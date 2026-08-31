@@ -75,6 +75,45 @@ def structure_unresolved_items(packet: dict[str, Any]) -> list[str]:
     return [str(item) for item in revision.get("unresolved_items") or []]
 
 
+def argument_route_charter(packet: dict[str, Any]) -> list[dict[str, Any]]:
+    """The approved source-local argument routes, reduced to what a judge needs.
+
+    Without this the editorial reviewer was forced to attest route hard
+    failures with no route data in hand (#293): a route charter names, for
+    every approved route, which sermon it lives in and which ordered steps
+    the professor actually walked — the ground truth for judging whether an
+    essay splices steps from different sermons into an argument he never made.
+    """
+
+    charter: list[dict[str, Any]] = []
+    for bundle in packet.get("argument_routes") or []:
+        revision = bundle.get("revision") or {}
+        charter.append(
+            {
+                "route_revision_id": revision.get("argument_route_revision_id"),
+                "route_label": revision.get("route_label"),
+                "conclusion_viewpoint_revision_id": revision.get(
+                    "validated_against_conclusion_viewpoint_revision_id"
+                ),
+                "source_ids": sorted(
+                    {
+                        str(item.get("source_id") or "")
+                        for item in bundle.get("attestations") or []
+                        if item.get("source_id")
+                    }
+                ),
+                "steps": [
+                    {
+                        "role": node.get("role"),
+                        "proposition": node.get("normalized_proposition"),
+                    }
+                    for node in revision.get("ordered_inference_nodes") or []
+                ],
+            }
+        )
+    return charter
+
+
 def source_texts(packet: dict[str, Any]) -> list[dict[str, str]]:
     return [
         {

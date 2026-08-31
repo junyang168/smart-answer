@@ -35,11 +35,13 @@ from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
 from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 from backend.pipeline.draft_first_author_runner import (
+    argument_route_charter,
     source_texts,
     structure_unresolved_items,
     verbatim_quote_report,
     viewpoint_charter,
 )
+from backend.pipeline.draft_first_source_binding import reader_paragraphs
 from backend.pipeline.matthew_exposition_authoring import sha256_text
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -217,6 +219,43 @@ REVISION_SCHEMA: dict[str, Any] = {
 }
 
 
+def _call(client: Any, prompt_path: Path, payload: dict[str, Any], schema: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Run one gate call and return (result, fingerprint) — every judgment traceable."""
+
+    prompt = prompt_path.read_text(encoding="utf-8")
+    payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    result = client.generate_json(prompt, payload_json, schema)
+    fingerprint = {
+        "prompt": prompt_path.name,
+        "prompt_sha256": sha256_text(prompt),
+        "payload_sha256": sha256_text(payload_json),
+        "schema": schema.get("name"),
+        "model": client.model,
+        "backend": client.backend,
+        "reasoning_effort": client.reasoning_effort,
+    }
+    return result, fingerprint
+
+
+def changed_and_ending_paragraphs(
+    baseline: str, revised: str
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Paragraphs new in the revision, and the revision's actual ending.
+
+    The old pipeline paid twice for these lessons: rerunning full reviewers
+    every round re-rolls their standards, and judging the ending from a diff
+    misses an unchanged closing paragraph sitting after an insertion. Delta
+    rounds therefore review exactly the changed paragraphs plus the last two
+    reader paragraphs, always re-read from the revised text itself.
+    """
+
+    baseline_shas = {p["paragraph_sha256"] for p in reader_paragraphs(baseline)}
+    revised_paragraphs = reader_paragraphs(revised)
+    changed = [p for p in revised_paragraphs if p["paragraph_sha256"] not in baseline_shas]
+    ending = revised_paragraphs[-2:]
+    return changed, ending
+
+
 class DraftReviewContractError(ValueError):
     pass
 
@@ -349,60 +388,72 @@ def run_gates(
     profile: Mapping[str, Any],
     clients: Mapping[str, Any],
     round_dir: Path,
+    baseline_manuscript: str | None = None,
+    baseline_review: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     charter = viewpoint_charter(dict(packet))
     unresolved = structure_unresolved_items(dict(packet))
+    routes = argument_route_charter(dict(packet))
     sources = source_texts(dict(packet))
+    fingerprints: dict[str, Any] = {}
 
-    alignment_payload = json.dumps(
-        {
-            "manuscript_markdown": manuscript,
-            "approved_viewpoints": charter,
-            "unresolved_items": unresolved,
-            "source_originals": sources,
-        },
-        ensure_ascii=False,
-        sort_keys=True,
-    )
-    alignment = clients["alignment"].generate_json(
-        (PROMPTS / "draft_first_alignment_check.md").read_text(encoding="utf-8"),
+    delta_scope: dict[str, Any] | None = None
+    if baseline_manuscript is not None:
+        changed, ending = changed_and_ending_paragraphs(baseline_manuscript, manuscript)
+        delta_scope = {
+            "mode": "delta",
+            "changed_paragraphs": [p["text"] for p in changed],
+            "ending_paragraphs": [p["text"] for p in ending],
+        }
+
+    alignment_payload = {
+        "manuscript_markdown": manuscript,
+        "approved_viewpoints": charter,
+        "unresolved_items": unresolved,
+        "source_originals": sources,
+    }
+    if delta_scope is not None:
+        alignment_payload["review_scope"] = delta_scope
+    alignment, fingerprints["alignment"] = _call(
+        clients["alignment"],
+        PROMPTS / "draft_first_alignment_check.md",
         alignment_payload,
         ALIGNMENT_SCHEMA,
     )
     validate_alignment(alignment, manuscript=manuscript)
     _write(round_dir / "alignment.json", alignment)
 
-    blind_read = clients["blind_read"].generate_json(
-        (PROMPTS / "draft_first_blind_read.md").read_text(encoding="utf-8"),
-        json.dumps({"article": manuscript}, ensure_ascii=False),
+    blind_read, fingerprints["blind_read"] = _call(
+        clients["blind_read"],
+        PROMPTS / "draft_first_blind_read.md",
+        {"article": manuscript},
         BLIND_READ_SCHEMA,
     )
     _write(round_dir / "blind-read.json", blind_read)
 
-    blind_compare = clients["blind_compare"].generate_json(
-        (PROMPTS / "draft_first_blind_compare.md").read_text(encoding="utf-8"),
-        json.dumps(
-            {"approved_viewpoints": charter, "unresolved_items": unresolved, "blind_read": blind_read},
-            ensure_ascii=False,
-            sort_keys=True,
-        ),
+    blind_compare, fingerprints["blind_compare"] = _call(
+        clients["blind_compare"],
+        PROMPTS / "draft_first_blind_compare.md",
+        {"approved_viewpoints": charter, "unresolved_items": unresolved, "blind_read": blind_read},
         BLIND_COMPARE_SCHEMA,
     )
     _write(round_dir / "blind-compare.json", blind_compare)
 
-    review = clients["editorial"].generate_json(
-        (PROMPTS / "draft_first_editorial_review.md").read_text(encoding="utf-8"),
-        json.dumps(
-            {
-                "manuscript_markdown": manuscript,
-                "approved_viewpoints": charter,
-                "unresolved_items": unresolved,
-                "source_originals": sources,
-                "quality_profile": profile,
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-        ),
+    review_payload = {
+        "manuscript_markdown": manuscript,
+        "approved_viewpoints": charter,
+        "unresolved_items": unresolved,
+        "argument_routes": routes,
+        "source_originals": sources,
+        "quality_profile": profile,
+    }
+    if delta_scope is not None:
+        review_payload["review_scope"] = delta_scope
+        review_payload["baseline_review"] = dict(baseline_review or {})
+    review, fingerprints["editorial"] = _call(
+        clients["editorial"],
+        PROMPTS / "draft_first_editorial_review.md",
+        review_payload,
         _review_schema(profile),
     )
     review_verdict = validate_review(review, manuscript=manuscript, profile=profile)
@@ -418,6 +469,8 @@ def run_gates(
     )
     outcome = {
         "manuscript_sha256": sha256_text(manuscript),
+        "gate_fingerprints": fingerprints,
+        "review": review,
         "quote_report": quote_report,
         "review_verdict": review_verdict,
         "blind_read": blind_read,
@@ -463,6 +516,8 @@ def main() -> int:
     )
 
     history: list[dict[str, Any]] = []
+    baseline_manuscript: str | None = None
+    baseline_review: dict[str, Any] | None = None
     for round_number in range(MAX_REVISION_ROUNDS + 1):
         round_dir = args.output_dir / f"round-{round_number:02d}"
         outcome = run_gates(
@@ -471,12 +526,19 @@ def main() -> int:
             profile=profile,
             clients=clients,
             round_dir=round_dir,
+            baseline_manuscript=baseline_manuscript,
+            baseline_review=baseline_review,
         )
+        baseline_manuscript = manuscript
+        baseline_review = outcome.get("review")
         history.append(
             {
                 "round": round_number,
+                "mode": "delta" if round_number else "full",
                 "passed": outcome["passed"],
                 "blocking_count": len(outcome["blocking_findings"]),
+                "blind_answer": outcome["blind_read"]["answer_in_one_sentence"],
+                "gate_fingerprints": outcome["gate_fingerprints"],
             }
         )
         if outcome["passed"] or round_number == MAX_REVISION_ROUNDS:
@@ -506,6 +568,9 @@ def main() -> int:
         "draft_path": str(args.draft),
         "evidence_packet_sha256": packet.get("evidence_packet_sha256"),
         "quality_profile_id": profile.get("profile_id"),
+        "quality_profile_sha256": sha256_text(
+            args.quality_profile.read_text(encoding="utf-8")
+        ),
         "rounds": history,
         "status": "review_passed" if history[-1]["passed"] else "human_review_required",
         "final_manuscript_sha256": sha256_text(manuscript),
