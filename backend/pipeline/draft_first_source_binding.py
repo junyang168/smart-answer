@@ -24,7 +24,7 @@ from dotenv import load_dotenv
 
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
-from backend.pipeline.draft_first_author_runner import source_texts
+from backend.pipeline.draft_first_author_runner import argument_route_charter, source_texts
 from backend.pipeline.matthew_exposition_authoring import sha256_text
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -64,6 +64,7 @@ BINDING_SCHEMA: dict[str, Any] = {
                     "additionalProperties": False,
                     "properties": {
                         "paragraph_index": {"type": "integer"},
+                        "route_revision_id": {"type": ["string", "null"]},
                         "spans": {
                             "type": "array",
                             "items": {
@@ -77,7 +78,7 @@ BINDING_SCHEMA: dict[str, Any] = {
                             },
                         },
                     },
-                    "required": ["paragraph_index", "spans"],
+                    "required": ["paragraph_index", "route_revision_id", "spans"],
                 },
             }
         },
@@ -121,6 +122,10 @@ def verify_bindings(
     content_by_source = {
         str(item.get("source_id") or ""): str(item.get("content") or "")
         for item in originals
+    }
+    known_routes = {
+        str(item.get("route_revision_id") or "")
+        for item in argument_route_charter(dict(packet))
     }
     rows = {int(item["paragraph_index"]): item for item in proposed["bindings"]}
     findings: list[dict[str, Any]] = []
@@ -171,10 +176,21 @@ def verify_bindings(
                     "overlap": round(overlap, 3),
                 }
             )
+        route_revision_id = row.get("route_revision_id")
+        if route_revision_id is not None and str(route_revision_id) not in known_routes:
+            findings.append(
+                {
+                    "paragraph_index": index,
+                    "code": "unknown_route",
+                    "route_revision_id": str(route_revision_id),
+                }
+            )
+            route_revision_id = None
         verified.append(
             {
                 "paragraph_index": index,
                 "paragraph_sha256": paragraph["paragraph_sha256"],
+                "route_revision_id": route_revision_id,
                 "spans": spans,
             }
         )
@@ -208,6 +224,7 @@ def main() -> int:
                     {"paragraph_index": p["paragraph_index"], "text": p["text"]}
                     for p in paragraphs
                 ],
+                "argument_routes": argument_route_charter(dict(packet)),
                 "source_originals": source_texts(dict(packet)),
             },
             ensure_ascii=False,

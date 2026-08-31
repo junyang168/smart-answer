@@ -1353,6 +1353,59 @@ def _draft_first_packet_chain_ok(
     return all(value == packet_sha for value in declared)
 
 
+def _draft_first_route_steps(
+    route_revision_id: str, packet: dict[str, Any]
+) -> tuple[str | None, list[dict[str, Any]]]:
+    """Ordered steps of one approved route, with per-step verbatim excerpts.
+
+    The route view lets the reviewer walk the professor's own argument beside
+    the paragraph that renders it (#306): each step carries the fragments its
+    attestations bind, in the same shape the briefed pipeline's cards use, so
+    the existing frontend renders it unchanged.
+    """
+
+    fragments = {
+        str(item.get("fragment_id") or ""): item
+        for item in packet.get("source_fragments") or []
+    }
+    for bundle in packet.get("argument_routes") or []:
+        revision = bundle.get("revision") or {}
+        if str(revision.get("argument_route_revision_id") or "") != route_revision_id:
+            continue
+        step_fragments: dict[str, list[str]] = {}
+        for attestation in bundle.get("attestations") or []:
+            for binding in attestation.get("step_bindings") or []:
+                key = str(binding.get("route_step_key") or "")
+                step_fragments.setdefault(key, []).extend(
+                    str(value) for value in binding.get("source_fragment_ids") or []
+                )
+        steps: list[dict[str, Any]] = []
+        for node in revision.get("ordered_inference_nodes") or []:
+            key = str(node.get("route_step_key") or "")
+            fragment_ids = list(dict.fromkeys(step_fragments.get(key, [])))
+            excerpts = [
+                str(fragments[fid].get("verbatim_excerpt"))
+                for fid in fragment_ids
+                if fid in fragments and fragments[fid].get("verbatim_excerpt")
+            ]
+            steps.append(
+                {
+                    "route_step_key": key,
+                    "role": str(node.get("role") or "support"),
+                    "proposition": (
+                        str(node.get("normalized_proposition"))
+                        if node.get("normalized_proposition")
+                        else None
+                    ),
+                    "fragment_ids": fragment_ids,
+                    "excerpts": excerpts,
+                    "media_clips": [],
+                }
+            )
+        return str(revision.get("route_label") or "") or None, steps
+    return None, []
+
+
 def _draft_first_annotated_markdown(
     markdown: str,
     bindings_record: dict[str, Any],
@@ -1438,6 +1491,15 @@ def _draft_first_annotated_markdown(
                 cards.append(card)
         if not cards:
             continue
+        route_revision_id = str(binding.get("route_revision_id") or "")
+        if route_revision_id:
+            route_label, route_steps = _draft_first_route_steps(
+                route_revision_id, knowledge
+            )
+            if route_steps:
+                cards[0]["route_revision_id"] = route_revision_id
+                cards[0]["route_label"] = route_label
+                cards[0]["route_steps"] = route_steps
         with_sources += 1
         annotation_id = f"p{paragraph['paragraph_index'] + 1}"
         annotations.append(
