@@ -237,6 +237,53 @@ def _call(client: Any, prompt_path: Path, payload: dict[str, Any], schema: dict[
     return result, fingerprint
 
 
+def merge_delta_scores(
+    baseline_review: Mapping[str, Any], delta_review: Mapping[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Inherit unaffected dimension scores programmatically (#302).
+
+    A delta reviewer told to copy the baseline may or may not comply; the
+    runner therefore copies for it. Only dimensions where the delta round's
+    own findings land keep the delta reviewer's score — affectedness comes
+    from actual finding locations, never a static coupling table (#33's
+    documented mistake). Hard failures stay re-assessed each round: a
+    one-vote veto is exactly what must not be inherited blindly.
+    """
+
+    # Affected = where this round's findings land, plus where the previous
+    # round's blocking findings landed — those dimensions were just revised,
+    # so their baseline score is exactly the one that must not be inherited.
+    affected = {str(item["dimension_id"]) for item in delta_review["findings"]}
+    affected |= {
+        str(item["dimension_id"])
+        for item in baseline_review.get("findings") or []
+        if item.get("blocking")
+    }
+    baseline_scores = {
+        str(item["dimension_id"]): item for item in baseline_review["dimension_scores"]
+    }
+    merged_scores = []
+    inherited: list[str] = []
+    rescored: list[str] = []
+    for item in delta_review["dimension_scores"]:
+        dimension_id = str(item["dimension_id"])
+        if dimension_id in affected or dimension_id not in baseline_scores:
+            merged_scores.append(item)
+            rescored.append(dimension_id)
+        else:
+            merged_scores.append(baseline_scores[dimension_id])
+            inherited.append(dimension_id)
+    merged = {**delta_review, "dimension_scores": merged_scores}
+    provenance = {"rescored_dimensions": sorted(rescored), "inherited_dimensions": sorted(inherited)}
+    return merged, provenance
+
+
+def result_sha256(result: Mapping[str, Any]) -> str:
+    """Content hash of one gate's output, bound into the run record (#302)."""
+
+    return sha256_text(json.dumps(result, ensure_ascii=False, sort_keys=True))
+
+
 def changed_and_ending_paragraphs(
     baseline: str, revised: str
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -421,6 +468,7 @@ def run_gates(
         ALIGNMENT_SCHEMA,
     )
     validate_alignment(alignment, manuscript=manuscript)
+    fingerprints["alignment"]["result_sha256"] = result_sha256(alignment)
     _write(round_dir / "alignment.json", alignment)
 
     blind_read, fingerprints["blind_read"] = _call(
@@ -429,6 +477,7 @@ def run_gates(
         {"article": manuscript},
         BLIND_READ_SCHEMA,
     )
+    fingerprints["blind_read"]["result_sha256"] = result_sha256(blind_read)
     _write(round_dir / "blind-read.json", blind_read)
 
     blind_compare, fingerprints["blind_compare"] = _call(
@@ -437,6 +486,7 @@ def run_gates(
         {"approved_viewpoints": charter, "unresolved_items": unresolved, "blind_read": blind_read},
         BLIND_COMPARE_SCHEMA,
     )
+    fingerprints["blind_compare"]["result_sha256"] = result_sha256(blind_compare)
     _write(round_dir / "blind-compare.json", blind_compare)
 
     review_payload = {
@@ -456,7 +506,11 @@ def run_gates(
         review_payload,
         _review_schema(profile),
     )
+    if delta_scope is not None and baseline_review is not None:
+        review, score_provenance = merge_delta_scores(baseline_review, review)
+        review["score_provenance"] = score_provenance
     review_verdict = validate_review(review, manuscript=manuscript, profile=profile)
+    fingerprints["editorial"]["result_sha256"] = result_sha256(review)
     _write(round_dir / "editorial-review.json", review)
 
     quote_report = verbatim_quote_report(manuscript, dict(packet))
@@ -538,6 +592,7 @@ def main() -> int:
                 "passed": outcome["passed"],
                 "blocking_count": len(outcome["blocking_findings"]),
                 "blind_answer": outcome["blind_read"]["answer_in_one_sentence"],
+                "outcome_sha256": result_sha256(outcome),
                 "gate_fingerprints": outcome["gate_fingerprints"],
             }
         )

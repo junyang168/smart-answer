@@ -75,6 +75,18 @@ def main() -> int:
         raise SystemExit("review-run.json does not bind this final manuscript")
     if bindings_record.get("manuscript_sha256") != manuscript_sha:
         raise SystemExit("source bindings do not bind this final manuscript")
+    packet_payload = json.loads(packet.read_text(encoding="utf-8"))
+    packet_sha = str(
+        (packet_payload.get("result") or packet_payload).get("evidence_packet_sha256") or ""
+    )
+    for name, declared in (
+        ("review-run.json", run_record.get("evidence_packet_sha256")),
+        ("source bindings", bindings_record.get("evidence_packet_sha256")),
+    ):
+        if str(declared or "") != packet_sha:
+            raise SystemExit(
+                f"{name} declares a different evidence packet ({declared}) than the one registered ({packet_sha})"
+            )
 
     manifest = {
         "schema_version": SCHEMA_VERSION,
@@ -94,6 +106,7 @@ def main() -> int:
         "brief_sha256": "",
         "evidence_packet_relative_path": _relative_to_staging(packet, staging),
         "evidence_packet_file_sha256": _sha256(packet),
+        "evidence_packet_sha256": packet_sha,
         "source_bindings_relative_path": _relative_to_staging(bindings, staging),
         "source_bindings_sha256": _sha256(bindings),
         "publication_decision": None,

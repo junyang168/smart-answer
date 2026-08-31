@@ -1328,6 +1328,31 @@ def _stage_checks(workflow: dict[str, Any]) -> list[dict[str, str]]:
 
 
 
+def _draft_first_packet_chain_ok(
+    manifest: dict[str, Any],
+    bindings_record: dict[str, Any],
+    evidence_packet: dict[str, Any],
+    *,
+    workflow: dict[str, Any],
+) -> bool:
+    """Manifest, bindings, and review run must all name the same packet (#302).
+
+    Verifying only the file hash proved the registered file was unchanged; it
+    did not prove that the bindings and the review were produced against that
+    same packet. All three declarations must agree with the packet itself.
+    """
+
+    packet_sha = str(evidence_packet.get("evidence_packet_sha256") or "")
+    if not packet_sha:
+        return False
+    declared = [
+        str(manifest.get("evidence_packet_sha256") or ""),
+        str(bindings_record.get("evidence_packet_sha256") or ""),
+        str(workflow.get("evidence_packet_sha256") or ""),
+    ]
+    return all(value == packet_sha for value in declared)
+
+
 def _draft_first_annotated_markdown(
     markdown: str,
     bindings_record: dict[str, Any],
@@ -1550,6 +1575,9 @@ def _review_data(manifest_path: Path, *, include_markdown: bool) -> dict[str, An
             == current_manuscript_sha
             and str(manifest.get("evidence_packet_file_sha256") or "")
             == _sha256(evidence_path)
+            and _draft_first_packet_chain_ok(
+                manifest, bindings_record, evidence_packet, workflow=_read_json(workflow_path)
+            )
         )
     integrity = "verified" if integrity_matches else "changed"
     workflow = _read_json(workflow_path)

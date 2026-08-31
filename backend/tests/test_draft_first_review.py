@@ -261,3 +261,112 @@ def test_projection_audit_floors():
     assert "binding_coverage_below_floor" in codes
     assert "binding_low_overlap" in codes
     assert projection["passed"] is False
+
+
+# ---- #302: Codex round-two gaps ----
+
+
+def test_route_charter_carries_per_source_attested_steps():
+    from backend.pipeline.draft_first_author_runner import argument_route_charter
+
+    packet = {
+        "argument_routes": [
+            {
+                "revision": {
+                    "argument_route_revision_id": "ARR-1",
+                    "route_label": "L",
+                    "validated_against_conclusion_viewpoint_revision_id": "CVR-1",
+                    "ordered_inference_nodes": [
+                        {"route_step_key": "P1", "role": "observation", "normalized_proposition": "甲"},
+                        {"route_step_key": "P2", "role": "inference", "normalized_proposition": "乙"},
+                    ],
+                },
+                "attestations": [
+                    {
+                        "source_id": "SRC-A",
+                        "completeness": "full",
+                        "step_bindings": [
+                            {"route_step_key": "P1", "attestation_status": "attested"},
+                            {"route_step_key": "P2", "attestation_status": "attested"},
+                        ],
+                    },
+                    {
+                        "source_id": "SRC-B",
+                        "completeness": "partial",
+                        "step_bindings": [
+                            {"route_step_key": "P1", "attestation_status": "attested"}
+                        ],
+                    },
+                ],
+            }
+        ]
+    }
+    [route] = argument_route_charter(packet)
+    assert route["steps"][0]["step_key"] == "P1"
+    attestations = {a["source_id"]: a for a in route["source_attestations"]}
+    assert attestations["SRC-A"]["completeness"] == "full"
+    assert attestations["SRC-A"]["attested_step_keys"] == ["P1", "P2"]
+    assert attestations["SRC-B"]["attested_step_keys"] == ["P1"]
+
+
+def test_delta_scores_inherit_unless_affected():
+    from backend.pipeline.draft_first_review_runner import merge_delta_scores
+
+    baseline = {
+        "dimension_scores": [
+            {"dimension_id": "a", "score": 10, "evidence": "base-a"},
+            {"dimension_id": "b", "score": 9, "evidence": "base-b"},
+            {"dimension_id": "c", "score": 8, "evidence": "base-c"},
+        ],
+        "findings": [
+            {"dimension_id": "c", "blocking": True, "anchor": "x", "summary": "", "required_change": ""}
+        ],
+    }
+    delta = {
+        "dimension_scores": [
+            {"dimension_id": "a", "score": 4, "evidence": "delta rerolled"},
+            {"dimension_id": "b", "score": 7, "evidence": "delta finding here"},
+            {"dimension_id": "c", "score": 9, "evidence": "revised and rescored"},
+        ],
+        "findings": [
+            {"dimension_id": "b", "blocking": True, "anchor": "y", "summary": "", "required_change": ""}
+        ],
+    }
+    merged, provenance = merge_delta_scores(baseline, delta)
+    by_id = {s["dimension_id"]: s["score"] for s in merged["dimension_scores"]}
+    assert by_id == {"a": 10, "b": 7, "c": 9}  # a inherited; b delta-finding; c revised-last-round
+    assert provenance == {
+        "rescored_dimensions": ["b", "c"],
+        "inherited_dimensions": ["a"],
+    }
+
+
+def test_gate_outputs_are_sha_bound():
+    import inspect
+    from backend.pipeline import draft_first_review_runner as review
+
+    src = inspect.getsource(review.run_gates)
+    assert src.count('["result_sha256"]') == 4
+    assert '"outcome_sha256"' in inspect.getsource(review.main)
+
+
+def test_packet_chain_requires_three_way_agreement():
+    from backend.api.wang_article_reviews import _draft_first_packet_chain_ok
+
+    packet = {"evidence_packet_sha256": "PK"}
+    ok = _draft_first_packet_chain_ok(
+        {"evidence_packet_sha256": "PK"},
+        {"evidence_packet_sha256": "PK"},
+        packet,
+        workflow={"evidence_packet_sha256": "PK"},
+    )
+    assert ok is True
+    assert (
+        _draft_first_packet_chain_ok(
+            {"evidence_packet_sha256": "PK"},
+            {"evidence_packet_sha256": "OTHER"},
+            packet,
+            workflow={"evidence_packet_sha256": "PK"},
+        )
+        is False
+    )
