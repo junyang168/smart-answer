@@ -370,3 +370,18 @@ def test_packet_chain_requires_three_way_agreement():
         )
         is False
     )
+
+
+def test_author_payload_carries_routes_and_layered_license():
+    """#304: routes reach the author; alignment licenses in two layers."""
+
+    import inspect
+    from pathlib import Path
+    from backend.pipeline import draft_first_author_runner as author
+
+    assert '"argument_routes": argument_route_charter(packet)' in inspect.getsource(author.main)
+    prompts = Path(author.__file__).parent / "prompts"
+    rules = (prompts / "draft_first_topic_author.md").read_text()
+    assert "路线是骨架不是上限" in rules
+    alignment = (prompts / "draft_first_alignment_check.md").read_text()
+    assert "polarity 为 denied 的立场不得被正面断言" in alignment
