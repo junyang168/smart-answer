@@ -1300,6 +1300,146 @@ def _stage_checks(workflow: dict[str, Any]) -> list[dict[str, str]]:
     ]
 
 
+
+def _draft_first_annotated_markdown(
+    markdown: str,
+    bindings_record: dict[str, Any],
+    packet: dict[str, Any],
+) -> tuple[str, list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
+    """Source disclosure for a draft-first essay, driven by derived bindings.
+
+    Draft-first manuscripts carry no provenance comments; the bindings file
+    (verbatim-verified spans per reader paragraph, #287) plays their role.
+    Cards go through the same builder the provenance path uses, so sermon
+    spans keep their audio timing and the frontend shape is unchanged.
+    """
+
+    from backend.pipeline.draft_first_source_binding import reader_paragraphs
+
+    knowledge = packet
+    originals_payload = knowledge.get("source_originals") or {}
+    originals = {
+        str(item.get("source_id") or ""): item
+        for item in originals_payload.get("originals", [])
+    }
+    documents = {
+        str(item.get("source_id") or ""): item
+        for item in knowledge.get("source_documents", [])
+    }
+    paragraphs = reader_paragraphs(markdown)
+    bindings_by_sha = {
+        str(item.get("paragraph_sha256") or ""): item
+        for item in bindings_record.get("bindings") or []
+    }
+    sermon_cache: dict[str, dict[str, Any]] = {}
+    annotations: list[dict[str, Any]] = []
+    findings: list[dict[str, Any]] = []
+    insertions: list[tuple[int, str]] = []
+    with_sources = 0
+    cursor = 0
+    for paragraph in paragraphs:
+        text = str(paragraph["text"])
+        offset = markdown.find(text, cursor)
+        if offset < 0:
+            findings.append(
+                {
+                    "code": "paragraph_not_located",
+                    "paragraph_id": f"p{paragraph['paragraph_index'] + 1}",
+                    "message": "读者段落无法在稿件中定位。",
+                }
+            )
+            continue
+        cursor = offset + len(text)
+        binding = bindings_by_sha.get(str(paragraph["paragraph_sha256"]))
+        if binding is None:
+            findings.append(
+                {
+                    "code": "paragraph_binding_missing",
+                    "paragraph_id": f"p{paragraph['paragraph_index'] + 1}",
+                    "message": "该段落没有登记来源绑定（稿件可能在绑定后被改动）。",
+                }
+            )
+            continue
+        cards: list[dict[str, Any]] = []
+        for span in binding.get("spans") or []:
+            source_id = str(span.get("source_id") or "")
+            excerpt = str(span.get("excerpt") or "")
+            original = originals.get(source_id)
+            if not original or excerpt not in str(original.get("content") or ""):
+                findings.append(
+                    {
+                        "code": "binding_excerpt_unverified",
+                        "paragraph_id": f"p{paragraph['paragraph_index'] + 1}",
+                        "message": "登记的来源片段无法在原文中逐字复核。",
+                    }
+                )
+                continue
+            card = _original_source_card(
+                original=original,
+                document=documents.get(source_id) or original,
+                excerpt=excerpt,
+                mapping_kind="derived_source_binding",
+                claim_ids=[],
+                sermon_cache=sermon_cache,
+            )
+            if card:
+                cards.append(card)
+        if not cards:
+            continue
+        with_sources += 1
+        annotation_id = f"p{paragraph['paragraph_index'] + 1}"
+        annotations.append(
+            {
+                "annotation_id": annotation_id,
+                "paragraph_sha256": paragraph["paragraph_sha256"],
+                "sources": cards,
+            }
+        )
+        insertions.append(
+            (offset + len(text), f"\n\n[查看本段来源]({SOURCE_MARKER_PREFIX}{annotation_id})")
+        )
+    annotated = markdown
+    for position, marker in reversed(insertions):
+        annotated = annotated[:position] + marker + annotated[position:]
+    projection_audit = {
+        "schema_version": "wang_article_source_projection_audit.v1",
+        "manuscript_sha256": hashlib.sha256(markdown.encode("utf-8")).hexdigest(),
+        "authoring_packet_sha256": str(packet.get("evidence_packet_sha256") or ""),
+        "paragraphs_checked": len(paragraphs),
+        "paragraphs_with_sources": with_sources,
+        "direct_quotes_checked": 0,
+        "findings": findings,
+        "passed": not any(
+            item["code"] in {"binding_excerpt_unverified", "paragraph_not_located"}
+            for item in findings
+        ),
+    }
+    clips = [
+        annotation["sources"][index].get("media")
+        for annotation in annotations
+        for index in range(len(annotation["sources"]))
+        if annotation["sources"][index].get("media")
+    ]
+    playback_audit = {
+        "schema_version": "wang_article_source_playback_audit.v1",
+        "manuscript_sha256": projection_audit["manuscript_sha256"],
+        "authoring_packet_sha256": projection_audit["authoring_packet_sha256"],
+        "clips_checked": len(clips),
+        "exact_clips": sum(
+            1 for clip in clips if clip.get("timing_status") == "exact"
+        ),
+        "estimated_clips": sum(
+            1 for clip in clips if clip.get("timing_status") == "estimated"
+        ),
+        "paragraph_fallback_clips": sum(
+            1 for clip in clips if clip.get("timing_status") not in {"exact", "estimated"}
+        ),
+        "findings": [],
+        "passed": True,
+    }
+    return annotated, annotations, projection_audit, playback_audit
+
+
 def _review_data(manifest_path: Path, *, include_markdown: bool) -> dict[str, Any]:
     manifest = _read_json(manifest_path)
     if manifest.get("schema_version") != MANIFEST_SCHEMA:
@@ -1321,6 +1461,7 @@ def _review_data(manifest_path: Path, *, include_markdown: bool) -> dict[str, An
         expected_manuscript_sha == current_manuscript_sha
         and expected_workflow_sha == current_workflow_sha
     )
+    variant = str(manifest.get("variant") or "briefed")
     packet: dict[str, Any] = {}
     packet_relative_path = str(manifest.get("authoring_packet_relative_path") or "").strip()
     if packet_relative_path:
@@ -1332,6 +1473,24 @@ def _review_data(manifest_path: Path, *, include_markdown: bool) -> dict[str, An
             str(manifest.get("authoring_packet_file_sha256") or "") == _sha256(packet_path)
             and str(manifest.get("authoring_packet_sha256") or "")
             == str(packet.get("packet_sha256") or "")
+        )
+    bindings_record: dict[str, Any] = {}
+    evidence_packet: dict[str, Any] = {}
+    if variant == "draft_first":
+        bindings_path = _safe_staging_child(
+            str(manifest.get("source_bindings_relative_path") or "")
+        )
+        evidence_path = _safe_staging_child(
+            str(manifest.get("evidence_packet_relative_path") or "")
+        )
+        if not bindings_path.is_file() or not evidence_path.is_file():
+            raise ValueError("draft-first review bindings or evidence packet is missing")
+        bindings_record = _read_json(bindings_path)
+        evidence_packet = _result(_read_json(evidence_path))
+        integrity_matches = integrity_matches and (
+            str(manifest.get("source_bindings_sha256") or "") == _sha256(bindings_path)
+            and str(bindings_record.get("manuscript_sha256") or "")
+            == current_manuscript_sha
         )
     integrity = "verified" if integrity_matches else "changed"
     workflow = _read_json(workflow_path)
@@ -1356,6 +1515,16 @@ def _review_data(manifest_path: Path, *, include_markdown: bool) -> dict[str, An
                 detail="审稿预览绑定的稿件或状态已经改变，请重新登记后再审。",
             )
         manuscript = manuscript_path.read_text(encoding="utf-8")
+        if variant == "draft_first":
+            (
+                result["markdown"],
+                result["source_annotations"],
+                result["source_projection_audit"],
+                result["source_playback_audit"],
+            ) = _draft_first_annotated_markdown(
+                manuscript, bindings_record, evidence_packet
+            )
+            return result
         knowledge = packet.get("knowledge") if isinstance(packet.get("knowledge"), dict) else {}
         if knowledge:
             packet = dict(packet)
