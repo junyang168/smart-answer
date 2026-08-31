@@ -181,3 +181,6 @@ client_secret.json
 # Claude Code: the project hooks are shared, personal overrides and worktrees are not.
 .claude/*
 !.claude/settings.json
+
+# Renamed/backup virtualenvs (a .venv.old-3.12 slipped into PR #296 via git add -A)
+.venv*/
