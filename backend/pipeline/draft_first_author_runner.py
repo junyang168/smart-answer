@@ -62,6 +62,19 @@ def viewpoint_charter(packet: dict[str, Any]) -> list[dict[str, Any]]:
     return charter
 
 
+def structure_unresolved_items(packet: dict[str, Any]) -> list[str]:
+    """The reviewed structure's own list of what the sources leave open.
+
+    The charter without this list told every consumer to "keep unresolved
+    relations unresolved" while hiding which relations those are; the
+    church-foundation final harmonized three positive identifications into
+    one referent and passed review blind (#291).
+    """
+
+    revision = (packet.get("structure") or {}).get("revision") or {}
+    return [str(item) for item in revision.get("unresolved_items") or []]
+
+
 def source_texts(packet: dict[str, Any]) -> list[dict[str, str]]:
     return [
         {
@@ -130,6 +143,7 @@ def main() -> int:
         "reader_question": args.reader_question,
         "audience": args.audience,
         "approved_viewpoints": viewpoint_charter(packet),
+        "unresolved_items": structure_unresolved_items(packet),
         "source_originals": source_texts(packet),
     }
     payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True)

@@ -36,6 +36,7 @@ from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
 from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 from backend.pipeline.draft_first_author_runner import (
     source_texts,
+    structure_unresolved_items,
     verbatim_quote_report,
     viewpoint_charter,
 )
@@ -350,12 +351,14 @@ def run_gates(
     round_dir: Path,
 ) -> dict[str, Any]:
     charter = viewpoint_charter(dict(packet))
+    unresolved = structure_unresolved_items(dict(packet))
     sources = source_texts(dict(packet))
 
     alignment_payload = json.dumps(
         {
             "manuscript_markdown": manuscript,
             "approved_viewpoints": charter,
+            "unresolved_items": unresolved,
             "source_originals": sources,
         },
         ensure_ascii=False,
@@ -379,7 +382,7 @@ def run_gates(
     blind_compare = clients["blind_compare"].generate_json(
         (PROMPTS / "draft_first_blind_compare.md").read_text(encoding="utf-8"),
         json.dumps(
-            {"approved_viewpoints": charter, "blind_read": blind_read},
+            {"approved_viewpoints": charter, "unresolved_items": unresolved, "blind_read": blind_read},
             ensure_ascii=False,
             sort_keys=True,
         ),
@@ -393,6 +396,7 @@ def run_gates(
             {
                 "manuscript_markdown": manuscript,
                 "approved_viewpoints": charter,
+                "unresolved_items": unresolved,
                 "source_originals": sources,
                 "quality_profile": profile,
             },
@@ -484,6 +488,7 @@ def main() -> int:
                     "manuscript_markdown": manuscript,
                     "findings": outcome["blocking_findings"],
                     "approved_viewpoints": viewpoint_charter(dict(packet)),
+                    "unresolved_items": structure_unresolved_items(dict(packet)),
                     "source_originals": source_texts(dict(packet)),
                 },
                 ensure_ascii=False,

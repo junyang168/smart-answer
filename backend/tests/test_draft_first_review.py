@@ -139,3 +139,22 @@ def test_clean_gates_produce_no_blocking_findings():
         quote_report={"quotes_failing": []},
     )
     assert blocking == []
+
+
+def test_unresolved_items_reach_every_payload():
+    """#291: the structure's unresolved list must travel with the charter."""
+
+    from backend.pipeline.draft_first_author_runner import structure_unresolved_items
+    import inspect
+    from backend.pipeline import draft_first_review_runner as review
+
+    packet = {
+        "structure": {"revision": {"unresolved_items": ["三种正面识别之间的关系未统一"]}}
+    }
+    assert structure_unresolved_items(packet) == ["三种正面识别之间的关系未统一"]
+    assert structure_unresolved_items({}) == []
+
+    gate_source = inspect.getsource(review.run_gates)
+    assert gate_source.count('"unresolved_items": unresolved') == 3
+    main_source = inspect.getsource(review.main)
+    assert '"unresolved_items": structure_unresolved_items(dict(packet))' in main_source
