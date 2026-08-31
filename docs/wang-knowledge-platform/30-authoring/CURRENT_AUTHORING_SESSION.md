@@ -6,7 +6,7 @@
 > **與代碼對齊**：不適用
 > **權威範圍**：無。本文只說明此刻已發布什麼，不定規則。
 
-Updated: 2026-08-30 (America/Chicago)
+Updated: 2026-08-31 (America/Chicago)
 
 ## Project boundary
 
@@ -56,6 +56,20 @@ The 2026-08-30 #278 generalization trial added a source-relationship and reader-
 The narrowed Author run produced manuscript SHA `fd7587e4f3aae85b15497bb3c9312cbe6d65a52394096b595c96b0cc93003c09`, with 14 grounding paragraphs and zero grounding findings. Independent Review could reconstruct one question, one answer and a five-step proof chain, but its then-current contract incorrectly left one route-binding defect and one missing prose bridge nonblocking. The system now rejects every nonblocking finding in the four core argument dimensions, and a missing bridge must mark the proof chain incomplete. This rule applies to future generations; the trial manuscript was not silently hand-patched. Program Audit initially found eight missing audio anchors in the legacy array transcript `S 220206`; SHA-bound raw-index alignment resolved seven, and a paragraph-local strong-context bound resolved the badly misheard rebuke quotation. The rerun passed with zero errors and automatically published the trial scope to the Wang repository. Repository publication did not deploy production code.
 
 The Article 3 runtime artifacts are present under the canonical Wang platform repository at `$DATA_BASE_DIR/wang-knowledge-platform/repository`. The production backend at `/opt/homebrew/var/www/smart-answer` was explicitly authorized and cut over to this canonical repository on 2026-08-16; it lists all three articles and preserves their reader-visible Markdown SHAs. The legacy `$DATA_BASE_DIR/wang_repository` path has been archived and deleted. Do not work around the automated publication policy by labeling an automated decision as human approval.
+
+## Draft-first authoring line (2026-08-30/31)
+
+A second, parallel authoring line now exists beside the briefed pipeline; neither replaces the other until the owner rules after side-by-side review.
+
+Generation (#283, PR #284): `draft_first_author_runner` takes a reader question, the structure's focal CVPs with modality, `structure.revision.unresolved_items` (#291) and the complete source originals, and drafts in one subscription call under twelve functional writing rules (`prompts/draft_first_topic_author.md`). No Brief, no author-declared provenance. Production author model is `claude-opus-5` by the owner's four-draft ranking; the owner's taste rulings — restraint over abundance, lean introductions, prune the professor's tangents, traditional-character prose — are encoded as rules 9–11 plus the output line. `gpt-5.6-sol` writes noticeably dry under the same rules and is not an author.
+
+Verification (#285/#291/#293, PRs #286/#292/#294): three post-hoc gates — alignment (`gpt-5.6-sol` via codex CLI; beyond-source, modality upgrades incl. harmonizing relations the unresolved list declares open, sources'-silence-as-Scripture swaps), blind read (`claude-haiku-4-5` reads only the finished article; a gpt closed comparison checks what reached the reader against the CVPs), and editorial review (`claude-fable-5` with the WQ dimensions, hard failures, and the approved source-local ArgumentRoutes so route attestations are made from data). Revision rounds are deltas — changed paragraphs plus the always-re-read ending against the anchored baseline; at most two, then `human_review_required`. Quote verification stays deterministic (spans ≥8 chars; short corner-bracket term mentions are typography). Every gate call is fingerprinted (prompt/payload/model SHAs) into `review-run.json`. All model calls go through subscription CLIs, never API-key clients.
+
+Preview (#287, PRs #288/#289): draft-first products register into the same admin review list via `scripts/register-draft-first-review.py` (`variant: "draft_first"`). Per-paragraph source disclosure is derived after the fact — `draft_first_source_binding` proposes verbatim spans, the code verifies them character-for-character, and the read model builds cards through the existing builder so sermon spans keep audio timing. Spans carry an overlap score; low-overlap spans are flagged for the human, and the projection audit fails on missing bindings or coverage under 50%. Cards show draft-first stage chips, not the briefed pipeline's.
+
+Registered: `church-foundation-draft-first-v1` — manuscript SHA `b1e334003a96ce2601ccbc1b1765307b136fd8bc03acf7348301a5d94d967f33`, `review_passed`, re-checked clean (round-0, zero findings, zero hard failures) by the hardened gates after PR #294, 17/19 paragraphs bound (0.895 coverage), 33 audio clips with no paragraph fallback. Publication remains the owner's decision; nothing in this line auto-publishes.
+
+Live lessons this line has already banked: thin knowledge layers make even a strong author invent (a gates-not-prevail trial on 2 Claims produced nine unsourced elaborations, every one caught — run archived on #295, not registered); external review (Codex) found the unresolved-items data gap after a passed review, so human/registry judgments must travel as data, never prompt prose; and #282's registry work fixed the reason the packet could not see the professor's Eph 2:20 argument (cross-reference claims were lane-filtered out of scope resolution).
 
 ## Repository integration
 
