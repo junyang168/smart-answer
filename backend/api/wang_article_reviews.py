@@ -1428,16 +1428,46 @@ def _draft_first_annotated_markdown(
     annotated = markdown
     for position, marker in reversed(insertions):
         annotated = annotated[:position] + marker + annotated[position:]
+    for row in bindings_record.get("findings") or []:
+        if str(row.get("code")) == "low_overlap":
+            findings.append(
+                {
+                    "code": "binding_low_overlap",
+                    "paragraph_id": f"p{int(row.get('paragraph_index') or 0) + 1}",
+                    "message": (
+                        "来源片段逐字属实，但与段落内容的重合度低"
+                        f"（{row.get('overlap')}）；请人工确认它确实支持本段。"
+                    ),
+                }
+            )
+    # A manuscript edited after binding (missing shas) or bound to almost
+    # nothing must not present itself as an audited page (#293).
+    coverage = with_sources / len(paragraphs) if paragraphs else 0.0
+    if coverage < 0.5:
+        findings.append(
+            {
+                "code": "binding_coverage_below_floor",
+                "paragraph_id": "",
+                "message": f"绑定覆盖率 {coverage:.0%} 低于 50% 底线。",
+            }
+        )
     projection_audit = {
         "schema_version": "wang_article_source_projection_audit.v1",
         "manuscript_sha256": hashlib.sha256(markdown.encode("utf-8")).hexdigest(),
         "authoring_packet_sha256": str(packet.get("evidence_packet_sha256") or ""),
         "paragraphs_checked": len(paragraphs),
         "paragraphs_with_sources": with_sources,
+        "binding_coverage": round(coverage, 3),
         "direct_quotes_checked": 0,
         "findings": findings,
         "passed": not any(
-            item["code"] in {"binding_excerpt_unverified", "paragraph_not_located"}
+            item["code"]
+            in {
+                "binding_excerpt_unverified",
+                "paragraph_not_located",
+                "paragraph_binding_missing",
+                "binding_coverage_below_floor",
+            }
             for item in findings
         ),
     }
@@ -1518,6 +1548,8 @@ def _review_data(manifest_path: Path, *, include_markdown: bool) -> dict[str, An
             str(manifest.get("source_bindings_sha256") or "") == _sha256(bindings_path)
             and str(bindings_record.get("manuscript_sha256") or "")
             == current_manuscript_sha
+            and str(manifest.get("evidence_packet_file_sha256") or "")
+            == _sha256(evidence_path)
         )
     integrity = "verified" if integrity_matches else "changed"
     workflow = _read_json(workflow_path)

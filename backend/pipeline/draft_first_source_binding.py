@@ -31,6 +31,24 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PROMPT_PATH = Path(__file__).with_name("prompts") / "draft_first_source_binding.md"
 MIN_EXCERPT_CHARS = 20
 MAX_SPANS_PER_PARAGRAPH = 3
+#: Character-bigram overlap below this marks a span as low_overlap: verbatim
+#: in the source but bearing little visible relation to the paragraph it
+#: claims to support. Flagged, never silently kept as clean (#293).
+LOW_OVERLAP_FLOOR = 0.10
+
+
+def _bigrams(value: str) -> set[str]:
+    text = re.sub(r"\s+", "", value)
+    return {text[i : i + 2] for i in range(len(text) - 1)}
+
+
+def excerpt_overlap(paragraph_text: str, excerpt: str) -> float:
+    """Share of the excerpt's character bigrams that appear in the paragraph."""
+
+    excerpt_grams = _bigrams(excerpt)
+    if not excerpt_grams:
+        return 0.0
+    return len(excerpt_grams & _bigrams(paragraph_text)) / len(excerpt_grams)
 
 BINDING_SCHEMA: dict[str, Any] = {
     "name": "wang_draft_first_source_binding_v1",
@@ -135,7 +153,24 @@ def verify_bindings(
                     }
                 )
                 continue
-            spans.append({"source_id": source_id, "excerpt": excerpt})
+            overlap = excerpt_overlap(str(paragraph["text"]), excerpt)
+            if overlap < LOW_OVERLAP_FLOOR:
+                findings.append(
+                    {
+                        "paragraph_index": index,
+                        "code": "low_overlap",
+                        "source_id": source_id,
+                        "overlap": round(overlap, 3),
+                        "excerpt": excerpt[:80],
+                    }
+                )
+            spans.append(
+                {
+                    "source_id": source_id,
+                    "excerpt": excerpt,
+                    "overlap": round(overlap, 3),
+                }
+            )
         verified.append(
             {
                 "paragraph_index": index,
