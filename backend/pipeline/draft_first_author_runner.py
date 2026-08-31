@@ -65,6 +65,7 @@ def viewpoint_charter(packet: dict[str, Any]) -> list[dict[str, Any]]:
 def source_texts(packet: dict[str, Any]) -> list[dict[str, str]]:
     return [
         {
+            "source_id": str(item.get("source_id")),
             "title": str(item.get("title")),
             "source_type": str(item.get("source_type")),
             "content": str(item.get("content")),

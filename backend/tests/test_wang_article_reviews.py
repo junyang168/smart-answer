@@ -697,3 +697,117 @@ def test_route_cannot_hide_a_direct_quote_without_an_exact_original(
             "message": "本段逐字引文没有命中原稿中的精确文本。",
         }
     ]
+
+
+# ---- draft-first source bindings (#287) ----
+
+
+def _binding_packet():
+    return {
+        "evidence_packet_sha256": "pk1",
+        "source_originals": {
+            "originals": [
+                {
+                    "source_id": "SRC-N",
+                    "source_type": "notes_manuscript",
+                    "title": "母本",
+                    "content": "耶穌同時擁有先知、祭司、君王三重受膏職分，其身份獨特而至高。",
+                }
+            ]
+        },
+        "source_documents": [
+            {"source_id": "SRC-N", "source_type": "notes_manuscript", "title": "母本",
+             "source_url": "/resources/notes/n1"}
+        ],
+    }
+
+
+def test_binding_verification_drops_unverbatim_spans():
+    from backend.pipeline.draft_first_source_binding import (
+        reader_paragraphs,
+        verify_bindings,
+    )
+
+    markdown = "# 標題\n\n第一段講三重職分。\n\n## 小節\n\n第二段。\n"
+    paragraphs = reader_paragraphs(markdown)
+    assert [p["text"] for p in paragraphs] == ["第一段講三重職分。", "第二段。"]
+
+    result = verify_bindings(
+        {
+            "bindings": [
+                {
+                    "paragraph_index": 0,
+                    "spans": [
+                        {"source_id": "SRC-N", "excerpt": "耶穌同時擁有先知、祭司、君王三重受膏職分"},
+                        {"source_id": "SRC-N", "excerpt": "教授沒有說過的句子在此足夠長超過二十個字元了"},
+                        {"source_id": "SRC-X", "excerpt": "耶穌同時擁有先知、祭司、君王三重受膏職分"},
+                    ],
+                },
+                {"paragraph_index": 1, "spans": []},
+            ]
+        },
+        paragraphs=paragraphs,
+        packet=_binding_packet(),
+    )
+    assert [len(item["spans"]) for item in result["bindings"]] == [1, 0]
+    codes = sorted(item["code"] for item in result["findings"])
+    assert codes == ["excerpt_not_verbatim", "unknown_source"]
+
+
+def test_draft_first_annotations_reuse_the_card_shape():
+    from backend.api.wang_article_reviews import _draft_first_annotated_markdown
+    from backend.pipeline.draft_first_source_binding import reader_paragraphs
+
+    markdown = "# 標題\n\n第一段講三重職分。\n\n第二段沒有綁定來源。\n"
+    paragraphs = reader_paragraphs(markdown)
+    bindings_record = {
+        "bindings": [
+            {
+                "paragraph_index": 0,
+                "paragraph_sha256": paragraphs[0]["paragraph_sha256"],
+                "spans": [
+                    {"source_id": "SRC-N", "excerpt": "耶穌同時擁有先知、祭司、君王三重受膏職分"}
+                ],
+            },
+            {
+                "paragraph_index": 1,
+                "paragraph_sha256": paragraphs[1]["paragraph_sha256"],
+                "spans": [],
+            },
+        ]
+    }
+    annotated, annotations, projection, playback = _draft_first_annotated_markdown(
+        markdown, bindings_record, _binding_packet()
+    )
+    assert len(annotations) == 1
+    card = annotations[0]["sources"][0]
+    assert card["source_type"] == "notes_manuscript"
+    assert card["mapping_kind"] == "derived_source_binding"
+    assert card["excerpts"] == ["耶穌同時擁有先知、祭司、君王三重受膏職分"]
+    assert "[查看本段来源](#review-source-evidence-p1)" in annotated
+    assert projection["paragraphs_checked"] == 2
+    assert projection["paragraphs_with_sources"] == 1
+    assert projection["passed"] is True
+    assert playback["clips_checked"] == 0
+
+
+def test_draft_first_tampered_binding_fails_the_audit():
+    from backend.api.wang_article_reviews import _draft_first_annotated_markdown
+    from backend.pipeline.draft_first_source_binding import reader_paragraphs
+
+    markdown = "# 標題\n\n第一段講三重職分。\n"
+    paragraphs = reader_paragraphs(markdown)
+    bindings_record = {
+        "bindings": [
+            {
+                "paragraph_index": 0,
+                "paragraph_sha256": paragraphs[0]["paragraph_sha256"],
+                "spans": [{"source_id": "SRC-N", "excerpt": "原文裡不存在的一句話被塞進了綁定檔案"}],
+            }
+        ]
+    }
+    _, annotations, projection, _ = _draft_first_annotated_markdown(
+        markdown, bindings_record, _binding_packet()
+    )
+    assert annotations == []
+    assert projection["passed"] is False
