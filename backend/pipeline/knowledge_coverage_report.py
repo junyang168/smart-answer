@@ -164,12 +164,25 @@ def build_report(
             for row in selection["admissions"].get(claim_id, [])
             if row["signal"] == "occurrence_section"
         ]
+        # The relation-only pass cannot see an anchor that occurrence or a
+        # route admitted, so an upstream edge recorded later (an owner ruling
+        # repairing what extraction missed, #324) proves the Claim only in the
+        # full four-signal selection. Read the proof off those admissions
+        # rather than re-deriving it.
+        relation_admissions = [
+            row
+            for row in selection["admissions"].get(claim_id, [])
+            if row["signal"] == "claim_relation"
+        ]
         route_signal = bool(route_admissions)
         occurrence_signal = bool(occurrence_admissions)
+        relation_signal = bool(relation_admissions)
         if route_signal:
             qualification = "proved_by_argument_route"
         elif occurrence_signal:
             qualification = "proved_by_occurrence_section"
+        elif relation_signal:
+            qualification = "proved_by_claim_relation"
         elif occurrence_available and (occurrence_status_by_claim or {}).get(
             claim_id
         ) == "pending_missing_projection_input":
@@ -185,7 +198,8 @@ def build_report(
                 "current_lane": lanes.get(claim_id),
                 "active_viewpoint_claim_link": claim_id in linked,
                 "scripture_ref_signal": claim_id in seeds,
-                "claim_relation_signal": False,
+                "claim_relation_signal": relation_signal,
+                "claim_relation_admissions": relation_admissions,
                 "argument_route_signal": route_signal,
                 "argument_route_admissions": route_admissions,
                 "occurrence_section_signal": (
@@ -292,6 +306,10 @@ def build_report(
         ),
         "disputed_pending_missing_projection_input_count": sum(
             row["scope_qualification"] == "pending_missing_projection_input"
+            for row in disputed_rows
+        ),
+        "disputed_proved_by_claim_relation_count": sum(
+            row["scope_qualification"] == "proved_by_claim_relation"
             for row in disputed_rows
         ),
         "disputed_unproved_after_all_four_signals_count": sum(
