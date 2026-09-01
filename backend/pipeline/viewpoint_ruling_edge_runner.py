@@ -119,6 +119,7 @@ def build_claim_relation_additions(
                 "relation_type": relation_type,
                 "reason": reason,
                 "review_status": "human_approved",
+                "review_artifact_sha256": str(ruling["artifact_sha256"]),
                 "visibility": "internal",
             }
         )
@@ -249,9 +250,23 @@ def main() -> int:
     plan_document["artifact_sha256"] = sha256_json(plan_document)
     _write_derived(args.output_dir / "ruling-edge-plan.json", plan_document)
 
+    # The build checked each ruled endpoint is still the current wording; the
+    # same expectation rides the apply so a wording that moves between plan
+    # and apply conflicts instead of receiving an edge ruled against the old
+    # text.
+    expected_current: dict[str, str] = {}
+    for row in viewpoint_additions:
+        expected_current[str(row["source_viewpoint_id"])] = str(
+            row["validated_source_viewpoint_revision_id"]
+        )
+        expected_current[str(row["target_viewpoint_id"])] = str(
+            row["validated_target_viewpoint_revision_id"]
+        )
     mutations = 0
     if args.apply:
-        result = store.apply_plan(plan)
+        result = store.apply_plan(
+            plan, expected_current_viewpoint_revisions=expected_current
+        )
         if result.get("status") == "applied":
             mutations = len(plan.operations)
         observed_claim = {

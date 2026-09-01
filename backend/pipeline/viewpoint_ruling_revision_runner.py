@@ -172,6 +172,10 @@ def build_revision_package(
                 moved[field] = new_revision_id
                 touched = True
         if touched:
+            moved["review_provenance"] = {
+                "review_artifact_sha256": str(ruling["artifact_sha256"]),
+                "basis_identity_decision_ids": [],
+            }
             dragged["viewpoint_relations"].append(str(row["viewpoint_relation_id"]))
             relations_out.append(moved)
 
@@ -214,6 +218,12 @@ def build_revision_package(
             "conclusion_viewpoint_revision_id": new_revision_id,
         }
         bumped["argument_route_revision_id"] = f"ARR-{sha256_json(seed)[:20]}"
+        # The bump is approved by THIS ruling, not by whatever review approved
+        # the wording it leaves behind -- stale credentials on a successor
+        # claim an approval that never read the new conclusion.
+        bumped["review_artifact_sha256"] = str(ruling["artifact_sha256"])
+        bumped["approved_by"] = str(ruling["decided_by"])
+        bumped["approved_at"] = str(ruling["decided_at"])
         bumped_route_revisions[previous_id] = bumped["argument_route_revision_id"]
         route_revisions_out.append(bumped)
         moved_head = deepcopy(route_head)
@@ -384,7 +394,14 @@ def main() -> int:
 
     mutations = 0
     if args.apply:
-        result = store.apply_plan(plan)
+        result = store.apply_plan(
+            plan,
+            expected_current_viewpoint_revisions={
+                str(package["canonical_viewpoints"][0]["viewpoint_id"]): str(
+                    ruling["target_viewpoint_revision_id"]
+                )
+            },
+        )
         if result.get("status") == "applied":
             mutations = len(plan.operations)
         observed = {

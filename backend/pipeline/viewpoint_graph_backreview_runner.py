@@ -157,8 +157,12 @@ def main() -> int:
             continue
         superseded = str(item["structure_revision_id"])
         successor = dict(item)
-        successor["revision_number"] = int(item["revision_number"]) + 1
-        successor["revision"] = successor["revision_number"]
+        # A successor is a NEW store object: bookkeeping stays at store
+        # revision 1 and generations are counted by the supersedes chain --
+        # unified with the ruling runners after #326's live fire (old+1 here
+        # left records whose stored revision could never equal the field).
+        successor["revision_number"] = 1
+        successor["revision"] = 1
         successor["supersedes_revision_id"] = superseded
         successor["review_provenance"] = provenance
         seed = {
