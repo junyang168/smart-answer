@@ -109,8 +109,14 @@ def build_revision_package(
     )
     if ruling.get("new_scope"):
         new_revision["scope"] = deepcopy(ruling["new_scope"])
-    new_revision["revision"] = int(old["revision"]) + 1
-    new_revision["revision_number"] = int(old.get("revision_number") or old["revision"]) + 1
+    # A successor is a NEW store object: its store revision starts at 1 and
+    # the model enforces revision_number == store revision. Generations are
+    # counted by the supersedes chain, never by this bookkeeping field -- the
+    # batch compiler resets it to 1 for the same reason, and setting old+1
+    # here corrupted the registry on first live fire (readers refused every
+    # scope build until the snapshot was restored).
+    new_revision["revision"] = 1
+    new_revision["revision_number"] = 1
     new_revision["supersedes_revision_id"] = target
     # The provenance model deliberately holds two fields and no more (the
     # 2026-08-25 outage note on ViewpointRevisionProvenance); the ruling's
@@ -194,14 +200,17 @@ def build_revision_package(
         for node in bumped.get("ordered_inference_nodes") or []:
             if node.get("conclusion_viewpoint_revision_id") == target:
                 node["conclusion_viewpoint_revision_id"] = new_revision_id
-        number = int(bumped.get("revision_number") or bumped["revision"]) + 1
-        bumped["revision"] = number
-        bumped["revision_number"] = number
+        generation = int(bumped.get("revision_number") or bumped["revision"]) + 1
+        bumped["revision"] = 1
+        bumped["revision_number"] = 1
         bumped["supersedes_revision_id"] = previous_id
         seed = {
             "policy_version": ROUTE_CHANGESET_POLICY_VERSION,
             "argument_route_id": route_id,
-            "revision_number": number,
+            # The id seed keeps the generation count so successive bumps of
+            # the same route derive distinct ids; the stored bookkeeping
+            # fields stay at the new object's store revision of 1.
+            "revision_number": generation,
             "conclusion_viewpoint_revision_id": new_revision_id,
         }
         bumped["argument_route_revision_id"] = f"ARR-{sha256_json(seed)[:20]}"
@@ -260,9 +269,8 @@ def build_revision_package(
         for f in successor.get("focal_viewpoints") or []:
             if str(f.get("viewpoint_revision_id")) == target:
                 f["viewpoint_revision_id"] = new_revision_id
-        number = int(successor.get("revision_number") or successor["revision"]) + 1
-        successor["revision"] = number
-        successor["revision_number"] = number
+        successor["revision"] = 1
+        successor["revision_number"] = 1
         successor["supersedes_revision_id"] = previous_id
         successor["review_provenance"] = {
             "review_artifact_sha256": str(ruling["artifact_sha256"]),

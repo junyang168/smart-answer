@@ -771,14 +771,19 @@ def compile_cvp_batch_package(
                 for node in record.get("ordered_inference_nodes") or []:
                     if node.get("conclusion_viewpoint_revision_id") == target:
                         node["conclusion_viewpoint_revision_id"] = new_revision_id
-                bumped_number = int(record["revision_number"]) + 1
-                record["revision"] = bumped_number
-                record["revision_number"] = bumped_number
+                generation = int(record["revision_number"]) + 1
+                # A bumped route revision is a NEW store object whose store
+                # revision starts at 1, and the model enforces
+                # revision_number == store revision; the generation count
+                # lives in the id seed and the supersedes chain. old+1 here
+                # was a latent copy of the defect #326's live fire exposed.
+                record["revision"] = 1
+                record["revision_number"] = 1
                 record["supersedes_revision_id"] = previous_id
                 seed = {
                     "policy_version": CVP_BATCH_CHANGESET_POLICY_VERSION,
                     "argument_route_id": record["argument_route_id"],
-                    "revision_number": bumped_number,
+                    "revision_number": generation,
                     "conclusion_viewpoint_revision_id": new_revision_id,
                 }
                 record["argument_route_revision_id"] = f"ARR-{sha256_json(seed)[:20]}"
