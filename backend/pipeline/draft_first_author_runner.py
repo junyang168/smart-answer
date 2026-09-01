@@ -195,9 +195,9 @@ def main() -> int:
         # (bare verse numbers, untranslated Greek); the profile says what the
         # reader does not bring, and rule 13 tells the author to write to it.
         default=(
-            "神学生和追求的平信徒。神学生熟悉经文与原文术语；平信徒包括初信与慕道的读者——"
-            "他们爱读认真讲解圣经的文章，但未必记得某章某节的上下文，不认识希腊文，"
-            "也没有神学词汇；他们需要文章自带全部背景。"
+            "神学生和追求的老基督徒。他们有圣经常识——知道摩西五经、先知书、使徒行传是什么，"
+            "认得利未记、认得拉比这类词，不需要从头解释；但不滚瓜烂熟，"
+            "记不住某章某节具体讲了什么、上下文是什么。多数人不懂希腊文。"
         ),
     )
     parser.add_argument("--output-dir", type=Path, required=True)
