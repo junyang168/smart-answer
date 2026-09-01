@@ -202,6 +202,12 @@ def main() -> int:
     )
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument(
+        "--series-context",
+        type=Path,
+        help="JSON of sibling essays in the series: reader questions, one-line "
+        "answers, claimed arguments; rule 6 keeps this essay from re-arguing them",
+    )
+    parser.add_argument(
         "--provider",
         choices=("claude", "codex"),
         default="claude",
@@ -223,6 +229,10 @@ def main() -> int:
         "argument_routes": argument_route_charter(packet),
         "source_originals": source_texts(packet),
     }
+    if args.series_context:
+        payload["series_context"] = json.loads(
+            args.series_context.read_text(encoding="utf-8")
+        )
     payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
     client_type = (
