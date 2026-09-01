@@ -19,6 +19,7 @@ from backend.pipeline.viewpoint_scope_selection import (
     ARGUMENT_DEPENDENCY_RELATION_TYPES,
     select_scope_units,
 )
+from backend.pipeline.occurrence_section_projection import claim_universe_sha256
 
 from .knowledge_models import ClaimRecord, KnowledgeSourceDocument
 from .viewpoint_foundation import semantic_record_sha, sha256_json
@@ -65,8 +66,8 @@ class ArticleAcceptanceFixture(StrictPilotModel):
 
 
 class Matthew16PilotScope(StrictPilotModel):
-    schema_version: Literal["wang_matthew16_viewpoint_pilot_scope_v2"] = (
-        "wang_matthew16_viewpoint_pilot_scope_v2"
+    schema_version: Literal["wang_matthew16_viewpoint_pilot_scope_v3"] = (
+        "wang_matthew16_viewpoint_pilot_scope_v3"
     )
     chapter: Literal[16] = 16
     passage_units: list[str]
@@ -83,6 +84,7 @@ class Matthew16PilotScope(StrictPilotModel):
     relation_scope: Literal["source_local"] = "source_local"
     route_cross_source_allowed: Literal[True] = True
     occurrence_signal_status: Literal["available", "unavailable"]
+    occurrence_projection_sha256: str | None = None
     statistics: dict[str, int]
     model_calls_executed: Literal[0] = 0
     master_data_mutations: Literal[0] = 0
@@ -193,6 +195,12 @@ def build_matthew16_pilot_scope(
     argument_route_revisions: Sequence[Mapping[str, Any]] = (),
     argument_route_attestations: Sequence[Mapping[str, Any]] = (),
     occurrence_unit_ids_by_claim: Mapping[str, Sequence[str]] | None = None,
+    occurrence_admissions_by_claim: Mapping[
+        str, Sequence[Mapping[str, Any]]
+    ]
+    | None = None,
+    occurrence_projection_sha256: str | None = None,
+    occurrence_projection_claim_universe_sha256: str | None = None,
     article_dirs: Sequence[Path] = (),
     thematic_source_ids: Sequence[str] = (),
 ) -> Matthew16PilotScope:
@@ -274,6 +282,13 @@ def build_matthew16_pilot_scope(
             )
         )
     pilot_claims.sort(key=lambda item: item.claim_id)
+    if occurrence_admissions_by_claim is not None:
+        if not occurrence_projection_sha256:
+            raise ValueError("detailed occurrence admissions require a projection SHA")
+        if occurrence_projection_claim_universe_sha256 != claim_universe_sha256(
+            [item.model_dump(mode="json") for item in pilot_claims]
+        ):
+            raise ValueError("occurrence projection Claim universe mismatch")
     selection = select_scope_units(
         claims=[item.model_dump(mode="json") for item in pilot_claims],
         passage_units=PASSAGE_UNITS,
@@ -283,6 +298,7 @@ def build_matthew16_pilot_scope(
         route_revisions=argument_route_revisions,
         attestations=argument_route_attestations,
         occurrence_unit_ids_by_claim=occurrence_unit_ids_by_claim,
+        occurrence_admissions_by_claim=occurrence_admissions_by_claim,
     )
     pilot_claims = [
         item.model_copy(
@@ -300,7 +316,7 @@ def build_matthew16_pilot_scope(
         key=lambda item: item.draft_id,
     )
     payload = {
-        "schema_version": "wang_matthew16_viewpoint_pilot_scope_v2",
+        "schema_version": "wang_matthew16_viewpoint_pilot_scope_v3",
         "chapter": 16,
         "passage_units": list(PASSAGE_UNITS),
         "source_catalog_sha256": source_catalog_sha256,
@@ -316,6 +332,7 @@ def build_matthew16_pilot_scope(
         "relation_scope": "source_local",
         "route_cross_source_allowed": True,
         "occurrence_signal_status": selection["occurrence_signal_status"],
+        "occurrence_projection_sha256": occurrence_projection_sha256,
         "statistics": {
             "mapped_source_total": len(pilot_sources),
             "passage_exegesis_source_total": sum(item.processing_phase == "passage_exegesis" for item in pilot_sources),

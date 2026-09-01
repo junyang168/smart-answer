@@ -22,6 +22,13 @@ from backend.pipeline.viewpoint_scope_selection import (
     direct_seed_units,
     select_scope_units,
 )
+from backend.pipeline.occurrence_section_projection import (
+    claim_identity_universe_sha256,
+    claim_universe_sha256,
+    projection_admissions_by_claim,
+    projection_status_by_claim,
+    verify_projection_artifact,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -108,6 +115,12 @@ def build_report(
     routes: list[dict[str, Any]] | None = None,
     route_revisions: list[dict[str, Any]] | None = None,
     occurrence_unit_ids_by_claim: Mapping[str, Iterable[str]] | None = None,
+    occurrence_admissions_by_claim: Mapping[
+        str, Iterable[Mapping[str, Any]]
+    ]
+    | None = None,
+    occurrence_status_by_claim: Mapping[str, str] | None = None,
+    occurrence_projection_sha256: str | None = None,
     scope_lanes: Mapping[str, str] | None = None,
     scope_artifact_sha256: str | None = None,
 ) -> dict[str, Any]:
@@ -122,7 +135,15 @@ def build_report(
         claims=claims,
         passage_units=passage_units,
         relations=relations,
-        occurrence_unit_ids_by_claim=occurrence_unit_ids_by_claim,
+    )
+    route_only_selection = select_scope_units(
+        claims=claims,
+        passage_units=passage_units,
+        relations=relations,
+        links=links,
+        routes=routes or [],
+        route_revisions=route_revisions or [],
+        attestations=attestations,
     )
     selection = select_scope_units(
         claims=claims,
@@ -133,6 +154,7 @@ def build_report(
         route_revisions=route_revisions or [],
         attestations=attestations,
         occurrence_unit_ids_by_claim=occurrence_unit_ids_by_claim,
+        occurrence_admissions_by_claim=occurrence_admissions_by_claim,
     )
     relation_only_scope = set(relation_only_selection["claim_units"])
     corrected_scope = set(selection["claim_units"])
@@ -151,12 +173,15 @@ def build_report(
     # admissions. Keep route/occurrence as annotations on that exact set so a
     # valid second route does not make an item disappear from the audit.
     disputed = sorted(legacy_scope - relation_only_scope)
-    occurrence_available = occurrence_unit_ids_by_claim is not None
+    occurrence_available = (
+        occurrence_unit_ids_by_claim is not None
+        or occurrence_admissions_by_claim is not None
+    )
     disputed_rows = []
     for claim_id in disputed:
         route_admissions = [
             row
-            for row in selection["admissions"].get(claim_id, [])
+            for row in route_only_selection["admissions"].get(claim_id, [])
             if row["signal"] == "argument_route"
         ]
         occurrence_admissions = [
@@ -170,8 +195,12 @@ def build_report(
             qualification = "proved_by_argument_route"
         elif occurrence_signal:
             qualification = "proved_by_occurrence_section"
+        elif occurrence_available and (occurrence_status_by_claim or {}).get(
+            claim_id
+        ) == "pending_missing_projection_input":
+            qualification = "pending_missing_projection_input"
         elif occurrence_available:
-            qualification = "unproved"
+            qualification = "unproved_after_all_four_signals"
         else:
             qualification = "pending_occurrence_evidence"
         disputed_rows.append(
@@ -210,6 +239,7 @@ def build_report(
             "claim_universe": "exact_scope_artifact",
         },
         "input_sha256s": {
+            "occurrence_section_projection": occurrence_projection_sha256,
             "claims": sha256_json(
                 sorted(claims, key=lambda row: str(row["claim_id"]))
             ),
@@ -281,6 +311,18 @@ def build_report(
             row["scope_qualification"] == "pending_occurrence_evidence"
             for row in disputed_rows
         ),
+        "disputed_proved_by_occurrence_count": sum(
+            row["scope_qualification"] == "proved_by_occurrence_section"
+            for row in disputed_rows
+        ),
+        "disputed_pending_missing_projection_input_count": sum(
+            row["scope_qualification"] == "pending_missing_projection_input"
+            for row in disputed_rows
+        ),
+        "disputed_unproved_after_all_four_signals_count": sum(
+            row["scope_qualification"] == "unproved_after_all_four_signals"
+            for row in disputed_rows
+        ),
         "occurrence_signal_status": selection["occurrence_signal_status"],
         "rejected_relation_count": len(selection["rejected_relations"]),
         "out_of_universe_relation_endpoints": rejected_outside,
@@ -311,6 +353,7 @@ def main() -> int:
     load_dotenv(PROJECT_ROOT / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scope-artifact", type=Path, required=True)
+    parser.add_argument("--occurrence-projection", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
@@ -325,6 +368,28 @@ def main() -> int:
     if not scope_claims:
         raise ValueError("scope artifact has no Claim universe")
 
+    occurrence_admissions = None
+    occurrence_statuses = None
+    occurrence_projection_sha = None
+    if args.occurrence_projection:
+        occurrence = _read(args.occurrence_projection)
+        verify_projection_artifact(occurrence)
+        if occurrence.get("scope_artifact_sha256") != stated_scope_sha:
+            raise ValueError("occurrence projection scope artifact mismatch")
+        if occurrence.get(
+            "parent_scope_claim_universe_sha256"
+        ) != claim_universe_sha256(scope_claims):
+            raise ValueError("occurrence projection parent Claim pins mismatch")
+        if occurrence.get(
+            "claim_identity_universe_sha256"
+        ) != claim_identity_universe_sha256(
+            scope_claims
+        ):
+            raise ValueError("occurrence projection Claim identity universe mismatch")
+        occurrence_admissions = projection_admissions_by_claim(occurrence)
+        occurrence_statuses = projection_status_by_claim(occurrence)
+        occurrence_projection_sha = str(occurrence["artifact_sha256"])
+
     store = PostgresKnowledgeStore()
     report = build_report(
         claims=scope_claims,
@@ -334,6 +399,9 @@ def main() -> int:
         routes=store.list_records("argument_routes"),
         route_revisions=store.list_records("argument_route_revisions"),
         passage_units=PASSAGE_UNITS,
+        occurrence_admissions_by_claim=occurrence_admissions,
+        occurrence_status_by_claim=occurrence_statuses,
+        occurrence_projection_sha256=occurrence_projection_sha,
         scope_lanes={
             str(row["claim_id"]): str(row.get("lane") or "")
             for row in scope_claims

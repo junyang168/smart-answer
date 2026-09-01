@@ -50,6 +50,7 @@ from backend.api.canonical_repository.viewpoint_foundation import (
     semantic_record_sha,
     sha256_json,
 )
+from backend.pipeline.occurrence_section_projection import claim_universe_sha256
 
 
 def _fixture(tmp_path):
@@ -225,6 +226,45 @@ def test_pilot_scope_producer_uses_argument_dependency_selector(tmp_path):
     assert context.passage_unit_ids == ["16:13-18"]
     assert context.admission_basis[0]["signal"] == "claim_relation"
     assert context.admission_basis[0]["authority"] == "recall_only"
+
+
+def test_pilot_scope_producer_consumes_sha_bound_occurrence_admissions(tmp_path):
+    catalog, selection, manifest, sources, claims, article = _fixture(tmp_path)
+    manifest["claims"][1]["source_id"] = manifest["claims"][0]["source_id"]
+    manifest.pop("manifest_sha256")
+    manifest["manifest_sha256"] = sha256_json(manifest)
+    expected_universe = claim_universe_sha256(manifest["claims"])
+
+    result = build_matthew16_pilot_scope(
+        source_catalog=catalog,
+        source_catalog_sha256="1" * 64,
+        source_map_sha256="2" * 64,
+        source_selection=selection,
+        claim_manifest=manifest,
+        source_documents=sources,
+        claims=claims,
+        occurrence_admissions_by_claim={
+            "C-CONTEXT": [
+                {
+                    "passage_unit_ids": ["16:13-18"],
+                    "evidence_step_id": "E-CONTEXT",
+                    "source_fragment_id": "F-CONTEXT",
+                    "section_index": 1,
+                }
+            ]
+        },
+        occurrence_projection_sha256="d" * 64,
+        occurrence_projection_claim_universe_sha256=expected_universe,
+        article_dirs=[article],
+        thematic_source_ids=["sermon:missing"],
+    )
+
+    context = next(item for item in result.claims if item.claim_id == "C-CONTEXT")
+    assert context.lane == "core"
+    assert context.passage_unit_ids == ["16:13-18"]
+    assert context.admission_basis[0]["signal"] == "occurrence_section"
+    assert context.admission_basis[0]["source_fragment_id"] == "F-CONTEXT"
+    assert result.occurrence_projection_sha256 == "d" * 64
 
 
 def test_pilot_viewpoint_classification_is_explicit_and_fail_closed():

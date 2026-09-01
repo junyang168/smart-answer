@@ -225,6 +225,10 @@ def select_scope_units(
     route_revisions: Iterable[Mapping[str, Any]] = (),
     attestations: Iterable[Mapping[str, Any]] = (),
     occurrence_unit_ids_by_claim: Mapping[str, Iterable[str]] | None = None,
+    occurrence_admissions_by_claim: Mapping[
+        str, Iterable[Mapping[str, Any]]
+    ]
+    | None = None,
 ) -> dict[str, Any]:
     """Apply the four legal admission signals to one exact Claim universe."""
 
@@ -239,6 +243,11 @@ def select_scope_units(
             {"signal": "scripture_ref", "passage_unit_ids": sorted(claim_units)}
         )
 
+    if (
+        occurrence_unit_ids_by_claim is not None
+        and occurrence_admissions_by_claim is not None
+    ):
+        raise ValueError("supply either occurrence unit ids or detailed admissions, not both")
     occurrence_map = occurrence_unit_ids_by_claim or {}
     for claim_id, raw_units in sorted(occurrence_map.items()):
         if claim_id not in rows:
@@ -250,6 +259,24 @@ def select_scope_units(
         admissions[claim_id].append(
             {"signal": "occurrence_section", "passage_unit_ids": sorted(valid_units)}
         )
+    for claim_id, raw_admissions in sorted(
+        (occurrence_admissions_by_claim or {}).items()
+    ):
+        if claim_id not in rows:
+            continue
+        for raw_admission in raw_admissions:
+            detail = dict(raw_admission)
+            valid_units = set(
+                str(value) for value in detail.get("passage_unit_ids") or []
+            ) & set(passage_units)
+            if not valid_units:
+                continue
+            units.setdefault(claim_id, set()).update(valid_units)
+            detail.pop("signal", None)
+            detail["passage_unit_ids"] = sorted(valid_units)
+            admissions[claim_id].append(
+                {"signal": "occurrence_section", **detail}
+            )
 
     dependencies, rejected_relations = _eligible_relations(relations, claim_sources)
     route_groups = _eligible_route_groups(
@@ -341,6 +368,9 @@ def select_scope_units(
         "route_growth": route_growth,
         "rejected_relations": rejected_relations,
         "occurrence_signal_status": (
-            "available" if occurrence_unit_ids_by_claim is not None else "unavailable"
+            "available"
+            if occurrence_unit_ids_by_claim is not None
+            or occurrence_admissions_by_claim is not None
+            else "unavailable"
         ),
     }
