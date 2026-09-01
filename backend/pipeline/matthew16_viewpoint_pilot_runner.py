@@ -37,6 +37,11 @@ def main() -> int:
         claim_manifest=_read(args.claim_manifest),
         source_documents=store.list_records("source_documents"),
         claims=store.list_records("claims"),
+        claim_relations=store.list_records("claim_relations"),
+        viewpoint_claim_links=store.list_records("viewpoint_claim_links"),
+        argument_routes=store.list_records("argument_routes"),
+        argument_route_revisions=store.list_records("argument_route_revisions"),
+        argument_route_attestations=store.list_records("argument_route_attestations"),
         article_dirs=args.article_dir,
         thematic_source_ids=args.thematic_source_id,
     )
