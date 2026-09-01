@@ -1082,7 +1082,19 @@ def main() -> int:
             decided_at=_stable_decided_at(batch_dir),
         )
         _write_immutable(batch_dir / "cvp-change-package.json", package)
-        plan = store.plan_package(package, source_kind="cvp_batch_resolution")
+        # A viewpoint-wording supersede strands the attestations pinned to the
+        # route revisions it bumps. They are immutable, so the package minted
+        # replacements and named the stranded originals; retiring them rides
+        # the same ChangeSet, the same way the route worker retires the
+        # attestations its own revisions strand.
+        plan = store.plan_package(
+            package,
+            source_kind="cvp_batch_resolution",
+            retiring_keys=[
+                ("argument_route_attestations", str(value))
+                for value in package.get("superseded_attestation_ids") or []
+            ],
+        )
         plan_document = plan.as_dict()
         plan_document["schema_version"] = "wang_cvp_batch_changeset_plan_v1"
         plan_document["apply_allowed"] = bool(args.apply)

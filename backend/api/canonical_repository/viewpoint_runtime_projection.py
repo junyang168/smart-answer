@@ -174,7 +174,18 @@ def validate_runtime_authoring_graph(
         viewpoint_revision = viewpoint_revisions.get(viewpoint_revision_id)
         if not route:
             findings.append(f"{revision_id}: missing argument route {revision['argument_route_id']}")
-        elif viewpoint_revision_id != viewpoints.get(str(route["conclusion_viewpoint_id"]), {}).get("current_revision_id"):
+        elif (
+            route.get("current_revision_id") == revision_id
+            and viewpoint_revision_id
+            != viewpoints.get(str(route["conclusion_viewpoint_id"]), {}).get("current_revision_id")
+        ):
+            # Only the route's current revision owes currency to the viewpoint.
+            # A superseded revision pins the wording it was validated against --
+            # that is the succession chain itself, the same way a superseded
+            # viewpoint revision keeps its old wording. Demanding currency of
+            # history made a viewpoint-wording supersede unappliable: retiring
+            # the old route revision broke the supersedes-chain check below,
+            # keeping it active broke this one.
             findings.append(f"{revision_id}: conclusion viewpoint revision is stale")
         if not viewpoint_revision or viewpoint_revision.get("viewpoint_id") != revision.get("route_signature", {}).get("conclusion_viewpoint_id"):
             findings.append(f"{revision_id}: invalid conclusion viewpoint revision")

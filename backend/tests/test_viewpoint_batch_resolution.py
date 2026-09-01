@@ -5490,6 +5490,187 @@ def test_revision_repoints_the_records_the_reviewer_confirmed():
     assert moved[0]["validated_against_viewpoint_revision_id"] == new_revision
 
 
+def _dependent_route_revision() -> dict[str, Any]:
+    return {
+        "record_kind": "argument_route_revision",
+        "record": {
+            "argument_route_revision_id": "ARR-old",
+            "argument_route_id": "AR-1",
+            "revision": 1,
+            "revision_number": 1,
+            "validated_against_conclusion_viewpoint_revision_id": "CVR-1",
+            "ordered_inference_nodes": [
+                {"route_step_key": "S1", "conclusion_viewpoint_revision_id": "CVR-1"}
+            ],
+            "route_signature": {"conclusion_viewpoint_id": "CV-1"},
+        },
+    }
+
+
+def _dependent_attestation() -> dict[str, Any]:
+    return {
+        "record_kind": "argument_route_attestation",
+        "record": {
+            "argument_route_attestation_id": "ARA-old",
+            "argument_route_id": "AR-1",
+            "validated_against_route_revision_id": "ARR-old",
+            "source_id": "2016_NYSC_3",
+            "source_revision_sha256": "source-sha",
+            "claim_ids": ["C-earlier"],
+            "step_bindings": [
+                {
+                    "route_step_key": "S1",
+                    "claim_component_keys": [],
+                    "evidence_step_ids": [],
+                    "source_fragment_ids": [],
+                    "attestation_status": "attested",
+                }
+            ],
+            "terminal_claim_link_id": "VCL-old",
+        },
+    }
+
+
+def test_revision_supersedes_stranded_attestations_instead_of_editing_them():
+    """#318: a wording revision drags the route revision, and the attestation
+    pinned to it follows as a NEW record minted with the route worker's own id
+    recipe -- never as an in-place edit of an immutable id. The stranded
+    original is named for retirement in the same ChangeSet."""
+
+    proposal = _member_proposal(viewpoint_revisions=[_revision()])
+    review = _passing_review(proposal)
+    review = CanonicalViewpointReviewResponse.model_validate(
+        review.model_dump(mode="json")
+        | {
+            "revision_reviews": [
+                review.revision_reviews[0].model_dump(mode="json")
+                | {"confirmed_dependent_ids": ["ARR-old", "ARA-old"]}
+            ]
+        }
+    )
+    package = compile_cvp_batch_package(
+        proposal=proposal,
+        review=review,
+        deterministic_validation_sha256="validation-sha",
+        scope_manifest_sha256="scope-manifest-sha",
+        claims=[_claim("C1", ROCK_STATEMENT)],
+        registry_context=REGISTRY_CONTEXT_ROCK,
+        revision_dependents={
+            "CVR-1": [_dependent_route_revision(), _dependent_attestation()]
+        },
+        proposal_artifact_sha256="proposal-call-sha",
+        review_artifact_sha256="review-call-sha",
+        proposer_model_id="gpt-5.6-sol/high",
+        reviewer_model_id="claude-opus-5/high",
+        decided_at="2026-08-24T12:00:00Z",
+    )
+
+    new_cvr = package["viewpoint_revisions"][0]["viewpoint_revision_id"]
+    arr = package["argument_route_revisions"][0]
+    assert arr["argument_route_revision_id"] != "ARR-old"
+    assert arr["supersedes_revision_id"] == "ARR-old"
+    assert arr["validated_against_conclusion_viewpoint_revision_id"] == new_cvr
+
+    ara = package["argument_route_attestations"][0]
+    assert ara["argument_route_attestation_id"] != "ARA-old"
+    assert ara["validated_against_route_revision_id"] == arr["argument_route_revision_id"]
+    assert package["superseded_attestation_ids"] == ["ARA-old"]
+
+    # The reminted id follows the route worker's recipe, so either path
+    # derives the same id for the same fact.
+    from backend.api.canonical_repository.viewpoint_route_changeset import (
+        ROUTE_CHANGESET_POLICY_VERSION,
+    )
+
+    seed = {
+        "policy_version": ROUTE_CHANGESET_POLICY_VERSION,
+        "route_revision_id": arr["argument_route_revision_id"],
+        "source_id": "2016_NYSC_3",
+        "source_revision_sha256": "source-sha",
+        "claim_ids": ["C-earlier"],
+        "step_bindings": _dependent_attestation()["record"]["step_bindings"],
+        "terminal_claim_link_id": "VCL-old",
+    }
+    assert ara["argument_route_attestation_id"] == f"ARA-{sha256_json(seed)[:20]}"
+
+
+def test_revision_without_route_dependents_strands_no_attestations():
+    proposal = _member_proposal(viewpoint_revisions=[_revision()])
+    review = _passing_review(proposal)
+    review = CanonicalViewpointReviewResponse.model_validate(
+        review.model_dump(mode="json")
+        | {
+            "revision_reviews": [
+                review.revision_reviews[0].model_dump(mode="json")
+                | {"confirmed_dependent_ids": ["VCL-old"]}
+            ]
+        }
+    )
+    package = compile_cvp_batch_package(
+        proposal=proposal,
+        review=review,
+        deterministic_validation_sha256="validation-sha",
+        scope_manifest_sha256="scope-manifest-sha",
+        claims=[_claim("C1", ROCK_STATEMENT)],
+        registry_context=REGISTRY_CONTEXT_ROCK,
+        revision_dependents={"CVR-1": [_dependent_link()]},
+        proposal_artifact_sha256="proposal-call-sha",
+        review_artifact_sha256="review-call-sha",
+        proposer_model_id="gpt-5.6-sol/high",
+        reviewer_model_id="claude-opus-5/high",
+        decided_at="2026-08-24T12:00:00Z",
+    )
+    assert package["superseded_attestation_ids"] == []
+
+
+def test_only_the_current_route_revision_owes_currency_to_the_viewpoint():
+    """#318: a superseded route revision pins the wording it was validated
+    against -- that is the succession chain, not staleness. Only the route's
+    current revision must track the viewpoint's current wording."""
+
+    from backend.api.canonical_repository.viewpoint_runtime_projection import (
+        validate_runtime_authoring_graph,
+    )
+
+    def graph(current: str) -> dict[str, dict[str, dict[str, Any]]]:
+        return {
+            "canonical_viewpoints": {
+                "CV-1": {"viewpoint_id": "CV-1", "current_revision_id": "CVR-2"}
+            },
+            "viewpoint_revisions": {
+                "CVR-1": {"viewpoint_id": "CV-1"},
+                "CVR-2": {"viewpoint_id": "CV-1"},
+            },
+            "argument_routes": {
+                "AR-1": {
+                    "argument_route_id": "AR-1",
+                    "current_revision_id": current,
+                    "conclusion_viewpoint_id": "CV-1",
+                }
+            },
+            "argument_route_revisions": {
+                "ARR-old": {
+                    "argument_route_id": "AR-1",
+                    "validated_against_conclusion_viewpoint_revision_id": "CVR-1",
+                    "route_signature": {"conclusion_viewpoint_id": "CV-1"},
+                },
+                "ARR-new": {
+                    "argument_route_id": "AR-1",
+                    "validated_against_conclusion_viewpoint_revision_id": "CVR-2",
+                    "route_signature": {"conclusion_viewpoint_id": "CV-1"},
+                    "supersedes_revision_id": "ARR-old",
+                },
+            },
+        }
+
+    healthy = validate_runtime_authoring_graph(graph(current="ARR-new"))
+    assert "ARR-old: conclusion viewpoint revision is stale" not in healthy
+    assert not [f for f in healthy if f.startswith(("ARR-", "AR-1"))]
+
+    lagging = validate_runtime_authoring_graph(graph(current="ARR-old"))
+    assert "ARR-old: conclusion viewpoint revision is stale" in lagging
+
+
 def test_revision_that_strands_an_unconfirmed_record_is_refused():
     proposal = _member_proposal(viewpoint_revisions=[_revision()])
     with pytest.raises(CvpBatchChangeSetError, match="strands unconfirmed records: VCL-old"):
