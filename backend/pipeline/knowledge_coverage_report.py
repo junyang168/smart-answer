@@ -1,30 +1,14 @@
-"""Measure which Claims a passage scope can actually see, and which it loses.
+"""Audit passage-scope coverage without changing master data.
 
-The owner's ruling (#312): which verse a Claim cites is not which verse it is
-interpreting. `scripture_refs` alone once routed the professor's Eph 2:20
-argument for Matt 16:18 out of resolution, and every downstream model went
-blind with it. Scope membership is therefore computed as a closure:
-
-    1. Seed — every Claim whose scripture_refs overlap the scope's passage
-       windows enters core.
-    2. Argument-dependency closure — every Claim that supports, qualifies, or
-       otherwise stands in a recorded ClaimRelation to an in-scope Claim joins
-       the scope, whatever verse it cites; repeat to a fixed point.
-    3. Route edges — Claims bound in the attestations of an ArgumentRoute that
-       already touches the scope join with it (the closure's recall depends on
-       the relation graph; route bindings are the second belt).
-    4. Whatever is still outside is listed by name, never silently dropped.
-
-Read-only: no model calls, no master-data writes. The report compares the
-closure against the current lane assignment and against link coverage, so the
-numbers say how much load-bearing material the old single-signal filter hid.
+The report compares the former undirected/all-relation expansion with the
+legal four-signal selector. Its Claim universe is always the supplied scope
+artifact; unrelated registry Claims and non-Claim endpoints cannot enter.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -33,7 +17,18 @@ from dotenv import load_dotenv
 from backend.api.canonical_repository.matthew16_viewpoint_pilot import PASSAGE_UNITS
 from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
-from backend.pipeline.passage_knowledge_slice import reference_overlaps
+from backend.pipeline.viewpoint_scope_selection import (
+    ARGUMENT_DEPENDENCY_RELATION_TYPES,
+    direct_seed_units,
+    select_scope_units,
+)
+from backend.pipeline.occurrence_section_projection import (
+    claim_identity_universe_sha256,
+    claim_universe_sha256,
+    projection_admissions_by_claim,
+    projection_status_by_claim,
+    verify_projection_artifact,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -41,111 +36,73 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 def seed_claims(
     claims: Iterable[Mapping[str, Any]], passage_units: Mapping[str, Any]
 ) -> set[str]:
-    """Claims whose own scripture_refs overlap any scope passage window."""
+    return set(direct_seed_units(claims, passage_units))
 
-    seeded: set[str] = set()
-    for claim in claims:
-        refs = [str(value) for value in claim.get("scripture_refs") or []]
-        for passages in passage_units.values():
-            if any(
-                reference_overlaps(reference, passage)
-                for reference in refs
-                for passage in passages
-            ):
-                seeded.add(str(claim["claim_id"]))
-                break
-    return seeded
+
+def _legacy_undirected_closure(
+    seeds: set[str], relations: Iterable[Mapping[str, Any]], universe: set[str]
+) -> tuple[set[str], list[int]]:
+    """Reproduce the old broad graph walk inside the correct denominator."""
+
+    edges = [
+        (str(row.get("from_id") or ""), str(row.get("to_id") or ""))
+        for row in relations
+    ]
+    selected = set(seeds)
+    growth: list[int] = []
+    while True:
+        additions: set[str] = set()
+        for left, right in edges:
+            if left in selected and right in universe - selected:
+                additions.add(right)
+            if right in selected and left in universe - selected:
+                additions.add(left)
+        if not additions:
+            return selected, growth
+        selected.update(additions)
+        growth.append(len(additions))
 
 
 def relation_closure(
-    in_scope: set[str], relations: Iterable[Mapping[str, Any]]
+    in_scope: set[str],
+    relations: Iterable[Mapping[str, Any]],
+    *,
+    claims: Iterable[Mapping[str, Any]],
 ) -> tuple[set[str], list[int]]:
-    """Fixed-point closure over recorded ClaimRelations, both directions.
+    """Correct upstream, typed, source-local relation-only closure."""
 
-    A Claim supporting an in-scope Claim serves the passage's argument; an
-    in-scope Claim's own recorded qualifications belong with it equally. The
-    per-round growth is returned so the report can show how deep the
-    professor's cross-scripture argumentation actually chains.
-    """
-
-    edges: list[tuple[str, str]] = [
-        (str(item.get("from_id") or ""), str(item.get("to_id") or ""))
-        for item in relations
-    ]
-    scope = set(in_scope)
-    growth: list[int] = []
-    while True:
-        added: set[str] = set()
-        for left, right in edges:
-            if left in scope and right not in scope:
-                added.add(right)
-            if right in scope and left not in scope:
-                added.add(left)
-        if not added:
-            break
-        scope |= added
-        growth.append(len(added))
-    return scope, growth
+    selection = select_scope_units(
+        claims=[dict(row) for row in claims],
+        passage_units={"scope": ()},
+        relations=relations,
+        occurrence_unit_ids_by_claim={claim_id: ["scope"] for claim_id in in_scope},
+    )
+    return set(selection["claim_units"]), selection["relation_growth"]
 
 
 def closure_with_units(
     seed_units: dict[str, set[str]],
     relations: Iterable[Mapping[str, Any]],
     attestations: Iterable[Mapping[str, Any]],
+    *,
+    claims: Iterable[Mapping[str, Any]],
+    links: Iterable[Mapping[str, Any]] = (),
+    routes: Iterable[Mapping[str, Any]] = (),
+    route_revisions: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, set[str]]:
-    """Closure that also inherits passage units along the edges (#315).
+    """Correct closure with unit propagation and reviewed route expansion."""
 
-    A claim pulled in because it supports a 16:13-18 claim belongs to
-    16:13-18: units propagate with membership, so the repaired lane rows are
-    fully determined by the graph, never hand-assigned.
-    """
-
-    edges: list[tuple[str, str]] = [
-        (str(item.get("from_id") or ""), str(item.get("to_id") or ""))
-        for item in relations
-    ]
-    route_groups: dict[str, set[str]] = {}
-    for attestation in attestations:
-        route_id = str(attestation.get("argument_route_id") or "")
-        route_groups.setdefault(route_id, set()).update(
-            str(value) for value in attestation.get("claim_ids") or []
-        )
-    units = {claim: set(values) for claim, values in seed_units.items()}
-    changed = True
-    while changed:
-        changed = False
-        for left, right in edges:
-            for a, b in ((left, right), (right, left)):
-                if a in units and units[a] - units.get(b, set()):
-                    units.setdefault(b, set()).update(units[a])
-                    changed = True
-        for members in route_groups.values():
-            pooled: set[str] = set()
-            for member in members:
-                pooled |= units.get(member, set())
-            if pooled:
-                for member in members:
-                    if pooled - units.get(member, set()):
-                        units.setdefault(member, set()).update(pooled)
-                        changed = True
-    return units
-
-
-def route_edge_expansion(
-    in_scope: set[str], attestations: Iterable[Mapping[str, Any]]
-) -> set[str]:
-    """Claims attested alongside in-scope Claims on the same route."""
-
-    added: set[str] = set()
-    by_route: dict[str, set[str]] = {}
-    for attestation in attestations:
-        route_id = str(attestation.get("argument_route_id") or "")
-        claim_ids = {str(value) for value in attestation.get("claim_ids") or []}
-        by_route.setdefault(route_id, set()).update(claim_ids)
-    for claim_ids in by_route.values():
-        if claim_ids & in_scope:
-            added |= claim_ids - in_scope
-    return added
+    selection = select_scope_units(
+        claims=[dict(row) for row in claims],
+        passage_units={key: () for values in seed_units.values() for key in values},
+        relations=relations,
+        links=links,
+        routes=routes,
+        route_revisions=route_revisions,
+        attestations=attestations,
+        occurrence_unit_ids_by_claim=seed_units,
+    )
+    return {key: set(values) for key, values in selection["claim_units"].items()}
 
 
 def build_report(
@@ -155,106 +112,321 @@ def build_report(
     attestations: list[dict[str, Any]],
     links: list[dict[str, Any]],
     passage_units: Mapping[str, Any],
+    routes: list[dict[str, Any]] | None = None,
+    route_revisions: list[dict[str, Any]] | None = None,
+    occurrence_unit_ids_by_claim: Mapping[str, Iterable[str]] | None = None,
+    occurrence_admissions_by_claim: Mapping[
+        str, Iterable[Mapping[str, Any]]
+    ]
+    | None = None,
+    occurrence_status_by_claim: Mapping[str, str] | None = None,
+    occurrence_projection_sha256: str | None = None,
     scope_lanes: Mapping[str, str] | None = None,
+    scope_artifact_sha256: str | None = None,
 ) -> dict[str, Any]:
-    claim_ids = {str(item["claim_id"]) for item in claims}
-    seeds = seed_claims(claims, passage_units)
-    after_relations, growth = relation_closure(seeds, relations)
-    route_added = route_edge_expansion(after_relations, attestations)
-    scope = after_relations | route_added
-    orphans = sorted(claim_ids - scope)
+    """Build a deterministic, SHA-bound legal-scope difference report."""
 
+    claim_ids = {str(row["claim_id"]) for row in claims}
+    seeds = seed_claims(claims, passage_units)
+    legacy_scope, legacy_growth = _legacy_undirected_closure(
+        seeds, relations, claim_ids
+    )
+    relation_only_selection = select_scope_units(
+        claims=claims,
+        passage_units=passage_units,
+        relations=relations,
+    )
+    route_only_selection = select_scope_units(
+        claims=claims,
+        passage_units=passage_units,
+        relations=relations,
+        links=links,
+        routes=routes or [],
+        route_revisions=route_revisions or [],
+        attestations=attestations,
+    )
+    selection = select_scope_units(
+        claims=claims,
+        passage_units=passage_units,
+        relations=relations,
+        links=links,
+        routes=routes or [],
+        route_revisions=route_revisions or [],
+        attestations=attestations,
+        occurrence_unit_ids_by_claim=occurrence_unit_ids_by_claim,
+        occurrence_admissions_by_claim=occurrence_admissions_by_claim,
+    )
+    relation_only_scope = set(relation_only_selection["claim_units"])
+    corrected_scope = set(selection["claim_units"])
     linked = {
-        str(item.get("claim_id") or "")
-        for item in links
-        if item.get("effective_state") == "active"
+        str(row.get("claim_id") or "")
+        for row in links
+        if row.get("effective_state") == "active"
+        and str(row.get("review_status") or "")
+        in {"approved", "human_approved", "system_approved"}
     }
     lanes = dict(scope_lanes or {})
-    recovered_from_context = sorted(
-        value
-        for value in scope
-        if lanes.get(value) == "source_context_candidate"
+    statements = {
+        str(row["claim_id"]): str(row.get("statement") or "") for row in claims
+    }
+    # #320's disposition population is the 41 legacy-only relation
+    # admissions. Keep route/occurrence as annotations on that exact set so a
+    # valid second route does not make an item disappear from the audit.
+    disputed = sorted(legacy_scope - relation_only_scope)
+    occurrence_available = (
+        occurrence_unit_ids_by_claim is not None
+        or occurrence_admissions_by_claim is not None
     )
-    report = {
-        "schema_version": "wang_knowledge_coverage_report_v1",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+    disputed_rows = []
+    for claim_id in disputed:
+        route_admissions = [
+            row
+            for row in route_only_selection["admissions"].get(claim_id, [])
+            if row["signal"] == "argument_route"
+        ]
+        occurrence_admissions = [
+            row
+            for row in selection["admissions"].get(claim_id, [])
+            if row["signal"] == "occurrence_section"
+        ]
+        route_signal = bool(route_admissions)
+        occurrence_signal = bool(occurrence_admissions)
+        if route_signal:
+            qualification = "proved_by_argument_route"
+        elif occurrence_signal:
+            qualification = "proved_by_occurrence_section"
+        elif occurrence_available and (occurrence_status_by_claim or {}).get(
+            claim_id
+        ) == "pending_missing_projection_input":
+            qualification = "pending_missing_projection_input"
+        elif occurrence_available:
+            qualification = "unproved_after_all_four_signals"
+        else:
+            qualification = "pending_occurrence_evidence"
+        disputed_rows.append(
+            {
+                "claim_id": claim_id,
+                "statement": statements[claim_id],
+                "current_lane": lanes.get(claim_id),
+                "active_viewpoint_claim_link": claim_id in linked,
+                "scripture_ref_signal": claim_id in seeds,
+                "claim_relation_signal": False,
+                "argument_route_signal": route_signal,
+                "argument_route_admissions": route_admissions,
+                "occurrence_section_signal": (
+                    occurrence_signal
+                    if occurrence_available
+                    else "unavailable_in_current_master_schema"
+                ),
+                "occurrence_section_admissions": occurrence_admissions,
+                "scope_qualification": qualification,
+            }
+        )
+    rejected_outside = [
+        row
+        for row in selection["rejected_relations"]
+        if row["reason"] == "endpoint_outside_claim_universe"
+    ]
+    report: dict[str, Any] = {
+        "schema_version": "wang_knowledge_coverage_report_v2",
+        "scope_artifact_sha256": scope_artifact_sha256,
+        "policy": {
+            "relation_direction": "upstream_from_to",
+            "relation_type_allowlist": sorted(ARGUMENT_DEPENDENCY_RELATION_TYPES),
+            "relation_scope": "source_local",
+            "candidate_relations": "recall_only",
+            "route_scope": "approved_current_route_may_cross_source",
+            "claim_universe": "exact_scope_artifact",
+        },
+        "input_sha256s": {
+            "occurrence_section_projection": occurrence_projection_sha256,
+            "claims": sha256_json(
+                sorted(claims, key=lambda row: str(row["claim_id"]))
+            ),
+            "claim_relations": sha256_json(
+                sorted(
+                    relations,
+                    key=lambda row: str(row.get("claim_relation_id") or ""),
+                )
+            ),
+            "viewpoint_claim_links": sha256_json(
+                sorted(
+                    links,
+                    key=lambda row: str(row.get("viewpoint_claim_link_id") or ""),
+                )
+            ),
+            "argument_routes": sha256_json(
+                sorted(
+                    routes or [],
+                    key=lambda row: str(row.get("argument_route_id") or ""),
+                )
+            ),
+            "argument_route_revisions": sha256_json(
+                sorted(
+                    route_revisions or [],
+                    key=lambda row: str(
+                        row.get("argument_route_revision_id") or ""
+                    ),
+                )
+            ),
+            "argument_route_attestations": sha256_json(
+                sorted(
+                    attestations,
+                    key=lambda row: str(
+                        row.get("argument_route_attestation_id") or ""
+                    ),
+                )
+            ),
+        },
         "claims_total": len(claim_ids),
         "seed_count": len(seeds),
-        "closure_rounds": growth,
-        "closure_count": len(after_relations),
-        "route_edge_added": sorted(route_added),
-        "scope_count": len(scope),
-        "scope_unlinked": sorted(
-            value for value in scope if value in claim_ids and value not in linked
+        "legacy_undirected_growth": legacy_growth,
+        "legacy_undirected_scope_count": len(legacy_scope),
+        "relation_only_growth": relation_only_selection["relation_growth"],
+        "relation_only_scope_count": len(relation_only_scope),
+        "relation_only_recovered_from_context_count": len(
+            relation_only_scope - seeds
         ),
-        "recovered_from_context_lane": recovered_from_context,
-        "orphans": orphans,
+        "corrected_relation_growth": selection["relation_growth"],
+        "corrected_route_growth": selection["route_growth"],
+        "corrected_scope_count": len(corrected_scope),
+        "corrected_scope_claim_ids": sorted(corrected_scope),
+        "corrected_recovered_from_context_lane": sorted(
+            claim_id
+            for claim_id in corrected_scope
+            if lanes.get(claim_id) == "source_context_candidate"
+        ),
+        "corrected_scope_unlinked": sorted(corrected_scope - linked),
+        "orphan_claim_ids": sorted(claim_ids - corrected_scope),
+        "disputed_legacy_admission_count": len(disputed_rows),
+        "disputed_legacy_admissions": disputed_rows,
+        "disputed_active_link_count": sum(
+            bool(row["active_viewpoint_claim_link"]) for row in disputed_rows
+        ),
+        "disputed_proved_by_route_count": sum(
+            row["scope_qualification"] == "proved_by_argument_route"
+            for row in disputed_rows
+        ),
+        "disputed_pending_occurrence_count": sum(
+            row["scope_qualification"] == "pending_occurrence_evidence"
+            for row in disputed_rows
+        ),
+        "disputed_proved_by_occurrence_count": sum(
+            row["scope_qualification"] == "proved_by_occurrence_section"
+            for row in disputed_rows
+        ),
+        "disputed_pending_missing_projection_input_count": sum(
+            row["scope_qualification"] == "pending_missing_projection_input"
+            for row in disputed_rows
+        ),
+        "disputed_unproved_after_all_four_signals_count": sum(
+            row["scope_qualification"] == "unproved_after_all_four_signals"
+            for row in disputed_rows
+        ),
+        "occurrence_signal_status": selection["occurrence_signal_status"],
+        "rejected_relation_count": len(selection["rejected_relations"]),
+        "out_of_universe_relation_endpoints": rejected_outside,
     }
     report["report_sha256"] = sha256_json(report)
     return report
 
 
+def _read(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _write_immutable(path: Path, payload: Mapping[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        if _read(path) != payload:
+            raise ValueError(f"immutable report differs at {path}")
+        return
+    temporary = path.with_suffix(path.suffix + ".partial")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
 def main() -> int:
     load_dotenv(PROJECT_ROOT / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--scope-artifact",
-        type=Path,
-        help="pilot scope artifact whose lane assignments the report compares against",
-    )
-    parser.add_argument(
-        "--source-prefix",
-        action="append",
-        help="limit claims to ids starting with these prefixes (default: every claim)",
-    )
+    parser.add_argument("--scope-artifact", type=Path, required=True)
+    parser.add_argument("--occurrence-projection", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
+    scope = _read(args.scope_artifact)
+    stated_scope_sha = str(scope.get("artifact_sha256") or "")
+    unsigned_scope = {
+        key: value for key, value in scope.items() if key != "artifact_sha256"
+    }
+    if not stated_scope_sha or stated_scope_sha != sha256_json(unsigned_scope):
+        raise ValueError("scope artifact SHA mismatch")
+    scope_claims = [dict(row) for row in scope.get("claims") or []]
+    if not scope_claims:
+        raise ValueError("scope artifact has no Claim universe")
+
+    occurrence_admissions = None
+    occurrence_statuses = None
+    occurrence_projection_sha = None
+    if args.occurrence_projection:
+        occurrence = _read(args.occurrence_projection)
+        verify_projection_artifact(occurrence)
+        if occurrence.get("scope_artifact_sha256") != stated_scope_sha:
+            raise ValueError("occurrence projection scope artifact mismatch")
+        if occurrence.get(
+            "parent_scope_claim_universe_sha256"
+        ) != claim_universe_sha256(scope_claims):
+            raise ValueError("occurrence projection parent Claim pins mismatch")
+        if occurrence.get(
+            "claim_identity_universe_sha256"
+        ) != claim_identity_universe_sha256(
+            scope_claims
+        ):
+            raise ValueError("occurrence projection Claim identity universe mismatch")
+        occurrence_admissions = projection_admissions_by_claim(occurrence)
+        occurrence_statuses = projection_status_by_claim(occurrence)
+        occurrence_projection_sha = str(occurrence["artifact_sha256"])
+
     store = PostgresKnowledgeStore()
-    claims = store.list_records("claims")
-    if args.source_prefix:
-        prefixes = tuple(args.source_prefix)
-        claims = [c for c in claims if str(c["claim_id"]).startswith(prefixes)]
-    relations = store.list_records("claim_relations")
-    attestations = store.list_records("argument_route_attestations")
-    links = store.list_records("viewpoint_claim_links")
-
-    scope_lanes: dict[str, str] = {}
-    if args.scope_artifact:
-        artifact = json.loads(args.scope_artifact.read_text(encoding="utf-8"))
-        scope_lanes = {
-            str(row.get("claim_id") or ""): str(row.get("lane") or "")
-            for row in artifact.get("claims") or []
-        }
-
     report = build_report(
-        claims=claims,
-        relations=relations,
-        attestations=attestations,
-        links=links,
+        claims=scope_claims,
+        relations=store.list_records("claim_relations"),
+        attestations=store.list_records("argument_route_attestations"),
+        links=store.list_records("viewpoint_claim_links"),
+        routes=store.list_records("argument_routes"),
+        route_revisions=store.list_records("argument_route_revisions"),
         passage_units=PASSAGE_UNITS,
-        scope_lanes=scope_lanes,
+        occurrence_admissions_by_claim=occurrence_admissions,
+        occurrence_status_by_claim=occurrence_statuses,
+        occurrence_projection_sha256=occurrence_projection_sha,
+        scope_lanes={
+            str(row["claim_id"]): str(row.get("lane") or "")
+            for row in scope_claims
+        },
+        scope_artifact_sha256=stated_scope_sha,
     )
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(
-        json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    _write_immutable(args.output, report)
     print(
         json.dumps(
             {
-                key: (len(report[key]) if isinstance(report[key], list) else report[key])
-                for key in (
-                    "claims_total",
-                    "seed_count",
-                    "closure_rounds",
-                    "scope_count",
-                    "route_edge_added",
-                    "recovered_from_context_lane",
-                    "scope_unlinked",
-                    "orphans",
-                )
+                "claims_total": report["claims_total"],
+                "seed_count": report["seed_count"],
+                "legacy_scope_count": report["legacy_undirected_scope_count"],
+                "corrected_scope_count": report["corrected_scope_count"],
+                "disputed_legacy_admission_count": report[
+                    "disputed_legacy_admission_count"
+                ],
+                "disputed_active_link_count": report[
+                    "disputed_active_link_count"
+                ],
+                "occurrence_signal_status": report["occurrence_signal_status"],
+                "report_sha256": report["report_sha256"],
             },
             ensure_ascii=False,
+            indent=2,
         )
     )
     return 0

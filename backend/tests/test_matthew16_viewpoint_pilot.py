@@ -50,6 +50,7 @@ from backend.api.canonical_repository.viewpoint_foundation import (
     semantic_record_sha,
     sha256_json,
 )
+from backend.pipeline.occurrence_section_projection import claim_universe_sha256
 
 
 def _fixture(tmp_path):
@@ -187,6 +188,83 @@ def test_pilot_scope_sha_binds_article_bytes(tmp_path):
     expected = hashlib.sha256((article / "manuscript.md").read_bytes()).hexdigest()
     assert result.article_acceptance_fixtures[0].manuscript_sha256 == expected
     assert result.artifact_sha256
+
+
+def test_pilot_scope_producer_uses_argument_dependency_selector(tmp_path):
+    catalog, selection, manifest, sources, claims, article = _fixture(tmp_path)
+    # The second Claim cites no Matthew passage, but is an upstream premise for
+    # the direct Matthew seed in the same source.
+    claims[1]["statement"] = "弗二章的论证支持这项结论。"
+    manifest["claims"][1]["source_id"] = manifest["claims"][0]["source_id"]
+    manifest["claims"][1]["claim_revision_sha256"] = semantic_record_sha(
+        ClaimRecord.model_validate(claims[1])
+    )
+    manifest.pop("manifest_sha256")
+    manifest["manifest_sha256"] = sha256_json(manifest)
+    result = build_matthew16_pilot_scope(
+        source_catalog=catalog,
+        source_catalog_sha256="1" * 64,
+        source_map_sha256="2" * 64,
+        source_selection=selection,
+        claim_manifest=manifest,
+        source_documents=sources,
+        claims=claims,
+        claim_relations=[
+            {
+                "claim_relation_id": "CR-CONTEXT-CORE",
+                "from_id": "C-CONTEXT",
+                "to_id": "C-CORE",
+                "relation_type": "supports",
+                "review_status": "candidate",
+            }
+        ],
+        article_dirs=[article],
+        thematic_source_ids=["sermon:missing"],
+    )
+    context = next(item for item in result.claims if item.claim_id == "C-CONTEXT")
+    assert context.lane == "core"
+    assert context.passage_unit_ids == ["16:13-18"]
+    assert context.admission_basis[0]["signal"] == "claim_relation"
+    assert context.admission_basis[0]["authority"] == "recall_only"
+
+
+def test_pilot_scope_producer_consumes_sha_bound_occurrence_admissions(tmp_path):
+    catalog, selection, manifest, sources, claims, article = _fixture(tmp_path)
+    manifest["claims"][1]["source_id"] = manifest["claims"][0]["source_id"]
+    manifest.pop("manifest_sha256")
+    manifest["manifest_sha256"] = sha256_json(manifest)
+    expected_universe = claim_universe_sha256(manifest["claims"])
+
+    result = build_matthew16_pilot_scope(
+        source_catalog=catalog,
+        source_catalog_sha256="1" * 64,
+        source_map_sha256="2" * 64,
+        source_selection=selection,
+        claim_manifest=manifest,
+        source_documents=sources,
+        claims=claims,
+        occurrence_admissions_by_claim={
+            "C-CONTEXT": [
+                {
+                    "passage_unit_ids": ["16:13-18"],
+                    "evidence_step_id": "E-CONTEXT",
+                    "source_fragment_id": "F-CONTEXT",
+                    "section_index": 1,
+                }
+            ]
+        },
+        occurrence_projection_sha256="d" * 64,
+        occurrence_projection_claim_universe_sha256=expected_universe,
+        article_dirs=[article],
+        thematic_source_ids=["sermon:missing"],
+    )
+
+    context = next(item for item in result.claims if item.claim_id == "C-CONTEXT")
+    assert context.lane == "core"
+    assert context.passage_unit_ids == ["16:13-18"]
+    assert context.admission_basis[0]["signal"] == "occurrence_section"
+    assert context.admission_basis[0]["source_fragment_id"] == "F-CONTEXT"
+    assert result.occurrence_projection_sha256 == "d" * 64
 
 
 def test_pilot_viewpoint_classification_is_explicit_and_fail_closed():
