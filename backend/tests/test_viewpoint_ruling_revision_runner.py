@@ -132,28 +132,120 @@ def test_supersede_drags_the_confirmed_dependents_by_succession():
     assert vsr["supersedes_revision_id"] == "VSR-OLD"
     assert vsr["focal_viewpoints"][0]["viewpoint_revision_id"] == new_id
 
+    ruling_sha = _ruling()["artifact_sha256"]
+    assert arr["review_artifact_sha256"] == ruling_sha
+    assert arr["approved_by"] == "junyang"
+    assert ara["review_artifact_sha256"] == ruling_sha
 
-def test_wording_that_moved_since_the_ruling_returns_to_the_owner():
+
+def test_repointed_relation_carries_the_ruling_as_provenance():
     records = _records()
-    records["viewpoint_revisions"][0]["core_proposition"] = "别的措辞。"
-    with pytest.raises(RevisionRulingError, match="wording moved"):
-        build_revision_package(_ruling(), store_records=records)
-
-
-def test_a_dependent_the_owner_never_saw_refuses_to_follow_silently():
+    records["viewpoint_relations"] = [
+        {
+            "viewpoint_relation_id": "VREL-1",
+            "source_viewpoint_id": "CV-1",
+            "target_viewpoint_id": "CV-2",
+            "validated_source_viewpoint_revision_id": "CVR-OLD",
+            "validated_target_viewpoint_revision_id": "CVR-OTHER",
+            "relation_type": "entails",
+            "effective_state": "active",
+            "review_provenance": {
+                "review_artifact_sha256": "stale-review-sha",
+                "basis_identity_decision_ids": [],
+            },
+        }
+    ]
     ruling = _ruling(
         expected_dependents={
             "viewpoint_claim_links": ["VCL-1"],
+            "viewpoint_relations": ["VREL-1"],
             "argument_route_revisions": ["ARR-OLD"],
+            "argument_route_attestations": ["ARA-OLD"],
             "viewpoint_structure_revisions": ["VSR-OLD"],
         }
     )
-    with pytest.raises(RevisionRulingError, match="dependents diverge"):
-        build_revision_package(ruling, store_records=_records())
+    package, _, _ = build_revision_package(ruling, store_records=records)
+    moved = package["viewpoint_relations"][0]
+    assert moved["review_provenance"]["review_artifact_sha256"] == ruling["artifact_sha256"]
 
 
-def test_non_current_target_returns_to_the_owner():
+def test_successor_records_survive_the_store_round_trip():
+    """The store writes a NEW object at store revision 1 and readback carries
+    that revision; a successor whose bookkeeping said old+1 validated inside
+    the package and corrupted the registry at read time (#326 live fire).
+    The vaccine: every successor must validate under its strict model with
+    the store's revision of 1 applied."""
+
+    from backend.api.canonical_repository.knowledge_models import (
+        ArgumentRouteRevisionRecord,
+        ViewpointRevisionRecord,
+        ViewpointStructureRevisionRecord,
+    )
+
     records = _records()
-    records["canonical_viewpoints"][0]["current_revision_id"] = "CVR-NEWER"
-    with pytest.raises(RevisionRulingError, match="not the current revision"):
-        build_revision_package(_ruling(), store_records=records)
+    records["viewpoint_revisions"][0] |= {
+        "schema_version": "wang_viewpoint_revision_v1",
+        "proposition_signature": {
+            "subject": "旧主语", "predicate": "已先取决于", "object": "神的先在决定",
+            "polarity": "affirmed", "modality": "断言",
+            "conditions": [], "temporal_scope": [], "population_scope": ["教会"],
+        },
+        "scope": {"scripture_scope": ["馬太福音16:19"], "audience_scope": [], "historical_scope": []},
+        "review_status": "system_approved",
+        "approved_by": "batch", "approved_at": "2026-08-25",
+    }
+    records["argument_route_revisions"][0] |= {
+        "schema_version": "wang_argument_route_revision_v2",
+        "route_label": "未来完成式→天上先定",
+        "route_signature": {
+            "conclusion_viewpoint_id": "CV-1",
+            "inference_method_codes": ["grammatical_argument"],
+        },
+        "ordered_inference_nodes": [
+            {
+                "route_step_key": "P1",
+                "role": "premise",
+                "required_for_full_attestation": True,
+                "normalized_proposition": "未来完成式表示天上已先决定。",
+            },
+            {
+                "route_step_key": "C1",
+                "role": "conclusion",
+                "required_for_full_attestation": True,
+                "conclusion_viewpoint_revision_id": "CVR-OLD",
+            },
+        ],
+        "review_status": "system_approved",
+        "approved_by": "route-batch", "approved_at": "2026-08-25",
+        "review_artifact_sha256": "stale-review-sha",
+    }
+    records["viewpoint_structure_revisions"][0] |= {
+        "central_synthesis": "标准先定于天上。",
+        "scope_manifest_sha256": "scope-sha",
+        "focal_viewpoints": [
+            {"viewpoint_revision_id": "CVR-OLD", "structure_role": "central_claim"}
+        ],
+    }
+    ruling = _ruling(
+        new_proposition_signature={
+            "subject": "新主语", "predicate": "已先取决于", "object": "神的先在决定",
+            "polarity": "affirmed", "modality": "断言",
+            "conditions": [], "temporal_scope": [], "population_scope": ["教会"],
+        },
+    )
+    package, _, _ = build_revision_package(ruling, store_records=records)
+    models = {
+        "viewpoint_revisions": ViewpointRevisionRecord,
+        "argument_route_revisions": ArgumentRouteRevisionRecord,
+        "viewpoint_structure_revisions": ViewpointStructureRevisionRecord,
+    }
+    checked = 0
+    for collection, model in models.items():
+        for row in package.get(collection) or []:
+            model.model_validate(dict(row) | {"revision": 1})
+            checked += 1
+    assert checked == 3
+
+    # And the successors carry THIS ruling's credentials, not the stale ones.
+    arr = package["argument_route_revisions"][0]
+    assert arr["review_artifact_sha256"] == ruling["artifact_sha256"]

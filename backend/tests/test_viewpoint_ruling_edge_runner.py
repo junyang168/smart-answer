@@ -55,6 +55,8 @@ def test_ruled_claim_edge_is_built_with_provenance():
     assert len(rows) == 1
     assert rows[0]["review_status"] == "human_approved"
     assert rows[0]["claim_relation_id"].startswith("CR-")
+    ruling_sha = _ruling(claim_relation_additions=[_claim_edge()])["artifact_sha256"]
+    assert rows[0]["review_artifact_sha256"] == ruling_sha
 
 
 def test_claim_edge_outside_the_dependency_allowlist_is_refused():

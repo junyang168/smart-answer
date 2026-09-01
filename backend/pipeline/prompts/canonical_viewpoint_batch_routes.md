@@ -31,7 +31,7 @@ C1              conclusion    → 指向某个已定结论
 
 **`source_route_attestations`：某一篇里实际讲了哪几步**（严格单来源）
 
-每个 `step_bindings` 把某个节点绑到该篇的 `claim_component_keys`、EvidenceStep 和 SourceFragment，`attestation_status` 填 `attested` / `missing` / `ambiguous`。`attested` 必须至少有一个 component key 和 EvidenceStep。`source_revision_sha256` 从 packet 精确复制。
+每个 `step_bindings` 把某个节点绑到该篇的 `claim_component_keys`、EvidenceStep 和 SourceFragment，`attestation_status` 填 `attested` / `missing` / `ambiguous`。`attested` 必须至少有一个 component key 和 EvidenceStep。**步与片段是一对：`evidence_step_ids` 里引用了哪个 EvidenceStep，`source_fragment_ids` 就必须同时绑上该步自己的片段（片段属于哪一步，看 packet 中该 EvidenceStep 条目所列；逐字从 packet 复制 id）。引步不绑其片段，整条 attestation 会被确定性校验拒绝；拿别步的片段充数同样被拒。** `source_revision_sha256` 从 packet 精确复制。
 
 ## 最重要的一条
 

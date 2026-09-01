@@ -109,8 +109,14 @@ def build_revision_package(
     )
     if ruling.get("new_scope"):
         new_revision["scope"] = deepcopy(ruling["new_scope"])
-    new_revision["revision"] = int(old["revision"]) + 1
-    new_revision["revision_number"] = int(old.get("revision_number") or old["revision"]) + 1
+    # A successor is a NEW store object: its store revision starts at 1 and
+    # the model enforces revision_number == store revision. Generations are
+    # counted by the supersedes chain, never by this bookkeeping field -- the
+    # batch compiler resets it to 1 for the same reason, and setting old+1
+    # here corrupted the registry on first live fire (readers refused every
+    # scope build until the snapshot was restored).
+    new_revision["revision"] = 1
+    new_revision["revision_number"] = 1
     new_revision["supersedes_revision_id"] = target
     # The provenance model deliberately holds two fields and no more (the
     # 2026-08-25 outage note on ViewpointRevisionProvenance); the ruling's
@@ -166,6 +172,10 @@ def build_revision_package(
                 moved[field] = new_revision_id
                 touched = True
         if touched:
+            moved["review_provenance"] = {
+                "review_artifact_sha256": str(ruling["artifact_sha256"]),
+                "basis_identity_decision_ids": [],
+            }
             dragged["viewpoint_relations"].append(str(row["viewpoint_relation_id"]))
             relations_out.append(moved)
 
@@ -194,17 +204,26 @@ def build_revision_package(
         for node in bumped.get("ordered_inference_nodes") or []:
             if node.get("conclusion_viewpoint_revision_id") == target:
                 node["conclusion_viewpoint_revision_id"] = new_revision_id
-        number = int(bumped.get("revision_number") or bumped["revision"]) + 1
-        bumped["revision"] = number
-        bumped["revision_number"] = number
+        generation = int(bumped.get("revision_number") or bumped["revision"]) + 1
+        bumped["revision"] = 1
+        bumped["revision_number"] = 1
         bumped["supersedes_revision_id"] = previous_id
         seed = {
             "policy_version": ROUTE_CHANGESET_POLICY_VERSION,
             "argument_route_id": route_id,
-            "revision_number": number,
+            # The id seed keeps the generation count so successive bumps of
+            # the same route derive distinct ids; the stored bookkeeping
+            # fields stay at the new object's store revision of 1.
+            "revision_number": generation,
             "conclusion_viewpoint_revision_id": new_revision_id,
         }
         bumped["argument_route_revision_id"] = f"ARR-{sha256_json(seed)[:20]}"
+        # The bump is approved by THIS ruling, not by whatever review approved
+        # the wording it leaves behind -- stale credentials on a successor
+        # claim an approval that never read the new conclusion.
+        bumped["review_artifact_sha256"] = str(ruling["artifact_sha256"])
+        bumped["approved_by"] = str(ruling["decided_by"])
+        bumped["approved_at"] = str(ruling["decided_at"])
         bumped_route_revisions[previous_id] = bumped["argument_route_revision_id"]
         route_revisions_out.append(bumped)
         moved_head = deepcopy(route_head)
@@ -260,9 +279,8 @@ def build_revision_package(
         for f in successor.get("focal_viewpoints") or []:
             if str(f.get("viewpoint_revision_id")) == target:
                 f["viewpoint_revision_id"] = new_revision_id
-        number = int(successor.get("revision_number") or successor["revision"]) + 1
-        successor["revision"] = number
-        successor["revision_number"] = number
+        successor["revision"] = 1
+        successor["revision_number"] = 1
         successor["supersedes_revision_id"] = previous_id
         successor["review_provenance"] = {
             "review_artifact_sha256": str(ruling["artifact_sha256"]),
@@ -376,7 +394,14 @@ def main() -> int:
 
     mutations = 0
     if args.apply:
-        result = store.apply_plan(plan)
+        result = store.apply_plan(
+            plan,
+            expected_current_viewpoint_revisions={
+                str(package["canonical_viewpoints"][0]["viewpoint_id"]): str(
+                    ruling["target_viewpoint_revision_id"]
+                )
+            },
+        )
         if result.get("status") == "applied":
             mutations = len(plan.operations)
         observed = {
