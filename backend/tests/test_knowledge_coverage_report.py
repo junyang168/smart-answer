@@ -1,7 +1,6 @@
 from backend.api.canonical_repository.matthew16_viewpoint_pilot import PASSAGE_UNITS
 from backend.pipeline.knowledge_coverage_report import (
     build_report,
-    closure_with_units,
     relation_closure,
     seed_claims,
 )
@@ -182,16 +181,3 @@ def test_report_discloses_legacy_only_admission_and_occurrence_gap():
         "scope_qualification"
     ] == "proved_by_occurrence_section"
 
-
-def test_units_propagate_only_upstream():
-    claims = [_claim("CORE"), _claim("UPSTREAM"), _claim("DOWNSTREAM")]
-    units = closure_with_units(
-        {"CORE": {"16:13-18"}},
-        [
-            {"claim_relation_id": "UP", "from_id": "UPSTREAM", "to_id": "CORE", "relation_type": "supports"},
-            {"claim_relation_id": "DOWN", "from_id": "CORE", "to_id": "DOWNSTREAM", "relation_type": "supports"},
-        ],
-        [],
-        claims=claims,
-    )
-    assert units == {"CORE": {"16:13-18"}, "UPSTREAM": {"16:13-18"}}

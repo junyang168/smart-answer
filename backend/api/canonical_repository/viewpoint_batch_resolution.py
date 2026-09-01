@@ -3738,6 +3738,8 @@ def validate_consolidation_fallback(
     *,
     consolidation: IdentityConsolidationResponse,
     proposal: CanonicalViewpointProposalResponse,
+    original_proposal: CanonicalViewpointProposalResponse | None = None,
+    review: CanonicalViewpointReviewResponse | None = None,
 ) -> dict[str, Any]:
     """A refused merge must still leave the two viewpoints connected.
 
@@ -3782,6 +3784,29 @@ def validate_consolidation_fallback(
         endpoints = [focal.endpoint() for focal in structure.focal]
         if any(kind == "new" for kind, _ in endpoints):
             connected_targets |= {key for kind, key in endpoints if kind == "existing"}
+    # A match the reviewer struck down is not a refused merge: the review
+    # ruled the target unrelated (`wrong_target_viewpoint`), so demanding a
+    # relation to it would order the batch to fabricate a connection the
+    # reviewer just severed -- the reconsideration prompt forbids exactly
+    # that. Twice in one night a consolidation hallucinated an unrelated
+    # revision id, the review caught it, every later gate passed, and this
+    # check was the only dissenter. The overturn is read off the recorded
+    # review, never inferred: some component of the original proposal aimed
+    # at that revision, and the reviewer flagged that component with
+    # `wrong_target_viewpoint`.
+    overturned: dict[str, str] = {}
+    if original_proposal is not None and review is not None:
+        flagged = {
+            (item.claim_id, item.component_index)
+            for item in review.change_reviews
+            if item.decision != "pass" and "wrong_target_viewpoint" in item.finding_codes
+        }
+        for decision in original_proposal.claim_decisions:
+            for index, component in enumerate(decision.components):
+                if (decision.claim_id, index) in flagged and component.target_viewpoint_revision_id:
+                    overturned[str(component.target_viewpoint_revision_id)] = (
+                        f"{decision.claim_id}#{index}"
+                    )
     findings: list[str] = []
     unmerged: list[dict[str, str]] = []
     for verdict in consolidation.verdicts:
@@ -3789,6 +3814,16 @@ def validate_consolidation_fallback(
             continue
         target = str(verdict.target_viewpoint_revision_id)
         if target in merged_targets:
+            continue
+        if target in overturned:
+            unmerged.append(
+                {
+                    "matched_revision_id": target,
+                    "ruled_local_key": verdict.local_key,
+                    "status": "match_overturned",
+                    "overturning_finding": overturned[target],
+                }
+            )
             continue
         unmerged.append({"matched_revision_id": target, "ruled_local_key": verdict.local_key})
         if target not in connected_targets:

@@ -80,31 +80,6 @@ def relation_closure(
     return set(selection["claim_units"]), selection["relation_growth"]
 
 
-def closure_with_units(
-    seed_units: dict[str, set[str]],
-    relations: Iterable[Mapping[str, Any]],
-    attestations: Iterable[Mapping[str, Any]],
-    *,
-    claims: Iterable[Mapping[str, Any]],
-    links: Iterable[Mapping[str, Any]] = (),
-    routes: Iterable[Mapping[str, Any]] = (),
-    route_revisions: Iterable[Mapping[str, Any]] = (),
-) -> dict[str, set[str]]:
-    """Correct closure with unit propagation and reviewed route expansion."""
-
-    selection = select_scope_units(
-        claims=[dict(row) for row in claims],
-        passage_units={key: () for values in seed_units.values() for key in values},
-        relations=relations,
-        links=links,
-        routes=routes,
-        route_revisions=route_revisions,
-        attestations=attestations,
-        occurrence_unit_ids_by_claim=seed_units,
-    )
-    return {key: set(values) for key, values in selection["claim_units"].items()}
-
-
 def build_report(
     *,
     claims: list[dict[str, Any]],

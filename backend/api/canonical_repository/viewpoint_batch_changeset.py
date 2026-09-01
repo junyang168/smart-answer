@@ -39,6 +39,7 @@ from .viewpoint_batch_resolution import (
 )
 from .viewpoint_foundation import sha256_json
 from .viewpoint_resolution import ReviewClaim
+from .viewpoint_route_changeset import ROUTE_CHANGESET_POLICY_VERSION
 
 CVP_BATCH_CHANGESET_POLICY_VERSION = "cvp_batch_changeset_v1"
 
@@ -798,6 +799,15 @@ def compile_cvp_batch_package(
                 )
             elif kind == "argument_route_attestation":
                 attestations_out.append(record)
+    # A confirmed attestation follows the bumped route revision as a new
+    # record, never as an edit: attestations are immutable, and their id seed
+    # (the same recipe the route worker mints with, so either path derives the
+    # same id for the same fact) includes the route revision -- pinning the new
+    # revision is a new fact. The stranded original is returned in
+    # `superseded_attestation_ids` for the caller to retire in the same
+    # ChangeSet, exactly as the route worker retires the attestations its own
+    # revisions strand.
+    superseded_attestation_ids: list[str] = []
     for record in attestations_out:
         previous_id = str(record.get("validated_against_route_revision_id"))
         bumped = bumped_route_revisions.get(previous_id)
@@ -806,7 +816,19 @@ def compile_cvp_batch_package(
                 f"{record.get('argument_route_attestation_id')}: attestation pins a route "
                 "revision this ChangeSet does not move"
             )
+        superseded_attestation_ids.append(str(record["argument_route_attestation_id"]))
         record["validated_against_route_revision_id"] = bumped
+        attestation_seed = {
+            "policy_version": ROUTE_CHANGESET_POLICY_VERSION,
+            "route_revision_id": bumped,
+            "source_id": str(record["source_id"]),
+            "source_revision_sha256": str(record["source_revision_sha256"]),
+            "claim_ids": sorted({str(value) for value in record.get("claim_ids") or []}),
+            "step_bindings": record.get("step_bindings") or [],
+            "terminal_claim_link_id": str(record["terminal_claim_link_id"]),
+        }
+        record["argument_route_attestation_id"] = f"ARA-{sha256_json(attestation_seed)[:20]}"
+        record["review_artifact_sha256"] = review_artifact_sha256
 
     package_identity = {
         "policy_version": CVP_BATCH_CHANGESET_POLICY_VERSION,
@@ -851,6 +873,7 @@ def compile_cvp_batch_package(
         "argument_route_attestations": sorted(
             attestations_out, key=lambda item: item["argument_route_attestation_id"]
         ),
+        "superseded_attestation_ids": sorted(superseded_attestation_ids),
     }
 
 
