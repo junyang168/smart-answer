@@ -2215,6 +2215,116 @@ def test_structure_split_may_append_a_structure_from_the_corrected_focal():
     ]
 
 
+def test_structure_split_may_append_multiple_contiguous_structures():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    proposal = _proposal(
+        new_viewpoint_candidates=[
+            _candidate("ROCK-NOT-PETER"),
+            _candidate("SPARE"),
+            _candidate("THIRD"),
+        ],
+        structures=[_structure("ROCK-NOT-PETER", "SPARE", "THIRD")],
+    )
+    effective = apply_reconsideration_patches(
+        reconsideration=_reconsideration(
+            structure_dispositions=[
+                {"structure_index": 0, "disposition": "accepted", "reason": "拆成三个中心。"}
+            ],
+            structure_patches=[
+                {
+                    "structure_index": 0,
+                    "action": "upsert",
+                    "structure": _structure("ROCK-NOT-PETER", synthesis="第一个中心。"),
+                },
+                {
+                    "structure_index": 1,
+                    "action": "upsert",
+                    "structure": _structure("SPARE", synthesis="第二个中心。"),
+                },
+                {
+                    "structure_index": 2,
+                    "action": "upsert",
+                    "structure": _structure("THIRD", synthesis="第三个中心。"),
+                },
+            ],
+        ),
+        proposal=proposal,
+        review=_review("pass"),
+    )
+
+    assert [item.central_synthesis for item in effective.structures] == [
+        "第一个中心。",
+        "第二个中心。",
+        "第三个中心。",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("indices", "rendered"),
+    [
+        ([2], "got [2]"),
+        ([2, 1], "got [2, 1]"),
+    ],
+)
+def test_structure_append_indices_must_start_at_the_end_and_be_contiguous(
+    indices: list[int], rendered: str
+):
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    proposal = _proposal(
+        new_viewpoint_candidates=[_candidate("ROCK-NOT-PETER")],
+        structures=[_structure("ROCK-NOT-PETER")],
+    )
+    with pytest.raises(
+        BatchResolutionError,
+        match=r"append indices must be contiguous in input order from 1",
+    ) as caught:
+        apply_reconsideration_patches(
+            reconsideration=_reconsideration(
+                structure_dispositions=[
+                    {"structure_index": 0, "disposition": "accepted", "reason": "拆分。"}
+                ],
+                structure_patches=[
+                    {
+                        "structure_index": index,
+                        "action": "upsert",
+                        "structure": _structure("ROCK-NOT-PETER"),
+                    }
+                    for index in indices
+                ],
+            ),
+            proposal=proposal,
+            review=_review("pass"),
+        )
+    assert rendered in str(caught.value)
+
+
+def test_duplicate_structure_append_index_is_rejected_by_the_response_schema():
+    with pytest.raises(ValidationError, match="structure patches must be unique"):
+        _reconsideration(
+            structure_dispositions=[
+                {"structure_index": 0, "disposition": "accepted", "reason": "拆分。"}
+            ],
+            structure_patches=[
+                {
+                    "structure_index": 1,
+                    "action": "upsert",
+                    "structure": _structure("ROCK-NOT-PETER"),
+                },
+                {
+                    "structure_index": 1,
+                    "action": "upsert",
+                    "structure": _structure("ROCK-NOT-PETER"),
+                },
+            ],
+        )
+
+
 def test_appended_structure_with_focal_outside_the_findings_is_refused():
     from backend.api.canonical_repository.viewpoint_batch_resolution import (
         apply_reconsideration_patches,

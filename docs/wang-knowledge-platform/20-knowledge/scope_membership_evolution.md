@@ -3,7 +3,7 @@
 > **读者**：Solution architect、Developer、神学编辑
 > **类型**：说明
 > **状态**：当前
-> **与代码对齐**：2026-09-01（核对到 #320 的 `viewpoint_scope_selection.py` 与 `knowledge_coverage_report.py`）
+> **与代码对齐**：2026-09-01（核对到 #322 的 `viewpoint_scope_selection.py`、`occurrence_section_projection.py` 与 `knowledge_coverage_report.py`）
 > **权威范围**：无。本文解释范围判定为什么长成今天这样、代价何在、下一步在哪；现行算法的权威在 `backend/pipeline/viewpoint_scope_selection.py`。
 
 ## 问题本身
@@ -50,7 +50,7 @@
 
 四路取或：经文 refs、原稿落段、同源上游关系、已批准 Route。章节是锚点，普通关系边只提供召回，不因此获得批准或论证权威。
 
-复核（马太16章 613 条精确 universe，2026-09-01）：214 条 refs 种子；严格关系闭包追回 19 条，已批准 Route 再证明 1 条。旧算法额外收入的 41 条逐项核对后，1 条有 Route 入径，其余 40 条仍等待 occurrence 落段证据。当前 master schema 没有可供这个 runner 消费的 occurrence-to-section 投影，所以这 40 条只能标为「资格未证完」，不能自动保留，也不能自动撤销既有观点链接。
+复核（马太16章 613 条精确 universe，2026-09-01）：214 条 refs 种子；严格关系闭包追回 19 条。#322 随后把 Claim、EvidenceStep、SourceFragment、原稿段落与来源本地 section 串成 SHA-bound 派生投影，613 条 Claim 全部取得有效 occurrence 路径。旧算法额外收入的固定 41 条逐项重验后，1 条由已批准 Route 证明，37 条由 occurrence 落段证明，0 条缺投影输入；余下 3 条在四种信号下仍未证明，维持 `source_context_candidate`。本轮没有自动撤销它们既有的观点链接，链接处置与 passage scope 资格分开。
 
 **三道护栏**（闭包的召回率系于关系图完整性，抽取漏记一条边就可能漏一条 Claim）：
 
@@ -73,5 +73,6 @@
 - 弗2:20 泄漏案与修复过程：#282、#312（含负责人裁决原文与算法定稿）
 - 旧算法下 60 条候选的解析入库：#315；该 scope 资格已由 #320 重新审计
 - 方向、类型、同源、universe 修正与 41 条差额报告：#320
+- occurrence-to-section 投影与 41 条终局重验：#322
 - Graph-first 设计方向：#213
-- 现行实现与差额报告：`backend/pipeline/viewpoint_scope_selection.py`、`backend/pipeline/knowledge_coverage_report.py`、`staging/reports/knowledge-coverage/wkp320-2026-09-01/matt16-scope-difference.json`
+- 现行实现与差额报告：`backend/pipeline/viewpoint_scope_selection.py`、`backend/pipeline/occurrence_section_projection.py`、`backend/pipeline/knowledge_coverage_report.py`、`staging/reports/knowledge-coverage/wkp322-2026-08-31/matt16-scope-difference-v8.json`

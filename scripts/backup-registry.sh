@@ -28,11 +28,42 @@ DB_URL="${KNOWLEDGE_DATABASE_URL:-$(env_value KNOWLEDGE_DATABASE_URL)}"
 [[ -n "$DB_URL" ]] || fail "KNOWLEDGE_DATABASE_URL is required (from .env)"
 
 STAMP="$(date -u +%Y-%m-%d)"
-TARGET_DIR="$DATA_BASE_DIR/wang-knowledge-platform/staging/viewpoint-backfill/registry-backup-$STAMP-$LABEL"
-[[ ! -e "$TARGET_DIR/smart_answer_knowledge.dump" ]] || fail "backup already exists: $TARGET_DIR"
-mkdir -p "$TARGET_DIR"
+TARGET_PARENT="$DATA_BASE_DIR/wang-knowledge-platform/staging/viewpoint-backfill"
+TARGET_DIR="$TARGET_PARENT/registry-backup-$STAMP-$LABEL"
+FINAL_DUMP="$TARGET_DIR/smart_answer_knowledge.dump"
+[[ ! -e "$FINAL_DUMP" ]] || fail "backup already exists: $TARGET_DIR"
+mkdir -p "$TARGET_PARENT"
+if ! mkdir "$TARGET_DIR"; then
+    fail "backup target already exists or another backup is running: $TARGET_DIR"
+fi
 
-pg_dump --format=custom --file="$TARGET_DIR/smart_answer_knowledge.dump" "$DB_URL"
-SIZE="$(du -h "$TARGET_DIR/smart_answer_knowledge.dump" | cut -f1)"
-printf 'backup-registry: wrote %s (%s)\n' "$TARGET_DIR/smart_answer_knowledge.dump" "$SIZE"
-printf 'restore with: pg_restore --clean --if-exists -d "<db-url>" "%s"\n' "$TARGET_DIR/smart_answer_knowledge.dump"
+TEMP_DUMP=""
+cleanup() {
+    status=$?
+    if [[ -n "$TEMP_DUMP" && -e "$TEMP_DUMP" ]]; then
+        rm -f -- "$TEMP_DUMP"
+    fi
+    if [[ $status -ne 0 && ! -e "$FINAL_DUMP" ]]; then
+        rmdir "$TARGET_DIR" 2>/dev/null || true
+    fi
+    trap - EXIT
+    exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+TEMP_DUMP="$(mktemp "$TARGET_DIR/.smart_answer_knowledge.dump.partial.XXXXXX")"
+pg_dump --format=custom --file="$TEMP_DUMP" "$DB_URL"
+[[ -s "$TEMP_DUMP" ]] || fail "pg_dump produced an empty archive"
+
+if ! ARCHIVE_LISTING="$(pg_restore --list "$TEMP_DUMP")"; then
+    fail "pg_restore could not read the completed archive"
+fi
+[[ -n "${ARCHIVE_LISTING//[[:space:]]/}" ]] || fail "pg_restore returned an empty archive listing"
+
+SIZE="$(du -h "$TEMP_DUMP" | cut -f1)"
+mv "$TEMP_DUMP" "$FINAL_DUMP"
+TEMP_DUMP=""
+printf 'backup-registry: wrote %s (%s)\n' "$FINAL_DUMP" "$SIZE"
+printf 'restore with: pg_restore --clean --if-exists -d "<db-url>" "%s"\n' "$FINAL_DUMP"
