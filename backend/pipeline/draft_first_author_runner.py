@@ -163,9 +163,24 @@ def verbatim_quote_report(manuscript: str, packet: dict[str, Any]) -> dict[str, 
         for quote in quotes
         if quote
     ]
+    # Readability rule the owner set after the keys article shipped a
+    # full-verse quotation inline (the rock article had block-quoted its
+    # verses by luck, not by rule): a quotation long enough to be a full
+    # sentence or verse reads as a wall inline and must stand as a Markdown
+    # blockquote. Short runs -- term mentions, the professor's pivot lines --
+    # stay inline. The threshold is length, the one property code can judge.
+    blockquoted = "\n".join(
+        line for line in manuscript.splitlines() if line.startswith(">")
+    )
+    long_inline = [
+        value.strip()
+        for value in re.findall(r"「([^」]+)」", manuscript)
+        if len(value.strip()) >= 40 and value.strip() not in blockquoted
+    ]
     return {
         "quotes_checked": len(checked),
         "quotes_failing": [item["quote"] for item in checked if not item["verbatim"]],
+        "long_quotes_not_blockquoted": long_inline,
     }
 
 
@@ -174,7 +189,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--packet", type=Path, required=True)
     parser.add_argument("--reader-question", required=True)
-    parser.add_argument("--audience", default="神学生和追求的平信徒")
+    parser.add_argument(
+        "--audience",
+        # A thin label made the author mirror its sources' seminary register
+        # (bare verse numbers, untranslated Greek); the profile says what the
+        # reader does not bring, and rule 13 tells the author to write to it.
+        default=(
+            "神学生和追求的老基督徒。他们有圣经常识——知道摩西五经、先知书、使徒行传是什么，"
+            "认得利未记、认得拉比这类词，不需要从头解释；但不滚瓜烂熟，"
+            "记不住某章某节具体讲了什么、上下文是什么。多数人不懂希腊文。"
+        ),
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument(
         "--provider",
@@ -206,6 +231,16 @@ def main() -> int:
     client = client_type(model=args.model, reasoning_effort=args.reasoning_effort)
     result = client.generate_json(prompt, payload_json, DRAFT_SCHEMA)
     manuscript = str(result["manuscript_markdown"])
+    # A model occasionally nests the envelope: the field's value is itself a
+    # JSON object with the same key. Unwrap deterministically until markdown.
+    while manuscript.lstrip().startswith("{"):
+        try:
+            inner = json.loads(manuscript)
+        except ValueError:
+            break
+        if not isinstance(inner, dict) or "manuscript_markdown" not in inner:
+            break
+        manuscript = str(inner["manuscript_markdown"])
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "draft.md").write_text(manuscript, encoding="utf-8")

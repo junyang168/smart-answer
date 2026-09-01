@@ -91,11 +91,24 @@ BLIND_READ_SCHEMA: dict[str, Any] = {
             "question_as_read": {"type": "string"},
             "answer_in_one_sentence": {"type": "string"},
             "qualifications_kept": {"type": "array", "items": {"type": "string"}},
+            "comprehension_obstacles": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "quote": {"type": "string"},
+                        "why": {"type": "string"},
+                    },
+                    "required": ["quote", "why"],
+                },
+            },
         },
         "required": [
             "question_as_read",
             "answer_in_one_sentence",
             "qualifications_kept",
+            "comprehension_obstacles",
         ],
     },
 }
@@ -351,9 +364,16 @@ def validate_review(
         for item in review["hard_failure_assessments"]
         if item["failed"]
     ]
+    # Reviewers quote what the reader sees; the manuscript carries Markdown.
+    # An anchor inside a blockquote or bold run ('> **編者按**：…') is verbatim
+    # in the rendered text while failing a raw-byte match, and that mismatch
+    # once crashed a whole review run instead of anchoring one finding.
+    rendered = re.sub(r"^>\s?", "", manuscript, flags=re.MULTILINE)
+    rendered = rendered.replace("**", "").replace("*", "")
     for finding in review["findings"]:
+        anchor = str(finding["anchor"])
         _require(
-            str(finding["anchor"]) in manuscript,
+            anchor in manuscript or anchor in rendered,
             f"review anchor not verbatim in manuscript: {finding['anchor'][:60]!r}",
         )
     # A dimension below its minimum or a declared hard failure without any
@@ -369,6 +389,7 @@ def validate_review(
 def merge_blocking_findings(
     *,
     alignment: Mapping[str, Any],
+    blind_read: Mapping[str, Any],
     blind_compare: Mapping[str, Any],
     review: Mapping[str, Any],
     review_verdict: Mapping[str, Any],
@@ -395,6 +416,35 @@ def merge_blocking_findings(
                     "summary": "引文与原文不逐字一致；改为逐字引用，或提及用法去掉引号改为转述。",
                 }
             )
+    for quote in quote_report.get("long_quotes_not_blockquoted") or []:
+        if not any(f["anchor"] == quote for f in findings):
+            findings.append(
+                {
+                    "gate": "quote_check",
+                    "kind": "long_quote_not_blockquoted",
+                    "anchor": quote,
+                    "summary": "整句／整节长引文须用 Markdown 引文块（>）单独成块呈现，"
+                    "不得留在行内引号里；短语提及不受此限。",
+                }
+            )
+    # The blind reader is the lay-reader proxy (the owner's charge after the
+    # keys article opened with bare verse numbers and untranslated Greek):
+    # a spot that stops the reader cold is a blocking defect even when every
+    # sentence is faithful. The reader quotes the exact spot so the finding
+    # anchors.
+    for obstacle in blind_read.get("comprehension_obstacles") or []:
+        findings.append(
+            {
+                "gate": "blind_read",
+                "kind": "reader_assumed_background",
+                "anchor": str(obstacle["quote"]),
+                "summary": "普通读者在此摸不着头脑："
+                + str(obstacle["why"])
+                + "｜首次触及的经文先交代场景；原文字符出现处必须随手给出中文对应"
+                "（如 ἔσται δεδεμένον「將是已經被捆綁的」），语法概念先用人话说明，"
+                "读者跳过原文字符仍能完整跟上。",
+            }
+        )
     if not (
         blind_compare["answer_matches_settled_positions"]
         and blind_compare["modality_preserved"]
@@ -516,6 +566,7 @@ def run_gates(
     quote_report = verbatim_quote_report(manuscript, dict(packet))
     blocking = merge_blocking_findings(
         alignment=alignment,
+        blind_read=blind_read,
         blind_compare=blind_compare,
         review=review,
         review_verdict=review_verdict,
