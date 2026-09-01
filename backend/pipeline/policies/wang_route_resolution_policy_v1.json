@@ -23,5 +23,5 @@
     "correction": "canonical_viewpoint_route_reconsideration.md"
   },
   "validator_version": "wang_argument_route_validation_v2",
-  "call_timeout_seconds": 900
+  "call_timeout_seconds": 1800
 }
