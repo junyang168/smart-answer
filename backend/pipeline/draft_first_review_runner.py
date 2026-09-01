@@ -351,9 +351,16 @@ def validate_review(
         for item in review["hard_failure_assessments"]
         if item["failed"]
     ]
+    # Reviewers quote what the reader sees; the manuscript carries Markdown.
+    # An anchor inside a blockquote or bold run ('> **編者按**：…') is verbatim
+    # in the rendered text while failing a raw-byte match, and that mismatch
+    # once crashed a whole review run instead of anchoring one finding.
+    rendered = re.sub(r"^>\s?", "", manuscript, flags=re.MULTILINE)
+    rendered = rendered.replace("**", "").replace("*", "")
     for finding in review["findings"]:
+        anchor = str(finding["anchor"])
         _require(
-            str(finding["anchor"]) in manuscript,
+            anchor in manuscript or anchor in rendered,
             f"review anchor not verbatim in manuscript: {finding['anchor'][:60]!r}",
         )
     # A dimension below its minimum or a declared hard failure without any
@@ -393,6 +400,17 @@ def merge_blocking_findings(
                     "kind": "unverbatim_quote",
                     "anchor": quote,
                     "summary": "引文与原文不逐字一致；改为逐字引用，或提及用法去掉引号改为转述。",
+                }
+            )
+    for quote in quote_report.get("long_quotes_not_blockquoted") or []:
+        if not any(f["anchor"] == quote for f in findings):
+            findings.append(
+                {
+                    "gate": "quote_check",
+                    "kind": "long_quote_not_blockquoted",
+                    "anchor": quote,
+                    "summary": "整句／整节长引文须用 Markdown 引文块（>）单独成块呈现，"
+                    "不得留在行内引号里；短语提及不受此限。",
                 }
             )
     if not (

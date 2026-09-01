@@ -163,9 +163,24 @@ def verbatim_quote_report(manuscript: str, packet: dict[str, Any]) -> dict[str, 
         for quote in quotes
         if quote
     ]
+    # Readability rule the owner set after the keys article shipped a
+    # full-verse quotation inline (the rock article had block-quoted its
+    # verses by luck, not by rule): a quotation long enough to be a full
+    # sentence or verse reads as a wall inline and must stand as a Markdown
+    # blockquote. Short runs -- term mentions, the professor's pivot lines --
+    # stay inline. The threshold is length, the one property code can judge.
+    blockquoted = "\n".join(
+        line for line in manuscript.splitlines() if line.startswith(">")
+    )
+    long_inline = [
+        value.strip()
+        for value in re.findall(r"「([^」]+)」", manuscript)
+        if len(value.strip()) >= 40 and value.strip() not in blockquoted
+    ]
     return {
         "quotes_checked": len(checked),
         "quotes_failing": [item["quote"] for item in checked if not item["verbatim"]],
+        "long_quotes_not_blockquoted": long_inline,
     }
 
 
