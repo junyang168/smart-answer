@@ -231,6 +231,16 @@ def main() -> int:
     client = client_type(model=args.model, reasoning_effort=args.reasoning_effort)
     result = client.generate_json(prompt, payload_json, DRAFT_SCHEMA)
     manuscript = str(result["manuscript_markdown"])
+    # A model occasionally nests the envelope: the field's value is itself a
+    # JSON object with the same key. Unwrap deterministically until markdown.
+    while manuscript.lstrip().startswith("{"):
+        try:
+            inner = json.loads(manuscript)
+        except ValueError:
+            break
+        if not isinstance(inner, dict) or "manuscript_markdown" not in inner:
+            break
+        manuscript = str(inner["manuscript_markdown"])
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "draft.md").write_text(manuscript, encoding="utf-8")
