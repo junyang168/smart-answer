@@ -131,6 +131,7 @@ def build_revision_package(
     }
     new_revision["approved_by"] = str(ruling["decided_by"])
     new_revision["approved_at"] = str(ruling["decided_at"])
+    new_revision["review_status"] = "human_approved"
     revision_seed = {
         "viewpoint_id": viewpoint_id,
         "supersedes": target,
@@ -176,6 +177,7 @@ def build_revision_package(
                 "review_artifact_sha256": str(ruling["artifact_sha256"]),
                 "basis_identity_decision_ids": [],
             }
+            moved["review_status"] = "human_approved"
             dragged["viewpoint_relations"].append(str(row["viewpoint_relation_id"]))
             relations_out.append(moved)
 
@@ -224,6 +226,7 @@ def build_revision_package(
         bumped["review_artifact_sha256"] = str(ruling["artifact_sha256"])
         bumped["approved_by"] = str(ruling["decided_by"])
         bumped["approved_at"] = str(ruling["decided_at"])
+        bumped["review_status"] = "human_approved"
         bumped_route_revisions[previous_id] = bumped["argument_route_revision_id"]
         route_revisions_out.append(bumped)
         moved_head = deepcopy(route_head)
@@ -254,6 +257,7 @@ def build_revision_package(
         }
         minted["argument_route_attestation_id"] = f"ARA-{sha256_json(attestation_seed)[:20]}"
         minted["review_artifact_sha256"] = str(ruling["artifact_sha256"])
+        minted["review_status"] = "human_approved"
         attestations_out.append(minted)
         retiring.append(("argument_route_attestations", old_attestation_id))
 
@@ -286,6 +290,7 @@ def build_revision_package(
             "review_artifact_sha256": str(ruling["artifact_sha256"]),
             "basis_identity_decision_ids": [],
         }
+        successor["review_status"] = "human_approved"
         seed = {
             "structure_id": structure_id,
             "supersedes": previous_id,

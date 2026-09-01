@@ -15,6 +15,7 @@ from backend.api.canonical_repository.postgres_store import (
     normalize_package,
     record_content_sha,
     reviewed_relations_package,
+    stored_operation_payload,
 )
 
 
@@ -98,6 +99,41 @@ def test_human_review_fields_survive_ai_reimport() -> None:
     assert operation.payload["review_status"] == "approved"
     assert operation.payload["review_note"] == "同工已核对"
     assert operation.payload["reviewed_by"] == "reviewer-1"
+
+
+def test_explicit_human_ruling_promotes_existing_system_review() -> None:
+    package = _package()
+    system_reviewed = normalize_package(package)["claims"]["CL-1"]
+    system_reviewed.update(
+        {
+            "review_status": "system_approved",
+            "review_note": "旧模型审核",
+            "reviewed_by": "review-model",
+            "revision": 3,
+        }
+    )
+    existing = {
+        ("claims", "CL-1"): {
+            "revision": 3,
+            "content_sha256": record_content_sha(system_reviewed),
+            "payload": system_reviewed,
+        }
+    }
+    ruled = _package()
+    ruled["claims"][0].update(
+        {
+            "review_status": "human_approved",
+            "review_note": "owner ruling",
+            "reviewed_by": "junyang",
+        }
+    )
+
+    plan = build_change_set_plan(ruled, existing)
+    operation = next(item for item in plan.operations if item.object_id == "CL-1")
+    assert operation.payload["review_status"] == "human_approved"
+    assert operation.payload["review_note"] == "owner ruling"
+    assert operation.payload["reviewed_by"] == "junyang"
+    assert stored_operation_payload(operation)["revision"] == 4
 
 
 def test_reviewed_relation_artifact_becomes_edges_and_negative_constraints() -> None:
