@@ -871,3 +871,54 @@ def test_binding_verification_drops_unknown_routes():
     )
     assert result["bindings"][0]["route_revision_id"] is None
     assert [f["code"] for f in result["findings"]] == ["unknown_route"]
+
+
+def test_archived_reviews_leave_the_front_page_but_keep_their_detail(tmp_path, monkeypatch):
+    """The owner's 2026-09-01 complaint: five superseded experiment versions
+    stacked flat beside the current essay. Archived manifests move to
+    archived_reviews in the listing and stay readable individually."""
+
+    import json
+    from backend.api import wang_article_reviews as module
+
+    staging = tmp_path / "staging"
+    manifests = staging / "article-reviews"
+    manifests.mkdir(parents=True)
+    monkeypatch.setattr(module, "WANG_STAGING_DIR", staging)
+    monkeypatch.setattr(module, "REVIEW_MANIFEST_ROOT", manifests)
+
+    def _register(review_id: str, archived: bool) -> None:
+        manuscript = staging / f"{review_id}.md"
+        manuscript.write_text(f"# {review_id}\n", encoding="utf-8")
+        workflow = staging / f"{review_id}-workflow.json"
+        workflow.write_text(json.dumps({"status": "review_passed"}), encoding="utf-8")
+        manifest = {
+            "schema_version": module.MANIFEST_SCHEMA,
+            "review_id": review_id,
+            "title": review_id,
+            "passage": "太16:18",
+            "registered_at": "2026-09-01T00:00:00+00:00",
+            "manuscript_relative_path": manuscript.name,
+            "manuscript_sha256": module._sha256(manuscript),
+            "workflow_status_relative_path": workflow.name,
+            "workflow_status_sha256": module._sha256(workflow),
+            "workflow_status": "review_passed",
+        }
+        if archived:
+            manifest["archived"] = True
+            manifest["superseded_by"] = "current-essay"
+        (manifests / f"{review_id}.json").write_text(
+            json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+        )
+
+    _register("current-essay", archived=False)
+    _register("old-experiment-v12", archived=True)
+
+    listing = module.list_article_reviews()
+    assert [row["review_id"] for row in listing["reviews"]] == ["current-essay"]
+    assert [row["review_id"] for row in listing["archived_reviews"]] == [
+        "old-experiment-v12"
+    ]
+    detail = module.article_review("old-experiment-v12")
+    assert detail["archived"] is True
+    assert detail["superseded_by"] == "current-essay"

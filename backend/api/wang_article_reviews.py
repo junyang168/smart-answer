@@ -1592,6 +1592,9 @@ def _review_data(manifest_path: Path, *, include_markdown: bool) -> dict[str, An
     if not review_id or manifest_path.stem != review_id:
         raise ValueError("review id does not match its manifest filename")
 
+    archived = bool(manifest.get("archived"))
+    superseded_by = str(manifest.get("superseded_by") or "") or None
+
     manuscript_path = _safe_staging_child(str(manifest.get("manuscript_relative_path") or ""))
     workflow_path = _safe_staging_child(str(manifest.get("workflow_status_relative_path") or ""))
     if not manuscript_path.is_file() or not workflow_path.is_file():
@@ -1645,6 +1648,8 @@ def _review_data(manifest_path: Path, *, include_markdown: bool) -> dict[str, An
     workflow = _read_json(workflow_path)
     result: dict[str, Any] = {
         "review_id": review_id,
+        "archived": archived,
+        "superseded_by": superseded_by,
         "title": str(manifest.get("title") or "").strip(),
         "passage": str(manifest.get("passage") or "").strip(),
         "registered_at": str(manifest.get("registered_at") or ""),
@@ -1725,15 +1730,31 @@ def _review_data(manifest_path: Path, *, include_markdown: bool) -> dict[str, An
 
 @router.get("")
 def list_article_reviews() -> dict[str, Any]:
+    """List current reviews; archived experiment versions ride separately.
+
+    The owner's complaint (2026-09-01): five Brief-era rock versions stacked
+    flat beside the current essay made the list unreadable. An archived
+    manifest stays readable at its detail URL -- history is kept, the front
+    page shows one row per living essay.
+    """
+
     reviews: list[dict[str, Any]] = []
+    archived: list[dict[str, Any]] = []
     warnings: list[dict[str, str]] = []
     if REVIEW_MANIFEST_ROOT.is_dir():
         for manifest_path in sorted(REVIEW_MANIFEST_ROOT.glob("*.json")):
             try:
-                reviews.append(_review_data(manifest_path, include_markdown=False))
+                data = _review_data(manifest_path, include_markdown=False)
             except ValueError as exc:
                 warnings.append({"manifest": manifest_path.name, "message": str(exc)})
-    return {"schema_version": RESPONSE_SCHEMA, "reviews": reviews, "warnings": warnings}
+                continue
+            (archived if data.get("archived") else reviews).append(data)
+    return {
+        "schema_version": RESPONSE_SCHEMA,
+        "reviews": reviews,
+        "archived_reviews": archived,
+        "warnings": warnings,
+    }
 
 
 @router.get("/{review_id}")
