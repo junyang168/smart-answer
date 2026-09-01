@@ -89,6 +89,7 @@ def test_review_anchor_must_be_verbatim():
 
 def test_blocking_findings_merge_across_gates():
     blocking = merge_blocking_findings(
+        blind_read={"comprehension_obstacles": []},
         alignment={
             "findings": [
                 {"quote": "經文沒有說明這件事", "kind": "attribution_swap", "note": "把講道的沉默說成經文的"}
@@ -128,6 +129,7 @@ def test_blocking_findings_merge_across_gates():
 
 def test_clean_gates_produce_no_blocking_findings():
     blocking = merge_blocking_findings(
+        blind_read={"comprehension_obstacles": []},
         alignment={"findings": []},
         blind_compare={
             "answer_matches_settled_positions": True,

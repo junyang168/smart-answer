@@ -189,7 +189,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--packet", type=Path, required=True)
     parser.add_argument("--reader-question", required=True)
-    parser.add_argument("--audience", default="神学生和追求的平信徒")
+    parser.add_argument(
+        "--audience",
+        # A thin label made the author mirror its sources' seminary register
+        # (bare verse numbers, untranslated Greek); the profile says what the
+        # reader does not bring, and rule 13 tells the author to write to it.
+        default=(
+            "神学生和追求的平信徒。神学生熟悉经文与原文术语；平信徒包括初信与慕道的读者——"
+            "他们爱读认真讲解圣经的文章，但未必记得某章某节的上下文，不认识希腊文，"
+            "也没有神学词汇；他们需要文章自带全部背景。"
+        ),
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument(
         "--provider",

@@ -91,11 +91,24 @@ BLIND_READ_SCHEMA: dict[str, Any] = {
             "question_as_read": {"type": "string"},
             "answer_in_one_sentence": {"type": "string"},
             "qualifications_kept": {"type": "array", "items": {"type": "string"}},
+            "comprehension_obstacles": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "quote": {"type": "string"},
+                        "why": {"type": "string"},
+                    },
+                    "required": ["quote", "why"],
+                },
+            },
         },
         "required": [
             "question_as_read",
             "answer_in_one_sentence",
             "qualifications_kept",
+            "comprehension_obstacles",
         ],
     },
 }
@@ -376,6 +389,7 @@ def validate_review(
 def merge_blocking_findings(
     *,
     alignment: Mapping[str, Any],
+    blind_read: Mapping[str, Any],
     blind_compare: Mapping[str, Any],
     review: Mapping[str, Any],
     review_verdict: Mapping[str, Any],
@@ -413,6 +427,22 @@ def merge_blocking_findings(
                     "不得留在行内引号里；短语提及不受此限。",
                 }
             )
+    # The blind reader is the lay-reader proxy (the owner's charge after the
+    # keys article opened with bare verse numbers and untranslated Greek):
+    # a spot that stops the reader cold is a blocking defect even when every
+    # sentence is faithful. The reader quotes the exact spot so the finding
+    # anchors.
+    for obstacle in blind_read.get("comprehension_obstacles") or []:
+        findings.append(
+            {
+                "gate": "blind_read",
+                "kind": "reader_assumed_background",
+                "anchor": str(obstacle["quote"]),
+                "summary": "普通读者在此摸不着头脑："
+                + str(obstacle["why"])
+                + "｜首次触及的经文先交代场景；原文语言现象先平实解释，原文字符只作括注。",
+            }
+        )
     if not (
         blind_compare["answer_matches_settled_positions"]
         and blind_compare["modality_preserved"]
@@ -534,6 +564,7 @@ def run_gates(
     quote_report = verbatim_quote_report(manuscript, dict(packet))
     blocking = merge_blocking_findings(
         alignment=alignment,
+        blind_read=blind_read,
         blind_compare=blind_compare,
         review=review,
         review_verdict=review_verdict,
