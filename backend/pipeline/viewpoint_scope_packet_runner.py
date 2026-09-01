@@ -29,6 +29,9 @@ from backend.api.canonical_repository.knowledge_models import (
     SourceFragmentRecord,
     ViewpointRevisionRecord,
 )
+from backend.api.canonical_repository.matthew16_viewpoint_pilot import (
+    validate_pilot_scope_artifact,
+)
 from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
 from backend.api.canonical_repository.store import RepositoryStore
 from backend.api.canonical_repository.viewpoint_foundation import (
@@ -190,6 +193,10 @@ def build_scope_packet(
     database_url: str | None,
 ) -> dict[str, Any]:
     scope_sha = _validate_sha(scope)
+    # The SHA proves the artifact was not altered; conformance is proved by
+    # the model. A non-conforming hand-derived scope once rode a valid SHA
+    # straight into resolution (#327).
+    validate_pilot_scope_artifact(scope)
     manifest_body = {
         key: value for key, value in claim_manifest.items() if key != "manifest_sha256"
     }
