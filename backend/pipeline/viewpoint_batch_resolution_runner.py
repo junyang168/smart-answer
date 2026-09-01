@@ -590,7 +590,10 @@ def run_batch(
     consolidation_fallback_report = None
     if consolidation is not None:
         consolidation_fallback_report = validate_consolidation_fallback(
-            consolidation=consolidation, proposal=effective_proposal
+            consolidation=consolidation,
+            proposal=effective_proposal,
+            original_proposal=proposal,
+            review=review,
         )
 
     recorded_model_executions = _recorded_model_executions(

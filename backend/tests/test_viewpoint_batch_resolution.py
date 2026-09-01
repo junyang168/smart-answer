@@ -5690,6 +5690,45 @@ def test_revision_that_strands_an_unconfirmed_record_is_refused():
         )
 
 
+def test_a_match_the_reviewer_overturned_needs_no_relation():
+    """A consolidation match the review struck down as `wrong_target_viewpoint`
+    is not a refused merge: demanding a relation to the unrelated revision
+    would order the batch to fabricate the very connection the reviewer
+    severed. The overturn is read off the recorded review, and the fallback
+    report keeps the audit trail."""
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        validate_consolidation_fallback,
+    )
+
+    review = CanonicalViewpointReviewResponse.model_validate(
+        {
+            "proposal_sha256": "proposal-sha",
+            "change_reviews": [
+                {"claim_id": "C1", "component_index": 0, "decision": "pass", "reason": "通过"},
+                {
+                    "claim_id": "C1",
+                    "component_index": 1,
+                    "decision": "correct",
+                    "finding_codes": ["wrong_target_viewpoint"],
+                    "reason": "该 target 是无关观点。",
+                    "correction": "改指本批新候选，不得沿用 CVR-1。",
+                },
+            ],
+            "novelty_review": {"status": "pass", "missed_claim_ids": [], "reason": "无漏项"},
+        }
+    )
+    report = validate_consolidation_fallback(
+        consolidation=_consolidation(_merge_verdict()),
+        proposal=_proposal(),
+        original_proposal=_proposal(),
+        review=review,
+    )
+    row = report["unmerged_matches"][0]
+    assert row["status"] == "match_overturned"
+    assert row["overturning_finding"] == "C1#1"
+
+
 def test_refused_merge_must_leave_the_two_viewpoints_related():
     from backend.api.canonical_repository.viewpoint_batch_resolution import (
         validate_consolidation_fallback,
