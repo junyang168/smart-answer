@@ -425,6 +425,13 @@ def preserve_human_review(
     incoming: Mapping[str, Any], existing: Optional[Mapping[str, Any]]
 ) -> dict[str, Any]:
     result = dict(incoming)
+    # An explicit owner ruling is allowed to promote a record that was
+    # previously system-approved.  The old blanket preservation rule kept the
+    # system status and made the ruling provenance contradict the status that
+    # answers "who approved this?".  Lower-authority reimports still cannot
+    # erase an existing reviewed decision below.
+    if result.get("review_status") == "human_approved":
+        return result
     if not existing or existing.get("review_status", "candidate") == "candidate":
         return result
     for field in REVIEW_FIELDS:
@@ -508,6 +515,20 @@ class ChangeOperation:
     # went out of the store unnoticed until a manuscript vanished from every
     # scripture-grouped view and someone spotted it by eye.
     removed_fields: tuple[str, ...] = ()
+
+
+def stored_operation_payload(operation: ChangeOperation) -> dict[str, Any]:
+    """Return the exact payload persisted for one ChangeSet operation.
+
+    A package and a ChangeOperation deliberately omit the store-assigned
+    revision from semantic hashing.  The write boundary adds it.  Keeping that
+    transformation in one helper lets strict-model tests exercise the same
+    bytes the apply path writes instead of approximating the round trip.
+    """
+
+    payload = dict(operation.payload)
+    payload["revision"] = operation.after_revision
+    return payload
 
 
 @dataclass(frozen=True)
@@ -1188,8 +1209,7 @@ class PostgresKnowledgeStore:
                                 operation.before_revision, operation.after_revision,
                             ))
                         continue
-                    payload = dict(operation.payload)
-                    payload["revision"] = operation.after_revision
+                    payload = stored_operation_payload(operation)
                     content_sha = record_content_sha(payload)
                     review_status = str(payload.get("review_status", "candidate"))
                     visibility = str(payload.get("visibility", "internal"))
@@ -1290,8 +1310,7 @@ class PostgresKnowledgeStore:
         behind their back makes all three lie.
         """
 
-        payload = dict(operation.payload)
-        payload["revision"] = operation.after_revision
+        payload = stored_operation_payload(operation)
         retiring = operation.operation == "retire"
         cursor.execute(
             """UPDATE wang_knowledge.objects

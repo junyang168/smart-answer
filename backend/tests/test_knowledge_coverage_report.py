@@ -181,3 +181,59 @@ def test_report_discloses_legacy_only_admission_and_occurrence_gap():
         "scope_qualification"
     ] == "proved_by_occurrence_section"
 
+
+def test_report_discloses_claim_relation_proof_from_occurrence_anchor():
+    claims = [
+        _claim("CORE", ["太 16:18"]),
+        _claim("ANCHOR"),
+        _claim("UPSTREAM"),
+    ]
+    relations = [
+        {
+            # The legacy undirected walk admitted UPSTREAM in the wrong
+            # direction; the legal relation-only pass does not.
+            "claim_relation_id": "LEGACY-REVERSE",
+            "from_id": "CORE",
+            "to_id": "UPSTREAM",
+            "relation_type": "supports",
+        },
+        {
+            # Once ANCHOR is admitted by its actual occurrence, this legal
+            # upstream edge proves UPSTREAM through the fourth signal.
+            "claim_relation_id": "RULED-UPSTREAM",
+            "from_id": "UPSTREAM",
+            "to_id": "ANCHOR",
+            "relation_type": "supports",
+            "review_status": "human_approved",
+        },
+    ]
+
+    report = build_report(
+        claims=claims,
+        relations=relations,
+        attestations=[],
+        links=[],
+        passage_units=PASSAGE_UNITS,
+        occurrence_admissions_by_claim={
+            "ANCHOR": [
+                {
+                    "passage_unit_ids": ["16:13-18"],
+                    "source_fragment_id": "FR-ANCHOR",
+                    "section_index": 2,
+                }
+            ]
+        },
+        occurrence_projection_sha256="b" * 64,
+    )
+
+    row = next(
+        item
+        for item in report["disputed_legacy_admissions"]
+        if item["claim_id"] == "UPSTREAM"
+    )
+    assert row["scope_qualification"] == "proved_by_claim_relation"
+    assert row["claim_relation_signal"] is True
+    assert [item["relation_id"] for item in row["claim_relation_admissions"]] == [
+        "RULED-UPSTREAM"
+    ]
+    assert report["disputed_proved_by_claim_relation_count"] == 1

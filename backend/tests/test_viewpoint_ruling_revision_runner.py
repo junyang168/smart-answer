@@ -135,7 +135,11 @@ def test_supersede_drags_the_confirmed_dependents_by_succession():
     ruling_sha = _ruling()["artifact_sha256"]
     assert arr["review_artifact_sha256"] == ruling_sha
     assert arr["approved_by"] == "junyang"
+    assert arr["review_status"] == "human_approved"
     assert ara["review_artifact_sha256"] == ruling_sha
+    assert ara["review_status"] == "human_approved"
+    assert package["viewpoint_revisions"][0]["review_status"] == "human_approved"
+    assert vsr["review_status"] == "human_approved"
 
 
 def test_repointed_relation_carries_the_ruling_as_provenance():
@@ -167,6 +171,7 @@ def test_repointed_relation_carries_the_ruling_as_provenance():
     package, _, _ = build_revision_package(ruling, store_records=records)
     moved = package["viewpoint_relations"][0]
     assert moved["review_provenance"]["review_artifact_sha256"] == ruling["artifact_sha256"]
+    assert moved["review_status"] == "human_approved"
 
 
 def test_successor_records_survive_the_store_round_trip():
@@ -180,6 +185,11 @@ def test_successor_records_survive_the_store_round_trip():
         ArgumentRouteRevisionRecord,
         ViewpointRevisionRecord,
         ViewpointStructureRevisionRecord,
+    )
+    from backend.api.canonical_repository.postgres_store import (
+        ChangeOperation,
+        record_content_sha,
+        stored_operation_payload,
     )
 
     records = _records()
@@ -242,10 +252,54 @@ def test_successor_records_survive_the_store_round_trip():
     checked = 0
     for collection, model in models.items():
         for row in package.get(collection) or []:
-            model.model_validate(dict(row) | {"revision": 1})
+            operation = ChangeOperation(
+                operation="create",
+                collection=collection,
+                object_id=next(
+                    str(row[key])
+                    for key in (
+                        "viewpoint_revision_id",
+                        "argument_route_revision_id",
+                        "structure_revision_id",
+                    )
+                    if key in row
+                ),
+                before_sha256=None,
+                after_sha256=record_content_sha(row),
+                before_revision=None,
+                after_revision=1,
+                payload=row,
+            )
+            model.model_validate(stored_operation_payload(operation))
             checked += 1
     assert checked == 3
 
     # And the successors carry THIS ruling's credentials, not the stale ones.
     arr = package["argument_route_revisions"][0]
     assert arr["review_artifact_sha256"] == ruling["artifact_sha256"]
+
+
+def test_wording_that_moved_since_the_ruling_returns_to_the_owner():
+    records = _records()
+    records["viewpoint_revisions"][0]["core_proposition"] = "别的措辞。"
+    with pytest.raises(RevisionRulingError, match="wording moved"):
+        build_revision_package(_ruling(), store_records=records)
+
+
+def test_a_dependent_the_owner_never_saw_refuses_to_follow_silently():
+    ruling = _ruling(
+        expected_dependents={
+            "viewpoint_claim_links": ["VCL-1"],
+            "argument_route_revisions": ["ARR-OLD"],
+            "viewpoint_structure_revisions": ["VSR-OLD"],
+        }
+    )
+    with pytest.raises(RevisionRulingError, match="dependents diverge"):
+        build_revision_package(ruling, store_records=_records())
+
+
+def test_non_current_target_returns_to_the_owner():
+    records = _records()
+    records["canonical_viewpoints"][0]["current_revision_id"] = "CVR-NEWER"
+    with pytest.raises(RevisionRulingError, match="not the current revision"):
+        build_revision_package(_ruling(), store_records=records)
