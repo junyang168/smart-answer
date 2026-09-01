@@ -2581,12 +2581,13 @@ def apply_reconsideration_patches(
     # The focal endpoints of structures under accepted correction: the material
     # a split is allowed to redistribute. A reviewer mandating "break this
     # structure in two" needs a patch whose target index did not exist when the
-    # proposal was written, so an index past the end is an append -- refused
-    # unless every focal of the appended structure comes out of a structure
+    # proposal was written, so only the next contiguous index is an append --
+    # refused unless every focal of the appended structure comes out of a structure
     # under accepted correction or is itself under an accepted component
     # finding. CVB-wkp315-lane-repair-p2-004 forced this: the reviewer's two
     # sanctioned fixes were both unwritable, one using role values the schema
-    # does not define and the other needing exactly this append.
+    # does not define and the other needing exactly this append. Gaps and
+    # reordering are rejected below rather than silently normalized.
     accepted_structure_focal: set[tuple[str, str]] = {
         endpoint
         for index in accepted_structures
@@ -2595,12 +2596,32 @@ def apply_reconsideration_patches(
     }
     structure_replacements: dict[int, dict[str, Any] | None] = {}
     structure_appends: list[tuple[int, dict[str, Any]]] = []
+    append_indices = [
+        patch.structure_index
+        for patch in reconsideration.structure_patches
+        if patch.action == "upsert"
+        and patch.structure_index >= len(proposal.structures)
+    ]
+    expected_append_indices = list(
+        range(
+            len(proposal.structures),
+            len(proposal.structures) + len(append_indices),
+        )
+    )
+    append_sequence_valid = append_indices == expected_append_indices
+    if not append_sequence_valid:
+        findings.append(
+            "structures: append indices must be contiguous in input order from "
+            f"{len(proposal.structures)}; got {append_indices}"
+        )
     for patch in reconsideration.structure_patches:
         if patch.structure_index >= len(proposal.structures):
             if patch.action == "delete":
                 findings.append(
                     f"structures#{patch.structure_index}: patch target does not exist"
                 )
+                continue
+            if not append_sequence_valid:
                 continue
             assert patch.structure is not None
             confined = all(
