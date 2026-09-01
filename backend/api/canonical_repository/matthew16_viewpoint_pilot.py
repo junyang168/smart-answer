@@ -107,6 +107,40 @@ class Matthew16PilotScope(StrictPilotModel):
         return self
 
 
+
+def validate_pilot_scope_artifact(payload: Mapping[str, Any]) -> "Matthew16PilotScope":
+    """Model-validate a scope artifact a runner is about to consume.
+
+    The artifact SHA proves the file was not altered; it does not prove the
+    file conforms. A hand-derived v5 scope once declared the v1 schema while
+    carrying three extra fields, a revision note that miscounted its own lane
+    moves, and statistics copied unchanged from its parent -- and every
+    consumer accepted it because only the SHA was checked. Conformance is
+    therefore checked where the artifact is consumed, not only where it is
+    produced, and the lane tallies are recomputed rather than trusted.
+    """
+
+    scope = Matthew16PilotScope.model_validate(dict(payload))
+    lanes = [item.lane for item in scope.claims]
+    recomputed = {
+        "claim_total": len(lanes),
+        "core_claim_total": sum(lane == "core" for lane in lanes),
+        "source_context_candidate_total": sum(
+            lane == "source_context_candidate" for lane in lanes
+        ),
+    }
+    mismatched = sorted(
+        f"{key}: stated {scope.statistics.get(key)}, actual {value}"
+        for key, value in recomputed.items()
+        if scope.statistics.get(key) != value
+    )
+    if mismatched:
+        raise ValueError(
+            "scope artifact statistics disagree with its claims: "
+            + "; ".join(mismatched)
+        )
+    return scope
+
 def file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
