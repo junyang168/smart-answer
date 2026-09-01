@@ -3,8 +3,8 @@
 > **读者**：Solution architect、Developer、神学编辑
 > **类型**：说明
 > **状态**：当前
-> **与代码对齐**：2026-08-31（核对到 `knowledge_coverage_report.py` 首版）
-> **权威范围**：无。本文解释范围判定为什么长成今天这样、代价何在、下一步在哪；现行算法的权威在 #312 的定稿评论与 `backend/pipeline/knowledge_coverage_report.py`。
+> **与代码对齐**：2026-09-01（核对到 #320 的 `viewpoint_scope_selection.py` 与 `knowledge_coverage_report.py`）
+> **权威范围**：无。本文解释范围判定为什么长成今天这样、代价何在、下一步在哪；现行算法的权威在 `backend/pipeline/viewpoint_scope_selection.py`。
 
 ## 问题本身
 
@@ -24,34 +24,39 @@
 
 整套机器（抽取、解析、路线、闸门）都是在这个简化下建成并验证的。没有它，可能没有今天任何一条跑通的链。
 
-**账单——2026-08-31 到期**。简化的盲区是教授的招牌讲法：**以经解经**。他用弗2:20 的定冠词证明太16:18 的磐石是谁，这条 Claim 标注的经文是「弗 2:20」——以弗所书永远不落在马太的窗口里，于是教授证明「磐石不是彼得」最有力的一步论证，被入口筛选静默地挡在了观点层外。写文章时撞出此案（详见 #282/#312），随后按新算法全库一量：**同类被冤枉的共 60 条**，另有试点圈外从未处理的疆域（如 16:24–27 的财产伦理教导）。
+**账单——2026-08-31 到期**。简化的盲区是教授的招牌讲法：**以经解经**。他用弗2:20 的定冠词证明太16:18 的磐石是谁，这条 Claim 标注的经文是「弗 2:20」——以弗所书永远不落在马太的窗口里，于是教授证明「磐石不是彼得」最有力的一步论证，被入口筛选静默地挡在了观点层外。写文章时撞出此案（详见 #282/#312）。当时的首份报告宣称追回 **60 条**，但 #320 复核发现那个数字来自一个过宽的实现：它把所有关系当作无向边，也没有 relation type、同源、Claim universe 等限制，甚至把非 Claim 节点计入。那份基线数字已作废，不能用来判断有多少 Claim 真正被冤枉。
 
 负责人对此案的裁决，是本文的核心句：
 
 > **引用了哪节经文，不等于它正在解释哪节经文。**
 
-## 第二代：种子 + 论证依赖闭包（现行）
+## 第二代：四信号选择器（现行）
 
-负责人设计的两步算法（定稿在 #312，实现在 `knowledge_coverage_report.py`）：
+负责人在 #312 定稿、#320 收紧边界的算法：
 
 ```
 第一步·种子
     凡经文标注与主题窗口重叠的 Claim，进入范围。
 
-第二步·闭包
-    凡通过已记录的 ClaimRelation 支持、限定或构成范围内 Claim 的
-    Claim——无论它引用弗2、诗篇还是哪一卷——随之进入同一范围。
-    反复执行，直到不再增加。
+第二步·同源上游闭包
+    只沿 supports、qualifies、extends、explains、corroborates 五类
+    ClaimRelation 的 from→to 上游方向，把前提带入其所支持的结论范围。
+    两端必须都在本次 scope 的 Claim universe，且来自同一来源。
+
+第三步·另外两个合法信号
+    occurrence 落在本 passage section，或 Claim 经当前已批准的
+    ArgumentRoute attestation 随其结论观点进入。只有 Route 可以跨来源。
 ```
 
-角色就此重排：**章节从裁判退为锚点，图（Claim 之间的自然联系）成为真正的裁判**。
+四路取或：经文 refs、原稿落段、同源上游关系、已批准 Route。章节是锚点，普通关系边只提供召回，不因此获得批准或论证权威。
 
-实测（马太16章基线，2026-08-31）：种子 266 条，闭包四轮追加 40+20+9+2 条——教授的跨经文论证链最深四层；60 条被第一代冤枉的全部归队，弗2:20 案一轮闭包即捞回。
+复核（马太16章 613 条精确 universe，2026-09-01）：214 条 refs 种子；严格关系闭包追回 19 条，已批准 Route 再证明 1 条。旧算法额外收入的 41 条逐项核对后，1 条有 Route 入径，其余 40 条仍等待 occurrence 落段证据。当前 master schema 没有可供这个 runner 消费的 occurrence-to-section 投影，所以这 40 条只能标为「资格未证完」，不能自动保留，也不能自动撤销既有观点链接。
 
-**两道护栏**（闭包的召回率系于关系图的完整性，抽取漏记一条边就漏一条 Claim）：
+**三道护栏**（闭包的召回率系于关系图完整性，抽取漏记一条边就可能漏一条 Claim）：
 
-1. 路线见证作为第二种边：ArgumentRoute attestation 绑定的 Claim 随其结论观点入范围；
-2. 四路信号全空的孤 Claim 单独成表交人判断，**不许静默留在外面**。
+1. `candidate` ClaimRelation 可用于召回，但只把 Claim 送进正式解析，不批准 Claim 或关系；
+2. 跨来源只能走当前、已批准且 revision 对齐的 ArgumentRoute；
+3. 四路信号全空或有信号尚无可用资料的 Claim 单独成表交人判断，**不许静默留在外面**。
 
 ## 第三代：graph-first（未来，#213）
 
@@ -66,6 +71,7 @@
 ## 相关记录
 
 - 弗2:20 泄漏案与修复过程：#282、#312（含负责人裁决原文与算法定稿）
-- 60 条追回 Claim 的解析入库：#315
+- 旧算法下 60 条候选的解析入库：#315；该 scope 资格已由 #320 重新审计
+- 方向、类型、同源、universe 修正与 41 条差额报告：#320
 - Graph-first 设计方向：#213
-- 现行实现与基线报告：`backend/pipeline/knowledge_coverage_report.py`、`staging/reports/knowledge-coverage/matt16-closure-baseline-2026-08-31.json`
+- 现行实现与差额报告：`backend/pipeline/viewpoint_scope_selection.py`、`backend/pipeline/knowledge_coverage_report.py`、`staging/reports/knowledge-coverage/wkp320-2026-09-01/matt16-scope-difference.json`
