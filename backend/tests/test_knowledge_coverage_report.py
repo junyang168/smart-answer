@@ -156,6 +156,32 @@ def test_report_discloses_legacy_only_admission_and_occurrence_gap():
     assert report["disputed_legacy_admissions"][0]["claim_id"] == "DOWNSTREAM"
     assert report["disputed_legacy_admissions"][0]["scope_qualification"] == "pending_occurrence_evidence"
 
+    completed = build_report(
+        claims=claims,
+        relations=relations,
+        attestations=[],
+        links=[],
+        passage_units=PASSAGE_UNITS,
+        occurrence_admissions_by_claim={
+            "DOWNSTREAM": [
+                {
+                    "passage_unit_ids": ["16:13-18"],
+                    "source_fragment_id": "FR-DOWNSTREAM",
+                    "section_index": 1,
+                }
+            ]
+        },
+        occurrence_status_by_claim={
+            "DOWNSTREAM": "proved_by_occurrence_section"
+        },
+        occurrence_projection_sha256="a" * 64,
+    )
+    assert completed["disputed_legacy_admission_count"] == 1
+    assert completed["disputed_proved_by_occurrence_count"] == 1
+    assert completed["disputed_legacy_admissions"][0][
+        "scope_qualification"
+    ] == "proved_by_occurrence_section"
+
 
 def test_units_propagate_only_upstream():
     claims = [_claim("CORE"), _claim("UPSTREAM"), _claim("DOWNSTREAM")]
