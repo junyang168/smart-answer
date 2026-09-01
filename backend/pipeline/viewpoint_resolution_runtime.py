@@ -14,7 +14,9 @@ from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
-CALL_TIMEOUT_SECONDS = 900.0
+# 900s proved too tight for opus reviewing a 20-claim effective proposal at
+# high effort (#315: final review timed out with every earlier stage done).
+CALL_TIMEOUT_SECONDS = 1800.0
 
 
 def read_artifact(path: Path) -> dict[str, Any]:

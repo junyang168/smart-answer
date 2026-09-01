@@ -1876,6 +1876,7 @@ def _reconsideration(
     candidate_patches: list[dict[str, Any]] | None = None,
     relation_patches: list[dict[str, Any]] | None = None,
     structure_patches: list[dict[str, Any]] | None = None,
+    structure_dispositions: list[dict[str, Any]] | None = None,
 ) -> Any:
     from backend.api.canonical_repository.viewpoint_batch_resolution import (
         CanonicalViewpointReconsiderationResponse,
@@ -1898,6 +1899,7 @@ def _reconsideration(
             "candidate_patches": candidate_patches or [],
             "relation_patches": relation_patches or [],
             "structure_patches": structure_patches or [],
+            "structure_dispositions": structure_dispositions or [],
         }
     )
 
@@ -2168,6 +2170,103 @@ def test_structure_delete_does_not_shift_a_later_patch_target():
     )
 
     assert [item.central_synthesis for item in effective.structures] == ["改写过的第二个中心。"]
+
+
+def test_structure_split_may_append_a_structure_from_the_corrected_focal():
+    """CVB-wkp315-lane-repair-p2-004: the reviewer mandates splitting one
+    structure in two, so the second half lands at an index the proposal never
+    had. An append at exactly that position is legal when every focal comes
+    out of the structure under accepted correction."""
+
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    proposal = _proposal(
+        new_viewpoint_candidates=[_candidate("ROCK-NOT-PETER"), _candidate("SPARE")],
+        structures=[_structure("ROCK-NOT-PETER", "SPARE")],
+    )
+
+    effective = apply_reconsideration_patches(
+        reconsideration=_reconsideration(
+            structure_dispositions=[
+                {"structure_index": 0, "disposition": "accepted", "reason": "中心不够单一，拆分。"}
+            ],
+            structure_patches=[
+                {
+                    "structure_index": 0,
+                    "action": "upsert",
+                    "structure": _structure("ROCK-NOT-PETER", synthesis="拆出的第一个中心。"),
+                },
+                {
+                    "structure_index": 1,
+                    "action": "upsert",
+                    "structure": _structure("SPARE", synthesis="拆出的第二个中心。"),
+                },
+            ],
+        ),
+        proposal=proposal,
+        review=_review("pass"),
+    )
+
+    assert [item.central_synthesis for item in effective.structures] == [
+        "拆出的第一个中心。",
+        "拆出的第二个中心。",
+    ]
+
+
+def test_appended_structure_with_focal_outside_the_findings_is_refused():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    proposal = _proposal(
+        new_viewpoint_candidates=[_candidate("ROCK-NOT-PETER"), _candidate("SPARE")],
+        structures=[_structure("ROCK-NOT-PETER")],
+    )
+
+    with pytest.raises(
+        BatchResolutionError, match="structures#1: appended structure is not confined"
+    ):
+        apply_reconsideration_patches(
+            reconsideration=_reconsideration(
+                structure_dispositions=[
+                    {"structure_index": 0, "disposition": "accepted", "reason": "拆分。"}
+                ],
+                structure_patches=[
+                    {
+                        "structure_index": 0,
+                        "action": "upsert",
+                        "structure": _structure("ROCK-NOT-PETER", synthesis="改写的中心。"),
+                    },
+                    {
+                        "structure_index": 1,
+                        "action": "upsert",
+                        "structure": _structure("SPARE", synthesis="夹带的新中心。"),
+                    },
+                ],
+            ),
+            proposal=proposal,
+            review=_review("pass"),
+        )
+
+
+def test_structure_delete_past_the_end_is_still_refused():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        apply_reconsideration_patches,
+    )
+
+    with pytest.raises(BatchResolutionError, match="structures#5: patch target does not exist"):
+        apply_reconsideration_patches(
+            reconsideration=_reconsideration(
+                structure_dispositions=[
+                    {"structure_index": 0, "disposition": "accepted", "reason": "有一处要改。"}
+                ],
+                structure_patches=[{"structure_index": 5, "action": "delete"}],
+            ),
+            proposal=_proposal(),
+            review=_review("pass"),
+        )
 
 
 def test_unpatched_relations_are_copied_unchanged():

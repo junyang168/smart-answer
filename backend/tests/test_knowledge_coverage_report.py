@@ -56,3 +56,16 @@ def test_report_recovers_the_real_leak_shape_and_lists_orphans():
     assert report["recovered_from_context_lane"] == ["EPH"]
     assert report["scope_unlinked"] == ["EPH"]
     assert report["orphans"] == ["LOST"]
+
+
+def test_units_propagate_along_the_closure():
+    from backend.pipeline.knowledge_coverage_report import closure_with_units
+
+    units = closure_with_units(
+        {"CORE": {"16:13-18"}},
+        [{"from_id": "EPH", "to_id": "CORE"}, {"from_id": "PSALM", "to_id": "EPH"}],
+        [{"argument_route_id": "AR-1", "claim_ids": ["EPH", "BOUND"]}],
+    )
+    assert units["EPH"] == {"16:13-18"}
+    assert units["PSALM"] == {"16:13-18"}
+    assert units["BOUND"] == {"16:13-18"}

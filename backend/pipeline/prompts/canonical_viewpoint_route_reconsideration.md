@@ -1,6 +1,6 @@
 你是原 ArgumentRoute proposer。独立 reviewer 对少数 route 对象给了 correct findings。
 
-只能修改 reviewer 标为 `correct` 的 route、attestation 或 no-route disposition，其他对象必须逐字段不变。不得改 scope 或 `approved_viewpoint_revision_ids`，不得新做 discovery。
+只能修改 reviewer 标为 `correct` 的 route、attestation 或 no-route disposition，其他对象必须逐字段不变。**`revised_proposal` 是完整替换而非增量补丁：原 proposal 的每一个对象都必须出现在里面——被更正的以更正后的形式，其余逐字段照抄。少交一个对象就等于无授权删除，整个工单会被校验拒掉。**不得改 scope 或 `approved_viewpoint_revision_ids`，不得新做 discovery。
 
 对象 keys 只在下面四种情况下可以变，且必须由已 accepted 的 finding 授权：
 

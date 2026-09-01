@@ -88,6 +88,49 @@ def relation_closure(
     return scope, growth
 
 
+def closure_with_units(
+    seed_units: dict[str, set[str]],
+    relations: Iterable[Mapping[str, Any]],
+    attestations: Iterable[Mapping[str, Any]],
+) -> dict[str, set[str]]:
+    """Closure that also inherits passage units along the edges (#315).
+
+    A claim pulled in because it supports a 16:13-18 claim belongs to
+    16:13-18: units propagate with membership, so the repaired lane rows are
+    fully determined by the graph, never hand-assigned.
+    """
+
+    edges: list[tuple[str, str]] = [
+        (str(item.get("from_id") or ""), str(item.get("to_id") or ""))
+        for item in relations
+    ]
+    route_groups: dict[str, set[str]] = {}
+    for attestation in attestations:
+        route_id = str(attestation.get("argument_route_id") or "")
+        route_groups.setdefault(route_id, set()).update(
+            str(value) for value in attestation.get("claim_ids") or []
+        )
+    units = {claim: set(values) for claim, values in seed_units.items()}
+    changed = True
+    while changed:
+        changed = False
+        for left, right in edges:
+            for a, b in ((left, right), (right, left)):
+                if a in units and units[a] - units.get(b, set()):
+                    units.setdefault(b, set()).update(units[a])
+                    changed = True
+        for members in route_groups.values():
+            pooled: set[str] = set()
+            for member in members:
+                pooled |= units.get(member, set())
+            if pooled:
+                for member in members:
+                    if pooled - units.get(member, set()):
+                        units.setdefault(member, set()).update(pooled)
+                        changed = True
+    return units
+
+
 def route_edge_expansion(
     in_scope: set[str], attestations: Iterable[Mapping[str, Any]]
 ) -> set[str]:
