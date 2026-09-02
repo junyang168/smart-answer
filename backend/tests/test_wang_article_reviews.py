@@ -118,7 +118,9 @@ def test_internal_review_is_sha_bound_and_not_a_publication(tmp_path: Path, monk
     assert [item["state"] for item in result["stage_checks"]] == [
         "complete", "not_run", "not_run", "not_run", "not_run"
     ]
-    assert "publication_decision" not in result
+    # The review is not a publication: the decision field exists but stays
+    # empty until the owner presses publish (#344).
+    assert result["publication_decision"] is None
 
 
 def test_review_projects_excerpt_level_audio_from_raw_timed_transcript(
@@ -922,3 +924,73 @@ def test_archived_reviews_leave_the_front_page_but_keep_their_detail(tmp_path, m
     detail = module.article_review("old-experiment-v12")
     assert detail["archived"] is True
     assert detail["superseded_by"] == "current-essay"
+
+
+def test_publish_button_writes_what_the_reader_route_validates(tmp_path, monkeypatch):
+    """The owner's publish decision produces exactly the artifacts the public
+    route checks: manuscript copy, approved decision with matching SHA, and a
+    manifest entry. Unpublish withdraws; a review that has not passed refuses."""
+
+    import json
+    from fastapi import HTTPException
+    import pytest as _pytest
+    from backend.api import wang_article_reviews as module
+
+    staging = tmp_path / "staging"
+    manifests = staging / "article-reviews"
+    manifests.mkdir(parents=True)
+    publications = tmp_path / "repository" / "draft-first-publications"
+    monkeypatch.setattr(module, "WANG_STAGING_DIR", staging)
+    monkeypatch.setattr(module, "REVIEW_MANIFEST_ROOT", manifests)
+    monkeypatch.setattr(module, "PUBLICATION_ROOT", publications)
+
+    manuscript = staging / "essay.md"
+    manuscript.write_text("# 天國的鑰匙\n\n正文。\n", encoding="utf-8")
+    workflow = staging / "workflow.json"
+    workflow.write_text(json.dumps({"status": "review_passed"}), encoding="utf-8")
+    manifest = {
+        "schema_version": module.MANIFEST_SCHEMA,
+        "review_id": "kingdom-keys-draft-first-v1",
+        "title": "天國的鑰匙",
+        "passage": "太16:19；太18:18",
+        "registered_at": "2026-09-01T00:00:00+00:00",
+        "manuscript_relative_path": manuscript.name,
+        "manuscript_sha256": module._sha256(manuscript),
+        "workflow_status_relative_path": workflow.name,
+        "workflow_status_sha256": module._sha256(workflow),
+        "workflow_status": "review_passed",
+    }
+    (manifests / "kingdom-keys-draft-first-v1.json").write_text(
+        json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+    )
+
+    result = module.publish_article_review("kingdom-keys-draft-first-v1")
+    assert result["published"] is True
+    assert result["public_slug"] == "kingdom-keys"
+    target = publications / "kingdom-keys-draft-first-v1"
+    decision = json.loads((target / "publication-decision.json").read_text())
+    assert decision["decision"] == "approved"
+    import hashlib
+    assert decision["manuscript_sha256"] == hashlib.sha256(
+        (target / "manuscript.md").read_bytes()
+    ).hexdigest()
+    draft_manifest = json.loads((target / "editorial-draft-manifest.json").read_text())
+    item = draft_manifest["drafts"][0]
+    assert item["public_slug"] == "kingdom-keys"
+    assert item["passage"] == "太16:19"
+    detail = module.article_review("kingdom-keys-draft-first-v1")
+    assert detail["publication_decision"]["decision"] == "approved"
+
+    module.unpublish_article_review("kingdom-keys-draft-first-v1")
+    decision = json.loads((target / "publication-decision.json").read_text())
+    assert decision["decision"] == "withdrawn"
+
+    # a review that has not passed refuses publication
+    manifest["workflow_status"] = "human_review_required"
+    workflow.write_text(json.dumps({"status": "human_review_required"}), encoding="utf-8")
+    manifest["workflow_status_sha256"] = module._sha256(workflow)
+    (manifests / "kingdom-keys-draft-first-v1.json").write_text(
+        json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+    )
+    with _pytest.raises(HTTPException):
+        module.publish_article_review("kingdom-keys-draft-first-v1")

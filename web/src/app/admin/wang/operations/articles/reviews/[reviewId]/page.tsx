@@ -5,6 +5,7 @@ import { AlertTriangle, ArrowLeft, CheckCircle2, CircleDashed, FileText, ShieldA
 import { slugifyHeadingAnchor } from "@/app/components/full-article/heading-anchor";
 import { ReviewArticle } from "../ReviewArticle";
 import { fetchTopicEssayReview } from "../data";
+import { PublishControls } from "../PublishControls";
 
 export const dynamic = "force-dynamic";
 
@@ -45,8 +46,13 @@ export default async function TopicEssayReviewPage(props: { params: Promise<{ re
                 : "这是写作流程中的工作稿，只供教会同工继续审阅。页面不会出现在公开文库；正式文章仍须完成 grounding、独立编审、差异审核与程序审计。"}
             </p>
           </div>
-          <div className="rounded-2xl border border-amber-300 bg-white/70 px-4 py-3 text-sm font-bold text-amber-950">
-            不代表人工批准
+          <div className="flex flex-col items-end gap-3">
+            <PublishControls
+              reviewId={reviewId}
+              workflowStatus={review.workflow_status}
+              integrityStatus={review.integrity_status}
+              publicationDecision={review.publication_decision ?? null}
+            />
           </div>
         </div>
       </header>
