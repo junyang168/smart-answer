@@ -8,6 +8,7 @@ import remarkGfm from "remark-gfm";
 import type { PublicArticleClip, PublicAudioSection, PublicWangArticle } from "../article-types";
 import { SourceEvidenceDisclosure } from "@/app/admin/wang/operations/articles/reviews/SourceEvidenceDisclosure";
 import type { ReviewSourceAnnotation } from "@/app/admin/wang/operations/articles/reviews/types";
+import { extractArticleToc, type ArticleTocHeading } from "./article-toc";
 
 type ViewMode = "read" | "listen";
 
@@ -237,10 +238,16 @@ export function PublicArticleReader({ article }: { article: PublicWangArticle })
   // 目录以正文标题为准：旧管线的文章跟着原声段落走（两边标题一致），
   // draft-first 的文章没有 audio_sections，目录从 markdown 的 ##/### 标题生成。
   const sectionHeadings = useMemo(() => {
-    if (hasAudio) return headingGroups.map((group) => group.heading);
-    const h2 = [...articleProse.matchAll(/^##\s+(.+)$/gm)].map((match) => match[1].trim());
-    if (h2.length >= 2) return h2;
-    return [...articleProse.matchAll(/^###\s+(.+)$/gm)].map((match) => match[1].trim());
+    if (hasAudio) {
+      return headingGroups.map<ArticleTocHeading>((group, ordinal) => ({
+        id: sectionId(ordinal),
+        label: group.heading,
+        level: 3,
+        line: 0,
+        ordinal,
+      }));
+    }
+    return extractArticleToc(articleProse);
   }, [hasAudio, headingGroups, articleProse]);
 
   useEffect(() => {
@@ -289,6 +296,15 @@ export function PublicArticleReader({ article }: { article: PublicWangArticle })
     else media.pause();
   }, [activePlayer]);
 
+  const sectionIndexForHeading = (level: 2 | 3, title: string, line?: number) => {
+    return sectionHeadings.findIndex(
+      (heading) =>
+        heading.level === level
+        && heading.label === title
+        && (hasAudio || heading.line === line),
+    );
+  };
+
   return (
     <main className="min-h-screen bg-[#f7f4ee] pb-28 text-stone-900">
       <header className="border-b border-stone-200/80 bg-[#eee7da]">
@@ -319,18 +335,20 @@ export function PublicArticleReader({ article }: { article: PublicWangArticle })
       </div>
 
       <div className="mx-auto max-w-6xl px-5 py-10 sm:px-8 lg:py-14">
-        <nav aria-label="本文目錄" className="mb-12 rounded-2xl border border-stone-200 bg-white/70 p-5 sm:p-6">
-          <p className="text-xs font-bold tracking-[0.16em] text-stone-500">{sectionCountLabel(sectionHeadings.length)}</p>
-          <ol className={`mt-4 grid gap-2 sm:grid-cols-2 ${sectionHeadings.length >= 5 ? "lg:grid-cols-4" : "lg:grid-cols-3"}`}>
-            {sectionHeadings.map((heading, index) => (
-              <li key={heading}>
-                <button type="button" onClick={() => scrollToView(mode, index)} className={`h-full w-full rounded-xl px-3 py-3 text-left text-sm leading-6 transition ${activeSection === index ? "bg-amber-100 font-semibold text-amber-950" : "hover:bg-stone-100"}`}>
-                  <span className="mr-2 text-stone-400">{index + 1}</span>{heading}
-                </button>
-              </li>
-            ))}
-          </ol>
-        </nav>
+        {sectionHeadings.length > 0 && (
+          <nav aria-label="本文目錄" className="mb-12 rounded-2xl border border-stone-200 bg-white/70 p-5 sm:p-6">
+            <p className="text-xs font-bold tracking-[0.16em] text-stone-500">{sectionCountLabel(sectionHeadings.length)}</p>
+            <ol className={`mt-4 grid gap-2 sm:grid-cols-2 ${sectionHeadings.length >= 5 ? "lg:grid-cols-4" : "lg:grid-cols-3"}`}>
+              {sectionHeadings.map((heading, index) => (
+                <li key={heading.id}>
+                  <button type="button" onClick={() => scrollToView(mode, index)} className={`h-full w-full rounded-xl px-3 py-3 text-left text-sm leading-6 transition ${activeSection === index ? "bg-amber-100 font-semibold text-amber-950" : "hover:bg-stone-100"}`}>
+                    <span className="mr-2 text-stone-400">{index + 1}</span>{heading.label}
+                  </button>
+                </li>
+              ))}
+            </ol>
+          </nav>
+        )}
 
         <section role="tabpanel" aria-label="閱讀文章" aria-hidden={mode !== "read"} className={mode === "read" ? "block" : "hidden"}>
           <article className="mx-auto max-w-3xl rounded-[2rem] bg-[#fffdf9] px-6 py-9 shadow-[0_18px_60px_rgba(70,55,35,0.08)] sm:px-10 sm:py-12 lg:px-14">
@@ -376,14 +394,14 @@ export function PublicArticleReader({ article }: { article: PublicWangArticle })
                     if (!sources || !showSources) return null;
                     return <SourceEvidenceDisclosure sources={sources} />;
                   },
-                  h2: ({ children }) => {
+                  h2: ({ children, node }) => {
                     const title = nodeText(children).trim();
-                    const index = sectionHeadings.indexOf(title);
+                    const index = sectionIndexForHeading(2, title, node?.position?.start.line);
                     return <h2 id={index >= 0 ? sectionId(index) : undefined}>{children}</h2>;
                   },
-                  h3: ({ children }) => {
+                  h3: ({ children, node }) => {
                     const title = nodeText(children).trim();
-                    const index = sectionHeadings.indexOf(title);
+                    const index = sectionIndexForHeading(3, title, node?.position?.start.line);
                     const count = clipCounts.get(title) ?? 0;
                     return (
                       <div id={index >= 0 ? sectionId(index) : undefined} className="group scroll-mt-[220px]">

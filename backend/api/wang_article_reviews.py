@@ -9,14 +9,18 @@ never make the public article endpoint accept the manuscript.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import math
+import os
 import re
+import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from opencc import OpenCC
 
 from backend.api.config import DATA_BASE_PATH, WANG_REPOSITORY_DIR, WANG_STAGING_DIR
@@ -1775,6 +1779,100 @@ def article_review(review_id: str) -> dict[str, Any]:
 
 PUBLICATION_ROOT = WANG_REPOSITORY_DIR / "draft-first-publications"
 PUBLICATION_DECISION_SCHEMA = "human-publication-decision.v1"
+PUBLICATION_SIGNATURE_MAX_AGE_SECONDS = 60
+
+
+@dataclass(frozen=True)
+class PublicationActor:
+    actor_id: str
+    role: str
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Replace one publication artifact without exposing a partial file."""
+
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
+    try:
+        temporary.write_text(text, encoding="utf-8")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    _atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+
+
+def _publication_signature(
+    *, action: str, review_id: str, actor_id: str, role: str, timestamp: str, secret: str
+) -> str:
+    message = "\0".join((action, review_id, actor_id, role, timestamp)).encode("utf-8")
+    return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
+
+
+def _verified_publication_actor(
+    review_id: str,
+    action: str,
+    actor_id: str | None = Header(default=None, alias="X-Wang-Publication-Actor"),
+    role: str | None = Header(default=None, alias="X-Wang-Publication-Role"),
+    timestamp: str | None = Header(default=None, alias="X-Wang-Publication-Timestamp"),
+    signature: str | None = Header(default=None, alias="X-Wang-Publication-Signature"),
+) -> PublicationActor:
+    """Verify the server-session actor and the configured owner allow-list."""
+
+    if not actor_id or not role or not timestamp or not signature:
+        raise HTTPException(status_code=401, detail="发布身份声明缺失。")
+    secret = os.getenv("WANG_PUBLICATION_ACTION_SECRET", "")
+    owners = {
+        value.strip()
+        for value in os.getenv("WANG_PUBLICATION_OWNER_IDS", "").split(",")
+        if value.strip()
+    }
+    if not secret or not owners:
+        raise HTTPException(status_code=503, detail="发布负责人验证尚未配置。")
+    if role not in {"admin", "editor"} or actor_id not in owners:
+        raise HTTPException(status_code=403, detail="只有指定负责人可以发布或撤下文章。")
+    try:
+        age = abs(time.time() - int(timestamp))
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail="发布身份声明无效。") from exc
+    if age > PUBLICATION_SIGNATURE_MAX_AGE_SECONDS:
+        raise HTTPException(status_code=401, detail="发布身份声明已过期。")
+    expected = _publication_signature(
+        action=action,
+        review_id=review_id,
+        actor_id=actor_id,
+        role=role,
+        timestamp=timestamp,
+        secret=secret,
+    )
+    if not hmac.compare_digest(expected, signature):
+        raise HTTPException(status_code=401, detail="发布身份声明无效。")
+    return PublicationActor(actor_id=actor_id, role=role)
+
+
+def _publish_actor(
+    review_id: str,
+    actor_id: str | None = Header(default=None, alias="X-Wang-Publication-Actor"),
+    role: str | None = Header(default=None, alias="X-Wang-Publication-Role"),
+    timestamp: str | None = Header(default=None, alias="X-Wang-Publication-Timestamp"),
+    signature: str | None = Header(default=None, alias="X-Wang-Publication-Signature"),
+) -> PublicationActor:
+    return _verified_publication_actor(
+        review_id, "publish", actor_id, role, timestamp, signature
+    )
+
+
+def _unpublish_actor(
+    review_id: str,
+    actor_id: str | None = Header(default=None, alias="X-Wang-Publication-Actor"),
+    role: str | None = Header(default=None, alias="X-Wang-Publication-Role"),
+    timestamp: str | None = Header(default=None, alias="X-Wang-Publication-Timestamp"),
+    signature: str | None = Header(default=None, alias="X-Wang-Publication-Signature"),
+) -> PublicationActor:
+    return _verified_publication_actor(
+        review_id, "unpublish", actor_id, role, timestamp, signature
+    )
 
 
 def _default_public_slug(review_id: str) -> str:
@@ -1786,7 +1884,11 @@ def _primary_passage(passage: str) -> str:
 
 
 @router.post("/{review_id}/publish")
-def publish_article_review(review_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def publish_article_review(
+    review_id: str,
+    payload: dict[str, Any] | None = None,
+    actor: PublicationActor = Depends(_publish_actor),
+) -> dict[str, Any]:
     """The owner's publish button: make one passed review visible to readers.
 
     Publication is the owner's decision alone -- this endpoint sits behind the
@@ -1817,19 +1919,16 @@ def publish_article_review(review_id: str, payload: dict[str, Any] | None = None
     target = PUBLICATION_ROOT / review_id
     target.mkdir(parents=True, exist_ok=True)
     manuscript_text = str(review.get("markdown") or "")
-    (target / "manuscript.md").write_text(manuscript_text, encoding="utf-8")
+    _atomic_write_text(target / "manuscript.md", manuscript_text)
     manuscript_sha = hashlib.sha256(
         (target / "manuscript.md").read_bytes()
     ).hexdigest()
-    (target / "source-annotations.json").write_text(
-        json.dumps(
-            {"source_annotations": review.get("source_annotations") or []},
-            ensure_ascii=False,
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
+    annotations_path = target / "source-annotations.json"
+    _atomic_write_json(
+        annotations_path,
+        {"source_annotations": review.get("source_annotations") or []},
     )
+    annotations_sha = _sha256(annotations_path)
 
     from datetime import datetime, timezone
 
@@ -1841,12 +1940,13 @@ def publish_article_review(review_id: str, payload: dict[str, Any] | None = None
         "editorial_review_passed": True,
         "technical_audit_status": "pass",
         "manuscript_sha256": manuscript_sha,
+        "source_annotations_sha256": annotations_sha,
         "decided_at": decided_at,
+        "decided_by": actor.actor_id,
+        "decided_by_role": actor.role,
         "source": "wang-article-reviews-publish-endpoint",
     }
-    (target / "publication-decision.json").write_text(
-        json.dumps(decision, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    _atomic_write_json(target / "publication-decision.json", decision)
     draft_manifest = {
         "schema_version": "editorial-draft-manifest.v1",
         "drafts": [
@@ -1857,16 +1957,14 @@ def publish_article_review(review_id: str, payload: dict[str, Any] | None = None
                 "public_slug": slug,
                 "relative_path": "manuscript.md",
                 "source_annotations_path": "source-annotations.json",
+                "source_annotations_sha256": annotations_sha,
                 "audit_config": {
                     "publication_decision_path": "publication-decision.json"
                 },
             }
         ],
     }
-    (target / "editorial-draft-manifest.json").write_text(
-        json.dumps(draft_manifest, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    _atomic_write_json(target / "editorial-draft-manifest.json", draft_manifest)
 
     manifest = _read_json(manifest_path)
     manifest["publication_decision"] = {
@@ -1874,10 +1972,10 @@ def publish_article_review(review_id: str, payload: dict[str, Any] | None = None
         "decided_at": decided_at,
         "public_slug": slug,
         "manuscript_sha256": manuscript_sha,
+        "source_annotations_sha256": annotations_sha,
+        "decided_by": actor.actor_id,
     }
-    manifest_path.write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    _atomic_write_json(manifest_path, manifest)
     return {
         "review_id": review_id,
         "published": True,
@@ -1888,7 +1986,10 @@ def publish_article_review(review_id: str, payload: dict[str, Any] | None = None
 
 
 @router.post("/{review_id}/unpublish")
-def unpublish_article_review(review_id: str) -> dict[str, Any]:
+def unpublish_article_review(
+    review_id: str,
+    actor: PublicationActor = Depends(_unpublish_actor),
+) -> dict[str, Any]:
     """Withdraw a published review from the reader site. Idempotent."""
 
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,99}", review_id):
@@ -1903,16 +2004,14 @@ def unpublish_article_review(review_id: str) -> dict[str, Any]:
         from datetime import datetime, timezone
 
         decision["withdrawn_at"] = datetime.now(timezone.utc).isoformat()
-        decision_path.write_text(
-            json.dumps(decision, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
+        decision["withdrawn_by"] = actor.actor_id
+        decision["withdrawn_by_role"] = actor.role
+        _atomic_write_json(decision_path, decision)
     manifest = _read_json(manifest_path)
     manifest["publication_decision"] = {
         "decision": "withdrawn",
         "withdrawn_at": decision.get("withdrawn_at") if decision_path.is_file() else None,
+        "withdrawn_by": actor.actor_id,
     }
-    manifest_path.write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    _atomic_write_json(manifest_path, manifest)
     return {"review_id": review_id, "published": False}

@@ -191,29 +191,194 @@ def test_source_annotations_travel_with_the_publication(tmp_path: Path, monkeypa
     """The reader page's 显示原文来源 toggle renders exactly what publish wrote
     to source-annotations.json; a publication without the file degrades to []."""
 
-    _publication_fixture(tmp_path, monkeypatch)
+    manuscript = _publication_fixture(tmp_path, monkeypatch)
     draft = tmp_path / "editorial_drafts" / "DRAFT-M16-002-V1"
     manifest = json.loads((draft / "editorial-draft-manifest.json").read_text(encoding="utf-8"))
     assert public_wang_articles.public_article_data("matthew-16-13-20")["source_annotations"] == []
 
+    manuscript.write_text(
+        manuscript.read_text(encoding="utf-8").replace(
+            "正文。\n\n**資料說明：**",
+            "正文。\n\n[查看本段来源](#review-source-evidence-p1)\n\n**資料說明：**",
+        ),
+        encoding="utf-8",
+    )
     manifest["drafts"][0]["source_annotations_path"] = "source-annotations.json"
-    _write_json(draft / "editorial-draft-manifest.json", manifest)
+    paragraph_sha = hashlib.sha256("正文。".encode("utf-8")).hexdigest()
     _write_json(
         draft / "source-annotations.json",
         {
             "source_annotations": [
                 {
                     "annotation_id": "p1",
-                    "paragraph_sha256": "abc",
+                    "paragraph_sha256": paragraph_sha,
                     "sources": [{"fragment_ids": ["F-1"], "title": "母本片段", "excerpts": ["原文"]}],
                 }
             ]
         },
     )
+    annotations_sha = hashlib.sha256((draft / "source-annotations.json").read_bytes()).hexdigest()
+    manifest["drafts"][0]["source_annotations_sha256"] = annotations_sha
+    _write_json(draft / "editorial-draft-manifest.json", manifest)
+    decision_path = draft / "human-publication-decision.json"
+    decision = json.loads(decision_path.read_text(encoding="utf-8"))
+    decision["manuscript_sha256"] = hashlib.sha256(manuscript.read_bytes()).hexdigest()
+    decision["source_annotations_sha256"] = annotations_sha
+    _write_json(decision_path, decision)
     payload = public_wang_articles.public_article_data("matthew-16-13-20")
     assert payload["source_annotations"][0]["annotation_id"] == "p1"
 
-    # a path that escapes the publication directory is ignored, not followed
+    # A path that escapes the publication directory invalidates the current
+    # publication; it must not silently serve unverified disclosure data.
     manifest["drafts"][0]["source_annotations_path"] = "../../outside.json"
     _write_json(draft / "editorial-draft-manifest.json", manifest)
-    assert public_wang_articles.public_article_data("matthew-16-13-20")["source_annotations"] == []
+    with pytest.raises(HTTPException) as escaped:
+        public_wang_articles.public_article_data("matthew-16-13-20")
+    assert escaped.value.status_code == 404
+
+
+def test_source_annotation_tampering_or_wrong_paragraph_anchor_fails_closed(
+    tmp_path: Path, monkeypatch
+) -> None:
+    manuscript = _publication_fixture(tmp_path, monkeypatch)
+    draft = tmp_path / "editorial_drafts" / "DRAFT-M16-002-V1"
+    manuscript.write_text(
+        manuscript.read_text(encoding="utf-8")
+        + "\n\n受约束段落。\n\n[查看本段来源](#review-source-evidence-p1)",
+        encoding="utf-8",
+    )
+    annotations_path = draft / "source-annotations.json"
+    _write_json(
+        annotations_path,
+        {
+            "source_annotations": [
+                {
+                    "annotation_id": "p1",
+                    "paragraph_sha256": "0" * 64,
+                    "sources": [{"title": "来源", "excerpts": ["原文"]}],
+                }
+            ]
+        },
+    )
+    annotations_sha = hashlib.sha256(annotations_path.read_bytes()).hexdigest()
+    manifest_path = draft / "editorial-draft-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["drafts"][0].update(
+        {
+            "source_annotations_path": "source-annotations.json",
+            "source_annotations_sha256": annotations_sha,
+        }
+    )
+    _write_json(manifest_path, manifest)
+    decision_path = draft / "human-publication-decision.json"
+    decision = json.loads(decision_path.read_text(encoding="utf-8"))
+    decision["manuscript_sha256"] = hashlib.sha256(manuscript.read_bytes()).hexdigest()
+    decision["source_annotations_sha256"] = annotations_sha
+    _write_json(decision_path, decision)
+
+    assert public_wang_articles.list_public_articles() == {"articles": []}
+
+    # Even a correctly anchored file stops being trusted after a byte changes.
+    payload = json.loads(annotations_path.read_text(encoding="utf-8"))
+    payload["source_annotations"][0]["paragraph_sha256"] = hashlib.sha256(
+        "受约束段落。".encode("utf-8")
+    ).hexdigest()
+    _write_json(annotations_path, payload)
+    assert public_wang_articles.list_public_articles() == {"articles": []}
+
+
+def test_latest_slug_decision_replaces_old_revision_without_reviving_it(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = tmp_path / "editorial_drafts"
+
+    def write_revision(draft_id: str, title: str, decided_at: str) -> Path:
+        draft = root / draft_id
+        draft.mkdir(parents=True)
+        manuscript = draft / "article.md"
+        manuscript.write_text(f"# {title}\n\n正文。", encoding="utf-8")
+        _write_json(
+            draft / "editorial-draft-manifest.json",
+            {
+                "drafts": [
+                    {
+                        "draft_id": draft_id,
+                        "title": title,
+                        "passage": "太16:18",
+                        "public_slug": "church-foundation",
+                        "relative_path": "article.md",
+                        "audit_config": {"publication_decision_path": "decision.json"},
+                    }
+                ]
+            },
+        )
+        decision_path = draft / "decision.json"
+        _write_json(
+            decision_path,
+            {
+                "schema_version": "human-publication-decision.v1",
+                "draft_id": draft_id,
+                "decision": "approved",
+                "editorial_review_passed": True,
+                "technical_audit_status": "pass",
+                "manuscript_sha256": hashlib.sha256(manuscript.read_bytes()).hexdigest(),
+                "decided_at": decided_at,
+                "source": "wang-article-reviews-publish-endpoint",
+            },
+        )
+        return decision_path
+
+    write_revision("church-foundation-draft-first-v1", "第一版", "2026-09-01T10:00:00+00:00")
+    current_decision = write_revision(
+        "church-foundation-draft-first-v2", "第二版", "2026-09-01T11:00:00+00:00"
+    )
+    monkeypatch.setattr(public_wang_articles, "EDITORIAL_DRAFT_ROOT", root)
+
+    assert public_wang_articles.public_article_data("church-foundation")["title"] == "第二版"
+
+    withdrawn = json.loads(current_decision.read_text(encoding="utf-8"))
+    withdrawn["decision"] = "withdrawn"
+    _write_json(current_decision, withdrawn)
+    assert public_wang_articles.list_public_articles() == {"articles": []}
+    with pytest.raises(HTTPException):
+        public_wang_articles.public_article_data("church-foundation")
+
+
+def test_legacy_decisions_without_timestamp_keep_first_valid_publication(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _publication_fixture(tmp_path, monkeypatch)
+    root = tmp_path / "editorial_drafts"
+    backup = root / "ZZ-BACKUP"
+    backup.mkdir()
+    manuscript = backup / "article.md"
+    manuscript.write_text("# 备份", encoding="utf-8")
+    _write_json(
+        backup / "editorial-draft-manifest.json",
+        {
+            "drafts": [
+                {
+                    "draft_id": "ZZ-BACKUP",
+                    "title": "不应遮住正式稿",
+                    "passage": "太16:13–20",
+                    "relative_path": "article.md",
+                    "audit_config": {"publication_decision_path": "decision.json"},
+                }
+            ]
+        },
+    )
+    _write_json(
+        backup / "decision.json",
+        {
+            "schema_version": "human-publication-decision.v1",
+            "draft_id": "ZZ-BACKUP",
+            "decision": "withdrawn",
+            "editorial_review_passed": True,
+            "technical_audit_status": "pass",
+            "manuscript_sha256": hashlib.sha256(manuscript.read_bytes()).hexdigest(),
+        },
+    )
+
+    assert public_wang_articles.public_article_data("matthew-16-13-20")["title"] == (
+        "馬太福音 16:13–20：認信與教會"
+    )
