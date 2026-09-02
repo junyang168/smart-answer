@@ -1,3 +1,5 @@
+import type { ReviewSourceAnnotation } from "@/app/admin/wang/operations/articles/reviews/types";
+
 export type PublicMedia = {
   kind: "audio" | "video" | "unknown";
   url: string | null;
@@ -28,4 +30,5 @@ export type PublicWangArticle = {
   audio_sections: PublicAudioSection[];
   audio_section_count: number;
   player_count: number;
+  source_annotations?: ReviewSourceAnnotation[];
 };

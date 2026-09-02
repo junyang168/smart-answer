@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { BookOpen, CalendarDays, Headphones, Pause, Play, RotateCcw } from "lucide-react";
+import { BookOpen, BookOpenText, CalendarDays, Headphones, Pause, Play, RotateCcw } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { PublicArticleClip, PublicAudioSection, PublicWangArticle } from "../article-types";
+import { SourceEvidenceDisclosure } from "@/app/admin/wang/operations/articles/reviews/SourceEvidenceDisclosure";
+import type { ReviewSourceAnnotation } from "@/app/admin/wang/operations/articles/reviews/types";
 
 type ViewMode = "read" | "listen";
 
@@ -16,6 +18,52 @@ function nodeText(node: ReactNode): string {
     return nodeText((node as { props?: { children?: ReactNode } }).props?.children);
   }
   return "";
+}
+
+function nodeHref(node: ReactNode): string | null {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const href = nodeHref(child);
+      if (href) return href;
+    }
+  }
+  if (node && typeof node === "object" && "props" in node) {
+    const props = (node as { props?: { href?: unknown; children?: ReactNode } }).props;
+    if (typeof props?.href === "string") return props.href;
+    return nodeHref(props?.children);
+  }
+  return null;
+}
+
+type Footnote = { id: string; markdown: string; sourceAnnotationId: string | null };
+
+function prepareFootnotes(markdown: string): { body: string; footnotes: Footnote[] } {
+  const footnotes: Footnote[] = [];
+  const body = markdown
+    .split("\n")
+    .filter((line) => {
+      const match = line.match(/^\[\^([^\]]+)\]:\s*(.+)$/);
+      if (!match) return true;
+      const sourceMatch = match[2].match(
+        /\s*\[查看本注来源\]\(#review-source-evidence-(p\d+)\)\s*$/,
+      );
+      footnotes.push({
+        id: match[1],
+        markdown: sourceMatch ? match[2].slice(0, sourceMatch.index).trimEnd() : match[2],
+        sourceAnnotationId: sourceMatch?.[1] ?? null,
+      });
+      return false;
+    })
+    .join("\n")
+    .replace(/\[\^([^\]]+)\]/g, (_match, id: string) => `[${id}](#article-footnote-${id})`);
+  return { body, footnotes };
+}
+
+const CHINESE_NUMERALS = ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十"];
+
+function sectionCountLabel(count: number) {
+  const numeral = count >= 1 && count <= 10 ? CHINESE_NUMERALS[count - 1] : String(count);
+  return `本文${numeral}節`;
 }
 
 function formatTime(value: number | null) {
@@ -158,9 +206,18 @@ function OriginalClipPlayer({ clip, playerKey, onRegister, onPlay, onPause, head
 export function PublicArticleReader({ article }: { article: PublicWangArticle }) {
   const [mode, setMode] = useState<ViewMode>("read");
   const [activeSection, setActiveSection] = useState(0);
+  const [showSources, setShowSources] = useState(false);
   const [activePlayer, setActivePlayer] = useState<{ key: string; label: string; heading: string } | null>(null);
   const [playing, setPlaying] = useState(false);
   const players = useRef(new Map<string, HTMLMediaElement>());
+
+  const hasAudio = article.audio_sections.length > 0;
+  const articleBody = article.markdown.replace(/^#\s+.+(?:\r?\n)+/, "");
+  const { body: articleProse, footnotes } = useMemo(() => prepareFootnotes(articleBody), [articleBody]);
+  const sourceAnnotations = useMemo(
+    () => new Map((article.source_annotations ?? []).map((item: ReviewSourceAnnotation) => [item.annotation_id, item.sources])),
+    [article.source_annotations],
+  );
 
   const headingGroups = useMemo(() => {
     const groups: Array<{ heading: string; blocks: PublicAudioSection[] }> = [];
@@ -177,16 +234,25 @@ export function PublicArticleReader({ article }: { article: PublicWangArticle })
     [headingGroups],
   );
 
+  // 目录以正文标题为准：旧管线的文章跟着原声段落走（两边标题一致），
+  // draft-first 的文章没有 audio_sections，目录从 markdown 的 ##/### 标题生成。
+  const sectionHeadings = useMemo(() => {
+    if (hasAudio) return headingGroups.map((group) => group.heading);
+    const h2 = [...articleProse.matchAll(/^##\s+(.+)$/gm)].map((match) => match[1].trim());
+    if (h2.length >= 2) return h2;
+    return [...articleProse.matchAll(/^###\s+(.+)$/gm)].map((match) => match[1].trim());
+  }, [hasAudio, headingGroups, articleProse]);
+
   useEffect(() => {
     if (mode !== "read") return;
-    const nodes = headingGroups.map((_, index) => document.getElementById(sectionId(index))).filter(Boolean) as HTMLElement[];
+    const nodes = sectionHeadings.map((_, index) => document.getElementById(sectionId(index))).filter(Boolean) as HTMLElement[];
     const observer = new IntersectionObserver((entries) => {
       const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
       if (visible) setActiveSection(Number(visible.target.id.replace("article-section-", "")) - 1);
     }, { rootMargin: "-18% 0px -68% 0px" });
     nodes.forEach((node) => observer.observe(node));
     return () => observer.disconnect();
-  }, [headingGroups, mode]);
+  }, [sectionHeadings, mode]);
 
   const scrollToView = useCallback((targetMode: ViewMode, index: number) => {
     setMode(targetMode);
@@ -223,8 +289,6 @@ export function PublicArticleReader({ article }: { article: PublicWangArticle })
     else media.pause();
   }, [activePlayer]);
 
-  const articleBody = article.markdown.replace(/^#\s+.+(?:\r?\n)+/, "");
-
   return (
     <main className="min-h-screen bg-[#f7f4ee] pb-28 text-stone-900">
       <header className="border-b border-stone-200/80 bg-[#eee7da]">
@@ -244,9 +308,11 @@ export function PublicArticleReader({ article }: { article: PublicWangArticle })
             <button type="button" role="tab" aria-selected={mode === "read"} onClick={() => scrollToView("read", activeSection)} className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition sm:px-5 ${mode === "read" ? "bg-stone-900 text-white" : "text-stone-600 hover:text-stone-950"}`}>
               <BookOpen className="h-4 w-4" />閱讀文章
             </button>
-            <button type="button" role="tab" aria-selected={mode === "listen"} onClick={() => scrollToView("listen", activeSection)} className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition sm:px-5 ${mode === "listen" ? "bg-stone-900 text-white" : "text-stone-600 hover:text-stone-950"}`}>
-              <Headphones className="h-4 w-4" />聆聽原聲
-            </button>
+            {hasAudio && (
+              <button type="button" role="tab" aria-selected={mode === "listen"} onClick={() => scrollToView("listen", activeSection)} className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition sm:px-5 ${mode === "listen" ? "bg-stone-900 text-white" : "text-stone-600 hover:text-stone-950"}`}>
+                <Headphones className="h-4 w-4" />聆聽原聲
+              </button>
+            )}
           </div>
           <span className="hidden text-sm text-stone-500 sm:inline">{mode === "read" ? "完整文章" : `${article.audio_section_count} 個原聲段落 · ${article.player_count} 段錄音/錄像`}</span>
         </div>
@@ -254,12 +320,12 @@ export function PublicArticleReader({ article }: { article: PublicWangArticle })
 
       <div className="mx-auto max-w-6xl px-5 py-10 sm:px-8 lg:py-14">
         <nav aria-label="本文目錄" className="mb-12 rounded-2xl border border-stone-200 bg-white/70 p-5 sm:p-6">
-          <p className="text-xs font-bold tracking-[0.16em] text-stone-500">本文五節</p>
-          <ol className="mt-4 grid gap-2 lg:grid-cols-5">
-            {headingGroups.map((group, index) => (
-              <li key={group.heading}>
+          <p className="text-xs font-bold tracking-[0.16em] text-stone-500">{sectionCountLabel(sectionHeadings.length)}</p>
+          <ol className={`mt-4 grid gap-2 sm:grid-cols-2 ${sectionHeadings.length >= 5 ? "lg:grid-cols-4" : "lg:grid-cols-3"}`}>
+            {sectionHeadings.map((heading, index) => (
+              <li key={heading}>
                 <button type="button" onClick={() => scrollToView(mode, index)} className={`h-full w-full rounded-xl px-3 py-3 text-left text-sm leading-6 transition ${activeSection === index ? "bg-amber-100 font-semibold text-amber-950" : "hover:bg-stone-100"}`}>
-                  <span className="mr-2 text-stone-400">{index + 1}</span>{group.heading}
+                  <span className="mr-2 text-stone-400">{index + 1}</span>{heading}
                 </button>
               </li>
             ))}
@@ -268,18 +334,61 @@ export function PublicArticleReader({ article }: { article: PublicWangArticle })
 
         <section role="tabpanel" aria-label="閱讀文章" aria-hidden={mode !== "read"} className={mode === "read" ? "block" : "hidden"}>
           <article className="mx-auto max-w-3xl rounded-[2rem] bg-[#fffdf9] px-6 py-9 shadow-[0_18px_60px_rgba(70,55,35,0.08)] sm:px-10 sm:py-12 lg:px-14">
-            <div className="prose prose-stone max-w-none prose-headings:font-serif prose-h2:mt-16 prose-h2:border-b prose-h2:border-stone-200 prose-h2:pb-3 prose-h2:text-2xl prose-h3:mt-14 prose-h3:scroll-mt-[220px] prose-h3:text-2xl prose-p:text-[1.05rem] prose-p:leading-8 prose-blockquote:border-amber-700 prose-blockquote:bg-amber-50/70 prose-blockquote:px-5 prose-blockquote:py-2 prose-blockquote:not-italic prose-li:leading-8 sm:prose-p:text-[1.1rem]">
+            {sourceAnnotations.size > 0 && (
+              <div className="not-prose mb-9 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3.5">
+                <div className="flex items-center gap-3">
+                  <span className="rounded-xl bg-amber-100 p-2 text-amber-900">
+                    <BookOpenText className="h-4 w-4" />
+                  </span>
+                  <div>
+                    <p className="text-sm font-bold text-stone-900">显示原文来源</p>
+                    <p className="mt-0.5 text-xs text-stone-500">逐字稿、时间点 Audio 与母本片段</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={showSources}
+                  aria-label="显示段落原文来源"
+                  onClick={() => setShowSources((current) => !current)}
+                  className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-700 focus-visible:ring-offset-2 ${
+                    showSources ? "bg-amber-800" : "bg-stone-300"
+                  }`}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+                      showSources ? "translate-x-6" : "translate-x-1"
+                    }`}
+                  />
+                </button>
+              </div>
+            )}
+            <div className="prose prose-stone max-w-none prose-headings:font-serif prose-h2:mt-16 prose-h2:scroll-mt-[220px] prose-h2:border-b prose-h2:border-stone-200 prose-h2:pb-3 prose-h2:text-2xl prose-h3:mt-14 prose-h3:scroll-mt-[220px] prose-h3:text-2xl prose-p:text-[1.05rem] prose-p:leading-8 prose-blockquote:border-amber-700 prose-blockquote:bg-amber-50/70 prose-blockquote:px-5 prose-blockquote:py-2 prose-blockquote:not-italic prose-li:leading-8 sm:prose-p:text-[1.1rem]">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={{
+                  p: ({ children }) => {
+                    const href = nodeHref(children);
+                    const match = href?.match(/^#review-source-evidence-(p\d+)$/);
+                    if (!match) return <p>{children}</p>;
+                    const sources = sourceAnnotations.get(match[1]);
+                    if (!sources || !showSources) return null;
+                    return <SourceEvidenceDisclosure sources={sources} />;
+                  },
+                  h2: ({ children }) => {
+                    const title = nodeText(children).trim();
+                    const index = sectionHeadings.indexOf(title);
+                    return <h2 id={index >= 0 ? sectionId(index) : undefined}>{children}</h2>;
+                  },
                   h3: ({ children }) => {
                     const title = nodeText(children).trim();
-                    const index = headingGroups.findIndex((group) => group.heading === title);
+                    const index = sectionHeadings.indexOf(title);
                     const count = clipCounts.get(title) ?? 0;
                     return (
                       <div id={index >= 0 ? sectionId(index) : undefined} className="group scroll-mt-[220px]">
                         <h3>{children}</h3>
-                        {index >= 0 && count > 0 && (
+                        {hasAudio && index >= 0 && count > 0 && (
                           <button type="button" onClick={() => scrollToView("listen", index)} className="not-prose mt-3 inline-flex items-center gap-2 rounded-full bg-amber-100 px-4 py-2 text-sm font-semibold text-amber-950 hover:bg-amber-200">
                             <Headphones className="h-4 w-4" />聽本節原聲 · {count} 段
                           </button>
@@ -288,11 +397,32 @@ export function PublicArticleReader({ article }: { article: PublicWangArticle })
                     );
                   },
                 }}
-              >{articleBody}</ReactMarkdown>
+              >{articleProse}</ReactMarkdown>
             </div>
+            {footnotes.length > 0 && (
+              <aside aria-label="文章注釋" className="mt-14 border-t border-stone-200 pt-7">
+                <p className="text-xs font-bold tracking-[0.14em] text-stone-500">注釋</p>
+                <ol className="mt-4 space-y-4 text-sm leading-7 text-stone-600">
+                  {footnotes.map((footnote) => (
+                    <li key={footnote.id} id={`article-footnote-${footnote.id}`} className="flex scroll-mt-[220px] items-start gap-2">
+                      <span className="font-bold text-stone-900">{footnote.id}.</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="prose prose-stone max-w-none text-sm leading-7 prose-p:m-0">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{footnote.markdown}</ReactMarkdown>
+                        </div>
+                        {showSources && footnote.sourceAnnotationId && sourceAnnotations.has(footnote.sourceAnnotationId) ? (
+                          <SourceEvidenceDisclosure sources={sourceAnnotations.get(footnote.sourceAnnotationId)!} />
+                        ) : null}
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              </aside>
+            )}
           </article>
         </section>
 
+        {hasAudio && (
         <section role="tabpanel" aria-label="聆聽原聲" aria-hidden={mode !== "listen"} className={mode === "listen" ? "block" : "hidden"}>
           <div className="mx-auto max-w-4xl space-y-14">
             {headingGroups.map((group, sectionIndex) => (
@@ -326,6 +456,7 @@ export function PublicArticleReader({ article }: { article: PublicWangArticle })
             ))}
           </div>
         </section>
+        )}
       </div>
 
       {activePlayer && (

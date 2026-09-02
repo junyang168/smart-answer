@@ -185,3 +185,35 @@ def test_changed_manuscript_invalidates_existing_approval(tmp_path: Path, monkey
     manuscript.write_text(manuscript.read_text(encoding="utf-8") + "\n未批准的新段落。", encoding="utf-8")
 
     assert public_wang_articles.list_public_articles() == {"articles": []}
+
+
+def test_source_annotations_travel_with_the_publication(tmp_path: Path, monkeypatch) -> None:
+    """The reader page's 显示原文来源 toggle renders exactly what publish wrote
+    to source-annotations.json; a publication without the file degrades to []."""
+
+    _publication_fixture(tmp_path, monkeypatch)
+    draft = tmp_path / "editorial_drafts" / "DRAFT-M16-002-V1"
+    manifest = json.loads((draft / "editorial-draft-manifest.json").read_text(encoding="utf-8"))
+    assert public_wang_articles.public_article_data("matthew-16-13-20")["source_annotations"] == []
+
+    manifest["drafts"][0]["source_annotations_path"] = "source-annotations.json"
+    _write_json(draft / "editorial-draft-manifest.json", manifest)
+    _write_json(
+        draft / "source-annotations.json",
+        {
+            "source_annotations": [
+                {
+                    "annotation_id": "p1",
+                    "paragraph_sha256": "abc",
+                    "sources": [{"fragment_ids": ["F-1"], "title": "母本片段", "excerpts": ["原文"]}],
+                }
+            ]
+        },
+    )
+    payload = public_wang_articles.public_article_data("matthew-16-13-20")
+    assert payload["source_annotations"][0]["annotation_id"] == "p1"
+
+    # a path that escapes the publication directory is ignored, not followed
+    manifest["drafts"][0]["source_annotations_path"] = "../../outside.json"
+    _write_json(draft / "editorial-draft-manifest.json", manifest)
+    assert public_wang_articles.public_article_data("matthew-16-13-20")["source_annotations"] == []
