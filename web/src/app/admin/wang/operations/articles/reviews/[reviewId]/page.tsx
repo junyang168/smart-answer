@@ -24,6 +24,7 @@ export default async function TopicEssayReviewPage(props: { params: Promise<{ re
   if (!review) notFound();
   const sectionHeadings = headings(review.markdown);
   const published = review.workflow_status === "workflow_published";
+  const humanPublished = review.publication_decision?.decision === "approved";
 
   return (
     <main className="pb-20">
@@ -36,14 +37,16 @@ export default async function TopicEssayReviewPage(props: { params: Promise<{ re
           <div className="max-w-4xl">
             <p className="flex items-center gap-2 text-sm font-black tracking-[0.14em] text-amber-900">
               <ShieldAlert className="h-4 w-4" />
-              {published ? "POC 内部审稿 · 自动流程已出版" : "POC 内部审稿 · 尚未出版"}
+              {humanPublished ? "审稿通过 · 已出版" : published ? "POC 内部审稿 · 自动流程已出版" : "POC 内部审稿 · 尚未出版"}
             </p>
             <p className="mt-6 text-sm font-bold text-stone-600">{review.passage}</p>
             <h1 className="mt-3 font-serif text-3xl font-bold leading-tight text-stone-950 sm:text-5xl">{review.title}</h1>
             <p className="mt-5 max-w-3xl text-sm leading-7 text-stone-700 sm:text-base">
-              {published
+              {humanPublished
+                ? "这版已经出版，读者可以在王教授文库看见。这里仍保留内部来源对照，供教会同工继续审阅；如需下架，用右侧「从读者站撤下」。"
+                : published
                 ? "这版已经通过 grounding、独立编审、差异审核与程序审计，并由自动流程发布到王教授文库；这里仍保留内部来源对照，供教会同工继续审阅。"
-                : "这是写作流程中的工作稿，只供教会同工继续审阅。页面不会出现在公开文库；正式文章仍须完成 grounding、独立编审、差异审核与程序审计。"}
+                : "这是写作流程中的工作稿，只供教会同工继续审阅。页面不会出现在公开文库；闸门全部通过后，可以用右侧「正式出版」发布给读者。"}
             </p>
           </div>
           <div className="flex flex-col items-end gap-3">
