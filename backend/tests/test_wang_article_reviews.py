@@ -964,12 +964,44 @@ def test_publish_button_writes_what_the_reader_route_validates(tmp_path, monkeyp
         json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
     )
 
-    result = module.publish_article_review("kingdom-keys-draft-first-v1")
+    import time
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("WANG_PUBLICATION_ACTION_SECRET", "test-secret")
+    monkeypatch.setenv("WANG_PUBLICATION_OWNER_IDS", "owner-1")
+    app = FastAPI()
+    app.include_router(module.router)
+    client = TestClient(app)
+    publish_path = "/admin/wang/article-reviews/kingdom-keys-draft-first-v1/publish"
+    assert client.post(publish_path).status_code == 401
+    timestamp = str(int(time.time()))
+    signature = module._publication_signature(
+        action="publish",
+        review_id="kingdom-keys-draft-first-v1",
+        actor_id="owner-1",
+        role="editor",
+        timestamp=timestamp,
+        secret="test-secret",
+    )
+    response = client.post(
+        publish_path,
+        headers={
+            "X-Wang-Publication-Actor": "owner-1",
+            "X-Wang-Publication-Role": "editor",
+            "X-Wang-Publication-Timestamp": timestamp,
+            "X-Wang-Publication-Signature": signature,
+        },
+    )
+    assert response.status_code == 200
+    result = response.json()
+    actor = module.PublicationActor(actor_id="owner-1", role="editor")
     assert result["published"] is True
     assert result["public_slug"] == "kingdom-keys"
     target = publications / "kingdom-keys-draft-first-v1"
     decision = json.loads((target / "publication-decision.json").read_text())
     assert decision["decision"] == "approved"
+    assert decision["decided_by"] == "owner-1"
     import hashlib
     assert decision["manuscript_sha256"] == hashlib.sha256(
         (target / "manuscript.md").read_bytes()
@@ -980,14 +1012,21 @@ def test_publish_button_writes_what_the_reader_route_validates(tmp_path, monkeyp
     assert item["passage"] == "太16:19"
     # 读者页的「显示原文来源」开关吃的就是这份数据：发布必须随稿落盘。
     assert item["source_annotations_path"] == "source-annotations.json"
+    assert item["source_annotations_sha256"] == decision["source_annotations_sha256"]
     annotations = json.loads((target / "source-annotations.json").read_text())
     assert isinstance(annotations["source_annotations"], list)
     detail = module.article_review("kingdom-keys-draft-first-v1")
     assert detail["publication_decision"]["decision"] == "approved"
 
-    module.unpublish_article_review("kingdom-keys-draft-first-v1")
+    # Repeating publication refreshes the same artifact and keeps one identity.
+    repeated = module.publish_article_review("kingdom-keys-draft-first-v1", actor=actor)
+    assert repeated["public_slug"] == result["public_slug"]
+
+    module.unpublish_article_review("kingdom-keys-draft-first-v1", actor=actor)
+    module.unpublish_article_review("kingdom-keys-draft-first-v1", actor=actor)
     decision = json.loads((target / "publication-decision.json").read_text())
     assert decision["decision"] == "withdrawn"
+    assert decision["withdrawn_by"] == "owner-1"
 
     # a review that has not passed refuses publication
     manifest["workflow_status"] = "human_review_required"
@@ -997,4 +1036,79 @@ def test_publish_button_writes_what_the_reader_route_validates(tmp_path, monkeyp
         json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
     )
     with _pytest.raises(HTTPException):
-        module.publish_article_review("kingdom-keys-draft-first-v1")
+        module.publish_article_review("kingdom-keys-draft-first-v1", actor=actor)
+
+
+def test_publication_actor_assertion_is_signed_fresh_and_owner_scoped(monkeypatch):
+    import time
+    from fastapi import HTTPException
+    import pytest as _pytest
+    from backend.api import wang_article_reviews as module
+
+    monkeypatch.setenv("WANG_PUBLICATION_ACTION_SECRET", "test-secret")
+    monkeypatch.setenv("WANG_PUBLICATION_OWNER_IDS", "owner-1")
+    timestamp = str(int(time.time()))
+    signature = module._publication_signature(
+        action="publish",
+        review_id="review-v1",
+        actor_id="owner-1",
+        role="editor",
+        timestamp=timestamp,
+        secret="test-secret",
+    )
+    actor = module._verified_publication_actor(
+        "review-v1", "publish", "owner-1", "editor", timestamp, signature
+    )
+    assert actor == module.PublicationActor(actor_id="owner-1", role="editor")
+
+    with _pytest.raises(HTTPException) as wrong_action:
+        module._verified_publication_actor(
+            "review-v1", "unpublish", "owner-1", "editor", timestamp, signature
+        )
+    assert wrong_action.value.status_code == 401
+
+    outsider_signature = module._publication_signature(
+        action="publish",
+        review_id="review-v1",
+        actor_id="editor-2",
+        role="editor",
+        timestamp=timestamp,
+        secret="test-secret",
+    )
+    with _pytest.raises(HTTPException) as outsider:
+        module._verified_publication_actor(
+            "review-v1", "publish", "editor-2", "editor", timestamp, outsider_signature
+        )
+    assert outsider.value.status_code == 403
+
+    old_timestamp = str(int(time.time()) - module.PUBLICATION_SIGNATURE_MAX_AGE_SECONDS - 1)
+    old_signature = module._publication_signature(
+        action="publish",
+        review_id="review-v1",
+        actor_id="owner-1",
+        role="editor",
+        timestamp=old_timestamp,
+        secret="test-secret",
+    )
+    with _pytest.raises(HTTPException) as expired:
+        module._verified_publication_actor(
+            "review-v1", "publish", "owner-1", "editor", old_timestamp, old_signature
+        )
+    assert expired.value.status_code == 401
+
+
+def test_publication_artifact_replacement_never_exposes_partial_file(tmp_path, monkeypatch):
+    import pytest as _pytest
+    from backend.api import wang_article_reviews as module
+
+    artifact = tmp_path / "decision.json"
+    artifact.write_text("old", encoding="utf-8")
+
+    def fail_replace(_source, _target):
+        raise OSError("simulated replace failure")
+
+    monkeypatch.setattr(module.os, "replace", fail_replace)
+    with _pytest.raises(OSError):
+        module._atomic_write_text(artifact, "new")
+    assert artifact.read_text(encoding="utf-8") == "old"
+    assert list(tmp_path.glob(".*.tmp")) == []

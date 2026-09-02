@@ -84,6 +84,24 @@ rebuilt on the next attempt rather than reused. It used to be written after the
 build, which meant a broken release was cached as complete and retrying could
 never recover it.
 
+### Wang article publication identity
+
+The manual publish and unpublish buttons fail closed unless both the frontend
+and backend receive the same two server-only settings:
+
+```dotenv
+WANG_PUBLICATION_ACTION_SECRET=<random shared secret>
+WANG_PUBLICATION_OWNER_IDS=<comma-separated internal user IDs>
+```
+
+Set them in the frontend and backend configuration files under
+`/opt/homebrew/var/www/smart-answer-config/`; never prefix the secret with
+`NEXT_PUBLIC_`. The frontend derives the actor from the server-side NextAuth
+session and signs a short-lived assertion. The backend verifies that signature
+and checks the owner allow-list again before recording `decided_by` or
+`withdrawn_by`. A missing setting returns 503; do not bypass it by calling the
+backend endpoint directly.
+
 ### Python
 
 The interpreter is pinned by `.python-version` (currently `3.13`), read from

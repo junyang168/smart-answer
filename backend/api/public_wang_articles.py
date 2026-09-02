@@ -153,16 +153,149 @@ def _public_topics(item: dict) -> list[str]:
     return list(dict.fromkeys(topics))
 
 
-def _approved_publication(manifest_path: Path, item: dict) -> tuple[Path, dict] | None:
+def _publication_record(manifest_path: Path, item: dict) -> dict | None:
     draft_id = str(item.get("draft_id") or "").strip()
     manuscript_path = _safe_child(manifest_path.parent, str(item.get("relative_path") or "").strip())
     decision_relative = str((item.get("audit_config") or {}).get("publication_decision_path") or "").strip()
     decision_path = _safe_child(manifest_path.parent, decision_relative)
-    if not draft_id or not manuscript_path or not manuscript_path.is_file() or not decision_path:
+    if not draft_id or not manuscript_path or not decision_path or not decision_path.is_file():
         return None
     decision = _read_json(decision_path)
+    decided_at = str(decision.get("decided_at") or "")
+    try:
+        file_order = decision_path.stat().st_mtime_ns
+    except OSError:
+        file_order = 0
+    return {
+        "manifest_path": manifest_path,
+        "item": item,
+        "manuscript_path": manuscript_path,
+        "decision": decision,
+        "order": (decided_at, file_order, draft_id),
+    }
+
+
+def _latest_publications_by_slug() -> dict[str, dict]:
+    """Choose the latest decision before checking whether it is approved.
+
+    Selecting only approved records would revive an older revision when the
+    newest one is withdrawn or damaged.  A withdrawal is itself the current
+    decision for the slug, so it must shadow every earlier approval.
+    """
+
+    managed: dict[str, dict] = {}
+    legacy: dict[str, dict] = {}
+    for manifest_path in sorted(EDITORIAL_DRAFT_ROOT.glob("**/editorial-draft-manifest.json")):
+        manifest = _read_json(manifest_path)
+        for item in manifest.get("drafts", []) or []:
+            slug = _manifest_passage_slug(item)
+            record = _publication_record(manifest_path, item)
+            if not slug or not record:
+                continue
+            managed_by_review_endpoint = (
+                record["decision"].get("source")
+                == "wang-article-reviews-publish-endpoint"
+            )
+            if managed_by_review_endpoint and record["decision"].get("decided_at"):
+                if slug not in managed or record["order"] > managed[slug]["order"]:
+                    managed[slug] = record
+            elif slug not in legacy and _approved_publication(record):
+                # Other publication workflows preserve their old first-valid
+                # behavior. Their decided_at values do not opt them into the
+                # draft-first endpoint's same-slug replacement contract.
+                legacy[slug] = record
+    return {**legacy, **managed}
+
+
+SOURCE_MARKER_RE = re.compile(
+    r"\s*\[查看本(?:段|注)来源\]\(#review-source-evidence-(p\d+)\)\s*$"
+)
+
+
+def _source_marker_paragraph_shas(markdown: str) -> dict[str, str] | None:
+    markers: dict[str, str] = {}
+    previous_block = ""
+    for raw_block in re.split(r"\n\s*\n", markdown):
+        block = raw_block.strip()
+        if not block:
+            continue
+        match = SOURCE_MARKER_RE.search(block)
+        if not match:
+            previous_block = block
+            continue
+        annotation_id = match.group(1)
+        if annotation_id in markers:
+            return None
+        governed = block[: match.start()].strip() or previous_block
+        if not governed:
+            return None
+        markers[annotation_id] = hashlib.sha256(governed.encode("utf-8")).hexdigest()
+        previous_block = governed
+    return markers
+
+
+def _verified_source_annotations(record: dict) -> list[dict] | None:
+    decision = record["decision"]
+    expected_sha = str(decision.get("source_annotations_sha256") or "")
+    if not expected_sha:
+        return []  # Legacy publications remain readable without trusted disclosure.
+    item = record["item"]
+    if str(item.get("source_annotations_sha256") or "") != expected_sha:
+        return None
+    manifest_path = record["manifest_path"]
+    annotations_path = _safe_child(
+        manifest_path.parent, str(item.get("source_annotations_path") or "").strip()
+    )
+    if annotations_path:
+        try:
+            annotations_path.relative_to(manifest_path.parent.resolve())
+        except ValueError:
+            annotations_path = None
     if (
-        decision.get("schema_version") not in APPROVAL_SCHEMA_VERSIONS
+        not re.fullmatch(r"[0-9a-f]{64}", expected_sha)
+        or not annotations_path
+        or not annotations_path.is_file()
+        or _sha256(annotations_path) != expected_sha
+    ):
+        return None
+    loaded = _read_json(annotations_path).get("source_annotations")
+    if not isinstance(loaded, list):
+        return None
+    marker_shas = _source_marker_paragraph_shas(
+        record["manuscript_path"].read_text(encoding="utf-8")
+    )
+    if marker_shas is None:
+        return None
+    annotations: list[dict] = []
+    seen: set[str] = set()
+    for annotation in loaded:
+        if not isinstance(annotation, dict):
+            return None
+        annotation_id = str(annotation.get("annotation_id") or "")
+        paragraph_sha = str(annotation.get("paragraph_sha256") or "")
+        if (
+            not annotation_id
+            or annotation_id in seen
+            or marker_shas.get(annotation_id) != paragraph_sha
+            or not isinstance(annotation.get("sources"), list)
+            or not annotation.get("sources")
+        ):
+            return None
+        seen.add(annotation_id)
+        annotations.append(annotation)
+    if seen != set(marker_shas):
+        return None
+    return annotations
+
+
+def _approved_publication(record: dict) -> tuple[Path, dict, list[dict]] | None:
+    item = record["item"]
+    draft_id = str(item.get("draft_id") or "").strip()
+    manuscript_path = record["manuscript_path"]
+    decision = record["decision"]
+    if (
+        not manuscript_path.is_file()
+        or decision.get("schema_version") not in APPROVAL_SCHEMA_VERSIONS
         or decision.get("draft_id") != draft_id
         or decision.get("decision") != "approved"
         or decision.get("editorial_review_passed") is not True
@@ -170,7 +303,10 @@ def _approved_publication(manifest_path: Path, item: dict) -> tuple[Path, dict] 
         or decision.get("manuscript_sha256") != _sha256(manuscript_path)
     ):
         return None
-    return manuscript_path, decision
+    annotations = _verified_source_annotations(record)
+    if annotations is None:
+        return None
+    return manuscript_path, decision, annotations
 
 
 def _public_source(source_document: dict) -> dict | None:
@@ -208,105 +344,89 @@ def _public_markdown(markdown: str) -> str:
 
 
 def public_article_data(slug: str) -> dict:
-    for manifest_path in sorted(EDITORIAL_DRAFT_ROOT.glob("**/editorial-draft-manifest.json")):
-        manifest = _read_json(manifest_path)
-        for item in manifest.get("drafts", []) or []:
-            if _manifest_passage_slug(item) != slug:
-                continue
-            approved = _approved_publication(manifest_path, item)
-            if not approved:
-                continue
-            manuscript_path, _decision = approved
-            package_path = _safe_child(
-                manifest_path.parent,
-                str(item.get("presentation_package_path") or "").strip(),
-            )
-            package = _read_json(package_path) if package_path and package_path.is_file() else {}
-            plan_id = str((item.get("audit_config") or {}).get("plan_id") or item.get("candidate_id") or "")
-            plan = next(
-                (candidate for candidate in package.get("product_plans", []) or [] if candidate.get("plan_id") == plan_id),
-                {},
-            )
-            decisions = {
-                str(decision.get("decision_id") or ""): decision
-                for decision in plan.get("decisions", []) or []
-            }
-            sources = {
-                str(source.get("source_id") or ""): source
-                for source in package.get("source_documents", []) or []
-            }
-            audio_sections = []
-            for section in (item.get("audit_config") or {}).get("decision_sections", []) or []:
-                decision = decisions.get(str(section.get("decision_id") or "")) or {}
-                clips = []
-                for presentation in decision.get("source_presentations", []) or []:
-                    source = _public_source(sources.get(str(presentation.get("source_id") or "")) or {})
-                    if not source or not source.get("media", {}).get("url"):
-                        continue
-                    clips.append(
-                        {
-                            "title": source["title"],
-                            "sermon_label": source["sermon_label"],
-                            "delivered_on": source["delivered_on"],
-                            "public_url": source["public_url"],
-                            "media": source["media"],
-                            "start_seconds": presentation.get("start_seconds"),
-                            "end_seconds": presentation.get("end_seconds"),
-                        }
-                    )
-                if clips:
-                    audio_sections.append(
-                        {
-                            "heading": str(section.get("markdown_heading") or "").strip(),
-                            "title": str(decision.get("section_title") or section.get("markdown_heading") or "").strip(),
-                            "passage": str(decision.get("passage") or "").strip(),
-                            "clips": clips,
-                        }
-                    )
-            markdown = _public_markdown(manuscript_path.read_text(encoding="utf-8"))
-            source_annotations = []
-            annotations_path = _safe_child(
-                manifest_path.parent,
-                str(item.get("source_annotations_path") or "").strip(),
-            )
-            if annotations_path and annotations_path.is_file():
-                loaded = _read_json(annotations_path).get("source_annotations")
-                if isinstance(loaded, list):
-                    source_annotations = loaded
-            return {
-                "slug": slug,
-                "title": str(item.get("title") or "").strip(),
-                "passage": str(item.get("passage") or "").strip(),
-                "markdown": markdown,
-                "audio_sections": audio_sections,
-                "source_annotations": source_annotations,
-                "audio_section_count": len(audio_sections),
-                "player_count": sum(len(section["clips"]) for section in audio_sections),
-            }
+    record = _latest_publications_by_slug().get(slug)
+    approved = _approved_publication(record) if record else None
+    if approved:
+        manuscript_path, _decision, source_annotations = approved
+        manifest_path = record["manifest_path"]
+        item = record["item"]
+        package_path = _safe_child(
+            manifest_path.parent,
+            str(item.get("presentation_package_path") or "").strip(),
+        )
+        package = _read_json(package_path) if package_path and package_path.is_file() else {}
+        plan_id = str((item.get("audit_config") or {}).get("plan_id") or item.get("candidate_id") or "")
+        plan = next(
+            (candidate for candidate in package.get("product_plans", []) or [] if candidate.get("plan_id") == plan_id),
+            {},
+        )
+        decisions = {
+            str(decision.get("decision_id") or ""): decision
+            for decision in plan.get("decisions", []) or []
+        }
+        sources = {
+            str(source.get("source_id") or ""): source
+            for source in package.get("source_documents", []) or []
+        }
+        audio_sections = []
+        for section in (item.get("audit_config") or {}).get("decision_sections", []) or []:
+            decision = decisions.get(str(section.get("decision_id") or "")) or {}
+            clips = []
+            for presentation in decision.get("source_presentations", []) or []:
+                source = _public_source(sources.get(str(presentation.get("source_id") or "")) or {})
+                if not source or not source.get("media", {}).get("url"):
+                    continue
+                clips.append(
+                    {
+                        "title": source["title"],
+                        "sermon_label": source["sermon_label"],
+                        "delivered_on": source["delivered_on"],
+                        "public_url": source["public_url"],
+                        "media": source["media"],
+                        "start_seconds": presentation.get("start_seconds"),
+                        "end_seconds": presentation.get("end_seconds"),
+                    }
+                )
+            if clips:
+                audio_sections.append(
+                    {
+                        "heading": str(section.get("markdown_heading") or "").strip(),
+                        "title": str(decision.get("section_title") or section.get("markdown_heading") or "").strip(),
+                        "passage": str(decision.get("passage") or "").strip(),
+                        "clips": clips,
+                    }
+                )
+        markdown = _public_markdown(manuscript_path.read_text(encoding="utf-8"))
+        return {
+            "slug": slug,
+            "title": str(item.get("title") or "").strip(),
+            "passage": str(item.get("passage") or "").strip(),
+            "markdown": markdown,
+            "audio_sections": audio_sections,
+            "source_annotations": source_annotations,
+            "audio_section_count": len(audio_sections),
+            "player_count": sum(len(section["clips"]) for section in audio_sections),
+        }
     raise HTTPException(status_code=404, detail="找不到這篇文章。")
 
 
 @router.get("")
 def list_public_articles():
     articles = []
-    seen: set[str] = set()
-    for manifest_path in sorted(EDITORIAL_DRAFT_ROOT.glob("**/editorial-draft-manifest.json")):
-        manifest = _read_json(manifest_path)
-        for item in manifest.get("drafts", []) or []:
-            slug = _manifest_passage_slug(item)
-            if not slug or slug in seen or not _approved_publication(manifest_path, item):
-                continue
-            seen.add(slug)
-            articles.append(
-                {
-                    "slug": slug,
-                    "title": str(item.get("title") or "").strip(),
-                    "passage": str(item.get("passage") or "").strip(),
-                    "scripture": _public_scripture_reference(item),
-                    "topics": _public_topics(item),
-                    "href": f"/resources/wang-repository/articles/{slug}",
-                }
-            )
+    for slug, record in sorted(_latest_publications_by_slug().items()):
+        if not _approved_publication(record):
+            continue
+        item = record["item"]
+        articles.append(
+            {
+                "slug": slug,
+                "title": str(item.get("title") or "").strip(),
+                "passage": str(item.get("passage") or "").strip(),
+                "scripture": _public_scripture_reference(item),
+                "topics": _public_topics(item),
+                "href": f"/resources/wang-repository/articles/{slug}",
+            }
+        )
     return {"articles": articles}
 
 
