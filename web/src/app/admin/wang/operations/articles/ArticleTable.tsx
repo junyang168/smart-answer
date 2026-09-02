@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertTriangle, ChevronDown, ChevronRight, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 import type { ArticleRow, ArticlesPayload } from "./types";
 
@@ -40,7 +40,6 @@ export function ArticleTable() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState<string | null>(null);
-  const [onlyWritten, setOnlyWritten] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -57,12 +56,29 @@ export function ArticleTable() {
     }
   }
 
-  useMemo(() => { void load(); }, []);
+  useEffect(() => {
+    let active = true;
+    fetch("/api/admin/wang/operations/articles", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || "無法讀取文章總表");
+        if (active) {
+          setData(payload);
+          setError(null);
+        }
+      })
+      .catch((reason) => {
+        if (active) setError(reason instanceof Error ? reason.message : String(reason));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
-  const rows = useMemo(() => {
-    if (!data) return [];
-    return onlyWritten ? data.rows.filter((row) => row.draft) : data.rows;
-  }, [data, onlyWritten]);
+  const rows = data?.rows ?? [];
 
   if (loading && !data) {
     return (
@@ -85,8 +101,7 @@ export function ArticleTable() {
   return (
     <section className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Metric label="編排計劃" value={String(summary.plans)} detail={`${summary.unwritten} 個還沒寫`} />
-        <Metric label="已有稿件" value={String(summary.written)} detail={`已發布 ${summary.published}`} />
+        <Metric label="文章稿件" value={String(summary.articles)} detail={`已發布 ${summary.published}`} />
         <Metric label="已記錄的文章執行" value={String(summary.article_runs_recorded)}
           detail={summary.article_runs_recorded ? "面板或 CLI 觸發" : "記錄表上線後還沒跑過"} />
         <Metric label="文章花費" value={money(summary.spend_usd)} detail="只算記錄表裡的執行" />
@@ -104,11 +119,8 @@ export function ArticleTable() {
       )}
 
       <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3">
-        <label className="flex items-center gap-2 text-sm font-semibold text-slate-600">
-          <input type="checkbox" checked={onlyWritten} onChange={(event) => setOnlyWritten(event.target.checked)} />
-          只看已經有稿件的
-        </label>
-        <span className="ml-auto text-sm text-slate-500">{rows.length} / {summary.plans}</span>
+        <span className="text-sm text-slate-500">只列已有稿件；歷史 CompositionPlan 不再充當待寫隊列。</span>
+        <span className="ml-auto text-sm text-slate-500">{rows.length}</span>
         <button onClick={load} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />重新讀取
         </button>
@@ -118,7 +130,7 @@ export function ArticleTable() {
         <table className="min-w-full text-sm">
           <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs font-bold text-slate-600">
             <tr>
-              <th className="px-4 py-2.5">文章／編排計劃</th>
+              <th className="px-4 py-2.5">文章</th>
               <th className="px-3 py-2.5">經文</th>
               <th className="px-3 py-2.5">目前階段</th>
               <th className="px-3 py-2.5">編審</th>
@@ -129,9 +141,9 @@ export function ArticleTable() {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {rows.map((row) => (
-              <Row key={row.plan_id} row={row}
-                open={open === row.plan_id}
-                onToggle={() => setOpen(open === row.plan_id ? null : row.plan_id)} />
+              <Row key={row.draft_id} row={row}
+                open={open === row.draft_id}
+                onToggle={() => setOpen(open === row.draft_id ? null : row.draft_id)} />
             ))}
           </tbody>
         </table>
@@ -154,16 +166,16 @@ function Row({ row, open, onToggle }: { row: ArticleRow; open: boolean; onToggle
         <td className="px-4 py-2">
           <div className="flex items-center gap-1.5">
             {open ? <ChevronDown className="h-3.5 w-3.5 text-slate-400" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />}
-            <span className={`font-semibold ${row.draft ? "text-slate-900" : "text-slate-400"}`}>{row.title}</span>
+            <span className="font-semibold text-slate-900">{row.title}</span>
           </div>
           <div className="mt-0.5 pl-5 font-mono text-[10.5px] text-slate-400">
-            {row.draft ?? row.plan_id}{row.axis ? ` · ${row.axis}` : ""}
+            {row.draft_id}
           </div>
         </td>
         <td className="px-3 py-2 text-xs text-slate-600">{row.passage ?? "—"}</td>
         <td className="px-3 py-2 text-xs">
           {row.current_stage ? stageLabels[row.current_stage] ?? row.current_stage
-            : <span className="text-slate-400">還沒寫</span>}
+            : <span className="text-slate-400">未追蹤</span>}
         </td>
         <td className="px-3 py-2">
           {editorial ? (
@@ -216,7 +228,7 @@ function Detail({ row }: { row: ArticleRow }) {
                 {stageLabels[stage.stage] ?? stage.stage}
               </span>
             </li>
-          )) : <li className="text-slate-400">這個計劃還沒有稿件，所以還沒有階段。</li>}
+          )) : <li className="text-slate-400">這篇稿件沒有可顯示的階段資料。</li>}
         </ol>
         {row.blockers.length > 0 && (
           <>

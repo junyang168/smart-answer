@@ -6,9 +6,10 @@ generation half of the #283 experiment: can code reproduce the calibration
 draft's quality from the same three inputs a careful human writer used? The
 verification half (grounding, review) is deliberately out of scope here.
 
-POC input is an existing TheologicalEvidencePacket, reused only as a SHA-bound
-carrier of `focal_viewpoints` and `source_originals`; a production version
-would read the registry directly.
+Input is the TheologicalEvidencePacket produced by
+`theological_evidence_packet_runner`: a SHA-bound carrier of the approved
+viewpoints, source-local routes, and complete source originals. The Author does
+not read the registry directly.
 """
 
 from __future__ import annotations

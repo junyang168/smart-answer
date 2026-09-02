@@ -11,7 +11,7 @@ export default function ArticleOverviewPage() {
             <p className="text-sm font-bold tracking-wide text-indigo-300">Wang Knowledge Platform</p>
             <h1 className="mt-2 text-3xl font-black tracking-tight">寫文章：總表</h1>
             <p className="mt-3 text-base leading-7 text-slate-300">
-              一行一個編排計劃。講道進知識庫是另一條線，在總覽。兩者是多對多：一篇文章站在好幾篇講道上，一篇講道也可以進好幾篇文章。
+              一行一篇已有稿件。講道進知識庫是另一條線，在總覽。兩者是多對多：一篇文章站在好幾篇講道上，一篇講道也可以進好幾篇文章。歷史 CompositionPlan 不再列作待寫文章。
             </p>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-3">
