@@ -3,12 +3,12 @@
 > **读者**：神学编辑、Solution architect、Developer
 > **类型**：流程
 > **状态**：当前
-> **与代码对齐**：2026-08-31（核对到 10b65059）
+> **与代码对齐**：2026-09-01（核对到 #343 实作）
 > **权威范围**：draft-first 生产线从输入到负责人终审的运行阶段、各道检查的职责边界、修订循环与停止规则。写作规则的具体条文以 prompt 文件为准；知识层（观点、论证路线）的形成不在本文范围。
 
 ## 一、这是什么
 
-Draft-first 是平台的第二条文章生产线，与原有的 Brief 管线并存。它的做法一句话说完：
+Draft-first 是专题综合文章唯一的当前生产线。旧 Brief 管线已经退役；历史成品和审稿记录继续只读保留。它的做法一句话说完：
 
 > **先放手写好，再逐句查实。**
 
@@ -97,9 +97,9 @@ Draft-first 是平台的第二条文章生产线，与原有的 Brief 管线并�
 
 ## 三、每一步说清楚
 
-### 输入：三样东西，全部是已有的权威数据
+### 输入：三样东西，由共享编译器从权威数据产生
 
-没有任何一样需要为写文章新造。读者问题由编辑一句话给出；观点清单和论证路线来自知识层已审核的记录；原文就是库里的逐字稿与母本。**观点清单里那份「留而未决的关系」必须随清单同行**——写的和查的都要拿到它，否则文章会把教授没说定的事写成定论（真实发生过一次，四道检查全员漏放，教训换来的规矩）。
+没有任何一样需要为写文章新造。读者问题由编辑一句话给出；独立的 `theological_evidence_packet_runner` 从当前 master data 机械编译已批准的观点、论证路线、Claims、来源片段和完整逐字稿／母本，并把依赖与内容 SHA 锁进同一个 `TheologicalEvidencePacket`。作者只读这份 packet，不直接遍历 registry。**观点清单里那份「留而未决的关系」必须随清单同行**——写的和查的都要拿到它，否则文章会把教授没说定的事写成定论（真实发生过一次，四道检查全员漏放，教训换来的规矩）。
 
 ### 写稿：一次调用，十几条写作规则
 
@@ -132,18 +132,28 @@ Draft-first 是平台的第二条文章生产线，与原有的 Brief 管线并�
 
 写作规则不是设计出来的，是**裁决累积出来的**：负责人每一次具体的编辑意见（「细节过多」「编辑观察入注」「结尾稍有重复」）被泛化成一条与具体文章无关的规则，进入规则文件，四道检查同步引用同一条界线——规矩只让一个环节知道，迟早会被别的环节改掉，这是平台反复付过学费的教训。外部复查（另一家模型的审计）同样走这条路：发现 → 验证 → 规则或代码 → 全线生效。
 
-## 五、与 Brief 管线的关系
+## 五、Brief 管线已经退役
 
-两条线并存。Brief 管线（编排 → 撰写 → 质量）仍是已发表三篇马太释经文章的产线，未日落；draft-first 是否取而代之，由负责人在并排审读两条线的成品后决定。两条线共享同一知识层、同一审稿页、同一条铁律：**发布永远是人的决定。**
+专题综合文章不再生成 Brief，也不再调用旧的「按 Brief 撰写 → Grounding／Program Audit」半套。历史 Brief 版文章、审核 artifact 和审稿页渲染继续只读可见；它们不是新生产入口。证据包编译器是知识层与文章层之间的共享地基，已从旧 Composition runner 独立出来。
+
+这个退役决定不改变马太释经和微讲道对 `CompositionPlan` 的使用。它们是另外两条产品流程，不在本流程的退役范围。
 
 ## 六、Developer 附录
 
 运行命令（全部模型调用走订阅 CLI，不直连 API）：
 
 ```bash
+# 先从当前 master data 编译 SHA-bound packet（不会调用模型）
+backend/.venv/bin/python -m backend.pipeline.theological_evidence_packet_runner \
+  --scope <scope.json> --output-dir <run>/packet
+
+# 只验证编包输入与输出；仍写出 packet 供检查
+backend/.venv/bin/python -m backend.pipeline.theological_evidence_packet_runner \
+  --scope <scope.json> --output-dir <run>/packet-dry-run --dry-run
+
 # 写稿
 backend/.venv/bin/python -m backend.pipeline.draft_first_author_runner \
-  --packet <TheologicalEvidencePacket> --reader-question "<一句话>" \
+  --packet <run>/packet/theological-evidence-packet.json --reader-question "<一句话>" \
   --output-dir <run>/author-v1
 
 # 四道检查 + 修订循环

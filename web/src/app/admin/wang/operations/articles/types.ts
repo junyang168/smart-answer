@@ -25,13 +25,8 @@ export type ArticleRun = {
 };
 
 export type ArticleRow = {
-  plan_id: string;
+  draft_id: string;
   title: string;
-  axis: string | null;
-  product_type: string | null;
-  decision_count: number | null;
-  plan_review_status: string | null;
-  draft: string | null;
   slug: string | null;
   passage: string | null;
   current_stage: string | null;
@@ -54,9 +49,7 @@ export type ArticlesPayload = {
   schema_version: string;
   generated_at: string;
   summary: {
-    plans: number;
-    written: number;
-    unwritten: number;
+    articles: number;
     published: number;
     spend_usd: number;
     article_runs_recorded: number;

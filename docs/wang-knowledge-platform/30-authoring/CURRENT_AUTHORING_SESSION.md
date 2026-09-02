@@ -6,7 +6,24 @@
 > **與代碼對齊**：不適用
 > **權威範圍**：無。本文只說明此刻已發布什麼，不定規則。
 
-Updated: 2026-08-31 (America/Chicago)
+Updated: 2026-09-01 (America/Chicago)
+
+## 2026-09-01 authoring-line decision
+
+The owner retired the Brief-based theological topic essay line in #343. New
+topic essays use draft-first only. The deterministic evidence packet compiler
+remains shared infrastructure under
+`backend.pipeline.theological_evidence_packet_runner`; it compiles the reviewed
+Structure, CVP, ArgumentRoute, Claim, source fragment, and complete originals
+into one SHA-bound packet before any author model is called. Historical Brief
+artifacts and their admin review rendering remain readable, but no live runner,
+prompt, or operator command can create another Brief-based essay.
+
+This decision does **not** retire `CompositionPlan` from Matthew exposition or
+micro-sermons. Their current authoring flows and the Matthew progress read model
+continue unchanged. Only the theological-topic Brief writer and the generic
+article workbench's use of every stored plan as an unwritten-topic queue are
+retired.
 
 ## Project boundary
 
@@ -35,7 +52,7 @@ Two topic essays completed the full workflow and were automatically published to
 - `TES-matthew-16-18-church-foundation-v1`, current final manuscript SHA `236838a93b433dfaad85bc809b43c3240ee44136a15d67d676ea0473c6e42e4f` after the 2026-08-30 #278 opening-and-conclusion rerun;
 - `TES-matthew-16-18-gates-not-prevail-v1`, final manuscript SHA `b599e72f8e7b9d06f84315a5108cdeeee4192b1e7ee0ec089d3edddfd8bcc4c8`.
 
-Both decisions are `automated-publication-decision.v1`, with per-dimension minimums, no hard failure and Program Audit zero errors. The golden case also exercised a formal return from downstream Editorial Review to Composition when the approved brief itself caused the prose defect; nobody patched reader-visible prose outside the runners. The workflow definition, operator commands, POC record and non-destructive three-article gap report are under this directory with the `theological_editorial_synthesis_` prefix.
+Both decisions are `automated-publication-decision.v1`, with per-dimension minimums, no hard failure and Program Audit zero errors. The golden case also exercised a formal return from downstream Editorial Review to Composition when the approved brief itself caused the prose defect; nobody patched reader-visible prose outside the runners. Those artifacts remain historical evidence; #343 removed the obsolete operator commands and live Brief implementation after draft-first became the only theological-topic authoring line.
 
 The 2026-08-29 golden-case recalibration is the current review target. Its SHA-bound scope now carries the human-approved four-section outline, no-introduction-H2 rule and Aramaic-footnote placement. Composition brief SHA `1773fa3394f5d50bb0bc8b18253804de35d0e298f2f0154043202ebaae23c564` restores one governing question per heading and distinguishes primary support, corroboration, qualification and objection response. Author and review gates now preserve the source's 「或者」 at every summary, keep professor assertions separate from editorial unresolved disclosures, require an embedded objection's actual node rather than its label, and reject observer-language reader prose. Final Delta Review receives the revised full manuscript only as positional context for its declared paragraph diff; without that context it once falsely treated the last inserted paragraph as the article ending while an unchanged positive closing paragraph still followed it. Admin preview `church-foundation-poc-v14` is registered against `quality-v12`, with sources hidden by default and the source switch verified against transcript, Audio and manuscript links.
 

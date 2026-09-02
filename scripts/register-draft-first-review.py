@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Register a draft-first essay as an internal review preview.
 
-The draft-first pipeline (#283/#285) produces final.md + review-run.json +
-source-bindings.json instead of the briefed pipeline's authoring/composition
-directories; this registration binds those artifacts by SHA under the same
-manifest schema with `variant: "draft_first"`, so the admin review list shows
-both pipelines' products side by side.
+The draft-first pipeline produces final.md + review-run.json +
+source-bindings.json. This registration binds those artifacts by SHA under the
+review manifest schema with `variant: "draft_first"`. Historical Brief
+products remain readable, but this is the only live registration path for new
+theological-topic essays.
 """
 
 from __future__ import annotations

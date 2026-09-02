@@ -1,9 +1,10 @@
-"""The article pipeline: one row per composition plan, and what became of it.
+"""The article pipeline: one row per materialized article draft.
 
 Sermons and articles are two independent processes and the relation between
 them is many-to-many -- the 太16:13-20 article stands on eight sources, and one
 sermon can feed several articles.  So this is a second table, not five more
-columns on the first one; a row here is a plan or a draft, never a sermon.
+columns on the first one. Retired CompositionPlans remain historical master
+data; they are no longer treated as an unwritten-article queue here.
 
 Almost nothing is computed here.  `matthew_exposition_progress` already derives
 the stage chain, the SHA integrity checks and the blockers on every read, and
@@ -25,7 +26,6 @@ from fastapi import APIRouter, HTTPException
 from backend.config.wang_platform_paths import wang_platform_paths
 from backend.api.wang_operations import (
     _article_citations,
-    _database_url,
     _effective_status,
     _load_json,
     _load_runs,
@@ -35,7 +35,7 @@ from backend.api.wang_operations import (
 
 router = APIRouter(prefix="/admin/wang/operations", tags=["wang-admin"])
 
-SCHEMA_VERSION = "wang-operations-articles.v1"
+SCHEMA_VERSION = "wang-operations-articles.v2"
 
 QUALITY_PROFILE_DIR = Path(__file__).resolve().parents[1] / "config" / "editorial_quality_profiles"
 
@@ -103,50 +103,8 @@ def _dimension_verdict(
     }
 
 
-def _plans() -> list[dict[str, Any]]:
-    """Every composition plan in the authoring store.
-
-    Plans are where an article starts, so a plan nobody has written yet is this
-    table's equivalent of a sermon with no extraction: work that has to be
-    visible or it does not get done.
-    """
-
-    url = _database_url()
-    if not url:
-        return []
-    try:
-        import psycopg
-    except ImportError:
-        return []
-    try:
-        with psycopg.connect(url) as conn, conn.cursor() as cursor:
-            cursor.execute(
-                """SELECT object_id, payload, review_status, updated_at
-                     FROM wang_knowledge.objects
-                    WHERE collection='composition_plans' AND retired_at IS NULL
-                    ORDER BY object_id"""
-            )
-            rows = cursor.fetchall()
-    except Exception:  # pragma: no cover - depends on deployment
-        return []
-    plans = []
-    for object_id, payload, review_status, updated_at in rows:
-        document = dict(payload or {})
-        plans.append({
-            "plan_id": str(object_id),
-            "title": document.get("title") or str(object_id),
-            "axis": document.get("axis"),
-            "product_type": document.get("product_type"),
-            "corpus_scope": document.get("corpus_scope"),
-            "review_status": review_status,
-            "decision_count": len(document.get("decision_ids") or []),
-            "updated_at": updated_at.isoformat() if updated_at else None,
-        })
-    return plans
-
-
 def _drafts(paths: Any) -> dict[str, dict[str, Any]]:
-    """Published drafts, keyed by the plan they were written from."""
+    """Published drafts, keyed by immutable draft ID."""
 
     drafts: dict[str, dict[str, Any]] = {}
     root = paths.repository / "editorial_drafts"
@@ -157,14 +115,16 @@ def _drafts(paths: Any) -> dict[str, dict[str, Any]]:
         if not manifest:
             continue
         for draft in manifest.get("drafts") or []:
-            plan_id = str(draft.get("candidate_id") or "")
+            draft_id = str(draft.get("draft_id") or "")
+            if not draft_id:
+                continue
             config = draft.get("audit_config") or {}
             review = _load_json(
                 manifest_path.parent
                 / str(config.get("editorial_review_path") or "publication-editorial-review.json")
             )
-            drafts[plan_id or str(draft.get("draft_id"))] = {
-                "draft_id": draft.get("draft_id"),
+            drafts[draft_id] = {
+                "draft_id": draft_id,
                 "title": draft.get("title"),
                 "passage": draft.get("passage"),
                 "slug": draft.get("public_slug"),
@@ -198,13 +158,12 @@ def _progress_by_draft() -> dict[str, dict[str, Any]]:
 
 @router.get("/articles")
 def articles() -> dict[str, Any]:
-    """One row per plan or draft, recomputed on every read."""
+    """One row per materialized draft, recomputed on every read."""
 
     data_base = _data_base()
     paths = wang_platform_paths(data_base)
     now = datetime.now(timezone.utc)
 
-    plans = _plans()
     drafts = _drafts(paths)
     progress = _progress_by_draft()
     profiles = _quality_profiles()
@@ -225,38 +184,16 @@ def articles() -> dict[str, Any]:
         if run["stage"] == "article":
             runs_by_subject.setdefault(str(run["subject_id"]), []).append(run)
 
-    rows: list[dict[str, Any]] = []
-    seen_drafts: set[str] = set()
-    for plan in plans:
-        draft = drafts.get(plan["plan_id"])
-        rows.append(_row(plan, draft, progress, profiles, cited_by_draft, runs_by_subject))
-        if draft:
-            seen_drafts.add(str(draft["draft_id"]))
-
-    # A draft whose plan is not in the store still has to appear: the article
-    # exists, and a table that lists only what the store planned would hide it.
-    for plan_id, draft in drafts.items():
-        if str(draft["draft_id"]) in seen_drafts:
-            continue
-        warnings.append({
-            "code": "draft_without_a_stored_plan",
-            "message": f"{draft['draft_id']} 的編排計劃 {plan_id} 不在主庫裡，這一列只有稿件那一半。",
-        })
-        rows.append(
-            _row({"plan_id": plan_id, "title": draft.get("title") or plan_id, "axis": None,
-                  "product_type": None, "corpus_scope": None, "review_status": None,
-                  "decision_count": 0, "updated_at": None},
-                 draft, progress, profiles, cited_by_draft, runs_by_subject)
-        )
-
-    written = sum(1 for row in rows if row["draft"])
+    rows = [
+        _row(draft, progress, profiles, cited_by_draft, runs_by_subject)
+        for draft in drafts.values()
+    ]
+    rows.sort(key=lambda row: (str(row.get("passage") or ""), row["draft_id"]))
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": now.isoformat(),
         "summary": {
-            "plans": len(rows),
-            "written": written,
-            "unwritten": len(rows) - written,
+            "articles": len(rows),
             "published": sum(1 for row in rows if row["repository_published"]),
             "spend_usd": round(
                 sum(
@@ -275,28 +212,22 @@ def articles() -> dict[str, Any]:
 
 
 def _row(
-    plan: dict[str, Any],
-    draft: Optional[dict[str, Any]],
+    draft: dict[str, Any],
     progress: dict[str, dict[str, Any]],
     profiles: dict[str, dict[str, Any]],
     cited_by_draft: dict[str, list[str]],
     runs_by_subject: dict[str, list[dict[str, Any]]],
 ) -> dict[str, Any]:
-    draft_id = str(draft["draft_id"]) if draft else None
-    tracked = progress.get(draft_id or "", {})
-    profile = profiles.get(str(draft.get("profile_id") or "")) if draft else None
-    editorial = _dimension_verdict(draft.get("review") if draft else None, profile)
-    runs = runs_by_subject.get(draft_id or plan["plan_id"], [])
+    draft_id = str(draft["draft_id"])
+    tracked = progress.get(draft_id, {})
+    profile = profiles.get(str(draft.get("profile_id") or ""))
+    editorial = _dimension_verdict(draft.get("review"), profile)
+    runs = runs_by_subject.get(draft_id, [])
     return {
-        "plan_id": plan["plan_id"],
-        "title": (draft or {}).get("title") or plan["title"],
-        "axis": plan.get("axis"),
-        "product_type": plan.get("product_type"),
-        "decision_count": plan.get("decision_count"),
-        "plan_review_status": plan.get("review_status"),
-        "draft": draft_id,
-        "slug": (draft or {}).get("slug"),
-        "passage": (draft or {}).get("passage") or (tracked.get("passage") or {}).get("display"),
+        "draft_id": draft_id,
+        "title": draft.get("title") or draft_id,
+        "slug": draft.get("slug"),
+        "passage": draft.get("passage") or (tracked.get("passage") or {}).get("display"),
         "current_stage": tracked.get("current_stage"),
         "stages": tracked.get("stages") or [],
         "editorial": editorial,
