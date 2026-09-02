@@ -177,6 +177,14 @@ def verbatim_quote_report(manuscript: str, packet: dict[str, Any]) -> dict[str, 
         for value in re.findall(r"「([^」]+)」", manuscript)
         if len(value.strip()) >= 40 and value.strip() not in blockquoted
     ]
+    # A quotation immediately tagged with a scripture reference is a verse
+    # being shown to the reader; the reader page highlights only blockquotes,
+    # and the owner wants every displayed verse highlighted regardless of
+    # length (a 28-character John 20:23 slipped the length rule).
+    for match in re.finditer(r"「([^」]+)」[（(][^（()）]{1,12}[0-9一二三四五六七八九十]{1,4}[^（()）]{0,8}[)）]", manuscript):
+        quote = match.group(1).strip()
+        if quote and quote not in blockquoted and quote not in long_inline:
+            long_inline.append(quote)
     return {
         "quotes_checked": len(checked),
         "quotes_failing": [item["quote"] for item in checked if not item["verbatim"]],
@@ -202,6 +210,12 @@ def main() -> int:
     )
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument(
+        "--series-context",
+        type=Path,
+        help="JSON of sibling essays in the series: reader questions, one-line "
+        "answers, claimed arguments; rule 6 keeps this essay from re-arguing them",
+    )
+    parser.add_argument(
         "--provider",
         choices=("claude", "codex"),
         default="claude",
@@ -223,6 +237,10 @@ def main() -> int:
         "argument_routes": argument_route_charter(packet),
         "source_originals": source_texts(packet),
     }
+    if args.series_context:
+        payload["series_context"] = json.loads(
+            args.series_context.read_text(encoding="utf-8")
+        )
     payload_json = json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
     client_type = (
