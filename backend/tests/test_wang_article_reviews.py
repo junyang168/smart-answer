@@ -978,6 +978,10 @@ def test_publish_button_writes_what_the_reader_route_validates(tmp_path, monkeyp
     item = draft_manifest["drafts"][0]
     assert item["public_slug"] == "kingdom-keys"
     assert item["passage"] == "太16:19"
+    # 读者页的「显示原文来源」开关吃的就是这份数据：发布必须随稿落盘。
+    assert item["source_annotations_path"] == "source-annotations.json"
+    annotations = json.loads((target / "source-annotations.json").read_text())
+    assert isinstance(annotations["source_annotations"], list)
     detail = module.article_review("kingdom-keys-draft-first-v1")
     assert detail["publication_decision"]["decision"] == "approved"
 

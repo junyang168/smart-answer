@@ -264,12 +264,22 @@ def public_article_data(slug: str) -> dict:
                         }
                     )
             markdown = _public_markdown(manuscript_path.read_text(encoding="utf-8"))
+            source_annotations = []
+            annotations_path = _safe_child(
+                manifest_path.parent,
+                str(item.get("source_annotations_path") or "").strip(),
+            )
+            if annotations_path and annotations_path.is_file():
+                loaded = _read_json(annotations_path).get("source_annotations")
+                if isinstance(loaded, list):
+                    source_annotations = loaded
             return {
                 "slug": slug,
                 "title": str(item.get("title") or "").strip(),
                 "passage": str(item.get("passage") or "").strip(),
                 "markdown": markdown,
                 "audio_sections": audio_sections,
+                "source_annotations": source_annotations,
                 "audio_section_count": len(audio_sections),
                 "player_count": sum(len(section["clips"]) for section in audio_sections),
             }

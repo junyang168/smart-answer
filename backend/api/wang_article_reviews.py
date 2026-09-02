@@ -1821,6 +1821,15 @@ def publish_article_review(review_id: str, payload: dict[str, Any] | None = None
     manuscript_sha = hashlib.sha256(
         (target / "manuscript.md").read_bytes()
     ).hexdigest()
+    (target / "source-annotations.json").write_text(
+        json.dumps(
+            {"source_annotations": review.get("source_annotations") or []},
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
     from datetime import datetime, timezone
 
@@ -1847,6 +1856,7 @@ def publish_article_review(review_id: str, payload: dict[str, Any] | None = None
                 "passage": _primary_passage(str(review.get("passage") or "")),
                 "public_slug": slug,
                 "relative_path": "manuscript.md",
+                "source_annotations_path": "source-annotations.json",
                 "audit_config": {
                     "publication_decision_path": "publication-decision.json"
                 },
