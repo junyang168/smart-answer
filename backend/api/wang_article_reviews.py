@@ -19,7 +19,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException
 from opencc import OpenCC
 
-from backend.api.config import DATA_BASE_PATH, WANG_STAGING_DIR
+from backend.api.config import DATA_BASE_PATH, WANG_REPOSITORY_DIR, WANG_STAGING_DIR
 from backend.api.canonical_repository.service import CanonicalRepositoryService
 from backend.pipeline.excerpt_audio_alignment import (
     align_transcript_excerpt,
@@ -1650,6 +1650,7 @@ def _review_data(manifest_path: Path, *, include_markdown: bool) -> dict[str, An
         "review_id": review_id,
         "archived": archived,
         "superseded_by": superseded_by,
+        "publication_decision": manifest.get("publication_decision"),
         "title": str(manifest.get("title") or "").strip(),
         "passage": str(manifest.get("passage") or "").strip(),
         "registered_at": str(manifest.get("registered_at") or ""),
@@ -1768,3 +1769,140 @@ def article_review(review_id: str) -> dict[str, Any]:
         return {"schema_version": RESPONSE_SCHEMA, **_review_data(manifest_path, include_markdown=True)}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+# --- publication ---------------------------------------------------------
+
+PUBLICATION_ROOT = WANG_REPOSITORY_DIR / "draft-first-publications"
+PUBLICATION_DECISION_SCHEMA = "human-publication-decision.v1"
+
+
+def _default_public_slug(review_id: str) -> str:
+    return re.sub(r"-draft-first(-v\d+)?$", "", review_id)
+
+
+def _primary_passage(passage: str) -> str:
+    return re.split(r"[；;]", passage or "", maxsplit=1)[0].strip()
+
+
+@router.post("/{review_id}/publish")
+def publish_article_review(review_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The owner's publish button: make one passed review visible to readers.
+
+    Publication is the owner's decision alone -- this endpoint sits behind the
+    admin login, and nothing in the pipeline calls it. It refuses any review
+    that has not passed every gate with verified integrity, then writes the
+    exact artifacts the public reader route already validates: a manuscript
+    copy, a human publication decision carrying the manuscript SHA, and a
+    draft manifest entry. Idempotent: publishing twice refreshes the same
+    slug.
+    """
+
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,99}", review_id):
+        raise HTTPException(status_code=404, detail="找不到这份审稿预览。")
+    manifest_path = REVIEW_MANIFEST_ROOT / f"{review_id}.json"
+    if not manifest_path.is_file():
+        raise HTTPException(status_code=404, detail="找不到这份审稿预览。")
+    review = _review_data(manifest_path, include_markdown=True)
+    if review.get("workflow_status") != "review_passed":
+        raise HTTPException(status_code=409, detail="未通过全部闸门的稿件不能发布。")
+    if review.get("integrity_status") != "verified":
+        raise HTTPException(status_code=409, detail="完整性校验未通过，不能发布。")
+
+    options = payload or {}
+    slug = str(options.get("public_slug") or _default_public_slug(review_id))
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,99}", slug):
+        raise HTTPException(status_code=422, detail="public_slug 不合法。")
+
+    target = PUBLICATION_ROOT / review_id
+    target.mkdir(parents=True, exist_ok=True)
+    manuscript_text = str(review.get("markdown") or "")
+    (target / "manuscript.md").write_text(manuscript_text, encoding="utf-8")
+    manuscript_sha = hashlib.sha256(
+        (target / "manuscript.md").read_bytes()
+    ).hexdigest()
+
+    from datetime import datetime, timezone
+
+    decided_at = datetime.now(timezone.utc).isoformat()
+    decision = {
+        "schema_version": PUBLICATION_DECISION_SCHEMA,
+        "draft_id": review_id,
+        "decision": "approved",
+        "editorial_review_passed": True,
+        "technical_audit_status": "pass",
+        "manuscript_sha256": manuscript_sha,
+        "decided_at": decided_at,
+        "source": "wang-article-reviews-publish-endpoint",
+    }
+    (target / "publication-decision.json").write_text(
+        json.dumps(decision, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    draft_manifest = {
+        "schema_version": "editorial-draft-manifest.v1",
+        "drafts": [
+            {
+                "draft_id": review_id,
+                "title": review.get("title") or review_id,
+                "passage": _primary_passage(str(review.get("passage") or "")),
+                "public_slug": slug,
+                "relative_path": "manuscript.md",
+                "audit_config": {
+                    "publication_decision_path": "publication-decision.json"
+                },
+            }
+        ],
+    }
+    (target / "editorial-draft-manifest.json").write_text(
+        json.dumps(draft_manifest, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    manifest = _read_json(manifest_path)
+    manifest["publication_decision"] = {
+        "decision": "approved",
+        "decided_at": decided_at,
+        "public_slug": slug,
+        "manuscript_sha256": manuscript_sha,
+    }
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    return {
+        "review_id": review_id,
+        "published": True,
+        "public_slug": slug,
+        "public_href": f"/resources/wang-repository/articles/{slug}",
+        "manuscript_sha256": manuscript_sha,
+    }
+
+
+@router.post("/{review_id}/unpublish")
+def unpublish_article_review(review_id: str) -> dict[str, Any]:
+    """Withdraw a published review from the reader site. Idempotent."""
+
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,99}", review_id):
+        raise HTTPException(status_code=404, detail="找不到这份审稿预览。")
+    manifest_path = REVIEW_MANIFEST_ROOT / f"{review_id}.json"
+    if not manifest_path.is_file():
+        raise HTTPException(status_code=404, detail="找不到这份审稿预览。")
+    decision_path = PUBLICATION_ROOT / review_id / "publication-decision.json"
+    if decision_path.is_file():
+        decision = _read_json(decision_path)
+        decision["decision"] = "withdrawn"
+        from datetime import datetime, timezone
+
+        decision["withdrawn_at"] = datetime.now(timezone.utc).isoformat()
+        decision_path.write_text(
+            json.dumps(decision, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    manifest = _read_json(manifest_path)
+    manifest["publication_decision"] = {
+        "decision": "withdrawn",
+        "withdrawn_at": decision.get("withdrawn_at") if decision_path.is_file() else None,
+    }
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    return {"review_id": review_id, "published": False}

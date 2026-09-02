@@ -17,6 +17,7 @@ export type TopicEssayReviewSummary = {
   brief_sha256: string;
   authoring_packet_sha256: string;
   workflow_status: string;
+  publication_decision?: { decision?: string; public_slug?: string } | null;
   stage_checks: ReviewStageCheck[];
   href: string;
 };
