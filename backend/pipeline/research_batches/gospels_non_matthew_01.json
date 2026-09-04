@@ -1,0 +1,31 @@
+{
+  "schema_version": "wang_research_batch_v1",
+  "batch_id": "RB-GOSPELS-NON-MATTHEW-01",
+  "purpose": "处理 sermon catalog 中尚未成功入库、主经卷归于马可福音、路加福音或约翰福音且不属于纯专题型的七篇讲道；经卷归属只决定处理队列，不预设主题、观点或结论。",
+  "selection_note": "固定于 sermon_catalog.json SHA256 7690fe92d1cef03ab9c3e4203f69ef6caa4e187822d911cf72a2bf1171196c96。七篇均已有 first-pass survey；五篇 source_stage=published，两篇 source_stage=reviewed。每篇只处理一次，其他经卷与主题保留为来源内容，不改变本批次身份。",
+  "semantic_assumption": "none",
+  "candidate_generation_policy": {
+    "derive_after_independent_extraction": true,
+    "allow_unassigned_material": true,
+    "allow_multiple_topic_candidates": true,
+    "preserve_scripture_context": true,
+    "separate_questions_from_topic_exposition": true
+  },
+  "models": {
+    "extraction": "gpt-5.6-sol",
+    "extraction_reasoning_effort": "medium",
+    "independent_review": "claude-sonnet-5",
+    "adjudicator": "gpt-5.6-sol",
+    "reconsideration": "claude-sonnet-5"
+  },
+  "transcript_ids": [
+    "2019-09-29 可4章10-12 耶穌恐怕人悔改嗎",
+    "2012 NYSC 專題：馬太福音釋經（三）5",
+    "2021 NYSC 專題：馬太福音釋經（八）王守仁 教授 4之4",
+    "S 201220",
+    "220-426-110-1143",
+    "2011 NYSC 專題：馬太福音釋經（二）4",
+    "S 230604"
+  ],
+  "sources": []
+}
