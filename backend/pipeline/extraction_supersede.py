@@ -29,6 +29,10 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from backend.pipeline.record_withdrawal import Withdrawal, closure_from_fragments
+from backend.pipeline.relation_id_namespace import (
+    is_source_extraction_relation_id,
+    package_source_key,
+)
 
 
 #: Where each collection keeps its object id, for the collections a knowledge
@@ -109,30 +113,22 @@ def superseded(
     # In that case fragment closure is empty and the predecessor edge otherwise
     # remains live forever.
     #
-    # Every extraction package is single-source. An existing relation whose
-    # two endpoints are both carried by the incoming package therefore belongs
-    # to this source; if the package omits its key, the new generation has
-    # superseded it. Requiring both endpoints prevents a package from retiring
-    # a future cross-source edge merely because it owns one end.
+    # Endpoint locality is not ownership: a later curated relation can connect
+    # two records from this source without belonging to extraction.  The ID
+    # dialect is the explicit ownership marker, so only a relation in this
+    # source's extraction namespace can be superseded here.  One-time bare v2
+    # IDs are handled by the incident migration, not inferred from endpoints.
     incoming_keys = arriving_keys(package)
-    incoming_object_ids = {
-        object_id
-        for collection, object_id in incoming_keys
-        if collection not in RELATION_COLLECTIONS
-    }
+    source_key = package_source_key(package)
     for collection, rows in (relations or {}).items():
         id_field = PACKAGE_ID_FIELDS.get(collection)
         if id_field is None:
             continue
-        for relation_id, payload in rows.items():
+        for relation_id in rows:
             key = (collection, str(relation_id))
             if key in incoming_keys or key in withdrawal.dangling_relations:
                 continue
-            endpoints = {
-                str(payload.get("from_id") or ""),
-                str(payload.get("to_id") or ""),
-            }
-            if "" not in endpoints and endpoints <= incoming_object_ids:
+            if is_source_extraction_relation_id(source_key, relation_id):
                 withdrawal.superseded_relations.append(key)
     # The same rule the fragments already got, applied to everything the
     # closure walked to. A record the new extraction reproduces under the same

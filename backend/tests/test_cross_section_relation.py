@@ -179,3 +179,9 @@ def test_subscription_generation_has_a_distinct_backend_bound_fingerprint() -> N
     assert "backend" not in api
     assert subscription["backend"] == "codex-subscription"
     assert subscription["fingerprint_sha256"] != api["fingerprint_sha256"]
+
+
+def test_id_globalization_does_not_invalidate_semantic_v2_cache() -> None:
+    """Changing a repository key is not a reason to call the model again."""
+
+    assert SCHEMA_VERSION == "wang_cross_section_relation_v2"

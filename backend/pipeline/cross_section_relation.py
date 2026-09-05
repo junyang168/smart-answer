@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from backend.pipeline.knowledge_package import live_claim_ids, live_claims
+from backend.pipeline.relation_id_namespace import namespaced_relation_id, package_source_key
 
 PROMPT_PATH = Path(__file__).with_name("prompts") / "cross_section_relation_discovery.md"
 
@@ -43,13 +44,11 @@ PROMPT_PATH = Path(__file__).with_name("prompts") / "cross_section_relation_disc
 # of `discovery_identity`, so a package processed under v1 is re-proposed
 # instead of served from a cache built when a merged-away claim was a valid
 # endpoint.
-#
-# v3: relation ids are source-namespaced before they leave this stage. Model
-# responses use deliberately short ids such as XER001 and XCR001, just as the
-# section extractor does. Those ids are local to one call and cannot be used as
-# canonical repository keys: the second sermon would overwrite the first and a
-# research-batch merge would reject the duplicate.
-SCHEMA_VERSION = "wang_cross_section_relation_v3"
+# ID globalization is a deterministic representation change, not a semantic
+# discovery change. Keep the v2 identity stable so already-reviewed v2 output
+# remains a valid model cache; merge/ingest globalizes its IDs mechanically.
+# New model responses are globalized below before they leave this stage.
+SCHEMA_VERSION = "wang_cross_section_relation_v2"
 
 #: The same vocabulary the extraction uses. This stage adds edges to an existing
 #: graph; it does not get its own dialect.
@@ -253,35 +252,24 @@ def apply_proposals(
     """
 
     updated = json.loads(json.dumps(package, ensure_ascii=False))
-    sources = updated.get("source_documents") or []
-    if len(sources) != 1:
-        raise CrossSectionValidationError(
-            "cross-section package must contain exactly one source document"
-        )
-    source_key = str(sources[0].get("transcript_id") or sources[0].get("source_id") or "")
-    if not source_key:
-        raise CrossSectionValidationError("source document has no stable identity")
-    namespace = f"DK-{hashlib.sha256(source_key.encode('utf-8')).hexdigest()[:12]}"
-
-    def namespaced(value: Any) -> str:
-        relation_id = str(value or "")
-        if not relation_id:
-            raise CrossSectionValidationError("cross-section relation has no id")
-        if relation_id.startswith(f"{namespace}-"):
-            return relation_id
-        return f"{namespace}-{relation_id}"
+    try:
+        source_key = package_source_key(updated)
+    except ValueError as exc:
+        raise CrossSectionValidationError(str(exc)) from exc
 
     for row in response.get("evidence_relations") or []:
         updated.setdefault("knowledge_relations", []).append({
             **row,
-            "relation_id": namespaced(row.get("relation_id")),
+            "relation_id": namespaced_relation_id(source_key, row.get("relation_id")),
             "discovered_by": SCHEMA_VERSION,
             "review_status": "candidate",
         })
     for row in response.get("claim_relations") or []:
         updated.setdefault("claim_relations", []).append({
             **row,
-            "claim_relation_id": namespaced(row.get("claim_relation_id")),
+            "claim_relation_id": namespaced_relation_id(
+                source_key, row.get("claim_relation_id")
+            ),
             "discovered_by": SCHEMA_VERSION,
             "review_status": "candidate",
         })

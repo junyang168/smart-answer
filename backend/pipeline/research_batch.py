@@ -13,6 +13,11 @@ import re
 from pathlib import Path
 from typing import Any, Iterable
 
+from backend.api.canonical_repository.postgres_store import sha256_json
+from backend.pipeline.relation_id_namespace import (
+    migrate_legacy_cross_section_relation_ids,
+)
+
 
 SCHEMA_VERSION = "wang_research_batch_v1"
 MERGED_SCHEMA_VERSION = "wang_research_batch_knowledge_v1"
@@ -256,7 +261,10 @@ def merge_reviewed_packages(
 
     for path in package_paths:
         raw = path.read_bytes()
-        package = json.loads(raw)
+        original_package = json.loads(raw)
+        package, relation_id_migration = migrate_legacy_cross_section_relation_ids(
+            original_package
+        )
         sources = package.get("source_documents") or []
         if len(sources) != 1:
             raise ResearchBatchValidationError(
@@ -281,6 +289,9 @@ def merge_reviewed_packages(
                 "transcript_id": transcript_id,
                 "package_path": str(path),
                 "package_sha256": _sha256_bytes(raw),
+                "package_canonical_sha256": sha256_json(original_package),
+                "effective_package_sha256": sha256_json(package),
+                "relation_id_namespace_migration": relation_id_migration,
                 "extraction_fingerprint": (package.get("extraction") or {}).get(
                     "fingerprint_sha256"
                 ),

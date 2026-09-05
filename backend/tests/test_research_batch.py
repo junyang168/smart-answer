@@ -220,6 +220,39 @@ def test_merge_preserves_unassigned_material_without_topics(tmp_path: Path) -> N
     assert merged["summary"]["claims"] == 2
 
 
+def test_merge_globalizes_legacy_relation_ids_before_duplicate_check(tmp_path: Path) -> None:
+    batch = _batch()
+    first = _package(tmp_path / "a.json", "讲道甲", "A")
+    second = _package(tmp_path / "b.json", "讲道乙", "B")
+    for path in (first, second):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["knowledge_relations"][0]["relation_id"] = "XER001"
+        payload["claim_relations"] = [{
+            "claim_relation_id": "XCR001",
+            "from_id": payload["claims"][0]["claim_id"],
+            "to_id": payload["claims"][0]["claim_id"],
+            "relation_type": "qualifies",
+        }]
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    merged = merge_reviewed_packages(batch, [first, second])
+
+    evidence_relation_ids = [row["relation_id"] for row in merged["knowledge_relations"]]
+    claim_relation_ids = [row["claim_relation_id"] for row in merged["claim_relations"]]
+    assert len(evidence_relation_ids) == len(set(evidence_relation_ids)) == 2
+    assert len(claim_relation_ids) == len(set(claim_relation_ids)) == 2
+    assert all(value.endswith("-XER001") for value in evidence_relation_ids)
+    assert all(value.endswith("-XCR001") for value in claim_relation_ids)
+    assert all(
+        row["relation_id_namespace_migration"]["status"] == "applied"
+        for row in merged["lineage"]
+    )
+    assert all(
+        row["package_canonical_sha256"] != row["effective_package_sha256"]
+        for row in merged["lineage"]
+    )
+
+
 def test_merge_applies_only_source_bound_fidelity_correction(tmp_path: Path) -> None:
     batch = _batch()
     first = _package(tmp_path / "a.json", "讲道甲", "A")
