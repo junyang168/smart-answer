@@ -50,5 +50,10 @@
       "project_id": "16_章_-_生命",
       "source_url": "/resources/notes_to_manuscript_series/d5c55bdf-6375-49e9-a08d-22eda1eaf21d/16_章_-_生命"
     }
-  ]
+  ],
+  "reviewed_package_reuse": {
+    "S 220206": "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/research-batches/RB-S-220206-END-TO-END-01/reviewed/S_220206-566e8ca150dd.reviewed-candidate.json",
+    "220-426-110-1139": "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/matthew-16-13-20-sources/reviewed/220_426_110_1139-0d5b2062b148.reviewed-candidate.json",
+    "notes_manuscript:16_章_-_彌賽亞，捨己": "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/matthew-16-notes/v3-sections/notes_manuscript_16-72483dc200ad.consensus-applied.json"
+  }
 }

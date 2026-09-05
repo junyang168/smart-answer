@@ -589,6 +589,27 @@ def test_apply_records_which_fields_an_update_removed() -> None:
     ]
 
 
+def test_apply_rejects_revision_drift_even_when_semantic_sha_is_unchanged() -> None:
+    """A retire/revive can change revision without changing semantic bytes."""
+
+    stored = normalize_package(_package())["source_documents"]["SRC-1"]
+    changed = {
+        "schema_version": "wang_shared_knowledge_v1.3",
+        "source_documents": [
+            {"source_id": "SRC-1", "source_type": "sermon_transcript", "title": "新标题"}
+        ],
+    }
+    plan = build_change_set_plan(
+        changed, _stored("source_documents", "SRC-1", stored)
+    )
+    cursor = _RecordingCursor((2, record_content_sha(stored), None))
+    store = PostgresKnowledgeStore.__new__(PostgresKnowledgeStore)
+    store.connect = lambda: _RecordingConnection(cursor)  # type: ignore[method-assign]
+
+    with pytest.raises(ChangeSetConflict, match="expected revision 1, found 2"):
+        store.apply_plan(plan)
+
+
 def test_route_apply_cas_rejects_a_stale_conclusion_revision() -> None:
     cursor = _RecordingCursor(("CVR-NEW",))
 

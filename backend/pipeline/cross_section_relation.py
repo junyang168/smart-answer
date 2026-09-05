@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from backend.pipeline.knowledge_package import live_claim_ids, live_claims
+from backend.pipeline.relation_id_namespace import namespaced_relation_id, package_source_key
 
 PROMPT_PATH = Path(__file__).with_name("prompts") / "cross_section_relation_discovery.md"
 
@@ -43,6 +44,10 @@ PROMPT_PATH = Path(__file__).with_name("prompts") / "cross_section_relation_disc
 # of `discovery_identity`, so a package processed under v1 is re-proposed
 # instead of served from a cache built when a merged-away claim was a valid
 # endpoint.
+# ID globalization is a deterministic representation change, not a semantic
+# discovery change. Keep the v2 identity stable so already-reviewed v2 output
+# remains a valid model cache; merge/ingest globalizes its IDs mechanically.
+# New model responses are globalized below before they leave this stage.
 SCHEMA_VERSION = "wang_cross_section_relation_v2"
 
 #: The same vocabulary the extraction uses. This stage adds edges to an existing
@@ -247,13 +252,26 @@ def apply_proposals(
     """
 
     updated = json.loads(json.dumps(package, ensure_ascii=False))
+    try:
+        source_key = package_source_key(updated)
+    except ValueError as exc:
+        raise CrossSectionValidationError(str(exc)) from exc
+
     for row in response.get("evidence_relations") or []:
         updated.setdefault("knowledge_relations", []).append({
-            **row, "discovered_by": SCHEMA_VERSION, "review_status": "candidate",
+            **row,
+            "relation_id": namespaced_relation_id(source_key, row.get("relation_id")),
+            "discovered_by": SCHEMA_VERSION,
+            "review_status": "candidate",
         })
     for row in response.get("claim_relations") or []:
         updated.setdefault("claim_relations", []).append({
-            **row, "discovered_by": SCHEMA_VERSION, "review_status": "candidate",
+            **row,
+            "claim_relation_id": namespaced_relation_id(
+                source_key, row.get("claim_relation_id")
+            ),
+            "discovered_by": SCHEMA_VERSION,
+            "review_status": "candidate",
         })
     summary = updated.setdefault("summary", {})
     summary["evidence_relation_count"] = len(updated.get("knowledge_relations") or [])

@@ -15,6 +15,7 @@ and the retirement then expected to find unchanged.
 from __future__ import annotations
 
 from backend.pipeline.extraction_supersede import arriving_keys, superseded
+from backend.pipeline.relation_id_namespace import source_namespace
 
 
 def _package(fragment_ids, evidence_ids, claim_ids=("CL001",)):
@@ -100,6 +101,91 @@ def test_the_first_sectioned_re_extraction_still_behaves_as_it_did() -> None:
         ).closure()
     )
     assert ("evidence_steps", "E012") in retired
+
+
+def test_a_source_local_relation_omitted_by_the_new_package_is_retired() -> None:
+    namespace = source_namespace("SRC-A")
+    incoming = _package(["FR-1"], [f"{namespace}-E1", f"{namespace}-E2"])
+    incoming["knowledge_relations"] = [{
+        "relation_id": f"{namespace}-XER001",
+        "from_id": f"{namespace}-E1",
+        "to_id": f"{namespace}-E2",
+    }]
+    relations = {
+        "knowledge_relations": {
+            f"{namespace}-ER099": {
+                "relation_id": f"{namespace}-ER099",
+                "from_id": f"{namespace}-E1",
+                "to_id": f"{namespace}-E2",
+            },
+        },
+    }
+
+    withdrawal = superseded(
+        incoming,
+        live_fragments={"FR-1": {"source_id": "SRC-A"}},
+        owners={},
+        claims={},
+        relations=relations,
+    )
+
+    assert withdrawal.superseded_relations == [
+        ("knowledge_relations", f"{namespace}-ER099")
+    ]
+    assert ("knowledge_relations", f"{namespace}-ER099") in withdrawal.closure()
+    assert withdrawal.as_dict()["relations_superseded"] == 1
+
+
+def test_same_source_curated_relation_is_not_inferred_to_belong_to_extraction() -> None:
+    namespace = source_namespace("SRC-A")
+    incoming = _package(["FR-1"], [f"{namespace}-E1", f"{namespace}-E2"])
+    relations = {
+        "knowledge_relations": {
+            f"{namespace}-CURATED-1": {
+                "relation_id": f"{namespace}-CURATED-1",
+                "from_id": f"{namespace}-E1",
+                "to_id": f"{namespace}-E2",
+            },
+            "XER001": {
+                "relation_id": "XER001",
+                "from_id": f"{namespace}-E1",
+                "to_id": f"{namespace}-E2",
+            },
+        }
+    }
+
+    withdrawal = superseded(
+        incoming,
+        live_fragments={"FR-1": {"source_id": "SRC-A"}},
+        owners={},
+        claims={},
+        relations=relations,
+    )
+
+    assert withdrawal.superseded_relations == []
+
+
+def test_an_omitted_cross_source_relation_is_not_retired() -> None:
+    incoming = _package(["FR-1"], ["DK-A-E1"])
+    relations = {
+        "knowledge_relations": {
+            "CROSS-1": {
+                "relation_id": "CROSS-1",
+                "from_id": "DK-A-E1",
+                "to_id": "DK-B-E1",
+            },
+        },
+    }
+
+    withdrawal = superseded(
+        incoming,
+        live_fragments={"FR-1": {"source_id": "SRC-A"}},
+        owners={},
+        claims={},
+        relations=relations,
+    )
+
+    assert withdrawal.superseded_relations == []
 
 
 def test_every_stage_names_a_sermon_the_way_extraction_does() -> None:

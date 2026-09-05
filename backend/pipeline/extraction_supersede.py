@@ -29,6 +29,10 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from backend.pipeline.record_withdrawal import Withdrawal, closure_from_fragments
+from backend.pipeline.relation_id_namespace import (
+    is_source_extraction_relation_id,
+    package_source_key,
+)
 
 
 #: Where each collection keeps its object id, for the collections a knowledge
@@ -42,6 +46,7 @@ PACKAGE_ID_FIELDS = {
     "knowledge_relations": "relation_id",
     "claim_relations": "claim_relation_id",
 }
+RELATION_COLLECTIONS = {"knowledge_relations", "claim_relations"}
 
 
 def arriving_keys(package: Mapping[str, Any]) -> set[tuple[str, str]]:
@@ -101,8 +106,32 @@ def superseded(
     withdrawal = closure_from_fragments(
         replaced, owners=owners, claims=claims, relations=relations
     )
+    # Relations are repository objects too. Cross-section v2 exposed why they
+    # cannot be retired only as collateral damage from removed fragments: a
+    # re-run can keep every fragment and endpoint while replacing a source-
+    # local edge id (for example XER001) with its globally namespaced form.
+    # In that case fragment closure is empty and the predecessor edge otherwise
+    # remains live forever.
+    #
+    # Endpoint locality is not ownership: a later curated relation can connect
+    # two records from this source without belonging to extraction.  The ID
+    # dialect is the explicit ownership marker, so only a relation in this
+    # source's extraction namespace can be superseded here.  One-time bare v2
+    # IDs are handled by the incident migration, not inferred from endpoints.
+    incoming_keys = arriving_keys(package)
+    source_key = package_source_key(package)
+    for collection, rows in (relations or {}).items():
+        id_field = PACKAGE_ID_FIELDS.get(collection)
+        if id_field is None:
+            continue
+        for relation_id in rows:
+            key = (collection, str(relation_id))
+            if key in incoming_keys or key in withdrawal.dangling_relations:
+                continue
+            if is_source_extraction_relation_id(source_key, relation_id):
+                withdrawal.superseded_relations.append(key)
     # The same rule the fragments already got, applied to everything the
     # closure walked to. A record the new extraction reproduces under the same
     # id is an update; retiring it in the change set that writes it makes the
     # change set conflict with itself.
-    return withdrawal.excluding(arriving_keys(package))
+    return withdrawal.excluding(incoming_keys)

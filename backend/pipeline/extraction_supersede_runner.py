@@ -24,6 +24,9 @@ from backend.pipeline.extraction_supersede import package_source_ids, superseded
 from backend.pipeline.source_keys import package_row_key
 from backend.pipeline.run_ledger import run_record
 from backend.pipeline.record_withdrawal import ANCHORED_COLLECTIONS
+from backend.pipeline.relation_id_namespace import (
+    migrate_legacy_cross_section_relation_ids,
+)
 
 RELATION_COLLECTIONS = ("claim_relations", "knowledge_relations")
 
@@ -131,7 +134,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args(argv)
 
-    package = json.loads(args.package.read_text(encoding="utf-8"))
+    original_package = json.loads(args.package.read_text(encoding="utf-8"))
+    package, relation_id_migration = migrate_legacy_cross_section_relation_ids(
+        original_package
+    )
     store = PostgresKnowledgeStore(args.database_url)
     change_set, withdrawal, articles = plan(store, package, source_kind=args.source_kind)
     output: dict[str, Any] = {
@@ -140,6 +146,7 @@ def main(argv: list[str] | None = None) -> int:
         "supersedes": withdrawal.as_dict(),
         "change_set_id": change_set.change_set_id,
         "summary": change_set.as_dict()["summary"],
+        "relation_id_namespace_migration": relation_id_migration,
         # The only thing a person has to act on: new material means the
         # articles written from the old material get regenerated.
         "articles_to_regenerate": articles,
@@ -161,7 +168,11 @@ def main(argv: list[str] | None = None) -> int:
         ) as record:
             output["result"] = store.apply_plan(
                 change_set,
-                metadata={"input_path": str(args.package), "supersedes": withdrawal.as_dict()},
+                metadata={
+                    "input_path": str(args.package),
+                    "supersedes": withdrawal.as_dict(),
+                    "relation_id_namespace_migration": relation_id_migration,
+                },
             )
             record.quality({
                 "status": (output["result"] or {}).get("status"),
@@ -172,6 +183,7 @@ def main(argv: list[str] | None = None) -> int:
                 # The one thing a person has to act on afterwards: new material
                 # means the articles written from the old material go stale.
                 "articles_to_regenerate": articles,
+                "relation_id_namespace_migration": relation_id_migration,
             })
             record.outputs(args.package)
     print(json.dumps(output, ensure_ascii=False, indent=2))

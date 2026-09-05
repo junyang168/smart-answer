@@ -1201,6 +1201,13 @@ class PostgresKnowledgeStore:
                             expected=operation.before_sha256, found=actual_sha,
                             retired_at=locked[2] if locked else None,
                         )
+                    actual_revision = int(locked[0]) if locked else None
+                    if actual_revision != operation.before_revision:
+                        raise ChangeSetConflict(
+                            f"Concurrent revision change for {operation.collection}/"
+                            f"{operation.object_id}: expected revision "
+                            f"{operation.before_revision}, found {actual_revision}"
+                        )
                     if operation.operation in {"retire", "revive"}:
                         self._set_retirement(cursor, plan, index, operation)
                         if operation.before_revision is not None:
