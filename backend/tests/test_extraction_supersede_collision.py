@@ -102,6 +102,59 @@ def test_the_first_sectioned_re_extraction_still_behaves_as_it_did() -> None:
     assert ("evidence_steps", "E012") in retired
 
 
+def test_a_source_local_relation_omitted_by_the_new_package_is_retired() -> None:
+    incoming = _package(["FR-1"], ["DK-A-E1", "DK-A-E2"])
+    incoming["knowledge_relations"] = [{
+        "relation_id": "DK-A-XER001",
+        "from_id": "DK-A-E1",
+        "to_id": "DK-A-E2",
+    }]
+    relations = {
+        "knowledge_relations": {
+            "XER001": {
+                "relation_id": "XER001",
+                "from_id": "DK-A-E1",
+                "to_id": "DK-A-E2",
+            },
+        },
+    }
+
+    withdrawal = superseded(
+        incoming,
+        live_fragments={"FR-1": {"source_id": "SRC-A"}},
+        owners={},
+        claims={},
+        relations=relations,
+    )
+
+    assert withdrawal.superseded_relations == [("knowledge_relations", "XER001")]
+    assert ("knowledge_relations", "XER001") in withdrawal.closure()
+    assert withdrawal.as_dict()["relations_superseded"] == 1
+
+
+def test_an_omitted_cross_source_relation_is_not_retired() -> None:
+    incoming = _package(["FR-1"], ["DK-A-E1"])
+    relations = {
+        "knowledge_relations": {
+            "CROSS-1": {
+                "relation_id": "CROSS-1",
+                "from_id": "DK-A-E1",
+                "to_id": "DK-B-E1",
+            },
+        },
+    }
+
+    withdrawal = superseded(
+        incoming,
+        live_fragments={"FR-1": {"source_id": "SRC-A"}},
+        owners={},
+        claims={},
+        relations=relations,
+    )
+
+    assert withdrawal.superseded_relations == []
+
+
 def test_every_stage_names_a_sermon_the_way_extraction_does() -> None:
     """One source, one row -- whichever stage is filing.
 

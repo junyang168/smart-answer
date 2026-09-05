@@ -31,6 +31,8 @@ class Withdrawal:
     orphaned_claims: list[str] = field(default_factory=list)
     #: (collection, relation_id) whose endpoint this withdrawal removes.
     dangling_relations: list[tuple[str, str]] = field(default_factory=list)
+    #: Source-local predecessor edges omitted by the incoming package.
+    superseded_relations: list[tuple[str, str]] = field(default_factory=list)
     #: Fragments whose source could not be read, so nothing can be said of them.
     unresolved_fragments: int = 0
 
@@ -59,6 +61,7 @@ class Withdrawal:
         keys += sorted(self.orphaned_owners)
         keys += [("claims", claim) for claim in sorted(self.orphaned_claims)]
         keys += sorted(self.dangling_relations)
+        keys += sorted(self.superseded_relations)
         return keys
 
     def excluding(self, keys: "set[tuple[str, str]]") -> "Withdrawal":
@@ -85,6 +88,9 @@ class Withdrawal:
             dangling_relations=[
                 key for key in self.dangling_relations if key not in keys
             ],
+            superseded_relations=[
+                key for key in self.superseded_relations if key not in keys
+            ],
             unresolved_fragments=self.unresolved_fragments,
         )
 
@@ -100,6 +106,7 @@ class Withdrawal:
             "owners_weakened_but_standing": len(self.weakened_owners),
             "claims_with_no_live_evidence": len(self.orphaned_claims),
             "relations_left_dangling": len(self.dangling_relations),
+            "relations_superseded": len(self.superseded_relations),
             "unresolved_fragments": self.unresolved_fragments,
             "closure": len(self.closure()),
         }

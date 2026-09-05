@@ -42,6 +42,7 @@ PACKAGE_ID_FIELDS = {
     "knowledge_relations": "relation_id",
     "claim_relations": "claim_relation_id",
 }
+RELATION_COLLECTIONS = {"knowledge_relations", "claim_relations"}
 
 
 def arriving_keys(package: Mapping[str, Any]) -> set[tuple[str, str]]:
@@ -101,8 +102,40 @@ def superseded(
     withdrawal = closure_from_fragments(
         replaced, owners=owners, claims=claims, relations=relations
     )
+    # Relations are repository objects too. Cross-section v2 exposed why they
+    # cannot be retired only as collateral damage from removed fragments: a
+    # re-run can keep every fragment and endpoint while replacing a source-
+    # local edge id (for example XER001) with its globally namespaced form.
+    # In that case fragment closure is empty and the predecessor edge otherwise
+    # remains live forever.
+    #
+    # Every extraction package is single-source. An existing relation whose
+    # two endpoints are both carried by the incoming package therefore belongs
+    # to this source; if the package omits its key, the new generation has
+    # superseded it. Requiring both endpoints prevents a package from retiring
+    # a future cross-source edge merely because it owns one end.
+    incoming_keys = arriving_keys(package)
+    incoming_object_ids = {
+        object_id
+        for collection, object_id in incoming_keys
+        if collection not in RELATION_COLLECTIONS
+    }
+    for collection, rows in (relations or {}).items():
+        id_field = PACKAGE_ID_FIELDS.get(collection)
+        if id_field is None:
+            continue
+        for relation_id, payload in rows.items():
+            key = (collection, str(relation_id))
+            if key in incoming_keys or key in withdrawal.dangling_relations:
+                continue
+            endpoints = {
+                str(payload.get("from_id") or ""),
+                str(payload.get("to_id") or ""),
+            }
+            if "" not in endpoints and endpoints <= incoming_object_ids:
+                withdrawal.superseded_relations.append(key)
     # The same rule the fragments already got, applied to everything the
     # closure walked to. A record the new extraction reproduces under the same
     # id is an update; retiring it in the change set that writes it makes the
     # change set conflict with itself.
-    return withdrawal.excluding(arriving_keys(package))
+    return withdrawal.excluding(incoming_keys)
