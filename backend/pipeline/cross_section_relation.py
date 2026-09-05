@@ -43,7 +43,13 @@ PROMPT_PATH = Path(__file__).with_name("prompts") / "cross_section_relation_disc
 # of `discovery_identity`, so a package processed under v1 is re-proposed
 # instead of served from a cache built when a merged-away claim was a valid
 # endpoint.
-SCHEMA_VERSION = "wang_cross_section_relation_v2"
+#
+# v3: relation ids are source-namespaced before they leave this stage. Model
+# responses use deliberately short ids such as XER001 and XCR001, just as the
+# section extractor does. Those ids are local to one call and cannot be used as
+# canonical repository keys: the second sermon would overwrite the first and a
+# research-batch merge would reject the duplicate.
+SCHEMA_VERSION = "wang_cross_section_relation_v3"
 
 #: The same vocabulary the extraction uses. This stage adds edges to an existing
 #: graph; it does not get its own dialect.
@@ -247,13 +253,37 @@ def apply_proposals(
     """
 
     updated = json.loads(json.dumps(package, ensure_ascii=False))
+    sources = updated.get("source_documents") or []
+    if len(sources) != 1:
+        raise CrossSectionValidationError(
+            "cross-section package must contain exactly one source document"
+        )
+    source_key = str(sources[0].get("transcript_id") or sources[0].get("source_id") or "")
+    if not source_key:
+        raise CrossSectionValidationError("source document has no stable identity")
+    namespace = f"DK-{hashlib.sha256(source_key.encode('utf-8')).hexdigest()[:12]}"
+
+    def namespaced(value: Any) -> str:
+        relation_id = str(value or "")
+        if not relation_id:
+            raise CrossSectionValidationError("cross-section relation has no id")
+        if relation_id.startswith(f"{namespace}-"):
+            return relation_id
+        return f"{namespace}-{relation_id}"
+
     for row in response.get("evidence_relations") or []:
         updated.setdefault("knowledge_relations", []).append({
-            **row, "discovered_by": SCHEMA_VERSION, "review_status": "candidate",
+            **row,
+            "relation_id": namespaced(row.get("relation_id")),
+            "discovered_by": SCHEMA_VERSION,
+            "review_status": "candidate",
         })
     for row in response.get("claim_relations") or []:
         updated.setdefault("claim_relations", []).append({
-            **row, "discovered_by": SCHEMA_VERSION, "review_status": "candidate",
+            **row,
+            "claim_relation_id": namespaced(row.get("claim_relation_id")),
+            "discovered_by": SCHEMA_VERSION,
+            "review_status": "candidate",
         })
     summary = updated.setdefault("summary", {})
     summary["evidence_relation_count"] = len(updated.get("knowledge_relations") or [])

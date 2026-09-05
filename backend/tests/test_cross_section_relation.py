@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 
 from backend.pipeline.cross_section_relation import (
@@ -125,12 +127,35 @@ def test_added_relations_say_where_they_came_from() -> None:
     package = _package()
     updated = apply_proposals(package, _proposal(), identity={"fingerprint_sha256": "fp"})
     added = updated["knowledge_relations"][0]
+    namespace = hashlib.sha256("notes_manuscript:test".encode()).hexdigest()[:12]
+    assert added["relation_id"] == f"DK-{namespace}-XER001"
     assert added["discovered_by"] == SCHEMA_VERSION
     assert added["review_status"] == "candidate"
     assert updated["summary"]["evidence_relation_count"] == 1
     assert updated["cross_section_relations"]["evidence_relations_added"] == 1
     # The source package is not mutated.
     assert package["knowledge_relations"] == []
+
+
+def test_claim_relations_receive_the_same_source_namespace() -> None:
+    package = _package()
+    proposal = {
+        "evidence_relations": [],
+        "claim_relations": [{
+            "claim_relation_id": "XCR001",
+            "from_id": "CL1",
+            "to_id": "CL2",
+            "relation_type": "qualifies",
+            "reason": "后者限定前者",
+        }],
+    }
+
+    updated = apply_proposals(package, proposal, identity={"fingerprint_sha256": "fp"})
+
+    namespace = hashlib.sha256("notes_manuscript:test".encode()).hexdigest()[:12]
+    assert updated["claim_relations"][0]["claim_relation_id"] == (
+        f"DK-{namespace}-XCR001"
+    )
 
 
 def test_boundaries_follow_the_package_section_plan() -> None:
