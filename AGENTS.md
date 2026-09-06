@@ -42,6 +42,36 @@ Reviewer-call invariant: run one Independent Editorial Review for the initial dr
 
 For Matthew exposition articles, a programmatically verified editorial review in which every applicable dimension reaches its own minimum in the quality profile (currently 80% of each dimension's weight) and no hard failure is declared, followed by a passing Program Audit with zero errors, triggers automatic Wang repository publication. There is no total-score threshold: `total_score` is reported for a reader and decides nothing, because one number let a weak dimension be carried by the others. The quality profile is the authority for the bars; do not restate a number here that the profile can change. The runner must create an `automated-publication-decision.v1` bound to the manuscript, editorial review, and audit SHAs; it must never label this as human approval. Publishing to the Wang repository is not deploying: do not deploy as part of this workflow.
 
+# Architecture reasoning defaults
+
+Do not assume an existing workflow needs another field, prompt rule, gate, schema,
+agent or stage. Before adding one, stop and ask whether the problem should really be
+this complex and state the simplest solution that preserves the non-negotiable
+constraints.
+
+Identify the established human or industry best practice for the problem class before
+inventing a project-specific workflow. Treat that practice as the default. Depart from
+it only when a named project constraint makes it insufficient, and record that exact
+gap; using AI is not by itself a reason to redesign a mature human workflow.
+
+For a systemic failure, compare at least these three alternatives before implementing:
+
+1. strengthen the existing component;
+2. move the decision or verification to the role that should own it;
+3. remove the component entirely.
+
+Every new mechanism carries the burden of proof: name the observed failure it prevents
+and why an existing mechanism cannot prevent it. Internal data-model complexity must
+not leak into a creative agent's runtime input unless that complexity is demonstrably
+necessary for the creative task.
+
+If the same class of failure recurs, a model passes work that the user rejects, or a
+prompt repair fixes one symptom while creating another, stop local optimization. Do an
+architecture reset: restate the reader-visible outcome, separate who decides, who
+executes and who verifies, design the minimum alternative as if the current
+implementation did not exist, and test it on real samples before changing the
+production pipeline.
+
 # Where the work happens
 
 Every session shares this checkout, and git keeps HEAD, the index and the stash
