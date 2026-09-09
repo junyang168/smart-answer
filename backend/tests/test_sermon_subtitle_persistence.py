@@ -262,6 +262,25 @@ def test_missing_actor_stops_before_generation_or_extraction(
     assert captured == {}
 
 
+def test_headingless_review_stops_before_extraction_without_governed_writeback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = _source(tmp_path)
+    captured = _capture_run(monkeypatch)
+
+    with pytest.raises(SubtitlePersistenceError, match="headingless script_review"):
+        runner.run_one(
+            source_path,
+            output_dir=tmp_path / "out",
+            client=object(),
+            prompt="prompt",
+            reasoning_effort="medium",
+            force=False,
+        )
+
+    assert captured == {}
+
+
 def test_pipeline_default_writer_uses_governed_service_and_stops_on_acl_denial(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -351,7 +370,15 @@ def test_sermon_manager_save_service_enforces_acl_and_expected_sha(tmp_path: Pat
     manager = SermonManager.__new__(SermonManager)
     manager.base_folder = str(tmp_path)
     manager._sm = SimpleNamespace(update_sermon_metadata=lambda *_args: None)
-    manager.get_sermon_permissions = lambda *_args: SimpleNamespace(canWrite=False)
+    manager._acl = SimpleNamespace(
+        get_user_permissions=lambda user_id: (
+            ["read_any_item"] if user_id == "reader@example.org"
+            else ["read_any_item", "write_owned_item", "assign_item"]
+        )
+    )
+
+    assert manager.can_persist_generated_subtitles("reader@example.org") is False
+    assert manager.can_persist_generated_subtitles("editor@example.org") is True
 
     with pytest.raises(PermissionError):
         manager.persist_generated_subtitles(
@@ -361,7 +388,6 @@ def test_sermon_manager_save_service_enforces_acl_and_expected_sha(tmp_path: Pat
         )
     assert json.loads(source_path.read_text()) == _rows()
 
-    manager.get_sermon_permissions = lambda *_args: SimpleNamespace(canWrite=True)
     with pytest.raises(SubtitlePersistenceError, match="changed before subtitle write-back"):
         manager.persist_generated_subtitles(
             "editor@example.org", "S governed",
@@ -382,7 +408,11 @@ def test_sermon_manager_save_service_preserves_body_and_returns_post_save_sha(
     manager = SermonManager.__new__(SermonManager)
     manager.base_folder = str(tmp_path)
     manager._sm = SimpleNamespace(update_sermon_metadata=lambda *_args: None)
-    manager.get_sermon_permissions = lambda *_args: SimpleNamespace(canWrite=True)
+    manager._acl = SimpleNamespace(
+        get_user_permissions=lambda *_args: [
+            "read_any_item", "write_owned_item", "assign_item"
+        ]
+    )
     before_sha = hashlib.sha256(source_path.read_bytes()).hexdigest()
 
     report = manager.persist_generated_subtitles(

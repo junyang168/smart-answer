@@ -34,7 +34,7 @@ from backend.pipeline.extraction_sections import (
     SectionPlan,
     breadcrumb_for,
     combine_sections,
-    heading_level,
+    has_section_headings,
     load_cached_plan,
     plan_sections,
     save_plan,
@@ -154,13 +154,6 @@ def _archive_rejected_candidate(
 
 def _segment_texts(source: dict[str, Any]) -> list[str]:
     return [str(segment.get("text") or "") for segment in source.get("script") or []]
-
-
-def _has_section_headings(source: dict[str, Any], *, level: int) -> bool:
-    return any(
-        (depth := heading_level(text)) is not None and depth <= level
-        for text in _segment_texts(source)
-    )
 
 
 def segment_locator(position: int) -> str:
@@ -978,6 +971,9 @@ def run_one(
     transcript, raw = _load(transcript_path)
     transcript_id = transcript_path.stem
     section_settings = sections or SectionSettings()
+    source_has_headings = has_section_headings(
+        _segment_texts(transcript), level=section_settings.level
+    )
     if write_back_subtitles and not section_settings.allow_generated:
         raise SubtitlePersistenceError(
             "subtitle persistence cannot be combined with generated sections disabled"
@@ -987,9 +983,18 @@ def run_one(
             "subtitle persistence requires an authenticated --subtitle-user-id"
         )
     if (
+        transcript_path.parent.name == "script_review"
+        and not source_has_headings
+        and not write_back_subtitles
+    ):
+        raise SubtitlePersistenceError(
+            "headingless script_review sermon requires "
+            "--write-back-generated-subtitles and --subtitle-user-id before extraction"
+        )
+    if (
         write_back_subtitles
         and section_settings.allow_generated
-        and not _has_section_headings(transcript, level=section_settings.level)
+        and not source_has_headings
     ):
         before_payload = json.loads(raw)
         report = _persist_generated_subtitles(
@@ -1018,7 +1023,9 @@ def run_one(
             raise SubtitlePersistenceError(
                 "reloaded sermon SHA does not match the authorized save result"
             )
-        if not _has_section_headings(transcript, level=section_settings.level):
+        if not has_section_headings(
+            _segment_texts(transcript), level=section_settings.level
+        ):
             raise SubtitlePersistenceError(
                 "saved sermon still has no usable section headings; extraction not started"
             )

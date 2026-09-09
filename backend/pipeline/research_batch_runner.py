@@ -39,7 +39,9 @@ from pathlib import Path
 from typing import Any
 
 from backend.config.wang_platform_paths import wang_platform_paths
+from backend.pipeline.corpus_survey_runner import _load
 from backend.pipeline.detailed_knowledge_extraction_runner import _slug
+from backend.pipeline.extraction_sections import has_section_headings
 from backend.pipeline.research_batch import (
     batch_members,
     load_research_batch,
@@ -128,6 +130,31 @@ def resolve_transcript_dir(member: dict[str, Any], transcript_dirs: list[Path]) 
         return transcript_dirs[0]
     path = resolve_transcript_path(member["key"], transcript_dirs)
     return path.parent if path is not None else None
+
+
+def headingless_review_members(
+    members: list[dict[str, Any]], transcript_dirs: list[Path]
+) -> list[str]:
+    """Review transcripts that require governed subtitle persistence.
+
+    Published transcripts are immutable and may use SHA-bound internal section
+    plans. Markdown sources carry their own compatibility path. A review transcript
+    is the one governed source type where silently generating internal-only titles
+    would bypass the editable source-of-record workflow.
+    """
+
+    headingless: list[str] = []
+    for member in members:
+        if member["source_type"] != "sermon_transcript":
+            continue
+        source_path = resolve_transcript_path(member["key"], transcript_dirs)
+        if source_path is None or source_path.parent.name != "script_review":
+            continue
+        source, _ = _load(source_path)
+        texts = [str(row.get("text") or "") for row in source.get("script") or []]
+        if not has_section_headings(texts):
+            headingless.append(member["key"])
+    return headingless
 
 
 def _member_source_manifest(member: dict[str, Any], path: Path) -> None:
@@ -429,6 +456,15 @@ def main() -> int:
             + ", ".join(str(directory) for directory in transcript_dirs)
             + ": " + ", ".join(missing)
         )
+    wanted = set(DEFAULT_STAGES) if args.stage == "all" else {args.stage}
+    if "extract" in wanted and not args.write_back_generated_subtitles:
+        headingless = headingless_review_members(members, transcript_dirs)
+        if headingless:
+            parser.error(
+                "headingless script_review members require "
+                "--write-back-generated-subtitles and --subtitle-user-id before extraction: "
+                + ", ".join(headingless)
+            )
 
     selected_batch = {**batch, "transcript_ids": [], "sources": []}
     for member in members:
@@ -447,7 +483,6 @@ def main() -> int:
         write_back_generated_subtitles=args.write_back_generated_subtitles,
         subtitle_user_id=args.subtitle_user_id,
     )
-    wanted = set(DEFAULT_STAGES) if args.stage == "all" else {args.stage}
     selected = [row for row in plan if row["stage"] in wanted]
     merged_output = output_root / "merged" / "research-batch-knowledge.json"
     preview = {
