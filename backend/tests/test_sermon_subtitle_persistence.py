@@ -188,6 +188,60 @@ def test_write_back_subtitle_generation_uses_the_subscription_client(
     assert seen["client"] is client
 
 
+def test_subtitles_only_persists_and_stops_before_extraction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = _source(tmp_path)
+    writer = _SavingWriter(source_path)
+    captured = _capture_run(monkeypatch)
+    monkeypatch.setattr(runner, "generate_subtitles", lambda *_args, **_kwargs: _insertions())
+
+    status, output = runner.run_one(
+        source_path,
+        output_dir=tmp_path / "out",
+        client=object(),
+        prompt="prompt",
+        reasoning_effort="medium",
+        force=False,
+        write_back_subtitles=True,
+        subtitle_actor_id="editor@example.org",
+        subtitle_writer=writer,
+        subtitles_only=True,
+    )
+
+    assert status == "created"
+    assert output == source_path
+    assert writer.calls == 1
+    assert captured == {}
+
+
+def test_subtitles_only_skips_a_source_that_already_has_headings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = _source(tmp_path, heading=True)
+    captured = _capture_run(monkeypatch)
+    monkeypatch.setattr(
+        runner, "generate_subtitles",
+        lambda *_args, **_kwargs: pytest.fail("existing headings must not be regenerated"),
+    )
+
+    status, output = runner.run_one(
+        source_path,
+        output_dir=tmp_path / "out",
+        client=object(),
+        prompt="prompt",
+        reasoning_effort="medium",
+        force=False,
+        write_back_subtitles=True,
+        subtitle_actor_id="editor@example.org",
+        subtitles_only=True,
+    )
+
+    assert status == "skipped"
+    assert output == source_path
+    assert captured == {}
+
+
 def test_write_failure_stops_before_extraction_and_is_audited(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

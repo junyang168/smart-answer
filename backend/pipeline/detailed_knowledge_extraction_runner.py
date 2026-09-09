@@ -974,6 +974,7 @@ def run_one(
     write_back_subtitles: bool = False,
     subtitle_actor_id: str | None = None,
     subtitle_writer: Callable[..., dict[str, Any]] | None = None,
+    subtitles_only: bool = False,
 ) -> tuple[str, Path]:
     transcript, raw = _load(transcript_path)
     transcript_id = transcript_path.stem
@@ -986,6 +987,11 @@ def run_one(
         raise SubtitlePersistenceError(
             "subtitle persistence requires an authenticated --subtitle-user-id"
         )
+    if subtitles_only and not write_back_subtitles:
+        raise SubtitlePersistenceError(
+            "subtitle-only mode requires --write-back-generated-subtitles"
+        )
+    subtitles_persisted = False
     if (
         write_back_subtitles
         and section_settings.allow_generated
@@ -1002,6 +1008,7 @@ def run_one(
             client=client if isinstance(client, CodexSubscriptionClient) else None,
             writer=subtitle_writer,
         )
+        subtitles_persisted = True
         transcript, raw = _load(transcript_path)
         after_payload = json.loads(raw)
         if not isinstance(before_payload, list) or not isinstance(after_payload, list):
@@ -1029,6 +1036,8 @@ def run_one(
             allow_generated=False,
             only=section_settings.only,
         )
+    if subtitles_only:
+        return ("created" if subtitles_persisted else "skipped"), transcript_path
     header = (
         f"逐字稿 ID：{transcript_id}\n标题：{transcript.get('metadata', {}).get('title', transcript_id)}\n\n"
         "以下是该逐字稿的一个完整章节。S 编号是全文唯一定位码，不因章节而改变。"
@@ -1116,6 +1125,10 @@ def main() -> int:
         "--subtitle-user-id",
         help="authenticated sermon editor identity used for ACL-checked subtitle write-back",
     )
+    parser.add_argument(
+        "--subtitles-only", action="store_true",
+        help="persist and verify missing review-source subtitles, then stop before extraction",
+    )
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -1123,6 +1136,10 @@ def main() -> int:
         parser.error("--write-back-generated-subtitles cannot be combined with --no-generated-sections")
     if args.write_back_generated_subtitles and not args.subtitle_user_id:
         parser.error("--write-back-generated-subtitles requires --subtitle-user-id")
+    if args.subtitles_only and not args.write_back_generated_subtitles:
+        parser.error("--subtitles-only requires --write-back-generated-subtitles")
+    if args.subtitles_only and args.source_manifest:
+        parser.error("--subtitles-only supports sermon review transcripts only")
     if args.max_section_sentences is not None and args.max_section_sentences <= 0:
         parser.error("--max-section-sentences must be positive")
     sections = SectionSettings(
@@ -1170,6 +1187,7 @@ def main() -> int:
             "allow_generated_sections": sections.allow_generated,
             "write_back_generated_subtitles": args.write_back_generated_subtitles,
             "subtitle_user_id": args.subtitle_user_id,
+            "subtitles_only": args.subtitles_only,
             "sections_per_source": {
                 key: len(value) for key, value in plan_rows.items()
             },
@@ -1195,6 +1213,7 @@ def main() -> int:
                 reasoning_effort=args.reasoning_effort, force=args.force, sections=sections,
                 write_back_subtitles=args.write_back_generated_subtitles,
                 subtitle_actor_id=args.subtitle_user_id,
+                subtitles_only=args.subtitles_only,
             )
             counts[status] += 1
             print(f"{status}: {path.name} -> {output}")
