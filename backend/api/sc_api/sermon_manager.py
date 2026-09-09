@@ -199,13 +199,13 @@ class SermonManager:
         """Persist pipeline-generated headings through the governed save layer.
 
         This is intentionally not a direct-write helper in the extraction
-        runner. The same ACL that guards the editor guards this method, and an
-        optimistic SHA check prevents a model response generated for an older
-        transcript from being applied over a proofreader's newer work.
+        runner. Any editor may add structure without first claiming the sermon;
+        readers remain excluded. An optimistic SHA check prevents a model
+        response generated for an older transcript from being applied over a
+        proofreader's newer work.
         """
 
-        permissions = self.get_sermon_permissions(user_id, item)
-        if not permissions.canWrite:
+        if not self.can_persist_generated_subtitles(user_id):
             raise PermissionError("You don't have permission to update this item")
 
         from backend.pipeline.sermon_subtitle_persistence import (
@@ -221,6 +221,12 @@ class SermonManager:
         )
         self._sm.update_sermon_metadata(user_id, item)
         return report
+
+    def can_persist_generated_subtitles(self, user_id: str) -> bool:
+        """Any editor or administrator may add headings without sermon ownership."""
+
+        permissions = set(self._acl.get_user_permissions(user_id) or [])
+        return bool(permissions.intersection({"write_owned_item", "write_any_item"}))
 
     def update_sermon_header(
         self,

@@ -34,7 +34,8 @@ from backend.pipeline.extraction_sections import (
     SectionPlan,
     breadcrumb_for,
     combine_sections,
-    heading_level,
+    has_section_headings,
+    leading_untitled_span_end,
     load_cached_plan,
     plan_sections,
     save_plan,
@@ -156,13 +157,6 @@ def _segment_texts(source: dict[str, Any]) -> list[str]:
     return [str(segment.get("text") or "") for segment in source.get("script") or []]
 
 
-def _has_section_headings(source: dict[str, Any], *, level: int) -> bool:
-    return any(
-        (depth := heading_level(text)) is not None and depth <= level
-        for text in _segment_texts(source)
-    )
-
-
 def _leading_untitled_span_end(source: dict[str, Any], *, level: int) -> int | None:
     """Return the exclusive end of an untitled leading span, if one exists.
 
@@ -172,14 +166,7 @@ def _leading_untitled_span_end(source: dict[str, Any], *, level: int) -> int | N
     that prefix when later source-authored headings already exist.
     """
 
-    segments = source.get("script") or []
-    if not segments:
-        return None
-    for position, text in enumerate(_segment_texts(source)):
-        depth = heading_level(text)
-        if depth is not None and depth <= level:
-            return position or None
-    return len(segments)
+    return leading_untitled_span_end(_segment_texts(source), level=level)
 
 
 def segment_locator(position: int) -> str:
@@ -1033,6 +1020,22 @@ def run_one(
     leading_untitled_end = _leading_untitled_span_end(
         transcript, level=section_settings.level
     )
+    source_has_headings = has_section_headings(
+        _segment_texts(transcript), level=section_settings.level
+    )
+    if (
+        transcript_path.parent.name == "script_review"
+        and (not source_has_headings or leading_untitled_end is not None)
+        and not write_back_subtitles
+    ):
+        raise SubtitlePersistenceError(
+            "script_review sermon with an untitled leading section requires "
+            "--write-back-generated-subtitles and --subtitle-user-id before extraction"
+        )
+    if write_back_subtitles and not _segment_texts(transcript):
+        raise SubtitlePersistenceError(
+            "empty script_review sermon cannot receive generated subtitles"
+        )
     if (
         write_back_subtitles
         and section_settings.allow_generated

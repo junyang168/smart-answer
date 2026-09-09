@@ -385,6 +385,23 @@ def test_batch_cli_requires_actor_for_subtitle_writeback(tmp_path, monkeypatch) 
         )
 
 
+def test_batch_stops_before_any_command_for_untitled_review_without_writeback(
+    tmp_path, monkeypatch
+) -> None:
+    batch = _batch_file(tmp_path)
+    review = tmp_path / "script_review"
+    review.mkdir()
+    for name in ("甲", "乙", "丙"):
+        (review / f"{name}.json").write_text("[]", encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        _run(
+            monkeypatch,
+            ["--batch", str(batch), "--transcript-dir", str(review),
+             "--output-root", str(tmp_path / "out"), "--stage", "extract"],
+        )
+
+
 def test_a_genuinely_missing_transcript_still_stops_the_run(tmp_path, monkeypatch) -> None:
     batch = _batch_file(tmp_path)
     transcripts = _transcripts(tmp_path, "甲", "乙")
