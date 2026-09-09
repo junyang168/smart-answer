@@ -242,6 +242,76 @@ def test_subtitles_only_skips_a_source_that_already_has_headings(
     assert captured == {}
 
 
+def test_subtitles_only_titles_only_the_prefix_before_a_later_heading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = _source(tmp_path)
+    rows = json.loads(source_path.read_text(encoding="utf-8"))
+    rows.append({
+        "index": "subtitle-existing", "type": "subtitle", "text": "## 已有后段标题"
+    })
+    source_path.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+    writer = _SavingWriter(source_path)
+    captured = _capture_run(monkeypatch)
+    seen: dict[str, Any] = {}
+
+    def generate(paragraphs: list[dict[str, Any]], **_kwargs: Any) -> list[dict[str, Any]]:
+        seen["indexes"] = [str(row["index"]) for row in paragraphs]
+        return _insertions()
+
+    monkeypatch.setattr(runner, "generate_subtitles", generate)
+
+    status, output = runner.run_one(
+        source_path,
+        output_dir=tmp_path / "out",
+        client=object(),
+        prompt="prompt",
+        reasoning_effort="medium",
+        force=False,
+        write_back_subtitles=True,
+        subtitle_actor_id="editor@example.org",
+        subtitle_writer=writer,
+        subtitles_only=True,
+    )
+
+    assert status == "created"
+    assert output == source_path
+    assert writer.calls == 1
+    assert seen["indexes"] == ["1", "21", "37"]
+    assert json.loads(source_path.read_text(encoding="utf-8"))[0]["text"] == "## 第一部分"
+    assert captured == {}
+
+
+def test_subtitle_write_back_rejects_an_untitled_leading_section_before_saving(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = _source(tmp_path)
+    writer = _SavingWriter(source_path)
+    monkeypatch.setattr(
+        runner,
+        "generate_subtitles",
+        lambda *_args, **_kwargs: [
+            {"after_index": "21", "text": "## 后面的标题", "level": 1}
+        ],
+    )
+
+    with pytest.raises(SubtitlePersistenceError, match="did not title the leading section"):
+        runner.run_one(
+            source_path,
+            output_dir=tmp_path / "out",
+            client=object(),
+            prompt="prompt",
+            reasoning_effort="medium",
+            force=False,
+            write_back_subtitles=True,
+            subtitle_actor_id="editor@example.org",
+            subtitle_writer=writer,
+            subtitles_only=True,
+        )
+
+    assert writer.calls == 0
+
+
 def test_write_failure_stops_before_extraction_and_is_audited(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

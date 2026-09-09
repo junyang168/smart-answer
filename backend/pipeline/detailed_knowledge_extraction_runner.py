@@ -163,6 +163,25 @@ def _has_section_headings(source: dict[str, Any], *, level: int) -> bool:
     )
 
 
+def _leading_untitled_span_end(source: dict[str, Any], *, level: int) -> int | None:
+    """Return the exclusive end of an untitled leading span, if one exists.
+
+    Seeing a heading somewhere in a sermon is not enough: ``sections_from_headings``
+    always starts at row zero, so prose before the first usable heading becomes an
+    anonymous (and often very large) extraction section.  Limit title generation to
+    that prefix when later source-authored headings already exist.
+    """
+
+    segments = source.get("script") or []
+    if not segments:
+        return None
+    for position, text in enumerate(_segment_texts(source)):
+        depth = heading_level(text)
+        if depth is not None and depth <= level:
+            return position or None
+    return len(segments)
+
+
 def segment_locator(position: int) -> str:
     """The anchor locator for a segment, by its position in the whole source.
 
@@ -262,6 +281,7 @@ def _persist_generated_subtitles(
     actor_id: str,
     client: CodexSubscriptionClient | None = None,
     writer: Callable[..., dict[str, Any]] | None = None,
+    scope_end: int | None = None,
 ) -> dict[str, Any]:
     """Generate all subtitle levels, write them back, and audit the mutation."""
 
@@ -270,9 +290,16 @@ def _persist_generated_subtitles(
             "generated subtitles can only be persisted to a script_review source"
         )
     source_sha256 = hashlib.sha256(raw).hexdigest()
+    segments = source.get("script") or []
+    if scope_end is not None:
+        if scope_end <= 0 or scope_end > len(segments):
+            raise SubtitlePersistenceError(
+                f"invalid subtitle generation scope end {scope_end!r}"
+            )
+        segments = segments[:scope_end]
     paragraphs = [
         {"index": segment.get("index"), "text": segment.get("text")}
-        for segment in source.get("script") or []
+        for segment in segments
     ]
     indexes = [str(row.get("index")) for row in paragraphs]
     if len(indexes) != len(set(indexes)):
@@ -292,6 +319,15 @@ def _persist_generated_subtitles(
         raise SubtitlePersistenceError(
             f"{source_id}: subtitle generator returned no insertions; extraction not started"
         )
+    if not any(
+        int(row.get("level") or 0) == 1
+        and str(row.get("after_index") or "").upper() == "START"
+        for row in insertions
+    ):
+        raise SubtitlePersistenceError(
+            f"{source_id}: subtitle generator did not title the leading section; "
+            "extraction not started"
+        )
 
     audit_dir = (
         output_dir / "subtitle-applications" / _slug(source_id)
@@ -306,6 +342,8 @@ def _persist_generated_subtitles(
         "source_path": str(source_path),
         "before_source_sha256": source_sha256,
         "actor_id": actor_id,
+        "scope_end": scope_end,
+        "scope_paragraphs": len(paragraphs),
         "insertions": insertions,
         "status": "generated",
     }
@@ -992,10 +1030,13 @@ def run_one(
             "subtitle-only mode requires --write-back-generated-subtitles"
         )
     subtitles_persisted = False
+    leading_untitled_end = _leading_untitled_span_end(
+        transcript, level=section_settings.level
+    )
     if (
         write_back_subtitles
         and section_settings.allow_generated
-        and not _has_section_headings(transcript, level=section_settings.level)
+        and leading_untitled_end is not None
     ):
         before_payload = json.loads(raw)
         report = _persist_generated_subtitles(
@@ -1007,6 +1048,7 @@ def run_one(
             actor_id=str(subtitle_actor_id),
             client=client if isinstance(client, CodexSubscriptionClient) else None,
             writer=subtitle_writer,
+            scope_end=leading_untitled_end,
         )
         subtitles_persisted = True
         transcript, raw = _load(transcript_path)
@@ -1025,9 +1067,9 @@ def run_one(
             raise SubtitlePersistenceError(
                 "reloaded sermon SHA does not match the authorized save result"
             )
-        if not _has_section_headings(transcript, level=section_settings.level):
+        if _leading_untitled_span_end(transcript, level=section_settings.level) is not None:
             raise SubtitlePersistenceError(
-                "saved sermon still has no usable section headings; extraction not started"
+                "saved sermon still has an untitled leading section; extraction not started"
             )
         # The generator has completed its job. From here onward headings are
         # canonical source rows, and no internal-only fallback may replace them.
@@ -1118,8 +1160,9 @@ def main() -> int:
     parser.add_argument(
         "--write-back-generated-subtitles",
         action="store_true",
-        help="for headingless script_review sermons, write generated subtitles to the "
-             "review transcript, verify body preservation, and reload before extraction",
+        help="for script_review sermons with a missing leading section title, write "
+             "generated subtitles to that untitled prefix, verify body preservation, "
+             "and reload before extraction",
     )
     parser.add_argument(
         "--subtitle-user-id",
@@ -1188,6 +1231,10 @@ def main() -> int:
             "write_back_generated_subtitles": args.write_back_generated_subtitles,
             "subtitle_user_id": args.subtitle_user_id,
             "subtitles_only": args.subtitles_only,
+            "leading_untitled_span_end": {
+                path.stem: _leading_untitled_span_end(_load(path)[0], level=sections.level)
+                for path in paths
+            },
             "sections_per_source": {
                 key: len(value) for key, value in plan_rows.items()
             },
