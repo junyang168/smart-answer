@@ -79,6 +79,15 @@ def test_plan_is_stable_and_revision_is_not_semantic_content() -> None:
     assert not any(item.object_id == "CL-1" for item in partial.operations)
 
 
+def test_source_fragment_transport_section_survives_store_normalization() -> None:
+    package = _package()
+    package["source_fragments"][0]["extraction_section_index"] = 7
+
+    fragment = normalize_package(package)["source_fragments"]["FR-1"]
+
+    assert fragment["extraction_section_index"] == 7
+
+
 def test_change_set_fingerprint_is_bound_to_the_exact_before_snapshot() -> None:
     package = _package()
     absent = build_change_set_plan(package, {})

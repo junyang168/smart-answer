@@ -75,6 +75,12 @@ STAGES = MEMBER_STAGES + BATCH_STAGES
 #: only step that touches the authoring authority.
 DEFAULT_STAGES = STAGES
 
+# Measured subscription boundary: a 162-sentence section exhausted the 900s
+# per-call timeout while the 125-sentence canary completed in about four
+# minutes. The extraction runner applies this only when it must actually split;
+# normal section plans and their fingerprints remain unchanged.
+DEFAULT_CODEX_FALLBACK_SECTION_SENTENCE_LIMIT = 125
+
 
 def artifact_paths(output_root: Path, member_key: str) -> dict[str, Path]:
     """Every path one member owns. This is the only layout there is.
@@ -213,13 +219,19 @@ def build_command_plan(
             "--model", extraction_model, "--reasoning-effort", extraction_effort,
             "--backend", extraction_backend,
         ]
-        if key in section_limits:
-            limit = int(section_limits[key])
+        configured_limit = section_limits.get(key)
+        if configured_limit is not None:
+            limit = int(configured_limit)
             if limit <= 0:
                 raise ValueError(
                     f"extraction_max_section_sentences[{key!r}] must be positive"
                 )
             extract += ["--max-section-sentences", str(limit)]
+        elif extraction_backend == "codex-subscription":
+            extract += [
+                "--fallback-max-section-sentences",
+                str(DEFAULT_CODEX_FALLBACK_SECTION_SENTENCE_LIMIT),
+            ]
         # The two source kinds differ here and nowhere else downstream: every
         # later stage reads `source_documents` out of the package and resolves
         # the source through `load_knowledge_source_document`.

@@ -469,6 +469,89 @@ def test_legacy_physical_coordinate_plan_is_not_reused_when_comments_exist(
     assert audit["insertion_origin"] == "new_model_generation"
 
 
+def test_headingless_published_source_migrates_exact_legacy_physical_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = _source(tmp_path)
+    source, raw = runner._load(source_path)
+    projection = runner.project_script(source["script"])
+    physical_sha = hashlib.sha256(raw).hexdigest()
+    output_dir = tmp_path / "out"
+    plan_path = output_dir / "section-plans" / f"{runner._slug(source_path.stem)}.json"
+    frozen = runner.SectionPlan(
+        sections=(
+            runner.Section(index=1, start=0, end=2, title="冻结的第一部分"),
+            runner.Section(index=2, start=2, end=3, title="冻结的第二部分"),
+        ),
+        origin=runner.FROM_GENERATOR,
+    )
+    runner.save_plan(plan_path, frozen, physical_sha)
+    monkeypatch.setattr(
+        runner,
+        "generate_subtitles",
+        lambda *_args, **_kwargs: pytest.fail("exact legacy plan must not regenerate"),
+    )
+
+    resolved = runner.resolve_section_plan(
+        source=source,
+        source_id=source_path.stem,
+        source_sha256=projection.body_sha256,
+        source_file_sha256=physical_sha,
+        output_dir=output_dir,
+        client=object(),
+    )
+
+    assert resolved == frozen
+    migrated = json.loads(plan_path.read_text(encoding="utf-8"))
+    assert migrated["source_body_sha256"] == projection.body_sha256
+    assert migrated["source_file_sha256"] == physical_sha
+    assert migrated["locator_space"] == runner.LOCATOR_SPACE
+
+
+def test_mixed_published_source_never_migrates_legacy_physical_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = _source(tmp_path)
+    rows = json.loads(source_path.read_text(encoding="utf-8"))
+    rows.insert(1, {"index": "comment-a", "type": "comment", "text": "编辑备注"})
+    source_path.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+    source, raw = runner._load(source_path)
+    projection = runner.project_script(source["script"])
+    physical_sha = hashlib.sha256(raw).hexdigest()
+    output_dir = tmp_path / "out"
+    plan_path = output_dir / "section-plans" / f"{runner._slug(source_path.stem)}.json"
+    runner.save_plan(
+        plan_path,
+        runner.SectionPlan(
+            sections=(
+                runner.Section(index=1, start=0, end=2, title="不安全的旧坐标"),
+                runner.Section(index=2, start=2, end=3, title="不安全的旧坐标二"),
+            ),
+            origin=runner.FROM_GENERATOR,
+        ),
+        physical_sha,
+    )
+    calls = 0
+
+    def fresh_generation(*_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
+        nonlocal calls
+        calls += 1
+        return _insertions()
+
+    monkeypatch.setattr(runner, "generate_subtitles", fresh_generation)
+    resolved = runner.resolve_section_plan(
+        source=source,
+        source_id=source_path.stem,
+        source_sha256=projection.body_sha256,
+        source_file_sha256=physical_sha,
+        output_dir=output_dir,
+        client=object(),
+    )
+
+    assert calls == 1
+    assert resolved.sections[0].title != "不安全的旧坐标"
+
+
 def test_write_failure_stops_before_extraction_and_is_audited(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -711,6 +794,88 @@ def test_headingless_capped_source_generates_a_plan_before_enforcing_the_cap(
 
     assert plan.origin == runner.FROM_GENERATOR
     assert [(section.start, section.end) for section in plan.sections] == [(0, 2), (2, 3)]
+
+
+def test_new_cap_reuses_uncapped_generated_plan_without_resegmenting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = {"script": _rows()}
+    calls = 0
+
+    def generate(*_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
+        nonlocal calls
+        calls += 1
+        return [
+            {"after_index": "START", "text": "## 第一部分", "level": 1},
+            {"after_index": "21", "text": "## 第二部分", "level": 1},
+        ]
+
+    monkeypatch.setattr(runner, "generate_subtitles", generate)
+    kwargs = {
+        "source": source,
+        "source_id": "S cached",
+        "source_sha256": runner.project_script(source["script"]).body_sha256,
+        "output_dir": tmp_path / "out",
+        "client": object(),
+    }
+    base = runner.resolve_section_plan(**kwargs)
+    capped = runner.resolve_section_plan(**kwargs, max_section_sentences=1)
+
+    assert calls == 1
+    assert [(row.start, row.end) for row in base.sections] == [(0, 2), (2, 3)]
+    assert [(row.start, row.end) for row in capped.sections] == [(0, 1), (1, 2), (2, 3)]
+    assert {row["boundary_kind"] for row in capped.split_lineage} == {"spoken_row"}
+
+
+def test_old_capped_generated_plan_is_recovered_without_subtitle_regeneration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = {"script": _rows()}
+    projection = runner.project_script(source["script"])
+    output_dir = tmp_path / "out"
+    path = output_dir / "section-plans" / f"{runner._slug('S legacy capped')}.json"
+    runner.save_plan(
+        path,
+        runner.SectionPlan(
+            sections=(
+                runner.Section(index=1, start=0, end=1, title="第一部分"),
+                runner.Section(index=2, start=1, end=3, title="第二部分"),
+            ),
+            origin=runner.FROM_GENERATOR,
+            max_section_sentences=180,
+            strategy="next_heading_balanced_min_chunks_v1",
+            split_lineage=({"section_index": 1},),
+        ),
+        source_sha256=projection.body_sha256,
+        editorial_structure_sha256=projection.editorial_structure_sha256,
+    )
+    monkeypatch.setattr(
+        runner,
+        "generate_subtitles",
+        lambda *_args, **_kwargs: pytest.fail("cached capped plan must not regenerate"),
+    )
+    assert runner.reusable_generated_plan(
+        source=source,
+        source_id="S legacy capped",
+        source_sha256=projection.body_sha256,
+        output_dir=output_dir,
+        level=2,
+        max_section_sentences=125,
+    ) is not None
+
+    plan = runner.resolve_section_plan(
+        source=source,
+        source_id="S legacy capped",
+        source_sha256=projection.body_sha256,
+        output_dir=output_dir,
+        max_section_sentences=125,
+        client=object(),
+    )
+
+    assert [(row.start, row.end) for row in plan.sections] == [(0, 1), (1, 3)]
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved["max_section_sentences"] is None
+    assert saved["section_strategy"] is None
 
 
 def test_post_save_body_mutation_stops_before_extraction(

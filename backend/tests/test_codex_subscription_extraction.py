@@ -20,13 +20,15 @@ from backend.pipeline.detailed_knowledge_extraction import (
 from backend.pipeline import detailed_knowledge_extraction_runner as extraction_runner
 from backend.pipeline.detailed_knowledge_extraction_runner import (
     SectionSettings,
+    _extract_sections,
     _package_artifact_sha256,
     _section_cache_artifact,
+    _section_cache_path,
     _load_valid_section_cache,
     build_client,
     run_one,
 )
-from backend.pipeline.extraction_sections import Section
+from backend.pipeline.extraction_sections import Section, SectionPlan, apply_section_limit
 
 
 def _transcript() -> dict:
@@ -260,6 +262,17 @@ def test_subscription_section_passes_schema_validator_and_sentence_ledger_and_th
         raise AssertionError("a full fingerprint cache hit must not launch Codex")
 
     monkeypatch.setattr("backend.pipeline.codex_subscription_client.subprocess.run", unexpected_run)
+    fallback_status, fallback_output = run_one(
+        transcript_path, output_dir=output_dir, client=client, prompt="extract",
+        reasoning_effort="medium", force=False,
+        sections=SectionSettings(
+            allow_generated=False,
+            fallback_max_sentences=1,
+        ),
+    )
+    assert fallback_status == "skipped"
+    assert fallback_output == output
+
     editorial_only_edit = _transcript()
     editorial_only_edit["script"].insert(
         1,
@@ -303,6 +316,142 @@ def test_subscription_section_passes_schema_validator_and_sentence_ledger_and_th
     assert recovered["extraction"]["artifact_sha256"] == _package_artifact_sha256(
         recovered
     )
+
+
+def test_subscription_fallback_limit_splits_only_after_uncapped_cache_miss(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transcript_path = tmp_path / "new-source.json"
+    transcript_path.write_text(
+        json.dumps(_transcript(), ensure_ascii=False), encoding="utf-8"
+    )
+    captured: dict[str, object] = {}
+
+    def fake_extraction(**kwargs):
+        captured.update(kwargs)
+        return "created", kwargs["output_path"]
+
+    monkeypatch.setattr(extraction_runner, "_run_extraction", fake_extraction)
+
+    class FakeClient:
+        model = "gpt-5.6-sol"
+        max_output_tokens = 64000
+
+    status, _ = run_one(
+        transcript_path,
+        output_dir=tmp_path / "output",
+        client=FakeClient(),
+        prompt="extract",
+        reasoning_effort="medium",
+        force=False,
+        sections=SectionSettings(
+            allow_generated=False,
+            fallback_max_sentences=2,
+        ),
+    )
+
+    assert status == "created"
+    plan = captured["plan"]
+    assert isinstance(plan, extraction_runner.SectionPlan)
+    assert len(plan.sections) == 2
+    assert plan.max_section_sentences == 2
+    assert plan.split_lineage
+
+
+def test_section_settings_rejects_two_competing_section_caps() -> None:
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        SectionSettings(max_sentences=125, fallback_max_sentences=125)
+
+
+def test_fallback_split_reuses_an_unchanged_base_section_cache(
+    tmp_path: Path,
+) -> None:
+    source = _transcript()
+    base = SectionPlan(
+        sections=(
+            Section(index=1, start=0, end=2, title="超长部分"),
+            Section(index=2, start=2, end=3, title="已完成部分"),
+        ),
+        origin="source_headings",
+    )
+    capped = apply_section_limit(
+        base,
+        [2, 1, 1],
+        headings=(),
+        max_section_sentences=2,
+    )
+    unchanged = base.sections[1]
+    response = {
+        "questions": [], "positions": [], "evidence_steps": [], "claims": [],
+        "evidence_relations": [], "claim_relations": [],
+        "observations": [{
+            "observation_id": "OBS001",
+            "statement": "听众提出问题",
+            "observation_type": "narrative_structure",
+            "argument_role": "background",
+            "scripture_refs": [],
+            "anchors": [{
+                "segment_index": "S0003",
+                "start_time": 16.0,
+                "end_time": 20.0,
+                "verbatim_excerpt": "所以这表明神性吗？",
+            }],
+        }],
+        "sentence_audit": [{
+            "sentence_id": "S0003#001",
+            "status": "extracted",
+            "covered_by": ["OBS001"],
+            "reason_code": None,
+            "reason": "",
+        }],
+    }
+    base_fingerprint = "base-generation"
+    cache_path = _section_cache_path(
+        tmp_path, "source", base_fingerprint, unchanged
+    )
+    cache_path.parent.mkdir(parents=True)
+    cache_path.write_text(
+        json.dumps(
+            _section_cache_artifact(unchanged, response, base_fingerprint),
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    class NoModelCall:
+        last_usage = None
+
+        def generate_json(self, *_args, **_kwargs):
+            raise AssertionError("unchanged base section must come from cache")
+
+    combined, usage, rows, _ = _extract_sections(
+        source_id="source",
+        exclusion_source_id="SRC-source",
+        source=source,
+        headings=(),
+        header="header",
+        plan=capped,
+        output_dir=tmp_path,
+        client=NoModelCall(),
+        prompt="prompt",
+        fingerprint="capped-generation",
+        force=False,
+        only=(3,),
+        fallback_cache_plan=base,
+        fallback_cache_fingerprint=base_fingerprint,
+    )
+
+    assert usage == []
+    assert rows == [{
+        "index": 3,
+        "start": 2,
+        "end": 3,
+        "title": "已完成部分",
+        "attempts": 0,
+        "cached": True,
+        "cache_origin": "fallback_base_plan",
+    }]
+    assert combined["observations"][0]["observation_id"] == "P03-OBS001"
 
 
 def test_subscription_backend_changes_fingerprint_without_changing_api_identity() -> None:

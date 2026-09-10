@@ -22,6 +22,7 @@ from backend.pipeline.cross_section_relation import (
     build_catalogue,
     discovery_identity,
     record_positions,
+    record_section_indexes,
     render_catalogue,
     validate_proposals,
 )
@@ -126,8 +127,10 @@ def _section_boundaries(package: dict[str, Any]) -> list[int]:
 
     Read off the package rather than configured, so the two stages cannot drift
     apart: resection the source and this stage follows, with no second place to
-    remember. A package with no plan is treated as one section, which makes
-    every proposal same-section and therefore rejected -- the safe direction.
+    remember. Sentence-range chunks may repeat a row start; their fragments
+    carry the authoritative extraction section index. A package with no plan is
+    treated as one section, which makes every proposal same-section and
+    therefore rejected -- the safe direction.
     """
 
     plan = (package.get("extraction") or {}).get("section_plan") or {}
@@ -234,11 +237,17 @@ def run(
         return _write_through(package, output_path, identity=identity)
 
     positions = record_positions(package)
+    record_sections = record_section_indexes(
+        package, positions=positions, boundaries=boundaries
+    )
     catalogue = build_catalogue(package, positions)
     if not catalogue:
         raise CrossSectionValidationError(f"{package_path}: no anchored records to relate")
     section_of = {
-        row["id"]: sum(1 for start in boundaries if start <= positions[row["id"]])
+        row["id"]: record_sections.get(
+            row["id"],
+            sum(1 for start in boundaries if start <= positions[row["id"]]),
+        )
         for row in catalogue
     }
     user_input = (
@@ -279,6 +288,7 @@ def run(
                 package,
                 positions=positions,
                 boundaries=boundaries,
+                sections=record_sections,
                 identity=identity,
             )
             response = candidate

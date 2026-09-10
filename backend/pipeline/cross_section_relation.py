@@ -144,6 +144,60 @@ def record_positions(package: dict[str, Any]) -> dict[str, int]:
     return positions
 
 
+def record_section_indexes(
+    package: dict[str, Any],
+    *,
+    positions: dict[str, int],
+    boundaries: Sequence[int],
+) -> dict[str, int]:
+    """Map anchored records to the extraction call that produced them.
+
+    Row-aligned sections can be reconstructed from a fragment's paragraph
+    position. Sentence-range transport chunks can share the same paragraph, so
+    new split packages stamp the producing section on each fragment. Legacy
+    packages retain the position-based fallback.
+    """
+
+    fragment_sections: dict[str, int] = {}
+    for fragment in package.get("source_fragments") or []:
+        fragment_id = str(fragment.get("fragment_id") or "")
+        value = fragment.get("extraction_section_index")
+        if fragment_id and isinstance(value, int) and value > 0:
+            fragment_sections[fragment_id] = value
+
+    sections: dict[str, int] = {}
+    for collection, id_key in (
+        ("observations", "observation_id"),
+        ("evidence_steps", "evidence_step_id"),
+        ("questions", "question_id"),
+        ("position_nodes", "position_id"),
+    ):
+        for record in package.get(collection) or []:
+            record_id = str(record.get(id_key) or "")
+            candidates = {
+                fragment_sections[value]
+                for value in record.get("source_fragment_ids") or []
+                if value in fragment_sections
+            }
+            if len(candidates) == 1:
+                sections[record_id] = next(iter(candidates))
+            elif record_id in positions:
+                sections[record_id] = _section_of(positions[record_id], boundaries)
+
+    for claim in live_claims(package):
+        claim_id = str(claim.get("claim_id") or "")
+        candidates = {
+            sections[value]
+            for value in claim.get("evidence_step_ids") or []
+            if value in sections
+        }
+        if len(candidates) == 1:
+            sections[claim_id] = next(iter(candidates))
+        elif claim_id in positions:
+            sections[claim_id] = _section_of(positions[claim_id], boundaries)
+    return sections
+
+
 def existing_edges(package: dict[str, Any]) -> set[tuple[str, str]]:
     """Undirected pairs already related, so this stage never restates one."""
 
@@ -186,6 +240,7 @@ def validate_proposals(
     *,
     positions: dict[str, int],
     boundaries: Sequence[int],
+    sections: dict[str, int] | None = None,
     identity: dict[str, Any] | None = None,
 ) -> None:
     """Reject anything that adds material, restates an edge, or stays in one section.
@@ -285,9 +340,13 @@ def validate_proposals(
             errors.append(f"{label}: duplicate proposal")
             return
         seen.add(signature)
-        if _section_of(positions.get(from_id, 0), boundaries) == _section_of(
-            positions.get(to_id, 0), boundaries
-        ):
+        from_section = (sections or {}).get(
+            from_id, _section_of(positions.get(from_id, 0), boundaries)
+        )
+        to_section = (sections or {}).get(
+            to_id, _section_of(positions.get(to_id, 0), boundaries)
+        )
+        if from_section == to_section:
             errors.append(
                 f"{label}: both ends are in the same section, which extraction "
                 f"could already see"

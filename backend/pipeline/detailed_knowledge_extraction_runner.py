@@ -35,6 +35,7 @@ from backend.pipeline.extraction_sections import (
     SectionBoundaryError,
     Section,
     SectionPlan,
+    apply_section_limit,
     breadcrumb_for,
     combine_sections,
     generated_plan_insertions,
@@ -42,6 +43,7 @@ from backend.pipeline.extraction_sections import (
     load_cached_plan,
     plan_sections,
     save_plan,
+    section_payload,
     sections_from_structure,
     structure_has_section_headings,
 )
@@ -242,7 +244,9 @@ def section_sentences(source: dict[str, Any], section: Section) -> list[AuditedS
 
     script = source.get("script") or []
     rows: list[AuditedSentence] = []
-    for position in range(section.start, section.end):
+    parent_start = section.parent_start if section.parent_start is not None else section.start
+    parent_end = section.parent_end if section.parent_end is not None else section.end
+    for position in range(parent_start, parent_end):
         text = str(script[position].get("text") or "")
         for start, end in sentence_spans(text):
             locator = segment_locator(position)
@@ -251,7 +255,11 @@ def section_sentences(source: dict[str, Any], section: Section) -> list[AuditedS
                 segment_index=locator,
                 text=text[start:end],
             ))
-    return rows
+    if section.sentence_start is None and section.sentence_end is None:
+        return rows
+    if section.sentence_start is None or section.sentence_end is None:
+        raise ValueError("section sentence range must provide both start and end")
+    return rows[section.sentence_start:section.sentence_end]
 
 
 def _section_prompt_body(
@@ -269,16 +277,50 @@ def _section_prompt_body(
     """
 
     script = source.get("script") or []
-    body = "\n\n".join(
-        "[segment {locator}; source_index={index}; {begin}-{finish}]\n{text}".format(
-            locator=segment_locator(position),
-            index=script[position].get("index"),
-            begin=script[position].get("start_time"),
-            finish=script[position].get("end_time"),
-            text=script[position].get("text", ""),
+    if section.sentence_start is None:
+        body = "\n\n".join(
+            "[segment {locator}; source_index={index}; {begin}-{finish}]\n{text}".format(
+                locator=segment_locator(position),
+                index=script[position].get("index"),
+                begin=script[position].get("start_time"),
+                finish=script[position].get("end_time"),
+                text=script[position].get("text", ""),
+            )
+            for position in range(section.start, section.end)
         )
-        for position in range(section.start, section.end)
-    )
+    else:
+        parent_start = section.parent_start if section.parent_start is not None else section.start
+        parent_end = section.parent_end if section.parent_end is not None else section.end
+        cursor = 0
+        rendered: list[str] = []
+        for position in range(parent_start, parent_end):
+            source_text = str(script[position].get("text") or "")
+            spans = sentence_spans(source_text)
+            row_start = max(0, section.sentence_start - cursor)
+            row_end = min(len(spans), section.sentence_end - cursor)
+            cursor += len(spans)
+            if row_start >= row_end:
+                continue
+            # Preserve every original character between the first and last
+            # selected sentence. Joining normalized sentence strings would
+            # manufacture adjacency and make a cross-sentence verbatim anchor
+            # fail against the real source row.
+            target_text = (
+                source_text
+                if row_start == 0 and row_end == len(spans)
+                else source_text[spans[row_start][0]:spans[row_end - 1][1]]
+            )
+            rendered.append(
+                "[segment {locator}; source_index={index}; {begin}-{finish}; "
+                "internal sentence-range target]\n{text}".format(
+                    locator=segment_locator(position),
+                    index=script[position].get("index"),
+                    begin=script[position].get("start_time"),
+                    finish=script[position].get("end_time"),
+                    text=target_text,
+                )
+            )
+        body = "\n\n".join(rendered)
     listing = "\n".join(f"[{row.sentence_id}] {row.text}" for row in sentences)
     section_label = f"本章节：{section.title}" if section.title else "本章节：（未命名）"
     breadcrumb = breadcrumb_for(headings, section.start)
@@ -293,6 +335,12 @@ def _section_prompt_body(
         "===== 编辑结构（不是教授原话，不可引用、不可作为证据锚点）=====\n"
         + section_label
         + "\n"
+        + (
+            "本输入是系统为 transport 上限生成的内部连续分片，不是新的来源章节。"
+            "只抽取并逐句审核下方列出的目标句；相邻分片关系由后续阶段恢复。\n"
+            if section.sentence_start is not None
+            else ""
+        )
         + ("\n".join(structural_rows) if structural_rows else "（本章节没有额外标题）")
         + "\n\n"
     )
@@ -307,9 +355,14 @@ def _section_prompt_body(
 
 
 def _section_cache_path(output_dir: Path, source_id: str, fingerprint: str, section: Section) -> Path:
+    sentence_suffix = (
+        f"-s{section.sentence_start:04d}-{section.sentence_end:04d}"
+        if section.sentence_start is not None and section.sentence_end is not None
+        else ""
+    )
     return (
         output_dir / "section-cache" / _slug(source_id) / fingerprint[:16]
-        / f"p{section.index:03d}-{section.start:04d}-{section.end:04d}.json"
+        / f"p{section.index:03d}-{section.start:04d}-{section.end:04d}{sentence_suffix}.json"
     )
 
 
@@ -332,7 +385,7 @@ def _section_cache_artifact(
     artifact = {
         "schema_version": SECTION_CACHE_VERSION,
         "generation_fingerprint_sha256": fingerprint,
-        "section": vars(section),
+        "section": section_payload(section),
         "response": response,
     }
     artifact["artifact_sha256"] = _section_cache_artifact_sha256(artifact)
@@ -355,7 +408,7 @@ def _load_valid_section_cache(
             return None
         if artifact.get("generation_fingerprint_sha256") != fingerprint:
             return None
-        if artifact.get("section") != vars(section):
+        if artifact.get("section") != section_payload(section):
             return None
         if artifact.get("artifact_sha256") != _section_cache_artifact_sha256(artifact):
             return None
@@ -725,13 +778,50 @@ def resolve_section_plan(
     texts = [str(row.get("text") or "") for row in projection.body_rows]
     indexes = [row.get("index") for row in projection.body_rows]
     counts = [len(sentence_spans(text)) for text in texts]
+    # The cached artifact is the uncapped editorial/base plan. Sentence caps are
+    # transport policy, derived deterministically in memory below. Keying this
+    # cache by a newly introduced cap would regenerate every headingless source
+    # and silently replace its frozen editorial boundaries.
     cached = preferred_plan
+    cached_used_legacy_physical_identity = False
     if cached is None:
         cached = load_cached_plan(
             path, source_sha256, level=level,
-            max_section_sentences=max_section_sentences,
+            max_section_sentences=None,
             editorial_structure_sha256=projection.editorial_structure_sha256,
+            accept_any_max=True,
         )
+    if (
+        cached is None
+        and source_file_sha256 is not None
+        and source_file_sha256 != source_sha256
+        and not any(
+            is_editorial_row(row)
+            for row in live_script(source.get("script"))
+        )
+    ):
+        # Before spoken_body_v1 existed, generated plans were bound to the
+        # physical JSON SHA. Reuse is coordinate-safe only when that exact file
+        # still contains body rows and nothing else: one physical row then
+        # equals one projected source row. Mixed files (subtitle/comment rows)
+        # must never enter this compatibility path because the old boundaries
+        # would point at a different locator space.
+        cached = load_cached_plan(
+            path,
+            source_file_sha256,
+            level=level,
+            max_section_sentences=None,
+            accept_any_max=True,
+        )
+        cached_used_legacy_physical_identity = cached is not None
+    cached_had_transport_policy = bool(
+        cached is not None
+        and (
+            cached.max_section_sentences is not None
+            or cached.strategy is not None
+            or cached.split_lineage
+        )
+    )
     if cached is not None:
         if structure_has_section_headings(
             projection.headings, level=level, body_length=len(texts)
@@ -742,7 +832,7 @@ def resolve_section_plan(
                 segment_indexes=indexes,
                 level=level,
                 sentence_counts=counts,
-                max_section_sentences=max_section_sentences,
+                max_section_sentences=None,
             )
             cached_partition = [
                 (row.start, row.end, row.title) for row in cached.sections
@@ -751,14 +841,28 @@ def resolve_section_plan(
                 (row.start, row.end, row.title) for row in structural_plan.sections
             ]
             if cached_partition != structural_partition:
-                cached = None
+                # A plan saved by the old opt-in cap may contain derived
+                # transport chunks. The uncapped source-heading plan is fully
+                # reconstructable without a model call, so recover that base
+                # instead of treating it as missing and regenerating titles.
+                cached = structural_plan if cached_had_transport_policy else None
         if cached is not None:
+            if cached_had_transport_policy:
+                cached = SectionPlan(
+                    sections=cached.sections,
+                    origin=cached.origin,
+                    level=cached.level,
+                )
             # A normal cache hit is a true no-op. The physical mixed-container
             # SHA may have changed only because an editor changed a comment,
             # which is neither source nor model context. Rewrite only when an
             # explicitly supplied pre-persistence plan must be rebound from a
             # legacy physical SHA to the current body/editorial identities.
-            if preferred_plan is not None:
+            if (
+                preferred_plan is not None
+                or cached_had_transport_policy
+                or cached_used_legacy_physical_identity
+            ):
                 save_plan(
                     path,
                     cached,
@@ -766,25 +870,37 @@ def resolve_section_plan(
                     source_file_sha256=source_file_sha256,
                     editorial_structure_sha256=projection.editorial_structure_sha256,
                 )
-            return cached
-    provider = _subtitle_provider(source_id, client) if allow_generated else None
-    plan = plan_sections(
-        texts,
+            base_plan = cached
+        else:
+            base_plan = None
+    else:
+        base_plan = None
+    if base_plan is None:
+        provider = _subtitle_provider(source_id, client) if allow_generated else None
+        base_plan = plan_sections(
+            texts,
+            headings=projection.headings,
+            segment_indexes=indexes,
+            level=level,
+            provider=provider,
+            sentence_counts=counts,
+            max_section_sentences=None,
+        )
+        save_plan(
+            path,
+            base_plan,
+            source_sha256,
+            source_file_sha256=source_file_sha256,
+            editorial_structure_sha256=projection.editorial_structure_sha256,
+        )
+    if max_section_sentences is None:
+        return base_plan
+    return apply_section_limit(
+        base_plan,
+        counts,
         headings=projection.headings,
-        segment_indexes=indexes,
-        level=level,
-        provider=provider,
-        sentence_counts=counts,
         max_section_sentences=max_section_sentences,
     )
-    save_plan(
-        path,
-        plan,
-        source_sha256,
-        source_file_sha256=source_file_sha256,
-        editorial_structure_sha256=projection.editorial_structure_sha256,
-    )
-    return plan
 
 
 def reusable_generated_plan(
@@ -796,10 +912,11 @@ def reusable_generated_plan(
     path = output_dir / "section-plans" / f"{_slug(source_id)}.json"
     plan = load_cached_plan(
         path, source_sha256, level=level,
-        max_section_sentences=max_section_sentences,
+        max_section_sentences=None,
         editorial_structure_sha256=project_script(
             source.get("script")
         ).editorial_structure_sha256,
+        accept_any_max=True,
     )
     if plan is None or plan.origin != FROM_GENERATOR:
         return None
@@ -841,17 +958,26 @@ def _extract_sections(
     force: bool,
     only: tuple[int, ...] | None = None,
     record: RunRecord | None = None,
+    fallback_cache_plan: SectionPlan | None = None,
+    fallback_cache_fingerprint: str | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Run every section, then concatenate.
 
-    Sections do not overlap, so there is no merge step and nothing to
-    deduplicate -- the combining is `combine_sections` and that is all of it.
+    Target sentence ranges do not overlap, so there is no response merge rule
+    and nothing to deduplicate -- the combining is `combine_sections` and that
+    is all of it. Two sentence-range chunks may name the same storage row, but
+    `section_sentences` gives them disjoint targets.
     """
 
     answered: list[tuple[Section, dict[str, Any]]] = []
     usage_rows: list[dict[str, Any]] = []
     section_rows: list[dict[str, Any]] = []
     exclusions: list[dict[str, Any]] = []
+    fallback_sections = {
+        (row.start, row.end, row.title): row
+        for row in (fallback_cache_plan.sections if fallback_cache_plan else ())
+        if row.sentence_start is None and row.sentence_end is None
+    }
     for section in plan.sections:
         if record is not None and record.cancel_requested():
             raise RunCancelled(f"cancel requested before section {section.index}")
@@ -877,8 +1003,47 @@ def _extract_sections(
                 exclusions.extend(exclusions_from_audit(
                     cached, sentences, source_id=exclusion_source_id,
                     ledger_sentence_id=ledger_sentence_id))
-                section_rows.append({**vars(section), "attempts": 0, "cached": True})
+                section_rows.append({**section_payload(section), "attempts": 0, "cached": True})
                 continue
+        fallback_section = (
+            fallback_sections.get((section.start, section.end, section.title))
+            if section.sentence_start is None
+            and fallback_cache_fingerprint is not None
+            and not force
+            else None
+        )
+        if fallback_section is not None:
+            fallback_cache_path = _section_cache_path(
+                output_dir,
+                source_id,
+                fallback_cache_fingerprint,
+                fallback_section,
+            )
+            if fallback_cache_path.is_file():
+                cached = _load_valid_section_cache(
+                    fallback_cache_path,
+                    section=fallback_section,
+                    fingerprint=fallback_cache_fingerprint,
+                    source=source,
+                    sentences=sentences,
+                )
+                if cached is not None:
+                    print(json.dumps({
+                        "phase": "extraction", "source": source_id,
+                        "section": section.index, "sections": len(plan.sections),
+                        "status": "cached_from_base_plan",
+                    }, ensure_ascii=False), flush=True)
+                    answered.append((section, cached))
+                    exclusions.extend(exclusions_from_audit(
+                        cached, sentences, source_id=exclusion_source_id,
+                        ledger_sentence_id=ledger_sentence_id))
+                    section_rows.append({
+                        **section_payload(section),
+                        "attempts": 0,
+                        "cached": True,
+                        "cache_origin": "fallback_base_plan",
+                    })
+                    continue
         print(json.dumps({
             "phase": "extraction", "source": source_id,
             "section": section.index, "sections": len(plan.sections),
@@ -950,7 +1115,7 @@ def _extract_sections(
         exclusions.extend(exclusions_from_audit(
             response, sentences, source_id=exclusion_source_id,
             ledger_sentence_id=ledger_sentence_id))
-        section_rows.append({**vars(section), "attempts": attempts, "cached": False})
+        section_rows.append({**section_payload(section), "attempts": attempts, "cached": False})
     return combine_sections(answered), usage_rows, section_rows, exclusions
 
 
@@ -961,12 +1126,13 @@ def _anchored_fragment(
     anchor: dict[str, Any],
     transcript: dict[str, Any],
     source_sha256: str,
+    extraction_section_index: int | None = None,
 ) -> dict[str, Any]:
     ordinal = int(anchor["segment_index"][1:]) - 1
     paragraph = transcript["script"][ordinal]
     paragraph_text = str(paragraph.get("text") or "")
     excerpt = anchor["verbatim_excerpt"]
-    return {
+    fragment = {
         "fragment_id": fragment_id,
         "source_id": source_id,
         "verbatim_excerpt": excerpt,
@@ -980,6 +1146,9 @@ def _anchored_fragment(
         "anchor_state": "source_version_bound",
         "review_status": "candidate",
     }
+    if extraction_section_index is not None:
+        fragment["extraction_section_index"] = extraction_section_index
+    return fragment
 
 
 def compile_package(
@@ -1060,10 +1229,24 @@ def compile_package(
         editorial_structure_sha256 or projection.editorial_structure_sha256
     )
     fragments: list[dict[str, Any]] = []
-    fragment_by_anchor: dict[tuple[str, str], str] = {}
+    fragment_by_anchor: dict[tuple[str, str, int | None], str] = {}
+    split_lineage = (
+        ((extraction.get("section_plan") or {}).get("section_policy") or {}).get(
+            "split_lineage"
+        )
+        or []
+    )
 
     def fragment_for(owner_id: str, anchor: dict[str, Any], position: int) -> str:
-        key = (anchor["segment_index"], anchor["verbatim_excerpt"])
+        section_match = re.search(r"(?:^|-)P(\d+)-", owner_id)
+        extraction_section_index = (
+            int(section_match.group(1)) if section_match and split_lineage else None
+        )
+        key = (
+            anchor["segment_index"],
+            anchor["verbatim_excerpt"],
+            extraction_section_index,
+        )
         existing = fragment_by_anchor.get(key)
         if existing:
             return existing
@@ -1072,6 +1255,7 @@ def compile_package(
         fragments.append(_anchored_fragment(
             fragment_id=fragment_id, source_id=source_id, anchor=anchor,
             transcript=transcript, source_sha256=source_sha256,
+            extraction_section_index=extraction_section_index,
         ))
         return fragment_id
 
@@ -1224,6 +1408,11 @@ class SectionSettings:
     #: sources keep their legacy fingerprints; a configured source starts at
     #: `##` and only an oversized unit consults its `###` boundaries.
     max_sentences: int | None = None
+    #: Subscription safety cap used only after an unchanged uncapped package
+    #: has had a chance to prove itself current. This prevents a transport
+    #: policy from invalidating successful corpus history while still bounding
+    #: every new, stale or damaged extraction.
+    fallback_max_sentences: int | None = None
     #: Whether a source with no headings may have boundaries generated for it.
     #: Off makes the run offline and deterministic; on covers the 90 published
     #: transcripts that carry no headings at all.
@@ -1232,6 +1421,22 @@ class SectionSettings:
     #: schema change costs one call this way instead of one per section, which
     #: is the difference between trying an idea and deciding not to.
     only: tuple[int, ...] | None = None
+
+    def __post_init__(self) -> None:
+        if self.max_sentences is not None and self.max_sentences <= 0:
+            raise ValueError("max_sentences must be positive")
+        if (
+            self.fallback_max_sentences is not None
+            and self.fallback_max_sentences <= 0
+        ):
+            raise ValueError("fallback_max_sentences must be positive")
+        if (
+            self.max_sentences is not None
+            and self.fallback_max_sentences is not None
+        ):
+            raise ValueError(
+                "max_sentences and fallback_max_sentences are mutually exclusive"
+            )
 
 
 def _run(
@@ -1265,38 +1470,37 @@ def _run(
         **source,
         "script": [dict(row) for row in projection.body_rows],
     }
-    plan = resolve_section_plan(
-        source=source, source_id=source_id, source_sha256=source_sha256,
-        output_dir=output_dir, level=sections.level,
-        max_section_sentences=sections.max_sentences,
-        allow_generated=sections.allow_generated,
-        client=client if isinstance(client, CodexSubscriptionClient) else None,
-        source_file_sha256=source_file_sha256,
-        preferred_plan=preferred_plan,
-    )
-    identity = extraction_identity(
-        source_sha256=source_sha256, prompt=prompt,
-        model_id=client.model, reasoning_effort=reasoning_effort,
-        max_output_tokens=client.max_output_tokens,
-        section_plan=plan.identity(),
-        source_text_sha256=hashlib.sha256(
-            "\n".join(_segment_texts(source_body)).encode("utf-8")
-        ).hexdigest(),
-        editorial_structure_sha256=projection.editorial_structure_sha256,
-        model_context_sha256=hashlib.sha256(header.encode("utf-8")).hexdigest(),
-        model_input_contract_version=MODEL_INPUT_CONTRACT_VERSION,
-        section_model_input_sha256s=_section_model_input_sha256s(
-            source_body, projection.headings, header, plan
-        ),
-        source_file_sha256=source_file_sha256,
-        package_compiler_version=PACKAGE_COMPILER_VERSION,
-        section_scope=list(sections.only) if sections.only is not None else None,
-        backend=client.backend if isinstance(client, CodexSubscriptionClient) else None,
-    )
-    identity["source_body_sha256"] = source_sha256
-    identity["source_file_sha256"] = source_file_sha256
     output_path = output_dir / f"{_slug(source_id)}.detailed-knowledge.json"
-    if output_path.is_file() and not force:
+
+    def identity_for(plan: SectionPlan) -> dict[str, Any]:
+        identity = extraction_identity(
+            source_sha256=source_sha256, prompt=prompt,
+            model_id=client.model, reasoning_effort=reasoning_effort,
+            max_output_tokens=client.max_output_tokens,
+            section_plan=plan.identity(),
+            source_text_sha256=hashlib.sha256(
+                "\n".join(_segment_texts(source_body)).encode("utf-8")
+            ).hexdigest(),
+            editorial_structure_sha256=projection.editorial_structure_sha256,
+            model_context_sha256=hashlib.sha256(header.encode("utf-8")).hexdigest(),
+            model_input_contract_version=MODEL_INPUT_CONTRACT_VERSION,
+            section_model_input_sha256s=_section_model_input_sha256s(
+                source_body, projection.headings, header, plan
+            ),
+            source_file_sha256=source_file_sha256,
+            package_compiler_version=PACKAGE_COMPILER_VERSION,
+            section_scope=list(sections.only) if sections.only is not None else None,
+            backend=(
+                client.backend if isinstance(client, CodexSubscriptionClient) else None
+            ),
+        )
+        identity["source_body_sha256"] = source_sha256
+        identity["source_file_sha256"] = source_file_sha256
+        return identity
+
+    def existing_result(identity: dict[str, Any]) -> tuple[str, Path] | None:
+        if not output_path.is_file() or force:
+            return None
         try:
             existing = json.loads(output_path.read_text(encoding="utf-8"))
             validate_merged_package(existing)
@@ -1333,6 +1537,55 @@ def _run(
                 })
                 record.outputs(output_path)
             return "created", output_path
+        return None
+
+    fallback_cache_plan: SectionPlan | None = None
+    fallback_cache_fingerprint: str | None = None
+    if sections.fallback_max_sentences is not None:
+        base_plan = resolve_section_plan(
+            source=source, source_id=source_id, source_sha256=source_sha256,
+            output_dir=output_dir, level=sections.level,
+            max_section_sentences=None,
+            allow_generated=sections.allow_generated,
+            client=client if isinstance(client, CodexSubscriptionClient) else None,
+            source_file_sha256=source_file_sha256,
+            preferred_plan=preferred_plan,
+        )
+        base_identity = identity_for(base_plan)
+        unchanged = existing_result(base_identity)
+        if unchanged is not None:
+            return unchanged
+        fallback_cache_plan = base_plan
+        fallback_cache_fingerprint = str(
+            base_identity["generation_fingerprint_sha256"]
+        )
+        plan = apply_section_limit(
+            base_plan,
+            [
+                len(sentence_spans(str(row.get("text") or "")))
+                for row in projection.body_rows
+            ],
+            headings=projection.headings,
+            max_section_sentences=sections.fallback_max_sentences,
+        )
+        identity = (
+            base_identity if plan.identity() == base_plan.identity() else identity_for(plan)
+        )
+    else:
+        plan = resolve_section_plan(
+            source=source, source_id=source_id, source_sha256=source_sha256,
+            output_dir=output_dir, level=sections.level,
+            max_section_sentences=sections.max_sentences,
+            allow_generated=sections.allow_generated,
+            client=client if isinstance(client, CodexSubscriptionClient) else None,
+            source_file_sha256=source_file_sha256,
+            preferred_plan=preferred_plan,
+        )
+        identity = identity_for(plan)
+
+    current = existing_result(identity)
+    if current is not None:
+        return current
     # Opened after the skip check so a no-op re-run does not file a row. At 240
     # sources a nightly "nothing changed" pass would otherwise bury the runs
     # that did something.
@@ -1357,6 +1610,8 @@ def _run(
             output_path=output_path, output_dir=output_dir, client=client,
             prompt=prompt, sections=sections, force=force,
             source_descriptor=source_descriptor,
+            fallback_cache_plan=fallback_cache_plan,
+            fallback_cache_fingerprint=fallback_cache_fingerprint,
         )
 
 
@@ -1368,6 +1623,8 @@ def _run_extraction(
     client: Stage1OpenAIClient | Stage1AnthropicClient | CodexSubscriptionClient,
     prompt: str,
     sections: "SectionSettings", force: bool, source_descriptor: dict[str, Any] | None,
+    fallback_cache_plan: SectionPlan | None = None,
+    fallback_cache_fingerprint: str | None = None,
 ) -> tuple[str, Path]:
     """The part of an extraction that is worth recording, once a row exists."""
 
@@ -1378,6 +1635,8 @@ def _run_extraction(
         output_dir=output_dir, client=client, prompt=prompt,
         fingerprint=identity["generation_fingerprint_sha256"], force=force,
         only=sections.only, record=record,
+        fallback_cache_plan=fallback_cache_plan,
+        fallback_cache_fingerprint=fallback_cache_fingerprint,
     )
     package = compile_package(
         transcript_id=source_id, transcript_path=source_path, transcript=source,
@@ -1660,6 +1919,7 @@ def run_one(
         section_settings = SectionSettings(
             level=section_settings.level,
             max_sentences=section_settings.max_sentences,
+            fallback_max_sentences=section_settings.fallback_max_sentences,
             allow_generated=False,
             only=section_settings.only,
         )
@@ -1735,6 +1995,11 @@ def main() -> int:
         help="split only an oversized section at the next heading level, using the "
              "fewest balanced chunks that satisfy this limit",
     )
+    parser.add_argument(
+        "--fallback-max-section-sentences", type=int,
+        help="preserve an unchanged successful package; otherwise apply this "
+             "sentence limit before any model call",
+    )
     parser.add_argument("--only-sections", type=int, nargs="+", metavar="N",
                         help="run only these section numbers (1-based); the package "
                              "is then marked incomplete")
@@ -1760,8 +2025,22 @@ def main() -> int:
         parser.error("--write-back-generated-subtitles requires --subtitle-user-id")
     if args.max_section_sentences is not None and args.max_section_sentences <= 0:
         parser.error("--max-section-sentences must be positive")
+    if (
+        args.fallback_max_section_sentences is not None
+        and args.fallback_max_section_sentences <= 0
+    ):
+        parser.error("--fallback-max-section-sentences must be positive")
+    if (
+        args.max_section_sentences is not None
+        and args.fallback_max_section_sentences is not None
+    ):
+        parser.error(
+            "--max-section-sentences and --fallback-max-section-sentences "
+            "are mutually exclusive"
+        )
     sections = SectionSettings(
         level=args.section_level, max_sentences=args.max_section_sentences,
+        fallback_max_sentences=args.fallback_max_section_sentences,
         allow_generated=not args.no_generated_sections,
         only=tuple(args.only_sections) if args.only_sections else None,
     )
@@ -1783,12 +2062,18 @@ def main() -> int:
                 segment_indexes=[row.get("index") for row in projection.body_rows],
                 level=sections.level,
                 sentence_counts=counts,
-                max_section_sentences=sections.max_sentences,
+                max_section_sentences=(
+                    sections.max_sentences or sections.fallback_max_sentences
+                ),
             )
+            source_body = {
+                **source,
+                "script": [dict(row) for row in projection.body_rows],
+            }
             return [
                 {
-                    **vars(section),
-                    "sentences": sum(counts[section.start:section.end]),
+                    **section_payload(section),
+                    "sentences": len(section_sentences(source_body, section)),
                 }
                 for section in plan.sections
             ]

@@ -142,6 +142,12 @@ def test_command_plan_propagates_subscription_and_governed_subtitle_writeback(
     assert extracts["讲道甲"][extracts["讲道甲"].index("--backend") + 1] == (
         "codex-subscription"
     )
+    assert extracts["讲道甲"][
+        extracts["讲道甲"].index("--fallback-max-section-sentences") + 1
+    ] == "125"
+    assert extracts["讲道乙"][
+        extracts["讲道乙"].index("--fallback-max-section-sentences") + 1
+    ] == "125"
     cross_sections = {
         row["transcript_id"]: row["command"]
         for row in plan if row["stage"] == "cross_section"

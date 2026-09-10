@@ -14,6 +14,7 @@ from backend.pipeline.cross_section_relation import (
     discovery_identity,
     existing_edges,
     record_positions,
+    record_section_indexes,
     validate_proposals,
 )
 from backend.pipeline.cross_section_relation_runner import _section_boundaries
@@ -78,6 +79,33 @@ def test_accepts_a_genuinely_long_relation() -> None:
     package = _package()
     validate_proposals(
         _proposal(), package, positions=record_positions(package), boundaries=[0, 25]
+    )
+
+
+def test_sentence_range_chunks_in_one_spoken_row_remain_cross_section() -> None:
+    package = _package()
+    package["source_fragments"][0].update({
+        "paragraph_key": "S0018",
+        "extraction_section_index": 1,
+    })
+    package["source_fragments"][1].update({
+        "paragraph_key": "S0018",
+        "extraction_section_index": 2,
+    })
+    positions = record_positions(package)
+    sections = record_section_indexes(
+        package, positions=positions, boundaries=[17, 17]
+    )
+
+    assert positions["OBS1"] == positions["E1"] == 17
+    assert sections["OBS1"] == 1
+    assert sections["E1"] == sections["CL1"] == 2
+    validate_proposals(
+        _proposal(),
+        package,
+        positions=positions,
+        boundaries=[17, 17],
+        sections=sections,
     )
 
 

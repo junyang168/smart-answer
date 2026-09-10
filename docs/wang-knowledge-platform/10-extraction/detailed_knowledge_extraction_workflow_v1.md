@@ -96,6 +96,14 @@ cross-section 是第二次模型调用，不能借用第一遍 extraction 的 ge
 
 章节不重叠，所以合并就是拼接：`combine_sections` 加上各章节的 ID 前缀，没有归属规则、没有跨度匹配、没有去重。`load_bearing` 校验也不再延后——章节内含它所推出的那一步，完整合约在单次调用内就能判。
 
+### Subscription transport 分片
+
+一次 Codex subscription 调用的 900 秒上限是每个 section 的边界，不是整篇讲道的边界。实测 125 句的 section 约四分钟完成，而 162 句的 section 用满 900 秒仍未返回。批次因此对 subscription extraction 使用 125 句 fallback guard；这不是内容阈值，也不改变教授讲了什么。runner 先用原 plan 验证既有完整 package：若 artifact、fingerprint 與 coverage 均 current，直接 skip，guard 不得使成功历史失效；只有新来源、stale 或损坏的 package 才启用分片。
+
+guard 只处理超限 section，顺序固定：先使用已有 `###` 边界；不足时使用 spoken body row 边界；若一个存储 row 自己仍超限，才在该 row 的逐句 audit 序列上建立不重叠的内部 sentence range。后两种都是 **internal transport split**，不写入 subtitle、不修改 source JSON、body SHA、S locator 或 editorial-structure SHA，也不得显示成教授的篇章划分。正常 section 没有发生分片时，plan identity 与既有 extraction fingerprint 必须保持完全相同。
+
+sentence-range 分片可能落在同一个 S locator 内，因此新分片 package 的 SourceFragment 另记 `extraction_section_index`。这只是产生该对象的调用归属，不是 source coordinate。跨 section runner 优先用它区分分片，旧 package 没有该字段时仍按 paragraph position 读取；由此同一个 source row 的两个分片可以补关系，而不会把重复的 S locator 误判成同一 extraction section。
+
 ### 没有 `##` 的来源
 
 115 份已发布逐字稿有 90 份完全没有标题。这些由抽取管线自己调用编辑器已有的加小标题功能取得边界。

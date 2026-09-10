@@ -10,12 +10,14 @@ from backend.pipeline.detailed_knowledge_extraction import (
     DetailedExtractionValidationError,
     validate_sentence_audit,
 )
+from backend.pipeline.detailed_knowledge_extraction_runner import (
+    _section_prompt_body,
+    section_sentences,
+)
 from backend.pipeline.extraction_sections import (
     FROM_GENERATOR,
     FROM_SOURCE,
-    OversizedSectionError,
     Section,
-    SectionBoundaryError,
     SectionPlan,
     breadcrumb_for,
     load_cached_plan,
@@ -74,6 +76,7 @@ def test_oversized_section_uses_subheadings_to_make_two_balanced_chunks() -> Non
     assert [(row.start, row.end) for row in plan.sections] == [(0, 6), (6, 12)]
     assert [sum([30] * (row.end - row.start)) for row in plan.sections] == [180, 180]
     assert plan.sections[1].title == "第一部分 > 子题 6"
+    assert {row["boundary_kind"] for row in plan.split_lineage} == {"h3"}
 
 
 def test_adaptive_sectioning_keeps_normal_h2_section_whole() -> None:
@@ -100,13 +103,78 @@ def test_adaptive_sectioning_uses_three_chunks_only_when_two_cannot_fit() -> Non
     assert [(row.start, row.end) for row in plan.sections] == [(0, 3), (3, 6), (6, 9)]
 
 
-def test_adaptive_sectioning_fails_closed_without_a_safe_subheading() -> None:
+def test_adaptive_sectioning_falls_back_to_spoken_row_boundaries() -> None:
     segments = _segments(8)
-    with pytest.raises(OversizedSectionError, match="no level-3 heading"):
-        plan_sections(
-            segments, headings=[EditorialHeading(0, 2, "第一部分")],
-            sentence_counts=[30] * len(segments), max_section_sentences=180,
-        )
+    plan = plan_sections(
+        segments, headings=[EditorialHeading(0, 2, "第一部分")],
+        sentence_counts=[30] * len(segments), max_section_sentences=180,
+    )
+    assert [(row.start, row.end) for row in plan.sections] == [(0, 4), (4, 8)]
+    assert {row["boundary_kind"] for row in plan.split_lineage} == {"spoken_row"}
+
+
+def test_adaptive_sectioning_uses_disjoint_sentence_ranges_for_one_large_row() -> None:
+    plan = plan_sections(
+        _segments(3), headings=[EditorialHeading(0, 2, "第一部分")],
+        sentence_counts=[30, 181, 30], max_section_sentences=180,
+    )
+    assert [(row.sentence_start, row.sentence_end) for row in plan.sections] == [
+        (0, 120),
+        (120, 241),
+    ]
+    assert {row["boundary_kind"] for row in plan.split_lineage} == {"sentence"}
+
+
+def test_sentence_range_chunks_keep_disjoint_parent_audit_ids() -> None:
+    source = {
+        "script": [{"index": 1, "text": "第一句。  \n第二句。第三句。第四句。"}]
+    }
+    plan = plan_sections(
+        [source["script"][0]["text"]],
+        headings=[EditorialHeading(0, 2, "第一部分")],
+        sentence_counts=[4],
+        max_section_sentences=2,
+    )
+    assert [
+        [sentence.sentence_id for sentence in section_sentences(source, section)]
+        for section in plan.sections
+    ] == [["S0001#001", "S0001#002"], ["S0001#003", "S0001#004"]]
+    first_sentences = section_sentences(source, plan.sections[0])
+    prompt = _section_prompt_body(
+        source,
+        plan.sections[0],
+        first_sentences,
+        [EditorialHeading(0, 2, "第一部分")],
+    )
+    assert "第一句。  \n第二句。" in prompt
+    assert "第三句。" not in prompt
+    assert "内部连续分片" in prompt
+
+
+def test_unchanged_cap_does_not_change_section_identity() -> None:
+    segments = _segments(3)
+    uncapped = plan_sections(
+        segments, headings=[EditorialHeading(0, 2, "第一部分")],
+        sentence_counts=[20, 20, 20],
+    )
+    capped = plan_sections(
+        segments, headings=[EditorialHeading(0, 2, "第一部分")],
+        sentence_counts=[20, 20, 20], max_section_sentences=125,
+    )
+    assert capped is uncapped or capped == uncapped
+    assert capped.identity() == uncapped.identity()
+
+
+def test_same_boundary_keeps_legacy_deepest_title_identity() -> None:
+    plan = plan_sections(
+        _segments(3),
+        headings=[
+            EditorialHeading(0, 2, "父层标题"),
+            EditorialHeading(0, 3, "内部标题"),
+        ],
+        level=3,
+    )
+    assert plan.sections[0].title == "内部标题"
 
 
 def test_sections_cover_every_segment_exactly_once() -> None:
@@ -171,15 +239,15 @@ def test_a_trailing_empty_heading_does_not_suppress_the_generator() -> None:
     ]
 
 
-def test_duplicate_editorial_headings_at_one_level_fail_closed() -> None:
-    with pytest.raises(SectionBoundaryError, match="duplicate H2"):
-        plan_sections(
-            _segments(3),
-            headings=[
-                EditorialHeading(boundary=0, level=2, title="第一标题"),
-                EditorialHeading(boundary=0, level=2, title="冲突标题"),
-            ],
-        )
+def test_historical_overall_and_section_titles_can_share_one_boundary() -> None:
+    plan = plan_sections(
+        _segments(3),
+        headings=[
+            EditorialHeading(boundary=0, level=2, title="旧总标题"),
+            EditorialHeading(boundary=0, level=2, title="第一节标题"),
+        ],
+    )
+    assert plan.sections[0].title == "第一节标题"
 
 
 def test_a_source_that_already_has_headings_never_calls_the_generator() -> None:

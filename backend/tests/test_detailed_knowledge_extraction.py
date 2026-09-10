@@ -15,6 +15,8 @@ from backend.pipeline.detailed_knowledge_extraction import (
 )
 from backend.pipeline.detailed_knowledge_extraction_runner import _validation_feedback
 from backend.pipeline.detailed_knowledge_extraction_runner import compile_package
+from backend.pipeline.extraction_sections import Section, namespace_response
+from backend.pipeline.knowledge_package_merge import validate_merged_package
 from backend.pipeline.source_projection import LOCATOR_SPACE, project_script
 from backend.pipeline.knowledge_consensus_applier import (
     ConsensusApplicationError,
@@ -249,6 +251,97 @@ def test_compile_namespaces_ids_and_binds_source_hashes(tmp_path: Path) -> None:
         package["source_documents"][0]["extraction_record_namespace"]
     )
     assert package["source_fragments"][0]["anchor_state"] == "source_version_bound"
+    assert "extraction_section_index" not in package["source_fragments"][0]
+
+
+def test_split_package_fragments_record_their_extraction_section(tmp_path: Path) -> None:
+    transcript = _transcript()
+    raw = json.dumps(transcript, ensure_ascii=False).encode("utf-8")
+    response = namespace_response(
+        _response(),
+        Section(index=2, start=0, end=2, title="内部 transport 分片"),
+    )
+    extraction = extraction_identity(
+        source_sha256=project_script(transcript["script"]).body_sha256,
+        prompt="prompt",
+        model_id="gpt-5.6-sol",
+        reasoning_effort="medium",
+        max_output_tokens=32000,
+        section_plan={
+            "origin": "source_headings",
+            "section_count": 2,
+            "boundaries": [0, 0],
+            "titles_sha256": "titles",
+            "section_policy": {
+                "level": 2,
+                "max_section_sentences": 125,
+                "strategy": "sentence-ranges",
+                "split_lineage": [{"section_index": 2}],
+            },
+        },
+    )
+
+    package = compile_package(
+        transcript_id="011WSR01",
+        transcript_path=tmp_path / "011WSR01.json",
+        transcript=transcript,
+        raw=raw,
+        response=response,
+        extraction=extraction,
+    )
+
+    validate_merged_package(package)
+    assert {row["extraction_section_index"] for row in package["source_fragments"]} == {2}
+
+
+def test_identical_excerpt_in_two_split_sections_does_not_share_fragment(tmp_path: Path) -> None:
+    transcript = _transcript()
+    raw = json.dumps(transcript, ensure_ascii=False).encode("utf-8")
+    first = namespace_response(
+        _response(), Section(index=1, start=0, end=2, title="分片一")
+    )
+    second = namespace_response(
+        _response(), Section(index=2, start=0, end=2, title="分片二")
+    )
+    response = {key: first[key] + second[key] for key in first}
+    extraction = extraction_identity(
+        source_sha256=project_script(transcript["script"]).body_sha256,
+        prompt="prompt",
+        model_id="gpt-5.6-sol",
+        reasoning_effort="medium",
+        max_output_tokens=32000,
+        section_plan={
+            "origin": "source_headings",
+            "section_count": 2,
+            "boundaries": [0, 0],
+            "titles_sha256": "titles",
+            "section_policy": {
+                "level": 2,
+                "max_section_sentences": 125,
+                "strategy": "sentence-ranges",
+                "split_lineage": [{"section_index": 1}, {"section_index": 2}],
+            },
+        },
+    )
+
+    package = compile_package(
+        transcript_id="011WSR01",
+        transcript_path=tmp_path / "011WSR01.json",
+        transcript=transcript,
+        raw=raw,
+        response=response,
+        extraction=extraction,
+    )
+
+    validate_merged_package(package)
+    duplicates = [
+        row
+        for row in package["source_fragments"]
+        if row["paragraph_key"] == "S0001"
+        and row["verbatim_excerpt"] == "有人说人子只强调人性"
+    ]
+    assert len(duplicates) == 2
+    assert {row["extraction_section_index"] for row in duplicates} == {1, 2}
 
 
 def test_distinct_model_outputs_have_disjoint_record_generations(tmp_path: Path) -> None:

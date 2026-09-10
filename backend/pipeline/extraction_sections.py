@@ -34,7 +34,7 @@ import hashlib
 import json
 import os
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -54,7 +54,7 @@ DEFAULT_SECTION_LEVEL = 2
 #: Versioned because it becomes part of the extraction identity whenever the
 #: adaptive guard is enabled.  Changing how equal-sized choices are resolved
 #: must invalidate the old section cache rather than silently moving anchors.
-ADAPTIVE_SECTION_STRATEGY = "next_heading_balanced_min_chunks_v1"
+ADAPTIVE_SECTION_STRATEGY = "next_heading_then_spoken_row_balanced_min_chunks_v2"
 
 #: How the boundaries were arrived at. Recorded on the plan because the two are
 #: not equally trustworthy: one is where the author actually broke the text, the
@@ -71,6 +71,13 @@ class Section:
     start: int
     end: int
     title: str
+    # Set only for an internal transport split. The target sentence offsets are
+    # relative to the unsplit parent H2 section, so two chunks cut from the same
+    # spoken row still have disjoint, stable audit ids.
+    parent_start: int | None = None
+    parent_end: int | None = None
+    sentence_start: int | None = None
+    sentence_end: int | None = None
 
     @property
     def length(self) -> int:
@@ -80,6 +87,22 @@ class Section:
         return self.start <= position < self.end
 
 
+def section_payload(section: Section) -> dict[str, Any]:
+    """Stable serialized shape, omitting split-only fields on normal sections."""
+
+    payload: dict[str, Any] = {
+        "index": section.index,
+        "start": section.start,
+        "end": section.end,
+        "title": section.title,
+    }
+    for field in ("parent_start", "parent_end", "sentence_start", "sentence_end"):
+        value = getattr(section, field)
+        if value is not None:
+            payload[field] = value
+    return payload
+
+
 @dataclass(frozen=True)
 class SectionPlan:
     sections: tuple[Section, ...]
@@ -87,6 +110,7 @@ class SectionPlan:
     level: int = DEFAULT_SECTION_LEVEL
     max_section_sentences: int | None = None
     strategy: str | None = None
+    split_lineage: tuple[dict[str, Any], ...] = ()
 
     def identity(self) -> dict[str, Any]:
         """What has to enter the extraction fingerprint.
@@ -107,11 +131,12 @@ class SectionPlan:
         # Preserve the legacy identity for the default `##` plan.  Existing
         # completed sources must not rerun merely because an opt-in guard was
         # added for one oversized source.
-        if self.level != DEFAULT_SECTION_LEVEL or self.max_section_sentences is not None:
+        if self.level != DEFAULT_SECTION_LEVEL or self.split_lineage:
             identity["section_policy"] = {
                 "level": self.level,
                 "max_section_sentences": self.max_section_sentences,
                 "strategy": self.strategy,
+                "split_lineage": list(self.split_lineage),
             }
         return identity
 
@@ -161,15 +186,13 @@ def sections_from_structure(
 
     starts: list[int] = [0]
     titles: dict[int, tuple[int, str]] = {}
-    seen_heading_slots: set[tuple[int, int]] = set()
     for heading in headings:
         if heading.level <= level and heading.boundary < body_length:
-            slot = (heading.boundary, heading.level)
-            if slot in seen_heading_slots:
-                raise SectionBoundaryError(
-                    f"duplicate H{heading.level} headings at body boundary {heading.boundary}"
-                )
-            seen_heading_slots.add(slot)
+            # Historical published files can carry an old overall title and a
+            # later first-section title at the same H2 boundary. Both remain
+            # visible editorial context; the later row is the deterministic
+            # section label. New generated insertions still reject duplicate
+            # boundaries before persistence.
             previous = titles.get(heading.boundary)
             if previous is None or heading.level >= previous[0]:
                 titles[heading.boundary] = (heading.level, heading.title)
@@ -418,71 +441,213 @@ def plan_sections(
         origin = FROM_GENERATOR
         if generated:
             sections = generated
-    if max_section_sentences is not None:
-        sections = _split_oversized_sections(
-            sections, sentence_counts or (), headings=headings, level=level,
-            max_section_sentences=max_section_sentences,
-        )
-    return SectionPlan(
+    base = SectionPlan(
         sections=tuple(sections), origin=origin, level=level,
+    )
+    if max_section_sentences is None:
+        return base
+    return apply_section_limit(
+        base,
+        sentence_counts or (),
+        headings=headings,
         max_section_sentences=max_section_sentences,
-        strategy=ADAPTIVE_SECTION_STRATEGY if max_section_sentences is not None else None,
     )
 
 
-def _split_oversized_sections(
-    sections: Sequence[Section],
+def apply_section_limit(
+    plan: SectionPlan,
     sentence_counts: Sequence[int],
     *,
     headings: Sequence[EditorialHeading],
-    level: int,
     max_section_sentences: int,
-) -> list[Section]:
-    """Split only oversized sections, at the next heading depth.
+) -> SectionPlan:
+    """Split oversized sections at semantic headings, then spoken-row boundaries.
 
-    The next-level headings are atomic boundaries, not an instruction to make
-    one model call per heading.  Contiguous atoms are grouped into the fewest
-    chunks that fit the limit; among equally small plans the most balanced one
-    wins.  This keeps the normal case at two calls.
+    The next-level headings remain the preferred atoms. Some reviewed sermons,
+    however, have only generated H2 structure and a single H2 can still contain
+    hundreds of audited sentences. A boundary between two spoken rows changes
+    neither row, source coordinate nor source identity, so it is the deterministic
+    fallback. If one storage row itself exceeds the limit, its audited sentence
+    sequence is partitioned without changing the row, source locator or source
+    file; the package records which extraction section produced every fragment
+    so cross-section recovery can distinguish two chunks of the same row.
+
+    A cap that changes nothing returns the original plan byte-for-byte at the
+    identity level. This is a transport guard, not a reason to invalidate every
+    completed extraction in the corpus.
     """
 
+    if max_section_sentences <= 0:
+        raise ValueError("max_section_sentences must be positive")
     result: list[Section] = []
-    for section in sections:
+    lineage: list[dict[str, Any]] = []
+    for section in plan.sections:
         total = sum(sentence_counts[section.start:section.end])
         if total <= max_section_sentences:
             result.append(section)
             continue
 
-        starts = [section.start] + sorted({
+        heading_starts = [section.start] + sorted({
             heading.boundary
             for heading in headings
-            if heading.level == level + 1
+            if heading.level == plan.level + 1
             and section.start < heading.boundary < section.end
         })
-        if len(starts) == 1:
-            raise OversizedSectionError(
-                f"section {section.index} has {total} sentences (limit "
-                f"{max_section_sentences}) but no level-{level + 1} heading boundary"
-            )
-        ends = starts[1:] + [section.end]
-        atom_weights = [sum(sentence_counts[start:end]) for start, end in zip(starts, ends)]
-        if max(atom_weights) > max_section_sentences:
-            position = atom_weights.index(max(atom_weights))
-            raise OversizedSectionError(
-                f"section {section.index} has a level-{level + 1} block with "
-                f"{atom_weights[position]} sentences (limit {max_section_sentences})"
-            )
+        heading_ends = heading_starts[1:] + [section.end]
+        heading_weights = [
+            sum(sentence_counts[start:end])
+            for start, end in zip(heading_starts, heading_ends)
+        ]
+        if len(heading_starts) > 1 and max(heading_weights) <= max_section_sentences:
+            starts = heading_starts
+            ends = heading_ends
+            atom_weights = heading_weights
+            boundary_kind = f"h{plan.level + 1}"
+        else:
+            starts = list(range(section.start, section.end))
+            ends = [start + 1 for start in starts]
+            atom_weights = [sentence_counts[start] for start in starts]
+            if atom_weights and max(atom_weights) > max_section_sentences:
+                groups = _balanced_minimum_groups(
+                    tuple(1 for _ in range(total)), max_section_sentences
+                )
+                parts = len(groups)
+                parent_counts = sentence_counts[section.start:section.end]
+                for part, (sentence_start, sentence_end) in enumerate(groups, start=1):
+                    start, end = _row_span_for_sentence_range(
+                        section.start,
+                        parent_counts,
+                        sentence_start,
+                        sentence_end,
+                    )
+                    title = (
+                        section.title
+                        if start == section.start
+                        else breadcrumb_for(headings, start) or section.title
+                    )
+                    result.append(Section(
+                        index=0,
+                        start=start,
+                        end=end,
+                        title=title,
+                        parent_start=section.start,
+                        parent_end=section.end,
+                        sentence_start=sentence_start,
+                        sentence_end=sentence_end,
+                    ))
+                    lineage.append({
+                        "parent_section_index": section.index,
+                        "part": part,
+                        "parts": parts,
+                        "start": start,
+                        "end": end,
+                        "sentence_start": sentence_start,
+                        "sentence_end": sentence_end,
+                        "boundary_kind": "sentence",
+                    })
+                continue
+            boundary_kind = "spoken_row"
         groups = _balanced_minimum_groups(tuple(atom_weights), max_section_sentences)
-        for atom_start, atom_end in groups:
+        parts = len(groups)
+        parent_prefix = [0]
+        for count in sentence_counts[section.start:section.end]:
+            parent_prefix.append(parent_prefix[-1] + count)
+        for part, (atom_start, atom_end) in enumerate(groups, start=1):
             start = starts[atom_start]
             end = ends[atom_end - 1]
             title = section.title if start == section.start else breadcrumb_for(headings, start)
-            result.append(Section(index=0, start=start, end=end, title=title))
+            sentence_start = parent_prefix[start - section.start]
+            sentence_end = parent_prefix[end - section.start]
+            result.append(Section(
+                index=0,
+                start=start,
+                end=end,
+                title=title or section.title,
+                parent_start=section.start,
+                parent_end=section.end,
+                sentence_start=sentence_start,
+                sentence_end=sentence_end,
+            ))
+            lineage.append({
+                "parent_section_index": section.index,
+                "part": part,
+                "parts": parts,
+                "start": start,
+                "end": end,
+                "sentence_start": sentence_start,
+                "sentence_end": sentence_end,
+                "boundary_kind": boundary_kind,
+            })
 
-    return [
-        Section(index=index, start=row.start, end=row.end, title=row.title)
+    if not lineage:
+        return plan
+    sections = tuple(
+        replace(row, index=index)
         for index, row in enumerate(result, start=1)
-    ]
+    )
+    lineage_by_span = {
+        (
+            row["start"],
+            row["end"],
+            row.get("sentence_start"),
+            row.get("sentence_end"),
+        ): row
+        for row in lineage
+    }
+    normalized_lineage = tuple(
+        {
+            **lineage_by_span[
+                (
+                    section.start,
+                    section.end,
+                    section.sentence_start,
+                    section.sentence_end,
+                )
+            ],
+            "section_index": section.index,
+        }
+        for section in sections
+        if (
+            section.start,
+            section.end,
+            section.sentence_start,
+            section.sentence_end,
+        ) in lineage_by_span
+    )
+    return SectionPlan(
+        sections=sections,
+        origin=plan.origin,
+        level=plan.level,
+        max_section_sentences=max_section_sentences,
+        strategy=ADAPTIVE_SECTION_STRATEGY,
+        split_lineage=normalized_lineage,
+    )
+
+
+def _row_span_for_sentence_range(
+    parent_start: int,
+    row_sentence_counts: Sequence[int],
+    sentence_start: int,
+    sentence_end: int,
+) -> tuple[int, int]:
+    """Smallest spoken-row span containing a parent-relative sentence range."""
+
+    if sentence_start < 0 or sentence_end <= sentence_start:
+        raise OversizedSectionError("invalid sentence-range partition")
+    cursor = 0
+    first: int | None = None
+    last: int | None = None
+    for offset, count in enumerate(row_sentence_counts):
+        next_cursor = cursor + count
+        if first is None and sentence_start < next_cursor:
+            first = parent_start + offset
+        if sentence_end <= next_cursor:
+            last = parent_start + offset + 1
+            break
+        cursor = next_cursor
+    if first is None or last is None:
+        raise OversizedSectionError("sentence-range partition falls outside its parent section")
+    return first, last
 
 
 def _balanced_minimum_groups(
@@ -537,6 +702,7 @@ def load_cached_plan(
     path: Path, source_sha256: str, *, level: int = DEFAULT_SECTION_LEVEL,
     max_section_sentences: int | None = None,
     editorial_structure_sha256: str | None = None,
+    accept_any_max: bool = False,
 ) -> SectionPlan | None:
     """Load a plan bound to the exact spoken-source body identity."""
 
@@ -562,8 +728,10 @@ def load_cached_plan(
     expected_strategy = (
         ADAPTIVE_SECTION_STRATEGY if max_section_sentences is not None else None
     )
-    if (cached_level, cached_max, cached_strategy) != (
-        level, max_section_sentences, expected_strategy,
+    if cached_level != level:
+        return None
+    if not accept_any_max and (cached_max, cached_strategy) != (
+        max_section_sentences, expected_strategy,
     ):
         return None
     return SectionPlan(
@@ -572,6 +740,7 @@ def load_cached_plan(
         level=cached_level,
         max_section_sentences=cached_max,
         strategy=cached_strategy,
+        split_lineage=tuple(payload.get("split_lineage") or ()),
     )
 
 
@@ -596,7 +765,8 @@ def save_plan(
                 "section_level": plan.level,
                 "max_section_sentences": plan.max_section_sentences,
                 "section_strategy": plan.strategy,
-                "sections": [vars(section) for section in plan.sections],
+                "split_lineage": list(plan.split_lineage),
+                "sections": [section_payload(section) for section in plan.sections],
             },
             ensure_ascii=False,
             indent=2,
@@ -674,9 +844,11 @@ def combine_sections(
 ) -> dict[str, Any]:
     """Concatenate per-section responses into one document-level response.
 
-    Sections do not overlap, so this is concatenation and nothing else -- no
-    ownership rule, no span matching, no dedup. That is the whole reason the
-    section is a better unit than the overlapping window it replaced.
+    Target sentence ranges do not overlap, so this is concatenation and nothing
+    else -- no ownership rule, no span matching, no dedup. Sentence-range
+    transport chunks can share one storage row while still owning disjoint
+    audited sentences; that is different from the overlapping window this
+    design replaced.
     """
 
     combined: dict[str, Any] = {key: [] for key in ID_KEYS}
