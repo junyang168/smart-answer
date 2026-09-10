@@ -8,6 +8,7 @@ from typing import Any, Sequence
 
 from backend.pipeline.observation_type_vocabulary import OBSERVATION_TYPES
 from backend.pipeline.sentence_ledger_vocabulary import REASON_CODES
+from backend.pipeline.source_projection import project_script
 
 # v2 closes `observation_type` to the six categories the prompt already names.
 # v3 moved the unit of extraction from the document to an overlapping window.
@@ -248,8 +249,9 @@ def anchor_spans(response: dict[str, Any], transcript: dict[str, Any]) -> dict[s
     exact here; a missing excerpt simply contributes no span.
     """
 
+    source_rows = project_script(transcript.get("script", [])).body_rows
     segments = {f"S{index + 1:04d}": str(segment.get("text") or "")
-                for index, segment in enumerate(transcript.get("script", []))}
+                for index, segment in enumerate(source_rows)}
     spans: dict[str, list[tuple[int, int]]] = {}
     for collection in ("questions", "positions", "observations", "evidence_steps"):
         for row in response.get(collection, []) or []:
@@ -283,8 +285,9 @@ def validate_sentence_audit(
         only the latter is what every downstream gate can see.
     """
 
+    source_rows = project_script(transcript.get("script", [])).body_rows
     segments = {f"S{index + 1:04d}": str(segment.get("text") or "")
-                for index, segment in enumerate(transcript.get("script", []))}
+                for index, segment in enumerate(source_rows)}
     spans = anchor_spans(response, transcript)
     rows = response.get("sentence_audit") or []
     by_id: dict[str, dict[str, Any]] = {}
@@ -345,6 +348,13 @@ def extraction_identity(
     max_output_tokens: int,
     section_plan: dict[str, Any] | None = None,
     source_text_sha256: str | None = None,
+    editorial_structure_sha256: str | None = None,
+    model_context_sha256: str | None = None,
+    model_input_contract_version: str | None = None,
+    section_model_input_sha256s: list[dict[str, Any]] | None = None,
+    source_file_sha256: str | None = None,
+    package_compiler_version: str | None = None,
+    section_scope: list[int] | None = None,
     backend: str | None = None,
 ) -> dict[str, Any]:
     generation = {
@@ -371,6 +381,23 @@ def extraction_identity(
     # failure the `section_plan` note above describes, one level down.
     if source_text_sha256 is not None:
         generation["source_text_sha256"] = source_text_sha256
+    # Editorial headings are visible context and may change grouping, but they
+    # are not source text.  Give them their own identity so renaming a heading
+    # invalidates model output without changing source anchors or body SHA.
+    if editorial_structure_sha256 is not None:
+        generation["editorial_structure_sha256"] = editorial_structure_sha256
+    # The document header (including its editorial title) and the renderer
+    # contract both affect the bytes shown to the model. They are deliberately
+    # separate from source identity: changing either invalidates model output,
+    # but can never renumber or stale a source anchor.
+    if model_context_sha256 is not None:
+        generation["model_context_sha256"] = model_context_sha256
+    if model_input_contract_version is not None:
+        generation["model_input_contract_version"] = model_input_contract_version
+    if section_model_input_sha256s is not None:
+        generation["section_model_input_sha256s"] = json.loads(
+            json.dumps(section_model_input_sha256s, sort_keys=True)
+        )
     # Preserve every existing API fingerprint byte-for-byte. The opt-in Codex
     # backend is added only when selected, both to identify its artifacts and
     # to prevent API and subscription runs from sharing a semantic cache.
@@ -380,9 +407,22 @@ def extraction_identity(
         json.dumps(generation, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
     full = {"source_sha256": source_sha256, **generation, "generation_fingerprint_sha256": generation_fingerprint}
+    # These inputs change the compiled artifact, not what any individual
+    # section model call sees. Keep them out of `generation_fingerprint` so a
+    # compiler-only rebuild can reuse the exact validated section responses
+    # without spending another model call. The physical mixed JSON hash is
+    # different: it is read-time provenance only. Editorial comments live in
+    # that container but are neither source nor model context, so their edit
+    # must not create a new package or semantic record generation.
+    if package_compiler_version is not None:
+        full["package_compiler_version"] = package_compiler_version
+    if section_scope is not None:
+        full["section_scope"] = sorted(set(section_scope))
     full["fingerprint_sha256"] = hashlib.sha256(
         json.dumps(full, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+    if source_file_sha256 is not None:
+        full["source_file_sha256"] = source_file_sha256
     return full
 
 
@@ -410,7 +450,8 @@ def validate_response(
     rule moves to where it can be answered: the merged package.
     """
 
-    segments = {f"S{index + 1:04d}": segment for index, segment in enumerate(transcript.get("script", []))}
+    source_rows = project_script(transcript.get("script", [])).body_rows
+    segments = {f"S{index + 1:04d}": segment for index, segment in enumerate(source_rows)}
     collections = {
         "question": (response.get("questions", []), "question_id"),
         "position": (response.get("positions", []), "position_id"),
@@ -426,6 +467,18 @@ def validate_response(
         _require(all(values), f"{label}: missing ID")
         _require(len(values) == len(set(values)), f"{label}: duplicate ID")
         ids[label] = set(values)
+    owners: dict[str, str] = {}
+    cross_collection_duplicates: list[str] = []
+    for label, values in ids.items():
+        for value in values:
+            prior = owners.setdefault(value, label)
+            if prior != label:
+                cross_collection_duplicates.append(f"{value} ({prior}, {label})")
+    _require(
+        not cross_collection_duplicates,
+        "IDs must be globally unique across extraction collections: "
+        + ", ".join(sorted(cross_collection_duplicates)),
+    )
 
     anchor_errors: list[str] = []
 
@@ -503,17 +556,26 @@ def validate_response(
     # edge is how "the professor reasoned from this" is recorded at all.  The
     # target stays an evidence step -- observations do not support each other.
     supported_by_observation: set[str] = set()
+    evidence_relation_signatures: set[tuple[str, str, str]] = set()
     for row in response.get("evidence_relations", []):
         from_id = row["from_id"]
+        to_id = row["to_id"]
         collect(
             from_id in ids["evidence"] or from_id in ids["observation"],
             f"{row['relation_id']}: unknown relation source",
         )
         collect(
-            row["to_id"] in ids["evidence"],
+            to_id in ids["evidence"],
             f"{row['relation_id']}: unknown evidence endpoint",
         )
-        if from_id in ids["observation"] and row["to_id"] in ids["evidence"]:
+        collect(from_id != to_id, f"{row['relation_id']}: relation cannot point to itself")
+        signature = (from_id, to_id, str(row.get("relation_type") or ""))
+        collect(
+            signature not in evidence_relation_signatures,
+            f"{row['relation_id']}: duplicate evidence relation {signature!r}",
+        )
+        evidence_relation_signatures.add(signature)
+        if from_id in ids["observation"] and to_id in ids["evidence"]:
             supported_by_observation.add(from_id)
 
     # The rule this whole schema change exists for.  An observation the
@@ -531,11 +593,24 @@ def validate_response(
             f"to an evidence step; either record the step the professor reasoned "
             f"to, or mark it background",
         )
+    claim_relation_signatures: set[tuple[str, str, str]] = set()
     for row in response.get("claim_relations", []):
+        from_id = row["from_id"]
+        to_id = row["to_id"]
         collect(
-            row["from_id"] in ids["claim"] and row["to_id"] in ids["claim"],
+            from_id in ids["claim"] and to_id in ids["claim"],
             f"{row['claim_relation_id']}: unknown claim endpoint",
         )
+        collect(
+            from_id != to_id,
+            f"{row['claim_relation_id']}: relation cannot point to itself",
+        )
+        signature = (from_id, to_id, str(row.get("relation_type") or ""))
+        collect(
+            signature not in claim_relation_signatures,
+            f"{row['claim_relation_id']}: duplicate claim relation {signature!r}",
+        )
+        claim_relation_signatures.add(signature)
     if validation_errors:
         raise DetailedExtractionValidationError(
             "mechanical validation failed: " + " | ".join(validation_errors)

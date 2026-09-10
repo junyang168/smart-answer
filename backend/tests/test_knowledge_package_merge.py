@@ -14,6 +14,7 @@ def _package(index: int) -> dict:
     fragment_id = f"FRAGMENT-{index}"
     evidence_id = f"EVIDENCE-{index}"
     claim_id = f"CLAIM-{index}"
+    target_claim_id = f"CLAIM-TARGET-{index}"
     return {
         "schema_version": "wang_shared_knowledge_v1.2",
         "package_id": f"SYNTHETIC-PACKAGE-{index}",
@@ -34,14 +35,20 @@ def _package(index: int) -> dict:
                 "claim_id": claim_id,
                 "evidence_step_ids": [evidence_id],
                 "opposed_position_ids": [],
-            }
+            },
+            {
+                "claim_id": target_claim_id,
+                "evidence_step_ids": [evidence_id],
+                "opposed_position_ids": [],
+            },
         ],
         "knowledge_relations": [],
         "claim_relations": [
             {
                 "claim_relation_id": f"RELATION-{index}",
                 "from_id": claim_id,
-                "to_id": claim_id,
+                "to_id": target_claim_id,
+                "relation_type": "supports",
             }
         ],
     }
@@ -60,7 +67,7 @@ def test_merge_packages_preserves_all_objects(tmp_path: Path) -> None:
     paths = _write_packages(tmp_path)
     merged = merge_packages(paths, package_id="SYNTHETIC-MERGE")
     assert len(merged["source_documents"]) == 3
-    assert len(merged["claims"]) == 3
+    assert len(merged["claims"]) == 6
     assert len(merged["evidence_steps"]) == 3
     assert len(merged["claim_relations"]) == 3
 
@@ -71,6 +78,59 @@ def test_merge_validation_rejects_unknown_relation_endpoint(tmp_path: Path) -> N
     merged["claim_relations"][0]["to_id"] = "missing"
     with pytest.raises(KnowledgePackageMergeError, match="unknown endpoints"):
         validate_merged_package(merged)
+
+
+def test_merge_accepts_observation_to_evidence_knowledge_relation() -> None:
+    package = _package(1)
+    package["observations"] = [{
+        "observation_id": "OBSERVATION-1",
+        "source_fragment_ids": ["FRAGMENT-1"],
+    }]
+    package["knowledge_relations"] = [{
+        "relation_id": "EVIDENCE-RELATION-1",
+        "from_id": "OBSERVATION-1",
+        "to_id": "EVIDENCE-1",
+        "relation_type": "supports",
+    }]
+
+    validate_merged_package(package)
+
+
+def test_merge_rejects_missing_legacy_singular_fragment_reference() -> None:
+    package = _package(1)
+    package["evidence_steps"][0].pop("source_fragment_ids")
+    package["evidence_steps"][0]["source_fragment_id"] = "FRAGMENT-MISSING"
+
+    with pytest.raises(KnowledgePackageMergeError, match="unknown fragments"):
+        validate_merged_package(package)
+
+
+def test_merge_rejects_an_id_reused_by_different_collections() -> None:
+    package = _package(1)
+    package["knowledge_relations"] = [{
+        "relation_id": "RELATION-1",
+        "from_id": "EVIDENCE-1",
+        "to_id": "EVIDENCE-1",
+        "relation_type": "supports",
+    }]
+
+    with pytest.raises(KnowledgePackageMergeError, match="globally unique"):
+        validate_merged_package(package)
+
+
+def test_merge_rejects_self_edges_and_duplicate_semantic_edges() -> None:
+    package = _package(1)
+    package["claim_relations"][0]["to_id"] = "CLAIM-1"
+    with pytest.raises(KnowledgePackageMergeError, match="point to itself"):
+        validate_merged_package(package)
+
+    package = _package(1)
+    package["claim_relations"].append({
+        **package["claim_relations"][0],
+        "claim_relation_id": "RELATION-SECOND",
+    })
+    with pytest.raises(KnowledgePackageMergeError, match="duplicate semantic relation"):
+        validate_merged_package(package)
 
 
 def test_merge_can_record_neutral_comparison_scope(tmp_path: Path) -> None:

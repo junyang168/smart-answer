@@ -28,7 +28,14 @@ from backend.pipeline.base_contract_coverage import (
     ScriptureRef,
     parse_passage_range,
 )
-from backend.pipeline.knowledge_source import live_script, markdown_blocks
+from backend.pipeline.knowledge_source import markdown_blocks
+from backend.pipeline.source_projection import (
+    SourceProjection,
+    assert_locator_space_compatible,
+    project_script,
+    script_from_markdown_blocks,
+    source_uses_body_locator_space,
+)
 from backend.pipeline.sentence_ledger import (
     AnchoredSpan,
     build_inventory,
@@ -42,6 +49,26 @@ from backend.pipeline.sentence_ledger import (
 #: one: a claim reaches the text only through the evidence steps that produced
 #: it, and pretending otherwise invents an anchor the package does not hold.
 ANCHORED_COLLECTIONS = ("evidence_steps", "observations", "questions", "position_nodes")
+
+
+def load_source_script(source_path: Path) -> list[dict[str, Any]]:
+    """Load the physical script so locator compatibility can be checked."""
+    if source_path.suffix == ".json":
+        payload = json.loads(source_path.read_text(encoding="utf-8"))
+        script = payload.get("script") if isinstance(payload, dict) else payload
+    else:
+        script = script_from_markdown_blocks(
+            markdown_blocks(source_path.read_text(encoding="utf-8"))
+        )
+    if not isinstance(script, list):
+        raise ValueError(f"{source_path}: source has no script list")
+    return [dict(row) for row in script]
+
+
+def load_source_projection(source_path: Path) -> SourceProjection:
+    """Load the source/editorial projections without mixing their identities."""
+
+    return project_script(load_source_script(source_path))
 
 
 def load_segments(source_path: Path) -> list[tuple[int, str]]:
@@ -60,17 +87,11 @@ def load_segments(source_path: Path) -> list[tuple[int, str]]:
     keys on position; this is the same scheme, not a new one.
     """
 
-    if source_path.suffix == ".json":
-        payload = json.loads(source_path.read_text(encoding="utf-8"))
-        script = payload.get("script") if isinstance(payload, dict) else payload
-        # Soft-deleted text is not in the denominator. It is not material the
-        # claim layer failed to take; it is material a proofreader removed.
-        return [
-            (position, str(row.get("text") or ""))
-            for position, row in enumerate(live_script(script), start=1)
-        ]
-    text = source_path.read_text(encoding="utf-8")
-    return list(enumerate(markdown_blocks(text), start=1))
+    projection = load_source_projection(source_path)
+    return [
+        (position, str(row.get("text") or ""))
+        for position, row in enumerate(projection.body_rows, start=1)
+    ]
 
 
 def place_fragments(
@@ -167,9 +188,20 @@ def terminal_exclusions(package: dict[str, Any]) -> dict[str, str]:
 
 def run(source_path: Path, package_path: Path, passage: str | None = None) -> dict[str, Any]:
     package = json.loads(package_path.read_text(encoding="utf-8"))
-    source_id = str(package["source_documents"][0]["source_id"])
-    segments = load_segments(source_path)
-    source_sha256 = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    source_document = package["source_documents"][0]
+    source_id = str(source_document["source_id"])
+    script = load_source_script(source_path)
+    assert_locator_space_compatible(source_document, script)
+    projection = project_script(script)
+    segments = [
+        (position, str(row.get("text") or ""))
+        for position, row in enumerate(projection.body_rows, start=1)
+    ]
+    source_sha256 = (
+        projection.body_sha256
+        if source_uses_body_locator_space(source_document)
+        else hashlib.sha256(source_path.read_bytes()).hexdigest()
+    )
     inventory = build_inventory(segments, source_id=source_id)
     spans, unplaced = place_fragments(package, segments, source_sha256)
 
@@ -200,9 +232,8 @@ def run(source_path: Path, package_path: Path, passage: str | None = None) -> di
         "exclusions_recorded": len(package.get("sentence_exclusions") or []),
         "exclusions_terminal": len(terminal_exclusions(package)),
         "blocks": summary.blocks,
-        # The total is not the score. Headings are represented 0% of the time
-        # by design and are a quarter of the sentences, so a change in prose
-        # coverage is invisible in the total it is averaged into.
+        # Editorial rows are not source sentences, so every category here is a
+        # verdict over professor-spoken material only.
         "by_category": {
             name: {
                 "total": category.total,

@@ -10,10 +10,12 @@ fingerprint, unless ``--force`` is passed.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
+import os
 import re
-import shutil
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,7 +25,7 @@ from dotenv import load_dotenv
 
 from backend.config.wang_platform_paths import wang_platform_paths
 from backend.pipeline.corpus_survey import SurveyValidationError, validate_survey
-from backend.pipeline.knowledge_source import live_script
+from backend.pipeline.source_projection import LOCATOR_SPACE, EditorialHeading, project_script
 from backend.pipeline.stage1 import Stage1OpenAIClient
 
 
@@ -141,13 +143,11 @@ def _slug(transcript_id: str) -> str:
 
 
 def _load(path: Path) -> tuple[dict[str, Any], bytes]:
-    """One transcript, as the proofreader left it.
+    """Load the physical transcript and its exact on-disk provenance bytes.
 
-    Soft-deleted spans are dropped here rather than by each caller, because
-    the text has ten readers and a filter applied in one of them is nine
-    readers still quoting deleted material. `raw` stays the bytes on disk:
-    it is the provenance of the file, and a hash that did not match the file
-    would break every anchor that records one.
+    Source projection is deliberately not performed here.  ``project_script``
+    owns soft-deletion and editorial-row filtering; pre-projecting in the
+    loader makes that transform run twice and can change source text again.
     """
 
     raw = path.read_bytes()
@@ -158,11 +158,11 @@ def _load(path: Path) -> tuple[dict[str, Any], bytes]:
                 "title": path.stem,
                 "status": "reviewed",
             },
-            "script": live_script(parsed),
+            "script": parsed,
         }, raw
     if not isinstance(parsed, dict):
         raise ValueError(f"{path}: transcript JSON must be an object or an array")
-    return {**parsed, "script": live_script(parsed.get("script"))}, raw
+    return parsed, raw
 
 
 def _segment_locator(position: int) -> str:
@@ -181,6 +181,8 @@ def _uses_unique_segment_locators(survey_path: Path) -> bool:
         survey = json.loads(survey_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return False
+    if not isinstance(survey, dict):
+        return False
     references: list[Any] = []
     for cluster in survey.get("content_clusters", []):
         references.extend(cluster.get("segment_indexes", []))
@@ -193,39 +195,85 @@ def _existing_output(
     output_dir: Path,
     transcript_id: str,
     extraction_fingerprint: str,
+    *,
+    transcript: dict[str, Any],
+    raw_source: bytes,
 ) -> Path | None:
+    def matches(path: Path) -> bool:
+        try:
+            survey = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(survey, dict):
+                return False
+            source = survey.get("source", {})
+            extraction = survey.get("extraction", {})
+            if not isinstance(source, dict) or not isinstance(extraction, dict):
+                return False
+            if (
+                source.get("transcript_id") != transcript_id
+                or extraction.get("fingerprint_sha256")
+                != extraction_fingerprint
+                or extraction.get("artifact_sha256")
+                != _survey_artifact_sha256(survey)
+            ):
+                return False
+            validate_survey(
+                survey,
+                transcript,
+                raw_source,
+                expected_extraction_fingerprint=extraction_fingerprint,
+            )
+        except (OSError, json.JSONDecodeError, SurveyValidationError, TypeError):
+            return False
+        return True
+
     canonical_path = output_dir / f"{_slug(transcript_id)}.first-pass.json"
-    if canonical_path.exists():
-        try:
-            source = json.loads(canonical_path.read_text(encoding="utf-8")).get("source", {})
-        except json.JSONDecodeError:
-            source = {}
-        extraction = json.loads(canonical_path.read_text(encoding="utf-8")).get("extraction", {})
-        if (
-            source.get("transcript_id") == transcript_id
-            and extraction.get("fingerprint_sha256") == extraction_fingerprint
-        ):
-            return canonical_path
+    if canonical_path.exists() and matches(canonical_path):
+        return canonical_path
     for survey_path in output_dir.glob("*.first-pass.json"):
-        try:
-            source = json.loads(survey_path.read_text(encoding="utf-8")).get("source", {})
-        except json.JSONDecodeError:
-            continue
-        extraction = json.loads(survey_path.read_text(encoding="utf-8")).get("extraction", {})
-        if (
-            source.get("transcript_id") == transcript_id
-            and extraction.get("fingerprint_sha256") == extraction_fingerprint
-        ):
+        if survey_path != canonical_path and matches(survey_path):
             # Upgrade legacy collision-prone names without changing content.
-            if survey_path != canonical_path:
-                survey_path.replace(canonical_path)
+            _archive_superseded_output(canonical_path)
+            os.replace(survey_path, canonical_path)
             return canonical_path
     return None
 
 
-def _transcript_for_prompt(payload: dict[str, Any]) -> str:
+def _atomic_artifact_write(path: Path, data: bytes) -> None:
+    """Install one complete survey artifact without exposing partial JSON."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def _survey_artifact_sha256(survey: dict[str, Any]) -> str:
+    candidate = copy.deepcopy(survey)
+    (candidate.get("extraction") or {}).pop("artifact_sha256", None)
+    encoded = json.dumps(
+        candidate, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _transcript_for_prompt(
+    payload: dict[str, Any], headings: tuple[EditorialHeading, ...] = ()
+) -> str:
+    projection = project_script(payload.get("script", []))
+    body_rows = list(projection.body_rows)
+    effective_headings = headings or projection.headings
     rows: list[str] = []
-    for position, segment in enumerate(payload.get("script", [])):
+    for position, segment in enumerate(body_rows):
         rows.append(
             "[segment {locator}; source_index={index}; {start}-{end}]\n{text}".format(
                 locator=_segment_locator(position),
@@ -235,7 +283,17 @@ def _transcript_for_prompt(payload: dict[str, Any]) -> str:
                 text=segment.get("text", ""),
             )
         )
-    return "\n\n".join(rows)
+    editorial = "\n".join(
+        f"[位于 {_segment_locator(row.boundary)} 之前；H{row.level}] {row.title}"
+        for row in effective_headings
+        if row.boundary < len(body_rows)
+    )
+    return (
+        "===== 编辑结构（不是教授原话，不可引用、不可作为证据锚点）=====\n"
+        + (editorial or "（无标题）")
+        + "\n\n===== 教授讲论正文 =====\n"
+        + "\n\n".join(rows)
+    )
 
 
 def _extraction_metadata(
@@ -245,11 +303,13 @@ def _extraction_metadata(
     model_id: str,
     reasoning_effort: str,
     max_output_tokens: int,
+    editorial_structure_sha256: str | None = None,
+    user_prompt_sha256: str | None = None,
 ) -> dict[str, Any]:
     response_schema_sha256 = hashlib.sha256(
         json.dumps(SURVEY_RESPONSE_SCHEMA, ensure_ascii=False, sort_keys=True).encode("utf-8")
     ).hexdigest()
-    generation_identity = {
+    contract_identity = {
         "prompt_sha256": hashlib.sha256(system_prompt.encode("utf-8")).hexdigest(),
         "model_id": model_id,
         "reasoning_effort": reasoning_effort,
@@ -257,6 +317,19 @@ def _extraction_metadata(
         "schema_version": EXTRACTION_SCHEMA_VERSION,
         "response_schema_sha256": response_schema_sha256,
     }
+    contract_fingerprint = hashlib.sha256(
+        json.dumps(
+            contract_identity,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    generation_identity = dict(contract_identity)
+    if editorial_structure_sha256 is not None:
+        generation_identity["editorial_structure_sha256"] = editorial_structure_sha256
+    if user_prompt_sha256 is not None:
+        generation_identity["user_prompt_sha256"] = user_prompt_sha256
     generation_fingerprint = hashlib.sha256(
         json.dumps(
             generation_identity,
@@ -268,6 +341,7 @@ def _extraction_metadata(
     identity = {
         "source_sha256": source_sha256,
         **generation_identity,
+        "contract_fingerprint_sha256": contract_fingerprint,
         "generation_fingerprint_sha256": generation_fingerprint,
     }
     fingerprint = hashlib.sha256(
@@ -284,9 +358,12 @@ def _archive_superseded_output(output_path: Path) -> Path | None:
     """Preserve the previous extraction before replacing its canonical slot."""
     if not output_path.exists():
         return None
+    raw = output_path.read_bytes()
     try:
-        previous = json.loads(output_path.read_text(encoding="utf-8"))
+        previous = json.loads(raw)
     except (OSError, json.JSONDecodeError):
+        previous = {}
+    if not isinstance(previous, dict):
         previous = {}
     extraction = previous.get("extraction") or {}
     source = previous.get("source") or {}
@@ -294,12 +371,44 @@ def _archive_superseded_output(output_path: Path) -> Path | None:
     if not fingerprint:
         source_hash = str(source.get("sha256") or "unknown")
         fingerprint = f"legacy-{source_hash[:16]}"
+    content_hash = hashlib.sha256(raw).hexdigest()[:16]
     archive_dir = output_path.parent / "generations"
-    archive_dir.mkdir(parents=True, exist_ok=True)
-    archive_path = archive_dir / f"{output_path.stem}.{fingerprint}.json"
+    archive_path = archive_dir / (
+        f"{output_path.stem}.{fingerprint}.{content_hash}.json"
+    )
     if not archive_path.exists():
-        shutil.copy2(output_path, archive_path)
+        _atomic_artifact_write(archive_path, raw)
     return archive_path
+
+
+def _retire_other_transcript_outputs(
+    output_dir: Path, transcript_id: str, *, keep: Path | None = None
+) -> None:
+    """Archive obsolete current-slot names for one transcript.
+
+    Older runners used collision-prone filenames.  Once a canonical current
+    artifact exists, leaving an old name beside it makes synthesis see two
+    current artifacts for the same transcript.  Retirement is lossless: the
+    exact old bytes are installed in ``generations/`` before the current-slot
+    file is removed.
+    """
+
+    for candidate in output_dir.glob("*.first-pass.json"):
+        if keep is not None and candidate == keep:
+            continue
+        try:
+            payload = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        source = payload.get("source")
+        if not isinstance(source, dict) or source.get("transcript_id") != transcript_id:
+            continue
+        archive = _archive_superseded_output(candidate)
+        if archive is None or not archive.exists():
+            raise OSError(f"could not archive superseded survey {candidate}")
+        candidate.unlink()
 
 
 def _make_survey(
@@ -319,7 +428,11 @@ def _make_survey(
             "transcript_id": transcript_id,
             "path": str(path),
             "publication_status": payload.get("metadata", {}).get("status"),
-            "sha256": hashlib.sha256(raw).hexdigest(),
+            "sha256": extraction["source_sha256"],
+            "source_body_sha256": extraction["source_sha256"],
+            "source_file_sha256": hashlib.sha256(raw).hexdigest(),
+            "editorial_structure_sha256": extraction.get("editorial_structure_sha256"),
+            "locator_space": LOCATOR_SPACE,
             "segment_count": len(payload.get("script", [])),
         },
         "extraction": extraction,
@@ -442,18 +555,37 @@ def run_one(
     max_output_tokens: int,
     force: bool,
 ) -> tuple[str, Path | None]:
-    payload, raw = _load(path)
+    physical_payload, raw = _load(path)
     transcript_id = path.stem
-    source_hash = hashlib.sha256(raw).hexdigest()
+    projection = project_script(physical_payload.get("script"))
+    payload = {
+        **physical_payload,
+        "script": [dict(row) for row in projection.body_rows],
+    }
+    source_hash = projection.body_sha256
+    user_prompt = (
+        f"逐字稿 ID：{transcript_id}\n"
+        f"标题：{payload.get('metadata', {}).get('title', transcript_id)}\n\n"
+        "每段开头的 S0001、S0002 等是本次普查唯一定位码。content_clusters.segment_indexes "
+        "及 anchors.segment_index 必须逐字使用这些 S 编号，不要使用 source_index。\n\n"
+        "以下是完整逐字稿。请依据系统提示输出 JSON。\n\n"
+        + _transcript_for_prompt(physical_payload, projection.headings)
+    )
     extraction = _extraction_metadata(
         source_sha256=source_hash,
         system_prompt=system_prompt,
         model_id=model_id,
         reasoning_effort=reasoning_effort,
         max_output_tokens=max_output_tokens,
+        editorial_structure_sha256=projection.editorial_structure_sha256,
+        user_prompt_sha256=hashlib.sha256(user_prompt.encode("utf-8")).hexdigest(),
     )
     existing = _existing_output(
-        output_dir, transcript_id, extraction["fingerprint_sha256"]
+        output_dir,
+        transcript_id,
+        extraction["fingerprint_sha256"],
+        transcript=physical_payload,
+        raw_source=raw,
     )
     if existing and _has_duplicate_segment_ids(payload) and not _uses_unique_segment_locators(existing):
         # Cards created before survey-local locators cannot distinguish two
@@ -461,16 +593,10 @@ def run_one(
         # only these affected transcripts.
         existing = None
     if existing and not force:
+        _retire_other_transcript_outputs(
+            output_dir, transcript_id, keep=existing
+        )
         return "skipped", existing
-
-    user_prompt = (
-        f"逐字稿 ID：{transcript_id}\n"
-        f"标题：{payload.get('metadata', {}).get('title', transcript_id)}\n\n"
-        "每段开头的 S0001、S0002 等是本次普查唯一定位码。content_clusters.segment_indexes "
-        "及 anchors.segment_index 必须逐字使用这些 S 编号，不要使用 source_index。\n\n"
-        "以下是完整逐字稿。请依据系统提示输出 JSON。\n\n"
-        + _transcript_for_prompt(payload)
-    )
     # Exact source anchors are a non-negotiable constraint.  A model may
     # occasionally normalize punctuation while copying Chinese transcript
     # text, so give it one targeted correction pass.  We never fuzzy-repair
@@ -495,7 +621,7 @@ def run_one(
         try:
             validate_survey(
                 candidate,
-                payload,
+                physical_payload,
                 raw,
                 expected_extraction_fingerprint=extraction["fingerprint_sha256"],
             )
@@ -506,9 +632,16 @@ def run_one(
         break
     if survey is None:
         raise validation_error or SurveyValidationError("survey validation failed")
+    survey["extraction"]["artifact_sha256"] = _survey_artifact_sha256(survey)
     output_path = output_dir / f"{_slug(transcript_id)}.first-pass.json"
+    _retire_other_transcript_outputs(
+        output_dir, transcript_id, keep=output_path
+    )
     _archive_superseded_output(output_path)
-    output_path.write_text(json.dumps(survey, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _atomic_artifact_write(
+        output_path,
+        (json.dumps(survey, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+    )
     return "created", output_path
 
 

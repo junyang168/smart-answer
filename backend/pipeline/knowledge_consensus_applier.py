@@ -9,17 +9,79 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
+import tempfile
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from backend.pipeline.knowledge_package_merge import (
+    KnowledgePackageMergeError,
+    validate_merged_package,
+)
 from backend.pipeline.knowledge_source import load_knowledge_source_document
 from backend.pipeline.run_ledger import run_record
 from backend.pipeline.source_keys import package_row_key
+from backend.pipeline.source_projection import assert_locator_space_compatible, project_script
+from backend.pipeline.corpus_ai_review_runner import _validate_claim_layer_package
+from backend.pipeline.corpus_ai_adjudication_runner import _overrides_artifact_sha256
 
 
 class ConsensusApplicationError(ValueError):
     pass
+
+
+def _validate_overrides_artifact(
+    overrides: dict[str, Any], *, package_sha256: str
+) -> None:
+    if overrides.get("artifact_sha256") != _overrides_artifact_sha256(overrides):
+        raise ConsensusApplicationError(
+            "consensus overrides artifact is incomplete or was modified"
+        )
+    fingerprint = overrides.get("adjudication_fingerprint")
+    if not isinstance(fingerprint, dict):
+        raise ConsensusApplicationError(
+            "consensus overrides lack a package-bound adjudication fingerprint"
+        )
+    if fingerprint.get("source_package_sha256") != package_sha256:
+        raise ConsensusApplicationError(
+            "consensus overrides were adjudicated against a different package"
+        )
+
+
+def _serialized(payload: dict[str, Any]) -> bytes:
+    return (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+
+
+def _atomic_write(path: Path, content: bytes) -> None:
+    """Install one complete derived artifact, never a partially written JSON file."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _archive_previous(path: Path) -> None:
+    if not path.is_file():
+        return
+    content = path.read_bytes()
+    fingerprint = hashlib.sha256(content).hexdigest()[:16]
+    archive = path.parent / "consensus-generations" / f"{path.stem}.{fingerprint}.json"
+    if not archive.exists():
+        _atomic_write(archive, content)
 
 
 def _matches_signature(anchor: dict[str, Any], signature: dict[str, Any], transcript_id: str) -> bool:
@@ -162,10 +224,21 @@ def apply_consensus_overrides(
             transcript = transcripts.get(transcript_id)
             if transcript is None:
                 raise ConsensusApplicationError(f"missing transcript for anchor addition: {transcript_id}")
+            source = next(
+                item for item in result.get("source_documents", [])
+                if item.get("transcript_id") == transcript_id
+            )
+            try:
+                assert_locator_space_compatible(source, transcript.get("script", []))
+            except ValueError as exc:
+                raise ConsensusApplicationError(
+                    f"ambiguous source locators for {transcript_id}: {exc}"
+                ) from exc
             source_index = str(addition.get("source_index") or "")
+            source_rows = project_script(transcript.get("script", [])).body_rows
             matching = [
                 (ordinal, segment)
-                for ordinal, segment in enumerate(transcript.get("script", []))
+                for ordinal, segment in enumerate(source_rows)
                 if str(segment.get("index")) == source_index
             ]
             if len(matching) != 1:
@@ -179,10 +252,6 @@ def apply_consensus_overrides(
                 raise ConsensusApplicationError(f"anchor addition is not verbatim: {claim_id}:{source_index}")
             evidence_id = f"AI-ADJ-{claim_id}-{position:02d}"
             fragment_id = f"FR-{evidence_id}"
-            source = next(
-                item for item in result.get("source_documents", [])
-                if item.get("transcript_id") == transcript_id
-            )
             fragments.append({
                 "fragment_id": fragment_id,
                 "source_id": source["source_id"],
@@ -339,6 +408,16 @@ def apply_consensus_overrides(
         "active_claim_count": len(result.get("claims", [])) - len(superseded),
         "superseded_claim_count": len(superseded),
     }
+    # Consensus can add evidence/fragments and retarget or remove relations.
+    # Revalidate the whole graph before it becomes a current artifact: local
+    # Claim checks cannot detect a generated ID colliding with another
+    # collection or a dangling endpoint introduced by a future override type.
+    try:
+        validate_merged_package(result)
+    except KnowledgePackageMergeError as exc:
+        raise ConsensusApplicationError(
+            f"consensus result violates package integrity: {exc}"
+        ) from exc
     return result
 
 
@@ -352,8 +431,13 @@ def main() -> int:
         default=Path("/opt/homebrew/var/www/church/web/data/script_published"),
     )
     args = parser.parse_args()
-    package = json.loads(args.package.read_text(encoding="utf-8"))
+    package_bytes = args.package.read_bytes()
+    package = json.loads(package_bytes)
+    _validate_claim_layer_package(package)
     overrides = json.loads(args.overrides.read_text(encoding="utf-8"))
+    _validate_overrides_artifact(
+        overrides, package_sha256=hashlib.sha256(package_bytes).hexdigest()
+    )
     transcripts = {}
     transcript_dirs = [args.transcript_dir]
     for source in package.get("source_documents", []):
@@ -361,6 +445,21 @@ def main() -> int:
         transcript, _, _ = load_knowledge_source_document(source, transcript_dirs)
         transcripts[transcript_id] = transcript
     subject = package_row_key(package) or args.package.name
+    result = apply_consensus_overrides(package, overrides, transcripts)
+    encoded = _serialized(result)
+    # The output bytes are the complete deterministic function of package,
+    # overrides, and the SHA-validated transcripts above. Check before opening
+    # a run record: replaying the exact stage must write neither the artifact
+    # nor a second ledger row.
+    if args.output.is_file() and args.output.read_bytes() == encoded:
+        print(json.dumps({
+            "status": "skipped",
+            "reason": "matching consensus application",
+            "adjudication_fingerprint": (
+                result.get("consensus_application") or {}
+            ).get("adjudication_fingerprint"),
+        }, ensure_ascii=False))
+        return 0
     # No model call here, so the row costs nothing and says the one thing the
     # overview could not: whether the adjudicator's overrides were ever applied.
     # One source reached the store from its raw extraction package because
@@ -372,12 +471,12 @@ def main() -> int:
     # still read ✗. A stage name is part of the user-facing contract, not an
     # internal label.
     with run_record(subject=subject, stage="merge") as record:
-        record.inputs({"overrides_path": str(args.overrides)})
-        result = apply_consensus_overrides(package, overrides, transcripts)
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(
-            json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-        )
+        record.inputs({
+            "package_sha256": hashlib.sha256(args.package.read_bytes()).hexdigest(),
+            "overrides_sha256": hashlib.sha256(args.overrides.read_bytes()).hexdigest(),
+        })
+        _archive_previous(args.output)
+        _atomic_write(args.output, encoded)
         record.quality(result["consensus_application"])
         record.outputs(args.output)
     print(json.dumps(result["consensus_application"], ensure_ascii=False))

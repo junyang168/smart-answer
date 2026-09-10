@@ -36,7 +36,12 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from backend.pipeline.knowledge_package import live_claim_ids, live_claims
-from backend.pipeline.relation_id_namespace import namespaced_relation_id, package_source_key
+from backend.pipeline.relation_id_namespace import (
+    generation_namespace,
+    namespaced_id,
+    package_record_namespace,
+    package_source_key,
+)
 
 PROMPT_PATH = Path(__file__).with_name("prompts") / "cross_section_relation_discovery.md"
 
@@ -181,6 +186,7 @@ def validate_proposals(
     *,
     positions: dict[str, int],
     boundaries: Sequence[int],
+    identity: dict[str, Any] | None = None,
 ) -> None:
     """Reject anything that adds material, restates an edge, or stays in one section.
 
@@ -198,8 +204,69 @@ def validate_proposals(
     edges = existing_edges(package)
     errors: list[str] = []
     seen: set[tuple[str, str, str]] = set()
+    seen_relation_ids: set[str] = set()
+    existing_relation_ids: set[str] = set()
+    # A real cross-section extraction package has exactly one source and its
+    # model-local IDs must be interpreted in that source namespace. Some graph
+    # validation callers deliberately pass only records (no source descriptor);
+    # there the raw IDs are already the only available identity and endpoint
+    # errors must not be hidden behind a non-applicable migration error.
+    source_key = ""
+    proposal_namespace = ""
+    if package.get("source_documents"):
+        try:
+            source_key = package_source_key(package)
+            if identity is not None:
+                proposal_namespace, _ = cross_section_generation_identity(
+                    package, response, identity
+                )
+        except ValueError as exc:
+            errors.append(str(exc))
+    if source_key:
+        for rows, field in (
+            (package.get("knowledge_relations") or [], "relation_id"),
+            (package.get("claim_relations") or [], "claim_relation_id"),
+        ):
+            for row in rows:
+                effective = str(row.get(field) or "").strip()
+                if not effective:
+                    errors.append(f"existing {field}: relation has no id")
+                    continue
+                if effective in existing_relation_ids:
+                    errors.append(f"existing duplicate relationship id {effective}")
+                existing_relation_ids.add(effective)
 
-    def check(row: dict[str, Any], label: str, allowed_from: set[str], allowed_to: set[str]) -> None:
+    def check(
+        row: dict[str, Any],
+        label: str,
+        allowed_from: set[str],
+        allowed_to: set[str],
+        relation_kind: str,
+    ) -> None:
+        raw_value = (
+            row.get("relation_id")
+            if relation_kind == "evidence"
+            else row.get("claim_relation_id")
+        )
+        raw_id = str(raw_value or "")
+        if proposal_namespace:
+            try:
+                effective_id = namespaced_id(proposal_namespace, raw_id)
+            except ValueError as exc:
+                errors.append(f"{label}: {exc}")
+                return
+        else:
+            effective_id = raw_id.strip()
+            if not effective_id:
+                errors.append(f"{label}: cross-section relation has no id")
+                return
+        if effective_id in seen_relation_ids:
+            errors.append(f"{label}: duplicate relationship id {effective_id}")
+            return
+        seen_relation_ids.add(effective_id)
+        if effective_id in existing_relation_ids:
+            errors.append(f"{label}: relationship id already exists {effective_id}")
+            return
         from_id, to_id = str(row["from_id"]), str(row["to_id"])
         if from_id not in allowed_from:
             errors.append(f"{label}: {from_id} is not a record this stage may relate from")
@@ -231,9 +298,21 @@ def validate_proposals(
     for row in response.get("evidence_relations") or []:
         # Same rule as extraction: an observation may reason into a step, and a
         # step into a step, but nothing supports an observation.
-        check(row, str(row.get("relation_id") or "?"), observation_ids | evidence_ids, evidence_ids)
+        check(
+            row,
+            str(row.get("relation_id") or "?"),
+            observation_ids | evidence_ids,
+            evidence_ids,
+            "evidence",
+        )
     for row in response.get("claim_relations") or []:
-        check(row, str(row.get("claim_relation_id") or "?"), claim_ids, claim_ids)
+        check(
+            row,
+            str(row.get("claim_relation_id") or "?"),
+            claim_ids,
+            claim_ids,
+            "claim",
+        )
     if errors:
         raise CrossSectionValidationError("cross-window validation failed: " + " | ".join(errors))
 
@@ -253,23 +332,30 @@ def apply_proposals(
 
     updated = json.loads(json.dumps(package, ensure_ascii=False))
     try:
-        source_key = package_source_key(updated)
+        parent_namespace = package_record_namespace(updated)
+        namespace, generation = cross_section_generation_identity(
+            updated, response, identity
+        )
     except ValueError as exc:
         raise CrossSectionValidationError(str(exc)) from exc
 
     for row in response.get("evidence_relations") or []:
         updated.setdefault("knowledge_relations", []).append({
             **row,
-            "relation_id": namespaced_relation_id(source_key, row.get("relation_id")),
+            "relation_id": namespaced_id(namespace, row.get("relation_id")),
+            "record_namespace": namespace,
+            "parent_extraction_record_namespace": parent_namespace,
             "discovered_by": SCHEMA_VERSION,
             "review_status": "candidate",
         })
     for row in response.get("claim_relations") or []:
         updated.setdefault("claim_relations", []).append({
             **row,
-            "claim_relation_id": namespaced_relation_id(
-                source_key, row.get("claim_relation_id")
+            "claim_relation_id": namespaced_id(
+                namespace, row.get("claim_relation_id")
             ),
+            "record_namespace": namespace,
+            "parent_extraction_record_namespace": parent_namespace,
             "discovered_by": SCHEMA_VERSION,
             "review_status": "candidate",
         })
@@ -277,21 +363,54 @@ def apply_proposals(
     summary["evidence_relation_count"] = len(updated.get("knowledge_relations") or [])
     summary["claim_relation_count"] = len(updated.get("claim_relations") or [])
     updated["cross_section_relations"] = {
-        **identity,
+        **generation,
         "evidence_relations_added": len(response.get("evidence_relations") or []),
         "claim_relations_added": len(response.get("claim_relations") or []),
     }
     return updated
 
 
+def cross_section_generation_identity(
+    package: dict[str, Any], response: dict[str, Any], identity: dict[str, Any]
+) -> tuple[str, dict[str, Any]]:
+    """Bind model-local edge ordinals to this exact second-stage response.
+
+    Extraction and cross-section discovery are separate model calls. Reusing
+    the extraction namespace here would let a later ``XER001`` overwrite an
+    earlier, semantically different ``XER001``. The parent namespace, discovery
+    input fingerprint, and canonical response hash make identical retries
+    stable and different responses disjoint.
+    """
+
+    parent_namespace = package_record_namespace(package)
+    fingerprint = str(identity.get("fingerprint_sha256") or "").strip()
+    model_output_sha256 = hashlib.sha256(
+        json.dumps(
+            response, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    ).hexdigest()
+    namespace = generation_namespace(
+        parent_namespace, fingerprint, model_output_sha256
+    )
+    return namespace, {
+        **identity,
+        "parent_extraction_record_namespace": parent_namespace,
+        "record_namespace": namespace,
+        "model_output_sha256": model_output_sha256,
+    }
+
+
 def discovery_identity(
     *, package_sha256: str, prompt: str, model_id: str, section_count: int,
+    reasoning_effort: str = "medium", max_output_tokens: int = 16000,
     backend: str = "api",
 ) -> dict[str, Any]:
     generation = {
         "package_sha256": package_sha256,
         "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
         "model_id": model_id,
+        "reasoning_effort": reasoning_effort,
+        "max_output_tokens": max_output_tokens,
         "section_count": section_count,
         "schema_version": SCHEMA_VERSION,
     }

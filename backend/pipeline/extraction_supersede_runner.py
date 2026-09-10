@@ -17,8 +17,6 @@ from dotenv import load_dotenv
 
 from backend.api.canonical_repository.postgres_store import (
     PostgresKnowledgeStore,
-    build_retirement_plan,
-    combined_plan,
 )
 from backend.pipeline.extraction_supersede import package_source_ids, superseded
 from backend.pipeline.source_keys import package_row_key
@@ -26,61 +24,76 @@ from backend.pipeline.run_ledger import run_record
 from backend.pipeline.record_withdrawal import ANCHORED_COLLECTIONS
 from backend.pipeline.relation_id_namespace import (
     migrate_legacy_cross_section_relation_ids,
+    source_namespace,
 )
 
 RELATION_COLLECTIONS = ("claim_relations", "knowledge_relations")
 
-#: A composition plan that has produced a manuscript. Plans without one are
-#: candidates, and a candidate plan is rebuilt from whatever the claim layer
-#: holds when somebody writes from it -- there is nothing to tell anyone about.
-ARTICLE_COLLECTION = "composition_plans"
-
-
-def articles_to_regenerate(
-    object_ids: set[str],
+def products_to_rebuild(
+    changed_records: set[tuple[str, str]],
     *,
-    routes: Mapping[str, Mapping[str, Any]],
-    decisions: Mapping[str, Mapping[str, Any]],
-    plans: Mapping[str, Mapping[str, Any]],
+    dependencies: Mapping[str, Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
-    """The written articles this withdrawal invalidates.
+    """Current downstream products invalidated by this withdrawal.
 
-    Not a reason to refuse. New material means the article that drew on the
-    old material is rewritten, and the plan, its decisions and its routes are
-    all products of that rewrite -- so a decision citing a retired claim is
-    the expected state between ingesting and regenerating, not a fault to
-    repair. The one thing nobody can work out for themselves is which
-    manuscripts just went stale.
+    This is the read-only preview of ``PostgresKnowledgeStore`` dependency
+    invalidation.  It deliberately reads the generic ProductDependency
+    records used by draft-first products instead of reconstructing an older
+    CompositionPlan citation graph.  Keeping preview and apply on the same
+    authority prevents an ingest from silently making a product stale.
 
-    Traced through the actual citation paths rather than by searching the
-    payload text, so an id mentioned in prose does not read as a dependency.
+    Claim dependencies have a dedicated field for backwards compatibility;
+    every other dependency is represented in ``dependency_manifest``.
     """
 
-    if not object_ids:
+    if not changed_records:
         return []
-    by_plan: dict[str, set[str]] = {}
-    for payload in routes.values():
-        if str(payload.get("claim_id") or "") in object_ids:
-            by_plan.setdefault(str(payload.get("target_id") or ""), set()).add(
-                str(payload.get("claim_id"))
-            )
-    for payload in decisions.values():
-        cited = {str(value) for value in (payload.get("claim_ids") or [])} & object_ids
-        if cited:
-            by_plan.setdefault(str(payload.get("plan_id") or ""), set()).update(cited)
-
-    articles: list[dict[str, Any]] = []
-    for plan_id, payload in plans.items():
-        if not payload.get("manuscript_sha256"):
+    by_consumer: dict[tuple[str, str], dict[str, set[Any]]] = {}
+    for dependency_id, payload in dependencies.items():
+        if str(payload.get("status") or "current") != "current":
             continue
-        cited = by_plan.get(plan_id, set())
-        if cited:
-            articles.append({
-                "plan_id": plan_id,
-                "description": str(payload.get("description") or "")[:80],
-                "claims_withdrawn": len(cited),
-            })
-    return sorted(articles, key=lambda row: -row["claims_withdrawn"])
+        refs = {
+            (str(item.get("collection") or ""), str(item.get("record_id") or ""))
+            for item in payload.get("dependency_manifest") or []
+            if isinstance(item, Mapping)
+        }
+        claim_id = str(payload.get("claim_id") or "").strip()
+        if claim_id:
+            refs.add(("claims", claim_id))
+        affected = refs & changed_records
+        if not affected:
+            continue
+        consumer_kind = str(payload.get("consumer_kind") or "unknown")
+        consumer_id = str(payload.get("consumer_id") or "")
+        group = by_consumer.setdefault(
+            (consumer_kind, consumer_id),
+            {"dependency_ids": set(), "changed_records": set()},
+        )
+        group["dependency_ids"].add(str(dependency_id))
+        group["changed_records"].update(affected)
+
+    return [
+        {
+            "consumer_kind": consumer_kind,
+            "consumer_id": consumer_id,
+            "affected_dependency_ids": sorted(group["dependency_ids"]),
+            "changed_records": [
+                {"collection": collection, "record_id": record_id}
+                for collection, record_id in sorted(group["changed_records"])
+            ],
+        }
+        for (consumer_kind, consumer_id), group in sorted(by_consumer.items())
+    ]
+
+
+def product_impact_keys(change_set: Any) -> set[tuple[str, str]]:
+    """Records whose revision/state change can invalidate a consumer."""
+
+    return {
+        (operation.collection, operation.object_id)
+        for operation in change_set.operations
+        if operation.operation in {"update", "retire", "revive"}
+    }
 
 
 def _live(cursor: Any, collection: str) -> dict[str, dict[str, Any]]:
@@ -92,37 +105,160 @@ def _live(cursor: Any, collection: str) -> dict[str, dict[str, Any]]:
     return {str(object_id): payload for object_id, payload in cursor.fetchall()}
 
 
+def transcript_source_aliases(
+    package: Mapping[str, Any], live_documents: Mapping[str, Mapping[str, Any]]
+) -> set[str]:
+    """Legacy source IDs that name the same explicit transcript identity."""
+
+    incoming = {
+        str(row.get("source_id") or ""): (
+            str(row.get("source_type") or "").strip(),
+            str(row.get("transcript_id") or "").strip(),
+        )
+        for row in package.get("source_documents") or []
+        if str(row.get("source_id") or "").strip()
+        and str(row.get("transcript_id") or "").strip()
+    }
+    if len(incoming.values()) != len(set(incoming.values())):
+        raise ValueError(
+            "incoming package has multiple source IDs for the same transcript identity"
+        )
+
+    incoming_identities = set(incoming.values())
+    incoming_transcripts = {transcript_id for _, transcript_id in incoming_identities}
+
+    aliases: set[str] = set()
+    for source_id, row in live_documents.items():
+        if source_id in incoming:
+            continue
+        transcript_id = str(row.get("transcript_id") or source_id).strip()
+        if transcript_id not in incoming_transcripts:
+            continue
+        source_type = str(row.get("source_type") or "").strip()
+        if not source_type or any(
+            not incoming_type
+            for incoming_type, incoming_transcript in incoming_identities
+            if incoming_transcript == transcript_id
+        ):
+            raise ValueError(
+                "cannot safely alias source with missing source_type: "
+                f"{source_id!r} and transcript {transcript_id!r}"
+            )
+        if (source_type, transcript_id) in incoming_identities:
+            aliases.add(source_id)
+    return aliases
+
+
+def transcript_predecessor_namespaces(
+    package: Mapping[str, Any], live_documents: Mapping[str, Mapping[str, Any]]
+) -> set[str]:
+    """Every explicit extraction namespace currently serving this transcript.
+
+    The current source id can remain stable while a new extraction generation
+    arrives, so this includes both aliases and the row that will be updated.
+    Exact generations come from SourceDocument provenance. The legacy compiler
+    used ``transcript_id`` for direct sermon runs but a manifest ``source_id``
+    for manifest runs, and the SourceDocument does not record which entry point
+    produced it. Include both candidates, but only after matching the complete
+    ``(source_type, transcript_id)`` identity, so a same-named source of another
+    type cannot be swept into this replacement.
+    """
+
+    incoming_identities = {
+        (
+            str(row.get("source_type") or "").strip(),
+            str(row.get("transcript_id") or "").strip(),
+        )
+        for row in package.get("source_documents") or []
+        if str(row.get("source_type") or "").strip()
+        and str(row.get("transcript_id") or "").strip()
+    }
+    live_types_by_transcript: dict[str, set[str]] = {}
+    for source_id, row in live_documents.items():
+        transcript_id = str(row.get("transcript_id") or source_id).strip()
+        source_type = str(row.get("source_type") or "").strip()
+        if transcript_id and source_type:
+            live_types_by_transcript.setdefault(transcript_id, set()).add(source_type)
+    ambiguous_transcripts = sorted(
+        transcript_id
+        for _source_type, transcript_id in incoming_identities
+        if len(live_types_by_transcript.get(transcript_id, set())) > 1
+    )
+    if ambiguous_transcripts:
+        raise ValueError(
+            "cannot safely infer a legacy transcript namespace shared by multiple "
+            "source types: " + ", ".join(ambiguous_transcripts)
+        )
+    result: set[str] = set()
+    for source_id, row in live_documents.items():
+        transcript_id = str(row.get("transcript_id") or source_id).strip()
+        identity = (
+            str(row.get("source_type") or "").strip(),
+            transcript_id,
+        )
+        if identity not in incoming_identities:
+            continue
+        declared = str(row.get("extraction_record_namespace") or "").strip()
+        if declared:
+            result.add(declared)
+        for legacy_key in {str(source_id).strip(), transcript_id}:
+            if legacy_key:
+                result.add(source_namespace(legacy_key))
+    return result
+
+
 def plan(store: PostgresKnowledgeStore, package: dict[str, Any], *, source_kind: str):
     """The one change set that lands `package` and withdraws its predecessor.
 
-    Returns the plan, the withdrawal, and the written articles it invalidates.
+    Returns the plan, the withdrawal, and the downstream products it invalidates.
     """
 
     with store.connect() as conn, conn.cursor() as cursor:
+        live_documents = _live(cursor, "source_documents")
+        aliases = transcript_source_aliases(package, live_documents)
+        predecessor_namespaces = transcript_predecessor_namespaces(
+            package, live_documents
+        )
         withdrawal = superseded(
             package,
             live_fragments=_live(cursor, "source_fragments"),
             owners={name: _live(cursor, name) for name in ANCHORED_COLLECTIONS},
             claims=_live(cursor, "claims"),
             relations={name: _live(cursor, name) for name in RELATION_COLLECTIONS},
+            source_alias_ids=aliases,
+            predecessor_namespaces=predecessor_namespaces,
         )
-        articles = articles_to_regenerate(
-            {o for _, o in withdrawal.closure()},
-            routes=_live(cursor, "knowledge_routes"),
-            decisions=_live(cursor, "composition_decisions"),
-            plans=_live(cursor, ARTICLE_COLLECTION),
-        )
-    arrival = store.plan_package(package, source_kind=source_kind)
+        dependencies = _live(cursor, "product_dependencies")
     keys = withdrawal.closure()
-    retirement = store.plan_retirement(
-        keys,
-        reason=f"superseded by {package.get('package_id')}",
-        package_id=str(package.get("package_id") or "PACKAGE"),
-        source_kind="extraction_supersede",
-    ) if keys else build_retirement_plan(
-        [], {}, reason="none", package_id=str(package.get("package_id") or "PACKAGE"),
+    change_set = store.plan_package(
+        package,
+        source_kind=source_kind,
+        retiring_keys=keys,
     )
-    return combined_plan(arrival, retirement), withdrawal, articles
+    products = products_to_rebuild(
+        product_impact_keys(change_set),
+        dependencies=dependencies,
+    )
+    return change_set, withdrawal, products
+
+
+def no_op_result(change_set: Any) -> dict[str, Any] | None:
+    """Return a terminal result when this exact store state needs no write.
+
+    After a replacement lands, replanning the same package sees the new rows
+    as unchanged and the old rows as already retired. Its withdrawal
+    fingerprint is therefore different from the first apply, so relying only
+    on ChangeSet fingerprint idempotency would insert a second, empty ChangeSet.
+    Zero operations means zero database writes instead.
+    """
+
+    if change_set.operations:
+        return None
+    return {
+        "status": "unchanged",
+        "change_set_id": None,
+        "summary": change_set.as_dict()["summary"],
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -139,7 +275,7 @@ def main(argv: list[str] | None = None) -> int:
         original_package
     )
     store = PostgresKnowledgeStore(args.database_url)
-    change_set, withdrawal, articles = plan(store, package, source_kind=args.source_kind)
+    change_set, withdrawal, products = plan(store, package, source_kind=args.source_kind)
     output: dict[str, Any] = {
         "package": str(args.package),
         "sources": sorted(package_source_ids(package)),
@@ -147,11 +283,16 @@ def main(argv: list[str] | None = None) -> int:
         "change_set_id": change_set.change_set_id,
         "summary": change_set.as_dict()["summary"],
         "relation_id_namespace_migration": relation_id_migration,
-        # The only thing a person has to act on: new material means the
-        # articles written from the old material get regenerated.
-        "articles_to_regenerate": articles,
+        # The only thing a person has to act on: new material means every
+        # current downstream consumer bound to the old records gets rebuilt.
+        "products_to_rebuild": products,
     }
     if args.apply:
+        unchanged = no_op_result(change_set)
+        if unchanged is not None:
+            output["result"] = unchanged
+            print(json.dumps(output, ensure_ascii=False, indent=2))
+            return 0
         # Only a run that writes files a row. Planning is a question anybody may
         # ask and one row per question would bury the writes among them. The
         # row matters more since this became the batch runner's ingest stage:
@@ -180,9 +321,7 @@ def main(argv: list[str] | None = None) -> int:
             })
             record.metadata({
                 "change_set_id": output.get("change_set_id"),
-                # The one thing a person has to act on afterwards: new material
-                # means the articles written from the old material go stale.
-                "articles_to_regenerate": articles,
+                "products_to_rebuild": products,
                 "relation_id_namespace_migration": relation_id_migration,
             })
             record.outputs(args.package)

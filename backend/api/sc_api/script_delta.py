@@ -6,8 +6,17 @@ import math
 import re
 import datetime
 import tempfile
+import hashlib
+import fcntl
+import warnings
+from pathlib import Path
 
 from .sentence_splitter import SentenceSplitter
+
+
+class ScriptConflictError(RuntimeError):
+    """The editor tried to save over a newer script snapshot."""
+
 
 class ScriptDelta:
 
@@ -206,8 +215,19 @@ class ScriptDelta:
         return script_changes
     
   
-    def save_script(self,user_id:str, type:str, item:str, data):
-        #update local file        
+    def save_script(
+        self,
+        user_id: str,
+        type: str,
+        item: str,
+        data,
+        *,
+        expected_current_sha256: str | None = None,
+    ):
+        if type not in {'scripts', 'slides'}:
+            raise ValueError(f"unsupported update type: {type}")
+        if type == 'scripts' and not expected_current_sha256:
+            raise ValueError("expected_current_sha256 is required for script updates")
         folder = 'slide' if type == 'slides' else 'script_review'
         data_dicts = []
         for p in data:
@@ -220,11 +240,24 @@ class ScriptDelta:
             if p.end_index:
                 ent['end_index'] = p.end_index
             data_dicts.append(ent)
-        self.save_script_rows(folder, data_dicts)
+        written_sha256 = self.save_script_rows(
+            folder,
+            data_dicts,
+            expected_current_sha256=expected_current_sha256,
+        )
 
-        return {"message": f"{folder} updated successfully"}
+        return {
+            "message": f"{folder} updated successfully",
+            "script_sha256": written_sha256,
+        }
 
-    def save_script_rows(self, folder: str, rows):
+    def save_script_rows(
+        self,
+        folder: str,
+        rows,
+        *,
+        expected_current_sha256: str | None = None,
+    ):
         """Atomically save already-normalized rows without dropping their fields.
 
         The editor's ``save_script`` deliberately projects Pydantic objects to
@@ -233,33 +266,121 @@ class ScriptDelta:
         so it uses this narrower mapping-based entry point.
         """
 
-        self.save_rows(self.base_folder, self.item_name, folder, rows)
+        return self.save_rows(
+            self.base_folder,
+            self.item_name,
+            folder,
+            rows,
+            expected_current_sha256=expected_current_sha256,
+        )
 
     @staticmethod
-    def save_rows(base_folder: str, item_name: str, folder: str, rows):
-        """Atomic mapping save that does not require loading the media timeline."""
+    def read_rows_with_sha(base_folder: str, item_name: str, folder: str):
+        """Read one exact script snapshot under the same lock used by writers."""
 
         if folder not in ('slide', 'script_review'):
             raise ValueError(f"unsupported script folder: {folder}")
         target = os.path.join(base_folder, folder, item_name + '.json')
-        os.makedirs(os.path.dirname(target), exist_ok=True)
-        target_mode = os.stat(target).st_mode & 0o777 if os.path.exists(target) else 0o644
-        descriptor, temporary = tempfile.mkstemp(
-            prefix=f".{item_name}.", suffix=".tmp", dir=os.path.dirname(target)
+        lock_path = os.path.join(
+            os.path.dirname(target), f".{os.path.basename(target)}.lock"
         )
-        try:
-            os.chmod(temporary, target_mode)
-            with os.fdopen(descriptor, "w", encoding="UTF-8") as file:
-                json.dump(list(rows), file, ensure_ascii=False, indent=4)
-                file.flush()
-                os.fsync(file.fileno())
-            os.replace(temporary, target)
-        except Exception:
+        with open(lock_path, "a+b") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_SH)
+            raw = Path(target).read_bytes()
+        rows = json.loads(raw)
+        if not isinstance(rows, list):
+            raise ValueError(f"{target}: script must be a JSON array")
+        return rows, hashlib.sha256(raw).hexdigest()
+
+    def get_review_script_with_sha(self):
+        rows, source_sha256 = self.read_rows_with_sha(
+            self.base_folder, self.item_name, "script_review"
+        )
+        self.patched = rows
+        self.add_timeline(self.patched)
+        return self.patched, source_sha256
+
+    @staticmethod
+    def save_rows(
+        base_folder: str,
+        item_name: str,
+        folder: str,
+        rows,
+        *,
+        expected_current_sha256: str | None = None,
+    ):
+        """Atomically save mappings, with an optional compare-and-swap guard.
+
+        Every writer takes the same sidecar lock. Pipeline writes additionally
+        supply the SHA they read, so an editor save that lands while headings
+        are being generated makes the pipeline fail instead of being
+        overwritten by a stale result.
+        """
+
+        if folder not in ('slide', 'script_review'):
+            raise ValueError(f"unsupported script folder: {folder}")
+        if folder == 'script_review' and not expected_current_sha256:
+            raise ValueError(
+                "expected_current_sha256 is required for script_review writes"
+            )
+        target = os.path.join(base_folder, folder, item_name + '.json')
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        lock_path = os.path.join(
+            os.path.dirname(target), f".{os.path.basename(target)}.lock"
+        )
+        with open(lock_path, "a+b") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            if expected_current_sha256 is not None:
+                actual = (
+                    hashlib.sha256(Path(target).read_bytes()).hexdigest()
+                    if os.path.exists(target)
+                    else None
+                )
+                if actual != expected_current_sha256:
+                    raise ScriptConflictError(
+                        "script changed before atomic save: "
+                        f"expected {expected_current_sha256}, found {actual or 'missing'}"
+                    )
+            target_mode = os.stat(target).st_mode & 0o777 if os.path.exists(target) else 0o644
+            encoded = json.dumps(list(rows), ensure_ascii=False, indent=4).encode("UTF-8")
+            written_sha256 = hashlib.sha256(encoded).hexdigest()
+            descriptor, temporary = tempfile.mkstemp(
+                prefix=f".{item_name}.", suffix=".tmp", dir=os.path.dirname(target)
+            )
             try:
-                os.unlink(temporary)
-            except FileNotFoundError:
-                pass
-            raise
+                os.chmod(temporary, target_mode)
+                with os.fdopen(descriptor, "wb") as file:
+                    file.write(encoded)
+                    file.flush()
+                    os.fsync(file.fileno())
+                os.replace(temporary, target)
+                # Verify the installed bytes before releasing the lock.  A
+                # caller-side read would race with the next valid writer and
+                # could falsely report this successful commit as a failure.
+                committed_sha256 = hashlib.sha256(Path(target).read_bytes()).hexdigest()
+                if committed_sha256 != written_sha256:
+                    raise RuntimeError("installed script bytes differ from authorized payload")
+                directory_fd = os.open(os.path.dirname(target), os.O_RDONLY)
+                try:
+                    try:
+                        os.fsync(directory_fd)
+                    except OSError as exc:
+                        # The file contents were already fsynced and atomically
+                        # installed. Reporting the operation as failed here
+                        # invites a retry that inserts the same subtitles again.
+                        warnings.warn(
+                            f"could not fsync script directory after committed save: {exc}",
+                            RuntimeWarning,
+                        )
+                finally:
+                    os.close(directory_fd)
+            except Exception:
+                try:
+                    os.unlink(temporary)
+                except FileNotFoundError:
+                    pass
+                raise
+            return written_sha256
 
 
     @staticmethod

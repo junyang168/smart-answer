@@ -15,11 +15,20 @@ from backend.pipeline.extraction_sections import (
     FROM_SOURCE,
     OversizedSectionError,
     Section,
+    SectionBoundaryError,
+    SectionPlan,
     breadcrumb_for,
     load_cached_plan,
     plan_sections,
     save_plan,
     sections_from_headings,
+)
+from backend.pipeline.knowledge_source import markdown_blocks
+from backend.pipeline.source_projection import (
+    LOCATOR_SPACE,
+    EditorialHeading,
+    project_script,
+    script_from_markdown_blocks,
 )
 
 
@@ -38,7 +47,7 @@ def test_sections_split_at_the_units_the_source_was_written_in() -> None:
     segments[8] = "## 二、從馬可福音現象回應"
     segments[15] = "## 三、捨己與背十字架"
     sections = sections_from_headings(segments)
-    assert [(s.start, s.end) for s in sections] == [(0, 8), (8, 15), (15, 20)]
+    assert [(s.start, s.end) for s in sections] == [(0, 7), (7, 13), (13, 17)]
     assert [s.title for s in sections] == [
         "一、彌賽亞秘密理論", "二、從馬可福音現象回應", "三、捨己與背十字架",
     ]
@@ -56,11 +65,11 @@ def test_subheadings_do_not_start_a_section() -> None:
 
 def test_oversized_section_uses_subheadings_to_make_two_balanced_chunks() -> None:
     segments = _segments(12)
-    segments[0] = "## 第一部分"
-    for position in (2, 4, 6, 8, 10):
-        segments[position] = f"### 子题 {position}"
+    headings = [EditorialHeading(0, 2, "第一部分")]
+    headings.extend(EditorialHeading(position, 3, f"子题 {position}") for position in (2, 4, 6, 8, 10))
     plan = plan_sections(
-        segments, sentence_counts=[30] * len(segments), max_section_sentences=180,
+        segments, headings=headings,
+        sentence_counts=[30] * len(segments), max_section_sentences=180,
     )
     assert [(row.start, row.end) for row in plan.sections] == [(0, 6), (6, 12)]
     assert [sum([30] * (row.end - row.start)) for row in plan.sections] == [180, 180]
@@ -69,31 +78,34 @@ def test_oversized_section_uses_subheadings_to_make_two_balanced_chunks() -> Non
 
 def test_adaptive_sectioning_keeps_normal_h2_section_whole() -> None:
     segments = _segments(6)
-    segments[0] = "## 第一部分"
-    segments[3] = "### 子题"
+    headings = [EditorialHeading(0, 2, "第一部分"), EditorialHeading(3, 3, "子题")]
     plan = plan_sections(
-        segments, sentence_counts=[20] * len(segments), max_section_sentences=180,
+        segments, headings=headings,
+        sentence_counts=[20] * len(segments), max_section_sentences=180,
     )
     assert [(row.start, row.end) for row in plan.sections] == [(0, 6)]
 
 
 def test_adaptive_sectioning_uses_three_chunks_only_when_two_cannot_fit() -> None:
     segments = _segments(9)
-    segments[0] = "## 第一部分"
-    segments[3] = "### 子题二"
-    segments[6] = "### 子题三"
+    headings = [
+        EditorialHeading(0, 2, "第一部分"),
+        EditorialHeading(3, 3, "子题二"),
+        EditorialHeading(6, 3, "子题三"),
+    ]
     plan = plan_sections(
-        segments, sentence_counts=[50] * len(segments), max_section_sentences=180,
+        segments, headings=headings,
+        sentence_counts=[50] * len(segments), max_section_sentences=180,
     )
     assert [(row.start, row.end) for row in plan.sections] == [(0, 3), (3, 6), (6, 9)]
 
 
 def test_adaptive_sectioning_fails_closed_without_a_safe_subheading() -> None:
     segments = _segments(8)
-    segments[0] = "## 第一部分"
     with pytest.raises(OversizedSectionError, match="no level-3 heading"):
         plan_sections(
-            segments, sentence_counts=[30] * len(segments), max_section_sentences=180,
+            segments, headings=[EditorialHeading(0, 2, "第一部分")],
+            sentence_counts=[30] * len(segments), max_section_sentences=180,
         )
 
 
@@ -102,7 +114,7 @@ def test_sections_cover_every_segment_exactly_once() -> None:
     for position in (0, 7, 7, 19):
         segments[position] = f"## 標題 {position}"
     covered = [p for s in sections_from_headings(segments) for p in range(s.start, s.end)]
-    assert covered == list(range(30))
+    assert covered == list(range(27))
 
 
 def test_breadcrumb_reports_the_enclosing_heading_chain() -> None:
@@ -110,8 +122,9 @@ def test_breadcrumb_reports_the_enclosing_heading_chain() -> None:
     segments[0] = "## 二、從馬可福音現象回應"
     segments[2] = "### 釋經"
     segments[5] = "### 附錄"
-    assert breadcrumb_for(segments, 4) == "二、從馬可福音現象回應 > 釋經"
-    assert breadcrumb_for(segments, 6) == "二、從馬可福音現象回應 > 附錄"
+    headings = project_script([{"text": text} for text in segments]).headings
+    assert breadcrumb_for(headings, 2) == "二、從馬可福音現象回應 > 釋經"
+    assert breadcrumb_for(headings, 3) == "二、從馬可福音現象回應 > 附錄"
 
 
 # --------------------------------------------------------------------------
@@ -139,6 +152,36 @@ def test_a_source_with_no_headings_gets_boundaries_from_the_generator() -> None:
     assert plan.sections[1].title == "第一部分：八福"
 
 
+def test_a_trailing_empty_heading_does_not_suppress_the_generator() -> None:
+    provider = _provider([
+        {"after_index": "START", "text": "## 正确标题", "level": 1},
+    ])
+    segments = _segments(3)
+
+    plan = plan_sections(
+        segments,
+        headings=[EditorialHeading(boundary=3, level=2, title="空标题")],
+        provider=provider,
+    )
+
+    assert plan.origin == FROM_GENERATOR
+    assert [section.title for section in plan.sections] == ["正确标题"]
+    assert provider.seen == [
+        {"index": index, "text": text} for index, text in enumerate(segments)
+    ]
+
+
+def test_duplicate_editorial_headings_at_one_level_fail_closed() -> None:
+    with pytest.raises(SectionBoundaryError, match="duplicate H2"):
+        plan_sections(
+            _segments(3),
+            headings=[
+                EditorialHeading(boundary=0, level=2, title="第一标题"),
+                EditorialHeading(boundary=0, level=2, title="冲突标题"),
+            ],
+        )
+
+
 def test_a_source_that_already_has_headings_never_calls_the_generator() -> None:
     """Where the author broke the text beats a model's guess at where they would."""
 
@@ -146,7 +189,12 @@ def test_a_source_that_already_has_headings_never_calls_the_generator() -> None:
     segments[0] = "## 一、標題"
     segments[6] = "## 二、標題"
     called = []
-    plan = plan_sections(segments, provider=lambda rows: called.append(rows) or [])
+    projection = project_script([{"text": text} for text in segments])
+    plan = plan_sections(
+        [row["text"] for row in projection.body_rows],
+        headings=projection.headings,
+        provider=lambda rows: called.append(rows) or [],
+    )
     assert plan.origin == FROM_SOURCE
     assert called == []
     assert len(plan.sections) == 2
@@ -177,16 +225,69 @@ def test_plan_enters_the_fingerprint_and_survives_a_round_trip(tmp_path: Path) -
 
 def test_cached_plan_is_bound_to_adaptive_policy(tmp_path: Path) -> None:
     segments = _segments(10)
-    segments[0] = "## 第一部分"
-    segments[5] = "### 第二小段"
     plan = plan_sections(
-        segments, sentence_counts=[30] * len(segments), max_section_sentences=180,
+        segments,
+        headings=[
+            EditorialHeading(0, 2, "第一部分"),
+            EditorialHeading(5, 3, "第二小段"),
+        ],
+        sentence_counts=[30] * len(segments), max_section_sentences=180,
     )
     path = tmp_path / "plan.json"
     save_plan(path, plan, source_sha256="abc")
     assert load_cached_plan(path, "abc", max_section_sentences=180) == plan
     assert load_cached_plan(path, "abc") is None
     assert load_cached_plan(path, "abc", max_section_sentences=200) is None
+
+
+def test_saving_an_identical_section_plan_does_not_rewrite_the_artifact(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "plan.json"
+    plan = SectionPlan(
+        sections=(Section(index=1, start=0, end=2, title="第一部分"),),
+        origin=FROM_SOURCE,
+    )
+    save_plan(
+        path,
+        plan,
+        source_sha256="abc",
+        source_file_sha256="physical",
+        editorial_structure_sha256="structure",
+    )
+    first_inode = path.stat().st_ino
+
+    save_plan(
+        path,
+        plan,
+        source_sha256="abc",
+        source_file_sha256="physical",
+        editorial_structure_sha256="structure",
+    )
+
+    assert path.stat().st_ino == first_inode
+
+
+def test_cached_plan_is_invalidated_when_editorial_structure_changes(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "plan.json"
+    plan = SectionPlan(
+        sections=(Section(index=1, start=0, end=2, title="旧标题"),),
+        origin=FROM_SOURCE,
+    )
+    save_plan(
+        path,
+        plan,
+        source_sha256="same-body",
+        editorial_structure_sha256="old-structure",
+    )
+
+    assert load_cached_plan(
+        path,
+        "same-body",
+        editorial_structure_sha256="new-structure",
+    ) is None
 
 
 def test_legacy_default_cache_remains_compatible_but_not_with_new_policy(
@@ -309,11 +410,20 @@ def test_coverage_is_recorded_on_the_package_it_scores(tmp_path: Path) -> None:
     source.write_text(
         "## 一、標題\n\n彼得宣認耶穌是基督，這一認信本身是正確的。\n", encoding="utf-8"
     )
+    projection = project_script(
+        script_from_markdown_blocks(markdown_blocks(source.read_text(encoding="utf-8")))
+    )
     package_path = tmp_path / "pkg.json"
     package_path.write_text(json.dumps({
-        "source_documents": [{"source_id": "SRC"}],
+        "source_documents": [{
+            "source_id": "SRC",
+            "source_type": "notes_manuscript",
+            "source_sha256": projection.body_sha256,
+            "source_body_sha256": projection.body_sha256,
+            "locator_space": LOCATOR_SPACE,
+        }],
         "source_fragments": [{
-            "fragment_id": "FR-1", "paragraph_key": "S0002",
+            "fragment_id": "FR-1", "paragraph_key": "S0001",
             "verbatim_excerpt": "彼得宣認耶穌是基督",
         }],
         "evidence_steps": [{"evidence_step_id": "E001", "source_fragment_ids": ["FR-1"]}],

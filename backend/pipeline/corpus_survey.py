@@ -6,6 +6,13 @@ import json
 from pathlib import Path
 from typing import Any
 
+from backend.pipeline.source_projection import (
+    LocatorSpaceError,
+    assert_locator_space_compatible,
+    project_script,
+    source_uses_body_locator_space,
+)
+
 
 ALLOWED_CLUSTER_FUNCTIONS = {
     "exegesis",
@@ -53,8 +60,15 @@ def validate_survey(
     _require(survey.get("survey_version") == "wang_corpus_first_pass_v1", "unsupported survey_version")
 
     source = survey.get("source") or {}
-    script = transcript.get("script") or []
-    # Survey-local locators address physical segments unambiguously even when
+    physical_script = transcript.get("script") or []
+    try:
+        assert_locator_space_compatible(source, physical_script)
+    except LocatorSpaceError as exc:
+        raise SurveyValidationError(str(exc)) from exc
+    uses_body_identity = source_uses_body_locator_space(source)
+    projection = project_script(physical_script)
+    script = list(projection.body_rows) if uses_body_identity else physical_script
+    # Survey-local locators address source-body segments unambiguously even when
     # a legacy transcript repeats its own ``index`` value.  Unique original
     # IDs remain accepted for backward compatibility with earlier v1 cards.
     segments = {f"S{position + 1:04d}": segment for position, segment in enumerate(script)}
@@ -71,13 +85,18 @@ def validate_survey(
         "first-pass samples must be published or reviewed",
     )
     _require(source.get("segment_count") == len(script), "source.segment_count does not match transcript")
-    _require(source.get("sha256") == hashlib.sha256(raw_source).hexdigest(), "source SHA256 mismatch")
+    actual_source_sha256 = (
+        projection.body_sha256
+        if uses_body_identity
+        else hashlib.sha256(raw_source).hexdigest()
+    )
+    _require(source.get("sha256") == actual_source_sha256, "source SHA256 mismatch")
 
     extraction = survey.get("extraction")
     if expected_extraction_fingerprint is not None:
         _require(isinstance(extraction, dict), "missing extraction metadata")
     if isinstance(extraction, dict):
-        identity_keys = (
+        identity_keys = [
             "source_sha256",
             "prompt_sha256",
             "model_id",
@@ -85,23 +104,33 @@ def validate_survey(
             "max_output_tokens",
             "schema_version",
             "response_schema_sha256",
+            "contract_fingerprint_sha256",
             "generation_fingerprint_sha256",
-        )
+        ]
+        if "editorial_structure_sha256" in extraction:
+            identity_keys.append("editorial_structure_sha256")
+        if "user_prompt_sha256" in extraction:
+            identity_keys.append("user_prompt_sha256")
         identity = {key: extraction.get(key) for key in identity_keys}
         computed = hashlib.sha256(
             json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
         _require(extraction.get("source_sha256") == source.get("sha256"), "extraction source SHA256 mismatch")
+        generation_keys = [
+            "prompt_sha256",
+            "model_id",
+            "reasoning_effort",
+            "max_output_tokens",
+            "schema_version",
+            "response_schema_sha256",
+        ]
+        if "editorial_structure_sha256" in extraction:
+            generation_keys.append("editorial_structure_sha256")
+        if "user_prompt_sha256" in extraction:
+            generation_keys.append("user_prompt_sha256")
         generation_identity = {
             key: extraction.get(key)
-            for key in (
-                "prompt_sha256",
-                "model_id",
-                "reasoning_effort",
-                "max_output_tokens",
-                "schema_version",
-                "response_schema_sha256",
-            )
+            for key in generation_keys
         }
         generation_computed = hashlib.sha256(
             json.dumps(
@@ -114,6 +143,29 @@ def validate_survey(
         _require(
             extraction.get("generation_fingerprint_sha256") == generation_computed,
             "extraction generation fingerprint mismatch",
+        )
+        contract_identity = {
+            key: extraction.get(key)
+            for key in [
+                "prompt_sha256",
+                "model_id",
+                "reasoning_effort",
+                "max_output_tokens",
+                "schema_version",
+                "response_schema_sha256",
+            ]
+        }
+        contract_computed = hashlib.sha256(
+            json.dumps(
+                contract_identity,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        _require(
+            extraction.get("contract_fingerprint_sha256") == contract_computed,
+            "extraction contract fingerprint mismatch",
         )
         _require(extraction.get("fingerprint_sha256") == computed, "extraction fingerprint mismatch")
         if expected_extraction_fingerprint is not None:

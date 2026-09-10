@@ -12,8 +12,9 @@ and passed `validate_response` first try on both Opus 5 and DeepSeek v4 pro. So
 the lever is the *closed question*, not the small chunk: "these 42 sentences,
 account for each one" is answerable; "produce the argument layer" is not.
 
-`##` is the right cut because it is where the manuscript was written. The
-notes pipeline generates one unit per `##` (`stage1_units.json` for this 母本
+`##` is the right grouping boundary in the existing editorial structure; it is
+not source text. The notes pipeline generates one unit per `##`
+(`stage1_units.json` for this 母本
 names four, and they are its four `##` sections), and the measurement agrees:
 of 264 relations extraction produced within a section, 0 cross a `##`, while
 every one of the 20 long-distance relations crosses a `###`. `###` is the
@@ -31,13 +32,20 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
+import os
+import tempfile
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-HEADING_PATTERN = re.compile(r"^(#{1,6})\s")
+from backend.pipeline.source_projection import (
+    EditorialHeading,
+    LOCATOR_SPACE,
+    heading_level,
+    heading_text,
+    project_script,
+)
 
 #: Headings at or above this level start a new section. See the module docstring
 #: for why this is 2 and not 3.
@@ -111,16 +119,7 @@ class SectionPlan:
         return next((s for s in self.sections if s.contains(position)), None)
 
 
-def heading_level(text: str) -> int | None:
-    match = HEADING_PATTERN.match(str(text).lstrip())
-    return len(match.group(1)) if match else None
-
-
-def heading_text(text: str) -> str:
-    return HEADING_PATTERN.sub("", str(text).lstrip(), count=1).strip()
-
-
-def breadcrumb_for(segments: Sequence[str], position: int) -> str:
+def breadcrumb_for(headings: Sequence[EditorialHeading], position: int) -> str:
     """The enclosing heading chain at `position`, outermost first.
 
     Free context, and what the sub-headings are actually good for: a section
@@ -129,31 +128,61 @@ def breadcrumb_for(segments: Sequence[str], position: int) -> str:
     """
 
     chain: dict[int, str] = {}
-    for index in range(min(position + 1, len(segments))):
-        level = heading_level(segments[index])
-        if level is None:
+    for heading in headings:
+        if heading.boundary > position:
             continue
-        chain = {depth: title for depth, title in chain.items() if depth < level}
-        chain[level] = heading_text(segments[index])
+        chain = {depth: title for depth, title in chain.items() if depth < heading.level}
+        chain[heading.level] = heading.title
     return " > ".join(chain[depth] for depth in sorted(chain))
 
 
 def sections_from_headings(
     segments: Sequence[str], *, level: int = DEFAULT_SECTION_LEVEL
 ) -> list[Section]:
-    """Split at the headings the source already carries."""
+    """Compatibility wrapper projecting inline headings out of ``segments``."""
+
+    projection = project_script([{"text": text} for text in segments])
+    return sections_from_structure(
+        len(projection.body_rows), projection.headings, level=level
+    )
+
+
+def sections_from_structure(
+    body_length: int,
+    headings: Sequence[EditorialHeading],
+    *,
+    level: int = DEFAULT_SECTION_LEVEL,
+) -> list[Section]:
+    """Split spoken body at editor-authored boundaries.
+
+    The heading row itself is not inside either section.  Every boundary is in
+    body coordinates, so adding a subtitle cannot renumber a source locator.
+    """
 
     starts: list[int] = [0]
-    titles: dict[int, str] = {}
-    for position, text in enumerate(segments):
-        depth = heading_level(text)
-        if depth is not None and depth <= level:
-            titles[position] = heading_text(text)
-            if position > starts[-1]:
-                starts.append(position)
+    titles: dict[int, tuple[int, str]] = {}
+    seen_heading_slots: set[tuple[int, int]] = set()
+    for heading in headings:
+        if heading.level <= level and heading.boundary < body_length:
+            slot = (heading.boundary, heading.level)
+            if slot in seen_heading_slots:
+                raise SectionBoundaryError(
+                    f"duplicate H{heading.level} headings at body boundary {heading.boundary}"
+                )
+            seen_heading_slots.add(slot)
+            previous = titles.get(heading.boundary)
+            if previous is None or heading.level >= previous[0]:
+                titles[heading.boundary] = (heading.level, heading.title)
+            if 0 < heading.boundary < body_length and heading.boundary > starts[-1]:
+                starts.append(heading.boundary)
     return [
-        Section(index=index + 1, start=start, end=end, title=titles.get(start, ""))
-        for index, (start, end) in enumerate(zip(starts, starts[1:] + [len(segments)]))
+        Section(
+            index=index + 1,
+            start=start,
+            end=end,
+            title=titles.get(start, (0, ""))[1],
+        )
+        for index, (start, end) in enumerate(zip(starts, starts[1:] + [body_length]))
         if end > start
     ]
 
@@ -172,6 +201,49 @@ def has_section_headings(
         (depth := heading_level(text)) is not None and depth <= level
         for text in segments
     )
+
+
+def structure_has_section_headings(
+    headings: Sequence[EditorialHeading], *, level: int = DEFAULT_SECTION_LEVEL,
+    body_length: int | None = None,
+) -> bool:
+    """Whether editorial structure contains a section-level label."""
+
+    return any(
+        row.level <= level
+        and (body_length is None or row.boundary < body_length)
+        for row in headings
+    )
+
+
+def leading_untitled_span_end(
+    segments: Sequence[str], *, level: int = DEFAULT_SECTION_LEVEL
+) -> int | None:
+    """Return the exclusive end of an untitled leading span, if one exists."""
+
+    if not segments:
+        return None
+    for position, text in enumerate(segments):
+        depth = heading_level(text)
+        if depth is not None and depth <= level:
+            return position or None
+    return len(segments)
+
+
+def leading_untitled_body_end(
+    headings: Sequence[EditorialHeading],
+    body_length: int,
+    *,
+    level: int = DEFAULT_SECTION_LEVEL,
+) -> int | None:
+    """Exclusive body-coordinate end of an unlabeled leading span, if any."""
+
+    if body_length == 0:
+        return None
+    for heading in headings:
+        if heading.level <= level:
+            return heading.boundary or None
+    return body_length
 
 
 #: A callable that takes `[{"index": ..., "text": ...}]` and returns
@@ -193,27 +265,78 @@ class OversizedSectionError(ValueError):
     """A section is over its limit and has no safe next-level split."""
 
 
+def generated_plan_insertions(
+    plan: SectionPlan, body_rows: Sequence[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Render a frozen generated plan as persisted ``##`` editorial rows."""
+
+    if plan.origin != FROM_GENERATOR:
+        raise SectionBoundaryError("cached plan was not generated subtitles")
+    if not body_rows or not plan.sections:
+        raise SectionBoundaryError("cached generated plan has no spoken-source sections")
+    if plan.sections[0].start != 0 or not plan.sections[0].title.strip():
+        raise SectionBoundaryError("cached generated plan did not title the leading section")
+    expected_start = 0
+    insertions: list[dict[str, Any]] = []
+    for ordinal, section in enumerate(plan.sections, start=1):
+        if section.index != ordinal or section.start != expected_start:
+            raise SectionBoundaryError("cached generated sections are not a contiguous partition")
+        if section.end <= section.start or section.end > len(body_rows) or not section.title.strip():
+            raise SectionBoundaryError("cached generated section is untitled or out of range")
+        after_index = (
+            "START"
+            if section.start == 0
+            else str(body_rows[section.start - 1].get("index"))
+        )
+        insertions.append(
+            {"after_index": after_index, "text": section.title, "level": 1}
+        )
+        expected_start = section.end
+    if expected_start != len(body_rows):
+        raise SectionBoundaryError("cached generated sections do not cover the spoken source")
+    return insertions
+
+
 def sections_from_generator(
-    segments: Sequence[str], provider: SubtitleProvider
+    segments: Sequence[str],
+    provider: SubtitleProvider,
+    *,
+    segment_indexes: Sequence[Any] | None = None,
 ) -> list[Section]:
     """Ask the subtitle generator where this source breaks.
 
-    The generated titles are *not* written back into the source. Inserting them
-    would shift every S-number after the insertion point, which moves anchors,
-    the ledger's inventory, and `source_sha256` -- and only the boundaries are
-    needed here. The titles ride along on the plan instead.
+    Generated headings are editorial structure.  Whether or not they are later
+    persisted in the same JSON, the returned boundaries stay in spoken-body
+    coordinates and therefore never move S locators.
     """
 
-    paragraphs = [{"index": str(position), "text": text} for position, text in enumerate(segments)]
+    indexes = list(segment_indexes) if segment_indexes is not None else list(range(len(segments)))
+    if len(indexes) != len(segments):
+        raise ValueError("segment_indexes must cover every spoken segment")
+    normalized_indexes = [str(value) for value in indexes]
+    if len(normalized_indexes) != len(set(normalized_indexes)):
+        raise SectionBoundaryError("spoken source indexes are not unique")
+    position_by_index = {
+        value: position for position, value in enumerate(normalized_indexes)
+    }
+    paragraphs = [
+        {"index": indexes[position], "text": text}
+        for position, text in enumerate(segments)
+    ]
     insertions = provider(paragraphs) or []
     boundaries: dict[int, str] = {0: ""}
     for row in insertions:
         if int(row.get("level") or 0) != 1:
             continue
-        after = str(row.get("after_index") or "")
+        raw_after = row.get("after_index")
+        after = "" if raw_after is None else str(raw_after)
         # "START" means before everything; otherwise the section opens at the
         # segment following the one named.
-        position = 0 if after.upper() == "START" else _position_after(after, len(segments))
+        position = (
+            0
+            if after.upper() == "START"
+            else _position_after(after, position_by_index, len(segments))
+        )
         if position is None:
             # Not skipped. A boundary nobody can place is a section this source
             # will never be asked about, and dropping it quietly leaves the
@@ -231,7 +354,9 @@ def sections_from_generator(
     ]
 
 
-def _position_after(after_index: str, total: int) -> int | None:
+def _position_after(
+    after_index: str, position_by_index: dict[str, int], total: int
+) -> int | None:
     """The segment a section opens at, or None if the index names no segment.
 
     `total` is allowed as a result: a heading proposed after the last segment
@@ -240,21 +365,23 @@ def _position_after(after_index: str, total: int) -> int | None:
     only the second one is a fault worth failing the source over.
     """
 
-    if not after_index.lstrip("-").isdigit():
+    if after_index not in position_by_index:
         return None
-    position = int(after_index) + 1
+    position = position_by_index[after_index] + 1
     return position if 0 < position <= total else None
 
 
 def plan_sections(
     segments: Sequence[str],
     *,
+    headings: Sequence[EditorialHeading] = (),
+    segment_indexes: Sequence[Any] | None = None,
     level: int = DEFAULT_SECTION_LEVEL,
     provider: SubtitleProvider | None = None,
     sentence_counts: Sequence[int] | None = None,
     max_section_sentences: int | None = None,
 ) -> SectionPlan:
-    """Section the source, generating boundaries only when it has none.
+    """Section spoken source rows, generating boundaries only when it has none.
 
     A source that already carries `##` is never sent to the generator: those
     headings are where the text was actually composed, and a model's guess does
@@ -280,16 +407,20 @@ def plan_sections(
             max_section_sentences=max_section_sentences,
             strategy=ADAPTIVE_SECTION_STRATEGY if max_section_sentences is not None else None,
         )
-    sections = sections_from_headings(segments, level=level)
+    sections = sections_from_structure(len(segments), headings, level=level)
     origin = FROM_SOURCE
-    if len(sections) <= 1 and provider is not None:
-        generated = sections_from_generator(segments, provider)
+    if not structure_has_section_headings(
+        headings, level=level, body_length=len(segments)
+    ) and provider is not None:
+        generated = sections_from_generator(
+            segments, provider, segment_indexes=segment_indexes
+        )
         origin = FROM_GENERATOR
-        if len(generated) > 1:
+        if generated:
             sections = generated
     if max_section_sentences is not None:
         sections = _split_oversized_sections(
-            segments, sections, sentence_counts or (), level=level,
+            sections, sentence_counts or (), headings=headings, level=level,
             max_section_sentences=max_section_sentences,
         )
     return SectionPlan(
@@ -300,8 +431,12 @@ def plan_sections(
 
 
 def _split_oversized_sections(
-    segments: Sequence[str], sections: Sequence[Section], sentence_counts: Sequence[int],
-    *, level: int, max_section_sentences: int,
+    sections: Sequence[Section],
+    sentence_counts: Sequence[int],
+    *,
+    headings: Sequence[EditorialHeading],
+    level: int,
+    max_section_sentences: int,
 ) -> list[Section]:
     """Split only oversized sections, at the next heading depth.
 
@@ -318,11 +453,12 @@ def _split_oversized_sections(
             result.append(section)
             continue
 
-        starts = [section.start] + [
-            position
-            for position in range(section.start + 1, section.end)
-            if heading_level(segments[position]) == level + 1
-        ]
+        starts = [section.start] + sorted({
+            heading.boundary
+            for heading in headings
+            if heading.level == level + 1
+            and section.start < heading.boundary < section.end
+        })
         if len(starts) == 1:
             raise OversizedSectionError(
                 f"section {section.index} has {total} sentences (limit "
@@ -340,7 +476,7 @@ def _split_oversized_sections(
         for atom_start, atom_end in groups:
             start = starts[atom_start]
             end = ends[atom_end - 1]
-            title = section.title if start == section.start else breadcrumb_for(segments, start)
+            title = section.title if start == section.start else breadcrumb_for(headings, start)
             result.append(Section(index=0, start=start, end=end, title=title))
 
     return [
@@ -400,13 +536,25 @@ def _balanced_minimum_groups(
 def load_cached_plan(
     path: Path, source_sha256: str, *, level: int = DEFAULT_SECTION_LEVEL,
     max_section_sentences: int | None = None,
+    editorial_structure_sha256: str | None = None,
 ) -> SectionPlan | None:
-    """A generated plan is only reusable for the exact source it was made from."""
+    """Load a plan bound to the exact spoken-source body identity."""
 
     if not path.is_file():
         return None
     payload = json.loads(path.read_text(encoding="utf-8"))
-    if payload.get("source_sha256") != source_sha256:
+    cached_locator_space = payload.get("locator_space")
+    if cached_locator_space not in {None, LOCATOR_SPACE}:
+        return None
+    recorded_source_sha256 = payload.get("source_body_sha256") or payload.get("source_sha256")
+    if recorded_source_sha256 != source_sha256:
+        return None
+    recorded_structure_sha256 = payload.get("editorial_structure_sha256")
+    if (
+        recorded_structure_sha256 is not None
+        and editorial_structure_sha256 is not None
+        and recorded_structure_sha256 != editorial_structure_sha256
+    ):
         return None
     cached_level = int(payload.get("section_level", DEFAULT_SECTION_LEVEL))
     cached_max = payload.get("max_section_sentences")
@@ -427,12 +575,23 @@ def load_cached_plan(
     )
 
 
-def save_plan(path: Path, plan: SectionPlan, source_sha256: str) -> None:
+def save_plan(
+    path: Path,
+    plan: SectionPlan,
+    source_sha256: str,
+    *,
+    source_file_sha256: str | None = None,
+    editorial_structure_sha256: str | None = None,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+    content = (
         json.dumps(
             {
                 "source_sha256": source_sha256,
+                "source_body_sha256": source_sha256,
+                "source_file_sha256": source_file_sha256,
+                "editorial_structure_sha256": editorial_structure_sha256,
+                "locator_space": LOCATOR_SPACE,
                 "origin": plan.origin,
                 "section_level": plan.level,
                 "max_section_sentences": plan.max_section_sentences,
@@ -442,9 +601,26 @@ def save_plan(path: Path, plan: SectionPlan, source_sha256: str) -> None:
             ensure_ascii=False,
             indent=2,
         )
-        + "\n",
-        encoding="utf-8",
+        + "\n"
     )
+    encoded = content.encode("utf-8")
+    if path.is_file() and path.read_bytes() == encoded:
+        return
+    descriptor, temporary = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 # --------------------------------------------------------------------------

@@ -335,6 +335,7 @@ from backend.pipeline.detailed_knowledge_extraction_runner import (  # noqa: E40
 )
 from backend.pipeline.extraction_sections import Section  # noqa: E402
 from backend.pipeline.sentence_ledger_runner import load_segments  # noqa: E402
+from backend.pipeline.source_projection import project_script  # noqa: E402
 
 
 def _published_transcript(tmp_path: Path, texts: list[str]) -> tuple[Path, dict]:
@@ -366,7 +367,7 @@ def test_a_transcript_is_inventoried_by_position_like_its_anchors(tmp_path: Path
     """
 
     path, _ = _published_transcript(tmp_path, ["## 標題", "第一句。", "第二句。"])
-    assert [index for index, _ in load_segments(path)] == [1, 2, 3]
+    assert [index for index, _ in load_segments(path)] == [1, 2]
 
 
 def test_an_exclusion_addresses_the_sentence_the_ledger_inventoried(tmp_path: Path) -> None:
@@ -378,7 +379,11 @@ def test_an_exclusion_addresses_the_sentence_the_ledger_inventoried(tmp_path: Pa
     """
 
     path, source = _published_transcript(tmp_path, ["## 標題", "第一句。第二句。"])
-    sentences = section_sentences(source, Section(index=1, start=0, end=2, title="標題"))
+    source = {
+        **source,
+        "script": list(project_script(source["script"]).body_rows),
+    }
+    sentences = section_sentences(source, Section(index=1, start=0, end=1, title="標題"))
     source_id = published_source_id("sermon", None)
     exclusions = exclusions_from_audit(
         {"sentence_audit": [

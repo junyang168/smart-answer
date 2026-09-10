@@ -30,7 +30,13 @@ from typing import Any, Iterable, Optional
 from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
 from backend.pipeline.base_contract_coverage import sentence_spans
 from backend.pipeline.sentence_ledger import PROSE, classify_sentence
-from backend.pipeline.knowledge_source import live_script, markdown_blocks
+from backend.pipeline.knowledge_source import markdown_blocks
+from backend.pipeline.source_projection import (
+    assert_locator_space_compatible,
+    project_script,
+    script_from_markdown_blocks,
+    source_uses_body_locator_space,
+)
 
 # Collections that can carry a `source_fragment_id`, i.e. that can be placed on
 # the source text.  `claims` deliberately is not one of them: a claim reaches
@@ -122,20 +128,17 @@ def load_segments(document: dict[str, Any], path: Path) -> tuple[list[dict[str, 
     raw = path.read_bytes()
     if str(document.get("source_type") or "") == "notes_manuscript":
         blocks = markdown_blocks(raw.decode("utf-8"))
-        script: list[dict[str, Any]] = [
-            {"index": position + 1, "text": block} for position, block in enumerate(blocks)
-        ]
+        script = script_from_markdown_blocks(blocks)
     else:
         parsed = json.loads(raw)
         script = parsed.get("script", []) if isinstance(parsed, dict) else parsed
         if not isinstance(script, list):
             raise ValueError(f"{path}: transcript has no script list")
-        # A struck-through span was deleted by a proofreader, so it is not a
-        # gap in coverage and must not be shown to a reviewer as one.
-        script = live_script(script)
+    assert_locator_space_compatible(document, script)
+    projection = project_script(script)
 
     segments = []
-    for position, item in enumerate(script):
+    for position, item in enumerate(projection.body_rows):
         text = str((item or {}).get("text") or "")
         stripped = text.strip()
         segments.append(
@@ -152,7 +155,7 @@ def load_segments(document: dict[str, Any], path: Path) -> tuple[list[dict[str, 
                 "fragment_ids": [],
             }
         )
-    return segments, hashlib.sha256(raw).hexdigest()
+    return segments, projection.body_sha256
 
 
 class _SegmentIndex:
@@ -340,17 +343,27 @@ class SourceCoverageReader:
             "project_id": document.get("project_id"),
             "source_path": str(path) if path else str(document.get("source_path") or ""),
             "recorded_sha256": document.get("source_sha256"),
+            "recorded_body_sha256": document.get("source_body_sha256"),
             "file_state": "missing",
             "file_sha256": None,
+            "body_sha256": None,
         }
         if path is None:
             return {"source": {**meta, "stats": _empty_stats()}, "segments": [], "fragments": {}, "nodes": {}, "claims": {}}
 
-        segments, file_sha256 = load_segments(document, path)
-        meta["file_sha256"] = file_sha256
+        segments, body_sha256 = load_segments(document, path)
+        meta["file_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        meta["body_sha256"] = body_sha256
         # A source edited after extraction does not merely lose a few anchors;
         # every offset in it is now a guess.  The page has to say which it is.
-        meta["file_state"] = "current" if file_sha256 == meta["recorded_sha256"] else "drifted"
+        uses_body_coordinates = source_uses_body_locator_space(document)
+        expected_sha256 = (
+            meta["recorded_body_sha256"]
+            if uses_body_coordinates
+            else meta["recorded_sha256"]
+        )
+        actual_sha256 = body_sha256 if uses_body_coordinates else meta["file_sha256"]
+        meta["file_state"] = "current" if actual_sha256 == expected_sha256 else "drifted"
 
         fragments = _place_fragments(corpus["fragments_by_source"].get(source_id, []), segments)
         nodes, claims = self._attach(corpus, fragments)

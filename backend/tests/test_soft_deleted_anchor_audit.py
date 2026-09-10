@@ -2,8 +2,23 @@
 
 from __future__ import annotations
 
-from backend.api.canonical_repository.postgres_store import build_retirement_plan
-from backend.pipeline.soft_deleted_anchor_audit import audit, excerpt_is_deleted
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from backend.api.canonical_repository.postgres_store import (
+    build_retirement_plan,
+    normalize_package,
+    record_content_sha,
+)
+from backend.pipeline.soft_deleted_anchor_audit import (
+    audit,
+    excerpt_is_deleted,
+    segment_texts,
+)
+from backend.pipeline.record_withdrawal import closure_from_fragments
 
 SEGMENTS = ["教會建立在信仰上。~~我昨天講過這個。~~所以我們繼續。"]
 
@@ -38,6 +53,37 @@ def test_text_that_survives_anywhere_is_not_deleted() -> None:
     assert excerpt_is_deleted("我昨天講過", segments, "S0001")
 
 
+def test_editorial_rows_do_not_make_deleted_source_excerpt_survive(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "sermon.json"
+    path.write_text(
+        json.dumps(
+            [
+                {"index": 1, "text": "教授說：~~這句已經刪除~~。"},
+                {
+                    "index": "subtitle-1",
+                    "type": "subtitle",
+                    "text": "## 這句已經刪除",
+                    "user_id": "editor@example.org",
+                },
+                {
+                    "index": "comment-1",
+                    "type": "comment",
+                    "text": "這句已經刪除",
+                },
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    segments = segment_texts(path)
+
+    assert segments == ["教授說：~~這句已經刪除~~。"]
+    assert excerpt_is_deleted("這句已經刪除", segments, "S0001") is True
+
+
 def _audit(**overrides):
     base = dict(
         fragments={
@@ -69,6 +115,21 @@ def test_a_record_keeping_one_live_anchor_is_weakened_not_retired() -> None:
     result = _audit()
     assert result.weakened_owners == [("evidence_steps", "E-kept")]
     assert result.orphaned_owners == [("evidence_steps", "E-gone")]
+
+
+def test_legacy_singular_fragment_owner_is_in_the_withdrawal_closure() -> None:
+    result = closure_from_fragments(
+        {"FR-dead": "SRC-1"},
+        owners={
+            "evidence_steps": {
+                "E-legacy": {"source_fragment_id": "FR-dead"},
+            }
+        },
+        claims={},
+    )
+
+    assert result.orphaned_owners == [("evidence_steps", "E-legacy")]
+    assert ("evidence_steps", "E-legacy") in result.closure()
 
 
 def test_a_claim_keeps_standing_while_one_of_its_steps_does() -> None:
@@ -218,6 +279,171 @@ def test_a_fragment_the_new_extraction_reproduces_is_an_update_not_a_casualty() 
     assert set(result.withdrawn_fragments) == {"FR-old"}
 
 
+def test_a_legacy_source_id_for_the_same_transcript_is_retired_with_its_generation() -> None:
+    from backend.pipeline.extraction_supersede_runner import transcript_source_aliases
+
+    package = _package()
+    package["source_documents"][0]["transcript_id"] = "SERMON-1"
+    aliases = transcript_source_aliases(
+        package,
+        {
+            "SRC-1": {
+                "source_id": "SRC-1",
+                "source_type": "sermon_transcript",
+                "transcript_id": "SERMON-1",
+            },
+            "legacy-sermon-1": {
+                "source_id": "legacy-sermon-1",
+                "source_type": "sermon_transcript",
+                "transcript_id": "SERMON-1",
+            },
+            "SRC-2": {
+                "source_id": "SRC-2",
+                "source_type": "sermon_transcript",
+                "transcript_id": "SERMON-2",
+            },
+        },
+    )
+    result = superseded(
+        package,
+        live_fragments={
+            "FR-alias": {"source_id": "legacy-sermon-1"},
+            "FR-other": {"source_id": "SRC-2"},
+        },
+        owners={},
+        claims={},
+        source_alias_ids=aliases,
+    )
+
+    assert aliases == {"legacy-sermon-1"}
+    assert result.withdrawn_fragments == {"FR-alias": "legacy-sermon-1"}
+    assert ("source_documents", "legacy-sermon-1") in result.closure()
+    assert ("source_documents", "SRC-2") not in result.closure()
+
+
+def test_alias_matching_does_not_cross_source_types() -> None:
+    from backend.pipeline.extraction_supersede_runner import transcript_source_aliases
+
+    package = _package()
+    package["source_documents"][0]["transcript_id"] = "SHARED-NAME"
+    assert transcript_source_aliases(
+        package,
+        {
+            "notes-with-same-name": {
+                "source_type": "notes_manuscript",
+                "transcript_id": "SHARED-NAME",
+            }
+        },
+    ) == set()
+
+
+def test_legacy_source_id_is_used_as_transcript_identity() -> None:
+    from backend.pipeline.extraction_supersede_runner import transcript_source_aliases
+
+    package = _package()
+    package["source_documents"][0]["transcript_id"] = "SERMON-1"
+    assert transcript_source_aliases(
+        package,
+        {
+            "SERMON-1": {
+                "source_id": "SERMON-1",
+                "source_type": "sermon_transcript",
+            }
+        },
+    ) == {"SERMON-1"}
+
+
+def test_ambiguous_legacy_alias_without_source_type_fails_closed() -> None:
+    from backend.pipeline.extraction_supersede_runner import transcript_source_aliases
+
+    package = _package()
+    package["source_documents"][0]["transcript_id"] = "SERMON-1"
+    with pytest.raises(ValueError, match="missing source_type"):
+        transcript_source_aliases(package, {"SERMON-1": {"source_id": "SERMON-1"}})
+
+
+def test_incoming_package_cannot_name_one_transcript_twice() -> None:
+    from backend.pipeline.extraction_supersede_runner import transcript_source_aliases
+
+    package = _package()
+    package["source_documents"][0]["transcript_id"] = "SERMON-1"
+    package["source_documents"].append({
+        "source_id": "SRC-alias",
+        "source_type": "sermon_transcript",
+        "transcript_id": "SERMON-1",
+    })
+    with pytest.raises(ValueError, match="multiple source IDs"):
+        transcript_source_aliases(package, {})
+
+
+def test_alias_identity_includes_source_type() -> None:
+    from backend.pipeline.extraction_supersede_runner import transcript_source_aliases
+
+    package = {
+        "source_documents": [
+            {
+                "source_id": "SERMON-NEW",
+                "source_type": "sermon_transcript",
+                "transcript_id": "SHARED-NAME",
+            },
+            {
+                "source_id": "NOTES-NEW",
+                "source_type": "notes_manuscript",
+                "transcript_id": "SHARED-NAME",
+            },
+        ]
+    }
+    live = {
+        "SERMON-OLD": {
+            "source_type": "sermon_transcript",
+            "transcript_id": "SHARED-NAME",
+        },
+        "NOTES-OLD": {
+            "source_type": "notes_manuscript",
+            "transcript_id": "SHARED-NAME",
+        },
+    }
+
+    assert transcript_source_aliases(package, live) == {"SERMON-OLD", "NOTES-OLD"}
+
+
+def test_predecessor_namespaces_include_exact_and_legacy_source_generations() -> None:
+    from backend.pipeline.extraction_supersede_runner import (
+        transcript_predecessor_namespaces,
+    )
+    from backend.pipeline.relation_id_namespace import source_namespace
+
+    package = {
+        "source_documents": [{
+            "source_id": "SRC-NEW",
+            "source_type": "sermon_transcript",
+            "transcript_id": "SERMON-1",
+        }]
+    }
+    live = {
+        "SRC-OLD": {
+            "source_type": "sermon_transcript",
+            "transcript_id": "SERMON-1",
+            "extraction_record_namespace": "DK-111111111111",
+        },
+        "UNRELATED": {
+            "source_type": "sermon_transcript",
+            "transcript_id": "SERMON-2",
+            "extraction_record_namespace": "DK-222222222222",
+        },
+    }
+
+    assert transcript_predecessor_namespaces(package, live) == {
+        "DK-111111111111",
+        source_namespace("SRC-OLD"),
+        # Direct sermon extraction historically names its generated records
+        # from transcript_id, while manifest extraction names them from
+        # source_id. A legacy SourceDocument does not say which path produced
+        # it, so both exact candidates must be retired.
+        source_namespace("SERMON-1"),
+    }
+
+
 def test_the_sources_come_from_the_documents_not_the_fragments() -> None:
     assert package_source_ids(_package()) == {"SRC-1"}
     assert package_source_ids({"source_fragments": [{"source_id": "SRC-9"}]}) == set()
@@ -240,7 +466,7 @@ def test_arrival_and_withdrawal_plan_as_one_change_set() -> None:
     merged = combined_plan(arrival, withdrawal)
     assert merged.as_dict()["summary"]["retired"] == 1
     assert merged.as_dict()["summary"]["created"] == arrival.as_dict()["summary"]["created"]
-    assert [item.operation for item in merged.operations][-1] == "retire"
+    assert [item.operation for item in merged.operations][0] == "retire"
     assert merged.change_set_id not in {arrival.change_set_id, withdrawal.change_set_id}
 
 
@@ -248,55 +474,170 @@ def test_arrival_and_withdrawal_plan_as_one_change_set() -> None:
 # which written articles a withdrawal invalidates
 # ---------------------------------------------------------------------------
 
-from backend.pipeline.extraction_supersede_runner import articles_to_regenerate  # noqa: E402
+from backend.pipeline.extraction_supersede_runner import (  # noqa: E402
+    no_op_result,
+    product_impact_keys,
+    products_to_rebuild,
+)
 
-PLANS = {
-    "CP-written": {"manuscript_sha256": "abc", "description": "太16:13–20"},
-    "CP-candidate": {"description": "還沒寫成稿"},
+DEPENDENCIES = {
+    "PD-draft": {
+        "consumer_kind": "matthew_draft",
+        "consumer_id": "DRAFT-matthew-16-13-20",
+        "claim_id": "CL-old",
+        "status": "current",
+        "dependency_manifest": [],
+    },
+    "PD-qa": {
+        "consumer_kind": "evidence_qa",
+        "consumer_id": "QA-kingdom-keys",
+        "claim_id": "CL-kept",
+        "status": "current",
+        "dependency_manifest": [
+            {"collection": "source_fragments", "record_id": "SF-old"}
+        ],
+    },
+    "PD-already-stale": {
+        "consumer_kind": "matthew_draft",
+        "consumer_id": "DRAFT-old",
+        "claim_id": "CL-old",
+        "status": "invalidated",
+    },
 }
 
 
-def test_only_a_plan_that_produced_a_manuscript_is_reported() -> None:
-    """A candidate plan is rebuilt from whatever the claim layer holds when
-    somebody writes from it, so there is nothing to tell anyone about."""
-
-    articles = articles_to_regenerate(
-        {"CL-old"},
-        routes={"R1": {"claim_id": "CL-old", "target_id": "CP-candidate"}},
-        decisions={},
-        plans=PLANS,
+def test_only_current_product_dependencies_are_reported() -> None:
+    products = products_to_rebuild(
+        {("claims", "CL-old")}, dependencies=DEPENDENCIES
     )
-    assert articles == []
+    assert products == [{
+        "consumer_kind": "matthew_draft",
+        "consumer_id": "DRAFT-matthew-16-13-20",
+        "affected_dependency_ids": ["PD-draft"],
+        "changed_records": [{"collection": "claims", "record_id": "CL-old"}],
+    }]
 
 
-def test_a_written_article_is_reported_through_either_citation_path() -> None:
-    by_route = articles_to_regenerate(
-        {"CL-old"},
-        routes={"R1": {"claim_id": "CL-old", "target_id": "CP-written"}},
-        decisions={},
-        plans=PLANS,
+def test_repeated_supersede_with_no_operations_performs_no_database_write() -> None:
+    from backend.api.canonical_repository.postgres_store import build_change_set_plan
+
+    package = _package()
+    current = {}
+    for collection, rows in normalize_package(package).items():
+        for object_id, payload in rows.items():
+            stored = {**payload, "revision": 1}
+            current[(collection, object_id)] = {
+                "revision": 1,
+                "content_sha256": record_content_sha(stored),
+                "payload": stored,
+            }
+    repeated = build_change_set_plan(package, current)
+
+    assert repeated.operations == ()
+    assert no_op_result(repeated)["status"] == "unchanged"
+    assert no_op_result(repeated)["change_set_id"] is None
+
+
+def test_full_supersede_replan_after_apply_has_zero_operations() -> None:
+    from backend.api.canonical_repository.postgres_store import build_change_set_plan
+    from backend.pipeline.extraction_supersede_runner import plan
+
+    package = _package()
+    normalized = normalize_package(package)
+    existing = {}
+    live: dict[str, dict[str, dict]] = {}
+    for collection, rows in normalized.items():
+        live[collection] = {}
+        for object_id, payload in rows.items():
+            stored = {**payload, "revision": 1}
+            live[collection][object_id] = stored
+            existing[(collection, object_id)] = {
+                "revision": 1,
+                "content_sha256": record_content_sha(stored),
+                "payload": stored,
+            }
+
+    class Cursor:
+        def __init__(self) -> None:
+            self.collection = ""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, _sql, params):
+            self.collection = str(params[0])
+
+        def fetchall(self):
+            return list((live.get(self.collection) or {}).items())
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def cursor(self):
+            return Cursor()
+
+    class Store:
+        def connect(self):
+            return Connection()
+
+        def plan_package(self, incoming, *, source_kind, retiring_keys=()):
+            assert retiring_keys == []
+            return build_change_set_plan(incoming, existing, source_kind=source_kind)
+
+    change_set, withdrawal, products = plan(
+        Store(), package, source_kind="knowledge_package"
     )
-    by_decision = articles_to_regenerate(
-        {"CL-old"},
-        routes={},
-        decisions={"CD-1": {"plan_id": "CP-written", "claim_ids": ["CL-old", "CL-kept"]}},
-        plans=PLANS,
+    assert withdrawal.closure() == []
+    assert products == []
+    assert change_set.operations == ()
+    assert no_op_result(change_set)["status"] == "unchanged"
+
+
+def test_dependency_manifest_reports_non_claim_changes() -> None:
+    products = products_to_rebuild(
+        {("source_fragments", "SF-old")}, dependencies=DEPENDENCIES
     )
-    assert [row["plan_id"] for row in by_route] == ["CP-written"]
-    assert [row["plan_id"] for row in by_decision] == ["CP-written"]
-    assert by_decision[0]["claims_withdrawn"] == 1
+    assert products[0]["consumer_kind"] == "evidence_qa"
+    assert products[0]["affected_dependency_ids"] == ["PD-qa"]
+    assert products[0]["changed_records"] == [
+        {"collection": "source_fragments", "record_id": "SF-old"}
+    ]
+
+
+def test_updated_records_are_part_of_the_product_impact_preview() -> None:
+    change_set = SimpleNamespace(operations=[
+        SimpleNamespace(operation="create", collection="claims", object_id="CL-new"),
+        SimpleNamespace(operation="update", collection="claims", object_id="CL-old"),
+        SimpleNamespace(operation="retire", collection="source_fragments", object_id="SF-old"),
+    ])
+    assert product_impact_keys(change_set) == {
+        ("claims", "CL-old"),
+        ("source_fragments", "SF-old"),
+    }
 
 
 def test_an_id_appearing_only_in_prose_is_not_a_dependency() -> None:
     """Traced through the citation fields, not by searching the payload text."""
 
-    articles = articles_to_regenerate(
-        {"CL-old"},
-        routes={},
-        decisions={"CD-1": {"plan_id": "CP-written", "decision": "參見 CL-old 的討論", "claim_ids": []}},
-        plans=PLANS,
+    products = products_to_rebuild(
+        {("claims", "CL-old")},
+        dependencies={
+            "PD-prose": {
+                "consumer_kind": "matthew_draft",
+                "consumer_id": "DRAFT-1",
+                "claim_id": "CL-kept",
+                "notes": "參見 CL-old 的討論",
+            }
+        },
     )
-    assert articles == []
+    assert products == []
 
 
 # ---------------------------------------------------------------------------

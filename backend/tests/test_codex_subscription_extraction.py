@@ -20,9 +20,13 @@ from backend.pipeline.detailed_knowledge_extraction import (
 from backend.pipeline import detailed_knowledge_extraction_runner as extraction_runner
 from backend.pipeline.detailed_knowledge_extraction_runner import (
     SectionSettings,
+    _package_artifact_sha256,
+    _section_cache_artifact,
+    _load_valid_section_cache,
     build_client,
     run_one,
 )
+from backend.pipeline.extraction_sections import Section
 
 
 def _transcript() -> dict:
@@ -104,6 +108,50 @@ def _response() -> dict:
 
 def _completed(args: list[str], *, stdout: str = "", stderr: str = "", returncode: int = 0):
     return subprocess.CompletedProcess(args=args, returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+def test_section_cache_requires_self_hash_and_full_mechanical_validation(
+    tmp_path: Path,
+) -> None:
+    source = _transcript()
+    section = Section(index=1, start=0, end=3, title="固定章节")
+    sentences = extraction_runner.section_sentences(source, section)
+    response = _response()
+    artifact = _section_cache_artifact(section, response, "generation-fingerprint")
+    path = tmp_path / "section.json"
+    path.write_text(json.dumps(artifact, ensure_ascii=False), encoding="utf-8")
+
+    assert _load_valid_section_cache(
+        path,
+        section=section,
+        fingerprint="generation-fingerprint",
+        source=source,
+        sentences=sentences,
+    ) == response
+
+    artifact["response"]["claims"][0]["statement"] = "被篡改但仍是合法 JSON"
+    path.write_text(json.dumps(artifact, ensure_ascii=False), encoding="utf-8")
+    assert _load_valid_section_cache(
+        path,
+        section=section,
+        fingerprint="generation-fingerprint",
+        source=source,
+        sentences=sentences,
+    ) is None
+
+    restamped = _section_cache_artifact(section, _response(), "generation-fingerprint")
+    restamped["response"]["claims"][0]["evidence_step_ids"] = ["E999"]
+    restamped["artifact_sha256"] = extraction_runner._section_cache_artifact_sha256(
+        restamped
+    )
+    path.write_text(json.dumps(restamped, ensure_ascii=False), encoding="utf-8")
+    assert _load_valid_section_cache(
+        path,
+        section=section,
+        fingerprint="generation-fingerprint",
+        source=source,
+        sentences=sentences,
+    ) is None
 
 
 def test_subscription_environment_removes_api_billing_credentials() -> None:
@@ -200,12 +248,30 @@ def test_subscription_section_passes_schema_validator_and_sentence_ledger_and_th
     int(package["extraction"]["model_output_sha256"], 16)
     assert package["coverage"]["available"] is True
     assert package["coverage"]["unprocessed"] == 0
+    assert package["extraction"]["artifact_sha256"] == _package_artifact_sha256(
+        package
+    )
     assert all("OPENAI_API_KEY" not in child for child in child_environments)
+    section_plan_path = next((output_dir / "section-plans").glob("*.json"))
+    section_plan_before = section_plan_path.read_bytes()
+    section_plan_mtime_before = section_plan_path.stat().st_mtime_ns
 
     def unexpected_run(*_args, **_kwargs):
         raise AssertionError("a full fingerprint cache hit must not launch Codex")
 
     monkeypatch.setattr("backend.pipeline.codex_subscription_client.subprocess.run", unexpected_run)
+    editorial_only_edit = _transcript()
+    editorial_only_edit["script"].insert(
+        1,
+        {
+            "index": "comment-1",
+            "type": "comment",
+            "text": "这条编辑备注既不是来源，也不进入模型。",
+        },
+    )
+    transcript_path.write_text(
+        json.dumps(editorial_only_edit, ensure_ascii=False), encoding="utf-8"
+    )
     fresh_client = CodexSubscriptionClient(
         model="gpt-5.6-sol", executable="codex", environment=environment,
     )
@@ -216,6 +282,27 @@ def test_subscription_section_passes_schema_validator_and_sentence_ledger_and_th
     )
     assert cached_status == "skipped"
     assert cached_output == output
+    assert section_plan_path.read_bytes() == section_plan_before
+    assert section_plan_path.stat().st_mtime_ns == section_plan_mtime_before
+
+    # Legacy runner versions exposed the current package before coverage was
+    # calculated. The exact validated model generation must be repaired
+    # mechanically, not called again or mistaken for a complete no-op.
+    incomplete = json.loads(output.read_text(encoding="utf-8"))
+    del incomplete["coverage"]
+    output.write_text(json.dumps(incomplete, ensure_ascii=False), encoding="utf-8")
+    recovered_status, recovered_output = run_one(
+        transcript_path, output_dir=output_dir, client=fresh_client, prompt="extract",
+        reasoning_effort="medium", force=False,
+        sections=SectionSettings(allow_generated=False),
+    )
+    assert recovered_status == "created"
+    assert recovered_output == output
+    recovered = json.loads(output.read_text(encoding="utf-8"))
+    assert recovered["coverage"]["available"] is True
+    assert recovered["extraction"]["artifact_sha256"] == _package_artifact_sha256(
+        recovered
+    )
 
 
 def test_subscription_backend_changes_fingerprint_without_changing_api_identity() -> None:

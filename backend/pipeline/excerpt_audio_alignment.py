@@ -20,6 +20,12 @@ from typing import Any
 
 from opencc import OpenCC
 
+from backend.pipeline.source_projection import (
+    LocatorSpaceError,
+    assert_locator_space_compatible,
+    project_script,
+)
+
 
 SCHEMA_VERSION = "wang_excerpt_audio_alignment.v1"
 # Reviewed transcripts repair ASR omissions as well as punctuation.  Requiring
@@ -92,9 +98,17 @@ def _seconds(entry: dict[str, Any], edge: str) -> float | None:
 
 
 def _published_segment(
-    published: dict[str, Any] | list[Any], fragment: dict[str, Any]
+    published: dict[str, Any] | list[Any],
+    fragment: dict[str, Any],
+    *,
+    body_coordinates: bool,
 ) -> dict[str, Any] | None:
-    script = published if isinstance(published, list) else published.get("script") or []
+    physical_script = published if isinstance(published, list) else published.get("script") or []
+    script = (
+        list(project_script(physical_script).body_rows)
+        if body_coordinates
+        else physical_script
+    )
     key = str(fragment.get("paragraph_key") or "")
     match = _PARAGRAPH_KEY.match(key)
     if match:
@@ -293,14 +307,34 @@ def align_excerpt(
         return base
     base["published_source_sha256"] = published_sha
     base["raw_timed_source_sha256"] = raw_sha
-    expected_sha = str(source.get("source_sha256") or "")
-    if expected_sha and expected_sha != published_sha:
+    published_script = (
+        published
+        if isinstance(published, list)
+        else published.get("script") or []
+        if isinstance(published, dict)
+        else []
+    )
+    published_body_sha = project_script(published_script).body_sha256
+    try:
+        body_coordinates = assert_locator_space_compatible(source, published_script)
+    except LocatorSpaceError as exc:
+        base["reason"] = str(exc)
+        return base
+    expected_sha = str(
+        source.get("source_body_sha256") or source.get("source_sha256") or ""
+    )
+    actual_sha = published_body_sha if body_coordinates else published_sha
+    if expected_sha and expected_sha != actual_sha:
         base["reason"] = "published transcript SHA does not match SourceDocument"
         return base
     if not isinstance(published, (dict, list)) or not isinstance(raw, dict):
         base["reason"] = "transcript shape cannot provide paragraph lineage"
         return base
-    segment = _published_segment(published, fragment)
+    segment = _published_segment(
+        published,
+        fragment,
+        body_coordinates=body_coordinates,
+    )
     if segment is None:
         base["reason"] = "published paragraph cannot be resolved"
         return base
@@ -416,7 +450,8 @@ def align_transcript_excerpt(
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         published = {}
     excerpt_normalized = _normalized(excerpt)
-    script = published if isinstance(published, list) else published.get("script") or []
+    physical_script = published if isinstance(published, list) else published.get("script") or []
+    script = project_script(physical_script).body_rows
     candidates = [
         row
         for row in script

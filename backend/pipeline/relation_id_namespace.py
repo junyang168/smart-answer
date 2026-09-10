@@ -1,4 +1,4 @@
-"""Deterministically globalize legacy cross-section relation identifiers.
+"""Deterministically globalize extraction-generation identifiers.
 
 The cross-section model is asked to emit short identifiers such as ``XER001``
 and ``XCR001``.  Those identifiers are local to one source/model call.  Version
@@ -6,11 +6,11 @@ and ``XCR001``.  Those identifiers are local to one source/model call.  Version
 could reject the duplicate and the canonical store could silently overwrite a
 different source's relation under the same ``(collection, object_id)`` key.
 
-This module is deliberately not a content stage.  It changes only relation
-identifiers and the explicit identifier references carried by the consensus
-application.  Historical model review and adjudication artifacts remain
-immutable; callers persist the returned manifest beside the effective package
-or in ChangeSet lineage so the mechanical transformation is auditable.
+The source key alone is not enough: a later response can reuse ``CL001`` for a
+different statement. New packages therefore bind every generated object and
+relation to the exact input fingerprint and canonical model-output hash. The legacy
+migration remains deliberately narrower: it changes only relation identifiers
+and their explicit consensus references, and records an auditable manifest.
 """
 
 from __future__ import annotations
@@ -61,16 +61,69 @@ def source_namespace(source_key: str) -> str:
     return f"DK-{hashlib.sha256(value.encode('utf-8')).hexdigest()[:12]}"
 
 
-def namespaced_relation_id(source_key: str, relation_id: Any) -> str:
-    """Namespace one model-local relation id without changing an existing one."""
+def generation_namespace(
+    source_key: str, extraction_fingerprint: str, model_output_sha256: str
+) -> str:
+    """Identify one exact extraction generation, not a model-local ordinal.
+
+    ``CL001`` and ``E001`` are positions in one model response. A later model
+    response can assign those ordinals to different statements, so source-only
+    namespacing cannot prove record identity and could preserve an old review
+    decision on new content. Exact input and output identities make equal runs
+    stable while making distinct generations disjoint.
+    """
+
+    values = [
+        str(source_key or "").strip(),
+        str(extraction_fingerprint or "").strip(),
+        str(model_output_sha256 or "").strip(),
+    ]
+    if not all(values):
+        raise RelationIdNamespaceError(
+            "generation namespace requires source, extraction fingerprint, and model output SHA"
+        )
+    encoded = json.dumps(values, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    # Exact generations are new identities, so they are not constrained by the
+    # 12-hex legacy source namespace. Twenty hex digits keep IDs readable while
+    # making an accidental namespace collision negligible; the store's global
+    # unique index remains the final fail-closed guard.
+    return f"DK-{hashlib.sha256(encoded).hexdigest()[:20]}"
+
+
+def package_record_namespace(package: Mapping[str, Any]) -> str:
+    """Return the record namespace declared by an exact package generation."""
+
+    declared = str((package.get("extraction") or {}).get("record_namespace") or "").strip()
+    if declared:
+        if not re.fullmatch(r"DK-(?:[0-9a-f]{12}|[0-9a-f]{20})", declared):
+            raise RelationIdNamespaceError(
+                f"package declares invalid record namespace {declared!r}"
+            )
+        return declared
+    return source_namespace(package_source_key(package))
+
+
+def namespaced_id(namespace: str, relation_id: Any) -> str:
+    """Place a model-local ID in an already-resolved record namespace."""
 
     value = str(relation_id or "").strip()
     if not value:
         raise RelationIdNamespaceError("cross-section relation has no id")
-    namespace = source_namespace(source_key)
     if value.startswith(f"{namespace}-"):
         return value
     return f"{namespace}-{value}"
+
+
+def namespaced_relation_id(source_key: str, relation_id: Any) -> str:
+    """Namespace one model-local relation id without changing an existing one."""
+
+    return namespaced_id(source_namespace(source_key), relation_id)
+
+
+def package_relation_id(package: Mapping[str, Any], relation_id: Any) -> str:
+    """Namespace a relation in the package's exact extraction generation."""
+
+    return namespaced_id(package_record_namespace(package), relation_id)
 
 
 def is_source_extraction_relation_id(source_key: str, relation_id: Any) -> bool:
@@ -82,12 +135,31 @@ def is_source_extraction_relation_id(source_key: str, relation_id: Any) -> bool:
     a new extraction omits it.
     """
 
-    namespace = re.escape(source_namespace(source_key))
+    return is_namespaced_extraction_relation_id(
+        source_namespace(source_key), relation_id
+    )
+
+
+def is_namespaced_extraction_relation_id(namespace: str, relation_id: Any) -> bool:
+    """Whether an edge id belongs to an explicit generated namespace."""
+
+    escaped = re.escape(str(namespace or ""))
     return bool(
-        re.fullmatch(
-            rf"{namespace}-(?:P\d+-)?(?:ER|CR|XER|XCR)\d+",
+        escaped
+        and re.fullmatch(
+            rf"{escaped}-(?:P\d+-)?(?:ER|CR|XER|XCR)\d+",
             str(relation_id or ""),
         )
+    )
+
+
+def is_package_extraction_relation_id(
+    package: Mapping[str, Any], relation_id: Any
+) -> bool:
+    """Whether an edge belongs to this exact package generation."""
+
+    return is_namespaced_extraction_relation_id(
+        package_record_namespace(package), relation_id
     )
 
 
@@ -143,7 +215,7 @@ def migrate_legacy_cross_section_relation_ids(
     original = json.loads(json.dumps(package, ensure_ascii=False))
     migrated = json.loads(json.dumps(package, ensure_ascii=False))
     source_key = package_source_key(original)
-    namespace = source_namespace(source_key)
+    namespace = package_record_namespace(original)
     input_sha = sha256_json(original)
     id_map: dict[str, str] = {}
     changed_paths: list[dict[str, str]] = []
@@ -152,7 +224,7 @@ def migrate_legacy_cross_section_relation_ids(
         old = str(value or "")
         if not pattern.fullmatch(old):
             return old
-        new = namespaced_relation_id(source_key, old)
+        new = namespaced_id(namespace, old)
         prior = id_map.setdefault(old, new)
         if prior != new:
             raise RelationIdNamespaceError(f"non-bijective mapping for {old}")

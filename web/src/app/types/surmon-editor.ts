@@ -58,6 +58,7 @@ export interface SurmonScriptParagraph {
 export interface SurmonScriptResponse {
   header: SurmonEditorHeader;
   script: SurmonScriptParagraph[];
+  script_sha256: string | null;
 }
 
 export interface SurmonSlideAsset {
@@ -158,6 +159,7 @@ export interface SurmonUpdateScriptPayload {
   item: string;
   type: 'scripts' | 'slides';
   data: SurmonScriptParagraph[] | unknown;
+  expected_script_sha256?: string;
 }
 
 export interface SurmonUpdateHeaderPayload {

@@ -27,7 +27,7 @@ from .fellowship_schedule import (
     save_fellowship_entries,
 )
 from .image_to_text import ImageToText
-from .script_delta import ScriptDelta
+from .script_delta import ScriptConflictError, ScriptDelta
 from .sermon_comment import SermonCommentManager
 from .sermon_meta import Sermon, SermonMetaManager
 
@@ -135,13 +135,17 @@ class SermonManager:
             sermon.series_id = self.get_series_id_for_item(item)
 
         sd = ScriptDelta(self.base_folder, item)
-        script =  sd.get_script( changes == 'changes')
+        if changes == 'changes':
+            script = sd.get_script(True)
+            script_sha256 = None
+        else:
+            script, script_sha256 = sd.get_review_script_with_sha()
         for p in script:
             if p.get('type') == 'comment':
                 ui = self.get_user_info( p.get('user_id') )
                 if ui:
                     p['user_name'] = ui.get('name')
-        return sermon, script
+        return sermon, script, script_sha256
     
     def get_series_id_for_item(self, item: str) -> Optional[str]:
         series_meta_file = os.path.join(self.config_folder, 'sermon_series.json')
@@ -177,16 +181,36 @@ class SermonManager:
         return {'image_url': img_url}
 
 
-    def update_sermon(self, user_id:str, type:str,  item:str, data:dict):
+    def update_sermon(
+        self,
+        user_id: str,
+        type: str,
+        item: str,
+        data: dict,
+        *,
+        expected_script_sha256: str | None = None,
+    ):
         permissions = self.get_sermon_permissions(user_id, item)
         if not permissions.canWrite:
             raise PermissionError("You don't have permission to update this item")
+        if type not in {"scripts", "slides"}:
+            raise ValueError(f"unsupported update type: {type}")
+        if type == "scripts" and not expected_script_sha256:
+            raise ValueError("expected_script_sha256 is required for script updates")
         
-        #update last updated and author
-        self._sm.update_sermon_metadata(user_id, item)
-
         sd = ScriptDelta(self.base_folder, item)
-        return sd.save_script(user_id, type, item,data)
+        # Script persistence is one atomic file operation. Updating the
+        # separate metadata object before CAS would leave a false "edited"
+        # record when the script save conflicts; doing it afterwards could
+        # report failure after the script had already committed. Metadata
+        # edits use their dedicated endpoint instead.
+        return sd.save_script(
+            user_id,
+            type,
+            item,
+            data,
+            expected_current_sha256=expected_script_sha256,
+        )
 
     def persist_generated_subtitles(
         self,
@@ -219,7 +243,11 @@ class SermonManager:
             insertions=insertions,
             actor_id=user_id,
         )
-        self._sm.update_sermon_metadata(user_id, item)
+        # The generated rows already carry ``user_id`` and the pipeline writes
+        # a SHA-bound application audit.  Do not start a second, non-atomic
+        # metadata-file mutation after the transcript commit: if that write
+        # failed, callers could report the operation as failed even though the
+        # governed transcript had already changed.
         return report
 
     def can_persist_generated_subtitles(self, user_id: str) -> bool:

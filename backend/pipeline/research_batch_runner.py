@@ -34,6 +34,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -41,12 +42,13 @@ from typing import Any
 from backend.config.wang_platform_paths import wang_platform_paths
 from backend.pipeline.corpus_survey_runner import _load
 from backend.pipeline.detailed_knowledge_extraction_runner import _slug
-from backend.pipeline.extraction_sections import has_section_headings
+from backend.pipeline.extraction_sections import leading_untitled_body_end
 from backend.pipeline.research_batch import (
     batch_members,
     load_research_batch,
     merge_reviewed_packages,
 )
+from backend.pipeline.source_projection import project_script
 from backend.pipeline.transcript_source import resolve_transcript_path
 
 
@@ -132,7 +134,7 @@ def resolve_transcript_dir(member: dict[str, Any], transcript_dirs: list[Path]) 
     return path.parent if path is not None else None
 
 
-def headingless_review_members(
+def review_members_with_untitled_leading_sections(
     members: list[dict[str, Any]], transcript_dirs: list[Path]
 ) -> list[str]:
     """Review transcripts that require governed subtitle persistence.
@@ -143,7 +145,7 @@ def headingless_review_members(
     would bypass the editable source-of-record workflow.
     """
 
-    headingless: list[str] = []
+    untitled: list[str] = []
     for member in members:
         if member["source_type"] != "sermon_transcript":
             continue
@@ -151,10 +153,12 @@ def headingless_review_members(
         if source_path is None or source_path.parent.name != "script_review":
             continue
         source, _ = _load(source_path)
-        texts = [str(row.get("text") or "") for row in source.get("script") or []]
-        if not has_section_headings(texts):
-            headingless.append(member["key"])
-    return headingless
+        projection = project_script(source.get("script"))
+        if not projection.body_rows or leading_untitled_body_end(
+            projection.headings, len(projection.body_rows)
+        ) is not None:
+            untitled.append(member["key"])
+    return untitled
 
 
 def _member_source_manifest(member: dict[str, Any], path: Path) -> None:
@@ -167,11 +171,7 @@ def _member_source_manifest(member: dict[str, Any], path: Path) -> None:
     """
 
     row = {key: value for key, value in member.items() if key != "key"}
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps({"sources": [row]}, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    _write_manifest(path, {"sources": [row]})
 
 
 def build_command_plan(
@@ -309,8 +309,25 @@ def build_command_plan(
 
 
 def _write_manifest(path: Path, payload: dict[str, Any]) -> None:
+    """Install one complete batch artifact without exposing partial JSON."""
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    encoded = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    descriptor, temporary = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 #: The batch runner's stage name -> the name that stage files in the ledger,
@@ -323,6 +340,7 @@ LEDGER_STAGE = {
     "review": "review",
     "adjudicate": "adjudication",
     "apply": "merge",
+    "ingest": "ingest",
 }
 
 
@@ -391,6 +409,16 @@ def _member_status(plan: list[dict[str, Any]], results: dict[str, Any]) -> list[
     return rows
 
 
+def failed_member_runs(results: dict[str, dict[str, Any]]) -> list[str]:
+    """Members whose current invocation cannot authorize a batch merge."""
+
+    return sorted(
+        str(key)
+        for key, result in results.items()
+        if key is not None and result.get("status") in {"failed", "interrupted"}
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--batch", type=Path, required=True)
@@ -404,6 +432,10 @@ def main() -> int:
     parser.add_argument(
         "--only", nargs="+", metavar="SOURCE",
         help="run only these members (transcript id or source_id)",
+    )
+    parser.add_argument(
+        "--exclude", nargs="+", metavar="SOURCE",
+        help="exclude these members while preserving the batch's frozen order",
     )
     parser.add_argument(
         "--apply", action="store_true",
@@ -439,12 +471,24 @@ def main() -> int:
         / batch["batch_id"]
     )
     members = batch_members(batch)
+    known = {member["key"] for member in members}
+    if args.only and args.exclude:
+        overlap = sorted(set(args.only) & set(args.exclude))
+        if overlap:
+            parser.error("members cannot be both --only and --exclude: " + ", ".join(overlap))
     if args.only:
-        known = {member["key"] for member in members}
         unknown = sorted(set(args.only).difference(known))
         if unknown:
             parser.error("--only names members outside the batch: " + ", ".join(unknown))
         members = [member for member in members if member["key"] in set(args.only)]
+    if args.exclude:
+        unknown = sorted(set(args.exclude).difference(known))
+        if unknown:
+            parser.error("--exclude names members outside the batch: " + ", ".join(unknown))
+        excluded = set(args.exclude)
+        members = [member for member in members if member["key"] not in excluded]
+    if not members:
+        parser.error("member selection is empty")
     transcript_dirs = args.transcript_dirs or [DEFAULT_TRANSCRIPT_DIR]
     missing = [
         member["key"] for member in members
@@ -458,12 +502,12 @@ def main() -> int:
         )
     wanted = set(DEFAULT_STAGES) if args.stage == "all" else {args.stage}
     if "extract" in wanted and not args.write_back_generated_subtitles:
-        headingless = headingless_review_members(members, transcript_dirs)
-        if headingless:
+        untitled = review_members_with_untitled_leading_sections(members, transcript_dirs)
+        if untitled:
             parser.error(
-                "headingless script_review members require "
+                "script_review members with an untitled leading section require "
                 "--write-back-generated-subtitles and --subtitle-user-id before extraction: "
-                + ", ".join(headingless)
+                + ", ".join(untitled)
             )
 
     selected_batch = {**batch, "transcript_ids": [], "sources": []}
@@ -574,14 +618,20 @@ def main() -> int:
     # of it must not write one. Merging what `--only` selected would replace a
     # full merge with a one-member file and report success -- silently wrong in
     # exactly the way this orchestration exists to stop.
-    partial_selection = bool(args.only) and len(members) < len(batch_members(batch))
+    partial_selection = len(members) < len(batch_members(batch))
+    failed_current_members = failed_member_runs(results)
     if partial_selection and "merge" in wanted:
         merge_error = (
             "merge skipped: --only selected "
             f"{len(members)} of {len(batch_members(batch))} members, and the "
             "merged package describes the whole batch"
         )
-    elif "merge" in wanted and not interrupted:
+    elif "merge" in wanted and (interrupted or failed_current_members):
+        merge_error = (
+            "merge skipped: current run failed or was interrupted for "
+            + ", ".join(failed_current_members)
+        )
+    elif "merge" in wanted:
         reviewed_paths = reviewed_package_paths(selected_batch, output_root=output_root)
         absent = [str(path) for path in reviewed_paths if not path.is_file()]
         if absent:
@@ -591,15 +641,16 @@ def main() -> int:
             merge_error = "missing reviewed packages: " + ", ".join(absent)
         else:
             merged = merge_reviewed_packages(selected_batch, reviewed_paths)
-            merged_output.parent.mkdir(parents=True, exist_ok=True)
-            merged_output.write_text(
-                json.dumps(merged, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-            )
+            _write_manifest(merged_output, merged)
 
     # What ran, per member, so the check asks only about stages this batch
     # actually executed.
     ran: dict[str, list[str]] = {}
     for row in selected:
+        # A non-apply ingest is deliberately only a read-only ChangeSet plan;
+        # the ingest runner correctly writes no ledger row for that question.
+        if row["stage"] == "ingest" and not args.apply:
+            continue
         if results.get(row["transcript_id"], {}).get("status") in {"completed", "running"}:
             ran.setdefault(row["transcript_id"], []).append(row["stage"])
     unrecorded = unrecorded_stages(ran)

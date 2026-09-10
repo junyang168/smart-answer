@@ -3,13 +3,18 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
 from backend.api.canonical_repository.postgres_store import (
     ChangeSetConflict,
+    EXTRACTION_RECORD_COLLECTIONS,
+    NON_LIVE_EXTRACTION_REFERENCE_COLLECTIONS,
+    SEMANTIC_REFERENCE_COLLECTIONS,
     SOURCE_KEYS,
     PostgresKnowledgeStore,
+    PostgresKnowledgeStoreError,
     build_active_snapshot,
     build_change_set_plan,
     normalize_package,
@@ -72,6 +77,84 @@ def test_plan_is_stable_and_revision_is_not_semantic_content() -> None:
     }
     partial = build_change_set_plan(package, existing)
     assert not any(item.object_id == "CL-1" for item in partial.operations)
+
+
+def test_change_set_fingerprint_is_bound_to_the_exact_before_snapshot() -> None:
+    package = _package()
+    absent = build_change_set_plan(package, {})
+    prior = normalize_package(_package())["claims"]["CL-1"]
+    prior["title"] = "older claim"
+    existing = build_change_set_plan(
+        package,
+        {
+            ("claims", "CL-1"): {
+                "revision": 7,
+                "content_sha256": record_content_sha(prior),
+                "payload": prior,
+            }
+        },
+    )
+
+    assert absent.fingerprint_sha256 != existing.fingerprint_sha256
+    assert absent.change_set_id != existing.change_set_id
+
+
+def test_a_source_document_id_cannot_be_reused_for_another_transcript() -> None:
+    package = _package()
+    package["source_documents"][0]["transcript_id"] = "SERMON-NEW"
+    current = normalize_package(_package())["source_documents"]["SRC-1"]
+    current["transcript_id"] = "SERMON-OLD"
+
+    with pytest.raises(PostgresKnowledgeStoreError, match="cannot change identity"):
+        build_change_set_plan(
+            package,
+            {
+                ("source_documents", "SRC-1"): {
+                    "revision": 1,
+                    "content_sha256": record_content_sha(current),
+                    "payload": current,
+                }
+            },
+        )
+
+
+def test_package_cannot_declare_two_source_ids_for_one_transcript_identity() -> None:
+    package = _package()
+    package["source_documents"] = [
+        {
+            "source_id": "SRC-ONE",
+            "source_type": "sermon_transcript",
+            "transcript_id": "SERMON-1",
+        },
+        {
+            "source_id": "SRC-TWO",
+            "source_type": "sermon_transcript",
+            "transcript_id": "SERMON-1",
+        },
+    ]
+
+    with pytest.raises(PostgresKnowledgeStoreError, match="declared by both"):
+        normalize_package(package)
+
+
+def test_legacy_source_type_can_be_completed_without_changing_transcript_identity() -> None:
+    package = _package()
+    package["source_documents"][0]["transcript_id"] = "SERMON-1"
+    legacy = normalize_package(package)["source_documents"]["SRC-1"]
+    legacy["source_type"] = ""
+
+    plan = build_change_set_plan(
+        package,
+        {
+            ("source_documents", "SRC-1"): {
+                "revision": 1,
+                "content_sha256": record_content_sha(legacy),
+                "payload": legacy,
+            }
+        },
+    )
+
+    assert any(row.object_id == "SRC-1" for row in plan.operations)
 
 
 def test_human_review_fields_survive_ai_reimport() -> None:
@@ -215,6 +298,14 @@ def test_current_shared_package_can_be_normalized() -> None:
     assert normalized["source_documents"]
 
 
+def test_package_rejects_an_id_reused_by_another_collection() -> None:
+    package = _package()
+    package["claims"][0]["claim_id"] = "E-1"
+
+    with pytest.raises(PostgresKnowledgeStoreError, match="globally unique"):
+        normalize_package(package)
+
+
 def test_migration_defines_transactional_authoring_tables() -> None:
     sql = Path(
         "backend/api/canonical_repository/migrations/001_postgres_authoring_store.sql"
@@ -228,6 +319,45 @@ def test_migration_defines_transactional_authoring_tables() -> None:
         "wang_knowledge.review_events",
     ):
         assert table in sql
+
+
+def test_migration_enforces_global_record_identity() -> None:
+    sql = Path(
+        "backend/api/canonical_repository/migrations/005_global_object_id_uniqueness.sql"
+    ).read_text(encoding="utf-8")
+    assert "UNIQUE INDEX" in sql
+    assert "wang_knowledge.objects (object_id)" in sql
+    assert "source_documents_current_transcript_identity_unique_idx" in sql
+
+
+def test_applying_an_empty_plan_is_a_database_no_op() -> None:
+    plan = build_change_set_plan(
+        {"schema_version": "wang_shared_knowledge_v1.3", "package_id": "EMPTY"},
+        {},
+    )
+    store = PostgresKnowledgeStore.__new__(PostgresKnowledgeStore)
+    store.connect = lambda: pytest.fail("empty plan must not open a transaction")  # type: ignore[method-assign]
+
+    assert store.apply_plan(plan)["status"] == "unchanged"
+
+
+def test_apply_rechecks_global_id_ownership_under_the_transaction_lock() -> None:
+    operation = SimpleNamespace(
+        collection="claims",
+        object_id="GLOBAL-1",
+        operation="create",
+    )
+
+    class ConflictingOwnerCursor(_RecordingCursor):
+        def fetchall(self):
+            if "WHERE object_id = ANY" in self._last:
+                return [("evidence_steps", "GLOBAL-1")]
+            return []
+
+    with pytest.raises(ChangeSetConflict, match="already belongs to evidence_steps"):
+        PostgresKnowledgeStore._assert_global_id_uniqueness(
+            ConflictingOwnerCursor(None), SimpleNamespace(operations=(operation,))
+        )
 
 
 def test_active_snapshot_contains_only_approved_claims_with_bound_evidence() -> None:
@@ -552,6 +682,102 @@ def test_dependency_invalidation_matches_any_pinned_manifest_record() -> None:
     )
 
 
+def test_one_dependency_keeps_every_change_reason_but_invalidates_once() -> None:
+    class DependencyCursor(_RecordingCursor):
+        def fetchall(self):
+            if (
+                "collection='product_dependencies'" in self._last
+                and "SELECT object_id" in self._last
+            ):
+                return [(
+                    "PD-1",
+                    3,
+                    {
+                        "dependency_id": "PD-1",
+                        "consumer_kind": "matthew_draft",
+                        "consumer_id": "DRAFT-1",
+                        "claim_id": "CL-1",
+                        "status": "current",
+                        "revision": 3,
+                    },
+                )]
+            return []
+
+    cursor = DependencyCursor(())
+    store = PostgresKnowledgeStore.__new__(PostgresKnowledgeStore)
+    count = store._invalidate_dependencies(
+        cursor,
+        SimpleNamespace(change_set_id="CS-MULTI"),
+        [
+            ("claims", "CL-1", 1, 2),
+            ("source_fragments", "SF-1", 1, 2),
+        ],
+        7,
+    )
+
+    updates = [
+        params
+        for sql, params in cursor.statements
+        if "UPDATE wang_knowledge.objects SET revision" in sql
+        and "product_dependencies" in sql
+    ]
+    assert count == 1
+    assert len(updates) == 1
+    updated = json.loads(updates[0][4])
+    assert updated["invalidation_event_ids"] == [
+        "IMPACT-CS-MULTI-claims-CL-1",
+        "IMPACT-CS-MULTI-source_fragments-SF-1",
+    ]
+    impact_inserts = [
+        params
+        for sql, params in cursor.statements
+        if "VALUES ('impact_events'" in sql and "wang_knowledge.objects" in sql
+    ]
+    assert [params[0] for params in impact_inserts] == [
+        "IMPACT-CS-MULTI-claims-CL-1",
+        "IMPACT-CS-MULTI-source_fragments-SF-1",
+    ]
+
+
+def test_generated_impact_event_cannot_collide_with_another_collection() -> None:
+    class CollisionCursor(_RecordingCursor):
+        def fetchall(self):
+            if "WHERE object_id=%s FOR UPDATE" in self._last:
+                return [("claims",)]
+            if (
+                "collection='product_dependencies'" in self._last
+                and "SELECT object_id" in self._last
+            ):
+                return [(
+                    "PD-1",
+                    1,
+                    {
+                        "dependency_id": "PD-1",
+                        "consumer_kind": "matthew_draft",
+                        "consumer_id": "DRAFT-1",
+                        "claim_id": "CL-1",
+                        "status": "current",
+                        "revision": 1,
+                    },
+                )]
+            return []
+
+    cursor = CollisionCursor(())
+    store = PostgresKnowledgeStore.__new__(PostgresKnowledgeStore)
+
+    with pytest.raises(ChangeSetConflict, match="generated impact event"):
+        store._invalidate_dependencies(
+            cursor,
+            SimpleNamespace(change_set_id="CS-COLLISION"),
+            [("claims", "CL-1", 1, 2)],
+            0,
+        )
+
+    assert not any(
+        "VALUES ('impact_events'" in sql for sql, _ in cursor.statements
+    )
+
+
 def test_apply_records_which_fields_an_update_removed() -> None:
     """The removal outlives the session that caused it.
 
@@ -608,6 +834,582 @@ def test_apply_rejects_revision_drift_even_when_semantic_sha_is_unchanged() -> N
 
     with pytest.raises(ChangeSetConflict, match="expected revision 1, found 2"):
         store.apply_plan(plan)
+
+
+def test_reextraction_cannot_leave_current_semantic_master_data_on_old_ids() -> None:
+    from backend.api.canonical_repository.postgres_store import build_retirement_plan
+
+    claim = normalize_package(_package())["claims"]["CL-1"]
+    plan = build_retirement_plan(
+        [("claims", "CL-1")],
+        _stored("claims", "CL-1", claim),
+        reason="new extraction generation",
+        package_id="PKG-REEXTRACT",
+    )
+
+    class SemanticReferenceCursor(_RecordingCursor):
+        def fetchall(self):
+            if "SELECT collection, object_id, payload" in self._last:
+                return [(
+                    "viewpoint_claim_links",
+                    "VCL-1",
+                    {"link_id": "VCL-1", "claim_id": "CL-1"},
+                )]
+            return []
+
+    cursor = SemanticReferenceCursor((1, record_content_sha(claim), None))
+    store = PostgresKnowledgeStore.__new__(PostgresKnowledgeStore)
+    store.connect = lambda: _RecordingConnection(cursor)  # type: ignore[method-assign]
+
+    with pytest.raises(ChangeSetConflict, match="coordinated CVR update"):
+        store.apply_plan(plan)
+
+
+def test_retiring_a_source_alias_cannot_leave_semantic_master_data_on_it() -> None:
+    from backend.api.canonical_repository.postgres_store import build_retirement_plan
+
+    source = normalize_package(_package())["source_documents"]["SRC-1"]
+    plan = build_retirement_plan(
+        [("source_documents", "SRC-1")],
+        _stored("source_documents", "SRC-1", source),
+        reason="replace source alias",
+        package_id="PKG-REEXTRACT",
+    )
+
+    class SemanticReferenceCursor(_RecordingCursor):
+        def fetchall(self):
+            if "SELECT collection, object_id, payload" in self._last:
+                return [(
+                    "argument_route_attestations",
+                    "ARA-1",
+                    {"attestation_id": "ARA-1", "source_id": "SRC-1"},
+                )]
+            return []
+
+    cursor = SemanticReferenceCursor((1, record_content_sha(source), None))
+    store = PostgresKnowledgeStore.__new__(PostgresKnowledgeStore)
+    store.connect = lambda: _RecordingConnection(cursor)  # type: ignore[method-assign]
+
+    with pytest.raises(ChangeSetConflict, match="coordinated CVR update"):
+        store.apply_plan(plan)
+
+
+def test_updating_a_stable_source_document_does_not_invalidate_its_source_id() -> None:
+    current = normalize_package(_package())["source_documents"]["SRC-1"]
+    package = _package()
+    package["source_documents"][0]["source_sha256"] = "new-body"
+    plan = build_change_set_plan(
+        package, _stored("source_documents", "SRC-1", current)
+    )
+    cursor = _RecordingCursor(None)
+
+    PostgresKnowledgeStore._assert_no_uncoordinated_semantic_references(cursor, plan)
+
+    assert cursor.statements == []
+
+
+def test_updating_an_extraction_record_preserves_live_semantic_references() -> None:
+    extraction = SimpleNamespace(
+        collection="claims",
+        object_id="CL-STABLE",
+        operation="update",
+        payload={"claim_id": "CL-STABLE", "review_status": "reviewed"},
+        after_revision=2,
+    )
+    cursor = _RecordingCursor(None)
+
+    PostgresKnowledgeStore._assert_no_uncoordinated_semantic_references(
+        cursor, SimpleNamespace(operations=(extraction,))
+    )
+
+    assert cursor.statements == []
+
+
+def test_a_planned_semantic_update_must_remove_the_predecessor_reference() -> None:
+    extraction = SimpleNamespace(
+        collection="claims",
+        object_id="CL-OLD",
+        operation="retire",
+        payload={"claim_id": "CL-OLD"},
+        after_revision=2,
+    )
+    semantic = SimpleNamespace(
+        collection="viewpoint_claim_links",
+        object_id="VCL-1",
+        operation="update",
+        payload={"link_id": "VCL-1", "claim_id": "CL-OLD"},
+        after_revision=2,
+    )
+
+    class PlannedSemanticCursor(_RecordingCursor):
+        def fetchall(self):
+            if "SELECT collection, object_id, payload" in self._last:
+                return [(
+                    "viewpoint_claim_links",
+                    "VCL-1",
+                    {"link_id": "VCL-1", "claim_id": "CL-OLD"},
+                )]
+            return []
+
+    with pytest.raises(ChangeSetConflict, match="planned viewpoint_claim_links/VCL-1"):
+        PostgresKnowledgeStore._assert_no_uncoordinated_semantic_references(
+            PlannedSemanticCursor(None),
+            SimpleNamespace(operations=(extraction, semantic)),
+        )
+
+
+@pytest.mark.parametrize(
+    ("collection", "payload"),
+    [
+        (
+            "viewpoint_claim_links",
+            {
+                "viewpoint_claim_link_id": "VCL-1",
+                "claim_id": "CL-CURRENT",
+                "evidence_bindings": [{
+                    "evidence_step_id": "E-OLD",
+                    "source_fragment_id": "FR-CURRENT",
+                }],
+            },
+        ),
+        (
+            "viewpoint_proposition_units",
+            {
+                "proposition_unit_id": "VPU-1",
+                "parent_claim_id": "CL-CURRENT",
+                "source_id": "SRC-CURRENT",
+                "evidence_bindings": [{
+                    "evidence_step_id": "E-OLD",
+                    "source_fragment_id": "FR-CURRENT",
+                }],
+            },
+        ),
+    ],
+)
+def test_nested_live_evidence_bindings_block_retirement(
+    collection: str, payload: dict[str, Any]
+) -> None:
+    extraction = SimpleNamespace(
+        collection="evidence_steps",
+        object_id="E-OLD",
+        operation="retire",
+        payload={"evidence_step_id": "E-OLD"},
+        after_revision=2,
+    )
+
+    class NestedReferenceCursor(_RecordingCursor):
+        def fetchall(self):
+            if "SELECT collection, object_id, payload" in self._last:
+                return [(collection, "SEM-1", payload)]
+            return []
+
+    with pytest.raises(ChangeSetConflict, match="E-OLD"):
+        PostgresKnowledgeStore._assert_no_uncoordinated_semantic_references(
+            NestedReferenceCursor(None),
+            SimpleNamespace(operations=(extraction,)),
+        )
+
+
+def test_retired_composition_workflow_is_not_live_cvr_master_data() -> None:
+    extraction = SimpleNamespace(
+        collection="claims",
+        object_id="CL-OLD",
+        operation="retire",
+        payload={"claim_id": "CL-OLD"},
+        after_revision=2,
+    )
+    cursor = _RecordingCursor(None)
+
+    PostgresKnowledgeStore._assert_no_uncoordinated_semantic_references(
+        cursor, SimpleNamespace(operations=(extraction,))
+    )
+
+    selected_collections = cursor.statements[0][1][0]
+    assert "composition_plans" not in selected_collections
+    assert "composition_decisions" not in selected_collections
+
+
+def test_semantic_lineage_and_transcript_metadata_are_not_live_id_references() -> None:
+    extraction = SimpleNamespace(
+        collection="claims",
+        object_id="CL-OLD",
+        operation="retire",
+        payload={"claim_id": "CL-OLD"},
+        after_revision=2,
+    )
+    semantic = SimpleNamespace(
+        collection="viewpoint_claim_links",
+        object_id="VCL-1",
+        operation="update",
+        payload={
+            "viewpoint_claim_link_id": "VCL-1",
+            "claim_id": "CL-NEW",
+            "previous_claim_id": "CL-OLD",
+        },
+        after_revision=2,
+    )
+
+    class LineageCursor(_RecordingCursor):
+        def fetchall(self):
+            if "SELECT collection, object_id, payload" in self._last:
+                return [(
+                    "viewpoint_claim_links",
+                    "VCL-1",
+                    {
+                        "viewpoint_claim_link_id": "VCL-1",
+                        "claim_id": "CL-OLD",
+                        "transcript_id": "CL-OLD",
+                    },
+                )]
+            return []
+
+    PostgresKnowledgeStore._assert_no_uncoordinated_semantic_references(
+        LineageCursor(None),
+        SimpleNamespace(operations=(extraction, semantic)),
+    )
+
+
+def test_an_unclassified_future_semantic_reference_field_fails_closed() -> None:
+    extraction = SimpleNamespace(
+        collection="evidence_steps",
+        object_id="E-OLD",
+        operation="retire",
+        payload={"evidence_step_id": "E-OLD"},
+        after_revision=2,
+    )
+
+    class FutureFieldCursor(_RecordingCursor):
+        def fetchall(self):
+            if "SELECT collection, object_id, payload" in self._last:
+                return [(
+                    "viewpoint_claim_links",
+                    "VCL-1",
+                    {
+                        "viewpoint_claim_link_id": "VCL-1",
+                        "claim_id": "CL-CURRENT",
+                        "future_grounding_ids": ["E-OLD"],
+                    },
+                )]
+            return []
+
+    with pytest.raises(ChangeSetConflict, match="unclassified id field"):
+        PostgresKnowledgeStore._assert_no_uncoordinated_semantic_references(
+            FutureFieldCursor(None),
+            SimpleNamespace(operations=(extraction,)),
+        )
+
+
+def test_an_unclassified_mapping_key_reference_fails_closed() -> None:
+    extraction = SimpleNamespace(
+        collection="evidence_steps",
+        object_id="E-OLD",
+        operation="retire",
+        payload={"evidence_step_id": "E-OLD"},
+        after_revision=2,
+    )
+
+    class KeyedReferenceCursor(_RecordingCursor):
+        def fetchall(self):
+            if "SELECT collection, object_id, payload" in self._last:
+                return [(
+                    "viewpoint_claim_links",
+                    "VCL-1",
+                    {
+                        "viewpoint_claim_link_id": "VCL-1",
+                        "claim_id": "CL-CURRENT",
+                        "future_evidence_weights": {"E-OLD": 0.7},
+                    },
+                )]
+            return []
+
+    with pytest.raises(ChangeSetConflict, match="<key>=E-OLD"):
+        PostgresKnowledgeStore._assert_no_uncoordinated_semantic_references(
+            KeyedReferenceCursor(None),
+            SimpleNamespace(operations=(extraction,)),
+        )
+
+
+def test_every_registered_collection_classifies_extraction_reference_semantics() -> None:
+    from backend.api.canonical_repository.knowledge_models import KNOWLEDGE_COLLECTIONS
+
+    classified = (
+        EXTRACTION_RECORD_COLLECTIONS
+        | {"source_documents"}
+        | SEMANTIC_REFERENCE_COLLECTIONS
+        | NON_LIVE_EXTRACTION_REFERENCE_COLLECTIONS
+    )
+    assert set(KNOWLEDGE_COLLECTIONS) == classified
+
+
+def test_retired_alias_text_in_transcript_metadata_does_not_block_repair() -> None:
+    alias = SimpleNamespace(
+        collection="source_documents",
+        object_id="SERMON-1",
+        operation="retire",
+        payload={"source_id": "SERMON-1"},
+        after_revision=2,
+    )
+
+    class MetadataCursor(_RecordingCursor):
+        def fetchall(self):
+            if "SELECT collection, object_id, payload" in self._last:
+                return [(
+                    "argument_route_attestations",
+                    "ARA-1",
+                    {
+                        "argument_route_attestation_id": "ARA-1",
+                        "source_id": "SRC-NEW",
+                        "transcript_id": "SERMON-1",
+                    },
+                )]
+            return []
+
+    PostgresKnowledgeStore._assert_no_uncoordinated_semantic_references(
+        MetadataCursor(None), SimpleNamespace(operations=(alias,))
+    )
+
+
+def test_untyped_current_source_document_blocks_a_new_source_identity() -> None:
+    package = _package()
+    package["source_documents"][0]["transcript_id"] = "SERMON-1"
+    plan = build_change_set_plan(package, {})
+
+    class UntypedSourceCursor(_RecordingCursor):
+        def fetchall(self):
+            if "btrim(COALESCE(payload->>'source_type',''))" in self._last:
+                return [("SRC-LEGACY", "", "SERMON-1")]
+            return []
+
+    cursor = UntypedSourceCursor(None)
+    with pytest.raises(ChangeSetConflict, match="has no source_type"):
+        PostgresKnowledgeStore._assert_source_identity_uniqueness(cursor, plan)
+
+
+def test_apply_rejects_two_incoming_source_ids_for_one_transcript_identity() -> None:
+    first = SimpleNamespace(
+        collection="source_documents",
+        object_id="SRC-ONE",
+        operation="create",
+        payload={
+            "source_id": "SRC-ONE",
+            "source_type": "sermon_transcript",
+            "transcript_id": "SERMON-1",
+        },
+        after_revision=1,
+    )
+    second = SimpleNamespace(
+        collection="source_documents",
+        object_id="SRC-TWO",
+        operation="create",
+        payload={
+            "source_id": "SRC-TWO",
+            "source_type": "sermon_transcript",
+            "transcript_id": "SERMON-1",
+        },
+        after_revision=1,
+    )
+
+    with pytest.raises(ChangeSetConflict, match="Multiple incoming SourceDocuments"):
+        PostgresKnowledgeStore._assert_source_identity_uniqueness(
+            _RecordingCursor(None), SimpleNamespace(operations=(first, second))
+        )
+
+
+def _edge_operation(
+    edge_id: str, from_id: str, to_id: str, *, operation: str = "create"
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        collection="claim_relations",
+        object_id=edge_id,
+        operation=operation,
+        payload={
+            "claim_relation_id": edge_id,
+            "from_id": from_id,
+            "to_id": to_id,
+            "relation_type": "supports",
+        },
+        after_revision=1,
+    )
+
+
+def test_apply_rejects_an_incoming_self_edge() -> None:
+    with pytest.raises(ChangeSetConflict, match="points to itself"):
+        PostgresKnowledgeStore._assert_edge_integrity(
+            _RecordingCursor(None),
+            SimpleNamespace(operations=(_edge_operation("CR-1", "CL-1", "CL-1"),)),
+        )
+
+
+def test_apply_rejects_retiring_an_endpoint_without_its_current_edge() -> None:
+    retiring_claim = SimpleNamespace(
+        collection="claims",
+        object_id="CL-1",
+        operation="retire",
+        payload={"claim_id": "CL-1"},
+        after_revision=2,
+    )
+
+    class SurvivingEdgeCursor(_RecordingCursor):
+        def fetchall(self):
+            if "AND (from_id = ANY" in self._last:
+                return [("claim_relations", "CR-1", "CL-1", "CL-2")]
+            return []
+
+    with pytest.raises(ChangeSetConflict, match="would leave current edge"):
+        PostgresKnowledgeStore._assert_edge_integrity(
+            SurvivingEdgeCursor(None),
+            SimpleNamespace(operations=(retiring_claim,)),
+        )
+
+
+def test_apply_allows_an_edge_update_that_removes_its_retiring_endpoint() -> None:
+    retiring_claim = SimpleNamespace(
+        collection="claims",
+        object_id="CL-1",
+        operation="retire",
+        payload={"claim_id": "CL-1"},
+        after_revision=2,
+    )
+    updated_edge = _edge_operation(
+        "CR-1", "CL-3", "CL-2", operation="update"
+    )
+
+    class RepointedEdgeCursor(_RecordingCursor):
+        def fetchall(self):
+            if "AND (from_id = ANY" in self._last:
+                return [("claim_relations", "CR-1", "CL-1", "CL-2")]
+            if "SELECT collection, object_id FROM wang_knowledge.objects" in self._last:
+                return [("claims", "CL-2"), ("claims", "CL-3")]
+            if "FROM wang_knowledge.edges" in self._last:
+                return [("claim_relations", "CR-1", "CL-1", "CL-2", "supports")]
+            return []
+
+    PostgresKnowledgeStore._assert_edge_integrity(
+        RepointedEdgeCursor(None),
+        SimpleNamespace(operations=(retiring_claim, updated_edge)),
+    )
+
+
+def test_apply_rejects_retiring_a_fragment_still_cited_by_a_live_step() -> None:
+    retiring_fragment = SimpleNamespace(
+        collection="source_fragments",
+        object_id="FR-OLD",
+        operation="retire",
+        payload={"fragment_id": "FR-OLD"},
+        after_revision=2,
+    )
+
+    class SurvivingStepCursor(_RecordingCursor):
+        def fetchall(self):
+            if "WHERE collection = ANY" in self._last:
+                return [(
+                    "evidence_steps",
+                    "E-1",
+                    {"evidence_step_id": "E-1", "source_fragment_id": "FR-OLD"},
+                )]
+            return []
+
+    with pytest.raises(ChangeSetConflict, match="E-1 -> FR-OLD"):
+        PostgresKnowledgeStore._assert_no_dangling_package_references(
+            SurvivingStepCursor(None),
+            SimpleNamespace(operations=(retiring_fragment,)),
+        )
+
+
+def test_apply_rejects_duplicate_semantic_edges_in_one_change_set() -> None:
+    plan = SimpleNamespace(
+        operations=(
+            _edge_operation("CR-1", "CL-1", "CL-2"),
+            _edge_operation("CR-2", "CL-1", "CL-2"),
+        )
+    )
+
+    with pytest.raises(ChangeSetConflict, match="Duplicate semantic edge"):
+        PostgresKnowledgeStore._assert_edge_integrity(_RecordingCursor(None), plan)
+
+
+def test_apply_rejects_a_dangling_incoming_edge_endpoint() -> None:
+    class EndpointCursor(_RecordingCursor):
+        def fetchall(self):
+            if "SELECT collection, object_id FROM wang_knowledge.objects" in self._last:
+                return [("claims", "CL-1")]
+            return []
+
+    with pytest.raises(ChangeSetConflict, match="non-current endpoints: CL-2"):
+        PostgresKnowledgeStore._assert_edge_integrity(
+            EndpointCursor(None),
+            SimpleNamespace(operations=(_edge_operation("CR-1", "CL-1", "CL-2"),)),
+        )
+
+
+def test_apply_rejects_an_existing_semantic_edge_under_another_id() -> None:
+    class ExistingEdgeCursor(_RecordingCursor):
+        def fetchall(self):
+            if "SELECT collection, object_id FROM wang_knowledge.objects" in self._last:
+                return [("claims", "CL-1"), ("claims", "CL-2")]
+            if "FROM wang_knowledge.edges" in self._last:
+                return [("claim_relations", "CR-OLD", "CL-1", "CL-2", "supports")]
+            return []
+
+    with pytest.raises(ChangeSetConflict, match="already has another current ID"):
+        PostgresKnowledgeStore._assert_edge_integrity(
+            ExistingEdgeCursor(None),
+            SimpleNamespace(operations=(_edge_operation("CR-NEW", "CL-1", "CL-2"),)),
+        )
+
+
+def test_edge_duplicate_check_uses_the_planned_signature_for_an_update() -> None:
+    updated = _edge_operation("CR-1", "CL-1", "CL-3", operation="update")
+    created = _edge_operation("CR-2", "CL-1", "CL-2")
+
+    class UpdatedSignatureCursor(_RecordingCursor):
+        def fetchall(self):
+            if "SELECT collection, object_id FROM wang_knowledge.objects" in self._last:
+                return [
+                    ("claims", "CL-1"),
+                    ("claims", "CL-2"),
+                    ("claims", "CL-3"),
+                ]
+            if "FROM wang_knowledge.edges" in self._last:
+                return [("claim_relations", "CR-1", "CL-1", "CL-2", "supports")]
+            return []
+
+    PostgresKnowledgeStore._assert_edge_integrity(
+        UpdatedSignatureCursor(None),
+        SimpleNamespace(operations=(updated, created)),
+    )
+
+
+def test_apply_rejects_an_endpoint_from_the_wrong_collection() -> None:
+    class WrongTypeCursor(_RecordingCursor):
+        def fetchall(self):
+            if "SELECT collection, object_id FROM wang_knowledge.objects" in self._last:
+                return [("evidence_steps", "CL-1"), ("claims", "CL-2")]
+            return []
+
+    with pytest.raises(ChangeSetConflict, match="belongs to evidence_steps"):
+        PostgresKnowledgeStore._assert_edge_integrity(
+            WrongTypeCursor(None),
+            SimpleNamespace(operations=(_edge_operation("CR-1", "CL-1", "CL-2"),)),
+        )
+
+
+def test_apply_rejects_an_endpoint_with_ambiguous_global_ownership() -> None:
+    class AmbiguousOwnerCursor(_RecordingCursor):
+        def fetchall(self):
+            if "SELECT collection, object_id FROM wang_knowledge.objects" in self._last:
+                return [
+                    ("claims", "CL-1"),
+                    ("evidence_steps", "CL-1"),
+                    ("claims", "CL-2"),
+                ]
+            return []
+
+    with pytest.raises(ChangeSetConflict, match="ambiguous global ownership"):
+        PostgresKnowledgeStore._assert_edge_integrity(
+            AmbiguousOwnerCursor(None),
+            SimpleNamespace(operations=(_edge_operation("CR-1", "CL-1", "CL-2"),)),
+        )
 
 
 def test_route_apply_cas_rejects_a_stale_conclusion_revision() -> None:

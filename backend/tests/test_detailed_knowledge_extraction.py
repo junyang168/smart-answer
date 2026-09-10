@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -14,9 +15,15 @@ from backend.pipeline.detailed_knowledge_extraction import (
 )
 from backend.pipeline.detailed_knowledge_extraction_runner import _validation_feedback
 from backend.pipeline.detailed_knowledge_extraction_runner import compile_package
+from backend.pipeline.source_projection import LOCATOR_SPACE, project_script
 from backend.pipeline.knowledge_consensus_applier import (
     ConsensusApplicationError,
+    _validate_overrides_artifact,
     apply_consensus_overrides,
+)
+from backend.pipeline import knowledge_consensus_applier as consensus_runner
+from backend.pipeline.corpus_ai_adjudication_runner import (
+    _overrides_artifact_sha256,
 )
 
 
@@ -129,6 +136,83 @@ def test_validation_feedback_includes_exact_referenced_segment() -> None:
     assert "连续逐字复制" in feedback
 
 
+def test_model_context_and_render_contract_change_generation_not_source_identity() -> None:
+    base = dict(
+        source_sha256="body-sha",
+        prompt="prompt",
+        model_id="gpt-5.6-sol",
+        reasoning_effort="medium",
+        max_output_tokens=32000,
+        editorial_structure_sha256="structure-sha",
+        model_input_contract_version="projection-v1",
+    )
+    first = extraction_identity(**base, model_context_sha256="title-a")
+    title_changed = extraction_identity(**base, model_context_sha256="title-b")
+    renderer_changed = extraction_identity(
+        **{**base, "model_input_contract_version": "projection-v2"},
+        model_context_sha256="title-a",
+    )
+    section_metadata_changed = extraction_identity(
+        **base,
+        model_context_sha256="title-a",
+        section_model_input_sha256s=[{"section_index": 1, "sha256": "changed"}],
+    )
+
+    assert first["source_sha256"] == title_changed["source_sha256"]
+    assert len({
+        first["generation_fingerprint_sha256"],
+        title_changed["generation_fingerprint_sha256"],
+        renderer_changed["generation_fingerprint_sha256"],
+        section_metadata_changed["generation_fingerprint_sha256"],
+    }) == 4
+
+
+def test_container_sha_is_provenance_not_package_or_generation_identity() -> None:
+    base = dict(
+        source_sha256="body-sha",
+        prompt="prompt",
+        model_id="gpt-5.6-sol",
+        reasoning_effort="medium",
+        max_output_tokens=32000,
+    )
+    first = extraction_identity(
+        **base,
+        source_file_sha256="file-a",
+        package_compiler_version="compiler-v1",
+    )
+    physical_edit = extraction_identity(
+        **base,
+        source_file_sha256="file-b",
+        package_compiler_version="compiler-v1",
+    )
+    compiler_edit = extraction_identity(
+        **base,
+        source_file_sha256="file-a",
+        package_compiler_version="compiler-v2",
+    )
+    partial = extraction_identity(
+        **base,
+        source_file_sha256="file-a",
+        package_compiler_version="compiler-v1",
+        section_scope=[3, 1, 3],
+    )
+
+    assert {
+        first["generation_fingerprint_sha256"],
+        physical_edit["generation_fingerprint_sha256"],
+        compiler_edit["generation_fingerprint_sha256"],
+        partial["generation_fingerprint_sha256"],
+    } == {first["generation_fingerprint_sha256"]}
+    assert first["fingerprint_sha256"] == physical_edit["fingerprint_sha256"]
+    assert first["source_file_sha256"] != physical_edit["source_file_sha256"]
+    assert len({
+        first["fingerprint_sha256"],
+        compiler_edit["fingerprint_sha256"],
+        partial["fingerprint_sha256"],
+    }) == 3
+    assert partial["section_scope"] == [1, 3]
+
+
 def test_audience_evidence_cannot_be_eligible() -> None:
     response = _response()
     response["evidence_steps"][1]["support_eligibility"] = "eligible_candidate"
@@ -155,8 +239,219 @@ def test_compile_namespaces_ids_and_binds_source_hashes(tmp_path: Path) -> None:
     assert claim["evidence_step_ids"][0].endswith("-E001")
     assert claim["opposed_position_ids"][0].endswith("-POS001")
     assert package["questions"][0]["answer_claim_ids"] == [claim["claim_id"]]
-    assert package["source_fragments"][0]["source_sha256"] == hashlib.sha256(raw).hexdigest()
+    body_sha = project_script(transcript["script"]).body_sha256
+    assert package["source_fragments"][0]["source_sha256"] == body_sha
+    assert package["source_documents"][0]["source_body_sha256"] == body_sha
+    assert package["source_documents"][0]["source_file_sha256"] == hashlib.sha256(raw).hexdigest()
+    assert package["source_documents"][0]["locator_space"] == LOCATOR_SPACE
+    assert package["extraction"]["locator_space"] == LOCATOR_SPACE
+    assert package["extraction"]["record_namespace"] == (
+        package["source_documents"][0]["extraction_record_namespace"]
+    )
     assert package["source_fragments"][0]["anchor_state"] == "source_version_bound"
+
+
+def test_distinct_model_outputs_have_disjoint_record_generations(tmp_path: Path) -> None:
+    transcript = _transcript()
+    raw = json.dumps(transcript, ensure_ascii=False).encode("utf-8")
+    extraction = extraction_identity(
+        source_sha256=hashlib.sha256(raw).hexdigest(),
+        prompt="prompt",
+        model_id="gpt-5.6-sol",
+        reasoning_effort="medium",
+        max_output_tokens=32000,
+    )
+    first = compile_package(
+        transcript_id="011WSR01",
+        transcript_path=tmp_path / "011WSR01.json",
+        transcript=transcript,
+        raw=raw,
+        response=_response(),
+        extraction=extraction,
+    )
+    same = compile_package(
+        transcript_id="011WSR01",
+        transcript_path=tmp_path / "011WSR01.json",
+        transcript=transcript,
+        raw=raw,
+        response=_response(),
+        extraction=extraction,
+    )
+    changed_response = _response()
+    changed_response["claims"][0]["statement"] = "同一序号现在表达另一项主张"
+    changed = compile_package(
+        transcript_id="011WSR01",
+        transcript_path=tmp_path / "011WSR01.json",
+        transcript=transcript,
+        raw=raw,
+        response=changed_response,
+        extraction=extraction,
+    )
+
+    first_ids = {
+        first["claims"][0]["claim_id"],
+        first["evidence_steps"][0]["evidence_step_id"],
+    }
+    same_ids = {
+        same["claims"][0]["claim_id"],
+        same["evidence_steps"][0]["evidence_step_id"],
+    }
+    changed_ids = {
+        changed["claims"][0]["claim_id"],
+        changed["evidence_steps"][0]["evidence_step_id"],
+    }
+    assert first_ids == same_ids
+    assert first_ids.isdisjoint(changed_ids)
+
+
+def test_editorial_container_only_change_preserves_semantic_record_ids(
+    tmp_path: Path,
+) -> None:
+    transcript = _transcript()
+    raw = json.dumps(transcript, ensure_ascii=False).encode("utf-8")
+    base = dict(
+        source_sha256=project_script(transcript["script"]).body_sha256,
+        prompt="prompt",
+        model_id="gpt-5.6-sol",
+        reasoning_effort="medium",
+        max_output_tokens=32000,
+    )
+    before_identity = extraction_identity(**base, source_file_sha256="file-a")
+    after_identity = extraction_identity(**base, source_file_sha256="file-b")
+
+    before = compile_package(
+        transcript_id="011WSR01",
+        transcript_path=tmp_path / "011WSR01.json",
+        transcript=transcript,
+        raw=raw,
+        response=_response(),
+        extraction=before_identity,
+        source_file_sha256="file-a",
+    )
+    after = compile_package(
+        transcript_id="011WSR01",
+        transcript_path=tmp_path / "011WSR01.json",
+        transcript=transcript,
+        raw=raw,
+        response=_response(),
+        extraction=after_identity,
+        source_file_sha256="file-b",
+    )
+
+    assert before_identity["fingerprint_sha256"] == after_identity[
+        "fingerprint_sha256"
+    ]
+    assert before["extraction"]["record_namespace"] == after["extraction"][
+        "record_namespace"
+    ]
+    assert before["claims"][0]["claim_id"] == after["claims"][0]["claim_id"]
+    assert before["source_documents"][0]["source_file_sha256"] != after[
+        "source_documents"
+    ][0]["source_file_sha256"]
+
+
+def test_source_type_is_part_of_the_exact_generation_namespace(tmp_path: Path) -> None:
+    transcript = _transcript()
+    raw = json.dumps(transcript, ensure_ascii=False).encode("utf-8")
+    extraction = extraction_identity(
+        source_sha256=hashlib.sha256(raw).hexdigest(),
+        prompt="prompt",
+        model_id="gpt-5.6-sol",
+        reasoning_effort="medium",
+        max_output_tokens=32000,
+    )
+    sermon = compile_package(
+        transcript_id="same-key",
+        transcript_path=tmp_path / "same-key.json",
+        transcript=transcript,
+        raw=raw,
+        response=_response(),
+        extraction=extraction,
+    )
+    notes = compile_package(
+        transcript_id="same-key",
+        transcript_path=tmp_path / "same-key.md",
+        transcript=transcript,
+        raw=raw,
+        response=_response(),
+        extraction=extraction,
+        source_descriptor={
+            "source_id": "same-key",
+            "source_type": "notes_manuscript",
+            "transcript_id": "same-key",
+        },
+    )
+
+    assert sermon["extraction"]["record_namespace"] != (
+        notes["extraction"]["record_namespace"]
+    )
+
+
+def test_model_ids_must_be_unique_across_record_and_relation_types() -> None:
+    response = _response()
+    response["claim_relations"] = [{
+        "claim_relation_id": response["evidence_relations"][0]["relation_id"],
+        "from_id": "CL001",
+        "to_id": "CL001",
+        "relation_type": "supports",
+        "reason": "collision",
+    }]
+
+    with pytest.raises(DetailedExtractionValidationError, match="globally unique"):
+        validate_response(response, _transcript())
+
+
+@pytest.mark.parametrize(
+    ("collection", "id_field", "from_id", "to_id"),
+    [
+        ("evidence_relations", "relation_id", "E001", "E001"),
+        ("claim_relations", "claim_relation_id", "CL001", "CL001"),
+    ],
+)
+def test_model_relations_cannot_point_to_themselves(
+    collection: str, id_field: str, from_id: str, to_id: str
+) -> None:
+    response = _response()
+    response[collection] = [{
+        id_field: "SELF001",
+        "from_id": from_id,
+        "to_id": to_id,
+        "relation_type": "supports",
+        "reason": "invalid self edge",
+    }]
+
+    with pytest.raises(DetailedExtractionValidationError, match="cannot point to itself"):
+        validate_response(response, _transcript())
+
+
+@pytest.mark.parametrize(
+    ("collection", "id_field"),
+    [
+        ("evidence_relations", "relation_id"),
+        ("claim_relations", "claim_relation_id"),
+    ],
+)
+def test_model_cannot_repeat_one_semantic_relation_under_two_ids(
+    collection: str, id_field: str
+) -> None:
+    response = _response()
+    original = (
+        dict(response[collection][0])
+        if response[collection]
+        else {
+            "claim_relation_id": "CR001",
+            "from_id": "CL001",
+            "to_id": "CL001",
+            "relation_type": "supports",
+            "reason": "first copy",
+        }
+    )
+    response[collection] = [original]
+    duplicate = {**original, id_field: "DUPLICATE002"}
+    response[collection].append(duplicate)
+
+    with pytest.raises(DetailedExtractionValidationError, match="duplicate .* relation"):
+        validate_response(response, _transcript())
 
 
 def test_compiled_package_can_feed_existing_claude_reviewer(tmp_path: Path) -> None:
@@ -239,6 +534,152 @@ def test_consensus_applier_accepts_combined_string_fingerprint(tmp_path: Path) -
         {"011WSR01": transcript},
     )
     assert result["consensus_application"]["adjudication_fingerprint"] == "combined-fp"
+
+
+def test_consensus_cli_guard_binds_overrides_to_exact_package_and_bytes() -> None:
+    artifact = {
+        "adjudication_fingerprint": {
+            "fingerprint_sha256": "fp",
+            "source_package_sha256": "package-a",
+        },
+        "claims": {},
+    }
+    artifact["artifact_sha256"] = _overrides_artifact_sha256(artifact)
+
+    _validate_overrides_artifact(artifact, package_sha256="package-a")
+
+    tampered = json.loads(json.dumps(artifact))
+    tampered["claims"]["CL-1"] = {"status": "ai_consensus_applied"}
+    with pytest.raises(ConsensusApplicationError, match="modified"):
+        _validate_overrides_artifact(tampered, package_sha256="package-a")
+    with pytest.raises(ConsensusApplicationError, match="different package"):
+        _validate_overrides_artifact(artifact, package_sha256="package-b")
+
+
+def test_consensus_added_evidence_cannot_collide_with_another_collection(
+    tmp_path: Path,
+) -> None:
+    transcript = _transcript()
+    raw = json.dumps(transcript, ensure_ascii=False).encode("utf-8")
+    package = compile_package(
+        transcript_id="011WSR01",
+        transcript_path=tmp_path / "011WSR01.json",
+        transcript=transcript,
+        raw=raw,
+        response=_response(),
+        extraction=extraction_identity(
+            source_sha256=hashlib.sha256(raw).hexdigest(),
+            prompt="prompt",
+            model_id="gpt-5.6-sol",
+            reasoning_effort="medium",
+            max_output_tokens=32000,
+        ),
+    )
+    claim_id = package["claims"][0]["claim_id"]
+    generated_evidence_id = f"AI-ADJ-{claim_id}-01"
+    package["questions"][0]["question_id"] = generated_evidence_id
+    overrides = {
+        "adjudication_fingerprint": {"fingerprint_sha256": "fp"},
+        "claims": {
+            claim_id: {
+                "status": "ai_consensus_applied",
+                "approval_status": "not_human_approved",
+                "excluded_anchors": [],
+                "excluded_claim_relation_ids": [],
+                "anchor_additions": [{
+                    "transcript_id": "011WSR01",
+                    "source_index": "11",
+                    "verbatim_excerpt": "那一位人子领受永远的权柄",
+                    "evidence_type": "scripture_evidence",
+                }],
+                "structural_notes": [],
+                "adjudication_fingerprint": "fp",
+            }
+        },
+    }
+
+    with pytest.raises(ConsensusApplicationError, match="globally unique"):
+        apply_consensus_overrides(package, overrides, {"011WSR01": transcript})
+
+
+def test_consensus_cli_exact_replay_writes_no_artifact_or_second_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    transcript = _transcript()
+    raw = json.dumps(transcript, ensure_ascii=False).encode("utf-8")
+    transcript_path = tmp_path / "011WSR01.json"
+    transcript_path.write_bytes(raw)
+    package = compile_package(
+        transcript_id="011WSR01",
+        transcript_path=transcript_path,
+        transcript=transcript,
+        raw=raw,
+        response=_response(),
+        extraction=extraction_identity(
+            source_sha256=project_script(transcript["script"]).body_sha256,
+            prompt="prompt",
+            model_id="gpt-5.6-sol",
+            reasoning_effort="medium",
+            max_output_tokens=32000,
+        ),
+    )
+    package_path = tmp_path / "package.json"
+    overrides_path = tmp_path / "overrides.json"
+    output_path = tmp_path / "consensus.json"
+    package_path.write_text(json.dumps(package, ensure_ascii=False), encoding="utf-8")
+    package_sha256 = hashlib.sha256(package_path.read_bytes()).hexdigest()
+    overrides = {
+        "adjudication_fingerprint": {
+            "fingerprint_sha256": "fp",
+            "source_package_sha256": package_sha256,
+        },
+        "claims": {},
+    }
+    overrides["artifact_sha256"] = _overrides_artifact_sha256(overrides)
+    overrides_path.write_text(
+        json.dumps(overrides),
+        encoding="utf-8",
+    )
+    runs: list[str] = []
+
+    class FakeRecord:
+        def __enter__(self):
+            runs.append("merge")
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def inputs(self, *_args):
+            return None
+
+        def quality(self, *_args):
+            return None
+
+        def outputs(self, *_args):
+            return None
+
+    monkeypatch.setattr(consensus_runner, "run_record", lambda **_kwargs: FakeRecord())
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "knowledge_consensus_applier",
+            "--package", str(package_path),
+            "--overrides", str(overrides_path),
+            "--output", str(output_path),
+            "--transcript-dir", str(tmp_path),
+        ],
+    )
+
+    assert consensus_runner.main() == 0
+    before = output_path.read_bytes()
+    before_mtime = output_path.stat().st_mtime_ns
+    assert consensus_runner.main() == 0
+
+    assert runs == ["merge"]
+    assert output_path.read_bytes() == before
+    assert output_path.stat().st_mtime_ns == before_mtime
 
 
 def _two_claim_package(tmp_path: Path) -> tuple[dict, dict]:

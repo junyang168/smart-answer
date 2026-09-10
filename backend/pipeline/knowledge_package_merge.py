@@ -60,11 +60,23 @@ def validate_merged_package(package: dict[str, Any]) -> None:
         name: _ids(list(package.get(name) or []), field, name)
         for name, field in ID_FIELDS.items()
     }
+    id_owners: dict[str, str] = {}
+    collisions: list[str] = []
+    for collection, values in ids.items():
+        for value in values:
+            prior = id_owners.setdefault(value, collection)
+            if prior != collection:
+                collisions.append(f"{value} ({prior}, {collection})")
+    if collisions:
+        raise KnowledgePackageMergeError(
+            "record IDs must be globally unique: " + ", ".join(sorted(collisions))
+        )
     source_ids = ids["source_documents"]
     fragment_ids = ids["source_fragments"]
     evidence_ids = ids["evidence_steps"]
     claim_ids = ids["claims"]
     position_ids = ids["position_nodes"]
+    observation_ids = ids["observations"]
 
     for row in package.get("source_fragments", []):
         if str(row.get("source_id") or "") not in source_ids:
@@ -73,7 +85,15 @@ def validate_merged_package(package: dict[str, Any]) -> None:
             )
     for collection in ("questions", "position_nodes", "observations", "evidence_steps"):
         for row in package.get(collection, []):
-            missing = set(row.get("source_fragment_ids") or []) - fragment_ids
+            referenced_fragments = {
+                str(value)
+                for value in [
+                    row.get("source_fragment_id"),
+                    *(row.get("source_fragment_ids") or []),
+                ]
+                if value
+            }
+            missing = referenced_fragments - fragment_ids
             if missing:
                 raise KnowledgePackageMergeError(
                     f"{collection}/{row[ID_FIELDS[collection]]}: unknown fragments {sorted(missing)}"
@@ -101,16 +121,62 @@ def validate_merged_package(package: dict[str, Any]) -> None:
             raise KnowledgePackageMergeError(
                 f"{row['claim_id']}: unknown positions {sorted(missing_positions)}"
             )
-    for collection, endpoints in (
-        ("knowledge_relations", evidence_ids),
-        ("claim_relations", claim_ids),
-    ):
-        for row in package.get(collection, []):
-            missing = {str(row.get("from_id") or ""), str(row.get("to_id") or "")} - endpoints
-            if missing:
-                raise KnowledgePackageMergeError(
-                    f"{collection}/{row[ID_FIELDS[collection]]}: unknown endpoints {sorted(missing)}"
-                )
+    # An evidence relation may reason from an observation to an evidence step.
+    # Treating both endpoints as evidence rejected every normal detailed package
+    # that preserved a load-bearing observation, even though extraction's own
+    # schema and validator require that relation.
+    semantic_edges: dict[tuple[str, str, str, str], str] = {}
+
+    def validate_edge_identity(
+        collection: str, edge_id: str, row: dict[str, Any]
+    ) -> tuple[str, str]:
+        from_id = str(row.get("from_id") or "")
+        to_id = str(row.get("to_id") or "")
+        relation_type = str(row.get("relation_type") or "").strip()
+        if not from_id or not to_id:
+            raise KnowledgePackageMergeError(
+                f"{collection}/{edge_id}: empty endpoint"
+            )
+        if from_id == to_id:
+            raise KnowledgePackageMergeError(
+                f"{collection}/{edge_id}: relation cannot point to itself"
+            )
+        if not relation_type:
+            raise KnowledgePackageMergeError(
+                f"{collection}/{edge_id}: missing relation_type"
+            )
+        signature = (collection, from_id, to_id, relation_type)
+        prior = semantic_edges.setdefault(signature, edge_id)
+        if prior != edge_id:
+            raise KnowledgePackageMergeError(
+                f"{collection}: duplicate semantic relation {prior} and {edge_id} "
+                f"both name {from_id}->{to_id} ({relation_type})"
+            )
+        return from_id, to_id
+
+    for row in package.get("knowledge_relations", []):
+        relation_id = str(row.get("relation_id") or "")
+        from_id, to_id = validate_edge_identity(
+            "knowledge_relations", relation_id, row
+        )
+        missing_from = {str(row.get("from_id") or "")} - (evidence_ids | observation_ids)
+        missing_to = {str(row.get("to_id") or "")} - evidence_ids
+        if missing_from or missing_to:
+            raise KnowledgePackageMergeError(
+                f"knowledge_relations/{row[ID_FIELDS['knowledge_relations']]}: "
+                f"unknown endpoints {sorted(missing_from | missing_to)}"
+            )
+    for row in package.get("claim_relations", []):
+        relation_id = str(row.get("claim_relation_id") or "")
+        from_id, to_id = validate_edge_identity(
+            "claim_relations", relation_id, row
+        )
+        missing = {from_id, to_id} - claim_ids
+        if missing:
+            raise KnowledgePackageMergeError(
+                f"claim_relations/{row[ID_FIELDS['claim_relations']]}: "
+                f"unknown endpoints {sorted(missing)}"
+            )
 
 
 def merge_packages(

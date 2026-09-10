@@ -40,6 +40,7 @@ from backend.api.scripture import (
     reference_slugs,
     spoken_references,
 )
+from backend.pipeline.source_projection import assert_locator_space_compatible, project_script
 
 
 #: 同一篇讲道里，两段录音相隔多久之内算「接着讲」。
@@ -137,7 +138,9 @@ class Sermons:
         raw = json.loads(path.read_text(encoding="utf-8"))
         # 两种格式都有：有的逐字稿是 {"metadata":…, "script":[…]}，有的直接是
         # 段落数组。只认前者会让整篇讲道无声无息地消失。
-        script = raw["script"] if isinstance(raw, dict) else raw
+        physical_script = raw["script"] if isinstance(raw, dict) else raw
+        assert_locator_space_compatible(document, physical_script)
+        script = list(project_script(physical_script).body_rows)
         transcript_id = str(document.get("transcript_id") or source_id)
         media = self._media_for(transcript_id)
         full_text = "".join(

@@ -12,7 +12,11 @@ from typing import Any, Iterable, Sequence
 from backend.api.canonical_repository.viewpoint_runtime_projection import (
     ViewpointKnowledgeProjection,
 )
-from backend.pipeline.knowledge_source import live_script
+from backend.pipeline.source_projection import (
+    assert_locator_space_compatible,
+    project_script,
+    source_uses_body_locator_space,
+)
 from backend.pipeline.base_contract_coverage import (
     BOOK_CODE_TO_CHINESE,
     FLAG_CROSS_REFERENCE,
@@ -1801,12 +1805,7 @@ def _sermon_transcript_slices(
         document = documents_by_id[source_id]
         transcript_path = Path(document["source_path"])
         raw_transcript = transcript_path.read_text(encoding="utf-8")
-        actual_sha256 = sha256_text(raw_transcript)
-        declared_sha256 = document.get("source_sha256")
-        if declared_sha256 and declared_sha256 != actual_sha256:
-            raise AuthoringContractError(
-                f"stale sermon transcript source: {source_id}"
-            )
+        actual_file_sha256 = sha256_text(raw_transcript)
         transcript = json.loads(raw_transcript)
         if isinstance(transcript, list):
             # `script_review/` transcripts are a bare segment list; only
@@ -1814,9 +1813,27 @@ def _sermon_transcript_slices(
             segments = transcript
         else:
             segments = transcript.get("script") or transcript.get("segments") or []
-        # An article must never quote text a proofreader struck through: this
-        # is the one reader whose output is prose a person will publish.
-        segments = live_script(segments)
+        try:
+            assert_locator_space_compatible(document, segments)
+        except ValueError as exc:
+            raise AuthoringContractError(f"ambiguous source locators: {source_id}: {exc}") from exc
+        projection = project_script(segments)
+        uses_body_coordinates = source_uses_body_locator_space(document)
+        expected_sha256 = document.get("source_sha256")
+        if uses_body_coordinates:
+            expected_sha256 = document.get("source_body_sha256")
+        actual_sha256 = (
+            projection.body_sha256
+            if uses_body_coordinates
+            else actual_file_sha256
+        )
+        if expected_sha256 and expected_sha256 != actual_sha256:
+            raise AuthoringContractError(
+                f"stale sermon transcript source: {source_id}"
+            )
+        # Editorial subtitles/comments are co-located in the JSON but are not
+        # professor speech and therefore cannot enter an authoring packet.
+        segments = list(projection.body_rows)
         segments_by_index = {segment.get("index"): segment for segment in segments}
 
         segment_texts: dict[str, str] = {}
@@ -1832,6 +1849,7 @@ def _sermon_transcript_slices(
             "source_id": source_id,
             "path": str(transcript_path.resolve()),
             "sha256": actual_sha256,
+            "file_sha256": actual_file_sha256,
             "segment_indices": sorted(str(index) for index in indices),
         }
     return slices

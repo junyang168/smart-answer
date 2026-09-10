@@ -140,6 +140,26 @@ def test_opaque_editor_indices_are_matched_as_written() -> None:
     assert accepted[0]["after_index"] == "p-9f3a"
 
 
+def test_integer_source_indexes_match_the_models_string_after_index() -> None:
+    rows = [{"index": 1, "text": "a"}, {"index": 2, "text": "b"}]
+
+    accepted = validate_insertions(
+        _answer({"after_index": "1", "text": "## 標題", "level": 1}), rows
+    )
+
+    assert accepted[0]["after_index"] == "1"
+
+
+def test_a_heading_after_the_final_paragraph_is_rejected() -> None:
+    rows = [{"index": "0", "text": "a"}, {"index": "1", "text": "b"}]
+
+    with pytest.raises(SubtitleValidationError, match="空标题"):
+        validate_insertions(
+            _answer({"after_index": "1", "text": "## 没有正文", "level": 1}),
+            rows,
+        )
+
+
 # -- the call --------------------------------------------------------------
 
 
@@ -401,11 +421,86 @@ def test_update_script_turns_permission_failure_into_http_403(monkeypatch) -> No
         item="S 220206",
         type="scripts",
         data=[endpoint.Paragraph(index=1, text="正文")],
+        expected_script_sha256="a" * 64,
     )
     with pytest.raises(HTTPException) as caught:
         endpoint.update_script(request)
     assert caught.value.status_code == 403
     assert caught.value.detail == "not allowed"
+
+
+def test_update_script_rejects_missing_snapshot_before_any_write(monkeypatch) -> None:
+    from fastapi import HTTPException
+
+    endpoint = _endpoint()
+    monkeypatch.setattr(
+        endpoint.sermon_manager,
+        "update_sermon",
+        lambda *_args, **_kwargs: pytest.fail("manager must not run without CAS snapshot"),
+    )
+    request = endpoint.UpdateRequest(
+        user_id="editor@example.org",
+        item="S 220206",
+        type="scripts",
+        data=[endpoint.Paragraph(index=1, text="正文")],
+    )
+
+    with pytest.raises(HTTPException) as caught:
+        endpoint.update_script(request)
+
+    assert caught.value.status_code == 400
+    assert caught.value.detail == "expected_script_sha256 is required for script updates"
+
+
+def test_update_script_rejects_type_alias_that_would_bypass_script_cas(monkeypatch) -> None:
+    from fastapi import HTTPException
+
+    endpoint = _endpoint()
+    monkeypatch.setattr(
+        endpoint.sermon_manager,
+        "update_sermon",
+        lambda *_args, **_kwargs: pytest.fail("unsupported type must not reach manager"),
+    )
+    request = endpoint.UpdateRequest(
+        user_id="editor@example.org",
+        item="S 220206",
+        type="script",
+        data=[endpoint.Paragraph(index=1, text="正文")],
+        expected_script_sha256="a" * 64,
+    )
+
+    with pytest.raises(HTTPException) as caught:
+        endpoint.update_script(request)
+
+    assert caught.value.status_code == 400
+    assert caught.value.detail == "unsupported update type: script"
+
+
+def test_update_script_passes_snapshot_sha_and_returns_conflict_as_409(monkeypatch) -> None:
+    from fastapi import HTTPException
+    from backend.api.sc_api.script_delta import ScriptConflictError
+
+    endpoint = _endpoint()
+    seen = {}
+
+    def conflict(*_args, **kwargs):
+        seen.update(kwargs)
+        raise ScriptConflictError("newer script exists")
+
+    monkeypatch.setattr(endpoint.sermon_manager, "update_sermon", conflict)
+    request = endpoint.UpdateRequest(
+        user_id="editor@example.org",
+        item="S 220206",
+        type="scripts",
+        data=[endpoint.Paragraph(index=1, text="正文")],
+        expected_script_sha256="a" * 64,
+    )
+
+    with pytest.raises(HTTPException) as caught:
+        endpoint.update_script(request)
+
+    assert caught.value.status_code == 409
+    assert seen["expected_script_sha256"] == "a" * 64
 
 
 def test_a_failed_generation_does_not_become_one_section(ledger) -> None:

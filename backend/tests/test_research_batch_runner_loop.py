@@ -86,6 +86,31 @@ def test_one_failing_source_does_not_take_the_others_down(tmp_path, monkeypatch,
     assert report["status"] == "partial"
 
 
+def test_exclude_preserves_order_and_keeps_another_session_out_of_the_run(
+    tmp_path, monkeypatch, capsys,
+) -> None:
+    batch = _batch_file(tmp_path)
+    transcripts = _transcripts(tmp_path, "甲", "乙", "丙")
+
+    code, calls = _run(
+        monkeypatch,
+        [
+            "--batch", str(batch),
+            "--transcript-dir", str(transcripts),
+            "--output-root", str(tmp_path / "out"),
+            "--stage", "extract",
+            "--exclude", "乙",
+        ],
+    )
+
+    assert code == 0
+    assert [next(name for name in ("甲", "丙") if name in command) for command in calls] == [
+        "甲", "丙"
+    ]
+    report = json.loads(capsys.readouterr().out)
+    assert [row["source"] for row in report["members"]] == ["甲", "丙"]
+
+
 def test_a_failed_source_skips_its_own_later_stages(tmp_path, monkeypatch, capsys) -> None:
     """Reviewing an extraction that was never written is a second, noisier error."""
 
@@ -355,4 +380,35 @@ def test_only_does_not_overwrite_a_whole_batch_merge(tmp_path, monkeypatch, caps
     assert report["status"] == "partial_selection"
     assert "merge skipped" in report["merge_error"]
     # Narrowing the run on purpose is not a failure.
+    assert code == 0
+
+
+def test_exclude_does_not_overwrite_a_whole_batch_merge(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    batch = _batch_file(tmp_path)
+    transcripts = _transcripts(tmp_path, "甲", "乙", "丙")
+    output = tmp_path / "out"
+    merged = output / "merged" / "research-batch-knowledge.json"
+    merged.parent.mkdir(parents=True)
+    merged.write_text('{"note": "full merge"}', encoding="utf-8")
+    for name, suffix in [("甲", "A"), ("丙", "C")]:
+        _reviewed_package(
+            runner.artifact_paths(output, name)["reviewed"], name, suffix
+        )
+
+    code, _ = _run(
+        monkeypatch,
+        [
+            "--batch", str(batch),
+            "--transcript-dir", str(transcripts),
+            "--output-root", str(output),
+            "--exclude", "乙",
+        ],
+    )
+    report = json.loads(capsys.readouterr().out)
+
+    assert json.loads(merged.read_text(encoding="utf-8")) == {"note": "full merge"}
+    assert report["status"] == "partial_selection"
+    assert "merge skipped" in report["merge_error"]
     assert code == 0

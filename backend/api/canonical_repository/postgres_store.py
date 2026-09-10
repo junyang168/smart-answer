@@ -31,6 +31,16 @@ EDGE_COLLECTIONS = {
     "viewpoint_proposition_unit_links",
     "viewpoint_relations",
 }
+EDGE_ENDPOINT_COLLECTIONS = {
+    "knowledge_relations": ({"evidence_steps", "observations"}, {"evidence_steps"}),
+    "claim_relations": ({"claims"}, {"claims"}),
+    "claim_relation_constraints": ({"claims"}, {"claims"}),
+    "viewpoint_claim_links": ({"canonical_viewpoints"}, {"claims"}),
+    "viewpoint_proposition_unit_links": (
+        {"canonical_viewpoints"}, {"viewpoint_proposition_units"},
+    ),
+    "viewpoint_relations": ({"canonical_viewpoints"}, {"canonical_viewpoints"}),
+}
 VIEWPOINT_VALIDATION_COLLECTIONS = {
     "source_documents",
     "source_fragments",
@@ -55,6 +65,93 @@ VIEWPOINT_VALIDATION_COLLECTIONS = {
     "viewpoint_atomic_resolution_ledgers",
     "viewpoint_atomic_quality_reports",
     "viewpoint_automated_promotion_decisions",
+}
+EXTRACTION_RECORD_COLLECTIONS = {
+    "source_fragments",
+    "questions",
+    "position_nodes",
+    "observations",
+    "evidence_steps",
+    "claims",
+    "knowledge_relations",
+    "claim_relations",
+}
+# Fields that mean a *current semantic dependency* on an extraction record.
+# Searching every string value caused transcript metadata and explicit lineage
+# (for example ``previous_claim_id``) to masquerade as live references. Nested
+# objects are still traversed, but only values under these authoritative field
+# names can block a retirement.
+# Retired CompositionPlan/CompositionDecision rows are historical artifacts,
+# not live authoring authority; draft-first products are protected through
+# ProductDependency invalidation instead.
+SEMANTIC_EXTRACTION_REFERENCE_FIELDS = {
+    "topic_identity_reconciliations": {"claim_ids"},
+    "claim_relation_constraints": {"source_id", "target_id"},
+    "knowledge_routes": {"claim_id"},
+    "editorial_syntheses": {"claim_ids"},
+    "viewpoint_coverage_snapshots": {"source_id"},
+    "viewpoint_structure_revisions": {"basis_claim_ids"},
+    "viewpoint_claim_links": {
+        "claim_id", "supporting_relation_ids", "evidence_step_id", "source_fragment_id",
+    },
+    "viewpoint_proposition_units": {
+        "parent_claim_id", "source_id", "evidence_step_id", "source_fragment_id",
+    },
+    "viewpoint_atomic_coverage_snapshots": {"claim_ids", "source_ids"},
+    "viewpoint_atomic_resolution_ledgers": {"parent_claim_id"},
+    "argument_route_revisions": {"evidence_step_ids", "source_fragment_ids"},
+    "argument_route_attestations": {
+        "source_id", "claim_ids", "evidence_step_ids", "source_fragment_ids",
+    },
+    "viewpoint_relations": {
+        "supporting_claim_relation_ids", "supporting_claim_ids",
+        "correction_evidence_claim_ids",
+    },
+    "viewpoint_identity_candidates": {"candidate_claim_ids", "seed_relation_ids"},
+    "viewpoint_resolution_ledgers": {"claim_id"},
+}
+SEMANTIC_REFERENCE_COLLECTIONS = set(SEMANTIC_EXTRACTION_REFERENCE_FIELDS)
+PACKAGE_REFERENCE_FIELDS = {
+    "source_fragments": {"source_id"},
+    "questions": {"source_fragment_id", "source_fragment_ids", "answer_claim_ids"},
+    "position_nodes": {"source_fragment_ids"},
+    "observations": {"source_fragment_id", "source_fragment_ids"},
+    "evidence_steps": {
+        "source_fragment_id", "source_fragment_ids", "produced_claim_ids",
+    },
+    "claims": {
+        "evidence_step_ids", "opposed_position_ids", "superseded_by",
+        "source_id", "evidence_id",
+    },
+}
+# Every registered collection is deliberately classified as extraction,
+# current semantic master data, or non-live/history. The test over this set
+# forces a new collection to choose before it can silently escape the guard.
+NON_LIVE_EXTRACTION_REFERENCE_COLLECTIONS = {
+    "argument_routes",
+    "canonical_viewpoints",
+    "composition_decisions",
+    "composition_plans",
+    "editorial_checks",
+    "impact_events",
+    "product_dependencies",
+    "tensions",
+    "topic_nodes",
+    "viewpoint_atomic_quality_reports",
+    "viewpoint_automated_promotion_decisions",
+    "viewpoint_identity_decisions",
+    "viewpoint_proposition_unit_links",
+    "viewpoint_quality_reports",
+    "viewpoint_revisions",
+    "viewpoint_structures",
+}
+# These fields preserve history or source lookup identity; they do not assert
+# that the referenced extraction object remains live. Every other previously
+# unclassified exact object-id occurrence fails closed during retirement so a
+# new schema field cannot silently bypass the allowlist above.
+NON_LIVE_EXTRACTION_ID_FIELDS = {
+    "previous_claim_id",
+    "transcript_id",
 }
 REVIEW_FIELDS = {
     "review_status",
@@ -402,6 +499,8 @@ def _normalize_records(
     records = KnowledgePackageImporter._model_records(dict(payload))
     normalized: dict[str, dict[str, dict[str, Any]]] = {}
     stated: dict[tuple[str, str], frozenset[str]] = {}
+    id_owners: dict[str, str] = {}
+    source_identity_owners: dict[tuple[str, str], str] = {}
     for collection, values in records.items():
         normalized[collection] = {}
         for value in values:
@@ -411,6 +510,24 @@ def _normalize_records(
                 raise PostgresKnowledgeStoreError(
                     f"Duplicate record {collection}/{record_id} in package"
                 )
+            prior_collection = id_owners.setdefault(record_id, collection)
+            if prior_collection != collection:
+                raise PostgresKnowledgeStoreError(
+                    "Record IDs are globally unique; "
+                    f"{record_id!r} appears in both {prior_collection} and {collection}"
+                )
+            if collection == "source_documents":
+                identity = (
+                    str(row.get("source_type") or "").strip(),
+                    str(row.get("transcript_id") or record_id).strip(),
+                )
+                prior_source = source_identity_owners.setdefault(identity, record_id)
+                if prior_source != record_id:
+                    raise PostgresKnowledgeStoreError(
+                        "Current SourceDocument identity is unique; "
+                        f"{identity!r} is declared by both {prior_source!r} "
+                        f"and {record_id!r}"
+                    )
             normalized[collection][record_id] = row
             stated[(collection, record_id)] = frozenset(value.model_fields_set)
     return normalized, stated
@@ -531,6 +648,25 @@ def stored_operation_payload(operation: ChangeOperation) -> dict[str, Any]:
     return payload
 
 
+def operation_fingerprint_rows(
+    operations: Sequence[ChangeOperation],
+) -> list[dict[str, Any]]:
+    """Bind ChangeSet identity to the exact store snapshot it intends to change."""
+
+    return [
+        {
+            "operation": row.operation,
+            "collection": row.collection,
+            "object_id": row.object_id,
+            "before_sha256": row.before_sha256,
+            "after_sha256": row.after_sha256,
+            "before_revision": row.before_revision,
+            "after_revision": row.after_revision,
+        }
+        for row in operations
+    ]
+
+
 @dataclass(frozen=True)
 class ChangeSetPlan:
     change_set_id: str
@@ -603,6 +739,25 @@ def build_change_set_plan(
                 current_payload,
                 stated[(collection, object_id)],
             )
+            if collection == "source_documents" and current_payload:
+                incoming_identity = (
+                    str(merged.get("source_type") or "").strip(),
+                    str(merged.get("transcript_id") or object_id).strip(),
+                )
+                current_identity = (
+                    str(current_payload.get("source_type") or "").strip(),
+                    str(current_payload.get("transcript_id") or object_id).strip(),
+                )
+                completing_legacy_type = (
+                    not current_identity[0]
+                    and bool(incoming_identity[0])
+                    and incoming_identity[1] == current_identity[1]
+                )
+                if incoming_identity != current_identity and not completing_legacy_type:
+                    raise PostgresKnowledgeStoreError(
+                        f"SourceDocument id {object_id!r} cannot change identity "
+                        f"from {current_identity!r} to {incoming_identity!r}"
+                    )
             incoming = preserve_human_review(merged, current_payload)
             removed_fields = fields_removed(current_payload, incoming)
             after_sha = record_content_sha(incoming)
@@ -627,10 +782,11 @@ def build_change_set_plan(
 
     source_sha = sha256_json(package)
     fingerprint_payload = {
-        "planner_schema": "wang_postgres_changeset_v1",
+        "planner_schema": "wang_postgres_changeset_v2",
         "source_kind": source_kind,
         "source_sha256": source_sha,
         "package_id": str(package.get("package_id") or ""),
+        "operations": operation_fingerprint_rows(operations),
     }
     fingerprint = sha256_json(fingerprint_payload)
     recognized = set(KnowledgePackageImporter.SOURCE_COLLECTION_KEYS) | {
@@ -695,10 +851,11 @@ def build_retirement_plan(
             )
         )
     fingerprint = sha256_json({
-        "planner_schema": "wang_postgres_retirement_v1",
+        "planner_schema": "wang_postgres_retirement_v2",
         "source_kind": source_kind,
         "reason": reason,
         "keys": [list(key) for key in sorted({(c, o) for c, o in keys})],
+        "operations": operation_fingerprint_rows(operations),
     })
     return ChangeSetPlan(
         change_set_id=f"KCS-{fingerprint[:20]}",
@@ -755,10 +912,11 @@ def build_revival_plan(
             )
         )
     fingerprint = sha256_json({
-        "planner_schema": "wang_postgres_revival_v1",
+        "planner_schema": "wang_postgres_revival_v2",
         "source_kind": source_kind,
         "reason": reason,
         "keys": [list(key) for key in sorted({(c, o) for c, o in keys})],
+        "operations": operation_fingerprint_rows(operations),
     })
     return ChangeSetPlan(
         change_set_id=f"KCS-{fingerprint[:20]}",
@@ -780,14 +938,20 @@ def combined_plan(arrival: ChangeSetPlan, withdrawal: ChangeSetPlan) -> ChangeSe
     fingerprint covers both halves, so re-running the same arrival against the
     same predecessor plans the same change set and applies once.
 
-    Arrivals come first. The withdrawal is built to exclude every id the
-    package carries, so the two halves never touch the same row.
+    Withdrawals come first inside the transaction. The withdrawal is built to
+    exclude every id the package carries, so the halves never touch the same
+    row; retiring an old SourceDocument alias first also lets the database's
+    current-transcript uniqueness constraint admit its replacement without an
+    observable gap outside the transaction.
     """
 
     fingerprint = sha256_json({
-        "planner_schema": "wang_postgres_arrival_with_withdrawal_v1",
+        "planner_schema": "wang_postgres_arrival_with_withdrawal_v2",
         "arrival": arrival.fingerprint_sha256,
         "withdrawal": withdrawal.fingerprint_sha256,
+        "operations": operation_fingerprint_rows(
+            withdrawal.operations + arrival.operations
+        ),
     })
     return ChangeSetPlan(
         change_set_id=f"KCS-{fingerprint[:20]}",
@@ -795,7 +959,7 @@ def combined_plan(arrival: ChangeSetPlan, withdrawal: ChangeSetPlan) -> ChangeSe
         package_id=arrival.package_id,
         source_kind=arrival.source_kind,
         source_sha256=arrival.source_sha256,
-        operations=arrival.operations + withdrawal.operations,
+        operations=withdrawal.operations + arrival.operations,
         unchanged=arrival.unchanged + withdrawal.unchanged,
         ignored_keys=arrival.ignored_keys,
     )
@@ -1052,6 +1216,24 @@ class PostgresKnowledgeStore:
             for object_id in rows
         ]
         with self.connect() as conn:
+            # The schema's global unique index is the final concurrency guard;
+            # this read gives a useful fail-closed error before a plan is made
+            # and also protects installations until migration 005 is applied.
+            incoming_owner = {object_id: collection for collection, object_id in keys}
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """SELECT collection, object_id FROM wang_knowledge.objects
+                       WHERE object_id = ANY(%s)""",
+                    (sorted(incoming_owner),),
+                )
+                for existing_collection, object_id in cursor.fetchall():
+                    expected_collection = incoming_owner[str(object_id)]
+                    if str(existing_collection) != expected_collection:
+                        raise PostgresKnowledgeStoreError(
+                            "Record IDs are globally unique; "
+                            f"{object_id!r} already belongs to {existing_collection}, "
+                            f"not {expected_collection}"
+                        )
             existing = self._existing(conn, keys)
             if any(
                 collection in VIEWPOINT_VALIDATION_COLLECTIONS - {
@@ -1126,8 +1308,18 @@ class PostgresKnowledgeStore:
                 str(payload["relation_type"]),
             )
         return (
-            str(payload.get("from_id") or payload.get("source_id") or payload.get("from_claim_id")),
-            str(payload.get("to_id") or payload.get("target_id") or payload.get("to_claim_id")),
+            str(
+                payload.get("from_id")
+                or payload.get("source_id")
+                or payload.get("from_claim_id")
+                or ""
+            ),
+            str(
+                payload.get("to_id")
+                or payload.get("target_id")
+                or payload.get("to_claim_id")
+                or ""
+            ),
             str(payload["relation_type"]),
         )
 
@@ -1160,8 +1352,22 @@ class PostgresKnowledgeStore:
         metadata: Optional[dict[str, Any]] = None,
         expected_current_viewpoint_revisions: Optional[Mapping[str, str]] = None,
     ) -> dict[str, Any]:
+        if not plan.operations:
+            return {
+                "status": "unchanged",
+                "change_set_id": None,
+                "summary": plan.as_dict()["summary"],
+            }
         with self.connect() as conn:
             with conn.cursor() as cursor:
+                # ChangeSets share cross-record invariants that row locks alone
+                # cannot protect (most importantly a new CVR link racing a
+                # source re-extraction). Serialize the short apply transaction;
+                # model work and planning happen before this lock is taken.
+                cursor.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                    ("wang_knowledge.apply_plan.v1",),
+                )
                 cursor.execute(
                     "SELECT status, summary FROM wang_knowledge.change_sets WHERE fingerprint_sha256=%s",
                     (plan.fingerprint_sha256,),
@@ -1169,6 +1375,12 @@ class PostgresKnowledgeStore:
                 prior = cursor.fetchone()
                 if prior and prior[0] == "applied":
                     return {"status": "already_applied", "change_set_id": plan.change_set_id, "summary": prior[1]}
+
+                self._assert_global_id_uniqueness(cursor, plan)
+                self._assert_source_identity_uniqueness(cursor, plan)
+                self._assert_edge_integrity(cursor, plan)
+                self._assert_no_dangling_package_references(cursor, plan)
+                self._assert_no_uncoordinated_semantic_references(cursor, plan)
 
                 self._assert_current_viewpoint_revisions(
                     cursor, expected_current_viewpoint_revisions or {}
@@ -1304,6 +1516,550 @@ class PostgresKnowledgeStore:
                 )
         return {"status": "applied", "change_set_id": plan.change_set_id, "summary": summary}
 
+    @staticmethod
+    def _assert_global_id_uniqueness(cursor: Any, plan: ChangeSetPlan) -> None:
+        """Repeat the planning check under the global apply lock.
+
+        Migration 005 is the permanent database backstop, but an installation
+        with pre-existing source-identity duplicates cannot install it until
+        those rows are repaired. Two plans made before either apply must still
+        not create the same object id in different collections meanwhile.
+        """
+
+        incoming: dict[str, str] = {}
+        for operation in plan.operations:
+            if operation.operation == "retire":
+                continue
+            prior = incoming.setdefault(operation.object_id, operation.collection)
+            if prior != operation.collection:
+                raise ChangeSetConflict(
+                    "Record IDs are globally unique; "
+                    f"{operation.object_id!r} arrives in both {prior} "
+                    f"and {operation.collection}"
+                )
+        if not incoming:
+            return
+        cursor.execute(
+            """SELECT collection, object_id FROM wang_knowledge.objects
+               WHERE object_id = ANY(%s) FOR UPDATE""",
+            (sorted(incoming),),
+        )
+        conflicts = [
+            (str(object_id), str(collection), incoming[str(object_id)])
+            for collection, object_id in cursor.fetchall()
+            if str(collection) != incoming[str(object_id)]
+        ]
+        if conflicts:
+            object_id, existing, arriving = sorted(conflicts)[0]
+            raise ChangeSetConflict(
+                "Record IDs are globally unique; "
+                f"{object_id!r} already belongs to {existing}, not {arriving}"
+            )
+
+    @staticmethod
+    def _assert_source_identity_uniqueness(cursor: Any, plan: ChangeSetPlan) -> None:
+        """Lock and reject a second current source for one transcript identity."""
+
+        retiring = {
+            operation.object_id
+            for operation in plan.operations
+            if operation.collection == "source_documents"
+            and operation.operation == "retire"
+        }
+        incoming_identities: dict[tuple[str, str], str] = {}
+        for operation in plan.operations:
+            if operation.collection != "source_documents" or operation.operation == "retire":
+                continue
+            payload = stored_operation_payload(operation)
+            source_type = str(payload.get("source_type") or "").strip()
+            transcript_id = str(
+                payload.get("transcript_id") or operation.object_id
+            ).strip()
+            if not source_type:
+                raise ChangeSetConflict(
+                    f"SourceDocument {operation.object_id} has no stable source_type identity"
+                )
+            identity = (source_type, transcript_id)
+            prior_source = incoming_identities.setdefault(identity, operation.object_id)
+            if prior_source != operation.object_id:
+                raise ChangeSetConflict(
+                    "Multiple incoming SourceDocuments would name "
+                    f"{identity}: {prior_source}, {operation.object_id}"
+                )
+            cursor.execute(
+                """SELECT object_id,
+                          btrim(COALESCE(payload->>'source_type','')),
+                          btrim(COALESCE(NULLIF(payload->>'transcript_id',''), object_id))
+                   FROM wang_knowledge.objects
+                   WHERE collection='source_documents' AND retired_at IS NULL
+                     AND object_id<>%s
+                     AND (
+                       (
+                         btrim(COALESCE(payload->>'source_type',''))=''
+                         AND btrim(COALESCE(NULLIF(payload->>'transcript_id',''), object_id))=%s
+                       )
+                       OR (
+                         btrim(payload->>'source_type')=%s
+                         AND btrim(COALESCE(NULLIF(payload->>'transcript_id',''), object_id))=%s
+                       )
+                     )
+                   FOR UPDATE""",
+                (operation.object_id, transcript_id, source_type, transcript_id),
+            )
+            conflicts: set[str] = set()
+            for object_id, existing_type, _existing_transcript in cursor.fetchall():
+                if str(object_id) in retiring:
+                    continue
+                if not str(existing_type or "").strip():
+                    raise ChangeSetConflict(
+                        "Cannot prove transcript identity uniqueness while current "
+                        f"SourceDocument {object_id!r} has no source_type"
+                    )
+                conflicts.add(str(object_id))
+            if conflicts:
+                raise ChangeSetConflict(
+                    "Multiple current SourceDocuments would name "
+                    f"({source_type}, {transcript_id}): " + ", ".join(sorted(conflicts))
+                )
+
+    @classmethod
+    def _assert_edge_integrity(cls, cursor: Any, plan: ChangeSetPlan) -> None:
+        """Validate every arriving edge against the transaction's final graph.
+
+        Model validators are useful early feedback, but the database write is
+        the chokepoint shared by extraction, consensus, CVR and imported
+        increments. Recheck here under the global apply lock so no path can
+        create a self-edge, dangling endpoint, or the same semantic edge under
+        a second identifier.
+        """
+
+        retiring_keys = {
+            (operation.collection, operation.object_id)
+            for operation in plan.operations
+            if operation.operation == "retire"
+        }
+        retiring_ids = {object_id for _, object_id in retiring_keys}
+        planned_edge_operations = {
+            (operation.collection, operation.object_id): operation
+            for operation in plan.operations
+            if operation.collection in EDGE_COLLECTIONS
+        }
+        arriving_owners = {
+            operation.object_id: operation.collection
+            for operation in plan.operations
+            if operation.operation != "retire"
+        }
+        incoming_edges: list[tuple[str, str, str, str, str]] = []
+        incoming_signatures: dict[tuple[str, str, str, str], str] = {}
+        endpoint_ids: set[str] = set()
+        for operation in plan.operations:
+            if operation.collection not in EDGE_COLLECTIONS or operation.operation == "retire":
+                continue
+            payload = stored_operation_payload(operation)
+            from_id, to_id, relation_type = cls._edge_values(
+                operation.collection, payload
+            )
+            if not from_id or not to_id:
+                raise ChangeSetConflict(
+                    f"Edge {operation.collection}/{operation.object_id} has an empty endpoint"
+                )
+            if not relation_type:
+                raise ChangeSetConflict(
+                    f"Edge {operation.collection}/{operation.object_id} has no relation type"
+                )
+            if from_id == to_id:
+                raise ChangeSetConflict(
+                    f"Edge {operation.collection}/{operation.object_id} points to itself"
+                )
+            signature = (operation.collection, from_id, to_id, relation_type)
+            prior = incoming_signatures.setdefault(signature, operation.object_id)
+            if prior != operation.object_id:
+                raise ChangeSetConflict(
+                    "Duplicate semantic edge in one ChangeSet: "
+                    f"{operation.collection}/{prior} and {operation.object_id} "
+                    f"both name {from_id}->{to_id} ({relation_type})"
+                )
+            incoming_edges.append(
+                (operation.collection, operation.object_id, from_id, to_id, relation_type)
+            )
+            endpoint_ids.update((from_id, to_id))
+        if retiring_ids:
+            cursor.execute(
+                """SELECT edge_collection, edge_id, from_id, to_id
+                   FROM wang_knowledge.edges
+                   WHERE retired_at IS NULL
+                     AND (from_id = ANY(%s) OR to_id = ANY(%s))
+                   FOR UPDATE""",
+                (sorted(retiring_ids), sorted(retiring_ids)),
+            )
+            surviving_references = []
+            for collection, edge_id, from_id, to_id in cursor.fetchall():
+                key = (str(collection), str(edge_id))
+                planned = planned_edge_operations.get(key)
+                if planned is not None:
+                    if planned.operation == "retire":
+                        continue
+                    from_id, to_id, _ = cls._edge_values(
+                        key[0], stored_operation_payload(planned)
+                    )
+                if str(from_id) in retiring_ids or str(to_id) in retiring_ids:
+                    surviving_references.append(
+                        (key[0], key[1], str(from_id), str(to_id))
+                    )
+            if surviving_references:
+                collection, edge_id, from_id, to_id = sorted(
+                    surviving_references
+                )[0]
+                raise ChangeSetConflict(
+                    f"Retirement would leave current edge {collection}/{edge_id} "
+                    f"with non-current endpoint {from_id}->{to_id}"
+                )
+        if not incoming_edges:
+            return
+
+        cursor.execute(
+            """SELECT collection, object_id FROM wang_knowledge.objects
+               WHERE object_id = ANY(%s) AND retired_at IS NULL FOR UPDATE""",
+            (sorted(endpoint_ids),),
+        )
+        current_owner_sets: dict[str, set[str]] = {}
+        for collection, object_id in cursor.fetchall():
+            object_id = str(object_id)
+            if object_id in retiring_ids:
+                continue
+            current_owner_sets.setdefault(object_id, set()).add(str(collection))
+        ambiguous = {
+            object_id: owners
+            for object_id, owners in current_owner_sets.items()
+            if len(owners) > 1
+        }
+        if ambiguous:
+            object_id = sorted(ambiguous)[0]
+            raise ChangeSetConflict(
+                f"Edge endpoint {object_id} has ambiguous global ownership: "
+                + ", ".join(sorted(ambiguous[object_id]))
+            )
+        current_owners = {
+            object_id: next(iter(owners))
+            for object_id, owners in current_owner_sets.items()
+        }
+        final_owners = {**current_owners, **arriving_owners}
+        for collection, edge_id, from_id, to_id, _ in incoming_edges:
+            missing = {from_id, to_id} - set(final_owners)
+            if missing:
+                raise ChangeSetConflict(
+                    f"Edge {collection}/{edge_id} has non-current endpoints: "
+                    + ", ".join(sorted(missing))
+                )
+            allowed_from, allowed_to = EDGE_ENDPOINT_COLLECTIONS[collection]
+            if final_owners[from_id] not in allowed_from:
+                raise ChangeSetConflict(
+                    f"Edge {collection}/{edge_id} from endpoint {from_id} belongs to "
+                    f"{final_owners[from_id]}, expected {sorted(allowed_from)}"
+                )
+            if final_owners[to_id] not in allowed_to:
+                raise ChangeSetConflict(
+                    f"Edge {collection}/{edge_id} to endpoint {to_id} belongs to "
+                    f"{final_owners[to_id]}, expected {sorted(allowed_to)}"
+                )
+
+        cursor.execute(
+            """SELECT edge_collection, edge_id, from_id, to_id, relation_type
+               FROM wang_knowledge.edges WHERE retired_at IS NULL FOR UPDATE"""
+        )
+        existing: dict[tuple[str, str, str, str], set[str]] = {}
+        for collection, edge_id, from_id, to_id, relation_type in cursor.fetchall():
+            key = (str(collection), str(edge_id))
+            planned = planned_edge_operations.get(key)
+            if planned is not None:
+                if planned.operation == "retire":
+                    continue
+                from_id, to_id, relation_type = cls._edge_values(
+                    key[0], stored_operation_payload(planned)
+                )
+            signature = (
+                key[0], str(from_id), str(to_id), str(relation_type)
+            )
+            existing.setdefault(signature, set()).add(key[1])
+        for collection, edge_id, from_id, to_id, relation_type in incoming_edges:
+            other_owners = existing.get(
+                (collection, from_id, to_id, relation_type), set()
+            ) - {edge_id}
+            if other_owners:
+                owner = sorted(other_owners)[0]
+                raise ChangeSetConflict(
+                    "Semantic edge already has another current ID: "
+                    f"{collection}/{owner}, not {edge_id}, names "
+                    f"{from_id}->{to_id} ({relation_type})"
+                )
+
+    @staticmethod
+    def _assert_no_uncoordinated_semantic_references(
+        cursor: Any, plan: ChangeSetPlan
+    ) -> None:
+        """Do not retire extraction identity under current CVR records.
+
+        Model-local ordinals are not semantic identity. Re-extraction therefore
+        creates a disjoint generation and retires its predecessor. If current
+        viewpoint/route master data still cites that predecessor, a coordinated
+        CVR ChangeSet must update or retire those records in the same plan;
+        silently leaving them attached to retired content is forbidden. An
+        ``update`` preserves the same object id and is therefore deliberately
+        not included: references to an identity-preserving update remain valid.
+        """
+
+        retired_ids = {
+            operation.object_id
+            for operation in plan.operations
+            if (
+                operation.collection in EXTRACTION_RECORD_COLLECTIONS
+                or operation.collection == "source_documents"
+            )
+            and operation.operation == "retire"
+        }
+        if not retired_ids:
+            return
+        planned_operations = {
+            (operation.collection, operation.object_id): operation
+            for operation in plan.operations
+        }
+        cursor.execute(
+            """SELECT collection, object_id, payload
+               FROM wang_knowledge.objects
+               WHERE collection = ANY(%s) AND retired_at IS NULL
+               FOR UPDATE""",
+            (sorted(SEMANTIC_REFERENCE_COLLECTIONS),),
+        )
+
+        def strings(value: Any) -> set[str]:
+            if isinstance(value, Mapping):
+                found: set[str] = set()
+                for key, child in value.items():
+                    if isinstance(key, str):
+                        found.add(key)
+                    found.update(strings(child))
+                return found
+            if isinstance(value, (list, tuple, set)):
+                found: set[str] = set()
+                for child in value:
+                    found.update(strings(child))
+                return found
+            return {value} if isinstance(value, str) else set()
+
+        def exact_references(collection: str, value: Any) -> set[str]:
+            fields = SEMANTIC_EXTRACTION_REFERENCE_FIELDS.get(collection, set())
+            if not fields or not isinstance(value, (Mapping, list, tuple, set)):
+                return set()
+            if isinstance(value, Mapping):
+                found: set[str] = set()
+                for key, child in value.items():
+                    if str(key) in fields:
+                        found.update(strings(child) & retired_ids)
+                    else:
+                        found.update(exact_references(collection, child))
+                return found
+            found: set[str] = set()
+            for child in value:
+                found.update(exact_references(collection, child))
+            return found
+
+        def unclassified_references(
+            collection: str, value: Any, *, path: tuple[str, ...] = ()
+        ) -> set[str]:
+            fields = SEMANTIC_EXTRACTION_REFERENCE_FIELDS.get(collection, set())
+            found: set[str] = set()
+            if isinstance(value, Mapping):
+                for key, child in value.items():
+                    field = str(key)
+                    if field in retired_ids:
+                        found.add(f"{'.'.join(path) or '<root>'}.<key>={field}")
+                    if field in fields or field in NON_LIVE_EXTRACTION_ID_FIELDS:
+                        continue
+                    found.update(
+                        unclassified_references(
+                            collection, child, path=(*path, field)
+                        )
+                    )
+                return found
+            if isinstance(value, (list, tuple, set)):
+                for child in value:
+                    found.update(
+                        unclassified_references(collection, child, path=path)
+                    )
+                return found
+            if isinstance(value, str) and value in retired_ids:
+                found.add(f"{'.'.join(path) or '<root>'}={value}")
+            return found
+
+        blockers: list[str] = []
+        for collection, object_id, payload in cursor.fetchall():
+            key = (str(collection), str(object_id))
+            planned = planned_operations.get(key)
+            if planned is not None:
+                if planned.operation != "retire":
+                    planned_payload = stored_operation_payload(planned)
+                    references = exact_references(key[0], planned_payload)
+                    if references:
+                        blockers.append(
+                            f"planned {key[0]}/{key[1]} still -> "
+                                f"{','.join(sorted(references))}"
+                            )
+                    unknown = unclassified_references(key[0], planned_payload)
+                    if unknown:
+                        blockers.append(
+                            f"planned {key[0]}/{key[1]} has unclassified id field "
+                            f"{','.join(sorted(unknown))}"
+                        )
+                continue
+            references = exact_references(key[0], payload)
+            if references:
+                blockers.append(
+                    f"{key[0]}/{key[1]} -> {','.join(sorted(references))}"
+                )
+            unknown = unclassified_references(key[0], payload)
+            if unknown:
+                blockers.append(
+                    f"{key[0]}/{key[1]} has unclassified id field "
+                    f"{','.join(sorted(unknown))}"
+                )
+        # A newly created semantic row is absent from the locked query above.
+        for key, planned in planned_operations.items():
+            if key[0] not in SEMANTIC_REFERENCE_COLLECTIONS:
+                continue
+            if planned.operation == "retire":
+                continue
+            references = exact_references(
+                key[0], stored_operation_payload(planned)
+            )
+            if references and not any(
+                item.startswith(f"planned {key[0]}/{key[1]} ")
+                for item in blockers
+            ):
+                blockers.append(
+                    f"planned {key[0]}/{key[1]} still -> "
+                    f"{','.join(sorted(references))}"
+                )
+            unknown = unclassified_references(
+                key[0], stored_operation_payload(planned)
+            )
+            if unknown and not any(
+                item.startswith(f"planned {key[0]}/{key[1]} has unclassified ")
+                for item in blockers
+            ):
+                blockers.append(
+                    f"planned {key[0]}/{key[1]} has unclassified id field "
+                    f"{','.join(sorted(unknown))}"
+                )
+        if blockers:
+            raise ChangeSetConflict(
+                "re-extraction requires a coordinated CVR update; current semantic "
+                "master data still references the predecessor: "
+                + " | ".join(sorted(blockers)[:20])
+            )
+
+    @staticmethod
+    def _assert_no_dangling_package_references(
+        cursor: Any, plan: ChangeSetPlan
+    ) -> None:
+        """Do not retire a package object while a current package row cites it.
+
+        Supersession retires a whole extraction generation.  Its closure must
+        include every current owner of a retiring id, or update that owner in
+        the same ChangeSet so the retired id is removed.  Otherwise a retry can
+        appear successful while leaving a package that cannot be traversed.
+        """
+
+        retired_ids = {
+            operation.object_id
+            for operation in plan.operations
+            if (
+                operation.collection in EXTRACTION_RECORD_COLLECTIONS
+                or operation.collection == "source_documents"
+            )
+            and operation.operation == "retire"
+        }
+        if not retired_ids:
+            return
+
+        planned_operations = {
+            (operation.collection, operation.object_id): operation
+            for operation in plan.operations
+        }
+
+        def strings(value: Any) -> set[str]:
+            if isinstance(value, Mapping):
+                found: set[str] = set()
+                for child in value.values():
+                    found.update(strings(child))
+                return found
+            if isinstance(value, (list, tuple, set)):
+                found: set[str] = set()
+                for child in value:
+                    found.update(strings(child))
+                return found
+            return {value} if isinstance(value, str) else set()
+
+        def references(collection: str, value: Any) -> set[str]:
+            fields = PACKAGE_REFERENCE_FIELDS.get(collection, set())
+            if not fields or not isinstance(value, (Mapping, list, tuple, set)):
+                return set()
+            if isinstance(value, Mapping):
+                found: set[str] = set()
+                for key, child in value.items():
+                    if str(key) in fields:
+                        found.update(strings(child) & retired_ids)
+                    else:
+                        found.update(references(collection, child))
+                return found
+            found: set[str] = set()
+            for child in value:
+                found.update(references(collection, child))
+            return found
+
+        cursor.execute(
+            """SELECT collection, object_id, payload
+               FROM wang_knowledge.objects
+               WHERE collection = ANY(%s) AND retired_at IS NULL
+               FOR UPDATE""",
+            (sorted(PACKAGE_REFERENCE_FIELDS),),
+        )
+        blockers: list[str] = []
+        seen_planned: set[tuple[str, str]] = set()
+        for collection, object_id, payload in cursor.fetchall():
+            key = (str(collection), str(object_id))
+            planned = planned_operations.get(key)
+            if planned is not None:
+                seen_planned.add(key)
+                if planned.operation == "retire":
+                    continue
+                payload = stored_operation_payload(planned)
+            found = references(key[0], payload)
+            if found:
+                prefix = "planned " if planned is not None else ""
+                blockers.append(
+                    f"{prefix}{key[0]}/{key[1]} -> {','.join(sorted(found))}"
+                )
+
+        # Creates and restores are absent from the current-row query. Updates
+        # are normally seen there, but including unseen ones is fail-closed for
+        # malformed plans and test doubles.
+        for key, planned in planned_operations.items():
+            if key in seen_planned or key[0] not in PACKAGE_REFERENCE_FIELDS:
+                continue
+            if planned.operation == "retire":
+                continue
+            found = references(key[0], stored_operation_payload(planned))
+            if found:
+                blockers.append(
+                    f"planned {key[0]}/{key[1]} -> {','.join(sorted(found))}"
+                )
+
+        if blockers:
+            raise ChangeSetConflict(
+                "retirement would leave current extraction records pointing to "
+                "non-current objects: " + " | ".join(sorted(blockers)[:20])
+            )
+
     def _set_retirement(
         self, cursor: Any, plan: ChangeSetPlan, index: int, operation: ChangeOperation
     ) -> None:
@@ -1366,7 +2122,8 @@ class PostgresKnowledgeStore:
         changed_records: list[tuple[str, str, int, int]],
         operation_offset: int,
     ) -> int:
-        count = 0
+        matched_by_change: dict[tuple[str, str, int, int], list[str]] = {}
+        dependencies: dict[str, tuple[int, dict[str, Any]]] = {}
         for changed_collection, changed_id, from_revision, to_revision in changed_records:
             manifest_ref = canonical_json([{
                 "collection": changed_collection,
@@ -1385,48 +2142,100 @@ class PostgresKnowledgeStore:
                 (changed_collection, changed_id, manifest_ref),
             )
             rows = cursor.fetchall()
-            affected_ids: list[str] = []
             for dependency_id, revision, payload in rows:
-                updated = dict(payload)
-                updated["status"] = "invalidated"
-                updated.setdefault("invalidation_change_set_ids", []).append(plan.change_set_id)
-                next_revision = int(revision) + 1
-                updated["revision"] = next_revision
-                content_sha = record_content_sha(updated)
-                cursor.execute(
-                    """UPDATE wang_knowledge.objects SET revision=%s, review_status=%s,
-                       visibility=%s, content_sha256=%s, payload=%s::jsonb, updated_at=now()
-                       WHERE collection='product_dependencies' AND object_id=%s""",
-                    (
-                        next_revision, updated.get("review_status", "candidate"),
-                        updated.get("visibility", "internal"), content_sha,
-                        canonical_json(updated), dependency_id,
-                    ),
-                )
-                cursor.execute(
-                    """INSERT INTO wang_knowledge.object_versions
-                       (collection, object_id, revision, content_sha256, payload, change_set_id)
-                       VALUES ('product_dependencies',%s,%s,%s,%s::jsonb,%s)""",
-                    (dependency_id, next_revision, content_sha, canonical_json(updated), plan.change_set_id),
-                )
-                cursor.execute(
-                    """INSERT INTO wang_knowledge.change_operations
-                       (change_set_id, operation_index, operation, collection, object_id,
-                        after_sha256, before_revision, after_revision, details)
-                       VALUES (%s,%s,'invalidate','product_dependencies',%s,%s,%s,%s,%s::jsonb)""",
-                    (
-                        plan.change_set_id, operation_offset + count, dependency_id,
-                        content_sha, revision, next_revision,
-                        canonical_json({
-                            "changed_collection": changed_collection,
-                            "changed_record_id": changed_id,
-                        }),
-                    ),
-                )
-                affected_ids.append(dependency_id)
-                count += 1
+                dependency_id = str(dependency_id)
+                dependencies.setdefault(dependency_id, (int(revision), dict(payload)))
+                matched_by_change.setdefault(
+                    (changed_collection, changed_id, from_revision, to_revision), []
+                ).append(dependency_id)
+
+        # Scan all change reasons before mutating status. Otherwise the first
+        # matched record flips a dependency to invalidated and later records in
+        # the same ChangeSet can no longer see it, leaving the impact ledger
+        # with only one of several true causes.
+        for count, dependency_id in enumerate(sorted(dependencies)):
+            revision, payload = dependencies[dependency_id]
+            reasons = [
+                change
+                for change, affected in matched_by_change.items()
+                if dependency_id in affected
+            ]
+            event_ids = [
+                f"IMPACT-{plan.change_set_id}-{collection}-{record_id}"
+                for collection, record_id, _, _ in reasons
+            ]
+            updated = dict(payload)
+            updated["status"] = "invalidated"
+            updated["invalidation_change_set_ids"] = sorted({
+                *updated.get("invalidation_change_set_ids", []),
+                plan.change_set_id,
+            })
+            updated["invalidation_event_ids"] = sorted({
+                *updated.get("invalidation_event_ids", []),
+                *event_ids,
+            })
+            next_revision = revision + 1
+            updated["revision"] = next_revision
+            content_sha = record_content_sha(updated)
+            cursor.execute(
+                """UPDATE wang_knowledge.objects SET revision=%s, review_status=%s,
+                   visibility=%s, content_sha256=%s, payload=%s::jsonb, updated_at=now()
+                   WHERE collection='product_dependencies' AND object_id=%s""",
+                (
+                    next_revision, updated.get("review_status", "candidate"),
+                    updated.get("visibility", "internal"), content_sha,
+                    canonical_json(updated), dependency_id,
+                ),
+            )
+            cursor.execute(
+                """INSERT INTO wang_knowledge.object_versions
+                   (collection, object_id, revision, content_sha256, payload, change_set_id)
+                   VALUES ('product_dependencies',%s,%s,%s,%s::jsonb,%s)""",
+                (
+                    dependency_id, next_revision, content_sha,
+                    canonical_json(updated), plan.change_set_id,
+                ),
+            )
+            cursor.execute(
+                """INSERT INTO wang_knowledge.change_operations
+                   (change_set_id, operation_index, operation, collection, object_id,
+                    after_sha256, before_revision, after_revision, details)
+                   VALUES (%s,%s,'invalidate','product_dependencies',%s,%s,%s,%s,%s::jsonb)""",
+                (
+                    plan.change_set_id, operation_offset + count, dependency_id,
+                    content_sha, revision, next_revision,
+                    canonical_json({
+                        "changed_records": [
+                            {"collection": collection, "record_id": record_id}
+                            for collection, record_id, _, _ in reasons
+                        ],
+                    }),
+                ),
+            )
+
+        for change, affected_ids in matched_by_change.items():
+            changed_collection, changed_id, from_revision, to_revision = change
+            affected_ids = sorted(set(affected_ids))
             if affected_ids:
                 event_id = f"IMPACT-{plan.change_set_id}-{changed_collection}-{changed_id}"
+                # ``impact_events`` are derived inside the apply transaction,
+                # after the incoming package's global-ID preflight has run.
+                # They still live in the same global object-id namespace.  Do
+                # not let this internal insertion become a bypass while an
+                # installation is waiting to apply migration 005.
+                cursor.execute(
+                    """SELECT collection FROM wang_knowledge.objects
+                       WHERE object_id=%s FOR UPDATE""",
+                    (event_id,),
+                )
+                owners = {str(row[0]) for row in cursor.fetchall()}
+                foreign_owners = owners - {"impact_events"}
+                if foreign_owners:
+                    raise ChangeSetConflict(
+                        "Record IDs are globally unique; generated impact event "
+                        f"{event_id!r} already belongs to "
+                        + ", ".join(sorted(foreign_owners))
+                    )
                 event = {
                     "impact_event_id": event_id,
                     "changed_record_type": changed_collection,
@@ -1459,7 +2268,7 @@ class PostgresKnowledgeStore:
                        ON CONFLICT DO NOTHING""",
                     (event_id, content_sha, canonical_json(event), plan.change_set_id),
                 )
-        return count
+        return len(dependencies)
 
     def ingest_package(
         self,
@@ -1533,6 +2342,14 @@ class PostgresKnowledgeStore:
         )
         change_set_id = f"KCS-REVIEW-{uuid.uuid4().hex[:20]}"
         with self.connect() as conn, conn.cursor() as cursor:
+            # Review decisions can invalidate ProductDependency rows and create
+            # ImpactEvent objects. They therefore participate in the same
+            # cross-record invariants as ``apply_plan`` and must serialize on
+            # the same transaction lock.
+            cursor.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                ("wang_knowledge.apply_plan.v1",),
+            )
             cursor.execute(
                 """SELECT revision, content_sha256, payload
                    FROM wang_knowledge.objects

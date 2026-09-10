@@ -991,6 +991,9 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
 
   const mediaRef = useRef<HTMLVideoElement | HTMLAudioElement | null>(null);
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const scriptShaRef = useRef<string | null>(null);
+  const scriptEpochRef = useRef(0);
   const activeEditorRef = useRef<SimpleMDEEditor | null>(null);
   const activeEditorIndexRef = useRef<number | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
@@ -1562,6 +1565,13 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
 
   const loadData = useCallback(async () => {
     if (!resolvedUserEmail) return;
+    const loadEpoch = scriptEpochRef.current + 1;
+    scriptEpochRef.current = loadEpoch;
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    scriptShaRef.current = null;
     setState({ status: "loading", paragraphs: [] });
 
     try {
@@ -1576,10 +1586,14 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
         ),
       ]);
 
+      if (loadEpoch !== scriptEpochRef.current) {
+        return;
+      }
 
       setProfile(userInfo);
       setPermissions(perms);
       const paragraphs = ensureSequence(script.script ?? []);
+      scriptShaRef.current = script.script_sha256;
       setState({
         status: "ready",
         header: script.header,
@@ -2179,26 +2193,53 @@ export const SurmonEditor = ({ item, viewChanges }: SurmonEditorProps) => {
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
       }
+      const saveEpoch = scriptEpochRef.current;
       saveTimerRef.current = setTimeout(async () => {
+        saveTimerRef.current = null;
         setIsSaving(true);
-        try {
-          const payload: SurmonUpdateScriptPayload = {
-            user_id: resolvedUserEmail,
-            item,
-            type: "scripts",
-            data: paragraphs,
-          };
-          await fetchJSON(`${API_PREFIX}/update_script`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
+        const queuedSave = saveQueueRef.current
+          .catch(() => undefined)
+          .then(async () => {
+            // A navigation or reload invalidates queued edits from the prior
+            // script. Never let their response replace the new script SHA.
+            if (saveEpoch !== scriptEpochRef.current) {
+              return;
+            }
+            const expectedScriptSha256 = scriptShaRef.current;
+            if (!expectedScriptSha256) {
+              throw new Error("缺少逐字稿版本，請重新載入後再儲存。");
+            }
+            const payload: SurmonUpdateScriptPayload = {
+              user_id: resolvedUserEmail,
+              item,
+              type: "scripts",
+              data: paragraphs,
+              expected_script_sha256: expectedScriptSha256,
+            };
+            const saved = await fetchJSON<{ script_sha256: string }>(`${API_PREFIX}/update_script`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+            if (!saved.script_sha256) {
+              throw new Error("伺服器未回傳逐字稿版本，請重新載入。");
+            }
+            if (saveEpoch !== scriptEpochRef.current) {
+              return;
+            }
+            scriptShaRef.current = saved.script_sha256;
+            setLastSavedAt(new Date());
           });
-          setLastSavedAt(new Date());
+        saveQueueRef.current = queuedSave;
+        try {
+          await queuedSave;
         } catch (error) {
           const message = error instanceof Error ? error.message : "儲存失敗";
           setSaveError(message);
         } finally {
-          setIsSaving(false);
+          if (saveQueueRef.current === queuedSave) {
+            setIsSaving(false);
+          }
         }
       }, SAVE_DELAY);
     },

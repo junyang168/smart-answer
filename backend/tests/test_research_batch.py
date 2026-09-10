@@ -13,6 +13,7 @@ from backend.pipeline.research_batch import (
 from backend.pipeline.research_batch_runner import (
     artifact_paths,
     build_command_plan,
+    failed_member_runs,
     resolve_transcript_dir,
     reviewed_package_paths,
 )
@@ -184,6 +185,16 @@ def test_batch_source_resolution_prefers_published_regardless_of_argument_order(
 
     assert resolve_transcript_dir(member, [review, published]) == published
     assert resolve_transcript_dir(member, [published, review]) == published
+
+
+def test_a_failed_current_member_blocks_merge_even_when_old_artifacts_exist() -> None:
+    assert failed_member_runs(
+        {
+            "讲道甲": {"status": "completed"},
+            "讲道乙": {"status": "failed", "failed_stage": "review"},
+            "讲道丙": {"status": "interrupted", "failed_stage": "extract"},
+        }
+    ) == ["讲道丙", "讲道乙"]
 
 
 def test_command_plan_reuses_explicit_reviewed_package(tmp_path: Path) -> None:

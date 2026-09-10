@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
 from .models import NotesMapEntry, SourceMap, TranscriptMapEntry
+from backend.pipeline.source_projection import project_script
 
 
 PAGE_MARKER = re.compile(r"^\s*<!--\s*Page:\s*(.+?)(?:\s+\(Not Processed\))?\s*-->\s*$")
@@ -37,9 +38,8 @@ def load_transcript_paragraphs(path: Path) -> List[Dict[str, Any]]:
         raise ValueError("Sermon transcript has an unsupported format")
     return [
         paragraph
-        for paragraph in paragraphs
+        for paragraph in project_script(paragraphs).body_rows
         if isinstance(paragraph, dict)
-        and paragraph.get("type") != "comment"
         and str(paragraph.get("text") or "").strip()
     ]
 

@@ -315,23 +315,35 @@ def validate_claude_reconsideration(
 def adjudication_fingerprint(
     *,
     review_fingerprint: str,
+    review_artifact_sha256: str,
     openai_prompt: str,
     openai_model: str,
     openai_reasoning_effort: str,
+    openai_max_output_tokens: int = 32000,
     claude_prompt: str,
     claude_model: str,
+    claude_max_output_tokens: int = 32000,
     openai_backend: str = "api",
     claude_backend: str = "api",
+    source_package_sha256: str | None = None,
 ) -> dict[str, str]:
     identity = {
         "review_fingerprint": review_fingerprint,
+        # The reviewer call identity does not include deterministic routing
+        # such as spot-check selection. Adjudication consumes the routed
+        # artifact, so its exact bytes are an independent required input.
+        "review_artifact_sha256": review_artifact_sha256,
         "openai_prompt_sha256": hashlib.sha256(openai_prompt.encode()).hexdigest(),
         "openai_model": openai_model,
         "openai_reasoning_effort": openai_reasoning_effort,
+        "openai_max_output_tokens": openai_max_output_tokens,
         "claude_reconsideration_prompt_sha256": hashlib.sha256(claude_prompt.encode()).hexdigest(),
         "claude_model": claude_model,
+        "claude_max_output_tokens": claude_max_output_tokens,
         "schema_version": ADJUDICATION_VERSION,
     }
+    if source_package_sha256 is not None:
+        identity["source_package_sha256"] = source_package_sha256
     # Existing API adjudications retain their fingerprint. A subscription run
     # must not reuse one that was paid for through the API account.
     if openai_backend != "api":

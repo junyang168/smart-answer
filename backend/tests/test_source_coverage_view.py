@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from backend.pipeline.base_contract_coverage import sentence_spans, split_sentences
+from backend.pipeline.knowledge_source import markdown_blocks
 from backend.pipeline.source_coverage_view import (
     SourceCoverageReader,
     _flatten_spans,
@@ -16,6 +17,11 @@ from backend.pipeline.source_coverage_view import (
     load_segments,
     resolve_source_path,
     segment_key,
+)
+from backend.pipeline.source_projection import (
+    LOCATOR_SPACE,
+    project_script,
+    script_from_markdown_blocks,
 )
 
 
@@ -95,7 +101,8 @@ def test_load_segments_keeps_a_manuscript_and_a_transcript_on_one_scheme(tmp_pat
     segments, sha256 = load_segments({"source_type": "sermon_transcript"}, transcript)
     assert [item["key"] for item in segments] == ["S0001", "S0002", "S0003"]
     assert segments[0]["index"] == 7 and segments[0]["start_time"] == 0
-    assert sha256 == _sha256(transcript)
+    payload = json.loads(transcript.read_text())
+    assert sha256 == project_script(payload["script"]).body_sha256
 
     manuscript = tmp_path / "final.md"
     manuscript.write_text("第一段。\n仍是第一段。\n\n第二段。\n", encoding="utf-8")
@@ -104,20 +111,25 @@ def test_load_segments_keeps_a_manuscript_and_a_transcript_on_one_scheme(tmp_pat
     assert [item["index"] for item in blocks] == [1, 2]
 
 
-def test_a_heading_is_labelled_rather_than_filtered_out(tmp_path: Path) -> None:
-    """Half a manuscript's segments are headings.
-
-    Counting them as material the claim layer failed to take would roughly
-    double the apparent gap; dropping them from the inventory would be an
-    exclusion nobody recorded.  So they are kept and labelled.
-    """
+def test_editorial_headings_are_not_source_coverage_segments(tmp_path: Path) -> None:
     manuscript = tmp_path / "final.md"
     manuscript.write_text(
         "## 一、試探神蹟\n\n太 16:1 記載，法利賽人來試探。\n\n### 釋經\n\n# 不是標題\n仍是同一段。\n",
         encoding="utf-8",
     )
-    segments, _ = load_segments({"source_type": "notes_manuscript"}, manuscript)
-    assert [item["is_heading"] for item in segments] == [True, False, True, False]
+    script = script_from_markdown_blocks(markdown_blocks(manuscript.read_text(encoding="utf-8")))
+    projection = project_script(script)
+    segments, _ = load_segments({
+        "source_type": "notes_manuscript",
+        "source_sha256": projection.body_sha256,
+        "source_body_sha256": projection.body_sha256,
+        "locator_space": LOCATOR_SPACE,
+    }, manuscript)
+    assert [item["text"] for item in segments] == [
+        "太 16:1 記載，法利賽人來試探。",
+        "# 不是標題\n仍是同一段。",
+    ]
+    assert [item["is_heading"] for item in segments] == [False, False]
 
 
 def test_resolve_source_path_falls_back_to_the_transcript_id(tmp_path: Path, transcript: Path) -> None:

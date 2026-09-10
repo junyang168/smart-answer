@@ -31,6 +31,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from backend.pipeline.source_projection import assert_locator_space_compatible, project_script
+
 
 class LinkingError(RuntimeError):
     """Raised when a link cannot be made without inventing or overwriting."""
@@ -114,10 +116,14 @@ def _require(condition: bool, message: str) -> None:
         raise LinkingError(message)
 
 
-def _segment_text(transcript: dict[str, Any], segment_index: str) -> str:
+def _segment_text(
+    transcript: dict[str, Any], segment_index: str, source: dict[str, Any]
+) -> str:
+    assert_locator_space_compatible(source, transcript.get("script", []))
+    source_rows = project_script(transcript.get("script", [])).body_rows
     segments = {
         f"S{index + 1:04d}": str(segment.get("text") or "")
-        for index, segment in enumerate(transcript.get("script", []))
+        for index, segment in enumerate(source_rows)
     }
     _require(segment_index in segments, f"unknown segment {segment_index}")
     return segments[segment_index]
@@ -174,7 +180,9 @@ def build_linking_package(
 
         transcript = transcripts.get(step.source_id)
         _require(transcript is not None, f"transcript not supplied for {step.source_id}")
-        text = _segment_text(transcript, step.segment_index)
+        source = store.get_record("source_documents", step.source_id)
+        _require(source is not None, f"source document not found: {step.source_id}")
+        text = _segment_text(transcript, step.segment_index, source)
         _require(
             step.excerpt in text,
             f"{step.evidence_step_id}: excerpt is not verbatim in "
@@ -240,7 +248,9 @@ def build_linking_package(
 
         transcript = transcripts.get(attachment.source_id)
         _require(transcript is not None, f"transcript not supplied for {attachment.source_id}")
-        text = _segment_text(transcript, attachment.segment_index)
+        source = store.get_record("source_documents", attachment.source_id)
+        _require(source is not None, f"source document not found: {attachment.source_id}")
+        text = _segment_text(transcript, attachment.segment_index, source)
         _require(
             attachment.excerpt in text,
             f"{attachment.evidence_step_id}: excerpt is not verbatim in "

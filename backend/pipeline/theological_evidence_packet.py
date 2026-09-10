@@ -15,6 +15,14 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from backend.pipeline.knowledge_source import markdown_blocks
+from backend.pipeline.source_projection import (
+    assert_locator_space_compatible,
+    project_script,
+    script_from_markdown_blocks,
+    source_uses_body_locator_space,
+)
+
 from backend.api.canonical_repository.viewpoint_foundation import (
     semantic_record_sha,
     sha256_json,
@@ -102,13 +110,8 @@ def _filesystem_source_original(source: Mapping[str, Any]) -> dict[str, Any]:
     _require(path.is_file(), f"scoped source original is missing: {source_id}")
     raw = path.read_bytes()
     file_sha256 = hashlib.sha256(raw).hexdigest()
-    _require(
-        file_sha256 == str(source.get("source_sha256") or ""),
-        f"scoped source original SHA mismatch: {source_id}",
-    )
     if source_type == "notes_manuscript":
-        content = raw.decode("utf-8")
-        content_format = "markdown"
+        script = script_from_markdown_blocks(markdown_blocks(raw.decode("utf-8")))
     else:
         try:
             payload = json.loads(raw.decode("utf-8"))
@@ -121,30 +124,49 @@ def _filesystem_source_original(source: Mapping[str, Any]) -> dict[str, Any]:
             isinstance(script, list) and bool(script),
             f"sermon transcript has no script: {source_id}",
         )
-        lines: list[str] = []
-        for segment in script:
-            if not isinstance(segment, dict):
-                continue
-            text = str(segment.get("text") or "").strip()
-            if not text:
-                continue
-            timeline = str(segment.get("start_timeline") or "").strip()
-            if not timeline and isinstance(segment.get("start_time"), (int, float)):
-                seconds = max(0, int(segment["start_time"]))
-                timeline = f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
-            if not timeline and segment.get("index") is not None:
-                end_index = segment.get("end_index")
-                timeline = (
-                    f"{segment['index']}-{end_index}"
-                    if end_index is not None
-                    else str(segment["index"])
-                )
-            lines.append(f"[{timeline}] {text}" if timeline else text)
-        content = "\n\n".join(lines)
-        content_format = "timestamped_transcript"
+    assert_locator_space_compatible(source, script)
+    projection = project_script(script)
+    uses_body_identity = source_uses_body_locator_space(source)
+    expected_sha256 = str(
+        source.get("source_body_sha256") or source.get("source_sha256") or ""
+    )
+    actual_sha256 = projection.body_sha256 if uses_body_identity else file_sha256
+    _require(
+        actual_sha256 == expected_sha256,
+        f"scoped source original SHA mismatch: {source_id}",
+    )
+    lines: list[str] = []
+    for segment in projection.body_rows:
+        if not isinstance(segment, dict):
+            continue
+        text = str(segment.get("text") or "").strip()
+        if not text:
+            continue
+        timeline = str(segment.get("start_timeline") or "").strip()
+        if not timeline and isinstance(segment.get("start_time"), (int, float)):
+            seconds = max(0, int(segment["start_time"]))
+            timeline = (
+                f"{seconds // 3600:02d}:{seconds % 3600 // 60:02d}:"
+                f"{seconds % 60:02d}"
+            )
+        if not timeline and segment.get("index") is not None:
+            end_index = segment.get("end_index")
+            timeline = (
+                f"{segment['index']}-{end_index}"
+                if end_index is not None
+                else str(segment["index"])
+            )
+        lines.append(f"[{timeline}] {text}" if timeline else text)
+    content = "\n\n".join(lines)
+    content_format = (
+        "timestamped_source_body"
+        if source_type == "sermon_transcript"
+        else "source_body_blocks"
+    )
     _require(bool(content.strip()), f"scoped source original is empty: {source_id}")
     return {
         "original_file_sha256": file_sha256,
+        "source_body_sha256": projection.body_sha256,
         "content_format": content_format,
         "content": content,
     }
@@ -177,8 +199,17 @@ def build_scoped_source_originals(
         original_file_sha256 = _nonempty(
             loaded.get("original_file_sha256"), f"{source_id}.original_file_sha256"
         )
+        source_body_sha256 = _nonempty(
+            loaded.get("source_body_sha256") or original_file_sha256,
+            f"{source_id}.source_body_sha256",
+        )
+        expected_sha256 = str(
+            source.get("source_body_sha256") or source.get("source_sha256") or ""
+        )
+        uses_body_identity = source_uses_body_locator_space(source)
+        actual_sha256 = source_body_sha256 if uses_body_identity else original_file_sha256
         _require(
-            original_file_sha256 == str(source.get("source_sha256") or ""),
+            actual_sha256 == expected_sha256,
             f"scoped source original SHA mismatch: {source_id}",
         )
         originals.append(
@@ -189,7 +220,8 @@ def build_scoped_source_originals(
                     source.get("title") or source.get("transcript_id") or source_id
                 ),
                 "transcript_id": source.get("transcript_id"),
-                "source_version_sha256": original_file_sha256,
+                "source_version_sha256": actual_sha256,
+                "source_file_sha256": original_file_sha256,
                 "content_format": _nonempty(
                     loaded.get("content_format"), f"{source_id}.content_format"
                 ),

@@ -5,8 +5,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
-import shutil
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,24 +31,43 @@ from backend.pipeline.detailed_knowledge_extraction import (
 from backend.pipeline.sentence_ledger import sentence_id as ledger_sentence_id
 from backend.pipeline.extraction_sections import (
     DEFAULT_SECTION_LEVEL,
+    FROM_GENERATOR,
+    SectionBoundaryError,
     Section,
     SectionPlan,
     breadcrumb_for,
     combine_sections,
-    has_section_headings,
+    generated_plan_insertions,
+    leading_untitled_body_end,
     load_cached_plan,
     plan_sections,
     save_plan,
+    sections_from_structure,
+    structure_has_section_headings,
 )
 from backend.pipeline.knowledge_source import load_source_manifest, markdown_source_document
+from backend.pipeline.knowledge_package_merge import (
+    KnowledgePackageMergeError,
+    validate_merged_package,
+)
+from backend.pipeline.relation_id_namespace import generation_namespace
 from backend.pipeline.llm_usage import usage_row, usage_summary
-from backend.pipeline.run_ledger import RunRecord, run_record
+from backend.pipeline.run_ledger import RunCancelled, RunRecord, run_record
 from backend.pipeline.sentence_ledger_runner import run as run_ledger
 from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
 from backend.pipeline.subtitle_generation import generate_subtitles
 from backend.pipeline.sermon_subtitle_persistence import (
     SubtitlePersistenceError,
+    apply_insertions,
     verify_saved_result,
+)
+from backend.pipeline.source_projection import (
+    EditorialHeading,
+    LOCATOR_SPACE,
+    SourceProjection,
+    is_editorial_row,
+    live_script,
+    project_script,
 )
 
 
@@ -89,20 +109,74 @@ DEFAULT_OUTPUT_DIR = wang_platform_paths().claim_layer_staging / "detailed-extra
 PROMPT_PATH = Path("backend/pipeline/prompts/detailed_knowledge_extraction.md")
 NOTES_PROMPT_PATH = Path("backend/pipeline/prompts/detailed_notes_knowledge_extraction.md")
 VALIDATION_ATTEMPTS = 4
+MODEL_INPUT_CONTRACT_VERSION = "detailed-extraction-source-projection-v1"
+PACKAGE_COMPILER_VERSION = "wang-shared-knowledge-compiler-v2"
+SECTION_CACHE_VERSION = "wang-detailed-extraction-section-cache-v1"
+
+
+def _atomic_artifact_write(path: Path, data: bytes) -> None:
+    """Install one recovery/audit artifact without exposing partial JSON."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_file() and path.read_bytes() == data:
+        return
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            try:
+                os.fsync(directory_fd)
+            except OSError:
+                # The file was already fsynced and atomically installed. Do
+                # not report failure after commit and invite a duplicate retry.
+                pass
+        finally:
+            os.close(directory_fd)
+    except Exception:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _atomic_json_artifact_write(path: Path, payload: Any) -> None:
+    _atomic_artifact_write(
+        path,
+        (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+    )
+
+
+def _package_artifact_sha256(package: dict[str, Any]) -> str:
+    """Hash the complete current package, excluding only this self-hash."""
+
+    candidate = json.loads(json.dumps(package, ensure_ascii=False))
+    (candidate.get("extraction") or {}).pop("artifact_sha256", None)
+    return hashlib.sha256(
+        json.dumps(
+            candidate,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def _archive(path: Path) -> None:
     if not path.is_file():
         return
-    try:
-        old = json.loads(path.read_text(encoding="utf-8"))
-        fingerprint = str((old.get("extraction") or {}).get("fingerprint_sha256") or "legacy")[:12]
-    except (OSError, json.JSONDecodeError):
-        fingerprint = "unreadable"
+    raw = path.read_bytes()
+    fingerprint = hashlib.sha256(raw).hexdigest()[:16]
     archive = path.parent / "generations" / f"{path.stem}.{fingerprint}.json"
-    archive.parent.mkdir(parents=True, exist_ok=True)
     if not archive.exists():
-        shutil.copy2(path, archive)
+        _atomic_artifact_write(archive, raw)
 
 
 def _validation_feedback(
@@ -142,13 +216,9 @@ def _archive_rejected_candidate(
     if target.exists():
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         target = target.with_name(f"attempt-{attempt:02d}-{timestamp}.json")
-    target.write_text(
-        json.dumps(
-            {"validation_error": str(error), "candidate": candidate},
-            ensure_ascii=False,
-            indent=2,
-        ) + "\n",
-        encoding="utf-8",
+    _atomic_json_artifact_write(
+        target,
+        {"validation_error": str(error), "candidate": candidate},
     )
 
 
@@ -185,7 +255,10 @@ def section_sentences(source: dict[str, Any], section: Section) -> list[AuditedS
 
 
 def _section_prompt_body(
-    source: dict[str, Any], section: Section, sentences: Sequence[AuditedSentence]
+    source: dict[str, Any],
+    section: Section,
+    sentences: Sequence[AuditedSentence],
+    headings: Sequence[EditorialHeading] = (),
 ) -> str:
     """Render one section: its text, then the sentences it must account for.
 
@@ -207,14 +280,26 @@ def _section_prompt_body(
         for position in range(section.start, section.end)
     )
     listing = "\n".join(f"[{row.sentence_id}] {row.text}" for row in sentences)
-    header = f"本章节：{section.title}" if section.title else "本章节"
-    breadcrumb = breadcrumb_for(_segment_texts(source), section.start)
+    section_label = f"本章节：{section.title}" if section.title else "本章节：（未命名）"
+    breadcrumb = breadcrumb_for(headings, section.start)
     if breadcrumb and breadcrumb != section.title:
-        header += f"\n所在标题层级：{breadcrumb}"
+        section_label += f"\n所在标题层级：{breadcrumb}"
+    structural_rows = [
+        f"[位于 {segment_locator(row.boundary)} 之前；H{row.level}] {row.title}"
+        for row in headings
+        if section.start <= row.boundary < section.end
+    ]
+    editorial_context = (
+        "===== 编辑结构（不是教授原话，不可引用、不可作为证据锚点）=====\n"
+        + section_label
+        + "\n"
+        + ("\n".join(structural_rows) if structural_rows else "（本章节没有额外标题）")
+        + "\n\n"
+    )
     return (
-        f"{header}\n"
         f"范围：{segment_locator(section.start)}–{segment_locator(section.end - 1)}"
         f"（{section.length} 段）\n\n"
+        f"{editorial_context}"
         f"{body}\n\n"
         f"===== 本章节全部句子（{len(sentences)} 句），每一句都必须在 sentence_audit 中出现一次 =====\n\n"
         f"{listing}"
@@ -226,6 +311,96 @@ def _section_cache_path(output_dir: Path, source_id: str, fingerprint: str, sect
         output_dir / "section-cache" / _slug(source_id) / fingerprint[:16]
         / f"p{section.index:03d}-{section.start:04d}-{section.end:04d}.json"
     )
+
+
+def _section_cache_artifact_sha256(artifact: dict[str, Any]) -> str:
+    candidate = json.loads(json.dumps(artifact, ensure_ascii=False))
+    candidate.pop("artifact_sha256", None)
+    return hashlib.sha256(
+        json.dumps(
+            candidate,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _section_cache_artifact(
+    section: Section, response: dict[str, Any], fingerprint: str
+) -> dict[str, Any]:
+    artifact = {
+        "schema_version": SECTION_CACHE_VERSION,
+        "generation_fingerprint_sha256": fingerprint,
+        "section": vars(section),
+        "response": response,
+    }
+    artifact["artifact_sha256"] = _section_cache_artifact_sha256(artifact)
+    return artifact
+
+
+def _load_valid_section_cache(
+    path: Path,
+    *,
+    section: Section,
+    fingerprint: str,
+    source: dict[str, Any],
+    sentences: Sequence[Any],
+) -> dict[str, Any] | None:
+    try:
+        artifact = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(artifact, dict):
+            return None
+        if artifact.get("schema_version") != SECTION_CACHE_VERSION:
+            return None
+        if artifact.get("generation_fingerprint_sha256") != fingerprint:
+            return None
+        if artifact.get("section") != vars(section):
+            return None
+        if artifact.get("artifact_sha256") != _section_cache_artifact_sha256(artifact):
+            return None
+        response = artifact.get("response")
+        if not isinstance(response, dict):
+            return None
+        validate_response(response, source)
+        validate_sentence_audit(response, source, sentences)
+    except (
+        OSError,
+        json.JSONDecodeError,
+        DetailedExtractionValidationError,
+        KeyError,
+        TypeError,
+        ValueError,
+    ):
+        return None
+    return response
+
+
+def _section_model_input_sha256s(
+    source: dict[str, Any],
+    headings: Sequence[EditorialHeading],
+    header: str,
+    plan: SectionPlan,
+) -> list[dict[str, Any]]:
+    """Hash the exact first-call user input for every planned section."""
+
+    return [
+        {
+            "section_index": section.index,
+            "sha256": hashlib.sha256(
+                (
+                    header
+                    + _section_prompt_body(
+                        source,
+                        section,
+                        section_sentences(source, section),
+                        headings,
+                    )
+                ).encode("utf-8")
+            ).hexdigest(),
+        }
+        for section in plan.sections
+    ]
 
 
 def _subtitle_provider(source_id: str, client: CodexSubscriptionClient | None = None):
@@ -255,36 +430,92 @@ def _persist_generated_subtitles(
     actor_id: str,
     client: CodexSubscriptionClient | None = None,
     writer: Callable[..., dict[str, Any]] | None = None,
+    scope_end: int | None = None,
+    cached_generated_plan: SectionPlan | None = None,
 ) -> dict[str, Any]:
-    """Generate all subtitle levels, write them back, and audit the mutation."""
+    """Persist governed subtitles, reusing the frozen generated plan when safe."""
 
     if source_path.parent.name != "script_review":
         raise SubtitlePersistenceError(
             "generated subtitles can only be persisted to a script_review source"
         )
     source_sha256 = hashlib.sha256(raw).hexdigest()
+    segments = list(project_script(source.get("script")).body_rows)
+    if scope_end is not None:
+        if scope_end <= 0 or scope_end > len(segments):
+            raise SubtitlePersistenceError(
+                f"invalid subtitle generation scope end {scope_end!r}"
+            )
+        segments = segments[:scope_end]
     paragraphs = [
         {"index": segment.get("index"), "text": segment.get("text")}
-        for segment in source.get("script") or []
+        for segment in segments
     ]
     indexes = [str(row.get("index")) for row in paragraphs]
     if len(indexes) != len(set(indexes)):
         raise SubtitlePersistenceError("sermon paragraph indexes are not unique")
 
-    print(json.dumps({
-        "phase": "subtitle_generation", "source": source_id,
-        "paragraphs": len(paragraphs), "status": "started",
-    }, ensure_ascii=False), flush=True)
-    insertions = generate_subtitles(
-        paragraphs,
-        subject=source_id,
-        consumer="extraction_persisted_subtitles",
-        client=client,
-    )
+    if cached_generated_plan is not None:
+        try:
+            insertions = generated_plan_insertions(cached_generated_plan, paragraphs)
+        except SectionBoundaryError as exc:
+            raise SubtitlePersistenceError(str(exc)) from exc
+        insertion_origin = "cached_generated_section_plan"
+        print(json.dumps({
+            "phase": "subtitle_generation", "source": source_id,
+            "paragraphs": len(paragraphs), "status": "reused_cached_section_plan",
+            "model_called": False,
+        }, ensure_ascii=False), flush=True)
+    else:
+        insertion_origin = "new_model_generation"
+        print(json.dumps({
+            "phase": "subtitle_generation", "source": source_id,
+            "paragraphs": len(paragraphs), "status": "started",
+        }, ensure_ascii=False), flush=True)
+        insertions = generate_subtitles(
+            paragraphs,
+            subject=source_id,
+            consumer="extraction_persisted_subtitles",
+            client=client,
+        )
     if not insertions:
         raise SubtitlePersistenceError(
             f"{source_id}: subtitle generator returned no insertions; extraction not started"
         )
+    if not any(
+        int(row.get("level") or 0) == 1
+        and str(row.get("after_index") or "").upper() == "START"
+        for row in insertions
+    ):
+        raise SubtitlePersistenceError(
+            f"{source_id}: subtitle plan did not title the leading section; extraction not started"
+        )
+    allowed_after_indexes = {"START", *indexes}
+    seen_boundaries: set[tuple[str, int]] = set()
+    final_scoped_index = str(paragraphs[-1].get("index"))
+    for insertion in insertions:
+        raw_after = insertion.get("after_index")
+        after_index = "START" if str(raw_after).upper() == "START" else str(raw_after)
+        if raw_after is None or after_index not in allowed_after_indexes:
+            raise SubtitlePersistenceError(
+                f"{source_id}: subtitle after_index {raw_after!r} is outside its generation scope"
+            )
+        try:
+            insertion_level = int(insertion.get("level"))
+        except (TypeError, ValueError) as exc:
+            raise SubtitlePersistenceError(
+                f"{source_id}: subtitle level is not an integer"
+            ) from exc
+        boundary = (after_index, insertion_level)
+        if boundary in seen_boundaries:
+            raise SubtitlePersistenceError(
+                f"{source_id}: duplicate subtitle boundary {boundary!r}"
+            )
+        seen_boundaries.add(boundary)
+        if after_index == final_scoped_index:
+            raise SubtitlePersistenceError(
+                f"{source_id}: subtitle plan opens an empty section after the generation scope"
+            )
 
     audit_dir = (
         output_dir / "subtitle-applications" / _slug(source_id)
@@ -292,19 +523,37 @@ def _persist_generated_subtitles(
     )
     audit_dir.mkdir(parents=True, exist_ok=True)
     audit_path = audit_dir / "application.json"
-    (audit_dir / "before-source.json").write_bytes(raw)
+    _atomic_artifact_write(audit_dir / "before-source.json", raw)
+    before_payload = json.loads(raw)
+    if not isinstance(before_payload, list):
+        raise SubtitlePersistenceError("script_review sermon must be a JSON array")
+    expected_after = apply_insertions(
+        before_payload,
+        insertions,
+        source_sha256=source_sha256,
+        user_id=actor_id,
+    )
+    expected_after_raw = json.dumps(
+        expected_after, ensure_ascii=False, indent=4
+    ).encode("UTF-8")
     audit: dict[str, Any] = {
         "schema_version": "wang_sermon_subtitle_application_v1",
         "source_id": source_id,
         "source_path": str(source_path),
         "before_source_sha256": source_sha256,
         "actor_id": actor_id,
+        "scope_end": scope_end,
+        "scope_paragraphs": len(paragraphs),
+        "insertion_origin": insertion_origin,
+        "cached_section_plan": (
+            cached_generated_plan.identity() if cached_generated_plan is not None else None
+        ),
         "insertions": insertions,
-        "status": "generated",
+        "expected_after_source_sha256": hashlib.sha256(expected_after_raw).hexdigest(),
+        "expected_after_body_sha256": project_script(expected_after).body_sha256,
+        "status": "applying",
     }
-    audit_path.write_text(
-        json.dumps(audit, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    _atomic_json_artifact_write(audit_path, audit)
 
     print(json.dumps({
         "phase": "subtitle_persistence", "source": source_id,
@@ -334,20 +583,126 @@ def _persist_generated_subtitles(
             )
     except Exception as exc:
         audit.update({"status": "failed", "error": f"{type(exc).__name__}: {exc}"})
-        audit_path.write_text(
-            json.dumps(audit, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-        )
+        _atomic_json_artifact_write(audit_path, audit)
         raise
     audit.update({"status": "persisted", "save_report": report})
-    audit_path.write_text(
-        json.dumps(audit, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    _atomic_json_artifact_write(audit_path, audit)
     print(json.dumps({
         "phase": "subtitle_persistence", "source": source_id,
         "insertions": len(insertions), "status": "persisted",
         "after_source_sha256": report.get("after_source_sha256"),
     }, ensure_ascii=False), flush=True)
-    return report
+    return {
+        **report,
+        "audit_path": str(audit_path),
+        "insertion_origin": insertion_origin,
+    }
+
+
+def _assert_subtitle_persistence_authorized(
+    actor_id: str,
+    *,
+    writer: Callable[..., dict[str, Any]] | None,
+    authorizer: Callable[[str], bool] | None,
+) -> None:
+    """Fail before subtitle generation when the eventual save is forbidden."""
+
+    if writer is None:
+        if authorizer is not None:
+            raise SubtitlePersistenceError(
+                "a custom subtitle authorizer requires a custom subtitle writer"
+            )
+        # Use the same manager instance that will perform the governed save.
+        # Import lazily so extraction that does not need a write remains free
+        # of the web application's file-watcher initialization.
+        from backend.api.sc_api.sermon_manager import sermonManager
+
+        allowed = sermonManager.can_persist_generated_subtitles(actor_id)
+    else:
+        if authorizer is None:
+            raise SubtitlePersistenceError(
+                "a custom subtitle writer requires an authorization preflight"
+            )
+        allowed = authorizer(actor_id)
+    if not allowed:
+        raise PermissionError("You don't have permission to update this item")
+
+
+def reconcile_subtitle_application(
+    *, source_id: str, source_path: Path, output_dir: Path, current_raw: bytes
+) -> dict[str, Any] | None:
+    """Finalize an interrupted subtitle audit when the committed bytes prove it.
+
+    The transcript and its staging audit cannot share one filesystem
+    transaction. A hard process death after the atomic transcript replace can
+    therefore leave an ``applying`` audit. On resume we reconstruct the exact
+    proposed result from the saved before-image and accept it only when every
+    row matches the current file.
+    """
+
+    root = output_dir / "subtitle-applications" / _slug(source_id)
+    if not root.is_dir():
+        return None
+    try:
+        current_rows = json.loads(current_raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(current_rows, list):
+        return None
+    candidates = sorted(
+        root.glob("*/application.json"),
+        key=lambda path: path.stat().st_mtime_ns,
+        reverse=True,
+    )
+    for audit_path in candidates:
+        try:
+            audit = json.loads(audit_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if audit.get("status") not in {"applying", "generated", "failed"}:
+            continue
+        before_path = audit_path.with_name("before-source.json")
+        if not before_path.is_file():
+            continue
+        before_raw = before_path.read_bytes()
+        if hashlib.sha256(before_raw).hexdigest() != audit.get("before_source_sha256"):
+            continue
+        try:
+            before_rows = json.loads(before_raw)
+            expected_rows = apply_insertions(
+                before_rows,
+                audit.get("insertions") or [],
+                source_sha256=str(audit.get("before_source_sha256") or ""),
+                user_id=str(audit.get("actor_id") or ""),
+            )
+        except (json.JSONDecodeError, SubtitlePersistenceError):
+            continue
+        if expected_rows != current_rows:
+            continue
+        current_sha256 = hashlib.sha256(current_raw).hexdigest()
+        expected_sha256 = str(audit.get("expected_after_source_sha256") or "")
+        report = {
+            "source_path": str(source_path),
+            "before_source_sha256": audit["before_source_sha256"],
+            "after_source_sha256": current_sha256,
+            "before_body_sha256": project_script(before_rows).body_sha256,
+            "after_body_sha256": project_script(current_rows).body_sha256,
+            "insertions": len(audit.get("insertions") or []),
+            "actor_id": audit.get("actor_id"),
+            "recovered_after_interrupted_audit": True,
+            "expected_serialization_sha256": expected_sha256 or None,
+            "expected_serialization_matched": (
+                not expected_sha256 or expected_sha256 == current_sha256
+            ),
+        }
+        audit.update({
+            "status": "persisted",
+            "save_report": report,
+            "recovery": "current source exactly matched the predeclared subtitle application",
+        })
+        _atomic_json_artifact_write(audit_path, audit)
+        return report
+    return None
 
 
 def resolve_section_plan(
@@ -355,6 +710,8 @@ def resolve_section_plan(
     level: int = DEFAULT_SECTION_LEVEL, allow_generated: bool = True,
     max_section_sentences: int | None = None,
     client: CodexSubscriptionClient | None = None,
+    source_file_sha256: str | None = None,
+    preferred_plan: SectionPlan | None = None,
 ) -> SectionPlan:
     """The plan for this source, generated at most once and then reused.
 
@@ -364,20 +721,94 @@ def resolve_section_plan(
     """
 
     path = output_dir / "section-plans" / f"{_slug(source_id)}.json"
-    cached = load_cached_plan(
+    projection = project_script(source.get("script"))
+    texts = [str(row.get("text") or "") for row in projection.body_rows]
+    indexes = [row.get("index") for row in projection.body_rows]
+    counts = [len(sentence_spans(text)) for text in texts]
+    cached = preferred_plan
+    if cached is None:
+        cached = load_cached_plan(
+            path, source_sha256, level=level,
+            max_section_sentences=max_section_sentences,
+            editorial_structure_sha256=projection.editorial_structure_sha256,
+        )
+    if cached is not None:
+        if structure_has_section_headings(
+            projection.headings, level=level, body_length=len(texts)
+        ):
+            structural_plan = plan_sections(
+                texts,
+                headings=projection.headings,
+                segment_indexes=indexes,
+                level=level,
+                sentence_counts=counts,
+                max_section_sentences=max_section_sentences,
+            )
+            cached_partition = [
+                (row.start, row.end, row.title) for row in cached.sections
+            ]
+            structural_partition = [
+                (row.start, row.end, row.title) for row in structural_plan.sections
+            ]
+            if cached_partition != structural_partition:
+                cached = None
+        if cached is not None:
+            # A normal cache hit is a true no-op. The physical mixed-container
+            # SHA may have changed only because an editor changed a comment,
+            # which is neither source nor model context. Rewrite only when an
+            # explicitly supplied pre-persistence plan must be rebound from a
+            # legacy physical SHA to the current body/editorial identities.
+            if preferred_plan is not None:
+                save_plan(
+                    path,
+                    cached,
+                    source_sha256,
+                    source_file_sha256=source_file_sha256,
+                    editorial_structure_sha256=projection.editorial_structure_sha256,
+                )
+            return cached
+    provider = _subtitle_provider(source_id, client) if allow_generated else None
+    plan = plan_sections(
+        texts,
+        headings=projection.headings,
+        segment_indexes=indexes,
+        level=level,
+        provider=provider,
+        sentence_counts=counts,
+        max_section_sentences=max_section_sentences,
+    )
+    save_plan(
+        path,
+        plan,
+        source_sha256,
+        source_file_sha256=source_file_sha256,
+        editorial_structure_sha256=projection.editorial_structure_sha256,
+    )
+    return plan
+
+
+def reusable_generated_plan(
+    *, source: dict[str, Any], source_id: str, source_sha256: str,
+    output_dir: Path, level: int, max_section_sentences: int | None,
+) -> SectionPlan | None:
+    """Return the frozen generated plan only when it can title this exact source."""
+
+    path = output_dir / "section-plans" / f"{_slug(source_id)}.json"
+    plan = load_cached_plan(
         path, source_sha256, level=level,
         max_section_sentences=max_section_sentences,
+        editorial_structure_sha256=project_script(
+            source.get("script")
+        ).editorial_structure_sha256,
     )
-    if cached is not None:
-        return cached
-    provider = _subtitle_provider(source_id, client) if allow_generated else None
-    texts = _segment_texts(source)
-    plan = plan_sections(
-        texts, level=level, provider=provider,
-        sentence_counts=[len(sentence_spans(text)) for text in texts],
-        max_section_sentences=max_section_sentences,
-    )
-    save_plan(path, plan, source_sha256)
+    if plan is None or plan.origin != FROM_GENERATOR:
+        return None
+    try:
+        generated_plan_insertions(
+            plan, list(project_script(source.get("script")).body_rows)
+        )
+    except SectionBoundaryError:
+        return None
     return plan
 
 
@@ -400,6 +831,7 @@ def _extract_sections(
     source_id: str,
     exclusion_source_id: str,
     source: dict[str, Any],
+    headings: Sequence[EditorialHeading],
     header: str,
     plan: SectionPlan,
     output_dir: Path,
@@ -421,33 +853,48 @@ def _extract_sections(
     section_rows: list[dict[str, Any]] = []
     exclusions: list[dict[str, Any]] = []
     for section in plan.sections:
+        if record is not None and record.cancel_requested():
+            raise RunCancelled(f"cancel requested before section {section.index}")
         if only is not None and section.index not in only:
             continue
         cache_path = _section_cache_path(output_dir, source_id, fingerprint, section)
         sentences = section_sentences(source, section)
         if cache_path.is_file() and not force:
-            print(json.dumps({
-                "phase": "extraction", "source": source_id,
-                "section": section.index, "sections": len(plan.sections),
-                "status": "cached",
-            }, ensure_ascii=False), flush=True)
-            cached = json.loads(cache_path.read_text(encoding="utf-8"))["response"]
-            answered.append((section, cached))
-            exclusions.extend(exclusions_from_audit(
-                cached, sentences, source_id=exclusion_source_id,
-                ledger_sentence_id=ledger_sentence_id))
-            section_rows.append({**vars(section), "attempts": 0, "cached": True})
-            continue
+            cached = _load_valid_section_cache(
+                cache_path,
+                section=section,
+                fingerprint=fingerprint,
+                source=source,
+                sentences=sentences,
+            )
+            if cached is not None:
+                print(json.dumps({
+                    "phase": "extraction", "source": source_id,
+                    "section": section.index, "sections": len(plan.sections),
+                    "status": "cached",
+                }, ensure_ascii=False), flush=True)
+                answered.append((section, cached))
+                exclusions.extend(exclusions_from_audit(
+                    cached, sentences, source_id=exclusion_source_id,
+                    ledger_sentence_id=ledger_sentence_id))
+                section_rows.append({**vars(section), "attempts": 0, "cached": True})
+                continue
         print(json.dumps({
             "phase": "extraction", "source": source_id,
             "section": section.index, "sections": len(plan.sections),
             "title": section.title, "sentences": len(sentences), "status": "started",
         }, ensure_ascii=False), flush=True)
-        user_input = header + _section_prompt_body(source, section, sentences)
+        user_input = header + _section_prompt_body(
+            source, section, sentences, headings
+        )
         last_error: DetailedExtractionValidationError | None = None
         last_candidate: dict[str, Any] | None = None
         response, attempts = None, 0
         for attempt in range(1, VALIDATION_ATTEMPTS + 1):
+            if record is not None and record.cancel_requested():
+                raise RunCancelled(
+                    f"cancel requested before section {section.index} attempt {attempt}"
+                )
             attempts = attempt
             print(json.dumps({
                 "phase": "extraction", "source": source_id,
@@ -462,6 +909,8 @@ def _extract_sections(
                     + "\n\n===== 机械验证反馈 =====\n"
                     + _validation_feedback(last_error, source)
                 )
+            if record is not None:
+                record.model_call_started()
             candidate = client.generate_json(
                 prompt, feedback, DETAILED_RESPONSE_SCHEMA, cache_prefix=user_input
             )
@@ -473,6 +922,7 @@ def _extract_sections(
             # at nothing.
             if record is not None:
                 record.usage([call_usage])
+                record.model_call_completed()
             try:
                 # A section is a composition unit, so the full contract is
                 # answerable inside it: measured, 0 of 264 relations cross a
@@ -492,10 +942,9 @@ def _extract_sections(
             raise last_error or DetailedExtractionValidationError(
                 f"section {section.index} validation failed"
             )
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        cache_path.write_text(
-            json.dumps({"section": vars(section), "response": response}, ensure_ascii=False) + "\n",
-            encoding="utf-8",
+        _archive(cache_path)
+        _atomic_json_artifact_write(
+            cache_path, _section_cache_artifact(section, response, fingerprint)
         )
         answered.append((section, response))
         exclusions.extend(exclusions_from_audit(
@@ -536,6 +985,9 @@ def _anchored_fragment(
 def compile_package(
     *, transcript_id: str, transcript_path: Path, transcript: dict[str, Any], raw: bytes,
     response: dict[str, Any], extraction: dict[str, Any],
+    source_body_sha256: str | None = None,
+    source_file_sha256: str | None = None,
+    editorial_structure_sha256: str | None = None,
     source_descriptor: dict[str, Any] | None = None,
     usage_rows: list[dict[str, Any]] | None = None,
     section_rows: list[dict[str, Any]] | None = None,
@@ -546,12 +998,23 @@ def compile_package(
     # Namespace them here before a package can ever be merged with another
     # sermon.  A 200-sermon corpus cannot safely contain 200 different CL001s.
     source_key = str((source_descriptor or {}).get("source_id") or transcript_id)
-    namespace = f"DK-{hashlib.sha256(source_key.encode('utf-8')).hexdigest()[:12]}"
+    source_type = str(
+        (source_descriptor or {}).get("source_type") or "sermon_transcript"
+    )
     model_output_sha256 = hashlib.sha256(
         json.dumps(
             response, ensure_ascii=False, sort_keys=True, separators=(",", ":")
         ).encode("utf-8")
     ).hexdigest()
+    namespace = generation_namespace(
+        f"{source_type}:{source_key}",
+        str(
+            extraction.get("generation_fingerprint_sha256")
+            or extraction.get("fingerprint_sha256")
+            or ""
+        ),
+        model_output_sha256,
+    )
     response = json.loads(json.dumps(response, ensure_ascii=False))
     id_maps = {
         "question": {row["question_id"]: f"{namespace}-{row['question_id']}" for row in response["questions"]},
@@ -590,7 +1053,12 @@ def compile_package(
         row["to_id"] = id_maps["claim"][row["to_id"]]
 
     source_id = published_source_id(transcript_id, source_descriptor)
-    source_sha256 = hashlib.sha256(raw).hexdigest()
+    projection = project_script(transcript.get("script"))
+    source_sha256 = source_body_sha256 or projection.body_sha256
+    physical_sha256 = source_file_sha256 or hashlib.sha256(raw).hexdigest()
+    structure_sha256 = (
+        editorial_structure_sha256 or projection.editorial_structure_sha256
+    )
     fragments: list[dict[str, Any]] = []
     fragment_by_anchor: dict[tuple[str, str], str] = {}
 
@@ -670,6 +1138,11 @@ def compile_package(
         "transcript_id": transcript_id,
         "title": transcript.get("metadata", {}).get("title", transcript_id),
         "source_sha256": source_sha256,
+        "source_body_sha256": source_sha256,
+        "source_file_sha256": physical_sha256,
+        "editorial_structure_sha256": structure_sha256,
+        "locator_space": LOCATOR_SPACE,
+        "extraction_record_namespace": namespace,
         "source_path": str(transcript_path),
         "review_status": "candidate",
     }
@@ -678,6 +1151,11 @@ def compile_package(
         source_document.update({
             "source_id": source_id,
             "source_sha256": source_sha256,
+            "source_body_sha256": source_sha256,
+            "source_file_sha256": physical_sha256,
+            "editorial_structure_sha256": structure_sha256,
+            "locator_space": LOCATOR_SPACE,
+            "extraction_record_namespace": namespace,
             "source_path": str(transcript_path),
             "review_status": "candidate",
         })
@@ -695,6 +1173,8 @@ def compile_package(
         "claim_relations": response["claim_relations"],
         "extraction": {
             **extraction,
+            "locator_space": LOCATOR_SPACE,
+            "record_namespace": namespace,
             # Artifact metadata does not participate in the pre-generation
             # fingerprint. This lets the unchanged API identity keep matching
             # older caches while every newly written artifact names its
@@ -768,6 +1248,7 @@ def _run(
     sections: SectionSettings,
     force: bool,
     source_descriptor: dict[str, Any] | None = None,
+    preferred_plan: SectionPlan | None = None,
 ) -> tuple[str, Path]:
     """Extract one source, whatever kind of source it is.
 
@@ -777,13 +1258,21 @@ def _run(
     loop twice.
     """
 
-    source_sha256 = hashlib.sha256(raw).hexdigest()
+    source_file_sha256 = hashlib.sha256(raw).hexdigest()
+    projection = project_script(source.get("script"))
+    source_sha256 = projection.body_sha256
+    source_body = {
+        **source,
+        "script": [dict(row) for row in projection.body_rows],
+    }
     plan = resolve_section_plan(
         source=source, source_id=source_id, source_sha256=source_sha256,
         output_dir=output_dir, level=sections.level,
         max_section_sentences=sections.max_sentences,
         allow_generated=sections.allow_generated,
         client=client if isinstance(client, CodexSubscriptionClient) else None,
+        source_file_sha256=source_file_sha256,
+        preferred_plan=preferred_plan,
     )
     identity = extraction_identity(
         source_sha256=source_sha256, prompt=prompt,
@@ -791,15 +1280,59 @@ def _run(
         max_output_tokens=client.max_output_tokens,
         section_plan=plan.identity(),
         source_text_sha256=hashlib.sha256(
-            "\n".join(_segment_texts(source)).encode("utf-8")
+            "\n".join(_segment_texts(source_body)).encode("utf-8")
         ).hexdigest(),
+        editorial_structure_sha256=projection.editorial_structure_sha256,
+        model_context_sha256=hashlib.sha256(header.encode("utf-8")).hexdigest(),
+        model_input_contract_version=MODEL_INPUT_CONTRACT_VERSION,
+        section_model_input_sha256s=_section_model_input_sha256s(
+            source_body, projection.headings, header, plan
+        ),
+        source_file_sha256=source_file_sha256,
+        package_compiler_version=PACKAGE_COMPILER_VERSION,
+        section_scope=list(sections.only) if sections.only is not None else None,
         backend=client.backend if isinstance(client, CodexSubscriptionClient) else None,
     )
+    identity["source_body_sha256"] = source_sha256
+    identity["source_file_sha256"] = source_file_sha256
     output_path = output_dir / f"{_slug(source_id)}.detailed-knowledge.json"
     if output_path.is_file() and not force:
-        existing = json.loads(output_path.read_text(encoding="utf-8"))
-        if (existing.get("extraction") or {}).get("fingerprint_sha256") == identity["fingerprint_sha256"]:
-            return "skipped", output_path
+        try:
+            existing = json.loads(output_path.read_text(encoding="utf-8"))
+            validate_merged_package(existing)
+        except (OSError, json.JSONDecodeError, KnowledgePackageMergeError):
+            # The current file is not a cache hit merely because its name is
+            # right. `_run_extraction` archives it before installing a rebuilt
+            # artifact, and validated section caches avoid a needless model
+            # call when their own generation fingerprint still matches.
+            existing = None
+        if (
+            existing is not None
+            and (existing.get("extraction") or {}).get("fingerprint_sha256")
+            == identity["fingerprint_sha256"]
+            and existing.get("complete") is (sections.only is None)
+            and (existing.get("extraction") or {}).get("artifact_sha256")
+            == _package_artifact_sha256(existing)
+        ):
+            if isinstance(existing.get("coverage"), dict):
+                return "skipped", output_path
+            # Older code exposed the package at its current path before
+            # calculating coverage. Finish that deterministic commit instead
+            # of paying for identical model output again.
+            with run_record(subject=source_id, stage="extraction") as record:
+                record.inputs({"fingerprint_sha256": identity["fingerprint_sha256"]})
+                existing["coverage"] = _coverage(source_path, output_path)
+                _archive(output_path)
+                existing.setdefault("extraction", {})["artifact_sha256"] = (
+                    _package_artifact_sha256(existing)
+                )
+                _atomic_json_artifact_write(output_path, existing)
+                record.quality({
+                    **_coverage_quality(existing["coverage"]),
+                    "recovered_interrupted_artifact_commit": True,
+                })
+                record.outputs(output_path)
+            return "created", output_path
     # Opened after the skip check so a no-op re-run does not file a row. At 240
     # sources a nightly "nothing changed" pass would otherwise bury the runs
     # that did something.
@@ -818,7 +1351,8 @@ def _run(
             "prompt_sha256": identity.get("prompt_sha256"),
         })
         return _run_extraction(
-            record=record, source_id=source_id, source=source, raw=raw,
+            record=record, source_id=source_id, source=source_body,
+            headings=projection.headings, raw=raw,
             source_path=source_path, header=header, plan=plan, identity=identity,
             output_path=output_path, output_dir=output_dir, client=client,
             prompt=prompt, sections=sections, force=force,
@@ -828,6 +1362,7 @@ def _run(
 
 def _run_extraction(
     *, record: RunRecord, source_id: str, source: dict[str, Any], raw: bytes,
+    headings: Sequence[EditorialHeading],
     source_path: Path, header: str, plan: SectionPlan, identity: dict[str, Any],
     output_path: Path, output_dir: Path,
     client: Stage1OpenAIClient | Stage1AnthropicClient | CodexSubscriptionClient,
@@ -839,7 +1374,7 @@ def _run_extraction(
     response, usage_rows, section_rows, exclusions = _extract_sections(
         source_id=source_id,
         exclusion_source_id=published_source_id(source_id, source_descriptor),
-        source=source, header=header, plan=plan,
+        source=source, headings=headings, header=header, plan=plan,
         output_dir=output_dir, client=client, prompt=prompt,
         fingerprint=identity["generation_fingerprint_sha256"], force=force,
         only=sections.only, record=record,
@@ -847,20 +1382,48 @@ def _run_extraction(
     package = compile_package(
         transcript_id=source_id, transcript_path=source_path, transcript=source,
         raw=raw, response=response, extraction=identity,
+        source_body_sha256=str(identity["source_body_sha256"]),
+        source_file_sha256=str(identity["source_file_sha256"]),
+        editorial_structure_sha256=str(identity["editorial_structure_sha256"]),
         source_descriptor=source_descriptor, usage_rows=usage_rows, section_rows=section_rows,
         exclusions=exclusions, complete=sections.only is None,
     )
+    try:
+        validate_merged_package(package)
+    except KnowledgePackageMergeError as exc:
+        raise DetailedExtractionValidationError(
+            f"compiled package violates graph integrity: {exc}"
+        ) from exc
     output_dir.mkdir(parents=True, exist_ok=True)
-    _archive(output_path)
-    output_path.write_text(json.dumps(package, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     # The ledger is arithmetic over the package that was just written -- no
     # model call, nothing to approve -- so every extraction can carry its own
     # scoreboard instead of it having to be recomputed by hand later. It reports
     # and does not gate: a red light onto a queue nobody can drain gets switched
     # off within a month, and who may switch this one on is not this runner's
-    # decision to make.
-    package["coverage"] = _coverage(source_path, output_path)
-    output_path.write_text(json.dumps(package, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    # decision to make. Compute it from a private complete package first. The
+    # current path must never briefly contain a matching extraction fingerprint
+    # without its coverage: a crash in that window would make the next run skip
+    # the model generation and preserve the incomplete artifact forever.
+    descriptor, coverage_name = tempfile.mkstemp(
+        dir=output_dir, prefix=f".{output_path.name}.coverage.", suffix=".json"
+    )
+    coverage_path = Path(coverage_name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(
+                (json.dumps(package, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+            )
+            handle.flush()
+            os.fsync(handle.fileno())
+        package["coverage"] = _coverage(source_path, coverage_path)
+    finally:
+        try:
+            coverage_path.unlink()
+        except FileNotFoundError:
+            pass
+    _archive(output_path)
+    package["extraction"]["artifact_sha256"] = _package_artifact_sha256(package)
+    _atomic_json_artifact_write(output_path, package)
     record.quality(_coverage_quality(package["coverage"]))
     record.outputs(output_path)
     _print_usage(source_id, usage_rows)
@@ -967,12 +1530,23 @@ def run_one(
     write_back_subtitles: bool = False,
     subtitle_actor_id: str | None = None,
     subtitle_writer: Callable[..., dict[str, Any]] | None = None,
+    subtitle_authorizer: Callable[[str], bool] | None = None,
 ) -> tuple[str, Path]:
     transcript, raw = _load(transcript_path)
     transcript_id = transcript_path.stem
+    if transcript_path.parent.name == "script_review":
+        reconcile_subtitle_application(
+            source_id=transcript_id,
+            source_path=transcript_path,
+            output_dir=output_dir,
+            current_raw=raw,
+        )
     section_settings = sections or SectionSettings()
-    source_has_headings = has_section_headings(
-        _segment_texts(transcript), level=section_settings.level
+    projection = project_script(transcript.get("script"))
+    leading_untitled_end = leading_untitled_body_end(
+        projection.headings,
+        len(projection.body_rows),
+        level=section_settings.level,
     )
     if write_back_subtitles and not section_settings.allow_generated:
         raise SubtitlePersistenceError(
@@ -984,18 +1558,62 @@ def run_one(
         )
     if (
         transcript_path.parent.name == "script_review"
-        and not source_has_headings
+        and leading_untitled_end is not None
         and not write_back_subtitles
     ):
         raise SubtitlePersistenceError(
-            "headingless script_review sermon requires "
+            "script_review sermon with an untitled leading section requires "
             "--write-back-generated-subtitles and --subtitle-user-id before extraction"
         )
+    if write_back_subtitles and not projection.body_rows:
+        raise SubtitlePersistenceError(
+            "empty script_review sermon cannot receive generated subtitles"
+        )
+    preferred_plan: SectionPlan | None = None
     if (
         write_back_subtitles
         and section_settings.allow_generated
-        and not source_has_headings
+        and leading_untitled_end is not None
     ):
+        _assert_subtitle_persistence_authorized(
+            str(subtitle_actor_id),
+            writer=subtitle_writer,
+            authorizer=subtitle_authorizer,
+        )
+        before_source_sha256 = hashlib.sha256(raw).hexdigest()
+        cached_plan = (
+            reusable_generated_plan(
+                source=transcript,
+                source_id=transcript_id,
+                source_sha256=projection.body_sha256,
+                output_dir=output_dir,
+                level=section_settings.level,
+                max_section_sentences=section_settings.max_sentences,
+            )
+            if leading_untitled_end == len(projection.body_rows)
+            else None
+        )
+        # Plans written before the body/editorial identity split were bound to
+        # the physical file SHA. Accept one only through the same full-plan
+        # validation as a current cache; after persistence `_run` rewrites its
+        # metadata with the body identity. This is a compatibility read, not a
+        # second source identity.
+        legacy_plan_is_coordinate_safe = not any(
+            is_editorial_row(row) for row in live_script(transcript.get("script"))
+        )
+        if (
+            cached_plan is None
+            and leading_untitled_end == len(projection.body_rows)
+            and legacy_plan_is_coordinate_safe
+        ):
+            cached_plan = reusable_generated_plan(
+                source=transcript,
+                source_id=transcript_id,
+                source_sha256=before_source_sha256,
+                output_dir=output_dir,
+                level=section_settings.level,
+                max_section_sentences=section_settings.max_sentences,
+            )
         before_payload = json.loads(raw)
         report = _persist_generated_subtitles(
             source_id=transcript_id,
@@ -1006,6 +1624,8 @@ def run_one(
             actor_id=str(subtitle_actor_id),
             client=client if isinstance(client, CodexSubscriptionClient) else None,
             writer=subtitle_writer,
+            scope_end=leading_untitled_end,
+            cached_generated_plan=cached_plan,
         )
         transcript, raw = _load(transcript_path)
         after_payload = json.loads(raw)
@@ -1023,16 +1643,23 @@ def run_one(
             raise SubtitlePersistenceError(
                 "reloaded sermon SHA does not match the authorized save result"
             )
-        if not has_section_headings(
-            _segment_texts(transcript), level=section_settings.level
-        ):
+        reloaded_projection = project_script(transcript.get("script"))
+        if leading_untitled_body_end(
+            reloaded_projection.headings,
+            len(reloaded_projection.body_rows),
+            level=section_settings.level,
+        ) is not None:
             raise SubtitlePersistenceError(
-                "saved sermon still has no usable section headings; extraction not started"
+                "saved sermon still has an untitled leading section; extraction not started"
             )
+        if cached_plan is not None:
+            preferred_plan = cached_plan
         # The generator has completed its job. From here onward headings are
-        # canonical source rows, and no internal-only fallback may replace them.
+        # persisted editorial structure. They may guide section grouping, but
+        # the source projection keeps them out of sentences and evidence.
         section_settings = SectionSettings(
             level=section_settings.level,
+            max_sentences=section_settings.max_sentences,
             allow_generated=False,
             only=section_settings.only,
         )
@@ -1045,6 +1672,7 @@ def run_one(
         source_id=transcript_id, source=transcript, raw=raw, source_path=transcript_path,
         header=header, output_dir=output_dir, client=client, prompt=prompt,
         reasoning_effort=reasoning_effort, sections=section_settings, force=force,
+        preferred_plan=preferred_plan,
     )
 
 
@@ -1146,10 +1774,14 @@ def main() -> int:
         def section_plan_summary(source: dict[str, Any]) -> list[dict[str, Any]]:
             # Dry run never calls the generator; a source with no headings
             # reports one section, which is what an offline run would do.
-            texts = _segment_texts(source)
+            projection = project_script(source.get("script"))
+            texts = [str(row.get("text") or "") for row in projection.body_rows]
             counts = [len(sentence_spans(text)) for text in texts]
             plan = plan_sections(
-                texts, level=sections.level,
+                texts,
+                headings=projection.headings,
+                segment_indexes=[row.get("index") for row in projection.body_rows],
+                level=sections.level,
                 sentence_counts=counts,
                 max_section_sentences=sections.max_sentences,
             )

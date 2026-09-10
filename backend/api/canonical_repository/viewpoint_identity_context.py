@@ -11,6 +11,16 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from backend.pipeline.knowledge_source import markdown_blocks
+from backend.pipeline.source_projection import (
+    assert_locator_space_compatible,
+    is_editorial_row,
+    live_text,
+    project_script,
+    script_from_markdown_blocks,
+    source_uses_body_locator_space,
+)
+
 from .viewpoint_foundation import sha256_json
 from .viewpoint_resolution import ViewpointIdentityReviewPacket
 
@@ -104,8 +114,9 @@ def _source_rows(path: Path) -> tuple[str, list[dict[str, Any]]]:
     source_text = path.read_text(encoding="utf-8")
     if path.suffix.lower() not in {".json"}:
         rows = [
-            {"start": match.start(), "end": match.end(), "text": match.group(0)}
+            {"start": match.start(), "end": match.end(), "text": live_text(match.group(0))}
             for match in re.finditer(r"\S(?:.*?\S)?(?=\n\s*\n|\Z)", source_text, re.S)
+            if not is_editorial_row({"text": match.group(0)})
         ]
         if not rows:
             raise ValueError(f"source document has no paragraph content: {path}")
@@ -115,7 +126,7 @@ def _source_rows(path: Path) -> tuple[str, list[dict[str, Any]]]:
     if not isinstance(values, list):
         raise ValueError(f"unsupported source document shape: {path}")
     rows = []
-    for value in values:
+    for value in project_script(values).body_rows:
         if not isinstance(value, dict) or not isinstance(value.get("index"), int):
             continue
         text = value.get("text")
@@ -154,7 +165,18 @@ def build_identity_context_packet(
         expected_sha = str(descriptor.get("source_sha256") or "")
         if not source_path.is_file():
             raise ValueError(f"source path is unavailable for {source_id}")
-        actual_sha = hashlib.sha256(source_path.read_bytes()).hexdigest()
+        raw_bytes = source_path.read_bytes()
+        file_sha = hashlib.sha256(raw_bytes).hexdigest()
+        if source_path.suffix.lower() == ".json":
+            raw_source = json.loads(raw_bytes)
+            source_script = raw_source.get("script") if isinstance(raw_source, dict) else raw_source
+        else:
+            source_script = script_from_markdown_blocks(
+                markdown_blocks(raw_bytes.decode("utf-8"))
+            )
+        assert_locator_space_compatible(descriptor, source_script)
+        uses_body_identity = source_uses_body_locator_space(descriptor)
+        actual_sha = project_script(source_script).body_sha256 if uses_body_identity else file_sha
         if not expected_sha or actual_sha != expected_sha:
             raise ValueError(f"source document SHA mismatch for {source_id}")
         parent_source_shas = {
