@@ -21,6 +21,7 @@ from backend.pipeline.knowledge_package_merge import (
 )
 from backend.pipeline.knowledge_source import load_knowledge_source_document
 from backend.pipeline.run_ledger import run_record
+from backend.pipeline.sentence_ledger_runner import coverage_for_package
 from backend.pipeline.source_keys import package_row_key
 from backend.pipeline.source_projection import assert_locator_space_compatible, project_script
 from backend.pipeline.corpus_ai_review_runner import _validate_claim_layer_package
@@ -408,6 +409,40 @@ def apply_consensus_overrides(
         "active_claim_count": len(result.get("claims", [])) - len(superseded),
         "superseded_claim_count": len(superseded),
     }
+    source_documents = result.get("source_documents") or []
+    if "coverage" in result:
+        if len(source_documents) != 1:
+            raise ConsensusApplicationError(
+                "a package-level coverage report requires exactly one source document"
+            )
+        source_document = source_documents[0]
+        transcript_id = str(source_document.get("transcript_id") or "")
+        transcript = transcripts.get(transcript_id)
+        if transcript is None:
+            raise ConsensusApplicationError(
+                f"missing transcript for final coverage: {transcript_id}"
+            )
+        try:
+            result["coverage"] = {
+                "available": True,
+                **coverage_for_package(
+                    source_document=source_document,
+                    script=list(transcript.get("script") or []),
+                    package=result,
+                    source_file_sha256=str(
+                        source_document.get("source_file_sha256")
+                        or source_document.get("source_sha256")
+                        or ""
+                    ),
+                    reconciled_against=(
+                        f"consensus:{adjudication_fingerprint or 'unknown'}"
+                    ),
+                ),
+            }
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ConsensusApplicationError(
+                f"could not recompute final package coverage: {exc}"
+            ) from exc
     # Consensus can add evidence/fragments and retarget or remove relations.
     # Revalidate the whole graph before it becomes a current artifact: local
     # Claim checks cannot detect a generated ID colliding with another

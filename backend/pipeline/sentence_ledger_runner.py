@@ -186,11 +186,18 @@ def terminal_exclusions(package: dict[str, Any]) -> dict[str, str]:
     return terminal
 
 
-def run(source_path: Path, package_path: Path, passage: str | None = None) -> dict[str, Any]:
-    package = json.loads(package_path.read_text(encoding="utf-8"))
-    source_document = package["source_documents"][0]
+def coverage_for_package(
+    *,
+    source_document: dict[str, Any],
+    script: list[dict[str, Any]],
+    package: dict[str, Any],
+    source_file_sha256: str | None = None,
+    passage: str | None = None,
+    reconciled_against: str = "in-memory-package",
+) -> dict[str, Any]:
+    """Compute coverage from the final in-memory package and physical script."""
+
     source_id = str(source_document["source_id"])
-    script = load_source_script(source_path)
     assert_locator_space_compatible(source_document, script)
     projection = project_script(script)
     segments = [
@@ -200,8 +207,10 @@ def run(source_path: Path, package_path: Path, passage: str | None = None) -> di
     source_sha256 = (
         projection.body_sha256
         if source_uses_body_locator_space(source_document)
-        else hashlib.sha256(source_path.read_bytes()).hexdigest()
+        else source_file_sha256
     )
+    if not source_sha256:
+        raise ValueError("legacy coverage calculation requires source file SHA256")
     inventory = build_inventory(segments, source_id=source_id)
     spans, unplaced = place_fragments(package, segments, source_sha256)
 
@@ -215,7 +224,7 @@ def run(source_path: Path, package_path: Path, passage: str | None = None) -> di
     rows = reconcile(
         inventory, spans,
         exclusions_by_sentence=terminal_exclusions(package),
-        target=target, reconciled_against=package_path.name,
+        target=target, reconciled_against=reconciled_against,
     )
     summary = summarise(rows)
     categories = summarise_by_category(inventory, rows, dict(segments))
@@ -247,6 +256,18 @@ def run(source_path: Path, package_path: Path, passage: str | None = None) -> di
             for name, category in categories.items()
         },
     }
+
+
+def run(source_path: Path, package_path: Path, passage: str | None = None) -> dict[str, Any]:
+    package = json.loads(package_path.read_text(encoding="utf-8"))
+    return coverage_for_package(
+        source_document=package["source_documents"][0],
+        script=load_source_script(source_path),
+        package=package,
+        source_file_sha256=hashlib.sha256(source_path.read_bytes()).hexdigest(),
+        passage=passage,
+        reconciled_against=package_path.name,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -488,6 +488,12 @@ def test_consensus_applier_removes_anchor_and_relation_without_approving(tmp_pat
             reasoning_effort="medium", max_output_tokens=32000,
         ),
     )
+    package["coverage"] = {
+        "available": True,
+        "anchored_spans": len(package["source_fragments"]),
+        "represented": 0,
+        "unprocessed": 999,
+    }
     claim = package["claims"][0]
     relation_id = package["claim_relations"][0]["claim_relation_id"]
     anchor = claim["occurrences"][0]["anchors"][0]
@@ -515,6 +521,8 @@ def test_consensus_applier_removes_anchor_and_relation_without_approving(tmp_pat
     assert relation_id not in {row["claim_relation_id"] for row in result["claim_relations"]}
     assert any(value.startswith("AI-ADJ-") for value in updated["evidence_step_ids"])
     assert result["consensus_application"]["approval_status"] == "not_human_approved"
+    assert result["coverage"]["anchored_spans"] == len(result["source_fragments"])
+    assert result["coverage"]["unprocessed"] != 999
 
 
 def test_consensus_applier_accepts_combined_string_fingerprint(tmp_path: Path) -> None:
@@ -534,6 +542,32 @@ def test_consensus_applier_accepts_combined_string_fingerprint(tmp_path: Path) -
         {"011WSR01": transcript},
     )
     assert result["consensus_application"]["adjudication_fingerprint"] == "combined-fp"
+
+
+def test_consensus_applier_refuses_stale_single_source_coverage_on_merged_package(
+    tmp_path: Path,
+) -> None:
+    transcript = _transcript()
+    raw = json.dumps(transcript, ensure_ascii=False).encode("utf-8")
+    package = compile_package(
+        transcript_id="011WSR01", transcript_path=tmp_path / "011WSR01.json",
+        transcript=transcript, raw=raw, response=_response(),
+        extraction=extraction_identity(
+            source_sha256=hashlib.sha256(raw).hexdigest(), prompt="prompt",
+            model_id="gpt-5.6-sol", reasoning_effort="medium", max_output_tokens=32000,
+        ),
+    )
+    package["coverage"] = {"available": True, "source_id": package["source_documents"][0]["source_id"]}
+    package["source_documents"].append(
+        {**package["source_documents"][0], "source_id": "SRC-SECOND", "transcript_id": "SECOND"}
+    )
+
+    with pytest.raises(ConsensusApplicationError, match="exactly one source document"):
+        apply_consensus_overrides(
+            package,
+            {"adjudication_fingerprint": "fp", "claims": {}},
+            {"011WSR01": transcript, "SECOND": transcript},
+        )
 
 
 def test_consensus_cli_guard_binds_overrides_to_exact_package_and_bytes() -> None:

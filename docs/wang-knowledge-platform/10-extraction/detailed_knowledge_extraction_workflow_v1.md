@@ -169,6 +169,8 @@ DeepSeek v4 pro 作备用（`--model deepseek-v4-pro`），约 gpt 的三分之�
 
 “fingerprint 相同”只是 cache 候选，不是完整性证明。跳过模型或进入下游阶段前仍须逐跳验证 current JSON 的 graph、完整性标记与 artifact self-hash、review 的逐 claim 覆盖与 deterministic routing、adjudication 与 override 的机械一致性。override 还必须绑定它所裁决的 exact package SHA；缺失的纯派生 sidecar 可从已经验证的主 artifact 恢复，不能借同一个 fingerprint 接受残缺、被改写或配错上游的 current 文件。合法 JSON 若顶层不是该阶段要求的 object 也视为损坏 cache，不能因 `.get()` 异常中止整个批次。逐字稿 loader 保留物理 JSON，soft deletion、正文过滤与 editorial structure 分离只由统一 source projection 执行一次。
 
+Consensus override 若新增、移除或迁移 source fragment，reviewed candidate 必须从最终 graph 与同一 SHA-bound source 重新计算 coverage；不得沿用 extraction package 的 `anchored_spans` 或 sentence reconciliation 摘要。重算只更新派生报告，不把 editorial rows 放回来源分母。
+
 数据库 ChangeSet 的 identity 还必须绑定 planning 时每项 operation 的 before/after SHA 与 revision。只按 package fingerprint 判断“已经执行过”是不够的：同一 package 在数据库后来发生合法变化后再次执行，必须产生针对新 before-state 的计划，不能误报 `already_applied`。精确重跑若计划为零 operation，则在打开数据库连接、run ledger 或 artifact writer 前直接返回 `unchanged`。
 
 ## 五、双模型复审与最小修正规则
