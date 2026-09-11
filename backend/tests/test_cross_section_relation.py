@@ -306,6 +306,71 @@ def test_boundaries_follow_the_package_section_plan() -> None:
     assert _section_boundaries({"extraction": {}}) == [0]
 
 
+def test_boundaries_follow_current_section_plan_shape() -> None:
+    """Current extraction packages persist section rows, not legacy boundaries."""
+
+    package = _package()
+    package["extraction"]["section_plan"] = {
+        "section_count": 3,
+        "section_policy": {"strategy": "test"},
+        "sections": [
+            {"index": 1, "start": 0, "end": 10},
+            {"index": 2, "start": 10, "end": 25},
+            {"index": 3, "start": 25, "end": 40},
+        ],
+    }
+
+    assert _section_boundaries(package) == [0, 10, 25]
+
+
+def test_sentence_range_section_plan_may_repeat_a_row_boundary() -> None:
+    package = _package()
+    package["extraction"]["section_plan"] = {
+        "section_count": 2,
+        "sections": [
+            {"index": 1, "start": 0, "end": 1, "sentence_end": 20},
+            {"index": 2, "start": 0, "end": 1, "sentence_start": 20},
+        ],
+    }
+
+    assert _section_boundaries(package) == [0, 0]
+
+
+@pytest.mark.parametrize(
+    "plan",
+    [
+        {"section_count": 2, "sections": [{"index": 1, "start": 0, "end": 1}]},
+        {"sections": [{"index": 1, "start": 5, "end": 10}]},
+        {"sections": [{"index": 1, "end": 10}]},
+        {"boundaries": [0, -1]},
+        {"section_count": 3, "boundaries": [0, 10]},
+        {},
+        {"unexpected": [0, 10]},
+    ],
+)
+def test_malformed_present_section_plan_fails_closed(plan: dict) -> None:
+    package = _package()
+    package["extraction"]["section_plan"] = plan
+
+    with pytest.raises(CrossSectionValidationError, match="section_plan"):
+        _section_boundaries(package)
+
+
+def test_mixed_section_plan_rejects_disagreeing_topologies() -> None:
+    package = _package()
+    package["extraction"]["section_plan"] = {
+        "section_count": 2,
+        "sections": [
+            {"index": 1, "start": 0, "end": 10},
+            {"index": 2, "start": 10, "end": 20},
+        ],
+        "boundaries": [0, 12],
+    }
+
+    with pytest.raises(CrossSectionValidationError, match="disagree"):
+        _section_boundaries(package)
+
+
 def test_subscription_generation_has_a_distinct_backend_bound_fingerprint() -> None:
     kwargs = {
         "package_sha256": "package", "prompt": "prompt",

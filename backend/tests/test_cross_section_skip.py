@@ -17,7 +17,11 @@ from pathlib import Path
 import pytest
 
 from backend.pipeline.cross_section_relation import CrossSectionValidationError, discovery_identity
-from backend.pipeline.cross_section_relation_runner import already_current, _stamp_artifact
+from backend.pipeline.cross_section_relation_runner import (
+    _stamp_artifact,
+    already_current,
+    run,
+)
 from backend.pipeline.detailed_knowledge_extraction_runner import (
     _package_artifact_sha256,
 )
@@ -46,12 +50,12 @@ def _package(tmp_path: Path) -> Path:
     return path
 
 
-def _output_matching(package_path: Path, out: Path) -> None:
+def _output_matching(package_path: Path, out: Path, *, section_count: int = 2) -> None:
     raw = package_path.read_bytes()
     package = json.loads(raw)
     identity = discovery_identity(
         package_sha256=hashlib.sha256(raw).hexdigest(),
-        prompt=PROMPT, model_id=MODEL, section_count=2,
+        prompt=PROMPT, model_id=MODEL, section_count=section_count,
     )
     package["cross_section_relations"] = identity
     _stamp_artifact(package)
@@ -112,6 +116,89 @@ def test_same_fingerprint_with_modified_output_is_not_current(tmp_path: Path) ->
         prompt=PROMPT,
         model_id=MODEL,
     )
+
+
+def test_current_shape_does_not_reuse_stale_single_section_output(
+    tmp_path: Path,
+) -> None:
+    package = _package(tmp_path)
+    payload = json.loads(package.read_text(encoding="utf-8"))
+    payload["extraction"]["section_plan"] = {
+        "section_count": 2,
+        "sections": [
+            {"index": 1, "start": 0, "end": 5},
+            {"index": 2, "start": 5, "end": 10},
+        ],
+    }
+    payload["extraction"]["artifact_sha256"] = _package_artifact_sha256(payload)
+    package.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    out = tmp_path / "out.json"
+    _output_matching(package, out, section_count=1)
+
+    assert not already_current(
+        package_path=package, output_path=out, prompt=PROMPT, model_id=MODEL
+    )
+    _output_matching(package, out, section_count=2)
+    assert already_current(
+        package_path=package, output_path=out, prompt=PROMPT, model_id=MODEL
+    )
+
+
+def test_current_shape_multi_section_run_does_not_write_through(
+    tmp_path: Path,
+) -> None:
+    package = _package(tmp_path)
+    payload = json.loads(package.read_text(encoding="utf-8"))
+    payload["extraction"]["section_plan"] = {
+        "section_count": 2,
+        "sections": [
+            {"index": 1, "start": 0, "end": 5},
+            {"index": 2, "start": 5, "end": 10},
+        ],
+    }
+    payload["source_fragments"] = [
+        {
+            "fragment_id": "FR-1",
+            "source_id": "SRC-A",
+            "paragraph_key": "S0001",
+            "verbatim_excerpt": "甲",
+        }
+    ]
+    payload["observations"] = [
+        {
+            "observation_id": "OBS-1",
+            "statement": "甲",
+            "argument_role": "load_bearing",
+            "source_fragment_ids": ["FR-1"],
+        }
+    ]
+    payload["extraction"]["artifact_sha256"] = _package_artifact_sha256(payload)
+    package.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    class EmptyProposalClient:
+        model = MODEL
+        reasoning_effort = "medium"
+        max_output_tokens = 16000
+        backend = "api"
+        last_usage = None
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def generate_json(self, *_args, **_kwargs) -> dict:
+            self.calls += 1
+            return {"evidence_relations": [], "claim_relations": []}
+
+    client = EmptyProposalClient()
+    result = run(
+        package_path=package,
+        output_path=tmp_path / "out.json",
+        client=client,
+        prompt=PROMPT,
+    )
+
+    assert client.calls == 1
+    assert (result.get("cross_section_relations") or {}).get("skipped") is None
 
 
 def test_incomplete_extraction_cannot_enter_cross_section_discovery(tmp_path: Path) -> None:

@@ -128,13 +128,93 @@ def _section_boundaries(package: dict[str, Any]) -> list[int]:
     Read off the package rather than configured, so the two stages cannot drift
     apart: resection the source and this stage follows, with no second place to
     remember. Sentence-range chunks may repeat a row start; their fragments
-    carry the authoritative extraction section index. A package with no plan is
-    treated as one section, which makes every proposal same-section and
-    therefore rejected -- the safe direction.
+    carry the authoritative extraction section index. Current extraction
+    packages persist full ``sections`` rows; older packages persist only a
+    ``boundaries`` list. Both encode the same topology and must remain readable.
+
+    A genuinely absent plan is treated as one section. A present but malformed
+    or unrecognised plan must fail closed instead of silently taking the
+    single-section write-through path: doing that would certify that
+    cross-section discovery ran when it actually skipped every relation.
     """
 
-    plan = (package.get("extraction") or {}).get("section_plan") or {}
-    return [int(value) for value in plan.get("boundaries") or [0]]
+    extraction = package.get("extraction") or {}
+    if "section_plan" not in extraction or extraction.get("section_plan") is None:
+        return [0]
+    plan = extraction["section_plan"]
+    if not isinstance(plan, dict):
+        raise CrossSectionValidationError(
+            "cross-section input section_plan must be an object"
+        )
+    if not plan:
+        raise CrossSectionValidationError(
+            "cross-section input has an empty section_plan"
+        )
+
+    def checked(values: Any, *, field: str) -> list[int]:
+        if not isinstance(values, list) or not values:
+            raise CrossSectionValidationError(
+                f"cross-section input section_plan.{field} must be a non-empty list"
+            )
+        boundaries: list[int] = []
+        for index, value in enumerate(values):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise CrossSectionValidationError(
+                    f"cross-section input section_plan.{field}[{index}] has "
+                    "an invalid start boundary"
+                )
+            boundaries.append(value)
+        if boundaries[0] != 0 or boundaries != sorted(boundaries):
+            raise CrossSectionValidationError(
+                f"cross-section input section_plan.{field} boundaries must "
+                "start at 0 and be ordered"
+            )
+        return boundaries
+
+    from_sections: list[int] | None = None
+    if "sections" in plan:
+        sections = plan["sections"]
+        if not isinstance(sections, list) or not sections:
+            raise CrossSectionValidationError(
+                "cross-section input section_plan.sections must be a non-empty list"
+            )
+        if not all(isinstance(row, dict) and "start" in row for row in sections):
+            raise CrossSectionValidationError(
+                "cross-section input section_plan.sections rows require start"
+            )
+        from_sections = checked(
+            [row["start"] for row in sections], field="sections"
+        )
+    from_boundaries: list[int] | None = None
+    if "boundaries" in plan:
+        from_boundaries = checked(plan["boundaries"], field="boundaries")
+
+    resolved: list[int]
+    if from_sections is not None and from_boundaries is not None:
+        if from_sections != from_boundaries:
+            raise CrossSectionValidationError(
+                "cross-section input section_plan sections and boundaries disagree"
+            )
+        resolved = from_sections
+    elif from_sections is not None:
+        resolved = from_sections
+    elif from_boundaries is not None:
+        resolved = from_boundaries
+    else:
+        raise CrossSectionValidationError(
+            "cross-section input has an unrecognised section_plan shape"
+        )
+
+    declared_count = plan.get("section_count")
+    if declared_count is not None and (
+        isinstance(declared_count, bool)
+        or not isinstance(declared_count, int)
+        or declared_count != len(resolved)
+    ):
+        raise CrossSectionValidationError(
+            "cross-section input section_plan.section_count does not match topology"
+        )
+    return resolved
 
 
 def _write_through(
