@@ -43,12 +43,16 @@ from backend.config.wang_platform_paths import wang_platform_paths
 from backend.pipeline.corpus_survey_runner import _load
 from backend.pipeline.detailed_knowledge_extraction_runner import _slug
 from backend.pipeline.extraction_sections import leading_untitled_body_end
+from backend.pipeline.knowledge_source import markdown_source_document
 from backend.pipeline.research_batch import (
     batch_members,
     load_research_batch,
     merge_reviewed_packages,
 )
-from backend.pipeline.source_projection import project_script
+from backend.pipeline.source_projection import (
+    project_script,
+    provably_nonspoken_inline_markup,
+)
 from backend.pipeline.transcript_source import resolve_transcript_path
 
 
@@ -165,6 +169,29 @@ def review_members_with_untitled_leading_sections(
         ) is not None:
             untitled.append(member["key"])
     return untitled
+
+
+def members_with_inline_editor_payload(
+    members: list[dict[str, Any]], transcript_dirs: list[Path]
+) -> list[str]:
+    """Return sermons whose body rows contain provably non-spoken payload."""
+
+    unsafe: list[str] = []
+    for member in members:
+        if member["source_type"] == "sermon_transcript":
+            source_path = resolve_transcript_path(member["key"], transcript_dirs)
+            if source_path is None:
+                continue
+            source, _ = _load(source_path)
+        else:
+            source = markdown_source_document(member)[0]
+        projection = project_script(source.get("script"))
+        if any(
+            provably_nonspoken_inline_markup(str(row.get("text") or ""))
+            for row in projection.body_rows
+        ):
+            unsafe.append(member["key"])
+    return unsafe
 
 
 def _member_source_manifest(member: dict[str, Any], path: Path) -> None:
@@ -513,6 +540,14 @@ def main() -> int:
             + ": " + ", ".join(missing)
         )
     wanted = set(DEFAULT_STAGES) if args.stage == "all" else {args.stage}
+    if "extract" in wanted:
+        unsafe = members_with_inline_editor_payload(members, transcript_dirs)
+        if unsafe:
+            parser.error(
+                "source-bearing rows contain inline SVG/HTML editor payload; "
+                "move it to provenance-typed editorial rows before extraction: "
+                + ", ".join(unsafe)
+            )
     if "extract" in wanted and not args.write_back_generated_subtitles:
         untitled = review_members_with_untitled_leading_sections(members, transcript_dirs)
         if untitled:

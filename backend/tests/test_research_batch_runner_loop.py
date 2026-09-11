@@ -327,6 +327,72 @@ def test_batch_stops_before_any_command_for_headingless_review_without_writeback
         )
 
 
+def test_batch_stops_before_any_command_for_inline_editor_payload(
+    tmp_path, monkeypatch
+) -> None:
+    batch = _batch_file(tmp_path)
+    published = tmp_path / "script_published"
+    published.mkdir()
+    for name in ("甲", "乙", "丙"):
+        rows = [{"index": 1, "text": "教授正文。"}]
+        if name == "乙":
+            rows[0]["text"] += "\n<svg><text>编辑图形</text></svg>"
+        (published / f"{name}.json").write_text(
+            json.dumps(rows, ensure_ascii=False), encoding="utf-8"
+        )
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        runner.subprocess,
+        "run",
+        lambda command, **_kwargs: calls.append(command),
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "research_batch_runner",
+            "--batch", str(batch),
+            "--transcript-dir", str(published),
+            "--output-root", str(tmp_path / "out"),
+            "--stage", "extract",
+        ],
+    )
+    with pytest.raises(SystemExit):
+        runner.main()
+    assert calls == []
+
+
+def test_notes_payload_stops_batch_before_any_member_command(
+    tmp_path, monkeypatch
+) -> None:
+    manuscript = tmp_path / "notes.md"
+    manuscript.write_text(
+        "## 标题\n\n教授笔记。\n\n<!-- editor payload -->",
+        encoding="utf-8",
+    )
+    batch = _batch_file(tmp_path, manuscript=manuscript)
+    transcripts = _transcripts(tmp_path, "甲", "乙", "丙")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        runner.subprocess,
+        "run",
+        lambda command, **_kwargs: calls.append(command),
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "research_batch_runner",
+            "--batch", str(batch),
+            "--transcript-dir", str(transcripts),
+            "--output-root", str(tmp_path / "out"),
+            "--stage", "extract",
+        ],
+    )
+    with pytest.raises(SystemExit):
+        runner.main()
+    assert calls == []
+
+
 def test_a_genuinely_missing_transcript_still_stops_the_run(tmp_path, monkeypatch) -> None:
     batch = _batch_file(tmp_path)
     transcripts = _transcripts(tmp_path, "甲", "乙")

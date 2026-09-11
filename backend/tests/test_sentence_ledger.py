@@ -460,3 +460,67 @@ def test_a_heading_exclusion_is_named_structural_not_interpretive():
     assert by_text["## 一、彌賽亞秘密"] == "structural_markup"
     # A prose sentence the model set aside still needs a person.
     assert by_text["彼得的認信是正確的。"] == "not_exegesis"
+
+
+@pytest.mark.parametrize(
+    "markup",
+    [
+        '<rect width="2" height="3"/>',
+        ".node { fill: #fff; stroke: #000; }",
+        "-- editor comment -->",
+    ],
+)
+def test_machine_markup_exclusions_are_structural_without_human_approval(
+    markup: str,
+) -> None:
+    from backend.pipeline.detailed_knowledge_extraction import (
+        AuditedSentence,
+        exclusions_from_audit,
+    )
+
+    rows = exclusions_from_audit(
+        {
+            "sentence_audit": [
+                {
+                    "sentence_id": "s1",
+                    "status": "not_extracted",
+                    "reason_code": "not_exegesis",
+                    "reason": "机器标记",
+                }
+            ]
+        },
+        [AuditedSentence(sentence_id="s1", segment_index="S0001", text=markup)],
+        source_id="SRC",
+        ledger_sentence_id=sentence_id,
+    )
+    assert rows[0]["reason_code"] == "structural_markup"
+
+
+def test_blockquote_exclusion_remains_an_unapproved_authorship_question() -> None:
+    from backend.pipeline.detailed_knowledge_extraction import (
+        AuditedSentence,
+        exclusions_from_audit,
+    )
+
+    rows = exclusions_from_audit(
+        {
+            "sentence_audit": [
+                {
+                    "sentence_id": "s1",
+                    "status": "not_extracted",
+                    "reason_code": "not_exegesis",
+                    "reason": "可能是经文，也可能是投影片",
+                }
+            ]
+        },
+        [
+            AuditedSentence(
+                sentence_id="s1",
+                segment_index="S0001",
+                text="> 可能是经文，也可能是投影片",
+            )
+        ],
+        source_id="SRC",
+        ledger_sentence_id=sentence_id,
+    )
+    assert rows[0]["reason_code"] == "not_exegesis"

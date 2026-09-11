@@ -8,7 +8,7 @@ from typing import Any, Sequence
 
 from backend.pipeline.observation_type_vocabulary import OBSERVATION_TYPES
 from backend.pipeline.sentence_ledger_vocabulary import REASON_CODES
-from backend.pipeline.source_projection import project_script
+from backend.pipeline.source_projection import excerpt_overlaps_inline_markup, project_script
 
 # v2 closes `observation_type` to the six categories the prompt already names.
 # v3 moved the unit of extraction from the document to an overlapping window.
@@ -476,6 +476,10 @@ def validate_response(
     """
 
     source_rows = project_script(transcript.get("script", [])).body_rows
+    source_type = str(
+        (transcript.get("metadata") or {}).get("source_type")
+        or "sermon_transcript"
+    )
     segments = {f"S{index + 1:04d}": segment for index, segment in enumerate(source_rows)}
     collections = {
         "question": (response.get("questions", []), "question_id"),
@@ -507,7 +511,12 @@ def validate_response(
 
     anchor_errors: list[str] = []
 
-    def check_anchors(owner: str, anchors: list[dict[str, Any]]) -> None:
+    def check_anchors(
+        owner: str,
+        anchors: list[dict[str, Any]],
+        *,
+        allow_reviewed_notes_blockquote: bool = False,
+    ) -> None:
         if not anchors:
             anchor_errors.append(f"{owner}: at least one source anchor is required")
             return
@@ -529,6 +538,19 @@ def validate_response(
                 anchor_errors.append(f"{owner}: empty verbatim excerpt in {locator}")
             elif excerpt not in str(segment.get("text") or ""):
                 anchor_errors.append(f"{owner}: excerpt is not verbatim in {locator}")
+            elif excerpt_overlaps_inline_markup(
+                str(segment.get("text") or ""),
+                excerpt,
+                blocked_kinds=(
+                    {"svg", "html_comment", "inline_heading"}
+                    if allow_reviewed_notes_blockquote
+                    else None
+                ),
+            ):
+                anchor_errors.append(
+                    f"{owner}: excerpt lands in provenance-ambiguous inline markup "
+                    f"in {locator}"
+                )
 
     for collection_name, id_key in (
         ("questions", "question_id"),
@@ -537,7 +559,21 @@ def validate_response(
         ("evidence_steps", "evidence_step_id"),
     ):
         for row in response.get(collection_name, []):
-            check_anchors(str(row.get(id_key) or collection_name), row.get("anchors") or [])
+            allow_notes_quote = source_type == "notes_manuscript" and (
+                (
+                    collection_name == "observations"
+                    and row.get("observation_type") == "scripture_text"
+                )
+                or (
+                    collection_name == "evidence_steps"
+                    and row.get("speaker") == "quoted_source"
+                )
+            )
+            check_anchors(
+                str(row.get(id_key) or collection_name),
+                row.get("anchors") or [],
+                allow_reviewed_notes_blockquote=allow_notes_quote,
+            )
     validation_errors = list(anchor_errors)
 
     def collect(condition: bool, message: str) -> None:
@@ -650,10 +686,23 @@ def validate_response(
 #: text alone settles it -- `AuditedSentence` does not carry the block it came
 #: from, and for these two categories it does not need to.
 _STRUCTURAL_MARKUP = re.compile(r"^\s*(#{1,6}\s|([-*+]|\d+[.)])\s)")
+_MACHINE_MARKUP_SYNTAX = re.compile(
+    r"^\s*(?:"
+    r"<!--|--[^>]*-->|"
+    r"</?(?:svg|style|defs|marker|path|line|rect|ellipse|circle|text|tspan|"
+    r"polygon|polyline|g)\b[^>]*>|"
+    r"[.#][A-Za-z_][\w.-]*\s*\{"
+    r"(?=[^}]*(?:fill|stroke|font-family|font-size|text-anchor)\s*:)[^}]*\}"
+    r")",
+    re.I | re.S,
+)
 
 
 def _is_structural_markup(text: str) -> bool:
-    return bool(_STRUCTURAL_MARKUP.match(str(text or "")))
+    value = str(text or "")
+    return bool(
+        _STRUCTURAL_MARKUP.match(value) or _MACHINE_MARKUP_SYNTAX.match(value)
+    )
 
 
 def exclusions_from_audit(

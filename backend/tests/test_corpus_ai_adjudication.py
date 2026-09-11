@@ -212,6 +212,41 @@ def test_accept_requires_executable_patch_and_verbatim_new_anchor() -> None:
         )
 
 
+def test_adjudication_cannot_add_anchor_inside_inline_markup() -> None:
+    response = {
+        "scope_confirmation": "source_fidelity_only_no_theological_critique",
+        "adjudications": [
+            {
+                "claim_id": "CL-1",
+                "decision": "accept",
+                "rationale": "来源支持",
+                "source_anchor_indexes": [0],
+                "patch": _patch(
+                    anchor_additions=[
+                        {
+                            "transcript_id": "L3",
+                            "source_index": "10",
+                            "verbatim_excerpt": "投影片结论",
+                            "evidence_type": "reasoning",
+                        }
+                    ]
+                ),
+            }
+        ],
+    }
+
+    with pytest.raises(
+        AIAdjudicationValidationError,
+        match="provenance-ambiguous inline markup",
+    ):
+        validate_openai_adjudication(
+            response,
+            reviews=_reviews(),
+            claims_by_id=_claims(),
+            transcript_segments={"L3": {"10": "> 投影片结论\n教授正文。"}},
+        )
+
+
 def test_fidelity_adjudication_cannot_silently_change_product_route() -> None:
     response = {
         "scope_confirmation": "source_fidelity_only_no_theological_critique",

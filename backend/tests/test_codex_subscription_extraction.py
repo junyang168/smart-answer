@@ -15,6 +15,7 @@ from backend.pipeline.codex_subscription_client import (
 )
 from backend.pipeline.detailed_knowledge_extraction import (
     DETAILED_RESPONSE_SCHEMA,
+    DetailedExtractionValidationError,
     extraction_identity,
 )
 from backend.pipeline import detailed_knowledge_extraction_runner as extraction_runner
@@ -226,6 +227,73 @@ def test_api_client_remains_the_default(monkeypatch: pytest.MonkeyPatch) -> None
     )
     assert isinstance(client, FakeAPIClient)
     assert constructed[0]["api_key_env"] == "OPENAI_API_KEY"
+
+
+def test_inline_svg_fails_before_login_or_model_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transcript = _transcript()
+    transcript["script"][0]["text"] += "\n<svg><text>编辑图形</text></svg>"
+    transcript_path = tmp_path / "inline-svg.json"
+    transcript_path.write_text(
+        json.dumps(transcript, ensure_ascii=False), encoding="utf-8"
+    )
+    calls: list[list[str]] = []
+
+    def unexpected_run(command, **_kwargs):
+        calls.append(command)
+        raise AssertionError("inline editor payload must fail before subscription login")
+
+    monkeypatch.setattr(
+        "backend.pipeline.codex_subscription_client.subprocess.run", unexpected_run
+    )
+    client = CodexSubscriptionClient(model="gpt-5.6-sol", executable="codex")
+    with pytest.raises(DetailedExtractionValidationError, match="inline editor payload"):
+        run_one(
+            transcript_path,
+            output_dir=tmp_path / "output",
+            client=client,
+            prompt="extract",
+            reasoning_effort="medium",
+            force=False,
+            sections=SectionSettings(allow_generated=False),
+        )
+    assert calls == []
+
+
+def test_payload_dry_run_reports_clean_cli_error_without_model_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys,
+) -> None:
+    transcript = _transcript()
+    transcript["script"][0]["text"] += "\n<!-- editor payload -->"
+    transcript_path = tmp_path / "inline-comment.json"
+    transcript_path.write_text(
+        json.dumps(transcript, ensure_ascii=False), encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "detailed_knowledge_extraction_runner",
+            "--output-dir", str(tmp_path / "output"),
+            "--transcript-dir", str(tmp_path),
+            "--ids", transcript_path.stem,
+            "--dry-run",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        extraction_runner.main()
+
+    assert exc_info.value.code == 2
+    error = capsys.readouterr().err
+    assert "inline editor payload" in error
+    assert "Traceback" not in error
+
+
+def test_current_model_contract_is_v3_after_inline_markup_quarantine() -> None:
+    assert extraction_runner.MODEL_INPUT_CONTRACT_VERSION == (
+        "detailed-extraction-spoken-text-v3"
+    )
 
 
 def test_subscription_section_passes_schema_validator_and_sentence_ledger_and_then_caches(

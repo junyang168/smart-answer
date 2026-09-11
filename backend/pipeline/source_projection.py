@@ -17,6 +17,19 @@ from typing import Any, Iterable, Mapping
 
 SOFT_DELETION = re.compile(r"~~([^~]+?)~~", re.S)
 HEADING_PATTERN = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
+SVG_BLOCK_PATTERN = re.compile(r"<svg\b[^>]*>.*?</svg\s*>", re.I | re.S)
+SVG_OPEN_PATTERN = re.compile(r"<svg\b", re.I)
+SVG_ELEMENT_PATTERN = re.compile(
+    r"</?(?:style|defs|marker|path|line|rect|ellipse|circle|text|tspan|polygon|"
+    r"polyline|g)\b[^>]*>",
+    re.I,
+)
+HTML_COMMENT_PATTERN = re.compile(r"<!--.*?-->", re.S)
+HTML_COMMENT_OPEN_PATTERN = re.compile(r"<!--")
+BLOCKQUOTE_LINE_PATTERN = re.compile(r"(?m)^[ \t]*>[^\n]*(?:\n|$)")
+INLINE_HEADING_LINE_PATTERN = re.compile(
+    r"(?m)^[ \t]*#{1,6}[ \t]+[^\n]*(?:\n|$)"
+)
 EDITORIAL_ROW_TYPES = frozenset({"subtitle", "comment"})
 EDITORIAL_ONLY_FIELDS = frozenset({"type", "user_id"})
 LOCATOR_SPACE = "spoken_body_v1"
@@ -24,6 +37,103 @@ LOCATOR_SPACE = "spoken_body_v1"
 
 class LocatorSpaceError(ValueError):
     """A source descriptor cannot prove how its locators address the script."""
+
+
+@dataclass(frozen=True)
+class InlineMarkupSpan:
+    """A non-prose or provenance-ambiguous span inside a source-bearing row."""
+
+    start: int
+    end: int
+    kind: str
+
+
+def inline_markup_spans(text: str) -> tuple[InlineMarkupSpan, ...]:
+    """Locate inline structure that cannot serve as professor-speech evidence.
+
+    A transcript row may interleave speech with Markdown blockquotes or an
+    editor-created SVG. The row itself remains in spoken locator space, but an
+    anchor cannot turn that embedded structure into a professor quotation.
+    Blockquotes are intentionally only evidence-ineligible here: they can hold
+    spoken scripture or editorial slide text, and current storage has no
+    provenance field that can safely decide which.
+    """
+
+    value = str(text or "")
+    spans: list[InlineMarkupSpan] = []
+    for kind, pattern in (
+        ("svg", SVG_BLOCK_PATTERN),
+        ("svg", SVG_ELEMENT_PATTERN),
+        ("html_comment", HTML_COMMENT_PATTERN),
+        ("blockquote", BLOCKQUOTE_LINE_PATTERN),
+        ("inline_heading", INLINE_HEADING_LINE_PATTERN),
+    ):
+        spans.extend(
+            InlineMarkupSpan(match.start(), match.end(), kind)
+            for match in pattern.finditer(value)
+        )
+
+    # A missing closing marker is not permission to send editor payload to the
+    # model. Extend unmatched openers to the end of the row and fail closed.
+    for kind, opener, covered in (
+        ("svg", SVG_OPEN_PATTERN, SVG_BLOCK_PATTERN),
+        ("html_comment", HTML_COMMENT_OPEN_PATTERN, HTML_COMMENT_PATTERN),
+    ):
+        covered_ranges = [(m.start(), m.end()) for m in covered.finditer(value)]
+        for match in opener.finditer(value):
+            if any(left <= match.start() < right for left, right in covered_ranges):
+                continue
+            spans.append(InlineMarkupSpan(match.start(), len(value), kind))
+    return tuple(sorted(spans, key=lambda row: (row.start, row.end, row.kind)))
+
+
+def provably_nonspoken_inline_markup(text: str) -> tuple[InlineMarkupSpan, ...]:
+    """Return editor payload whose syntax alone proves it is not speech."""
+
+    rows = sorted(
+        (
+            span
+            for span in inline_markup_spans(text)
+            if span.kind in {"svg", "html_comment"}
+        ),
+        key=lambda span: (span.kind, span.start, span.end),
+    )
+    merged: list[InlineMarkupSpan] = []
+    for span in rows:
+        if (
+            merged
+            and merged[-1].kind == span.kind
+            and span.start <= merged[-1].end
+        ):
+            prior = merged[-1]
+            merged[-1] = InlineMarkupSpan(
+                prior.start, max(prior.end, span.end), prior.kind
+            )
+        else:
+            merged.append(span)
+    return tuple(merged)
+
+
+def excerpt_overlaps_inline_markup(
+    text: str,
+    excerpt: str,
+    *,
+    blocked_kinds: set[str] | frozenset[str] | None = None,
+) -> bool:
+    """Whether the deterministic first verbatim match lands in inline structure."""
+
+    value = str(text or "")
+    needle = str(excerpt or "")
+    start = value.find(needle) if needle else -1
+    if start < 0:
+        return False
+    end = start + len(needle)
+    return any(
+        (blocked_kinds is None or span.kind in blocked_kinds)
+        and span.start < end
+        and start < span.end
+        for span in inline_markup_spans(value)
+    )
 
 
 def live_text(text: str) -> str:

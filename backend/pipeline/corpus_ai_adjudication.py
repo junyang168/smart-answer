@@ -5,6 +5,8 @@ import json
 from copy import deepcopy
 from typing import Any
 
+from backend.pipeline.source_projection import excerpt_overlaps_inline_markup
+
 
 ADJUDICATION_VERSION = "wang_corpus_ai_adjudication_v1"
 RECONSIDERATION_VERSION = "wang_corpus_claude_reconsideration_v1"
@@ -232,6 +234,10 @@ def validate_openai_adjudication(
             source_text = transcript_segments.get(str(transcript_id), {}).get(source_index)
             _require(source_text is not None, f"{claim_id}: added anchor source does not exist")
             _require(excerpt and excerpt in source_text, f"{claim_id}: added anchor is not verbatim")
+            _require(
+                not excerpt_overlaps_inline_markup(source_text or "", excerpt),
+                f"{claim_id}: added anchor lands in provenance-ambiguous inline markup",
+            )
         outgoing_relation_ids = {
             str(item.get("relation_id") or "")
             for item in claim.get("relations", [])

@@ -113,6 +113,61 @@ def test_rejects_non_verbatim_anchor() -> None:
         validate_response(response, _transcript())
 
 
+def test_rejects_anchor_into_inline_blockquote_even_when_verbatim() -> None:
+    transcript = _transcript()
+    transcript["script"][0]["text"] = "> 我说不对。\n教授正文仍在这里。"
+    response = _response()
+    response["positions"] = []
+    response["claims"][0]["opposed_position_ids"] = []
+    response["evidence_steps"][0]["anchors"][0]["verbatim_excerpt"] = "我说不对"
+
+    with pytest.raises(
+        DetailedExtractionValidationError, match="provenance-ambiguous inline markup"
+    ):
+        validate_response(response, transcript)
+
+
+def test_reviewed_notes_allow_scripture_blockquote_as_quoted_source() -> None:
+    transcript = _transcript()
+    transcript["metadata"]["source_type"] = "notes_manuscript"
+    transcript["script"][1]["text"] = "> 那一位人子领受永远的权柄。"
+    response = _response()
+    response["evidence_steps"][0].update(
+        {
+            "statement": "经文说人子领受永远权柄",
+            "step_type": "scripture_evidence",
+            "speaker": "quoted_source",
+            "stance": "quoted",
+            "support_eligibility": "context_only",
+            "anchors": [
+                {
+                    "segment_index": "S0002",
+                    "start_time": None,
+                    "end_time": None,
+                    "verbatim_excerpt": "那一位人子领受永远的权柄",
+                }
+            ],
+        }
+    )
+
+    validate_response(response, transcript)
+
+
+def test_reviewed_notes_blockquote_cannot_be_professor_evidence() -> None:
+    transcript = _transcript()
+    transcript["metadata"]["source_type"] = "notes_manuscript"
+    transcript["script"][0]["text"] = "> 我说不对。\n教授正文仍在这里。"
+    response = _response()
+    response["positions"] = []
+    response["claims"][0]["opposed_position_ids"] = []
+    response["evidence_steps"][0]["anchors"][0]["verbatim_excerpt"] = "我说不对"
+
+    with pytest.raises(
+        DetailedExtractionValidationError, match="provenance-ambiguous inline markup"
+    ):
+        validate_response(response, transcript)
+
+
 def test_reports_all_anchor_errors_in_one_validation_pass() -> None:
     response = _response()
     response["evidence_steps"][0]["anchors"][0]["verbatim_excerpt"] = "错误证据"

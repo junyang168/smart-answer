@@ -11,8 +11,11 @@ from backend.pipeline.source_projection import (
     LOCATOR_SPACE,
     LocatorSpaceError,
     assert_locator_space_compatible,
+    excerpt_overlaps_inline_markup,
+    inline_markup_spans,
     live_script,
     project_script,
+    provably_nonspoken_inline_markup,
     source_uses_body_locator_space,
 )
 from backend.pipeline.source_projection import script_from_markdown_blocks
@@ -24,6 +27,51 @@ def _body_rows() -> list[dict]:
         {"index": 20, "text": "第二句。", "start_time": 5, "end_time": 10},
         {"index": 30, "text": "第三句。", "start_time": 10, "end_time": 15},
     ]
+
+
+def test_inline_markup_spans_separate_proven_editor_payload_from_ambiguous_quotes() -> None:
+    text = (
+        "教授正文。\n"
+        "> ### 编辑提纲\n"
+        "> 可能是朗读经文，也可能是投影片。\n"
+        "<svg><rect width=\"2\"/></svg>\n"
+        "<!-- editor note -->\n"
+        "后续正文。"
+    )
+
+    assert {span.kind for span in inline_markup_spans(text)} == {
+        "blockquote",
+        "svg",
+        "html_comment",
+    }
+    assert {span.kind for span in provably_nonspoken_inline_markup(text)} == {
+        "svg",
+        "html_comment",
+    }
+    assert excerpt_overlaps_inline_markup(text, "编辑提纲") is True
+    assert excerpt_overlaps_inline_markup(text, "rect width") is True
+    assert excerpt_overlaps_inline_markup(text, "教授正文") is False
+    assert excerpt_overlaps_inline_markup(text, "后续正文") is False
+
+
+def test_unclosed_editor_payload_fails_closed_to_the_end_of_the_row() -> None:
+    text = "教授正文。\n<svg><text>编辑图形"
+    spans = provably_nonspoken_inline_markup(text)
+    assert [(span.kind, span.end) for span in spans] == [("svg", len(text))]
+
+
+def test_inline_markup_overlap_uses_the_same_first_match_as_anchor_compilation() -> None:
+    assert excerpt_overlaps_inline_markup(
+        "相同句。\n> 相同句。", "相同句"
+    ) is False
+    assert excerpt_overlaps_inline_markup(
+        "> 相同句。\n相同句。", "相同句"
+    ) is True
+
+
+def test_heading_marker_without_a_horizontal_title_does_not_swallow_next_line() -> None:
+    text = "##\n教授正文。"
+    assert excerpt_overlaps_inline_markup(text, "教授正文") is False
 
 
 def test_editorial_rows_never_change_spoken_body_identity_or_coordinates() -> None:

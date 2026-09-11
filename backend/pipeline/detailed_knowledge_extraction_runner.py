@@ -70,6 +70,7 @@ from backend.pipeline.source_projection import (
     is_editorial_row,
     live_script,
     project_script,
+    provably_nonspoken_inline_markup,
 )
 
 
@@ -111,9 +112,34 @@ DEFAULT_OUTPUT_DIR = wang_platform_paths().claim_layer_staging / "detailed-extra
 PROMPT_PATH = Path("backend/pipeline/prompts/detailed_knowledge_extraction.md")
 NOTES_PROMPT_PATH = Path("backend/pipeline/prompts/detailed_notes_knowledge_extraction.md")
 VALIDATION_ATTEMPTS = 4
-MODEL_INPUT_CONTRACT_VERSION = "detailed-extraction-spoken-text-v2"
+MODEL_INPUT_CONTRACT_VERSION = "detailed-extraction-spoken-text-v3"
 PACKAGE_COMPILER_VERSION = "wang-shared-knowledge-compiler-v3"
 SECTION_CACHE_VERSION = "wang-detailed-extraction-section-cache-v3"
+
+
+def _assert_no_inline_editor_payload(
+    source_id: str, body_rows: Sequence[Mapping[str, Any]]
+) -> None:
+    """Refuse body rows whose syntax proves they contain editor payload."""
+
+    findings: list[str] = []
+    for position, row in enumerate(body_rows, start=1):
+        kinds = sorted(
+            {
+                span.kind
+                for span in provably_nonspoken_inline_markup(
+                    str(row.get("text") or "")
+                )
+            }
+        )
+        if kinds:
+            findings.append(f"S{position:04d} ({', '.join(kinds)})")
+    if findings:
+        raise DetailedExtractionValidationError(
+            f"{source_id}: source-bearing rows contain inline editor payload at "
+            + ", ".join(findings)
+            + "; move it to provenance-typed editorial rows before extraction"
+        )
 
 
 def _atomic_artifact_write(path: Path, data: bytes) -> None:
@@ -196,9 +222,16 @@ def _validation_feedback(
         "\n涉及段落的完整原文如下：\n" + "\n\n".join(segment_rows)
         if segment_rows else ""
     )
+    markup_guidance = (
+        "该 excerpt 虽逐字存在，但落在 Markdown/HTML 编辑结构内；"
+        "请改用同一论点在普通来源正文中的逐字片段，不可锚定该结构。"
+        if "provenance-ambiguous inline markup" in message
+        else ""
+    )
     return (
         f"上一版未通过机械验证：{message}。{detail}\n"
         "请保留上一版中其余有效对象，只修复所有同类机械错误，再重新输出完整 JSON。"
+        f"{markup_guidance}"
         "每个 verbatim_excerpt 必须从对应段落连续逐字复制；不能改字、补标点或拼接。"
     )
 
@@ -1550,9 +1583,19 @@ def _run(
 
     source_file_sha256 = hashlib.sha256(raw).hexdigest()
     projection = project_script(source.get("script"))
+    _assert_no_inline_editor_payload(source_id, projection.body_rows)
     source_sha256 = projection.body_sha256
+    source_type = str(
+        (source_descriptor or {}).get("source_type") or "sermon_transcript"
+    )
     source_body = {
         **source,
+        "metadata": {
+            **dict(source.get("metadata") or {}),
+            # The runner invocation owns provenance. A sermon JSON cannot
+            # self-declare as reviewed notes to unlock blockquote anchors.
+            "source_type": source_type,
+        },
         "script": [dict(row) for row in projection.body_rows],
     }
     output_path = output_dir / f"{_slug(source_id)}.detailed-knowledge.json"
@@ -1880,6 +1923,7 @@ def run_one(
         )
     section_settings = sections or SectionSettings()
     projection = project_script(transcript.get("script"))
+    _assert_no_inline_editor_payload(transcript_id, projection.body_rows)
     leading_untitled_end = leading_untitled_body_end(
         projection.headings,
         len(projection.body_rows),
@@ -2128,10 +2172,13 @@ def main() -> int:
     if missing:
         parser.error("missing transcripts: " + ", ".join(missing))
     if args.dry_run:
-        def section_plan_summary(source: dict[str, Any]) -> list[dict[str, Any]]:
+        def section_plan_summary(
+            source_id: str, source: dict[str, Any]
+        ) -> list[dict[str, Any]]:
             # Dry run never calls the generator; a source with no headings
             # reports one section, which is what an offline run would do.
             projection = project_script(source.get("script"))
+            _assert_no_inline_editor_payload(source_id, projection.body_rows)
             texts = [str(row.get("text") or "") for row in projection.body_rows]
             counts = [len(sentence_spans(text)) for text in texts]
             plan = plan_sections(
@@ -2156,11 +2203,19 @@ def main() -> int:
                 for section in plan.sections
             ]
 
-        plan_rows = {path.stem: section_plan_summary(_load(path)[0]) for path in paths}
-        plan_rows.update({
-            str(row["source_id"]): section_plan_summary(markdown_source_document(row)[0])
-            for row in source_rows
-        })
+        try:
+            plan_rows = {
+                path.stem: section_plan_summary(path.stem, _load(path)[0])
+                for path in paths
+            }
+            plan_rows.update({
+                str(row["source_id"]): section_plan_summary(
+                    str(row["source_id"]), markdown_source_document(row)[0]
+                )
+                for row in source_rows
+            })
+        except DetailedExtractionValidationError as exc:
+            parser.error(str(exc))
         print(json.dumps({
             "transcripts": args.ids or [],
             "sources": [row["source_id"] for row in source_rows], "model": args.model,
