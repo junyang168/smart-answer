@@ -140,23 +140,48 @@ def resolve_transcript_dir(member: dict[str, Any], transcript_dirs: list[Path]) 
     return path.parent if path is not None else None
 
 
+def resolve_editorial_transcript_path(
+    member: dict[str, Any], transcript_dirs: list[Path]
+) -> Path | None:
+    """Return the governed editor copy without changing source precedence."""
+
+    if member["source_type"] != "sermon_transcript":
+        return None
+    transcript_id = member["key"]
+    for directory in transcript_dirs:
+        if directory.name != "script_review":
+            continue
+        candidate = directory / f"{transcript_id}.json"
+        if candidate.is_file():
+            return candidate
+    authoritative = resolve_transcript_path(transcript_id, transcript_dirs)
+    if authoritative is not None and authoritative.parent.name == "script_review":
+        return authoritative
+    return None
+
+
 def review_members_with_untitled_leading_sections(
     members: list[dict[str, Any]], transcript_dirs: list[Path]
 ) -> list[str]:
     """Review transcripts that require governed subtitle persistence.
 
-    Published transcripts are immutable and may use SHA-bound internal section
-    plans. Markdown sources carry their own compatibility path. A review transcript
-    is the one governed source type where silently generating internal-only titles
-    would bypass the editable source-of-record workflow.
+    The professor's spoken source may be published while its editor-authored
+    headings remain in script_review.  The two projections must therefore be
+    resolved independently; choosing published first must never bypass title
+    preflight.
     """
 
     untitled: list[str] = []
     for member in members:
         if member["source_type"] != "sermon_transcript":
             continue
-        source_path = resolve_transcript_path(member["key"], transcript_dirs)
-        if source_path is None or source_path.parent.name != "script_review":
+        source_path = resolve_editorial_transcript_path(member, transcript_dirs)
+        if source_path is None:
+            source_path = resolve_transcript_path(member["key"], transcript_dirs)
+        if source_path is None or source_path.parent.name not in {
+            "script_published",
+            "script_review",
+        }:
             continue
         source, _ = _load(source_path)
         projection = project_script(source.get("script"))
@@ -213,6 +238,7 @@ def build_command_plan(
             continue
         paths = artifact_paths(output_root, key)
         member_dir = resolve_transcript_dir(member, transcript_dirs) or transcript_dirs[0]
+        editorial_path = resolve_editorial_transcript_path(member, transcript_dirs)
         extract = [
             sys.executable, "-m", "backend.pipeline.detailed_knowledge_extraction_runner",
             "--output-dir", str(paths["package"].parent),
@@ -239,9 +265,16 @@ def build_command_plan(
             extract += ["--source-manifest", str(paths["source_manifest"])]
         else:
             extract += ["--transcript-dir", str(member_dir), "--ids", key]
-            # Published transcripts are immutable historical snapshots. Only
-            # review transcripts can receive reader-visible generated titles.
-            if write_back_generated_subtitles and member_dir.name == "script_review":
+            authoritative_path = member_dir / f"{key}.json"
+            if editorial_path is not None and editorial_path != authoritative_path:
+                extract += ["--editorial-transcript", str(editorial_path)]
+            # Spoken rows remain published; generated editorial rows are saved
+            # only through the governed review copy.
+            if write_back_generated_subtitles:
+                if editorial_path is None or editorial_path.parent.name != "script_review":
+                    raise ValueError(
+                        f"{key}: generated subtitle write-back requires a script_review copy"
+                    )
                 if not subtitle_user_id:
                     raise ValueError(
                         "subtitle_user_id is required for generated subtitle write-back"

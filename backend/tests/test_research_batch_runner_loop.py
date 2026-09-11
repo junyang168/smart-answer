@@ -327,6 +327,77 @@ def test_batch_stops_before_any_command_for_headingless_review_without_writeback
         )
 
 
+def test_published_source_cannot_hide_a_headingless_editorial_copy(
+    tmp_path, monkeypatch
+) -> None:
+    batch = _batch_file(tmp_path)
+    published = tmp_path / "script_published"
+    review = tmp_path / "script_review"
+    published.mkdir()
+    review.mkdir()
+    for name in ("甲", "乙", "丙"):
+        rows = [{"index": 1, "text": "正文。"}]
+        (published / f"{name}.json").write_text(
+            json.dumps(rows, ensure_ascii=False), encoding="utf-8"
+        )
+        (review / f"{name}.json").write_text(
+            json.dumps(rows, ensure_ascii=False), encoding="utf-8"
+        )
+
+    with pytest.raises(SystemExit):
+        _run(
+            monkeypatch,
+            [
+                "--batch", str(batch),
+                "--transcript-dir", str(published),
+                "--transcript-dir", str(review),
+                "--output-root", str(tmp_path / "out"),
+                "--stage", "extract",
+            ],
+        )
+
+
+def test_batch_reads_published_speech_and_writes_titles_only_to_review(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    batch = _batch_file(tmp_path)
+    published = tmp_path / "script_published"
+    review = tmp_path / "script_review"
+    published.mkdir()
+    review.mkdir()
+    for name in ("甲", "乙", "丙"):
+        rows = [{"index": 1, "text": "正文。"}]
+        (published / f"{name}.json").write_text(
+            json.dumps(rows, ensure_ascii=False), encoding="utf-8"
+        )
+        (review / f"{name}.json").write_text(
+            json.dumps(rows, ensure_ascii=False), encoding="utf-8"
+        )
+
+    code, calls = _run(
+        monkeypatch,
+        [
+            "--batch", str(batch),
+            "--transcript-dir", str(published),
+            "--transcript-dir", str(review),
+            "--output-root", str(tmp_path / "out"),
+            "--stage", "extract",
+            "--only", "甲",
+            "--write-back-generated-subtitles",
+            "--subtitle-user-id", "editor@example.org",
+        ],
+    )
+    capsys.readouterr()
+
+    assert code == 0
+    command = calls[0]
+    assert command[command.index("--transcript-dir") + 1] == str(published)
+    assert command[command.index("--editorial-transcript") + 1] == str(
+        review / "甲.json"
+    )
+    assert "--write-back-generated-subtitles" in command
+
+
 def test_a_genuinely_missing_transcript_still_stops_the_run(tmp_path, monkeypatch) -> None:
     batch = _batch_file(tmp_path)
     transcripts = _transcripts(tmp_path, "甲", "乙")

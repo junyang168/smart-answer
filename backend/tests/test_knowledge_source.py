@@ -17,6 +17,7 @@ from backend.pipeline.knowledge_source import (
 )
 from backend.pipeline.source_projection import (
     LOCATOR_SPACE,
+    body_coordinate_sha256,
     project_script,
     script_from_markdown_blocks,
 )
@@ -180,6 +181,57 @@ def test_new_source_identity_ignores_comments_but_detects_titles_and_body(tmp_pa
     transcript_path.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(ValueError, match="source body hash mismatch"):
         load_knowledge_source_document(source, [transcript_dir])
+
+
+def test_published_source_loads_only_editorial_headings_from_review_copy(
+    tmp_path: Path,
+) -> None:
+    published_dir = tmp_path / "script_published"
+    review_dir = tmp_path / "script_review"
+    published_dir.mkdir()
+    review_dir.mkdir()
+    published_rows = [
+        {"index": 1, "text": "教授正文。", "start_time": 4, "end_time": 8},
+        {"index": 2, "text": "第二段。", "start_time": 8, "end_time": 12},
+    ]
+    review_rows = [
+        {"index": "subtitle-a", "type": "subtitle", "text": "## 编辑标题"},
+        {"index": 1, "text": "教授正文。"},
+        {"index": 2, "text": "第二段。"},
+    ]
+    published_path = published_dir / "mixed-source.json"
+    review_path = review_dir / "mixed-source.json"
+    published_path.write_text(json.dumps(published_rows, ensure_ascii=False), encoding="utf-8")
+    review_path.write_text(json.dumps(review_rows, ensure_ascii=False), encoding="utf-8")
+    published_projection = project_script(published_rows)
+    review_projection = project_script(review_rows)
+    source = {
+        "source_id": "SRC-mixed-source",
+        "source_type": "sermon_transcript",
+        "transcript_id": "mixed-source",
+        "source_sha256": published_projection.body_sha256,
+        "source_body_sha256": published_projection.body_sha256,
+        "source_file_sha256": hashlib.sha256(published_path.read_bytes()).hexdigest(),
+        "editorial_structure_path": str(review_path),
+        "editorial_structure_sha256": review_projection.editorial_structure_sha256,
+        "editorial_body_coordinate_sha256": body_coordinate_sha256(review_rows),
+        "locator_space": LOCATOR_SPACE,
+    }
+
+    payload, loaded_raw, resolved = load_knowledge_source_document(
+        source, [published_dir, review_dir]
+    )
+
+    projection = project_script(payload["script"])
+    assert resolved == published_path
+    assert loaded_raw == published_path.read_bytes()
+    assert projection.body_rows == tuple(published_rows)
+    assert projection.headings[0].title == "编辑标题"
+
+    review_rows[1]["index"] = 99
+    review_path.write_text(json.dumps(review_rows, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(ValueError, match="coordinate mismatch"):
+        load_knowledge_source_document(source, [published_dir, review_dir])
 
 
 def test_legacy_mixed_source_refuses_ambiguous_s_locator_space(tmp_path: Path) -> None:

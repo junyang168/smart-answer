@@ -108,7 +108,7 @@ sentence-range 分片可能落在同一个 S locator 内，因此新分片 packa
 
 115 份已发布逐字稿有 90 份完全没有标题。这些由抽取管线自己调用编辑器已有的加小标题功能取得边界。
 
-已发布的历史快照仍只生成内部边界，不反写不可变来源。以 `script_review` 为来源、明确传入 `--write-back-generated-subtitles` 时则走正式写回阶段：核对旧 SHA，保存标题，写入后重新加载，再从带标题的新来源开始抽取。若同一来源已有与旧 SHA 绑定的 generated section plan，写回必须复用其中已经冻结的 `##` 边界和标题，不得再调一次模型产生第二套切分；没有可复用 plan 时才生成新的一级、二级 insertion。
+已发布的逐字稿继续提供教授正文与音视频时间码，不能写入；同一 `transcript_id` 的 `script_review` 提供并保存编辑结构。runner 必须分别解析这两份投影，再按稳定的正文段落坐标把 review 标题叠加到 published 正文给模型；不能因为 published 的目录优先级更高就跳过标题检查，也不能为了读取标题而把缺少时间码的 review 工作副本冒充 published 来源。明确传入 `--write-back-generated-subtitles` 时，runner 核对 review 的旧 SHA，保存标题并重新加载，再与 published 正文组合后开始抽取。若同一正文已有冻结的 generated section plan，写回必须复用其中已经冻结的 `##` 边界和标题，不得再调一次模型产生第二套切分；没有可复用 plan 时才生成新的一级、二级 insertion。
 
 设计约束：
 
@@ -117,13 +117,13 @@ sentence-range 分片可能落在同一个 S locator 内，因此新分片 packa
 - **所有 `script_review` 写入都必须 compare-and-swap。** API 只接受 `scripts` / `slides` 两种明确类型，不能用近似 type 绕过；`scripts` 从路由、service 到最底层 writer 都必须携带读取时的文件 SHA。编辑器的 debounce 请求按顺序等待，后一笔只能使用前一笔成功返回的 SHA；换讲道或重新加载会使旧队列失效。
 - **开头也必须有标题。** 只在后半篇看见一个 `##` 不算完成标题流程；否则标题前的正文仍会成为匿名 extraction section。批次 preflight 与单篇 runner 都必须在模型调用前挡住这种来源。
 - **标题不是来源。** `type=subtitle` 可以与正文存在同一个 `script_review` JSON，但它属于 editorial structure；comment 也属于编辑数据。两者都不得取得 S 编号、source locator、SourceFragment、证据 anchor 或来源正文身份。标题只以明确标记为「不是教授原话」的分组 context 进入模型。
+- **published 与 review 只按相同正文组合。** 模型与 anchor 使用的正文 row、时间码和 body SHA 全部来自 published；review 只贡献标题的 boundary、level 与 text。两份文件的有序段落 `index/end_index` 骨架或去除 soft deletion 后的正文不一致时都在模型调用前失败，不能猜测标题应落在哪一段，也不能让过期工作副本的标题进入当前正文。
 - **写回后分开计算身份。** 保存后重新读取档案；物理文件 SHA 与 editorial-structure SHA 会改变，来源 body SHA 和 S 编号必须保持不变。标题或模型输入呈现改变会使 model-generation fingerprint 和 section cache 失效，但不能使来源正文或已有 anchor 变成另一份教授原话；comment-only 改动两者都不失效。
 
 旧 package 不做 locator 重绑。只有 source body、每个逐字 excerpt、原始 source index、section plan、模型输入 contract 与 generation fingerprint 都能按当前规则验证时，才可作为同一代模型输出复用；任一证明失败就重新抽取。程序不得通过改写 locator 或 SourceFragment 来让旧 package 看似 current。重抽取的到达和旧代退休必须在同一个数据库事务内完成。
 旧的物理行 locator 与 `spoken_body_v1` 不得混用：新 SourceDocument 必须同时携带 `source_body_sha256` 和显式 `locator_space=spoken_body_v1`；缺任一项都失败。旧 SourceDocument 一旦对应的 JSON 含 subtitle 或 comment，就只能完整重抽，`source_anchor_binding` 也不得只补 metadata 后把旧 `S` 编号冒充为 body locator。同 ID 的 review/status 更新不破坏引用；只有将对象退休时，current CVR/ArgumentRoute 对它的 live reference 才必须在同一 ChangeSet 中迁移或退休。历史 CompositionPlan/CompositionDecision 不再是下游影响权威；draft-first 产品由 ProductDependency 失效机制保护。
 
-未开启写入模式时，内部 section plan 仍按来源雜湊快取，其指纹进入 `extraction_identity`；这是给不可变已发布快照与 Markdown 来源的兼容路径，不会让网页出现标题。
-批次或单篇命令若尝试在未开启写入模式时抽取无标题的 `script_review`，必须在任何模型调用前失败，不能静默借用这条兼容路径。
+未开启写入模式时，Markdown 来源仍可按来源雜湊使用内部 section plan。受治理的讲道来源无论正文来自 published 还是 review，只要开头没有 editor 标题，都必须在任何模型调用前失败，不能静默借用内部生成路径。
 
 ### 每次抽取自带计分板
 
@@ -173,7 +173,7 @@ DeepSeek v4 pro 作备用（`--model deepseek-v4-pro`），约 gpt 的三分之�
 6. 没有证据的主张；
 7. 来源、prompt、模型、生成设置或 schema 世代不一致的 cache。
 
-抽取有两层身份。section-generation fingerprint 包含来源 body SHA256、editorial-structure SHA256、模型输入呈现 SHA256、prompt SHA256、模型 ID、reasoning effort、token budget、schema 版本及 response schema SHA256；artifact fingerprint 再加入 package compiler 版本和可选的 `--only-sections` 范围。后两项变化只重编译 package、复用逐 section 已验证响应，不重复付模型 token。物理来源文件 SHA 保存在 artifact 内作读取审计，但不进入任一语义 fingerprint；否则同一个 JSON 里的 editor comment 会使全篇 claim/evidence 假换代。局部 section 探针必须标记 `complete=false`，其 artifact identity 与完整运行不同；cross-section、review、merge 与 ingest 不得接受它。旧结果按 artifact 内容 SHA 归档，不能把不同抽取世代静默混合。
+抽取有两层身份。section-generation fingerprint 包含来源 body SHA256、editorial-structure SHA256、模型输入呈现 SHA256、prompt SHA256、模型 ID、reasoning effort、token budget、schema 版本及 response schema SHA256；artifact fingerprint 再加入 package compiler 版本和可选的 `--only-sections` 范围。后两项变化只重编译 package、复用逐 section 已验证响应，不重复付模型 token。标题首次从已冻结的内部 plan 持久化到 review 时，editorial provenance 会改变；只有旧、新每个 section 的完整模型输入 SHA 以及其余生成控制逐项相同，才可复用旧 response cache 并生成新 package identity，否则重新调用模型。物理来源文件 SHA 保存在 artifact 内作读取审计，但不进入任一语义 fingerprint；否则同一个 JSON 里的 editor comment 会使全篇 claim/evidence 假换代。局部 section 探针必须标记 `complete=false`，其 artifact identity 与完整运行不同；cross-section、review、merge 与 ingest 不得接受它。旧结果按 artifact 内容 SHA 归档，不能把不同抽取世代静默混合。
 
 “fingerprint 相同”只是 cache 候选，不是完整性证明。跳过模型或进入下游阶段前仍须逐跳验证 current JSON 的 graph、完整性标记与 artifact self-hash、review 的逐 claim 覆盖与 deterministic routing、adjudication 与 override 的机械一致性。override 还必须绑定它所裁决的 exact package SHA；缺失的纯派生 sidecar 可从已经验证的主 artifact 恢复，不能借同一个 fingerprint 接受残缺、被改写或配错上游的 current 文件。合法 JSON 若顶层不是该阶段要求的 object 也视为损坏 cache，不能因 `.get()` 异常中止整个批次。逐字稿 loader 保留物理 JSON，soft deletion、正文过滤与 editorial structure 分离只由统一 source projection 执行一次。
 
