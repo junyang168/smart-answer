@@ -17,6 +17,10 @@ from backend.api.canonical_repository.postgres_store import (
     reviewed_relations_package,
     stored_operation_payload,
 )
+from backend.api.canonical_repository.viewpoint_foundation import sha256_json
+from backend.api.canonical_repository.viewpoint_production_safety import (
+    collection_fingerprint,
+)
 
 
 def _package() -> dict:
@@ -619,6 +623,64 @@ def test_route_apply_cas_rejects_a_stale_conclusion_revision() -> None:
         )
 
     assert any("FOR UPDATE" in sql for sql, _ in cursor.statements)
+
+
+def test_cvp_apply_takes_global_lock_and_rejects_stale_registry_cut() -> None:
+    cursor = _RecordingCursor(())
+    with pytest.raises(ChangeSetConflict, match="Registry cut is stale"):
+        PostgresKnowledgeStore._assert_registry_fingerprint(
+            cursor,
+            expected_sha256="stale",
+            collections=("canonical_viewpoints",),
+        )
+
+    stored = normalize_package(_package())["source_documents"]["SRC-1"]
+    changed = {
+        "schema_version": "wang_shared_knowledge_v1.3",
+        "source_documents": [
+            {"source_id": "SRC-1", "source_type": "sermon_transcript", "title": "新标题"}
+        ],
+    }
+    plan = build_change_set_plan(
+        changed, _stored("source_documents", "SRC-1", stored)
+    )
+    cursor = _RecordingCursor((1, record_content_sha(stored), None))
+    store = PostgresKnowledgeStore.__new__(PostgresKnowledgeStore)
+    store.connect = lambda: _RecordingConnection(cursor)  # type: ignore[method-assign]
+    store.apply_plan(
+        plan,
+        expected_registry_fingerprint_sha256=sha256_json(
+            {"canonical_viewpoints": []}
+        ),
+        registry_collections=("canonical_viewpoints",),
+    )
+
+    statements = [sql for sql, _ in cursor.statements]
+    advisory_index = next(i for i, sql in enumerate(statements) if "pg_advisory_xact_lock" in sql)
+    write_index = next(i for i, sql in enumerate(statements) if "INSERT INTO wang_knowledge.change_sets" in sql)
+    assert advisory_index < write_index
+
+
+def test_store_and_freeze_registry_fingerprint_formulas_match() -> None:
+    rows = [{"viewpoint_id": "CV2", "revision": 2}, {"viewpoint_id": "CV1", "revision": 1}]
+
+    class Store:
+        def list_records(self, collection):
+            return list(rows)
+
+    class Cursor:
+        def execute(self, sql, params=()):
+            pass
+
+        def fetchall(self):
+            return [(row,) for row in rows]
+
+    expected = collection_fingerprint(Store(), ("canonical_viewpoints",))
+    PostgresKnowledgeStore._assert_registry_fingerprint(
+        Cursor(),
+        expected_sha256=expected,
+        collections=("canonical_viewpoints",),
+    )
 
 
 def test_a_preserved_review_field_is_not_reported_as_removed() -> None:

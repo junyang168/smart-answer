@@ -31,6 +31,7 @@ def load_route_policy(path: Path) -> dict[str, Any]:
         "correction",
         "prompts",
         "validator_version",
+        "max_request_bytes",
         "call_timeout_seconds",
     }
     if set(policy) != required_top:
@@ -63,6 +64,8 @@ def load_route_policy(path: Path) -> dict[str, Any]:
         raise ValueError("Route review batch size must be positive")
     if int(policy["call_timeout_seconds"]) < 1:
         raise ValueError("Route call timeout must be positive")
+    if int(policy["max_request_bytes"]) < 1:
+        raise ValueError("Route request byte ceiling must be positive")
     return policy
 
 

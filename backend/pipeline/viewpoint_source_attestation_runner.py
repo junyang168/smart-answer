@@ -10,7 +10,10 @@ from typing import Any
 
 from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
 from backend.api.canonical_repository.knowledge_models import ClaimRecord
-from backend.api.canonical_repository.viewpoint_foundation import semantic_record_sha
+from backend.api.canonical_repository.viewpoint_foundation import (
+    semantic_record_sha,
+    sha256_json,
+)
 from backend.api.canonical_repository.viewpoint_source_attestation import (
     build_source_eligibility_artifact,
 )
@@ -39,8 +42,11 @@ def _write_immutable(path: Path, payload: dict[str, Any]) -> None:
 
 
 def build_attestations(
-    *, claim_manifest_path: Path, research_batches_root: Path,
-    output_path: Path, database_url: str | None = None,
+    *,
+    claim_manifest_path: Path,
+    lineage_manifest_path: Path,
+    output_path: Path,
+    database_url: str | None = None,
 ) -> dict[str, Any]:
     manifest = _read(claim_manifest_path)
     manifest_claim_ids = {
@@ -51,23 +57,51 @@ def build_attestations(
         row["claim_id"]: ClaimRecord.model_validate(row)
         for row in store.list_records("claims")
     }
-    candidates: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]] = {}
-    for path in sorted(research_batches_root.glob("*/reviewed/*.reviewed-candidate.json")):
-        payload = _read(path)
-        if not {
-            str(row.get("claim_id") or "") for row in payload.get("claims") or []
-        } & manifest_claim_ids:
-            continue
-        slug = path.name.removesuffix(".reviewed-candidate.json")
-        review_path = path.parent.parent / "reviews" / f"{slug}.independent-review.json"
-        if not review_path.is_file():
-            continue
-        review_payload = _read(review_path)
-        adjudication_path = (
-            path.parent.parent / "adjudications" / f"{slug}.ai-adjudication.json"
+    lineage_manifest = _read(lineage_manifest_path)
+    lineage_body = {
+        key: value for key, value in lineage_manifest.items() if key != "artifact_sha256"
+    }
+    if lineage_manifest.get("artifact_sha256") != sha256_json(lineage_body):
+        raise ValueError("lineage manifest SHA mismatch")
+    rows_by_claim: dict[str, dict[str, Any]] = {}
+    for row in lineage_manifest.get("claims") or []:
+        claim_id = str(row.get("claim_id") or "")
+        if not claim_id or claim_id in rows_by_claim:
+            raise ValueError(f"lineage manifest duplicate/empty Claim: {claim_id}")
+        rows_by_claim[claim_id] = dict(row)
+    if set(rows_by_claim) != manifest_claim_ids:
+        raise ValueError(
+            "lineage manifest Claim set differs: "
+            f"missing={sorted(manifest_claim_ids - set(rows_by_claim))}, "
+            f"extra={sorted(set(rows_by_claim) - manifest_claim_ids)}"
         )
+
+    package_bindings: dict[str, dict[str, Any]] = {}
+    review_bindings: dict[str, dict[str, Any]] = {}
+    for claim_id, lineage in sorted(rows_by_claim.items()):
+        path = Path(str(lineage.get("reviewed_candidate_path") or ""))
+        review_path = Path(str(lineage.get("independent_review_path") or ""))
+        adjudication_value = str(lineage.get("adjudication_path") or "")
+        adjudication_path = Path(adjudication_value) if adjudication_value else None
+        if not path.is_file() or not review_path.is_file():
+            raise ValueError(f"{claim_id}: selected lineage artifact is missing")
+        if _file_sha(path) != lineage.get("reviewed_candidate_sha256"):
+            raise ValueError(f"{claim_id}: selected reviewed candidate SHA drift")
+        if _file_sha(review_path) != lineage.get("independent_review_sha256"):
+            raise ValueError(f"{claim_id}: selected independent review SHA drift")
+        if adjudication_path is not None and not adjudication_path.is_file():
+            raise ValueError(f"{claim_id}: selected adjudication is missing")
+        if (
+            adjudication_path is not None
+            and _file_sha(adjudication_path) != lineage.get("adjudication_sha256")
+        ):
+            raise ValueError(f"{claim_id}: selected adjudication SHA drift")
+        payload = _read(path)
+        review_payload = _read(review_path)
         adjudication_payload = (
-            _read(adjudication_path) if adjudication_path.is_file() else None
+            _read(adjudication_path)
+            if adjudication_path is not None and adjudication_path.is_file()
+            else None
         )
         adjudication_results = {
             str(row.get("claim_id") or ""): row
@@ -82,6 +116,7 @@ def build_attestations(
             or _file_sha(review_input_path) != stated_input_sha
         ):
             raise ValueError(f"{review_path}: independent review input package does not bind")
+        review_input_payload = _read(review_input_path)
         package_binding = {
             "payload": payload,
             "artifact_sha256": _file_sha(path),
@@ -91,48 +126,55 @@ def build_attestations(
             str(row.get("claim_id") or ""): row
             for row in review_payload.get("claim_reviews") or []
         }
-        for claim in payload.get("claims") or []:
-            claim_id = str(claim.get("claim_id") or "")
-            current = current_claims.get(claim_id)
-            review_row = reviews.get(claim_id)
-            try:
-                package_claim = ClaimRecord.model_validate(claim)
-            except Exception:
-                continue
-            if (
-                current is None
-                or review_row is None
-                or semantic_record_sha(package_claim) != semantic_record_sha(current)
-            ):
-                continue
-            review_binding = {
-                "payload": review_payload,
-                "claim_review": review_row,
-                "review_input_artifact_sha256": stated_input_sha,
-                "artifact_sha256": _file_sha(review_path),
-                "path": str(review_path),
-                "adjudication_payload": adjudication_payload,
-                "adjudication_result": adjudication_results.get(claim_id),
-                "adjudication_artifact_sha256": (
-                    _file_sha(adjudication_path)
-                    if adjudication_payload is not None
-                    else None
-                ),
+        package_claims = {
+            str(row.get("claim_id") or ""): row for row in payload.get("claims") or []
+        }
+        current = current_claims.get(claim_id)
+        review_row = reviews.get(claim_id)
+        try:
+            package_claim = ClaimRecord.model_validate(package_claims[claim_id])
+        except (KeyError, ValueError) as exc:
+            raise ValueError(
+                f"{claim_id}: selected reviewed candidate lacks the pinned Claim"
+            ) from exc
+        if (
+            current is None
+            or review_row is None
+            or semantic_record_sha(package_claim) != semantic_record_sha(current)
+        ):
+            raise ValueError(f"{claim_id}: selected lineage does not bind current Claim")
+        if str(review_row.get("decision") or "") == "pass":
+            review_input_claims = {
+                str(row.get("claim_id") or ""): row
+                for row in review_input_payload.get("claims") or []
             }
-            candidates.setdefault(claim_id, []).append(
-                (package_binding, review_binding)
-            )
-    package_bindings = {}
-    review_bindings = {}
-    for claim_id, rows in sorted(candidates.items()):
-        package_binding, review_binding = min(
-            rows,
-            key=lambda row: (
-                row[0]["artifact_sha256"], row[1]["artifact_sha256"]
-            ),
-        )
+            try:
+                reviewed_claim = ClaimRecord.model_validate(
+                    review_input_claims[claim_id]
+                )
+            except (KeyError, ValueError) as exc:
+                raise ValueError(
+                    f"{claim_id}: independent review input lacks the selected Claim"
+                ) from exc
+            if semantic_record_sha(reviewed_claim) != semantic_record_sha(current):
+                raise ValueError(
+                    f"{claim_id}: passing review covers different Claim semantics"
+                )
         package_bindings[claim_id] = package_binding
-        review_bindings[claim_id] = review_binding
+        review_bindings[claim_id] = {
+            "payload": review_payload,
+            "claim_review": review_row,
+            "review_input_artifact_sha256": stated_input_sha,
+            "artifact_sha256": _file_sha(review_path),
+            "path": str(review_path),
+            "adjudication_payload": adjudication_payload,
+            "adjudication_result": adjudication_results.get(claim_id),
+            "adjudication_artifact_sha256": (
+                _file_sha(adjudication_path)
+                if adjudication_payload is not None and adjudication_path is not None
+                else None
+            ),
+        }
     artifact = build_source_eligibility_artifact(
         claim_manifest=manifest,
         claims=[item.model_dump(mode="json") for item in current_claims.values()],
@@ -149,13 +191,18 @@ def build_attestations(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--claim-manifest", type=Path, required=True)
-    parser.add_argument("--research-batches-root", type=Path, required=True)
+    parser.add_argument(
+        "--lineage-manifest",
+        type=Path,
+        required=True,
+        help="content-addressed exact Claim-to-reviewed-package/review lineage selection",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--database-url")
     args = parser.parse_args()
     payload = build_attestations(
         claim_manifest_path=args.claim_manifest,
-        research_batches_root=args.research_batches_root,
+        lineage_manifest_path=args.lineage_manifest,
         output_path=args.output,
         database_url=args.database_url,
     )

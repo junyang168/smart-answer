@@ -210,8 +210,23 @@ def build_source_eligibility_artifact(
             and consensus.get("adjudication_fingerprint") == adjudicator.get("fingerprint_sha256")
             and review_binding.get("adjudication_artifact_sha256")
         )
+        adjudication_binds_review = bool(
+            adjudication_result.get("claim_id") == claim_id
+            and adjudicator.get("review_fingerprint")
+            == reviewer.get("fingerprint_sha256")
+            and consensus.get("adjudication_fingerprint")
+            == adjudicator.get("fingerprint_sha256")
+            and review_binding.get("adjudication_artifact_sha256")
+        )
         if decision == "human_review_required":
             reject(claim_id, "human_review_required", "Independent source review explicitly requires human review.")
+            continue
+        if decision == "changes_suggested" and not adjudication_binds_review:
+            reject(
+                claim_id,
+                "unapplied_review_change",
+                "Consensus candidate does not bind the review and adjudication chain.",
+            )
             continue
         if decision == "changes_suggested" and claim_id not in applied and not withdrawn:
             reject(claim_id, "unapplied_review_change", "Independent review requested a change not bound as applied.")
