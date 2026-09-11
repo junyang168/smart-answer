@@ -10,13 +10,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Any, Mapping
 
 from dotenv import load_dotenv
 
 from backend.api.canonical_repository.postgres_store import (
+    EXTRACTION_RECORD_COLLECTIONS,
+    OBSOLETE_CANDIDATE_RETIREMENT_COLLECTIONS,
     PostgresKnowledgeStore,
+    SEMANTIC_REFERENCE_COLLECTIONS,
+    record_content_sha,
+    sha256_json,
+    uncoordinated_semantic_reference_blockers,
 )
 from backend.pipeline.extraction_supersede import package_source_ids, superseded
 from backend.pipeline.source_keys import package_row_key
@@ -28,6 +35,23 @@ from backend.pipeline.relation_id_namespace import (
 )
 
 RELATION_COLLECTIONS = ("claim_relations", "knowledge_relations")
+
+
+def _seal_audit(audit: dict[str, Any]) -> dict[str, Any]:
+    audit["scope_sha256"] = sha256_json(audit)
+    return audit
+
+
+def _retiring_extraction_ids(change_set: Any) -> set[str]:
+    return {
+        operation.object_id
+        for operation in change_set.operations
+        if operation.operation == "retire"
+        and (
+            operation.collection in EXTRACTION_RECORD_COLLECTIONS
+            or operation.collection == "source_documents"
+        )
+    }
 
 def products_to_rebuild(
     changed_records: set[tuple[str, str]],
@@ -103,6 +127,382 @@ def _live(cursor: Any, collection: str) -> dict[str, dict[str, Any]]:
         (collection,),
     )
     return {str(object_id): payload for object_id, payload in cursor.fetchall()}
+
+
+def obsolete_candidate_batch_retirement(
+    *,
+    batch_id: str,
+    live: Mapping[str, Mapping[str, Mapping[str, Any]]],
+    all_live_rows: list[tuple[str, str, Mapping[str, Any]]],
+    known_plan_ids: set[str] | None = None,
+    record_states: Mapping[tuple[str, str], Mapping[str, Any]] | None = None,
+) -> tuple[list[tuple[str, str]], dict[str, Any]]:
+    """Freeze one retired-workflow candidate batch into an explicit retire set.
+
+    This is intentionally opt-in. It is not a license to delete semantic
+    master data whenever re-extraction encounters a reference. The only
+    eligible rows are internal, unapproved candidates owned by the named old
+    CompositionPlan batch. Every exact reference from outside the selected set
+    blocks the cleanup, and revisions/content SHAs are reported before apply.
+    """
+
+    normalized_batch = str(batch_id or "").strip()
+    if not normalized_batch.startswith("RB-") or len(normalized_batch) <= 3:
+        raise ValueError("obsolete candidate batch id must start with RB-")
+    plan_pattern = re.compile(
+        rf"^CP-{re.escape(normalized_batch[3:])}-[ST]-[0-9a-f]{{12}}$"
+    )
+    synthesis_pattern = re.compile(
+        rf"^SYN-{re.escape(normalized_batch[3:])}-[ST]-[0-9a-f]{{12}}$"
+    )
+    known = sorted(
+        object_id
+        for object_id in (known_plan_ids or set())
+        if plan_pattern.fullmatch(object_id)
+    )
+    plans = {
+        object_id: payload
+        for object_id, payload in (live.get("composition_plans") or {}).items()
+        if plan_pattern.fullmatch(object_id)
+    }
+    batch_plan_ids = set(known) | set(plans)
+    if not plans:
+        if not known:
+            raise ValueError(
+                f"obsolete candidate batch {normalized_batch} has no known CompositionPlan rows"
+            )
+        lingering = sorted(
+            [
+                f"composition_decisions/{object_id}"
+                for object_id, payload in (
+                    live.get("composition_decisions") or {}
+                ).items()
+                if str(payload.get("plan_id") or "") in batch_plan_ids
+            ]
+            + [
+                f"knowledge_routes/{object_id}"
+                for object_id, payload in (live.get("knowledge_routes") or {}).items()
+                if str(payload.get("target_id") or "") in batch_plan_ids
+            ]
+            + [
+                f"editorial_syntheses/{object_id}"
+                for object_id, payload in (
+                    live.get("editorial_syntheses") or {}
+                ).items()
+                if synthesis_pattern.fullmatch(object_id)
+            ]
+        )
+        if lingering:
+            raise ValueError(
+                "obsolete candidate batch is only partially retired: "
+                + ", ".join(lingering)
+            )
+        audit = {
+            "schema_version": "wang_obsolete_candidate_batch_retirement_v1",
+            "batch_id": normalized_batch,
+            "reason_code": "composition_plan_candidate_retired_by_draft_first",
+            "selection_policy": (
+                "explicit batch; exact retired-workflow id/foreign-key ownership; "
+                "candidate+internal only; "
+                "zero external current references"
+            ),
+            "status": "already_retired",
+            "known_plan_ids": known,
+            "summary": {
+                **{
+                    collection: 0
+                    for collection in OBSOLETE_CANDIDATE_RETIREMENT_COLLECTIONS
+                },
+                "total": 0,
+            },
+            "records": [],
+        }
+        return [], _seal_audit(audit)
+    plan_ids = batch_plan_ids
+    selected: dict[tuple[str, str], Mapping[str, Any]] = {
+        ("composition_plans", object_id): payload
+        for object_id, payload in plans.items()
+    }
+    for object_id, payload in (live.get("composition_decisions") or {}).items():
+        if str(payload.get("plan_id") or "") in plan_ids:
+            selected[("composition_decisions", object_id)] = payload
+    for object_id, payload in (live.get("knowledge_routes") or {}).items():
+        if str(payload.get("target_id") or "") in plan_ids:
+            selected[("knowledge_routes", object_id)] = payload
+    for object_id, payload in (live.get("editorial_syntheses") or {}).items():
+        if synthesis_pattern.fullmatch(object_id):
+            selected[("editorial_syntheses", object_id)] = payload
+
+    invalid = [
+        f"{collection}/{object_id}"
+        for (collection, object_id), payload in sorted(selected.items())
+        if str(payload.get("review_status") or "") != "candidate"
+        or str(payload.get("visibility") or "") != "internal"
+    ]
+    if invalid:
+        raise ValueError(
+            "obsolete candidate retirement includes non-candidate authority: "
+            + ", ".join(invalid)
+        )
+
+    selected_ids = {object_id for _collection, object_id in selected}
+
+    def strings(value: Any) -> set[str]:
+        if isinstance(value, Mapping):
+            found = {str(key) for key in value if isinstance(key, str)}
+            for child in value.values():
+                found.update(strings(child))
+            return found
+        if isinstance(value, (list, tuple, set)):
+            found: set[str] = set()
+            for child in value:
+                found.update(strings(child))
+            return found
+        return {value} if isinstance(value, str) else set()
+
+    external_references: list[str] = []
+    for collection, object_id, payload in all_live_rows:
+        key = (str(collection), str(object_id))
+        if key in selected:
+            continue
+        referenced = strings(payload) & selected_ids
+        if referenced:
+            external_references.append(
+                f"{key[0]}/{key[1]} -> {','.join(sorted(referenced))}"
+            )
+    if external_references:
+        raise ValueError(
+            "obsolete candidate batch still has current external references: "
+            + " | ".join(sorted(external_references))
+        )
+
+    records = []
+    for (collection, object_id), payload in sorted(selected.items()):
+        state = (record_states or {}).get((collection, object_id)) or {}
+        content_sha256 = str(
+            state.get("content_sha256") or record_content_sha(payload)
+        )
+        if content_sha256 != record_content_sha(payload):
+            raise ValueError(
+                "obsolete candidate row has inconsistent stored content SHA: "
+                f"{collection}/{object_id}"
+            )
+        records.append({
+            "collection": collection,
+            "object_id": object_id,
+            "expected_revision": state.get("revision", payload.get("revision")),
+            "expected_content_sha256": content_sha256,
+        })
+    summary = {
+        collection: sum(row["collection"] == collection for row in records)
+        for collection in OBSOLETE_CANDIDATE_RETIREMENT_COLLECTIONS
+    }
+    summary["total"] = len(records)
+    audit = {
+        "schema_version": "wang_obsolete_candidate_batch_retirement_v1",
+        "batch_id": normalized_batch,
+        "reason_code": "composition_plan_candidate_retired_by_draft_first",
+        "selection_policy": (
+            "explicit batch; exact retired-workflow id/foreign-key ownership; "
+            "candidate+internal only; "
+            "zero external current references"
+        ),
+        "status": "planned",
+        "known_plan_ids": known,
+        "summary": summary,
+        "records": records,
+    }
+    _seal_audit(audit)
+    return [
+        (row["collection"], row["object_id"])
+        for row in records
+    ], audit
+
+
+def stale_pending_topic_identity_retirement(
+    *,
+    batch_id: str,
+    change_set: Any,
+    all_live_rows: list[tuple[str, str, Mapping[str, Any]]],
+    record_states: Mapping[tuple[str, str], Mapping[str, Any]] | None = None,
+) -> tuple[list[tuple[str, str]], dict[str, Any]]:
+    """Select only pending topic identities made stale by this replacement.
+
+    Topic identity reconciliation belongs to intelligent grouping, not to the
+    retired CompositionPlan workflow.  A re-extraction cannot preserve a
+    pending proposal that names claims from the retired generation, however;
+    the proposal has to be regenerated from the new claims.  The operator must
+    name its origin batch explicitly, and approved/resolved rows remain hard
+    semantic blockers rather than being silently discarded.
+    """
+
+    normalized_batch = str(batch_id or "").strip()
+    if not normalized_batch.startswith("RB-") or len(normalized_batch) <= 3:
+        raise ValueError("pending topic identity batch id must start with RB-")
+    retired_ids = _retiring_extraction_ids(change_set)
+    retired_ids_sha256 = sha256_json(sorted(retired_ids))
+    selected: dict[tuple[str, str], tuple[Mapping[str, Any], list[str]]] = {}
+    invalid: list[str] = []
+    for collection, object_id, payload in all_live_rows:
+        if (
+            collection != "topic_identity_reconciliations"
+            or str(payload.get("origin_batch_id") or "") != normalized_batch
+        ):
+            continue
+        stale_refs = sorted(
+            set(map(str, payload.get("claim_ids") or [])) & retired_ids
+        )
+        if not stale_refs:
+            continue
+        key = (str(collection), str(object_id))
+        if (
+            str(payload.get("review_status") or "") != "candidate"
+            or str(payload.get("visibility") or "") != "internal"
+            or str(payload.get("status") or "")
+            not in {"pending_match", "pending_new"}
+        ):
+            invalid.append(f"{key[0]}/{key[1]}")
+            continue
+        selected[key] = (payload, stale_refs)
+    if invalid:
+        raise ValueError(
+            "stale topic identity retirement includes resolved or approved authority: "
+            + ", ".join(sorted(invalid))
+        )
+
+    selected_ids = {object_id for _collection, object_id in selected}
+
+    def strings(value: Any) -> set[str]:
+        if isinstance(value, Mapping):
+            found = {str(key) for key in value if isinstance(key, str)}
+            for child in value.values():
+                found.update(strings(child))
+            return found
+        if isinstance(value, (list, tuple, set)):
+            found: set[str] = set()
+            for child in value:
+                found.update(strings(child))
+            return found
+        return {value} if isinstance(value, str) else set()
+
+    external_references: list[str] = []
+    for collection, object_id, payload in all_live_rows:
+        key = (str(collection), str(object_id))
+        if key in selected:
+            continue
+        referenced = strings(payload) & selected_ids
+        if referenced:
+            external_references.append(
+                f"{key[0]}/{key[1]} -> {','.join(sorted(referenced))}"
+            )
+    if external_references:
+        raise ValueError(
+            "stale pending topic identities still have current external references: "
+            + " | ".join(sorted(external_references))
+        )
+
+    records = []
+    for (collection, object_id), (payload, stale_refs) in sorted(selected.items()):
+        state = (record_states or {}).get((collection, object_id)) or {}
+        content_sha256 = str(
+            state.get("content_sha256") or record_content_sha(payload)
+        )
+        if content_sha256 != record_content_sha(payload):
+            raise ValueError(
+                "pending topic identity row has inconsistent stored content SHA: "
+                f"{collection}/{object_id}"
+            )
+        records.append({
+            "collection": collection,
+            "object_id": object_id,
+            "expected_revision": state.get("revision", payload.get("revision")),
+            "expected_content_sha256": content_sha256,
+            "stale_claim_ids": stale_refs,
+        })
+    audit = {
+        "schema_version": "wang_stale_pending_topic_identity_retirement_v1",
+        "batch_id": normalized_batch,
+        "reason_code": (
+            "pending_topic_identity_invalidated_by_extraction_supersession"
+        ),
+        "selection_policy": (
+            "explicit origin batch; exact retiring claim reference; "
+            "candidate+internal+pending only; zero external current references"
+        ),
+        "status": "planned" if records else "not_needed",
+        "retired_extraction_ids_sha256": retired_ids_sha256,
+        "summary": {"topic_identity_reconciliations": len(records), "total": len(records)},
+        "records": records,
+    }
+    _seal_audit(audit)
+    return [
+        (row["collection"], row["object_id"])
+        for row in records
+    ], audit
+
+
+def validate_obsolete_retirement_plan(
+    change_set: Any, audit: Mapping[str, Any] | None
+) -> None:
+    """Bind the reported candidate snapshot to the exact retirement plan."""
+
+    if not audit or audit.get("status") == "already_retired":
+        return
+    operations = {
+        (operation.collection, operation.object_id): operation
+        for operation in change_set.operations
+    }
+    mismatches: list[str] = []
+    for row in audit.get("records") or []:
+        key = (str(row.get("collection") or ""), str(row.get("object_id") or ""))
+        operation = operations.get(key)
+        if operation is None or operation.operation != "retire":
+            mismatches.append(f"{key[0]}/{key[1]} is not planned for retirement")
+            continue
+        if operation.before_revision != row.get("expected_revision"):
+            mismatches.append(f"{key[0]}/{key[1]} revision drifted")
+        if operation.before_sha256 != row.get("expected_content_sha256"):
+            mismatches.append(f"{key[0]}/{key[1]} content drifted")
+    if mismatches:
+        raise ValueError(
+            "obsolete candidate retirement snapshot does not match ChangeSet: "
+            + " | ".join(mismatches)
+        )
+
+
+def validate_stale_topic_identity_retirement_plan(
+    change_set: Any, audit: Mapping[str, Any] | None
+) -> None:
+    """Bind the stale pending identity audit to the exact ChangeSet."""
+
+    if not audit:
+        return
+    if audit.get("retired_extraction_ids_sha256") != sha256_json(
+        sorted(_retiring_extraction_ids(change_set))
+    ):
+        raise ValueError(
+            "stale topic identity audit does not match retiring extraction ids"
+        )
+    operations = {
+        (operation.collection, operation.object_id): operation
+        for operation in change_set.operations
+    }
+    mismatches: list[str] = []
+    for row in audit.get("records") or []:
+        key = (str(row.get("collection") or ""), str(row.get("object_id") or ""))
+        operation = operations.get(key)
+        if operation is None or operation.operation != "retire":
+            mismatches.append(f"{key[0]}/{key[1]} is not planned for retirement")
+            continue
+        if operation.before_revision != row.get("expected_revision"):
+            mismatches.append(f"{key[0]}/{key[1]} revision drifted")
+        if operation.before_sha256 != row.get("expected_content_sha256"):
+            mismatches.append(f"{key[0]}/{key[1]} content drifted")
+    if mismatches:
+        raise ValueError(
+            "stale topic identity retirement snapshot does not match ChangeSet: "
+            + " | ".join(mismatches)
+        )
 
 
 def transcript_source_aliases(
@@ -207,7 +607,14 @@ def transcript_predecessor_namespaces(
     return result
 
 
-def plan(store: PostgresKnowledgeStore, package: dict[str, Any], *, source_kind: str):
+def plan(
+    store: PostgresKnowledgeStore,
+    package: dict[str, Any],
+    *,
+    source_kind: str,
+    retire_obsolete_candidate_batch: str | None = None,
+    retire_stale_pending_topic_identity_batch: str | None = None,
+):
     """The one change set that lands `package` and withdraws its predecessor.
 
     Returns the plan, the withdrawal, and the downstream products it invalidates.
@@ -228,18 +635,104 @@ def plan(store: PostgresKnowledgeStore, package: dict[str, Any], *, source_kind:
             source_alias_ids=aliases,
             predecessor_namespaces=predecessor_namespaces,
         )
-        dependencies = _live(cursor, "product_dependencies")
-    keys = withdrawal.closure()
+        cursor.execute(
+            """SELECT collection, object_id, revision, content_sha256, payload
+               FROM wang_knowledge.objects WHERE retired_at IS NULL"""
+        )
+        current_rows = [
+            (str(collection), str(object_id), int(revision), str(content_sha256), payload)
+            for collection, object_id, revision, content_sha256, payload
+            in cursor.fetchall()
+        ]
+        all_live_rows = [
+            (collection, object_id, payload)
+            for collection, object_id, _revision, _content_sha256, payload
+            in current_rows
+        ]
+        record_states = {
+            (collection, object_id): {
+                "revision": revision,
+                "content_sha256": content_sha256,
+            }
+            for collection, object_id, revision, content_sha256, _payload
+            in current_rows
+        }
+        dependencies = {
+            object_id: payload
+            for collection, object_id, payload in all_live_rows
+            if collection == "product_dependencies"
+        }
+        semantic_rows = [
+            (collection, object_id, payload)
+            for collection, object_id, payload in all_live_rows
+            if collection in SEMANTIC_REFERENCE_COLLECTIONS
+        ]
+        obsolete_retirement = None
+        obsolete_keys: list[tuple[str, str]] = []
+        if retire_obsolete_candidate_batch:
+            candidate_live = {
+                collection: {
+                    object_id: payload
+                    for row_collection, object_id, payload in all_live_rows
+                    if row_collection == collection
+                }
+                for collection in OBSOLETE_CANDIDATE_RETIREMENT_COLLECTIONS
+            }
+            cursor.execute(
+                """SELECT object_id FROM wang_knowledge.objects
+                   WHERE collection='composition_plans'"""
+            )
+            known_plan_ids = {str(row[0]) for row in cursor.fetchall()}
+            obsolete_keys, obsolete_retirement = obsolete_candidate_batch_retirement(
+                batch_id=retire_obsolete_candidate_batch,
+                live=candidate_live,
+                all_live_rows=all_live_rows,
+                known_plan_ids=known_plan_ids,
+                record_states=record_states,
+            )
+    keys = sorted(set(withdrawal.closure()) | set(obsolete_keys))
     change_set = store.plan_package(
         package,
         source_kind=source_kind,
         retiring_keys=keys,
     )
+    validate_obsolete_retirement_plan(change_set, obsolete_retirement)
+    stale_topic_identity_retirement = None
+    if retire_stale_pending_topic_identity_batch:
+        stale_keys, stale_topic_identity_retirement = (
+            stale_pending_topic_identity_retirement(
+                batch_id=retire_stale_pending_topic_identity_batch,
+                change_set=change_set,
+                all_live_rows=all_live_rows,
+                record_states=record_states,
+            )
+        )
+        if stale_keys:
+            keys = sorted(set(keys) | set(stale_keys))
+            change_set = store.plan_package(
+                package,
+                source_kind=source_kind,
+                retiring_keys=keys,
+            )
+            validate_obsolete_retirement_plan(change_set, obsolete_retirement)
+        validate_stale_topic_identity_retirement_plan(
+            change_set, stale_topic_identity_retirement
+        )
     products = products_to_rebuild(
         product_impact_keys(change_set),
         dependencies=dependencies,
     )
-    return change_set, withdrawal, products
+    semantic_blockers = uncoordinated_semantic_reference_blockers(
+        change_set, semantic_rows
+    )
+    return (
+        change_set,
+        withdrawal,
+        products,
+        semantic_blockers,
+        obsolete_retirement,
+        stale_topic_identity_retirement,
+    )
 
 
 def no_op_result(change_set: Any) -> dict[str, Any] | None:
@@ -267,6 +760,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("package", type=Path)
     parser.add_argument("--database-url")
     parser.add_argument("--source-kind", default="knowledge_package")
+    parser.add_argument(
+        "--retire-obsolete-candidate-batch",
+        help=(
+            "explicitly retire one internal candidate CompositionPlan batch in "
+            "the same ChangeSet; refuses approved/public/external-referenced rows"
+        ),
+    )
+    parser.add_argument(
+        "--retire-stale-pending-topic-identities",
+        metavar="BATCH_ID",
+        help=(
+            "retire only candidate/internal pending topic identity proposals from "
+            "the named origin batch that cite claims retired by this re-extraction"
+        ),
+    )
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args(argv)
 
@@ -275,7 +783,22 @@ def main(argv: list[str] | None = None) -> int:
         original_package
     )
     store = PostgresKnowledgeStore(args.database_url)
-    change_set, withdrawal, products = plan(store, package, source_kind=args.source_kind)
+    (
+        change_set,
+        withdrawal,
+        products,
+        semantic_blockers,
+        obsolete_retirement,
+        stale_topic_identity_retirement,
+    ) = plan(
+        store,
+        package,
+        source_kind=args.source_kind,
+        retire_obsolete_candidate_batch=args.retire_obsolete_candidate_batch,
+        retire_stale_pending_topic_identity_batch=(
+            args.retire_stale_pending_topic_identities
+        ),
+    )
     output: dict[str, Any] = {
         "package": str(args.package),
         "sources": sorted(package_source_ids(package)),
@@ -286,8 +809,23 @@ def main(argv: list[str] | None = None) -> int:
         # The only thing a person has to act on: new material means every
         # current downstream consumer bound to the old records gets rebuilt.
         "products_to_rebuild": products,
+        "semantic_rebind_required": bool(semantic_blockers),
+        "semantic_references_to_rebind": semantic_blockers,
     }
+    if obsolete_retirement is not None:
+        output["obsolete_candidate_batch_retirement"] = obsolete_retirement
+    if stale_topic_identity_retirement is not None:
+        output["stale_pending_topic_identity_retirement"] = (
+            stale_topic_identity_retirement
+        )
     if args.apply:
+        if semantic_blockers:
+            output["result"] = {
+                "status": "blocked",
+                "reason": "coordinated CVR update required",
+            }
+            print(json.dumps(output, ensure_ascii=False, indent=2))
+            return 2
         unchanged = no_op_result(change_set)
         if unchanged is not None:
             output["result"] = unchanged
@@ -313,6 +851,10 @@ def main(argv: list[str] | None = None) -> int:
                     "input_path": str(args.package),
                     "supersedes": withdrawal.as_dict(),
                     "relation_id_namespace_migration": relation_id_migration,
+                    "obsolete_candidate_batch_retirement": obsolete_retirement,
+                    "stale_pending_topic_identity_retirement": (
+                        stale_topic_identity_retirement
+                    ),
                 },
             )
             record.quality({
@@ -323,6 +865,10 @@ def main(argv: list[str] | None = None) -> int:
                 "change_set_id": output.get("change_set_id"),
                 "products_to_rebuild": products,
                 "relation_id_namespace_migration": relation_id_migration,
+                "obsolete_candidate_batch_retirement": obsolete_retirement,
+                "stale_pending_topic_identity_retirement": (
+                    stale_topic_identity_retirement
+                ),
             })
             record.outputs(args.package)
     print(json.dumps(output, ensure_ascii=False, indent=2))

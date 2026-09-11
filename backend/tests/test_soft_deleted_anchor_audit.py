@@ -476,8 +476,12 @@ def test_arrival_and_withdrawal_plan_as_one_change_set() -> None:
 
 from backend.pipeline.extraction_supersede_runner import (  # noqa: E402
     no_op_result,
+    obsolete_candidate_batch_retirement,
     product_impact_keys,
     products_to_rebuild,
+    stale_pending_topic_identity_retirement,
+    validate_obsolete_retirement_plan,
+    validate_stale_topic_identity_retirement_plan,
 )
 
 DEPENDENCIES = {
@@ -504,6 +508,362 @@ DEPENDENCIES = {
         "status": "invalidated",
     },
 }
+
+
+def _obsolete_candidate_live() -> dict[str, dict[str, dict]]:
+    batch_key = "TEST-OBSOLETE"
+    plan_id = f"CP-{batch_key}-S-abcdef123456"
+    candidate = {"review_status": "candidate", "visibility": "internal", "revision": 1}
+    return {
+        "composition_plans": {
+            plan_id: {**candidate, "plan_id": plan_id},
+        },
+        "composition_decisions": {
+            "CD-TEST": {**candidate, "decision_id": "CD-TEST", "plan_id": plan_id},
+        },
+        "knowledge_routes": {
+            "KR-TEST": {**candidate, "route_id": "KR-TEST", "target_id": plan_id},
+        },
+        "editorial_syntheses": {
+            "SYN-TEST-OBSOLETE-S-123456abcdef": {
+                **candidate,
+                "synthesis_id": "SYN-TEST-OBSOLETE-S-123456abcdef",
+                "corpus_scope": f"RB-{batch_key}",
+            },
+        },
+        "topic_identity_reconciliations": {
+            "TIR-TEST": {
+                **candidate,
+                "reconciliation_id": "TIR-TEST",
+                "origin_batch_id": f"RB-{batch_key}",
+                "status": "pending_new",
+            },
+        },
+    }
+
+
+def _live_rows(live: dict[str, dict[str, dict]]) -> list[tuple[str, str, dict]]:
+    return [
+        (collection, object_id, payload)
+        for collection, rows in live.items()
+        for object_id, payload in rows.items()
+    ]
+
+
+def test_obsolete_candidate_retirement_is_explicit_and_snapshot_bound() -> None:
+    live = _obsolete_candidate_live()
+    sibling_id = "CP-TEST-OBSOLETE-EXTRA-S-abcdef123456"
+    live["composition_plans"][sibling_id] = {
+        "plan_id": sibling_id,
+        "review_status": "candidate",
+        "visibility": "internal",
+        "revision": 1,
+    }
+    keys, audit = obsolete_candidate_batch_retirement(
+        batch_id="RB-TEST-OBSOLETE",
+        live=live,
+        all_live_rows=_live_rows(live),
+        known_plan_ids=set(live["composition_plans"]),
+    )
+
+    assert len(keys) == audit["summary"]["total"] == 4
+    assert ("composition_plans", sibling_id) not in keys
+    assert ("topic_identity_reconciliations", "TIR-TEST") not in keys
+    assert audit["status"] == "planned"
+    assert audit["reason_code"] == "composition_plan_candidate_retired_by_draft_first"
+    assert len(audit["scope_sha256"]) == 64
+    assert all(row["expected_revision"] == 1 for row in audit["records"])
+    assert all(len(row["expected_content_sha256"]) == 64 for row in audit["records"])
+
+
+def test_obsolete_candidate_retirement_refuses_authority_and_external_refs() -> None:
+    live = _obsolete_candidate_live()
+    live["composition_plans"][
+        "CP-TEST-OBSOLETE-S-abcdef123456"
+    ]["review_status"] = "approved"
+    with pytest.raises(ValueError, match="non-candidate authority"):
+        obsolete_candidate_batch_retirement(
+            batch_id="RB-TEST-OBSOLETE",
+            live=live,
+            all_live_rows=_live_rows(live),
+            known_plan_ids=set(live["composition_plans"]),
+        )
+
+    live = _obsolete_candidate_live()
+    rows = _live_rows(live) + [
+        ("product_dependencies", "PD-OUTSIDE", {"route_ids": ["KR-TEST"]})
+    ]
+    with pytest.raises(ValueError, match="external references"):
+        obsolete_candidate_batch_retirement(
+            batch_id="RB-TEST-OBSOLETE",
+            live=live,
+            all_live_rows=rows,
+            known_plan_ids=set(live["composition_plans"]),
+        )
+
+    live = _obsolete_candidate_live()
+    topic_synthesis_id = "SYN-FAMILY-topic-discovery"
+    live["editorial_syntheses"][topic_synthesis_id] = {
+        "synthesis_id": topic_synthesis_id,
+        "corpus_scope": "RB-TEST-OBSOLETE",
+        "review_status": "candidate",
+        "visibility": "internal",
+        "revision": 1,
+    }
+    keys, _audit = obsolete_candidate_batch_retirement(
+        batch_id="RB-TEST-OBSOLETE",
+        live=live,
+        all_live_rows=_live_rows(live),
+        known_plan_ids=set(live["composition_plans"]),
+    )
+    assert ("editorial_syntheses", topic_synthesis_id) not in keys
+
+
+def test_obsolete_candidate_retirement_replay_requires_known_history() -> None:
+    keys, audit = obsolete_candidate_batch_retirement(
+        batch_id="RB-TEST-OBSOLETE",
+        live={},
+        all_live_rows=[],
+        known_plan_ids={"CP-TEST-OBSOLETE-S-abcdef123456"},
+    )
+
+    assert keys == []
+    assert audit["status"] == "already_retired"
+    lingering = _obsolete_candidate_live()
+    lingering["composition_plans"] = {}
+    with pytest.raises(ValueError, match="partially retired"):
+        obsolete_candidate_batch_retirement(
+            batch_id="RB-TEST-OBSOLETE",
+            live=lingering,
+            all_live_rows=_live_rows(lingering),
+            known_plan_ids={"CP-TEST-OBSOLETE-S-abcdef123456"},
+        )
+    with pytest.raises(ValueError, match="no known CompositionPlan"):
+        obsolete_candidate_batch_retirement(
+            batch_id="RB-TYPO",
+            live={},
+            all_live_rows=[],
+            known_plan_ids={"CP-TEST-OBSOLETE-S-abcdef123456"},
+        )
+
+
+def test_obsolete_retirement_audit_must_match_change_set_snapshot() -> None:
+    live = _obsolete_candidate_live()
+    _, audit = obsolete_candidate_batch_retirement(
+        batch_id="RB-TEST-OBSOLETE",
+        live=live,
+        all_live_rows=_live_rows(live),
+        known_plan_ids=set(live["composition_plans"]),
+    )
+    operations = tuple(
+        SimpleNamespace(
+            collection=row["collection"],
+            object_id=row["object_id"],
+            operation="retire",
+            before_revision=row["expected_revision"],
+            before_sha256=row["expected_content_sha256"],
+        )
+        for row in audit["records"]
+    )
+    validate_obsolete_retirement_plan(SimpleNamespace(operations=operations), audit)
+
+    drifted = list(operations)
+    drifted[0] = SimpleNamespace(
+        **{**vars(drifted[0]), "before_revision": 2}
+    )
+    with pytest.raises(ValueError, match="revision drifted"):
+        validate_obsolete_retirement_plan(
+            SimpleNamespace(operations=tuple(drifted)), audit
+        )
+    drifted = list(operations)
+    drifted[0] = SimpleNamespace(
+        **{**vars(drifted[0]), "before_sha256": "different"}
+    )
+    with pytest.raises(ValueError, match="content drifted"):
+        validate_obsolete_retirement_plan(
+            SimpleNamespace(operations=tuple(drifted)), audit
+        )
+
+
+def test_stale_topic_identity_retirement_is_exact_and_snapshot_bound() -> None:
+    extraction = SimpleNamespace(
+        collection="claims", object_id="CL-OLD", operation="retire"
+    )
+    stale = {
+        "reconciliation_id": "TIR-STALE",
+        "origin_batch_id": "RB-TOPIC",
+        "claim_ids": ["CL-OLD", "CL-KEPT"],
+        "status": "pending_new",
+        "review_status": "candidate",
+        "visibility": "internal",
+        "revision": 3,
+    }
+    untouched = {
+        **stale,
+        "reconciliation_id": "TIR-UNTOUCHED",
+        "claim_ids": ["CL-KEPT"],
+    }
+    other_batch = {
+        **stale,
+        "reconciliation_id": "TIR-OTHER",
+        "origin_batch_id": "RB-OTHER",
+    }
+    rows = [
+        ("topic_identity_reconciliations", "TIR-STALE", stale),
+        ("topic_identity_reconciliations", "TIR-UNTOUCHED", untouched),
+        ("topic_identity_reconciliations", "TIR-OTHER", other_batch),
+    ]
+    keys, audit = stale_pending_topic_identity_retirement(
+        batch_id="RB-TOPIC",
+        change_set=SimpleNamespace(operations=(extraction,)),
+        all_live_rows=rows,
+    )
+
+    assert keys == [("topic_identity_reconciliations", "TIR-STALE")]
+    assert audit["status"] == "planned"
+    assert audit["records"][0]["stale_claim_ids"] == ["CL-OLD"]
+    assert len(audit["scope_sha256"]) == 64
+
+    retirement = SimpleNamespace(
+        collection="topic_identity_reconciliations",
+        object_id="TIR-STALE",
+        operation="retire",
+        before_revision=3,
+        before_sha256=record_content_sha(stale),
+    )
+    validate_stale_topic_identity_retirement_plan(
+        SimpleNamespace(operations=(extraction, retirement)), audit
+    )
+
+
+def test_stale_topic_identity_retirement_refuses_authority_and_external_refs() -> None:
+    extraction = SimpleNamespace(
+        collection="claims", object_id="CL-OLD", operation="retire"
+    )
+    stale = {
+        "reconciliation_id": "TIR-STALE",
+        "origin_batch_id": "RB-TOPIC",
+        "claim_ids": ["CL-OLD"],
+        "status": "pending_new",
+        "review_status": "candidate",
+        "visibility": "internal",
+        "revision": 1,
+    }
+    with pytest.raises(ValueError, match="resolved or approved"):
+        stale_pending_topic_identity_retirement(
+            batch_id="RB-TOPIC",
+            change_set=SimpleNamespace(operations=(extraction,)),
+            all_live_rows=[(
+                "topic_identity_reconciliations",
+                "TIR-STALE",
+                {**stale, "review_status": "approved"},
+            )],
+        )
+    with pytest.raises(ValueError, match="external references"):
+        stale_pending_topic_identity_retirement(
+            batch_id="RB-TOPIC",
+            change_set=SimpleNamespace(operations=(extraction,)),
+            all_live_rows=[
+                ("topic_identity_reconciliations", "TIR-STALE", stale),
+                ("product_dependencies", "PD-STALE", {"record_ids": ["TIR-STALE"]}),
+            ],
+        )
+
+
+def test_supersede_plan_merges_explicit_obsolete_candidate_retirements() -> None:
+    from backend.pipeline.extraction_supersede_runner import plan
+
+    package = _package()
+    candidate_live = _obsolete_candidate_live()
+    all_rows = _live_rows(candidate_live)
+    obsolete_rows = [
+        row for row in all_rows
+        if row[0] != "topic_identity_reconciliations"
+    ]
+
+    class Cursor:
+        def __init__(self) -> None:
+            self.collection = ""
+            self.mode = "collection"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, sql, params=None):
+            if "SELECT object_id FROM" in sql:
+                self.mode = "known_plans"
+            elif "SELECT collection, object_id, revision" in sql and params is None:
+                self.mode = "all_live"
+            else:
+                self.mode = "collection"
+                self.collection = str(params[0])
+
+        def fetchall(self):
+            if self.mode == "known_plans":
+                return [(object_id,) for object_id in candidate_live["composition_plans"]]
+            if self.mode == "all_live":
+                return [
+                    (
+                        collection,
+                        object_id,
+                        payload["revision"],
+                        record_content_sha(payload),
+                        payload,
+                    )
+                    for collection, object_id, payload in all_rows
+                ]
+            return list((candidate_live.get(self.collection) or {}).items())
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def cursor(self):
+            return Cursor()
+
+    class Store:
+        def connect(self):
+            return Connection()
+
+        def plan_package(self, _incoming, *, source_kind, retiring_keys=()):
+            assert source_kind == "knowledge_package"
+            assert set(retiring_keys) == {
+                (collection, object_id)
+                for collection, rows in candidate_live.items()
+                if collection != "topic_identity_reconciliations"
+                for object_id in rows
+            }
+            operations = tuple(
+                SimpleNamespace(
+                    collection=collection,
+                    object_id=object_id,
+                    operation="retire",
+                    before_revision=payload["revision"],
+                    before_sha256=record_content_sha(payload),
+                )
+                for collection, object_id, payload in obsolete_rows
+            )
+            return SimpleNamespace(operations=operations)
+
+    change_set, withdrawal, products, blockers, audit, stale_audit = plan(
+        Store(),
+        package,
+        source_kind="knowledge_package",
+        retire_obsolete_candidate_batch="RB-TEST-OBSOLETE",
+    )
+
+    assert len(change_set.operations) == 4
+    assert withdrawal.closure() == []
+    assert products == []
+    assert blockers == []
+    assert audit["summary"]["total"] == 4
+    assert stale_audit is None
 
 
 def test_only_current_product_dependencies_are_reported() -> None:
@@ -567,10 +927,25 @@ def test_full_supersede_replan_after_apply_has_zero_operations() -> None:
         def __exit__(self, *_args):
             return False
 
-        def execute(self, _sql, params):
-            self.collection = str(params[0])
+        def execute(self, sql, params=None):
+            if params is None:
+                self.collection = "__all__"
+            else:
+                self.collection = str(params[0])
 
         def fetchall(self):
+            if self.collection == "__all__":
+                return [
+                    (
+                        collection,
+                        object_id,
+                        payload["revision"],
+                        record_content_sha(payload),
+                        payload,
+                    )
+                    for collection, rows in live.items()
+                    for object_id, payload in rows.items()
+                ]
             return list((live.get(self.collection) or {}).items())
 
     class Connection:
@@ -591,11 +966,21 @@ def test_full_supersede_replan_after_apply_has_zero_operations() -> None:
             assert retiring_keys == []
             return build_change_set_plan(incoming, existing, source_kind=source_kind)
 
-    change_set, withdrawal, products = plan(
+    (
+        change_set,
+        withdrawal,
+        products,
+            semantic_blockers,
+            obsolete_retirement,
+            stale_topic_identity_retirement,
+        ) = plan(
         Store(), package, source_kind="knowledge_package"
     )
     assert withdrawal.closure() == []
     assert products == []
+    assert semantic_blockers == []
+    assert obsolete_retirement is None
+    assert stale_topic_identity_retirement is None
     assert change_set.operations == ()
     assert no_op_result(change_set)["status"] == "unchanged"
 

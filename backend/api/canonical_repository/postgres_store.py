@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import tempfile
 import uuid
 from dataclasses import asdict, dataclass
@@ -111,6 +112,12 @@ SEMANTIC_EXTRACTION_REFERENCE_FIELDS = {
     "viewpoint_resolution_ledgers": {"claim_id"},
 }
 SEMANTIC_REFERENCE_COLLECTIONS = set(SEMANTIC_EXTRACTION_REFERENCE_FIELDS)
+OBSOLETE_CANDIDATE_RETIREMENT_COLLECTIONS = (
+    "composition_decisions",
+    "composition_plans",
+    "editorial_syntheses",
+    "knowledge_routes",
+)
 PACKAGE_REFERENCE_FIELDS = {
     "source_fragments": {"source_id"},
     "questions": {"source_fragment_id", "source_fragment_ids", "answer_claim_ids"},
@@ -712,6 +719,152 @@ class ChangeSetPlan:
             "removals": [dict(item) for item in removals],
         }
         return value
+
+
+def uncoordinated_semantic_reference_blockers(
+    plan: ChangeSetPlan,
+    rows: Sequence[tuple[str, str, Mapping[str, Any]]],
+) -> list[str]:
+    """Describe live semantic rows a re-extraction ChangeSet would strand.
+
+    This is deliberately a pure function shared by preview and the locked
+    apply guard. A preview that only reports draft-product dependencies can
+    otherwise say a replacement is clear even though apply later discovers
+    current CVR/topic master data pinned to the retiring extraction generation.
+    """
+
+    retired_ids = {
+        operation.object_id
+        for operation in plan.operations
+        if (
+            operation.collection in EXTRACTION_RECORD_COLLECTIONS
+            or operation.collection == "source_documents"
+        )
+        and operation.operation == "retire"
+    }
+    if not retired_ids:
+        return []
+    planned_operations = {
+        (operation.collection, operation.object_id): operation
+        for operation in plan.operations
+    }
+
+    def strings(value: Any) -> set[str]:
+        if isinstance(value, Mapping):
+            found: set[str] = set()
+            for key, child in value.items():
+                if isinstance(key, str):
+                    found.add(key)
+                found.update(strings(child))
+            return found
+        if isinstance(value, (list, tuple, set)):
+            found = set()
+            for child in value:
+                found.update(strings(child))
+            return found
+        return {value} if isinstance(value, str) else set()
+
+    def exact_references(collection: str, value: Any) -> set[str]:
+        fields = SEMANTIC_EXTRACTION_REFERENCE_FIELDS.get(collection, set())
+        if not fields or not isinstance(value, (Mapping, list, tuple, set)):
+            return set()
+        if isinstance(value, Mapping):
+            found: set[str] = set()
+            for key, child in value.items():
+                if str(key) in fields:
+                    found.update(strings(child) & retired_ids)
+                else:
+                    found.update(exact_references(collection, child))
+            return found
+        found = set()
+        for child in value:
+            found.update(exact_references(collection, child))
+        return found
+
+    def unclassified_references(
+        collection: str, value: Any, *, path: tuple[str, ...] = ()
+    ) -> set[str]:
+        fields = SEMANTIC_EXTRACTION_REFERENCE_FIELDS.get(collection, set())
+        found: set[str] = set()
+        if isinstance(value, Mapping):
+            for key, child in value.items():
+                field = str(key)
+                if field in retired_ids:
+                    found.add(f"{'.'.join(path) or '<root>'}.<key>={field}")
+                if field in fields or field in NON_LIVE_EXTRACTION_ID_FIELDS:
+                    continue
+                found.update(
+                    unclassified_references(
+                        collection, child, path=(*path, field)
+                    )
+                )
+            return found
+        if isinstance(value, (list, tuple, set)):
+            for child in value:
+                found.update(
+                    unclassified_references(collection, child, path=path)
+                )
+            return found
+        if isinstance(value, str) and value in retired_ids:
+            found.add(f"{'.'.join(path) or '<root>'}={value}")
+        return found
+
+    blockers: list[str] = []
+    for collection, object_id, payload in rows:
+        key = (str(collection), str(object_id))
+        planned = planned_operations.get(key)
+        if planned is not None:
+            if planned.operation != "retire":
+                planned_payload = stored_operation_payload(planned)
+                references = exact_references(key[0], planned_payload)
+                if references:
+                    blockers.append(
+                        f"planned {key[0]}/{key[1]} still -> "
+                        f"{','.join(sorted(references))}"
+                    )
+                unknown = unclassified_references(key[0], planned_payload)
+                if unknown:
+                    blockers.append(
+                        f"planned {key[0]}/{key[1]} has unclassified id field "
+                        f"{','.join(sorted(unknown))}"
+                    )
+            continue
+        references = exact_references(key[0], payload)
+        if references:
+            blockers.append(
+                f"{key[0]}/{key[1]} -> {','.join(sorted(references))}"
+            )
+        unknown = unclassified_references(key[0], payload)
+        if unknown:
+            blockers.append(
+                f"{key[0]}/{key[1]} has unclassified id field "
+                f"{','.join(sorted(unknown))}"
+            )
+    # Newly created semantic rows are absent from the live-row input.
+    for key, planned in planned_operations.items():
+        if key[0] not in SEMANTIC_REFERENCE_COLLECTIONS:
+            continue
+        if planned.operation == "retire":
+            continue
+        planned_payload = stored_operation_payload(planned)
+        references = exact_references(key[0], planned_payload)
+        if references and not any(
+            item.startswith(f"planned {key[0]}/{key[1]} ") for item in blockers
+        ):
+            blockers.append(
+                f"planned {key[0]}/{key[1]} still -> "
+                f"{','.join(sorted(references))}"
+            )
+        unknown = unclassified_references(key[0], planned_payload)
+        if unknown and not any(
+            item.startswith(f"planned {key[0]}/{key[1]} has unclassified ")
+            for item in blockers
+        ):
+            blockers.append(
+                f"planned {key[0]}/{key[1]} has unclassified id field "
+                f"{','.join(sorted(unknown))}"
+            )
+    return sorted(blockers)
 
 
 def build_change_set_plan(
@@ -1376,6 +1529,18 @@ class PostgresKnowledgeStore:
                 if prior and prior[0] == "applied":
                     return {"status": "already_applied", "change_set_id": plan.change_set_id, "summary": prior[1]}
 
+                self._assert_obsolete_candidate_retirement(
+                    cursor,
+                    plan,
+                    (metadata or {}).get("obsolete_candidate_batch_retirement"),
+                )
+                self._assert_stale_pending_topic_identity_retirement(
+                    cursor,
+                    plan,
+                    (metadata or {}).get(
+                        "stale_pending_topic_identity_retirement"
+                    ),
+                )
                 self._assert_global_id_uniqueness(cursor, plan)
                 self._assert_source_identity_uniqueness(cursor, plan)
                 self._assert_edge_integrity(cursor, plan)
@@ -1808,21 +1973,15 @@ class PostgresKnowledgeStore:
         not included: references to an identity-preserving update remain valid.
         """
 
-        retired_ids = {
-            operation.object_id
-            for operation in plan.operations
-            if (
+        if not any(
+            (
                 operation.collection in EXTRACTION_RECORD_COLLECTIONS
                 or operation.collection == "source_documents"
             )
             and operation.operation == "retire"
-        }
-        if not retired_ids:
-            return
-        planned_operations = {
-            (operation.collection, operation.object_id): operation
             for operation in plan.operations
-        }
+        ):
+            return
         cursor.execute(
             """SELECT collection, object_id, payload
                FROM wang_knowledge.objects
@@ -1830,13 +1989,164 @@ class PostgresKnowledgeStore:
                FOR UPDATE""",
             (sorted(SEMANTIC_REFERENCE_COLLECTIONS),),
         )
+        blockers = uncoordinated_semantic_reference_blockers(
+            plan, cursor.fetchall()
+        )
+        if blockers:
+            raise ChangeSetConflict(
+                "re-extraction requires a coordinated CVR update; current semantic "
+                "master data still references the predecessor: "
+                + " | ".join(sorted(blockers)[:20])
+            )
+
+    @staticmethod
+    def _assert_obsolete_candidate_retirement(
+        cursor: Any,
+        plan: ChangeSetPlan,
+        audit: Mapping[str, Any] | None,
+    ) -> None:
+        """Recheck an opt-in legacy candidate cleanup under the apply lock."""
+
+        if audit is None:
+            return
+        if (
+            audit.get("schema_version")
+            != "wang_obsolete_candidate_batch_retirement_v1"
+            or audit.get("reason_code")
+            != "composition_plan_candidate_retired_by_draft_first"
+        ):
+            raise ChangeSetConflict(
+                "obsolete candidate retirement audit is missing its governed identity"
+            )
+        canonical_audit = dict(audit)
+        stored_scope_sha256 = str(canonical_audit.pop("scope_sha256", ""))
+        if stored_scope_sha256 != sha256_json(canonical_audit):
+            raise ChangeSetConflict(
+                "obsolete candidate retirement audit scope SHA does not match"
+            )
+        batch_id = str(audit.get("batch_id") or "")
+        if not batch_id.startswith("RB-") or len(batch_id) <= 3:
+            raise ChangeSetConflict(
+                "obsolete candidate retirement audit has an invalid batch id"
+            )
+        batch_key = re.escape(batch_id[3:])
+        plan_pattern = re.compile(rf"^CP-{batch_key}-[ST]-[0-9a-f]{{12}}$")
+        synthesis_pattern = re.compile(
+            rf"^SYN-{batch_key}-[ST]-[0-9a-f]{{12}}$"
+        )
+        known_plan_ids = {
+            str(object_id)
+            for object_id in audit.get("known_plan_ids") or []
+            if plan_pattern.fullmatch(str(object_id))
+        }
+
+        def belongs_to_obsolete_batch(
+            collection: str, object_id: str, payload: Mapping[str, Any]
+        ) -> bool:
+            if collection == "composition_plans":
+                return bool(plan_pattern.fullmatch(object_id))
+            if collection == "composition_decisions":
+                plan_id = str(payload.get("plan_id") or "")
+                return plan_id in known_plan_ids or bool(plan_pattern.fullmatch(plan_id))
+            if collection == "knowledge_routes":
+                plan_id = str(payload.get("target_id") or "")
+                return plan_id in known_plan_ids or bool(plan_pattern.fullmatch(plan_id))
+            if collection == "editorial_syntheses":
+                return bool(synthesis_pattern.fullmatch(object_id))
+            return False
+
+        status = audit.get("status")
+        if status == "already_retired":
+            if audit.get("records") not in ([], None) or any(
+                operation.operation == "retire"
+                and operation.collection
+                in OBSOLETE_CANDIDATE_RETIREMENT_COLLECTIONS
+                for operation in plan.operations
+            ):
+                raise ChangeSetConflict(
+                    "already-retired candidate audit conflicts with planned retires"
+                )
+            cursor.execute(
+                """SELECT collection, object_id, payload
+                   FROM wang_knowledge.objects
+                   WHERE retired_at IS NULL FOR UPDATE"""
+            )
+            resurrected = sorted(
+                f"{collection}/{object_id}"
+                for collection, object_id, payload in cursor.fetchall()
+                if belongs_to_obsolete_batch(
+                    str(collection), str(object_id), payload
+                )
+            )
+            if resurrected:
+                raise ChangeSetConflict(
+                    "already-retired candidate batch has live rows again: "
+                    + ", ".join(resurrected[:20])
+                )
+            return
+        if status != "planned":
+            raise ChangeSetConflict(
+                "obsolete candidate retirement audit has an invalid status"
+            )
+        records = audit.get("records")
+        if not isinstance(records, list) or not records:
+            raise ChangeSetConflict(
+                "obsolete candidate retirement audit has no records"
+            )
+        audited: dict[tuple[str, str], Mapping[str, Any]] = {}
+        for row in records:
+            if not isinstance(row, Mapping):
+                raise ChangeSetConflict(
+                    "obsolete candidate retirement audit contains a malformed record"
+                )
+            key = (
+                str(row.get("collection") or ""),
+                str(row.get("object_id") or ""),
+            )
+            if (
+                key in audited
+                or key[0] not in OBSOLETE_CANDIDATE_RETIREMENT_COLLECTIONS
+                or not key[1]
+            ):
+                raise ChangeSetConflict(
+                    "obsolete candidate retirement audit has a duplicate or invalid key"
+                )
+            audited[key] = row
+
+        planned = {
+            (operation.collection, operation.object_id): operation
+            for operation in plan.operations
+        }
+        for key, row in audited.items():
+            operation = planned.get(key)
+            if operation is None or operation.operation != "retire":
+                raise ChangeSetConflict(
+                    f"obsolete candidate retirement omits planned retire {key[0]}/{key[1]}"
+                )
+            if (
+                operation.before_revision != row.get("expected_revision")
+                or operation.before_sha256 != row.get("expected_content_sha256")
+            ):
+                raise ChangeSetConflict(
+                    f"obsolete candidate retirement snapshot drifted for {key[0]}/{key[1]}"
+                )
+        unexpected = sorted(
+            key
+            for key, operation in planned.items()
+            if operation.operation == "retire"
+            and key[0] in OBSOLETE_CANDIDATE_RETIREMENT_COLLECTIONS
+            and key not in audited
+        )
+        if unexpected:
+            raise ChangeSetConflict(
+                "obsolete candidate retirement audit omits candidate-workflow retires: "
+                + ", ".join(f"{collection}/{object_id}" for collection, object_id in unexpected)
+            )
 
         def strings(value: Any) -> set[str]:
             if isinstance(value, Mapping):
-                found: set[str] = set()
-                for key, child in value.items():
-                    if isinstance(key, str):
-                        found.add(key)
+                found = {str(key) for key in value if isinstance(key, str)}
+                for child in value.values():
                     found.update(strings(child))
                 return found
             if isinstance(value, (list, tuple, set)):
@@ -1846,115 +2156,264 @@ class PostgresKnowledgeStore:
                 return found
             return {value} if isinstance(value, str) else set()
 
-        def exact_references(collection: str, value: Any) -> set[str]:
-            fields = SEMANTIC_EXTRACTION_REFERENCE_FIELDS.get(collection, set())
-            if not fields or not isinstance(value, (Mapping, list, tuple, set)):
-                return set()
-            if isinstance(value, Mapping):
-                found: set[str] = set()
-                for key, child in value.items():
-                    if str(key) in fields:
-                        found.update(strings(child) & retired_ids)
-                    else:
-                        found.update(exact_references(collection, child))
-                return found
-            found: set[str] = set()
-            for child in value:
-                found.update(exact_references(collection, child))
-            return found
-
-        def unclassified_references(
-            collection: str, value: Any, *, path: tuple[str, ...] = ()
-        ) -> set[str]:
-            fields = SEMANTIC_EXTRACTION_REFERENCE_FIELDS.get(collection, set())
-            found: set[str] = set()
-            if isinstance(value, Mapping):
-                for key, child in value.items():
-                    field = str(key)
-                    if field in retired_ids:
-                        found.add(f"{'.'.join(path) or '<root>'}.<key>={field}")
-                    if field in fields or field in NON_LIVE_EXTRACTION_ID_FIELDS:
-                        continue
-                    found.update(
-                        unclassified_references(
-                            collection, child, path=(*path, field)
-                        )
-                    )
-                return found
-            if isinstance(value, (list, tuple, set)):
-                for child in value:
-                    found.update(
-                        unclassified_references(collection, child, path=path)
-                    )
-                return found
-            if isinstance(value, str) and value in retired_ids:
-                found.add(f"{'.'.join(path) or '<root>'}={value}")
-            return found
-
+        cursor.execute(
+            """SELECT collection, object_id, payload
+               FROM wang_knowledge.objects
+               WHERE retired_at IS NULL FOR UPDATE"""
+        )
+        audited_ids = {object_id for _collection, object_id in audited}
         blockers: list[str] = []
+        seen_current: set[tuple[str, str]] = set()
+        seen_rows: set[tuple[str, str]] = set()
         for collection, object_id, payload in cursor.fetchall():
             key = (str(collection), str(object_id))
-            planned = planned_operations.get(key)
-            if planned is not None:
-                if planned.operation != "retire":
-                    planned_payload = stored_operation_payload(planned)
-                    references = exact_references(key[0], planned_payload)
-                    if references:
-                        blockers.append(
-                            f"planned {key[0]}/{key[1]} still -> "
-                                f"{','.join(sorted(references))}"
-                            )
-                    unknown = unclassified_references(key[0], planned_payload)
-                    if unknown:
-                        blockers.append(
-                            f"planned {key[0]}/{key[1]} has unclassified id field "
-                            f"{','.join(sorted(unknown))}"
-                        )
+            seen_rows.add(key)
+            operation = planned.get(key)
+            if key in audited:
+                seen_current.add(key)
+                if (
+                    not belongs_to_obsolete_batch(key[0], key[1], payload)
+                    or str(payload.get("review_status") or "") != "candidate"
+                    or str(payload.get("visibility") or "") != "internal"
+                ):
+                    blockers.append(f"{key[0]}/{key[1]} is no longer pending candidate data")
                 continue
-            references = exact_references(key[0], payload)
+            if operation is not None:
+                if operation.operation == "retire":
+                    continue
+                payload = stored_operation_payload(operation)
+            if belongs_to_obsolete_batch(key[0], key[1], payload):
+                prefix = "planned " if operation is not None else ""
+                blockers.append(
+                    f"{prefix}{key[0]}/{key[1]} is an omitted obsolete candidate"
+                )
+            references = strings(payload) & audited_ids
+            if references:
+                prefix = "planned " if operation is not None else ""
+                blockers.append(
+                    f"{prefix}{key[0]}/{key[1]} -> {','.join(sorted(references))}"
+                )
+        missing = sorted(set(audited) - seen_current)
+        blockers.extend(
+            f"{collection}/{object_id} is no longer current"
+            for collection, object_id in missing
+        )
+        # Creates are absent from the locked current-row query. Check every
+        # non-retire arrival so one ChangeSet cannot introduce the dangling
+        # reference it claims to have ruled out.
+        for key, operation in planned.items():
+            if key in seen_rows or operation.operation == "retire":
+                continue
+            payload = stored_operation_payload(operation)
+            if belongs_to_obsolete_batch(key[0], key[1], payload):
+                blockers.append(
+                    f"planned {key[0]}/{key[1]} is an omitted obsolete candidate"
+                )
+            references = strings(payload) & audited_ids
             if references:
                 blockers.append(
-                    f"{key[0]}/{key[1]} -> {','.join(sorted(references))}"
-                )
-            unknown = unclassified_references(key[0], payload)
-            if unknown:
-                blockers.append(
-                    f"{key[0]}/{key[1]} has unclassified id field "
-                    f"{','.join(sorted(unknown))}"
-                )
-        # A newly created semantic row is absent from the locked query above.
-        for key, planned in planned_operations.items():
-            if key[0] not in SEMANTIC_REFERENCE_COLLECTIONS:
-                continue
-            if planned.operation == "retire":
-                continue
-            references = exact_references(
-                key[0], stored_operation_payload(planned)
-            )
-            if references and not any(
-                item.startswith(f"planned {key[0]}/{key[1]} ")
-                for item in blockers
-            ):
-                blockers.append(
-                    f"planned {key[0]}/{key[1]} still -> "
-                    f"{','.join(sorted(references))}"
-                )
-            unknown = unclassified_references(
-                key[0], stored_operation_payload(planned)
-            )
-            if unknown and not any(
-                item.startswith(f"planned {key[0]}/{key[1]} has unclassified ")
-                for item in blockers
-            ):
-                blockers.append(
-                    f"planned {key[0]}/{key[1]} has unclassified id field "
-                    f"{','.join(sorted(unknown))}"
+                    f"planned {key[0]}/{key[1]} -> {','.join(sorted(references))}"
                 )
         if blockers:
             raise ChangeSetConflict(
-                "re-extraction requires a coordinated CVR update; current semantic "
-                "master data still references the predecessor: "
-                + " | ".join(sorted(blockers)[:20])
+                "obsolete candidate retirement changed after preview or has current "
+                "external references: " + " | ".join(sorted(set(blockers))[:20])
+            )
+
+    @staticmethod
+    def _assert_stale_pending_topic_identity_retirement(
+        cursor: Any,
+        plan: ChangeSetPlan,
+        audit: Mapping[str, Any] | None,
+    ) -> None:
+        """Recheck pending topic identities invalidated by re-extraction."""
+
+        if audit is None:
+            return
+        if (
+            audit.get("schema_version")
+            != "wang_stale_pending_topic_identity_retirement_v1"
+            or audit.get("reason_code")
+            != "pending_topic_identity_invalidated_by_extraction_supersession"
+        ):
+            raise ChangeSetConflict(
+                "stale topic identity retirement audit is missing its governed identity"
+            )
+        canonical_audit = dict(audit)
+        stored_scope_sha256 = str(canonical_audit.pop("scope_sha256", ""))
+        if stored_scope_sha256 != sha256_json(canonical_audit):
+            raise ChangeSetConflict(
+                "stale topic identity retirement audit scope SHA does not match"
+            )
+        batch_id = str(audit.get("batch_id") or "")
+        if not batch_id.startswith("RB-") or len(batch_id) <= 3:
+            raise ChangeSetConflict(
+                "stale topic identity retirement audit has an invalid batch id"
+            )
+        retired_ids = {
+            operation.object_id
+            for operation in plan.operations
+            if operation.operation == "retire"
+            and (
+                operation.collection in EXTRACTION_RECORD_COLLECTIONS
+                or operation.collection == "source_documents"
+            )
+        }
+        if audit.get("retired_extraction_ids_sha256") != sha256_json(
+            sorted(retired_ids)
+        ):
+            raise ChangeSetConflict(
+                "stale topic identity audit does not match retiring extraction ids"
+            )
+        status = str(audit.get("status") or "")
+        records = audit.get("records")
+        if status == "not_needed":
+            if records not in ([], None):
+                raise ChangeSetConflict(
+                    "not-needed topic identity audit contains retirement records"
+                )
+            records = []
+        elif status == "planned":
+            if not isinstance(records, list) or not records:
+                raise ChangeSetConflict(
+                    "stale topic identity retirement audit has no records"
+                )
+        else:
+            raise ChangeSetConflict(
+                "stale topic identity retirement audit has an invalid status"
+            )
+
+        audited: dict[tuple[str, str], Mapping[str, Any]] = {}
+        for row in records:
+            if not isinstance(row, Mapping):
+                raise ChangeSetConflict(
+                    "stale topic identity retirement audit contains a malformed record"
+                )
+            key = (
+                str(row.get("collection") or ""),
+                str(row.get("object_id") or ""),
+            )
+            if (
+                key in audited
+                or key[0] != "topic_identity_reconciliations"
+                or not key[1]
+            ):
+                raise ChangeSetConflict(
+                    "stale topic identity retirement audit has a duplicate or invalid key"
+                )
+            audited[key] = row
+
+        planned = {
+            (operation.collection, operation.object_id): operation
+            for operation in plan.operations
+        }
+        for key, row in audited.items():
+            operation = planned.get(key)
+            if operation is None or operation.operation != "retire":
+                raise ChangeSetConflict(
+                    f"stale topic identity retirement omits {key[0]}/{key[1]}"
+                )
+            if (
+                operation.before_revision != row.get("expected_revision")
+                or operation.before_sha256 != row.get("expected_content_sha256")
+            ):
+                raise ChangeSetConflict(
+                    f"stale topic identity retirement snapshot drifted for {key[0]}/{key[1]}"
+                )
+
+        def strings(value: Any) -> set[str]:
+            if isinstance(value, Mapping):
+                found = {str(key) for key in value if isinstance(key, str)}
+                for child in value.values():
+                    found.update(strings(child))
+                return found
+            if isinstance(value, (list, tuple, set)):
+                found: set[str] = set()
+                for child in value:
+                    found.update(strings(child))
+                return found
+            return {value} if isinstance(value, str) else set()
+
+        cursor.execute(
+            """SELECT collection, object_id, payload
+               FROM wang_knowledge.objects
+               WHERE retired_at IS NULL FOR UPDATE"""
+        )
+        rows = [
+            (str(collection), str(object_id), payload)
+            for collection, object_id, payload in cursor.fetchall()
+        ]
+        audited_ids = {object_id for _collection, object_id in audited}
+        seen: set[tuple[str, str]] = set()
+        blockers: list[str] = []
+
+        def inspect(
+            key: tuple[str, str], payload: Mapping[str, Any], *, planned_row: bool
+        ) -> None:
+            stale_refs = sorted(
+                set(map(str, payload.get("claim_ids") or [])) & retired_ids
+            )
+            is_scoped_identity = (
+                key[0] == "topic_identity_reconciliations"
+                and str(payload.get("origin_batch_id") or "") == batch_id
+                and bool(stale_refs)
+            )
+            if key in audited:
+                seen.add(key)
+                expected_refs = sorted(
+                    map(str, audited[key].get("stale_claim_ids") or [])
+                )
+                if (
+                    not is_scoped_identity
+                    or stale_refs != expected_refs
+                    or str(payload.get("review_status") or "") != "candidate"
+                    or str(payload.get("visibility") or "") != "internal"
+                    or str(payload.get("status") or "")
+                    not in {"pending_match", "pending_new"}
+                ):
+                    blockers.append(
+                        f"{key[0]}/{key[1]} is no longer the audited pending candidate"
+                    )
+                return
+            if is_scoped_identity:
+                prefix = "planned " if planned_row else ""
+                blockers.append(
+                    f"{prefix}{key[0]}/{key[1]} is an omitted stale identity"
+                )
+            references = strings(payload) & audited_ids
+            if references:
+                prefix = "planned " if planned_row else ""
+                blockers.append(
+                    f"{prefix}{key[0]}/{key[1]} -> {','.join(sorted(references))}"
+                )
+
+        seen_rows: set[tuple[str, str]] = set()
+        for collection, object_id, payload in rows:
+            key = (collection, object_id)
+            seen_rows.add(key)
+            operation = planned.get(key)
+            if operation is not None:
+                if operation.operation == "retire":
+                    if key in audited:
+                        inspect(key, payload, planned_row=False)
+                    continue
+                payload = stored_operation_payload(operation)
+                inspect(key, payload, planned_row=True)
+                continue
+            inspect(key, payload, planned_row=False)
+        for key, operation in planned.items():
+            if key in seen_rows or operation.operation == "retire":
+                continue
+            inspect(key, stored_operation_payload(operation), planned_row=True)
+        blockers.extend(
+            f"{collection}/{object_id} is no longer current"
+            for collection, object_id in sorted(set(audited) - seen)
+        )
+        if blockers:
+            raise ChangeSetConflict(
+                "stale pending topic identity retirement changed after preview, "
+                "omitted an eligible row, or has current external references: "
+                + " | ".join(sorted(set(blockers))[:20])
             )
 
     @staticmethod

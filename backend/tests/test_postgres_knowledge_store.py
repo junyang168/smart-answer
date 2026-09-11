@@ -21,6 +21,8 @@ from backend.api.canonical_repository.postgres_store import (
     record_content_sha,
     reviewed_relations_package,
     stored_operation_payload,
+    sha256_json,
+    uncoordinated_semantic_reference_blockers,
 )
 
 
@@ -872,6 +874,319 @@ def test_reextraction_cannot_leave_current_semantic_master_data_on_old_ids() -> 
 
     with pytest.raises(ChangeSetConflict, match="coordinated CVR update"):
         store.apply_plan(plan)
+
+    assert uncoordinated_semantic_reference_blockers(
+        plan,
+        [
+            (
+                "viewpoint_claim_links",
+                "VCL-1",
+                {"link_id": "VCL-1", "claim_id": "CL-1"},
+            )
+        ],
+    ) == ["viewpoint_claim_links/VCL-1 -> CL-1"]
+
+
+def _obsolete_retirement_audit() -> dict[str, Any]:
+    audit = {
+        "schema_version": "wang_obsolete_candidate_batch_retirement_v1",
+        "batch_id": "RB-OLD",
+        "reason_code": "composition_plan_candidate_retired_by_draft_first",
+        "selection_policy": "test",
+        "status": "planned",
+        "known_plan_ids": ["CP-OLD-S-abcdef123456"],
+        "summary": {"total": 1},
+        "records": [
+            {
+                "collection": "knowledge_routes",
+                "object_id": "KR-OLD",
+                "expected_revision": 1,
+                "expected_content_sha256": "old-sha",
+            }
+        ],
+    }
+    audit["scope_sha256"] = sha256_json(audit)
+    return audit
+
+
+def _obsolete_retirement_plan(*extra: SimpleNamespace) -> SimpleNamespace:
+    retired = SimpleNamespace(
+        collection="knowledge_routes",
+        object_id="KR-OLD",
+        operation="retire",
+        before_revision=1,
+        before_sha256="old-sha",
+    )
+    return SimpleNamespace(operations=(retired, *extra))
+
+
+class _ObsoleteRetirementCursor(_RecordingCursor):
+    def __init__(self, rows: list[tuple[str, str, dict[str, Any]]]):
+        super().__init__(None)
+        self.rows = rows
+
+    def fetchall(self):
+        if "WHERE retired_at IS NULL FOR UPDATE" in self._last:
+            return self.rows
+        return []
+
+
+def test_obsolete_candidate_retirement_is_rechecked_under_apply_lock() -> None:
+    candidate = {
+        "route_id": "KR-OLD",
+        "target_id": "CP-OLD-S-abcdef123456",
+        "review_status": "candidate",
+        "visibility": "internal",
+    }
+    cursor = _ObsoleteRetirementCursor(
+        [("knowledge_routes", "KR-OLD", candidate)]
+    )
+
+    PostgresKnowledgeStore._assert_obsolete_candidate_retirement(
+        cursor, _obsolete_retirement_plan(), _obsolete_retirement_audit()
+    )
+
+    with pytest.raises(ChangeSetConflict, match="no longer pending candidate"):
+        PostgresKnowledgeStore._assert_obsolete_candidate_retirement(
+            _ObsoleteRetirementCursor(
+                [
+                    (
+                        "knowledge_routes",
+                        "KR-OLD",
+                        {**candidate, "review_status": "approved"},
+                    )
+                ]
+            ),
+            _obsolete_retirement_plan(),
+            _obsolete_retirement_audit(),
+        )
+
+    with pytest.raises(ChangeSetConflict, match="omitted obsolete candidate"):
+        PostgresKnowledgeStore._assert_obsolete_candidate_retirement(
+            _ObsoleteRetirementCursor([
+                ("knowledge_routes", "KR-OLD", candidate),
+                (
+                    "composition_plans",
+                    "CP-OLD-T-fedcba654321",
+                    {
+                        "plan_id": "CP-OLD-T-fedcba654321",
+                        "review_status": "candidate",
+                        "visibility": "internal",
+                    },
+                ),
+            ]),
+            _obsolete_retirement_plan(),
+            _obsolete_retirement_audit(),
+        )
+
+    with pytest.raises(ChangeSetConflict, match="no longer pending candidate"):
+        PostgresKnowledgeStore._assert_obsolete_candidate_retirement(
+            _ObsoleteRetirementCursor([
+                (
+                    "knowledge_routes",
+                    "KR-OLD",
+                    {**candidate, "target_id": "CP-ANOTHER-S-abcdef123456"},
+                )
+            ]),
+            _obsolete_retirement_plan(),
+            _obsolete_retirement_audit(),
+        )
+
+
+def test_obsolete_candidate_apply_guard_blocks_external_and_arriving_refs() -> None:
+    candidate = {
+        "route_id": "KR-OLD",
+        "target_id": "CP-OLD-S-abcdef123456",
+        "review_status": "candidate",
+        "visibility": "internal",
+    }
+    with pytest.raises(ChangeSetConflict, match="PD-OUTSIDE"):
+        PostgresKnowledgeStore._assert_obsolete_candidate_retirement(
+            _ObsoleteRetirementCursor(
+                [
+                    ("knowledge_routes", "KR-OLD", candidate),
+                    ("product_dependencies", "PD-OUTSIDE", {"route_ids": ["KR-OLD"]}),
+                ]
+            ),
+            _obsolete_retirement_plan(),
+            _obsolete_retirement_audit(),
+        )
+
+    arriving = SimpleNamespace(
+        collection="product_dependencies",
+        object_id="PD-NEW",
+        operation="create",
+        before_revision=None,
+        before_sha256=None,
+        after_revision=1,
+        payload={"dependency_id": "PD-NEW", "route_ids": ["KR-OLD"]},
+    )
+    with pytest.raises(ChangeSetConflict, match="planned product_dependencies/PD-NEW"):
+        PostgresKnowledgeStore._assert_obsolete_candidate_retirement(
+            _ObsoleteRetirementCursor(
+                [("knowledge_routes", "KR-OLD", candidate)]
+            ),
+            _obsolete_retirement_plan(arriving),
+            _obsolete_retirement_audit(),
+        )
+
+
+def test_obsolete_candidate_apply_guard_rejects_tampered_audit() -> None:
+    audit = _obsolete_retirement_audit()
+    audit["batch_id"] = "RB-TAMPERED"
+    with pytest.raises(ChangeSetConflict, match="scope SHA"):
+        PostgresKnowledgeStore._assert_obsolete_candidate_retirement(
+            _ObsoleteRetirementCursor([]),
+            _obsolete_retirement_plan(),
+            audit,
+        )
+
+
+def test_already_retired_candidate_audit_allows_a_changed_package_arrival() -> None:
+    audit = {
+        "schema_version": "wang_obsolete_candidate_batch_retirement_v1",
+        "batch_id": "RB-OLD",
+        "reason_code": "composition_plan_candidate_retired_by_draft_first",
+        "selection_policy": "test",
+        "status": "already_retired",
+        "known_plan_ids": ["CP-OLD-S-abcdef123456"],
+        "summary": {"total": 0},
+        "records": [],
+    }
+    audit["scope_sha256"] = sha256_json(audit)
+    arrival = SimpleNamespace(
+        collection="claims",
+        object_id="CL-NEW",
+        operation="create",
+    )
+
+    PostgresKnowledgeStore._assert_obsolete_candidate_retirement(
+        _ObsoleteRetirementCursor([]),
+        SimpleNamespace(operations=(arrival,)),
+        audit,
+    )
+    with pytest.raises(ChangeSetConflict, match="has live rows again"):
+        PostgresKnowledgeStore._assert_obsolete_candidate_retirement(
+            _ObsoleteRetirementCursor([
+                (
+                    "composition_plans",
+                    "CP-OLD-S-abcdef123456",
+                    {"plan_id": "CP-OLD-S-abcdef123456"},
+                )
+            ]),
+            SimpleNamespace(operations=(arrival,)),
+            audit,
+        )
+
+
+def _stale_topic_identity_audit(*, status: str = "planned") -> dict[str, Any]:
+    records = [] if status == "not_needed" else [{
+        "collection": "topic_identity_reconciliations",
+        "object_id": "TIR-STALE",
+        "expected_revision": 1,
+        "expected_content_sha256": "tir-sha",
+        "stale_claim_ids": ["CL-OLD"],
+    }]
+    audit = {
+        "schema_version": "wang_stale_pending_topic_identity_retirement_v1",
+        "batch_id": "RB-TOPIC",
+        "reason_code": "pending_topic_identity_invalidated_by_extraction_supersession",
+        "selection_policy": "test",
+        "status": status,
+        "retired_extraction_ids_sha256": sha256_json(["CL-OLD"]),
+        "summary": {
+            "topic_identity_reconciliations": len(records),
+            "total": len(records),
+        },
+        "records": records,
+    }
+    audit["scope_sha256"] = sha256_json(audit)
+    return audit
+
+
+def _stale_topic_identity_plan(*extra: SimpleNamespace) -> SimpleNamespace:
+    extraction = SimpleNamespace(
+        collection="claims",
+        object_id="CL-OLD",
+        operation="retire",
+        before_revision=1,
+        before_sha256="claim-sha",
+    )
+    identity = SimpleNamespace(
+        collection="topic_identity_reconciliations",
+        object_id="TIR-STALE",
+        operation="retire",
+        before_revision=1,
+        before_sha256="tir-sha",
+    )
+    return SimpleNamespace(operations=(extraction, identity, *extra))
+
+
+def test_stale_topic_identity_retirement_is_rechecked_under_apply_lock() -> None:
+    stale = {
+        "reconciliation_id": "TIR-STALE",
+        "origin_batch_id": "RB-TOPIC",
+        "claim_ids": ["CL-OLD", "CL-KEPT"],
+        "status": "pending_new",
+        "review_status": "candidate",
+        "visibility": "internal",
+    }
+    PostgresKnowledgeStore._assert_stale_pending_topic_identity_retirement(
+        _ObsoleteRetirementCursor([
+            ("topic_identity_reconciliations", "TIR-STALE", stale)
+        ]),
+        _stale_topic_identity_plan(),
+        _stale_topic_identity_audit(),
+    )
+
+    with pytest.raises(ChangeSetConflict, match="no longer the audited"):
+        PostgresKnowledgeStore._assert_stale_pending_topic_identity_retirement(
+            _ObsoleteRetirementCursor([
+                (
+                    "topic_identity_reconciliations",
+                    "TIR-STALE",
+                    {**stale, "status": "resolved"},
+                )
+            ]),
+            _stale_topic_identity_plan(),
+            _stale_topic_identity_audit(),
+        )
+
+
+def test_stale_topic_identity_guard_detects_omission_reappearance_and_refs() -> None:
+    stale = {
+        "reconciliation_id": "TIR-OTHER",
+        "origin_batch_id": "RB-TOPIC",
+        "claim_ids": ["CL-OLD"],
+        "status": "pending_match",
+        "review_status": "candidate",
+        "visibility": "internal",
+    }
+    no_identity_plan = SimpleNamespace(
+        operations=(_stale_topic_identity_plan().operations[0],)
+    )
+    with pytest.raises(ChangeSetConflict, match="omitted stale identity"):
+        PostgresKnowledgeStore._assert_stale_pending_topic_identity_retirement(
+            _ObsoleteRetirementCursor([
+                ("topic_identity_reconciliations", "TIR-OTHER", stale)
+            ]),
+            no_identity_plan,
+            _stale_topic_identity_audit(status="not_needed"),
+        )
+
+    audited = {
+        **stale,
+        "reconciliation_id": "TIR-STALE",
+    }
+    with pytest.raises(ChangeSetConflict, match="PD-OUTSIDE"):
+        PostgresKnowledgeStore._assert_stale_pending_topic_identity_retirement(
+            _ObsoleteRetirementCursor([
+                ("topic_identity_reconciliations", "TIR-STALE", audited),
+                ("product_dependencies", "PD-OUTSIDE", {"ids": ["TIR-STALE"]}),
+            ]),
+            _stale_topic_identity_plan(),
+            _stale_topic_identity_audit(),
+        )
 
 
 def test_retiring_a_source_alias_cannot_leave_semantic_master_data_on_it() -> None:
