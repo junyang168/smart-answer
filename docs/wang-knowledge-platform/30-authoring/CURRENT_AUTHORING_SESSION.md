@@ -6,12 +6,14 @@
 > **與代碼對齊**：不適用
 > **權威範圍**：無。本文只說明此刻已發布什麼，不定規則。
 
-Updated: 2026-09-01 (America/Chicago)
+Updated: 2026-09-02 (America/Chicago)
 
 ## 2026-09-01 authoring-line decision
 
-The owner retired the Brief-based theological topic essay line in #343. New
-topic essays use draft-first only. The deterministic evidence packet compiler
+The owner retired the Brief-based theological topic essay line in #343 and,
+on 2026-09-01, also retired the CompositionPlan-based Matthew exposition line.
+New topic essays and Matthew exposition articles use draft-first only. The
+deterministic evidence packet compiler
 remains shared infrastructure under
 `backend.pipeline.theological_evidence_packet_runner`; it compiles the reviewed
 Structure, CVP, ArgumentRoute, Claim, source fragment, and complete originals
@@ -19,17 +21,37 @@ into one SHA-bound packet before any author model is called. Historical Brief
 artifacts and their admin review rendering remain readable, but no live runner,
 prompt, or operator command can create another Brief-based essay.
 
-This decision does **not** retire `CompositionPlan` from Matthew exposition or
-micro-sermons. Their current authoring flows and the Matthew progress read model
-continue unchanged. Only the theological-topic Brief writer and the generic
-article workbench's use of every stored plan as an unwritten-topic queue are
-retired.
+Historical Brief and Matthew CompositionPlan artifacts remain readable as
+provenance for earlier publications, but they are not an authoring queue and
+must not authorize another manuscript. The active `CP-matthew-*` records and
+their plan-local candidate projections were retired from PostgreSQL after the
+owner found that this decision had not been reflected in stored data. Source
+Claims, Canonical Viewpoints, published artifacts, and micro-sermon plans were
+not retired by that cleanup. The legacy Matthew runner still requires a
+CompositionPlan; until its draft-first replacement is implemented, do not use
+that runner to generate a new Matthew manuscript.
 
 ## Project boundary
 
-This session belongs to Wang Knowledge Platform, not notes-to-sermon-agent. Do not run notes-to-sermon fidelity audit, source reconstruction, or article generation outside the Matthew exposition runner.
+This session belongs to Wang Knowledge Platform, not notes-to-sermon-agent. Do
+not run notes-to-sermon fidelity audit or source reconstruction. Do not generate
+another Matthew article until the draft-first Matthew entry point exists; the
+legacy Matthew exposition runner is not current authorization.
 
-The first active exegesis CanonicalViewpoint is now end-to-end master data: `CV-59fdfc87534d1f17fc9f` (“太 16:18 的磐石不指彼得本人”), system-approved by the formal atomic gate and applied to PostgreSQL. Its active composition projection is `matthew16-viewpoint-pilot-rock-v14-active-composition-projection-2026-08-23/composition-projection.json`, SHA-256 `78ed881b55ac2a6598c25b8a1a89ecedc3f2b9495f760659ab82ed70a7baf701`. `CP-matthew-16-13-20` passed a no-model/no-publication packet dry-run with that projection. Before the next real Matthew run, read `canonical_viewpoint_design.md` section 13.12: article sections must report exact `viewpoint_revision_ids_used`, while every reader-visible assertion still needs source Claim provenance. Do not start a second viewpoint until this first one has been exercised by the intended article generation or revision run.
+The first active exegesis CanonicalViewpoint is now end-to-end master data:
+`CV-59fdfc87534d1f17fc9f` (“太 16:18 的磐石不指彼得本人”), system-approved
+by the formal atomic gate and applied to PostgreSQL. The historical composition
+projection
+`matthew16-viewpoint-pilot-rock-v14-active-composition-projection-2026-08-23/composition-projection.json`,
+SHA-256 `78ed881b55ac2a6598c25b8a1a89ecedc3f2b9495f760659ab82ed70a7baf701`,
+and its no-model/no-publication `CP-matthew-16-13-20` packet dry-run remain
+reproducible records, but neither is active authorization. Before the
+draft-first Matthew runtime uses this viewpoint, read
+`canonical_viewpoint_design.md` section 13.12: article sections must report
+exact `viewpoint_revision_ids_used`, while every reader-visible assertion still
+needs source Claim provenance. Do not start a second viewpoint until this first
+one has been exercised by the intended draft-first article generation or
+revision run.
 
 ## Completed articles
 
@@ -76,7 +98,10 @@ The Article 3 runtime artifacts are present under the canonical Wang platform re
 
 ## Draft-first authoring line (2026-08-30/31)
 
-A second, parallel authoring line now exists beside the briefed pipeline; neither replaces the other until the owner rules after side-by-side review.
+Draft-first is the sole live authoring line for theological topic essays and
+Matthew exposition articles. The implementation and trials described below are
+the theological-topic runtime; they do not make the legacy CompositionPlan-based
+Matthew runner eligible for new work.
 
 Generation (#283, PR #284): `draft_first_author_runner` takes a reader question, the structure's focal CVPs with modality, `structure.revision.unresolved_items` (#291) and the complete source originals, and drafts in one subscription call under twelve functional writing rules (`prompts/draft_first_topic_author.md`). No Brief, no author-declared provenance. Production author model is `claude-opus-5` by the owner's four-draft ranking; the owner's taste rulings — restraint over abundance, lean introductions, prune the professor's tangents, traditional-character prose — are encoded as rules 9–11 plus the output line. `gpt-5.6-sol` writes noticeably dry under the same rules and is not an author.
 
@@ -117,7 +142,7 @@ No cron, launchd, API, or web invocation writes this survey automatically. The c
 
 Four issues carry what the 2026-08-18 session found but did not finish. #64 is the root cause of the other authoring symptoms and should go first.
 
-- **#64** — base-manuscript sentences marked load-bearing that never entered the claim layer. Every downstream gate reads only the claim layer, so such material does not exist as far as this system is concerned. `CP-matthew-16-1-12` still has 0 of 9 required steps carrying a `claim_id`, the same mine that stopped Article 2.
+- **#64** — base-manuscript sentences marked load-bearing that never entered the claim layer. Every downstream gate reads only the claim layer, so such material does not exist as far as this system is concerned. The retired `CP-matthew-16-1-12` recorded 0 of 9 required steps carrying a `claim_id`; that is historical evidence of the gap, not a plan to resume.
 - **#65** — derived artifacts with no rebuild path. The Program Audit reported 14 errors on a sound article, every one of them the manifest describing the previous version. Its manifest-shape checks are warnings for now; restore them to errors once the manifest is derived rather than hand-maintained.
 - **#66** — the manuscript that publishes has never passed the grounding gate. The gate runs before the writing review; the revision then rewrites prose and nothing re-checks it. Article 2's publication was only safe because that check was run by hand first.
 - **#67** — sermon generation, where expansion is the form's requirement rather than a violation. Needs #64 and #66 as its foundation.
@@ -126,8 +151,12 @@ Four issues carry what the 2026-08-18 session found but did not finish. #64 is t
 
 Matthew exposition articles now publish automatically when the program verifies that every applicable rubric dimension reached its own minimum, that no hard failure was declared, and that the Program Audit is `pass` or `pass_with_warnings` with zero errors. The dimension minimums live in the quality profile (revision 4: 80% of each weight); no total score gates publication. The workflow creates `automated-publication-decision.v1`; it must not claim human approval. Repository publication is part of the authoring workflow, but source-code push and production deployment remain separate operations.
 
-For a new article, start from its existing fast-passage CompositionPlan and knowledge snapshot, confirm the article's authoring contract on that plan (base source, required argument steps, allowed/ineligible operations), and invoke `backend.pipeline.matthew_exposition_authoring_runner` with `--plan-id <CompositionPlan id>`, `--program-audit-manifest`, `--program-audit-draft-id`, `--auto-accept-maintained-findings`, `--max-revision-rounds 2`, and `--max-grounding-attempts 4`. Omitting `--knowledge` compiles the snapshot from the store and writes it to the run directory as `compiled-knowledge-snapshot.json`, which is what the Program Audit reads; the two must be the same snapshot or the audit judges material the author never saw. Long runs get reaped when started as a tracked background task — launch detached and poll instead.
-
-The authoring contract now lives on the CompositionPlan in PostgreSQL, not in a `base-manuscript-contract-input.json` beside the staging artifacts. `--plan` / `--base-contract` still read those files for articles not yet migrated, and are mutually exclusive with `--plan-id`. Migrate an existing contract with `backend.pipeline.authoring_contract_migration`, which verifies every `source_excerpt` is still a verbatim substring of the manuscript it names before writing anything.
+Do not start a new Matthew article from a fast-passage CompositionPlan or invoke
+the legacy `backend.pipeline.matthew_exposition_authoring_runner` merely because
+it can still read `--plan-id`, `--plan`, or `--base-contract`. Those interfaces
+are historical implementation, not current authorization. New Matthew
+authoring must wait for the draft-first Matthew entry point to compile the same
+SHA-bound knowledge and complete originals required by the architecture. This
+does not block source extraction, knowledge review, or Canonical Viewpoint work.
 
 Reviewer-call invariant: one Independent Editorial Review for the initial draft, then exactly one Final Delta Review per revision. A Delta Review must return any next-round findings in the same response. Never add a Score-Gap Review or send a revised manuscript back through full Editorial Review.
