@@ -144,7 +144,6 @@ def test_sentence_range_chunks_keep_disjoint_parent_audit_ids() -> None:
         source,
         plan.sections[0],
         first_sentences,
-        [EditorialHeading(0, 2, "第一部分")],
     )
     assert "第一句。  \n第二句。" in prompt
     assert "第三句。" not in prompt
@@ -163,6 +162,28 @@ def test_unchanged_cap_does_not_change_section_identity() -> None:
     )
     assert capped is uncapped or capped == uncapped
     assert capped.identity() == uncapped.identity()
+
+
+def test_title_and_origin_do_not_change_model_section_identity() -> None:
+    first = SectionPlan(
+        sections=(Section(index=1, start=0, end=3, title="旧标题"),),
+        origin=FROM_SOURCE,
+    )
+    renamed = SectionPlan(
+        sections=(Section(index=1, start=0, end=3, title="新标题"),),
+        origin=FROM_GENERATOR,
+    )
+    moved = SectionPlan(
+        sections=(
+            Section(index=1, start=0, end=2, title="第一节"),
+            Section(index=2, start=2, end=3, title="第二节"),
+        ),
+        origin=FROM_SOURCE,
+    )
+
+    assert first.generation_identity() == renamed.generation_identity()
+    assert first.identity() != renamed.identity()
+    assert first.generation_identity() != moved.generation_identity()
 
 
 def test_same_boundary_keeps_legacy_deepest_title_identity() -> None:

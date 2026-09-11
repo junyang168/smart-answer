@@ -74,7 +74,7 @@
 - 每个 question、position、observation、evidence_step 至少一个 anchor。
 - `segment_index` 必须使用输入中的 S0001、S0002 等定位码。
 - `verbatim_excerpt` 必须是同一 segment 中连续、逐字复制的原文；不可改字、补标点或用省略号拼接。
-- 时间码由来源 segment 决定，不要自行估算。
+- 时间码由编译器从权威来源 segment 确定；所有 anchor 的 `start_time` 和 `end_time` 都输出 null，不要复制或估算。
 
 ID 使用本章节内部稳定前缀：Q001、POS001、OBS001、E001、CL001、ER001、CR001。章节前缀由合并阶段加上，你不必自行区分章节。不要把不同对象共用一个 ID。
 

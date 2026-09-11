@@ -1,11 +1,12 @@
 {
   "schema_version": "wang_research_batch_v1",
   "batch_id": "RB-CLAIM-REPAIR-TAKEOVER-358-20260911",
-  "purpose": "Issue #358 takeover of the four unresolved claim-layer sources previously assigned to #357; no CVR or topic induction.",
+  "purpose": "Issue #358 takeover of the unresolved claim-layer sources and the two sources previously excluded from its normal batch; no CVR or topic induction.",
   "semantic_assumption": "none",
   "transcript_ids": [
     "2019-4-14 罗4 1-25 因信成义",
     "2017 NYSC 專題：馬太福音釋經（六）3",
+    "S 200621",
     "2019-3-31 宗主国与附庸国的约",
     "2022年 NYSC 專題 馬太福音釋經（九）王守仁 教授  第二堂"
   ],

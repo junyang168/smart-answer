@@ -113,20 +113,34 @@ class SectionPlan:
     split_lineage: tuple[dict[str, Any], ...] = ()
 
     def identity(self) -> dict[str, Any]:
-        """What has to enter the extraction fingerprint.
+        """Auditable plan identity, including editor-authored display labels."""
+
+        return {
+            **self.generation_identity(),
+            "origin": self.origin,
+            "titles_sha256": hashlib.sha256(
+                json.dumps(
+                    [s.title for s in self.sections], ensure_ascii=False
+                ).encode("utf-8")
+            ).hexdigest(),
+        }
+
+    def generation_identity(self) -> dict[str, Any]:
+        """Only the topology that changes what source text a model sees.
 
         Without it, a source resegmented by a later generator run reads as the
         same extraction and is skipped, leaving a package in staging that
         answers a question nobody is asking any more.
+
+        Titles and provenance are deliberately absent.  They are editorial
+        labels, not professor-authored source, and the extraction renderer does
+        not send them to the model.  Renaming a heading can therefore rebuild
+        package/display metadata without minting a new claim generation.
         """
 
         identity = {
-            "origin": self.origin,
             "section_count": len(self.sections),
-            "boundaries": [section.start for section in self.sections],
-            "titles_sha256": hashlib.sha256(
-                json.dumps([s.title for s in self.sections], ensure_ascii=False).encode("utf-8")
-            ).hexdigest()[:16],
+            "sections": [section_generation_payload(section) for section in self.sections],
         }
         # Preserve the legacy identity for the default `##` plan.  Existing
         # completed sources must not rerun merely because an opt-in guard was
@@ -159,6 +173,14 @@ def breadcrumb_for(headings: Sequence[EditorialHeading], position: int) -> str:
         chain = {depth: title for depth, title in chain.items() if depth < heading.level}
         chain[heading.level] = heading.title
     return " > ".join(chain[depth] for depth in sorted(chain))
+
+
+def section_generation_payload(section: Section) -> dict[str, Any]:
+    """The section coordinates used by extraction, without its display title."""
+
+    payload = section_payload(section)
+    payload.pop("title", None)
+    return payload
 
 
 def sections_from_headings(
@@ -702,6 +724,7 @@ def load_cached_plan(
     path: Path, source_sha256: str, *, level: int = DEFAULT_SECTION_LEVEL,
     max_section_sentences: int | None = None,
     editorial_structure_sha256: str | None = None,
+    editorial_topology_sha256: str | None = None,
     accept_any_max: bool = False,
 ) -> SectionPlan | None:
     """Load a plan bound to the exact spoken-source body identity."""
@@ -716,11 +739,20 @@ def load_cached_plan(
     if recorded_source_sha256 != source_sha256:
         return None
     recorded_structure_sha256 = payload.get("editorial_structure_sha256")
-    if (
+    recorded_topology_sha256 = payload.get("editorial_topology_sha256")
+    if recorded_topology_sha256 is not None:
+        if (
+            editorial_topology_sha256 is None
+            or recorded_topology_sha256 != editorial_topology_sha256
+        ):
+            return None
+    elif (
         recorded_structure_sha256 is not None
         and editorial_structure_sha256 is not None
         and recorded_structure_sha256 != editorial_structure_sha256
     ):
+        # Legacy plans have no label-free topology identity. Fail closed once;
+        # the caller can deterministically rebuild a source-heading plan.
         return None
     cached_level = int(payload.get("section_level", DEFAULT_SECTION_LEVEL))
     cached_max = payload.get("max_section_sentences")
@@ -751,6 +783,7 @@ def save_plan(
     *,
     source_file_sha256: str | None = None,
     editorial_structure_sha256: str | None = None,
+    editorial_topology_sha256: str | None = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     content = (
@@ -760,6 +793,7 @@ def save_plan(
                 "source_body_sha256": source_sha256,
                 "source_file_sha256": source_file_sha256,
                 "editorial_structure_sha256": editorial_structure_sha256,
+                "editorial_topology_sha256": editorial_topology_sha256,
                 "locator_space": LOCATOR_SPACE,
                 "origin": plan.origin,
                 "section_level": plan.level,

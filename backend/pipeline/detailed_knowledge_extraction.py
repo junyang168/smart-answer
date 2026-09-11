@@ -58,8 +58,11 @@ ANCHOR_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
     "properties": {
         "segment_index": {"type": "string"},
-        "start_time": {"type": ["number", "null"]},
-        "end_time": {"type": ["number", "null"]},
+        # Media timing is compiled deterministically from the authoritative
+        # source row.  Letting a content model copy it made a timing-only
+        # publish change the model input/output and therefore claim identity.
+        "start_time": {"type": "null"},
+        "end_time": {"type": "null"},
         "verbatim_excerpt": {"type": "string"},
     },
     "required": ["segment_index", "start_time", "end_time", "verbatim_excerpt"],
@@ -381,15 +384,9 @@ def extraction_identity(
     # failure the `section_plan` note above describes, one level down.
     if source_text_sha256 is not None:
         generation["source_text_sha256"] = source_text_sha256
-    # Editorial headings are visible context and may change grouping, but they
-    # are not source text.  Give them their own identity so renaming a heading
-    # invalidates model output without changing source anchors or body SHA.
-    if editorial_structure_sha256 is not None:
-        generation["editorial_structure_sha256"] = editorial_structure_sha256
-    # The document header (including its editorial title) and the renderer
-    # contract both affect the bytes shown to the model. They are deliberately
-    # separate from source identity: changing either invalidates model output,
-    # but can never renumber or stale a source anchor.
+    # The model header and renderer contract affect the exact bytes shown to
+    # the model.  The caller deliberately keeps editorial titles, source ids,
+    # paragraph indexes and media timing out of that header/input.
     if model_context_sha256 is not None:
         generation["model_context_sha256"] = model_context_sha256
     if model_input_contract_version is not None:
@@ -403,17 +400,47 @@ def extraction_identity(
     # to prevent API and subscription runs from sharing a semantic cache.
     if backend is not None:
         generation["backend"] = backend
+    model_contract = {
+        key: generation[key]
+        for key in (
+            "prompt_sha256",
+            "model_id",
+            "reasoning_effort",
+            "max_output_tokens",
+            "schema_version",
+            "response_schema_sha256",
+            "model_context_sha256",
+            "model_input_contract_version",
+            "backend",
+        )
+        if key in generation
+    }
+    generation["model_contract_fingerprint_sha256"] = hashlib.sha256(
+        json.dumps(
+            model_contract,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
     generation_fingerprint = hashlib.sha256(
         json.dumps(generation, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
-    full = {"source_sha256": source_sha256, **generation, "generation_fingerprint_sha256": generation_fingerprint}
+    full = {
+        "source_sha256": source_sha256,
+        **generation,
+        "generation_fingerprint_sha256": generation_fingerprint,
+    }
     # These inputs change the compiled artifact, not what any individual
     # section model call sees. Keep them out of `generation_fingerprint` so a
     # compiler-only rebuild can reuse the exact validated section responses
-    # without spending another model call. The physical mixed JSON hash is
-    # different: it is read-time provenance only. Editorial comments live in
-    # that container but are neither source nor model context, so their edit
-    # must not create a new package or semantic record generation.
+    # without spending another model call. Editorial labels and the physical
+    # mixed-container SHA belong here: changing either refreshes package
+    # provenance/display data but must not mint a new claim generation.
+    if editorial_structure_sha256 is not None:
+        full["editorial_structure_sha256"] = editorial_structure_sha256
+    if source_file_sha256 is not None:
+        full["source_file_sha256"] = source_file_sha256
     if package_compiler_version is not None:
         full["package_compiler_version"] = package_compiler_version
     if section_scope is not None:
@@ -421,8 +448,6 @@ def extraction_identity(
     full["fingerprint_sha256"] = hashlib.sha256(
         json.dumps(full, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
-    if source_file_sha256 is not None:
-        full["source_file_sha256"] = source_file_sha256
     return full
 
 
@@ -487,6 +512,10 @@ def validate_response(
             anchor_errors.append(f"{owner}: at least one source anchor is required")
             return
         for anchor in anchors:
+            if anchor.get("start_time") is not None or anchor.get("end_time") is not None:
+                anchor_errors.append(
+                    f"{owner}: model anchor timing must be null; the compiler derives it"
+                )
             locator = str(anchor.get("segment_index") or "")
             if locator not in segments:
                 anchor_errors.append(f"{owner}: missing segment {locator}")

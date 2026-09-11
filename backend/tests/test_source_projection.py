@@ -44,6 +44,11 @@ def test_editorial_rows_never_change_spoken_body_identity_or_coordinates() -> No
 
     assert titled.body_rows == plain.body_rows == renamed_and_moved.body_rows
     assert titled.body_sha256 == plain.body_sha256 == renamed_and_moved.body_sha256
+    assert (
+        titled.spoken_text_sha256
+        == plain.spoken_text_sha256
+        == renamed_and_moved.spoken_text_sha256
+    )
     assert titled.editorial_structure_sha256 != renamed_and_moved.editorial_structure_sha256
 
     same_titles_different_comments = project_script([
@@ -68,6 +73,43 @@ def test_editorial_rows_never_change_spoken_body_identity_or_coordinates() -> No
     ])
     assert markdown_comment.headings == titled.headings
     assert markdown_comment.editorial_structure_sha256 == titled.editorial_structure_sha256
+
+
+def test_timing_changes_anchor_binding_but_not_spoken_text_identity() -> None:
+    before = project_script(_body_rows())
+    changed = [dict(row) for row in _body_rows()]
+    changed[0]["start_time"] = 37
+    changed[0]["end_time"] = 42
+    after = project_script(changed)
+
+    assert before.spoken_text_sha256 == after.spoken_text_sha256
+    assert before.body_sha256 != after.body_sha256
+
+
+def test_heading_rename_preserves_topology_but_boundary_move_does_not() -> None:
+    body = _body_rows()
+    first = project_script([
+        {"type": "subtitle", "text": "## 旧标题"},
+        body[0],
+        {"type": "subtitle", "text": "## 第二节"},
+        *body[1:],
+    ])
+    renamed = project_script([
+        {"type": "subtitle", "text": "## 新标题"},
+        body[0],
+        {"type": "subtitle", "text": "## 第二节改名"},
+        *body[1:],
+    ])
+    moved = project_script([
+        {"type": "subtitle", "text": "## 新标题"},
+        *body[:2],
+        {"type": "subtitle", "text": "## 第二节改名"},
+        body[2],
+    ])
+
+    assert first.editorial_topology_sha256 == renamed.editorial_topology_sha256
+    assert first.editorial_structure_sha256 != renamed.editorial_structure_sha256
+    assert first.editorial_topology_sha256 != moved.editorial_topology_sha256
 
 
 def test_legacy_empty_content_row_in_subtitle_index_namespace_is_editorial() -> None:
@@ -168,7 +210,7 @@ def test_section_boundaries_are_body_coordinates_and_headings_are_not_sentences(
     assert [row.text for row in sentences] == ["第一句。", "第二句。", "第三句。"]
 
 
-def test_prompt_labels_titles_as_non_source_and_never_renders_them_as_segments() -> None:
+def test_extraction_prompt_omits_titles_and_anchor_binding_metadata() -> None:
     projection = project_script([
         {"index": "subtitle-a", "type": "subtitle", "text": "## 编辑标题"},
         _body_rows()[0],
@@ -179,13 +221,20 @@ def test_prompt_labels_titles_as_non_source_and_never_renders_them_as_segments()
         source,
         section,
         section_sentences(source, section),
-        projection.headings,
     )
 
-    assert "编辑结构（不是教授原话，不可引用、不可作为证据锚点）" in prompt
-    assert "[位于 S0001 之前；H2] 编辑标题" in prompt
+    assert "编辑标题" not in prompt
     assert "source_index=subtitle-a" not in prompt
-    assert "[segment S0001; source_index=10" in prompt
+    assert "source_index=10" not in prompt
+    assert "; 0-5]" not in prompt
+    assert "[segment S0001]" in prompt
+
+    renamed = _section_prompt_body(
+        source,
+        Section(index=1, start=0, end=1, title="另一标题"),
+        section_sentences(source, section),
+    )
+    assert renamed == prompt
 
 
 def test_default_prompt_projection_never_turns_editorial_rows_into_segments() -> None:

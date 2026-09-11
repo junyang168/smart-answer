@@ -11,7 +11,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from dotenv import load_dotenv
 
@@ -36,13 +36,13 @@ from backend.pipeline.extraction_sections import (
     Section,
     SectionPlan,
     apply_section_limit,
-    breadcrumb_for,
     combine_sections,
     generated_plan_insertions,
     leading_untitled_body_end,
     load_cached_plan,
     plan_sections,
     save_plan,
+    section_generation_payload,
     section_payload,
     sections_from_structure,
     structure_has_section_headings,
@@ -111,9 +111,9 @@ DEFAULT_OUTPUT_DIR = wang_platform_paths().claim_layer_staging / "detailed-extra
 PROMPT_PATH = Path("backend/pipeline/prompts/detailed_knowledge_extraction.md")
 NOTES_PROMPT_PATH = Path("backend/pipeline/prompts/detailed_notes_knowledge_extraction.md")
 VALIDATION_ATTEMPTS = 4
-MODEL_INPUT_CONTRACT_VERSION = "detailed-extraction-source-projection-v1"
-PACKAGE_COMPILER_VERSION = "wang-shared-knowledge-compiler-v2"
-SECTION_CACHE_VERSION = "wang-detailed-extraction-section-cache-v1"
+MODEL_INPUT_CONTRACT_VERSION = "detailed-extraction-spoken-text-v2"
+PACKAGE_COMPILER_VERSION = "wang-shared-knowledge-compiler-v3"
+SECTION_CACHE_VERSION = "wang-detailed-extraction-section-cache-v3"
 
 
 def _atomic_artifact_write(path: Path, data: bytes) -> None:
@@ -266,7 +266,6 @@ def _section_prompt_body(
     source: dict[str, Any],
     section: Section,
     sentences: Sequence[AuditedSentence],
-    headings: Sequence[EditorialHeading] = (),
 ) -> str:
     """Render one section: its text, then the sentences it must account for.
 
@@ -279,11 +278,8 @@ def _section_prompt_body(
     script = source.get("script") or []
     if section.sentence_start is None:
         body = "\n\n".join(
-            "[segment {locator}; source_index={index}; {begin}-{finish}]\n{text}".format(
+            "[segment {locator}]\n{text}".format(
                 locator=segment_locator(position),
-                index=script[position].get("index"),
-                begin=script[position].get("start_time"),
-                finish=script[position].get("end_time"),
                 text=script[position].get("text", ""),
             )
             for position in range(section.start, section.end)
@@ -311,43 +307,23 @@ def _section_prompt_body(
                 else source_text[spans[row_start][0]:spans[row_end - 1][1]]
             )
             rendered.append(
-                "[segment {locator}; source_index={index}; {begin}-{finish}; "
-                "internal sentence-range target]\n{text}".format(
+                "[segment {locator}; internal sentence-range target]\n{text}".format(
                     locator=segment_locator(position),
-                    index=script[position].get("index"),
-                    begin=script[position].get("start_time"),
-                    finish=script[position].get("end_time"),
                     text=target_text,
                 )
             )
         body = "\n\n".join(rendered)
     listing = "\n".join(f"[{row.sentence_id}] {row.text}" for row in sentences)
-    section_label = f"本章节：{section.title}" if section.title else "本章节：（未命名）"
-    breadcrumb = breadcrumb_for(headings, section.start)
-    if breadcrumb and breadcrumb != section.title:
-        section_label += f"\n所在标题层级：{breadcrumb}"
-    structural_rows = [
-        f"[位于 {segment_locator(row.boundary)} 之前；H{row.level}] {row.title}"
-        for row in headings
-        if section.start <= row.boundary < section.end
-    ]
-    editorial_context = (
-        "===== 编辑结构（不是教授原话，不可引用、不可作为证据锚点）=====\n"
-        + section_label
-        + "\n"
-        + (
-            "本输入是系统为 transport 上限生成的内部连续分片，不是新的来源章节。"
-            "只抽取并逐句审核下方列出的目标句；相邻分片关系由后续阶段恢复。\n"
-            if section.sentence_start is not None
-            else ""
-        )
-        + ("\n".join(structural_rows) if structural_rows else "（本章节没有额外标题）")
-        + "\n\n"
+    split_context = (
+        "本输入是系统为 transport 上限生成的内部连续分片，不是新的来源章节。"
+        "只抽取并逐句审核下方列出的目标句；相邻分片关系由后续阶段恢复。\n\n"
+        if section.sentence_start is not None
+        else ""
     )
     return (
         f"范围：{segment_locator(section.start)}–{segment_locator(section.end - 1)}"
         f"（{section.length} 段）\n\n"
-        f"{editorial_context}"
+        f"{split_context}"
         f"{body}\n\n"
         f"===== 本章节全部句子（{len(sentences)} 句），每一句都必须在 sentence_audit 中出现一次 =====\n\n"
         f"{listing}"
@@ -362,8 +338,31 @@ def _section_cache_path(output_dir: Path, source_id: str, fingerprint: str, sect
     )
     return (
         output_dir / "section-cache" / _slug(source_id) / fingerprint[:16]
-        / f"p{section.index:03d}-{section.start:04d}-{section.end:04d}{sentence_suffix}.json"
+        / f"p{section.start:04d}-{section.end:04d}{sentence_suffix}.json"
     )
+
+
+def _section_cache_payload(section: Section) -> dict[str, Any]:
+    """Coordinates that make one section response reusable across plan renumbering."""
+
+    payload = section_generation_payload(section)
+    payload.pop("index", None)
+    return payload
+
+
+def _section_generation_fingerprint(
+    model_contract_fingerprint: str, model_input_sha256: str
+) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            {
+                "model_contract_fingerprint_sha256": model_contract_fingerprint,
+                "model_input_sha256": model_input_sha256,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def _section_cache_artifact_sha256(artifact: dict[str, Any]) -> str:
@@ -380,12 +379,17 @@ def _section_cache_artifact_sha256(artifact: dict[str, Any]) -> str:
 
 
 def _section_cache_artifact(
-    section: Section, response: dict[str, Any], fingerprint: str
+    section: Section,
+    response: dict[str, Any],
+    fingerprint: str,
+    *,
+    model_input_sha256: str,
 ) -> dict[str, Any]:
     artifact = {
         "schema_version": SECTION_CACHE_VERSION,
         "generation_fingerprint_sha256": fingerprint,
-        "section": section_payload(section),
+        "model_input_sha256": model_input_sha256,
+        "section": _section_cache_payload(section),
         "response": response,
     }
     artifact["artifact_sha256"] = _section_cache_artifact_sha256(artifact)
@@ -399,6 +403,7 @@ def _load_valid_section_cache(
     fingerprint: str,
     source: dict[str, Any],
     sentences: Sequence[Any],
+    model_input_sha256: str,
 ) -> dict[str, Any] | None:
     try:
         artifact = json.loads(path.read_text(encoding="utf-8"))
@@ -408,7 +413,9 @@ def _load_valid_section_cache(
             return None
         if artifact.get("generation_fingerprint_sha256") != fingerprint:
             return None
-        if artifact.get("section") != section_payload(section):
+        if artifact.get("model_input_sha256") != model_input_sha256:
+            return None
+        if artifact.get("section") != _section_cache_payload(section):
             return None
         if artifact.get("artifact_sha256") != _section_cache_artifact_sha256(artifact):
             return None
@@ -431,7 +438,6 @@ def _load_valid_section_cache(
 
 def _section_model_input_sha256s(
     source: dict[str, Any],
-    headings: Sequence[EditorialHeading],
     header: str,
     plan: SectionPlan,
 ) -> list[dict[str, Any]]:
@@ -440,20 +446,29 @@ def _section_model_input_sha256s(
     return [
         {
             "section_index": section.index,
-            "sha256": hashlib.sha256(
-                (
-                    header
-                    + _section_prompt_body(
-                        source,
-                        section,
-                        section_sentences(source, section),
-                        headings,
-                    )
-                ).encode("utf-8")
-            ).hexdigest(),
+            "sha256": _section_model_input_sha256(
+                source,
+                header,
+                section,
+                section_sentences(source, section),
+            ),
         }
         for section in plan.sections
     ]
+
+
+def _section_model_input_sha256(
+    source: dict[str, Any],
+    header: str,
+    section: Section,
+    sentences: Sequence[Any],
+) -> str:
+    return hashlib.sha256(
+        (
+            header
+            + _section_prompt_body(source, section, sentences)
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def _subtitle_provider(source_id: str, client: CodexSubscriptionClient | None = None):
@@ -784,11 +799,23 @@ def resolve_section_plan(
     # and silently replace its frozen editorial boundaries.
     cached = preferred_plan
     cached_used_legacy_physical_identity = False
+    cached_needs_identity_upgrade = False
+    if path.is_file():
+        try:
+            cached_needs_identity_upgrade = (
+                json.loads(path.read_text(encoding="utf-8")).get(
+                    "editorial_topology_sha256"
+                )
+                is None
+            )
+        except (OSError, json.JSONDecodeError, AttributeError):
+            cached_needs_identity_upgrade = False
     if cached is None:
         cached = load_cached_plan(
             path, source_sha256, level=level,
             max_section_sentences=None,
             editorial_structure_sha256=projection.editorial_structure_sha256,
+            editorial_topology_sha256=projection.editorial_topology_sha256,
             accept_any_max=True,
         )
     if (
@@ -853,22 +880,22 @@ def resolve_section_plan(
                     origin=cached.origin,
                     level=cached.level,
                 )
-            # A normal cache hit is a true no-op. The physical mixed-container
-            # SHA may have changed only because an editor changed a comment,
-            # which is neither source nor model context. Rewrite only when an
-            # explicitly supplied pre-persistence plan must be rebound from a
-            # legacy physical SHA to the current body/editorial identities.
             if (
                 preferred_plan is not None
                 or cached_had_transport_policy
                 or cached_used_legacy_physical_identity
+                or cached_needs_identity_upgrade
             ):
+                # A successful legacy read is upgraded once with explicit
+                # body/editorial/topology bindings. Current cache hits do not
+                # rewrite merely because a comment changed the physical file.
                 save_plan(
                     path,
                     cached,
                     source_sha256,
                     source_file_sha256=source_file_sha256,
                     editorial_structure_sha256=projection.editorial_structure_sha256,
+                    editorial_topology_sha256=projection.editorial_topology_sha256,
                 )
             base_plan = cached
         else:
@@ -892,6 +919,7 @@ def resolve_section_plan(
             source_sha256,
             source_file_sha256=source_file_sha256,
             editorial_structure_sha256=projection.editorial_structure_sha256,
+            editorial_topology_sha256=projection.editorial_topology_sha256,
         )
     if max_section_sentences is None:
         return base_plan
@@ -910,20 +938,18 @@ def reusable_generated_plan(
     """Return the frozen generated plan only when it can title this exact source."""
 
     path = output_dir / "section-plans" / f"{_slug(source_id)}.json"
+    projection = project_script(source.get("script"))
     plan = load_cached_plan(
         path, source_sha256, level=level,
         max_section_sentences=None,
-        editorial_structure_sha256=project_script(
-            source.get("script")
-        ).editorial_structure_sha256,
+        editorial_structure_sha256=projection.editorial_structure_sha256,
+        editorial_topology_sha256=projection.editorial_topology_sha256,
         accept_any_max=True,
     )
     if plan is None or plan.origin != FROM_GENERATOR:
         return None
     try:
-        generated_plan_insertions(
-            plan, list(project_script(source.get("script")).body_rows)
-        )
+        generated_plan_insertions(plan, list(projection.body_rows))
     except SectionBoundaryError:
         return None
     return plan
@@ -955,11 +981,10 @@ def _extract_sections(
     client: Stage1OpenAIClient | Stage1AnthropicClient | CodexSubscriptionClient,
     prompt: str,
     fingerprint: str,
+    cache_contract_fingerprint: str | None = None,
     force: bool,
     only: tuple[int, ...] | None = None,
     record: RunRecord | None = None,
-    fallback_cache_plan: SectionPlan | None = None,
-    fallback_cache_fingerprint: str | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Run every section, then concatenate.
 
@@ -973,25 +998,30 @@ def _extract_sections(
     usage_rows: list[dict[str, Any]] = []
     section_rows: list[dict[str, Any]] = []
     exclusions: list[dict[str, Any]] = []
-    fallback_sections = {
-        (row.start, row.end, row.title): row
-        for row in (fallback_cache_plan.sections if fallback_cache_plan else ())
-        if row.sentence_start is None and row.sentence_end is None
-    }
     for section in plan.sections:
         if record is not None and record.cancel_requested():
             raise RunCancelled(f"cancel requested before section {section.index}")
         if only is not None and section.index not in only:
             continue
-        cache_path = _section_cache_path(output_dir, source_id, fingerprint, section)
         sentences = section_sentences(source, section)
+        model_input_sha256 = _section_model_input_sha256(
+            source, header, section, sentences
+        )
+        section_fingerprint = _section_generation_fingerprint(
+            cache_contract_fingerprint or fingerprint,
+            model_input_sha256,
+        )
+        cache_path = _section_cache_path(
+            output_dir, source_id, section_fingerprint, section
+        )
         if cache_path.is_file() and not force:
             cached = _load_valid_section_cache(
                 cache_path,
                 section=section,
-                fingerprint=fingerprint,
+                fingerprint=section_fingerprint,
                 source=source,
                 sentences=sentences,
+                model_input_sha256=model_input_sha256,
             )
             if cached is not None:
                 print(json.dumps({
@@ -1005,53 +1035,12 @@ def _extract_sections(
                     ledger_sentence_id=ledger_sentence_id))
                 section_rows.append({**section_payload(section), "attempts": 0, "cached": True})
                 continue
-        fallback_section = (
-            fallback_sections.get((section.start, section.end, section.title))
-            if section.sentence_start is None
-            and fallback_cache_fingerprint is not None
-            and not force
-            else None
-        )
-        if fallback_section is not None:
-            fallback_cache_path = _section_cache_path(
-                output_dir,
-                source_id,
-                fallback_cache_fingerprint,
-                fallback_section,
-            )
-            if fallback_cache_path.is_file():
-                cached = _load_valid_section_cache(
-                    fallback_cache_path,
-                    section=fallback_section,
-                    fingerprint=fallback_cache_fingerprint,
-                    source=source,
-                    sentences=sentences,
-                )
-                if cached is not None:
-                    print(json.dumps({
-                        "phase": "extraction", "source": source_id,
-                        "section": section.index, "sections": len(plan.sections),
-                        "status": "cached_from_base_plan",
-                    }, ensure_ascii=False), flush=True)
-                    answered.append((section, cached))
-                    exclusions.extend(exclusions_from_audit(
-                        cached, sentences, source_id=exclusion_source_id,
-                        ledger_sentence_id=ledger_sentence_id))
-                    section_rows.append({
-                        **section_payload(section),
-                        "attempts": 0,
-                        "cached": True,
-                        "cache_origin": "fallback_base_plan",
-                    })
-                    continue
         print(json.dumps({
             "phase": "extraction", "source": source_id,
             "section": section.index, "sections": len(plan.sections),
             "title": section.title, "sentences": len(sentences), "status": "started",
         }, ensure_ascii=False), flush=True)
-        user_input = header + _section_prompt_body(
-            source, section, sentences, headings
-        )
+        user_input = header + _section_prompt_body(source, section, sentences)
         last_error: DetailedExtractionValidationError | None = None
         last_candidate: dict[str, Any] | None = None
         response, attempts = None, 0
@@ -1109,7 +1098,13 @@ def _extract_sections(
             )
         _archive(cache_path)
         _atomic_json_artifact_write(
-            cache_path, _section_cache_artifact(section, response, fingerprint)
+            cache_path,
+            _section_cache_artifact(
+                section,
+                response,
+                section_fingerprint,
+                model_input_sha256=model_input_sha256,
+            ),
         )
         answered.append((section, response))
         exclusions.extend(exclusions_from_audit(
@@ -1124,12 +1119,11 @@ def _anchored_fragment(
     fragment_id: str,
     source_id: str,
     anchor: dict[str, Any],
-    transcript: dict[str, Any],
+    source_rows: Sequence[dict[str, Any]],
     source_sha256: str,
     extraction_section_index: int | None = None,
 ) -> dict[str, Any]:
-    ordinal = int(anchor["segment_index"][1:]) - 1
-    paragraph = transcript["script"][ordinal]
+    paragraph = _anchor_source_row(source_rows, anchor)
     paragraph_text = str(paragraph.get("text") or "")
     excerpt = anchor["verbatim_excerpt"]
     fragment = {
@@ -1151,18 +1145,99 @@ def _anchored_fragment(
     return fragment
 
 
+_SOURCE_LOCATOR = re.compile(r"^S([0-9]{4,})$")
+
+
+def _anchor_source_row(
+    source_rows: Sequence[dict[str, Any]], anchor: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Resolve an S locator only in projected spoken-body coordinates."""
+
+    locator = str(anchor.get("segment_index") or "")
+    match = _SOURCE_LOCATOR.fullmatch(locator)
+    if match is None:
+        raise DetailedExtractionValidationError(
+            f"invalid spoken-source locator {locator!r}"
+        )
+    ordinal = int(match.group(1)) - 1
+    if ordinal < 0 or ordinal >= len(source_rows):
+        raise DetailedExtractionValidationError(
+            f"spoken-source locator {locator!r} is outside 1..{len(source_rows)}"
+        )
+    return source_rows[ordinal]
+
+
 def compile_package(
     *, transcript_id: str, transcript_path: Path, transcript: dict[str, Any], raw: bytes,
     response: dict[str, Any], extraction: dict[str, Any],
     source_body_sha256: str | None = None,
     source_file_sha256: str | None = None,
     editorial_structure_sha256: str | None = None,
+    editorial_topology_sha256: str | None = None,
     source_descriptor: dict[str, Any] | None = None,
     usage_rows: list[dict[str, Any]] | None = None,
     section_rows: list[dict[str, Any]] | None = None,
     exclusions: list[dict[str, Any]] | None = None,
     complete: bool = True,
 ) -> dict[str, Any]:
+    projection = project_script(transcript.get("script"))
+    source_rows = projection.body_rows
+    declared_body_bindings = [
+        value
+        for value in (
+            extraction.get("source_sha256"),
+            extraction.get("source_body_sha256"),
+            source_body_sha256,
+        )
+        if value is not None
+    ]
+    if (
+        extraction.get("source_sha256") is None
+        or any(str(value) != projection.body_sha256 for value in declared_body_bindings)
+    ):
+        raise DetailedExtractionValidationError(
+            "extraction anchor binding does not match the current spoken-body projection"
+        )
+    expected_body_sha256 = projection.body_sha256
+    expected_text_sha256 = extraction.get("source_text_sha256")
+    if (
+        not isinstance(expected_text_sha256, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", expected_text_sha256)
+        or expected_text_sha256 != projection.spoken_text_sha256
+    ):
+        raise DetailedExtractionValidationError(
+            "extraction spoken-text identity is missing or does not match the current source"
+        )
+    current_file_sha256 = hashlib.sha256(raw).hexdigest()
+    optional_bindings = (
+        (
+            "source file",
+            current_file_sha256,
+            (extraction.get("source_file_sha256"), source_file_sha256),
+        ),
+        (
+            "editorial structure",
+            projection.editorial_structure_sha256,
+            (
+                extraction.get("editorial_structure_sha256"),
+                editorial_structure_sha256,
+            ),
+        ),
+        (
+            "editorial topology",
+            projection.editorial_topology_sha256,
+            (
+                extraction.get("editorial_topology_sha256"),
+                editorial_topology_sha256,
+            ),
+        ),
+    )
+    for label, current, declared in optional_bindings:
+        if any(str(value) != current for value in declared if value is not None):
+            raise DetailedExtractionValidationError(
+                f"extraction {label} binding does not match the current source"
+            )
+
     # Model-facing IDs are intentionally short so the JSON remains tractable.
     # Namespace them here before a package can ever be merged with another
     # sermon.  A 200-sermon corpus cannot safely contain 200 different CL001s.
@@ -1222,12 +1297,11 @@ def compile_package(
         row["to_id"] = id_maps["claim"][row["to_id"]]
 
     source_id = published_source_id(transcript_id, source_descriptor)
-    projection = project_script(transcript.get("script"))
-    source_sha256 = source_body_sha256 or projection.body_sha256
-    physical_sha256 = source_file_sha256 or hashlib.sha256(raw).hexdigest()
-    structure_sha256 = (
-        editorial_structure_sha256 or projection.editorial_structure_sha256
-    )
+    source_sha256 = expected_body_sha256
+    physical_sha256 = current_file_sha256
+    structure_sha256 = projection.editorial_structure_sha256
+    topology_sha256 = projection.editorial_topology_sha256
+    spoken_text_sha256 = expected_text_sha256
     fragments: list[dict[str, Any]] = []
     fragment_by_anchor: dict[tuple[str, str, int | None], str] = {}
     split_lineage = (
@@ -1254,7 +1328,7 @@ def compile_package(
         fragment_by_anchor[key] = fragment_id
         fragments.append(_anchored_fragment(
             fragment_id=fragment_id, source_id=source_id, anchor=anchor,
-            transcript=transcript, source_sha256=source_sha256,
+            source_rows=source_rows, source_sha256=source_sha256,
             extraction_section_index=extraction_section_index,
         ))
         return fragment_id
@@ -1291,14 +1365,19 @@ def compile_package(
         item = dict(row)
         item["title"] = item.pop("statement")
         item["claim_type"] = item.pop("claim_kind")
-        item["extraction_fingerprints"] = [extraction["fingerprint_sha256"]]
+        item["extraction_fingerprints"] = [
+            extraction.get("generation_fingerprint_sha256")
+            or extraction["fingerprint_sha256"]
+        ]
         anchors = []
         for evidence_id in item["evidence_step_ids"]:
             evidence = next(step for step in evidence_steps if step["evidence_step_id"] == evidence_id)
             for anchor in evidence_anchor_snapshots[evidence_id]:
                 anchors.append({
                     "paragraph_key": anchor["segment_index"],
-                    "media_time": anchor["start_time"],
+                    "media_time": _anchor_source_row(source_rows, anchor).get(
+                        "start_time"
+                    ),
                     "evidence_id": evidence_id,
                     "evidence_type": evidence["step_type"],
                     "speaker": evidence["speaker"],
@@ -1310,7 +1389,7 @@ def compile_package(
         item["occurrences"] = [{
             "source_id": source_key,
             "transcript_id": source_key,
-            "lecture": transcript.get("metadata", {}).get("title", transcript_id),
+            "lecture": source_key,
             "anchors": anchors,
         }]
         item["maturity"] = "candidate"
@@ -1323,8 +1402,11 @@ def compile_package(
         "title": transcript.get("metadata", {}).get("title", transcript_id),
         "source_sha256": source_sha256,
         "source_body_sha256": source_sha256,
+        "source_text_sha256": spoken_text_sha256,
+        "anchor_binding_sha256": source_sha256,
         "source_file_sha256": physical_sha256,
         "editorial_structure_sha256": structure_sha256,
+        "editorial_topology_sha256": topology_sha256,
         "locator_space": LOCATOR_SPACE,
         "extraction_record_namespace": namespace,
         "source_path": str(transcript_path),
@@ -1336,8 +1418,11 @@ def compile_package(
             "source_id": source_id,
             "source_sha256": source_sha256,
             "source_body_sha256": source_sha256,
+            "source_text_sha256": spoken_text_sha256,
+            "anchor_binding_sha256": source_sha256,
             "source_file_sha256": physical_sha256,
             "editorial_structure_sha256": structure_sha256,
+            "editorial_topology_sha256": topology_sha256,
             "locator_space": LOCATOR_SPACE,
             "extraction_record_namespace": namespace,
             "source_path": str(transcript_path),
@@ -1477,15 +1562,13 @@ def _run(
             source_sha256=source_sha256, prompt=prompt,
             model_id=client.model, reasoning_effort=reasoning_effort,
             max_output_tokens=client.max_output_tokens,
-            section_plan=plan.identity(),
-            source_text_sha256=hashlib.sha256(
-                "\n".join(_segment_texts(source_body)).encode("utf-8")
-            ).hexdigest(),
+            section_plan=plan.generation_identity(),
+            source_text_sha256=projection.spoken_text_sha256,
             editorial_structure_sha256=projection.editorial_structure_sha256,
             model_context_sha256=hashlib.sha256(header.encode("utf-8")).hexdigest(),
             model_input_contract_version=MODEL_INPUT_CONTRACT_VERSION,
             section_model_input_sha256s=_section_model_input_sha256s(
-                source_body, projection.headings, header, plan
+                source_body, header, plan
             ),
             source_file_sha256=source_file_sha256,
             package_compiler_version=PACKAGE_COMPILER_VERSION,
@@ -1496,6 +1579,9 @@ def _run(
         )
         identity["source_body_sha256"] = source_sha256
         identity["source_file_sha256"] = source_file_sha256
+        identity["editorial_topology_sha256"] = (
+            projection.editorial_topology_sha256
+        )
         return identity
 
     def existing_result(identity: dict[str, Any]) -> tuple[str, Path] | None:
@@ -1539,8 +1625,6 @@ def _run(
             return "created", output_path
         return None
 
-    fallback_cache_plan: SectionPlan | None = None
-    fallback_cache_fingerprint: str | None = None
     if sections.fallback_max_sentences is not None:
         base_plan = resolve_section_plan(
             source=source, source_id=source_id, source_sha256=source_sha256,
@@ -1555,10 +1639,6 @@ def _run(
         unchanged = existing_result(base_identity)
         if unchanged is not None:
             return unchanged
-        fallback_cache_plan = base_plan
-        fallback_cache_fingerprint = str(
-            base_identity["generation_fingerprint_sha256"]
-        )
         plan = apply_section_limit(
             base_plan,
             [
@@ -1605,26 +1685,24 @@ def _run(
         })
         return _run_extraction(
             record=record, source_id=source_id, source=source_body,
+            authoritative_source=source,
             headings=projection.headings, raw=raw,
             source_path=source_path, header=header, plan=plan, identity=identity,
             output_path=output_path, output_dir=output_dir, client=client,
             prompt=prompt, sections=sections, force=force,
             source_descriptor=source_descriptor,
-            fallback_cache_plan=fallback_cache_plan,
-            fallback_cache_fingerprint=fallback_cache_fingerprint,
         )
 
 
 def _run_extraction(
     *, record: RunRecord, source_id: str, source: dict[str, Any], raw: bytes,
+    authoritative_source: dict[str, Any] | None = None,
     headings: Sequence[EditorialHeading],
     source_path: Path, header: str, plan: SectionPlan, identity: dict[str, Any],
     output_path: Path, output_dir: Path,
     client: Stage1OpenAIClient | Stage1AnthropicClient | CodexSubscriptionClient,
     prompt: str,
     sections: "SectionSettings", force: bool, source_descriptor: dict[str, Any] | None,
-    fallback_cache_plan: SectionPlan | None = None,
-    fallback_cache_fingerprint: str | None = None,
 ) -> tuple[str, Path]:
     """The part of an extraction that is worth recording, once a row exists."""
 
@@ -1634,16 +1712,17 @@ def _run_extraction(
         source=source, headings=headings, header=header, plan=plan,
         output_dir=output_dir, client=client, prompt=prompt,
         fingerprint=identity["generation_fingerprint_sha256"], force=force,
+        cache_contract_fingerprint=identity["model_contract_fingerprint_sha256"],
         only=sections.only, record=record,
-        fallback_cache_plan=fallback_cache_plan,
-        fallback_cache_fingerprint=fallback_cache_fingerprint,
     )
     package = compile_package(
-        transcript_id=source_id, transcript_path=source_path, transcript=source,
+        transcript_id=source_id, transcript_path=source_path,
+        transcript=authoritative_source or source,
         raw=raw, response=response, extraction=identity,
         source_body_sha256=str(identity["source_body_sha256"]),
         source_file_sha256=str(identity["source_file_sha256"]),
         editorial_structure_sha256=str(identity["editorial_structure_sha256"]),
+        editorial_topology_sha256=str(identity["editorial_topology_sha256"]),
         source_descriptor=source_descriptor, usage_rows=usage_rows, section_rows=section_rows,
         exclusions=exclusions, complete=sections.only is None,
     )
@@ -1769,7 +1848,6 @@ def run_source(
     source, raw, source_path = markdown_source_document(source_descriptor)
     source_id = str(source_descriptor["source_id"])
     header = (
-        f"来源 ID：{source_id}\n标题：{source.get('metadata', {}).get('title', source_id)}\n"
         f"来源类型：{source_descriptor.get('source_type', 'notes_manuscript')}\n\n"
         "以下是该 Markdown 讲稿的一个完整章节。S 编号是全文唯一定位码，不因章节而改变。"
         "请只输出符合 schema 的完整 JSON。\n\n"
@@ -1924,7 +2002,7 @@ def run_one(
             only=section_settings.only,
         )
     header = (
-        f"逐字稿 ID：{transcript_id}\n标题：{transcript.get('metadata', {}).get('title', transcript_id)}\n\n"
+        "来源类型：sermon_transcript\n\n"
         "以下是该逐字稿的一个完整章节。S 编号是全文唯一定位码，不因章节而改变。"
         "请只输出符合 schema 的完整 JSON。\n\n"
     )

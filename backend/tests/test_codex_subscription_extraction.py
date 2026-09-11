@@ -24,6 +24,8 @@ from backend.pipeline.detailed_knowledge_extraction_runner import (
     _package_artifact_sha256,
     _section_cache_artifact,
     _section_cache_path,
+    _section_generation_fingerprint,
+    _section_model_input_sha256,
     _load_valid_section_cache,
     build_client,
     run_one,
@@ -63,28 +65,28 @@ def _response() -> dict:
             "question_id": "Q001", "text": "这表明神性吗？", "questioner": "audience",
             "question_type": "clarification", "answer_state": "answered",
             "answer_claim_ids": ["CL001"],
-            "anchors": [{"segment_index": "S0003", "start_time": 16.0,
-                         "end_time": 20.0, "verbatim_excerpt": "所以这表明神性吗？"}],
+            "anchors": [{"segment_index": "S0003", "start_time": None,
+                         "end_time": None, "verbatim_excerpt": "所以这表明神性吗？"}],
         }],
         "positions": [{
             "position_id": "POS001", "title": "人子只强调人性", "attribution": "external_view",
-            "anchors": [{"segment_index": "S0001", "start_time": 1.0,
-                         "end_time": 8.0, "verbatim_excerpt": "有人说人子只强调人性"}],
+            "anchors": [{"segment_index": "S0001", "start_time": None,
+                         "end_time": None, "verbatim_excerpt": "有人说人子只强调人性"}],
         }],
         "observations": [{
             "observation_id": "OBS001", "statement": "人子领受永远权柄",
             "observation_type": "scripture_text", "argument_role": "background",
             "scripture_refs": ["但以理书7:13-14"],
-            "anchors": [{"segment_index": "S0002", "start_time": 8.0,
-                         "end_time": 16.0, "verbatim_excerpt": "那一位人子领受永远的权柄"}],
+            "anchors": [{"segment_index": "S0002", "start_time": None,
+                         "end_time": None, "verbatim_excerpt": "那一位人子领受永远的权柄"}],
         }],
         "evidence_steps": [{
             "evidence_step_id": "E001", "statement": "教授否定只强调人性的读法",
             "step_type": "reasoning", "speaker": "professor", "stance": "asserted",
             "discourse_role": "refutation", "support_eligibility": "eligible_candidate",
             "scripture_refs": [], "produced_claim_ids": ["CL001"],
-            "anchors": [{"segment_index": "S0001", "start_time": 1.0,
-                         "end_time": 8.0, "verbatim_excerpt": "我说不对"}],
+            "anchors": [{"segment_index": "S0001", "start_time": None,
+                         "end_time": None, "verbatim_excerpt": "我说不对"}],
         }],
         "claims": [{
             "claim_id": "CL001", "statement": "那一位人子具有神性身份",
@@ -119,7 +121,12 @@ def test_section_cache_requires_self_hash_and_full_mechanical_validation(
     section = Section(index=1, start=0, end=3, title="固定章节")
     sentences = extraction_runner.section_sentences(source, section)
     response = _response()
-    artifact = _section_cache_artifact(section, response, "generation-fingerprint")
+    artifact = _section_cache_artifact(
+        section,
+        response,
+        "generation-fingerprint",
+        model_input_sha256="model-input",
+    )
     path = tmp_path / "section.json"
     path.write_text(json.dumps(artifact, ensure_ascii=False), encoding="utf-8")
 
@@ -129,6 +136,7 @@ def test_section_cache_requires_self_hash_and_full_mechanical_validation(
         fingerprint="generation-fingerprint",
         source=source,
         sentences=sentences,
+        model_input_sha256="model-input",
     ) == response
 
     artifact["response"]["claims"][0]["statement"] = "被篡改但仍是合法 JSON"
@@ -139,9 +147,15 @@ def test_section_cache_requires_self_hash_and_full_mechanical_validation(
         fingerprint="generation-fingerprint",
         source=source,
         sentences=sentences,
+        model_input_sha256="model-input",
     ) is None
 
-    restamped = _section_cache_artifact(section, _response(), "generation-fingerprint")
+    restamped = _section_cache_artifact(
+        section,
+        _response(),
+        "generation-fingerprint",
+        model_input_sha256="model-input",
+    )
     restamped["response"]["claims"][0]["evidence_step_ids"] = ["E999"]
     restamped["artifact_sha256"] = extraction_runner._section_cache_artifact_sha256(
         restamped
@@ -153,6 +167,7 @@ def test_section_cache_requires_self_hash_and_full_mechanical_validation(
         fingerprint="generation-fingerprint",
         source=source,
         sentences=sentences,
+        model_input_sha256="model-input",
     ) is None
 
 
@@ -253,13 +268,17 @@ def test_subscription_section_passes_schema_validator_and_sentence_ledger_and_th
     assert package["extraction"]["artifact_sha256"] == _package_artifact_sha256(
         package
     )
+    original_generation = package["extraction"]["generation_fingerprint_sha256"]
+    original_full_fingerprint = package["extraction"]["fingerprint_sha256"]
+    original_source_file_sha256 = package["source_documents"][0]["source_file_sha256"]
+    original_claim_ids = [row["claim_id"] for row in package["claims"]]
     assert all("OPENAI_API_KEY" not in child for child in child_environments)
     section_plan_path = next((output_dir / "section-plans").glob("*.json"))
     section_plan_before = section_plan_path.read_bytes()
     section_plan_mtime_before = section_plan_path.stat().st_mtime_ns
 
     def unexpected_run(*_args, **_kwargs):
-        raise AssertionError("a full fingerprint cache hit must not launch Codex")
+        raise AssertionError("an unchanged semantic generation must not launch Codex")
 
     monkeypatch.setattr("backend.pipeline.codex_subscription_client.subprocess.run", unexpected_run)
     fallback_status, fallback_output = run_one(
@@ -293,10 +312,67 @@ def test_subscription_section_passes_schema_validator_and_sentence_ledger_and_th
         reasoning_effort="medium", force=False,
         sections=SectionSettings(allow_generated=False),
     )
-    assert cached_status == "skipped"
+    assert cached_status == "created"
     assert cached_output == output
+    editorial_package = json.loads(output.read_text(encoding="utf-8"))
+    assert editorial_package["extraction"]["generation_fingerprint_sha256"] == original_generation
+    assert editorial_package["extraction"]["fingerprint_sha256"] != original_full_fingerprint
+    assert editorial_package["source_documents"][0]["source_file_sha256"] != original_source_file_sha256
+    assert [row["claim_id"] for row in editorial_package["claims"]] == original_claim_ids
+    assert editorial_package["claims"][0]["extraction_fingerprints"] == [original_generation]
+    assert editorial_package["sections"][0]["cached"] is True
     assert section_plan_path.read_bytes() == section_plan_before
     assert section_plan_path.stat().st_mtime_ns == section_plan_mtime_before
+
+    # A subtitle is editorial structure in the same JSON container. It may
+    # change the package provenance and the displayed section label, but not
+    # the semantic model generation or any generation-scoped record ID.
+    title_only_edit = json.loads(json.dumps(editorial_only_edit, ensure_ascii=False))
+    title_only_edit["script"].insert(
+        0,
+        {"index": "subtitle-1", "type": "subtitle", "text": "编辑标题"},
+    )
+    transcript_path.write_text(
+        json.dumps(title_only_edit, ensure_ascii=False), encoding="utf-8"
+    )
+    title_status, title_output = run_one(
+        transcript_path, output_dir=output_dir, client=fresh_client, prompt="extract",
+        reasoning_effort="medium", force=False,
+        sections=SectionSettings(allow_generated=False),
+    )
+    assert title_status == "created"
+    assert title_output == output
+    title_package = json.loads(output.read_text(encoding="utf-8"))
+    assert title_package["extraction"]["generation_fingerprint_sha256"] == original_generation
+    assert [row["claim_id"] for row in title_package["claims"]] == original_claim_ids
+    assert title_package["sections"][0]["cached"] is True
+
+    # Timing is current locator metadata, not spoken text. Recompile it from
+    # the authoritative row without asking the model to repeat its claims.
+    timing_only_edit = json.loads(json.dumps(title_only_edit, ensure_ascii=False))
+    timing_only_edit["script"][1]["start_time"] = 101.0
+    timing_only_edit["script"][1]["end_time"] = 108.0
+    transcript_path.write_text(
+        json.dumps(timing_only_edit, ensure_ascii=False), encoding="utf-8"
+    )
+    timing_status, timing_output = run_one(
+        transcript_path, output_dir=output_dir, client=fresh_client, prompt="extract",
+        reasoning_effort="medium", force=False,
+        sections=SectionSettings(allow_generated=False),
+    )
+    assert timing_status == "created"
+    assert timing_output == output
+    timing_package = json.loads(output.read_text(encoding="utf-8"))
+    assert timing_package["extraction"]["generation_fingerprint_sha256"] == original_generation
+    assert [row["claim_id"] for row in timing_package["claims"]] == original_claim_ids
+    first_spoken_fragment = next(
+        row
+        for row in timing_package["source_fragments"]
+        if row["paragraph_key"] == "S0001"
+    )
+    assert first_spoken_fragment["media_time"] == 101.0
+    assert timing_package["claims"][0]["occurrences"][0]["anchors"][0]["media_time"] == 101.0
+    assert timing_package["sections"][0]["cached"] is True
 
     # Legacy runner versions exposed the current package before coverage was
     # calculated. The exact validated model generation must be repaired
@@ -358,6 +434,74 @@ def test_subscription_fallback_limit_splits_only_after_uncapped_cache_miss(
     assert plan.split_lineage
 
 
+def test_legacy_generated_plan_title_rename_is_rebuilt_without_model_call(
+    tmp_path: Path,
+) -> None:
+    body = _transcript()["script"]
+    old_source = {
+        "metadata": {"title": "固定抽取来源", "status": "published"},
+        "script": [
+            {"index": "subtitle-1", "type": "subtitle", "text": "## 旧标题一"},
+            body[0],
+            body[1],
+            {"index": "subtitle-2", "type": "subtitle", "text": "## 旧标题二"},
+            body[2],
+        ],
+    }
+    current_source = json.loads(json.dumps(old_source, ensure_ascii=False))
+    current_source["script"][0]["text"] = "## 新标题一"
+    current_source["script"][3]["text"] = "## 新标题二"
+    old_projection = extraction_runner.project_script(old_source["script"])
+    current_projection = extraction_runner.project_script(current_source["script"])
+    legacy_plan = SectionPlan(
+        sections=(
+            Section(index=1, start=0, end=2, title="旧标题一"),
+            Section(index=2, start=2, end=3, title="旧标题二"),
+        ),
+        origin="generated_subtitles",
+    )
+    plan_path = (
+        tmp_path
+        / "section-plans"
+        / f"{extraction_runner._slug('source')}.json"
+    )
+    plan_path.parent.mkdir(parents=True)
+    plan_path.write_text(
+        json.dumps(
+            {
+                "source_body_sha256": old_projection.body_sha256,
+                "editorial_structure_sha256": old_projection.editorial_structure_sha256,
+                "origin": legacy_plan.origin,
+                "section_level": 2,
+                "max_section_sentences": None,
+                "section_strategy": None,
+                "split_lineage": [],
+                "sections": [vars(section) for section in legacy_plan.sections],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    class NoModelCall:
+        def generate_json(self, *_args, **_kwargs):
+            raise AssertionError("title rename must not regenerate section boundaries")
+
+    resolved = extraction_runner.resolve_section_plan(
+        source=current_source,
+        source_id="source",
+        source_sha256=current_projection.body_sha256,
+        output_dir=tmp_path,
+        allow_generated=True,
+        client=NoModelCall(),
+    )
+
+    assert resolved.generation_identity() == legacy_plan.generation_identity()
+    assert [section.title for section in resolved.sections] == ["新标题一", "新标题二"]
+    saved = json.loads(plan_path.read_text(encoding="utf-8"))
+    assert saved["editorial_topology_sha256"] == current_projection.editorial_topology_sha256
+
+
 def test_section_settings_rejects_two_competing_section_caps() -> None:
     with pytest.raises(ValueError, match="mutually exclusive"):
         SectionSettings(max_sentences=125, fallback_max_sentences=125)
@@ -390,12 +534,12 @@ def test_fallback_split_reuses_an_unchanged_base_section_cache(
             "observation_type": "narrative_structure",
             "argument_role": "background",
             "scripture_refs": [],
-            "anchors": [{
-                "segment_index": "S0003",
-                "start_time": 16.0,
-                "end_time": 20.0,
-                "verbatim_excerpt": "所以这表明神性吗？",
-            }],
+                "anchors": [{
+                    "segment_index": "S0003",
+                    "start_time": None,
+                    "end_time": None,
+                    "verbatim_excerpt": "所以这表明神性吗？",
+                }],
         }],
         "sentence_audit": [{
             "sentence_id": "S0003#001",
@@ -405,14 +549,26 @@ def test_fallback_split_reuses_an_unchanged_base_section_cache(
             "reason": "",
         }],
     }
-    base_fingerprint = "base-generation"
+    model_contract_fingerprint = "model-contract"
+    unchanged_sentences = extraction_runner.section_sentences(source, unchanged)
+    model_input_sha256 = _section_model_input_sha256(
+        source, "header", unchanged, unchanged_sentences
+    )
+    section_fingerprint = _section_generation_fingerprint(
+        model_contract_fingerprint, model_input_sha256
+    )
     cache_path = _section_cache_path(
-        tmp_path, "source", base_fingerprint, unchanged
+        tmp_path, "source", section_fingerprint, unchanged
     )
     cache_path.parent.mkdir(parents=True)
     cache_path.write_text(
         json.dumps(
-            _section_cache_artifact(unchanged, response, base_fingerprint),
+            _section_cache_artifact(
+                unchanged,
+                response,
+                section_fingerprint,
+                model_input_sha256=model_input_sha256,
+            ),
             ensure_ascii=False,
         ),
         encoding="utf-8",
@@ -435,10 +591,9 @@ def test_fallback_split_reuses_an_unchanged_base_section_cache(
         client=NoModelCall(),
         prompt="prompt",
         fingerprint="capped-generation",
+        cache_contract_fingerprint=model_contract_fingerprint,
         force=False,
         only=(3,),
-        fallback_cache_plan=base,
-        fallback_cache_fingerprint=base_fingerprint,
     )
 
     assert usage == []
@@ -449,9 +604,82 @@ def test_fallback_split_reuses_an_unchanged_base_section_cache(
         "title": "已完成部分",
         "attempts": 0,
         "cached": True,
-        "cache_origin": "fallback_base_plan",
     }]
     assert combined["observations"][0]["observation_id"] == "P03-OBS001"
+
+
+def test_section_cache_identity_reuses_renumbered_section_but_rejects_text_edit(
+    tmp_path: Path,
+) -> None:
+    source = _transcript()
+    old_section = Section(index=2, start=2, end=3, title="旧标题")
+    renumbered = Section(index=3, start=2, end=3, title="新标题")
+    sentences = extraction_runner.section_sentences(source, old_section)
+    response = {
+        "questions": [], "positions": [], "evidence_steps": [], "claims": [],
+        "evidence_relations": [], "claim_relations": [],
+        "observations": [{
+            "observation_id": "OBS001",
+            "statement": "听众提出问题",
+            "observation_type": "narrative_structure",
+            "argument_role": "background",
+            "scripture_refs": [],
+            "anchors": [{
+                "segment_index": "S0003", "start_time": None, "end_time": None,
+                "verbatim_excerpt": "所以这表明神性吗？",
+            }],
+        }],
+        "sentence_audit": [{
+            "sentence_id": "S0003#001", "status": "extracted",
+            "covered_by": ["OBS001"], "reason_code": None, "reason": "",
+        }],
+    }
+    contract = "model-contract"
+    old_input = _section_model_input_sha256(
+        source, "header", old_section, sentences
+    )
+    fingerprint = _section_generation_fingerprint(contract, old_input)
+    cache_path = _section_cache_path(tmp_path, "source", fingerprint, old_section)
+    cache_path.parent.mkdir(parents=True)
+    cache_path.write_text(
+        json.dumps(
+            _section_cache_artifact(
+                old_section,
+                response,
+                fingerprint,
+                model_input_sha256=old_input,
+            ),
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    assert _section_cache_path(tmp_path, "source", fingerprint, renumbered) == cache_path
+    assert _load_valid_section_cache(
+        cache_path,
+        section=renumbered,
+        fingerprint=fingerprint,
+        source=source,
+        sentences=sentences,
+        model_input_sha256=old_input,
+    ) == response
+
+    edited = json.loads(json.dumps(source, ensure_ascii=False))
+    edited["script"][2]["text"] = "听众：所以这真的表明神性吗？"
+    edited_sentences = extraction_runner.section_sentences(edited, renumbered)
+    edited_input = _section_model_input_sha256(
+        edited, "header", renumbered, edited_sentences
+    )
+    assert edited_input != old_input
+    assert _section_generation_fingerprint(contract, edited_input) != fingerprint
+    assert _load_valid_section_cache(
+        cache_path,
+        section=renumbered,
+        fingerprint=fingerprint,
+        source=edited,
+        sentences=edited_sentences,
+        model_input_sha256=edited_input,
+    ) is None
 
 
 def test_subscription_backend_changes_fingerprint_without_changing_api_identity() -> None:

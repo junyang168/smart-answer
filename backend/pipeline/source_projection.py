@@ -96,8 +96,10 @@ class SourceProjection:
 
     body_rows: tuple[dict[str, Any], ...]
     headings: tuple[EditorialHeading, ...]
+    spoken_text_sha256: str
     body_sha256: str
     editorial_structure_sha256: str
+    editorial_topology_sha256: str
 
 
 def _canonical_body_row(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -148,15 +150,22 @@ def project_script(script: Any) -> SourceProjection:
         body.append(row)
 
     canonical_body = [_canonical_body_row(row) for row in body]
+    canonical_spoken_text = [str(row.get("text") or "") for row in body]
     canonical_structure = [
         {"boundary": row.boundary, "level": row.level, "title": row.title}
+        for row in headings
+    ]
+    canonical_topology = [
+        {"boundary": row.boundary, "level": row.level}
         for row in headings
     ]
     return SourceProjection(
         body_rows=tuple(body),
         headings=tuple(headings),
+        spoken_text_sha256=_sha256_json(canonical_spoken_text),
         body_sha256=_sha256_json(canonical_body),
         editorial_structure_sha256=_sha256_json(canonical_structure),
+        editorial_topology_sha256=_sha256_json(canonical_topology),
     )
 
 
@@ -248,6 +257,6 @@ def source_body_sha256(script: Any) -> str:
 
 
 def editorial_structure_sha256(script: Any) -> str:
-    """The identity of model-visible editorial boundaries and labels."""
+    """The audit/display identity of editorial boundaries and labels."""
 
     return project_script(script).editorial_structure_sha256

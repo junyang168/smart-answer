@@ -46,20 +46,20 @@ def _response() -> dict:
             {
                 "question_id": "Q001", "text": "这表明神性吗？", "questioner": "audience",
                 "question_type": "clarification", "answer_state": "answered", "answer_claim_ids": ["CL001"],
-                "anchors": [{"segment_index": "S0003", "start_time": 16.0, "end_time": 20.0, "verbatim_excerpt": "所以这表明神性吗？"}],
+                "anchors": [{"segment_index": "S0003", "start_time": None, "end_time": None, "verbatim_excerpt": "所以这表明神性吗？"}],
             }
         ],
         "positions": [
             {
                 "position_id": "POS001", "title": "人子只强调人性", "attribution": "external_view",
-                "anchors": [{"segment_index": "S0001", "start_time": 1.0, "end_time": 8.0, "verbatim_excerpt": "有人说人子只强调人性"}],
+                "anchors": [{"segment_index": "S0001", "start_time": None, "end_time": None, "verbatim_excerpt": "有人说人子只强调人性"}],
             }
         ],
         "observations": [
             {
                 "observation_id": "OBS001", "statement": "人子领受永远权柄", "observation_type": "scripture_text", "argument_role": "background",
                 "scripture_refs": ["但以理书7:13-14"],
-                "anchors": [{"segment_index": "S0002", "start_time": 8.0, "end_time": 16.0, "verbatim_excerpt": "那一位人子领受永远的权柄"}],
+                "anchors": [{"segment_index": "S0002", "start_time": None, "end_time": None, "verbatim_excerpt": "那一位人子领受永远的权柄"}],
             }
         ],
         "evidence_steps": [
@@ -67,13 +67,13 @@ def _response() -> dict:
                 "evidence_step_id": "E001", "statement": "教授否定只强调人性的读法", "step_type": "reasoning",
                 "speaker": "professor", "stance": "asserted", "discourse_role": "refutation",
                 "support_eligibility": "eligible_candidate", "scripture_refs": [], "produced_claim_ids": ["CL001"],
-                "anchors": [{"segment_index": "S0001", "start_time": 1.0, "end_time": 8.0, "verbatim_excerpt": "我说不对"}],
+                "anchors": [{"segment_index": "S0001", "start_time": None, "end_time": None, "verbatim_excerpt": "我说不对"}],
             },
             {
                 "evidence_step_id": "E002", "statement": "听众追问神性", "step_type": "dialogue_context",
                 "speaker": "audience", "stance": "questioned", "discourse_role": "audience_question",
                 "support_eligibility": "context_only", "scripture_refs": [], "produced_claim_ids": [],
-                "anchors": [{"segment_index": "S0003", "start_time": 16.0, "end_time": 20.0, "verbatim_excerpt": "所以这表明神性吗？"}],
+                "anchors": [{"segment_index": "S0003", "start_time": None, "end_time": None, "verbatim_excerpt": "所以这表明神性吗？"}],
             },
         ],
         "claims": [
@@ -88,6 +88,22 @@ def _response() -> dict:
         ],
         "claim_relations": [],
     }
+
+
+def _bound_extraction_identity(
+    transcript: dict, **overrides: object
+) -> dict:
+    projection = project_script(transcript["script"])
+    values = {
+        "source_sha256": projection.body_sha256,
+        "source_text_sha256": projection.spoken_text_sha256,
+        "prompt": "prompt",
+        "model_id": "gpt-5.6-sol",
+        "reasoning_effort": "medium",
+        "max_output_tokens": 32000,
+    }
+    values.update(overrides)
+    return extraction_identity(**values)
 
 
 def test_rejects_non_verbatim_anchor() -> None:
@@ -107,6 +123,13 @@ def test_reports_all_anchor_errors_in_one_validation_pass() -> None:
     assert "E001" in message
     assert "OBS001" in message
     assert message.count("not verbatim") == 2
+
+
+def test_rejects_model_supplied_anchor_timing() -> None:
+    response = _response()
+    response["evidence_steps"][0]["anchors"][0]["start_time"] = 1.0
+    with pytest.raises(DetailedExtractionValidationError, match="timing must be null"):
+        validate_response(response, _transcript())
 
 
 def test_reports_anchor_and_relation_errors_together() -> None:
@@ -169,7 +192,25 @@ def test_model_context_and_render_contract_change_generation_not_source_identity
     }) == 4
 
 
-def test_container_sha_is_provenance_not_package_or_generation_identity() -> None:
+def test_editorial_structure_change_rebuilds_package_without_new_generation() -> None:
+    base = dict(
+        source_sha256="anchor-binding-sha",
+        source_text_sha256="spoken-text-sha",
+        prompt="prompt",
+        model_id="gpt-5.6-sol",
+        reasoning_effort="medium",
+        max_output_tokens=32000,
+    )
+    before = extraction_identity(**base, editorial_structure_sha256="title-a")
+    after = extraction_identity(**base, editorial_structure_sha256="title-b")
+
+    assert before["generation_fingerprint_sha256"] == after[
+        "generation_fingerprint_sha256"
+    ]
+    assert before["fingerprint_sha256"] != after["fingerprint_sha256"]
+
+
+def test_container_sha_changes_package_but_not_model_generation_identity() -> None:
     base = dict(
         source_sha256="body-sha",
         prompt="prompt",
@@ -205,7 +246,7 @@ def test_container_sha_is_provenance_not_package_or_generation_identity() -> Non
         compiler_edit["generation_fingerprint_sha256"],
         partial["generation_fingerprint_sha256"],
     } == {first["generation_fingerprint_sha256"]}
-    assert first["fingerprint_sha256"] == physical_edit["fingerprint_sha256"]
+    assert first["fingerprint_sha256"] != physical_edit["fingerprint_sha256"]
     assert first["source_file_sha256"] != physical_edit["source_file_sha256"]
     assert len({
         first["fingerprint_sha256"],
@@ -227,10 +268,7 @@ def test_compile_namespaces_ids_and_binds_source_hashes(tmp_path: Path) -> None:
     raw = json.dumps(transcript, ensure_ascii=False).encode("utf-8")
     response = _response()
     validate_response(response, transcript)
-    extraction = extraction_identity(
-        source_sha256=hashlib.sha256(raw).hexdigest(), prompt="prompt", model_id="gpt-5.6-sol",
-        reasoning_effort="medium", max_output_tokens=32000,
-    )
+    extraction = _bound_extraction_identity(transcript)
     package = compile_package(
         transcript_id="011WSR01", transcript_path=tmp_path / "011WSR01.json",
         transcript=transcript, raw=raw, response=response, extraction=extraction,
@@ -244,6 +282,10 @@ def test_compile_namespaces_ids_and_binds_source_hashes(tmp_path: Path) -> None:
     body_sha = project_script(transcript["script"]).body_sha256
     assert package["source_fragments"][0]["source_sha256"] == body_sha
     assert package["source_documents"][0]["source_body_sha256"] == body_sha
+    assert package["source_documents"][0]["source_text_sha256"] == project_script(
+        transcript["script"]
+    ).spoken_text_sha256
+    assert package["source_documents"][0]["anchor_binding_sha256"] == body_sha
     assert package["source_documents"][0]["source_file_sha256"] == hashlib.sha256(raw).hexdigest()
     assert package["source_documents"][0]["locator_space"] == LOCATOR_SPACE
     assert package["extraction"]["locator_space"] == LOCATOR_SPACE
@@ -251,7 +293,82 @@ def test_compile_namespaces_ids_and_binds_source_hashes(tmp_path: Path) -> None:
         package["source_documents"][0]["extraction_record_namespace"]
     )
     assert package["source_fragments"][0]["anchor_state"] == "source_version_bound"
+    assert package["claims"][0]["extraction_fingerprints"] == [
+        extraction["generation_fingerprint_sha256"]
+    ]
+    assert package["claims"][0]["occurrences"][0]["anchors"][0]["media_time"] == 1.0
     assert "extraction_section_index" not in package["source_fragments"][0]
+
+
+def test_compile_resolves_locators_against_spoken_rows_not_mixed_json_rows(
+    tmp_path: Path,
+) -> None:
+    transcript = _transcript()
+    transcript["script"].insert(
+        0, {"index": "subtitle-1", "type": "subtitle", "text": "## 编辑标题"}
+    )
+    transcript["script"].insert(
+        2, {"index": "comment-1", "type": "comment", "text": "编辑备注"}
+    )
+    raw = json.dumps(transcript, ensure_ascii=False).encode("utf-8")
+    package = compile_package(
+        transcript_id="011WSR01",
+        transcript_path=tmp_path / "011WSR01.json",
+        transcript=transcript,
+        raw=raw,
+        response=_response(),
+        extraction=_bound_extraction_identity(transcript),
+    )
+
+    times = {
+        row["paragraph_key"]: row["media_time"]
+        for row in package["source_fragments"]
+    }
+    assert times == {"S0001": 1.0, "S0002": 8.0, "S0003": 16.0}
+    assert package["claims"][0]["occurrences"][0]["anchors"][0]["media_time"] == 1.0
+
+
+@pytest.mark.parametrize("locator", ["S0000", "S0004", "S1", "not-a-locator"])
+def test_compile_rejects_malformed_or_out_of_range_spoken_locator(
+    tmp_path: Path, locator: str,
+) -> None:
+    transcript = _transcript()
+    raw = json.dumps(transcript, ensure_ascii=False).encode("utf-8")
+    response = _response()
+    response["questions"][0]["anchors"][0]["segment_index"] = locator
+
+    with pytest.raises(DetailedExtractionValidationError, match="locator"):
+        compile_package(
+            transcript_id="011WSR01",
+            transcript_path=tmp_path / "011WSR01.json",
+            transcript=transcript,
+            raw=raw,
+            response=response,
+            extraction=_bound_extraction_identity(transcript),
+        )
+
+
+@pytest.mark.parametrize("mutation", ["missing-text-identity", "wrong-body-identity"])
+def test_compile_refuses_unproved_source_binding(
+    tmp_path: Path, mutation: str,
+) -> None:
+    transcript = _transcript()
+    raw = json.dumps(transcript, ensure_ascii=False).encode("utf-8")
+    extraction = _bound_extraction_identity(transcript)
+    if mutation == "missing-text-identity":
+        extraction.pop("source_text_sha256")
+    else:
+        extraction["source_sha256"] = "0" * 64
+
+    with pytest.raises(DetailedExtractionValidationError, match="binding|text identity"):
+        compile_package(
+            transcript_id="011WSR01",
+            transcript_path=tmp_path / "011WSR01.json",
+            transcript=transcript,
+            raw=raw,
+            response=_response(),
+            extraction=extraction,
+        )
 
 
 def test_split_package_fragments_record_their_extraction_section(tmp_path: Path) -> None:
@@ -261,12 +378,8 @@ def test_split_package_fragments_record_their_extraction_section(tmp_path: Path)
         _response(),
         Section(index=2, start=0, end=2, title="内部 transport 分片"),
     )
-    extraction = extraction_identity(
-        source_sha256=project_script(transcript["script"]).body_sha256,
-        prompt="prompt",
-        model_id="gpt-5.6-sol",
-        reasoning_effort="medium",
-        max_output_tokens=32000,
+    extraction = _bound_extraction_identity(
+        transcript,
         section_plan={
             "origin": "source_headings",
             "section_count": 2,
@@ -304,12 +417,8 @@ def test_identical_excerpt_in_two_split_sections_does_not_share_fragment(tmp_pat
         _response(), Section(index=2, start=0, end=2, title="分片二")
     )
     response = {key: first[key] + second[key] for key in first}
-    extraction = extraction_identity(
-        source_sha256=project_script(transcript["script"]).body_sha256,
-        prompt="prompt",
-        model_id="gpt-5.6-sol",
-        reasoning_effort="medium",
-        max_output_tokens=32000,
+    extraction = _bound_extraction_identity(
+        transcript,
         section_plan={
             "origin": "source_headings",
             "section_count": 2,
@@ -347,13 +456,7 @@ def test_identical_excerpt_in_two_split_sections_does_not_share_fragment(tmp_pat
 def test_distinct_model_outputs_have_disjoint_record_generations(tmp_path: Path) -> None:
     transcript = _transcript()
     raw = json.dumps(transcript, ensure_ascii=False).encode("utf-8")
-    extraction = extraction_identity(
-        source_sha256=hashlib.sha256(raw).hexdigest(),
-        prompt="prompt",
-        model_id="gpt-5.6-sol",
-        reasoning_effort="medium",
-        max_output_tokens=32000,
-    )
+    extraction = _bound_extraction_identity(transcript)
     first = compile_package(
         transcript_id="011WSR01",
         transcript_path=tmp_path / "011WSR01.json",
@@ -401,38 +504,45 @@ def test_editorial_container_only_change_preserves_semantic_record_ids(
     tmp_path: Path,
 ) -> None:
     transcript = _transcript()
-    raw = json.dumps(transcript, ensure_ascii=False).encode("utf-8")
+    raw_before = json.dumps(transcript, ensure_ascii=False).encode("utf-8")
+    raw_after = json.dumps(transcript, ensure_ascii=False, indent=2).encode("utf-8")
     base = dict(
         source_sha256=project_script(transcript["script"]).body_sha256,
+        source_text_sha256=project_script(transcript["script"]).spoken_text_sha256,
         prompt="prompt",
         model_id="gpt-5.6-sol",
         reasoning_effort="medium",
         max_output_tokens=32000,
     )
-    before_identity = extraction_identity(**base, source_file_sha256="file-a")
-    after_identity = extraction_identity(**base, source_file_sha256="file-b")
+    before_identity = extraction_identity(
+        **base, source_file_sha256=hashlib.sha256(raw_before).hexdigest()
+    )
+    after_identity = extraction_identity(
+        **base, source_file_sha256=hashlib.sha256(raw_after).hexdigest()
+    )
 
     before = compile_package(
         transcript_id="011WSR01",
         transcript_path=tmp_path / "011WSR01.json",
         transcript=transcript,
-        raw=raw,
+        raw=raw_before,
         response=_response(),
         extraction=before_identity,
-        source_file_sha256="file-a",
     )
     after = compile_package(
         transcript_id="011WSR01",
         transcript_path=tmp_path / "011WSR01.json",
         transcript=transcript,
-        raw=raw,
+        raw=raw_after,
         response=_response(),
         extraction=after_identity,
-        source_file_sha256="file-b",
     )
 
-    assert before_identity["fingerprint_sha256"] == after_identity[
+    assert before_identity["fingerprint_sha256"] != after_identity[
         "fingerprint_sha256"
+    ]
+    assert before_identity["generation_fingerprint_sha256"] == after_identity[
+        "generation_fingerprint_sha256"
     ]
     assert before["extraction"]["record_namespace"] == after["extraction"][
         "record_namespace"
@@ -446,13 +556,7 @@ def test_editorial_container_only_change_preserves_semantic_record_ids(
 def test_source_type_is_part_of_the_exact_generation_namespace(tmp_path: Path) -> None:
     transcript = _transcript()
     raw = json.dumps(transcript, ensure_ascii=False).encode("utf-8")
-    extraction = extraction_identity(
-        source_sha256=hashlib.sha256(raw).hexdigest(),
-        prompt="prompt",
-        model_id="gpt-5.6-sol",
-        reasoning_effort="medium",
-        max_output_tokens=32000,
-    )
+    extraction = _bound_extraction_identity(transcript)
     sermon = compile_package(
         transcript_id="same-key",
         transcript_path=tmp_path / "same-key.json",
@@ -553,10 +657,7 @@ def test_compiled_package_can_feed_existing_claude_reviewer(tmp_path: Path) -> N
     package = compile_package(
         transcript_id="011WSR01", transcript_path=tmp_path / "011WSR01.json",
         transcript=transcript, raw=raw, response=_response(),
-        extraction=extraction_identity(
-            source_sha256=hashlib.sha256(raw).hexdigest(), prompt="prompt", model_id="gpt-5.6-sol",
-            reasoning_effort="medium", max_output_tokens=32000,
-        ),
+        extraction=_bound_extraction_identity(transcript),
     )
     normalized = _normalize_claim_layer(package)
     assert len(normalized["candidate_claims"]) == 1
@@ -576,10 +677,7 @@ def test_consensus_applier_removes_anchor_and_relation_without_approving(tmp_pat
     package = compile_package(
         transcript_id="011WSR01", transcript_path=tmp_path / "011WSR01.json",
         transcript=transcript, raw=raw, response=response,
-        extraction=extraction_identity(
-            source_sha256=hashlib.sha256(raw).hexdigest(), prompt="prompt", model_id="gpt-5.6-sol",
-            reasoning_effort="medium", max_output_tokens=32000,
-        ),
+        extraction=_bound_extraction_identity(transcript),
     )
     package["coverage"] = {
         "available": True,
@@ -624,10 +722,7 @@ def test_consensus_applier_accepts_combined_string_fingerprint(tmp_path: Path) -
     package = compile_package(
         transcript_id="011WSR01", transcript_path=tmp_path / "011WSR01.json",
         transcript=transcript, raw=raw, response=_response(),
-        extraction=extraction_identity(
-            source_sha256=hashlib.sha256(raw).hexdigest(), prompt="prompt",
-            model_id="gpt-5.6-sol", reasoning_effort="medium", max_output_tokens=32000,
-        ),
+        extraction=_bound_extraction_identity(transcript),
     )
     result = apply_consensus_overrides(
         package,
@@ -645,10 +740,7 @@ def test_consensus_applier_refuses_stale_single_source_coverage_on_merged_packag
     package = compile_package(
         transcript_id="011WSR01", transcript_path=tmp_path / "011WSR01.json",
         transcript=transcript, raw=raw, response=_response(),
-        extraction=extraction_identity(
-            source_sha256=hashlib.sha256(raw).hexdigest(), prompt="prompt",
-            model_id="gpt-5.6-sol", reasoning_effort="medium", max_output_tokens=32000,
-        ),
+        extraction=_bound_extraction_identity(transcript),
     )
     package["coverage"] = {"available": True, "source_id": package["source_documents"][0]["source_id"]}
     package["source_documents"].append(
@@ -694,13 +786,7 @@ def test_consensus_added_evidence_cannot_collide_with_another_collection(
         transcript=transcript,
         raw=raw,
         response=_response(),
-        extraction=extraction_identity(
-            source_sha256=hashlib.sha256(raw).hexdigest(),
-            prompt="prompt",
-            model_id="gpt-5.6-sol",
-            reasoning_effort="medium",
-            max_output_tokens=32000,
-        ),
+        extraction=_bound_extraction_identity(transcript),
     )
     claim_id = package["claims"][0]["claim_id"]
     generated_evidence_id = f"AI-ADJ-{claim_id}-01"
@@ -742,13 +828,7 @@ def test_consensus_cli_exact_replay_writes_no_artifact_or_second_run(
         transcript=transcript,
         raw=raw,
         response=_response(),
-        extraction=extraction_identity(
-            source_sha256=project_script(transcript["script"]).body_sha256,
-            prompt="prompt",
-            model_id="gpt-5.6-sol",
-            reasoning_effort="medium",
-            max_output_tokens=32000,
-        ),
+        extraction=_bound_extraction_identity(transcript),
     )
     package_path = tmp_path / "package.json"
     overrides_path = tmp_path / "overrides.json"
@@ -819,7 +899,7 @@ def _two_claim_package(tmp_path: Path) -> tuple[dict, dict]:
         "speaker": "professor", "stance": "asserted", "discourse_role": "restatement",
         "support_eligibility": "eligible_candidate", "scripture_refs": [], "produced_claim_ids": ["CL002"],
         "anchors": [{
-            "segment_index": "S0002", "start_time": 8.0, "end_time": 16.0,
+            "segment_index": "S0002", "start_time": None, "end_time": None,
             "verbatim_excerpt": "但以理书所说的那一位人子",
         }],
     })
@@ -836,10 +916,7 @@ def _two_claim_package(tmp_path: Path) -> tuple[dict, dict]:
     package = compile_package(
         transcript_id="011WSR01", transcript_path=tmp_path / "011WSR01.json",
         transcript=transcript, raw=raw, response=response,
-        extraction=extraction_identity(
-            source_sha256=hashlib.sha256(raw).hexdigest(), prompt="prompt", model_id="gpt-5.6-sol",
-            reasoning_effort="medium", max_output_tokens=32000,
-        ),
+        extraction=_bound_extraction_identity(transcript),
     )
     survivor_id, retired_id = (row["claim_id"] for row in package["claims"])
     overrides = {
