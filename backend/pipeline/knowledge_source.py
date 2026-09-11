@@ -10,9 +10,7 @@ from typing import Any
 
 from backend.pipeline.source_projection import (
     SOFT_DELETION,
-    apply_editorial_structure,
     assert_locator_space_compatible,
-    body_coordinate_sha256,
     live_script,
     live_text,
     project_script,
@@ -87,48 +85,6 @@ def load_knowledge_source_document(
             payload = parsed
         else:
             raise ValueError(f"{path}: transcript JSON must be an object or an array")
-
-        editorial_path_value = str(source.get("editorial_structure_path") or "").strip()
-        if editorial_path_value:
-            editorial_path = Path(editorial_path_value)
-            if not editorial_path.is_file():
-                raise FileNotFoundError(
-                    f"editorial transcript not found: {editorial_path}"
-                )
-            editorial_raw = editorial_path.read_bytes()
-            editorial_parsed = json.loads(editorial_raw)
-            if isinstance(editorial_parsed, list):
-                editorial_script = editorial_parsed
-            elif isinstance(editorial_parsed, dict):
-                editorial_script = editorial_parsed.get("script")
-            else:
-                raise ValueError(
-                    f"{editorial_path}: editorial transcript JSON must be an object or an array"
-                )
-            expected_coordinates = str(
-                source.get("editorial_body_coordinate_sha256") or ""
-            )
-            actual_coordinates = body_coordinate_sha256(editorial_script)
-            if not expected_coordinates:
-                raise ValueError(
-                    "editorial_structure_path requires editorial_body_coordinate_sha256"
-                )
-            if actual_coordinates != expected_coordinates:
-                raise ValueError(
-                    f"editorial transcript coordinate mismatch: {editorial_path}"
-                )
-            combined_script = apply_editorial_structure(
-                payload.get("script"), editorial_script
-            )
-            expected_structure = str(
-                source.get("editorial_structure_sha256") or ""
-            )
-            actual_structure = project_script(combined_script).editorial_structure_sha256
-            if expected_structure and actual_structure != expected_structure:
-                raise ValueError(
-                    f"editorial structure hash mismatch: {editorial_path}"
-                )
-            payload = {**payload, "script": combined_script}
 
     actual_file_sha256 = hashlib.sha256(raw).hexdigest()
     projection = project_script(payload.get("script"))

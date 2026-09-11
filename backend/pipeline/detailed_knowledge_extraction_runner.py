@@ -67,8 +67,6 @@ from backend.pipeline.source_projection import (
     EditorialHeading,
     LOCATOR_SPACE,
     SourceProjection,
-    apply_editorial_structure,
-    body_coordinate_sha256,
     is_editorial_row,
     live_script,
     project_script,
@@ -976,14 +974,9 @@ def _extract_sections(
     section_rows: list[dict[str, Any]] = []
     exclusions: list[dict[str, Any]] = []
     fallback_sections = {
-        (
-            row.start,
-            row.end,
-            row.title,
-            row.sentence_start,
-            row.sentence_end,
-        ): row
+        (row.start, row.end, row.title): row
         for row in (fallback_cache_plan.sections if fallback_cache_plan else ())
+        if row.sentence_start is None and row.sentence_end is None
     }
     for section in plan.sections:
         if record is not None and record.cancel_requested():
@@ -1013,16 +1006,10 @@ def _extract_sections(
                 section_rows.append({**section_payload(section), "attempts": 0, "cached": True})
                 continue
         fallback_section = (
-            fallback_sections.get(
-                (
-                    section.start,
-                    section.end,
-                    section.title,
-                    section.sentence_start,
-                    section.sentence_end,
-                )
-            )
-            if fallback_cache_fingerprint is not None and not force
+            fallback_sections.get((section.start, section.end, section.title))
+            if section.sentence_start is None
+            and fallback_cache_fingerprint is not None
+            and not force
             else None
         )
         if fallback_section is not None:
@@ -1485,46 +1472,6 @@ def _run(
     }
     output_path = output_dir / f"{_slug(source_id)}.detailed-knowledge.json"
 
-    def compatible_generation_cache(identity: dict[str, Any]) -> str | None:
-        """Reuse responses only when the exact model inputs still agree."""
-
-        if force or not output_path.is_file():
-            return None
-        try:
-            existing = json.loads(output_path.read_text(encoding="utf-8"))
-            validate_merged_package(existing)
-        except (OSError, json.JSONDecodeError, KnowledgePackageMergeError):
-            return None
-        if (existing.get("extraction") or {}).get(
-            "artifact_sha256"
-        ) != _package_artifact_sha256(existing):
-            return None
-        if existing.get("complete") is not (sections.only is None):
-            return None
-        previous = existing.get("extraction") or {}
-        exact_keys = (
-            "source_sha256",
-            "source_body_sha256",
-            "source_file_sha256",
-            "source_text_sha256",
-            "prompt_sha256",
-            "model_id",
-            "reasoning_effort",
-            "max_output_tokens",
-            "schema_version",
-            "response_schema_sha256",
-            "section_plan",
-            "model_context_sha256",
-            "model_input_contract_version",
-            "section_model_input_sha256s",
-            "backend",
-            "package_compiler_version",
-        )
-        if any(previous.get(key) != identity.get(key) for key in exact_keys):
-            return None
-        fingerprint = str(previous.get("generation_fingerprint_sha256") or "")
-        return fingerprint or None
-
     def identity_for(plan: SectionPlan) -> dict[str, Any]:
         identity = extraction_identity(
             source_sha256=source_sha256, prompt=prompt,
@@ -1639,10 +1586,6 @@ def _run(
     current = existing_result(identity)
     if current is not None:
         return current
-    compatible_fingerprint = compatible_generation_cache(identity)
-    if compatible_fingerprint is not None:
-        fallback_cache_plan = plan
-        fallback_cache_fingerprint = compatible_fingerprint
     # Opened after the skip check so a no-op re-run does not file a row. At 240
     # sources a nightly "nothing changed" pass would otherwise bury the runs
     # that did something.
@@ -1847,41 +1790,16 @@ def run_one(
     subtitle_actor_id: str | None = None,
     subtitle_writer: Callable[..., dict[str, Any]] | None = None,
     subtitle_authorizer: Callable[[str], bool] | None = None,
-    editorial_transcript_path: Path | None = None,
 ) -> tuple[str, Path]:
-    source_transcript, source_raw = _load(transcript_path)
+    transcript, raw = _load(transcript_path)
     transcript_id = transcript_path.stem
-    editorial_path = editorial_transcript_path
-    if editorial_path is None and transcript_path.parent.name == "script_review":
-        editorial_path = transcript_path
-    if editorial_path is not None and editorial_path.stem != transcript_id:
-        raise SubtitlePersistenceError(
-            "editorial transcript id does not match the authoritative source"
-        )
-    if editorial_path is not None:
-        editorial_transcript, editorial_raw = _load(editorial_path)
+    if transcript_path.parent.name == "script_review":
         reconcile_subtitle_application(
             source_id=transcript_id,
-            source_path=editorial_path,
+            source_path=transcript_path,
             output_dir=output_dir,
-            current_raw=editorial_raw,
+            current_raw=raw,
         )
-        editorial_transcript, editorial_raw = _load(editorial_path)
-    else:
-        editorial_transcript = source_transcript
-        editorial_raw = source_raw
-
-    if editorial_path is not None and editorial_path != transcript_path:
-        transcript = {
-            **source_transcript,
-            "script": apply_editorial_structure(
-                source_transcript.get("script"), editorial_transcript.get("script")
-            ),
-        }
-    else:
-        transcript = editorial_transcript
-        if editorial_path == transcript_path:
-            source_raw = editorial_raw
     section_settings = sections or SectionSettings()
     projection = project_script(transcript.get("script"))
     leading_untitled_end = leading_untitled_body_end(
@@ -1898,26 +1816,15 @@ def run_one(
             "subtitle persistence requires an authenticated --subtitle-user-id"
         )
     if (
-        leading_untitled_end is not None
-        and (
-            editorial_path is not None
-            or transcript_path.parent.name in {"script_published", "script_review"}
-        )
+        transcript_path.parent.name == "script_review"
+        and leading_untitled_end is not None
         and not write_back_subtitles
     ):
         raise SubtitlePersistenceError(
-            "sermon with an untitled leading section requires "
+            "script_review sermon with an untitled leading section requires "
             "--write-back-generated-subtitles and --subtitle-user-id before extraction"
         )
-    if write_back_subtitles and (
-        editorial_path is None or editorial_path.parent.name != "script_review"
-    ):
-        raise SubtitlePersistenceError(
-            "subtitle persistence requires a script_review editorial transcript"
-        )
-    if write_back_subtitles and not project_script(
-        editorial_transcript.get("script")
-    ).body_rows:
+    if write_back_subtitles and not projection.body_rows:
         raise SubtitlePersistenceError(
             "empty script_review sermon cannot receive generated subtitles"
         )
@@ -1932,7 +1839,7 @@ def run_one(
             writer=subtitle_writer,
             authorizer=subtitle_authorizer,
         )
-        before_source_sha256 = hashlib.sha256(editorial_raw).hexdigest()
+        before_source_sha256 = hashlib.sha256(raw).hexdigest()
         cached_plan = (
             reusable_generated_plan(
                 source=transcript,
@@ -1966,12 +1873,12 @@ def run_one(
                 level=section_settings.level,
                 max_section_sentences=section_settings.max_sentences,
             )
-        before_payload = json.loads(editorial_raw)
+        before_payload = json.loads(raw)
         report = _persist_generated_subtitles(
             source_id=transcript_id,
-            source=editorial_transcript,
-            raw=editorial_raw,
-            source_path=editorial_path,
+            source=transcript,
+            raw=raw,
+            source_path=transcript_path,
             output_dir=output_dir,
             actor_id=str(subtitle_actor_id),
             client=client if isinstance(client, CodexSubscriptionClient) else None,
@@ -1979,8 +1886,8 @@ def run_one(
             scope_end=leading_untitled_end,
             cached_generated_plan=cached_plan,
         )
-        editorial_transcript, editorial_raw = _load(editorial_path)
-        after_payload = json.loads(editorial_raw)
+        transcript, raw = _load(transcript_path)
+        after_payload = json.loads(raw)
         if not isinstance(before_payload, list) or not isinstance(after_payload, list):
             raise SubtitlePersistenceError(
                 "persisted script_review sermon must remain a JSON array"
@@ -1990,12 +1897,12 @@ def run_one(
             after_payload,
             expected_insertions=int(report["insertions"]),
         )
-        reloaded_sha256 = hashlib.sha256(editorial_raw).hexdigest()
+        reloaded_sha256 = hashlib.sha256(raw).hexdigest()
         if reloaded_sha256 != report.get("after_source_sha256"):
             raise SubtitlePersistenceError(
                 "reloaded sermon SHA does not match the authorized save result"
             )
-        reloaded_projection = project_script(editorial_transcript.get("script"))
+        reloaded_projection = project_script(transcript.get("script"))
         if leading_untitled_body_end(
             reloaded_projection.headings,
             len(reloaded_projection.body_rows),
@@ -2004,17 +1911,6 @@ def run_one(
             raise SubtitlePersistenceError(
                 "saved sermon still has an untitled leading section; extraction not started"
             )
-        if editorial_path != transcript_path:
-            transcript = {
-                **source_transcript,
-                "script": apply_editorial_structure(
-                    source_transcript.get("script"),
-                    editorial_transcript.get("script"),
-                ),
-            }
-        else:
-            transcript = editorial_transcript
-            source_raw = editorial_raw
         if cached_plan is not None:
             preferred_plan = cached_plan
         # The generator has completed its job. From here onward headings are
@@ -2032,28 +1928,11 @@ def run_one(
         "以下是该逐字稿的一个完整章节。S 编号是全文唯一定位码，不因章节而改变。"
         "请只输出符合 schema 的完整 JSON。\n\n"
     )
-    source_descriptor: dict[str, Any] | None = None
-    if editorial_path is not None and editorial_path != transcript_path:
-        editorial_projection = project_script(editorial_transcript.get("script"))
-        source_descriptor = {
-            "editorial_structure_path": str(editorial_path),
-            "editorial_structure_file_sha256": hashlib.sha256(
-                editorial_raw
-            ).hexdigest(),
-            "editorial_body_coordinate_sha256": body_coordinate_sha256(
-                editorial_transcript.get("script")
-            ),
-            "editorial_structure_sha256": (
-                editorial_projection.editorial_structure_sha256
-            ),
-        }
     return _run(
-        source_id=transcript_id, source=transcript, raw=source_raw,
-        source_path=transcript_path,
+        source_id=transcript_id, source=transcript, raw=raw, source_path=transcript_path,
         header=header, output_dir=output_dir, client=client, prompt=prompt,
         reasoning_effort=reasoning_effort, sections=section_settings, force=force,
         preferred_plan=preferred_plan,
-        source_descriptor=source_descriptor,
     )
 
 
@@ -2093,14 +1972,6 @@ def build_client(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--transcript-dir", type=Path, default=DEFAULT_TRANSCRIPT_DIR)
-    parser.add_argument(
-        "--editorial-transcript",
-        type=Path,
-        help=(
-            "script_review copy supplying editor-authored headings while the "
-            "authoritative transcript continues to supply spoken rows and timing"
-        ),
-    )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--ids", nargs="+")
@@ -2176,10 +2047,6 @@ def main() -> int:
     source_rows = load_source_manifest(args.source_manifest) if args.source_manifest else []
     paths = [args.transcript_dir / f"{transcript_id}.json" for transcript_id in (args.ids or [])]
     missing = [str(path) for path in paths if not path.is_file()]
-    if args.editorial_transcript and len(paths) != 1:
-        parser.error("--editorial-transcript requires exactly one --ids value")
-    if args.editorial_transcript and not args.editorial_transcript.is_file():
-        missing.append(str(args.editorial_transcript))
     if missing:
         parser.error("missing transcripts: " + ", ".join(missing))
     if args.dry_run:
@@ -2211,18 +2078,7 @@ def main() -> int:
                 for section in plan.sections
             ]
 
-        plan_rows = {}
-        for path in paths:
-            source = _load(path)[0]
-            if args.editorial_transcript:
-                editorial = _load(args.editorial_transcript)[0]
-                source = {
-                    **source,
-                    "script": apply_editorial_structure(
-                        source.get("script"), editorial.get("script")
-                    ),
-                }
-            plan_rows[path.stem] = section_plan_summary(source)
+        plan_rows = {path.stem: section_plan_summary(_load(path)[0]) for path in paths}
         plan_rows.update({
             str(row["source_id"]): section_plan_summary(markdown_source_document(row)[0])
             for row in source_rows
@@ -2263,7 +2119,6 @@ def main() -> int:
                 reasoning_effort=args.reasoning_effort, force=args.force, sections=sections,
                 write_back_subtitles=args.write_back_generated_subtitles,
                 subtitle_actor_id=args.subtitle_user_id,
-                editorial_transcript_path=args.editorial_transcript,
             )
             counts[status] += 1
             print(f"{status}: {path.name} -> {output}")

@@ -281,53 +281,6 @@ def test_run_one_reloads_persisted_source_before_extraction(
     assert len(audit["insertions"]) == 2
 
 
-def test_run_one_keeps_published_body_while_persisting_review_titles(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    review_path = _source(tmp_path)
-    published_dir = tmp_path / "script_published"
-    published_dir.mkdir()
-    published_path = published_dir / review_path.name
-    published_rows = [
-        {**row, "start_time": index * 10, "end_time": index * 10 + 5}
-        for index, row in enumerate(_rows())
-    ]
-    published_path.write_text(
-        json.dumps(published_rows, ensure_ascii=False), encoding="utf-8"
-    )
-    published_raw = published_path.read_bytes()
-    writer = _SavingWriter(review_path)
-    captured = _capture_run(monkeypatch)
-    monkeypatch.setattr(runner, "generate_subtitles", lambda *_args, **_kwargs: _insertions())
-
-    runner.run_one(
-        published_path,
-        editorial_transcript_path=review_path,
-        output_dir=tmp_path / "out",
-        client=object(),
-        prompt="prompt",
-        reasoning_effort="medium",
-        force=False,
-        sections=SectionSettings(),
-        write_back_subtitles=True,
-        subtitle_actor_id="editor@example.org",
-        subtitle_writer=writer,
-        subtitle_authorizer=lambda _actor_id: True,
-    )
-
-    assert captured["raw"] == published_raw
-    projected = runner.project_script(captured["source"]["script"])
-    assert projected.body_rows == tuple(published_rows)
-    assert [heading.title for heading in projected.headings] == [
-        "第一部分",
-        "内部说明",
-    ]
-    descriptor = captured["source_descriptor"]
-    assert descriptor["editorial_structure_path"] == str(review_path)
-    assert "editorial_body_coordinate_sha256" in descriptor
-    assert all(row.get("type") != "subtitle" for row in json.loads(published_raw))
-
-
 def test_write_back_subtitle_generation_uses_the_subscription_client(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

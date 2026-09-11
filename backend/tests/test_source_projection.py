@@ -10,9 +10,7 @@ import pytest
 from backend.pipeline.source_projection import (
     LOCATOR_SPACE,
     LocatorSpaceError,
-    apply_editorial_structure,
     assert_locator_space_compatible,
-    body_coordinate_sha256,
     live_script,
     project_script,
     source_uses_body_locator_space,
@@ -70,50 +68,6 @@ def test_editorial_rows_never_change_spoken_body_identity_or_coordinates() -> No
     ])
     assert markdown_comment.headings == titled.headings
     assert markdown_comment.editorial_structure_sha256 == titled.editorial_structure_sha256
-
-
-def test_editorial_overlay_preserves_authoritative_timing_and_imports_only_titles() -> None:
-    review_copy = [
-        {"index": "subtitle-a", "type": "subtitle", "text": "## 第一部分"},
-        {"index": 10, "text": "第一句。"},
-        {"index": 20, "text": "第二句。"},
-        {"index": "subtitle-b", "type": "subtitle", "text": "## 第二部分"},
-        {"index": 30, "text": "第三句。"},
-    ]
-
-    combined = apply_editorial_structure(_body_rows(), review_copy)
-    projection = project_script(combined)
-
-    assert projection.body_rows == tuple(_body_rows())
-    assert projection.body_sha256 == project_script(_body_rows()).body_sha256
-    assert [(row.boundary, row.title) for row in projection.headings] == [
-        (0, "第一部分"),
-        (2, "第二部分"),
-    ]
-    assert body_coordinate_sha256(_body_rows()) == body_coordinate_sha256(review_copy)
-
-
-def test_editorial_overlay_rejects_a_different_body_coordinate_skeleton() -> None:
-    review_copy = [
-        {"index": "subtitle-a", "type": "subtitle", "text": "## 第一部分"},
-        {"index": 10, "text": "第一句。"},
-        {"index": 99, "text": "错误段落。"},
-        {"index": 30, "text": "第三句。"},
-    ]
-
-    with pytest.raises(ValueError, match="coordinates do not match"):
-        apply_editorial_structure(_body_rows(), review_copy)
-
-
-def test_editorial_overlay_rejects_stale_working_copy_text() -> None:
-    review_copy = [
-        {"index": "subtitle-a", "type": "subtitle", "text": "## 第一部分"},
-        {"index": 10, "text": "被改过的正文。"},
-        *_body_rows()[1:],
-    ]
-
-    with pytest.raises(ValueError, match="body text does not match"):
-        apply_editorial_structure(_body_rows(), review_copy)
 
 
 def test_legacy_empty_content_row_in_subtitle_index_namespace_is_editorial() -> None:
