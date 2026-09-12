@@ -331,6 +331,28 @@ def test_validation_feedback_includes_exact_referenced_segment() -> None:
     assert "连续逐字复制" in feedback
 
 
+def test_validation_feedback_uses_body_locator_not_physical_subtitle_row() -> None:
+    transcript = _transcript()
+    transcript["script"].insert(
+        0,
+        {
+            "index": "subtitle-1",
+            "type": "subtitle",
+            "user_id": "editor@example.test",
+            "text": "## 编辑小标题",
+        },
+    )
+
+    feedback = _validation_feedback(
+        DetailedExtractionValidationError("Q003: excerpt is not verbatim in S0002"),
+        transcript,
+    )
+
+    assert "[S0002]\n但以理书所说的那一位人子领受永远的权柄。" in feedback
+    assert "编辑小标题" not in feedback
+    assert "有人说人子只强调人性" not in feedback
+
+
 def test_model_context_and_render_contract_change_generation_not_source_identity() -> None:
     base = dict(
         source_sha256="body-sha",

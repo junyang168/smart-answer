@@ -272,11 +272,18 @@ def _validation_feedback(
 ) -> str:
     message = str(error)
     segment_rows: list[str] = []
+    # Sxxxx addresses professor-body coordinates, not physical JSON rows.
+    # A source may co-locate type=subtitle editor rows in the same script.  A
+    # retry that indexes the mixed list directly can therefore show the model
+    # the preceding body row or even an editorial heading while claiming it is
+    # the failed locator.
+    body_rows = project_script(transcript.get("script") or []).body_rows
     for locator in dict.fromkeys(re.findall(r"\bS\d{4}\b", message)):
         ordinal = int(locator[1:]) - 1
-        script = transcript.get("script") or []
-        if 0 <= ordinal < len(script):
-            segment_rows.append(f"[{locator}]\n{str(script[ordinal].get('text') or '')}")
+        if 0 <= ordinal < len(body_rows):
+            segment_rows.append(
+                f"[{locator}]\n{str(body_rows[ordinal].get('text') or '')}"
+            )
     detail = (
         "\n涉及段落的完整原文如下：\n" + "\n\n".join(segment_rows)
         if segment_rows else ""
