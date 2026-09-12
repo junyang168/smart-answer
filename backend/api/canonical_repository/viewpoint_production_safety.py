@@ -20,12 +20,16 @@ from typing import Any
 
 import fcntl
 
-from backend.api.canonical_repository.knowledge_models import ClaimRecord
+from backend.api.canonical_repository.knowledge_models import ClaimRecord, EvidenceStepRecord
 from backend.api.canonical_repository.viewpoint_foundation import (
     semantic_record_sha,
     sha256_json,
 )
-from backend.api.canonical_repository.viewpoint_resolution import ReviewClaim
+from backend.api.canonical_repository.viewpoint_resolution import (
+    IDENTITY_ELIGIBLE_CLAIM_REVIEW_STATUSES,
+    ReviewClaim,
+    claim_evidence_integrity_findings,
+)
 
 
 CVP_FREEZE_VERSION = "wang_cvp_production_freeze_v1"
@@ -160,12 +164,21 @@ def _validate_scope_packet(scope_packet: Mapping[str, Any], store: Any) -> list[
             ClaimRecord.model_validate(raw) for raw in store.list_records("claims")
         )
     }
+    current_evidence = {
+        row.evidence_step_id: row
+        for row in (
+            EvidenceStepRecord.model_validate(raw)
+            for raw in store.list_records("evidence_steps")
+        )
+    }
     current_sources = {
         str(row.get("source_id") or ""): str(row.get("source_sha256") or "")
         for row in store.list_records("source_documents")
     }
+    packet_claim_ids: list[str] = []
     for raw in scope_packet.get("claims") or []:
         claim = ReviewClaim.model_validate(raw)
+        packet_claim_ids.append(claim.claim_id)
         current = current_claims.get(claim.claim_id)
         if current is None:
             findings.append(f"{claim.claim_id}: Claim missing from current corpus")
@@ -174,6 +187,16 @@ def _validate_scope_packet(scope_packet: Mapping[str, Any], store: Any) -> list[
             findings.append(f"{claim.claim_id}: Claim revision drift")
         if semantic_record_sha(current) != claim.claim_revision_sha256:
             findings.append(f"{claim.claim_id}: Claim content drift")
+        if current.review_status not in IDENTITY_ELIGIBLE_CLAIM_REVIEW_STATUSES:
+            findings.append(
+                f"{claim.claim_id}: Claim review status {current.review_status!r} "
+                "is not identity eligible"
+            )
+        projected_evidence_ids = {item.evidence_step_id for item in claim.evidence}
+        if projected_evidence_ids != set(current.evidence_step_ids):
+            findings.append(
+                f"{claim.claim_id}: scope packet evidence set differs from current Claim"
+            )
         expected_source_sha = current_sources.get(claim.source_id)
         if not expected_source_sha:
             findings.append(f"{claim.claim_id}: source missing from current corpus")
@@ -185,6 +208,15 @@ def _validate_scope_packet(scope_packet: Mapping[str, Any], store: Any) -> list[
         }
         if evidence_shas != {expected_source_sha}:
             findings.append(f"{claim.claim_id}: source SHA drift")
+    if len(packet_claim_ids) != len(set(packet_claim_ids)):
+        findings.append("scope packet contains duplicate Claim IDs")
+    findings.extend(
+        claim_evidence_integrity_findings(
+            claim_ids=packet_claim_ids,
+            claims=current_claims,
+            evidence_steps=current_evidence,
+        )
+    )
     return findings
 
 

@@ -51,6 +51,9 @@ DELTA_ADJUDICATION_VERSION = "wang_viewpoint_identity_delta_adjudication_v1"
 RESOLUTION_RUN_VERSION = "wang_viewpoint_identity_resolution_run_v1"
 
 APPROVED_STATUSES = frozenset({"system_approved", "human_approved", "approved"})
+IDENTITY_ELIGIBLE_CLAIM_REVIEW_STATUSES = frozenset(
+    {"ai_consensus_reviewed", "human_approved", "approved"}
+)
 VALID_ANCHOR_STATES = frozenset(
     {"source_version_bound", "canonical_citation_bound", "verified", "valid"}
 )
@@ -76,6 +79,61 @@ class ViewpointResolutionError(ValueError):
     def __init__(self, findings: Sequence[str]):
         self.findings = list(findings)
         super().__init__("Viewpoint resolution failed: " + " | ".join(self.findings))
+
+
+def claim_evidence_integrity_findings(
+    *,
+    claim_ids: Sequence[str],
+    claims: Mapping[str, ClaimRecord],
+    evidence_steps: Mapping[str, EvidenceStepRecord],
+) -> list[str]:
+    """Validate both stored projections of the Claim/EvidenceStep graph.
+
+    ``Claim.evidence_step_ids`` and ``EvidenceStep.produced_claim_ids`` are exact
+    reverse indexes of the same many-to-many relation.  Checking only the
+    direction a caller happens to traverse let malformed Claim generations
+    reach cross-sermon and CVP consumers with two different argument graphs.
+    """
+
+    selected = set(map(str, claim_ids))
+    findings: list[str] = []
+    claim_pairs: set[tuple[str, str]] = set()
+    evidence_pairs: set[tuple[str, str]] = set()
+
+    for claim_id in sorted(selected):
+        claim = claims.get(claim_id)
+        if claim is None:
+            findings.append(f"{claim_id}: Claim missing from current corpus")
+            continue
+        evidence_ids = list(claim.evidence_step_ids)
+        if len(evidence_ids) != len(set(evidence_ids)):
+            findings.append(f"{claim_id}: duplicate evidence_step_ids")
+        if not evidence_ids:
+            findings.append(f"{claim_id}: Claim has no evidence")
+        for evidence_id in evidence_ids:
+            claim_pairs.add((claim_id, evidence_id))
+            if evidence_id not in evidence_steps:
+                findings.append(f"{claim_id}: unknown evidence {evidence_id}")
+
+    for evidence_id, evidence in sorted(evidence_steps.items()):
+        produced_claim_ids = list(evidence.produced_claim_ids)
+        relevant = [claim_id for claim_id in produced_claim_ids if claim_id in selected]
+        for claim_id in sorted(set(relevant)):
+            if relevant.count(claim_id) > 1:
+                findings.append(
+                    f"{claim_id}/{evidence_id}: duplicate produced_claim_ids binding"
+                )
+        evidence_pairs.update((claim_id, evidence_id) for claim_id in relevant)
+
+    for claim_id, evidence_id in sorted(claim_pairs - evidence_pairs):
+        findings.append(
+            f"{claim_id}/{evidence_id}: non-reciprocal Claim-only evidence binding"
+        )
+    for claim_id, evidence_id in sorted(evidence_pairs - claim_pairs):
+        findings.append(
+            f"{claim_id}/{evidence_id}: non-reciprocal EvidenceStep-only binding"
+        )
+    return sorted(set(findings))
 
 
 class StrictArtifact(BaseModel):

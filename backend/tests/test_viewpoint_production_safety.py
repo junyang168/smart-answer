@@ -51,10 +51,19 @@ def _fixture(tmp_path: Path):
         claim_id="C1",
         statement="王教授所教导的命题",
         claim_type="teaching",
+        evidence_step_ids=["E1"],
         revision=1,
         review_status="approved",
     )
     store.rows["claims"] = [claim.model_dump(mode="json")]
+    store.rows["evidence_steps"] = [
+        {
+            "evidence_step_id": "E1",
+            "statement": "证据",
+            "produced_claim_ids": ["C1"],
+            "revision": 1,
+        }
+    ]
     store.rows["source_documents"] = [
         {
             "source_id": "S1",
@@ -174,6 +183,65 @@ def test_freeze_blocks_claim_revision_and_blocked_claims(tmp_path):
             route_policy_sha256="route-policy",
             runner_commit="abc123",
             validate_registry=False,
+        )
+
+
+def test_freeze_blocks_nonreciprocal_claim_evidence_graph(tmp_path):
+    store, _, freeze = _fixture(tmp_path)
+    store.rows["evidence_steps"][0]["produced_claim_ids"] = []
+    with pytest.raises(CvpProductionBlocked, match="Claim-only evidence binding"):
+        validate_cvp_freeze(
+            freeze,
+            store=store,
+            cvp_policy_sha256="cvp-policy",
+            route_policy_sha256="route-policy",
+            runner_commit="abc123",
+            validate_registry=False,
+        )
+
+    store, _, freeze = _fixture(tmp_path / "evidence-only")
+    store.rows["evidence_steps"].append(
+        {
+            "evidence_step_id": "E2",
+            "statement": "另一条证据",
+            "produced_claim_ids": ["C1"],
+            "revision": 1,
+        }
+    )
+    with pytest.raises(CvpProductionBlocked, match="EvidenceStep-only binding"):
+        validate_cvp_freeze(
+            freeze,
+            store=store,
+            cvp_policy_sha256="cvp-policy",
+            route_policy_sha256="route-policy",
+            runner_commit="abc123",
+            validate_registry=False,
+        )
+
+
+def test_freeze_blocks_nonfinal_claim_review_status(tmp_path):
+    store, packet_path, _ = _fixture(tmp_path)
+    store.rows["claims"][0]["review_status"] = "human_review_required"
+    current = ClaimRecord.model_validate(store.rows["claims"][0])
+    packet = json.loads(packet_path.read_text(encoding="utf-8"))
+    packet["claims"][0]["review_status"] = current.review_status
+    packet["claims"][0]["claim_revision_sha256"] = semantic_record_sha(current)
+    packet["packet_sha256"] = sha256_json(
+        {key: value for key, value in packet.items() if key != "packet_sha256"}
+    )
+    _write_json(packet_path, packet)
+    with pytest.raises(CvpProductionBlocked, match="not identity eligible"):
+        build_cvp_freeze(
+            ticket_id=357,
+            scope_packet_path=packet_path,
+            prerequisite_paths={},
+            store=store,
+            cvp_policy_sha256="cvp-policy",
+            route_policy_sha256="route-policy",
+            runner_commit="abc123",
+            worktree_root=tmp_path / "worktree",
+            output_root=tmp_path / "output",
+            global_lock_path=tmp_path / "lock",
         )
 
     store, packet_path, _ = _fixture(tmp_path / "blocked")

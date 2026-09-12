@@ -39,7 +39,11 @@ from backend.api.canonical_repository.viewpoint_foundation import (
     semantic_record_sha,
     sha256_json,
 )
-from backend.api.canonical_repository.viewpoint_resolution import compile_review_claim
+from backend.api.canonical_repository.viewpoint_resolution import (
+    IDENTITY_ELIGIBLE_CLAIM_REVIEW_STATUSES,
+    claim_evidence_integrity_findings,
+    compile_review_claim,
+)
 from backend.api.canonical_repository.viewpoint_claim_repin import (
     substantive_difference,
 )
@@ -271,6 +275,20 @@ def build_scope_packet(
     review_claims = []
     blocked: list[dict[str, Any]] = []
     advanced_review_pins: list[dict[str, Any]] = []
+    scope_graph_findings = claim_evidence_integrity_findings(
+        claim_ids=in_scope,
+        claims=claims,
+        evidence_steps=evidence_index,
+    )
+    graph_findings_by_claim = {
+        claim_id: [
+            finding
+            for finding in scope_graph_findings
+            if finding.startswith(f"{claim_id}:")
+            or finding.startswith(f"{claim_id}/")
+        ]
+        for claim_id in in_scope
+    }
     for claim_id in in_scope:
         manifest_row = manifest_rows.get(claim_id)
         claim = claims.get(claim_id)
@@ -281,6 +299,24 @@ def build_scope_packet(
         if claim is None:
             blocked.append({"claim_id": claim_id, "reason_code": "missing_claim",
                             "detail": "Claim is not in the authoring store."})
+            continue
+        if claim.review_status not in IDENTITY_ELIGIBLE_CLAIM_REVIEW_STATUSES:
+            blocked.append({
+                "claim_id": claim_id,
+                "reason_code": "claim_review_not_final",
+                "detail": (
+                    f"Claim review status {claim.review_status!r} is not eligible "
+                    "for identity resolution."
+                ),
+            })
+            continue
+        graph_findings = graph_findings_by_claim[claim_id]
+        if graph_findings:
+            blocked.append({
+                "claim_id": claim_id,
+                "reason_code": "claim_evidence_graph_invalid",
+                "detail": "; ".join(graph_findings),
+            })
             continue
         pinned_revision = int(manifest_row["pinned_claim_revision"])
         pin_moved = (
@@ -325,7 +361,7 @@ def build_scope_packet(
             coverage_source_sha256=source_sha256,
             attestation_sha=attestation_sha,
         )
-        if review_claim is None:
+        if review_claim is None or findings:
             blocked.append({"claim_id": claim_id, "reason_code": "invalid_source_evidence",
                             "detail": "; ".join(findings) or "Claim evidence is unusable."})
             continue
