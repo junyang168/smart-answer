@@ -21,6 +21,7 @@ from backend.pipeline.research_batch_runner import (
     build_command_plan,
     failed_member_runs,
     resolve_transcript_dir,
+    review_members_with_untitled_leading_sections,
     reviewed_package_paths,
 )
 
@@ -296,11 +297,32 @@ def test_batch_source_resolution_prefers_published_regardless_of_argument_order(
     review.mkdir()
     published.mkdir()
     member = {"key": "讲道甲", "source_type": "sermon_transcript"}
-    (review / "讲道甲.json").write_text("review", encoding="utf-8")
-    (published / "讲道甲.json").write_text("published", encoding="utf-8")
+    (review / "讲道甲.json").write_text(
+        json.dumps(
+            [
+                {"index": "subtitle-review", "type": "subtitle", "text": "## Review 标题"},
+                {"index": 1, "text": "review 正文不得参与。"},
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (published / "讲道甲.json").write_text(
+        json.dumps(
+            {
+                "metadata": {"status": "published"},
+                "script": [{"index": 1, "text": "published 权威正文。"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
 
     assert resolve_transcript_dir(member, [review, published]) == published
     assert resolve_transcript_dir(member, [published, review]) == published
+    assert review_members_with_untitled_leading_sections(
+        [member], [review, published]
+    ) == []
 
 
 def test_a_failed_current_member_blocks_merge_even_when_old_artifacts_exist() -> None:

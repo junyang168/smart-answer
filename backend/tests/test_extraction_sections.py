@@ -18,12 +18,16 @@ from backend.pipeline.extraction_sections import (
     FROM_GENERATOR,
     FROM_SOURCE,
     Section,
+    SectionBoundaryError,
     SectionPlan,
     breadcrumb_for,
+    has_transport_splits,
+    generated_plan_insertions,
     load_cached_plan,
     plan_sections,
     save_plan,
     sections_from_headings,
+    validate_titled_section_plan,
 )
 from backend.pipeline.knowledge_source import markdown_blocks
 from backend.pipeline.source_projection import (
@@ -239,6 +243,81 @@ def test_a_source_with_no_headings_gets_boundaries_from_the_generator() -> None:
     # level 2 is a subheading and must not open a section
     assert [(s.start, s.end) for s in plan.sections] == [(0, 6), (6, 14)]
     assert plan.sections[1].title == "第一部分：八福"
+
+
+@pytest.mark.parametrize("untitled_index", [0, 1])
+def test_extraction_plan_rejects_any_untitled_section(untitled_index: int) -> None:
+    titles = ["第一部分", "第二部分"]
+    titles[untitled_index] = ""
+    plan = SectionPlan(
+        sections=(
+            Section(index=1, start=0, end=2, title=titles[0]),
+            Section(index=2, start=2, end=4, title=titles[1]),
+        ),
+        origin=FROM_GENERATOR,
+    )
+
+    with pytest.raises(SectionBoundaryError, match="untitled"):
+        validate_titled_section_plan(plan, 4)
+
+
+@pytest.mark.parametrize(
+    "sections",
+    [
+        (
+            Section(index=1, start=0, end=2, title="第一部分"),
+            Section(index=2, start=1, end=2, title="重复尾段"),
+        ),
+        (
+            Section(index=1, start=0, end=2, title="第一部分"),
+            Section(index=2, start=0, end=2, title="完全重复"),
+        ),
+    ],
+)
+def test_base_plan_rejects_unattested_overlapping_sections(
+    sections: tuple[Section, ...],
+) -> None:
+    with pytest.raises(SectionBoundaryError, match="contiguous"):
+        validate_titled_section_plan(
+            SectionPlan(sections=sections, origin=FROM_GENERATOR),
+            2,
+        )
+
+
+def test_transport_cache_detection_includes_per_section_legacy_metadata() -> None:
+    plan = SectionPlan(
+        sections=(
+            Section(
+                index=1,
+                start=0,
+                end=1,
+                title="第一部分",
+                parent_start=0,
+                parent_end=1,
+                sentence_start=0,
+                sentence_end=2,
+            ),
+        ),
+        origin=FROM_GENERATOR,
+    )
+
+    assert has_transport_splits(plan) is True
+
+
+def test_top_level_transport_plan_cannot_be_rendered_as_editorial_subtitles() -> None:
+    plan = SectionPlan(
+        sections=(Section(index=1, start=0, end=2, title="冻结分片"),),
+        origin=FROM_GENERATOR,
+        max_section_sentences=125,
+        strategy="legacy_transport",
+        split_lineage=({"section_index": 1},),
+    )
+
+    with pytest.raises(SectionBoundaryError, match="transport-split"):
+        generated_plan_insertions(
+            plan,
+            [{"index": 1, "text": "第一段"}, {"index": 2, "text": "第二段"}],
+        )
 
 
 def test_a_trailing_empty_heading_does_not_suppress_the_generator() -> None:

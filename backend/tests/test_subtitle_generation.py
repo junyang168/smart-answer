@@ -124,6 +124,39 @@ def test_start_is_accepted_and_spelled_the_way_the_editor_matches_it() -> None:
     assert accepted[0]["after_index"] == "START"
 
 
+def test_extraction_consumer_requires_a_leading_title() -> None:
+    rows = [{"index": "0", "text": "a"}, {"index": "1", "text": "b"}]
+
+    with pytest.raises(SubtitleValidationError, match="START"):
+        validate_insertions(
+            _answer({"after_index": "0", "text": "## 第二部分", "level": 1}),
+            rows,
+            require_leading_title=True,
+        )
+
+
+def test_missing_leading_title_goes_back_through_extraction_retry_loop(ledger) -> None:
+    client = _StubClient(
+        _answer({"after_index": "4", "text": "## 第二部分", "level": 1}),
+        _answer(
+            {"after_index": "START", "text": "## 第一部分", "level": 1},
+            {"after_index": "4", "text": "## 第二部分", "level": 1},
+        ),
+    )
+
+    insertions = generate_subtitles(
+        _paragraphs(),
+        subject="2016_NYSC_3",
+        consumer="extraction_sections",
+        client=client,
+        require_leading_title=True,
+    )
+
+    assert insertions[0]["after_index"] == "START"
+    assert len(client.calls) == 2
+    assert "START" in client.calls[1]["user_prompt"]
+
+
 def test_a_level_outside_one_and_two_is_rejected() -> None:
     rows = [{"index": "0", "text": "a"}]
     with pytest.raises(SubtitleValidationError, match="level"):
