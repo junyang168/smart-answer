@@ -16,16 +16,19 @@ from backend.api.canonical_repository.postgres_store import (
     PostgresKnowledgeStore,
     canonical_json,
 )
+from backend.api.canonical_repository.reviewed_candidate_contract import (
+    ConsensusApplicationError,
+    validate_store_package_authorization,
+)
+from backend.pipeline.knowledge_package_merge import (
+    KnowledgePackageMergeError,
+    validate_merged_package,
+)
 from backend.pipeline.run_ledger import run_record
 from backend.pipeline.source_keys import document_row_key as _document_key
 from backend.pipeline.source_anchor_binding import bind_source_versions
 from backend.pipeline.reviewed_relation_integration import (
     build_reviewed_relation_integration,
-)
-from backend.pipeline.ai_review_ledger import (
-    build_plan,
-    collect_verdicts,
-    review_reason,
 )
 
 
@@ -131,7 +134,7 @@ def main() -> None:
     # let `review_status` say what actually happened.
     ai_review_parser = subparsers.add_parser(
         "sync-ai-review",
-        help="Record independent AI review verdicts against claims in the store.",
+        help="Retired: final AI outcomes arrive atomically with reviewed candidates.",
     )
     ai_review_parser.add_argument(
         "artifact_root",
@@ -199,7 +202,17 @@ def main() -> None:
                 record.outputs(args.package)
     elif args.command == "ingest-reviewed-relations":
         artifact = _load(args.artifact)
-        base = _load(args.base_package) if args.base_package else store.compile_package()
+        if args.base_package:
+            base = _load(args.base_package)
+            try:
+                validate_store_package_authorization(base)
+                validate_merged_package(base)
+            except (ConsensusApplicationError, KnowledgePackageMergeError) as exc:
+                raise SystemExit(
+                    f"reviewed-relations base package does not authenticate: {exc}"
+                ) from exc
+        else:
+            base = store.compile_package()
         integration = build_reviewed_relation_integration(artifact, base)
         if args.output_dir:
             _write(args.output_dir / "incremental-package.json", integration["incremental_package"])
@@ -308,33 +321,11 @@ def main() -> None:
                 )
         result = {"status": "synced", "changed": changed, "skipped": skipped}
     elif args.command == "sync-ai-review":
-        # `list_records` hands back payloads, and a claim carries its own id.
-        claims = {
-            str(row.get("claim_id") or ""): str(row.get("review_status") or "")
-            for row in store.list_records("claims")
-        }
-        claims.pop("", None)
-        verdicts = collect_verdicts(args.artifact_root)
-        plan = build_plan(claims, verdicts)
-        applied = []
-        if args.apply:
-            for verdict in plan.changes:
-                applied.append(
-                    store.record_review(
-                        "claims",
-                        verdict.claim_id,
-                        decision=verdict.target_status,
-                        reason=review_reason(verdict),
-                        reviewer_id=verdict.reviewer_id,
-                        reviewer_kind="ai",
-                    )
-                )
-        result = {
-            "status": "applied" if args.apply else "preview",
-            "artifact_root": str(args.artifact_root),
-            "summary": plan.summary(),
-            "applied": len(applied),
-        }
+        raise SystemExit(
+            "sync-ai-review is retired: it reads only the first-round review and "
+            "can overwrite post-adjudication truth. Ingest the sealed reviewed "
+            "candidate through extraction_supersede_runner instead."
+        )
     elif args.command == "bind-source-anchors":
         result = bind_source_versions(store, args.transcript_root, apply=args.apply)
     else:

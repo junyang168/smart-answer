@@ -21,6 +21,10 @@ from typing import Any, Iterable, Mapping, Optional, Sequence
 
 from .knowledge_importer import KnowledgePackageImporter
 from .knowledge_models import KNOWLEDGE_COLLECTIONS
+from .reviewed_candidate_contract import (
+    ConsensusApplicationError,
+    validate_store_package_authorization,
+)
 
 
 MIGRATIONS_DIR = Path(__file__).with_name("migrations")
@@ -546,22 +550,50 @@ def normalize_package(payload: Mapping[str, Any]) -> dict[str, dict[str, dict[st
 
 
 def preserve_human_review(
-    incoming: Mapping[str, Any], existing: Optional[Mapping[str, Any]]
+    incoming: Mapping[str, Any],
+    existing: Optional[Mapping[str, Any]],
+    *,
+    existing_reviewer_kind: str | None = None,
 ) -> dict[str, Any]:
     result = dict(incoming)
-    # An explicit owner ruling is allowed to promote a record that was
-    # previously system-approved.  The old blanket preservation rule kept the
-    # system status and made the ruling provenance contradict the status that
-    # answers "who approved this?".  Lower-authority reimports still cannot
-    # erase an existing reviewed decision below.
-    if result.get("review_status") == "human_approved":
+    # Package ingest cannot make an owner ruling; that authority belongs to
+    # record_review, which writes the record revision and human event together.
+    # Here we only carry forward a ruling already bound to current store state.
+    if not existing:
         return result
-    if not existing or existing.get("review_status", "candidate") == "candidate":
+    existing_status = existing.get("review_status", "candidate")
+    human_settled = _is_human_settled(
+        existing_status, existing_reviewer_kind=existing_reviewer_kind
+    )
+    # ``superseded`` is not an authority level: both the AI consensus applier
+    # and a human reviewer can produce it.  Preserve it only when the event
+    # ledger proves that the current ruling was human; otherwise a later exact
+    # review generation must be allowed to revive or reclassify the claim.
+    if not human_settled:
         return result
     for field in REVIEW_FIELDS:
         if field in existing:
             result[field] = existing[field]
     return result
+
+
+def _is_human_settled(
+    review_status: Any, *, existing_reviewer_kind: str | None
+) -> bool:
+    status = str(review_status or "candidate")
+    return status in {"approved", "human_approved"} or (
+        status == "superseded" and existing_reviewer_kind == "human"
+    )
+
+
+def _substantive_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """The revision content that an old review decision actually covered."""
+
+    return {
+        key: value
+        for key, value in payload.items()
+        if key not in REVIEW_FIELDS
+    }
 
 
 def _is_empty(value: Any) -> bool:
@@ -641,6 +673,19 @@ class ChangeOperation:
     removed_fields: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class PlannedReviewEvent:
+    review_event_id: str
+    collection: str
+    object_id: str
+    object_revision: int
+    reviewer_kind: str
+    reviewer_id: str
+    decision: str
+    reason: str
+    artifact: dict[str, Any]
+
+
 def stored_operation_payload(operation: ChangeOperation) -> dict[str, Any]:
     """Return the exact payload persisted for one ChangeSet operation.
 
@@ -674,6 +719,105 @@ def operation_fingerprint_rows(
     ]
 
 
+def review_event_fingerprint_rows(
+    events: Sequence[PlannedReviewEvent],
+) -> list[dict[str, Any]]:
+    return [asdict(row) for row in events]
+
+
+def planned_ai_review_events(
+    package: Mapping[str, Any],
+    operations: Sequence[ChangeOperation],
+    *,
+    source_sha256: str,
+) -> tuple[PlannedReviewEvent, ...]:
+    """Compile exact-once review events from a sealed candidate manifest."""
+
+    application = package.get("consensus_application")
+    if not isinstance(application, Mapping) or application.get("review_completion") != "complete":
+        return ()
+    rows = application.get("review_resolutions")
+    if not isinstance(rows, list):
+        raise PostgresKnowledgeStoreError(
+            "complete consensus application lacks review_resolutions"
+        )
+    resolutions = {
+        str(row.get("claim_id") or ""): row
+        for row in rows
+        if isinstance(row, Mapping)
+    }
+    if len(resolutions) != len(rows) or "" in resolutions:
+        raise PostgresKnowledgeStoreError(
+            "review_resolutions contain a missing or duplicate claim id"
+        )
+    events: list[PlannedReviewEvent] = []
+    for operation in operations:
+        if operation.collection != "claims" or operation.operation not in {"create", "update"}:
+            continue
+        resolution = resolutions.get(operation.object_id)
+        if resolution is None:
+            raise PostgresKnowledgeStoreError(
+                f"claims/{operation.object_id}: complete review manifest has no resolution"
+            )
+        target = str(resolution.get("target_review_status") or "")
+        actual = str(operation.payload.get("review_status") or "candidate")
+        # An existing human ruling outranks this AI run. preserve_human_review
+        # has already put it back into operation.payload, so no lower-authority
+        # event may contradict it.
+        if actual in {"approved", "human_approved", "superseded"} and actual != target:
+            continue
+        if actual != target or target not in {
+            "ai_consensus_reviewed",
+            "human_review_required",
+            "superseded",
+        }:
+            raise PostgresKnowledgeStoreError(
+                f"claims/{operation.object_id}: review resolution disagrees with final payload"
+            )
+        superseded_by = str(operation.payload.get("superseded_by") or "")
+        if (target == "superseded") != bool(superseded_by):
+            raise PostgresKnowledgeStoreError(
+                f"claims/{operation.object_id}: superseded target and survivor link disagree"
+            )
+        reviewer_id = str(resolution.get("reviewer_id") or "").strip()
+        reason = str(resolution.get("reason") or "").strip()
+        if not reviewer_id or not reason:
+            raise PostgresKnowledgeStoreError(
+                f"claims/{operation.object_id}: review resolution lacks reviewer or reason"
+            )
+        artifact = {
+            "reviewed_candidate_sha256": source_sha256,
+            "reviewed_candidate_artifact_sha256": application.get("artifact_sha256"),
+            "review_artifact_sha256": application.get("review_artifact_sha256"),
+            "review_fingerprint": application.get("review_fingerprint"),
+            "adjudication_artifact_sha256": application.get("adjudication_artifact_sha256"),
+            "adjudication_fingerprint": application.get("adjudication_fingerprint"),
+            "overrides_artifact_sha256": application.get("overrides_artifact_sha256"),
+            "resolution": dict(resolution),
+        }
+        identity = {
+            "collection": "claims",
+            "object_id": operation.object_id,
+            "object_revision": operation.after_revision,
+            "after_sha256": operation.after_sha256,
+            "artifact": artifact,
+        }
+        events.append(
+            PlannedReviewEvent(
+                review_event_id=f"REV-AI-{sha256_json(identity)[:32]}",
+                collection="claims",
+                object_id=operation.object_id,
+                object_revision=operation.after_revision,
+                reviewer_kind="ai",
+                reviewer_id=reviewer_id,
+                decision=target,
+                reason=reason,
+                artifact=artifact,
+            )
+        )
+    return tuple(events)
+
+
 @dataclass(frozen=True)
 class ChangeSetPlan:
     change_set_id: str
@@ -684,6 +828,7 @@ class ChangeSetPlan:
     operations: tuple[ChangeOperation, ...]
     unchanged: int
     ignored_keys: tuple[str, ...]
+    review_events: tuple[PlannedReviewEvent, ...] = ()
 
     @property
     def removals(self) -> tuple[dict[str, Any], ...]:
@@ -718,7 +863,67 @@ class ChangeSetPlan:
             "fields_removed": sum(len(item["fields"]) for item in removals),
             "removals": [dict(item) for item in removals],
         }
+        if self.review_events:
+            value["summary"]["review_events"] = len(self.review_events)
         return value
+
+
+def validate_change_set_plan_integrity(plan: ChangeSetPlan) -> None:
+    """Reject mutation of nested plan payloads before opening PostgreSQL."""
+
+    operation_index: dict[tuple[str, str, int], ChangeOperation] = {}
+    for operation in plan.operations:
+        if operation.operation not in {"create", "update"}:
+            continue
+        actual_sha = record_content_sha(stored_operation_payload(operation))
+        if actual_sha != operation.after_sha256:
+            raise PostgresKnowledgeStoreError(
+                f"planned payload changed after fingerprinting: "
+                f"{operation.collection}/{operation.object_id}"
+            )
+        key = (
+            operation.collection,
+            operation.object_id,
+            operation.after_revision,
+        )
+        if key in operation_index:
+            raise PostgresKnowledgeStoreError(
+                f"change set repeats one target revision: {key}"
+            )
+        operation_index[key] = operation
+
+    event_ids: set[str] = set()
+    for event in plan.review_events:
+        operation = operation_index.get(
+            (event.collection, event.object_id, event.object_revision)
+        )
+        resolution = event.artifact.get("resolution")
+        if (
+            operation is None
+            or not isinstance(resolution, Mapping)
+            or event.reviewer_kind != "ai"
+            or event.decision != resolution.get("target_review_status")
+            or event.reviewer_id != resolution.get("reviewer_id")
+            or event.reason != resolution.get("reason")
+        ):
+            raise PostgresKnowledgeStoreError(
+                f"planned review event no longer matches its claim operation: "
+                f"{event.review_event_id}"
+            )
+        identity = {
+            "collection": event.collection,
+            "object_id": event.object_id,
+            "object_revision": event.object_revision,
+            "after_sha256": operation.after_sha256,
+            "artifact": event.artifact,
+        }
+        expected_id = f"REV-AI-{sha256_json(identity)[:32]}"
+        if event.review_event_id != expected_id or expected_id in event_ids:
+            raise PostgresKnowledgeStoreError(
+                f"planned review event identity changed or repeats: "
+                f"{event.review_event_id}"
+            )
+        event_ids.add(expected_id)
 
 
 def uncoordinated_semantic_reference_blockers(
@@ -872,8 +1077,27 @@ def build_change_set_plan(
     existing: Mapping[tuple[str, str], Mapping[str, Any]],
     *,
     source_kind: str = "knowledge_package",
+    existing_review_authorities: Mapping[tuple[str, str], str] | None = None,
 ) -> ChangeSetPlan:
+    try:
+        validate_store_package_authorization(package)
+    except ConsensusApplicationError as exc:
+        raise PostgresKnowledgeStoreError(
+            f"reviewed candidate cannot enter the canonical store: {exc}"
+        ) from exc
     normalized, stated = _normalize_records(package)
+    review_targets = {
+        str(row.get("claim_id") or ""): str(
+            row.get("target_review_status") or ""
+        )
+        for row in (
+            (package.get("consensus_application") or {}).get(
+                "review_resolutions"
+            )
+            or []
+        )
+        if isinstance(row, Mapping)
+    }
     # The generic JSONB tables deliberately accept new collections without a
     # DDL migration, but viewpoint master data has cross-record invariants the
     # shape validator cannot see.  Refuse the ChangeSet before it receives an
@@ -887,11 +1111,72 @@ def build_change_set_plan(
         for object_id in sorted(normalized[collection]):
             current = existing.get((collection, object_id))
             current_payload = (current or {}).get("payload")
+            declared_status = str(
+                normalized[collection][object_id].get("review_status")
+                or "candidate"
+            )
+            current_status = str(
+                (current_payload or {}).get("review_status") or "candidate"
+            )
+            if (
+                collection == "claims"
+                and declared_status in {"approved", "human_approved"}
+                and declared_status != current_status
+            ):
+                raise PostgresKnowledgeStoreError(
+                    f"{collection}/{object_id}: package ingest cannot create or "
+                    "change a human approval; use record_review"
+                )
             merged = merge_over_existing(
                 normalized[collection][object_id],
                 current_payload,
                 stated[(collection, object_id)],
             )
+            existing_reviewer_kind = (existing_review_authorities or {}).get(
+                (collection, object_id)
+            )
+            if (
+                collection == "claims"
+                and current_payload
+                and current_payload.get("review_status") == "superseded"
+                and review_targets.get(object_id) not in {None, "", "superseded"}
+            ):
+                # `superseded_by` is substantive and normally survives an
+                # omitted field.  Here the sealed next-generation resolution
+                # explicitly revives the claim, so retaining the old AI merge
+                # target would contradict that exact reviewed candidate.
+                if existing_reviewer_kind == "ai":
+                    merged.pop("superseded_by", None)
+                elif existing_reviewer_kind != "human":
+                    raise PostgresKnowledgeStoreError(
+                        f"claims/{object_id}: cannot replace superseded status "
+                        "without a review event bound to the current revision"
+                    )
+            if (
+                collection == "claims"
+                and current_payload
+                and current_payload.get("review_status") == "superseded"
+                and existing_reviewer_kind not in {"ai", "human"}
+                and _substantive_payload(merged)
+                != _substantive_payload(current_payload)
+            ):
+                raise PostgresKnowledgeStoreError(
+                    f"claims/{object_id}: cannot change a superseded claim "
+                    "whose review authority is unknown"
+                )
+            if (
+                current_payload
+                and _is_human_settled(
+                    current_payload.get("review_status"),
+                    existing_reviewer_kind=existing_reviewer_kind,
+                )
+                and _substantive_payload(merged)
+                != _substantive_payload(current_payload)
+            ):
+                raise PostgresKnowledgeStoreError(
+                    f"{collection}/{object_id}: incoming package changes content "
+                    "covered by an existing human review; a new human ruling is required"
+                )
             if collection == "source_documents" and current_payload:
                 incoming_identity = (
                     str(merged.get("source_type") or "").strip(),
@@ -911,7 +1196,11 @@ def build_change_set_plan(
                         f"SourceDocument id {object_id!r} cannot change identity "
                         f"from {current_identity!r} to {incoming_identity!r}"
                     )
-            incoming = preserve_human_review(merged, current_payload)
+            incoming = preserve_human_review(
+                merged,
+                current_payload,
+                existing_reviewer_kind=existing_reviewer_kind,
+            )
             removed_fields = fields_removed(current_payload, incoming)
             after_sha = record_content_sha(incoming)
             before_sha = str((current or {}).get("content_sha256") or "") or None
@@ -934,18 +1223,23 @@ def build_change_set_plan(
             )
 
     source_sha = sha256_json(package)
+    review_events = planned_ai_review_events(
+        package, operations, source_sha256=source_sha
+    )
     fingerprint_payload = {
         "planner_schema": "wang_postgres_changeset_v2",
         "source_kind": source_kind,
         "source_sha256": source_sha,
         "package_id": str(package.get("package_id") or ""),
         "operations": operation_fingerprint_rows(operations),
+        "review_events": review_event_fingerprint_rows(review_events),
     }
     fingerprint = sha256_json(fingerprint_payload)
     recognized = set(KnowledgePackageImporter.SOURCE_COLLECTION_KEYS) | {
         "product_plans", "schema_version", "package_id", "title", "corpus_scope",
         "framework_candidate", "validation_experiments", "summary", "batch",
         "candidate_generation", "lineage", "approval_status",
+        "consensus_application",
     }
     ignored = tuple(sorted(set(package) - recognized))
     return ChangeSetPlan(
@@ -957,6 +1251,7 @@ def build_change_set_plan(
         operations=tuple(operations),
         unchanged=unchanged,
         ignored_keys=ignored,
+        review_events=review_events,
     )
 
 
@@ -1105,6 +1400,7 @@ def combined_plan(arrival: ChangeSetPlan, withdrawal: ChangeSetPlan) -> ChangeSe
         "operations": operation_fingerprint_rows(
             withdrawal.operations + arrival.operations
         ),
+        "review_events": review_event_fingerprint_rows(arrival.review_events),
     })
     return ChangeSetPlan(
         change_set_id=f"KCS-{fingerprint[:20]}",
@@ -1115,6 +1411,7 @@ def combined_plan(arrival: ChangeSetPlan, withdrawal: ChangeSetPlan) -> ChangeSe
         operations=withdrawal.operations + arrival.operations,
         unchanged=arrival.unchanged + withdrawal.unchanged,
         ignored_keys=arrival.ignored_keys,
+        review_events=arrival.review_events,
     )
 
 
@@ -1362,6 +1659,13 @@ class PostgresKnowledgeStore:
         Retiring afterwards is too late: nothing was ever planned.
         """
 
+        try:
+            validate_store_package_authorization(package)
+        except ConsensusApplicationError as exc:
+            raise PostgresKnowledgeStoreError(
+                f"reviewed candidate cannot enter the canonical store: {exc}"
+            ) from exc
+
         normalized = normalize_package(package)
         keys = [
             (collection, object_id)
@@ -1387,7 +1691,37 @@ class PostgresKnowledgeStore:
                             f"{object_id!r} already belongs to {existing_collection}, "
                             f"not {expected_collection}"
                         )
+                cursor.execute(
+                    """SELECT DISTINCT ON (collection, object_id)
+                              collection, object_id, reviewer_kind, decision,
+                              object_revision
+                       FROM wang_knowledge.review_events
+                       WHERE object_id = ANY(%s)
+                       ORDER BY collection, object_id,
+                                object_revision DESC, created_at DESC,
+                                review_event_id DESC""",
+                    (sorted(incoming_owner),),
+                )
+                existing_review_events = {
+                    (str(collection), str(object_id)): (
+                        str(reviewer_kind), str(decision), int(object_revision)
+                    )
+                    for collection, object_id, reviewer_kind, decision,
+                    object_revision
+                    in cursor.fetchall()
+                    if incoming_owner.get(str(object_id)) == str(collection)
+                }
             existing = self._existing(conn, keys)
+            existing_review_authorities = {
+                key: reviewer_kind
+                for key, (reviewer_kind, decision, object_revision)
+                in existing_review_events.items()
+                if str(((existing.get(key) or {}).get("payload") or {}).get(
+                    "review_status"
+                ) or "") == decision
+                and int((existing.get(key) or {}).get("revision") or 0)
+                == object_revision
+            }
             if any(
                 collection in VIEWPOINT_VALIDATION_COLLECTIONS - {
                     "source_documents", "source_fragments", "claims",
@@ -1413,6 +1747,7 @@ class PostgresKnowledgeStore:
             package,
             {key: row for key, row in existing.items() if key not in set(retiring_keys)},
             source_kind=source_kind,
+            existing_review_authorities=existing_review_authorities,
         )
         return combined_plan(arrival, withdrawal) if withdrawal else arrival
 
@@ -1505,6 +1840,7 @@ class PostgresKnowledgeStore:
         metadata: Optional[dict[str, Any]] = None,
         expected_current_viewpoint_revisions: Optional[Mapping[str, str]] = None,
     ) -> dict[str, Any]:
+        validate_change_set_plan_integrity(plan)
         if not plan.operations:
             return {
                 "status": "unchanged",
@@ -1670,6 +2006,26 @@ class PostgresKnowledgeStore:
                             (operation.collection, operation.object_id,
                              operation.before_revision or 0, operation.after_revision)
                         )
+
+                for review_event in plan.review_events:
+                    cursor.execute(
+                        """INSERT INTO wang_knowledge.review_events
+                           (review_event_id, collection, object_id,
+                            object_revision, reviewer_kind, reviewer_id,
+                            decision, reason, artifact)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)""",
+                        (
+                            review_event.review_event_id,
+                            review_event.collection,
+                            review_event.object_id,
+                            review_event.object_revision,
+                            review_event.reviewer_kind,
+                            review_event.reviewer_id,
+                            review_event.decision,
+                            review_event.reason,
+                            canonical_json(review_event.artifact),
+                        ),
+                    )
 
                 invalidated = self._invalidate_dependencies(cursor, plan, changed_records, len(plan.operations))
                 summary["invalidated_dependencies"] = invalidated

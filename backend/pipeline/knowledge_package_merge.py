@@ -139,6 +139,24 @@ def validate_merged_package(package: dict[str, Any]) -> None:
             raise KnowledgePackageMergeError(
                 f"{row['claim_id']}: unknown positions {sorted(missing_positions)}"
             )
+    superseded_targets = {
+        str(row["claim_id"]): str(row.get("superseded_by") or "")
+        for row in package.get("claims", [])
+        if row.get("superseded_by")
+    }
+    for claim_id, survivor_id in superseded_targets.items():
+        if survivor_id not in claim_ids:
+            raise KnowledgePackageMergeError(
+                f"{claim_id}: unknown superseded_by target {survivor_id}"
+            )
+        if survivor_id == claim_id:
+            raise KnowledgePackageMergeError(
+                f"{claim_id}: claim cannot supersede itself"
+            )
+        if survivor_id in superseded_targets:
+            raise KnowledgePackageMergeError(
+                f"{claim_id}: superseded survivor {survivor_id} is not live"
+            )
 
     # These are two stored projections of one many-to-many ``used_for`` link,
     # not independent hints.  Checking only endpoint existence let a Claim

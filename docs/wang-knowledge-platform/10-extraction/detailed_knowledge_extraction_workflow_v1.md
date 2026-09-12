@@ -318,9 +318,13 @@ PYTHONPATH=. .venv/bin/python -m backend.pipeline.corpus_ai_adjudication_runner 
 
 PYTHONPATH=. .venv/bin/python -m backend.pipeline.knowledge_consensus_applier \
   --package "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.detailed-knowledge.json" \
+  --review "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.independent-review.json" \
+  --adjudication "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.adjudication.json" \
   --overrides "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.overrides.json" \
   --output "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.reviewed-candidate.json"
 ```
+
+`--review` 与 `--adjudication` 不可省略。输出包必须以 sealed `scope_kind=source_scoped` 记录单篇身份、完整 extraction identity 与 complete per-claim resolutions，绑定四个 exact 输入 SHA（package、review、adjudication、overrides），并以 consensus-stage self-hash 覆盖最终 graph 与状态。缺失或 partial 的中间包使用不同路径，不得替换 current reviewed candidate。
 
 ## 八、中立 ResearchBatch：批次不是专题
 

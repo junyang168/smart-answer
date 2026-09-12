@@ -90,7 +90,7 @@ export KNOWLEDGE_DATABASE_URL='postgresql:///smart_answer_knowledge'
   ingest-package "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/shared_knowledge_pilot_v1.json" --apply
 ```
 
-研究批次先作为未分类的增量对象进入同一主库，再写入经过双模型审核的跨讲关系。跨讲关系不能只停留在批次目录，也不能直接修改一个大型 JSON；正式程序会先验证关系两端、证据 ID、关系 ID 冲突和自指关系，再生成可审计的增量包、候选快照、人工队列及整合报告：
+研究批次先作为未分类的增量对象进入同一主库，再写入经过双模型审核的跨讲关系。`--base-package` 必须是由 research-batch merge stage 生成、且 sealed `scope_kind=research_batch_aggregate` 的 aggregate reviewed candidate：它聚合每个成员的 exact resolution 与 artifact lineage，并以自己的 self-hash 覆盖合并后的完整 graph。单篇 candidate 则必须 sealed 为 `scope_kind=source_scoped`，保留唯一来源、`complete=true` 与 extraction identity。程序在生成任何 integration output 或读取数据库前先验证 scope、seal、review completion、全局 ID、Claim↔Evidence 互反关系与所有关系端点；删除 manifest 或重新封存坏 graph 都不能绕过。随后才生成可审计的增量包、候选快照、人工队列及整合报告：
 
 ```bash
 .venv/bin/python -m backend.pipeline.knowledge_store_runner \
@@ -103,7 +103,7 @@ export KNOWLEDGE_DATABASE_URL='postgresql:///smart_answer_knowledge'
   --apply
 ```
 
-`--apply` 以两个独立 ChangeSet 完成工作：先把研究批次中的来源、问题、观察、证据、主张及讲内关系写入 PostgreSQL，再写入通过双模型共识的跨讲关系。持续分歧的项目只进入 `human-review-queue.json`，不会写入主库。两次写入都以内容指纹保证幂等；相同输入重跑应返回 `already_applied`。
+`--apply` 以两个独立 ChangeSet 完成工作：先把 sealed research batch 中的来源、问题、观察、证据、主张及讲内关系写入 PostgreSQL，再写入通过双模型共识的跨讲关系。第一笔 ChangeSet 在写 claim revision 的同一事务内写对应 `review_event`；任一 event 失败时对象、版本、ChangeSet 与此前 event 全部回滚。持续分歧的项目只进入 `human-review-queue.json`，不会写入主库。两次写入都以内容指纹保证幂等；相同输入重跑应返回 `already_applied`。
 
 整合目录包含：
 

@@ -30,6 +30,14 @@ from backend.pipeline.knowledge_package_merge import (
     KnowledgePackageMergeError,
     validate_merged_package,
 )
+from backend.pipeline.knowledge_consensus_applier import (
+    ConsensusApplicationError,
+    validate_reviewed_candidate_artifact,
+)
+from backend.api.canonical_repository.reviewed_candidate_contract import (
+    reseal_after_relation_id_migration,
+    validate_store_package_authorization,
+)
 from backend.pipeline.source_keys import package_row_key
 from backend.pipeline.run_ledger import run_record
 from backend.pipeline.record_withdrawal import ANCHORED_COLLECTIONS
@@ -635,6 +643,12 @@ def plan(
         raise ValueError(
             f"supersede package violates graph integrity: {exc}"
         ) from exc
+    try:
+        validate_store_package_authorization(package)
+    except ConsensusApplicationError as exc:
+        raise ValueError(
+            f"supersede input lacks final review authority: {exc}"
+        ) from exc
 
     with store.connect() as conn, conn.cursor() as cursor:
         live_documents = _live(cursor, "source_documents")
@@ -795,9 +809,24 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     original_package = json.loads(args.package.read_text(encoding="utf-8"))
+    if original_package.get("consensus_application") is not None:
+        try:
+            validate_reviewed_candidate_artifact(original_package)
+        except ConsensusApplicationError as exc:
+            raise ValueError(
+                f"supersede reviewed candidate violates artifact integrity: {exc}"
+            ) from exc
+    elif args.apply:
+        raise ValueError(
+            "supersede --apply requires a fully reviewed consensus candidate"
+        )
     package, relation_id_migration = migrate_legacy_cross_section_relation_ids(
         original_package
     )
+    if original_package.get("consensus_application") is not None:
+        package = reseal_after_relation_id_migration(
+            original_package, package, relation_id_migration
+        )
     store = PostgresKnowledgeStore(args.database_url)
     (
         change_set,
@@ -822,6 +851,14 @@ def main(argv: list[str] | None = None) -> int:
         "change_set_id": change_set.change_set_id,
         "summary": change_set.as_dict()["summary"],
         "relation_id_namespace_migration": relation_id_migration,
+        "upstream_reviewed_candidate_artifact_sha256": (
+            (original_package.get("consensus_application") or {}).get(
+                "artifact_sha256"
+            )
+        ),
+        "effective_reviewed_candidate_artifact_sha256": (
+            (package.get("consensus_application") or {}).get("artifact_sha256")
+        ),
         # The only thing a person has to act on: new material means every
         # current downstream consumer bound to the old records gets rebuilt.
         "products_to_rebuild": products,
@@ -867,6 +904,12 @@ def main(argv: list[str] | None = None) -> int:
                     "input_path": str(args.package),
                     "supersedes": withdrawal.as_dict(),
                     "relation_id_namespace_migration": relation_id_migration,
+                    "upstream_reviewed_candidate_artifact_sha256": output.get(
+                        "upstream_reviewed_candidate_artifact_sha256"
+                    ),
+                    "effective_reviewed_candidate_artifact_sha256": output.get(
+                        "effective_reviewed_candidate_artifact_sha256"
+                    ),
                     "obsolete_candidate_batch_retirement": obsolete_retirement,
                     "stale_pending_topic_identity_retirement": (
                         stale_topic_identity_retirement

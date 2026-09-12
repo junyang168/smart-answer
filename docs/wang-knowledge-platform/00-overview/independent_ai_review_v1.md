@@ -3,7 +3,7 @@
 > **读者**：Developer
 > **类型**：流程
 > **状态**：当前
-> **与代码对齐**：未核对
+> **与代码对齐**：2026-09-12
 > **权威范围**：独立复审、双模型仲裁与人工分歧处理的通用政策。各子系统流程不得另立一套仲裁规则。
 
 > 状态：已实现并以第三、第四讲真实数据验证的内部质量控制流程。它只检查来源忠实度，不进行神学批评或事实核查，也不拥有人工批准权。
@@ -89,18 +89,20 @@ OpenAI 不得盲目接受 Claude。它看到完整逐字稿、候选主张、锚
 
 现在按裁定回写，沿用跨讲关系一直在用的两个词（`shared_knowledge_pilot._apply_claim_relation_review`）：
 
-| 复审裁定 | `review_status` |
+| 最终裁定 | `review_status` |
 | --- | --- |
-| `pass` | `ai_consensus_reviewed` |
-| `changes_suggested` | `human_review_required` |
-| `human_review_required` | `human_review_required` |
-| 没有裁定 | 留在 `candidate`，不猜 |
+| `pass`，未抽中 spot check | `ai_consensus_reviewed` |
+| `pass`，抽中 spot check | `human_review_required` |
+| `auto_applied` | `ai_consensus_reviewed`；若该项合并进另一 claim，则 loser 为 `superseded` |
+| `withdrawn` | `ai_consensus_reviewed` |
+| `human_confirmation_required`／`human_disagreement_required` | `human_review_required` |
+| 没有完整最终裁定 | 不得生成 current reviewed candidate，也不得入库 |
 
-`changes_suggested` 归到人工那一侧是有意的：复审要求改这条 claim，而仲裁那一轮改没改，产物里没记。把它读成「审过了、就这样挺好」等于拿一条说反话的裁定去批准 86 条。
+最终状态不再从第一轮 review 或文件 mtime 推断。`knowledge_consensus_applier` 把每条 claim 的最终 resolution、独立复审 SHA／fingerprint、仲裁 SHA／fingerprint、exact overrides SHA 和整包 self-hash 一起写入 reviewed candidate。sealed `scope_kind` 明确区分单篇 `source_scoped` 与研究批次 `research_batch_aggregate`：前者必须保留完整 extraction identity，后者必须保留 batch 与每个成员的 artifact lineage；删除字段再重封不能把一种包伪装成另一种。任何缺项、重复 claim、非法状态组合、错误 artifact 配对或重封后 graph 不一致都在数据库读取前拒绝。
 
 **`approved` 与 `human_approved` 不在这张表里**，一个都不会由这条路径写出。AI 复审通过不是人工批准——这条不能破，破了就是把 [#219](https://github.com/junyang168/smart-answer/issues/219)（观点层以 `system_approved` 写入却无人审核）换个层再来一次。
 
-回写方式与幂等性见[下一节](#六代码与运行)的 `sync-ai-review`。
+reviewed candidate 进入 PostgreSQL 时，claim revision 与对应的 AI `review_event` 在同一个 ChangeSet 事务中写入；失败全部回滚，精确重跑不增加 revision 或 event。
 
 ## 四、自动补丁与历史保留
 
@@ -151,14 +153,24 @@ PYTHONPATH=. .venv/bin/python -m backend.pipeline.corpus_ai_adjudication_runner
 PYTHONPATH=. .venv/bin/python -m backend.pipeline.shared_knowledge_pilot
 ```
 
-把复审裁定回写到 authoring store。默认只预览，`--apply` 才写：
+先从 exact review、adjudication 与 overrides 编译并认证 reviewed candidate，再用 supersede runner 预览或原子替换旧 extraction：
 
 ```bash
-PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.knowledge_store_runner sync-ai-review
-PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.knowledge_store_runner sync-ai-review --apply
+PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.knowledge_consensus_applier \
+  --package <cross-section-package> \
+  --review <independent-review> \
+  --adjudication <ai-adjudication> \
+  --overrides <consensus-overrides> \
+  --output <reviewed-candidate>
+
+PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.extraction_supersede_runner \
+  <reviewed-candidate>
+
+PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.extraction_supersede_runner \
+  <reviewed-candidate> --apply
 ```
 
-它扫描产物目录里带 `claim_reviews` 的档案，同一条 claim 有多份裁定时取最新的那份（按档案 mtime，所以重跑复审是覆盖而不是抢跑）。每条写入都经 `record_review`，`reason` 里带产物档名与 SHA，所以库里的一个状态追得回是哪份档案让它变成那样。已经在目标状态的跳过，因此再跑一次不会产生新事件。人已经决定过的（`approved`／`human_approved`／`superseded`）一律不动。
+旧的 `knowledge_store_runner sync-ai-review` 已退役：它只读取第一轮 review，并按 mtime 选择文件，无法证明仲裁与 override 是否属于同一条 exact artifact chain。人已经裁定的 revision 不接受低权限 AI 的语义改写；若 statement、evidence 或其他实质内容变化，ChangeSet fail closed，要求新的人工裁定。`superseded` 本身不是权限级别，系统依据最新、与当前状态匹配的 `review_event.reviewer_kind` 区分人工合并与 AI 合并。
 
 默认使用 `gpt-5.6-sol` medium 仲裁、`claude-sonnet-5` 复审／再审。Sonnet 5 调用不发送旧版 temperature 与 disabled-thinking 参数，使用模型默认 adaptive thinking；复审 runner 的输出预算为 32,000 tokens，因为 thinking 与最终 JSON 共用 `max_tokens`，旧的 10,000 上限会在模型输出 JSON 前耗尽。
 

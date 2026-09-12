@@ -294,6 +294,7 @@ flowchart TD
 12. correction 后写库的 effective proposal SHA 必须与终局复核绑定的 proposal SHA 相同；初审 A 的批准不得为 B 背书，终局复核任一维度非 `pass` 时不得产生 ChangeSet。
 13. 每条被路线结论引用的观点，其 scope 内可 attesting 成员来源必须 exact-once 落在 `attestation` 或经独立 reviewer 确认的无路线 disposition；缺席与重复都失败。
 14. ArgumentRoute correction 后写库的 effective proposal SHA 必须与终局复核绑定的 proposal SHA 相同；终局复核有任一非 `pass`，该 effective proposal 不得产生 ChangeSet。
+15. source eligibility attestation 若依据 `withdrawn` 或 `auto_applied` 裁定，row 与顶层 artifact hash 必须覆盖 exact adjudication SHA、状态以及适用时的 overrides SHA；不含这些字段的 legacy hash 只兼容无需仲裁的旧 `pass` 行。
 
 ## 9. 谁读观点
 

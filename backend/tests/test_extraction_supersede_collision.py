@@ -14,11 +14,20 @@ and the retirement then expected to find unchanged.
 
 from __future__ import annotations
 
+import json
+
+import pytest
+
 from backend.pipeline.extraction_supersede import arriving_keys, superseded
 from backend.pipeline.relation_id_namespace import source_namespace
 from backend.pipeline.extraction_supersede_runner import (
+    main,
     plan,
     transcript_predecessor_namespaces,
+)
+from backend.pipeline.knowledge_consensus_applier import (
+    CONSENSUS_APPLICATION_VERSION,
+    reviewed_candidate_artifact_sha256,
 )
 
 
@@ -260,6 +269,63 @@ def test_supersede_refuses_an_invalid_graph_before_connecting_to_the_store() -> 
 
     with pytest.raises(ValueError, match="supersede package violates graph integrity"):
         plan(Store(), package, source_kind="knowledge_package")
+
+
+def test_supersede_refuses_a_tampered_reviewed_candidate_before_database_access() -> None:
+    import pytest
+
+    package = {
+        "source_documents": [{"source_id": "SRC-A"}],
+        "source_fragments": [{"fragment_id": "FR-1", "source_id": "SRC-A"}],
+        "evidence_steps": [{
+            "evidence_step_id": "E-1",
+            "source_fragment_ids": ["FR-1"],
+            "produced_claim_ids": ["CL-1"],
+        }],
+        "claims": [{
+            "claim_id": "CL-1",
+            "title": "original",
+            "evidence_step_ids": ["E-1"],
+        }],
+        "consensus_application": {
+            "schema_version": CONSENSUS_APPLICATION_VERSION,
+        },
+    }
+    package["consensus_application"]["artifact_sha256"] = (
+        reviewed_candidate_artifact_sha256(package)
+    )
+    package["claims"][0]["title"] = "tampered but graph-valid"
+
+    class Store:
+        def connect(self):
+            raise AssertionError("tampered artifacts must fail before any DB access")
+
+    with pytest.raises(ValueError, match="final review authority"):
+        plan(Store(), package, source_kind="knowledge_package")
+
+
+def test_supersede_refuses_graph_valid_raw_extraction_before_database_access() -> None:
+    package = _package(["FR-1"], ["E-1"])
+    package["evidence_steps"][0]["produced_claim_ids"] = ["CL001"]
+    package["extraction"] = {"fingerprint_sha256": "raw-generation"}
+    package["complete"] = True
+
+    class Store:
+        def connect(self):
+            raise AssertionError("raw extraction must fail before any DB access")
+
+    with pytest.raises(ValueError, match="final review authority"):
+        plan(Store(), package, source_kind="knowledge_package")
+
+
+def test_supersede_apply_refuses_a_raw_unreviewed_package(tmp_path) -> None:
+    package_path = tmp_path / "raw.json"
+    package_path.write_text(
+        json.dumps(_package(["FR-1"], ["E-1"])), encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="fully reviewed consensus candidate"):
+        main([str(package_path), "--apply"])
 
 
 def test_an_omitted_cross_source_relation_is_not_retired() -> None:

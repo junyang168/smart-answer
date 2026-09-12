@@ -383,7 +383,10 @@ def build_command_plan(
                     "command": [
                         sys.executable, "-m", "backend.pipeline.knowledge_consensus_applier",
                         "--package", source, "--overrides", str(paths["overrides"]),
-                        "--output", str(paths["reviewed"]), "--transcript-dir", str(member_dir),
+                        "--output", str(paths["reviewed"]),
+                        "--review", str(paths["review"]),
+                        "--adjudication", str(paths["adjudication"]),
+                        "--transcript-dir", str(member_dir),
                     ],
                 },
                 # Ingest supersedes the extraction it replaces in the same
