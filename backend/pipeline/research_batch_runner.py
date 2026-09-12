@@ -255,6 +255,7 @@ def build_command_plan(
     # exists to end.
     review_budget = models.get("review_max_output_tokens")
     adjudicator_budget = models.get("adjudicator_max_output_tokens")
+    review_spot_check_percent = int(batch.get("review_spot_check_percent", 0))
     section_limits = batch.get("extraction_max_section_sentences") or {}
     plan: list[dict[str, Any]] = []
     reused = set((batch.get("reviewed_package_reuse") or {}).keys())
@@ -333,6 +334,8 @@ def build_command_plan(
             str(paths["review"]),
             "--batch-size",
             str(int(batch.get("review_batch_size", 20))),
+            "--spot-check-percent",
+            str(review_spot_check_percent),
             "--transcript-dir",
             str(member_dir),
             "--model",

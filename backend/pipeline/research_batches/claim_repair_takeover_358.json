@@ -21,6 +21,7 @@
     }
   },
   "review_batch_size": 20,
+  "review_spot_check_percent": 0,
   "models": {
     "extraction": "gpt-5.6-sol",
     "extraction_reasoning_effort": "medium",
