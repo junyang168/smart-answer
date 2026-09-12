@@ -20,8 +20,14 @@ from typing import Any
 
 import fcntl
 
-from backend.api.canonical_repository.knowledge_models import ClaimRecord, EvidenceStepRecord
+from backend.api.canonical_repository.knowledge_models import (
+    ClaimRecord,
+    EvidenceStepRecord,
+    SourceFragmentRecord,
+    evidence_fragment_ids,
+)
 from backend.api.canonical_repository.viewpoint_foundation import (
+    canonical_json,
     semantic_record_sha,
     sha256_json,
 )
@@ -171,6 +177,13 @@ def _validate_scope_packet(scope_packet: Mapping[str, Any], store: Any) -> list[
             for raw in store.list_records("evidence_steps")
         )
     }
+    current_fragments = {
+        row.fragment_id: row
+        for row in (
+            SourceFragmentRecord.model_validate(raw)
+            for raw in store.list_records("source_fragments")
+        )
+    }
     current_sources = {
         str(row.get("source_id") or ""): str(row.get("source_sha256") or "")
         for row in store.list_records("source_documents")
@@ -187,6 +200,25 @@ def _validate_scope_packet(scope_packet: Mapping[str, Any], store: Any) -> list[
             findings.append(f"{claim.claim_id}: Claim revision drift")
         if semantic_record_sha(current) != claim.claim_revision_sha256:
             findings.append(f"{claim.claim_id}: Claim content drift")
+        expected_claim_projection = {
+            "statement": current.statement,
+            "attribution": current.attribution,
+            "scripture_refs": sorted(
+                value if isinstance(value, str) else canonical_json(value)
+                for value in current.scripture_refs
+            ),
+            "review_status": current.review_status,
+        }
+        actual_claim_projection = {
+            "statement": claim.statement,
+            "attribution": claim.attribution,
+            "scripture_refs": claim.scripture_refs,
+            "review_status": claim.review_status,
+        }
+        if actual_claim_projection != expected_claim_projection:
+            findings.append(
+                f"{claim.claim_id}: scope packet Claim projection differs from current Claim"
+            )
         if current.review_status not in IDENTITY_ELIGIBLE_CLAIM_REVIEW_STATUSES:
             findings.append(
                 f"{claim.claim_id}: Claim review status {current.review_status!r} "
@@ -197,6 +229,59 @@ def _validate_scope_packet(scope_packet: Mapping[str, Any], store: Any) -> list[
             findings.append(
                 f"{claim.claim_id}: scope packet evidence set differs from current Claim"
             )
+        expected_evidence_pairs = {
+            (evidence_id, fragment_id)
+            for evidence_id in current.evidence_step_ids
+            if (evidence := current_evidence.get(evidence_id)) is not None
+            for fragment_id in evidence_fragment_ids(evidence)
+        }
+        packet_evidence_pairs = {
+            (item.evidence_step_id, item.source_fragment_id) for item in claim.evidence
+        }
+        if packet_evidence_pairs != expected_evidence_pairs:
+            findings.append(
+                f"{claim.claim_id}: scope packet evidence/fragment projection differs "
+                "from current corpus"
+            )
+        for item in claim.evidence:
+            evidence = current_evidence.get(item.evidence_step_id)
+            fragment = current_fragments.get(item.source_fragment_id)
+            if evidence is None or fragment is None:
+                findings.append(
+                    f"{claim.claim_id}: scope packet references missing evidence/fragment"
+                )
+                continue
+            expected_evidence_projection = {
+                "evidence_statement": evidence.statement,
+                "discourse_role": evidence.discourse_role,
+                "scripture_refs": sorted(set(evidence.scripture_refs)),
+                "support_eligibility": evidence.support_eligibility,
+                "source_id": fragment.source_id,
+                "paragraph_key": fragment.paragraph_key,
+                "media_time": fragment.media_time,
+                "verbatim_excerpt": fragment.verbatim_excerpt,
+                "citation_id": str(fragment.citation_id or ""),
+                "source_sha256": str(fragment.source_sha256 or ""),
+                "anchor_state": fragment.anchor_state,
+            }
+            actual_evidence_projection = {
+                "evidence_statement": item.evidence_statement,
+                "discourse_role": item.discourse_role,
+                "scripture_refs": item.scripture_refs,
+                "support_eligibility": item.support_eligibility,
+                "source_id": item.source_id,
+                "paragraph_key": item.paragraph_key,
+                "media_time": item.media_time,
+                "verbatim_excerpt": item.verbatim_excerpt,
+                "citation_id": item.citation_id,
+                "source_sha256": item.source_sha256,
+                "anchor_state": item.anchor_state,
+            }
+            if actual_evidence_projection != expected_evidence_projection:
+                findings.append(
+                    f"{claim.claim_id}/{item.evidence_step_id}/"
+                    f"{item.source_fragment_id}: scope packet evidence projection drift"
+                )
         expected_source_sha = current_sources.get(claim.source_id)
         if not expected_source_sha:
             findings.append(f"{claim.claim_id}: source missing from current corpus")

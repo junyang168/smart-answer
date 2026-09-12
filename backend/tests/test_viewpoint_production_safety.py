@@ -60,7 +60,20 @@ def _fixture(tmp_path: Path):
         {
             "evidence_step_id": "E1",
             "statement": "证据",
+            "source_fragment_id": "F1",
             "produced_claim_ids": ["C1"],
+            "support_eligibility": "eligible",
+            "revision": 1,
+        }
+    ]
+    store.rows["source_fragments"] = [
+        {
+            "fragment_id": "F1",
+            "source_id": "S1",
+            "verbatim_excerpt": "逐字",
+            "citation_id": "CIT1",
+            "source_sha256": "source-sha",
+            "anchor_state": "source_version_bound",
             "revision": 1,
         }
     ]
@@ -243,6 +256,32 @@ def test_freeze_blocks_nonfinal_claim_review_status(tmp_path):
             output_root=tmp_path / "output",
             global_lock_path=tmp_path / "lock",
         )
+
+
+def test_freeze_blocks_self_consistent_but_forged_scope_projection(tmp_path):
+    store, packet_path, _ = _fixture(tmp_path)
+    packet = json.loads(packet_path.read_text(encoding="utf-8"))
+    packet["claims"][0]["statement"] = "不是当前 Claim 的文字"
+    packet["claims"][0]["evidence"][0]["verbatim_excerpt"] = "不是当前逐字锚点"
+    packet["packet_sha256"] = sha256_json(
+        {key: value for key, value in packet.items() if key != "packet_sha256"}
+    )
+    _write_json(packet_path, packet)
+    with pytest.raises(CvpProductionBlocked) as exc_info:
+        build_cvp_freeze(
+            ticket_id=357,
+            scope_packet_path=packet_path,
+            prerequisite_paths={},
+            store=store,
+            cvp_policy_sha256="cvp-policy",
+            route_policy_sha256="route-policy",
+            runner_commit="abc123",
+            worktree_root=tmp_path / "worktree",
+            output_root=tmp_path / "output",
+            global_lock_path=tmp_path / "lock",
+        )
+    assert "scope packet Claim projection differs" in str(exc_info.value)
+    assert "scope packet evidence projection drift" in str(exc_info.value)
 
     store, packet_path, _ = _fixture(tmp_path / "blocked")
     packet = json.loads(packet_path.read_text(encoding="utf-8"))
