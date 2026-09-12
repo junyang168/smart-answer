@@ -17,6 +17,7 @@ from __future__ import annotations
 from backend.pipeline.extraction_supersede import arriving_keys, superseded
 from backend.pipeline.relation_id_namespace import source_namespace
 from backend.pipeline.extraction_supersede_runner import (
+    plan,
     transcript_predecessor_namespaces,
 )
 
@@ -237,6 +238,28 @@ def test_same_source_curated_claim_is_not_inferred_to_belong_to_extraction() -> 
     )
 
     assert ("claims", f"{namespace}-MERGED-001") not in withdrawal.closure()
+
+
+def test_supersede_refuses_an_invalid_graph_before_connecting_to_the_store() -> None:
+    import pytest
+
+    package = {
+        "source_documents": [{"source_id": "SRC-A"}],
+        "source_fragments": [{"fragment_id": "FR-1", "source_id": "SRC-A"}],
+        "evidence_steps": [{
+            "evidence_step_id": "E-1",
+            "source_fragment_ids": ["FR-1"],
+            "produced_claim_ids": ["CL-1"],
+        }],
+        "claims": [{"claim_id": "CL-1", "evidence_step_ids": []}],
+    }
+
+    class Store:
+        def connect(self):
+            raise AssertionError("invalid packages must fail before any DB access")
+
+    with pytest.raises(ValueError, match="supersede package violates graph integrity"):
+        plan(Store(), package, source_kind="knowledge_package")
 
 
 def test_an_omitted_cross_source_relation_is_not_retired() -> None:

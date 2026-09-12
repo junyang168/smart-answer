@@ -26,6 +26,10 @@ from backend.api.canonical_repository.postgres_store import (
     uncoordinated_semantic_reference_blockers,
 )
 from backend.pipeline.extraction_supersede import package_source_ids, superseded
+from backend.pipeline.knowledge_package_merge import (
+    KnowledgePackageMergeError,
+    validate_merged_package,
+)
 from backend.pipeline.source_keys import package_row_key
 from backend.pipeline.run_ledger import run_record
 from backend.pipeline.record_withdrawal import ANCHORED_COLLECTIONS
@@ -619,6 +623,18 @@ def plan(
 
     Returns the plan, the withdrawal, and the downstream products it invalidates.
     """
+
+    # This is the last package boundary before PostgreSQL.  Upstream runners
+    # validate their own output, but an operator can also invoke supersede
+    # directly with an older artifact.  Re-run the complete graph contract
+    # here so a stale package cannot bypass newer integrity gates merely by
+    # entering through the ingest CLI.
+    try:
+        validate_merged_package(package)
+    except KnowledgePackageMergeError as exc:
+        raise ValueError(
+            f"supersede package violates graph integrity: {exc}"
+        ) from exc
 
     with store.connect() as conn, conn.cursor() as cursor:
         live_documents = _live(cursor, "source_documents")
