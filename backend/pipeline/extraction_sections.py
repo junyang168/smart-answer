@@ -310,6 +310,61 @@ class OversizedSectionError(ValueError):
     """A section is over its limit and has no safe next-level split."""
 
 
+def validate_titled_section_plan(plan: SectionPlan, body_length: int) -> None:
+    """Require a titled, contiguous partition before claim extraction.
+
+    A title is editorial structure rather than spoken source, but an untitled
+    section still means the sectioning preflight did not finish.  This check is
+    origin-agnostic so legacy ``source_headings`` caches and partially headed
+    published transcripts cannot bypass the stronger generated-plan contract.
+    """
+
+    if body_length == 0:
+        if plan.sections:
+            raise SectionBoundaryError("empty source has extraction sections")
+        return
+    if not plan.sections:
+        raise SectionBoundaryError("section plan does not cover the spoken source")
+    expected_start = 0
+    for ordinal, section in enumerate(plan.sections, start=1):
+        if (
+            type(section.index) is not int
+            or type(section.start) is not int
+            or type(section.end) is not int
+            or section.index != ordinal
+            or section.start != expected_start
+        ):
+            raise SectionBoundaryError("extraction sections are not a contiguous partition")
+        if (
+            section.start < 0
+            or section.end <= section.start
+            or section.end > body_length
+            or not isinstance(section.title, str)
+            or not section.title.strip()
+        ):
+            raise SectionBoundaryError("extraction section is untitled or out of range")
+        expected_start = section.end
+    if expected_start != body_length:
+        raise SectionBoundaryError("section plan does not cover the spoken source")
+
+
+def has_transport_splits(plan: SectionPlan) -> bool:
+    """Whether a cached plan needs an explicit legacy transport migration."""
+
+    return bool(
+        plan.max_section_sentences is not None
+        or plan.strategy is not None
+        or plan.split_lineage
+        or any(
+            section.parent_start is not None
+            or section.parent_end is not None
+            or section.sentence_start is not None
+            or section.sentence_end is not None
+            for section in plan.sections
+        )
+    )
+
+
 def generated_plan_insertions(
     plan: SectionPlan, body_rows: Sequence[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -317,17 +372,26 @@ def generated_plan_insertions(
 
     if plan.origin != FROM_GENERATOR:
         raise SectionBoundaryError("cached plan was not generated subtitles")
-    if not body_rows or not plan.sections:
+    if has_transport_splits(plan):
+        raise SectionBoundaryError(
+            "transport-split generated plan cannot be persisted as subtitles"
+        )
+    if not body_rows:
         raise SectionBoundaryError("cached generated plan has no spoken-source sections")
-    if plan.sections[0].start != 0 or not plan.sections[0].title.strip():
-        raise SectionBoundaryError("cached generated plan did not title the leading section")
+    validate_titled_section_plan(plan, len(body_rows))
     expected_start = 0
     insertions: list[dict[str, Any]] = []
     for ordinal, section in enumerate(plan.sections, start=1):
-        if section.index != ordinal or section.start != expected_start:
-            raise SectionBoundaryError("cached generated sections are not a contiguous partition")
-        if section.end <= section.start or section.end > len(body_rows) or not section.title.strip():
-            raise SectionBoundaryError("cached generated section is untitled or out of range")
+        if (
+            section.start != expected_start
+            or section.parent_start is not None
+            or section.parent_end is not None
+            or section.sentence_start is not None
+            or section.sentence_end is not None
+        ):
+            raise SectionBoundaryError(
+                "transport-split generated plan cannot be persisted as subtitles"
+            )
         after_index = (
             "START"
             if section.start == 0
@@ -337,8 +401,6 @@ def generated_plan_insertions(
             {"after_index": after_index, "text": section.title, "level": 1}
         )
         expected_start = section.end
-    if expected_start != len(body_rows):
-        raise SectionBoundaryError("cached generated sections do not cover the spoken source")
     return insertions
 
 

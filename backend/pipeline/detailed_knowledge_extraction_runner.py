@@ -40,6 +40,7 @@ from backend.pipeline.extraction_sections import (
     apply_section_limit,
     combine_sections,
     generated_plan_insertions,
+    has_transport_splits,
     leading_untitled_body_end,
     load_cached_plan,
     plan_sections,
@@ -48,6 +49,7 @@ from backend.pipeline.extraction_sections import (
     section_payload,
     sections_from_structure,
     structure_has_section_headings,
+    validate_titled_section_plan,
 )
 from backend.pipeline.knowledge_source import load_source_manifest, markdown_source_document
 from backend.pipeline.knowledge_package_merge import (
@@ -858,7 +860,11 @@ def _subtitle_provider(source_id: str, client: CodexSubscriptionClient | None = 
 
     def provider(paragraphs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return generate_subtitles(
-            paragraphs, subject=source_id, consumer="extraction_sections", client=client
+            paragraphs,
+            subject=source_id,
+            consumer="extraction_sections",
+            client=client,
+            require_leading_title=True,
         )
 
     return provider
@@ -921,6 +927,7 @@ def _persist_generated_subtitles(
             subject=source_id,
             consumer="extraction_persisted_subtitles",
             client=client,
+            require_leading_title=True,
         )
     if not insertions:
         raise SubtitlePersistenceError(
@@ -1217,14 +1224,19 @@ def resolve_section_plan(
             accept_any_max=True,
         )
         cached_used_legacy_physical_identity = cached is not None
-    cached_had_transport_policy = bool(
-        cached is not None
-        and (
-            cached.max_section_sentences is not None
-            or cached.strategy is not None
-            or cached.split_lineage
+    if cached is not None and has_transport_splits(cached):
+        raise SectionBoundaryError(
+            "legacy transport-split section cache requires an explicit migration"
         )
-    )
+    if cached is not None:
+        try:
+            validate_titled_section_plan(cached, len(projection.body_rows))
+        except SectionBoundaryError:
+            # Untitled caches are not extraction preflight successes and must
+            # be rebuilt. Transport caches take the explicit error above: do
+            # not guess at their parent editorial boundaries here.
+            cached = None
+            cached_used_legacy_physical_identity = False
     if cached is not None:
         if structure_has_section_headings(
             projection.headings, level=level, body_length=len(texts)
@@ -1244,21 +1256,14 @@ def resolve_section_plan(
                 (row.start, row.end, row.title) for row in structural_plan.sections
             ]
             if cached_partition != structural_partition:
-                # A plan saved by the old opt-in cap may contain derived
-                # transport chunks. The uncapped source-heading plan is fully
-                # reconstructable without a model call, so recover that base
-                # instead of treating it as missing and regenerating titles.
-                cached = structural_plan if cached_had_transport_policy else None
+                # The source's current editorial structure supersedes this
+                # cache. Rebuild it deterministically below; transport caches
+                # were already rejected before this comparison.
+                cached = None
         if cached is not None:
-            if cached_had_transport_policy:
-                cached = SectionPlan(
-                    sections=cached.sections,
-                    origin=cached.origin,
-                    level=cached.level,
-                )
+            validate_titled_section_plan(cached, len(projection.body_rows))
             if (
                 preferred_plan is not None
-                or cached_had_transport_policy
                 or cached_used_legacy_physical_identity
                 or cached_needs_identity_upgrade
             ):
@@ -1289,6 +1294,7 @@ def resolve_section_plan(
             sentence_counts=counts,
             max_section_sentences=None,
         )
+        validate_titled_section_plan(base_plan, len(projection.body_rows))
         save_plan(
             path,
             base_plan,
@@ -1324,6 +1330,11 @@ def reusable_generated_plan(
     )
     if plan is None or plan.origin != FROM_GENERATOR:
         return None
+    if has_transport_splits(plan):
+        raise SubtitlePersistenceError(
+            "legacy transport-split cache cannot be written back as editorial "
+            "subtitles; an explicit cache migration is required"
+        )
     try:
         generated_plan_insertions(plan, list(projection.body_rows))
     except SectionBoundaryError:

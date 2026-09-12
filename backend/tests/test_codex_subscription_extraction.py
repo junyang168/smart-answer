@@ -65,6 +65,19 @@ def _transcript() -> dict:
     }
 
 
+def _titled_transcript() -> dict:
+    transcript = _transcript()
+    transcript["script"].insert(
+        0,
+        {
+            "index": "subtitle-fixed-source",
+            "type": "subtitle",
+            "text": "## 固定抽取来源",
+        },
+    )
+    return transcript
+
+
 def test_explicit_canary_mode_never_opens_the_run_ledger(monkeypatch) -> None:
     def unexpected_run_record(**_kwargs):
         raise AssertionError("no-run-ledger must not connect")
@@ -382,7 +395,9 @@ def test_subscription_section_passes_schema_validator_and_sentence_ledger_and_th
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     transcript_path = tmp_path / "fixed-source.json"
-    transcript_path.write_text(json.dumps(_transcript(), ensure_ascii=False), encoding="utf-8")
+    transcript_path.write_text(
+        json.dumps(_titled_transcript(), ensure_ascii=False), encoding="utf-8"
+    )
     output_dir = tmp_path / "output"
     calls: list[list[str]] = []
     child_environments: list[dict[str, str]] = []
@@ -442,7 +457,7 @@ def test_subscription_section_passes_schema_validator_and_sentence_ledger_and_th
     assert fallback_status == "skipped"
     assert fallback_output == output
 
-    editorial_only_edit = _transcript()
+    editorial_only_edit = _titled_transcript()
     editorial_only_edit["script"].insert(
         1,
         {
@@ -478,10 +493,7 @@ def test_subscription_section_passes_schema_validator_and_sentence_ledger_and_th
     # change the package provenance and the displayed section label, but not
     # the semantic model generation or any generation-scoped record ID.
     title_only_edit = json.loads(json.dumps(editorial_only_edit, ensure_ascii=False))
-    title_only_edit["script"].insert(
-        0,
-        {"index": "subtitle-1", "type": "subtitle", "text": "编辑标题"},
-    )
+    title_only_edit["script"][0]["text"] = "## 编辑标题"
     transcript_path.write_text(
         json.dumps(title_only_edit, ensure_ascii=False), encoding="utf-8"
     )
@@ -500,8 +512,11 @@ def test_subscription_section_passes_schema_validator_and_sentence_ledger_and_th
     # Timing is current locator metadata, not spoken text. Recompile it from
     # the authoritative row without asking the model to repeat its claims.
     timing_only_edit = json.loads(json.dumps(title_only_edit, ensure_ascii=False))
-    timing_only_edit["script"][1]["start_time"] = 101.0
-    timing_only_edit["script"][1]["end_time"] = 108.0
+    first_spoken_row = next(
+        row for row in timing_only_edit["script"] if row.get("index") == 10
+    )
+    first_spoken_row["start_time"] = 101.0
+    first_spoken_row["end_time"] = 108.0
     transcript_path.write_text(
         json.dumps(timing_only_edit, ensure_ascii=False), encoding="utf-8"
     )
@@ -549,7 +564,7 @@ def test_subscription_fallback_limit_splits_only_after_uncapped_cache_miss(
 ) -> None:
     transcript_path = tmp_path / "new-source.json"
     transcript_path.write_text(
-        json.dumps(_transcript(), ensure_ascii=False), encoding="utf-8"
+        json.dumps(_titled_transcript(), ensure_ascii=False), encoding="utf-8"
     )
     captured: dict[str, object] = {}
 

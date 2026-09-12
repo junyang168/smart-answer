@@ -11,6 +11,7 @@ import pytest
 from backend.api.sc_api.script_delta import ScriptConflictError, ScriptDelta
 from backend.pipeline import detailed_knowledge_extraction_runner as runner
 from backend.pipeline.detailed_knowledge_extraction_runner import SectionSettings
+from backend.pipeline.extraction_sections import FROM_SOURCE
 from backend.pipeline.sermon_subtitle_persistence import (
     SubtitleBodyMutationError,
     SubtitlePersistenceError,
@@ -213,6 +214,20 @@ def _source(tmp_path: Path, *, heading: bool = False) -> Path:
     if heading:
         rows.insert(0, {"index": "subtitle-existing", "type": "subtitle", "text": "## 已有标题"})
     path.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def _published_source(tmp_path: Path) -> Path:
+    folder = tmp_path / "script_published"
+    folder.mkdir()
+    path = folder / "S published.json"
+    path.write_text(
+        json.dumps(
+            {"metadata": {"status": "published"}, "script": _rows()},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
     return path
 
 
@@ -544,6 +559,148 @@ def test_headingless_published_source_migrates_exact_legacy_physical_plan(
     assert migrated["locator_space"] == runner.LOCATOR_SPACE
 
 
+def test_headingless_published_source_regenerates_untitled_cached_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = _published_source(tmp_path)
+    before_raw = source_path.read_bytes()
+    source, raw = runner._load(source_path)
+    projection = runner.project_script(source["script"])
+    output_dir = tmp_path / "out"
+    plan_path = output_dir / "section-plans" / f"{runner._slug(source_path.stem)}.json"
+    runner.save_plan(
+        plan_path,
+        runner.SectionPlan(
+            sections=(
+                runner.Section(index=1, start=0, end=1, title=""),
+                runner.Section(index=2, start=1, end=3, title="旧缓存第二部分"),
+            ),
+            origin=runner.FROM_GENERATOR,
+        ),
+        projection.body_sha256,
+        source_file_sha256=hashlib.sha256(raw).hexdigest(),
+        editorial_structure_sha256=projection.editorial_structure_sha256,
+        editorial_topology_sha256=projection.editorial_topology_sha256,
+    )
+    calls = 0
+
+    def fresh_generation(*_args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        nonlocal calls
+        calls += 1
+        assert kwargs["require_leading_title"] is True
+        return [
+            {"after_index": "START", "text": "## 新的第一部分", "level": 1},
+            {"after_index": "21", "text": "## 新的第二部分", "level": 1},
+        ]
+
+    monkeypatch.setattr(runner, "generate_subtitles", fresh_generation)
+
+    resolved = runner.resolve_section_plan(
+        source=source,
+        source_id=source_path.stem,
+        source_sha256=projection.body_sha256,
+        source_file_sha256=hashlib.sha256(raw).hexdigest(),
+        output_dir=output_dir,
+        client=object(),
+    )
+
+    assert calls == 1
+    assert [section.title for section in resolved.sections] == [
+        "新的第一部分",
+        "新的第二部分",
+    ]
+    assert source_path.read_bytes() == before_raw
+
+
+def test_partially_headed_source_cannot_extract_an_untitled_leading_span(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = {
+        "script": [
+            _rows()[0],
+            {"index": "subtitle-later", "type": "subtitle", "text": "## 后一部分"},
+            *_rows()[1:],
+        ]
+    }
+    projection = runner.project_script(source["script"])
+    monkeypatch.setattr(
+        runner,
+        "generate_subtitles",
+        lambda *_args, **_kwargs: pytest.fail(
+            "source headings must not be silently replaced by generated headings"
+        ),
+    )
+
+    with pytest.raises(runner.SectionBoundaryError, match="untitled"):
+        runner.resolve_section_plan(
+            source=source,
+            source_id="partially headed",
+            source_sha256=projection.body_sha256,
+            output_dir=tmp_path / "out",
+            client=object(),
+        )
+
+
+def test_disabling_generation_cannot_turn_a_headingless_source_into_one_untitled_section(
+    tmp_path: Path,
+) -> None:
+    source = {"script": _rows()}
+    projection = runner.project_script(source["script"])
+
+    with pytest.raises(runner.SectionBoundaryError, match="untitled"):
+        runner.resolve_section_plan(
+            source=source,
+            source_id="headingless no generation",
+            source_sha256=projection.body_sha256,
+            output_dir=tmp_path / "out",
+            allow_generated=False,
+        )
+
+
+def test_untitled_source_heading_cache_cannot_bypass_plan_postcondition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = {
+        "script": [
+            _rows()[0],
+            {"index": "subtitle-later", "type": "subtitle", "text": "## 后一部分"},
+            *_rows()[1:],
+        ]
+    }
+    projection = runner.project_script(source["script"])
+    output_dir = tmp_path / "out"
+    plan_path = output_dir / "section-plans" / f"{runner._slug('partial cached')}.json"
+    runner.save_plan(
+        plan_path,
+        runner.SectionPlan(
+            sections=(
+                runner.Section(index=1, start=0, end=1, title=""),
+                runner.Section(index=2, start=1, end=3, title="后一部分"),
+            ),
+            origin=FROM_SOURCE,
+        ),
+        projection.body_sha256,
+        editorial_structure_sha256=projection.editorial_structure_sha256,
+        editorial_topology_sha256=projection.editorial_topology_sha256,
+    )
+    monkeypatch.setattr(
+        runner,
+        "generate_subtitles",
+        lambda *_args, **_kwargs: pytest.fail(
+            "invalid source-heading cache must not invoke full-source generation"
+        ),
+    )
+
+    with pytest.raises(runner.SectionBoundaryError, match="untitled"):
+        runner.resolve_section_plan(
+            source=source,
+            source_id="partial cached",
+            source_sha256=projection.body_sha256,
+            output_dir=output_dir,
+            client=object(),
+        )
+
+
 def test_mixed_published_source_never_migrates_legacy_physical_plan(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -863,7 +1020,7 @@ def test_new_cap_reuses_uncapped_generated_plan_without_resegmenting(
     assert {row["boundary_kind"] for row in capped.split_lineage} == {"spoken_row"}
 
 
-def test_old_capped_generated_plan_is_recovered_without_subtitle_regeneration(
+def test_old_capped_generated_plan_fails_closed_without_subtitle_regeneration(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = {"script": _rows()}
@@ -890,28 +1047,25 @@ def test_old_capped_generated_plan_is_recovered_without_subtitle_regeneration(
         "generate_subtitles",
         lambda *_args, **_kwargs: pytest.fail("cached capped plan must not regenerate"),
     )
-    assert runner.reusable_generated_plan(
-        source=source,
-        source_id="S legacy capped",
-        source_sha256=projection.body_sha256,
-        output_dir=output_dir,
-        level=2,
-        max_section_sentences=125,
-    ) is not None
+    with pytest.raises(SubtitlePersistenceError, match="explicit cache migration"):
+        runner.reusable_generated_plan(
+            source=source,
+            source_id="S legacy capped",
+            source_sha256=projection.body_sha256,
+            output_dir=output_dir,
+            level=2,
+            max_section_sentences=125,
+        )
 
-    plan = runner.resolve_section_plan(
-        source=source,
-        source_id="S legacy capped",
-        source_sha256=projection.body_sha256,
-        output_dir=output_dir,
-        max_section_sentences=125,
-        client=object(),
-    )
-
-    assert [(row.start, row.end) for row in plan.sections] == [(0, 1), (1, 3)]
-    saved = json.loads(path.read_text(encoding="utf-8"))
-    assert saved["max_section_sentences"] is None
-    assert saved["section_strategy"] is None
+    with pytest.raises(runner.SectionBoundaryError, match="explicit migration"):
+        runner.resolve_section_plan(
+            source=source,
+            source_id="S legacy capped",
+            source_sha256=projection.body_sha256,
+            output_dir=output_dir,
+            max_section_sentences=125,
+            client=object(),
+        )
 
 
 def test_post_save_body_mutation_stops_before_extraction(

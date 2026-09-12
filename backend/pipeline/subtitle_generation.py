@@ -165,7 +165,10 @@ def render_paragraphs(paragraphs: Sequence[Mapping[str, str]]) -> str:
 
 
 def validate_insertions(
-    candidate: Mapping[str, Any], paragraphs: Sequence[Mapping[str, str]]
+    candidate: Mapping[str, Any],
+    paragraphs: Sequence[Mapping[str, str]],
+    *,
+    require_leading_title: bool = False,
 ) -> list[dict[str, Any]]:
     """Accept the answer only if every insertion lands somewhere real.
 
@@ -206,6 +209,11 @@ def validate_insertions(
         if not text:
             problems.append(f"第 {position} 条没有标题文字")
         accepted.append({"after_index": after, "text": text, "level": level})
+    if require_leading_title and not any(
+        row["after_index"] == START and row["level"] == 1 and row["text"]
+        for row in accepted
+    ):
+        problems.append("抽取分段必须用 START 为开头正文提供一级标题")
     if problems:
         raise SubtitleValidationError("；".join(problems))
     return accepted
@@ -233,6 +241,7 @@ def generate_subtitles(
     subject_kind: str = "source",
     client: "Stage1OpenAIClient | None" = None,
     attempts: int = VALIDATION_ATTEMPTS,
+    require_leading_title: bool = False,
 ) -> list[dict[str, Any]]:
     """Suggest where this sermon breaks, or raise saying why it could not.
 
@@ -272,7 +281,11 @@ def generate_subtitles(
             record.usage([usage_row(client.last_usage, attempt)])
             record.model_call_completed()
             try:
-                insertions = validate_insertions(candidate, rows)
+                insertions = validate_insertions(
+                    candidate,
+                    rows,
+                    require_leading_title=require_leading_title,
+                )
             except SubtitleValidationError as exc:
                 last_error = exc
                 continue
