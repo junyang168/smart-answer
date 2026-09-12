@@ -6,6 +6,7 @@ import json
 import pytest
 
 from backend.pipeline.cross_section_relation import (
+    PROMPT_PATH,
     SCHEMA_VERSION,
     CrossSectionValidationError,
     apply_proposals,
@@ -89,6 +90,14 @@ def test_accepts_a_genuinely_long_relation() -> None:
     validate_proposals(
         _proposal(), package, positions=record_positions(package), boundaries=[0, 25]
     )
+
+
+def test_prompt_uses_section_boundaries_not_the_retired_window_span() -> None:
+    prompt = PROMPT_PATH.read_text(encoding="utf-8")
+
+    assert "跨 section 关系没有最小段距" in prompt
+    assert "段距 ≥ 最小跨度" not in prompt
+    assert "每个窗口看 15 段" not in prompt
 
 
 def test_sentence_range_chunks_in_one_spoken_row_remain_cross_section() -> None:
