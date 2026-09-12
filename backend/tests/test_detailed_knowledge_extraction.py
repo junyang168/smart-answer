@@ -14,8 +14,11 @@ from backend.pipeline.detailed_knowledge_extraction import (
     extraction_identity,
     validate_response,
 )
-from backend.pipeline.detailed_knowledge_extraction_runner import _validation_feedback
-from backend.pipeline.detailed_knowledge_extraction_runner import compile_package
+from backend.pipeline.detailed_knowledge_extraction_runner import (
+    PROMPT_PATH,
+    _validation_feedback,
+    compile_package,
+)
 from backend.pipeline.extraction_sections import Section, namespace_response
 from backend.pipeline.knowledge_package_merge import validate_merged_package
 from backend.pipeline.source_projection import LOCATOR_SPACE, project_script
@@ -342,6 +345,14 @@ def test_rejects_duplicate_claim_evidence_reference() -> None:
 
     with pytest.raises(DetailedExtractionValidationError, match="duplicate evidence"):
         validate_response(response, _transcript())
+
+
+def test_sermon_prompt_warns_against_provenance_ambiguous_spoken_anchors() -> None:
+    prompt = PROMPT_PATH.read_text(encoding="utf-8")
+
+    assert "`> ...` blockquote" in prompt
+    assert "spoken anchor" in prompt
+    assert "`Sxxxx/Vnn` visual locator" in prompt
 
 
 def test_validation_feedback_includes_exact_referenced_segment() -> None:
