@@ -55,6 +55,17 @@ def _ids(rows: list[dict[str, Any]], field: str, label: str) -> set[str]:
     return set(values)
 
 
+def _reference_ids(row: dict[str, Any], field: str, owner: str) -> set[str]:
+    """Return one reference set without hiding repeated edges in an array."""
+
+    values = [str(value) for value in row.get(field) or []]
+    if len(values) != len(set(values)):
+        raise KnowledgePackageMergeError(
+            f"{owner}: duplicate references in {field}"
+        )
+    return set(values)
+
+
 def validate_merged_package(package: dict[str, Any]) -> None:
     ids = {
         name: _ids(list(package.get(name) or []), field, name)
@@ -85,34 +96,41 @@ def validate_merged_package(package: dict[str, Any]) -> None:
             )
     for collection in ("questions", "position_nodes", "observations", "evidence_steps"):
         for row in package.get(collection, []):
-            referenced_fragments = {
-                str(value)
-                for value in [
-                    row.get("source_fragment_id"),
-                    *(row.get("source_fragment_ids") or []),
-                ]
-                if value
-            }
+            referenced_fragments = _reference_ids(
+                row,
+                "source_fragment_ids",
+                f"{collection}/{row[ID_FIELDS[collection]]}",
+            )
+            if row.get("source_fragment_id"):
+                referenced_fragments.add(str(row["source_fragment_id"]))
             missing = referenced_fragments - fragment_ids
             if missing:
                 raise KnowledgePackageMergeError(
                     f"{collection}/{row[ID_FIELDS[collection]]}: unknown fragments {sorted(missing)}"
                 )
     for row in package.get("questions", []):
-        missing = set(row.get("answer_claim_ids") or []) - claim_ids
+        missing = _reference_ids(
+            row, "answer_claim_ids", row["question_id"]
+        ) - claim_ids
         if missing:
             raise KnowledgePackageMergeError(
                 f"{row['question_id']}: unknown answer claims {sorted(missing)}"
             )
     for row in package.get("evidence_steps", []):
-        missing = set(row.get("produced_claim_ids") or []) - claim_ids
+        missing = _reference_ids(
+            row, "produced_claim_ids", row["evidence_step_id"]
+        ) - claim_ids
         if missing:
             raise KnowledgePackageMergeError(
                 f"{row['evidence_step_id']}: unknown produced claims {sorted(missing)}"
             )
     for row in package.get("claims", []):
-        missing_evidence = set(row.get("evidence_step_ids") or []) - evidence_ids
-        missing_positions = set(row.get("opposed_position_ids") or []) - position_ids
+        missing_evidence = _reference_ids(
+            row, "evidence_step_ids", row["claim_id"]
+        ) - evidence_ids
+        missing_positions = _reference_ids(
+            row, "opposed_position_ids", row["claim_id"]
+        ) - position_ids
         if missing_evidence:
             raise KnowledgePackageMergeError(
                 f"{row['claim_id']}: unknown evidence {sorted(missing_evidence)}"
@@ -121,6 +139,30 @@ def validate_merged_package(package: dict[str, Any]) -> None:
             raise KnowledgePackageMergeError(
                 f"{row['claim_id']}: unknown positions {sorted(missing_positions)}"
             )
+
+    # These are two stored projections of one many-to-many ``used_for`` link,
+    # not independent hints.  Checking only endpoint existence let a Claim
+    # consume an EvidenceStep that did not name it, while the EvidenceStep
+    # simultaneously claimed to serve a different conclusion.  Downstream
+    # route and publication consumers then saw different graphs depending on
+    # which direction they traversed.
+    claim_evidence_pairs = {
+        (str(claim["claim_id"]), str(evidence_id))
+        for claim in package.get("claims", [])
+        for evidence_id in claim.get("evidence_step_ids") or []
+    }
+    evidence_claim_pairs = {
+        (str(claim_id), str(evidence["evidence_step_id"]))
+        for evidence in package.get("evidence_steps", [])
+        for claim_id in evidence.get("produced_claim_ids") or []
+    }
+    if claim_evidence_pairs != evidence_claim_pairs:
+        claim_only = sorted(claim_evidence_pairs - evidence_claim_pairs)
+        evidence_only = sorted(evidence_claim_pairs - claim_evidence_pairs)
+        raise KnowledgePackageMergeError(
+            "claim/evidence bindings must be reciprocal; "
+            f"claim_only={claim_only}, evidence_only={evidence_only}"
+        )
     # An evidence relation may reason from an observation to an evidence step.
     # Treating both endpoints as evidence rejected every normal detailed package
     # that preserved a load-bearing observation, even though extraction's own
