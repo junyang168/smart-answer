@@ -65,7 +65,7 @@
 关系表的边界（机械校验，写错即整次失败）：
 
 - `evidence_relations` 的 `to_id` **必须**是 evidence_step。`from_id` 可以是 observation 或 evidence_step。
-- **证据与主张的连接不用关系表达**：用 claim 的 `evidence_step_ids` 和 evidence_step 的 `produced_claim_ids`。不得建立 evidence_step → claim 的 evidence_relation。
+- **证据与主张的连接不用关系表达**：用 claim 的 `evidence_step_ids` 和 evidence_step 的 `produced_claim_ids`。这两份数组必须是同一条 many-to-many 连接的精确反向索引：claim 列出 E，当且仅当 E 的 `produced_claim_ids` 也列出该 claim；任一方向多一条或少一条，整份结果都会被程序拒绝。不得建立 evidence_step → claim 的 evidence_relation。
 - **反驳某个 position 也不用关系表达**：用 claim 的 `opposed_position_ids`。
 - 主张之间的关系放在 `claim_relations`，两端都必须是 claim。
 - `support_eligibility=eligible_candidate` 只能出现在 `speaker=professor` 且 `stance=asserted` 的 evidence_step 上；其余一律 `context_only` 或 `withheld_unreviewed`。
