@@ -22,6 +22,7 @@ from backend.api.canonical_repository.postgres_store import (
     PostgresKnowledgeStore,
     build_change_set_plan,
     normalize_package,
+    record_content_sha,
 )
 from backend.api.canonical_repository.store import RepositoryStore
 from backend.api.canonical_repository.viewpoint_foundation import (
@@ -608,6 +609,17 @@ def _foundation_package() -> tuple[dict, dict]:
     }
 
 
+def _existing_approved_claim(package: dict) -> dict:
+    claim = normalize_package(package)["claims"]["CL-PETER"]
+    return {
+        ("claims", "CL-PETER"): {
+            "revision": int(claim.get("revision") or 1),
+            "content_sha256": record_content_sha(claim),
+            "payload": claim,
+        }
+    }
+
+
 def test_batch_candidate_can_bind_scope_manifest_without_legacy_coverage() -> None:
     package, _ = _foundation_package()
     candidate = dict(package["viewpoint_identity_candidates"][0])
@@ -629,7 +641,7 @@ def test_batch_candidate_can_bind_scope_manifest_without_legacy_coverage() -> No
     package["viewpoint_identity_decisions"][0]["identity_candidate_id"] = candidate_id
     package["canonical_viewpoints"][0]["created_from_candidate_id"] = candidate_id
 
-    plan = build_change_set_plan(package, {})
+    plan = build_change_set_plan(package, _existing_approved_claim(package))
 
     assert plan.operations
 
@@ -637,7 +649,7 @@ def test_batch_candidate_can_bind_scope_manifest_without_legacy_coverage() -> No
 def test_foundation_package_is_registered_and_plans_one_viewpoint_edge() -> None:
     package, records = _foundation_package()
     normalized = normalize_package(package)
-    plan = build_change_set_plan(package, {})
+    plan = build_change_set_plan(package, _existing_approved_claim(package))
 
     assert records["quality"].eligibility_decision == "pass"
     assert "total_score" not in records["quality"].model_dump()
@@ -773,7 +785,7 @@ def test_change_set_refuses_two_active_full_memberships() -> None:
 
 def test_semantic_revision_cannot_be_rewritten_in_place() -> None:
     package, _ = _foundation_package()
-    initial = build_change_set_plan(package, {})
+    initial = build_change_set_plan(package, _existing_approved_claim(package))
     existing = {
         (item.collection, item.object_id): {
             "revision": item.after_revision,
@@ -782,6 +794,7 @@ def test_semantic_revision_cannot_be_rewritten_in_place() -> None:
         }
         for item in initial.operations
     }
+    existing.update(_existing_approved_claim(package))
     changed = json.loads(json.dumps(package))
     changed["viewpoint_revisions"][0]["core_proposition"] = "同一个 ID 下偷换命题"
 

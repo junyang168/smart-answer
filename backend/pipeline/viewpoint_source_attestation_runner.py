@@ -14,6 +14,14 @@ from backend.api.canonical_repository.viewpoint_foundation import semantic_recor
 from backend.api.canonical_repository.viewpoint_source_attestation import (
     build_source_eligibility_artifact,
 )
+from backend.api.canonical_repository.reviewed_candidate_contract import (
+    ConsensusApplicationError,
+    validate_reviewed_candidate_artifact,
+)
+from backend.pipeline.knowledge_package_merge import (
+    KnowledgePackageMergeError,
+    validate_merged_package,
+)
 
 
 def _read(path: Path) -> dict[str, Any]:
@@ -38,41 +46,51 @@ def _write_immutable(path: Path, payload: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
-def build_attestations(
-    *, claim_manifest_path: Path, research_batches_root: Path,
-    output_path: Path, database_url: str | None = None,
-) -> dict[str, Any]:
-    manifest = _read(claim_manifest_path)
-    manifest_claim_ids = {
-        str(row["claim_id"]) for row in manifest.get("claims") or []
-    }
-    store = PostgresKnowledgeStore(database_url)
-    current_claims = {
-        row["claim_id"]: ClaimRecord.model_validate(row)
-        for row in store.list_records("claims")
-    }
-    candidates: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]] = {}
-    for path in sorted(research_batches_root.glob("*/reviewed/*.reviewed-candidate.json")):
+def _validated_candidate_inputs(
+    *, manifest_claim_ids: set[str], research_batches_root: Path
+) -> list[dict[str, Any]]:
+    """Authenticate every relevant disk artifact before the first DB read."""
+
+    inputs: list[dict[str, Any]] = []
+    for path in sorted(
+        research_batches_root.glob("*/reviewed/*.reviewed-candidate.json")
+    ):
         payload = _read(path)
-        if not {
+        claim_ids = {
             str(row.get("claim_id") or "") for row in payload.get("claims") or []
-        } & manifest_claim_ids:
+        }
+        if not claim_ids & manifest_claim_ids:
             continue
+        try:
+            validate_reviewed_candidate_artifact(payload)
+            validate_merged_package(payload)
+        except (ConsensusApplicationError, KnowledgePackageMergeError) as exc:
+            raise ValueError(f"{path}: reviewed candidate does not authenticate: {exc}") from exc
+        application = payload["consensus_application"]
         slug = path.name.removesuffix(".reviewed-candidate.json")
         review_path = path.parent.parent / "reviews" / f"{slug}.independent-review.json"
-        if not review_path.is_file():
-            continue
-        review_payload = _read(review_path)
         adjudication_path = (
             path.parent.parent / "adjudications" / f"{slug}.ai-adjudication.json"
         )
-        adjudication_payload = (
-            _read(adjudication_path) if adjudication_path.is_file() else None
+        overrides_path = (
+            path.parent.parent / "overrides" / f"{slug}.consensus-overrides.json"
         )
-        adjudication_results = {
-            str(row.get("claim_id") or ""): row
-            for row in ((adjudication_payload or {}).get("results") or [])
-        }
+        if (
+            not review_path.is_file()
+            or not adjudication_path.is_file()
+            or not overrides_path.is_file()
+        ):
+            raise ValueError(
+                f"{path}: complete reviewed candidate is missing its review/adjudication/overrides artifact"
+            )
+        if _file_sha(review_path) != application["review_artifact_sha256"]:
+            raise ValueError(f"{path}: independent review SHA does not bind")
+        if _file_sha(adjudication_path) != application["adjudication_artifact_sha256"]:
+            raise ValueError(f"{path}: adjudication SHA does not bind")
+        if _file_sha(overrides_path) != application["overrides_artifact_sha256"]:
+            raise ValueError(f"{path}: overrides SHA does not bind")
+        review_payload = _read(review_path)
+        adjudication_payload = _read(adjudication_path)
         source = review_payload.get("source") or {}
         review_input_path = Path(str(source.get("package_path") or ""))
         stated_input_sha = str(source.get("package_sha256") or "")
@@ -81,10 +99,59 @@ def build_attestations(
             or not stated_input_sha
             or _file_sha(review_input_path) != stated_input_sha
         ):
-            raise ValueError(f"{review_path}: independent review input package does not bind")
+            raise ValueError(
+                f"{review_path}: independent review input package does not bind"
+            )
+        inputs.append(
+            {
+                "path": path,
+                "payload": payload,
+                "application": application,
+                "review_path": review_path,
+                "review_payload": review_payload,
+                "review_input_artifact_sha256": stated_input_sha,
+                "adjudication_path": adjudication_path,
+                "adjudication_payload": adjudication_payload,
+                "overrides_path": overrides_path,
+            }
+        )
+    return inputs
+
+
+def build_attestations(
+    *, claim_manifest_path: Path, research_batches_root: Path,
+    output_path: Path, database_url: str | None = None,
+) -> dict[str, Any]:
+    manifest = _read(claim_manifest_path)
+    manifest_claim_ids = {
+        str(row["claim_id"]) for row in manifest.get("claims") or []
+    }
+    candidate_inputs = _validated_candidate_inputs(
+        manifest_claim_ids=manifest_claim_ids,
+        research_batches_root=research_batches_root,
+    )
+    store = PostgresKnowledgeStore(database_url)
+    current_claims = {
+        row["claim_id"]: ClaimRecord.model_validate(row)
+        for row in store.list_records("claims")
+    }
+    candidates: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]] = {}
+    for item in candidate_inputs:
+        path = item["path"]
+        payload = item["payload"]
+        application = item["application"]
+        review_path = item["review_path"]
+        review_payload = item["review_payload"]
+        adjudication_path = item["adjudication_path"]
+        adjudication_payload = item["adjudication_payload"]
+        adjudication_results = {
+            str(row.get("claim_id") or ""): row
+            for row in (adjudication_payload.get("results") or [])
+        }
         package_binding = {
             "payload": payload,
-            "artifact_sha256": _file_sha(path),
+            "artifact_sha256": application["artifact_sha256"],
+            "file_sha256": _file_sha(path),
             "path": str(path),
         }
         reviews = {
@@ -108,16 +175,17 @@ def build_attestations(
             review_binding = {
                 "payload": review_payload,
                 "claim_review": review_row,
-                "review_input_artifact_sha256": stated_input_sha,
+                "review_input_artifact_sha256": item[
+                    "review_input_artifact_sha256"
+                ],
                 "artifact_sha256": _file_sha(review_path),
                 "path": str(review_path),
                 "adjudication_payload": adjudication_payload,
                 "adjudication_result": adjudication_results.get(claim_id),
                 "adjudication_artifact_sha256": (
                     _file_sha(adjudication_path)
-                    if adjudication_payload is not None
-                    else None
                 ),
+                "overrides_artifact_sha256": _file_sha(item["overrides_path"]),
             }
             candidates.setdefault(claim_id, []).append(
                 (package_binding, review_binding)

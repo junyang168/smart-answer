@@ -13,8 +13,13 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from backend.config.wang_platform_paths import wang_platform_paths
+from backend.api.canonical_repository.reviewed_candidate_contract import (
+    RESEARCH_BATCH_AGGREGATE,
+    ConsensusApplicationError,
+    validate_store_package_authorization,
+)
 from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+from backend.config.wang_platform_paths import wang_platform_paths
 from backend.pipeline.candidate_projection import (
     CANDIDATE_SCHEMA,
     PLAN_ADJUDICATION_SCHEMA,
@@ -26,6 +31,8 @@ from backend.pipeline.candidate_projection import (
     stable_plan_key,
     validate_candidates,
 )
+from backend.pipeline.knowledge_package import live_claims
+from backend.pipeline.reviewed_relation_integration import validate_reviewed_relations
 from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
 
 
@@ -153,8 +160,49 @@ def run(
     apply: bool,
     force: bool,
 ) -> dict[str, Any]:
-    knowledge = json.loads(knowledge_path.read_text(encoding="utf-8"))
+    knowledge_bytes = knowledge_path.read_bytes()
+    knowledge = json.loads(knowledge_bytes)
+    try:
+        validate_store_package_authorization(knowledge)
+    except ConsensusApplicationError as exc:
+        raise ValueError(
+            f"candidate projection input does not authenticate: {exc}"
+        ) from exc
+    if (knowledge.get("consensus_application") or {}).get("scope_kind") != (
+        RESEARCH_BATCH_AGGREGATE
+    ):
+        raise ValueError(
+            "candidate projection requires a sealed research-batch aggregate"
+        )
+    unresolved_claim_ids = sorted(
+        str(claim.get("claim_id") or "")
+        for claim in live_claims(knowledge)
+        if claim.get("review_status") != "ai_consensus_reviewed"
+    )
+    if unresolved_claim_ids:
+        raise ValueError(
+            "candidate projection requires every live claim to have final AI "
+            "consensus review: " + ", ".join(unresolved_claim_ids)
+        )
     relations = json.loads(relations_path.read_text(encoding="utf-8"))
+    expected_knowledge_sha256 = hashlib.sha256(knowledge_bytes).hexdigest()
+    if (relations.get("generation") or {}).get("source_knowledge_sha256") != (
+        expected_knowledge_sha256
+    ):
+        raise ValueError(
+            "candidate projection relations are not bound to the exact reviewed aggregate"
+        )
+    relation_findings = validate_reviewed_relations(relations, knowledge)
+    relation_errors = [
+        row for row in relation_findings if row.get("severity") == "error"
+    ]
+    if relation_errors:
+        raise ValueError(
+            "candidate projection relations failed integrity validation: "
+            + ", ".join(
+                sorted({str(row.get("code") or "unknown") for row in relation_errors})
+            )
+        )
     current = store.compile_package(package_id="CANDIDATE-PROJECTION-CONTEXT")
     source = projection_input(knowledge, relations, current.get("topic_nodes") or [])
     source_text = json.dumps(source, ensure_ascii=False, indent=2)

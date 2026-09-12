@@ -26,6 +26,9 @@ from backend.pipeline.knowledge_consensus_applier import (
     ConsensusApplicationError,
     _validate_overrides_artifact,
     apply_consensus_overrides,
+    apply_final_ai_review_outcomes,
+    reviewed_candidate_artifact_sha256,
+    validate_reviewed_candidate_artifact,
 )
 from backend.pipeline import knowledge_consensus_applier as consensus_runner
 from backend.pipeline.corpus_ai_adjudication_runner import (
@@ -946,6 +949,10 @@ def test_consensus_applier_removes_anchor_and_relation_without_approving(tmp_pat
     assert original_evidence["produced_claim_ids"] == []
     assert added_evidence["produced_claim_ids"] == [updated["claim_id"]]
     assert result["consensus_application"]["approval_status"] == "not_human_approved"
+    assert result["consensus_application"]["artifact_sha256"] == (
+        reviewed_candidate_artifact_sha256(result)
+    )
+    validate_reviewed_candidate_artifact(result, require_review_completion=False)
     assert result["coverage"]["anchored_spans"] == len(result["source_fragments"])
     assert result["coverage"]["unprocessed"] != 999
 
@@ -964,6 +971,188 @@ def test_consensus_applier_accepts_combined_string_fingerprint(tmp_path: Path) -
         {"011WSR01": transcript},
     )
     assert result["consensus_application"]["adjudication_fingerprint"] == "combined-fp"
+
+
+def test_consensus_candidate_self_seal_rejects_graph_valid_tampering(
+    tmp_path: Path,
+) -> None:
+    transcript = _transcript()
+    raw = json.dumps(transcript, ensure_ascii=False).encode("utf-8")
+    package = compile_package(
+        transcript_id="011WSR01", transcript_path=tmp_path / "011WSR01.json",
+        transcript=transcript, raw=raw, response=_response(),
+        extraction=_bound_extraction_identity(transcript),
+    )
+    result = apply_consensus_overrides(
+        package,
+        {"adjudication_fingerprint": "combined-fp", "claims": {}},
+        {"011WSR01": transcript},
+    )
+    result["claims"][0]["title"] = "结构仍合法，但内容已经被改写"
+
+    validate_merged_package(result)
+    with pytest.raises(ConsensusApplicationError, match="modified"):
+        validate_reviewed_candidate_artifact(result)
+
+
+def _final_review_fixture() -> tuple[dict, dict, dict]:
+    claim_ids = [
+        "CL-PASS",
+        "CL-SPOT",
+        "CL-AUTO",
+        "CL-WITHDRAWN",
+        "CL-CONFIRM",
+        "CL-DISAGREE",
+        "CL-MERGED",
+    ]
+    package = {
+        "complete": True,
+        "source_documents": [{"source_id": "SRC-FIXTURE"}],
+        "extraction": {"fingerprint_sha256": "e" * 64},
+        "claims": [
+            {
+                "claim_id": claim_id,
+                "review_status": (
+                    "superseded" if claim_id == "CL-MERGED" else "candidate"
+                ),
+                **(
+                    {"superseded_by": "CL-PASS"}
+                    if claim_id == "CL-MERGED"
+                    else {}
+                ),
+            }
+            for claim_id in claim_ids
+        ],
+        "consensus_application": {
+            "schema_version": "wang_ai_consensus_application_v2",
+            "scope_kind": "source_scoped",
+            "adjudication_fingerprint": "adj-fp",
+            "applied_claim_ids": ["CL-AUTO", "CL-MERGED"],
+            "merged_claim_ids": {"CL-MERGED": "CL-PASS"},
+            "approval_status": "not_human_approved",
+        },
+    }
+    decisions = {
+        "CL-PASS": "pass",
+        "CL-SPOT": "pass",
+        "CL-AUTO": "changes_suggested",
+        "CL-WITHDRAWN": "changes_suggested",
+        "CL-CONFIRM": "human_review_required",
+        "CL-DISAGREE": "changes_suggested",
+        "CL-MERGED": "changes_suggested",
+    }
+    review = {
+        "reviewer": {"fingerprint_sha256": "review-fp"},
+        "review_strategy": {
+            "reviewer_batches": [
+                {"reviewer": {"review_model_id": "claude-sonnet-5"}}
+            ]
+        },
+        "claim_reviews": [
+            {
+                "claim_id": claim_id,
+                "decision": decisions[claim_id],
+                "spot_check_selected": claim_id == "CL-SPOT",
+            }
+            for claim_id in claim_ids
+        ],
+    }
+    statuses = {
+        "CL-AUTO": "auto_applied",
+        "CL-WITHDRAWN": "withdrawn",
+        "CL-CONFIRM": "human_confirmation_required",
+        "CL-DISAGREE": "human_disagreement_required",
+        "CL-MERGED": "auto_applied",
+    }
+    adjudication = {
+        "adjudicator": {
+            "fingerprint_sha256": "adj-fp",
+            "review_fingerprint": "review-fp",
+            "generated_at": "2026-09-12T17:08:53+00:00",
+            "openai_model": "gpt-5.6-sol",
+        },
+        "results": [
+            {"claim_id": claim_id, "status": status}
+            for claim_id, status in statuses.items()
+        ],
+    }
+    return package, review, adjudication
+
+
+def test_final_ai_review_outcomes_compile_the_complete_state_machine() -> None:
+    package, review, adjudication = _final_review_fixture()
+
+    apply_final_ai_review_outcomes(
+        package,
+        review=review,
+        review_artifact_sha256="a" * 64,
+        adjudication=adjudication,
+        adjudication_artifact_sha256="b" * 64,
+        overrides_artifact_sha256="c" * 64,
+    )
+
+    statuses = {
+        row["claim_id"]: row["review_status"] for row in package["claims"]
+    }
+    assert statuses == {
+        "CL-PASS": "ai_consensus_reviewed",
+        "CL-SPOT": "human_review_required",
+        "CL-AUTO": "ai_consensus_reviewed",
+        "CL-WITHDRAWN": "ai_consensus_reviewed",
+        "CL-CONFIRM": "human_review_required",
+        "CL-DISAGREE": "human_review_required",
+        "CL-MERGED": "superseded",
+    }
+    assert package["consensus_application"]["final_review_status_counts"] == {
+        "ai_consensus_reviewed": 3,
+        "human_review_required": 3,
+        "superseded": 1,
+    }
+    assert len(package["consensus_application"]["review_resolutions"]) == 7
+    validate_reviewed_candidate_artifact(package)
+
+
+def test_final_ai_review_outcomes_reject_mismatched_review_chain() -> None:
+    package, review, adjudication = _final_review_fixture()
+    adjudication["adjudicator"]["review_fingerprint"] = "another-review"
+
+    with pytest.raises(ConsensusApplicationError, match="adjudication chain"):
+        apply_final_ai_review_outcomes(
+            package,
+            review=review,
+            review_artifact_sha256="a" * 64,
+            adjudication=adjudication,
+            adjudication_artifact_sha256="b" * 64,
+            overrides_artifact_sha256="c" * 64,
+        )
+
+
+def test_final_ai_review_outcomes_reject_duplicate_or_missing_rows() -> None:
+    package, review, adjudication = _final_review_fixture()
+    review["claim_reviews"].append(dict(review["claim_reviews"][0]))
+    with pytest.raises(ConsensusApplicationError, match="exactly once"):
+        apply_final_ai_review_outcomes(
+            package,
+            review=review,
+            review_artifact_sha256="a" * 64,
+            adjudication=adjudication,
+            adjudication_artifact_sha256="b" * 64,
+            overrides_artifact_sha256="c" * 64,
+        )
+
+
+def test_final_ai_review_outcomes_reject_applied_override_mismatch() -> None:
+    package, review, adjudication = _final_review_fixture()
+    package["consensus_application"]["applied_claim_ids"] = ["CL-AUTO"]
+    with pytest.raises(ConsensusApplicationError, match="exactly match"):
+        apply_final_ai_review_outcomes(
+            package,
+            review=review,
+            review_artifact_sha256="a" * 64,
+            adjudication=adjudication,
+            adjudication_artifact_sha256="b" * 64,
+            overrides_artifact_sha256="c" * 64,
+        )
 
 
 def test_consensus_cannot_reclassify_visual_source_as_spoken_anchor(
@@ -1126,6 +1315,8 @@ def test_consensus_cli_exact_replay_writes_no_artifact_or_second_run(
         extraction=_bound_extraction_identity(transcript),
     )
     package_path = tmp_path / "package.json"
+    review_path = tmp_path / "review.json"
+    adjudication_path = tmp_path / "adjudication.json"
     overrides_path = tmp_path / "overrides.json"
     output_path = tmp_path / "consensus.json"
     package_path.write_text(json.dumps(package, ensure_ascii=False), encoding="utf-8")
@@ -1142,6 +1333,33 @@ def test_consensus_cli_exact_replay_writes_no_artifact_or_second_run(
         json.dumps(overrides),
         encoding="utf-8",
     )
+    claim_ids = [row["claim_id"] for row in package["claims"]]
+    review = {
+        "reviewer": {"fingerprint_sha256": "review-fp"},
+        "review_strategy": {
+            "reviewer_batches": [
+                {"reviewer": {"review_model_id": "claude-sonnet-5"}}
+            ]
+        },
+        "claim_reviews": [
+            {"claim_id": claim_id, "decision": "pass"}
+            for claim_id in claim_ids
+        ],
+    }
+    review_bytes = json.dumps(review).encode("utf-8")
+    review_path.write_bytes(review_bytes)
+    adjudication = {
+        "adjudicator": {
+            "fingerprint_sha256": "fp",
+            "review_fingerprint": "review-fp",
+            "source_package_sha256": package_sha256,
+            "review_artifact_sha256": hashlib.sha256(review_bytes).hexdigest(),
+            "generated_at": "2026-09-12T00:00:00+00:00",
+            "openai_model": "gpt-5.6-sol",
+        },
+        "results": [],
+    }
+    adjudication_path.write_text(json.dumps(adjudication), encoding="utf-8")
     runs: list[str] = []
 
     class FakeRecord:
@@ -1163,14 +1381,34 @@ def test_consensus_cli_exact_replay_writes_no_artifact_or_second_run(
 
     monkeypatch.setattr(consensus_runner, "run_record", lambda **_kwargs: FakeRecord())
     monkeypatch.setattr(
+        consensus_runner,
+        "_validated_review_context",
+        lambda *_args, **_kwargs: (
+            {},
+            {claim_id: {} for claim_id in claim_ids},
+            [("011WSR01", transcript)],
+            {},
+            review,
+            review_bytes,
+        ),
+    )
+    monkeypatch.setattr(
+        consensus_runner, "_valid_adjudication_artifact", lambda *_args, **_kwargs: True
+    )
+    monkeypatch.setattr(
+        consensus_runner, "_valid_overrides_artifact", lambda *_args, **_kwargs: True
+    )
+    monkeypatch.setattr(
         sys,
         "argv",
         [
             "knowledge_consensus_applier",
             "--package", str(package_path),
-            "--overrides", str(overrides_path),
-            "--output", str(output_path),
-            "--transcript-dir", str(tmp_path),
+                "--overrides", str(overrides_path),
+                "--output", str(output_path),
+                "--review", str(review_path),
+                "--adjudication", str(adjudication_path),
+                "--transcript-dir", str(tmp_path),
         ],
     )
 

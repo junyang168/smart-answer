@@ -29,11 +29,187 @@ from backend.pipeline.source_projection import (
     project_script,
 )
 from backend.pipeline.corpus_ai_review_runner import _validate_claim_layer_package
-from backend.pipeline.corpus_ai_adjudication_runner import _overrides_artifact_sha256
+from backend.pipeline.corpus_ai_adjudication import actionable_reviews
+from backend.pipeline.corpus_ai_adjudication_runner import (
+    _adjudication_artifact_sha256,
+    _overrides_artifact_sha256,
+    _valid_adjudication_artifact,
+    _valid_overrides_artifact,
+    _validated_review_context,
+)
+from backend.api.canonical_repository.reviewed_candidate_contract import (
+    AI_REVIEW_PROVENANCE_VERSION,
+    CONSENSUS_APPLICATION_VERSION,
+    SOURCE_SCOPED,
+    ConsensusApplicationError,
+    reviewed_candidate_artifact_sha256,
+    validate_reviewed_candidate_artifact,
+)
 
 
-class ConsensusApplicationError(ValueError):
-    pass
+def apply_final_ai_review_outcomes(
+    package: dict[str, Any],
+    *,
+    review: dict[str, Any],
+    review_artifact_sha256: str,
+    adjudication: dict[str, Any],
+    adjudication_artifact_sha256: str,
+    overrides_artifact_sha256: str,
+) -> None:
+    """Put the post-adjudication verdict on every claim, with its audit chain."""
+
+    review_rows = list(review.get("claim_reviews") or [])
+    result_rows = list(adjudication.get("results") or [])
+    reviews = {
+        str(row.get("claim_id") or ""): row
+        for row in review_rows
+    }
+    results = {
+        str(row.get("claim_id") or ""): row
+        for row in result_rows
+    }
+    claim_id_rows = [
+        str(row.get("claim_id") or "") for row in package.get("claims") or []
+    ]
+    claim_ids = set(claim_id_rows)
+    if (
+        not all(claim_id_rows)
+        or len(claim_id_rows) != len(claim_ids)
+        or len(reviews) != len(review_rows)
+        or "" in reviews
+        or set(reviews) != claim_ids
+    ):
+        raise ConsensusApplicationError(
+            "final review must cover every package claim exactly once"
+        )
+    actionable_ids = {
+        claim_id
+        for claim_id, row in reviews.items()
+        if row.get("decision") != "pass"
+    }
+    if (
+        len(results) != len(result_rows)
+        or "" in results
+        or set(results) != actionable_ids
+    ):
+        raise ConsensusApplicationError(
+            "adjudication outcomes must cover every non-pass review exactly once"
+        )
+    allowed_decisions = {"pass", "changes_suggested", "human_review_required"}
+    if any(
+        str(row.get("decision") or "") not in allowed_decisions
+        for row in reviews.values()
+    ):
+        raise ConsensusApplicationError("review contains an unknown decision")
+    allowed_outcomes = {
+        "auto_applied",
+        "withdrawn",
+        "human_confirmation_required",
+        "human_disagreement_required",
+    }
+    if any(str(row.get("status") or "") not in allowed_outcomes for row in results.values()):
+        raise ConsensusApplicationError("adjudication contains an unknown final outcome")
+
+    reviewer = review.get("reviewer") or {}
+    adjudicator = adjudication.get("adjudicator") or {}
+    review_fingerprint = str(reviewer.get("fingerprint_sha256") or "")
+    adjudication_fingerprint = str(adjudicator.get("fingerprint_sha256") or "")
+    application = package.get("consensus_application") or {}
+    if (
+        not review_fingerprint
+        or not adjudication_fingerprint
+        or str(adjudicator.get("review_fingerprint") or "")
+        != review_fingerprint
+        or str(application.get("adjudication_fingerprint") or "")
+        != adjudication_fingerprint
+    ):
+        raise ConsensusApplicationError(
+            "final review is not bound to the applied adjudication chain"
+        )
+    auto_applied_ids = {
+        claim_id
+        for claim_id, row in results.items()
+        if row.get("status") == "auto_applied"
+    }
+    if set(application.get("applied_claim_ids") or []) != auto_applied_ids:
+        raise ConsensusApplicationError(
+            "applied overrides do not exactly match auto-applied adjudication outcomes"
+        )
+    reviewed_at = str(adjudicator.get("generated_at") or "")
+    if not reviewed_at:
+        raise ConsensusApplicationError("adjudication lacks deterministic review time")
+    batch_models = {
+        str(((row.get("reviewer") or {}).get("review_model_id") or "")).strip()
+        for row in ((review.get("review_strategy") or {}).get("reviewer_batches") or [])
+        if isinstance(row, dict)
+    }
+    batch_models.discard("")
+    reviewer_id = "+".join(sorted(batch_models)) or str(
+        reviewer.get("model")
+        or reviewer.get("model_id")
+        or reviewer.get("provider")
+        or "independent_ai_review"
+    )
+    adjudicator_id = str(adjudicator.get("openai_model") or "")
+
+    status_counts: dict[str, int] = {}
+    resolutions: list[dict[str, Any]] = []
+    for claim in package.get("claims") or []:
+        claim_id = str(claim["claim_id"])
+        row = reviews[claim_id]
+        decision = str(row.get("decision") or "")
+        if decision == "pass":
+            outcome = "human_spot_check" if row.get("spot_check_selected") else "not_required"
+            target = (
+                "human_review_required"
+                if row.get("spot_check_selected")
+                else "ai_consensus_reviewed"
+            )
+        else:
+            outcome = str(results[claim_id]["status"])
+            target = (
+                "ai_consensus_reviewed"
+                if outcome in {"auto_applied", "withdrawn"}
+                else "human_review_required"
+            )
+        if claim.get("superseded_by"):
+            target = "superseded"
+        status_counts[target] = status_counts.get(target, 0) + 1
+        reason = f"独立 AI 复审：{decision}；仲裁：{outcome}"
+        resolution_reviewer_id = (
+            f"{reviewer_id}+{adjudicator_id}"
+            if decision != "pass" and adjudicator_id
+            else reviewer_id
+        )
+        resolutions.append({
+            "schema_version": AI_REVIEW_PROVENANCE_VERSION,
+            "claim_id": claim_id,
+            "independent_review_decision": decision,
+            "adjudication_status": outcome,
+            "target_review_status": target,
+            "reviewer_id": resolution_reviewer_id,
+            "reason": reason,
+            "approval_status": "not_human_approved",
+        })
+        if not claim.get("superseded_by"):
+            claim["review_status"] = target
+            claim["reviewed_by"] = resolution_reviewer_id
+            claim["reviewed_at"] = reviewed_at
+            claim["review_note"] = reason
+
+    application.update(
+        {
+            "review_completion": "complete",
+            "review_artifact_sha256": review_artifact_sha256,
+            "review_fingerprint": review_fingerprint,
+            "adjudication_artifact_sha256": adjudication_artifact_sha256,
+            "overrides_artifact_sha256": overrides_artifact_sha256,
+            "final_review_status_counts": dict(sorted(status_counts.items())),
+            "review_resolutions": resolutions,
+        }
+    )
+    application["artifact_sha256"] = reviewed_candidate_artifact_sha256(package)
+    validate_reviewed_candidate_artifact(package)
 
 
 def _validate_overrides_artifact(
@@ -439,7 +615,8 @@ def apply_consensus_overrides(
         if missing:
             raise ConsensusApplicationError(f"claim references missing evidence: {claim['claim_id']}:{sorted(missing)}")
     result["consensus_application"] = {
-        "schema_version": "wang_ai_consensus_application_v1",
+        "schema_version": CONSENSUS_APPLICATION_VERSION,
+        "scope_kind": SOURCE_SCOPED,
         "adjudication_fingerprint": adjudication_fingerprint,
         "applied_claim_ids": sorted((overrides.get("claims") or {}).keys()),
         "removed_claim_relation_ids": sorted(relations_to_remove),
@@ -505,6 +682,10 @@ def apply_consensus_overrides(
         raise ConsensusApplicationError(
             f"consensus result violates package integrity: {exc}"
         ) from exc
+    result["consensus_application"]["artifact_sha256"] = (
+        reviewed_candidate_artifact_sha256(result)
+    )
+    validate_reviewed_candidate_artifact(result, require_review_completion=False)
     return result
 
 
@@ -513,6 +694,8 @@ def main() -> int:
     parser.add_argument("--package", type=Path, required=True)
     parser.add_argument("--overrides", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--review", type=Path, required=True)
+    parser.add_argument("--adjudication", type=Path, required=True)
     parser.add_argument(
         "--transcript-dir", type=Path,
         default=Path("/opt/homebrew/var/www/church/web/data/script_published"),
@@ -521,18 +704,76 @@ def main() -> int:
     package_bytes = args.package.read_bytes()
     package = json.loads(package_bytes)
     _validate_claim_layer_package(package)
+    review = None
+    review_bytes = b""
+    adjudication = None
+    adjudication_bytes = b""
+    loaded_transcripts: list[tuple[str, dict[str, Any]]] = []
+    if args.review and args.adjudication:
+        (
+            _survey,
+            claims_by_id,
+            loaded_transcripts,
+            transcript_segments,
+            review,
+            review_bytes,
+        ) = _validated_review_context(args.package, args.review, [args.transcript_dir])
+        adjudication_bytes = args.adjudication.read_bytes()
+        adjudication = json.loads(adjudication_bytes.decode("utf-8"))
+        adjudicator = adjudication.get("adjudicator") or {}
+        actionable = actionable_reviews(review)
+        if (
+            adjudicator.get("source_package_sha256")
+            != hashlib.sha256(package_bytes).hexdigest()
+            or adjudicator.get("review_artifact_sha256")
+            != hashlib.sha256(review_bytes).hexdigest()
+            or not _valid_adjudication_artifact(
+                adjudication,
+                expected_fingerprint=str(adjudicator.get("fingerprint_sha256") or ""),
+                reviews=actionable,
+                claims_by_id=claims_by_id,
+                transcript_segments=transcript_segments,
+            )
+        ):
+            raise ConsensusApplicationError(
+                "adjudication artifact is incomplete, modified, or bound to another review"
+            )
     overrides = json.loads(args.overrides.read_text(encoding="utf-8"))
     _validate_overrides_artifact(
         overrides, package_sha256=hashlib.sha256(package_bytes).hexdigest()
     )
-    transcripts = {}
+    if adjudication is not None and not _valid_overrides_artifact(
+        overrides,
+        outcome=adjudication,
+        claims_by_id=claims_by_id,
+        fingerprint=adjudication["adjudicator"],
+    ):
+        raise ConsensusApplicationError(
+            "consensus overrides do not exactly match this adjudication"
+        )
+    transcripts = {
+        transcript_id: transcript
+        for transcript_id, transcript in loaded_transcripts
+    }
     transcript_dirs = [args.transcript_dir]
     for source in package.get("source_documents", []):
         transcript_id = str(source.get("transcript_id") or "")
-        transcript, _, _ = load_knowledge_source_document(source, transcript_dirs)
-        transcripts[transcript_id] = transcript
+        if transcript_id not in transcripts:
+            transcript, _, _ = load_knowledge_source_document(source, transcript_dirs)
+            transcripts[transcript_id] = transcript
     subject = package_row_key(package) or args.package.name
     result = apply_consensus_overrides(package, overrides, transcripts)
+    if review is not None and adjudication is not None:
+        apply_final_ai_review_outcomes(
+            result,
+            review=review,
+            review_artifact_sha256=hashlib.sha256(review_bytes).hexdigest(),
+            adjudication=adjudication,
+            adjudication_artifact_sha256=hashlib.sha256(adjudication_bytes).hexdigest(),
+            overrides_artifact_sha256=hashlib.sha256(
+                args.overrides.read_bytes()
+            ).hexdigest(),
+        )
     encoded = _serialized(result)
     # The output bytes are the complete deterministic function of package,
     # overrides, and the SHA-validated transcripts above. Check before opening
@@ -560,6 +801,8 @@ def main() -> int:
     with run_record(subject=subject, stage="merge") as record:
         record.inputs({
             "package_sha256": hashlib.sha256(args.package.read_bytes()).hexdigest(),
+            "review_sha256": hashlib.sha256(review_bytes).hexdigest(),
+            "adjudication_sha256": hashlib.sha256(adjudication_bytes).hexdigest(),
             "overrides_sha256": hashlib.sha256(args.overrides.read_bytes()).hexdigest(),
         })
         _archive_previous(args.output)

@@ -24,6 +24,9 @@ from backend.api.canonical_repository.postgres_store import (
     sha256_json,
     uncoordinated_semantic_reference_blockers,
 )
+from backend.api.canonical_repository.reviewed_candidate_contract import (
+    reviewed_candidate_artifact_sha256,
+)
 
 
 def _package() -> dict:
@@ -42,6 +45,7 @@ def _package() -> dict:
                 "source_fragment_id": "FR-1",
                 "statement": "证据",
                 "support_eligibility": "withheld_unreviewed",
+                "produced_claim_ids": ["CL-1"],
             }
         ],
         "claims": [
@@ -168,7 +172,7 @@ def test_legacy_source_type_can_be_completed_without_changing_transcript_identit
     assert any(row.object_id == "SRC-1" for row in plan.operations)
 
 
-def test_human_review_fields_survive_ai_reimport() -> None:
+def test_ai_reimport_cannot_move_old_human_review_onto_changed_content() -> None:
     package = _package()
     reviewed = normalize_package(package)["claims"]["CL-1"]
     reviewed.update(
@@ -188,14 +192,30 @@ def test_human_review_fields_survive_ai_reimport() -> None:
     }
     changed = _package()
     changed["claims"][0]["statement"] = "更新后的候选文字"
-    plan = build_change_set_plan(changed, existing)
-    operation = next(item for item in plan.operations if item.object_id == "CL-1")
-    assert operation.payload["review_status"] == "approved"
-    assert operation.payload["review_note"] == "同工已核对"
-    assert operation.payload["reviewed_by"] == "reviewer-1"
+    with pytest.raises(PostgresKnowledgeStoreError, match="new human ruling"):
+        build_change_set_plan(changed, existing)
 
 
-def test_explicit_human_ruling_promotes_existing_system_review() -> None:
+def test_exact_replay_does_not_disturb_existing_human_review() -> None:
+    package = _package()
+    reviewed = normalize_package(package)["claims"]["CL-1"]
+    reviewed.update(
+        {
+            "review_status": "approved",
+            "review_note": "同工已核对",
+            "reviewed_by": "reviewer-1",
+            "revision": 4,
+        }
+    )
+
+    plan = build_change_set_plan(
+        package, _stored("claims", "CL-1", reviewed)
+    )
+
+    assert not any(row.object_id == "CL-1" for row in plan.operations)
+
+
+def test_package_ingest_cannot_promote_existing_system_review_to_human() -> None:
     package = _package()
     system_reviewed = normalize_package(package)["claims"]["CL-1"]
     system_reviewed.update(
@@ -222,12 +242,33 @@ def test_explicit_human_ruling_promotes_existing_system_review() -> None:
         }
     )
 
-    plan = build_change_set_plan(ruled, existing)
-    operation = next(item for item in plan.operations if item.object_id == "CL-1")
-    assert operation.payload["review_status"] == "human_approved"
-    assert operation.payload["review_note"] == "owner ruling"
-    assert operation.payload["reviewed_by"] == "junyang"
-    assert stored_operation_payload(operation)["revision"] == 4
+    with pytest.raises(PostgresKnowledgeStoreError, match="use record_review"):
+        build_change_set_plan(ruled, existing)
+
+
+@pytest.mark.parametrize("status", ["approved", "human_approved"])
+def test_package_ingest_cannot_create_claim_with_human_approval(status: str) -> None:
+    package = _package()
+    package["claims"][0]["review_status"] = status
+
+    with pytest.raises(PostgresKnowledgeStoreError, match="use record_review"):
+        build_change_set_plan(package, {})
+
+
+def test_same_human_status_cannot_be_moved_to_changed_content() -> None:
+    existing_package = _package()
+    existing_package["claims"][0]["review_status"] = "human_approved"
+    existing = normalize_package(existing_package)["claims"]["CL-1"]
+    incoming = _package()
+    incoming["claims"][0].update(
+        {
+            "review_status": "human_approved",
+            "statement": "未经过新人工裁定的改写",
+        }
+    )
+
+    with pytest.raises(PostgresKnowledgeStoreError, match="new human ruling"):
+        build_change_set_plan(incoming, _stored("claims", "CL-1", existing))
 
 
 def test_reviewed_relation_artifact_becomes_edges_and_negative_constraints() -> None:
@@ -667,6 +708,618 @@ class _RecordingConnection:
 
     def cursor(self) -> _RecordingCursor:
         return self._cursor
+
+
+def _reviewed_package() -> dict:
+    package = _package()
+    package["complete"] = True
+    package["extraction"] = {"fingerprint_sha256": "e" * 64}
+    reason = "独立 AI 复审：pass；仲裁：not_required"
+    package["claims"][0].update(
+        {
+            "review_status": "ai_consensus_reviewed",
+            "reviewed_by": "claude-sonnet-5+gpt-5.6-sol",
+            "reviewed_at": "2026-09-12T17:08:53+00:00",
+            "review_note": reason,
+        }
+    )
+    package["consensus_application"] = {
+        "schema_version": "wang_ai_consensus_application_v2",
+        "scope_kind": "source_scoped",
+        "artifact_sha256": "candidate-seal",
+        "review_completion": "complete",
+        "review_artifact_sha256": "a" * 64,
+        "review_fingerprint": "review-fingerprint",
+        "adjudication_artifact_sha256": "b" * 64,
+        "overrides_artifact_sha256": "c" * 64,
+        "adjudication_fingerprint": "adjudication-fingerprint",
+        "approval_status": "not_human_approved",
+        "applied_claim_ids": [],
+        "merged_claim_ids": {},
+        "final_review_status_counts": {"ai_consensus_reviewed": 1},
+        "review_resolutions": [
+            {
+                "schema_version": "wang_claim_ai_review_provenance_v1",
+                "claim_id": "CL-1",
+                "independent_review_decision": "pass",
+                "adjudication_status": "not_required",
+                "target_review_status": "ai_consensus_reviewed",
+                "reviewer_id": "claude-sonnet-5+gpt-5.6-sol",
+                "reason": reason,
+                "approval_status": "not_human_approved",
+            }
+        ],
+    }
+    package["consensus_application"]["artifact_sha256"] = (
+        reviewed_candidate_artifact_sha256(package)
+    )
+    return package
+
+
+def _reviewed_merge_package() -> dict:
+    package = _reviewed_package()
+    merged_claim = dict(package["claims"][0])
+    merged_claim.update(
+        {
+            "claim_id": "CL-2",
+            "review_status": "superseded",
+            "superseded_by": "CL-1",
+        }
+    )
+    for field in ("reviewed_by", "reviewed_at", "review_note"):
+        merged_claim.pop(field, None)
+    package["claims"].append(merged_claim)
+    package["evidence_steps"][0]["produced_claim_ids"].append("CL-2")
+    package["consensus_application"].update(
+        {
+            "applied_claim_ids": ["CL-2"],
+            "merged_claim_ids": {"CL-2": "CL-1"},
+            "final_review_status_counts": {
+                "ai_consensus_reviewed": 1,
+                "superseded": 1,
+            },
+        }
+    )
+    package["consensus_application"]["review_resolutions"].append(
+        {
+            "schema_version": "wang_claim_ai_review_provenance_v1",
+            "claim_id": "CL-2",
+            "independent_review_decision": "changes_suggested",
+            "adjudication_status": "auto_applied",
+            "target_review_status": "superseded",
+            "reviewer_id": "claude-sonnet-5+gpt-5.6-sol",
+            "reason": "独立 AI 复审：changes_suggested；仲裁：auto_applied",
+            "approval_status": "not_human_approved",
+        }
+    )
+    package["consensus_application"]["artifact_sha256"] = (
+        reviewed_candidate_artifact_sha256(package)
+    )
+    return package
+
+
+def test_review_events_are_planned_once_and_bound_to_the_claim_revision() -> None:
+    package = _reviewed_package()
+    first = build_change_set_plan(package, {})
+    independently_replanned = build_change_set_plan(package, {})
+
+    assert first.as_dict()["summary"]["review_events"] == 1
+    assert len(first.review_events) == 1
+    event = first.review_events[0]
+    claim = next(row for row in first.operations if row.object_id == "CL-1")
+    assert event.review_event_id.startswith("REV-AI-")
+    assert event.object_revision == claim.after_revision == 1
+    assert event.decision == "ai_consensus_reviewed"
+    assert independently_replanned.review_events[0].review_event_id == (
+        event.review_event_id
+    )
+
+    normalized = normalize_package(package)
+    existing = {
+        (collection, object_id): {
+            "revision": row.get("revision", 1),
+            "content_sha256": record_content_sha(row),
+            "payload": row,
+        }
+        for collection, rows in normalized.items()
+        for object_id, row in rows.items()
+    }
+    repeated = build_change_set_plan(package, existing)
+    assert repeated.operations == ()
+    assert repeated.review_events == ()
+
+
+def test_apply_plan_writes_review_event_in_the_same_transaction() -> None:
+    plan = build_change_set_plan(_reviewed_package(), {})
+    cursor = _RecordingCursor(None)
+    store = PostgresKnowledgeStore.__new__(PostgresKnowledgeStore)
+    store.connect = lambda: _RecordingConnection(cursor)  # type: ignore[method-assign]
+
+    result = store.apply_plan(plan)
+
+    rows = [
+        params
+        for sql, params in cursor.statements
+        if "INSERT INTO wang_knowledge.review_events" in sql
+    ]
+    assert result["status"] == "applied"
+    assert len(rows) == 1
+    assert rows[0][1:7] == (
+        "claims",
+        "CL-1",
+        1,
+        "ai",
+        "claude-sonnet-5+gpt-5.6-sol",
+        "ai_consensus_reviewed",
+    )
+    assert "ON CONFLICT" not in next(
+        sql for sql, _params in cursor.statements
+        if "INSERT INTO wang_knowledge.review_events" in sql
+    )
+
+
+def test_apply_plan_rejects_nested_payload_mutation_before_database_access() -> None:
+    plan = build_change_set_plan(_reviewed_package(), {})
+    claim = next(row for row in plan.operations if row.object_id == "CL-1")
+    claim.payload["statement"] = "mutated after planning"
+    store = PostgresKnowledgeStore.__new__(PostgresKnowledgeStore)
+    store.connect = lambda: pytest.fail(  # type: ignore[method-assign]
+        "mutated plan must fail before DB access"
+    )
+
+    with pytest.raises(PostgresKnowledgeStoreError, match="changed after fingerprinting"):
+        store.apply_plan(plan)
+
+
+def test_apply_plan_rejects_nested_event_mutation_before_database_access() -> None:
+    plan = build_change_set_plan(_reviewed_package(), {})
+    plan.review_events[0].artifact["review_artifact_sha256"] = "tampered"
+    store = PostgresKnowledgeStore.__new__(PostgresKnowledgeStore)
+    store.connect = lambda: pytest.fail(  # type: ignore[method-assign]
+        "mutated event must fail before DB access"
+    )
+
+    with pytest.raises(PostgresKnowledgeStoreError, match="identity changed"):
+        store.apply_plan(plan)
+
+
+def test_store_boundary_rejects_a_resealed_manifest_mismatch() -> None:
+    package = _reviewed_package()
+    package["claims"][0]["review_status"] = "human_review_required"
+    package["consensus_application"]["artifact_sha256"] = (
+        reviewed_candidate_artifact_sha256(package)
+    )
+
+    with pytest.raises(PostgresKnowledgeStoreError, match="disagrees"):
+        build_change_set_plan(package, {})
+
+
+def test_store_refuses_raw_extraction_even_if_consensus_manifest_was_removed() -> None:
+    package = _package()
+    package["extraction"] = {"fingerprint_sha256": "raw-generation"}
+
+    with pytest.raises(PostgresKnowledgeStoreError, match="sealed final reviewed"):
+        build_change_set_plan(package, {})
+
+
+def test_plan_package_authenticates_before_first_database_read() -> None:
+    package = _reviewed_package()
+    package["claims"][0]["statement"] = "tampered after sealing"
+    store = PostgresKnowledgeStore.__new__(PostgresKnowledgeStore)
+    store.connect = lambda: pytest.fail(  # type: ignore[method-assign]
+        "reviewed candidate auth must happen before DB access"
+    )
+
+    with pytest.raises(PostgresKnowledgeStoreError, match="modified"):
+        store.plan_package(package)
+
+
+def test_plan_package_rejects_resealed_graph_mismatch_before_database_read() -> None:
+    package = _reviewed_package()
+    package["evidence_steps"][0]["produced_claim_ids"] = []
+    package["consensus_application"]["artifact_sha256"] = (
+        reviewed_candidate_artifact_sha256(package)
+    )
+    store = PostgresKnowledgeStore.__new__(PostgresKnowledgeStore)
+    store.connect = lambda: pytest.fail(  # type: ignore[method-assign]
+        "graph auth must happen before DB access"
+    )
+
+    with pytest.raises(PostgresKnowledgeStoreError, match="reciprocal"):
+        store.plan_package(package)
+
+
+def test_source_scoped_reviewed_candidate_must_be_complete_before_database_read() -> None:
+    package = _reviewed_package()
+    package["extraction"] = {"fingerprint_sha256": "generation"}
+    package["complete"] = False
+    package["consensus_application"]["artifact_sha256"] = (
+        reviewed_candidate_artifact_sha256(package)
+    )
+    store = PostgresKnowledgeStore.__new__(PostgresKnowledgeStore)
+    store.connect = lambda: pytest.fail(  # type: ignore[method-assign]
+        "partial packages must fail before DB access"
+    )
+
+    with pytest.raises(PostgresKnowledgeStoreError, match="not a complete extraction"):
+        store.plan_package(package)
+
+
+def test_source_scope_cannot_be_hidden_by_removing_stage_fields() -> None:
+    package = _reviewed_package()
+    package.pop("extraction")
+    package["complete"] = False
+    package["consensus_application"]["artifact_sha256"] = (
+        reviewed_candidate_artifact_sha256(package)
+    )
+    store = PostgresKnowledgeStore.__new__(PostgresKnowledgeStore)
+    store.connect = lambda: pytest.fail(  # type: ignore[method-assign]
+        "a disguised partial source package must fail before DB access"
+    )
+
+    with pytest.raises(PostgresKnowledgeStoreError, match="not a complete extraction"):
+        store.plan_package(package)
+
+
+def test_source_scope_rejects_empty_extraction_identity() -> None:
+    package = _reviewed_package()
+    package["extraction"] = {}
+    package["consensus_application"]["artifact_sha256"] = (
+        reviewed_candidate_artifact_sha256(package)
+    )
+
+    with pytest.raises(PostgresKnowledgeStoreError, match="lacks extraction identity"):
+        build_change_set_plan(package, {})
+
+
+def test_reviewed_candidate_rejects_claim_level_ai_review_provenance() -> None:
+    package = _reviewed_package()
+    package["claims"][0]["ai_review_provenance"] = {"untrusted": True}
+    package["consensus_application"]["artifact_sha256"] = (
+        reviewed_candidate_artifact_sha256(package)
+    )
+
+    with pytest.raises(PostgresKnowledgeStoreError, match="claim-level AI review"):
+        build_change_set_plan(package, {})
+
+
+def test_raw_superseded_claim_requires_reviewed_candidate_contract() -> None:
+    package = _package()
+    package["claims"][0].update(
+        {"review_status": "superseded", "superseded_by": "CL-SURVIVOR"}
+    )
+
+    with pytest.raises(PostgresKnowledgeStoreError, match="sealed final reviewed"):
+        build_change_set_plan(package, {})
+
+
+def test_new_exact_ai_verdict_replaces_an_old_ai_verdict() -> None:
+    old_package = _reviewed_package()
+    old_claim = normalize_package(old_package)["claims"]["CL-1"]
+    incoming = _reviewed_package()
+    reason = "独立 AI 复审：changes_suggested；仲裁：human_disagreement_required"
+    incoming["claims"][0].update(
+        {
+            "review_status": "human_review_required",
+            "reviewed_by": "claude-sonnet-5+gpt-5.6-sol",
+            "review_note": reason,
+        }
+    )
+    resolution = incoming["consensus_application"]["review_resolutions"][0]
+    resolution.update(
+        {
+            "independent_review_decision": "changes_suggested",
+            "adjudication_status": "human_disagreement_required",
+            "target_review_status": "human_review_required",
+            "reason": reason,
+        }
+    )
+    incoming["consensus_application"]["final_review_status_counts"] = {
+        "human_review_required": 1
+    }
+    incoming["consensus_application"]["artifact_sha256"] = (
+        reviewed_candidate_artifact_sha256(incoming)
+    )
+
+    plan = build_change_set_plan(
+        incoming, _stored("claims", "CL-1", old_claim)
+    )
+
+    operation = next(row for row in plan.operations if row.object_id == "CL-1")
+    assert operation.payload["review_status"] == "human_review_required"
+    assert [event.decision for event in plan.review_events] == [
+        "human_review_required"
+    ]
+
+
+def test_existing_human_verdict_rejects_lower_authority_semantic_change() -> None:
+    incoming = _reviewed_package()
+    existing = normalize_package(incoming)["claims"]["CL-1"]
+    existing.update(
+        {
+            "review_status": "human_approved",
+            "reviewed_by": "owner",
+            "review_note": "人工裁定",
+        }
+    )
+    incoming_claim = incoming["claims"][0]
+    incoming_claim["statement"] = "AI run also carries a semantic correction"
+    incoming["consensus_application"]["artifact_sha256"] = (
+        reviewed_candidate_artifact_sha256(incoming)
+    )
+
+    with pytest.raises(PostgresKnowledgeStoreError, match="new human ruling"):
+        build_change_set_plan(incoming, _stored("claims", "CL-1", existing))
+
+
+def test_new_exact_review_can_revive_a_claim_superseded_by_old_ai() -> None:
+    incoming = _reviewed_package()
+    existing = normalize_package(incoming)["claims"]["CL-1"]
+    existing.update(
+        {
+            "review_status": "superseded",
+            "superseded_by": "CL-OLD-SURVIVOR",
+        }
+    )
+
+    plan = build_change_set_plan(
+        incoming,
+        _stored("claims", "CL-1", existing),
+        existing_review_authorities={("claims", "CL-1"): "ai"},
+    )
+
+    operation = next(row for row in plan.operations if row.object_id == "CL-1")
+    assert operation.payload["review_status"] == "ai_consensus_reviewed"
+    assert "superseded_by" not in operation.payload
+    assert [event.decision for event in plan.review_events] == [
+        "ai_consensus_reviewed"
+    ]
+
+
+@pytest.mark.parametrize("reviewer_kind", [None, "system"])
+def test_new_review_cannot_guess_authority_of_existing_superseded_claim(
+    reviewer_kind: str | None,
+) -> None:
+    incoming = _reviewed_package()
+    existing = normalize_package(incoming)["claims"]["CL-1"]
+    existing.update(
+        {"review_status": "superseded", "superseded_by": "CL-UNKNOWN"}
+    )
+    authorities = (
+        {("claims", "CL-1"): reviewer_kind} if reviewer_kind else {}
+    )
+
+    with pytest.raises(PostgresKnowledgeStoreError, match="current revision"):
+        build_change_set_plan(
+            incoming,
+            _stored("claims", "CL-1", existing),
+            existing_review_authorities=authorities,
+        )
+
+
+def test_human_superseded_claim_rejects_lower_authority_semantic_change() -> None:
+    original = _reviewed_merge_package()
+    incoming = _reviewed_merge_package()
+    incoming["claims"][1]["statement"] = "新的 AI 语义修订"
+    incoming["consensus_application"]["artifact_sha256"] = (
+        reviewed_candidate_artifact_sha256(incoming)
+    )
+    existing = normalize_package(original)["claims"]["CL-2"]
+    existing.update(
+        {
+            "review_status": "superseded",
+            "reviewed_by": "owner",
+            "review_note": "人工合并裁定",
+        }
+    )
+
+    with pytest.raises(PostgresKnowledgeStoreError, match="new human ruling"):
+        build_change_set_plan(
+            incoming,
+            _stored("claims", "CL-2", existing),
+            existing_review_authorities={("claims", "CL-2"): "human"},
+        )
+
+
+def test_exact_replay_preserves_human_superseded_authority_without_ai_event() -> None:
+    incoming = _reviewed_merge_package()
+    existing = normalize_package(incoming)["claims"]["CL-2"]
+    existing.update({"reviewed_by": "owner", "review_note": "人工合并裁定"})
+
+    plan = build_change_set_plan(
+        incoming,
+        _stored("claims", "CL-2", existing),
+        existing_review_authorities={("claims", "CL-2"): "human"},
+    )
+
+    assert not any(row.object_id == "CL-2" for row in plan.operations)
+    assert not any(event.object_id == "CL-2" for event in plan.review_events)
+
+
+def test_plan_package_passes_latest_matching_review_authority_to_planner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import backend.api.canonical_repository.postgres_store as store_module
+
+    package = _reviewed_package()
+    existing_claim = normalize_package(package)["claims"]["CL-1"]
+    existing_claim.update(
+        {"review_status": "superseded", "superseded_by": "CL-HUMAN"}
+    )
+    captured: dict = {}
+    sentinel = object()
+
+    class Cursor:
+        last = ""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def execute(self, sql, _params=()):
+            self.last = sql
+
+        def fetchall(self):
+            if "review_events" in self.last:
+                return [("claims", "CL-1", "human", "superseded", 1)]
+            return []
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def cursor(self):
+            return Cursor()
+
+    def fake_build(_package, _existing, **kwargs):
+        captured.update(kwargs)
+        return sentinel
+
+    store = PostgresKnowledgeStore.__new__(PostgresKnowledgeStore)
+    store.connect = lambda: Connection()  # type: ignore[method-assign]
+    store._existing = lambda _conn, _keys: _stored(  # type: ignore[method-assign]
+        "claims", "CL-1", existing_claim
+    )
+    monkeypatch.setattr(store_module, "build_change_set_plan", fake_build)
+
+    assert store.plan_package(package) is sentinel
+    assert captured["existing_review_authorities"] == {
+        ("claims", "CL-1"): "human"
+    }
+
+
+def test_plan_package_ignores_human_event_from_an_old_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import backend.api.canonical_repository.postgres_store as store_module
+
+    package = _reviewed_package()
+    existing_claim = normalize_package(package)["claims"]["CL-1"]
+    existing_claim.update(
+        {"review_status": "superseded", "superseded_by": "CL-OLD"}
+    )
+    captured: dict = {}
+    sentinel = object()
+
+    class Cursor:
+        last = ""
+
+        def __enter__(self): return self
+        def __exit__(self, *_exc): return False
+        def execute(self, sql, _params=()): self.last = sql
+        def fetchall(self):
+            if "review_events" in self.last:
+                return [("claims", "CL-1", "human", "superseded", 0)]
+            return []
+
+    class Connection:
+        def __enter__(self): return self
+        def __exit__(self, *_exc): return False
+        def cursor(self): return Cursor()
+
+    def fake_build(_package, _existing, **kwargs):
+        captured.update(kwargs)
+        return sentinel
+
+    store = PostgresKnowledgeStore.__new__(PostgresKnowledgeStore)
+    store.connect = lambda: Connection()  # type: ignore[method-assign]
+    store._existing = lambda _conn, _keys: _stored(  # type: ignore[method-assign]
+        "claims", "CL-1", existing_claim
+    )
+    monkeypatch.setattr(store_module, "build_change_set_plan", fake_build)
+
+    assert store.plan_package(package) is sentinel
+    assert captured["existing_review_authorities"] == {}
+
+
+def test_second_review_event_failure_aborts_before_changeset_completion() -> None:
+    package = _reviewed_package()
+    second = dict(package["claims"][0])
+    second["claim_id"] = "CL-2"
+    package["claims"].append(second)
+    package["evidence_steps"][0]["produced_claim_ids"].append("CL-2")
+    second_resolution = dict(
+        package["consensus_application"]["review_resolutions"][0]
+    )
+    second_resolution["claim_id"] = "CL-2"
+    package["consensus_application"]["review_resolutions"].append(
+        second_resolution
+    )
+    package["consensus_application"]["final_review_status_counts"] = {
+        "ai_consensus_reviewed": 2
+    }
+    package["consensus_application"]["artifact_sha256"] = (
+        reviewed_candidate_artifact_sha256(package)
+    )
+    plan = build_change_set_plan(package, {})
+
+    class FailingSecondEventCursor(_RecordingCursor):
+        def __init__(self) -> None:
+            super().__init__(None)
+            self.events = 0
+
+        def execute(self, sql: str, params: tuple = ()) -> None:
+            if "INSERT INTO wang_knowledge.review_events" in sql:
+                self.events += 1
+                if self.events == 2:
+                    raise RuntimeError("simulated review event insert failure")
+            super().execute(sql, params)
+
+    durable_statements: list[tuple[str, tuple]] = []
+
+    class TransactionConnection(_RecordingConnection):
+        exit_exception: object = None
+
+        def __exit__(self, exc_type: object, *_exc: object) -> bool:
+            self.exit_exception = exc_type
+            if exc_type is None:
+                durable_statements.extend(self._cursor.statements)
+            return False
+
+    cursor = FailingSecondEventCursor()
+    connection = TransactionConnection(cursor)
+    store = PostgresKnowledgeStore.__new__(PostgresKnowledgeStore)
+    store.connect = lambda: connection  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="simulated"):
+        store.apply_plan(plan)
+
+    assert connection.exit_exception is RuntimeError
+    assert durable_statements == []
+    assert not any(
+        "SET status='applied'" in sql for sql, _params in cursor.statements
+    )
+
+    retry_cursor = _RecordingCursor(None)
+    retry_connection = TransactionConnection(retry_cursor)
+    store.connect = lambda: retry_connection  # type: ignore[method-assign]
+
+    result = store.apply_plan(plan)
+
+    assert result["status"] == "applied"
+    assert retry_connection.exit_exception is None
+    committed_events = [
+        params[0]
+        for sql, params in durable_statements
+        if "INSERT INTO wang_knowledge.review_events" in sql
+    ]
+    assert len(committed_events) == len(set(committed_events)) == 2
+
+
+def test_ai_consensus_merge_writes_a_superseded_review_event() -> None:
+    package = _reviewed_merge_package()
+
+    plan = build_change_set_plan(package, {})
+
+    assert sorted(event.decision for event in plan.review_events) == [
+        "ai_consensus_reviewed",
+        "superseded",
+    ]
 
 
 def test_dependency_invalidation_matches_any_pinned_manifest_record() -> None:
@@ -1760,9 +2413,11 @@ def test_a_preserved_review_field_is_not_reported_as_removed() -> None:
         {"review_status": "approved", "review_note": "同工已核对", "revision": 4}
     )
     package = _package()
-    package["claims"][0].update({"statement": "更新后的候选文字", "review_note": None})
+    package["claims"][0]["review_note"] = None
     plan = build_change_set_plan(package, _stored("claims", "CL-1", reviewed))
 
-    operation = next(item for item in plan.operations if item.object_id == "CL-1")
-    assert operation.payload["review_note"] == "同工已核对"
-    assert operation.removed_fields == ()
+    assert not any(item.object_id == "CL-1" for item in plan.operations)
+    assert not any(
+        item["collection"] == "claims" and "review_note" in item["fields"]
+        for item in plan.removals
+    )
