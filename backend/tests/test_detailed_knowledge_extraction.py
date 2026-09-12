@@ -321,6 +321,29 @@ def test_reports_anchor_and_relation_errors_together() -> None:
     assert "unknown claim endpoint" in message
 
 
+@pytest.mark.parametrize("direction", ["claim_only", "evidence_only"])
+def test_rejects_nonreciprocal_claim_evidence_bindings(direction: str) -> None:
+    response = _response()
+    if direction == "claim_only":
+        response["claims"][0]["evidence_step_ids"].append("E002")
+    else:
+        response["evidence_steps"][1]["produced_claim_ids"].append("CL001")
+
+    with pytest.raises(
+        DetailedExtractionValidationError,
+        match="claim/evidence bindings must be reciprocal",
+    ):
+        validate_response(response, _transcript())
+
+
+def test_rejects_duplicate_claim_evidence_reference() -> None:
+    response = _response()
+    response["claims"][0]["evidence_step_ids"].append("E001")
+
+    with pytest.raises(DetailedExtractionValidationError, match="duplicate evidence"):
+        validate_response(response, _transcript())
+
+
 def test_validation_feedback_includes_exact_referenced_segment() -> None:
     feedback = _validation_feedback(
         DetailedExtractionValidationError("Q003: excerpt is not verbatim in S0002"),
@@ -903,6 +926,14 @@ def test_consensus_applier_removes_anchor_and_relation_without_approving(tmp_pat
     updated = result["claims"][0]
     assert relation_id not in {row["claim_relation_id"] for row in result["claim_relations"]}
     assert any(value.startswith("AI-ADJ-") for value in updated["evidence_step_ids"])
+    original_evidence = next(
+        row for row in result["evidence_steps"] if row["evidence_step_id"].endswith("E001")
+    )
+    added_evidence = next(
+        row for row in result["evidence_steps"] if row["evidence_step_id"].startswith("AI-ADJ-")
+    )
+    assert original_evidence["produced_claim_ids"] == []
+    assert added_evidence["produced_claim_ids"] == [updated["claim_id"]]
     assert result["consensus_application"]["approval_status"] == "not_human_approved"
     assert result["coverage"]["anchored_spans"] == len(result["source_fragments"])
     assert result["coverage"]["unprocessed"] != 999
@@ -1202,6 +1233,13 @@ def test_merging_a_duplicate_keeps_its_grip_on_the_source(tmp_path: Path) -> Non
         str(anchor["evidence_id"])
         for occurrence in survivor["occurrences"] for anchor in occurrence["anchors"]
     }
+    evidence = {
+        row["evidence_step_id"]: row for row in result["evidence_steps"]
+    }
+    assert all(
+        survivor["claim_id"] in evidence[evidence_id]["produced_claim_ids"]
+        for evidence_id in retired_evidence
+    )
     assert result["summary"]["active_claim_count"] == 1
     assert result["summary"]["superseded_claim_count"] == 1
     assert result["consensus_application"]["merged_claim_ids"] == {

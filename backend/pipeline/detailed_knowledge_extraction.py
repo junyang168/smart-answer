@@ -719,10 +719,18 @@ def validate_response(
         )
     for row in response.get("questions", []):
         collect(
+            len(row["answer_claim_ids"]) == len(set(row["answer_claim_ids"])),
+            f"{row['question_id']}: duplicate answer claim",
+        )
+        collect(
             set(row["answer_claim_ids"]) <= ids["claim"],
             f"{row['question_id']}: unknown answer claim",
         )
     for row in response.get("evidence_steps", []):
+        collect(
+            len(row["produced_claim_ids"]) == len(set(row["produced_claim_ids"])),
+            f"{row['evidence_step_id']}: duplicate produced claim",
+        )
         collect(
             set(row["produced_claim_ids"]) <= ids["claim"],
             f"{row['evidence_step_id']}: unknown claim",
@@ -735,14 +743,44 @@ def validate_response(
     for row in response.get("claims", []):
         collect(row["review_status"] == "candidate", f"{row['claim_id']}: extraction cannot approve")
         collect(
+            len(row["evidence_step_ids"]) == len(set(row["evidence_step_ids"])),
+            f"{row['claim_id']}: duplicate evidence",
+        )
+        collect(
             set(row["evidence_step_ids"]) <= ids["evidence"],
             f"{row['claim_id']}: unknown evidence",
+        )
+        collect(
+            len(row["opposed_position_ids"])
+            == len(set(row["opposed_position_ids"])),
+            f"{row['claim_id']}: duplicate opposed position",
         )
         collect(
             set(row["opposed_position_ids"]) <= ids["position"],
             f"{row['claim_id']}: unknown opposed position",
         )
         collect(bool(row["evidence_step_ids"]), f"{row['claim_id']}: claim has no evidence")
+
+    # A Claim's evidence_step_ids and an EvidenceStep's produced_claim_ids are
+    # the two projections of the same many-to-many connection.  Neither side
+    # is authoritative on its own, so a disagreement must make the extraction
+    # retry rather than being guessed into a package.
+    claim_evidence_pairs = {
+        (str(claim["claim_id"]), str(evidence_id))
+        for claim in response.get("claims", [])
+        for evidence_id in claim.get("evidence_step_ids") or []
+    }
+    evidence_claim_pairs = {
+        (str(claim_id), str(evidence["evidence_step_id"]))
+        for evidence in response.get("evidence_steps", [])
+        for claim_id in evidence.get("produced_claim_ids") or []
+    }
+    collect(
+        claim_evidence_pairs == evidence_claim_pairs,
+        "claim/evidence bindings must be reciprocal; "
+        f"claim_only={sorted(claim_evidence_pairs - evidence_claim_pairs)}, "
+        f"evidence_only={sorted(evidence_claim_pairs - claim_evidence_pairs)}",
+    )
     # An observation may be the source of a relation into the argument: that
     # edge is how "the professor reasoned from this" is recorded at all.  The
     # target stays an evidence step -- observations do not support each other.

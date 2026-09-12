@@ -112,7 +112,11 @@ def _anchored_evidence_ids(claims: list[dict[str, Any]]) -> set[str]:
 
 
 def _merge_into_survivor(
-    *, loser: dict[str, Any], survivor: dict[str, Any], relations: list[dict[str, Any]],
+    *,
+    loser: dict[str, Any],
+    survivor: dict[str, Any],
+    evidence: dict[str, dict[str, Any]],
+    relations: list[dict[str, Any]],
 ) -> None:
     """Move what the retired claim carried onto the one that stays.
 
@@ -156,6 +160,15 @@ def _merge_into_survivor(
     for evidence_id in loser.get("evidence_step_ids") or []:
         if evidence_id not in survivor_evidence:
             survivor_evidence.append(evidence_id)
+        evidence_step = evidence.get(str(evidence_id))
+        if evidence_step is None:
+            raise ConsensusApplicationError(
+                f"merge references missing evidence: {loser['claim_id']}:{evidence_id}"
+            )
+        produced = list(evidence_step.get("produced_claim_ids") or [])
+        if survivor["claim_id"] not in produced:
+            produced.append(survivor["claim_id"])
+        evidence_step["produced_claim_ids"] = produced
     survivor["evidence_step_ids"] = survivor_evidence
     for name in ("scripture_refs", "topic_terms", "opposed_position_ids"):
         merged = list(survivor.get(name) or [])
@@ -202,6 +215,22 @@ def apply_consensus_overrides(
             claim["ai_route_override"] = patch["route_type"]
 
         excluded = patch.get("excluded_anchors") or []
+        for signature in excluded:
+            matches = [
+                anchor
+                for occurrence in claim.get("occurrences", [])
+                for anchor in occurrence.get("anchors", [])
+                if _matches_signature(
+                    anchor,
+                    signature,
+                    str(occurrence.get("transcript_id") or ""),
+                )
+            ]
+            if len(matches) != 1:
+                raise ConsensusApplicationError(
+                    "excluded anchor must resolve exactly once: "
+                    f"{claim_id}:{signature!r}"
+                )
         removed_evidence_ids: set[str] = set()
         for occurrence in claim.get("occurrences", []):
             transcript_id = str(occurrence.get("transcript_id") or "")
@@ -219,10 +248,23 @@ def apply_consensus_overrides(
             for anchor in occurrence.get("anchors", [])
             if anchor.get("evidence_id")
         }
+        previous_evidence_ids = list(claim.get("evidence_step_ids", []))
         claim["evidence_step_ids"] = [
             value for value in claim.get("evidence_step_ids", [])
             if value not in removed_evidence_ids or value in still_anchored
         ]
+        removed_links = set(previous_evidence_ids) - set(claim["evidence_step_ids"])
+        for evidence_id in removed_links:
+            evidence_step = evidence.get(str(evidence_id))
+            if evidence_step is None:
+                raise ConsensusApplicationError(
+                    f"claim references missing evidence: {claim_id}:{evidence_id}"
+                )
+            evidence_step["produced_claim_ids"] = [
+                value
+                for value in evidence_step.get("produced_claim_ids") or []
+                if str(value) != claim_id
+            ]
 
         for position, addition in enumerate(patch.get("anchor_additions") or [], start=1):
             transcript_id = str(addition.get("transcript_id") or "")
@@ -345,6 +387,7 @@ def apply_consensus_overrides(
         _merge_into_survivor(
             loser=claims[claim_id],
             survivor=survivor,
+            evidence=evidence,
             relations=result.get("claim_relations", []),
         )
         claims[claim_id]["superseded_by"] = survivor_id

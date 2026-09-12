@@ -27,7 +27,7 @@ def _package(index: int) -> dict:
             {
                 "evidence_step_id": evidence_id,
                 "source_fragment_ids": [fragment_id],
-                "produced_claim_ids": [claim_id],
+                "produced_claim_ids": [claim_id, target_claim_id],
             }
         ],
         "claims": [
@@ -130,6 +130,33 @@ def test_merge_rejects_self_edges_and_duplicate_semantic_edges() -> None:
         "claim_relation_id": "RELATION-SECOND",
     })
     with pytest.raises(KnowledgePackageMergeError, match="duplicate semantic relation"):
+        validate_merged_package(package)
+
+
+@pytest.mark.parametrize("direction", ["claim_only", "evidence_only"])
+def test_merge_rejects_nonreciprocal_claim_evidence_bindings(
+    direction: str,
+) -> None:
+    package = _package(1)
+    if direction == "claim_only":
+        package["evidence_steps"][0]["produced_claim_ids"].remove(
+            "CLAIM-TARGET-1"
+        )
+    else:
+        package["claims"][1]["evidence_step_ids"] = []
+
+    with pytest.raises(
+        KnowledgePackageMergeError,
+        match="claim/evidence bindings must be reciprocal",
+    ):
+        validate_merged_package(package)
+
+
+def test_merge_rejects_duplicate_reference_edges() -> None:
+    package = _package(1)
+    package["claims"][0]["evidence_step_ids"].append("EVIDENCE-1")
+
+    with pytest.raises(KnowledgePackageMergeError, match="duplicate references"):
         validate_merged_package(package)
 
 
