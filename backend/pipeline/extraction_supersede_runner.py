@@ -12,7 +12,7 @@ import argparse
 import json
 import re
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from dotenv import load_dotenv
 
@@ -331,6 +331,359 @@ def obsolete_candidate_batch_retirement(
     ], audit
 
 
+def stale_candidate_projection_retirement(
+    *,
+    batch_ids: Sequence[str],
+    change_set: Any,
+    all_live_rows: list[tuple[str, str, Mapping[str, Any]]],
+    known_plan_ids: set[str],
+    record_states: Mapping[tuple[str, str], Mapping[str, Any]] | None = None,
+) -> tuple[list[tuple[str, str]], dict[str, Any]]:
+    """Retire only old-workflow projections invalidated by this extraction.
+
+    Historical CompositionPlans and decisions remain readable and are not part
+    of the retirement.  They prove ownership only.  The operator names every
+    allowed batch, and only candidate/internal routes and syntheses whose
+    authoritative claim fields name this ChangeSet's retiring generation are
+    eligible.  A mixed synthesis is retired whole; claim ids are never patched.
+    """
+
+    normalized_batches = sorted({str(value or "").strip() for value in batch_ids})
+    if not normalized_batches or any(
+        not value.startswith("RB-") or len(value) <= 3
+        for value in normalized_batches
+    ):
+        raise ValueError("stale projection batch ids must start with RB-")
+    plan_patterns = {
+        batch_id: re.compile(
+            rf"^CP-{re.escape(batch_id[3:])}-[ST]-[0-9a-f]{{12}}$"
+        )
+        for batch_id in normalized_batches
+    }
+    synthesis_patterns = {
+        batch_id: re.compile(
+            rf"^SYN-{re.escape(batch_id[3:])}-[ST]-[0-9a-f]{{12}}$"
+        )
+        for batch_id in normalized_batches
+    }
+    unknown_batches = sorted(
+        batch_id
+        for batch_id, pattern in plan_patterns.items()
+        if not any(pattern.fullmatch(plan_id) for plan_id in known_plan_ids)
+    )
+    if unknown_batches:
+        raise ValueError(
+            "unknown stale projection batch ids: " + ", ".join(unknown_batches)
+        )
+    retired_ids = _retiring_extraction_ids(change_set)
+    retired_ids_sha256 = sha256_json(sorted(retired_ids))
+    live_plans = {
+        object_id: payload
+        for collection, object_id, payload in all_live_rows
+        if collection == "composition_plans"
+    }
+    decisions_by_plan: dict[str, list[tuple[str, Mapping[str, Any]]]] = {}
+    for collection, object_id, payload in all_live_rows:
+        if collection != "composition_decisions":
+            continue
+        decisions_by_plan.setdefault(
+            str(payload.get("plan_id") or ""), []
+        ).append((object_id, payload))
+
+    def owner(
+        collection: str, object_id: str, payload: Mapping[str, Any]
+    ) -> tuple[str, str, list[str]] | None:
+        if collection == "knowledge_routes":
+            claim_id = str(payload.get("claim_id") or "")
+            stale_claim_ids = [claim_id] if claim_id in retired_ids else []
+            plan_id = str(payload.get("target_id") or "")
+            matches = [
+                batch_id
+                for batch_id, pattern in plan_patterns.items()
+                if pattern.fullmatch(plan_id)
+            ]
+        elif collection == "editorial_syntheses":
+            stale_claim_ids = sorted(
+                set(map(str, payload.get("claim_ids") or [])) & retired_ids
+            )
+            matches = [
+                batch_id
+                for batch_id, pattern in synthesis_patterns.items()
+                if pattern.fullmatch(object_id)
+                and str(payload.get("corpus_scope") or "") == batch_id
+            ]
+            plan_id = f"CP{object_id[3:]}" if object_id.startswith("SYN-") else ""
+        else:
+            return None
+        if not stale_claim_ids:
+            return None
+        if len(matches) != 1:
+            raise ValueError(
+                "stale candidate projection has ambiguous or mismatched batch ownership: "
+                f"{collection}/{object_id}"
+            )
+        batch_id = matches[0]
+        if plan_id not in known_plan_ids:
+            raise ValueError(
+                "stale candidate projection lacks a known historical CompositionPlan: "
+                f"{collection}/{object_id} -> {plan_id or '<missing>'}"
+            )
+        plan = live_plans.get(plan_id)
+        if plan is not None and (
+            str(plan.get("review_status") or "") != "candidate"
+            or str(plan.get("visibility") or "") != "internal"
+        ):
+            raise ValueError(
+                "stale candidate projection is attached to current plan authority: "
+                f"composition_plans/{plan_id}"
+            )
+        authoritative_decisions = sorted(
+            decision_id
+            for decision_id, decision in decisions_by_plan.get(plan_id, [])
+            if str(decision.get("review_status") or "") != "candidate"
+            or str(decision.get("visibility") or "") != "internal"
+        )
+        if authoritative_decisions:
+            raise ValueError(
+                "stale candidate projection is attached to current decision authority: "
+                + ", ".join(authoritative_decisions)
+            )
+        return batch_id, plan_id, stale_claim_ids
+
+    selected: dict[
+        tuple[str, str], tuple[Mapping[str, Any], str, str, list[str]]
+    ] = {}
+    invalid: list[str] = []
+    for collection, object_id, payload in all_live_rows:
+        owned = owner(collection, object_id, payload)
+        if owned is None:
+            continue
+        batch_id, plan_id, stale_claim_ids = owned
+        key = (str(collection), str(object_id))
+        if (
+            str(payload.get("review_status") or "") != "candidate"
+            or str(payload.get("visibility") or "") != "internal"
+        ):
+            invalid.append(f"{key[0]}/{key[1]}")
+            continue
+        selected[key] = (payload, batch_id, plan_id, stale_claim_ids)
+    if invalid:
+        raise ValueError(
+            "stale candidate projection includes non-candidate authority: "
+            + ", ".join(sorted(invalid))
+        )
+
+    def strings(value: Any) -> set[str]:
+        if isinstance(value, Mapping):
+            found = {str(key) for key in value if isinstance(key, str)}
+            for child in value.values():
+                found.update(strings(child))
+            return found
+        if isinstance(value, (list, tuple, set)):
+            found: set[str] = set()
+            for child in value:
+                found.update(strings(child))
+            return found
+        return {value} if isinstance(value, str) else set()
+
+    selected_ids = {object_id for _collection, object_id in selected}
+    external_references = []
+    for collection, object_id, payload in all_live_rows:
+        key = (str(collection), str(object_id))
+        if key in selected:
+            continue
+        referenced = strings(payload) & selected_ids
+        if referenced:
+            external_references.append(
+                f"{key[0]}/{key[1]} -> {','.join(sorted(referenced))}"
+            )
+    if external_references:
+        raise ValueError(
+            "stale candidate projections still have current external references: "
+            + " | ".join(sorted(external_references))
+        )
+
+    records = []
+    for (collection, object_id), (
+        payload,
+        batch_id,
+        plan_id,
+        stale_claim_ids,
+    ) in sorted(selected.items()):
+        state = (record_states or {}).get((collection, object_id)) or {}
+        content_sha256 = str(
+            state.get("content_sha256") or record_content_sha(payload)
+        )
+        if content_sha256 != record_content_sha(payload):
+            raise ValueError(
+                "stale candidate projection has inconsistent stored content SHA: "
+                f"{collection}/{object_id}"
+            )
+        records.append({
+            "collection": collection,
+            "object_id": object_id,
+            "batch_id": batch_id,
+            "owner_plan_id": plan_id,
+            "expected_revision": state.get("revision", payload.get("revision")),
+            "expected_content_sha256": content_sha256,
+            "stale_claim_ids": stale_claim_ids,
+        })
+    summary = {
+        "knowledge_routes": sum(
+            row["collection"] == "knowledge_routes" for row in records
+        ),
+        "editorial_syntheses": sum(
+            row["collection"] == "editorial_syntheses" for row in records
+        ),
+        "total": len(records),
+    }
+    audit = {
+        "schema_version": "wang_stale_candidate_projection_retirement_v1",
+        "batch_ids": normalized_batches,
+        "reason_code": (
+            "retired_composition_projection_invalidated_by_extraction_supersession"
+        ),
+        "selection_policy": (
+            "explicit batch allow-list; exact authoritative claim reference; "
+            "candidate+internal only; historical plan ownership; "
+            "zero external current references"
+        ),
+        "status": "planned" if records else "not_needed",
+        "retired_extraction_ids_sha256": retired_ids_sha256,
+        "summary": summary,
+        "records": records,
+    }
+    _seal_audit(audit)
+    return [(row["collection"], row["object_id"]) for row in records], audit
+
+
+def stale_ai_cross_sermon_constraint_retirement(
+    *,
+    constraint_ids: Sequence[str],
+    change_set: Any,
+    all_live_rows: list[tuple[str, str, Mapping[str, Any]]],
+    known_constraint_ids: set[str],
+    record_states: Mapping[tuple[str, str], Mapping[str, Any]] | None = None,
+) -> tuple[list[tuple[str, str]], dict[str, Any]]:
+    """Retire named AI cross-sermon judgments whose endpoint is superseded.
+
+    No claim-id mapping is inferred.  The old judgment remains in object
+    history; its current edge is retired atomically with the endpoint and a new
+    cross-sermon run must decide whether any relation still holds.
+    """
+
+    normalized_ids = sorted({str(value or "").strip() for value in constraint_ids})
+    if not normalized_ids or any(
+        re.fullmatch(r"CRC-XSR-[0-9a-f]{16}", value) is None
+        for value in normalized_ids
+    ):
+        raise ValueError("stale cross-sermon constraint ids must be CRC-XSR-<16 hex>")
+    unknown = sorted(set(normalized_ids) - known_constraint_ids)
+    if unknown:
+        raise ValueError(
+            "unknown stale cross-sermon constraint ids: " + ", ".join(unknown)
+        )
+    retired_ids = _retiring_extraction_ids(change_set)
+    retired_ids_sha256 = sha256_json(sorted(retired_ids))
+    selected: dict[tuple[str, str], tuple[Mapping[str, Any], list[str]]] = {}
+    live_requested: set[str] = set()
+    invalid: list[str] = []
+    for collection, object_id, payload in all_live_rows:
+        if collection != "claim_relation_constraints" or object_id not in normalized_ids:
+            continue
+        live_requested.add(object_id)
+        stale_claim_ids = sorted(
+            {str(payload.get("source_id") or ""), str(payload.get("target_id") or "")}
+            & retired_ids
+        )
+        expected_artifact_id = object_id.removeprefix("CRC-")
+        if (
+            not stale_claim_ids
+            or str(payload.get("constraint_id") or "") != object_id
+            or str(payload.get("review_artifact_id") or "") != expected_artifact_id
+            or str(payload.get("review_status") or "") != "ai_consensus"
+            or str(payload.get("visibility") or "") != "internal"
+        ):
+            invalid.append(f"{collection}/{object_id}")
+            continue
+        selected[(collection, object_id)] = (payload, stale_claim_ids)
+    if invalid:
+        raise ValueError(
+            "stale cross-sermon constraint is not an eligible AI judgment: "
+            + ", ".join(sorted(invalid))
+        )
+
+    def strings(value: Any) -> set[str]:
+        if isinstance(value, Mapping):
+            found = {str(key) for key in value if isinstance(key, str)}
+            for child in value.values():
+                found.update(strings(child))
+            return found
+        if isinstance(value, (list, tuple, set)):
+            found: set[str] = set()
+            for child in value:
+                found.update(strings(child))
+            return found
+        return {value} if isinstance(value, str) else set()
+
+    selected_ids = {object_id for _collection, object_id in selected}
+    external_references = []
+    for collection, object_id, payload in all_live_rows:
+        key = (str(collection), str(object_id))
+        if key in selected:
+            continue
+        referenced = strings(payload) & selected_ids
+        if referenced:
+            external_references.append(
+                f"{key[0]}/{key[1]} -> {','.join(sorted(referenced))}"
+            )
+    if external_references:
+        raise ValueError(
+            "stale cross-sermon constraints still have current external references: "
+            + " | ".join(sorted(external_references))
+        )
+
+    records = []
+    for (collection, object_id), (payload, stale_claim_ids) in sorted(selected.items()):
+        state = (record_states or {}).get((collection, object_id)) or {}
+        content_sha256 = str(
+            state.get("content_sha256") or record_content_sha(payload)
+        )
+        if content_sha256 != record_content_sha(payload):
+            raise ValueError(
+                "stale cross-sermon constraint has inconsistent stored content SHA: "
+                f"{collection}/{object_id}"
+            )
+        records.append({
+            "collection": collection,
+            "object_id": object_id,
+            "expected_revision": state.get("revision", payload.get("revision")),
+            "expected_content_sha256": content_sha256,
+            "source_id": str(payload.get("source_id") or ""),
+            "target_id": str(payload.get("target_id") or ""),
+            "review_artifact_id": str(payload.get("review_artifact_id") or ""),
+            "reason": str(payload.get("reason") or ""),
+            "stale_claim_ids": stale_claim_ids,
+        })
+    already_retired_ids = sorted(set(normalized_ids) - live_requested)
+    audit = {
+        "schema_version": "wang_stale_ai_cross_sermon_constraint_retirement_v1",
+        "constraint_ids": normalized_ids,
+        "reason_code": "cross_sermon_judgment_invalidated_by_claim_supersession",
+        "selection_policy": (
+            "explicit exact constraint id; internal ai_consensus only; exact "
+            "retiring endpoint; zero external current references; never retarget"
+        ),
+        "status": "planned" if records else "already_retired",
+        "retired_extraction_ids_sha256": retired_ids_sha256,
+        "already_retired_ids": already_retired_ids,
+        "summary": {"claim_relation_constraints": len(records), "total": len(records)},
+        "records": records,
+    }
+    _seal_audit(audit)
+    return [(row["collection"], row["object_id"]) for row in records], audit
+
+
 def stale_pending_topic_identity_retirement(
     *,
     batch_id: str,
@@ -517,6 +870,76 @@ def validate_stale_topic_identity_retirement_plan(
         )
 
 
+def validate_stale_candidate_projection_retirement_plan(
+    change_set: Any, audit: Mapping[str, Any] | None
+) -> None:
+    """Bind a stale route/synthesis audit to the exact ChangeSet."""
+
+    if not audit:
+        return
+    if audit.get("retired_extraction_ids_sha256") != sha256_json(
+        sorted(_retiring_extraction_ids(change_set))
+    ):
+        raise ValueError(
+            "stale candidate projection audit does not match retiring extraction ids"
+        )
+    operations = {
+        (operation.collection, operation.object_id): operation
+        for operation in change_set.operations
+    }
+    mismatches: list[str] = []
+    for row in audit.get("records") or []:
+        key = (str(row.get("collection") or ""), str(row.get("object_id") or ""))
+        operation = operations.get(key)
+        if operation is None or operation.operation != "retire":
+            mismatches.append(f"{key[0]}/{key[1]} is not planned for retirement")
+            continue
+        if operation.before_revision != row.get("expected_revision"):
+            mismatches.append(f"{key[0]}/{key[1]} revision drifted")
+        if operation.before_sha256 != row.get("expected_content_sha256"):
+            mismatches.append(f"{key[0]}/{key[1]} content drifted")
+    if mismatches:
+        raise ValueError(
+            "stale candidate projection snapshot does not match ChangeSet: "
+            + " | ".join(mismatches)
+        )
+
+
+def validate_stale_ai_cross_sermon_constraint_retirement_plan(
+    change_set: Any, audit: Mapping[str, Any] | None
+) -> None:
+    """Bind named stale cross-sermon judgments to the exact ChangeSet."""
+
+    if not audit:
+        return
+    if audit.get("retired_extraction_ids_sha256") != sha256_json(
+        sorted(_retiring_extraction_ids(change_set))
+    ):
+        raise ValueError(
+            "stale cross-sermon constraint audit does not match retiring extraction ids"
+        )
+    operations = {
+        (operation.collection, operation.object_id): operation
+        for operation in change_set.operations
+    }
+    mismatches: list[str] = []
+    for row in audit.get("records") or []:
+        key = (str(row.get("collection") or ""), str(row.get("object_id") or ""))
+        operation = operations.get(key)
+        if operation is None or operation.operation != "retire":
+            mismatches.append(f"{key[0]}/{key[1]} is not planned for retirement")
+            continue
+        if operation.before_revision != row.get("expected_revision"):
+            mismatches.append(f"{key[0]}/{key[1]} revision drifted")
+        if operation.before_sha256 != row.get("expected_content_sha256"):
+            mismatches.append(f"{key[0]}/{key[1]} content drifted")
+    if mismatches:
+        raise ValueError(
+            "stale cross-sermon constraint snapshot does not match ChangeSet: "
+            + " | ".join(mismatches)
+        )
+
+
 def transcript_source_aliases(
     package: Mapping[str, Any], live_documents: Mapping[str, Mapping[str, Any]]
 ) -> set[str]:
@@ -626,6 +1049,8 @@ def plan(
     source_kind: str,
     retire_obsolete_candidate_batch: str | None = None,
     retire_stale_pending_topic_identity_batch: str | None = None,
+    retire_stale_candidate_projection_batches: Sequence[str] = (),
+    retire_stale_ai_cross_sermon_constraint_ids: Sequence[str] = (),
 ):
     """The one change set that lands `package` and withdraws its predecessor.
 
@@ -699,6 +1124,16 @@ def plan(
         ]
         obsolete_retirement = None
         obsolete_keys: list[tuple[str, str]] = []
+        known_plan_ids: set[str] = set()
+        if (
+            retire_obsolete_candidate_batch
+            or retire_stale_candidate_projection_batches
+        ):
+            cursor.execute(
+                """SELECT object_id FROM wang_knowledge.objects
+                   WHERE collection='composition_plans'"""
+            )
+            known_plan_ids = {str(row[0]) for row in cursor.fetchall()}
         if retire_obsolete_candidate_batch:
             candidate_live = {
                 collection: {
@@ -708,11 +1143,6 @@ def plan(
                 }
                 for collection in OBSOLETE_CANDIDATE_RETIREMENT_COLLECTIONS
             }
-            cursor.execute(
-                """SELECT object_id FROM wang_knowledge.objects
-                   WHERE collection='composition_plans'"""
-            )
-            known_plan_ids = {str(row[0]) for row in cursor.fetchall()}
             obsolete_keys, obsolete_retirement = obsolete_candidate_batch_retirement(
                 batch_id=retire_obsolete_candidate_batch,
                 live=candidate_live,
@@ -720,6 +1150,13 @@ def plan(
                 known_plan_ids=known_plan_ids,
                 record_states=record_states,
             )
+        known_constraint_ids: set[str] = set()
+        if retire_stale_ai_cross_sermon_constraint_ids:
+            cursor.execute(
+                """SELECT object_id FROM wang_knowledge.objects
+                   WHERE collection='claim_relation_constraints'"""
+            )
+            known_constraint_ids = {str(row[0]) for row in cursor.fetchall()}
     keys = sorted(set(withdrawal.closure()) | set(obsolete_keys))
     change_set = store.plan_package(
         package,
@@ -727,9 +1164,22 @@ def plan(
         retiring_keys=keys,
     )
     validate_obsolete_retirement_plan(change_set, obsolete_retirement)
+    stale_projection_retirement = None
+    stale_projection_keys: list[tuple[str, str]] = []
+    if retire_stale_candidate_projection_batches:
+        stale_projection_keys, stale_projection_retirement = (
+            stale_candidate_projection_retirement(
+                batch_ids=retire_stale_candidate_projection_batches,
+                change_set=change_set,
+                all_live_rows=all_live_rows,
+                known_plan_ids=known_plan_ids,
+                record_states=record_states,
+            )
+        )
     stale_topic_identity_retirement = None
+    stale_topic_keys: list[tuple[str, str]] = []
     if retire_stale_pending_topic_identity_batch:
-        stale_keys, stale_topic_identity_retirement = (
+        stale_topic_keys, stale_topic_identity_retirement = (
             stale_pending_topic_identity_retirement(
                 batch_id=retire_stale_pending_topic_identity_batch,
                 change_set=change_set,
@@ -737,17 +1187,40 @@ def plan(
                 record_states=record_states,
             )
         )
-        if stale_keys:
-            keys = sorted(set(keys) | set(stale_keys))
-            change_set = store.plan_package(
-                package,
-                source_kind=source_kind,
-                retiring_keys=keys,
+    stale_cross_sermon_constraint_retirement = None
+    stale_constraint_keys: list[tuple[str, str]] = []
+    if retire_stale_ai_cross_sermon_constraint_ids:
+        stale_constraint_keys, stale_cross_sermon_constraint_retirement = (
+            stale_ai_cross_sermon_constraint_retirement(
+                constraint_ids=retire_stale_ai_cross_sermon_constraint_ids,
+                change_set=change_set,
+                all_live_rows=all_live_rows,
+                known_constraint_ids=known_constraint_ids,
+                record_states=record_states,
             )
-            validate_obsolete_retirement_plan(change_set, obsolete_retirement)
-        validate_stale_topic_identity_retirement_plan(
-            change_set, stale_topic_identity_retirement
         )
+    extra_keys = {
+        *stale_projection_keys,
+        *stale_topic_keys,
+        *stale_constraint_keys,
+    }
+    if extra_keys:
+        keys = sorted(set(keys) | extra_keys)
+        change_set = store.plan_package(
+            package,
+            source_kind=source_kind,
+            retiring_keys=keys,
+        )
+        validate_obsolete_retirement_plan(change_set, obsolete_retirement)
+    validate_stale_candidate_projection_retirement_plan(
+        change_set, stale_projection_retirement
+    )
+    validate_stale_topic_identity_retirement_plan(
+        change_set, stale_topic_identity_retirement
+    )
+    validate_stale_ai_cross_sermon_constraint_retirement_plan(
+        change_set, stale_cross_sermon_constraint_retirement
+    )
     products = products_to_rebuild(
         product_impact_keys(change_set),
         dependencies=dependencies,
@@ -762,6 +1235,8 @@ def plan(
         semantic_blockers,
         obsolete_retirement,
         stale_topic_identity_retirement,
+        stale_projection_retirement,
+        stale_cross_sermon_constraint_retirement,
     )
 
 
@@ -805,6 +1280,28 @@ def main(argv: list[str] | None = None) -> int:
             "the named origin batch that cite claims retired by this re-extraction"
         ),
     )
+    parser.add_argument(
+        "--retire-stale-candidate-projection-batch",
+        metavar="BATCH_ID",
+        action="append",
+        default=[],
+        help=(
+            "repeatable explicit allow-list; retire only candidate/internal old "
+            "CompositionPlan routes and syntheses that cite claims retired by "
+            "this re-extraction; plans and decisions remain historical records"
+        ),
+    )
+    parser.add_argument(
+        "--retire-stale-ai-cross-sermon-constraint",
+        metavar="CONSTRAINT_ID",
+        action="append",
+        default=[],
+        help=(
+            "repeatable exact allow-list; retire an internal ai_consensus "
+            "CRC-XSR constraint whose claim endpoint is retired, without "
+            "retargeting the old judgment"
+        ),
+    )
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args(argv)
 
@@ -835,6 +1332,8 @@ def main(argv: list[str] | None = None) -> int:
         semantic_blockers,
         obsolete_retirement,
         stale_topic_identity_retirement,
+        stale_projection_retirement,
+        stale_cross_sermon_constraint_retirement,
     ) = plan(
         store,
         package,
@@ -842,6 +1341,12 @@ def main(argv: list[str] | None = None) -> int:
         retire_obsolete_candidate_batch=args.retire_obsolete_candidate_batch,
         retire_stale_pending_topic_identity_batch=(
             args.retire_stale_pending_topic_identities
+        ),
+        retire_stale_candidate_projection_batches=(
+            args.retire_stale_candidate_projection_batch
+        ),
+        retire_stale_ai_cross_sermon_constraint_ids=(
+            args.retire_stale_ai_cross_sermon_constraint
         ),
     )
     output: dict[str, Any] = {
@@ -870,6 +1375,14 @@ def main(argv: list[str] | None = None) -> int:
     if stale_topic_identity_retirement is not None:
         output["stale_pending_topic_identity_retirement"] = (
             stale_topic_identity_retirement
+        )
+    if stale_projection_retirement is not None:
+        output["stale_candidate_projection_retirement"] = (
+            stale_projection_retirement
+        )
+    if stale_cross_sermon_constraint_retirement is not None:
+        output["stale_ai_cross_sermon_constraint_retirement"] = (
+            stale_cross_sermon_constraint_retirement
         )
     if args.apply:
         if semantic_blockers:
@@ -914,6 +1427,12 @@ def main(argv: list[str] | None = None) -> int:
                     "stale_pending_topic_identity_retirement": (
                         stale_topic_identity_retirement
                     ),
+                    "stale_candidate_projection_retirement": (
+                        stale_projection_retirement
+                    ),
+                    "stale_ai_cross_sermon_constraint_retirement": (
+                        stale_cross_sermon_constraint_retirement
+                    ),
                 },
             )
             record.quality({
@@ -927,6 +1446,12 @@ def main(argv: list[str] | None = None) -> int:
                 "obsolete_candidate_batch_retirement": obsolete_retirement,
                 "stale_pending_topic_identity_retirement": (
                     stale_topic_identity_retirement
+                ),
+                "stale_candidate_projection_retirement": (
+                    stale_projection_retirement
+                ),
+                "stale_ai_cross_sermon_constraint_retirement": (
+                    stale_cross_sermon_constraint_retirement
                 ),
             })
             record.outputs(args.package)

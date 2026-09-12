@@ -170,6 +170,18 @@ PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.extraction_supersede_r
   <reviewed-candidate> --apply
 ```
 
+预览若返回 `semantic_rebind_required=true`，不得直接 `--apply`。旧
+`CompositionPlan` 工作流遗留的 candidate/internal route 或 synthesis 只能通过可重复的
+`--retire-stale-candidate-projection-batch <BATCH_ID>` 明确 allow-list；该门禁只软退役
+权威 claim 字段精确引用本次 retiring generation 的投影，不退役历史
+`CompositionPlan`／`CompositionDecision`，也不从旧 claim ID 猜测新 ID。pending topic
+proposal 使用 `--retire-stale-pending-topic-identities <BATCH_ID>`。跨讲 negative
+constraint 只有在确认是 internal `ai_consensus`、端点正被本次 ChangeSet 退役时，才可用
+`--retire-stale-ai-cross-sermon-constraint <CRC-XSR-ID>` 精确列名；旧 judgment 随端点一同
+软退役，之后以新 aggregate 重跑跨讲判断，不得 retarget。三类 audit 都绑定 retiring IDs、
+row revision、content SHA 和精确 scope，并在同一事务的数据库锁内重算；缺 audit、出现
+approved/public authority、范围漂移或外部引用时一律失败。
+
 旧的 `knowledge_store_runner sync-ai-review` 已退役：它只读取第一轮 review，并按 mtime 选择文件，无法证明仲裁与 override 是否属于同一条 exact artifact chain。人已经裁定的 revision 不接受低权限 AI 的语义改写；若 statement、evidence 或其他实质内容变化，ChangeSet fail closed，要求新的人工裁定。`superseded` 本身不是权限级别，系统依据最新、与当前状态匹配的 `review_event.reviewer_kind` 区分人工合并与 AI 合并。
 
 默认使用 `gpt-5.6-sol` medium 仲裁、`claude-sonnet-5` 复审／再审。Sonnet 5 调用不发送旧版 temperature 与 disabled-thinking 参数，使用模型默认 adaptive thinking；复审 runner 的输出预算为 32,000 tokens，因为 thinking 与最终 JSON 共用 `max_tokens`，旧的 10,000 上限会在模型输出 JSON 前耗尽。
