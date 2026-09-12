@@ -182,6 +182,40 @@ def validate_research_batch(payload: dict[str, Any]) -> None:
         raise ResearchBatchValidationError(
             "every extraction_max_section_sentences value must be a positive integer"
         )
+    visual_attestations = payload.get("visual_source_attestations") or {}
+    if not isinstance(visual_attestations, dict):
+        raise ResearchBatchValidationError(
+            "visual_source_attestations must be an object"
+        )
+    unknown_visual_sources = sorted(set(visual_attestations).difference(keys))
+    if unknown_visual_sources:
+        raise ResearchBatchValidationError(
+            "visual_source_attestations contains members outside the batch: "
+            + ", ".join(unknown_visual_sources)
+        )
+    for member_key, rows in visual_attestations.items():
+        if not isinstance(rows, dict) or not rows:
+            raise ResearchBatchValidationError(
+                f"visual_source_attestations[{member_key!r}] must be a non-empty object"
+            )
+        for locator, raw_sha256 in rows.items():
+            if not re.fullmatch(r"S[0-9]{4,}/V[0-9]{2,}", str(locator)):
+                raise ResearchBatchValidationError(
+                    f"invalid visual source locator for {member_key}: {locator!r}"
+                )
+            if not re.fullmatch(r"[0-9a-f]{64}", str(raw_sha256)):
+                raise ResearchBatchValidationError(
+                    f"invalid visual source SHA256 for {member_key}#{locator}"
+                )
+    review_batch_size = payload.get("review_batch_size", 20)
+    if (
+        not isinstance(review_batch_size, int)
+        or isinstance(review_batch_size, bool)
+        or review_batch_size <= 0
+    ):
+        raise ResearchBatchValidationError(
+            "review_batch_size must be a positive integer"
+        )
     policy = payload.get("candidate_generation_policy") or {}
     if policy.get("derive_after_independent_extraction") is not True:
         raise ResearchBatchValidationError(

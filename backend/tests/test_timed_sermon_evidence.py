@@ -40,6 +40,34 @@ def test_timed_sermon_evidence_rejects_non_verbatim_excerpt(tmp_path) -> None:
         )
 
 
+def test_timed_sermon_evidence_cannot_turn_svg_into_spoken_excerpt(tmp_path) -> None:
+    svg = "<svg><text>图示</text></svg>"
+    transcript = tmp_path / "sermon.json"
+    transcript.write_text(
+        json.dumps({
+            "script": [{
+                "index": 7,
+                "start_time": 10,
+                "end_time": 20,
+                "text": "教授讲话。" + svg,
+            }]
+        }),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="non-spoken inline"):
+        build_timed_sermon_evidence(
+            {"claims": [{"claim_id": "CL-1"}]},
+            transcript,
+            {"source_id": "SRC-1", "transcript_id": "讲道"},
+            [{
+                "claim_id": "CL-1",
+                "source_index": 7,
+                "verbatim_excerpt": svg,
+            }],
+        )
+
+
 def test_timed_sermon_evidence_is_idempotent(tmp_path) -> None:
     transcript = tmp_path / "sermon.json"
     transcript.write_text(

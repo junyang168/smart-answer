@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -118,8 +119,11 @@ def record_positions(package: dict[str, Any]) -> dict[str, int]:
     fragment_position = {}
     for fragment in package.get("source_fragments") or []:
         key = str(fragment.get("paragraph_key") or "")
-        if key[1:].isdigit():
-            fragment_position[str(fragment.get("fragment_id"))] = int(key[1:]) - 1
+        match = re.fullmatch(r"S([0-9]+)(?:/V[0-9]+)?", key)
+        if match:
+            fragment_position[str(fragment.get("fragment_id"))] = (
+                int(match.group(1)) - 1
+            )
     positions: dict[str, int] = {}
     for collection in ("observations", "evidence_steps", "questions", "position_nodes"):
         for record in package.get(collection) or []:

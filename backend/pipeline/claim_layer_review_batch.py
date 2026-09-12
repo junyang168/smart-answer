@@ -14,7 +14,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+from backend.pipeline.corpus_ai_review import AI_REVIEW_VERSION, apply_risk_routing
 from backend.pipeline.knowledge_package import live_claims
+from backend.pipeline.source_keys import package_row_key
 
 
 class ClaimLayerReviewBatchError(ValueError):
@@ -30,6 +32,45 @@ def _sha256_json(value: Any) -> str:
             separators=(",", ":"),
         ).encode("utf-8")
     ).hexdigest()
+
+
+def _derived_batch_sha256(package: dict[str, Any]) -> str:
+    candidate = copy.deepcopy(package)
+    (candidate.get("review_batch") or {}).pop("batch_artifact_sha256", None)
+    return _sha256_json(candidate)
+
+
+def validate_split_claim_layer_package(package: dict[str, Any]) -> None:
+    """Prove a claim-only review partition has not changed after splitting."""
+
+    review_batch = package.get("review_batch")
+    if not isinstance(review_batch, dict):
+        raise ClaimLayerReviewBatchError("derived review package lacks review_batch")
+    expected = str(review_batch.get("batch_artifact_sha256") or "")
+    if not expected or expected != _derived_batch_sha256(package):
+        raise ClaimLayerReviewBatchError(
+            "derived review package artifact SHA is missing or invalid"
+        )
+    claims = live_claims(package)
+    claim_ids = [str(row.get("claim_id") or "") for row in claims]
+    declared = [str(value) for value in review_batch.get("claim_ids") or []]
+    if (
+        not all(claim_ids)
+        or claim_ids != declared
+        or int(review_batch.get("claim_count") or -1) != len(claim_ids)
+    ):
+        raise ClaimLayerReviewBatchError(
+            "derived review package claim snapshot does not match its partition"
+        )
+    other_ids = [
+        str(row.get("claim_id") or "")
+        for row in review_batch.get("other_batch_claims") or []
+        if isinstance(row, dict)
+    ]
+    if len(other_ids) != len(set(other_ids)) or set(other_ids) & set(claim_ids):
+        raise ClaimLayerReviewBatchError(
+            "derived review package other-claim scope is ambiguous"
+        )
 
 
 def split_claim_layer_package(
@@ -75,6 +116,9 @@ def split_claim_layer_package(
             "partition_policy": "claims_only_all_sources_and_relations_retained",
         }
         batch["package_id"] = f"{package.get('package_id') or 'CLAIM-LAYER'}-REVIEW-{index:02d}"
+        batch["review_batch"]["batch_artifact_sha256"] = _derived_batch_sha256(
+            batch
+        )
         batches.append(batch)
     return batches
 
@@ -134,6 +178,9 @@ def split_claim_layer_package_by_source(
             "partition_policy": "source_scoped_review_before_cross_source_synthesis",
         }
         batch["package_id"] = f"{package.get('package_id') or 'CLAIM-LAYER'}-SOURCE-{index:02d}"
+        batch["review_batch"]["batch_artifact_sha256"] = _derived_batch_sha256(
+            batch
+        )
         batches.append(batch)
     return batches
 
@@ -147,15 +194,79 @@ def merge_review_artifacts(
     """Combine batch reviews and prove exact one-time claim coverage."""
     if not artifacts:
         raise ClaimLayerReviewBatchError("no review artifacts to merge")
-    expected_ids = [str(row.get("claim_id") or "") for row in live_claims(source_package)]
+    try:
+        package_on_disk = json.loads(source_package_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ClaimLayerReviewBatchError(
+            f"cannot read source package snapshot: {source_package_path}"
+        ) from exc
+    if package_on_disk != source_package:
+        raise ClaimLayerReviewBatchError(
+            "source package object does not match the package snapshot on disk"
+        )
+    from backend.pipeline.corpus_ai_review_runner import _normalize_claim_layer
+
+    expected_claims = _normalize_claim_layer(source_package)["candidate_claims"]
+    expected_ids = [str(row.get("claim_id") or "") for row in expected_claims]
+    expected_source_package_sha256 = _sha256_json(source_package)
     reviews: list[dict[str, Any]] = []
     reviewed_claims: list[dict[str, Any]] = []
     assessments: list[dict[str, Any]] = []
     reviewer_batches: list[dict[str, Any]] = []
-    routing_summary: dict[str, int] = {}
     partition_policies: set[str] = set()
+    spot_check_percents: set[int] = set()
     usage_rows: list[dict[str, Any]] = []
+    batch_indexes: list[int] = []
+    declared_batch_counts: set[int] = set()
     for index, artifact in enumerate(artifacts, start=1):
+        from backend.pipeline.corpus_ai_review_runner import _matching_review_artifact
+
+        reviewed_snapshot = artifact.get("reviewed_claims") or []
+        reviewer_fingerprint = str(
+            (artifact.get("reviewer") or {}).get("fingerprint_sha256") or ""
+        )
+        spot_check_percent = artifact.get("spot_check_percent")
+        review_batch = (artifact.get("source") or {}).get("review_batch") or {}
+        reviewed_ids = [
+            str(row.get("claim_id") or "")
+            for row in reviewed_snapshot
+            if isinstance(row, dict)
+        ]
+        declared_ids = [str(value) for value in review_batch.get("claim_ids") or []]
+        if (
+            reviewed_ids != declared_ids
+            or review_batch.get("source_package_sha256")
+            != expected_source_package_sha256
+        ):
+            raise ClaimLayerReviewBatchError(
+                f"review batch {index} is not bound to its source-package partition"
+            )
+        try:
+            batch_index = int(review_batch["batch_index"])
+            batch_count = int(review_batch["batch_count"])
+            claim_count = int(review_batch["claim_count"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ClaimLayerReviewBatchError(
+                f"review batch {index} has incomplete partition metadata"
+            ) from exc
+        if claim_count != len(reviewed_ids) or batch_index <= 0 or batch_count <= 0:
+            raise ClaimLayerReviewBatchError(
+                f"review batch {index} has inconsistent partition metadata"
+            )
+        batch_indexes.append(batch_index)
+        declared_batch_counts.add(batch_count)
+        if not isinstance(spot_check_percent, int) or not _matching_review_artifact(
+            artifact,
+            survey={
+                "candidate_claims": reviewed_snapshot,
+                "other_batch_claims": review_batch.get("other_batch_claims") or [],
+            },
+            expected_fingerprint=reviewer_fingerprint,
+            spot_check_percent=spot_check_percent,
+        ):
+            raise ClaimLayerReviewBatchError(
+                f"review batch {index} is incomplete or was modified"
+            )
         reviews.extend(artifact.get("claim_reviews") or [])
         reviewed_claims.extend(artifact.get("reviewed_claims") or [])
         # Every batch was billed.  Dropping these left the batched path -- the
@@ -170,6 +281,7 @@ def merge_review_artifacts(
                 **(artifact.get("sermon_assessment") or {}),
             }
         )
+        spot_check_percents.add(int(artifact["spot_check_percent"]))
         reviewer_batches.append(
             {
                 "batch_index": index,
@@ -185,9 +297,6 @@ def merge_review_artifacts(
         )
         if partition_policy:
             partition_policies.add(partition_policy)
-        for key, value in (artifact.get("routing_summary") or {}).items():
-            routing_summary[key] = routing_summary.get(key, 0) + int(value)
-
     review_ids = [str(row.get("claim_id") or "") for row in reviews]
     if len(review_ids) != len(set(review_ids)):
         raise ClaimLayerReviewBatchError("combined review contains duplicate claim IDs")
@@ -198,17 +307,34 @@ def merge_review_artifacts(
             f"combined review coverage mismatch; missing={missing}, extra={extra}"
         )
     reviewed_claim_ids = [str(row.get("claim_id") or "") for row in reviewed_claims]
-    if set(reviewed_claim_ids) != set(expected_ids):
+    if (
+        len(reviewed_claim_ids) != len(set(reviewed_claim_ids))
+        or set(reviewed_claim_ids) != set(expected_ids)
+    ):
         raise ClaimLayerReviewBatchError("combined reviewed-claim snapshot is incomplete")
+    if declared_batch_counts != {len(artifacts)} or sorted(batch_indexes) != list(
+        range(1, len(artifacts) + 1)
+    ):
+        raise ClaimLayerReviewBatchError(
+            "review batches do not form one complete ordered partition"
+        )
     if len(partition_policies) > 1:
         raise ClaimLayerReviewBatchError(
             f"review batches use inconsistent partition policies: {sorted(partition_policies)}"
+        )
+    if len(spot_check_percents) != 1:
+        raise ClaimLayerReviewBatchError(
+            "review batches use inconsistent spot-check percentages"
         )
 
     review_by_id = {row["claim_id"]: row for row in reviews}
     claim_by_id = {row["claim_id"]: row for row in reviewed_claims}
     ordered_reviews = [review_by_id[claim_id] for claim_id in expected_ids]
     ordered_claims = [claim_by_id[claim_id] for claim_id in expected_ids]
+    if ordered_claims != expected_claims:
+        raise ClaimLayerReviewBatchError(
+            "combined reviewed-claim snapshot differs from the source package"
+        )
     aggregate_reviewer_fingerprint = _sha256_json(
         {
             "reviewer_batches": reviewer_batches,
@@ -219,14 +345,29 @@ def merge_review_artifacts(
             ),
         }
     )
-    return {
-        "schema_version": "wang_corpus_independent_review_batched_v1",
+    spot_check_percent = next(iter(spot_check_percents))
+    routed = apply_risk_routing(
+        {"claim_reviews": ordered_reviews},
+        reviewer_fingerprint_sha256=aggregate_reviewer_fingerprint,
+        spot_check_percent=spot_check_percent,
+    )
+    systemic_risks = list(
+        dict.fromkeys(
+            str(value)
+            for assessment in assessments
+            for value in assessment.get("systemic_risks") or []
+            if str(value)
+        )
+    )
+    combined = {
+        "schema_version": AI_REVIEW_VERSION,
         "source": {
             "input_mode": "curated_claim_layer_batched",
             "package_path": str(source_package_path),
             "package_id": source_package.get("package_id"),
             "package_sha256": hashlib.sha256(source_package_path.read_bytes()).hexdigest(),
             "claim_count": len(expected_ids),
+            "transcript_id": package_row_key(source_package),
         },
         "review_strategy": {
             "batch_count": len(artifacts),
@@ -242,9 +383,23 @@ def merge_review_artifacts(
             "provider": "anthropic_batched",
             "fingerprint_sha256": aggregate_reviewer_fingerprint,
         },
+        "spot_check_percent": spot_check_percent,
+        "sermon_assessment": {
+            "summary": "\n".join(
+                str(row.get("summary") or "")
+                for row in assessments
+                if str(row.get("summary") or "")
+            ),
+            "systemic_risks": systemic_risks,
+        },
         "sermon_assessments": assessments,
         "usage": usage_rows,
         "reviewed_claims": ordered_claims,
-        "claim_reviews": ordered_reviews,
-        "routing_summary": routing_summary,
+        **routed,
     }
+    from backend.pipeline.corpus_ai_review_runner import _review_artifact_sha256
+
+    combined["reviewer"]["artifact_sha256"] = _review_artifact_sha256(
+        combined
+    )
+    return combined

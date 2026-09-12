@@ -61,7 +61,10 @@ export type AnchorMethod =
   | "empty_excerpt"
   | "no_excerpt"
   | "ambiguous_excerpt"
-  | "not_in_source";
+  | "not_in_source"
+  | "visual_locator"
+  | "visual_locator_missing"
+  | "visual_source_drifted";
 
 export type Fragment = {
   id: string;
@@ -78,6 +81,8 @@ export type Fragment = {
   char_end: number | null;
   found_at_ordinal: number | null;
   node_ids: string[];
+  source_modality?: "visual";
+  visual_locator?: string;
 };
 
 export type NodeKind = "step" | "observation" | "question" | "position";
@@ -188,6 +193,9 @@ export const ANCHOR_NOTE: Record<AnchorMethod, string> = {
   no_excerpt: "記錄沒有 verbatim_excerpt，無法定位",
   ambiguous_excerpt: "這段文字在來源出現多次，不猜",
   not_in_source: "這段文字不在來源裡",
+  visual_locator: "视觉来源以精确 locator 与 SVG SHA 命中（不是逐字引语）",
+  visual_locator_missing: "视觉 locator 不在当前来源中",
+  visual_source_drifted: "视觉 locator 存在，但 SVG SHA 已变化",
 };
 
 export const isPlaced = (fragment: Fragment) => fragment.segment_ordinal !== null;

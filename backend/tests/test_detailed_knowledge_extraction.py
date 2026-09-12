@@ -10,6 +10,7 @@ import pytest
 from backend.pipeline.corpus_ai_review_runner import _normalize_claim_layer
 from backend.pipeline.detailed_knowledge_extraction import (
     DetailedExtractionValidationError,
+    detailed_response_schema,
     extraction_identity,
     validate_response,
 )
@@ -111,6 +112,120 @@ def test_rejects_non_verbatim_anchor() -> None:
     response["evidence_steps"][0]["anchors"][0]["verbatim_excerpt"] = "教授说不对"
     with pytest.raises(DetailedExtractionValidationError, match="not verbatim"):
         validate_response(response, _transcript())
+
+
+def test_rejects_excerpt_joined_across_a_removed_visual_block() -> None:
+    transcript = _transcript()
+    svg = "<svg><text>图</text></svg>"
+    transcript["script"][0]["text"] = (
+        "有人说人子只强调人性。" + svg + "我说不对。"
+    )
+    response = _response()
+    response["evidence_steps"][0]["anchors"][0]["verbatim_excerpt"] = (
+        "人性。\n我说不对"
+    )
+
+    with pytest.raises(DetailedExtractionValidationError, match="not verbatim"):
+        validate_response(response, transcript)
+
+
+def test_visual_anchor_compiles_raw_svg_and_literal_fact_provenance(tmp_path: Path) -> None:
+    transcript = _transcript()
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80">'
+        '<ellipse cx="50" cy="40" rx="30" ry="20" stroke="#82E047"/>'
+        '<text x="50" y="45">重疊</text>'
+        '</svg>'
+    )
+    transcript["script"][0]["text"] += "\n" + svg
+    projection = project_script(transcript["script"])
+    visual = projection.visual_blocks[0]
+    response = _response()
+    response["evidence_steps"][0]["anchors"].append(
+        {
+            "segment_index": visual.locator,
+            "start_time": None,
+            "end_time": None,
+            "verbatim_excerpt": "",
+            "source_modality": "visual",
+            "visual_fact_ids": ["VF001", "VF002", "VF003"],
+        }
+    )
+    validate_response(response, transcript)
+    extraction = extraction_identity(
+        source_sha256=projection.body_sha256,
+        source_text_sha256=projection.spoken_text_sha256,
+        prompt="prompt",
+        model_id="gpt-5.6-sol",
+        reasoning_effort="medium",
+        max_output_tokens=32000,
+        response_schema=detailed_response_schema(has_visual_source=True),
+    )
+    extraction["source_body_sha256"] = projection.body_sha256
+    extraction["source_visual_sha256"] = projection.visual_content_sha256
+    raw = json.dumps(transcript, ensure_ascii=False).encode("utf-8")
+    package = compile_package(
+        transcript_id="visual-sermon",
+        transcript_path=tmp_path / "visual-sermon.json",
+        transcript=transcript,
+        raw=raw,
+        response=response,
+        extraction=extraction,
+        visual_source_attestations={visual.locator: visual.raw_sha256},
+    )
+
+    visual_fragments = [
+        row for row in package["source_fragments"]
+        if row.get("source_modality") == "visual"
+    ]
+    assert len(visual_fragments) == 1
+    fragment = visual_fragments[0]
+    assert fragment["verbatim_excerpt"] == svg
+    assert fragment["visual_locator"] == "S0001/V01"
+    assert fragment["visual_block_sha256"] == visual.raw_sha256
+    assert [row["fact_id"] for row in fragment["visual_facts"]] == [
+        "VF001",
+        "VF002",
+        "VF003",
+    ]
+    source = package["source_documents"][0]
+    assert source["source_visual_sha256"] == projection.visual_content_sha256
+    assert source["visual_sources"][0]["locator"] == "S0001/V01"
+    assert source["visual_sources"][0]["raw_svg"] == svg
+    assert [
+        row["fact_id"] for row in source["visual_sources"][0]["literal_facts"]
+    ] == ["VF001", "VF002", "VF003"]
+    assert source["visual_source_attestations"] == [{
+        "locator": "S0001/V01",
+        "raw_sha256": visual.raw_sha256,
+        "attestation": "professor_displayed_or_drawn_visual_source",
+    }]
+    occurrence = package["claims"][0]["occurrences"][0]["anchors"]
+    visual_occurrence = next(row for row in occurrence if row.get("source_modality") == "visual")
+    assert visual_occurrence["proposed_highlight"]["text"] == svg
+
+
+def test_visual_extraction_must_account_for_every_literal_fact() -> None:
+    transcript = _transcript()
+    transcript["script"][0]["text"] += (
+        '\n<svg><ellipse cx="10" cy="10" rx="4" ry="3"/>'
+        '<text x="10">重叠</text></svg>'
+    )
+    visual = project_script(transcript["script"]).visual_blocks[0]
+    response = _response()
+    response["evidence_steps"][0]["anchors"].append(
+        {
+            "segment_index": visual.locator,
+            "start_time": None,
+            "end_time": None,
+            "verbatim_excerpt": "",
+            "source_modality": "visual",
+            "visual_fact_ids": ["VF003"],
+        }
+    )
+
+    with pytest.raises(DetailedExtractionValidationError, match="uncited literal facts"):
+        validate_response(response, transcript)
 
 
 def test_rejects_anchor_into_inline_blockquote_even_when_verbatim() -> None:
@@ -785,6 +900,67 @@ def test_consensus_applier_accepts_combined_string_fingerprint(tmp_path: Path) -
         {"011WSR01": transcript},
     )
     assert result["consensus_application"]["adjudication_fingerprint"] == "combined-fp"
+
+
+def test_consensus_cannot_reclassify_visual_source_as_spoken_anchor(
+    tmp_path: Path,
+) -> None:
+    transcript = _transcript()
+    svg = '<svg><text x="4">教授的图</text></svg>'
+    transcript["script"][1]["text"] += svg
+    projection = project_script(transcript["script"])
+    visual = projection.visual_blocks[0]
+    extraction = _bound_extraction_identity(
+        transcript,
+        response_schema=detailed_response_schema(has_visual_source=True),
+    )
+    extraction["source_visual_sha256"] = projection.visual_content_sha256
+    raw = json.dumps(transcript, ensure_ascii=False).encode("utf-8")
+    response = _response()
+    response["evidence_steps"][0]["anchors"].append(
+        {
+            "segment_index": visual.locator,
+            "start_time": None,
+            "end_time": None,
+            "verbatim_excerpt": "",
+            "source_modality": "visual",
+            "visual_fact_ids": [
+                str(fact["fact_id"]) for fact in visual.facts
+            ],
+        }
+    )
+    package = compile_package(
+        transcript_id="011WSR01",
+        transcript_path=tmp_path / "011WSR01.json",
+        transcript=transcript,
+        raw=raw,
+        response=response,
+        extraction=extraction,
+        visual_source_attestations={visual.locator: visual.raw_sha256},
+    )
+    claim_id = package["claims"][0]["claim_id"]
+    overrides = {
+        "adjudication_fingerprint": {"fingerprint_sha256": "fp"},
+        "claims": {
+            claim_id: {
+                "status": "ai_consensus_applied",
+                "approval_status": "not_human_approved",
+                "excluded_anchors": [],
+                "excluded_claim_relation_ids": [],
+                "anchor_additions": [{
+                    "transcript_id": "011WSR01",
+                    "source_index": "11",
+                    "verbatim_excerpt": visual.raw_svg,
+                    "evidence_type": "reasoning",
+                }],
+                "structural_notes": [],
+                "adjudication_fingerprint": "fp",
+            }
+        },
+    }
+
+    with pytest.raises(ConsensusApplicationError, match="non-spoken inline"):
+        apply_consensus_overrides(package, overrides, {"011WSR01": transcript})
 
 
 def test_consensus_applier_refuses_stale_single_source_coverage_on_merged_package(

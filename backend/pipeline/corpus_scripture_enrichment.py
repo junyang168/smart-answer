@@ -137,8 +137,23 @@ def classification_context(survey: dict[str, Any], inventory: list[dict[str, Any
                 "statement": owner.get("statement"),
                 "claim_kind": owner.get("claim_kind"),
                 "attribution": owner.get("attribution"),
-                "anchor_excerpts": [a.get("verbatim_excerpt") for a in owner.get("anchors") or []],
+                "anchor_excerpts": [
+                    anchor.get("verbatim_excerpt")
+                    for anchor in owner.get("anchors") or []
+                    if anchor.get("source_modality") != "visual"
+                ],
             }
+            visual_sources = [
+                {
+                    "visual_locator": anchor.get("visual_locator"),
+                    "visual_fact_ids": anchor.get("visual_fact_ids") or [],
+                    "quotation_status": "not_spoken_verbatim",
+                }
+                for anchor in owner.get("anchors") or []
+                if anchor.get("source_modality") == "visual"
+            ]
+            if visual_sources:
+                context["visual_sources"] = visual_sources
         rows.append(
             {
                 "ref_key": item["ref_key"],

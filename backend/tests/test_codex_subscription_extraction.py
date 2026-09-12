@@ -3,9 +3,11 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+from io import BytesIO
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from backend.pipeline.codex_subscription_client import (
     API_BILLING_ENV_VARS,
@@ -23,15 +25,18 @@ from backend.pipeline.detailed_knowledge_extraction_runner import (
     SectionSettings,
     _extract_sections,
     _package_artifact_sha256,
+    _render_visual_png,
     _section_cache_artifact,
     _section_cache_path,
     _section_generation_fingerprint,
     _section_model_input_sha256,
+    _visual_svg_for_render,
     _load_valid_section_cache,
     build_client,
     run_one,
 )
 from backend.pipeline.extraction_sections import Section, SectionPlan, apply_section_limit
+from backend.pipeline.source_projection import visual_source_blocks
 
 
 def _transcript() -> dict:
@@ -58,6 +63,19 @@ def _transcript() -> dict:
             },
         ],
     }
+
+
+def test_explicit_canary_mode_never_opens_the_run_ledger(monkeypatch) -> None:
+    def unexpected_run_record(**_kwargs):
+        raise AssertionError("no-run-ledger must not connect")
+
+    monkeypatch.setattr(extraction_runner, "run_record", unexpected_run_record)
+    with extraction_runner._extraction_run_record(
+        "canary", enabled=False
+    ) as record:
+        assert record.recording is False
+        record.model_call_started()
+        record.model_call_completed()
 
 
 def _response() -> dict:
@@ -214,6 +232,70 @@ def test_transport_failure_has_no_api_fallback(monkeypatch: pytest.MonkeyPatch) 
     assert len(calls) == 2
 
 
+def test_visual_source_image_is_attached_to_codex_exec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    image = tmp_path / "diagram.png"
+    image.write_bytes(b"png")
+    calls: list[list[str]] = []
+
+    def fake_run(command, **_kwargs):
+        calls.append(command)
+        if command[1:3] == ["login", "status"]:
+            return _completed(command, stdout="Logged in using ChatGPT\n")
+        output = Path(command[command.index("--output-last-message") + 1])
+        output.write_text("{}", encoding="utf-8")
+        return _completed(command)
+
+    monkeypatch.setattr(
+        "backend.pipeline.codex_subscription_client.subprocess.run", fake_run
+    )
+    client = CodexSubscriptionClient(model="gpt-5.6-sol", executable="codex")
+    assert client.generate_json(
+        "system", "user", {"type": "object"}, image_paths=[image]
+    ) == {}
+    command = calls[-1]
+    assert command[command.index("--image") + 1] == str(image.resolve())
+    assert command[-1] == "-"
+
+
+def test_visual_render_adds_cjk_font_fallback_and_opaque_white_background() -> None:
+    raw = '<svg width="40" height="40"><text x="5" y="20">神</text></svg>'
+    block = visual_source_blocks(raw, segment_index="S0001")[0]
+
+    render_input = _visual_svg_for_render(block)
+    assert block.raw_svg == raw
+    assert "Arial Unicode MS" in render_input
+    assert render_input.endswith("<text x=\"5\" y=\"20\">神</text></svg>")
+
+    image = Image.open(BytesIO(_render_visual_png(block))).convert("RGB")
+    assert image.getpixel((39, 39)) == (255, 255, 255)
+
+
+def test_visual_section_cache_identity_does_not_depend_on_host_png_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = _transcript()
+    source["script"][0]["text"] += "<svg><text>约的结构</text></svg>"
+    section = Section(index=1, start=0, end=1, title="图示")
+    sentences = extraction_runner.section_sentences(source, section)
+
+    def unexpected_render(_block):
+        raise AssertionError("model-input identity must not render a PNG")
+
+    monkeypatch.setattr(extraction_runner, "_render_visual_png", unexpected_render)
+    first = _section_model_input_sha256(source, "header", section, sentences)
+
+    source["script"][0]["text"] = source["script"][0]["text"].replace(
+        "约的结构", "新约的结构"
+    )
+    edited_sentences = extraction_runner.section_sentences(source, section)
+    second = _section_model_input_sha256(
+        source, "header", section, edited_sentences
+    )
+    assert first != second
+
+
 def test_api_client_remains_the_default(monkeypatch: pytest.MonkeyPatch) -> None:
     constructed: list[dict] = []
 
@@ -229,11 +311,11 @@ def test_api_client_remains_the_default(monkeypatch: pytest.MonkeyPatch) -> None
     assert constructed[0]["api_key_env"] == "OPENAI_API_KEY"
 
 
-def test_inline_svg_fails_before_login_or_model_call(
+def test_malformed_inline_svg_fails_before_login_or_model_call(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     transcript = _transcript()
-    transcript["script"][0]["text"] += "\n<svg><text>编辑图形</text></svg>"
+    transcript["script"][0]["text"] += "\n<svg><text>图形</text></tspan></svg>"
     transcript_path = tmp_path / "inline-svg.json"
     transcript_path.write_text(
         json.dumps(transcript, ensure_ascii=False), encoding="utf-8"
@@ -242,13 +324,13 @@ def test_inline_svg_fails_before_login_or_model_call(
 
     def unexpected_run(command, **_kwargs):
         calls.append(command)
-        raise AssertionError("inline editor payload must fail before subscription login")
+        raise AssertionError("malformed visual source must fail before subscription login")
 
     monkeypatch.setattr(
         "backend.pipeline.codex_subscription_client.subprocess.run", unexpected_run
     )
     client = CodexSubscriptionClient(model="gpt-5.6-sol", executable="codex")
-    with pytest.raises(DetailedExtractionValidationError, match="inline editor payload"):
+    with pytest.raises(DetailedExtractionValidationError, match="unreadable inline source"):
         run_one(
             transcript_path,
             output_dir=tmp_path / "output",
@@ -286,7 +368,7 @@ def test_payload_dry_run_reports_clean_cli_error_without_model_call(
 
     assert exc_info.value.code == 2
     error = capsys.readouterr().err
-    assert "inline editor payload" in error
+    assert "unreadable inline source" in error
     assert "Traceback" not in error
 
 

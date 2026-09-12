@@ -12,6 +12,10 @@ from opencc import OpenCC
 
 from backend.api.config import CONFIG_DIR, DATA_BASE_PATH, WANG_SEED_CATALOG_DIR
 from backend.api import sermon_converter_service as sermon_service
+from backend.pipeline.source_projection import (
+    validate_visual_fragment_against_block,
+    visual_source_blocks,
+)
 
 from .compiler import RepositoryCompiler
 from .knowledge_importer import KnowledgePackageImporter
@@ -300,9 +304,19 @@ class CanonicalRepositoryService:
                     for item in source_map.entries
                     if item.get("kind") == "transcript"
                 }
-            key = str(fragment.paragraph_key) if fragment.paragraph_key is not None else ""
-            paragraph = paragraph_cache[source_id].get(key)
-            map_entry = map_cache[source_id].get(key)
+            fragment_key = (
+                str(fragment.paragraph_key)
+                if fragment.paragraph_key is not None
+                else ""
+            )
+            visual_parent_key = fragment_key.split("/", 1)[0]
+            lookup_key = str(
+                fragment.source_segment_index
+                if getattr(fragment, "source_segment_index", None) is not None
+                else visual_parent_key
+            )
+            paragraph = paragraph_cache[source_id].get(lookup_key)
+            map_entry = map_cache[source_id].get(lookup_key)
             excerpt = fragment.verbatim_excerpt.strip()
             if paragraph is None or map_entry is None:
                 fragment.anchor_state = "missing_paragraph"
@@ -315,20 +329,57 @@ class CanonicalRepositoryService:
             if not excerpt or excerpt not in paragraph_text:
                 fragment.anchor_state = "non_verbatim"
                 continue
+            source_modality = str(
+                getattr(fragment, "source_modality", "spoken") or "spoken"
+            )
+            if source_modality == "visual":
+                visual_locator = str(getattr(fragment, "visual_locator", "") or "")
+                visual_block_sha256 = str(
+                    getattr(fragment, "visual_block_sha256", "") or ""
+                )
+                visual = next(
+                    (
+                        row
+                        for row in visual_source_blocks(
+                            paragraph_text,
+                            segment_index=visual_parent_key,
+                            source_segment_index=getattr(
+                                fragment, "source_segment_index", None
+                            ),
+                        )
+                        if row.locator == visual_locator
+                    ),
+                    None,
+                )
+                if (
+                    visual is None
+                    or not visual.readable
+                    or visual.raw_svg.strip() != excerpt
+                    or visual.raw_sha256 != visual_block_sha256
+                ):
+                    fragment.anchor_state = "invalid_visual_source"
+                    continue
+                try:
+                    validate_visual_fragment_against_block(
+                        fragment.model_dump(mode="python"), visual
+                    )
+                except ValueError:
+                    fragment.anchor_state = "invalid_visual_source"
+                    continue
 
             existing = self._existing_citation_for_excerpt(
-                source_id, "transcript", key, excerpt
+                source_id, "transcript", lookup_key, excerpt
             )
             if existing is None:
                 citation = Citation(
                     citation_id=stable_id(
-                        "CITK", source_id, key, sha256_text(excerpt)
+                        "CITK", source_id, lookup_key, sha256_text(excerpt)
                     ),
                     source_id=source_id,
                     source_sha256=canonical.source_sha256,
                     locator=CitationLocator(
                         kind="transcript",
-                        paragraph_keys=[key],
+                        paragraph_keys=[lookup_key],
                         highlight_text=excerpt,
                         highlight_text_sha256=sha256_text(excerpt),
                         char_start=paragraph_text.index(excerpt),
@@ -337,6 +388,11 @@ class CanonicalRepositoryService:
                         end_time=map_entry.get("end_time"),
                     ),
                     evidence_ids=[],
+                    role=(
+                        "visual_evidence"
+                        if source_modality == "visual"
+                        else "primary_evidence"
+                    ),
                     supports_claim="",
                 )
             else:

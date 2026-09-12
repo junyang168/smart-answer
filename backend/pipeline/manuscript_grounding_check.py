@@ -177,18 +177,35 @@ def build_paragraph_material(
             # Every fragment behind the step, not only the first: a step whose
             # reasoning rests on two sentences of the source was being checked
             # against one of them.
-            excerpts = [
-                excerpt
+            fragments = [
+                fragment
                 for fragment_id in evidence_step_fragment_ids(step)
                 if (fragment := fragments_by_id.get(fragment_id))
-                and (excerpt := fragment.get("verbatim_excerpt"))
             ]
-            evidence.append(
+            excerpts = [
+                str(fragment.get("verbatim_excerpt"))
+                for fragment in fragments
+                if fragment.get("source_modality") != "visual"
+                and fragment.get("verbatim_excerpt")
+            ]
+            visual_sources = [
                 {
-                    "statement": step.get("statement"),
-                    "source_excerpt": "\n".join(excerpts) or None,
+                    "source_modality": "visual",
+                    "visual_locator": fragment.get("visual_locator"),
+                    "visual_block_sha256": fragment.get("visual_block_sha256"),
+                    "visual_facts": list(fragment.get("visual_facts") or []),
+                    "quotation_status": "not_spoken_verbatim",
                 }
-            )
+                for fragment in fragments
+                if fragment.get("source_modality") == "visual"
+            ]
+            evidence_row = {
+                "statement": step.get("statement"),
+                "source_excerpt": "\n".join(excerpts) or None,
+            }
+            if visual_sources:
+                evidence_row["visual_sources"] = visual_sources
+            evidence.append(evidence_row)
         entry = {
             "claim_id": claim_id,
             "claim_statement": claim.get("statement"),
@@ -253,6 +270,10 @@ def _verify_texture_anchors(
     for anchor in texture_anchors:
         source_id = str(anchor.get("source_id") or "")
         excerpt = str(anchor.get("excerpt") or "")
+        if excerpt.lstrip().lower().startswith("<svg"):
+            raise GroundingCheckError(
+                "visual source cannot be licensed as a verbatim texture anchor"
+            )
         content = content_by_source.get(source_id)
         if content is None:
             raise GroundingCheckError(

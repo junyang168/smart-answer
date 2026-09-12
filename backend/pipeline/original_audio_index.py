@@ -296,6 +296,12 @@ def segment_time(sermon: dict[str, Any], fragment: dict[str, Any]) -> tuple[floa
     的 `media_time`——那是它所在段落的段首，会早好几分钟，但总比没有强。
     """
 
+    # A diagram may be shown while the professor is speaking, but it is not a
+    # spoken excerpt.  This module promises an index of his original audio, so
+    # a visual-only anchor must not manufacture an audio quotation interval.
+    if fragment.get("source_modality") == "visual":
+        return None
+
     located = _locate(sermon, fragment)
     anchors = _timeline(sermon)
     if located is not None and anchors:

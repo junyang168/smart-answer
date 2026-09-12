@@ -23,7 +23,11 @@ from backend.pipeline.knowledge_source import load_knowledge_source_document
 from backend.pipeline.run_ledger import run_record
 from backend.pipeline.sentence_ledger_runner import coverage_for_package
 from backend.pipeline.source_keys import package_row_key
-from backend.pipeline.source_projection import assert_locator_space_compatible, project_script
+from backend.pipeline.source_projection import (
+    assert_locator_space_compatible,
+    excerpt_overlaps_inline_markup,
+    project_script,
+)
 from backend.pipeline.corpus_ai_review_runner import _validate_claim_layer_package
 from backend.pipeline.corpus_ai_adjudication_runner import _overrides_artifact_sha256
 
@@ -251,6 +255,11 @@ def apply_consensus_overrides(
             paragraph_text = str(segment.get("text") or "")
             if not excerpt or excerpt not in paragraph_text:
                 raise ConsensusApplicationError(f"anchor addition is not verbatim: {claim_id}:{source_index}")
+            if excerpt_overlaps_inline_markup(paragraph_text, excerpt):
+                raise ConsensusApplicationError(
+                    f"anchor addition overlaps non-spoken inline structure: "
+                    f"{claim_id}:{source_index}; visual evidence must come from extraction"
+                )
             evidence_id = f"AI-ADJ-{claim_id}-{position:02d}"
             fragment_id = f"FR-{evidence_id}"
             fragments.append({

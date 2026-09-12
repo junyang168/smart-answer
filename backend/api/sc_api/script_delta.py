@@ -419,20 +419,115 @@ class ScriptDelta:
         return { 'metadata': metadata, 'script': sermon_detail}
 
 
-    def publish(self, author:str):
-        published_script = self.get_final_script_data()
-        published = {
-            'metadata': {
-                'author': author,
-                'title': self.item_name,
-                'status': 'published',
-                'last_updated': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-            },
-            'script': published_script
-        }
-        
-        with open( self.base_folder +  '/script_published/' + self.item_name + '.json', 'w') as file1:
-            json.dump(published, file1, ensure_ascii=False, indent=4)
+    def publish(
+        self,
+        author: str,
+        *,
+        expected_review_sha256: str | None = None,
+    ) -> str:
+        """Atomically publish one exact review snapshot.
+
+        Holding the review lock through the published-file replacement prevents
+        a source correction from claiming success after a concurrent editor has
+        changed the review transcript. The optional SHA is mandatory for
+        pipeline/governed repairs; the interactive legacy caller still
+        publishes whichever complete snapshot it locks.
+        """
+
+        review_target = os.path.join(
+            self.base_folder, "script_review", self.item_name + ".json"
+        )
+        review_lock_path = os.path.join(
+            os.path.dirname(review_target), f".{os.path.basename(review_target)}.lock"
+        )
+        published_target = os.path.join(
+            self.base_folder, "script_published", self.item_name + ".json"
+        )
+        os.makedirs(os.path.dirname(published_target), exist_ok=True)
+        published_lock_path = os.path.join(
+            os.path.dirname(published_target),
+            f".{os.path.basename(published_target)}.lock",
+        )
+
+        with open(review_lock_path, "a+b") as review_lock:
+            fcntl.flock(review_lock.fileno(), fcntl.LOCK_SH)
+            review_raw = Path(review_target).read_bytes()
+            review_sha256 = hashlib.sha256(review_raw).hexdigest()
+            if (
+                expected_review_sha256 is not None
+                and review_sha256 != expected_review_sha256
+            ):
+                raise ScriptConflictError(
+                    "review script changed before publish: "
+                    f"expected {expected_review_sha256}, found {review_sha256}"
+                )
+            published_script = json.loads(review_raw)
+            if not isinstance(published_script, list):
+                raise ValueError(f"{review_target}: review script must be a JSON array")
+            self.add_timeline(published_script)
+            published = {
+                "metadata": {
+                    "author": author,
+                    "title": self.item_name,
+                    "status": "published",
+                    "last_updated": datetime.datetime.now(
+                        datetime.timezone.utc
+                    ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                },
+                "script": published_script,
+            }
+            encoded = json.dumps(
+                published, ensure_ascii=False, indent=4
+            ).encode("UTF-8")
+            written_sha256 = hashlib.sha256(encoded).hexdigest()
+
+            with open(published_lock_path, "a+b") as published_lock:
+                fcntl.flock(published_lock.fileno(), fcntl.LOCK_EX)
+                target_mode = (
+                    os.stat(published_target).st_mode & 0o777
+                    if os.path.exists(published_target)
+                    else 0o644
+                )
+                descriptor, temporary = tempfile.mkstemp(
+                    prefix=f".{self.item_name}.",
+                    suffix=".tmp",
+                    dir=os.path.dirname(published_target),
+                )
+                try:
+                    os.chmod(temporary, target_mode)
+                    with os.fdopen(descriptor, "wb") as file:
+                        file.write(encoded)
+                        file.flush()
+                        os.fsync(file.fileno())
+                    os.replace(temporary, published_target)
+                    installed = hashlib.sha256(
+                        Path(published_target).read_bytes()
+                    ).hexdigest()
+                    if installed != written_sha256:
+                        raise RuntimeError(
+                            "installed published bytes differ from authorized payload"
+                        )
+                    directory_fd = os.open(
+                        os.path.dirname(published_target), os.O_RDONLY
+                    )
+                    try:
+                        try:
+                            os.fsync(directory_fd)
+                        except OSError as exc:
+                            warnings.warn(
+                                "could not fsync published-script directory after "
+                                f"committed save: {exc}",
+                                RuntimeWarning,
+                            )
+                    finally:
+                        os.close(directory_fd)
+                except Exception:
+                    try:
+                        os.unlink(temporary)
+                    except FileNotFoundError:
+                        pass
+                    raise
+        return written_sha256
 
 
 

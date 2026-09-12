@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 
 class CodexSubscriptionError(RuntimeError):
@@ -126,6 +126,7 @@ class CodexSubscriptionClient:
         temperature: float = 0.0,
         timeout_seconds: float | None = None,
         cache_prefix: str | None = None,
+        image_paths: Sequence[Path] | None = None,
     ) -> dict[str, Any]:
         del temperature  # Codex uses the selected model's supported controls.
         self._verify_chatgpt_login()
@@ -168,8 +169,15 @@ class CodexSubscriptionClient:
                 str(schema_path),
                 "--output-last-message",
                 str(output_path),
-                "-",
             ]
+            for image_path in image_paths or ():
+                resolved = Path(image_path).resolve()
+                if not resolved.is_file():
+                    raise CodexSubscriptionError(
+                        f"visual source image does not exist: {resolved}"
+                    )
+                command.extend(["--image", str(resolved)])
+            command.append("-")
             try:
                 completed = subprocess.run(
                     command,

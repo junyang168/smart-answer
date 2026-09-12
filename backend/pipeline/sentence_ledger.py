@@ -30,6 +30,7 @@ and approving an exclusion is a person's decision.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Sequence
@@ -51,6 +52,7 @@ from backend.pipeline.base_contract_coverage import (
     parse_scripture_refs,
     sentence_spans,
 )
+from backend.pipeline.source_projection import visual_source_blocks
 
 #: Terminal states. `unprocessed` is the only one that blocks.
 REPRESENTED = "represented"
@@ -86,6 +88,7 @@ class AnchoredSpan:
     segment_index: int
     start: int
     end: int
+    visual_fact_ids: tuple[str, ...] = ()
 
 
 def build_inventory(
@@ -105,23 +108,79 @@ def build_inventory(
     records: list[SentenceInventoryRecord] = []
     for segment_index, text in segments:
         seen: dict[str, int] = {}
-        for start, end in sentence_spans(text):
-            sentence = text[start:end]
+
+        def append_sentence(
+            sentence: str,
+            start: int,
+            end: int,
+            *,
+            source_modality: str = "spoken",
+            visual_locator: str | None = None,
+            visual_fact_id: str | None = None,
+        ) -> None:
             ordinal = seen.get(sentence, 0)
             seen[sentence] = ordinal + 1
-            records.append(
-                SentenceInventoryRecord(
-                    sentence_id=sentence_id(source_id, segment_index, sentence, ordinal),
-                    source_id=source_id,
-                    segment_index=segment_index,
-                    ordinal=ordinal,
-                    text=sentence,
-                    sentence_sha256=hashlib.sha256(sentence.encode("utf-8")).hexdigest(),
-                    char_start=start,
-                    char_end=end,
-                    source_sha256=source_sha256,
+            values: dict[str, Any] = {
+                "sentence_id": sentence_id(
+                    source_id, segment_index, sentence, ordinal
+                ),
+                "source_id": source_id,
+                "segment_index": segment_index,
+                "ordinal": ordinal,
+                "text": sentence,
+                "sentence_sha256": hashlib.sha256(
+                    sentence.encode("utf-8")
+                ).hexdigest(),
+                "char_start": start,
+                "char_end": end,
+                "source_sha256": source_sha256,
+            }
+            if source_modality == "visual":
+                values.update(
+                    {
+                        "source_modality": "visual",
+                        "visual_locator": visual_locator,
+                        "visual_fact_id": visual_fact_id,
+                    }
                 )
-            )
+            records.append(SentenceInventoryRecord(**values))
+
+        visuals = visual_source_blocks(
+            text, segment_index=f"S{segment_index:04d}"
+        )
+        if not visuals:
+            for start, end in sentence_spans(text):
+                append_sentence(text[start:end], start, end)
+            continue
+        cursor = 0
+        for visual in visuals:
+            spoken_chunk = text[cursor:visual.char_start]
+            for start, end in sentence_spans(spoken_chunk):
+                append_sentence(
+                    spoken_chunk[start:end], cursor + start, cursor + end
+                )
+            # One SVG is not one coverage bit. A diagram with 35 literal facts
+            # needs 35 independently provable verdicts; citing one label cannot
+            # make its other shapes, arrows or labels disappear from the
+            # denominator.
+            for fact in visual.facts:
+                append_sentence(
+                    json.dumps(
+                        fact,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                    visual.char_start,
+                    visual.char_end,
+                    source_modality="visual",
+                    visual_locator=visual.locator,
+                    visual_fact_id=str(fact["fact_id"]),
+                )
+            cursor = visual.char_end
+        spoken_chunk = text[cursor:]
+        for start, end in sentence_spans(spoken_chunk):
+            append_sentence(spoken_chunk[start:end], cursor + start, cursor + end)
     return records
 
 
@@ -139,6 +198,11 @@ def _covering(sentence: SentenceInventoryRecord, spans: Iterable[AnchoredSpan]) 
         if span.segment_index == sentence.segment_index
         and span.start < sentence.char_end
         and sentence.char_start < span.end
+        and (
+            getattr(sentence, "source_modality", None) != "visual"
+            or str(getattr(sentence, "visual_fact_id", "") or "")
+            in span.visual_fact_ids
+        )
     ]
     return sorted(dict.fromkeys(hits))
 
@@ -220,7 +284,15 @@ SCRIPTURE_QUOTATION = "scripture_quotation"
 LIST_ITEM = "list_item"
 FRAGMENT = "fragment"
 PROSE = "prose"
-SENTENCE_CATEGORIES = (PROSE, HEADING, SCRIPTURE_QUOTATION, LIST_ITEM, FRAGMENT)
+VISUAL = "visual"
+SENTENCE_CATEGORIES = (
+    PROSE,
+    VISUAL,
+    HEADING,
+    SCRIPTURE_QUOTATION,
+    LIST_ITEM,
+    FRAGMENT,
+)
 
 #: Below this many characters a prose sentence is a lead-in, not a claim about
 #: anything -- "太 16:21 記載：" and its kin. Structural, not a quality judgement.
@@ -262,7 +334,13 @@ def summarise_by_category(
         row = by_sentence.get(sentence.sentence_id)
         if row is None:
             continue
-        category = classify_sentence(segments.get(sentence.segment_index, ""), sentence.text)
+        category = (
+            VISUAL
+            if getattr(sentence, "source_modality", None) == "visual"
+            else classify_sentence(
+                segments.get(sentence.segment_index, ""), sentence.text
+            )
+        )
         summary = summaries[category]
         if row.status == REPRESENTED:
             summary.represented += 1

@@ -269,17 +269,30 @@ def _claim_semantic_input(
                     f"fragment {fragment_id}"
                 )
             source_ids.add(fragment.source_id)
-            fragments.append(
-                {
-                    "fragment_id": fragment.fragment_id,
-                    "source_id": fragment.source_id,
-                    "source_sha256": fragment.source_sha256,
-                    "paragraph_key": fragment.paragraph_key,
-                    "media_time": fragment.media_time,
-                    "verbatim_excerpt": fragment.verbatim_excerpt,
-                    "anchor_state": fragment.anchor_state,
-                }
-            )
+            fragment_row = {
+                "fragment_id": fragment.fragment_id,
+                "source_id": fragment.source_id,
+                "source_sha256": fragment.source_sha256,
+                "paragraph_key": fragment.paragraph_key,
+                "media_time": fragment.media_time,
+                "verbatim_excerpt": fragment.verbatim_excerpt,
+                "anchor_state": fragment.anchor_state,
+            }
+            if getattr(fragment, "source_modality", None) == "visual":
+                fragment_row.update(
+                    {
+                        "source_modality": "visual",
+                        "visual_locator": getattr(fragment, "visual_locator", None),
+                        "visual_block_sha256": getattr(
+                            fragment, "visual_block_sha256", None
+                        ),
+                        "visual_facts": list(
+                            getattr(fragment, "visual_facts", None) or []
+                        ),
+                        "quotation_status": "not_spoken_verbatim",
+                    }
+                )
+            fragments.append(fragment_row)
         evidence_rows.append(
             {
                 "evidence_step_id": step.evidence_step_id,

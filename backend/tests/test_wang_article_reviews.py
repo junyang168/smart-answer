@@ -15,6 +15,36 @@ def _write_json(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
 
 
+def test_visual_source_card_never_exposes_svg_as_spoken_excerpt() -> None:
+    item = wang_article_reviews._source_fragment_read_model(
+        {
+            "fragment_id": "FR-V",
+            "source_modality": "visual",
+            "visual_locator": "S0001/V01",
+                "visual_block_sha256": "a" * 64,
+                "visual_facts": [
+                    {"fact_id": "VF001", "tag": "text", "text": "摩西的律法"},
+                    {"fact_id": "VF002", "tag": "text", "text": "基督的律法"},
+            ],
+            "verbatim_excerpt": "<svg><text>摩西的律法</text></svg>",
+        },
+        {
+            "source_id": "NOTES-1",
+            "source_type": "notes_manuscript",
+            "title": "图示来源",
+        },
+        {},
+    )
+
+    assert item is not None
+    assert item["source_modality"] == "visual"
+    assert item["excerpts"] == [
+        "视觉来源（非口述，S0001/V01）：摩西的律法；基督的律法"
+    ]
+    assert "<svg" not in item["excerpts"][0]
+    assert item["visual_source"]["quotation_status"] == "not_spoken_verbatim"
+
+
 def _fixture(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
     staging = tmp_path / "staging"
     authoring = staging / "topic-essays" / "church-foundation" / "authoring-v1"

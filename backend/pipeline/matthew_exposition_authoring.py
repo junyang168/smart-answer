@@ -1218,6 +1218,7 @@ def _exegetical_source_slice(
     scoped_fragments: list[dict[str, Any]],
     passage: str,
     step_excerpts: Sequence[str],
+    source_documents: Sequence[dict[str, Any]] = (),
 ) -> dict[str, list[dict[str, Any]]]:
     """Return the source sentences the three source-judged dimensions need.
 
@@ -1262,7 +1263,37 @@ def _exegetical_source_slice(
                     )
 
     cited_excerpts: list[dict[str, Any]] = []
+    visual_sources: list[dict[str, Any]] = []
+    visual_descriptors = {
+        (str(source.get("source_id") or ""), str(visual.get("locator") or "")): visual
+        for source in source_documents
+        if isinstance(source, dict)
+        for visual in source.get("visual_sources") or []
+        if isinstance(visual, dict)
+    }
     for fragment in scoped_fragments:
+        if fragment.get("source_modality") == "visual":
+            source_id = str(fragment.get("source_id") or "")
+            locator = str(fragment.get("visual_locator") or "")
+            descriptor = visual_descriptors.get((source_id, locator), {})
+            visual_sources.append(
+                {
+                    "fragment_id": fragment.get("fragment_id"),
+                    "source_id": source_id,
+                    "source_modality": "visual",
+                    "visual_locator": locator,
+                    "visual_block_sha256": fragment.get("visual_block_sha256"),
+                    "visual_facts": list(fragment.get("visual_facts") or []),
+                    "complete_literal_facts": list(
+                        descriptor.get("literal_facts")
+                        or fragment.get("visual_facts")
+                        or []
+                    ),
+                    "raw_svg": descriptor.get("raw_svg"),
+                    "quotation_status": "not_spoken_verbatim",
+                }
+            )
+            continue
         excerpt = fragment.get("verbatim_excerpt") or ""
         flags = [
             flag
@@ -1277,10 +1308,13 @@ def _exegetical_source_slice(
                     "verbatim_excerpt": excerpt,
                 }
             )
-    return {
+    result = {
         "base_manuscript_exegesis": base_sentences,
         "cited_source_excerpts": cited_excerpts,
     }
+    if visual_sources:
+        result["cited_visual_sources"] = visual_sources
+    return result
 
 
 def build_editorial_review_packet(
@@ -1331,6 +1365,7 @@ def build_editorial_review_packet(
         if (fragment := next(
             (f for f in knowledge.get("source_fragments", [])
              if f.get("fragment_id") == fragment_id), None))
+        and fragment.get("source_modality") != "visual"
         and (excerpt := fragment.get("verbatim_excerpt"))
     ]
     source_slice = _exegetical_source_slice(
@@ -1338,6 +1373,7 @@ def build_editorial_review_packet(
         scoped_fragments=knowledge.get("source_fragments", []),
         passage=_require_nonempty_string(contract.get("passage"), "passage"),
         step_excerpts=step_excerpts,
+        source_documents=knowledge.get("source_documents", []),
     )
     # A tension the contract registered is the material the reviewer checks
     # `theological_tension_and_attribution` against: an article that quietly
@@ -1833,7 +1869,7 @@ def _sermon_transcript_slices(
             )
         # Editorial subtitles/comments are co-located in the JSON but are not
         # professor speech and therefore cannot enter an authoring packet.
-        segments = list(projection.body_rows)
+        segments = list(projection.spoken_rows)
         segments_by_index = {segment.get("index"): segment for segment in segments}
 
         segment_texts: dict[str, str] = {}

@@ -10,6 +10,7 @@ import pytest
 from backend.pipeline.source_projection import (
     LOCATOR_SPACE,
     LocatorSpaceError,
+    VisualSourceAttestationError,
     assert_locator_space_compatible,
     excerpt_overlaps_inline_markup,
     inline_markup_spans,
@@ -17,6 +18,10 @@ from backend.pipeline.source_projection import (
     project_script,
     provably_nonspoken_inline_markup,
     source_uses_body_locator_space,
+    validate_visual_source_attestations,
+    validate_visual_fragment_against_block,
+    visual_fragment_display_text,
+    visual_source_blocks,
 )
 from backend.pipeline.source_projection import script_from_markdown_blocks
 
@@ -58,6 +63,115 @@ def test_unclosed_editor_payload_fails_closed_to_the_end_of_the_row() -> None:
     text = "教授正文。\n<svg><text>编辑图形"
     spans = provably_nonspoken_inline_markup(text)
     assert [(span.kind, span.end) for span in spans] == [("svg", len(text))]
+
+
+def test_svg_is_visual_source_and_is_removed_only_from_spoken_projection() -> None:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="100">'
+        '<ellipse cx="50" cy="50" rx="40" ry="20" stroke="#82E047"/>'
+        '<text x="50" y="50">重疊</text>'
+        '</svg>'
+    )
+    row = {"index": 17, "text": f"前一句。\n{svg}\n後一句。"}
+    projection = project_script([row])
+
+    assert projection.body_rows[0]["text"] == row["text"]
+    assert svg not in projection.spoken_rows[0]["text"]
+    assert "前一句。" in projection.spoken_rows[0]["text"]
+    assert "後一句。" in projection.spoken_rows[0]["text"]
+    assert len(projection.visual_blocks) == 1
+    visual = projection.visual_blocks[0]
+    assert visual.locator == "S0001/V01"
+    assert visual.source_segment_index == 17
+    assert visual.readable is True
+    assert [fact["tag"] for fact in visual.facts] == ["svg", "ellipse", "text"]
+    assert visual.facts[-1]["text"] == "重疊"
+    assert projection.visual_content_sha256 is not None
+
+
+def test_svg_literal_facts_preserve_text_after_a_child_element() -> None:
+    visual = visual_source_blocks(
+        "<svg><text>A<tspan>B</tspan>C</text></svg>",
+        segment_index="S0001",
+    )[0]
+
+    assert visual.facts[1]["text"] == "A"
+    assert visual.facts[2]["text"] == "B"
+    assert visual.facts[2]["tail"] == "C"
+
+
+def test_visual_display_label_uses_only_visible_text_and_strips_zero_width() -> None:
+    fragment = {
+        "source_modality": "visual",
+        "visual_locator": "S0001/V01",
+        "visual_facts": [
+            {"tag": "style", "text": ".label { fill: red; }"},
+            {"tag": "text", "text": "\u200b盟约", "tail": None},
+            {"tag": "tspan", "text": "结构", "tail": "关系"},
+        ],
+    }
+
+    rendered = visual_fragment_display_text(fragment)
+    assert rendered == "视觉来源（非口述，S0001/V01）：盟约；结构；关系"
+    assert "fill" not in rendered
+
+
+def test_malformed_visual_source_is_preserved_and_marked_invalid() -> None:
+    svg = "<svg><text><tspan>圖</tspan></tspan></text></svg>"
+    blocks = visual_source_blocks(svg, segment_index="S0007")
+
+    assert len(blocks) == 1
+    assert blocks[0].locator == "S0007/V01"
+    assert blocks[0].raw_svg == svg
+    assert blocks[0].readable is False
+    assert "mismatched tag" in str(blocks[0].parse_error)
+
+
+@pytest.mark.parametrize(
+    "svg, reason",
+    [
+        ("<svg><FoReIgNoBjEcT/></svg>", "unsafe SVG element"),
+        ("<svg><animate attributeName=\"x\"/></svg>", "unsafe SVG element"),
+        ("<svg><rect onLoad=\"alert(1)\"/></svg>", "event handler attribute"),
+        ("<svg><style>@IMPORT url(https://example.test/a.css)</style></svg>", "external CSS import"),
+        ("<svg><rect style=\"fill:url('https://example.test/a.svg')\"/></svg>", "external CSS url"),
+    ],
+)
+def test_visual_source_rejects_case_insensitive_active_or_external_content(
+    svg: str, reason: str
+) -> None:
+    block = visual_source_blocks(svg, segment_index="S0001")[0]
+
+    assert block.readable is False
+    assert reason in str(block.parse_error)
+
+
+def test_visual_fragment_facts_must_be_exact_source_facts() -> None:
+    block = visual_source_blocks(
+        '<svg><text x="1">图</text></svg>', segment_index="S0001"
+    )[0]
+    fragment = {
+        "source_modality": "visual",
+        "visual_locator": block.locator,
+        "visual_block_sha256": block.raw_sha256,
+        "visual_canonical_sha256": block.canonical_sha256,
+        "visual_renderer_version": "svg_literal_facts_v3_cjk_white",
+        "visual_facts": [dict(block.facts[-1])],
+        "verbatim_excerpt": block.raw_svg,
+    }
+
+    validate_visual_fragment_against_block(fragment, block)
+    fragment["visual_facts"][0]["text"] = "被改写的图"
+    with pytest.raises(ValueError, match="does not match"):
+        validate_visual_fragment_against_block(fragment, block)
+
+
+def test_source_without_svg_keeps_existing_body_and_spoken_identity_shape() -> None:
+    projection = project_script(_body_rows())
+
+    assert projection.spoken_rows == projection.body_rows
+    assert projection.visual_blocks == ()
+    assert projection.visual_content_sha256 is None
 
 
 def test_inline_markup_overlap_uses_the_same_first_match_as_anchor_compilation() -> None:
@@ -300,3 +414,98 @@ def test_default_prompt_projection_never_turns_editorial_rows_into_segments() ->
     assert "source_index=subtitle-a" not in prompt
     assert "内部备注" not in prompt
     assert "[segment S0001; source_index=10" in prompt
+
+
+def test_shared_transcript_prompt_requires_prior_visual_attestation() -> None:
+    from backend.pipeline.corpus_survey_runner import _transcript_for_prompt
+
+    payload = {
+        "script": [
+            {
+                "index": 1,
+                "text": '教授正文。<svg><text x="1">图</text></svg>',
+            }
+        ]
+    }
+    with pytest.raises(VisualSourceAttestationError, match="without an external"):
+        _transcript_for_prompt(payload)
+
+    prompt = _transcript_for_prompt(payload, visual_source_attested=True)
+    assert "教授展示或画出的视觉来源" in prompt
+    assert "[visual source S0001/V01]" in prompt
+
+
+def test_readable_svg_still_requires_exact_source_attestation() -> None:
+    projection = project_script([
+        {"index": 1, "text": '教授正文。<svg><text x="1">图</text></svg>'}
+    ])
+    visual = projection.visual_blocks[0]
+
+    with pytest.raises(VisualSourceAttestationError, match="not attested"):
+        validate_visual_source_attestations(projection, {})
+    with pytest.raises(VisualSourceAttestationError, match="does not match"):
+        validate_visual_source_attestations(
+            projection, {visual.locator: "0" * 64}
+        )
+
+    validate_visual_source_attestations(
+        projection, {visual.locator: visual.raw_sha256}
+    )
+
+
+def test_visual_source_transport_split_contains_only_its_target_units() -> None:
+    source = {
+        "script": [{
+            "index": 1,
+            "text": "第一句。<svg><text>重要图</text></svg>第二句。第三句。",
+        }]
+    }
+    first = Section(
+        index=1,
+        start=0,
+        end=1,
+        title="",
+        parent_start=0,
+        parent_end=1,
+        sentence_start=0,
+        sentence_end=2,
+    )
+    second = Section(
+        index=2,
+        start=0,
+        end=1,
+        title="",
+        parent_start=0,
+        parent_end=1,
+        sentence_start=2,
+        sentence_end=4,
+    )
+
+    first_prompt = _section_prompt_body(
+        source, first, section_sentences(source, first)
+    )
+    second_prompt = _section_prompt_body(
+        source, second, section_sentences(source, second)
+    )
+
+    assert "第一句。" in first_prompt
+    assert "重要图" in first_prompt
+    assert "第二句。" not in first_prompt
+    assert "第三句。" not in first_prompt
+    assert "第一句。" not in second_prompt
+    assert "<svg" not in second_prompt
+    assert "重要图" not in second_prompt
+    assert "第二句。第三句。" in second_prompt
+
+
+@pytest.mark.parametrize(
+    "svg",
+    [
+        "<svg><style>@import url(https://example.invalid/a.css)</style></svg>",
+        "<svg><style>.a{fill:url(https://example.invalid/a.svg)}</style></svg>",
+    ],
+)
+def test_visual_source_rejects_external_css(svg: str) -> None:
+    visual = visual_source_blocks(svg, segment_index="S0001")[0]
+    assert visual.readable is False
+    assert "external CSS" in str(visual.parse_error)

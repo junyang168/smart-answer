@@ -145,6 +145,38 @@ def test_load_knowledge_source_document_normalizes_review_array(tmp_path: Path) 
     assert payload["script"][0]["text"] == "逐字稿內容"
 
 
+def test_visual_source_document_requires_persisted_locator_sha_attestation(
+    tmp_path: Path,
+) -> None:
+    transcript_dir = tmp_path / "script_published"
+    transcript_dir.mkdir()
+    transcript_path = transcript_dir / "visual-sermon.json"
+    svg = "<svg><text>教授的图</text></svg>"
+    payload = {"script": [{"index": 1, "text": "说明。" + svg}]}
+    transcript_path.write_text(
+        json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+    )
+    projection = project_script(payload["script"])
+    visual = projection.visual_blocks[0]
+    source = {
+        "source_id": "SRC-visual",
+        "source_type": "sermon_transcript",
+        "transcript_id": "visual-sermon",
+        "source_sha256": projection.body_sha256,
+        "source_body_sha256": projection.body_sha256,
+        "source_visual_sha256": projection.visual_content_sha256,
+        "locator_space": LOCATOR_SPACE,
+    }
+
+    with pytest.raises(ValueError, match="not attested"):
+        load_knowledge_source_document(source, [transcript_dir])
+
+    source["visual_source_attestations"] = [
+        {"locator": visual.locator, "raw_sha256": visual.raw_sha256}
+    ]
+    load_knowledge_source_document(source, [transcript_dir])
+
+
 def test_new_source_identity_ignores_comments_but_detects_titles_and_body(tmp_path: Path) -> None:
     transcript_dir = tmp_path / "script_review"
     transcript_dir.mkdir()
