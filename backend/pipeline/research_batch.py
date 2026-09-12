@@ -216,6 +216,15 @@ def validate_research_batch(payload: dict[str, Any]) -> None:
         raise ResearchBatchValidationError(
             "review_batch_size must be a positive integer"
         )
+    review_spot_check_percent = payload.get("review_spot_check_percent", 0)
+    if (
+        not isinstance(review_spot_check_percent, int)
+        or isinstance(review_spot_check_percent, bool)
+        or not 0 <= review_spot_check_percent <= 100
+    ):
+        raise ResearchBatchValidationError(
+            "review_spot_check_percent must be an integer from 0 through 100"
+        )
     policy = payload.get("candidate_generation_policy") or {}
     if policy.get("derive_after_independent_extraction") is not True:
         raise ResearchBatchValidationError(

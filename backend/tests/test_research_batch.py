@@ -199,6 +199,9 @@ def test_command_plan_propagates_subscription_and_governed_subtitle_writeback(
         "claude-subscription"
     )
     assert reviews["讲道甲"][reviews["讲道甲"].index("--batch-size") + 1] == "20"
+    assert reviews["讲道甲"][
+        reviews["讲道甲"].index("--spot-check-percent") + 1
+    ] == "0"
     assert adjudications["讲道甲"][
         adjudications["讲道甲"].index("--claude-backend") + 1
     ] == "claude-subscription"
@@ -207,6 +210,30 @@ def test_command_plan_propagates_subscription_and_governed_subtitle_writeback(
         "editor@example.org"
     )
     assert "--write-back-generated-subtitles" not in extracts["讲道乙"]
+
+
+def test_batch_may_explicitly_request_a_review_spot_check_rate(tmp_path: Path) -> None:
+    batch = _batch()
+    batch["review_spot_check_percent"] = 7
+
+    plan = build_command_plan(
+        batch,
+        transcript_dir=tmp_path,
+        output_root=tmp_path / "output",
+        force=False,
+    )
+    review = next(row["command"] for row in plan if row["stage"] == "review")
+
+    assert review[review.index("--spot-check-percent") + 1] == "7"
+
+
+@pytest.mark.parametrize("value", [-1, 101, 2.5, True])
+def test_review_spot_check_rate_is_bounded(value) -> None:
+    batch = _batch()
+    batch["review_spot_check_percent"] = value
+
+    with pytest.raises(ResearchBatchValidationError, match="review_spot_check_percent"):
+        validate_research_batch(batch)
 
 
 def test_batch_source_resolution_prefers_published_regardless_of_argument_order(
