@@ -1,7 +1,8 @@
 """Recover the argument links that no single extraction window could see.
 
-Section extraction (#88) asks about one `##` section at a time, so a relation
-whose two ends sit in different sections is one no call could see. Measured on
+Section extraction (#88) asks about one editorial or generated section at a
+time, so a relation whose two ends sit in different sections is one no call
+could see, even when the source segments are adjacent. Measured on
 the 太16:21–23 母本, that is a small but real set: 0 of 264 relations extraction
 produced cross a `##`, while the whole-document pass produced 7 that span 11–21
 segments -- every one of them the editorial pattern the notes prompt warns
@@ -13,9 +14,12 @@ about, the fact filed under 釋經 and the inference under 神學意義.
           →  太16:20 的保密命令要放在事工处境中解释
 
 Sectioning trades those for a rise in local coverage from 50% to 100%. This
-stage buys them back, and it can be cheap because it does not re-read the source: by the
-time it runs, every record is a statement with a known position, so the question
-is 289 short statements wide instead of a whole manuscript.
+stage buys them back, and it can be cheap because it does not re-read the
+source: by the time it runs, every record is a statement with a known section
+and position, so the question is 289 short statements wide instead of a whole
+manuscript. The old overlapping-window implementation used a minimum segment
+span; section-based extraction does not, and carrying that old threshold into
+the prompt suppresses every relation in a short, coarsely segmented sermon.
 
 Two properties keep it from becoming a second extraction:
 
