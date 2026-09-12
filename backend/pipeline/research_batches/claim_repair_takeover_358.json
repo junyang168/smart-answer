@@ -14,6 +14,13 @@
     "derive_after_independent_extraction": true,
     "allow_unassigned_material": true
   },
+  "visual_source_attestations": {
+    "2019-3-31 宗主国与附庸国的约": {
+      "S0001/V01": "a66f307dfcea3b6b513d28cafae9e20c2626866bc4eac1a1b468e817b3ad78e5",
+      "S0008/V01": "0c73a21a6f9b40347a77260e7c743aaa03045800ed80d2c5733846a6dfa083a3"
+    }
+  },
+  "review_batch_size": 20,
   "models": {
     "extraction": "gpt-5.6-sol",
     "extraction_reasoning_effort": "medium",

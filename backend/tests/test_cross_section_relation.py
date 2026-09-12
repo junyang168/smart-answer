@@ -67,6 +67,15 @@ def test_positions_come_from_the_validated_paragraph_key() -> None:
     assert positions["CL1"] == 33
 
 
+def test_visual_locator_inherits_its_parent_spoken_row_position() -> None:
+    package = _package()
+    package["source_fragments"][0]["paragraph_key"] = "S0018/V01"
+
+    positions = record_positions(package)
+
+    assert positions["OBS1"] == 17
+
+
 def test_catalogue_carries_statements_and_positions_but_never_source_text() -> None:
     package = _package()
     rows = build_catalogue(package, record_positions(package))

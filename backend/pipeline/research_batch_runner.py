@@ -50,8 +50,10 @@ from backend.pipeline.research_batch import (
     merge_reviewed_packages,
 )
 from backend.pipeline.source_projection import (
+    VisualSourceAttestationError,
     project_script,
     provably_nonspoken_inline_markup,
+    validate_visual_source_attestations,
 )
 from backend.pipeline.transcript_source import resolve_transcript_path
 
@@ -172,9 +174,11 @@ def review_members_with_untitled_leading_sections(
 
 
 def members_with_inline_editor_payload(
-    members: list[dict[str, Any]], transcript_dirs: list[Path]
+    members: list[dict[str, Any]],
+    transcript_dirs: list[Path],
+    visual_source_attestations: dict[str, dict[str, str]] | None = None,
 ) -> list[str]:
-    """Return sermons whose body rows contain provably non-spoken payload."""
+    """Return sources with malformed visuals or untyped inline editor payload."""
 
     unsafe: list[str] = []
     for member in members:
@@ -186,10 +190,34 @@ def members_with_inline_editor_payload(
         else:
             source = markdown_source_document(member)[0]
         projection = project_script(source.get("script"))
-        if any(
-            provably_nonspoken_inline_markup(str(row.get("text") or ""))
-            for row in projection.body_rows
-        ):
+        try:
+            validate_visual_source_attestations(
+                projection,
+                (visual_source_attestations or {}).get(member["key"]),
+            )
+            invalid = False
+        except VisualSourceAttestationError:
+            invalid = True
+        visuals_by_segment: dict[str, list[Any]] = {}
+        for visual in projection.visual_blocks:
+            visuals_by_segment.setdefault(visual.segment_index, []).append(visual)
+        for position, row in enumerate(projection.body_rows, start=1):
+            locator = f"S{position:04d}"
+            ranges = [
+                (visual.char_start, visual.char_end)
+                for visual in visuals_by_segment.get(locator, [])
+            ]
+            for span in provably_nonspoken_inline_markup(
+                str(row.get("text") or "")
+            ):
+                if any(
+                    left <= span.start and span.end <= right
+                    for left, right in ranges
+                ):
+                    continue
+                invalid = True
+                break
+        if invalid:
             unsafe.append(member["key"])
     return unsafe
 
@@ -259,6 +287,13 @@ def build_command_plan(
                 "--fallback-max-section-sentences",
                 str(DEFAULT_CODEX_FALLBACK_SECTION_SENTENCE_LIMIT),
             ]
+        for locator, raw_sha256 in sorted(
+            ((batch.get("visual_source_attestations") or {}).get(key) or {}).items()
+        ):
+            extract += [
+                "--visual-source-attestation",
+                f"{locator}={raw_sha256}",
+            ]
         # The two source kinds differ here and nowhere else downstream: every
         # later stage reads `source_documents` out of the package and resolves
         # the source through `load_knowledge_source_document`.
@@ -289,11 +324,21 @@ def build_command_plan(
         # holds for every member and no stage has to be conditional.
         source = str(paths["cross_section"])
         review = [
-            sys.executable, "-m", "backend.pipeline.corpus_ai_review_runner",
-            "--claim-layer-package", source,
-            "--claim-layer-output", str(paths["review"]),
-            "--transcript-dir", str(member_dir), "--model", review_model,
-            "--backend", anthropic_backend,
+            sys.executable,
+            "-m",
+            "backend.pipeline.claim_layer_review_batch_runner",
+            "--package",
+            source,
+            "--output",
+            str(paths["review"]),
+            "--batch-size",
+            str(int(batch.get("review_batch_size", 20))),
+            "--transcript-dir",
+            str(member_dir),
+            "--model",
+            review_model,
+            "--backend",
+            anthropic_backend,
         ]
         if review_budget:
             review += ["--max-output-tokens", str(int(review_budget))]
@@ -541,11 +586,15 @@ def main() -> int:
         )
     wanted = set(DEFAULT_STAGES) if args.stage == "all" else {args.stage}
     if "extract" in wanted:
-        unsafe = members_with_inline_editor_payload(members, transcript_dirs)
+        unsafe = members_with_inline_editor_payload(
+            members,
+            transcript_dirs,
+            batch.get("visual_source_attestations") or {},
+        )
         if unsafe:
             parser.error(
-                "source-bearing rows contain inline SVG/HTML editor payload; "
-                "move it to provenance-typed editorial rows before extraction: "
+                "source-bearing rows contain malformed visual source or untyped "
+                "HTML editor payload; correct it through the source editor before extraction: "
                 + ", ".join(unsafe)
             )
     if "extract" in wanted and not args.write_back_generated_subtitles:

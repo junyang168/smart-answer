@@ -29,6 +29,7 @@ from backend.pipeline.excerpt_audio_alignment import (
     align_transcript_excerpt,
     project_excerpt_timings,
 )
+from backend.pipeline.source_projection import visual_fragment_display_text
 
 
 router = APIRouter(prefix="/admin/wang/article-reviews", tags=["wang-admin"])
@@ -99,10 +100,21 @@ def _source_fragment_read_model(
     source: dict[str, Any],
     sermon_cache: dict[str, dict[str, Any]],
 ) -> dict[str, Any] | None:
-    excerpt = str(fragment.get("verbatim_excerpt") or "").strip()
+    raw_excerpt = str(fragment.get("verbatim_excerpt") or "").strip()
+    source_modality = str(fragment.get("source_modality") or "spoken")
+    visual_facts = list(fragment.get("visual_facts") or [])
+    if source_modality == "visual":
+        excerpt = visual_fragment_display_text(fragment)
+    else:
+        excerpt = raw_excerpt
     fragment_id = str(fragment.get("fragment_id") or "").strip()
     source_type = str(source.get("source_type") or "").strip()
-    if not excerpt or not fragment_id or source_type not in {"sermon_transcript", "notes_manuscript"}:
+    if (
+        not raw_excerpt
+        or not fragment_id
+        or source_modality not in {"spoken", "visual"}
+        or source_type not in {"sermon_transcript", "notes_manuscript"}
+    ):
         return None
     title = str(source.get("title") or source.get("transcript_id") or "来源材料").strip()
     result: dict[str, Any] = {
@@ -113,6 +125,14 @@ def _source_fragment_read_model(
         "full_source_url": None,
         "media": None,
     }
+    if source_modality == "visual":
+        result["source_modality"] = "visual"
+        result["visual_source"] = {
+            "locator": fragment.get("visual_locator"),
+            "block_sha256": fragment.get("visual_block_sha256"),
+            "facts": visual_facts,
+            "quotation_status": "not_spoken_verbatim",
+        }
     if source_type == "notes_manuscript":
         result["full_source_url"] = _safe_resource_url(source.get("source_url"))
         return result
@@ -262,6 +282,8 @@ def _claim_sources(
             matching_fragment_ids = [
                 fragment_id
                 for fragment_id in item["fragment_ids"]
+                if (fragments.get(fragment_id) or {}).get("source_modality")
+                != "visual"
                 if _contains_normalized_quote(
                     str((fragments.get(fragment_id) or {}).get("verbatim_excerpt") or ""),
                     quoted,
@@ -392,7 +414,9 @@ def _selected_supplemental_step_ids(
                 [
                     str(step.get("statement") or ""),
                     *[
-                        str((fragments.get(fragment_id) or {}).get("verbatim_excerpt") or "")
+                        visual_fragment_display_text(
+                            fragments.get(fragment_id) or {}
+                        )
                         for fragment_id in _fragment_ids(step)
                     ],
                 ]
@@ -1388,7 +1412,7 @@ def _draft_first_route_steps(
             key = str(node.get("route_step_key") or "")
             fragment_ids = list(dict.fromkeys(step_fragments.get(key, [])))
             excerpts = [
-                str(fragments[fid].get("verbatim_excerpt"))
+                visual_fragment_display_text(fragments[fid])
                 for fid in fragment_ids
                 if fid in fragments and fragments[fid].get("verbatim_excerpt")
             ]

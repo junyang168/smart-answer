@@ -718,7 +718,13 @@ class SermonManager:
         return self._acl.get_user(user_id)
 
 
-    def publish(self, user_id:str, item:str):
+    def publish(
+        self,
+        user_id: str,
+        item: str,
+        *,
+        expected_review_sha256: str | None = None,
+    ):
         permissions = self.get_sermon_permissions(user_id, item)
         if not permissions.canPublish:
             return  {"message": "You don't have permission to publish this item"}
@@ -726,6 +732,12 @@ class SermonManager:
         sermon = self._sm.get_sermon_metadata(user_id, item)
         if not sermon:
             return {"message": "sermon not found"}
+        published_script_sha256 = ScriptDelta(
+            self.base_folder, item
+        ).publish(
+            sermon.assigned_to,
+            expected_review_sha256=expected_review_sha256,
+        )
         before_snapshot = self._snapshot_sermon_meta(sermon)
         sermon.status = 'published'
         sermon.published_date = self._sm.convert_datetime_to_cst_string(datetime.now())
@@ -737,8 +749,10 @@ class SermonManager:
             self._snapshot_sermon_meta(sermon),
             context="publish",
         )
-        ScriptDelta(self.base_folder, item).publish(sermon.assigned_to)
-        return {"message": "sermon has been published"}
+        return {
+            "message": "sermon has been published",
+            "published_script_sha256": published_script_sha256,
+        }
     
     def get_final_sermon(self, user_id:str, item:str,  remove_tags:bool = True) -> dict:
         permissions = self.get_sermon_permissions(user_id, item)

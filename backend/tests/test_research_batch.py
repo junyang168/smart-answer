@@ -119,6 +119,35 @@ def test_batch_rejects_section_limit_for_member_outside_batch() -> None:
         validate_research_batch(batch)
 
 
+def test_visual_source_attestation_is_validated_and_forwarded(tmp_path: Path) -> None:
+    batch = _batch()
+    batch["visual_source_attestations"] = {
+        "讲道甲": {"S0003/V01": "a" * 64}
+    }
+
+    validate_research_batch(batch)
+    plan = build_command_plan(
+        batch,
+        transcript_dir=tmp_path / "transcripts",
+        output_root=tmp_path / "output",
+        force=False,
+        extraction_backend="codex-subscription",
+    )
+    command = next(
+        row["command"]
+        for row in plan
+        if row["stage"] == "extract" and row["transcript_id"] == "讲道甲"
+    )
+    index = command.index("--visual-source-attestation")
+    assert command[index + 1] == f"S0003/V01={'a' * 64}"
+
+    batch["visual_source_attestations"] = {
+        "讲道丙": {"S0003/V01": "a" * 64}
+    }
+    with pytest.raises(ResearchBatchValidationError, match="outside the batch"):
+        validate_research_batch(batch)
+
+
 def test_command_plan_propagates_subscription_and_governed_subtitle_writeback(
     tmp_path: Path,
 ) -> None:
@@ -165,9 +194,11 @@ def test_command_plan_propagates_subscription_and_governed_subtitle_writeback(
     reviews = {
         row["transcript_id"]: row["command"] for row in plan if row["stage"] == "review"
     }
+    assert "backend.pipeline.claim_layer_review_batch_runner" in reviews["讲道甲"]
     assert reviews["讲道甲"][reviews["讲道甲"].index("--backend") + 1] == (
         "claude-subscription"
     )
+    assert reviews["讲道甲"][reviews["讲道甲"].index("--batch-size") + 1] == "20"
     assert adjudications["讲道甲"][
         adjudications["讲道甲"].index("--claude-backend") + 1
     ] == "claude-subscription"

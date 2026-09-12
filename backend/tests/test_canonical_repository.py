@@ -12,6 +12,13 @@ from backend.api.canonical_repository.models import (
     TopicAssignment,
 )
 from backend.api.canonical_repository.service import CanonicalRepositoryService
+from backend.api.canonical_repository.source_maps import build_transcript_source_map
+from backend.api.canonical_repository.knowledge_models import (
+    EvidenceStepRecord,
+    KnowledgeSourceDocument,
+    SourceFragmentRecord,
+)
+from backend.pipeline.source_projection import visual_source_blocks
 
 
 @pytest.fixture
@@ -116,6 +123,101 @@ def test_transcript_source_map_and_exact_citation_resolution(repository_workspac
     assert resolution.locator.start_time == 130
     assert "citation=" in resolution.deep_link_url
     assert "t=130" in resolution.deep_link_url
+
+
+def test_visual_fragment_binds_to_parent_transcript_row_without_becoming_speech(
+    repository_workspace,
+) -> None:
+    service = repository_workspace["service"]
+    project_id, transcript_id = _write_transcript_project(repository_workspace)
+    transcript_path = repository_workspace["published"] / f"{transcript_id}.json"
+    payload = json.loads(transcript_path.read_text(encoding="utf-8"))
+    svg = '<svg><text x="4">约的结构</text></svg>'
+    payload["script"][1]["text"] += svg
+    transcript_path.write_text(
+        json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+    )
+    service.register_project_source(project_id)
+    visual = visual_source_blocks(
+        payload["script"][1]["text"],
+        segment_index="S0001",
+        source_segment_index=31,
+    )[0]
+    fragment = SourceFragmentRecord(
+        fragment_id="FR-VISUAL",
+        source_id="SRC-LOGICAL",
+        paragraph_key=visual.locator,
+        source_segment_index=31,
+        verbatim_excerpt=visual.raw_svg,
+        source_modality="visual",
+        visual_locator=visual.locator,
+        visual_block_sha256=visual.raw_sha256,
+        visual_canonical_sha256=visual.canonical_sha256,
+        visual_renderer_version="svg_literal_facts_v3_cjk_white",
+        visual_facts=list(visual.facts),
+    )
+    records = {
+        "source_documents": [
+            KnowledgeSourceDocument(
+                source_id="SRC-LOGICAL",
+                source_type="sermon_transcript",
+                transcript_id=transcript_id,
+            )
+        ],
+        "source_fragments": [fragment],
+        "evidence_steps": [
+            EvidenceStepRecord(
+                evidence_step_id="EV-VISUAL",
+                source_fragment_id=fragment.fragment_id,
+                statement="图示列出约的结构。",
+            )
+        ],
+        "knowledge_routes": [],
+    }
+
+    service._bind_knowledge_provenance(records)
+
+    assert fragment.anchor_state == "canonical_citation_bound"
+    citation = service.store.get_citation(str(fragment.citation_id))
+    assert citation.locator.paragraph_keys == ["31"]
+    assert citation.role == "visual_evidence"
+
+
+def test_transcript_source_map_skips_empty_non_visual_rows(repository_workspace) -> None:
+    service = repository_workspace["service"]
+    project_id, transcript_id = _write_transcript_project(repository_workspace)
+    transcript_path = repository_workspace["published"] / f"{transcript_id}.json"
+    payload = json.loads(transcript_path.read_text(encoding="utf-8"))
+    payload["script"].insert(1, {"index": 999, "text": ""})
+    transcript_path.write_text(
+        json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+    )
+
+    registered = service.register_project_source(project_id)
+    source_map = service.store.get_source_map(registered["source"]["source_id"])
+
+    assert all(row["paragraph_key"] != "999" for row in source_map.entries)
+    assert source_map.ambiguous == []
+
+
+def test_transcript_source_map_prefers_complete_svg_row_when_unified_preserves_it(
+    tmp_path,
+) -> None:
+    row = "前一句。\n<svg>\n<text>图</text>\n</svg>\n後一句。"
+    transcript = tmp_path / "sermon.json"
+    unified = tmp_path / "unified.md"
+    transcript.write_text(
+        json.dumps({"script": [{"index": 7, "text": row}]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    unified.write_text(f"## 标题\n\n{row}\n", encoding="utf-8")
+
+    source_map = build_transcript_source_map("SRC", transcript, unified)
+
+    assert source_map.missing == []
+    assert source_map.ambiguous == []
+    assert source_map.entries[0]["source_line_start"] == 3
+    assert source_map.entries[0]["source_line_end"] == 7
 
 
 def test_authoring_unit_detail_includes_renderable_manuscript_markdown(repository_workspace):

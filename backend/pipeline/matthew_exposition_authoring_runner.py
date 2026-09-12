@@ -62,6 +62,15 @@ PROMPTS = {
     "grounding_revision": PROMPT_DIR / "matthew_exposition_grounding_revision.md",
     "delta_review": PROMPT_DIR / "matthew_exposition_final_delta_review.md",
 }
+VISUAL_SOURCE_AUTHORING_ADDENDUM = """
+
+本次 packet 含 `source_modality=visual` 的教授视觉来源。它们是教授展示或画出的
+图示转录，属于来源证据，但不是教授口述逐字稿。必须使用 fragment 的 `visual_facts`、
+对应 SourceDocument `visual_sources` 中的完整 `literal_facts`/`raw_svg`，以及相邻的
+`sermon_transcript_texts` 理解图中文字和几何关系；绝不可把 raw SVG 或图中文字
+放进引号并声称是教授说出的原话。只有 packet 实际提供的事实及其口述解释可以进入
+正文，不得自行补足图的神学含义。
+"""
 
 
 def _utcnow() -> str:
@@ -70,6 +79,15 @@ def _utcnow() -> str:
 
 def _read_prompt(name: str) -> str:
     return PROMPTS[name].read_text(encoding="utf-8")
+
+
+def _prompt_for_packet(prompt: str, packet: dict[str, Any]) -> str:
+    has_visual = any(
+        fragment.get("source_modality") == "visual"
+        for fragment in (packet.get("knowledge") or {}).get("source_fragments", [])
+        if isinstance(fragment, dict)
+    )
+    return prompt + VISUAL_SOURCE_AUTHORING_ADDENDUM if has_visual else prompt
 
 
 def validate_viewpoint_projection_for_generation(packet: dict[str, Any]) -> None:
@@ -651,7 +669,7 @@ def run_authoring(
         else output_dir / f"authoring-grounding-{grounding_attempt:02d}.json"
     )
     if seed_author_result is None:
-        author_prompt = _read_prompt("author")
+        author_prompt = _prompt_for_packet(_read_prompt("author"), packet)
         author_fingerprint = generation_fingerprint(
             inputs={
                 "packet_sha256": packet_sha,
@@ -860,7 +878,7 @@ def run_authoring(
             },
         )
     else:
-        review_prompt = _read_prompt("review")
+        review_prompt = _prompt_for_packet(_read_prompt("review"), packet)
         editorial_review_packet = build_editorial_review_packet(
             authoring_packet=packet,
             author_result=author_result,
@@ -1100,7 +1118,7 @@ def run_authoring(
             result=result,
         )
 
-    revision_prompt = _read_prompt("revision")
+    revision_prompt = _prompt_for_packet(_read_prompt("revision"), packet)
     revision_input = canonical_json(
         {"packet": packet, "draft": draft, "accepted_findings": accepted_findings}
     )

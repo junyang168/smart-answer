@@ -12,6 +12,7 @@ from typing import Any
 from backend.pipeline.source_projection import (
     LOCATOR_SPACE,
     assert_locator_space_compatible,
+    excerpt_overlaps_inline_markup,
     project_script,
     source_uses_body_locator_space,
 )
@@ -85,6 +86,11 @@ def build_timed_sermon_evidence(
         text = str(segment.get("text") or "")
         if not excerpt or excerpt not in text:
             raise ValueError(f"excerpt is not verbatim: {claim_id}")
+        if excerpt_overlaps_inline_markup(text, excerpt):
+            raise ValueError(
+                f"excerpt overlaps non-spoken inline structure: {claim_id}; "
+                "visual evidence must come from extraction"
+            )
         start = segment.get("start_time")
         end = segment.get("end_time")
         if not isinstance(start, (int, float)) or not isinstance(end, (int, float)) or end <= start:

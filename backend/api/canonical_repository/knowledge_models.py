@@ -375,6 +375,15 @@ class SentenceInventoryRecord(EvolvingKnowledgeRecord):
     char_start: int
     char_end: int
     source_sha256: Optional[str] = None
+    source_modality: Optional[Literal["visual"]] = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    visual_locator: Optional[str] = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    visual_fact_id: Optional[str] = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class SentenceReconciliationRecord(EvolvingKnowledgeRecord):

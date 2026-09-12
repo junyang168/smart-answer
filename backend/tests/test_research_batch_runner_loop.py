@@ -9,6 +9,7 @@ and the sources in a batch have no dependency on one another at all.
 from __future__ import annotations
 
 import json
+import hashlib
 import subprocess
 from pathlib import Path
 
@@ -360,6 +361,42 @@ def test_batch_stops_before_any_command_for_inline_editor_payload(
     with pytest.raises(SystemExit):
         runner.main()
     assert calls == []
+
+
+def test_batch_allows_exactly_attested_visual_source(
+    tmp_path, monkeypatch
+) -> None:
+    batch = _batch_file(tmp_path)
+    published = tmp_path / "script_published"
+    published.mkdir()
+    svg = "<svg><text>教授展示的图</text></svg>"
+    for name in ("甲", "乙", "丙"):
+        text = "教授正文。" + (svg if name == "乙" else "")
+        (published / f"{name}.json").write_text(
+            json.dumps([{"index": 1, "text": text}], ensure_ascii=False),
+            encoding="utf-8",
+        )
+    payload = json.loads(batch.read_text(encoding="utf-8"))
+    payload["visual_source_attestations"] = {
+        "乙": {
+            "S0001/V01": hashlib.sha256(svg.encode("utf-8")).hexdigest()
+        }
+    }
+    batch.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    code, calls = _run(
+        monkeypatch,
+        [
+            "--batch", str(batch),
+            "--transcript-dir", str(published),
+            "--output-root", str(tmp_path / "out"),
+            "--stage", "extract",
+        ],
+    )
+
+    assert code == 0
+    command = next(command for command in calls if "乙" in command)
+    assert "--visual-source-attestation" in command
 
 
 def test_notes_payload_stops_batch_before_any_member_command(

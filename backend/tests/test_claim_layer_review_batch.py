@@ -4,11 +4,22 @@ from pathlib import Path
 
 import pytest
 
+from backend.pipeline import corpus_ai_adjudication_runner
 from backend.pipeline.claim_layer_review_batch import (
     ClaimLayerReviewBatchError,
     merge_review_artifacts,
     split_claim_layer_package,
     split_claim_layer_package_by_source,
+    validate_split_claim_layer_package,
+)
+from backend.pipeline.corpus_ai_review import AI_REVIEW_VERSION, apply_risk_routing
+from backend.pipeline.corpus_ai_review_runner import (
+    _matching_review_artifact,
+    _normalize_claim_layer,
+    _review_artifact_sha256,
+)
+from backend.pipeline.claim_layer_review_batch_runner import (
+    _assert_review_batch_binding,
 )
 
 
@@ -48,6 +59,27 @@ def test_split_retains_every_source_and_partitions_claims() -> None:
         == "claims_only_all_sources_and_relations_retained"
         for batch in batches
     )
+    for batch in batches:
+        validate_split_claim_layer_package(batch)
+
+
+def test_split_package_rejects_any_change_after_partitioning() -> None:
+    batch = split_claim_layer_package(_package(), batch_size=3)[0]
+    batch["claims"][0]["title"] = "silently changed"
+
+    with pytest.raises(ClaimLayerReviewBatchError, match="SHA"):
+        validate_split_claim_layer_package(batch)
+
+
+def test_runner_never_rebinds_an_old_review_to_a_new_partition() -> None:
+    batch = split_claim_layer_package(_package(), batch_size=3)[0]
+    artifact = _artifact(batch, 1)
+    artifact["source"].pop("review_batch")
+
+    with pytest.raises(ValueError, match="not bound"):
+        _assert_review_batch_binding(artifact, batch)
+
+    assert "review_batch" not in artifact["source"]
 
 
 def test_split_by_source_matches_pre_synthesis_responsibility() -> None:
@@ -72,26 +104,44 @@ def test_split_by_source_matches_pre_synthesis_responsibility() -> None:
 
 
 def _artifact(batch: dict, index: int) -> dict:
-    claims = [
-        {"claim_id": row["claim_id"], "statement": row.get("title", ""), "anchors": []}
-        for row in batch["claims"]
-    ]
-    reviews = [
+    claims = _normalize_claim_layer(batch)["candidate_claims"]
+    response = {
+        "sermon_assessment": {
+            "summary": f"batch {index}",
+            "systemic_risks": [],
+        },
+        "claim_reviews": [
         {
             "claim_id": row["claim_id"],
             "decision": "pass",
-            "routing_status": "ai_reviewed",
+            "issues": [],
+            "proposed_statement": "",
+            "proposed_claim_kind": "",
+            "proposed_route_type": "unchanged",
+            "rationale": "source supports claim",
+            "confidence": "high",
+            "human_review_reason": "",
         }
         for row in batch["claims"]
-    ]
-    return {
-        "source": {"batch": index, "review_batch": batch["review_batch"]},
-        "reviewer": {"fingerprint_sha256": f"review-{index}"},
-        "sermon_assessment": {"summary": f"batch {index}", "systemic_risks": []},
-        "reviewed_claims": claims,
-        "claim_reviews": reviews,
-        "routing_summary": {"ai_reviewed": len(reviews)},
+        ],
     }
+    fingerprint = f"review-{index}"
+    routed = apply_risk_routing(
+        response,
+        reviewer_fingerprint_sha256=fingerprint,
+        spot_check_percent=0,
+    )
+    artifact = {
+        "schema_version": AI_REVIEW_VERSION,
+        "source": {"batch": index, "review_batch": batch["review_batch"]},
+        "reviewer": {"fingerprint_sha256": fingerprint},
+        "spot_check_percent": 0,
+        "sermon_assessment": response["sermon_assessment"],
+        "reviewed_claims": claims,
+        **routed,
+    }
+    artifact["reviewer"]["artifact_sha256"] = _review_artifact_sha256(artifact)
+    return artifact
 
 
 def test_merge_proves_exact_claim_coverage(tmp_path: Path) -> None:
@@ -109,8 +159,74 @@ def test_merge_proves_exact_claim_coverage(tmp_path: Path) -> None:
         combined["review_strategy"]["partition_policy"]
         == "claims_only_all_sources_and_relations_retained"
     )
-    assert combined["routing_summary"] == {"ai_reviewed": 6}
+    assert combined["routing_summary"] == {
+        "ai_reviewed": 6,
+        "awaiting_openai_adjudication": 0,
+        "human_spot_check": 0,
+    }
     assert combined["reviewer"]["fingerprint_sha256"]
+    survey = _normalize_claim_layer(package)
+    assert _matching_review_artifact(
+        combined,
+        survey=survey,
+        expected_fingerprint=combined["reviewer"]["fingerprint_sha256"],
+        spot_check_percent=combined["spot_check_percent"],
+    )
+
+
+def test_adjudication_accepts_the_canonical_combined_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = _package()
+    package_path = _write_package(tmp_path, package)
+    survey = _normalize_claim_layer(package)
+    batches = split_claim_layer_package(package, batch_size=3)
+    combined = merge_review_artifacts(
+        [_artifact(batch, index) for index, batch in enumerate(batches, start=1)],
+        source_package=package,
+        source_package_path=package_path,
+    )
+    review_path = tmp_path / "combined-review.json"
+    review_path.write_text(json.dumps(combined), encoding="utf-8")
+    monkeypatch.setattr(
+        corpus_ai_adjudication_runner,
+        "_load_context",
+        lambda *_args: (
+            survey,
+            {row["claim_id"]: row for row in survey["candidate_claims"]},
+            [],
+            {},
+        ),
+    )
+
+    *_, accepted, review_bytes = (
+        corpus_ai_adjudication_runner._validated_review_context(
+            package_path, review_path, []
+        )
+    )
+
+    assert accepted == combined
+    assert review_bytes == review_path.read_bytes()
+
+
+def test_merge_rejects_review_snapshot_changed_from_source_package(
+    tmp_path: Path,
+) -> None:
+    package = _package()
+    package_path = _write_package(tmp_path, package)
+    batches = split_claim_layer_package(package, batch_size=3)
+    artifacts = [_artifact(batch, index) for index, batch in enumerate(batches, start=1)]
+    artifacts[0]["reviewed_claims"][0]["statement"] = "coherently but wrongly changed"
+    artifacts[0]["reviewer"]["artifact_sha256"] = _review_artifact_sha256(
+        artifacts[0]
+    )
+
+    with pytest.raises(ClaimLayerReviewBatchError, match="differs from the source"):
+        merge_review_artifacts(
+            artifacts,
+            source_package=package,
+            source_package_path=package_path,
+        )
 
 
 def test_merge_rejects_duplicate_review(tmp_path: Path) -> None:
@@ -119,7 +235,10 @@ def test_merge_rejects_duplicate_review(tmp_path: Path) -> None:
     batches = split_claim_layer_package(package, batch_size=3)
     artifacts = [_artifact(batch, index) for index, batch in enumerate(batches, start=1)]
     artifacts[1]["claim_reviews"][0] = copy.deepcopy(artifacts[0]["claim_reviews"][0])
-    with pytest.raises(ClaimLayerReviewBatchError, match="duplicate"):
+    artifacts[1]["reviewer"]["artifact_sha256"] = _review_artifact_sha256(
+        artifacts[1]
+    )
+    with pytest.raises(ClaimLayerReviewBatchError, match="modified"):
         merge_review_artifacts(
             artifacts,
             source_package=package,
@@ -198,6 +317,9 @@ def test_merge_carries_every_batch_bill(tmp_path: Path) -> None:
                 "cache_write_tokens": None, "completion_tokens": 100, "total_tokens": 1000 * index + 100,
             }
         ]
+        artifact["reviewer"]["artifact_sha256"] = _review_artifact_sha256(
+            artifact
+        )
         artifacts.append(artifact)
 
     combined = merge_review_artifacts(

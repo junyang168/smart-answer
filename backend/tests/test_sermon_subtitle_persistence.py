@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from backend.api.sc_api.script_delta import ScriptConflictError, ScriptDelta
 from backend.pipeline import detailed_knowledge_extraction_runner as runner
 from backend.pipeline.detailed_knowledge_extraction_runner import SectionSettings
 from backend.pipeline.sermon_subtitle_persistence import (
@@ -32,6 +33,41 @@ def _insertions() -> list[dict[str, Any]]:
     return [
         {"after_index": "START", "text": "## 第一部分", "level": 1},
         {"after_index": "21", "text": "### 内部说明", "level": 2},
+    ]
+
+
+def test_publish_is_atomic_and_bound_to_the_exact_review_snapshot(
+    tmp_path: Path,
+) -> None:
+    item = "visual-source"
+    for folder in ("script", "script_review", "script_published"):
+        (tmp_path / folder).mkdir()
+    (tmp_path / "script" / f"{item}.json").write_text(
+        json.dumps({"entries": []}), encoding="utf-8"
+    )
+    review_path = tmp_path / "script_review" / f"{item}.json"
+    review_path.write_text(
+        json.dumps(
+            [{"index": "subtitle-1", "type": "subtitle", "text": "## 图示"}],
+            ensure_ascii=False,
+            indent=4,
+        ),
+        encoding="utf-8",
+    )
+    review_sha = hashlib.sha256(review_path.read_bytes()).hexdigest()
+    delta = ScriptDelta(str(tmp_path), item)
+
+    with pytest.raises(ScriptConflictError, match="changed before publish"):
+        delta.publish("editor@example.org", expected_review_sha256="0" * 64)
+    assert not (tmp_path / "script_published" / f"{item}.json").exists()
+
+    published_sha = delta.publish(
+        "editor@example.org", expected_review_sha256=review_sha
+    )
+    published_path = tmp_path / "script_published" / f"{item}.json"
+    assert hashlib.sha256(published_path.read_bytes()).hexdigest() == published_sha
+    assert json.loads(published_path.read_text(encoding="utf-8"))["script"] == [
+        {"index": "subtitle-1", "type": "subtitle", "text": "## 图示"}
     ]
 
 

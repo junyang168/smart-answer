@@ -15,6 +15,7 @@ from backend.pipeline.source_projection import (
     live_text,
     project_script,
     script_from_markdown_blocks,
+    validate_visual_source_attestations,
 )
 from backend.pipeline.transcript_source import resolve_transcript_path
 
@@ -89,6 +90,12 @@ def load_knowledge_source_document(
     actual_file_sha256 = hashlib.sha256(raw).hexdigest()
     projection = project_script(payload.get("script"))
     try:
+        validate_visual_source_attestations(
+            projection, source.get("visual_source_attestations")
+        )
+    except ValueError as exc:
+        raise ValueError(f"visual source attestation mismatch: {exc}: {path}") from exc
+    try:
         uses_body_coordinates = assert_locator_space_compatible(
             source, payload.get("script")
         )
@@ -96,6 +103,7 @@ def load_knowledge_source_document(
         raise ValueError(f"{exc}: {path}") from exc
     expected_file_sha256 = str(source.get("source_file_sha256") or "")
     expected_body_sha256 = str(source.get("source_body_sha256") or "")
+    expected_visual_sha256 = source.get("source_visual_sha256")
     legacy_sha256 = str(source.get("source_sha256") or "")
     # For a new semantic descriptor the physical SHA is provenance, not the
     # staleness key: a comment-only editor save changes the bytes but neither
@@ -109,6 +117,10 @@ def load_knowledge_source_document(
         raise ValueError(f"source file hash mismatch: {path}")
     if uses_body_coordinates and expected_body_sha256 != projection.body_sha256:
         raise ValueError(f"source body hash mismatch: {path}")
+    if expected_visual_sha256 is not None and (
+        str(expected_visual_sha256) != str(projection.visual_content_sha256 or "")
+    ):
+        raise ValueError(f"source visual hash mismatch: {path}")
     # Editorial structure is provenance and model/cache input, not a source
     # validity gate. Callers that show headings include the current rendered
     # structure in their own fingerprint; body-only consumers remain usable

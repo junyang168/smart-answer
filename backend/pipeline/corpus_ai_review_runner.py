@@ -39,7 +39,10 @@ from backend.pipeline.knowledge_source import load_knowledge_source_document
 from backend.pipeline.llm_usage import usage_row, usage_summary
 from backend.pipeline.run_ledger import run_record
 from backend.pipeline.source_keys import package_row_key
-from backend.pipeline.source_projection import project_script
+from backend.pipeline.source_projection import (
+    project_script,
+    validate_visual_fragment_against_block,
+)
 from backend.pipeline.stage1 import Stage1AnthropicClient
 from backend.pipeline.cross_section_relation_runner import _artifact_sha256
 from backend.pipeline.detailed_knowledge_extraction_runner import (
@@ -109,6 +112,18 @@ CLAIM_LAYER_PROJECTION_VERSION = "wang_claim_layer_review_projection_v3"
 
 def _validate_claim_layer_package(package: dict[str, Any]) -> None:
     """Prove a package is a coherent, unmodified upstream stage artifact."""
+
+    if package.get("review_batch"):
+        from backend.pipeline.claim_layer_review_batch import (
+            ClaimLayerReviewBatchError,
+            validate_split_claim_layer_package,
+        )
+
+        try:
+            validate_split_claim_layer_package(package)
+        except ClaimLayerReviewBatchError as exc:
+            raise AIReviewValidationError(str(exc)) from exc
+        return
 
     try:
         validate_merged_package(package)
@@ -281,6 +296,21 @@ def _normalize_claim_layer(package: dict[str, Any]) -> dict[str, Any]:
                         "highlight_status": highlight.get("status"),
                         "review_note": highlight.get("review_note")
                         or highlight.get("rejection_reason"),
+                        **(
+                            {
+                                "source_modality": "visual",
+                                "visual_locator": anchor.get("visual_locator")
+                                or anchor.get("paragraph_key"),
+                                "visual_block_sha256": anchor.get(
+                                    "visual_block_sha256"
+                                ),
+                                "visual_fact_ids": list(
+                                    anchor.get("visual_fact_ids") or []
+                                ),
+                            }
+                            if anchor.get("source_modality") == "visual"
+                            else {}
+                        ),
                     }
                 )
         claims.append(
@@ -315,7 +345,12 @@ def _claim_layer_input(
     sections = []
     for source_id, source_document in source_documents:
         sections.append(
-            f"===== 完整来源：{source_id} =====\n{_transcript_for_prompt(source_document)}"
+            "===== 完整来源：{source_id} =====\n{transcript}".format(
+                source_id=source_id,
+                transcript=_transcript_for_prompt(
+                    source_document, visual_source_attested=True
+                ),
+            )
         )
     other_batch_claims = survey.get("other_batch_claims") or []
     duplicate_scope = ""
@@ -325,11 +360,24 @@ def _claim_layer_input(
             "只有判定重复时，`duplicate_of_claim_id` 可以指名其中一条）：\n"
             + json.dumps(other_batch_claims, ensure_ascii=False, indent=2)
         )
+    has_visual = any(
+        anchor.get("source_modality") == "visual"
+        for claim in survey.get("candidate_claims") or []
+        for anchor in claim.get("anchors") or []
+    )
+    visual_guidance = (
+        "\n\n本包含视觉来源锚点：SVG 是王教授展示或画出的图示转录，属于第一等来源，"
+        "但不是口述逐字引文。请审核 claim 是否忠实保留图中文字及几何关系、是否与相邻"
+        "口述解释一致；不得仅因它不是口述而删除，也不得把它描述成教授逐字说过的话。"
+        if has_visual
+        else ""
+    )
     return (
         "以下是已经精编的跨讲 claim layer。现有人工标签和状态只是待复核资料，"
         "不得因此默认正确。\n\n候选主张：\n"
         + json.dumps(survey["candidate_claims"], ensure_ascii=False, indent=2)
         + duplicate_scope
+        + visual_guidance
         + "\n\n"
         + "\n\n".join(sections)
     )
@@ -512,6 +560,25 @@ def run_claim_layer(
             source, transcript_dirs
         )
         projection = project_script(source_payload.get("script"))
+        visual_blocks = {row.locator: row for row in projection.visual_blocks}
+        for fragment in package.get("source_fragments") or []:
+            if (
+                fragment.get("source_id") != source_id
+                or fragment.get("source_modality") != "visual"
+            ):
+                continue
+            locator = str(fragment.get("visual_locator") or "")
+            block = visual_blocks.get(locator)
+            if block is None:
+                raise AIReviewValidationError(
+                    f"{source_id}: visual fragment locator does not resolve: {locator}"
+                )
+            try:
+                validate_visual_fragment_against_block(fragment, block)
+            except ValueError as exc:
+                raise AIReviewValidationError(
+                    f"{source_id}: invalid visual fragment: {exc}"
+                ) from exc
         expected_structure = str(
             source.get("editorial_structure_sha256") or ""
         )
@@ -534,7 +601,9 @@ def run_claim_layer(
         # A comment-only edit is not a new review input; a body or editorial
         # heading edit is. The physical file SHA remains source provenance.
         transcript_hashes[source_id] = _sha256_bytes(
-            _transcript_for_prompt(source_payload).encode("utf-8")
+            _transcript_for_prompt(
+                source_payload, visual_source_attested=True
+            ).encode("utf-8")
         )
         transcript_paths[source_id] = str(source_path)
     if not transcripts:

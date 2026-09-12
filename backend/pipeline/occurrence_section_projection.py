@@ -28,7 +28,7 @@ from backend.pipeline.viewpoint_scope_selection import direct_seed_units
 
 
 SCHEMA_VERSION = "wang_occurrence_section_projection_v1"
-_PARAGRAPH_KEY = re.compile(r"S(\d+)")
+_PARAGRAPH_KEY = re.compile(r"S(\d+)(?:/V\d+)?")
 
 
 def claim_universe_sha256(claims: Iterable[Mapping[str, Any]]) -> str:

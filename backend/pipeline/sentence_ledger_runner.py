@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,8 @@ from backend.pipeline.source_projection import (
     project_script,
     script_from_markdown_blocks,
     source_uses_body_locator_space,
+    validate_visual_fragment_against_block,
+    visual_source_blocks,
 )
 from backend.pipeline.sentence_ledger import (
     AnchoredSpan,
@@ -122,6 +125,49 @@ def place_fragments(
         excerpt = fragment.get("verbatim_excerpt") or ""
         if fragment_id not in cited or not excerpt:
             continue
+        if fragment.get("source_modality") == "visual":
+            locator = str(fragment.get("visual_locator") or "")
+            match = re.fullmatch(r"S([0-9]{4,})/V([0-9]{2,})", locator)
+            if match is None:
+                unplaced.append(fragment_id)
+                continue
+            segment_index = int(match.group(1))
+            segment_text = dict(segments).get(segment_index)
+            if segment_text is None:
+                unplaced.append(fragment_id)
+                continue
+            visuals = visual_source_blocks(
+                segment_text, segment_index=f"S{segment_index:04d}"
+            )
+            visual = next((row for row in visuals if row.locator == locator), None)
+            if (
+                visual is None
+                or not visual.readable
+                or excerpt != visual.raw_svg
+                or fragment.get("visual_block_sha256") != visual.raw_sha256
+            ):
+                unplaced.append(fragment_id)
+                continue
+            try:
+                validate_visual_fragment_against_block(fragment, visual)
+            except ValueError:
+                unplaced.append(fragment_id)
+                continue
+            visual_fact_ids = tuple(
+                str(fact.get("fact_id") or "")
+                for fact in fragment.get("visual_facts") or []
+                if str(fact.get("fact_id") or "")
+            )
+            spans.append(
+                AnchoredSpan(
+                    owner.get(fragment_id, fragment_id),
+                    segment_index,
+                    visual.char_start,
+                    visual.char_end,
+                    visual_fact_ids,
+                )
+            )
+            continue
         hits = [
             (index, text.find(excerpt))
             for index, text in segments
@@ -139,7 +185,8 @@ def place_fragments(
             # trusted exactly when the fragment's own `source_sha256` matches
             # the file in hand, and never otherwise.
             claimed = str(fragment.get("paragraph_key") or "")
-            wanted = int(claimed[1:]) if claimed[1:].isdigit() else None
+            match = re.fullmatch(r"S([0-9]{4,})(?:/V[0-9]{2,})?", claimed)
+            wanted = int(match.group(1)) if match else None
             hits = [hit for hit in hits if wanted is not None and hit[0] == wanted] or hits
         if len(hits) != 1:
             unplaced.append(fragment_id)
@@ -176,6 +223,10 @@ def terminal_exclusions(package: dict[str, Any]) -> dict[str, str]:
 
     terminal: dict[str, str] = {}
     for row in package.get("sentence_exclusions") or []:
+        if row.get("source_modality") == "visual" or "/V" in str(
+            row.get("segment_index") or ""
+        ):
+            continue
         reason_code = str(row.get("reason_code") or "")
         if not reason_code:
             continue
@@ -211,7 +262,9 @@ def coverage_for_package(
     )
     if not source_sha256:
         raise ValueError("legacy coverage calculation requires source file SHA256")
-    inventory = build_inventory(segments, source_id=source_id)
+    inventory = build_inventory(
+        segments, source_id=source_id, source_sha256=source_sha256
+    )
     spans, unplaced = place_fragments(package, segments, source_sha256)
 
     target = None

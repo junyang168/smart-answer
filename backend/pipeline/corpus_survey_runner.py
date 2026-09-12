@@ -25,7 +25,12 @@ from dotenv import load_dotenv
 
 from backend.config.wang_platform_paths import wang_platform_paths
 from backend.pipeline.corpus_survey import SurveyValidationError, validate_survey
-from backend.pipeline.source_projection import LOCATOR_SPACE, EditorialHeading, project_script
+from backend.pipeline.source_projection import (
+    LOCATOR_SPACE,
+    EditorialHeading,
+    VisualSourceAttestationError,
+    project_script,
+)
 from backend.pipeline.stage1 import Stage1OpenAIClient
 
 
@@ -267,20 +272,43 @@ def _survey_artifact_sha256(survey: dict[str, Any]) -> str:
 
 
 def _transcript_for_prompt(
-    payload: dict[str, Any], headings: tuple[EditorialHeading, ...] = ()
+    payload: dict[str, Any],
+    headings: tuple[EditorialHeading, ...] = (),
+    *,
+    visual_source_attested: bool = False,
 ) -> str:
     projection = project_script(payload.get("script", []))
+    if projection.visual_blocks and not visual_source_attested:
+        raise VisualSourceAttestationError(
+            "inline SVG cannot be presented as professor source without an "
+            "external locator/SHA attestation"
+        )
     body_rows = list(projection.body_rows)
     effective_headings = headings or projection.headings
     rows: list[str] = []
+    visuals_by_segment: dict[str, list[Any]] = {}
+    for visual in projection.visual_blocks:
+        visuals_by_segment.setdefault(visual.segment_index, []).append(visual)
     for position, segment in enumerate(body_rows):
+        locator = _segment_locator(position)
+        text = str(segment.get("text") or "")
+        for visual in sorted(
+            visuals_by_segment.get(locator, []),
+            key=lambda row: row.char_start,
+            reverse=True,
+        ):
+            text = (
+                text[:visual.char_start]
+                + f"\n[visual source {visual.locator}]\n"
+                + text[visual.char_end:]
+            )
         rows.append(
             "[segment {locator}; source_index={index}; {start}-{end}]\n{text}".format(
-                locator=_segment_locator(position),
+                locator=locator,
                 index=segment.get("index"),
                 start=segment.get("start_time"),
                 end=segment.get("end_time"),
-                text=segment.get("text", ""),
+                text=text,
             )
         )
     editorial = "\n".join(
@@ -288,12 +316,27 @@ def _transcript_for_prompt(
         for row in effective_headings
         if row.boundary < len(body_rows)
     )
-    return (
+    rendered = (
         "===== 编辑结构（不是教授原话，不可引用、不可作为证据锚点）=====\n"
         + (editorial or "（无标题）")
         + "\n\n===== 教授讲论正文 =====\n"
         + "\n\n".join(rows)
     )
+    if projection.visual_blocks:
+        rendered += (
+            "\n\n===== 教授展示或画出的视觉来源（不是口述原句）=====\n"
+            "以下图示是第一等来源。审核其语义时必须保留标签与几何关系，并结合相邻口述；"
+            "不得把 SVG 本身称作教授逐字说出的句子。\n\n"
+            + "\n\n".join(
+                f"[visual source {visual.locator}]\n"
+                "literal_facts="
+                + json.dumps(list(visual.facts), ensure_ascii=False, sort_keys=True)
+                + "\nraw_svg=\n"
+                + visual.raw_svg
+                for visual in projection.visual_blocks
+            )
+        )
+    return rendered
 
 
 def _extraction_metadata(
@@ -558,6 +601,11 @@ def run_one(
     physical_payload, raw = _load(path)
     transcript_id = path.stem
     projection = project_script(physical_payload.get("script"))
+    if projection.visual_blocks:
+        raise SurveyValidationError(
+            f"{transcript_id}: first-pass survey has no visual-source provenance "
+            "contract; use the attested detailed-extraction workflow"
+        )
     payload = {
         **physical_payload,
         "script": [dict(row) for row in projection.body_rows],

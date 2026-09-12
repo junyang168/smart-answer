@@ -25,6 +25,7 @@ from backend.api.canonical_repository.postgres_store import (
     PostgresKnowledgeStore,
     database_url_from_env,
 )
+from backend.pipeline.source_projection import visual_fragment_display_text
 
 # Collections that make up one source's argument layer.  `source_fragments`
 # carries the verbatim quote each node is anchored to; without it a reviewer
@@ -258,15 +259,24 @@ class ArgumentLayerReader:
                 fragment = fragments.get(fragment_id)
                 if not fragment:
                     continue
-                quotes.append(
-                    {
-                        "id": fragment_id,
-                        "text": fragment.get("verbatim_excerpt", ""),
-                        "paragraph_key": fragment.get("paragraph_key"),
-                        "media_time": fragment.get("media_time"),
-                        "anchor_state": fragment.get("anchor_state", ""),
-                    }
-                )
+                quote = {
+                    "id": fragment_id,
+                    "text": visual_fragment_display_text(fragment),
+                    "paragraph_key": fragment.get("paragraph_key"),
+                    "media_time": fragment.get("media_time"),
+                    "anchor_state": fragment.get("anchor_state", ""),
+                }
+                if fragment.get("source_modality") == "visual":
+                    quote.update(
+                        {
+                            "source_modality": "visual",
+                            "visual_locator": fragment.get("visual_locator"),
+                            "visual_facts": list(
+                                fragment.get("visual_facts") or []
+                            ),
+                        }
+                    )
+                quotes.append(quote)
                 if rank is None:
                     rank = _paragraph_rank(fragment.get("paragraph_key"))
             return {"quotes": quotes, "rank": rank}

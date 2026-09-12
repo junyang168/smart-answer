@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import tempfile
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -17,11 +19,44 @@ from backend.pipeline.corpus_ai_review_runner import (
     DEFAULT_TRANSCRIPT_DIRS,
     PROMPT_PATH,
     PROJECT_ROOT,
+    _validate_claim_layer_package,
     run_claim_layer,
 )
+from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
 from backend.pipeline.knowledge_package import live_claims
 from backend.pipeline.llm_usage import usage_summary
 from backend.pipeline.stage1 import Stage1AnthropicClient
+
+
+def _atomic_json_write(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _assert_review_batch_binding(artifact: dict, batch: dict) -> None:
+    """Never graft current partition metadata onto an older review artifact."""
+
+    expected = batch.get("review_batch")
+    actual = (artifact.get("source") or {}).get("review_batch")
+    if not isinstance(expected, dict) or actual != expected:
+        raise ValueError(
+            "independent review is not bound to the current immutable review batch"
+        )
 
 
 def main() -> int:
@@ -36,6 +71,11 @@ def main() -> int:
         help="Use source before cross-source synthesis; claim_count for already synthesized packages.",
     )
     parser.add_argument("--model", default="claude-sonnet-5")
+    parser.add_argument(
+        "--backend",
+        choices=("api", "claude-subscription"),
+        default="api",
+    )
     parser.add_argument("--max-output-tokens", type=int, default=24000)
     parser.add_argument("--spot-check-percent", type=int, default=10)
     parser.add_argument("--transcript-dir", action="append", type=Path, dest="transcript_dirs")
@@ -49,6 +89,7 @@ def main() -> int:
     args = parser.parse_args()
 
     package = json.loads(args.package.read_text(encoding="utf-8"))
+    _validate_claim_layer_package(package)
     batches = (
         split_claim_layer_package_by_source(package)
         if args.partition == "source"
@@ -62,7 +103,7 @@ def main() -> int:
     batch_paths: list[Path] = []
     for index, batch in enumerate(batches, start=1):
         path = input_dir / f"batch-{index:02d}.json"
-        path.write_text(json.dumps(batch, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        _atomic_json_write(path, batch)
         batch_paths.append(path)
 
     if args.dry_run:
@@ -87,12 +128,19 @@ def main() -> int:
     if not args.merge_existing:
         load_dotenv(PROJECT_ROOT / ".env")
         prompt = PROMPT_PATH.read_text(encoding="utf-8")
-        client = Stage1AnthropicClient(
-            model=args.model,
-            timeout_seconds=240,
-            max_retries=1,
-            max_output_tokens=args.max_output_tokens,
-        )
+        if args.backend == "claude-subscription":
+            client = ClaudeSubscriptionClient(
+                model=args.model,
+                timeout_seconds=900,
+                max_output_tokens=args.max_output_tokens,
+            )
+        else:
+            client = Stage1AnthropicClient(
+                model=args.model,
+                timeout_seconds=240,
+                max_retries=1,
+                max_output_tokens=args.max_output_tokens,
+            )
     artifacts = []
     for index, (path, batch) in enumerate(zip(batch_paths, batches), start=1):
         review_path = review_dir / f"batch-{index:02d}.independent-review.json"
@@ -113,9 +161,7 @@ def main() -> int:
                 force=args.force,
             )
             artifact = json.loads(output.read_text(encoding="utf-8"))
-        # Older review artifacts predate persisted partition metadata. Restore
-        # it from the immutable batch input before deterministic recombination.
-        artifact.setdefault("source", {})["review_batch"] = batch["review_batch"]
+        _assert_review_batch_binding(artifact, batch)
         print(f"[{index}/{len(batch_paths)}] {status}: {output}", flush=True)
         artifacts.append(artifact)
 
@@ -125,10 +171,7 @@ def main() -> int:
         source_package_path=args.package,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(
-        json.dumps(combined, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    _atomic_json_write(args.output, combined)
     print(json.dumps({"status": "created", "output": str(args.output)}, ensure_ascii=False))
     if combined.get("usage"):
         print(json.dumps(

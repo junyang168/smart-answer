@@ -56,16 +56,51 @@ def build_transcript_source_map(
     ambiguous: List[Dict[str, Any]] = []
     cursor = 0
 
-    for position, paragraph in enumerate(load_transcript_paragraphs(transcript_path)):
+    payload = json.loads(transcript_path.read_text(encoding="utf-8"))
+    physical = payload.get("script", []) if isinstance(payload, dict) else payload
+    projection = project_script(physical)
+    source_rows = [
+        (body_position, paragraph, projection.spoken_rows[body_position])
+        for body_position, paragraph in enumerate(projection.body_rows)
+        if isinstance(paragraph, dict)
+        and str(paragraph.get("text") or "").strip()
+    ]
+    for position, (body_position, paragraph, spoken_paragraph) in enumerate(
+        source_rows
+    ):
         paragraph_text = str(paragraph.get("text") or "").strip()
-        matches: List[int] = []
-        search_at = cursor
-        while True:
-            found = unified.find(paragraph_text, search_at)
-            if found < 0:
-                break
-            matches.append(found)
-            search_at = found + max(1, len(paragraph_text))
+        # Some unified sources preserve the professor-displayed SVG verbatim,
+        # while older prose-only exports omit it. Prefer the complete raw row;
+        # the spoken projection is only a compatibility fallback. Either way,
+        # the map entry remains bound to the complete raw paragraph hash.
+        spoken_text = str(spoken_paragraph.get("text") or "").strip()
+
+        def find_matches(candidate: str) -> List[int]:
+            if not candidate:
+                return []
+            found_rows: List[int] = []
+            search_at = cursor
+            while True:
+                found = unified.find(candidate, search_at)
+                if found < 0:
+                    break
+                found_rows.append(found)
+                search_at = found + len(candidate)
+            return found_rows
+
+        match_text = paragraph_text
+        matches = find_matches(match_text)
+        if not matches and spoken_text != paragraph_text:
+            match_text = spoken_text
+            matches = find_matches(match_text)
+        if not matches and not match_text and any(
+            block.segment_index == f"S{body_position + 1:04d}"
+            for block in projection.visual_blocks
+        ):
+            # A visual-only row omitted from a prose-only unified source has no
+            # textual coordinate. Preserve it at the exact insertion boundary
+            # required by the legacy SourceMap shape.
+            matches.append(cursor)
 
         paragraph_key = str(paragraph.get("index") if paragraph.get("index") is not None else position)
         if not matches:
@@ -74,7 +109,7 @@ def build_transcript_source_map(
         start = matches[0]
         if len(matches) > 1:
             ambiguous.append({"paragraph_key": paragraph_key, "paragraph_position": position, "match_count": len(matches)})
-        end = start + len(paragraph_text)
+        end = start + len(match_text)
         cursor = end
         entries.append(
             TranscriptMapEntry(

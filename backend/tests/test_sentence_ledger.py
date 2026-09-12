@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import pytest
 
 from backend.pipeline.base_contract_coverage import BOOK_CODE_TO_CHINESE, ScriptureRef, parse_passage_range
@@ -11,6 +12,7 @@ from backend.pipeline.sentence_ledger import (
     LIST_ITEM,
     PROSE,
     SCRIPTURE_QUOTATION,
+    VISUAL,
     classify_sentence,
     summarise_by_category,
     AUTO_TERMINAL_REASONS,
@@ -50,6 +52,10 @@ def test_inventory_addresses_every_sentence_with_its_span():
     ]
     for row in inventory:
         assert SEGMENT[row.char_start : row.char_end] == row.text
+        serialized = row.model_dump(mode="json")
+        assert "source_modality" not in serialized
+        assert "visual_locator" not in serialized
+        assert "visual_fact_id" not in serialized
 
 
 def test_editing_a_source_keeps_the_untouched_sentences_addressable():
@@ -334,8 +340,12 @@ from backend.pipeline.detailed_knowledge_extraction_runner import (  # noqa: E40
     section_sentences,
 )
 from backend.pipeline.extraction_sections import Section  # noqa: E402
-from backend.pipeline.sentence_ledger_runner import load_segments  # noqa: E402
-from backend.pipeline.source_projection import project_script  # noqa: E402
+from backend.pipeline.sentence_ledger_runner import (  # noqa: E402
+    load_segments,
+    place_fragments,
+    terminal_exclusions,
+)
+from backend.pipeline.source_projection import project_script, visual_source_blocks  # noqa: E402
 
 
 def _published_transcript(tmp_path: Path, texts: list[str]) -> tuple[Path, dict]:
@@ -494,6 +504,72 @@ def test_machine_markup_exclusions_are_structural_without_human_approval(
         ledger_sentence_id=sentence_id,
     )
     assert rows[0]["reason_code"] == "structural_markup"
+
+
+def test_each_svg_fact_is_a_visual_unit_and_only_an_exact_fact_citation_represents_it() -> None:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80">'
+        '<ellipse cx="50" cy="40" rx="30" ry="20"/>'
+        '<text x="50" y="45">重疊</text>'
+        '</svg>'
+    )
+    source = f"前一句。\n{svg}\n後一句。"
+    inventory = build_inventory([(1, source)], source_id="SRC")
+    source_visual = visual_source_blocks(source, segment_index="S0001")[0]
+    visual_rows = [
+        row for row in inventory if getattr(row, "source_modality", None) == "visual"
+    ]
+    assert len(inventory) == 2 + len(source_visual.facts) == 5
+    assert [row.visual_fact_id for row in visual_rows] == [
+        fact["fact_id"] for fact in source_visual.facts
+    ]
+    assert {row.visual_locator for row in visual_rows} == {"S0001/V01"}
+
+    package = {
+        "evidence_steps": [
+            {"evidence_step_id": "E1", "source_fragment_ids": ["FR-V1"]}
+        ],
+        "source_fragments": [
+            {
+                "fragment_id": "FR-V1",
+                "source_id": "SRC",
+                "source_modality": "visual",
+                "visual_locator": "S0001/V01",
+                "visual_block_sha256": hashlib.sha256(svg.encode("utf-8")).hexdigest(),
+                "visual_canonical_sha256": source_visual.canonical_sha256,
+                "visual_renderer_version": "svg_literal_facts_v3_cjk_white",
+                "visual_facts": [dict(source_visual.facts[-1])],
+                "verbatim_excerpt": svg,
+            }
+        ],
+    }
+    spans, unplaced = place_fragments(package, [(1, source)])
+    rows = reconcile(inventory, spans)
+    by_id = {row.sentence_id: row for row in rows}
+    assert unplaced == []
+    assert [by_id[row.sentence_id].status for row in visual_rows] == [
+        UNPROCESSED,
+        UNPROCESSED,
+        REPRESENTED,
+    ]
+
+    categories = summarise_by_category(inventory, rows, {1: source})
+    assert categories[VISUAL].represented == 1
+    assert categories[VISUAL].unprocessed == 2
+    assert terminal_exclusions(
+        {
+            "sentence_exclusions": [
+                {
+                    "sentence_id": visual_rows[0].sentence_id,
+                    "exclusion_id": "EX-V1",
+                    "segment_index": "S0001/V01",
+                    "source_modality": "visual",
+                    "text": svg,
+                    "reason_code": "structural_markup",
+                }
+            ]
+        }
+    ) == {}
 
 
 def test_blockquote_exclusion_remains_an_unapproved_authorship_question() -> None:

@@ -164,6 +164,7 @@ def test_object_specific_projections_keep_boundaries_and_dependencies():
     assert evidence.object_kind == "evidence"
     assert "彼得的认信来自天父启示" in evidence.text
     assert "这是我父在天上指示的" in evidence.text
+    assert "来源摘录：这是我父在天上指示的" in evidence.text
     assert len(evidence.dependency_record_sha256s) == 1
 
 

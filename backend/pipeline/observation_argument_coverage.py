@@ -89,12 +89,44 @@ def _excerpt(fragment: dict[str, Any]) -> str:
     return str(fragment.get("verbatim_excerpt") or "").strip()
 
 
+def _same_evidence_content(
+    left: dict[str, Any], right: dict[str, Any]
+) -> bool:
+    left_modality = str(left.get("source_modality") or "spoken")
+    right_modality = str(right.get("source_modality") or "spoken")
+    if left_modality != right_modality:
+        return False
+    if left_modality == "visual":
+        left_facts = {
+            str(row.get("fact_id") or "")
+            for row in left.get("visual_facts") or []
+            if isinstance(row, dict) and row.get("fact_id")
+        }
+        right_facts = {
+            str(row.get("fact_id") or "")
+            for row in right.get("visual_facts") or []
+            if isinstance(row, dict) and row.get("fact_id")
+        }
+        return bool(left_facts & right_facts)
+    left_excerpt = _excerpt(left)
+    right_excerpt = _excerpt(right)
+    return bool(
+        left_excerpt
+        and right_excerpt
+        and (
+            left_excerpt in right_excerpt or right_excerpt in left_excerpt
+        )
+    )
+
+
 def classify_observation(
     observation: dict[str, Any],
     *,
     fragments: dict[str, dict[str, Any]],
     evidence_fragment_ids: set[str],
-    evidence_by_paragraph: dict[tuple[str, str], list[tuple[str, str]]],
+    evidence_by_paragraph: dict[
+        tuple[str, str], list[tuple[str, dict[str, Any]]]
+    ],
     related_evidence: dict[str, list[str]] | None = None,
 ) -> dict[str, Any]:
     """Decide one observation's status, and say which evidence step it points at."""
@@ -124,12 +156,11 @@ def classify_observation(
     for fragment_id in resolved:
         fragment = fragments[fragment_id]
         paragraph = _paragraph(fragment)
-        excerpt = _excerpt(fragment)
         candidates = evidence_by_paragraph.get(paragraph, [])
         if candidates:
             saw_paragraph_evidence = True
-        for evidence_step_id, evidence_excerpt in candidates:
-            if excerpt and (excerpt in evidence_excerpt or evidence_excerpt in excerpt):
+        for evidence_step_id, evidence_fragment in candidates:
+            if _same_evidence_content(fragment, evidence_fragment):
                 return {
                     "status": PAIRED_BY_EXCERPT,
                     "evidence_step_id": evidence_step_id,
@@ -173,14 +204,18 @@ def measure_coverage(package: dict[str, Any]) -> dict[str, Any]:
     evidence_steps = package.get("evidence_steps", [])
 
     evidence_fragment_ids: set[str] = set()
-    evidence_by_paragraph: dict[tuple[str, str], list[tuple[str, str]]] = defaultdict(list)
+    evidence_by_paragraph: dict[
+        tuple[str, str], list[tuple[str, dict[str, Any]]]
+    ] = defaultdict(list)
     for step in evidence_steps:
         step_id = str(step.get("evidence_step_id") or "")
         for fragment_id in fragment_ids(step):
             evidence_fragment_ids.add(fragment_id)
             fragment = fragments.get(fragment_id)
             if fragment is not None:
-                evidence_by_paragraph[_paragraph(fragment)].append((step_id, _excerpt(fragment)))
+                evidence_by_paragraph[_paragraph(fragment)].append(
+                    (step_id, fragment)
+                )
 
     evidence_ids = {
         str(row.get("evidence_step_id")) for row in evidence_steps if row.get("evidence_step_id")

@@ -8,6 +8,7 @@ import json
 import os
 import re
 import tempfile
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +24,7 @@ from backend.pipeline.detailed_knowledge_extraction import (
     DETAILED_RESPONSE_SCHEMA,
     AuditedSentence,
     DetailedExtractionValidationError,
+    detailed_response_schema,
     exclusions_from_audit,
     extraction_identity,
     validate_response,
@@ -67,10 +69,15 @@ from backend.pipeline.source_projection import (
     EditorialHeading,
     LOCATOR_SPACE,
     SourceProjection,
+    VISUAL_RENDERER_VERSION,
+    VisualSourceBlock,
+    VisualSourceAttestationError,
     is_editorial_row,
     live_script,
     project_script,
     provably_nonspoken_inline_markup,
+    validate_visual_source_attestations,
+    visual_source_blocks,
 )
 
 
@@ -113,32 +120,84 @@ PROMPT_PATH = Path("backend/pipeline/prompts/detailed_knowledge_extraction.md")
 NOTES_PROMPT_PATH = Path("backend/pipeline/prompts/detailed_notes_knowledge_extraction.md")
 VALIDATION_ATTEMPTS = 4
 MODEL_INPUT_CONTRACT_VERSION = "detailed-extraction-spoken-text-v3"
+VISUAL_MODEL_INPUT_CONTRACT_VERSION = "detailed-extraction-visual-source-v1"
 PACKAGE_COMPILER_VERSION = "wang-shared-knowledge-compiler-v3"
 SECTION_CACHE_VERSION = "wang-detailed-extraction-section-cache-v3"
+VISUAL_SOURCE_HEADER = (
+    "本章节含有王教授在讲道中展示或画出的图。图是第一等来源证据，不是编辑备注，"
+    "但也不是口述原句。Sxxxx/Vnn 是图的定位码。请同时阅读附图、原始 SVG 与系统生成的"
+    "逐元素 literal facts，保留文字、颜色、位置、连线、箭头、包含或重叠等视觉关系。"
+    "不要把几何事实擅自升级为神学解释；结合相邻口述判断教授如何解释该图。"
+    "视觉锚点必须使用 source_modality=visual、对应的 Sxxxx/Vnn、空 verbatim_excerpt，"
+    "并列出实际使用的 visual_fact_ids。同一幅图的全部 literal fact ID 必须在该章节各视觉"
+    "锚点的并集中恰当出现，包含文字、形状、连线、分组和坐标关系；结构元素可归入使用整图"
+    "的观察，但不能静默遗漏。普通口述锚点必须使用 source_modality=spoken，且"
+    " visual_fact_ids 为空。每个视觉来源单位都必须被视觉锚点覆盖，不能作为结构标记排除。\n\n"
+)
 
 
-def _assert_no_inline_editor_payload(
-    source_id: str, body_rows: Sequence[Mapping[str, Any]]
+def _extraction_run_record(source_id: str, *, enabled: bool):
+    """Return a normal ledger context or an explicit no-write record.
+
+    A canary is allowed to create staging artifacts without touching the
+    operational database.  Making that a command-line contract is safer than
+    relying on whoever launches it to unset every database environment name.
+    """
+
+    if enabled:
+        return run_record(subject=source_id, stage="extraction")
+    return nullcontext(
+        RunRecord(
+            run_id="UNRECORDED-CANARY",
+            subject_id=source_id,
+            stage="extraction",
+            subject_kind="source",
+            conn=None,
+        )
+    )
+
+
+def _assert_inline_source_readable(
+    source_id: str,
+    projection: SourceProjection,
+    visual_source_attestations: Mapping[str, str] | None = None,
 ) -> None:
-    """Refuse body rows whose syntax proves they contain editor payload."""
+    """Allow attested professor visuals; reject malformed/editorial markup."""
 
     findings: list[str] = []
-    for position, row in enumerate(body_rows, start=1):
-        kinds = sorted(
-            {
-                span.kind
-                for span in provably_nonspoken_inline_markup(
-                    str(row.get("text") or "")
-                )
-            }
+    try:
+        validate_visual_source_attestations(
+            projection, visual_source_attestations
         )
-        if kinds:
-            findings.append(f"S{position:04d} ({', '.join(kinds)})")
+    except VisualSourceAttestationError as exc:
+        findings.append(str(exc))
+    visuals_by_segment: dict[str, list[VisualSourceBlock]] = {}
+    for visual in projection.visual_blocks:
+        visuals_by_segment.setdefault(visual.segment_index, []).append(visual)
+    for position, row in enumerate(projection.body_rows, start=1):
+        locator = f"S{position:04d}"
+        visual_ranges = [
+            (visual.char_start, visual.char_end)
+            for visual in visuals_by_segment.get(locator, [])
+        ]
+        for span in provably_nonspoken_inline_markup(str(row.get("text") or "")):
+            if span.kind == "svg" and any(
+                left <= span.start and span.end <= right
+                for left, right in visual_ranges
+            ):
+                continue
+            if span.kind == "html_comment" and any(
+                left <= span.start and span.end <= right
+                for left, right in visual_ranges
+            ):
+                continue
+            findings.append(f"{locator} ({span.kind})")
     if findings:
         raise DetailedExtractionValidationError(
-            f"{source_id}: source-bearing rows contain inline editor payload at "
+            f"{source_id}: unattested or unreadable inline source at "
             + ", ".join(findings)
-            + "; move it to provenance-typed editorial rows before extraction"
+            + "; attest visual source explicitly, or correct malformed/editorial "
+            "content through the sermon editor and republish before extraction"
         )
 
 
@@ -275,24 +334,79 @@ def segment_locator(position: int) -> str:
 def section_sentences(source: dict[str, Any], section: Section) -> list[AuditedSentence]:
     """Every sentence the section has to be answered for, with a stable id."""
 
-    script = source.get("script") or []
+    projection = project_script(source.get("script") or [])
+    script = projection.body_rows
+    visuals_by_segment: dict[str, list[VisualSourceBlock]] = {}
+    for visual in projection.visual_blocks:
+        visuals_by_segment.setdefault(visual.segment_index, []).append(visual)
     rows: list[AuditedSentence] = []
     parent_start = section.parent_start if section.parent_start is not None else section.start
     parent_end = section.parent_end if section.parent_end is not None else section.end
     for position in range(parent_start, parent_end):
         text = str(script[position].get("text") or "")
-        for start, end in sentence_spans(text):
-            locator = segment_locator(position)
+        locator = segment_locator(position)
+        visuals = visuals_by_segment.get(locator, [])
+        if not visuals:
+            for start, end in sentence_spans(text):
+                rows.append(AuditedSentence(
+                    sentence_id=f"{locator}#{len(rows) + 1:03d}",
+                    segment_index=locator,
+                    text=text[start:end],
+                    char_start=start,
+                    char_end=end,
+                ))
+            continue
+        cursor = 0
+        for visual in visuals:
+            spoken_chunk = text[cursor:visual.char_start]
+            for start, end in sentence_spans(spoken_chunk):
+                rows.append(AuditedSentence(
+                    sentence_id=f"{locator}#{len(rows) + 1:03d}",
+                    segment_index=locator,
+                    text=spoken_chunk[start:end],
+                    char_start=cursor + start,
+                    char_end=cursor + end,
+                ))
+            rows.append(AuditedSentence(
+                sentence_id=f"{visual.locator}#001",
+                segment_index=visual.locator,
+                text=(
+                    f"视觉来源 {visual.locator}：{len(visual.facts)} 个逐元素 literal facts；"
+                    "必须由 visual anchor 覆盖。"
+                ),
+                source_modality="visual",
+                char_start=visual.char_start,
+                char_end=visual.char_end,
+            ))
+            cursor = visual.char_end
+        spoken_chunk = text[cursor:]
+        for start, end in sentence_spans(spoken_chunk):
             rows.append(AuditedSentence(
                 sentence_id=f"{locator}#{len(rows) + 1:03d}",
                 segment_index=locator,
-                text=text[start:end],
+                text=spoken_chunk[start:end],
+                char_start=cursor + start,
+                char_end=cursor + end,
             ))
     if section.sentence_start is None and section.sentence_end is None:
         return rows
     if section.sentence_start is None or section.sentence_end is None:
         raise ValueError("section sentence range must provide both start and end")
     return rows[section.sentence_start:section.sentence_end]
+
+
+def _source_unit_count(text: str) -> int:
+    """Count speech sentences plus first-class visual blocks in one body row."""
+
+    projection = project_script([{"index": 1, "text": str(text or "")}])
+    if not projection.visual_blocks:
+        return len(sentence_spans(str(text or "")))
+    return len(
+        section_sentences(
+            {"script": list(projection.body_rows)},
+            Section(index=1, start=0, end=1, title=""),
+        )
+    )
 
 
 def _section_prompt_body(
@@ -309,6 +423,101 @@ def _section_prompt_body(
     """
 
     script = source.get("script") or []
+    projection = project_script(script)
+    if projection.visual_blocks:
+        target_visual_locators = {
+            row.segment_index
+            for row in sentences
+            if row.source_modality == "visual"
+        }
+        visuals_by_segment: dict[str, list[VisualSourceBlock]] = {}
+        for visual in projection.visual_blocks:
+            visuals_by_segment.setdefault(visual.segment_index, []).append(visual)
+
+        rendered_rows: list[str] = []
+        visual_rows: list[str] = []
+        parent_start = (
+            section.parent_start
+            if section.parent_start is not None
+            else section.start
+        )
+        parent_end = (
+            section.parent_end if section.parent_end is not None else section.end
+        )
+        target_by_segment: dict[str, list[AuditedSentence]] = {}
+        for sentence in sentences:
+            target_by_segment.setdefault(
+                sentence.segment_index.split("/", 1)[0], []
+            ).append(sentence)
+        for position in range(parent_start, parent_end):
+            locator = segment_locator(position)
+            targets = target_by_segment.get(locator, [])
+            if not targets:
+                continue
+            source_text = str(projection.body_rows[position].get("text") or "")
+            row_visuals = visuals_by_segment.get(locator, [])
+            if section.sentence_start is None:
+                left, right = 0, len(source_text)
+            else:
+                if any(
+                    row.char_start is None or row.char_end is None
+                    for row in targets
+                ):
+                    raise DetailedExtractionValidationError(
+                        f"{locator}: target source-unit span is missing"
+                    )
+                left = min(int(row.char_start) for row in targets)
+                right = max(int(row.char_end) for row in targets)
+            text = source_text[left:right]
+            for visual in sorted(
+                row_visuals, key=lambda row: row.char_start, reverse=True
+            ):
+                if visual.char_end <= left or visual.char_start >= right:
+                    continue
+                local_start = max(visual.char_start, left) - left
+                local_end = min(visual.char_end, right) - left
+                replacement = (
+                    f"\n[visual source {visual.locator}]\n"
+                    if visual.locator in target_visual_locators
+                    else "\n"
+                )
+                text = text[:local_start] + replacement + text[local_end:]
+            label = (
+                f"[segment {locator}; internal source-unit-range target]"
+                if section.sentence_start is not None
+                else f"[segment {locator}]"
+            )
+            rendered_rows.append(f"{label}\n{text}")
+            for visual in row_visuals:
+                if visual.locator not in target_visual_locators:
+                    continue
+                visual_rows.append(
+                    f"[visual source {visual.locator}]\n"
+                    f"raw_sha256={visual.raw_sha256}\n"
+                    f"canonical_sha256={visual.canonical_sha256}\n"
+                    "literal_facts="
+                    + json.dumps(list(visual.facts), ensure_ascii=False, sort_keys=True)
+                    + "\nraw_svg=\n"
+                    + visual.raw_svg
+                )
+        body = "\n\n".join(rendered_rows)
+        if visual_rows:
+            body += "\n\n===== 视觉来源（原始 SVG 与逐元素事实）=====\n\n" + "\n\n".join(visual_rows)
+        listing = "\n".join(f"[{row.sentence_id}] {row.text}" for row in sentences)
+        split_context = (
+            "本输入是系统为 transport 上限生成的内部连续分片，不是新的来源章节。"
+            "只抽取并逐句审核下方列出的目标句和视觉来源；相邻分片关系由后续阶段恢复。\n\n"
+            if section.sentence_start is not None
+            else ""
+        )
+        return (
+            f"范围：{segment_locator(section.start)}–{segment_locator(section.end - 1)}"
+            f"（{section.length} 段）\n\n"
+            f"{split_context}"
+            f"{body}\n\n"
+            f"===== 本章节全部来源单位（{len(sentences)} 个），每一个都必须在 sentence_audit 中出现一次 =====\n\n"
+            f"{listing}"
+        )
     if section.sentence_start is None:
         body = "\n\n".join(
             "[segment {locator}]\n{text}".format(
@@ -455,7 +664,18 @@ def _load_valid_section_cache(
         response = artifact.get("response")
         if not isinstance(response, dict):
             return None
-        validate_response(response, source)
+        validate_response(
+            response,
+            source,
+            visible_locators={
+                row.segment_index.split("/", 1)[0] for row in sentences
+            },
+            visible_visual_locators={
+                row.segment_index
+                for row in sentences
+                if row.source_modality == "visual"
+            },
+        )
         validate_sentence_audit(response, source, sentences)
     except (
         OSError,
@@ -496,12 +716,128 @@ def _section_model_input_sha256(
     section: Section,
     sentences: Sequence[Any],
 ) -> str:
-    return hashlib.sha256(
-        (
-            header
-            + _section_prompt_body(source, section, sentences)
-        ).encode("utf-8")
-    ).hexdigest()
+    value = header + _section_prompt_body(source, section, sentences)
+    visual_blocks = _section_visual_blocks(source, sentences)
+    if visual_blocks:
+        # Cache identity follows the canonical source and the versioned render
+        # contract, not host-specific PNG encoder bytes. The actual attached
+        # PNG SHA is recorded separately in per-section provenance.
+        image_rows = [
+            {
+                "locator": block.locator,
+                "raw_sha256": block.raw_sha256,
+                "canonical_sha256": block.canonical_sha256,
+                "renderer_version": VISUAL_RENDERER_VERSION,
+            }
+            for block in visual_blocks
+        ]
+        value += "\n\n===== ATTACHED VISUAL IMAGE IDENTITY =====\n" + json.dumps(
+            image_rows, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _section_visual_blocks(
+    source: dict[str, Any], sentences: Sequence[AuditedSentence]
+) -> list[VisualSourceBlock]:
+    wanted = {
+        row.segment_index
+        for row in sentences
+        if row.source_modality == "visual"
+    }
+    return [
+        block
+        for block in project_script(source.get("script") or []).visual_blocks
+        if block.locator in wanted
+    ]
+
+
+def _render_visual_png(block: VisualSourceBlock) -> bytes:
+    if not block.readable:
+        raise DetailedExtractionValidationError(
+            f"{block.locator}: cannot render unreadable visual source: {block.parse_error}"
+        )
+    try:
+        import cairosvg
+
+        return bytes(
+            cairosvg.svg2png(
+                bytestring=_visual_svg_for_render(block).encode("utf-8"),
+                background_color="#ffffff",
+            )
+        )
+    except Exception as exc:
+        raise DetailedExtractionValidationError(
+            f"{block.locator}: SVG render failed: {type(exc).__name__}: {exc}"
+        ) from exc
+
+
+_VISUAL_RENDER_FONT_STACK = (
+    "'Arial Unicode MS', 'Heiti SC', 'Noto Sans CJK SC', "
+    "'Noto Sans CJK TC', sans-serif"
+)
+_SVG_ROOT_TAG = re.compile(r"<svg\b[^>]*>", re.I | re.S)
+
+
+def _visual_svg_for_render(block: VisualSourceBlock) -> str:
+    """Add a renderer-only CJK fallback without changing source evidence."""
+
+    root = _SVG_ROOT_TAG.search(block.raw_svg)
+    if root is None:
+        raise DetailedExtractionValidationError(
+            f"{block.locator}: SVG render input has no root tag"
+        )
+    style = (
+        "<style>text,tspan{font-family:"
+        + _VISUAL_RENDER_FONT_STACK
+        + " !important;}</style>"
+    )
+    return block.raw_svg[: root.end()] + style + block.raw_svg[root.end() :]
+
+
+def _visual_image_paths(
+    *,
+    output_dir: Path,
+    source_id: str,
+    blocks: Sequence[VisualSourceBlock],
+) -> list[Path]:
+    paths: list[Path] = []
+    for block in blocks:
+        raw = _render_visual_png(block)
+        path = (
+            output_dir
+            / "visual-assets"
+            / _slug(source_id)
+            / f"{block.locator.rsplit('/', 1)[-1]}-{block.raw_sha256[:16]}.png"
+        )
+        _atomic_artifact_write(path, raw)
+        paths.append(path.resolve())
+    return paths
+
+
+def _visual_image_provenance(
+    *,
+    output_dir: Path,
+    blocks: Sequence[VisualSourceBlock],
+    paths: Sequence[Path],
+) -> list[dict[str, Any]]:
+    if len(blocks) != len(paths):
+        raise DetailedExtractionValidationError(
+            "visual render provenance does not match the attached image count"
+        )
+    return [
+        {
+            "locator": block.locator,
+            "raw_sha256": block.raw_sha256,
+            "canonical_sha256": block.canonical_sha256,
+            "renderer_version": VISUAL_RENDERER_VERSION,
+            "background_color": "#ffffff",
+            "font_stack": _VISUAL_RENDER_FONT_STACK,
+            "png_path": str(path.relative_to(output_dir.resolve())),
+            "png_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+        for block, path in zip(blocks, paths, strict=True)
+    ]
 
 
 def _subtitle_provider(source_id: str, client: CodexSubscriptionClient | None = None):
@@ -825,7 +1161,7 @@ def resolve_section_plan(
     projection = project_script(source.get("script"))
     texts = [str(row.get("text") or "") for row in projection.body_rows]
     indexes = [row.get("index") for row in projection.body_rows]
-    counts = [len(sentence_spans(text)) for text in texts]
+    counts = [_source_unit_count(text) for text in texts]
     # The cached artifact is the uncapped editorial/base plan. Sentence caps are
     # transport policy, derived deterministically in memory below. Keying this
     # cache by a newly introduced cap would regenerate every headingless source
@@ -1018,6 +1354,7 @@ def _extract_sections(
     force: bool,
     only: tuple[int, ...] | None = None,
     record: RunRecord | None = None,
+    response_schema: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Run every section, then concatenate.
 
@@ -1037,6 +1374,7 @@ def _extract_sections(
         if only is not None and section.index not in only:
             continue
         sentences = section_sentences(source, section)
+        visual_blocks = _section_visual_blocks(source, sentences)
         model_input_sha256 = _section_model_input_sha256(
             source, header, section, sentences
         )
@@ -1057,6 +1395,15 @@ def _extract_sections(
                 model_input_sha256=model_input_sha256,
             )
             if cached is not None:
+                visual_image_paths = (
+                    _visual_image_paths(
+                        output_dir=output_dir,
+                        source_id=source_id,
+                        blocks=visual_blocks,
+                    )
+                    if visual_blocks
+                    else []
+                )
                 print(json.dumps({
                     "phase": "extraction", "source": source_id,
                     "section": section.index, "sections": len(plan.sections),
@@ -1066,7 +1413,14 @@ def _extract_sections(
                 exclusions.extend(exclusions_from_audit(
                     cached, sentences, source_id=exclusion_source_id,
                     ledger_sentence_id=ledger_sentence_id))
-                section_rows.append({**section_payload(section), "attempts": 0, "cached": True})
+                row = {**section_payload(section), "attempts": 0, "cached": True}
+                if visual_blocks:
+                    row["visual_images"] = _visual_image_provenance(
+                        output_dir=output_dir,
+                        blocks=visual_blocks,
+                        paths=visual_image_paths,
+                    )
+                section_rows.append(row)
                 continue
         print(json.dumps({
             "phase": "extraction", "source": source_id,
@@ -1074,6 +1428,15 @@ def _extract_sections(
             "title": section.title, "sentences": len(sentences), "status": "started",
         }, ensure_ascii=False), flush=True)
         user_input = header + _section_prompt_body(source, section, sentences)
+        visual_image_paths = (
+            _visual_image_paths(
+                output_dir=output_dir,
+                source_id=source_id,
+                blocks=visual_blocks,
+            )
+            if visual_blocks
+            else []
+        )
         last_error: DetailedExtractionValidationError | None = None
         last_candidate: dict[str, Any] | None = None
         response, attempts = None, 0
@@ -1098,9 +1461,25 @@ def _extract_sections(
                 )
             if record is not None:
                 record.model_call_started()
-            candidate = client.generate_json(
-                prompt, feedback, DETAILED_RESPONSE_SCHEMA, cache_prefix=user_input
-            )
+            if visual_image_paths:
+                if not isinstance(client, CodexSubscriptionClient):
+                    raise DetailedExtractionValidationError(
+                        f"{source_id}: visual source requires a multimodal extraction client"
+                    )
+                candidate = client.generate_json(
+                    prompt,
+                    feedback,
+                    response_schema or DETAILED_RESPONSE_SCHEMA,
+                    cache_prefix=user_input,
+                    image_paths=visual_image_paths,
+                )
+            else:
+                candidate = client.generate_json(
+                    prompt,
+                    feedback,
+                    response_schema or DETAILED_RESPONSE_SCHEMA,
+                    cache_prefix=user_input,
+                )
             call_usage = {**usage_row(client.last_usage, attempt), "section_index": section.index}
             usage_rows.append(call_usage)
             # Reported per call rather than handed over at the end: a run that
@@ -1115,7 +1494,19 @@ def _extract_sections(
                 # answerable inside it: measured, 0 of 264 relations cross a
                 # `##`, and the step a load_bearing observation reasons to is
                 # in the same section as the observation.
-                validate_response(candidate, source)
+                validate_response(
+                    candidate,
+                    source,
+                    visible_locators={
+                        row.segment_index.split("/", 1)[0]
+                        for row in sentences
+                    },
+                    visible_visual_locators={
+                        row.segment_index
+                        for row in sentences
+                        if row.source_modality == "visual"
+                    },
+                )
                 validate_sentence_audit(candidate, source, sentences)
                 response = candidate
                 break
@@ -1143,7 +1534,18 @@ def _extract_sections(
         exclusions.extend(exclusions_from_audit(
             response, sentences, source_id=exclusion_source_id,
             ledger_sentence_id=ledger_sentence_id))
-        section_rows.append({**section_payload(section), "attempts": attempts, "cached": False})
+        row = {
+            **section_payload(section),
+            "attempts": attempts,
+            "cached": False,
+        }
+        if visual_blocks:
+            row["visual_images"] = _visual_image_provenance(
+                output_dir=output_dir,
+                blocks=visual_blocks,
+                paths=visual_image_paths,
+            )
+        section_rows.append(row)
     return combine_sections(answered), usage_rows, section_rows, exclusions
 
 
@@ -1158,7 +1560,29 @@ def _anchored_fragment(
 ) -> dict[str, Any]:
     paragraph = _anchor_source_row(source_rows, anchor)
     paragraph_text = str(paragraph.get("text") or "")
-    excerpt = anchor["verbatim_excerpt"]
+    locator = str(anchor.get("segment_index") or "")
+    modality = str(anchor.get("source_modality") or "spoken")
+    visual = None
+    if modality == "visual":
+        visual = next(
+            (
+                row
+                for row in visual_source_blocks(
+                    paragraph_text,
+                    segment_index=locator.split("/", 1)[0],
+                    source_segment_index=paragraph.get("index"),
+                )
+                if row.locator == locator
+            ),
+            None,
+        )
+        if visual is None or not visual.readable:
+            raise DetailedExtractionValidationError(
+                f"visual source locator {locator!r} cannot be bound"
+            )
+        excerpt = visual.raw_svg
+    else:
+        excerpt = anchor["verbatim_excerpt"]
     fragment = {
         "fragment_id": fragment_id,
         "source_id": source_id,
@@ -1173,18 +1597,34 @@ def _anchored_fragment(
         "anchor_state": "source_version_bound",
         "review_status": "candidate",
     }
+    if visual is not None:
+        requested = [str(value) for value in anchor.get("visual_fact_ids") or []]
+        facts = {
+            str(row["fact_id"]): row
+            for row in visual.facts
+        }
+        fragment.update(
+            {
+                "source_modality": "visual",
+                "visual_locator": visual.locator,
+                "visual_block_sha256": visual.raw_sha256,
+                "visual_canonical_sha256": visual.canonical_sha256,
+                "visual_renderer_version": VISUAL_RENDERER_VERSION,
+                "visual_facts": [facts[fact_id] for fact_id in requested],
+            }
+        )
     if extraction_section_index is not None:
         fragment["extraction_section_index"] = extraction_section_index
     return fragment
 
 
-_SOURCE_LOCATOR = re.compile(r"^S([0-9]{4,})$")
+_SOURCE_LOCATOR = re.compile(r"^S([0-9]{4,})(?:/V[0-9]{2,})?$")
 
 
 def _anchor_source_row(
     source_rows: Sequence[dict[str, Any]], anchor: Mapping[str, Any]
 ) -> dict[str, Any]:
-    """Resolve an S locator only in projected spoken-body coordinates."""
+    """Resolve a spoken or row-qualified visual locator to its body row."""
 
     locator = str(anchor.get("segment_index") or "")
     match = _SOURCE_LOCATOR.fullmatch(locator)
@@ -1212,8 +1652,15 @@ def compile_package(
     section_rows: list[dict[str, Any]] | None = None,
     exclusions: list[dict[str, Any]] | None = None,
     complete: bool = True,
+    visual_source_attestations: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     projection = project_script(transcript.get("script"))
+    try:
+        validate_visual_source_attestations(
+            projection, visual_source_attestations
+        )
+    except VisualSourceAttestationError as exc:
+        raise DetailedExtractionValidationError(str(exc)) from exc
     source_rows = projection.body_rows
     declared_body_bindings = [
         value
@@ -1240,6 +1687,16 @@ def compile_package(
     ):
         raise DetailedExtractionValidationError(
             "extraction spoken-text identity is missing or does not match the current source"
+        )
+    expected_visual_sha256 = extraction.get("source_visual_sha256")
+    if projection.visual_blocks:
+        if expected_visual_sha256 != projection.visual_content_sha256:
+            raise DetailedExtractionValidationError(
+                "extraction visual-source identity is missing or does not match the current source"
+            )
+    elif expected_visual_sha256 is not None:
+        raise DetailedExtractionValidationError(
+            "extraction declares visual-source identity for a source with no visuals"
         )
     current_file_sha256 = hashlib.sha256(raw).hexdigest()
     optional_bindings = (
@@ -1336,7 +1793,7 @@ def compile_package(
     topology_sha256 = projection.editorial_topology_sha256
     spoken_text_sha256 = expected_text_sha256
     fragments: list[dict[str, Any]] = []
-    fragment_by_anchor: dict[tuple[str, str, int | None], str] = {}
+    fragment_by_anchor: dict[tuple[str, str, str, tuple[str, ...], int | None], str] = {}
     split_lineage = (
         ((extraction.get("section_plan") or {}).get("section_policy") or {}).get(
             "split_lineage"
@@ -1352,6 +1809,8 @@ def compile_package(
         key = (
             anchor["segment_index"],
             anchor["verbatim_excerpt"],
+            str(anchor.get("source_modality") or "spoken"),
+            tuple(str(value) for value in anchor.get("visual_fact_ids") or []),
             extraction_section_index,
         )
         existing = fragment_by_anchor.get(key)
@@ -1406,18 +1865,38 @@ def compile_package(
         for evidence_id in item["evidence_step_ids"]:
             evidence = next(step for step in evidence_steps if step["evidence_step_id"] == evidence_id)
             for anchor in evidence_anchor_snapshots[evidence_id]:
+                paragraph = _anchor_source_row(source_rows, anchor)
+                modality = str(anchor.get("source_modality") or "spoken")
+                highlight = str(anchor.get("verbatim_excerpt") or "")
+                visual_fields: dict[str, Any] = {}
+                if modality == "visual":
+                    visual = next(
+                        row
+                        for row in visual_source_blocks(
+                            str(paragraph.get("text") or ""),
+                            segment_index=str(anchor["segment_index"]).split("/", 1)[0],
+                            source_segment_index=paragraph.get("index"),
+                        )
+                        if row.locator == anchor["segment_index"]
+                    )
+                    highlight = visual.raw_svg
+                    visual_fields = {
+                        "source_modality": "visual",
+                        "visual_locator": visual.locator,
+                        "visual_block_sha256": visual.raw_sha256,
+                        "visual_fact_ids": list(anchor.get("visual_fact_ids") or []),
+                    }
                 anchors.append({
                     "paragraph_key": anchor["segment_index"],
-                    "media_time": _anchor_source_row(source_rows, anchor).get(
-                        "start_time"
-                    ),
+                    "media_time": paragraph.get("start_time"),
                     "evidence_id": evidence_id,
                     "evidence_type": evidence["step_type"],
                     "speaker": evidence["speaker"],
                     "stance": evidence["stance"],
                     "discourse_role": evidence["discourse_role"],
                     "assertive": evidence["speaker"] == "professor" and evidence["stance"] == "asserted",
-                    "proposed_highlight": {"text": anchor["verbatim_excerpt"], "status": "proposed"},
+                    "proposed_highlight": {"text": highlight, "status": "proposed"},
+                    **visual_fields,
                 })
         item["occurrences"] = [{
             "source_id": source_key,
@@ -1445,6 +1924,21 @@ def compile_package(
         "source_path": str(transcript_path),
         "review_status": "candidate",
     }
+    if projection.visual_blocks:
+        source_document["source_visual_sha256"] = projection.visual_content_sha256
+        source_document["visual_sources"] = [
+            block.descriptor() for block in projection.visual_blocks
+        ]
+        source_document["visual_source_attestations"] = [
+            {
+                "locator": locator,
+                "raw_sha256": raw_sha256,
+                "attestation": "professor_displayed_or_drawn_visual_source",
+            }
+            for locator, raw_sha256 in sorted(
+                (visual_source_attestations or {}).items()
+            )
+        ]
     if source_descriptor:
         source_document.update(json.loads(json.dumps(source_descriptor, ensure_ascii=False)))
         source_document.update({
@@ -1461,6 +1955,21 @@ def compile_package(
             "source_path": str(transcript_path),
             "review_status": "candidate",
         })
+        if projection.visual_blocks:
+            source_document["source_visual_sha256"] = projection.visual_content_sha256
+            source_document["visual_sources"] = [
+                block.descriptor() for block in projection.visual_blocks
+            ]
+            source_document["visual_source_attestations"] = [
+                {
+                    "locator": locator,
+                    "raw_sha256": raw_sha256,
+                    "attestation": "professor_displayed_or_drawn_visual_source",
+                }
+                for locator, raw_sha256 in sorted(
+                    (visual_source_attestations or {}).items()
+                )
+            ]
     package = {
         "schema_version": "wang_shared_knowledge_v1.2",
         "package_id": f"DETAILED-{_slug(source_key)}",
@@ -1572,6 +2081,8 @@ def _run(
     force: bool,
     source_descriptor: dict[str, Any] | None = None,
     preferred_plan: SectionPlan | None = None,
+    visual_source_attestations: Mapping[str, str] | None = None,
+    record_run_ledger: bool = True,
 ) -> tuple[str, Path]:
     """Extract one source, whatever kind of source it is.
 
@@ -1583,7 +2094,18 @@ def _run(
 
     source_file_sha256 = hashlib.sha256(raw).hexdigest()
     projection = project_script(source.get("script"))
-    _assert_no_inline_editor_payload(source_id, projection.body_rows)
+    _assert_inline_source_readable(
+        source_id, projection, visual_source_attestations
+    )
+    has_visual_source = bool(projection.visual_blocks)
+    if has_visual_source and not isinstance(client, CodexSubscriptionClient):
+        raise DetailedExtractionValidationError(
+            f"{source_id}: visual source requires the codex-subscription multimodal backend"
+        )
+    response_schema = detailed_response_schema(
+        has_visual_source=has_visual_source
+    )
+    effective_header = header + (VISUAL_SOURCE_HEADER if has_visual_source else "")
     source_sha256 = projection.body_sha256
     source_type = str(
         (source_descriptor or {}).get("source_type") or "sermon_transcript"
@@ -1608,10 +2130,14 @@ def _run(
             section_plan=plan.generation_identity(),
             source_text_sha256=projection.spoken_text_sha256,
             editorial_structure_sha256=projection.editorial_structure_sha256,
-            model_context_sha256=hashlib.sha256(header.encode("utf-8")).hexdigest(),
-            model_input_contract_version=MODEL_INPUT_CONTRACT_VERSION,
+            model_context_sha256=hashlib.sha256(effective_header.encode("utf-8")).hexdigest(),
+            model_input_contract_version=(
+                VISUAL_MODEL_INPUT_CONTRACT_VERSION
+                if has_visual_source
+                else MODEL_INPUT_CONTRACT_VERSION
+            ),
             section_model_input_sha256s=_section_model_input_sha256s(
-                source_body, header, plan
+                source_body, effective_header, plan
             ),
             source_file_sha256=source_file_sha256,
             package_compiler_version=PACKAGE_COMPILER_VERSION,
@@ -1619,8 +2145,11 @@ def _run(
             backend=(
                 client.backend if isinstance(client, CodexSubscriptionClient) else None
             ),
+            response_schema=response_schema,
         )
         identity["source_body_sha256"] = source_sha256
+        if projection.visual_content_sha256 is not None:
+            identity["source_visual_sha256"] = projection.visual_content_sha256
         identity["source_file_sha256"] = source_file_sha256
         identity["editorial_topology_sha256"] = (
             projection.editorial_topology_sha256
@@ -1652,7 +2181,9 @@ def _run(
             # Older code exposed the package at its current path before
             # calculating coverage. Finish that deterministic commit instead
             # of paying for identical model output again.
-            with run_record(subject=source_id, stage="extraction") as record:
+            with _extraction_run_record(
+                source_id, enabled=record_run_ledger
+            ) as record:
                 record.inputs({"fingerprint_sha256": identity["fingerprint_sha256"]})
                 existing["coverage"] = _coverage(source_path, output_path)
                 _archive(output_path)
@@ -1685,7 +2216,7 @@ def _run(
         plan = apply_section_limit(
             base_plan,
             [
-                len(sentence_spans(str(row.get("text") or "")))
+                _source_unit_count(str(row.get("text") or ""))
                 for row in projection.body_rows
             ],
             headings=projection.headings,
@@ -1712,7 +2243,9 @@ def _run(
     # Opened after the skip check so a no-op re-run does not file a row. At 240
     # sources a nightly "nothing changed" pass would otherwise bury the runs
     # that did something.
-    with run_record(subject=source_id, stage="extraction") as record:
+    with _extraction_run_record(
+        source_id, enabled=record_run_ledger
+    ) as record:
         record.model(client.model)
         if isinstance(client, CodexSubscriptionClient):
             record.metadata({"backend": client.backend})
@@ -1730,10 +2263,11 @@ def _run(
             record=record, source_id=source_id, source=source_body,
             authoritative_source=source,
             headings=projection.headings, raw=raw,
-            source_path=source_path, header=header, plan=plan, identity=identity,
+            source_path=source_path, header=effective_header, plan=plan, identity=identity,
             output_path=output_path, output_dir=output_dir, client=client,
             prompt=prompt, sections=sections, force=force,
             source_descriptor=source_descriptor,
+            visual_source_attestations=visual_source_attestations,
         )
 
 
@@ -1746,9 +2280,13 @@ def _run_extraction(
     client: Stage1OpenAIClient | Stage1AnthropicClient | CodexSubscriptionClient,
     prompt: str,
     sections: "SectionSettings", force: bool, source_descriptor: dict[str, Any] | None,
+    visual_source_attestations: Mapping[str, str] | None = None,
 ) -> tuple[str, Path]:
     """The part of an extraction that is worth recording, once a row exists."""
 
+    response_schema = detailed_response_schema(
+        has_visual_source=bool(project_script(source.get("script")).visual_blocks)
+    )
     response, usage_rows, section_rows, exclusions = _extract_sections(
         source_id=source_id,
         exclusion_source_id=published_source_id(source_id, source_descriptor),
@@ -1757,6 +2295,7 @@ def _run_extraction(
         fingerprint=identity["generation_fingerprint_sha256"], force=force,
         cache_contract_fingerprint=identity["model_contract_fingerprint_sha256"],
         only=sections.only, record=record,
+        response_schema=response_schema,
     )
     package = compile_package(
         transcript_id=source_id, transcript_path=source_path,
@@ -1768,6 +2307,7 @@ def _run_extraction(
         editorial_topology_sha256=str(identity["editorial_topology_sha256"]),
         source_descriptor=source_descriptor, usage_rows=usage_rows, section_rows=section_rows,
         exclusions=exclusions, complete=sections.only is None,
+        visual_source_attestations=visual_source_attestations,
     )
     try:
         validate_merged_package(package)
@@ -1887,6 +2427,7 @@ def run_source(
     client: Stage1OpenAIClient | Stage1AnthropicClient | CodexSubscriptionClient,
     prompt: str, reasoning_effort: str, force: bool,
     sections: SectionSettings | None = None,
+    record_run_ledger: bool = True,
 ) -> tuple[str, Path]:
     source, raw, source_path = markdown_source_document(source_descriptor)
     source_id = str(source_descriptor["source_id"])
@@ -1899,6 +2440,10 @@ def run_source(
         source_id=source_id, source=source, raw=raw, source_path=source_path, header=header,
         output_dir=output_dir, client=client, prompt=prompt, reasoning_effort=reasoning_effort,
         sections=sections or SectionSettings(), force=force, source_descriptor=source_descriptor,
+        visual_source_attestations=(
+            source_descriptor.get("visual_source_attestations") or {}
+        ),
+        record_run_ledger=record_run_ledger,
     )
 
 
@@ -1911,6 +2456,8 @@ def run_one(
     subtitle_actor_id: str | None = None,
     subtitle_writer: Callable[..., dict[str, Any]] | None = None,
     subtitle_authorizer: Callable[[str], bool] | None = None,
+    visual_source_attestations: Mapping[str, str] | None = None,
+    record_run_ledger: bool = True,
 ) -> tuple[str, Path]:
     transcript, raw = _load(transcript_path)
     transcript_id = transcript_path.stem
@@ -1923,7 +2470,9 @@ def run_one(
         )
     section_settings = sections or SectionSettings()
     projection = project_script(transcript.get("script"))
-    _assert_no_inline_editor_payload(transcript_id, projection.body_rows)
+    _assert_inline_source_readable(
+        transcript_id, projection, visual_source_attestations
+    )
     leading_untitled_end = leading_untitled_body_end(
         projection.headings,
         len(projection.body_rows),
@@ -2055,7 +2604,31 @@ def run_one(
         header=header, output_dir=output_dir, client=client, prompt=prompt,
         reasoning_effort=reasoning_effort, sections=section_settings, force=force,
         preferred_plan=preferred_plan,
+        visual_source_attestations=visual_source_attestations,
+        record_run_ledger=record_run_ledger,
     )
+
+
+def parse_visual_source_attestations(values: Sequence[str]) -> dict[str, str]:
+    """Parse repeated ``LOCATOR=SHA256`` command-line attestations."""
+
+    result: dict[str, str] = {}
+    for value in values:
+        locator, separator, raw_sha256 = str(value).partition("=")
+        locator = locator.strip()
+        raw_sha256 = raw_sha256.strip()
+        if (
+            not separator
+            or not re.fullmatch(r"S[0-9]{4,}/V[0-9]{2,}", locator)
+            or not re.fullmatch(r"[0-9a-f]{64}", raw_sha256)
+        ):
+            raise ValueError(
+                "visual source attestation must be LOCATOR=64-lowercase-hex-SHA256"
+            )
+        if locator in result:
+            raise ValueError(f"duplicate visual source attestation: {locator}")
+        result[locator] = raw_sha256
+    return result
 
 
 def build_client(
@@ -2138,7 +2711,20 @@ def main() -> int:
         "--subtitle-user-id",
         help="authenticated sermon editor identity used for ACL-checked subtitle write-back",
     )
+    parser.add_argument(
+        "--visual-source-attestation",
+        action="append",
+        default=[],
+        metavar="LOCATOR=SHA256",
+        help="attest one inline SVG as professor-displayed/drawn source evidence; "
+             "repeat for every visual block",
+    )
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--no-run-ledger",
+        action="store_true",
+        help="create/inspect staging artifacts without writing pipeline_runs",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     if args.write_back_generated_subtitles and args.no_generated_sections:
@@ -2160,6 +2746,12 @@ def main() -> int:
             "--max-section-sentences and --fallback-max-section-sentences "
             "are mutually exclusive"
         )
+    try:
+        visual_source_attestations = parse_visual_source_attestations(
+            args.visual_source_attestation
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
     sections = SectionSettings(
         level=args.section_level, max_sentences=args.max_section_sentences,
         fallback_max_sentences=args.fallback_max_section_sentences,
@@ -2178,9 +2770,11 @@ def main() -> int:
             # Dry run never calls the generator; a source with no headings
             # reports one section, which is what an offline run would do.
             projection = project_script(source.get("script"))
-            _assert_no_inline_editor_payload(source_id, projection.body_rows)
+            _assert_inline_source_readable(
+                source_id, projection, visual_source_attestations
+            )
             texts = [str(row.get("text") or "") for row in projection.body_rows]
-            counts = [len(sentence_spans(text)) for text in texts]
+            counts = [_source_unit_count(text) for text in texts]
             plan = plan_sections(
                 texts,
                 headings=projection.headings,
@@ -2214,6 +2808,24 @@ def main() -> int:
                 )
                 for row in source_rows
             })
+            visual_rows = {
+                path.stem: [
+                    block.descriptor()
+                    for block in project_script(_load(path)[0].get("script")).visual_blocks
+                ]
+                for path in paths
+            }
+            visual_rows.update(
+                {
+                    str(row["source_id"]): [
+                        block.descriptor()
+                        for block in project_script(
+                            markdown_source_document(row)[0].get("script")
+                        ).visual_blocks
+                    ]
+                    for row in source_rows
+                }
+            )
         except DetailedExtractionValidationError as exc:
             parser.error(str(exc))
         print(json.dumps({
@@ -2231,6 +2843,7 @@ def main() -> int:
                 key: len(value) for key, value in plan_rows.items()
             },
             "section_plans": plan_rows,
+            "visual_sources": visual_rows,
             # Retained for scripts that read the old dry-run shape. Dry runs
             # never call either backend.
             "would_call_openai": False,
@@ -2252,6 +2865,8 @@ def main() -> int:
                 reasoning_effort=args.reasoning_effort, force=args.force, sections=sections,
                 write_back_subtitles=args.write_back_generated_subtitles,
                 subtitle_actor_id=args.subtitle_user_id,
+                visual_source_attestations=visual_source_attestations,
+                record_run_ledger=not args.no_run_ledger,
             )
             counts[status] += 1
             print(f"{status}: {path.name} -> {output}")
@@ -2266,6 +2881,7 @@ def main() -> int:
             status, output = run_source(
                 source_row, output_dir=args.output_dir, client=client, prompt=prompt,
                 reasoning_effort=args.reasoning_effort, force=args.force, sections=sections,
+                record_run_ledger=not args.no_run_ledger,
             )
             counts[status] += 1
             print(f"{status}: {source_row['source_id']} -> {output}")
