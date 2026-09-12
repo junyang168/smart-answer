@@ -120,6 +120,16 @@ def test_rejects_non_verbatim_anchor() -> None:
         validate_response(response, _transcript())
 
 
+def test_rejects_duplicate_source_anchor_before_package_compilation() -> None:
+    response = _response()
+    response["questions"][0]["anchors"].append(
+        dict(response["questions"][0]["anchors"][0])
+    )
+
+    with pytest.raises(DetailedExtractionValidationError, match="duplicate source anchor"):
+        validate_response(response, _transcript())
+
+
 def test_rejects_excerpt_joined_across_a_removed_visual_block() -> None:
     transcript = _transcript()
     svg = "<svg><text>图</text></svg>"

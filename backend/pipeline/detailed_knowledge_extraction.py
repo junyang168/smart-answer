@@ -584,6 +584,17 @@ def validate_response(
         if not anchors:
             anchor_errors.append(f"{owner}: at least one source anchor is required")
             return
+        anchor_keys = [
+            (
+                str(anchor.get("segment_index") or ""),
+                str(anchor.get("verbatim_excerpt") or ""),
+                str(anchor.get("source_modality") or "spoken"),
+                tuple(str(value) for value in anchor.get("visual_fact_ids") or []),
+            )
+            for anchor in anchors
+        ]
+        if len(anchor_keys) != len(set(anchor_keys)):
+            anchor_errors.append(f"{owner}: duplicate source anchor")
         for anchor in anchors:
             if anchor.get("start_time") is not None or anchor.get("end_time") is not None:
                 anchor_errors.append(
