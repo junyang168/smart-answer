@@ -74,6 +74,7 @@
 - 每个 question、position、observation、evidence_step 至少一个 anchor。
 - `segment_index` 必须使用输入中的 S0001、S0002 等定位码。
 - `verbatim_excerpt` 必须是同一 segment 中连续、逐字复制的原文；不可改字、补标点或用省略号拼接。
+- sermon transcript 中的 `> ...` blockquote、内嵌 Markdown 标题、原始 HTML comment 和 SVG markup 都是来源归属不明确的展示／编辑结构，**不得**作为 spoken anchor；即使其中的文字看起来与讲道内容一致，也要改用附近可证明的教授口述。经过显式 attestation 的 SVG 只能用输入提供的 `Sxxxx/Vnn` visual locator 和 `visual_fact_ids` 引用，不能把图中文字伪装成逐字口述。
 - 时间码由编译器从权威来源 segment 确定；所有 anchor 的 `start_time` 和 `end_time` 都输出 null，不要复制或估算。
 
 ID 使用本章节内部稳定前缀：Q001、POS001、OBS001、E001、CL001、ER001、CR001。章节前缀由合并阶段加上，你不必自行区分章节。不要把不同对象共用一个 ID。
