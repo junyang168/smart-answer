@@ -1579,6 +1579,12 @@ class _ObsoleteRetirementCursor(_RecordingCursor):
         self.rows = rows
 
     def fetchall(self):
+        if "WHERE collection='composition_plans'" in self._last:
+            return [
+                (object_id, payload)
+                for collection, object_id, payload in self.rows
+                if collection == "composition_plans"
+            ]
         if "WHERE retired_at IS NULL FOR UPDATE" in self._last:
             return self.rows
         return []
@@ -1805,6 +1811,15 @@ def test_stale_topic_identity_retirement_is_rechecked_under_apply_lock() -> None
             _stale_topic_identity_audit(),
         )
 
+    with pytest.raises(ChangeSetConflict, match="missing its audit"):
+        PostgresKnowledgeStore._assert_stale_pending_topic_identity_retirement(
+            _ObsoleteRetirementCursor([
+                ("topic_identity_reconciliations", "TIR-STALE", stale)
+            ]),
+            _stale_topic_identity_plan(),
+            None,
+        )
+
 
 def test_stale_topic_identity_guard_detects_omission_reappearance_and_refs() -> None:
     stale = {
@@ -1839,6 +1854,428 @@ def test_stale_topic_identity_guard_detects_omission_reappearance_and_refs() -> 
             ]),
             _stale_topic_identity_plan(),
             _stale_topic_identity_audit(),
+        )
+
+    unrelated_retire = SimpleNamespace(
+        collection="topic_identity_reconciliations",
+        object_id="TIR-UNRELATED",
+        operation="retire",
+        before_revision=1,
+        before_sha256="unrelated-sha",
+    )
+    with pytest.raises(ChangeSetConflict, match="exactly cover planned retires"):
+        PostgresKnowledgeStore._assert_stale_pending_topic_identity_retirement(
+            _ObsoleteRetirementCursor([
+                (
+                    "topic_identity_reconciliations",
+                    "TIR-STALE",
+                    {
+                        "reconciliation_id": "TIR-STALE",
+                        "origin_batch_id": "RB-TOPIC",
+                        "claim_ids": ["CL-OLD"],
+                        "status": "pending_new",
+                        "review_status": "candidate",
+                        "visibility": "internal",
+                    },
+                ),
+                (
+                    "topic_identity_reconciliations",
+                    "TIR-UNRELATED",
+                    {
+                        "reconciliation_id": "TIR-UNRELATED",
+                        "origin_batch_id": "RB-OTHER",
+                        "claim_ids": ["CL-KEPT"],
+                        "status": "resolved",
+                        "review_status": "approved",
+                        "visibility": "public",
+                    },
+                ),
+            ]),
+            SimpleNamespace(operations=(
+                *_stale_topic_identity_plan().operations,
+                unrelated_retire,
+            )),
+            _stale_topic_identity_audit(),
+        )
+
+
+def _stale_projection_lock_audit() -> dict[str, Any]:
+    audit = {
+        "schema_version": "wang_stale_candidate_projection_retirement_v1",
+        "batch_ids": ["RB-OLD-BATCH"],
+        "reason_code": (
+            "retired_composition_projection_invalidated_by_extraction_supersession"
+        ),
+        "selection_policy": "test",
+        "status": "planned",
+        "retired_extraction_ids_sha256": sha256_json(["CL-OLD"]),
+        "summary": {
+            "knowledge_routes": 1,
+            "editorial_syntheses": 0,
+            "total": 1,
+        },
+        "records": [{
+            "collection": "knowledge_routes",
+            "object_id": "KR-STALE",
+            "batch_id": "RB-OLD-BATCH",
+            "owner_plan_id": "CP-OLD-BATCH-S-abcdef123456",
+            "expected_revision": 2,
+            "expected_content_sha256": "route-sha",
+            "stale_claim_ids": ["CL-OLD"],
+        }],
+    }
+    audit["scope_sha256"] = sha256_json(audit)
+    return audit
+
+
+def _stale_projection_lock_plan(*extra: SimpleNamespace) -> SimpleNamespace:
+    return SimpleNamespace(operations=(
+        SimpleNamespace(
+            collection="claims",
+            object_id="CL-OLD",
+            operation="retire",
+            before_revision=1,
+            before_sha256="claim-sha",
+        ),
+        SimpleNamespace(
+            collection="knowledge_routes",
+            object_id="KR-STALE",
+            operation="retire",
+            before_revision=2,
+            before_sha256="route-sha",
+        ),
+        *extra,
+    ))
+
+
+def _stale_projection_lock_rows() -> list[tuple[str, str, dict[str, Any]]]:
+    return [
+        (
+            "composition_plans",
+            "CP-OLD-BATCH-S-abcdef123456",
+            {
+                "plan_id": "CP-OLD-BATCH-S-abcdef123456",
+                "review_status": "candidate",
+                "visibility": "internal",
+            },
+        ),
+        (
+            "composition_decisions",
+            "CD-OLD",
+            {
+                "decision_id": "CD-OLD",
+                "plan_id": "CP-OLD-BATCH-S-abcdef123456",
+                "review_status": "candidate",
+                "visibility": "internal",
+            },
+        ),
+        (
+            "knowledge_routes",
+            "KR-STALE",
+            {
+                "route_id": "KR-STALE",
+                "claim_id": "CL-OLD",
+                "target_id": "CP-OLD-BATCH-S-abcdef123456",
+                "review_status": "candidate",
+                "visibility": "internal",
+            },
+        ),
+    ]
+
+
+def test_stale_projection_retirement_is_rechecked_under_apply_lock() -> None:
+    PostgresKnowledgeStore._assert_stale_candidate_projection_retirement(
+        _ObsoleteRetirementCursor(_stale_projection_lock_rows()),
+        _stale_projection_lock_plan(),
+        _stale_projection_lock_audit(),
+    )
+
+    rows = _stale_projection_lock_rows()
+    rows[0] = (
+        rows[0][0],
+        rows[0][1],
+        {**rows[0][2], "review_status": "approved"},
+    )
+    with pytest.raises(ChangeSetConflict, match="current plan authority"):
+        PostgresKnowledgeStore._assert_stale_candidate_projection_retirement(
+            _ObsoleteRetirementCursor(rows),
+            _stale_projection_lock_plan(),
+            _stale_projection_lock_audit(),
+        )
+
+    with pytest.raises(ChangeSetConflict, match="missing its audit"):
+        PostgresKnowledgeStore._assert_stale_candidate_projection_retirement(
+            _ObsoleteRetirementCursor(_stale_projection_lock_rows()),
+            _stale_projection_lock_plan(),
+            None,
+        )
+
+
+def test_stale_projection_lock_blocks_omission_external_and_arriving_refs() -> None:
+    rows = [
+        *_stale_projection_lock_rows(),
+        (
+            "knowledge_routes",
+            "KR-NEWLY-STALE",
+            {
+                "route_id": "KR-NEWLY-STALE",
+                "claim_id": "CL-OLD",
+                "target_id": "CP-OLD-BATCH-S-abcdef123456",
+                "review_status": "candidate",
+                "visibility": "internal",
+            },
+        ),
+    ]
+    with pytest.raises(ChangeSetConflict, match="omitted stale projection"):
+        PostgresKnowledgeStore._assert_stale_candidate_projection_retirement(
+            _ObsoleteRetirementCursor(rows),
+            _stale_projection_lock_plan(),
+            _stale_projection_lock_audit(),
+        )
+
+    unrelated_retire = SimpleNamespace(
+        collection="knowledge_routes",
+        object_id="KR-UNRELATED",
+        operation="retire",
+        before_revision=1,
+        before_sha256="unrelated-sha",
+    )
+    with pytest.raises(ChangeSetConflict, match="exactly cover planned retires"):
+        PostgresKnowledgeStore._assert_stale_candidate_projection_retirement(
+            _ObsoleteRetirementCursor([
+                *_stale_projection_lock_rows(),
+                (
+                    "knowledge_routes",
+                    "KR-UNRELATED",
+                    {
+                        "route_id": "KR-UNRELATED",
+                        "claim_id": "CL-KEPT",
+                        "target_id": "CP-OLD-BATCH-S-abcdef123456",
+                        "review_status": "approved",
+                        "visibility": "public",
+                    },
+                ),
+            ]),
+            _stale_projection_lock_plan(unrelated_retire),
+            _stale_projection_lock_audit(),
+        )
+
+    for collection, object_id in [
+        ("composition_plans", "CP-COLLATERAL-S-0123456789ab"),
+        ("composition_decisions", "CD-COLLATERAL"),
+    ]:
+        collateral = SimpleNamespace(
+            collection=collection,
+            object_id=object_id,
+            operation="retire",
+            before_revision=1,
+            before_sha256="collateral-sha",
+        )
+        with pytest.raises(ChangeSetConflict, match="exactly cover planned retires"):
+            PostgresKnowledgeStore._assert_stale_candidate_projection_retirement(
+                _ObsoleteRetirementCursor([
+                    *_stale_projection_lock_rows(),
+                    (
+                        collection,
+                        object_id,
+                        {
+                            "review_status": "approved",
+                            "visibility": "public",
+                        },
+                    ),
+                ]),
+                _stale_projection_lock_plan(collateral),
+                _stale_projection_lock_audit(),
+            )
+
+    rows = [
+        *_stale_projection_lock_rows(),
+        ("product_dependencies", "PD-OUTSIDE", {"route_ids": ["KR-STALE"]}),
+    ]
+    with pytest.raises(ChangeSetConflict, match="PD-OUTSIDE"):
+        PostgresKnowledgeStore._assert_stale_candidate_projection_retirement(
+            _ObsoleteRetirementCursor(rows),
+            _stale_projection_lock_plan(),
+            _stale_projection_lock_audit(),
+        )
+
+    arriving = SimpleNamespace(
+        collection="product_dependencies",
+        object_id="PD-NEW",
+        operation="create",
+        before_revision=None,
+        before_sha256=None,
+        after_revision=1,
+        payload={"dependency_id": "PD-NEW", "route_ids": ["KR-STALE"]},
+    )
+    with pytest.raises(ChangeSetConflict, match="PD-NEW"):
+        PostgresKnowledgeStore._assert_stale_candidate_projection_retirement(
+            _ObsoleteRetirementCursor(_stale_projection_lock_rows()),
+            _stale_projection_lock_plan(arriving),
+            _stale_projection_lock_audit(),
+        )
+
+
+def _stale_constraint_lock_audit(*, retired: bool = False) -> dict[str, Any]:
+    record = {
+        "collection": "claim_relation_constraints",
+        "object_id": "CRC-XSR-0123456789abcdef",
+        "expected_revision": 4,
+        "expected_content_sha256": "constraint-sha",
+        "source_id": "CL-OLD",
+        "target_id": "CL-OTHER",
+        "review_artifact_id": "XSR-0123456789abcdef",
+        "reason": "different questions",
+        "stale_claim_ids": ["CL-OLD"],
+    }
+    audit = {
+        "schema_version": "wang_stale_ai_cross_sermon_constraint_retirement_v1",
+        "constraint_ids": ["CRC-XSR-0123456789abcdef"],
+        "reason_code": "cross_sermon_judgment_invalidated_by_claim_supersession",
+        "selection_policy": "test",
+        "status": "already_retired" if retired else "planned",
+        "retired_extraction_ids_sha256": sha256_json(["CL-OLD"]),
+        "already_retired_ids": ["CRC-XSR-0123456789abcdef"] if retired else [],
+        "summary": {
+            "claim_relation_constraints": 0 if retired else 1,
+            "total": 0 if retired else 1,
+        },
+        "records": [] if retired else [record],
+    }
+    audit["scope_sha256"] = sha256_json(audit)
+    return audit
+
+
+def _stale_constraint_lock_plan(*extra: SimpleNamespace) -> SimpleNamespace:
+    return SimpleNamespace(operations=(
+        SimpleNamespace(
+            collection="claims",
+            object_id="CL-OLD",
+            operation="retire",
+            before_revision=1,
+            before_sha256="claim-sha",
+        ),
+        SimpleNamespace(
+            collection="claim_relation_constraints",
+            object_id="CRC-XSR-0123456789abcdef",
+            operation="retire",
+            before_revision=4,
+            before_sha256="constraint-sha",
+        ),
+        *extra,
+    ))
+
+
+def _stale_constraint_lock_row() -> tuple[str, str, dict[str, Any]]:
+    return (
+        "claim_relation_constraints",
+        "CRC-XSR-0123456789abcdef",
+        {
+            "constraint_id": "CRC-XSR-0123456789abcdef",
+            "source_id": "CL-OLD",
+            "target_id": "CL-OTHER",
+            "review_artifact_id": "XSR-0123456789abcdef",
+            "reason": "different questions",
+            "review_status": "ai_consensus",
+            "visibility": "internal",
+        },
+    )
+
+
+def test_stale_cross_sermon_constraint_is_rechecked_under_apply_lock() -> None:
+    PostgresKnowledgeStore._assert_stale_ai_cross_sermon_constraint_retirement(
+        _ObsoleteRetirementCursor([_stale_constraint_lock_row()]),
+        _stale_constraint_lock_plan(),
+        _stale_constraint_lock_audit(),
+    )
+
+    collection, object_id, payload = _stale_constraint_lock_row()
+    with pytest.raises(ChangeSetConflict, match="no longer the audited AI judgment"):
+        PostgresKnowledgeStore._assert_stale_ai_cross_sermon_constraint_retirement(
+            _ObsoleteRetirementCursor([
+                (collection, object_id, {**payload, "review_status": "approved"})
+            ]),
+            _stale_constraint_lock_plan(),
+            _stale_constraint_lock_audit(),
+        )
+
+    with pytest.raises(ChangeSetConflict, match="missing its audit"):
+        PostgresKnowledgeStore._assert_stale_ai_cross_sermon_constraint_retirement(
+            _ObsoleteRetirementCursor([_stale_constraint_lock_row()]),
+            _stale_constraint_lock_plan(),
+            None,
+        )
+
+
+def test_stale_constraint_lock_blocks_reappearance_refs_and_tamper() -> None:
+    PostgresKnowledgeStore._assert_stale_ai_cross_sermon_constraint_retirement(
+        _ObsoleteRetirementCursor([]),
+        SimpleNamespace(operations=(_stale_constraint_lock_plan().operations[0],)),
+        _stale_constraint_lock_audit(retired=True),
+    )
+    with pytest.raises(ChangeSetConflict, match="is current again"):
+        PostgresKnowledgeStore._assert_stale_ai_cross_sermon_constraint_retirement(
+            _ObsoleteRetirementCursor([_stale_constraint_lock_row()]),
+            SimpleNamespace(operations=(
+                _stale_constraint_lock_plan().operations[0],
+            )),
+            _stale_constraint_lock_audit(retired=True),
+        )
+
+    unrelated_retire = SimpleNamespace(
+        collection="claim_relation_constraints",
+        object_id="CRC-XSR-fedcba9876543210",
+        operation="retire",
+        before_revision=1,
+        before_sha256="unrelated-sha",
+    )
+    with pytest.raises(ChangeSetConflict, match="exactly cover planned retires"):
+        PostgresKnowledgeStore._assert_stale_ai_cross_sermon_constraint_retirement(
+            _ObsoleteRetirementCursor([_stale_constraint_lock_row()]),
+            _stale_constraint_lock_plan(unrelated_retire),
+            _stale_constraint_lock_audit(),
+        )
+
+    revive = SimpleNamespace(
+        collection="claim_relation_constraints",
+        object_id="CRC-XSR-0123456789abcdef",
+        operation="revive",
+        before_revision=4,
+        before_sha256="constraint-sha",
+        after_revision=5,
+        payload=_stale_constraint_lock_row()[2],
+    )
+    with pytest.raises(ChangeSetConflict, match="cannot create, update, or revive"):
+        PostgresKnowledgeStore._assert_stale_ai_cross_sermon_constraint_retirement(
+            _ObsoleteRetirementCursor([]),
+            SimpleNamespace(operations=(
+                _stale_constraint_lock_plan().operations[0],
+                revive,
+            )),
+            _stale_constraint_lock_audit(retired=True),
+        )
+
+    with pytest.raises(ChangeSetConflict, match="PD-OUTSIDE"):
+        PostgresKnowledgeStore._assert_stale_ai_cross_sermon_constraint_retirement(
+            _ObsoleteRetirementCursor([
+                _stale_constraint_lock_row(),
+                (
+                    "product_dependencies",
+                    "PD-OUTSIDE",
+                    {"constraint_ids": ["CRC-XSR-0123456789abcdef"]},
+                ),
+            ]),
+            _stale_constraint_lock_plan(),
+            _stale_constraint_lock_audit(),
+        )
+
+    audit = _stale_constraint_lock_audit()
+    audit["reason_code"] = "tampered"
+    with pytest.raises(ChangeSetConflict, match="governed identity"):
+        PostgresKnowledgeStore._assert_stale_ai_cross_sermon_constraint_retirement(
+            _ObsoleteRetirementCursor([_stale_constraint_lock_row()]),
+            _stale_constraint_lock_plan(),
+            audit,
         )
 
 

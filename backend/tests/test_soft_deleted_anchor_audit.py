@@ -479,8 +479,12 @@ from backend.pipeline.extraction_supersede_runner import (  # noqa: E402
     obsolete_candidate_batch_retirement,
     product_impact_keys,
     products_to_rebuild,
+    stale_ai_cross_sermon_constraint_retirement,
+    stale_candidate_projection_retirement,
     stale_pending_topic_identity_retirement,
     validate_obsolete_retirement_plan,
+    validate_stale_ai_cross_sermon_constraint_retirement_plan,
+    validate_stale_candidate_projection_retirement_plan,
     validate_stale_topic_identity_retirement_plan,
 )
 
@@ -770,6 +774,301 @@ def test_stale_topic_identity_retirement_refuses_authority_and_external_refs() -
         )
 
 
+def _retiring_claim_plan() -> SimpleNamespace:
+    return SimpleNamespace(operations=(
+        SimpleNamespace(
+            collection="claims", object_id="CL-OLD", operation="retire"
+        ),
+    ))
+
+
+def _stale_projection_rows() -> list[tuple[str, str, dict]]:
+    plan_id = "CP-OLD-BATCH-S-abcdef123456"
+    return [
+        (
+            "composition_plans",
+            plan_id,
+            {
+                "plan_id": plan_id,
+                "review_status": "candidate",
+                "visibility": "internal",
+            },
+        ),
+        (
+            "composition_decisions",
+            "CD-OLD",
+            {
+                "decision_id": "CD-OLD",
+                "plan_id": plan_id,
+                "review_status": "candidate",
+                "visibility": "internal",
+            },
+        ),
+        (
+            "knowledge_routes",
+            "KR-STALE",
+            {
+                "route_id": "KR-STALE",
+                "claim_id": "CL-OLD",
+                "target_id": plan_id,
+                "review_status": "candidate",
+                "visibility": "internal",
+                "revision": 2,
+            },
+        ),
+        (
+            "knowledge_routes",
+            "KR-UNTOUCHED",
+            {
+                "route_id": "KR-UNTOUCHED",
+                "claim_id": "CL-KEPT",
+                "target_id": plan_id,
+                "review_status": "candidate",
+                "visibility": "internal",
+                "revision": 1,
+            },
+        ),
+        (
+            "editorial_syntheses",
+            "SYN-OLD-BATCH-S-abcdef123456",
+            {
+                "synthesis_id": "SYN-OLD-BATCH-S-abcdef123456",
+                "corpus_scope": "RB-OLD-BATCH",
+                "claim_ids": ["CL-OLD", "CL-KEPT"],
+                "review_status": "candidate",
+                "visibility": "internal",
+                "revision": 3,
+            },
+        ),
+    ]
+
+
+def test_stale_projection_retirement_is_narrow_and_retires_mixed_synthesis() -> None:
+    rows = _stale_projection_rows()
+    keys, audit = stale_candidate_projection_retirement(
+        batch_ids=["RB-OLD-BATCH"],
+        change_set=_retiring_claim_plan(),
+        all_live_rows=rows,
+        known_plan_ids={"CP-OLD-BATCH-S-abcdef123456"},
+    )
+
+    assert keys == [
+        ("editorial_syntheses", "SYN-OLD-BATCH-S-abcdef123456"),
+        ("knowledge_routes", "KR-STALE"),
+    ]
+    assert ("knowledge_routes", "KR-UNTOUCHED") not in keys
+    assert audit["summary"] == {
+        "knowledge_routes": 1,
+        "editorial_syntheses": 1,
+        "total": 2,
+    }
+    synthesis = next(
+        row for row in audit["records"]
+        if row["collection"] == "editorial_syntheses"
+    )
+    assert synthesis["stale_claim_ids"] == ["CL-OLD"]
+    assert synthesis["owner_plan_id"] == "CP-OLD-BATCH-S-abcdef123456"
+    assert len(audit["scope_sha256"]) == 64
+
+
+def test_stale_projection_retirement_rejects_bad_scope_authority_and_refs() -> None:
+    rows = _stale_projection_rows()
+    with pytest.raises(ValueError, match="unknown stale projection batch"):
+        stale_candidate_projection_retirement(
+            batch_ids=["RB-TYPO"],
+            change_set=_retiring_claim_plan(),
+            all_live_rows=rows,
+            known_plan_ids={"CP-OLD-BATCH-S-abcdef123456"},
+        )
+
+    bad_scope = [
+        (
+            collection,
+            object_id,
+            {**payload, "corpus_scope": "RB-OTHER"}
+            if collection == "editorial_syntheses"
+            else payload,
+        )
+        for collection, object_id, payload in rows
+    ]
+    with pytest.raises(ValueError, match="mismatched batch ownership"):
+        stale_candidate_projection_retirement(
+            batch_ids=["RB-OLD-BATCH"],
+            change_set=_retiring_claim_plan(),
+            all_live_rows=bad_scope,
+            known_plan_ids={"CP-OLD-BATCH-S-abcdef123456"},
+        )
+
+    approved_plan = [
+        (
+            collection,
+            object_id,
+            {**payload, "review_status": "approved"}
+            if collection == "composition_plans"
+            else payload,
+        )
+        for collection, object_id, payload in rows
+    ]
+    with pytest.raises(ValueError, match="current plan authority"):
+        stale_candidate_projection_retirement(
+            batch_ids=["RB-OLD-BATCH"],
+            change_set=_retiring_claim_plan(),
+            all_live_rows=approved_plan,
+            known_plan_ids={"CP-OLD-BATCH-S-abcdef123456"},
+        )
+
+    external = [*rows, ("product_dependencies", "PD-1", {"ids": ["KR-STALE"]})]
+    with pytest.raises(ValueError, match="external references"):
+        stale_candidate_projection_retirement(
+            batch_ids=["RB-OLD-BATCH"],
+            change_set=_retiring_claim_plan(),
+            all_live_rows=external,
+            known_plan_ids={"CP-OLD-BATCH-S-abcdef123456"},
+        )
+
+
+def test_stale_projection_audit_is_bound_to_change_set_snapshot() -> None:
+    rows = _stale_projection_rows()
+    keys, audit = stale_candidate_projection_retirement(
+        batch_ids=["RB-OLD-BATCH"],
+        change_set=_retiring_claim_plan(),
+        all_live_rows=rows,
+        known_plan_ids={"CP-OLD-BATCH-S-abcdef123456"},
+    )
+    payloads = {(collection, object_id): payload for collection, object_id, payload in rows}
+    operations = [
+        SimpleNamespace(
+            collection="claims",
+            object_id="CL-OLD",
+            operation="retire",
+            before_revision=1,
+            before_sha256="claim-sha",
+        ),
+        *[
+            SimpleNamespace(
+                collection=collection,
+                object_id=object_id,
+                operation="retire",
+                before_revision=payloads[(collection, object_id)]["revision"],
+                before_sha256=record_content_sha(payloads[(collection, object_id)]),
+            )
+            for collection, object_id in keys
+        ],
+    ]
+    plan = SimpleNamespace(operations=tuple(operations))
+    validate_stale_candidate_projection_retirement_plan(plan, audit)
+    operations[-1] = SimpleNamespace(
+        **{**vars(operations[-1]), "before_revision": 99}
+    )
+    with pytest.raises(ValueError, match="revision drifted"):
+        validate_stale_candidate_projection_retirement_plan(
+            SimpleNamespace(operations=tuple(operations)), audit
+        )
+
+
+def _stale_constraint() -> dict:
+    return {
+        "constraint_id": "CRC-XSR-0123456789abcdef",
+        "source_id": "CL-OLD",
+        "target_id": "CL-OTHER",
+        "reason": "the reviewed comparison answered different questions",
+        "review_artifact_id": "XSR-0123456789abcdef",
+        "review_status": "ai_consensus",
+        "visibility": "internal",
+        "revision": 4,
+    }
+
+
+def test_stale_cross_sermon_constraint_requires_exact_ai_authority() -> None:
+    constraint = _stale_constraint()
+    rows = [("claim_relation_constraints", constraint["constraint_id"], constraint)]
+    keys, audit = stale_ai_cross_sermon_constraint_retirement(
+        constraint_ids=[constraint["constraint_id"]],
+        change_set=_retiring_claim_plan(),
+        all_live_rows=rows,
+        known_constraint_ids={constraint["constraint_id"]},
+    )
+
+    assert keys == [("claim_relation_constraints", constraint["constraint_id"])]
+    assert audit["records"][0]["source_id"] == "CL-OLD"
+    assert audit["records"][0]["target_id"] == "CL-OTHER"
+    assert audit["records"][0]["reason"] == constraint["reason"]
+    assert audit["records"][0]["stale_claim_ids"] == ["CL-OLD"]
+
+    for replacement, match in [
+        ({"review_status": "approved"}, "eligible AI judgment"),
+        ({"visibility": "public"}, "eligible AI judgment"),
+        ({"source_id": "CL-KEPT"}, "eligible AI judgment"),
+        ({"review_artifact_id": "XSR-wrong"}, "eligible AI judgment"),
+    ]:
+        with pytest.raises(ValueError, match=match):
+            stale_ai_cross_sermon_constraint_retirement(
+                constraint_ids=[constraint["constraint_id"]],
+                change_set=_retiring_claim_plan(),
+                all_live_rows=[(
+                    "claim_relation_constraints",
+                    constraint["constraint_id"],
+                    {**constraint, **replacement},
+                )],
+                known_constraint_ids={constraint["constraint_id"]},
+            )
+
+
+def test_stale_cross_sermon_constraint_rejects_unknown_and_external_refs() -> None:
+    constraint = _stale_constraint()
+    with pytest.raises(ValueError, match="unknown stale cross-sermon"):
+        stale_ai_cross_sermon_constraint_retirement(
+            constraint_ids=["CRC-XSR-fedcba9876543210"],
+            change_set=_retiring_claim_plan(),
+            all_live_rows=[],
+            known_constraint_ids={constraint["constraint_id"]},
+        )
+    with pytest.raises(ValueError, match="external references"):
+        stale_ai_cross_sermon_constraint_retirement(
+            constraint_ids=[constraint["constraint_id"]],
+            change_set=_retiring_claim_plan(),
+            all_live_rows=[
+                ("claim_relation_constraints", constraint["constraint_id"], constraint),
+                (
+                    "product_dependencies",
+                    "PD-1",
+                    {"ids": [constraint["constraint_id"]]},
+                ),
+            ],
+            known_constraint_ids={constraint["constraint_id"]},
+        )
+
+
+def test_stale_cross_sermon_constraint_audit_is_snapshot_bound() -> None:
+    constraint = _stale_constraint()
+    rows = [("claim_relation_constraints", constraint["constraint_id"], constraint)]
+    _keys, audit = stale_ai_cross_sermon_constraint_retirement(
+        constraint_ids=[constraint["constraint_id"]],
+        change_set=_retiring_claim_plan(),
+        all_live_rows=rows,
+        known_constraint_ids={constraint["constraint_id"]},
+    )
+    plan = SimpleNamespace(operations=(
+        SimpleNamespace(
+            collection="claims", object_id="CL-OLD", operation="retire"
+        ),
+        SimpleNamespace(
+            collection="claim_relation_constraints",
+            object_id=constraint["constraint_id"],
+            operation="retire",
+            before_revision=4,
+            before_sha256=record_content_sha(constraint),
+        ),
+    ))
+    validate_stale_ai_cross_sermon_constraint_retirement_plan(plan, audit)
+    drifted = SimpleNamespace(operations=(
+        plan.operations[0],
+        SimpleNamespace(**{**vars(plan.operations[1]), "before_sha256": "changed"}),
+    ))
+    with pytest.raises(ValueError, match="content drifted"):
+        validate_stale_ai_cross_sermon_constraint_retirement_plan(drifted, audit)
+
+
 def test_supersede_plan_merges_explicit_obsolete_candidate_retirements() -> None:
     from backend.pipeline.extraction_supersede_runner import plan
 
@@ -851,7 +1150,16 @@ def test_supersede_plan_merges_explicit_obsolete_candidate_retirements() -> None
             )
             return SimpleNamespace(operations=operations)
 
-    change_set, withdrawal, products, blockers, audit, stale_audit = plan(
+    (
+        change_set,
+        withdrawal,
+        products,
+        blockers,
+        audit,
+        stale_audit,
+        stale_projection_audit,
+        stale_constraint_audit,
+    ) = plan(
         Store(),
         package,
         source_kind="knowledge_package",
@@ -864,6 +1172,8 @@ def test_supersede_plan_merges_explicit_obsolete_candidate_retirements() -> None
     assert blockers == []
     assert audit["summary"]["total"] == 4
     assert stale_audit is None
+    assert stale_projection_audit is None
+    assert stale_constraint_audit is None
 
 
 def test_only_current_product_dependencies_are_reported() -> None:
@@ -973,6 +1283,8 @@ def test_full_supersede_replan_after_apply_has_zero_operations() -> None:
             semantic_blockers,
             obsolete_retirement,
             stale_topic_identity_retirement,
+            stale_projection_retirement,
+            stale_constraint_retirement,
         ) = plan(
         Store(), package, source_kind="knowledge_package"
     )
@@ -981,6 +1293,8 @@ def test_full_supersede_replan_after_apply_has_zero_operations() -> None:
     assert semantic_blockers == []
     assert obsolete_retirement is None
     assert stale_topic_identity_retirement is None
+    assert stale_projection_retirement is None
+    assert stale_constraint_retirement is None
     assert change_set.operations == ()
     assert no_op_result(change_set)["status"] == "unchanged"
 

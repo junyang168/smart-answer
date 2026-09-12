@@ -1877,6 +1877,23 @@ class PostgresKnowledgeStore:
                         "stale_pending_topic_identity_retirement"
                     ),
                 )
+                self._assert_stale_candidate_projection_retirement(
+                    cursor,
+                    plan,
+                    (metadata or {}).get(
+                        "stale_candidate_projection_retirement"
+                    ),
+                    (metadata or {}).get(
+                        "obsolete_candidate_batch_retirement"
+                    ),
+                )
+                self._assert_stale_ai_cross_sermon_constraint_retirement(
+                    cursor,
+                    plan,
+                    (metadata or {}).get(
+                        "stale_ai_cross_sermon_constraint_retirement"
+                    ),
+                )
                 self._assert_global_id_uniqueness(cursor, plan)
                 self._assert_source_identity_uniqueness(cursor, plan)
                 self._assert_edge_integrity(cursor, plan)
@@ -2585,6 +2602,28 @@ class PostgresKnowledgeStore:
         """Recheck pending topic identities invalidated by re-extraction."""
 
         if audit is None:
+            unaudited = sorted(
+                (operation.collection, operation.object_id)
+                for operation in plan.operations
+                if operation.operation == "retire"
+                and operation.collection == "topic_identity_reconciliations"
+            )
+            has_extraction_retirement = any(
+                operation.operation == "retire"
+                and (
+                    operation.collection in EXTRACTION_RECORD_COLLECTIONS
+                    or operation.collection == "source_documents"
+                )
+                for operation in plan.operations
+            )
+            if unaudited and has_extraction_retirement:
+                raise ChangeSetConflict(
+                    "stale topic identity retirement is missing its audit: "
+                    + ", ".join(
+                        f"{collection}/{object_id}"
+                        for collection, object_id in unaudited[:20]
+                    )
+                )
             return
         if (
             audit.get("schema_version")
@@ -2663,6 +2702,21 @@ class PostgresKnowledgeStore:
             (operation.collection, operation.object_id): operation
             for operation in plan.operations
         }
+        unexpected_retires = sorted(
+            key
+            for key, operation in planned.items()
+            if operation.operation == "retire"
+            and key[0] == "topic_identity_reconciliations"
+            and key not in audited
+        )
+        if unexpected_retires:
+            raise ChangeSetConflict(
+                "stale topic identity audit does not exactly cover planned retires: "
+                + ", ".join(
+                    f"{collection}/{object_id}"
+                    for collection, object_id in unexpected_retires[:20]
+                )
+            )
         for key, row in audited.items():
             operation = planned.get(key)
             if operation is None or operation.operation != "retire":
@@ -2769,6 +2823,642 @@ class PostgresKnowledgeStore:
             raise ChangeSetConflict(
                 "stale pending topic identity retirement changed after preview, "
                 "omitted an eligible row, or has current external references: "
+                + " | ".join(sorted(set(blockers))[:20])
+            )
+
+    @staticmethod
+    def _assert_stale_candidate_projection_retirement(
+        cursor: Any,
+        plan: ChangeSetPlan,
+        audit: Mapping[str, Any] | None,
+        whole_batch_audit: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Recheck the narrow old-workflow projection retirement under lock."""
+
+        if audit is None:
+            whole_batch_keys = {
+                (str(row.get("collection") or ""), str(row.get("object_id") or ""))
+                for row in (whole_batch_audit or {}).get("records") or []
+                if isinstance(row, Mapping)
+            }
+            unaudited = sorted(
+                (operation.collection, operation.object_id)
+                for operation in plan.operations
+                if operation.operation == "retire"
+                and operation.collection in OBSOLETE_CANDIDATE_RETIREMENT_COLLECTIONS
+                and (operation.collection, operation.object_id) not in whole_batch_keys
+            )
+            has_extraction_retirement = any(
+                operation.operation == "retire"
+                and (
+                    operation.collection in EXTRACTION_RECORD_COLLECTIONS
+                    or operation.collection == "source_documents"
+                )
+                for operation in plan.operations
+            )
+            if unaudited and has_extraction_retirement:
+                raise ChangeSetConflict(
+                    "stale candidate projection retirement is missing its audit: "
+                    + ", ".join(
+                        f"{collection}/{object_id}"
+                        for collection, object_id in unaudited[:20]
+                    )
+                )
+            return
+        if (
+            audit.get("schema_version")
+            != "wang_stale_candidate_projection_retirement_v1"
+            or audit.get("reason_code")
+            != "retired_composition_projection_invalidated_by_extraction_supersession"
+        ):
+            raise ChangeSetConflict(
+                "stale candidate projection audit is missing its governed identity"
+            )
+        canonical_audit = dict(audit)
+        stored_scope_sha256 = str(canonical_audit.pop("scope_sha256", ""))
+        if stored_scope_sha256 != sha256_json(canonical_audit):
+            raise ChangeSetConflict(
+                "stale candidate projection audit scope SHA does not match"
+            )
+        batch_ids = audit.get("batch_ids")
+        if (
+            not isinstance(batch_ids, list)
+            or not batch_ids
+            or batch_ids != sorted(set(map(str, batch_ids)))
+            or any(
+                not str(batch_id).startswith("RB-") or len(str(batch_id)) <= 3
+                for batch_id in batch_ids
+            )
+        ):
+            raise ChangeSetConflict(
+                "stale candidate projection audit has invalid batch ids"
+            )
+        retired_ids = {
+            operation.object_id
+            for operation in plan.operations
+            if operation.operation == "retire"
+            and (
+                operation.collection in EXTRACTION_RECORD_COLLECTIONS
+                or operation.collection == "source_documents"
+            )
+        }
+        if audit.get("retired_extraction_ids_sha256") != sha256_json(
+            sorted(retired_ids)
+        ):
+            raise ChangeSetConflict(
+                "stale candidate projection audit does not match retiring extraction ids"
+            )
+        status = str(audit.get("status") or "")
+        records = audit.get("records")
+        if status == "not_needed":
+            if records not in ([], None):
+                raise ChangeSetConflict(
+                    "not-needed candidate projection audit contains retirement records"
+                )
+            records = []
+        elif status == "planned":
+            if not isinstance(records, list) or not records:
+                raise ChangeSetConflict(
+                    "stale candidate projection audit has no records"
+                )
+        else:
+            raise ChangeSetConflict(
+                "stale candidate projection audit has an invalid status"
+            )
+
+        audited: dict[tuple[str, str], Mapping[str, Any]] = {}
+        for row in records:
+            if not isinstance(row, Mapping):
+                raise ChangeSetConflict(
+                    "stale candidate projection audit contains a malformed record"
+                )
+            key = (
+                str(row.get("collection") or ""),
+                str(row.get("object_id") or ""),
+            )
+            if (
+                key in audited
+                or key[0] not in {"knowledge_routes", "editorial_syntheses"}
+                or not key[1]
+                or str(row.get("batch_id") or "") not in batch_ids
+            ):
+                raise ChangeSetConflict(
+                    "stale candidate projection audit has a duplicate or invalid key"
+                )
+            audited[key] = row
+        expected_summary = {
+            "knowledge_routes": sum(
+                key[0] == "knowledge_routes" for key in audited
+            ),
+            "editorial_syntheses": sum(
+                key[0] == "editorial_syntheses" for key in audited
+            ),
+            "total": len(audited),
+        }
+        if audit.get("summary") != expected_summary:
+            raise ChangeSetConflict(
+                "stale candidate projection audit summary does not match its records"
+            )
+
+        planned = {
+            (operation.collection, operation.object_id): operation
+            for operation in plan.operations
+        }
+        whole_batch_keys = {
+            (str(row.get("collection") or ""), str(row.get("object_id") or ""))
+            for row in (whole_batch_audit or {}).get("records") or []
+            if isinstance(row, Mapping)
+        }
+        unexpected_retires = sorted(
+            key
+            for key, operation in planned.items()
+            if operation.operation == "retire"
+            and key[0] in OBSOLETE_CANDIDATE_RETIREMENT_COLLECTIONS
+            and key not in audited
+            and key not in whole_batch_keys
+        )
+        if unexpected_retires:
+            raise ChangeSetConflict(
+                "stale candidate projection audit does not exactly cover planned retires: "
+                + ", ".join(
+                    f"{collection}/{object_id}"
+                    for collection, object_id in unexpected_retires[:20]
+                )
+            )
+        for key, row in audited.items():
+            operation = planned.get(key)
+            if operation is None or operation.operation != "retire":
+                raise ChangeSetConflict(
+                    f"stale candidate projection omits {key[0]}/{key[1]}"
+                )
+            if (
+                operation.before_revision != row.get("expected_revision")
+                or operation.before_sha256 != row.get("expected_content_sha256")
+            ):
+                raise ChangeSetConflict(
+                    f"stale candidate projection snapshot drifted for {key[0]}/{key[1]}"
+                )
+
+        plan_patterns = {
+            batch_id: re.compile(
+                rf"^CP-{re.escape(batch_id[3:])}-[ST]-[0-9a-f]{{12}}$"
+            )
+            for batch_id in batch_ids
+        }
+        synthesis_patterns = {
+            batch_id: re.compile(
+                rf"^SYN-{re.escape(batch_id[3:])}-[ST]-[0-9a-f]{{12}}$"
+            )
+            for batch_id in batch_ids
+        }
+
+        def projection_owner(
+            collection: str, object_id: str, payload: Mapping[str, Any]
+        ) -> tuple[str, str, list[str]] | None:
+            if collection == "knowledge_routes":
+                claim_id = str(payload.get("claim_id") or "")
+                stale_claim_ids = [claim_id] if claim_id in retired_ids else []
+                owner_plan_id = str(payload.get("target_id") or "")
+                matches = [
+                    batch_id
+                    for batch_id, pattern in plan_patterns.items()
+                    if pattern.fullmatch(owner_plan_id)
+                ]
+            elif collection == "editorial_syntheses":
+                stale_claim_ids = sorted(
+                    set(map(str, payload.get("claim_ids") or [])) & retired_ids
+                )
+                matches = [
+                    batch_id
+                    for batch_id, pattern in synthesis_patterns.items()
+                    if pattern.fullmatch(object_id)
+                    and str(payload.get("corpus_scope") or "") == batch_id
+                ]
+                owner_plan_id = (
+                    f"CP{object_id[3:]}" if object_id.startswith("SYN-") else ""
+                )
+            else:
+                return None
+            if not stale_claim_ids:
+                return None
+            if len(matches) != 1:
+                raise ChangeSetConflict(
+                    "stale candidate projection has ambiguous or mismatched ownership: "
+                    f"{collection}/{object_id}"
+                )
+            return matches[0], owner_plan_id, stale_claim_ids
+
+        def strings(value: Any) -> set[str]:
+            if isinstance(value, Mapping):
+                found = {str(key) for key in value if isinstance(key, str)}
+                for child in value.values():
+                    found.update(strings(child))
+                return found
+            if isinstance(value, (list, tuple, set)):
+                found: set[str] = set()
+                for child in value:
+                    found.update(strings(child))
+                return found
+            return {value} if isinstance(value, str) else set()
+
+        cursor.execute(
+            """SELECT collection, object_id, payload
+               FROM wang_knowledge.objects
+               WHERE retired_at IS NULL FOR UPDATE"""
+        )
+        current_rows = [
+            (str(collection), str(object_id), payload)
+            for collection, object_id, payload in cursor.fetchall()
+        ]
+        current_by_key = {
+            (collection, object_id): payload
+            for collection, object_id, payload in current_rows
+        }
+        cursor.execute(
+            """SELECT object_id, payload FROM wang_knowledge.objects
+               WHERE collection='composition_plans' FOR UPDATE"""
+        )
+        historical_plans = {
+            str(object_id): payload for object_id, payload in cursor.fetchall()
+        }
+        seen_current: set[tuple[str, str]] = set()
+        blockers: list[str] = []
+        effective_rows: dict[tuple[str, str], Mapping[str, Any]] = {}
+        for collection, object_id, current_payload in current_rows:
+            key = (collection, object_id)
+            operation = planned.get(key)
+            owned = projection_owner(collection, object_id, current_payload)
+            if key in audited:
+                seen_current.add(key)
+                expected = audited[key]
+                if (
+                    owned is None
+                    or owned[0] != str(expected.get("batch_id") or "")
+                    or owned[1] != str(expected.get("owner_plan_id") or "")
+                    or owned[2]
+                    != sorted(map(str, expected.get("stale_claim_ids") or []))
+                    or str(current_payload.get("review_status") or "") != "candidate"
+                    or str(current_payload.get("visibility") or "") != "internal"
+                ):
+                    blockers.append(
+                        f"{collection}/{object_id} is no longer the audited candidate projection"
+                    )
+            elif owned is not None and (
+                operation is None or operation.operation != "retire"
+            ):
+                prefix = "planned " if operation is not None else ""
+                blockers.append(
+                    f"{prefix}{collection}/{object_id} is an omitted stale projection"
+                )
+            elif owned is not None and operation is not None:
+                blockers.append(
+                    f"{collection}/{object_id} is retired without projection audit"
+                )
+            if operation is None:
+                effective_rows[key] = current_payload
+            elif operation.operation != "retire":
+                effective_rows[key] = stored_operation_payload(operation)
+        for key, operation in planned.items():
+            if key in current_by_key or operation.operation == "retire":
+                continue
+            payload = stored_operation_payload(operation)
+            effective_rows[key] = payload
+            if projection_owner(key[0], key[1], payload) is not None:
+                blockers.append(
+                    f"planned {key[0]}/{key[1]} is an omitted stale projection"
+                )
+        blockers.extend(
+            f"{collection}/{object_id} is no longer current"
+            for collection, object_id in sorted(set(audited) - seen_current)
+        )
+
+        final_plans = {
+            object_id: payload
+            for (collection, object_id), payload in effective_rows.items()
+            if collection == "composition_plans"
+        }
+        final_decisions: dict[str, list[tuple[str, Mapping[str, Any]]]] = {}
+        for (collection, object_id), payload in effective_rows.items():
+            if collection == "composition_decisions":
+                final_decisions.setdefault(
+                    str(payload.get("plan_id") or ""), []
+                ).append((object_id, payload))
+        for row in audited.values():
+            owner_plan_id = str(row.get("owner_plan_id") or "")
+            historical_plan = historical_plans.get(owner_plan_id)
+            if (
+                historical_plan is None
+                or str(historical_plan.get("plan_id") or "") != owner_plan_id
+            ):
+                blockers.append(
+                    f"composition_plans/{owner_plan_id} lacks historical ownership proof"
+                )
+            current_plan = final_plans.get(owner_plan_id)
+            if current_plan is not None and (
+                str(current_plan.get("review_status") or "") != "candidate"
+                or str(current_plan.get("visibility") or "") != "internal"
+            ):
+                blockers.append(
+                    f"composition_plans/{owner_plan_id} is current plan authority"
+                )
+            blockers.extend(
+                f"composition_decisions/{decision_id} is current decision authority"
+                for decision_id, decision in final_decisions.get(owner_plan_id, [])
+                if str(decision.get("review_status") or "") != "candidate"
+                or str(decision.get("visibility") or "") != "internal"
+            )
+
+        audited_ids = {object_id for _collection, object_id in audited}
+        for key, payload in effective_rows.items():
+            referenced = strings(payload) & audited_ids
+            if referenced:
+                blockers.append(
+                    f"{key[0]}/{key[1]} -> {','.join(sorted(referenced))}"
+                )
+        if blockers:
+            raise ChangeSetConflict(
+                "stale candidate projection retirement changed after preview, "
+                "omitted an eligible row, reached current authority, or has current "
+                "external references: "
+                + " | ".join(sorted(set(blockers))[:20])
+            )
+
+    @staticmethod
+    def _assert_stale_ai_cross_sermon_constraint_retirement(
+        cursor: Any,
+        plan: ChangeSetPlan,
+        audit: Mapping[str, Any] | None,
+    ) -> None:
+        """Recheck exact stale AI constraints without retargeting judgments."""
+
+        if audit is None:
+            unaudited = sorted(
+                (operation.collection, operation.object_id)
+                for operation in plan.operations
+                if operation.operation == "retire"
+                and operation.collection == "claim_relation_constraints"
+            )
+            has_extraction_retirement = any(
+                operation.operation == "retire"
+                and (
+                    operation.collection in EXTRACTION_RECORD_COLLECTIONS
+                    or operation.collection == "source_documents"
+                )
+                for operation in plan.operations
+            )
+            if unaudited and has_extraction_retirement:
+                raise ChangeSetConflict(
+                    "stale cross-sermon constraint retirement is missing its audit: "
+                    + ", ".join(
+                        f"{collection}/{object_id}"
+                        for collection, object_id in unaudited[:20]
+                    )
+                )
+            return
+        if (
+            audit.get("schema_version")
+            != "wang_stale_ai_cross_sermon_constraint_retirement_v1"
+            or audit.get("reason_code")
+            != "cross_sermon_judgment_invalidated_by_claim_supersession"
+        ):
+            raise ChangeSetConflict(
+                "stale cross-sermon constraint audit is missing its governed identity"
+            )
+        canonical_audit = dict(audit)
+        stored_scope_sha256 = str(canonical_audit.pop("scope_sha256", ""))
+        if stored_scope_sha256 != sha256_json(canonical_audit):
+            raise ChangeSetConflict(
+                "stale cross-sermon constraint audit scope SHA does not match"
+            )
+        constraint_ids = audit.get("constraint_ids")
+        if (
+            not isinstance(constraint_ids, list)
+            or not constraint_ids
+            or constraint_ids != sorted(set(map(str, constraint_ids)))
+            or any(
+                re.fullmatch(r"CRC-XSR-[0-9a-f]{16}", str(value)) is None
+                for value in constraint_ids
+            )
+        ):
+            raise ChangeSetConflict(
+                "stale cross-sermon constraint audit has invalid constraint ids"
+            )
+        retired_ids = {
+            operation.object_id
+            for operation in plan.operations
+            if operation.operation == "retire"
+            and (
+                operation.collection in EXTRACTION_RECORD_COLLECTIONS
+                or operation.collection == "source_documents"
+            )
+        }
+        if audit.get("retired_extraction_ids_sha256") != sha256_json(
+            sorted(retired_ids)
+        ):
+            raise ChangeSetConflict(
+                "stale cross-sermon constraint audit does not match retiring extraction ids"
+            )
+        records = audit.get("records")
+        if not isinstance(records, list):
+            raise ChangeSetConflict(
+                "stale cross-sermon constraint audit records are malformed"
+            )
+        already_retired_ids = audit.get("already_retired_ids")
+        if (
+            not isinstance(already_retired_ids, list)
+            or already_retired_ids != sorted(set(map(str, already_retired_ids)))
+        ):
+            raise ChangeSetConflict(
+                "stale cross-sermon constraint audit has invalid retired ids"
+            )
+        if set(already_retired_ids) | {
+            str(row.get("object_id") or "")
+            for row in records
+            if isinstance(row, Mapping)
+        } != set(constraint_ids):
+            raise ChangeSetConflict(
+                "stale cross-sermon constraint audit does not cover its exact ids"
+            )
+        expected_status = "planned" if records else "already_retired"
+        if audit.get("status") != expected_status:
+            raise ChangeSetConflict(
+                "stale cross-sermon constraint audit has an invalid status"
+            )
+
+        audited: dict[tuple[str, str], Mapping[str, Any]] = {}
+        for row in records:
+            if not isinstance(row, Mapping):
+                raise ChangeSetConflict(
+                    "stale cross-sermon constraint audit contains a malformed record"
+                )
+            key = (
+                str(row.get("collection") or ""),
+                str(row.get("object_id") or ""),
+            )
+            if (
+                key in audited
+                or key[0] != "claim_relation_constraints"
+                or key[1] not in constraint_ids
+            ):
+                raise ChangeSetConflict(
+                    "stale cross-sermon constraint audit has a duplicate or invalid key"
+                )
+            audited[key] = row
+        expected_summary = {
+            "claim_relation_constraints": len(audited),
+            "total": len(audited),
+        }
+        if audit.get("summary") != expected_summary:
+            raise ChangeSetConflict(
+                "stale cross-sermon constraint audit summary does not match records"
+            )
+
+        planned = {
+            (operation.collection, operation.object_id): operation
+            for operation in plan.operations
+        }
+        unexpected_retires = sorted(
+            key
+            for key, operation in planned.items()
+            if operation.operation == "retire"
+            and key[0] == "claim_relation_constraints"
+            and key not in audited
+        )
+        if unexpected_retires:
+            raise ChangeSetConflict(
+                "stale cross-sermon constraint audit does not exactly cover planned retires: "
+                + ", ".join(
+                    f"{collection}/{object_id}"
+                    for collection, object_id in unexpected_retires[:20]
+                )
+            )
+        governed_ids = set(map(str, constraint_ids))
+        governed_non_retires = sorted(
+            key
+            for key, operation in planned.items()
+            if key[0] == "claim_relation_constraints"
+            and key[1] in governed_ids
+            and operation.operation != "retire"
+        )
+        if governed_non_retires:
+            raise ChangeSetConflict(
+                "stale cross-sermon constraint audit cannot create, update, or revive "
+                "a governed id: "
+                + ", ".join(
+                    f"{collection}/{object_id}"
+                    for collection, object_id in governed_non_retires[:20]
+                )
+            )
+        for key, row in audited.items():
+            operation = planned.get(key)
+            if operation is None or operation.operation != "retire":
+                raise ChangeSetConflict(
+                    f"stale cross-sermon constraint omits {key[0]}/{key[1]}"
+                )
+            if (
+                operation.before_revision != row.get("expected_revision")
+                or operation.before_sha256 != row.get("expected_content_sha256")
+            ):
+                raise ChangeSetConflict(
+                    f"stale cross-sermon constraint snapshot drifted for {key[0]}/{key[1]}"
+                )
+
+        def strings(value: Any) -> set[str]:
+            if isinstance(value, Mapping):
+                found = {str(key) for key in value if isinstance(key, str)}
+                for child in value.values():
+                    found.update(strings(child))
+                return found
+            if isinstance(value, (list, tuple, set)):
+                found: set[str] = set()
+                for child in value:
+                    found.update(strings(child))
+                return found
+            return {value} if isinstance(value, str) else set()
+
+        cursor.execute(
+            """SELECT collection, object_id, payload
+               FROM wang_knowledge.objects
+               WHERE retired_at IS NULL FOR UPDATE"""
+        )
+        current_rows = [
+            (str(collection), str(object_id), payload)
+            for collection, object_id, payload in cursor.fetchall()
+        ]
+        current_by_key = {
+            (collection, object_id): payload
+            for collection, object_id, payload in current_rows
+        }
+        blockers: list[str] = []
+        seen: set[tuple[str, str]] = set()
+        effective_rows: dict[tuple[str, str], Mapping[str, Any]] = {}
+        for collection, object_id, current_payload in current_rows:
+            key = (collection, object_id)
+            operation = planned.get(key)
+            if object_id in constraint_ids and collection == "claim_relation_constraints":
+                if object_id in already_retired_ids:
+                    blockers.append(
+                        f"claim_relation_constraints/{object_id} is current again"
+                    )
+                row = audited.get(key)
+                if row is None:
+                    blockers.append(
+                        f"claim_relation_constraints/{object_id} is omitted from audit"
+                    )
+                else:
+                    seen.add(key)
+                    stale_claim_ids = sorted(
+                        {
+                            str(current_payload.get("source_id") or ""),
+                            str(current_payload.get("target_id") or ""),
+                        }
+                        & retired_ids
+                    )
+                    if (
+                        not stale_claim_ids
+                        or stale_claim_ids
+                        != sorted(map(str, row.get("stale_claim_ids") or []))
+                        or str(current_payload.get("constraint_id") or "") != object_id
+                        or str(current_payload.get("review_artifact_id") or "")
+                        != object_id.removeprefix("CRC-")
+                        or str(row.get("review_artifact_id") or "")
+                        != object_id.removeprefix("CRC-")
+                        or str(current_payload.get("source_id") or "")
+                        != str(row.get("source_id") or "")
+                        or str(current_payload.get("target_id") or "")
+                        != str(row.get("target_id") or "")
+                        or str(current_payload.get("reason") or "")
+                        != str(row.get("reason") or "")
+                        or str(current_payload.get("review_status") or "")
+                        != "ai_consensus"
+                        or str(current_payload.get("visibility") or "") != "internal"
+                    ):
+                        blockers.append(
+                            f"claim_relation_constraints/{object_id} is no longer the audited AI judgment"
+                        )
+            if operation is None:
+                effective_rows[key] = current_payload
+            elif operation.operation != "retire":
+                effective_rows[key] = stored_operation_payload(operation)
+        for key, operation in planned.items():
+            if key in current_by_key or operation.operation == "retire":
+                continue
+            effective_rows[key] = stored_operation_payload(operation)
+        blockers.extend(
+            f"{collection}/{object_id} is no longer current"
+            for collection, object_id in sorted(set(audited) - seen)
+        )
+        audited_ids = governed_ids
+        for key, payload in effective_rows.items():
+            referenced = strings(payload) & audited_ids
+            if referenced:
+                blockers.append(
+                    f"{key[0]}/{key[1]} -> {','.join(sorted(referenced))}"
+                )
+        if blockers:
+            raise ChangeSetConflict(
+                "stale cross-sermon constraint retirement changed after preview, "
+                "lost exact authority, or has current external references: "
                 + " | ".join(sorted(set(blockers))[:20])
             )
 
