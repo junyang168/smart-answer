@@ -13,5 +13,6 @@
 7. structural_notes 只解释拆分等后续结构影响；它不能代替可执行补丁。
 8. 忠实度仲裁与篇章／产品编排分层：除非 Claude 的 issue_type 明确包含 route_error，否则 route_type 必须输出 unchanged。不得仅因你偏好释经、专题或方法研究而改变路由。
 9. 使用最小修正原则。若问题仅在 relation，不得为了保留错误 relation 而扩写 claim；应直接在 excluded_claim_relation_ids 中删除该 relation。若问题仅在 anchor，不得顺带扩大 statement。
+10. 输入会为每条待仲裁 claim 给出 `valid_anchor_indexes`。`source_anchor_indexes` 与 `excluded_anchor_indexes` 只能使用该列表中的 ordinal；不得根据 raw package、完整逐字稿、其他 artifact 或锚点数量印象自行延长索引范围。
 
 `scope_confirmation` 必须是 `source_fidelity_only_no_theological_critique`。只输出符合 schema 的 JSON。
