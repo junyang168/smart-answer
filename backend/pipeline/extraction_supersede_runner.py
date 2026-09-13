@@ -1349,6 +1349,22 @@ def main(argv: list[str] | None = None) -> int:
             args.retire_stale_ai_cross_sermon_constraint
         ),
     )
+    claim_evidence_guard = (
+        store.read_claim_evidence_reciprocity_guard(change_set)
+        if change_set.operations
+        else None
+    )
+    claim_evidence_snapshot = (
+        {
+            "guard_sha256": claim_evidence_guard["guard_sha256"],
+            "snapshot_sha256": claim_evidence_guard[
+                "expected_active_snapshot"
+            ]["snapshot_sha256"],
+            "counts": claim_evidence_guard["expected_active_snapshot"]["counts"],
+        }
+        if claim_evidence_guard is not None
+        else None
+    )
     output: dict[str, Any] = {
         "package": str(args.package),
         "sources": sorted(package_source_ids(package)),
@@ -1369,6 +1385,7 @@ def main(argv: list[str] | None = None) -> int:
         "products_to_rebuild": products,
         "semantic_rebind_required": bool(semantic_blockers),
         "semantic_references_to_rebind": semantic_blockers,
+        "current_claim_evidence_snapshot": claim_evidence_snapshot,
     }
     if obsolete_retirement is not None:
         output["obsolete_candidate_batch_retirement"] = obsolete_retirement
@@ -1433,7 +1450,9 @@ def main(argv: list[str] | None = None) -> int:
                     "stale_ai_cross_sermon_constraint_retirement": (
                         stale_cross_sermon_constraint_retirement
                     ),
+                    "current_claim_evidence_snapshot": claim_evidence_snapshot,
                 },
+                expected_claim_evidence_guard=claim_evidence_guard,
             )
             record.quality({
                 "status": (output["result"] or {}).get("status"),
@@ -1453,6 +1472,7 @@ def main(argv: list[str] | None = None) -> int:
                 "stale_ai_cross_sermon_constraint_retirement": (
                     stale_cross_sermon_constraint_retirement
                 ),
+                "current_claim_evidence_snapshot": claim_evidence_snapshot,
             })
             record.outputs(args.package)
     print(json.dumps(output, ensure_ascii=False, indent=2))

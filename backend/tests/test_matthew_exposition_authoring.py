@@ -104,6 +104,122 @@ def test_authoring_transcript_slice_removes_visual_from_professor_speech(
     assert "<svg" not in str(slices)
 
 
+def test_authoring_transcript_slice_accepts_exact_legacy_published_source(
+    tmp_path: Path,
+) -> None:
+    payload = {
+        "script": [
+            {"index": "subtitle-1", "type": "subtitle", "text": "## 编辑标题"},
+            {"index": 10, "text": "教授的原话。"},
+        ]
+    }
+    raw = json.dumps(payload, ensure_ascii=False)
+    source_path = tmp_path / "published.json"
+    source_path.write_text(raw, encoding="utf-8")
+    source = {
+        "source_id": "SRC-LEGACY-PUBLISHED",
+        "source_type": "sermon_transcript",
+        "source_path": str(source_path),
+        "source_sha256": sha256_text(raw),
+    }
+
+    slices = _sermon_transcript_slices(
+        source_documents=[source],
+        scoped_fragments=[
+            {"source_id": source["source_id"], "source_segment_index": 10}
+        ],
+        sources_manifest={},
+    )
+
+    assert slices == {source["source_id"]: {"10": "教授的原话。"}}
+    assert "编辑标题" not in str(slices)
+
+
+@pytest.mark.parametrize("declared_sha", [None, "0" * 64])
+def test_authoring_transcript_slice_requires_exact_legacy_source_sha(
+    tmp_path: Path,
+    declared_sha: str | None,
+) -> None:
+    payload = {"script": [{"index": 10, "text": "教授的原话。"}]}
+    raw = json.dumps(payload, ensure_ascii=False)
+    source_path = tmp_path / "published.json"
+    source_path.write_text(raw, encoding="utf-8")
+    source = {
+        "source_id": "SRC-LEGACY",
+        "source_type": "sermon_transcript",
+        "source_path": str(source_path),
+    }
+    if declared_sha is not None:
+        source["source_sha256"] = declared_sha
+
+    with pytest.raises(AuthoringContractError):
+        _sermon_transcript_slices(
+            source_documents=[source],
+            scoped_fragments=[
+                {"source_id": source["source_id"], "source_segment_index": 10}
+            ],
+            sources_manifest={},
+        )
+
+
+def test_authoring_transcript_slice_rejects_duplicate_referenced_index(
+    tmp_path: Path,
+) -> None:
+    payload = {
+        "script": [
+            {"index": 10, "text": "第一段。"},
+            {"index": 10, "text": "第二段。"},
+        ]
+    }
+    raw = json.dumps(payload, ensure_ascii=False)
+    source_path = tmp_path / "published.json"
+    source_path.write_text(raw, encoding="utf-8")
+    source = {
+        "source_id": "SRC-DUPLICATE",
+        "source_type": "sermon_transcript",
+        "source_path": str(source_path),
+        "source_sha256": sha256_text(raw),
+    }
+
+    with pytest.raises(AuthoringContractError, match="duplicate referenced"):
+        _sermon_transcript_slices(
+            source_documents=[source],
+            scoped_fragments=[
+                {"source_id": source["source_id"], "source_segment_index": 10}
+            ],
+            sources_manifest={},
+        )
+
+
+def test_authoring_transcript_slice_rejects_review_when_published_exists(
+    tmp_path: Path,
+) -> None:
+    review_dir = tmp_path / "script_review"
+    published_dir = tmp_path / "script_published"
+    review_dir.mkdir()
+    published_dir.mkdir()
+    payload = {"script": [{"index": 10, "text": "教授的原话。"}]}
+    raw = json.dumps(payload, ensure_ascii=False)
+    review_path = review_dir / "SERMON.json"
+    review_path.write_text(raw, encoding="utf-8")
+    (published_dir / review_path.name).write_text(raw, encoding="utf-8")
+    source = {
+        "source_id": "SRC-REVIEW",
+        "source_type": "sermon_transcript",
+        "source_path": str(review_path),
+        "source_sha256": sha256_text(raw),
+    }
+
+    with pytest.raises(AuthoringContractError, match="published version"):
+        _sermon_transcript_slices(
+            source_documents=[source],
+            scoped_fragments=[
+                {"source_id": source["source_id"], "source_segment_index": 10}
+            ],
+            sources_manifest={},
+        )
+
+
 def test_visual_authoring_rule_is_conditional() -> None:
     prompt = "base prompt"
     ordinary = {"knowledge": {"source_fragments": []}}

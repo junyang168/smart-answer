@@ -12,6 +12,8 @@ ACTIVE_RELEASE_FILE="$DEPLOY_ROOT/active-release"
 LEGACY_RELEASE="${SMART_ANSWER_LEGACY_ROOT:-/opt/homebrew/var/www/smart-answer}"
 WEB_RUNTIME_DATA_DIR="${SMART_ANSWER_WEB_DATA_DIR:-$LEGACY_RELEASE/web/data}"
 BACKEND_PLIST="${SMART_ANSWER_BACKEND_PLIST:-$HOME/Library/LaunchAgents/com.smart_answer.fullarticleservice.plist}"
+FELLOWSHIP_REMINDER_PLIST="${SMART_ANSWER_FELLOWSHIP_REMINDER_PLIST:-$HOME/Library/LaunchAgents/com.smart_answer.fellowshipreminder.plist}"
+PLIST_BUDDY="${SMART_ANSWER_PLIST_BUDDY:-/usr/libexec/PlistBuddy}"
 BACKEND_HEALTH="${SMART_ANSWER_BACKEND_HEALTH:-http://127.0.0.1:8555/healthz}"
 FRONTEND_HEALTH="${SMART_ANSWER_FRONTEND_HEALTH:-http://127.0.0.1:3000/}"
 PM2_APP="${SMART_ANSWER_PM2_APP:-smart-answer}"
@@ -107,15 +109,106 @@ assert_backend_release() {
 
 set_backend_release() {
   local release="$1"
-  /usr/libexec/PlistBuddy -c "Set :ProgramArguments:0 $release/backend/.venv/bin/python3" "$BACKEND_PLIST" \
+  "$PLIST_BUDDY" -c "Set :ProgramArguments:0 $release/backend/.venv/bin/python3" "$BACKEND_PLIST" \
     || return 1
-  /usr/libexec/PlistBuddy -c "Set :WorkingDirectory $release" "$BACKEND_PLIST" \
+  "$PLIST_BUDDY" -c "Set :WorkingDirectory $release" "$BACKEND_PLIST" \
+    || return 1
+}
+
+set_fellowship_reminder_release() {
+  local release="$1"
+  "$PLIST_BUDDY" -c "Set :ProgramArguments:0 $release/backend/.venv/bin/python3" "$FELLOWSHIP_REMINDER_PLIST" \
+    || return 1
+  "$PLIST_BUDDY" -c "Set :ProgramArguments:1 $release/backend/fellowship_reminder_job.py" "$FELLOWSHIP_REMINDER_PLIST" \
+    || return 1
+  "$PLIST_BUDDY" -c "Set :WorkingDirectory $release" "$FELLOWSHIP_REMINDER_PLIST" \
     || return 1
 }
 
 restart_backend() {
   launchctl unload "$BACKEND_PLIST" 2>/dev/null || true
   launchctl load "$BACKEND_PLIST"
+}
+
+restart_fellowship_reminder() {
+  launchctl unload "$FELLOWSHIP_REMINDER_PLIST" 2>/dev/null || true
+  launchctl load "$FELLOWSHIP_REMINDER_PLIST"
+}
+
+assert_fellowship_reminder_release() {
+  local release="$1" expected_python expected_script configured_python configured_script configured_workdir
+  local label loaded
+  expected_python="$release/backend/.venv/bin/python3"
+  expected_script="$release/backend/fellowship_reminder_job.py"
+
+  configured_python="$("$PLIST_BUDDY" -c 'Print :ProgramArguments:0' "$FELLOWSHIP_REMINDER_PLIST")" \
+    || return 1
+  configured_script="$("$PLIST_BUDDY" -c 'Print :ProgramArguments:1' "$FELLOWSHIP_REMINDER_PLIST")" \
+    || return 1
+  configured_workdir="$("$PLIST_BUDDY" -c 'Print :WorkingDirectory' "$FELLOWSHIP_REMINDER_PLIST")" \
+    || return 1
+
+  [[ "$configured_python" == "$expected_python" ]] || {
+    printf 'deploy: fellowship reminder interpreter is %s, expected %s\n' \
+      "$configured_python" "$expected_python" >&2
+    return 1
+  }
+  [[ "$configured_script" == "$expected_script" ]] || {
+    printf 'deploy: fellowship reminder script is %s, expected %s\n' \
+      "$configured_script" "$expected_script" >&2
+    return 1
+  }
+  [[ "$configured_workdir" == "$release" ]] || {
+    printf 'deploy: fellowship reminder working directory is %s, expected %s\n' \
+      "$configured_workdir" "$release" >&2
+    return 1
+  }
+
+  label="$("$PLIST_BUDDY" -c 'Print :Label' "$FELLOWSHIP_REMINDER_PLIST")" \
+    || return 1
+  loaded="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null)" || {
+    printf 'deploy: fellowship reminder LaunchAgent is not loaded: %s\n' "$label" >&2
+    return 1
+  }
+  [[ "$loaded" == *"program = $expected_python"* ]] || {
+    printf 'deploy: loaded fellowship reminder does not use %s\n' "$expected_python" >&2
+    return 1
+  }
+  [[ "$loaded" == *"$expected_script"* ]] || {
+    printf 'deploy: loaded fellowship reminder does not use %s\n' "$expected_script" >&2
+    return 1
+  }
+  [[ "$loaded" == *"working directory = $release"* ]] || {
+    printf 'deploy: loaded fellowship reminder does not use working directory %s\n' "$release" >&2
+    return 1
+  }
+  log "Fellowship reminder is bound to $(basename "$release")"
+}
+
+activate_fellowship_reminder() {
+  local release="$1"
+  set_fellowship_reminder_release "$release" || return 1
+  restart_fellowship_reminder || return 1
+  assert_fellowship_reminder_release "$release" || return 1
+}
+
+validate_fellowship_reminder_plist() {
+  local key
+  for key in \
+    :Label \
+    :ProgramArguments:0 \
+    :ProgramArguments:1 \
+    :WorkingDirectory \
+    :StartCalendarInterval:Hour \
+    :StartCalendarInterval:Minute
+  do
+    "$PLIST_BUDDY" -c "Print $key" "$FELLOWSHIP_REMINDER_PLIST" >/dev/null \
+      || {
+        printf 'deploy: fellowship reminder LaunchAgent is missing required key %s: %s\n' \
+          "$key" "$FELLOWSHIP_REMINDER_PLIST" >&2
+        return 1
+      }
+  done
 }
 
 restart_frontend() {
@@ -126,6 +219,15 @@ restart_frontend() {
   pm2 delete "$PM2_APP" 2>/dev/null || true
   SMART_ANSWER_WEB_ROOT="$release/web" SMART_ANSWER_PM2_APP="$PM2_APP" \
     pm2 start "$PM2_CONFIG" --only "$PM2_APP" --update-env
+}
+
+verify_and_persist_frontend() {
+  wait_for_health frontend "$FRONTEND_HEALTH" || return 1
+  if ! pm2 save; then
+    printf 'deploy: failed to save PM2 process list\n' >&2
+    return 1
+  fi
+  log "PM2 resurrection state saved"
 }
 
 link_web_runtime_data() {
@@ -191,6 +293,10 @@ switch_services() {
     printf 'deploy: frontend build missing in %s\n' "$release" >&2
     return 1
   }
+  [[ -f "$release/backend/fellowship_reminder_job.py" ]] || {
+    printf 'deploy: fellowship reminder job missing in %s\n' "$release" >&2
+    return 1
+  }
   link_web_runtime_data "$release" || return 1
 
   set_backend_release "$release" || return 1
@@ -198,8 +304,10 @@ switch_services() {
   wait_for_health backend "$BACKEND_HEALTH" || return 1
   assert_backend_release "$(basename "$release")" || return 1
 
+  activate_fellowship_reminder "$release" || return 1
+
   restart_frontend "$release" || return 1
-  wait_for_health frontend "$FRONTEND_HEALTH" || return 1
+  verify_and_persist_frontend || return 1
 }
 
 rollback() {
@@ -262,8 +370,12 @@ resolve_python() {
   return 1
 }
 
-[[ -x /usr/libexec/PlistBuddy ]] || fail "PlistBuddy is unavailable"
+[[ -x "$PLIST_BUDDY" ]] || fail "PlistBuddy is unavailable: $PLIST_BUDDY"
 [[ -f "$BACKEND_PLIST" ]] || fail "backend LaunchAgent not found: $BACKEND_PLIST"
+[[ -f "$FELLOWSHIP_REMINDER_PLIST" ]] \
+  || fail "fellowship reminder LaunchAgent not found: $FELLOWSHIP_REMINDER_PLIST"
+validate_fellowship_reminder_plist \
+  || fail "fellowship reminder LaunchAgent is incomplete"
 [[ -f "$PM2_CONFIG" ]] || fail "PM2 config not found: $PM2_CONFIG"
 
 log "Fetching Git refs"
@@ -301,6 +413,7 @@ printf '   python:           %s (%s)\n' "$REQUIRED_PYTHON" "$PYTHON_BIN"
 printf '   web runtime data: %s\n' "$WEB_RUNTIME_DATA_DIR"
 printf '   backend health:   %s\n' "$BACKEND_HEALTH"
 printf '   frontend health:  %s\n' "$FRONTEND_HEALTH"
+printf '   reminder agent:   %s\n' "$FELLOWSHIP_REMINDER_PLIST"
 
 if [[ "$DRY_RUN" == true ]]; then
   log "Dry run complete; production was not changed"
@@ -311,6 +424,7 @@ fi
 # private to the deployment account until those secrets move to a keychain or
 # dedicated secret manager.
 chmod 600 "$BACKEND_PLIST"
+chmod 600 "$FELLOWSHIP_REMINDER_PLIST"
 
 mkdir -p "$RELEASES_DIR"
 
@@ -395,9 +509,10 @@ else
 fi
 
 if [[ "$PREVIOUS_RELEASE" == "$RELEASE_DIR" ]]; then
-  log "Commit is already active; verifying health only"
+  log "Commit is already active; reconciling the fellowship reminder and verifying health"
+  activate_fellowship_reminder "$RELEASE_DIR"
   wait_for_health backend "$BACKEND_HEALTH"
-  wait_for_health frontend "$FRONTEND_HEALTH"
+  verify_and_persist_frontend
   exit 0
 fi
 

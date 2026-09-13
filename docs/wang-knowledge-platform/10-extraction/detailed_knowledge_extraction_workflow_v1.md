@@ -181,6 +181,8 @@ Consensus override 若新增、移除或迁移 source fragment，reviewed candid
 
 数据库 ChangeSet 的 identity 还必须绑定 planning 时每项 operation 的 before/after SHA 与 revision。只按 package fingerprint 判断“已经执行过”是不够的：同一 package 在数据库后来发生合法变化后再次执行，必须产生针对新 before-state 的计划，不能误报 `already_applied`。精确重跑若计划为零 operation，则在打开数据库连接、run ledger 或 artifact writer 前直接返回 `unchanged`。
 
+暂停后恢复 source supersession 时，来源 SHA 绑定的逐 section 模型 cache 可以复用，但暂停前生成的 extraction、review、adjudication 或 reviewed-candidate artifact 不能作为当前生产数据库快照。每次 preview 都必须重新读取 PostgreSQL 中完整的 active Claim/Evidence 互反图；普通来源重跑不得用旧 package 改写现有 `Claim.evidence_step_ids` 或 `EvidenceStep.produced_claim_ids`，这类绑定变化必须来自新近、明确授权的 Claim/Evidence 裁决。preview 须在当前快照上模拟最终图并证明互反、无悬空、无重复；apply 还须在全局写锁内重新校验同一快照，任何漂移都必须回滚并重新规划。
+
 ## 五、双模型复审与最小修正规则
 
 Claude 必须重新阅读完整来源，并逐条检查说话者、立场、锚点、限定、遗漏和关系。Claude 的工作不是评论教授的神学是否正确。

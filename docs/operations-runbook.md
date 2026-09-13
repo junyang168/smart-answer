@@ -74,15 +74,25 @@ need its own deploy.
 7. Blocks on any critical finding from `npm audit --omit=dev`
 8. Restarts the backend LaunchAgent, waits for health, **asserts the backend
    reports the commit just deployed**
-9. Recreates the pm2 app, waits for frontend health
-10. On any failure in 8–9, rolls back to the previous release automatically
-11. Writes `.deploy-complete`, `active-release`, and a line in `deployments.log`
+9. Rebinds and reloads the fellowship-reminder LaunchAgent, then verifies its
+   interpreter, script and working directory all belong to the same release
+10. Recreates the pm2 app, waits for frontend health, then saves the verified
+    release binding for PM2 resurrection after a host reboot
+11. On any failure in 8–10, rolls back every release-bound service to the
+    previous release automatically and saves that verified rollback binding
+12. Writes `.deploy-complete`, `active-release`, and a line in `deployments.log`
 
 `.deploy-complete` means *this release has served healthy traffic*, not *the
 build finished*. A release that builds and then fails its health check is
 rebuilt on the next attempt rather than reused. It used to be written after the
 build, which meant a broken release was cached as complete and retrying could
 never recover it.
+
+PM2 resurrection state is written only after the frontend health check passes.
+A save failure fails the service switch and triggers rollback rather than
+leaving a deployment that works until the next reboot. Deploying an already
+active, healthy commit also refreshes the saved state without restarting the
+frontend.
 
 ### Wang article publication identity
 
@@ -163,6 +173,7 @@ that way. `.github/pull_request_template.md` carries the rule.
 |---|---|---|---|
 | 8555 | FastAPI backend, `backend.api.main:app` | LaunchAgent `com.smart_answer.fullarticleservice` | no |
 | 3000 | Next.js frontend | pm2 app `smart-answer` | yes, via nginx 443/80 |
+| — | Fellowship email reminder, daily schedule check at 10:00 | LaunchAgent `com.smartanswer.fellowshipreminder` | no |
 | 3003 | Next.js, older build | not in any deploy path (#78) | via nginx 8888 |
 | 8000 | legacy backend | processes dating from 2026-07-13 | `/sc_api/`, `/public`, `/static` |
 | 60000 | legacy QA service | LaunchAgent `smart_answer.service` | `/get_answer` |
@@ -178,6 +189,38 @@ local machine.
 use`, and the cycle writes roughly 8 MB of stderr a day. It had reached 283 MB.
 The service itself answers. Do not "fix" it by killing whatever holds port
 60000 without reading #76 first.
+
+### Fellowship reminder
+
+The fellowship reminder is a separate LaunchAgent, not part of the FastAPI
+process. Its plist is
+`~/Library/LaunchAgents/com.smart_answer.fellowshipreminder.plist`, while its
+label is `com.smartanswer.fellowshipreminder`. The plist retains the production
+mail environment and schedule, but all three code-owned paths must be rebound
+on every release switch:
+
+- `ProgramArguments[0]` → `<release>/backend/.venv/bin/python3`
+- `ProgramArguments[1]` → `<release>/backend/fellowship_reminder_job.py`
+- `WorkingDirectory` → `<release>`
+
+Only `scripts/deploy.sh` should perform that rebinding. It unloads and reloads
+the reminder without forcing a run, then checks the loaded LaunchAgent rather
+than trusting the plist on disk. A missing plist, missing script or loaded-path
+mismatch fails the deployment; rollback binds the reminder back to the previous
+release along with the web services.
+
+Inspect it without exposing its environment variables:
+
+```bash
+plist="$HOME/Library/LaunchAgents/com.smart_answer.fellowshipreminder.plist"
+/usr/libexec/PlistBuddy -c 'Print :ProgramArguments' "$plist"
+/usr/libexec/PlistBuddy -c 'Print :WorkingDirectory' "$plist"
+launchctl print "gui/$(id -u)/com.smartanswer.fellowshipreminder" \
+  | sed -n '/^[[:space:]]*program = /p;/^[[:space:]]*working directory = /p'
+```
+
+Do not run the reminder with `--force` while diagnosing: that sends mail. The
+normal deploy path never passes `--force` and never invokes the reminder job.
 
 ---
 

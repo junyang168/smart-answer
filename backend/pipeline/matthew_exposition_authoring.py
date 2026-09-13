@@ -13,7 +13,6 @@ from backend.api.canonical_repository.viewpoint_runtime_projection import (
     ViewpointKnowledgeProjection,
 )
 from backend.pipeline.source_projection import (
-    assert_locator_space_compatible,
     project_script,
     source_uses_body_locator_space,
 )
@@ -1840,6 +1839,16 @@ def _sermon_transcript_slices(
     for source_id, indices in referenced_indices.items():
         document = documents_by_id[source_id]
         transcript_path = Path(document["source_path"])
+        if transcript_path.parent.name == "script_review":
+            published_path = (
+                transcript_path.parent.parent
+                / "script_published"
+                / transcript_path.name
+            )
+            if published_path.is_file():
+                raise AuthoringContractError(
+                    f"non-authoritative review source has a published version: {source_id}"
+                )
         raw_transcript = transcript_path.read_text(encoding="utf-8")
         actual_file_sha256 = sha256_text(raw_transcript)
         transcript = json.loads(raw_transcript)
@@ -1849,28 +1858,43 @@ def _sermon_transcript_slices(
             segments = transcript
         else:
             segments = transcript.get("script") or transcript.get("segments") or []
-        try:
-            assert_locator_space_compatible(document, segments)
-        except ValueError as exc:
-            raise AuthoringContractError(f"ambiguous source locators: {source_id}: {exc}") from exc
         projection = project_script(segments)
         uses_body_coordinates = source_uses_body_locator_space(document)
-        expected_sha256 = document.get("source_sha256")
-        if uses_body_coordinates:
-            expected_sha256 = document.get("source_body_sha256")
+        identity_field = (
+            "source_body_sha256" if uses_body_coordinates else "source_sha256"
+        )
+        expected_sha256 = str(document.get(identity_field) or "").strip()
+        if not expected_sha256:
+            raise AuthoringContractError(
+                f"sermon transcript source is missing {identity_field}: {source_id}"
+            )
         actual_sha256 = (
             projection.body_sha256
             if uses_body_coordinates
             else actual_file_sha256
         )
-        if expected_sha256 and expected_sha256 != actual_sha256:
+        if expected_sha256 != actual_sha256:
             raise AuthoringContractError(
                 f"stale sermon transcript source: {source_id}"
             )
         # Editorial subtitles/comments are co-located in the JSON but are not
         # professor speech and therefore cannot enter an authoring packet.
+        # This reader resolves the source's stable, original row ``index`` via
+        # ``source_segment_index``; it never interprets legacy Sxxxx locators.
+        # A legacy descriptor is therefore safe here only under its exact
+        # published-file SHA, while new descriptors use the body projection SHA.
         segments = list(projection.spoken_rows)
-        segments_by_index = {segment.get("index"): segment for segment in segments}
+        segments_by_index: dict[Any, dict[str, Any]] = {}
+        for segment in segments:
+            segment_index = segment.get("index")
+            if segment_index not in indices:
+                continue
+            if segment_index in segments_by_index:
+                raise AuthoringContractError(
+                    f"duplicate referenced sermon segment index: "
+                    f"{source_id}#{segment_index}"
+                )
+            segments_by_index[segment_index] = segment
 
         segment_texts: dict[str, str] = {}
         for segment_index in sorted(indices):

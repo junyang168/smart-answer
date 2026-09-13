@@ -211,6 +211,71 @@ SOURCE_KEYS = {
     "viewpoint_quality_reports": "viewpoint_quality_reports",
 }
 
+CLAIM_EVIDENCE_COLLECTIONS = ("claims", "evidence_steps")
+CLAIM_EVIDENCE_ACTIVE_SNAPSHOT_SCHEMA_VERSION = (
+    "wang_claim_evidence_active_snapshot_v1"
+)
+CLAIM_EVIDENCE_RECIPROCITY_GUARD_SCHEMA_VERSION = (
+    "wang_claim_evidence_reciprocity_store_guard_v1"
+)
+PRODUCT_DEPENDENCY_ACTIVE_SNAPSHOT_SCHEMA_VERSION = (
+    "wang_product_dependency_active_snapshot_v1"
+)
+REVIEW_EVENT_LEDGER_SNAPSHOT_SCHEMA_VERSION = (
+    "wang_review_event_ledger_snapshot_v1"
+)
+CLAIM_EVIDENCE_FREEZE_BINDING_SCHEMA_VERSION = (
+    "wang_claim_evidence_reciprocity_freeze_binding_v1"
+)
+SOURCE_LINEAGE_IDENTITY_SNAPSHOT_SCHEMA_VERSION = (
+    "wang_source_lineage_identity_snapshot_v1"
+)
+CLAIM_EVIDENCE_RECIPROCITY_REPAIR_SOURCE_KIND = (
+    "wkp364_claim_evidence_reciprocity_repair"
+)
+CLAIM_EVIDENCE_PAIR_ADJUDICATION_SOURCE_KIND = (
+    "wkp364_claim_evidence_pair_adjudication"
+)
+CLAIM_EVIDENCE_REPAIR_SOURCE_KINDS = frozenset(
+    {
+        CLAIM_EVIDENCE_RECIPROCITY_REPAIR_SOURCE_KIND,
+        CLAIM_EVIDENCE_PAIR_ADJUDICATION_SOURCE_KIND,
+    }
+)
+CLAIM_EVIDENCE_RECIPROCITY_REPAIR_METADATA_KEY = (
+    "claim_evidence_reciprocity_repair"
+)
+CLAIM_EVIDENCE_SOURCE_REPLAY_SOURCE_KIND = (
+    "wkp364_claim_evidence_source_replay"
+)
+CLAIM_EVIDENCE_SOURCE_RERUN_SOURCE_KIND = (
+    "wkp364_claim_evidence_source_rerun"
+)
+CLAIM_EVIDENCE_SOURCE_QUEUE_SOURCE_KINDS = frozenset(
+    {
+        CLAIM_EVIDENCE_SOURCE_REPLAY_SOURCE_KIND,
+        CLAIM_EVIDENCE_SOURCE_RERUN_SOURCE_KIND,
+    }
+)
+CLAIM_EVIDENCE_SOURCE_QUEUE_METADATA_KEY = (
+    "claim_evidence_reciprocity_source_queue"
+)
+CLAIM_EVIDENCE_HUMAN_AUTHORITY_SNAPSHOT_SCHEMA_VERSION = (
+    "wang_claim_evidence_reciprocity_human_authority_snapshot_v1"
+)
+POSTGRES_APPLY_ADVISORY_LOCK_KEY = "wang_knowledge.apply_plan.v1"
+CLAIM_EVIDENCE_BACKUP_VERIFICATION_SCHEMA_VERSION = (
+    "wang_claim_evidence_reciprocity_backup_verification_v1"
+)
+CLAIM_EVIDENCE_BACKUP_REQUIRED_TABLES = (
+    "change_operations",
+    "change_sets",
+    "object_versions",
+    "objects",
+    "review_events",
+)
+_CLAIM_EVIDENCE_SOURCE_QUEUE_APPLY_TOKEN = object()
+
 
 class PostgresKnowledgeStoreError(RuntimeError):
     pass
@@ -245,6 +310,1184 @@ def record_content_sha(payload: Mapping[str, Any]) -> str:
     semantic = dict(payload)
     semantic.pop("revision", None)
     return sha256_json(semantic)
+
+
+def _sealed_artifact(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the canonical artifact seal used by the #364 queue artifacts."""
+
+    result = json.loads(canonical_json(payload))
+    result.pop("artifact_sha256", None)
+    result["artifact_sha256"] = sha256_json(result)
+    return result
+
+
+def _required_sha256(value: Any, *, label: str) -> str:
+    digest = str(value or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise PostgresKnowledgeStoreError(
+            f"{label} must be a lowercase SHA-256 digest"
+        )
+    return digest
+
+
+def _source_document_row_key(payload: Mapping[str, Any]) -> str:
+    """Mirror the canonical source-row identity without importing pipeline code."""
+
+    source_type = str(payload.get("source_type") or "").strip()
+    transcript_id = str(payload.get("transcript_id") or "").strip()
+    source_id = str(payload.get("source_id") or "").strip()
+    project_id = str(payload.get("project_id") or "").strip()
+    notes_prefix = "notes_manuscript:"
+    is_notes = (
+        source_type == "notes_manuscript"
+        or transcript_id.startswith(notes_prefix)
+        or source_id.startswith(notes_prefix)
+    )
+    if is_notes:
+        candidate = project_id or transcript_id or source_id
+        return (
+            candidate[len(notes_prefix) :].strip()
+            if candidate.startswith(notes_prefix)
+            else candidate
+        )
+    return transcript_id or source_id
+
+
+def _normalize_claim_evidence_source_generations(
+    rows: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    if isinstance(rows, (str, bytes)) or not isinstance(rows, Sequence) or not rows:
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence source work requires exact SourceDocument generations"
+        )
+    result: dict[tuple[str, str], dict[str, Any]] = {}
+    for index, row in enumerate(rows):
+        if not isinstance(row, Mapping):
+            raise PostgresKnowledgeStoreError(
+                f"SourceDocument generation {index} must be an object"
+            )
+        source_type = str(row.get("source_type") or "").strip()
+        row_key = str(row.get("row_key") or "").strip()
+        object_id = str(row.get("active_source_document_id") or "").strip()
+        namespace = str(row.get("extraction_record_namespace") or "").strip()
+        try:
+            revision = int(row.get("expected_revision"))
+        except (TypeError, ValueError) as exc:
+            raise PostgresKnowledgeStoreError(
+                f"SourceDocument generation {source_type}/{row_key} has invalid revision"
+            ) from exc
+        normalized = {
+            "source_type": source_type,
+            "row_key": row_key,
+            "active_source_document_id": object_id,
+            "expected_revision": revision,
+            "expected_content_sha256": _required_sha256(
+                row.get("expected_content_sha256"),
+                label=f"SourceDocument generation {source_type}/{row_key} content SHA",
+            ),
+            "source_body_sha256": _required_sha256(
+                row.get("source_body_sha256"),
+                label=f"SourceDocument generation {source_type}/{row_key} body SHA",
+            ),
+            "extraction_record_namespace": namespace,
+        }
+        if not source_type or not row_key or not object_id or not namespace or revision < 1:
+            raise PostgresKnowledgeStoreError(
+                f"SourceDocument generation {source_type or '<missing>'}/"
+                f"{row_key or '<missing>'} is incomplete"
+            )
+        key = (source_type, row_key)
+        if key in result:
+            raise PostgresKnowledgeStoreError(
+                f"SourceDocument generation repeats {source_type}/{row_key}"
+            )
+        result[key] = normalized
+    return [result[key] for key in sorted(result)]
+
+
+def _active_claim_evidence_source_generations(
+    rows: Sequence[Mapping[str, Any] | Sequence[Any]],
+) -> dict[tuple[str, str], dict[str, Any]]:
+    result: dict[tuple[str, str], dict[str, Any]] = {}
+    physical_ids: set[str] = set()
+    for raw in rows:
+        if isinstance(raw, Mapping):
+            object_id = str(raw.get("object_id") or "")
+            revision_value = raw.get("revision")
+            content_sha = str(raw.get("content_sha256") or "")
+            payload = raw.get("payload")
+        else:
+            try:
+                object_id, revision_value, content_sha, payload = raw[:4]
+            except (TypeError, ValueError) as exc:
+                raise PostgresKnowledgeStoreError(
+                    "SourceDocument rows require object_id, revision, content SHA and payload"
+                ) from exc
+            object_id = str(object_id or "")
+            content_sha = str(content_sha or "")
+        try:
+            revision = int(revision_value)
+        except (TypeError, ValueError) as exc:
+            raise PostgresKnowledgeStoreError(
+                f"SourceDocument {object_id or '<missing>'} has invalid revision"
+            ) from exc
+        if (
+            not object_id
+            or object_id in physical_ids
+            or revision < 1
+            or not isinstance(payload, Mapping)
+            or record_content_sha(payload) != content_sha
+            or str(payload.get("source_id") or "") != object_id
+        ):
+            raise PostgresKnowledgeStoreError(
+                f"SourceDocument {object_id or '<missing>'} physical identity or SHA is invalid"
+            )
+        source_type = str(payload.get("source_type") or "").strip()
+        row_key = _source_document_row_key(payload)
+        source_body_sha = str(
+            payload.get("source_body_sha256")
+            or payload.get("source_sha256")
+            or ""
+        )
+        namespace = str(payload.get("extraction_record_namespace") or "").strip()
+        _required_sha256(
+            source_body_sha,
+            label=f"SourceDocument {object_id} source body SHA",
+        )
+        if not source_type or not row_key or not namespace:
+            raise PostgresKnowledgeStoreError(
+                f"SourceDocument {object_id} semantic generation is incomplete"
+            )
+        key = (source_type, row_key)
+        if key in result:
+            raise PostgresKnowledgeStoreError(
+                f"Active SourceDocument generation repeats {source_type}/{row_key}"
+            )
+        physical_ids.add(object_id)
+        result[key] = {
+            "source_type": source_type,
+            "row_key": row_key,
+            "active_source_document_id": object_id,
+            "expected_revision": revision,
+            "expected_content_sha256": content_sha,
+            "source_body_sha256": source_body_sha,
+            "extraction_record_namespace": namespace,
+        }
+    return result
+
+
+def _claim_evidence_row(
+    row: Mapping[str, Any] | Sequence[Any],
+) -> tuple[str, str, int, str, dict[str, Any]]:
+    """Normalize one active Claim/Evidence database row for snapshotting."""
+
+    if isinstance(row, Mapping):
+        collection = str(row.get("collection") or "")
+        object_id = str(row.get("object_id") or "")
+        revision = row.get("revision")
+        content_sha256 = str(row.get("content_sha256") or "")
+        payload = row.get("payload")
+    else:
+        try:
+            collection, object_id, revision, content_sha256, payload = row
+        except (TypeError, ValueError) as exc:
+            raise PostgresKnowledgeStoreError(
+                "Claim/Evidence snapshot rows require collection, object_id, "
+                "revision, content_sha256 and payload"
+            ) from exc
+        collection = str(collection)
+        object_id = str(object_id)
+        content_sha256 = str(content_sha256)
+    if collection not in CLAIM_EVIDENCE_COLLECTIONS:
+        raise PostgresKnowledgeStoreError(
+            f"Claim/Evidence snapshot contains unsupported collection {collection!r}"
+        )
+    if not object_id or not isinstance(payload, Mapping):
+        raise PostgresKnowledgeStoreError(
+            f"Claim/Evidence snapshot row is incomplete: {collection}/{object_id or '<missing>'}"
+        )
+    try:
+        normalized_revision = int(revision)
+    except (TypeError, ValueError) as exc:
+        raise PostgresKnowledgeStoreError(
+            f"Claim/Evidence snapshot has invalid revision: {collection}/{object_id}"
+        ) from exc
+    if normalized_revision <= 0:
+        raise PostgresKnowledgeStoreError(
+            f"Claim/Evidence snapshot has invalid revision: {collection}/{object_id}"
+        )
+    normalized_payload = dict(payload)
+    # The row column is the CAS authority. A retire/revive advances that column
+    # while deliberately leaving the semantic payload untouched, so an active
+    # revived legacy row can still carry its prior payload revision.
+    expected_id_field = "claim_id" if collection == "claims" else "evidence_step_id"
+    if str(normalized_payload.get(expected_id_field) or "") != object_id:
+        raise PostgresKnowledgeStoreError(
+            f"Claim/Evidence snapshot object ID differs from payload: "
+            f"{collection}/{object_id}"
+        )
+    observed_sha = record_content_sha(normalized_payload)
+    if content_sha256 != observed_sha:
+        raise PostgresKnowledgeStoreError(
+            f"Claim/Evidence snapshot content SHA differs from payload: "
+            f"{collection}/{object_id}"
+        )
+    return (
+        collection,
+        object_id,
+        normalized_revision,
+        content_sha256,
+        normalized_payload,
+    )
+
+
+def build_claim_evidence_active_snapshot(
+    rows: Iterable[Mapping[str, Any] | Sequence[Any]],
+) -> dict[str, Any]:
+    """Seal the complete active Claim/Evidence row and pair state.
+
+    The record root detects an added, removed or revised row even when that row
+    is not in a repair plan.  The pair-state root separately binds both stored
+    projections, including dangling and repeated references, so a bad legacy
+    snapshot can be described exactly before a repair simulates its final state.
+    """
+
+    normalized: dict[tuple[str, str], tuple[int, str, dict[str, Any]]] = {}
+    for raw_row in rows:
+        collection, object_id, revision, content_sha256, payload = (
+            _claim_evidence_row(raw_row)
+        )
+        key = (collection, object_id)
+        if key in normalized:
+            raise PostgresKnowledgeStoreError(
+                f"Claim/Evidence snapshot repeats active row {collection}/{object_id}"
+            )
+        normalized[key] = (revision, content_sha256, payload)
+
+    claim_ids = {
+        object_id for collection, object_id in normalized if collection == "claims"
+    }
+    evidence_ids = {
+        object_id
+        for collection, object_id in normalized
+        if collection == "evidence_steps"
+    }
+    claim_pairs: set[tuple[str, str]] = set()
+    evidence_pairs: set[tuple[str, str]] = set()
+    duplicate_references: list[dict[str, Any]] = []
+
+    def references(
+        *, collection: str, object_id: str, payload: Mapping[str, Any], field: str
+    ) -> list[str]:
+        raw_values = payload.get(field) or []
+        if not isinstance(raw_values, (list, tuple)):
+            raise PostgresKnowledgeStoreError(
+                f"{collection}/{object_id}: {field} must be an array"
+            )
+        values = [str(value) for value in raw_values]
+        if any(not value for value in values):
+            raise PostgresKnowledgeStoreError(
+                f"{collection}/{object_id}: {field} contains an empty ID"
+            )
+        counts: dict[str, int] = {}
+        for value in values:
+            counts[value] = counts.get(value, 0) + 1
+        duplicate_references.extend(
+            {
+                "collection": collection,
+                "object_id": object_id,
+                "field": field,
+                "referenced_id": value,
+                "occurrences": count,
+            }
+            for value, count in sorted(counts.items())
+            if count > 1
+        )
+        return values
+
+    for (collection, object_id), (_revision, _content_sha256, payload) in sorted(
+        normalized.items()
+    ):
+        if collection == "claims":
+            claim_pairs.update(
+                (object_id, evidence_id)
+                for evidence_id in references(
+                    collection=collection,
+                    object_id=object_id,
+                    payload=payload,
+                    field="evidence_step_ids",
+                )
+            )
+        else:
+            evidence_pairs.update(
+                (claim_id, object_id)
+                for claim_id in references(
+                    collection=collection,
+                    object_id=object_id,
+                    payload=payload,
+                    field="produced_claim_ids",
+                )
+            )
+
+    dangling_claim_refs = sorted(
+        pair for pair in claim_pairs if pair[1] not in evidence_ids
+    )
+    dangling_evidence_refs = sorted(
+        pair for pair in evidence_pairs if pair[0] not in claim_ids
+    )
+    claim_only = claim_pairs - evidence_pairs
+    evidence_only = evidence_pairs - claim_pairs
+    pair_state = {
+        "claim_evidence_pairs": [list(pair) for pair in sorted(claim_pairs)],
+        "evidence_claim_pairs": [list(pair) for pair in sorted(evidence_pairs)],
+        "duplicate_references": duplicate_references,
+        "dangling_claim_evidence_refs": [
+            list(pair) for pair in dangling_claim_refs
+        ],
+        "dangling_evidence_claim_refs": [
+            list(pair) for pair in dangling_evidence_refs
+        ],
+    }
+    record_rows = [
+        {
+            "collection": collection,
+            "object_id": object_id,
+            "revision": revision,
+            "content_sha256": content_sha256,
+        }
+        for (collection, object_id), (revision, content_sha256, _payload)
+        in sorted(normalized.items())
+    ]
+    snapshot = {
+        "schema_version": CLAIM_EVIDENCE_ACTIVE_SNAPSHOT_SCHEMA_VERSION,
+        "records": record_rows,
+        "records_sha256": sha256_json(record_rows),
+        "pair_state_sha256": sha256_json(pair_state),
+        "counts": {
+            "active_claims": len(claim_ids),
+            "active_evidence_steps": len(evidence_ids),
+            "claim_evidence_pairs": len(claim_pairs),
+            "evidence_claim_pairs": len(evidence_pairs),
+            "reciprocal_pairs": len(claim_pairs & evidence_pairs),
+            "claim_only_pairs": len(claim_only),
+            "evidence_only_pairs": len(evidence_only),
+            "duplicate_array_references": sum(
+                int(item["occurrences"]) - 1 for item in duplicate_references
+            ),
+            "dangling_claim_evidence_refs": len(dangling_claim_refs),
+            "dangling_evidence_claim_refs": len(dangling_evidence_refs),
+            "dangling_endpoints": len(dangling_claim_refs)
+            + len(dangling_evidence_refs),
+        },
+    }
+    snapshot["snapshot_sha256"] = sha256_json(snapshot)
+    return snapshot
+
+
+def build_product_dependency_active_snapshot(
+    rows: Iterable[Mapping[str, Any] | Sequence[Any]],
+) -> dict[str, Any]:
+    """Seal every active ProductDependency identity and semantic payload SHA."""
+
+    records: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in rows:
+        if isinstance(raw, Mapping):
+            object_id = str(raw.get("object_id") or raw.get("dependency_id") or "")
+            revision = raw.get("revision")
+            content_sha256 = str(raw.get("content_sha256") or "")
+            payload = raw.get("payload")
+        else:
+            try:
+                object_id, revision, content_sha256, payload = raw
+            except (TypeError, ValueError) as exc:
+                raise PostgresKnowledgeStoreError(
+                    "ProductDependency snapshot rows require object_id, revision, "
+                    "content_sha256 and payload"
+                ) from exc
+            object_id = str(object_id)
+            content_sha256 = str(content_sha256)
+        if not object_id or object_id in seen or not isinstance(payload, Mapping):
+            raise PostgresKnowledgeStoreError(
+                f"ProductDependency snapshot has missing or repeated row {object_id!r}"
+            )
+        try:
+            normalized_revision = int(revision)
+        except (TypeError, ValueError) as exc:
+            raise PostgresKnowledgeStoreError(
+                f"ProductDependency {object_id} has invalid revision"
+            ) from exc
+        if (
+            normalized_revision <= 0
+            or record_content_sha(payload) != content_sha256
+        ):
+            raise PostgresKnowledgeStoreError(
+                f"ProductDependency {object_id} revision or content SHA is invalid"
+            )
+        seen.add(object_id)
+        records.append(
+            {
+                "object_id": object_id,
+                "revision": normalized_revision,
+                "content_sha256": content_sha256,
+            }
+        )
+    records.sort(key=lambda row: row["object_id"])
+    snapshot = {
+        "schema_version": PRODUCT_DEPENDENCY_ACTIVE_SNAPSHOT_SCHEMA_VERSION,
+        "records": records,
+        "records_sha256": sha256_json(records),
+    }
+    snapshot["snapshot_sha256"] = sha256_json(snapshot)
+    return snapshot
+
+
+def _canonical_review_event_rows(
+    rows: Iterable[Mapping[str, Any] | Sequence[Any]],
+) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in rows:
+        if isinstance(raw, Mapping):
+            values = (
+                raw.get("review_event_id"),
+                raw.get("collection"),
+                raw.get("object_id"),
+                raw.get("object_revision"),
+                raw.get("reviewer_kind"),
+                raw.get("reviewer_id"),
+                raw.get("decision"),
+                raw.get("reason"),
+                raw.get("artifact"),
+                raw.get("created_at"),
+            )
+        else:
+            try:
+                values = tuple(raw[:10])
+            except (TypeError, ValueError) as exc:
+                raise PostgresKnowledgeStoreError(
+                    "Review-event ledger rows require the complete semantic row"
+                ) from exc
+            if len(values) != 10:
+                raise PostgresKnowledgeStoreError(
+                    "Review-event ledger rows require the complete semantic row"
+                )
+        event_id = str(values[0] or "")
+        collection = str(values[1] or "")
+        object_id = str(values[2] or "")
+        try:
+            revision = int(values[3])
+        except (TypeError, ValueError) as exc:
+            raise PostgresKnowledgeStoreError(
+                f"Review event {event_id or '<missing>'} has invalid revision"
+            ) from exc
+        artifact = values[8]
+        created_at_value = values[9]
+        try:
+            if isinstance(created_at_value, datetime):
+                created_at = created_at_value
+            else:
+                created_at = datetime.fromisoformat(
+                    str(created_at_value or "").replace("Z", "+00:00")
+                )
+            if created_at.tzinfo is None:
+                raise ValueError("timestamp lacks timezone")
+            created_at_text = created_at.astimezone(timezone.utc).isoformat()
+        except (TypeError, ValueError) as exc:
+            raise PostgresKnowledgeStoreError(
+                f"Review event {event_id or '<missing>'} has invalid created_at"
+            ) from exc
+        if (
+            not event_id
+            or event_id in seen
+            or not collection
+            or not object_id
+            or revision <= 0
+            or not str(values[4] or "")
+            or not str(values[5] or "")
+            or not str(values[6] or "")
+            or not isinstance(artifact, Mapping)
+        ):
+            raise PostgresKnowledgeStoreError(
+                f"Review-event ledger has an invalid or repeated row {event_id!r}"
+            )
+        seen.add(event_id)
+        normalized.append(
+            {
+                "review_event_id": event_id,
+                "collection": collection,
+                "object_id": object_id,
+                "object_revision": revision,
+                "reviewer_kind": str(values[4]),
+                "reviewer_id": str(values[5]),
+                "decision": str(values[6]),
+                "reason": str(values[7] or ""),
+                "artifact": dict(artifact),
+                "created_at": created_at_text,
+            }
+        )
+    normalized.sort(key=lambda row: row["review_event_id"])
+    return normalized
+
+
+def build_review_event_ledger_snapshot(
+    rows: Iterable[Mapping[str, Any] | Sequence[Any]],
+) -> dict[str, Any]:
+    """Seal every review-event ledger row without exporting the row payloads.
+
+    Review events are append-only authority.  Binding only their count permits
+    an in-place replacement to preserve the denominator while changing who
+    authorized a current Claim, so the repair guard carries this semantic root
+    as well as the count.
+    """
+
+    normalized = _canonical_review_event_rows(rows)
+    snapshot = {
+        "schema_version": REVIEW_EVENT_LEDGER_SNAPSHOT_SCHEMA_VERSION,
+        "count": len(normalized),
+        "rows_sha256": sha256_json(normalized),
+    }
+    snapshot["snapshot_sha256"] = sha256_json(snapshot)
+    return snapshot
+
+
+def _validate_review_event_ledger_snapshot(snapshot: Mapping[str, Any]) -> None:
+    if snapshot.get("schema_version") != REVIEW_EVENT_LEDGER_SNAPSHOT_SCHEMA_VERSION:
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence guard has an unsupported review-event ledger snapshot"
+        )
+    count = snapshot.get("count")
+    if (
+        not isinstance(count, int)
+        or count < 0
+        or not re.fullmatch(r"[0-9a-f]{64}", str(snapshot.get("rows_sha256") or ""))
+    ):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence guard has an invalid review-event ledger root or count"
+        )
+    sealed = dict(snapshot)
+    observed_seal = str(sealed.pop("snapshot_sha256", ""))
+    if observed_seal != sha256_json(sealed):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence guard review-event ledger snapshot seal is invalid"
+        )
+
+
+def _build_claim_evidence_human_authority_snapshot(
+    head_rows: Sequence[Sequence[Any]],
+    review_rows: Sequence[Sequence[Any]],
+    human_proof_rows: Sequence[Sequence[Any]],
+) -> dict[str, Any]:
+    """Seal every Claim/Evidence head and every ledger-proven human ruling.
+
+    A bare ``superseded`` status is intentionally not authority: the live
+    corpus contains AI-superseded Claims.  Human protection exists only when a
+    review event is tied to the exact ObjectVersion and applied review-decision
+    ChangeSet that produced the reviewed semantic payload.  That also lets a
+    later retire/revive head retain its historical human protection without
+    pretending its retirement ChangeSet was a review decision.
+    """
+
+    review_events = _canonical_review_event_rows(review_rows)
+    review_by_id = {row["review_event_id"]: row for row in review_events}
+    events_by_key: dict[tuple[str, str, int], list[dict[str, Any]]] = {}
+    for event in review_events:
+        events_by_key.setdefault(
+            (
+                event["collection"],
+                event["object_id"],
+                int(event["object_revision"]),
+            ),
+            [],
+        ).append(event)
+
+    proof_by_key: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    seen_proof_events: set[str] = set()
+    for raw in human_proof_rows:
+        if len(raw) != 16:
+            raise PostgresKnowledgeStoreError(
+                "Human authority proof rows require the complete event/version ledger"
+            )
+        (
+            event_id,
+            collection,
+            object_id,
+            event_revision,
+            reviewer_kind,
+            decision,
+            artifact,
+            version_revision,
+            version_sha,
+            version_payload,
+            producer_change_set_id,
+            producer_status,
+            producer_source_kind,
+            producer_operation,
+            producer_after_revision,
+            producer_after_sha,
+        ) = raw
+        event_id = str(event_id or "")
+        collection = str(collection or "")
+        object_id = str(object_id or "")
+        if event_id in seen_proof_events:
+            raise PostgresKnowledgeStoreError(
+                f"Human authority proof repeats review event {event_id!r}"
+            )
+        seen_proof_events.add(event_id)
+        event = review_by_id.get(event_id)
+        try:
+            normalized_event_revision = int(event_revision)
+            normalized_version_revision = int(version_revision)
+            normalized_after_revision = int(producer_after_revision)
+        except (TypeError, ValueError):
+            normalized_event_revision = normalized_version_revision = 0
+            normalized_after_revision = 0
+        normalized_artifact = dict(artifact) if isinstance(artifact, Mapping) else {}
+        normalized_version_payload = (
+            dict(version_payload) if isinstance(version_payload, Mapping) else {}
+        )
+        proof = {
+            "review_event_id": event_id,
+            "collection": collection,
+            "object_id": object_id,
+            "object_revision": normalized_event_revision,
+            "reviewer_kind": str(reviewer_kind or ""),
+            "decision": str(decision or ""),
+            "artifact": normalized_artifact,
+            "version_revision": normalized_version_revision,
+            "version_content_sha256": str(version_sha or ""),
+            "version_payload": normalized_version_payload,
+            "producer_change_set_id": str(producer_change_set_id or ""),
+            "producer_status": str(producer_status or ""),
+            "producer_source_kind": str(producer_source_kind or ""),
+            "producer_operation": str(producer_operation or ""),
+            "producer_after_revision": normalized_after_revision,
+            "producer_after_sha256": str(producer_after_sha or ""),
+        }
+        if (
+            event is None
+            or proof["reviewer_kind"] != "human"
+            or event["reviewer_kind"] != "human"
+            or event["collection"] != collection
+            or event["object_id"] != object_id
+            or int(event["object_revision"]) != normalized_event_revision
+            or event["decision"] != proof["decision"]
+            or canonical_json(event["artifact"])
+            != canonical_json(normalized_artifact)
+        ):
+            raise PostgresKnowledgeStoreError(
+                f"Human authority review-event proof is inconsistent: {event_id!r}"
+            )
+        proof_by_key.setdefault((collection, object_id), []).append(proof)
+
+    scanned_heads: list[dict[str, Any]] = []
+    protected: list[dict[str, Any]] = []
+    seen_heads: set[tuple[str, str]] = set()
+    for raw in head_rows:
+        if len(raw) != 15:
+            raise PostgresKnowledgeStoreError(
+                "Human authority head rows require current ObjectVersion provenance"
+            )
+        (
+            collection,
+            object_id,
+            revision_value,
+            content_sha,
+            payload,
+            retired_at,
+            head_change_set_id,
+            version_revision,
+            version_sha,
+            version_payload,
+            producer_status,
+            producer_source_kind,
+            producer_operation,
+            producer_after_revision,
+            producer_after_sha,
+        ) = raw
+        collection = str(collection or "")
+        object_id = str(object_id or "")
+        key = (collection, object_id)
+        if collection not in CLAIM_EVIDENCE_COLLECTIONS or key in seen_heads:
+            raise PostgresKnowledgeStoreError(
+                f"Human authority head is invalid or repeated: {collection}/{object_id}"
+            )
+        seen_heads.add(key)
+        normalized = _claim_evidence_row(
+            (collection, object_id, revision_value, content_sha, payload)
+        )
+        revision = normalized[2]
+        content_sha = normalized[3]
+        payload = normalized[4]
+        head_change_set_id = str(head_change_set_id or "")
+        try:
+            normalized_version_revision = int(version_revision)
+            normalized_after_revision = int(producer_after_revision)
+        except (TypeError, ValueError) as exc:
+            raise PostgresKnowledgeStoreError(
+                f"{collection}/{object_id} current producer revision is invalid"
+            ) from exc
+        if (
+            normalized_version_revision != revision
+            or str(version_sha or "") != content_sha
+            or not isinstance(version_payload, Mapping)
+            or record_content_sha(version_payload) != content_sha
+            or canonical_json(
+                {key: value for key, value in version_payload.items() if key != "revision"}
+            )
+            != canonical_json(
+                {key: value for key, value in payload.items() if key != "revision"}
+            )
+            or not head_change_set_id
+            or str(producer_status or "") != "applied"
+            or str(producer_operation or "")
+            not in {"create", "update", "retire", "revive"}
+            or normalized_after_revision != revision
+            or str(producer_after_sha or "") != content_sha
+        ):
+            raise PostgresKnowledgeStoreError(
+                f"{collection}/{object_id} current ObjectVersion producer is incomplete"
+            )
+        scanned_heads.append(
+            {
+                "collection": collection,
+                "object_id": object_id,
+                "revision": revision,
+                "content_sha256": content_sha,
+                "retired": retired_at is not None,
+                "producer_change_set_id": head_change_set_id,
+            }
+        )
+
+        status = str(payload.get("review_status") or "candidate")
+        valid_authorities: list[dict[str, Any]] = []
+        for proof in proof_by_key.get(key, []):
+            same_semantic_head = (
+                proof["decision"] == status
+                and proof["version_content_sha256"] == content_sha
+                and isinstance(proof["version_payload"], Mapping)
+                and record_content_sha(proof["version_payload"]) == content_sha
+                and canonical_json(
+                    {
+                        key: value
+                        for key, value in proof["version_payload"].items()
+                        if key != "revision"
+                    }
+                )
+                == canonical_json(
+                    {key: value for key, value in payload.items() if key != "revision"}
+                )
+            )
+            if not same_semantic_head:
+                continue
+            producer_valid = (
+                proof["object_revision"] == proof["version_revision"]
+                and proof["producer_change_set_id"]
+                and proof["producer_status"] == "applied"
+                and proof["producer_source_kind"] == "review_decision"
+                and proof["producer_operation"]
+                in {"create", "update", "revive"}
+                and proof["producer_after_revision"] == proof["version_revision"]
+                and proof["producer_after_sha256"]
+                == proof["version_content_sha256"]
+                and str(proof["artifact"].get("change_set_id") or "")
+                == proof["producer_change_set_id"]
+            )
+            if not producer_valid:
+                raise PostgresKnowledgeStoreError(
+                    f"{collection}/{object_id} human event is not bound to its "
+                    "review-decision ObjectVersion producer"
+                )
+            valid_authorities.append(proof)
+
+        requires_human = status in {"approved", "human_approved"}
+        if not valid_authorities:
+            if requires_human:
+                raise PostgresKnowledgeStoreError(
+                    f"{collection}/{object_id} approved head lacks ledger-proven human authority"
+                )
+            continue
+        latest_revision = max(
+            int(proof["object_revision"]) for proof in valid_authorities
+        )
+        latest = [
+            proof
+            for proof in valid_authorities
+            if int(proof["object_revision"]) == latest_revision
+        ]
+        events_at_authority_revision = events_by_key.get(
+            (collection, object_id, latest_revision), []
+        )
+        if len(latest) != 1 or len(events_at_authority_revision) != 1:
+            raise PostgresKnowledgeStoreError(
+                f"{collection}/{object_id} has ambiguous human authority"
+            )
+        authority = latest[0]
+        event = review_by_id[authority["review_event_id"]]
+        projection_field = (
+            "evidence_step_ids" if collection == "claims" else "produced_claim_ids"
+        )
+        projection = payload.get(projection_field) or []
+        if not isinstance(projection, list) or any(not str(value) for value in projection):
+            raise PostgresKnowledgeStoreError(
+                f"{collection}/{object_id}.{projection_field} must be an ID array"
+            )
+        protected.append(
+            {
+                "collection": collection,
+                "object_id": object_id,
+                "revision": revision,
+                "content_sha256": content_sha,
+                "retired": retired_at is not None,
+                "review_status": status,
+                "human_decision": authority["decision"],
+                "reviewed_revision": latest_revision,
+                "producer_change_set_id": authority["producer_change_set_id"],
+                "head_producer_change_set_id": head_change_set_id,
+                "review_event_id": authority["review_event_id"],
+                "review_event_sha256": sha256_json(event),
+                "projection_field": projection_field,
+                "projection_ids": [str(value) for value in projection],
+            }
+        )
+
+    scanned_heads.sort(key=lambda row: (row["collection"], row["object_id"]))
+    protected.sort(key=lambda row: (row["collection"], row["object_id"]))
+    review_snapshot = build_review_event_ledger_snapshot(review_rows)
+    result = {
+        "schema_version": CLAIM_EVIDENCE_HUMAN_AUTHORITY_SNAPSHOT_SCHEMA_VERSION,
+        "scan_scope": "all_current_object_heads_claims_and_evidence_steps",
+        "scanned_record_count": len(scanned_heads),
+        "scanned_heads": scanned_heads,
+        "scanned_heads_sha256": sha256_json(scanned_heads),
+        "review_event_ledger_count": review_snapshot["count"],
+        "review_event_ledger_snapshot": review_snapshot,
+        "protected_records": protected,
+        "protected_records_sha256": sha256_json(protected),
+        "counts": {
+            "protected_records": len(protected),
+            "claims": sum(row["collection"] == "claims" for row in protected),
+            "evidence_steps": sum(
+                row["collection"] == "evidence_steps" for row in protected
+            ),
+        },
+    }
+    return _sealed_artifact(result)
+
+
+def _validate_claim_evidence_human_authority_snapshot(
+    artifact: Mapping[str, Any],
+) -> dict[str, Any]:
+    value = json.loads(canonical_json(artifact))
+    if value.get("schema_version") != (
+        CLAIM_EVIDENCE_HUMAN_AUTHORITY_SNAPSHOT_SCHEMA_VERSION
+    ):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence source queue human-authority snapshot schema is invalid"
+        )
+    claimed_seal = str(value.pop("artifact_sha256", ""))
+    if claimed_seal != sha256_json(value):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence source queue human-authority snapshot seal is invalid"
+        )
+    value["artifact_sha256"] = claimed_seal
+    ledger = value.get("review_event_ledger_snapshot")
+    if not isinstance(ledger, Mapping):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence source queue requires the full review-event ledger root"
+        )
+    _validate_review_event_ledger_snapshot(ledger)
+    if value.get("review_event_ledger_count") != ledger.get("count"):
+        raise PostgresKnowledgeStoreError(
+            "Human-authority review-event ledger count differs from its root"
+        )
+    heads = value.get("scanned_heads")
+    protected = value.get("protected_records")
+    if not isinstance(heads, list) or not isinstance(protected, list):
+        raise PostgresKnowledgeStoreError(
+            "Human-authority snapshot lacks its full current-head denominator"
+        )
+    ordered_heads = sorted(
+        heads, key=lambda row: (str(row.get("collection")), str(row.get("object_id")))
+    )
+    ordered_protected = sorted(
+        protected,
+        key=lambda row: (str(row.get("collection")), str(row.get("object_id"))),
+    )
+    head_keys = [
+        (str(row.get("collection") or ""), str(row.get("object_id") or ""))
+        for row in heads
+        if isinstance(row, Mapping)
+    ]
+    protected_keys = [
+        (str(row.get("collection") or ""), str(row.get("object_id") or ""))
+        for row in protected
+        if isinstance(row, Mapping)
+    ]
+    if (
+        heads != ordered_heads
+        or protected != ordered_protected
+        or len(head_keys) != len(heads)
+        or len(head_keys) != len(set(head_keys))
+        or len(protected_keys) != len(protected)
+        or len(protected_keys) != len(set(protected_keys))
+        or not set(protected_keys).issubset(set(head_keys))
+        or value.get("scanned_record_count") != len(heads)
+        or value.get("scanned_heads_sha256") != sha256_json(heads)
+        or value.get("protected_records_sha256") != sha256_json(protected)
+    ):
+        raise PostgresKnowledgeStoreError(
+            "Human-authority snapshot head/protected manifests differ"
+        )
+    expected_counts = {
+        "protected_records": len(protected),
+        "claims": sum(row.get("collection") == "claims" for row in protected),
+        "evidence_steps": sum(
+            row.get("collection") == "evidence_steps" for row in protected
+        ),
+    }
+    if value.get("counts") != expected_counts:
+        raise PostgresKnowledgeStoreError(
+            "Human-authority snapshot counts differ"
+        )
+    for label, rows in (("head", heads), ("protected", protected)):
+        for row in rows:
+            if (
+                row.get("collection") not in CLAIM_EVIDENCE_COLLECTIONS
+                or not str(row.get("object_id") or "")
+                or not isinstance(row.get("revision"), int)
+                or int(row["revision"]) < 1
+                or not re.fullmatch(
+                    r"[0-9a-f]{64}", str(row.get("content_sha256") or "")
+                )
+                or not str(
+                    row.get(
+                        "head_producer_change_set_id"
+                        if label == "protected"
+                        else "producer_change_set_id"
+                    )
+                    or ""
+                )
+            ):
+                raise PostgresKnowledgeStoreError(
+                    f"Human-authority {label} manifest row is invalid"
+                )
+    return value
+
+
+def _validate_claim_evidence_freeze_binding(binding: Mapping[str, Any]) -> None:
+    if binding.get("schema_version") != CLAIM_EVIDENCE_FREEZE_BINDING_SCHEMA_VERSION:
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence guard has an unsupported freeze binding"
+        )
+    artifact_sha = str(binding.get("frozen_input_artifact_sha256") or "")
+    frozen_at = str(binding.get("frozen_at") or "")
+    database_identity = binding.get("database_identity")
+    try:
+        parsed_frozen_at = datetime.fromisoformat(frozen_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence guard freeze timestamp is invalid"
+        ) from exc
+    if (
+        not re.fullmatch(r"[0-9a-f]{64}", artifact_sha)
+        or parsed_frozen_at.tzinfo is None
+        or not isinstance(database_identity, Mapping)
+        or not str(database_identity.get("database_name") or "")
+    ):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence guard freeze binding is incomplete"
+        )
+    sealed = dict(binding)
+    observed_seal = str(sealed.pop("binding_sha256", ""))
+    if observed_seal != sha256_json(sealed):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence guard freeze binding seal is invalid"
+        )
+
+
+def build_source_lineage_identity_snapshot(
+    rows: Iterable[Mapping[str, Any] | Sequence[Any]],
+) -> dict[str, Any]:
+    """Seal referenced SourceFragment/SourceDocument row identities."""
+
+    records: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for raw in rows:
+        if isinstance(raw, Mapping):
+            collection = str(raw.get("collection") or "")
+            object_id = str(raw.get("object_id") or "")
+            revision = raw.get("revision")
+            content_sha256 = str(raw.get("content_sha256") or "")
+            retired = raw.get("retired")
+        else:
+            try:
+                collection, object_id, revision, content_sha256, _payload, retired_at = raw
+            except (TypeError, ValueError) as exc:
+                raise PostgresKnowledgeStoreError(
+                    "Source-lineage snapshot rows require collection, object_id, "
+                    "revision, content SHA, payload and retired_at"
+                ) from exc
+            collection = str(collection)
+            object_id = str(object_id)
+            content_sha256 = str(content_sha256)
+            retired = retired_at is not None
+        key = (collection, object_id)
+        try:
+            normalized_revision = int(revision)
+        except (TypeError, ValueError) as exc:
+            raise PostgresKnowledgeStoreError(
+                f"Source-lineage row {collection}/{object_id} has invalid revision"
+            ) from exc
+        if (
+            collection not in {"source_fragments", "source_documents"}
+            or not object_id
+            or key in seen
+            or normalized_revision <= 0
+            or not re.fullmatch(r"[0-9a-f]{64}", content_sha256)
+            or not isinstance(retired, bool)
+        ):
+            raise PostgresKnowledgeStoreError(
+                f"Source-lineage snapshot has invalid row {collection}/{object_id}"
+            )
+        seen.add(key)
+        records.append(
+            {
+                "collection": collection,
+                "object_id": object_id,
+                "revision": normalized_revision,
+                "content_sha256": content_sha256,
+                "retired": retired,
+            }
+        )
+    records.sort(key=lambda row: (row["collection"], row["object_id"]))
+    snapshot = {
+        "schema_version": SOURCE_LINEAGE_IDENTITY_SNAPSHOT_SCHEMA_VERSION,
+        "records": records,
+        "records_sha256": sha256_json(records),
+    }
+    snapshot["snapshot_sha256"] = sha256_json(snapshot)
+    return snapshot
+
+
+def _validate_source_lineage_identity_snapshot(
+    snapshot: Mapping[str, Any],
+) -> None:
+    if snapshot.get("schema_version") != SOURCE_LINEAGE_IDENTITY_SNAPSHOT_SCHEMA_VERSION:
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence guard has an unsupported source-lineage snapshot"
+        )
+    records = snapshot.get("records")
+    if not isinstance(records, list):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence guard lacks source-lineage row identities"
+        )
+    try:
+        rebuilt = build_source_lineage_identity_snapshot(records)
+    except PostgresKnowledgeStoreError:
+        raise
+    if rebuilt != snapshot:
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence guard source-lineage snapshot seal is invalid"
+        )
+
+
+def _validate_product_dependency_active_snapshot(
+    snapshot: Mapping[str, Any],
+) -> None:
+    if snapshot.get("schema_version") != PRODUCT_DEPENDENCY_ACTIVE_SNAPSHOT_SCHEMA_VERSION:
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence guard has an unsupported ProductDependency snapshot"
+        )
+    records = snapshot.get("records")
+    if not isinstance(records, list):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence guard lacks full ProductDependency identities"
+        )
+    seen: set[str] = set()
+    for row in records:
+        if not isinstance(row, Mapping):
+            raise PostgresKnowledgeStoreError(
+                "Claim/Evidence guard has malformed ProductDependency identity"
+            )
+        object_id = str(row.get("object_id") or "")
+        if (
+            not object_id
+            or object_id in seen
+            or not isinstance(row.get("revision"), int)
+            or int(row["revision"]) <= 0
+            or not re.fullmatch(
+                r"[0-9a-f]{64}", str(row.get("content_sha256") or "")
+            )
+        ):
+            raise PostgresKnowledgeStoreError(
+                "Claim/Evidence guard has invalid ProductDependency identity"
+            )
+        seen.add(object_id)
+    if snapshot.get("records_sha256") != sha256_json(records):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence guard ProductDependency record root is invalid"
+        )
+    sealed = dict(snapshot)
+    observed_seal = str(sealed.pop("snapshot_sha256", ""))
+    if observed_seal != sha256_json(sealed):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence guard ProductDependency snapshot seal is invalid"
+        )
+
+
+def _validate_claim_evidence_active_snapshot(
+    snapshot: Mapping[str, Any],
+) -> None:
+    if snapshot.get("schema_version") != CLAIM_EVIDENCE_ACTIVE_SNAPSHOT_SCHEMA_VERSION:
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence guard has an unsupported active snapshot schema"
+        )
+    records = snapshot.get("records")
+    if not isinstance(records, list):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence guard active snapshot lacks full record identities"
+        )
+    record_keys: set[tuple[str, str]] = set()
+    for row in records:
+        if not isinstance(row, Mapping):
+            raise PostgresKnowledgeStoreError(
+                "Claim/Evidence guard active snapshot has a malformed record"
+            )
+        collection = str(row.get("collection") or "")
+        object_id = str(row.get("object_id") or "")
+        if (
+            collection not in CLAIM_EVIDENCE_COLLECTIONS
+            or not object_id
+            or not isinstance(row.get("revision"), int)
+            or int(row["revision"]) <= 0
+            or not re.fullmatch(r"[0-9a-f]{64}", str(row.get("content_sha256") or ""))
+        ):
+            raise PostgresKnowledgeStoreError(
+                "Claim/Evidence guard active snapshot has an invalid record identity"
+            )
+        key = (collection, object_id)
+        if key in record_keys:
+            raise PostgresKnowledgeStoreError(
+                f"Claim/Evidence guard active snapshot repeats {collection}/{object_id}"
+            )
+        record_keys.add(key)
+    if snapshot.get("records_sha256") != sha256_json(records):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence guard active snapshot record root is invalid"
+        )
+    if not isinstance(snapshot.get("counts"), Mapping) or not re.fullmatch(
+        r"[0-9a-f]{64}", str(snapshot.get("pair_state_sha256") or "")
+    ):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence guard active snapshot lacks pair-state counts or root"
+        )
+    sealed = dict(snapshot)
+    observed_seal = str(sealed.pop("snapshot_sha256", ""))
+    if observed_seal != sha256_json(sealed):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence guard active snapshot seal is invalid"
+        )
 
 
 ACTIVE_ANCHOR_STATES = {
@@ -866,6 +2109,431 @@ class ChangeSetPlan:
         if self.review_events:
             value["summary"]["review_events"] = len(self.review_events)
         return value
+
+
+@dataclass(frozen=True)
+class _ClaimEvidenceSourceQueueApplyContext:
+    token: object
+    expected_source_generations: tuple[dict[str, Any], ...]
+    expected_human_authority_snapshot: dict[str, Any]
+
+
+def _claim_evidence_plan_identity(plan: ChangeSetPlan) -> dict[str, Any]:
+    return {
+        "change_set_id": plan.change_set_id,
+        "fingerprint_sha256": plan.fingerprint_sha256,
+        "package_id": plan.package_id,
+        "source_kind": plan.source_kind,
+        "source_sha256": plan.source_sha256,
+        "operations_sha256": sha256_json(operation_fingerprint_rows(plan.operations)),
+        "review_events_sha256": sha256_json(
+            review_event_fingerprint_rows(plan.review_events)
+        ),
+    }
+
+
+def _validate_claim_evidence_source_queue_apply(
+    plan: ChangeSetPlan,
+    metadata: Optional[Mapping[str, Any]],
+    expected_source_generations: Sequence[Mapping[str, Any]],
+    expected_human_authority_snapshot: Mapping[str, Any],
+) -> _ClaimEvidenceSourceQueueApplyContext:
+    if plan.source_kind not in CLAIM_EVIDENCE_SOURCE_QUEUE_SOURCE_KINDS:
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence source-queue apply requires its dedicated source kind"
+        )
+    if not plan.operations:
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence source-queue apply requires a non-empty ChangeSet"
+        )
+    if not isinstance(metadata, Mapping) or set(metadata) != {
+        CLAIM_EVIDENCE_SOURCE_QUEUE_METADATA_KEY
+    }:
+        raise PostgresKnowledgeStoreError(
+            "Dedicated Claim/Evidence source work requires only its sealed queue metadata"
+        )
+    queue = metadata.get(CLAIM_EVIDENCE_SOURCE_QUEUE_METADATA_KEY)
+    if not isinstance(queue, Mapping):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence source-queue metadata must be an object"
+        )
+    required = {
+        "execution_plan_sha256",
+        "work_unit_sha256",
+        "source_queue_sha256",
+        "authority_validation_sha256",
+        "package_proof",
+        "expected_source_generations_sha256",
+        "expected_human_authority_snapshot_sha256",
+        "human_impact_sha256",
+    }
+    if set(queue) != required:
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence source-queue metadata fields are incomplete or unexpected"
+        )
+    for field in required - {"package_proof"}:
+        _required_sha256(queue.get(field), label=f"source-queue metadata {field}")
+
+    generations = _normalize_claim_evidence_source_generations(
+        expected_source_generations
+    )
+    human_snapshot = _validate_claim_evidence_human_authority_snapshot(
+        expected_human_authority_snapshot
+    )
+    if (
+        queue["expected_source_generations_sha256"] != sha256_json(generations)
+        or queue["expected_human_authority_snapshot_sha256"]
+        != human_snapshot["artifact_sha256"]
+    ):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence source-queue metadata is bound to another CAS snapshot"
+        )
+
+    proof = queue.get("package_proof")
+    if not isinstance(proof, Mapping):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence source-queue package proof must be an object"
+        )
+    shared_fields = {"kind", "effective_canonical_sha256", "guarded_apply_source_kind"}
+    if plan.source_kind == CLAIM_EVIDENCE_SOURCE_REPLAY_SOURCE_KIND:
+        expected_proof_fields = shared_fields | {
+            "authority_unit_id",
+            "historical_source_kind",
+        }
+        proof_valid = (
+            proof.get("kind") == "historical_exact_replay"
+            and bool(str(proof.get("authority_unit_id") or "").strip())
+            and bool(str(proof.get("historical_source_kind") or "").strip())
+            and proof.get("historical_source_kind")
+            not in CLAIM_EVIDENCE_SOURCE_QUEUE_SOURCE_KINDS
+        )
+    else:
+        expected_proof_fields = shared_fields | {
+            "rerun_candidate_receipt_sha256"
+        }
+        proof_valid = proof.get("kind") == "governed_source_rerun"
+        _required_sha256(
+            proof.get("rerun_candidate_receipt_sha256"),
+            label="source-queue rerun candidate receipt",
+        )
+    effective_sha = _required_sha256(
+        proof.get("effective_canonical_sha256"),
+        label="source-queue effective package",
+    )
+    if (
+        set(proof) != expected_proof_fields
+        or not proof_valid
+        or proof.get("guarded_apply_source_kind") != plan.source_kind
+        or effective_sha != plan.source_sha256
+    ):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence source-queue package proof differs from its ChangeSet"
+        )
+
+    frozen_ids = {
+        row["active_source_document_id"] for row in generations
+    }
+    frozen_keys = {(row["source_type"], row["row_key"]) for row in generations}
+    for operation in plan.operations:
+        if operation.collection != "source_documents":
+            continue
+        planned_payload = stored_operation_payload(operation)
+        planned_key = (
+            str(planned_payload.get("source_type") or "").strip(),
+            _source_document_row_key(planned_payload),
+        )
+        if operation.object_id in frozen_ids or planned_key in frozen_keys:
+            raise PostgresKnowledgeStoreError(
+                "Source-queue ChangeSet may not mutate its frozen SourceDocument generation"
+            )
+    return _ClaimEvidenceSourceQueueApplyContext(
+        token=_CLAIM_EVIDENCE_SOURCE_QUEUE_APPLY_TOKEN,
+        expected_source_generations=tuple(
+            json.loads(canonical_json(row)) for row in generations
+        ),
+        expected_human_authority_snapshot=human_snapshot,
+    )
+
+
+def build_claim_evidence_reciprocity_guard(
+    plan: ChangeSetPlan,
+    expected_active_snapshot: Mapping[str, Any],
+    expected_product_dependency_snapshot: Mapping[str, Any] | None = None,
+    expected_review_event_ledger_snapshot: Mapping[str, Any] | None = None,
+    expected_freeze_binding: Mapping[str, Any] | None = None,
+    expected_source_lineage_snapshot: Mapping[str, Any] | None = None,
+    expected_pair_adjudication_authorization: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Bind one sealed full active snapshot to exactly one ChangeSet plan."""
+
+    _validate_claim_evidence_active_snapshot(expected_active_snapshot)
+    if expected_product_dependency_snapshot is None:
+        if plan.source_kind in CLAIM_EVIDENCE_REPAIR_SOURCE_KINDS:
+            raise PostgresKnowledgeStoreError(
+                "Dedicated Claim/Evidence repair requires a full ProductDependency snapshot"
+            )
+        expected_product_dependency_snapshot = (
+            build_product_dependency_active_snapshot(())
+        )
+    _validate_product_dependency_active_snapshot(
+        expected_product_dependency_snapshot
+    )
+    if expected_review_event_ledger_snapshot is None:
+        if plan.source_kind in CLAIM_EVIDENCE_REPAIR_SOURCE_KINDS:
+            raise PostgresKnowledgeStoreError(
+                "Dedicated Claim/Evidence repair requires the full review-event "
+                "ledger root and count"
+            )
+        expected_review_event_ledger_snapshot = build_review_event_ledger_snapshot(())
+    _validate_review_event_ledger_snapshot(expected_review_event_ledger_snapshot)
+    if expected_freeze_binding is not None:
+        _validate_claim_evidence_freeze_binding(expected_freeze_binding)
+    if expected_source_lineage_snapshot is None:
+        expected_source_lineage_snapshot = build_source_lineage_identity_snapshot(())
+    _validate_source_lineage_identity_snapshot(expected_source_lineage_snapshot)
+    snapshot = json.loads(canonical_json(expected_active_snapshot))
+    guard = {
+        "schema_version": CLAIM_EVIDENCE_RECIPROCITY_GUARD_SCHEMA_VERSION,
+        "plan_identity": _claim_evidence_plan_identity(plan),
+        "expected_active_snapshot": snapshot,
+        "expected_product_dependency_snapshot": json.loads(
+            canonical_json(expected_product_dependency_snapshot)
+        ),
+        "expected_review_event_ledger_snapshot": json.loads(
+            canonical_json(expected_review_event_ledger_snapshot)
+        ),
+        "expected_freeze_binding": (
+            json.loads(canonical_json(expected_freeze_binding))
+            if expected_freeze_binding is not None
+            else None
+        ),
+        "expected_source_lineage_snapshot": json.loads(
+            canonical_json(expected_source_lineage_snapshot)
+        ),
+        "expected_pair_adjudication_authorization": (
+            json.loads(canonical_json(expected_pair_adjudication_authorization))
+            if expected_pair_adjudication_authorization is not None
+            else None
+        ),
+    }
+    guard["guard_sha256"] = sha256_json(guard)
+    return guard
+
+
+def _validate_claim_evidence_reciprocity_guard(
+    plan: ChangeSetPlan,
+    guard: Mapping[str, Any],
+) -> dict[str, Any]:
+    if guard.get("schema_version") != CLAIM_EVIDENCE_RECIPROCITY_GUARD_SCHEMA_VERSION:
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence repair has an unsupported store guard schema"
+        )
+    sealed = dict(guard)
+    observed_seal = str(sealed.pop("guard_sha256", ""))
+    if observed_seal != sha256_json(sealed):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence repair store guard seal is invalid"
+        )
+    if guard.get("plan_identity") != _claim_evidence_plan_identity(plan):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence repair store guard is bound to another ChangeSet plan"
+        )
+    snapshot = guard.get("expected_active_snapshot")
+    if not isinstance(snapshot, Mapping):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence repair store guard lacks its expected active snapshot"
+        )
+    _validate_claim_evidence_active_snapshot(snapshot)
+    dependency_snapshot = guard.get("expected_product_dependency_snapshot")
+    if not isinstance(dependency_snapshot, Mapping):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence repair guard lacks ProductDependency snapshot"
+        )
+    _validate_product_dependency_active_snapshot(dependency_snapshot)
+    review_snapshot = guard.get("expected_review_event_ledger_snapshot")
+    if not isinstance(review_snapshot, Mapping):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence repair guard lacks review-event ledger snapshot"
+        )
+    _validate_review_event_ledger_snapshot(review_snapshot)
+    freeze_binding = guard.get("expected_freeze_binding")
+    if freeze_binding is not None:
+        if not isinstance(freeze_binding, Mapping):
+            raise PostgresKnowledgeStoreError(
+                "Claim/Evidence repair guard has malformed freeze binding"
+            )
+        _validate_claim_evidence_freeze_binding(freeze_binding)
+    source_lineage_snapshot = guard.get("expected_source_lineage_snapshot")
+    if not isinstance(source_lineage_snapshot, Mapping):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence repair guard lacks source-lineage snapshot"
+        )
+    _validate_source_lineage_identity_snapshot(source_lineage_snapshot)
+    pair_authorization = guard.get("expected_pair_adjudication_authorization")
+    if plan.source_kind == CLAIM_EVIDENCE_PAIR_ADJUDICATION_SOURCE_KIND:
+        if not isinstance(pair_authorization, Mapping):
+            raise PostgresKnowledgeStoreError(
+                "Pair-adjudication repair guard lacks its sealed authorization"
+            )
+    elif pair_authorization is not None:
+        raise PostgresKnowledgeStoreError(
+            "Pair-adjudication authorization cannot govern another source kind"
+        )
+    return json.loads(canonical_json(guard))
+
+
+def _resolve_claim_evidence_reciprocity_guard(
+    plan: ChangeSetPlan,
+    metadata: Optional[Mapping[str, Any]],
+    explicit_guard: Optional[Mapping[str, Any]],
+) -> Optional[dict[str, Any]]:
+    repair_metadata = (metadata or {}).get(
+        CLAIM_EVIDENCE_RECIPROCITY_REPAIR_METADATA_KEY
+    )
+    if repair_metadata is not None and not isinstance(repair_metadata, Mapping):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence repair metadata must be an object"
+        )
+    metadata_guard = (
+        repair_metadata.get("store_guard")
+        if isinstance(repair_metadata, Mapping)
+        else None
+    )
+    if metadata_guard is not None and not isinstance(metadata_guard, Mapping):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence repair metadata store_guard must be an object"
+        )
+    if (
+        explicit_guard is not None
+        and metadata_guard is not None
+        and canonical_json(explicit_guard) != canonical_json(metadata_guard)
+    ):
+        raise PostgresKnowledgeStoreError(
+            "Explicit and metadata Claim/Evidence repair guards disagree"
+        )
+    selected = explicit_guard or metadata_guard
+    if (
+        plan.source_kind in CLAIM_EVIDENCE_REPAIR_SOURCE_KINDS
+        and selected is None
+    ):
+        raise PostgresKnowledgeStoreError(
+            "Claim/Evidence reciprocity repair requires a sealed store guard"
+        )
+    if selected is None:
+        return None
+    return _validate_claim_evidence_reciprocity_guard(plan, selected)
+
+
+def _validate_claim_evidence_repair_apply_metadata(
+    plan: ChangeSetPlan,
+    metadata: Optional[Mapping[str, Any]],
+    guard: Mapping[str, Any],
+) -> None:
+    """Require the operational artifact and verified backup at the write boundary."""
+
+    if not plan.operations:
+        return
+    repair = (metadata or {}).get(CLAIM_EVIDENCE_RECIPROCITY_REPAIR_METADATA_KEY)
+    if not isinstance(repair, Mapping):
+        raise PostgresKnowledgeStoreError(
+            "Dedicated Claim/Evidence repair requires operational apply metadata"
+        )
+    if canonical_json(repair.get("store_guard")) != canonical_json(guard):
+        raise PostgresKnowledgeStoreError(
+            "Dedicated Claim/Evidence repair metadata does not bind its store guard"
+        )
+    required_sha_fields = (
+        "audit_artifact_sha256",
+        "plan_artifact_sha256",
+        "action_manifest_sha256",
+        "operation_manifest_sha256",
+    )
+    for field in required_sha_fields:
+        value = str(repair.get(field) or "")
+        if not re.fullmatch(r"[0-9a-f]{64}", value):
+            raise PostgresKnowledgeStoreError(
+                f"Dedicated Claim/Evidence repair metadata lacks {field}"
+            )
+    if repair["operation_manifest_sha256"] != sha256_json(
+        operation_fingerprint_rows(plan.operations)
+    ):
+        raise PostgresKnowledgeStoreError(
+            "Dedicated Claim/Evidence repair operation manifest does not match plan"
+        )
+    backup = repair.get("backup")
+    if not isinstance(backup, Mapping):
+        raise PostgresKnowledgeStoreError(
+            "Dedicated Claim/Evidence repair requires verified backup metadata"
+        )
+    freeze_binding = guard.get("expected_freeze_binding")
+    if not isinstance(freeze_binding, Mapping):
+        raise PostgresKnowledgeStoreError(
+            "Dedicated Claim/Evidence repair requires a frozen-input binding"
+        )
+    _validate_claim_evidence_freeze_binding(freeze_binding)
+    sealed_backup = dict(backup)
+    backup_seal = str(sealed_backup.pop("artifact_sha256", ""))
+    try:
+        size_bytes = int(backup.get("size_bytes") or 0)
+        entry_count = int(backup.get("pg_restore_entry_count") or 0)
+    except (TypeError, ValueError):
+        size_bytes = 0
+        entry_count = 0
+    try:
+        archive_created_at = datetime.fromisoformat(
+            str(backup.get("archive_created_at") or "").replace("Z", "+00:00")
+        )
+        frozen_at = datetime.fromisoformat(
+            str(freeze_binding["frozen_at"]).replace("Z", "+00:00")
+        )
+        timestamp_is_bound = (
+            archive_created_at.tzinfo is not None
+            and frozen_at.tzinfo is not None
+            and archive_created_at
+            >= frozen_at.replace(microsecond=0)
+        )
+    except (TypeError, ValueError):
+        timestamp_is_bound = False
+    coverage = backup.get("required_table_coverage")
+    expected_coverage = [
+        {
+            "table_name": table_name,
+            "has_table_definition": True,
+            "has_table_data": True,
+        }
+        for table_name in CLAIM_EVIDENCE_BACKUP_REQUIRED_TABLES
+    ]
+    coverage_is_complete = (
+        coverage == expected_coverage
+        and backup.get("required_table_coverage_sha256")
+        == sha256_json(expected_coverage)
+    )
+    if (
+        backup.get("schema_version")
+        != CLAIM_EVIDENCE_BACKUP_VERIFICATION_SCHEMA_VERSION
+        or backup_seal != sha256_json(sealed_backup)
+        or not re.fullmatch(r"[0-9a-f]{64}", str(backup.get("sha256") or ""))
+        or not re.fullmatch(
+            r"[0-9a-f]{64}", str(backup.get("pg_restore_list_sha256") or "")
+        )
+        or size_bytes <= 0
+        or entry_count <= 0
+        or not str(backup.get("path") or "")
+        or backup.get("contains_wang_knowledge_schema") is not True
+        or backup.get("contains_required_table_data") is not True
+        or not coverage_is_complete
+        or not timestamp_is_bound
+        or str(backup.get("frozen_input_artifact_sha256") or "")
+        != str(freeze_binding["frozen_input_artifact_sha256"])
+        or str(backup.get("frozen_at") or "") != str(freeze_binding["frozen_at"])
+        or canonical_json(backup.get("database_identity") or {})
+        != canonical_json(freeze_binding["database_identity"])
+        or str(backup.get("archive_database_name") or "")
+        != str(freeze_binding["database_identity"]["database_name"])
+    ):
+        raise PostgresKnowledgeStoreError(
+            "Dedicated Claim/Evidence repair backup verification is invalid"
+        )
 
 
 def validate_change_set_plan_integrity(plan: ChangeSetPlan) -> None:
@@ -1546,6 +3214,297 @@ class PostgresKnowledgeStore:
             rows = cursor.fetchall()
         return [str(row[0]) for row in rows]
 
+    def read_claim_evidence_reciprocity_guard(
+        self,
+        plan: ChangeSetPlan,
+        *,
+        preserve_current_bindings: bool = True,
+    ) -> dict[str, Any]:
+        """Bind a source ChangeSet to the current repaired pair graph.
+
+        A source runner may resume from source-SHA-bound model artifacts, but
+        those artifacts are not a snapshot of the canonical store.  Read the
+        current Claim/Evidence heads under the same global writer lock used by
+        apply, reject an old package that would replace an existing endpoint's
+        repaired binding arrays, and seal the complete denominator for the
+        transaction-time final-graph check.
+        """
+
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (POSTGRES_APPLY_ADVISORY_LOCK_KEY,),
+            )
+            cursor.execute(
+                """SELECT collection, object_id, revision, content_sha256, payload
+                   FROM wang_knowledge.objects
+                   WHERE collection = ANY(%s) AND retired_at IS NULL
+                   ORDER BY collection, object_id FOR SHARE""",
+                (list(CLAIM_EVIDENCE_COLLECTIONS),),
+            )
+            endpoint_rows = list(cursor.fetchall())
+            active_snapshot = build_claim_evidence_active_snapshot(endpoint_rows)
+            active_rows = {
+                (row[0], row[1]): row
+                for row in (_claim_evidence_row(raw) for raw in endpoint_rows)
+            }
+
+            if preserve_current_bindings:
+                binding_fields = {
+                    "claims": "evidence_step_ids",
+                    "evidence_steps": "produced_claim_ids",
+                }
+                for operation in plan.operations:
+                    field = binding_fields.get(operation.collection)
+                    if field is None or operation.operation != "update":
+                        continue
+                    current = active_rows.get(
+                        (operation.collection, operation.object_id)
+                    )
+                    if current is None:
+                        continue
+                    before = list(current[4].get(field) or [])
+                    after = list(stored_operation_payload(operation).get(field) or [])
+                    if before != after:
+                        raise PostgresKnowledgeStoreError(
+                            f"{operation.collection}/{operation.object_id}: "
+                            f"source resume would replace current {field}; rebuild "
+                            "from the current production baseline or use a newly "
+                            "authorized Claim/Evidence adjudication"
+                        )
+
+            cursor.execute(
+                """SELECT object_id, revision, content_sha256, payload
+                   FROM wang_knowledge.objects
+                   WHERE collection='product_dependencies' AND retired_at IS NULL
+                   ORDER BY object_id FOR SHARE"""
+            )
+            dependency_snapshot = build_product_dependency_active_snapshot(
+                cursor.fetchall()
+            )
+            review_snapshot = self._review_event_ledger_snapshot(
+                cursor, lock_rows=True
+            )
+
+            fragment_ids: set[str] = set()
+            document_ids: set[str] = set()
+
+            def add_many(
+                payload: Mapping[str, Any],
+                plural: str,
+                singular: str,
+                sink: set[str],
+            ) -> None:
+                raw = payload.get(plural) or []
+                if not isinstance(raw, (list, tuple)):
+                    raise PostgresKnowledgeStoreError(
+                        f"Claim/Evidence source lineage field {plural} is not an array"
+                    )
+                sink.update(str(value) for value in raw if str(value))
+                if payload.get(singular):
+                    sink.add(str(payload[singular]))
+
+            for row in active_rows.values():
+                payload = row[4]
+                add_many(
+                    payload,
+                    "source_fragment_ids",
+                    "source_fragment_id",
+                    fragment_ids,
+                )
+                add_many(
+                    payload,
+                    "source_document_ids",
+                    "source_document_id",
+                    document_ids,
+                )
+                if payload.get("source_id"):
+                    document_ids.add(str(payload["source_id"]))
+
+            fragment_rows: list[Sequence[Any]] = []
+            if fragment_ids:
+                cursor.execute(
+                    """SELECT collection, object_id, revision, content_sha256,
+                              payload, retired_at
+                       FROM wang_knowledge.objects
+                       WHERE collection='source_fragments' AND object_id = ANY(%s)
+                       ORDER BY object_id FOR SHARE""",
+                    (sorted(fragment_ids),),
+                )
+                fragment_rows = list(cursor.fetchall())
+                for row in fragment_rows:
+                    payload = row[4]
+                    if isinstance(payload, Mapping) and payload.get("source_id"):
+                        document_ids.add(str(payload["source_id"]))
+
+            document_rows: list[Sequence[Any]] = []
+            if document_ids:
+                cursor.execute(
+                    """SELECT collection, object_id, revision, content_sha256,
+                              payload, retired_at
+                       FROM wang_knowledge.objects
+                       WHERE collection='source_documents' AND object_id = ANY(%s)
+                       ORDER BY object_id FOR SHARE""",
+                    (sorted(document_ids),),
+                )
+                document_rows = list(cursor.fetchall())
+            source_snapshot = build_source_lineage_identity_snapshot(
+                [*fragment_rows, *document_rows]
+            )
+            guard = build_claim_evidence_reciprocity_guard(
+                plan,
+                active_snapshot,
+                dependency_snapshot,
+                review_snapshot,
+                expected_source_lineage_snapshot=source_snapshot,
+            )
+            # Reuse the apply-time validator here so preview proves the exact
+            # final graph before returning a plan to an operator.
+            self._assert_claim_evidence_reciprocity_guard(cursor, plan, guard)
+            return guard
+
+    @staticmethod
+    def _claim_evidence_source_generations_from_cursor(
+        cursor: Any,
+        expected: Sequence[Mapping[str, Any]],
+        *,
+        lock_rows: bool,
+    ) -> list[dict[str, Any]]:
+        canonical_expected = _normalize_claim_evidence_source_generations(expected)
+        cursor.execute(
+            """SELECT object_id, revision, content_sha256, payload
+               FROM wang_knowledge.objects
+               WHERE collection='source_documents' AND retired_at IS NULL
+               ORDER BY object_id"""
+            + (" FOR UPDATE" if lock_rows else " FOR SHARE")
+        )
+        active = _active_claim_evidence_source_generations(list(cursor.fetchall()))
+        return [
+            active[key]
+            for key in (
+                (row["source_type"], row["row_key"])
+                for row in canonical_expected
+            )
+            if key in active
+        ]
+
+    def read_claim_evidence_source_generations(
+        self, expected_rows: Sequence[Mapping[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Read queue SourceDocument generations under the global writer lock."""
+
+        expected = _normalize_claim_evidence_source_generations(expected_rows)
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (POSTGRES_APPLY_ADVISORY_LOCK_KEY,),
+            )
+            return self._claim_evidence_source_generations_from_cursor(
+                cursor, expected, lock_rows=False
+            )
+
+    @staticmethod
+    def _claim_evidence_human_authority_from_cursor(
+        cursor: Any, *, lock_rows: bool
+    ) -> dict[str, Any]:
+        cursor.execute(
+            """SELECT o.collection, o.object_id, o.revision, o.content_sha256,
+                      o.payload, o.retired_at,
+                      ov.change_set_id, ov.revision, ov.content_sha256, ov.payload,
+                      cs.status, cs.source_kind,
+                      co.operation, co.after_revision, co.after_sha256
+               FROM wang_knowledge.objects o
+               LEFT JOIN wang_knowledge.object_versions ov
+                 ON ov.collection=o.collection
+                AND ov.object_id=o.object_id
+                AND ov.revision=o.revision
+               LEFT JOIN wang_knowledge.change_sets cs
+                 ON cs.change_set_id=ov.change_set_id
+               LEFT JOIN wang_knowledge.change_operations co
+                 ON co.change_set_id=ov.change_set_id
+                AND co.collection=ov.collection
+                AND co.object_id=ov.object_id
+                AND co.after_revision=ov.revision
+                AND co.after_sha256=ov.content_sha256
+               WHERE o.collection = ANY(%s)
+               ORDER BY o.collection, o.object_id"""
+            + (" FOR UPDATE OF o" if lock_rows else " FOR SHARE OF o"),
+            (list(CLAIM_EVIDENCE_COLLECTIONS),),
+        )
+        heads = list(cursor.fetchall())
+        cursor.execute(
+            """SELECT review_event_id, collection, object_id, object_revision,
+                      reviewer_kind, reviewer_id, decision, reason, artifact,
+                      created_at
+               FROM wang_knowledge.review_events
+               ORDER BY review_event_id FOR SHARE"""
+        )
+        review_rows = list(cursor.fetchall())
+        cursor.execute(
+            """SELECT re.review_event_id, re.collection, re.object_id,
+                      re.object_revision, re.reviewer_kind, re.decision,
+                      re.artifact,
+                      ov.revision, ov.content_sha256, ov.payload, ov.change_set_id,
+                      cs.status, cs.source_kind,
+                      co.operation, co.after_revision, co.after_sha256
+               FROM wang_knowledge.review_events re
+               LEFT JOIN wang_knowledge.object_versions ov
+                 ON ov.collection=re.collection
+                AND ov.object_id=re.object_id
+                AND ov.revision=re.object_revision
+               LEFT JOIN wang_knowledge.change_sets cs
+                 ON cs.change_set_id=ov.change_set_id
+               LEFT JOIN wang_knowledge.change_operations co
+                 ON co.change_set_id=ov.change_set_id
+                AND co.collection=ov.collection
+                AND co.object_id=ov.object_id
+                AND co.after_revision=ov.revision
+                AND co.after_sha256=ov.content_sha256
+               WHERE re.reviewer_kind='human'
+                 AND re.collection = ANY(%s)
+               ORDER BY re.collection, re.object_id, re.object_revision,
+                        re.review_event_id""",
+            (list(CLAIM_EVIDENCE_COLLECTIONS),),
+        )
+        human_proofs = list(cursor.fetchall())
+        return _build_claim_evidence_human_authority_snapshot(
+            heads, review_rows, human_proofs
+        )
+
+    def read_claim_evidence_current_human_authority(self) -> dict[str, Any]:
+        """Freeze all current heads and ledger-proven human Claim/Evidence authority."""
+
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (POSTGRES_APPLY_ADVISORY_LOCK_KEY,),
+            )
+            return self._claim_evidence_human_authority_from_cursor(
+                cursor, lock_rows=False
+            )
+
+    def apply_claim_evidence_source_queue_plan(
+        self,
+        plan: ChangeSetPlan,
+        *,
+        metadata: Mapping[str, Any],
+        expected_source_generations: Sequence[Mapping[str, Any]],
+        expected_human_authority_snapshot: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Apply one #364 source unit through its mandatory locked CAS gates."""
+
+        context = _validate_claim_evidence_source_queue_apply(
+            plan,
+            metadata,
+            expected_source_generations,
+            expected_human_authority_snapshot,
+        )
+        return self.apply_plan(
+            plan,
+            metadata=dict(metadata),
+            _claim_evidence_source_queue_context=context,
+        )
+
     def list_change_set_states(
         self, change_set_ids: Sequence[str]
     ) -> list[dict[str, str]]:
@@ -1812,6 +3771,1243 @@ class PostgresKnowledgeStore:
         )
 
     @staticmethod
+    def _assert_claim_evidence_source_lineage_snapshot(
+        cursor: Any,
+        active_rows: Mapping[
+            tuple[str, str], tuple[str, str, int, str, dict[str, Any]]
+        ],
+        expected_snapshot: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Lock and compare every source row referenced by active endpoints."""
+
+        _validate_source_lineage_identity_snapshot(expected_snapshot)
+        expected_records = {
+            (str(row["collection"]), str(row["object_id"])): dict(row)
+            for row in expected_snapshot["records"]
+        }
+        fragment_ids: set[str] = set()
+        document_ids: set[str] = set()
+
+        def add_many(payload: Mapping[str, Any], plural: str, singular: str, sink: set[str]) -> None:
+            raw = payload.get(plural) or []
+            if not isinstance(raw, (list, tuple)):
+                raise ChangeSetConflict(
+                    f"Claim/Evidence source lineage field {plural} is not an array"
+                )
+            sink.update(str(value) for value in raw if str(value))
+            if payload.get(singular):
+                sink.add(str(payload[singular]))
+
+        for _key, row in active_rows.items():
+            payload = row[4]
+            add_many(payload, "source_fragment_ids", "source_fragment_id", fragment_ids)
+            add_many(payload, "source_document_ids", "source_document_id", document_ids)
+            if payload.get("source_id"):
+                document_ids.add(str(payload["source_id"]))
+
+        expected_fragment_ids = {
+            object_id
+            for (collection, object_id) in expected_records
+            if collection == "source_fragments"
+        }
+        if fragment_ids != expected_fragment_ids:
+            raise ChangeSetConflict(
+                "Claim/Evidence repair source-fragment denominator differs from freeze"
+            )
+        fragment_rows: list[Sequence[Any]] = []
+        if fragment_ids:
+            cursor.execute(
+                """SELECT collection, object_id, revision, content_sha256,
+                          payload, retired_at
+                   FROM wang_knowledge.objects
+                   WHERE collection='source_fragments' AND object_id = ANY(%s)
+                   ORDER BY object_id
+                   FOR UPDATE""",
+                (sorted(fragment_ids),),
+            )
+            fragment_rows = list(cursor.fetchall())
+        for row in fragment_rows:
+            payload = row[4]
+            if not isinstance(payload, Mapping) or record_content_sha(payload) != str(row[3]):
+                raise ChangeSetConflict(
+                    f"SourceFragment {row[1]} content SHA differs from payload"
+                )
+            source_id = str(payload.get("source_id") or "")
+            if not source_id:
+                raise ChangeSetConflict(
+                    f"SourceFragment {row[1]} lacks its SourceDocument lineage"
+                )
+            document_ids.add(source_id)
+
+        expected_document_ids = {
+            object_id
+            for (collection, object_id) in expected_records
+            if collection == "source_documents"
+        }
+        if document_ids != expected_document_ids:
+            raise ChangeSetConflict(
+                "Claim/Evidence repair source-document denominator differs from freeze"
+            )
+        document_rows: list[Sequence[Any]] = []
+        if document_ids:
+            cursor.execute(
+                """SELECT collection, object_id, revision, content_sha256,
+                          payload, retired_at
+                   FROM wang_knowledge.objects
+                   WHERE collection='source_documents' AND object_id = ANY(%s)
+                   ORDER BY object_id
+                   FOR UPDATE""",
+                (sorted(document_ids),),
+            )
+            document_rows = list(cursor.fetchall())
+        for row in document_rows:
+            if not isinstance(row[4], Mapping) or record_content_sha(row[4]) != str(row[3]):
+                raise ChangeSetConflict(
+                    f"SourceDocument {row[1]} content SHA differs from payload"
+                )
+
+        actual = build_source_lineage_identity_snapshot(
+            [*fragment_rows, *document_rows]
+        )
+        if actual != expected_snapshot:
+            raise ChangeSetConflict(
+                "Referenced source-lineage snapshot drifted after repair freeze"
+            )
+        return actual
+
+    @staticmethod
+    def _assert_repair_targets_use_active_source_lineage(
+        plan: ChangeSetPlan,
+        active_rows: Mapping[
+            tuple[str, str], tuple[str, str, int, str, Mapping[str, Any]]
+        ],
+        source_snapshot: Mapping[str, Any],
+    ) -> None:
+        """Ignore unrelated legacy lineage, but never repair through retired evidence."""
+
+        touched_evidence_ids = {
+            operation.object_id
+            for operation in plan.operations
+            if operation.collection == "evidence_steps"
+        }
+        for operation in plan.operations:
+            if operation.collection != "claims" or operation.operation != "update":
+                continue
+            current = active_rows.get(("claims", operation.object_id))
+            if current is None:
+                continue
+            before = {
+                str(value) for value in current[4].get("evidence_step_ids") or []
+            }
+            after = {
+                str(value)
+                for value in stored_operation_payload(operation).get(
+                    "evidence_step_ids"
+                )
+                or []
+            }
+            touched_evidence_ids.update(after - before)
+
+        retired = {
+            (str(row["collection"]), str(row["object_id"]))
+            for row in source_snapshot.get("records") or []
+            if bool(row.get("retired"))
+        }
+        for evidence_id in sorted(touched_evidence_ids):
+            evidence = active_rows.get(("evidence_steps", evidence_id))
+            if evidence is None:
+                continue
+            payload = evidence[4]
+            fragment_ids = {
+                str(value)
+                for value in (
+                    payload.get("source_fragment_ids")
+                    or ([payload["source_fragment_id"]]
+                        if payload.get("source_fragment_id")
+                        else [])
+                )
+            }
+            source_ids = {
+                str(value)
+                for value in (
+                    payload.get("source_document_ids")
+                    or ([payload["source_id"]] if payload.get("source_id") else [])
+                )
+            }
+            retired_refs = sorted(
+                {
+                    object_id
+                    for collection, object_id in retired
+                    if (
+                        collection == "source_fragments"
+                        and object_id in fragment_ids
+                    )
+                    or (
+                        collection == "source_documents" and object_id in source_ids
+                    )
+                }
+            )
+            if retired_refs:
+                raise ChangeSetConflict(
+                    "Claim/Evidence repair target uses retired source lineage: "
+                    f"evidence_steps/{evidence_id} -> {','.join(retired_refs)}"
+                )
+
+    @staticmethod
+    def _assert_claim_evidence_reciprocity_guard(
+        cursor: Any,
+        plan: ChangeSetPlan,
+        guard: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Lock the full denominator and validate the repair's final graph."""
+
+        validated_guard = _validate_claim_evidence_reciprocity_guard(plan, guard)
+        expected = validated_guard["expected_active_snapshot"]
+        cursor.execute(
+            """SELECT collection, object_id, revision, content_sha256, payload
+               FROM wang_knowledge.objects
+               WHERE collection = ANY(%s) AND retired_at IS NULL
+               ORDER BY collection, object_id
+               FOR UPDATE""",
+            (list(CLAIM_EVIDENCE_COLLECTIONS),),
+        )
+        rows = list(cursor.fetchall())
+        actual = build_claim_evidence_active_snapshot(rows)
+
+        def record_index(snapshot: Mapping[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
+            return {
+                (str(row["collection"]), str(row["object_id"])): dict(row)
+                for row in snapshot["records"]
+            }
+
+        expected_records = record_index(expected)
+        actual_records = record_index(actual)
+        missing = sorted(set(expected_records) - set(actual_records))
+        unexpected = sorted(set(actual_records) - set(expected_records))
+        if missing or unexpected:
+            details: list[str] = []
+            if missing:
+                details.append(
+                    "missing="
+                    + ",".join(
+                        f"{collection}/{object_id}"
+                        for collection, object_id in missing[:10]
+                    )
+                )
+            if unexpected:
+                details.append(
+                    "unexpected="
+                    + ",".join(
+                        f"{collection}/{object_id}"
+                        for collection, object_id in unexpected[:10]
+                    )
+                )
+            raise ChangeSetConflict(
+                "Active Claim/Evidence snapshot ID drift after preview: "
+                + " | ".join(details)
+            )
+        revision_drift = [
+            (key, expected_records[key]["revision"], actual_records[key]["revision"])
+            for key in sorted(expected_records)
+            if expected_records[key]["revision"] != actual_records[key]["revision"]
+        ]
+        if revision_drift:
+            key, expected_revision, actual_revision = revision_drift[0]
+            raise ChangeSetConflict(
+                "Active Claim/Evidence snapshot revision drift after preview: "
+                f"{key[0]}/{key[1]} expected {expected_revision}, "
+                f"found {actual_revision}"
+            )
+        sha_drift = [
+            key
+            for key in sorted(expected_records)
+            if expected_records[key]["content_sha256"]
+            != actual_records[key]["content_sha256"]
+        ]
+        if sha_drift:
+            key = sha_drift[0]
+            raise ChangeSetConflict(
+                "Active Claim/Evidence snapshot content SHA drift after preview: "
+                f"{key[0]}/{key[1]}"
+            )
+        if (
+            expected.get("records_sha256") != actual.get("records_sha256")
+            or expected.get("pair_state_sha256") != actual.get("pair_state_sha256")
+            or expected.get("counts") != actual.get("counts")
+            or expected.get("snapshot_sha256") != actual.get("snapshot_sha256")
+        ):
+            raise ChangeSetConflict(
+                "Active Claim/Evidence pair-state drift after preview"
+            )
+
+        expected_dependencies = validated_guard[
+            "expected_product_dependency_snapshot"
+        ]
+        cursor.execute(
+            """SELECT object_id, revision, content_sha256, payload
+               FROM wang_knowledge.objects
+               WHERE collection='product_dependencies' AND retired_at IS NULL
+               ORDER BY object_id
+               FOR UPDATE"""
+        )
+        actual_dependencies = build_product_dependency_active_snapshot(
+            cursor.fetchall()
+        )
+        if actual_dependencies != expected_dependencies:
+            raise ChangeSetConflict(
+                "Active ProductDependency snapshot drift after repair preview"
+            )
+
+        active_rows: dict[
+            tuple[str, str], tuple[str, str, int, str, dict[str, Any]]
+        ] = {}
+        for row in rows:
+            normalized = _claim_evidence_row(row)
+            active_rows[(normalized[0], normalized[1])] = normalized
+        PostgresKnowledgeStore._assert_claim_evidence_source_lineage_snapshot(
+            cursor,
+            active_rows,
+            validated_guard["expected_source_lineage_snapshot"],
+        )
+        PostgresKnowledgeStore._assert_repair_targets_use_active_source_lineage(
+            plan,
+            active_rows,
+            validated_guard["expected_source_lineage_snapshot"],
+        )
+        if plan.source_kind in CLAIM_EVIDENCE_REPAIR_SOURCE_KINDS:
+            PostgresKnowledgeStore._assert_claim_evidence_repair_authority(
+                cursor,
+                plan,
+                active_rows,
+                pair_adjudication_authorization=validated_guard.get(
+                    "expected_pair_adjudication_authorization"
+                ),
+            )
+        planned_keys: set[tuple[str, str]] = set()
+        for operation in plan.operations:
+            if operation.collection not in CLAIM_EVIDENCE_COLLECTIONS:
+                continue
+            key = (operation.collection, operation.object_id)
+            if key in planned_keys:
+                raise ChangeSetConflict(
+                    "Claim/Evidence repair plan repeats object "
+                    f"{operation.collection}/{operation.object_id}"
+                )
+            planned_keys.add(key)
+            current = active_rows.get(key)
+            if operation.operation in {"update", "retire"}:
+                if current is None:
+                    raise ChangeSetConflict(
+                        f"Claim/Evidence repair {operation.operation} target is not active: "
+                        f"{operation.collection}/{operation.object_id}"
+                    )
+                if (
+                    operation.before_revision != current[2]
+                    or operation.before_sha256 != current[3]
+                ):
+                    raise ChangeSetConflict(
+                        "Claim/Evidence repair operation does not match its locked "
+                        f"before state: {operation.collection}/{operation.object_id}"
+                    )
+            elif operation.operation in {"create", "revive"}:
+                if current is not None:
+                    raise ChangeSetConflict(
+                        f"Claim/Evidence repair {operation.operation} target is already active: "
+                        f"{operation.collection}/{operation.object_id}"
+                    )
+            else:
+                raise ChangeSetConflict(
+                    "Claim/Evidence repair uses an unsupported operation for "
+                    f"{operation.collection}/{operation.object_id}: {operation.operation}"
+                )
+
+            if operation.operation == "retire":
+                active_rows.pop(key)
+                continue
+            payload = stored_operation_payload(operation)
+            active_rows[key] = (
+                operation.collection,
+                operation.object_id,
+                operation.after_revision,
+                operation.after_sha256,
+                payload,
+            )
+
+        final_snapshot = build_claim_evidence_active_snapshot(active_rows.values())
+        counts = final_snapshot["counts"]
+        if counts["duplicate_array_references"]:
+            raise ChangeSetConflict(
+                "Claim/Evidence repair final graph contains duplicate array references: "
+                f"{counts['duplicate_array_references']}"
+            )
+        if counts["dangling_endpoints"]:
+            raise ChangeSetConflict(
+                "Claim/Evidence repair final graph contains dangling endpoints: "
+                f"{counts['dangling_endpoints']}"
+            )
+        if counts["claim_only_pairs"] or counts["evidence_only_pairs"]:
+            raise ChangeSetConflict(
+                "Claim/Evidence repair final graph is not reciprocal: "
+                f"claim_only={counts['claim_only_pairs']}, "
+                f"evidence_only={counts['evidence_only_pairs']}"
+            )
+        review_snapshot = PostgresKnowledgeStore._review_event_ledger_snapshot(
+            cursor, lock_rows=True
+        )
+        if (
+            review_snapshot
+            != validated_guard["expected_review_event_ledger_snapshot"]
+        ):
+            raise ChangeSetConflict(
+                "Review-event ledger drifted after Claim/Evidence repair preview"
+            )
+        return final_snapshot
+
+    @staticmethod
+    def _assert_claim_evidence_reciprocity_applied_state(
+        cursor: Any,
+        plan: ChangeSetPlan,
+        guard: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """On idempotent retry, prove the exact guarded final state still exists."""
+
+        validated_guard = _validate_claim_evidence_reciprocity_guard(plan, guard)
+        expected_records = {
+            (str(row["collection"]), str(row["object_id"])): dict(row)
+            for row in validated_guard["expected_active_snapshot"]["records"]
+        }
+        for operation in plan.operations:
+            if operation.collection not in CLAIM_EVIDENCE_COLLECTIONS:
+                continue
+            key = (operation.collection, operation.object_id)
+            before = expected_records.get(key)
+            if (
+                before is None
+                or before["revision"] != operation.before_revision
+                or before["content_sha256"] != operation.before_sha256
+            ):
+                raise ChangeSetConflict(
+                    "Applied Claim/Evidence repair guard cannot derive its final row: "
+                    f"{operation.collection}/{operation.object_id}"
+                )
+            if operation.operation == "retire":
+                expected_records.pop(key)
+            else:
+                expected_records[key] = {
+                    "collection": operation.collection,
+                    "object_id": operation.object_id,
+                    "revision": operation.after_revision,
+                    "content_sha256": operation.after_sha256,
+                }
+
+        cursor.execute(
+            """SELECT collection, object_id, revision, content_sha256, payload
+               FROM wang_knowledge.objects
+               WHERE collection = ANY(%s) AND retired_at IS NULL
+               ORDER BY collection, object_id
+               FOR UPDATE""",
+            (list(CLAIM_EVIDENCE_COLLECTIONS),),
+        )
+        locked_rows = list(cursor.fetchall())
+        actual = build_claim_evidence_active_snapshot(locked_rows)
+        if actual["records"] != [
+            expected_records[key] for key in sorted(expected_records)
+        ]:
+            raise ChangeSetConflict(
+                "Applied Claim/Evidence repair final snapshot drifted after apply"
+            )
+        counts = actual["counts"]
+        if (
+            counts["duplicate_array_references"]
+            or counts["dangling_endpoints"]
+            or counts["claim_only_pairs"]
+            or counts["evidence_only_pairs"]
+        ):
+            raise ChangeSetConflict(
+                "Applied Claim/Evidence repair final graph is no longer clean"
+            )
+        cursor.execute(
+            """SELECT object_id, revision, content_sha256, payload
+               FROM wang_knowledge.objects
+               WHERE collection='product_dependencies' AND retired_at IS NULL
+               ORDER BY object_id
+               FOR UPDATE"""
+        )
+        dependencies = build_product_dependency_active_snapshot(cursor.fetchall())
+        if dependencies != validated_guard["expected_product_dependency_snapshot"]:
+            raise ChangeSetConflict(
+                "Applied Claim/Evidence repair ProductDependency snapshot drifted"
+            )
+        active_rows = {
+            (normalized[0], normalized[1]): normalized
+            for normalized in (_claim_evidence_row(row) for row in locked_rows)
+        }
+        PostgresKnowledgeStore._assert_claim_evidence_source_lineage_snapshot(
+            cursor,
+            active_rows,
+            validated_guard["expected_source_lineage_snapshot"],
+        )
+        authority_rows = dict(active_rows)
+        for operation in plan.operations:
+            if operation.collection not in CLAIM_EVIDENCE_COLLECTIONS:
+                continue
+            cursor.execute(
+                """SELECT payload
+                   FROM wang_knowledge.object_versions
+                   WHERE collection=%s AND object_id=%s
+                     AND revision=%s AND content_sha256=%s""",
+                (
+                    operation.collection,
+                    operation.object_id,
+                    operation.before_revision,
+                    operation.before_sha256,
+                ),
+            )
+            prior_version = cursor.fetchone()
+            if not prior_version or not isinstance(prior_version[0], Mapping):
+                raise ChangeSetConflict(
+                    "Applied Claim/Evidence repair lacks its exact before ObjectVersion: "
+                    f"{operation.collection}/{operation.object_id}"
+                )
+            before_payload = dict(prior_version[0])
+            if record_content_sha(before_payload) != operation.before_sha256:
+                raise ChangeSetConflict(
+                    "Applied Claim/Evidence repair before ObjectVersion SHA is invalid: "
+                    f"{operation.object_id}"
+                )
+            authority_rows[(operation.collection, operation.object_id)] = (
+                operation.collection,
+                operation.object_id,
+                int(operation.before_revision or 0),
+                str(operation.before_sha256 or ""),
+                before_payload,
+            )
+        PostgresKnowledgeStore._assert_repair_targets_use_active_source_lineage(
+            plan,
+            authority_rows,
+            validated_guard["expected_source_lineage_snapshot"],
+        )
+        PostgresKnowledgeStore._assert_claim_evidence_repair_authority(
+            cursor,
+            plan,
+            authority_rows,
+            pair_adjudication_authorization=validated_guard.get(
+                "expected_pair_adjudication_authorization"
+            ),
+        )
+        review_snapshot = PostgresKnowledgeStore._review_event_ledger_snapshot(
+            cursor, lock_rows=True
+        )
+        if (
+            review_snapshot
+            != validated_guard["expected_review_event_ledger_snapshot"]
+        ):
+            raise ChangeSetConflict(
+                "Applied Claim/Evidence repair review-event ledger drifted"
+            )
+        return actual
+
+    @staticmethod
+    def _assert_change_set_write_ledger(
+        cursor: Any,
+        plan: ChangeSetPlan,
+        metadata: Mapping[str, Any],
+        summary: Mapping[str, Any],
+    ) -> None:
+        """Verify the exact KCS, ChangeOperation and ObjectVersion ledger."""
+
+        cursor.execute(
+            """SELECT fingerprint_sha256, package_id, source_kind, source_sha256,
+                      status, summary, metadata, created_at, applied_at
+               FROM wang_knowledge.change_sets
+               WHERE change_set_id=%s""",
+            (plan.change_set_id,),
+        )
+        change_set_row = cursor.fetchone()
+        timestamps_valid = False
+        if change_set_row:
+            try:
+                created_at = (
+                    change_set_row[7]
+                    if isinstance(change_set_row[7], datetime)
+                    else datetime.fromisoformat(
+                        str(change_set_row[7] or "").replace("Z", "+00:00")
+                    )
+                )
+                applied_at = (
+                    change_set_row[8]
+                    if isinstance(change_set_row[8], datetime)
+                    else datetime.fromisoformat(
+                        str(change_set_row[8] or "").replace("Z", "+00:00")
+                    )
+                )
+                timestamps_valid = (
+                    created_at.tzinfo is not None
+                    and applied_at.tzinfo is not None
+                    and applied_at >= created_at
+                )
+            except (TypeError, ValueError):
+                timestamps_valid = False
+        if not change_set_row or (
+            str(change_set_row[0]) != plan.fingerprint_sha256
+            or str(change_set_row[1]) != plan.package_id
+            or str(change_set_row[2]) != plan.source_kind
+            or str(change_set_row[3]) != plan.source_sha256
+            or str(change_set_row[4]) != "applied"
+            or canonical_json(change_set_row[5] or {}) != canonical_json(summary)
+            or canonical_json(change_set_row[6] or {}) != canonical_json(metadata)
+            or not timestamps_valid
+        ):
+            raise ChangeSetConflict(
+                "Dedicated ChangeSet ledger write is incomplete"
+            )
+
+        cursor.execute(
+            """SELECT operation_index, operation, collection, object_id,
+                      before_sha256, after_sha256, before_revision, after_revision,
+                      details
+               FROM wang_knowledge.change_operations
+               WHERE change_set_id=%s
+               ORDER BY operation_index""",
+            (plan.change_set_id,),
+        )
+        observed_operations = list(cursor.fetchall())
+        expected_operations = [
+            (
+                index,
+                operation.operation,
+                operation.collection,
+                operation.object_id,
+                operation.before_sha256,
+                operation.after_sha256,
+                operation.before_revision,
+                operation.after_revision,
+                (
+                    {"removed_fields": list(operation.removed_fields)}
+                    if operation.removed_fields
+                    else {}
+                ),
+            )
+            for index, operation in enumerate(plan.operations)
+        ]
+        normalized_operations = [
+            (
+                int(row[0]),
+                str(row[1]),
+                str(row[2]),
+                str(row[3]),
+                str(row[4]) if row[4] is not None else None,
+                str(row[5]) if row[5] is not None else None,
+                int(row[6]) if row[6] is not None else None,
+                int(row[7]) if row[7] is not None else None,
+                dict(row[8] or {}),
+            )
+            for row in observed_operations
+        ]
+        if normalized_operations != expected_operations:
+            raise ChangeSetConflict(
+                "Dedicated ChangeOperation ledger differs "
+                "from its sealed plan"
+            )
+
+        cursor.execute(
+            """SELECT collection, object_id, revision, content_sha256,
+                      payload, change_set_id
+               FROM wang_knowledge.object_versions
+               WHERE change_set_id=%s
+               ORDER BY collection, object_id, revision""",
+            (plan.change_set_id,),
+        )
+        observed_versions = [
+            (
+                str(row[0]),
+                str(row[1]),
+                int(row[2]),
+                str(row[3]),
+                dict(row[4]),
+                str(row[5]),
+            )
+            for row in cursor.fetchall()
+        ]
+        expected_versions = sorted(
+            (
+                operation.collection,
+                operation.object_id,
+                operation.after_revision,
+                operation.after_sha256,
+                stored_operation_payload(operation),
+                plan.change_set_id,
+            )
+            for operation in plan.operations
+        )
+        if observed_versions != expected_versions:
+            raise ChangeSetConflict(
+                "Dedicated ObjectVersion ledger differs "
+                "from its sealed plan"
+            )
+
+    @staticmethod
+    def _assert_claim_evidence_repair_write_ledger(
+        cursor: Any,
+        plan: ChangeSetPlan,
+        metadata: Mapping[str, Any],
+        summary: Mapping[str, Any],
+        review_events_before: Mapping[str, Any],
+    ) -> None:
+        """Verify every dedicated repair write before the transaction may commit."""
+
+        PostgresKnowledgeStore._assert_change_set_write_ledger(
+            cursor, plan, metadata, summary
+        )
+
+        review_events_after = PostgresKnowledgeStore._review_event_ledger_snapshot(
+            cursor
+        )
+        if review_events_after != review_events_before:
+            raise ChangeSetConflict(
+                "Dedicated Claim/Evidence repair unexpectedly changed review events"
+            )
+
+    @staticmethod
+    def _review_event_ledger_snapshot(
+        cursor: Any, *, lock_rows: bool = False
+    ) -> dict[str, Any]:
+        cursor.execute(
+            """SELECT review_event_id, collection, object_id, object_revision,
+                      reviewer_kind, reviewer_id, decision, reason, artifact,
+                      created_at
+               FROM wang_knowledge.review_events
+               ORDER BY review_event_id"""
+            + (" FOR SHARE" if lock_rows else "")
+        )
+        return build_review_event_ledger_snapshot(cursor.fetchall())
+
+    @staticmethod
+    def _assert_claim_evidence_repair_authority(
+        cursor: Any,
+        plan: ChangeSetPlan,
+        active_rows: Mapping[
+            tuple[str, str], tuple[str, str, int, str, Mapping[str, Any]]
+        ],
+        *,
+        pair_adjudication_authorization: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Permit only human-approved Claim bindings to fill reverse indexes."""
+
+        if plan.review_events:
+            raise ChangeSetConflict(
+                "Dedicated Claim/Evidence repair may not create review events"
+            )
+
+        if plan.source_kind == CLAIM_EVIDENCE_PAIR_ADJUDICATION_SOURCE_KIND:
+            from backend.pipeline.claim_evidence_pair_adjudication import (
+                validate_pair_repair_authorization,
+            )
+
+            try:
+                validate_pair_repair_authorization(
+                    pair_adjudication_authorization or {},
+                    plan=plan,
+                    active_rows=active_rows,
+                )
+            except ValueError as exc:
+                raise ChangeSetConflict(
+                    f"Pair-adjudication repair authority failed: {exc}"
+                ) from exc
+
+            target_claim_ids = sorted(
+                operation.object_id
+                for operation in plan.operations
+                if operation.collection == "claims"
+            )
+            target_evidence_ids = sorted(
+                operation.object_id
+                for operation in plan.operations
+                if operation.collection == "evidence_steps"
+            )
+            cursor.execute(
+                """SELECT re.collection, re.object_id, re.object_revision,
+                          re.reviewer_kind, re.decision
+                   FROM wang_knowledge.review_events re
+                   WHERE (re.collection='claims' AND re.object_id = ANY(%s))
+                      OR (re.collection='evidence_steps' AND re.object_id = ANY(%s))
+                   ORDER BY re.collection, re.object_id, re.object_revision,
+                            re.review_event_id""",
+                (target_claim_ids, target_evidence_ids),
+            )
+            for collection, object_id, revision, reviewer_kind, decision in cursor.fetchall():
+                current = active_rows.get((str(collection), str(object_id)))
+                if (
+                    current is not None
+                    and int(revision) == current[2]
+                    and str(reviewer_kind) == "human"
+                    and str(decision)
+                    == str(current[4].get("review_status") or "candidate")
+                ):
+                    raise ChangeSetConflict(
+                        "Pair-adjudication repair cannot alter a current human-settled "
+                        f"object: {collection}/{object_id}"
+                    )
+            return
+
+        if pair_adjudication_authorization is not None:
+            raise ChangeSetConflict(
+                "Pair-adjudication authority cannot govern a projection-only repair"
+            )
+
+        additions_by_evidence: dict[str, tuple[str, ...]] = {}
+        added_claim_ids: set[str] = set()
+        for operation in plan.operations:
+            if operation.collection != "evidence_steps" or operation.operation != "update":
+                raise ChangeSetConflict(
+                    "Dedicated Claim/Evidence repair permits only active "
+                    "EvidenceStep updates; rejected "
+                    f"{operation.collection}/{operation.object_id} "
+                    f"{operation.operation}"
+                )
+            key = (operation.collection, operation.object_id)
+            current = active_rows.get(key)
+            if current is None:
+                raise ChangeSetConflict(
+                    "Dedicated Claim/Evidence repair target is not an active "
+                    f"EvidenceStep: {operation.object_id}"
+                )
+            if (
+                operation.before_revision != current[2]
+                or operation.before_sha256 != current[3]
+                or operation.after_revision != current[2] + 1
+            ):
+                raise ChangeSetConflict(
+                    "Dedicated Claim/Evidence repair operation does not match its "
+                    "locked adjacent revision: "
+                    f"evidence_steps/{operation.object_id}"
+                )
+            current_payload = dict(current[4])
+            planned_payload = stored_operation_payload(operation)
+            protected_before = {
+                key: value
+                for key, value in current_payload.items()
+                if key not in {"produced_claim_ids", "revision"}
+            }
+            protected_after = {
+                key: value
+                for key, value in planned_payload.items()
+                if key not in {"produced_claim_ids", "revision"}
+            }
+            if canonical_json(protected_before) != canonical_json(protected_after):
+                raise ChangeSetConflict(
+                    "Dedicated Claim/Evidence repair changed EvidenceStep content "
+                    f"outside produced_claim_ids: {operation.object_id}"
+                )
+            before = current_payload.get("produced_claim_ids") or []
+            after = planned_payload.get("produced_claim_ids") or []
+            if not isinstance(before, list) or not isinstance(after, list):
+                raise ChangeSetConflict(
+                    "Dedicated Claim/Evidence repair requires produced_claim_ids arrays: "
+                    f"{operation.object_id}"
+                )
+            before_ids = [str(value) for value in before]
+            after_ids = [str(value) for value in after]
+            if (
+                any(not value for value in before_ids + after_ids)
+                or len(before_ids) != len(set(before_ids))
+                or len(after_ids) != len(set(after_ids))
+            ):
+                raise ChangeSetConflict(
+                    "Dedicated Claim/Evidence repair found empty or duplicate "
+                    f"produced_claim_ids: {operation.object_id}"
+                )
+            if after_ids[: len(before_ids)] != before_ids:
+                raise ChangeSetConflict(
+                    "Dedicated Claim/Evidence repair may not remove or reorder "
+                    f"produced_claim_ids: {operation.object_id}"
+                )
+            additions = tuple(after_ids[len(before_ids) :])
+            if not additions:
+                raise ChangeSetConflict(
+                    "Dedicated Claim/Evidence repair update must append a proven "
+                    f"Claim binding: {operation.object_id}"
+                )
+            if operation.object_id in additions_by_evidence:
+                raise ChangeSetConflict(
+                    "Dedicated Claim/Evidence repair repeats EvidenceStep operation: "
+                    f"{operation.object_id}"
+                )
+            additions_by_evidence[operation.object_id] = additions
+            added_claim_ids.update(additions)
+
+        if not additions_by_evidence:
+            return
+
+        evidence_ids = sorted(additions_by_evidence)
+        cursor.execute(
+            """SELECT review_event_id, collection, object_id, object_revision,
+                      reviewer_kind, decision, artifact
+               FROM wang_knowledge.review_events
+               WHERE (collection='claims' AND object_id = ANY(%s))
+                  OR (collection='evidence_steps' AND object_id = ANY(%s))
+               ORDER BY collection, object_id, object_revision, review_event_id""",
+            (sorted(added_claim_ids), evidence_ids),
+        )
+        events: dict[tuple[str, str, int], list[dict[str, Any]]] = {}
+        for (
+            event_id,
+            collection,
+            object_id,
+            revision,
+            reviewer_kind,
+            decision,
+            artifact,
+        ) in cursor.fetchall():
+            events.setdefault(
+                (str(collection), str(object_id), int(revision)), []
+            ).append(
+                {
+                    "review_event_id": str(event_id),
+                    "reviewer_kind": str(reviewer_kind),
+                    "decision": str(decision),
+                    "artifact": dict(artifact or {}),
+                }
+            )
+
+        for evidence_id in evidence_ids:
+            current = active_rows[("evidence_steps", evidence_id)]
+            status = str(current[4].get("review_status") or "candidate")
+            matching_human = [
+                event
+                for event in events.get(("evidence_steps", evidence_id, current[2]), [])
+                if event["reviewer_kind"] == "human" and event["decision"] == status
+            ]
+            if matching_human:
+                raise ChangeSetConflict(
+                    "Dedicated Claim/Evidence repair cannot change a current "
+                    f"human-settled EvidenceStep: {evidence_id}"
+                )
+
+        cursor.execute(
+            """SELECT ov.object_id, ov.revision, ov.content_sha256,
+                      ov.change_set_id, co.operation, co.after_revision,
+                      co.after_sha256, cs.status, cs.source_kind
+               FROM wang_knowledge.object_versions ov
+               JOIN wang_knowledge.objects current
+                 ON current.collection=ov.collection
+                AND current.object_id=ov.object_id
+                AND current.revision=ov.revision
+                AND current.content_sha256=ov.content_sha256
+                AND current.retired_at IS NULL
+               LEFT JOIN wang_knowledge.change_operations co
+                 ON co.change_set_id=ov.change_set_id
+                AND co.collection=ov.collection
+                AND co.object_id=ov.object_id
+                AND co.after_revision=ov.revision
+                AND co.after_sha256=ov.content_sha256
+               JOIN wang_knowledge.change_sets cs
+                 ON cs.change_set_id=ov.change_set_id
+               WHERE ov.collection='claims' AND ov.object_id = ANY(%s)
+               ORDER BY ov.object_id, co.operation""",
+            (sorted(added_claim_ids),),
+        )
+        producers: dict[str, list[dict[str, Any]]] = {}
+        for (
+            object_id,
+            revision,
+            content_sha256,
+            change_set_id,
+            operation,
+            after_revision,
+            after_sha256,
+            change_set_status,
+            source_kind,
+        ) in cursor.fetchall():
+            producers.setdefault(str(object_id), []).append(
+                {
+                    "revision": int(revision),
+                    "content_sha256": str(content_sha256),
+                    "change_set_id": str(change_set_id),
+                    "operation": str(operation or ""),
+                    "after_revision": (
+                        int(after_revision) if after_revision is not None else None
+                    ),
+                    "after_sha256": str(after_sha256 or ""),
+                    "change_set_status": str(change_set_status or ""),
+                    "source_kind": str(source_kind or ""),
+                }
+            )
+
+        for evidence_id, claim_ids in additions_by_evidence.items():
+            for claim_id in claim_ids:
+                claim = active_rows.get(("claims", claim_id))
+                if claim is None:
+                    raise ChangeSetConflict(
+                        "Dedicated Claim/Evidence repair references a non-current "
+                        f"Claim: {claim_id}"
+                    )
+                claim_payload = claim[4]
+                if evidence_id not in {
+                    str(value) for value in claim_payload.get("evidence_step_ids") or []
+                }:
+                    raise ChangeSetConflict(
+                        "Dedicated Claim/Evidence repair cannot invent a binding absent "
+                        f"from the locked Claim: {claim_id}/{evidence_id}"
+                    )
+                status = str(claim_payload.get("review_status") or "candidate")
+                current_events = events.get(("claims", claim_id, claim[2]), [])
+                matching_events = [
+                    event
+                    for event in current_events
+                    if event["reviewer_kind"] == "human"
+                    and event["decision"] == status
+                ]
+                producer_rows = producers.get(claim_id, [])
+                if (
+                    status not in {"approved", "human_approved"}
+                    or len(current_events) != 1
+                    or len(matching_events) != 1
+                    or len(producer_rows) != 1
+                ):
+                    raise ChangeSetConflict(
+                        "Dedicated Claim/Evidence repair lacks one current human "
+                        f"Claim authority: {claim_id}"
+                    )
+                producer = producer_rows[0]
+                if (
+                    producer["revision"] != claim[2]
+                    or producer["content_sha256"] != claim[3]
+                    or producer["operation"] not in {"create", "update", "revive"}
+                    or producer["after_revision"] != claim[2]
+                    or producer["after_sha256"] != claim[3]
+                    or producer["change_set_status"] != "applied"
+                    or producer["source_kind"] != "review_decision"
+                    or str(matching_events[0]["artifact"].get("change_set_id") or "")
+                    != producer["change_set_id"]
+                ):
+                    raise ChangeSetConflict(
+                        "Dedicated Claim/Evidence repair human event is not bound to "
+                        f"the current ObjectVersion producer: {claim_id}"
+                    )
+
+    @staticmethod
+    def _source_queue_final_heads(
+        plan: ChangeSetPlan, expected: Mapping[str, Any]
+    ) -> list[dict[str, Any]]:
+        heads = {
+            (str(row["collection"]), str(row["object_id"])): dict(row)
+            for row in expected["scanned_heads"]
+        }
+        for operation in plan.operations:
+            if operation.collection not in CLAIM_EVIDENCE_COLLECTIONS:
+                continue
+            key = (operation.collection, operation.object_id)
+            if operation.operation == "create":
+                if key in heads:
+                    raise ChangeSetConflict(
+                        f"Source-queue plan creates existing head {key[0]}/{key[1]}"
+                    )
+            elif key not in heads:
+                raise ChangeSetConflict(
+                    f"Source-queue plan changes absent head {key[0]}/{key[1]}"
+                )
+            heads[key] = {
+                "collection": operation.collection,
+                "object_id": operation.object_id,
+                "revision": operation.after_revision,
+                "content_sha256": operation.after_sha256,
+                "retired": operation.operation == "retire",
+                "producer_change_set_id": plan.change_set_id,
+            }
+        return [heads[key] for key in sorted(heads)]
+
+    @staticmethod
+    def _assert_claim_evidence_source_queue_plan_authority(
+        plan: ChangeSetPlan, expected: Mapping[str, Any]
+    ) -> None:
+        protected = {
+            (str(row["collection"]), str(row["object_id"]))
+            for row in expected["protected_records"]
+        }
+        for operation in plan.operations:
+            key = (operation.collection, operation.object_id)
+            if key in protected:
+                raise ChangeSetConflict(
+                    "Claim/Evidence source work cannot mutate human-settled "
+                    f"{operation.collection}/{operation.object_id}"
+                )
+            if operation.collection in CLAIM_EVIDENCE_COLLECTIONS:
+                status = str(operation.payload.get("review_status") or "candidate")
+                if status in {"approved", "human_approved"}:
+                    raise ChangeSetConflict(
+                        "Claim/Evidence source work cannot create an unproven human "
+                        f"status on {operation.collection}/{operation.object_id}"
+                    )
+        if any(event.reviewer_kind != "ai" for event in plan.review_events):
+            raise ChangeSetConflict(
+                "Claim/Evidence source work permits only sealed planned AI review events"
+            )
+
+    @staticmethod
+    def _assert_claim_evidence_source_queue_review_ledger(
+        cursor: Any,
+        plan: ChangeSetPlan,
+        expected_before: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        cursor.execute(
+            """SELECT review_event_id, collection, object_id, object_revision,
+                      reviewer_kind, reviewer_id, decision, reason, artifact,
+                      created_at
+               FROM wang_knowledge.review_events
+               ORDER BY review_event_id FOR SHARE"""
+        )
+        actual_rows = _canonical_review_event_rows(list(cursor.fetchall()))
+        planned = {
+            event.review_event_id: event for event in plan.review_events
+        }
+        actual_by_id = {row["review_event_id"]: row for row in actual_rows}
+        if not set(planned).issubset(actual_by_id):
+            raise ChangeSetConflict(
+                "Claim/Evidence source work did not persist every planned review event"
+            )
+        for event_id, event in planned.items():
+            observed = actual_by_id[event_id]
+            expected_fields = {
+                "review_event_id": event.review_event_id,
+                "collection": event.collection,
+                "object_id": event.object_id,
+                "object_revision": event.object_revision,
+                "reviewer_kind": event.reviewer_kind,
+                "reviewer_id": event.reviewer_id,
+                "decision": event.decision,
+                "reason": event.reason,
+                "artifact": event.artifact,
+            }
+            if any(
+                canonical_json(observed[field]) != canonical_json(value)
+                for field, value in expected_fields.items()
+            ):
+                raise ChangeSetConflict(
+                    f"Planned review event {event_id} differs from its sealed plan"
+                )
+        preexisting = [
+            row for row in actual_rows if row["review_event_id"] not in planned
+        ]
+        if build_review_event_ledger_snapshot(preexisting) != expected_before:
+            raise ChangeSetConflict(
+                "Claim/Evidence source work review-event baseline drifted"
+            )
+        if len(actual_rows) != int(expected_before["count"]) + len(planned):
+            raise ChangeSetConflict(
+                "Claim/Evidence source work review-event accounting differs"
+            )
+        return build_review_event_ledger_snapshot(actual_rows)
+
+    def _assert_claim_evidence_source_queue_pre_state(
+        self,
+        cursor: Any,
+        plan: ChangeSetPlan,
+        context: _ClaimEvidenceSourceQueueApplyContext,
+    ) -> None:
+        actual_sources = self._claim_evidence_source_generations_from_cursor(
+            cursor, context.expected_source_generations, lock_rows=True
+        )
+        if actual_sources != list(context.expected_source_generations):
+            raise ChangeSetConflict(
+                "Claim/Evidence source work SourceDocument generation drifted"
+            )
+        actual_human = self._claim_evidence_human_authority_from_cursor(
+            cursor, lock_rows=True
+        )
+        if actual_human != context.expected_human_authority_snapshot:
+            raise ChangeSetConflict(
+                "Claim/Evidence source work human-authority snapshot drifted"
+            )
+        self._assert_claim_evidence_source_queue_plan_authority(
+            plan, context.expected_human_authority_snapshot
+        )
+
+    def _assert_claim_evidence_source_queue_post_state(
+        self,
+        cursor: Any,
+        plan: ChangeSetPlan,
+        context: _ClaimEvidenceSourceQueueApplyContext,
+    ) -> None:
+        actual_sources = self._claim_evidence_source_generations_from_cursor(
+            cursor, context.expected_source_generations, lock_rows=True
+        )
+        if actual_sources != list(context.expected_source_generations):
+            raise ChangeSetConflict(
+                "Claim/Evidence source work changed its frozen SourceDocument generation"
+            )
+        expected = context.expected_human_authority_snapshot
+        actual = self._claim_evidence_human_authority_from_cursor(
+            cursor, lock_rows=True
+        )
+        if actual["scanned_heads"] != self._source_queue_final_heads(plan, expected):
+            raise ChangeSetConflict(
+                "Claim/Evidence source work current-head readback differs from its plan"
+            )
+        if actual["protected_records"] != expected["protected_records"]:
+            raise ChangeSetConflict(
+                "Claim/Evidence source work changed human-settled authority"
+            )
+        expected_ledger_after = self._assert_claim_evidence_source_queue_review_ledger(
+            cursor,
+            plan,
+            expected["review_event_ledger_snapshot"],
+        )
+        if actual["review_event_ledger_snapshot"] != expected_ledger_after:
+            raise ChangeSetConflict(
+                "Claim/Evidence source work review-event ledger readback drifted"
+            )
+
+    @staticmethod
+    def _assert_change_set_object_readback(
+        cursor: Any, plan: ChangeSetPlan
+    ) -> None:
+        for operation in plan.operations:
+            cursor.execute(
+                """SELECT revision, content_sha256, payload, retired_at
+                   FROM wang_knowledge.objects
+                   WHERE collection=%s AND object_id=%s""",
+                (operation.collection, operation.object_id),
+            )
+            row = cursor.fetchone()
+            if not row or not isinstance(row[2], Mapping):
+                raise ChangeSetConflict(
+                    f"Dedicated ChangeSet object readback is missing: "
+                    f"{operation.collection}/{operation.object_id}"
+                )
+            expected_retired = operation.operation == "retire"
+            expected_payload = stored_operation_payload(operation)
+            payload_matches = (
+                canonical_json(row[2]) == canonical_json(expected_payload)
+                if operation.operation in {"create", "update"}
+                else canonical_json(
+                    {
+                        key: value
+                        for key, value in row[2].items()
+                        if key != "revision"
+                    }
+                )
+                == canonical_json(
+                    {
+                        key: value
+                        for key, value in expected_payload.items()
+                        if key != "revision"
+                    }
+                )
+            )
+            if (
+                int(row[0]) != operation.after_revision
+                or str(row[1]) != operation.after_sha256
+                or record_content_sha(row[2]) != operation.after_sha256
+                or (row[3] is not None) != expected_retired
+                or not payload_matches
+            ):
+                raise ChangeSetConflict(
+                    f"Dedicated ChangeSet object readback differs: "
+                    f"{operation.collection}/{operation.object_id}"
+                )
+
+    @staticmethod
     def _assert_current_viewpoint_revisions(
         cursor: Any, expected: Mapping[str, str]
     ) -> None:
@@ -1839,9 +5035,39 @@ class PostgresKnowledgeStore:
         *,
         metadata: Optional[dict[str, Any]] = None,
         expected_current_viewpoint_revisions: Optional[Mapping[str, str]] = None,
+        expected_claim_evidence_guard: Optional[Mapping[str, Any]] = None,
+        _claim_evidence_source_queue_context: Optional[
+            _ClaimEvidenceSourceQueueApplyContext
+        ] = None,
     ) -> dict[str, Any]:
+        source_queue_context = _claim_evidence_source_queue_context
+        if plan.source_kind in CLAIM_EVIDENCE_SOURCE_QUEUE_SOURCE_KINDS:
+            if (
+                source_queue_context is None
+                or source_queue_context.token
+                is not _CLAIM_EVIDENCE_SOURCE_QUEUE_APPLY_TOKEN
+            ):
+                raise PostgresKnowledgeStoreError(
+                    "Dedicated Claim/Evidence source work must use "
+                    "apply_claim_evidence_source_queue_plan"
+                )
+        elif source_queue_context is not None:
+            raise PostgresKnowledgeStoreError(
+                "Claim/Evidence source-queue guard cannot authorize another source kind"
+            )
+        claim_evidence_guard = _resolve_claim_evidence_reciprocity_guard(
+            plan, metadata, expected_claim_evidence_guard
+        )
         validate_change_set_plan_integrity(plan)
-        if not plan.operations:
+        if plan.source_kind in CLAIM_EVIDENCE_REPAIR_SOURCE_KINDS:
+            assert claim_evidence_guard is not None
+            _validate_claim_evidence_repair_apply_metadata(
+                plan, metadata, claim_evidence_guard
+            )
+        if (
+            not plan.operations
+            and plan.source_kind not in CLAIM_EVIDENCE_REPAIR_SOURCE_KINDS
+        ):
             return {
                 "status": "unchanged",
                 "change_set_id": None,
@@ -1855,15 +5081,92 @@ class PostgresKnowledgeStore:
                 # model work and planning happen before this lock is taken.
                 cursor.execute(
                     "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
-                    ("wang_knowledge.apply_plan.v1",),
+                    (POSTGRES_APPLY_ADVISORY_LOCK_KEY,),
                 )
                 cursor.execute(
-                    "SELECT status, summary FROM wang_knowledge.change_sets WHERE fingerprint_sha256=%s",
+                    """SELECT change_set_id, status, summary, metadata
+                       FROM wang_knowledge.change_sets
+                       WHERE fingerprint_sha256=%s""",
                     (plan.fingerprint_sha256,),
                 )
                 prior = cursor.fetchone()
-                if prior and prior[0] == "applied":
-                    return {"status": "already_applied", "change_set_id": plan.change_set_id, "summary": prior[1]}
+                if prior and prior[1] == "applied" and plan.operations:
+                    if source_queue_context is not None:
+                        if (
+                            str(prior[0]) != plan.change_set_id
+                            or canonical_json(prior[3] or {})
+                            != canonical_json(metadata or {})
+                        ):
+                            raise ChangeSetConflict(
+                                "Applied Claim/Evidence source work metadata differs "
+                                "from this retry"
+                            )
+                        expected_retry_summary = plan.as_dict()["summary"]
+                        expected_retry_summary["invalidated_dependencies"] = 0
+                        self._assert_change_set_write_ledger(
+                            cursor,
+                            plan,
+                            metadata or {},
+                            expected_retry_summary,
+                        )
+                        self._assert_change_set_object_readback(cursor, plan)
+                        self._assert_claim_evidence_source_queue_post_state(
+                            cursor, plan, source_queue_context
+                        )
+                    if (
+                        plan.source_kind in CLAIM_EVIDENCE_REPAIR_SOURCE_KINDS
+                        and claim_evidence_guard is not None
+                    ):
+                        if (
+                            str(prior[0]) != plan.change_set_id
+                            or canonical_json(prior[3] or {})
+                            != canonical_json(metadata or {})
+                        ):
+                            raise ChangeSetConflict(
+                                "Applied Claim/Evidence repair metadata or backup "
+                                "differs from this retry"
+                            )
+                        retry_review_events = self._review_event_ledger_snapshot(
+                            cursor
+                        )
+                        self._assert_claim_evidence_reciprocity_applied_state(
+                            cursor, plan, claim_evidence_guard
+                        )
+                        expected_retry_summary = plan.as_dict()["summary"]
+                        expected_retry_summary["invalidated_dependencies"] = 0
+                        self._assert_claim_evidence_repair_write_ledger(
+                            cursor,
+                            plan,
+                            metadata or {},
+                            expected_retry_summary,
+                            retry_review_events,
+                        )
+                    return {
+                        "status": "already_applied",
+                        "change_set_id": plan.change_set_id,
+                        "summary": prior[2],
+                    }
+
+                guarded_final_snapshot: Optional[dict[str, Any]] = None
+                if source_queue_context is not None:
+                    self._assert_claim_evidence_source_queue_pre_state(
+                        cursor, plan, source_queue_context
+                    )
+                if claim_evidence_guard is not None:
+                    guarded_final_snapshot = self._assert_claim_evidence_reciprocity_guard(
+                        cursor, plan, claim_evidence_guard
+                    )
+                if not plan.operations:
+                    return {
+                        "status": "unchanged",
+                        "change_set_id": None,
+                        "summary": plan.as_dict()["summary"],
+                    }
+                repair_review_events_before: Optional[dict[str, Any]] = None
+                if plan.source_kind in CLAIM_EVIDENCE_REPAIR_SOURCE_KINDS:
+                    repair_review_events_before = self._review_event_ledger_snapshot(
+                        cursor
+                    )
 
                 self._assert_obsolete_candidate_retirement(
                     cursor,
@@ -2045,13 +5348,71 @@ class PostgresKnowledgeStore:
                     )
 
                 invalidated = self._invalidate_dependencies(cursor, plan, changed_records, len(plan.operations))
+                if (
+                    plan.source_kind
+                    in (
+                        CLAIM_EVIDENCE_REPAIR_SOURCE_KINDS
+                        | CLAIM_EVIDENCE_SOURCE_QUEUE_SOURCE_KINDS
+                    )
+                    and invalidated
+                ):
+                    raise ChangeSetConflict(
+                        "Dedicated Claim/Evidence work encountered an uncoordinated "
+                        f"ProductDependency invalidation: {invalidated}"
+                    )
                 summary["invalidated_dependencies"] = invalidated
+                if guarded_final_snapshot is not None:
+                    cursor.execute(
+                        """SELECT collection, object_id, revision, content_sha256, payload
+                           FROM wang_knowledge.objects
+                           WHERE collection = ANY(%s) AND retired_at IS NULL
+                           ORDER BY collection, object_id""",
+                        (list(CLAIM_EVIDENCE_COLLECTIONS),),
+                    )
+                    written_rows = list(cursor.fetchall())
+                    written_snapshot = build_claim_evidence_active_snapshot(
+                        written_rows
+                    )
+                    if written_snapshot != guarded_final_snapshot:
+                        raise ChangeSetConflict(
+                            "Claim/Evidence repair database state differs from its "
+                            "locked final simulation"
+                        )
+                    written_active_rows = {
+                        (normalized[0], normalized[1]): normalized
+                        for normalized in (
+                            _claim_evidence_row(row) for row in written_rows
+                        )
+                    }
+                    assert claim_evidence_guard is not None
+                    PostgresKnowledgeStore._assert_claim_evidence_source_lineage_snapshot(
+                        cursor,
+                        written_active_rows,
+                        claim_evidence_guard["expected_source_lineage_snapshot"],
+                    )
                 cursor.execute(
                     """UPDATE wang_knowledge.change_sets
                        SET status='applied', summary=%s::jsonb, applied_at=now()
                        WHERE change_set_id=%s""",
                     (canonical_json(summary), plan.change_set_id),
                 )
+                if plan.source_kind in CLAIM_EVIDENCE_REPAIR_SOURCE_KINDS:
+                    assert repair_review_events_before is not None
+                    self._assert_claim_evidence_repair_write_ledger(
+                        cursor,
+                        plan,
+                        metadata or {},
+                        summary,
+                        repair_review_events_before,
+                    )
+                if source_queue_context is not None:
+                    self._assert_change_set_write_ledger(
+                        cursor, plan, metadata or {}, summary
+                    )
+                    self._assert_change_set_object_readback(cursor, plan)
+                    self._assert_claim_evidence_source_queue_post_state(
+                        cursor, plan, source_queue_context
+                    )
         return {"status": "applied", "change_set_id": plan.change_set_id, "summary": summary}
 
     @staticmethod
@@ -3853,7 +7214,7 @@ class PostgresKnowledgeStore:
             # the same transaction lock.
             cursor.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
-                ("wang_knowledge.apply_plan.v1",),
+                (POSTGRES_APPLY_ADVISORY_LOCK_KEY,),
             )
             cursor.execute(
                 """SELECT revision, content_sha256, payload
