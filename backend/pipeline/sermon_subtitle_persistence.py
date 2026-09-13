@@ -2,7 +2,7 @@
 
 This module owns the deterministic part of the write. Authorization and the
 actual save remain in ``SermonManager`` so the extraction runner cannot acquire
-a second, ungoverned path to ``script_review``.
+a second, ungoverned path to the authoritative transcript.
 """
 
 from __future__ import annotations
@@ -26,6 +26,43 @@ class SubtitlePersistenceError(RuntimeError):
 
 class SubtitleBodyMutationError(SubtitlePersistenceError):
     """A proposed or saved transcript changed something besides subtitles."""
+
+
+SUPPORTED_TRANSCRIPT_STAGES = frozenset({"script_review", "script_published"})
+
+
+def transcript_rows(payload: Any, *, stage: str) -> list[dict[str, Any]]:
+    """Return the physical script rows for one governed transcript stage."""
+
+    rows: Any
+    if stage == "script_review":
+        rows = payload
+    elif stage == "script_published":
+        if not isinstance(payload, Mapping):
+            raise SubtitlePersistenceError("script_published sermon must be a JSON object")
+        rows = payload.get("script")
+    else:
+        raise SubtitlePersistenceError(
+            f"generated subtitles cannot be written to unsupported stage {stage!r}"
+        )
+    if not isinstance(rows, list) or any(not isinstance(row, Mapping) for row in rows):
+        raise SubtitlePersistenceError(f"{stage} sermon script must be a JSON array of rows")
+    return [dict(row) for row in rows]
+
+
+def payload_with_rows(payload: Any, rows: Sequence[Mapping[str, Any]], *, stage: str) -> Any:
+    """Replace only the script rows while preserving the stage's outer payload."""
+
+    normalized = [dict(row) for row in rows]
+    if stage == "script_review":
+        return normalized
+    if stage == "script_published":
+        if not isinstance(payload, Mapping):
+            raise SubtitlePersistenceError("script_published sermon must be a JSON object")
+        return {**payload, "script": normalized}
+    raise SubtitlePersistenceError(
+        f"generated subtitles cannot be written to unsupported stage {stage!r}"
+    )
 
 
 def body_rows(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
@@ -146,7 +183,7 @@ def write_back_generated_subtitles(
     insertions: Sequence[Mapping[str, Any]],
     actor_id: str,
 ) -> dict[str, Any]:
-    """Write generated headings to one review transcript and verify the result.
+    """Write generated headings to one authoritative transcript and verify it.
 
     This is the shared write operation. Interactive callers enforce sermon ACL
     before entering it; the local extraction CLI requires its explicit
@@ -154,9 +191,10 @@ def write_back_generated_subtitles(
     separate insertion implementation.
     """
 
-    if source_path.parent.name != "script_review":
+    stage = source_path.parent.name
+    if stage not in SUPPORTED_TRANSCRIPT_STAGES:
         raise SubtitlePersistenceError(
-            "generated subtitles can only be written back to a script_review source"
+            "generated subtitles can only be written back to a governed transcript source"
         )
     before_raw = source_path.read_bytes()
     before_sha256 = hashlib.sha256(before_raw).hexdigest()
@@ -165,9 +203,8 @@ def write_back_generated_subtitles(
             f"sermon changed before subtitle write-back: expected {expected_source_sha256}, "
             f"found {before_sha256}"
         )
-    before = json.loads(before_raw)
-    if not isinstance(before, list):
-        raise SubtitlePersistenceError("script_review sermon must be a JSON array")
+    before_payload = json.loads(before_raw)
+    before = transcript_rows(before_payload, stage=stage)
     updated = apply_insertions(
         before,
         insertions,
@@ -175,23 +212,27 @@ def write_back_generated_subtitles(
         user_id=actor_id,
     )
     verify_saved_result(before, updated, expected_insertions=len(insertions))
+    updated_payload = payload_with_rows(before_payload, updated, stage=stage)
 
     # Imported lazily so deterministic insertion tests do not initialize the
     # web application. This writer preserves every mapping field and replaces
     # the file atomically.
     from backend.api.sc_api.script_delta import ScriptDelta
 
-    written_sha256 = ScriptDelta.save_rows(
-        str(source_path.parent.parent),
-        source_path.stem,
-        "script_review",
-        updated,
-        expected_current_sha256=before_sha256,
-    )
+    if stage == "script_review":
+        written_sha256 = ScriptDelta.save_rows(
+            str(source_path.parent.parent), source_path.stem, stage, updated,
+            expected_current_sha256=before_sha256,
+        )
+    else:
+        written_sha256 = ScriptDelta.save_json_payload(
+            str(source_path.parent.parent), source_path.stem, stage, updated_payload,
+            expected_current_sha256=before_sha256,
+        )
     if not str(written_sha256 or ""):
         raise SubtitlePersistenceError("atomic sermon save did not return its committed SHA")
     expected_committed_sha256 = hashlib.sha256(
-        json.dumps(updated, ensure_ascii=False, indent=4).encode("UTF-8")
+        json.dumps(updated_payload, ensure_ascii=False, indent=4).encode("UTF-8")
     ).hexdigest()
     if written_sha256 != expected_committed_sha256:
         # This is a broken writer contract, not an ordinary later commit.
@@ -202,10 +243,9 @@ def write_back_generated_subtitles(
             committed = json.loads(committed_raw)
         except json.JSONDecodeError as exc:
             raise SubtitlePersistenceError("committed sermon is not valid JSON") from exc
-        if not isinstance(committed, list):
-            raise SubtitlePersistenceError("committed script_review sermon is not a JSON array")
-        verify_saved_result(before, committed, expected_insertions=len(insertions))
-        if committed != updated:
+        committed_rows = transcript_rows(committed, stage=stage)
+        verify_saved_result(before, committed_rows, expected_insertions=len(insertions))
+        if committed != updated_payload:
             raise SubtitlePersistenceError(
                 "committed sermon differs from the exact authorized subtitle application"
             )
