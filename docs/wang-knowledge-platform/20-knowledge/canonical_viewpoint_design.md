@@ -150,7 +150,7 @@ flowchart TD
 
 **批次串行。** 第 N+1 批必须看得见第 N 批已经写入的观点，否则同一个观点会在两批里各建一个。所以上图末尾回到「逐批处理」，而不是并行铺开。
 
-**Canary 不凭印象手挑。** 完整 scope 的 grouping 冻结并通过 exact-once 后，程序才生成一份绑定 freeze、scope packet 与 grouping SHA 的选择 artifact。候选组必须完整、不属于 residual、在批次上限以内，并同时具有多来源、已有观点链接与尚未链接的 Claim，以及至少一条多证据 Claim；程序按固定顺序选最小的合格组。若没有这样的组，canary 入口关闭，不能退而挑一个最容易的单来源组，也不能另算或手改 grouping。
+**Canary 不凭印象手挑。** 完整 scope 的 grouping 冻结并通过 exact-once 后，程序才生成一份绑定 freeze、scope packet 与 grouping SHA 的选择 artifact。候选组必须完整、不属于 residual、在批次上限以内，并至少有两条 Claim、两个来源；程序选最小的合格组，平手时取 scope 中最早出现的组。Claim 是否可用由上游 freeze 负责，不再用「已有／未有观点链接」或「多证据」间接猜测难度。若没有合格组，canary 入口关闭；不能另算或手改 grouping。
 
 ### 其余各步
 

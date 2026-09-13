@@ -46,7 +46,7 @@ from backend.api.canonical_repository.viewpoint_resolution import (
 
 CVP_FREEZE_VERSION = "wang_cvp_production_freeze_v1"
 CVP_GROUPING_ENVELOPE_VERSION = "wang_canonical_viewpoint_grouping_envelope_v2"
-CVP_CANARY_SELECTION_VERSION = "wang_cvp_canary_selection_v1"
+CVP_CANARY_SELECTION_VERSION = "wang_cvp_canary_selection_v2"
 CVP_APPLY_AUTHORIZATION_VERSION = "wang_cvp_apply_authorization_v1"
 
 CORPUS_COLLECTIONS = (
@@ -649,7 +649,7 @@ def build_canary_selection(
     scope_packet: Mapping[str, Any],
     batch_size: int,
 ) -> dict[str, Any]:
-    """Select a small, structurally rich canary without semantic pre-screening.
+    """Select the smallest intact multi-source group without semantic proxies.
 
     The grouping model has already seen the complete frozen scope.  This step
     may only choose among its intact groups using fields already present in the
@@ -674,6 +674,10 @@ def build_canary_selection(
             ReviewClaim.model_validate(raw) for raw in scope_packet.get("claims") or []
         )
     }
+    claim_positions = {
+        str(raw["claim_id"]): index
+        for index, raw in enumerate(scope_packet.get("claims") or [])
+    }
     grouping = ClaimGroupingResponse.model_validate(grouping_envelope.get("grouping"))
     validate_grouping(
         grouping=grouping,
@@ -681,40 +685,32 @@ def build_canary_selection(
         claim_ids=list(claims),
     )
 
-    candidates: list[tuple[tuple[int, int, int, str], dict[str, Any]]] = []
+    candidates: list[tuple[tuple[int, int, str], dict[str, Any]]] = []
     for group in grouping.groups:
         group_claims = [claims[claim_id] for claim_id in group.claim_ids]
         source_ids = sorted({claim.source_id for claim in group_claims})
-        linked_count = sum(
-            bool(claim.active_full_viewpoint_id) for claim in group_claims
-        )
-        unlinked_count = len(group_claims) - linked_count
-        multi_evidence_count = sum(len(claim.evidence) > 1 for claim in group_claims)
         if (
             group.group_key == RESIDUAL_GROUP_KEY
             or not 2 <= len(group_claims) <= batch_size
             or len(source_ids) < 2
-            or linked_count < 1
-            or unlinked_count < 1
-            or multi_evidence_count < 1
         ):
             continue
+        first_scope_position = min(
+            claim_positions[claim_id] for claim_id in group.claim_ids
+        )
         details = {
             "group_key": group.group_key,
             "claim_ids": sorted(group.claim_ids),
             "claim_count": len(group_claims),
             "source_ids": source_ids,
             "source_count": len(source_ids),
-            "already_linked_claim_count": linked_count,
-            "unlinked_claim_count": unlinked_count,
-            "multi_evidence_claim_count": multi_evidence_count,
+            "first_scope_position": first_scope_position,
         }
-        # Prefer the smallest qualifying intact group, then broader provenance
-        # and more multi-step evidence.  group_key is the stable final tie-break.
+        # Prefer the smallest qualifying intact group.  Scope order, which is
+        # already frozen, breaks ties before the stable group key.
         rank = (
             len(group_claims),
-            -len(source_ids),
-            -multi_evidence_count,
+            first_scope_position,
             group.group_key,
         )
         candidates.append((rank, details))
@@ -722,8 +718,7 @@ def build_canary_selection(
     if not candidates:
         raise CvpProductionBlocked(
             [
-                "no intact canary group has 2+ Claims, 2+ sources, both linked and "
-                "unlinked Claims, and at least one multi-evidence Claim"
+                "no intact non-residual canary group has 2+ Claims from 2+ sources"
             ]
         )
     selected = min(candidates, key=lambda item: item[0])[1]
@@ -737,12 +732,9 @@ def build_canary_selection(
             "minimum_claim_count": 2,
             "maximum_claim_count": batch_size,
             "minimum_source_count": 2,
-            "requires_linked_and_unlinked_claims": True,
-            "minimum_multi_evidence_claim_count": 1,
             "ranking": [
                 "claim_count_ascending",
-                "source_count_descending",
-                "multi_evidence_claim_count_descending",
+                "first_scope_position_ascending",
                 "group_key_ascending",
             ],
         },

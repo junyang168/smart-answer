@@ -1927,7 +1927,7 @@ def test_grouping_must_cover_every_claim_exactly_once():
         batches_from_groups(grouping, batch_size=1)
 
 
-def test_canary_selection_uses_a_clean_intact_group_deterministically():
+def test_canary_selection_uses_the_smallest_multisource_group_deterministically():
     from backend.api.canonical_repository.viewpoint_production_safety import (
         CVP_GROUPING_ENVELOPE_VERSION,
         CvpProductionBlocked,
@@ -1935,21 +1935,18 @@ def test_canary_selection_uses_a_clean_intact_group_deterministically():
         validate_canary_selection,
     )
 
-    linked = _claim("C1", "已有观点的多步主张", source_id="S1").model_dump(
+    early_one = _claim("C1", "较早小组之一", source_id="S1").model_dump(
         mode="json"
     )
-    linked["active_full_viewpoint_id"] = "CV-1"
-    second_evidence = _evidence("C1", source_id="S1")
-    second_evidence["evidence_step_id"] = "C1-E2"
-    second_evidence["source_fragment_id"] = "C1-F2"
-    linked["evidence"].append(second_evidence)
-    unlinked = _claim("C2", "尚未链接的主张", source_id="S2").model_dump(
+    early_two = _claim("C2", "较早小组之二", source_id="S2").model_dump(
         mode="json"
     )
-    singleton = _claim("C3", "太小的分组", source_id="S3").model_dump(mode="json")
+    late_one = _claim("C3", "较晚小组之一", source_id="S3").model_dump(mode="json")
+    late_two = _claim("C4", "较晚小组之二", source_id="S4").model_dump(mode="json")
+    singleton = _claim("C5", "太小的分组", source_id="S5").model_dump(mode="json")
     packet_body = {
         "scope_label": "matthew-16-current",
-        "claims": [linked, unlinked, singleton],
+        "claims": [early_one, early_two, late_one, late_two, singleton],
     }
     scope_packet = packet_body | {"packet_sha256": sha256_json(packet_body)}
     freeze = {
@@ -1966,13 +1963,18 @@ def test_canary_selection_uses_a_clean_intact_group_deterministically():
             "scope_label": "matthew-16-current",
             "groups": [
                 {
-                    "group_key": "clean_mixed_group",
+                    "group_key": "a_later_multisource_group",
+                    "claim_ids": ["C3", "C4"],
+                    "rationale": "测试",
+                },
+                {
+                    "group_key": "z_earlier_multisource_group",
                     "claim_ids": ["C1", "C2"],
                     "rationale": "测试",
                 },
                 {
                     "group_key": "singleton",
-                    "claim_ids": ["C3"],
+                    "claim_ids": ["C5"],
                     "rationale": "测试",
                 },
             ],
@@ -1989,8 +1991,11 @@ def test_canary_selection_uses_a_clean_intact_group_deterministically():
         batch_size=20,
     )
 
-    assert selection["selected_group"]["group_key"] == "clean_mixed_group"
+    assert selection["schema_version"] == "wang_cvp_canary_selection_v2"
+    assert selection["qualifying_group_count"] == 2
+    assert selection["selected_group"]["group_key"] == "z_earlier_multisource_group"
     assert selection["selected_group"]["source_ids"] == ["S1", "S2"]
+    assert selection["selected_group"]["first_scope_position"] == 0
     assert (
         validate_canary_selection(
             selection,
@@ -1999,7 +2004,7 @@ def test_canary_selection_uses_a_clean_intact_group_deterministically():
             scope_packet=scope_packet,
             batch_size=20,
         )
-        == "clean_mixed_group"
+        == "z_earlier_multisource_group"
     )
 
     altered_body = {key: value for key, value in selection.items() if key != "artifact_sha256"}
