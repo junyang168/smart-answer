@@ -31,6 +31,7 @@ from backend.pipeline.claim_evidence_reciprocity_repair import (  # noqa: E402
     PREREQUISITES_MANIFEST_SCHEMA_VERSION,
     RESULT_SCHEMA_VERSION,
     _build_freeze_binding,
+    _change_set_from_dict,
     _read_post_apply_ledger,
     apply_sealed_plan,
     build_reciprocity_audit,
@@ -40,6 +41,14 @@ from backend.pipeline.claim_evidence_reciprocity_repair import (  # noqa: E402
     seal_artifact,
     validate_sealed_artifact,
     verify_postgres_backup_dump,
+)
+from backend.pipeline.claim_evidence_pair_adjudication import (  # noqa: E402
+    FINAL_DECISIONS_SCHEMA_VERSION,
+    apply_pair_repair_plan,
+    build_pair_repair_plan,
+    build_relation_packets,
+    packet_source_keys,
+    read_packet_source_records,
 )
 
 
@@ -1190,3 +1199,118 @@ def test_forged_human_input_is_rejected_against_the_review_ledger(
         "SELECT count(*) FROM wang_knowledge.change_sets WHERE change_set_id=%s",
         (forged_plan.change_set_id,),
     ) == 0
+
+
+def test_pair_adjudication_apply_is_atomic_clean_and_exactly_once(
+    postgres_store: PostgresKnowledgeStore,
+    tmp_path: Path,
+) -> None:
+    seeded = _seed_pairs(
+        postgres_store,
+        pair_count=1,
+        reciprocal=True,
+    )
+    _, drifted_claim = _object_row(postgres_store, "claims", "CL-1")
+    drifted_claim["evidence_step_ids"] = []
+    drift = postgres_store.plan_package(
+        {
+            "schema_version": "wang_shared_knowledge_v1.3",
+            "package_id": "WKP364-PAIR-ADJUDICATION-DRIFT",
+            "claims": [drifted_claim],
+        },
+        source_kind="integration_fixture_drift",
+    )
+    assert postgres_store.apply_plan(drift)["status"] == "applied"
+    frozen = _freeze(seeded)
+    audit = build_reciprocity_audit(
+        frozen["active_records"],
+        prerequisites=frozen["prerequisites"],
+        authority_records=frozen["authority_records"],
+        source_lineage_findings=frozen["source_lineage_findings"],
+        review_event_ledger_count=frozen["review_event_ledger_count"],
+        review_event_ledger_snapshot=frozen["review_event_ledger_snapshot"],
+        freeze_binding=_build_freeze_binding(
+            frozen_input_artifact_sha256=frozen["artifact_sha256"],
+            frozen_at=frozen["frozen_at"],
+            database_identity=frozen["database_identity"],
+        ),
+        source_lineage_identity_snapshot=frozen[
+            "source_lineage_identity_snapshot"
+        ],
+    )
+    assert audit["counts"]["evidence_only"] == 1
+    packets = build_relation_packets(
+        audit_artifact=audit,
+        frozen_input=frozen,
+        source_records=read_packet_source_records(
+            postgres_store, required=packet_source_keys(audit)
+        ),
+    )
+    final = seal_artifact(
+        {
+            "schema_version": FINAL_DECISIONS_SCHEMA_VERSION,
+            "packet_artifact_sha256": packets["artifact_sha256"],
+            "counts": {"include": 1, "exclude": 0, "needs_human": 0},
+            "decisions": [
+                {
+                    "pair_id": packets["pair_ids"][0],
+                    "decision": "include",
+                    "reason_code": "independent_model_consensus",
+                }
+            ],
+        }
+    )
+    preview = build_pair_repair_plan(
+        audit_artifact=audit,
+        frozen_input=frozen,
+        packet_artifact=packets,
+        final_decisions=final,
+    )
+    pg_dump = shutil.which("pg_dump")
+    if not pg_dump or not shutil.which("pg_restore"):
+        pytest.skip("pair repair integration requires pg_dump and pg_restore")
+    backup_dump = tmp_path / "wkp364-pair-repair.dump"
+    _run_postgres(
+        [
+            pg_dump,
+            "--format=custom",
+            f"--file={backup_dump}",
+            f"--dbname={postgres_store.database_url}",
+        ],
+        purpose="pg_dump",
+    )
+    receipt_path = tmp_path / "committed-receipt.json"
+    applied = apply_pair_repair_plan(
+        preview,
+        audit_artifact=audit,
+        frozen_input=frozen,
+        packet_artifact=packets,
+        final_decisions=final,
+        prerequisites_manifest=seeded.prerequisites_manifest,
+        backup_dump=backup_dump,
+        store=postgres_store,
+        committed_receipt_path=receipt_path,
+    )
+    assert applied["status"] == "verified"
+    assert applied["apply_result"]["status"] == "applied"
+    assert applied["fresh_counts"]["claim_only_pairs"] == 0
+    assert applied["fresh_counts"]["evidence_only_pairs"] == 0
+    assert applied["fresh_preview_operations"] == 0
+    assert receipt_path.is_file()
+    first_state = _database_state(postgres_store)
+    retry = apply_pair_repair_plan(
+        preview,
+        audit_artifact=audit,
+        frozen_input=frozen,
+        packet_artifact=packets,
+        final_decisions=final,
+        prerequisites_manifest=seeded.prerequisites_manifest,
+        backup_dump=backup_dump,
+        store=postgres_store,
+        committed_receipt_path=receipt_path,
+    )
+    assert retry["apply_result"]["status"] == "already_applied"
+    assert _database_state(postgres_store) == first_state
+    claim_revision, claim_payload = _object_row(postgres_store, "claims", "CL-1")
+    assert claim_revision == 3
+    assert claim_payload["evidence_step_ids"] == ["EV-1"]

@@ -233,6 +233,15 @@ SOURCE_LINEAGE_IDENTITY_SNAPSHOT_SCHEMA_VERSION = (
 CLAIM_EVIDENCE_RECIPROCITY_REPAIR_SOURCE_KIND = (
     "wkp364_claim_evidence_reciprocity_repair"
 )
+CLAIM_EVIDENCE_PAIR_ADJUDICATION_SOURCE_KIND = (
+    "wkp364_claim_evidence_pair_adjudication"
+)
+CLAIM_EVIDENCE_REPAIR_SOURCE_KINDS = frozenset(
+    {
+        CLAIM_EVIDENCE_RECIPROCITY_REPAIR_SOURCE_KIND,
+        CLAIM_EVIDENCE_PAIR_ADJUDICATION_SOURCE_KIND,
+    }
+)
 CLAIM_EVIDENCE_RECIPROCITY_REPAIR_METADATA_KEY = (
     "claim_evidence_reciprocity_repair"
 )
@@ -2253,12 +2262,13 @@ def build_claim_evidence_reciprocity_guard(
     expected_review_event_ledger_snapshot: Mapping[str, Any] | None = None,
     expected_freeze_binding: Mapping[str, Any] | None = None,
     expected_source_lineage_snapshot: Mapping[str, Any] | None = None,
+    expected_pair_adjudication_authorization: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Bind one sealed full active snapshot to exactly one ChangeSet plan."""
 
     _validate_claim_evidence_active_snapshot(expected_active_snapshot)
     if expected_product_dependency_snapshot is None:
-        if plan.source_kind == CLAIM_EVIDENCE_RECIPROCITY_REPAIR_SOURCE_KIND:
+        if plan.source_kind in CLAIM_EVIDENCE_REPAIR_SOURCE_KINDS:
             raise PostgresKnowledgeStoreError(
                 "Dedicated Claim/Evidence repair requires a full ProductDependency snapshot"
             )
@@ -2269,7 +2279,7 @@ def build_claim_evidence_reciprocity_guard(
         expected_product_dependency_snapshot
     )
     if expected_review_event_ledger_snapshot is None:
-        if plan.source_kind == CLAIM_EVIDENCE_RECIPROCITY_REPAIR_SOURCE_KIND:
+        if plan.source_kind in CLAIM_EVIDENCE_REPAIR_SOURCE_KINDS:
             raise PostgresKnowledgeStoreError(
                 "Dedicated Claim/Evidence repair requires the full review-event "
                 "ledger root and count"
@@ -2299,6 +2309,11 @@ def build_claim_evidence_reciprocity_guard(
         ),
         "expected_source_lineage_snapshot": json.loads(
             canonical_json(expected_source_lineage_snapshot)
+        ),
+        "expected_pair_adjudication_authorization": (
+            json.loads(canonical_json(expected_pair_adjudication_authorization))
+            if expected_pair_adjudication_authorization is not None
+            else None
         ),
     }
     guard["guard_sha256"] = sha256_json(guard)
@@ -2354,6 +2369,16 @@ def _validate_claim_evidence_reciprocity_guard(
             "Claim/Evidence repair guard lacks source-lineage snapshot"
         )
     _validate_source_lineage_identity_snapshot(source_lineage_snapshot)
+    pair_authorization = guard.get("expected_pair_adjudication_authorization")
+    if plan.source_kind == CLAIM_EVIDENCE_PAIR_ADJUDICATION_SOURCE_KIND:
+        if not isinstance(pair_authorization, Mapping):
+            raise PostgresKnowledgeStoreError(
+                "Pair-adjudication repair guard lacks its sealed authorization"
+            )
+    elif pair_authorization is not None:
+        raise PostgresKnowledgeStoreError(
+            "Pair-adjudication authorization cannot govern another source kind"
+        )
     return json.loads(canonical_json(guard))
 
 
@@ -2388,7 +2413,7 @@ def _resolve_claim_evidence_reciprocity_guard(
         )
     selected = explicit_guard or metadata_guard
     if (
-        plan.source_kind == CLAIM_EVIDENCE_RECIPROCITY_REPAIR_SOURCE_KIND
+        plan.source_kind in CLAIM_EVIDENCE_REPAIR_SOURCE_KINDS
         and selected is None
     ):
         raise PostgresKnowledgeStoreError(
@@ -3699,11 +3724,85 @@ class PostgresKnowledgeStore:
             raise ChangeSetConflict(
                 "Referenced source-lineage snapshot drifted after repair freeze"
             )
-        if any(bool(row["retired"]) for row in actual["records"]):
-            raise ChangeSetConflict(
-                "Claim/Evidence repair cannot use retired source lineage"
-            )
         return actual
+
+    @staticmethod
+    def _assert_repair_targets_use_active_source_lineage(
+        plan: ChangeSetPlan,
+        active_rows: Mapping[
+            tuple[str, str], tuple[str, str, int, str, Mapping[str, Any]]
+        ],
+        source_snapshot: Mapping[str, Any],
+    ) -> None:
+        """Ignore unrelated legacy lineage, but never repair through retired evidence."""
+
+        touched_evidence_ids = {
+            operation.object_id
+            for operation in plan.operations
+            if operation.collection == "evidence_steps"
+        }
+        for operation in plan.operations:
+            if operation.collection != "claims" or operation.operation != "update":
+                continue
+            current = active_rows.get(("claims", operation.object_id))
+            if current is None:
+                continue
+            before = {
+                str(value) for value in current[4].get("evidence_step_ids") or []
+            }
+            after = {
+                str(value)
+                for value in stored_operation_payload(operation).get(
+                    "evidence_step_ids"
+                )
+                or []
+            }
+            touched_evidence_ids.update(after - before)
+
+        retired = {
+            (str(row["collection"]), str(row["object_id"]))
+            for row in source_snapshot.get("records") or []
+            if bool(row.get("retired"))
+        }
+        for evidence_id in sorted(touched_evidence_ids):
+            evidence = active_rows.get(("evidence_steps", evidence_id))
+            if evidence is None:
+                continue
+            payload = evidence[4]
+            fragment_ids = {
+                str(value)
+                for value in (
+                    payload.get("source_fragment_ids")
+                    or ([payload["source_fragment_id"]]
+                        if payload.get("source_fragment_id")
+                        else [])
+                )
+            }
+            source_ids = {
+                str(value)
+                for value in (
+                    payload.get("source_document_ids")
+                    or ([payload["source_id"]] if payload.get("source_id") else [])
+                )
+            }
+            retired_refs = sorted(
+                {
+                    object_id
+                    for collection, object_id in retired
+                    if (
+                        collection == "source_fragments"
+                        and object_id in fragment_ids
+                    )
+                    or (
+                        collection == "source_documents" and object_id in source_ids
+                    )
+                }
+            )
+            if retired_refs:
+                raise ChangeSetConflict(
+                    "Claim/Evidence repair target uses retired source lineage: "
+                    f"evidence_steps/{evidence_id} -> {','.join(retired_refs)}"
+                )
 
     @staticmethod
     def _assert_claim_evidence_reciprocity_guard(
@@ -3821,9 +3920,19 @@ class PostgresKnowledgeStore:
             active_rows,
             validated_guard["expected_source_lineage_snapshot"],
         )
-        if plan.source_kind == CLAIM_EVIDENCE_RECIPROCITY_REPAIR_SOURCE_KIND:
+        PostgresKnowledgeStore._assert_repair_targets_use_active_source_lineage(
+            plan,
+            active_rows,
+            validated_guard["expected_source_lineage_snapshot"],
+        )
+        if plan.source_kind in CLAIM_EVIDENCE_REPAIR_SOURCE_KINDS:
             PostgresKnowledgeStore._assert_claim_evidence_repair_authority(
-                cursor, plan, active_rows
+                cursor,
+                plan,
+                active_rows,
+                pair_adjudication_authorization=validated_guard.get(
+                    "expected_pair_adjudication_authorization"
+                ),
             )
         planned_keys: set[tuple[str, str]] = set()
         for operation in plan.operations:
@@ -3991,7 +4100,7 @@ class PostgresKnowledgeStore:
         )
         authority_rows = dict(active_rows)
         for operation in plan.operations:
-            if operation.collection != "evidence_steps":
+            if operation.collection not in CLAIM_EVIDENCE_COLLECTIONS:
                 continue
             cursor.execute(
                 """SELECT payload
@@ -4009,7 +4118,7 @@ class PostgresKnowledgeStore:
             if not prior_version or not isinstance(prior_version[0], Mapping):
                 raise ChangeSetConflict(
                     "Applied Claim/Evidence repair lacks its exact before ObjectVersion: "
-                    f"{operation.object_id}"
+                    f"{operation.collection}/{operation.object_id}"
                 )
             before_payload = dict(prior_version[0])
             if record_content_sha(before_payload) != operation.before_sha256:
@@ -4024,8 +4133,18 @@ class PostgresKnowledgeStore:
                 str(operation.before_sha256 or ""),
                 before_payload,
             )
+        PostgresKnowledgeStore._assert_repair_targets_use_active_source_lineage(
+            plan,
+            authority_rows,
+            validated_guard["expected_source_lineage_snapshot"],
+        )
         PostgresKnowledgeStore._assert_claim_evidence_repair_authority(
-            cursor, plan, authority_rows
+            cursor,
+            plan,
+            authority_rows,
+            pair_adjudication_authorization=validated_guard.get(
+                "expected_pair_adjudication_authorization"
+            ),
         )
         review_snapshot = PostgresKnowledgeStore._review_event_ledger_snapshot(
             cursor, lock_rows=True
@@ -4221,12 +4340,70 @@ class PostgresKnowledgeStore:
         active_rows: Mapping[
             tuple[str, str], tuple[str, str, int, str, Mapping[str, Any]]
         ],
+        *,
+        pair_adjudication_authorization: Mapping[str, Any] | None = None,
     ) -> None:
         """Permit only human-approved Claim bindings to fill reverse indexes."""
 
         if plan.review_events:
             raise ChangeSetConflict(
                 "Dedicated Claim/Evidence repair may not create review events"
+            )
+
+        if plan.source_kind == CLAIM_EVIDENCE_PAIR_ADJUDICATION_SOURCE_KIND:
+            from backend.pipeline.claim_evidence_pair_adjudication import (
+                validate_pair_repair_authorization,
+            )
+
+            try:
+                validate_pair_repair_authorization(
+                    pair_adjudication_authorization or {},
+                    plan=plan,
+                    active_rows=active_rows,
+                )
+            except ValueError as exc:
+                raise ChangeSetConflict(
+                    f"Pair-adjudication repair authority failed: {exc}"
+                ) from exc
+
+            target_claim_ids = sorted(
+                operation.object_id
+                for operation in plan.operations
+                if operation.collection == "claims"
+            )
+            target_evidence_ids = sorted(
+                operation.object_id
+                for operation in plan.operations
+                if operation.collection == "evidence_steps"
+            )
+            cursor.execute(
+                """SELECT re.collection, re.object_id, re.object_revision,
+                          re.reviewer_kind, re.decision
+                   FROM wang_knowledge.review_events re
+                   WHERE (re.collection='claims' AND re.object_id = ANY(%s))
+                      OR (re.collection='evidence_steps' AND re.object_id = ANY(%s))
+                   ORDER BY re.collection, re.object_id, re.object_revision,
+                            re.review_event_id""",
+                (target_claim_ids, target_evidence_ids),
+            )
+            for collection, object_id, revision, reviewer_kind, decision in cursor.fetchall():
+                current = active_rows.get((str(collection), str(object_id)))
+                if (
+                    current is not None
+                    and int(revision) == current[2]
+                    and str(reviewer_kind) == "human"
+                    and str(decision)
+                    == str(current[4].get("review_status") or "candidate")
+                ):
+                    raise ChangeSetConflict(
+                        "Pair-adjudication repair cannot alter a current human-settled "
+                        f"object: {collection}/{object_id}"
+                    )
+            return
+
+        if pair_adjudication_authorization is not None:
+            raise ChangeSetConflict(
+                "Pair-adjudication authority cannot govern a projection-only repair"
             )
 
         additions_by_evidence: dict[str, tuple[str, ...]] = {}
@@ -4733,14 +4910,14 @@ class PostgresKnowledgeStore:
             plan, metadata, expected_claim_evidence_guard
         )
         validate_change_set_plan_integrity(plan)
-        if plan.source_kind == CLAIM_EVIDENCE_RECIPROCITY_REPAIR_SOURCE_KIND:
+        if plan.source_kind in CLAIM_EVIDENCE_REPAIR_SOURCE_KINDS:
             assert claim_evidence_guard is not None
             _validate_claim_evidence_repair_apply_metadata(
                 plan, metadata, claim_evidence_guard
             )
         if (
             not plan.operations
-            and plan.source_kind != CLAIM_EVIDENCE_RECIPROCITY_REPAIR_SOURCE_KIND
+            and plan.source_kind not in CLAIM_EVIDENCE_REPAIR_SOURCE_KINDS
         ):
             return {
                 "status": "unchanged",
@@ -4788,8 +4965,7 @@ class PostgresKnowledgeStore:
                             cursor, plan, source_queue_context
                         )
                     if (
-                        plan.source_kind
-                        == CLAIM_EVIDENCE_RECIPROCITY_REPAIR_SOURCE_KIND
+                        plan.source_kind in CLAIM_EVIDENCE_REPAIR_SOURCE_KINDS
                         and claim_evidence_guard is not None
                     ):
                         if (
@@ -4838,7 +5014,7 @@ class PostgresKnowledgeStore:
                         "summary": plan.as_dict()["summary"],
                     }
                 repair_review_events_before: Optional[dict[str, Any]] = None
-                if plan.source_kind == CLAIM_EVIDENCE_RECIPROCITY_REPAIR_SOURCE_KIND:
+                if plan.source_kind in CLAIM_EVIDENCE_REPAIR_SOURCE_KINDS:
                     repair_review_events_before = self._review_event_ledger_snapshot(
                         cursor
                     )
@@ -5026,7 +5202,7 @@ class PostgresKnowledgeStore:
                 if (
                     plan.source_kind
                     in (
-                        {CLAIM_EVIDENCE_RECIPROCITY_REPAIR_SOURCE_KIND}
+                        CLAIM_EVIDENCE_REPAIR_SOURCE_KINDS
                         | CLAIM_EVIDENCE_SOURCE_QUEUE_SOURCE_KINDS
                     )
                     and invalidated
@@ -5071,7 +5247,7 @@ class PostgresKnowledgeStore:
                        WHERE change_set_id=%s""",
                     (canonical_json(summary), plan.change_set_id),
                 )
-                if plan.source_kind == CLAIM_EVIDENCE_RECIPROCITY_REPAIR_SOURCE_KIND:
+                if plan.source_kind in CLAIM_EVIDENCE_REPAIR_SOURCE_KINDS:
                     assert repair_review_events_before is not None
                     self._assert_claim_evidence_repair_write_ledger(
                         cursor,
