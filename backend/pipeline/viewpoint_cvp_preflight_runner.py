@@ -15,6 +15,7 @@ from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.api.canonical_repository.viewpoint_production_safety import (
     CVP_APPLY_AUTHORIZATION_VERSION,
     CvpProductionBlocked,
+    build_canary_selection,
     build_cvp_freeze,
     exclusive_cvp_run_lock,
     file_sha256,
@@ -112,6 +113,11 @@ def main() -> int:
     auth_parser.add_argument("--backup-dump", type=Path, required=True)
     auth_parser.add_argument("--output", type=Path, required=True)
 
+    canary_parser = subcommands.add_parser("select-canary")
+    canary_parser.add_argument("--freeze", type=Path, required=True)
+    canary_parser.add_argument("--grouping", type=Path, required=True)
+    canary_parser.add_argument("--output", type=Path, required=True)
+
     args = parser.parse_args()
     commit = _repository_commit()
     cvp_sha, route_sha = _policy_fingerprints(args.cvp_policy, args.route_policy)
@@ -153,6 +159,25 @@ def main() -> int:
         )
         grouping = _read(args.grouping)
         grouping_sha = validate_grouping_envelope(grouping, freeze=freeze)
+        if args.command == "select-canary":
+            scope_packet = _read(Path(str(freeze["scope_packet"]["path"])))
+            selection = build_canary_selection(
+                grouping_envelope=grouping,
+                freeze=freeze,
+                scope_packet=scope_packet,
+                batch_size=int(load_cvp_policy(args.cvp_policy)["batch_size"]),
+            )
+            _write_immutable(args.output, selection)
+            print(
+                json.dumps(
+                    {
+                        "status": "canary_selected",
+                        "group_key": selection["selected_group"]["group_key"],
+                        "artifact_sha256": selection["artifact_sha256"],
+                    }
+                )
+            )
+            return 0
         if not args.backup_dump.is_file() or args.backup_dump.stat().st_size <= 0:
             raise CvpProductionBlocked(["backup dump is missing or empty"])
         completed = subprocess.run(

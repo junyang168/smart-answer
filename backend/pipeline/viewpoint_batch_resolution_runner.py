@@ -72,6 +72,7 @@ from backend.api.canonical_repository.viewpoint_production_safety import (
     claim_output_ownership,
     exclusive_cvp_run_lock,
     validate_apply_authorization,
+    validate_canary_selection,
     validate_content_addressed,
     validate_cvp_freeze,
     validate_execution_boundary,
@@ -906,7 +907,7 @@ def main() -> int:
         default="claude",
         help="subscription CLI used for CVP review; never falls back",
     )
-    parser.add_argument("--review-model", default="claude-opus-5")
+    parser.add_argument("--review-model", default="claude-fable-5-1")
     parser.add_argument("--review-effort", choices=("high", "xhigh"), default="high")
     parser.add_argument(
         "--max-batches",
@@ -965,11 +966,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--consolidation-model",
-        default="claude-opus-5",
-        help=(
-            "identity-only pass; on the 2026-08-25 calibration Opus caught the "
-            "duplicate in 3 of 3 runs and Sol in 0 of 3"
-        ),
+        default="claude-fable-5-1",
+        help="identity-only pass using the model pinned by the production policy",
     )
     parser.add_argument(
         "--consolidation-effort", choices=("high", "xhigh"), default="high"
@@ -985,7 +983,12 @@ def main() -> int:
         type=Path,
         help="reuse a validated v2 grouping bound to this exact freeze",
     )
-    parser.add_argument("--group-model", default="claude-opus-5")
+    parser.add_argument(
+        "--canary-selection",
+        type=Path,
+        help="deterministic clean-group selection bound to --freeze and --grouping",
+    )
+    parser.add_argument("--group-model", default="claude-fable-5-1")
     parser.add_argument("--group-effort", choices=("low", "medium", "high", "xhigh"), default="high")
     parser.add_argument(
         "--group-key",
@@ -1070,6 +1073,14 @@ def execute(args: argparse.Namespace) -> int:
         raise CvpProductionBlocked(
             ["--apply requires an already frozen --grouping artifact"]
         )
+    if getattr(args, "canary_selection", None) and not args.grouping:
+        raise CvpProductionBlocked(
+            ["--canary-selection requires an already frozen --grouping artifact"]
+        )
+    if args.group_key and not getattr(args, "canary_selection", None):
+        raise CvpProductionBlocked(
+            ["--group-key cannot manually select a production canary"]
+        )
     claim_output_ownership(
         output_root=args.output_dir, freeze=freeze, runner_commit=runner_commit
     )
@@ -1124,6 +1135,19 @@ def _execute_locked(
         )
         full_grouping = grouping
         batches = batches_from_groups(grouping, batch_size=batch_size)
+        if getattr(args, "canary_selection", None):
+            selected_group_key = validate_canary_selection(
+                _read(args.canary_selection),
+                grouping_envelope=stored,
+                freeze=freeze,
+                scope_packet=scope_packet,
+                batch_size=batch_size,
+            )
+            if args.group_key and args.group_key != [selected_group_key]:
+                raise CvpProductionBlocked(
+                    ["--group-key differs from the bound canary selection"]
+                )
+            args.group_key = [selected_group_key]
         if args.group_key:
             wanted = set(args.group_key)
             unknown = sorted(wanted - {item.group_key for item in grouping.groups})

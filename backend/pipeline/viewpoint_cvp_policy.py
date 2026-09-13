@@ -12,18 +12,24 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 
 
-CVP_POLICY_VERSION = "wang_cvp_resolution_policy_v1"
+CVP_POLICY_VERSION = "wang_cvp_resolution_policy_v2"
+SUPPORTED_CVP_POLICY_VERSIONS = frozenset(
+    {"wang_cvp_resolution_policy_v1", CVP_POLICY_VERSION}
+)
 DEFAULT_CVP_POLICY_PATH = (
     Path(__file__).resolve().parent
     / "policies"
-    / "wang_cvp_resolution_policy_v1.json"
+    / "wang_cvp_resolution_policy_v2.json"
 )
 
 
 def load_cvp_policy(path: Path) -> dict[str, Any]:
     policy = json.loads(path.read_text(encoding="utf-8"))
-    if policy.get("schema_version") != CVP_POLICY_VERSION:
-        raise ValueError(f"{path} is not a {CVP_POLICY_VERSION}")
+    if policy.get("schema_version") not in SUPPORTED_CVP_POLICY_VERSIONS:
+        raise ValueError(
+            f"{path} is not a supported CVP policy version: "
+            f"{sorted(SUPPORTED_CVP_POLICY_VERSIONS)}"
+        )
     required = {
         "schema_version",
         "policy_id",

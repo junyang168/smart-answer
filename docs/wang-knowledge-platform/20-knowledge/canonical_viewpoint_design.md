@@ -118,17 +118,17 @@ erDiagram
 
 ```mermaid
 flowchart TD
-    SC["scope 内的全部主张"] --> G["智能分组<br/>claude-opus-5"]
+    SC["scope 内的全部主张"] --> G["智能分组<br/>claude-fable-5-1"]
     G --> RP["程序强制覆盖<br/>每条主张恰好属于一组"]
     RP --> B["逐批处理，串行"]
     B --> S["一批主张 + 相关的已有观点<br/>（取来当上下文，不建立任何东西）"]
     S --> P["提议<br/>gpt-5.6-sol"]
     P --> V["程序验证<br/>主张是否全部处理、ID 是否存在、成分定位是否可解析"]
     V -->|"不通过"| F["整批失败"]
-    V -->|"通过"| R["独立复核<br/>claude-opus-5"]
+    V -->|"通过"| R["独立复核<br/>claude-fable-5-1"]
     R -->|"无异议"| W["写入：观点、路线、关系"]
     R -->|"有异议"| C["仲裁：意见交回提议者<br/>最多一轮"]
-    C -->|"确定性验证通过"| FR["终局复核实际写库的改正稿 B<br/>claude-opus-5"]
+    C -->|"确定性验证通过"| FR["终局复核实际写库的改正稿 B<br/>claude-fable-5-1"]
     C -->|"仍不一致"| H["转人工"]
     FR -->|"全部通过"| W
     FR -->|"仍有问题"| H
@@ -138,7 +138,7 @@ flowchart TD
 
 ### 分组
 
-一个 scope 的主张一次处理不完，所以先分组。这一步由模型做（默认 `claude-opus-5`），但**它的结果在覆盖率上不被信任**：程序随后强制每条主张恰好属于一组，并逐条记录修补——
+一个 scope 的主张一次处理不完，所以先分组。这一步由模型做（默认 `claude-fable-5-1`），但**它的结果在覆盖率上不被信任**：程序随后强制每条主张恰好属于一组，并逐条记录修补——
 
 | 情况 | 程序怎么办 |
 | --- | --- |
@@ -149,6 +149,8 @@ flowchart TD
 **分组只决定「哪些主张一起看」，不决定任何身份。** 同一组不代表同一个观点，不同组也不妨碍它们后来被判为同一个观点。
 
 **批次串行。** 第 N+1 批必须看得见第 N 批已经写入的观点，否则同一个观点会在两批里各建一个。所以上图末尾回到「逐批处理」，而不是并行铺开。
+
+**Canary 不凭印象手挑。** 完整 scope 的 grouping 冻结并通过 exact-once 后，程序才生成一份绑定 freeze、scope packet 与 grouping SHA 的选择 artifact。候选组必须完整、不属于 residual、在批次上限以内，并同时具有多来源、已有观点链接与尚未链接的 Claim，以及至少一条多证据 Claim；程序按固定顺序选最小的合格组。若没有这样的组，canary 入口关闭，不能退而挑一个最容易的单来源组，也不能另算或手改 grouping。
 
 ### 其余各步
 
@@ -218,9 +220,9 @@ flowchart TD
     P --> V["程序逐条验证<br/>结论观点、成分键、必需步骤、来源是否越界"]
     V -->|"个别目标确定性无效"| I["隔离该目标后重验<br/>（剩余部分必须仍满足全部不变量）"]
     I --> V
-    V -->|"通过"| R["分批独立复核<br/>claude-opus-5，每批 12 个目标"]
+    V -->|"通过"| R["分批独立复核<br/>claude-fable-5-1，每批 12 个目标"]
     R -->|"有异议"| C["仲裁：交回提议者<br/>gpt-5.6-sol，最多一轮"]
-    C --> FR["终局复核实际写库的改正稿<br/>claude-opus-5；只通过或转人工"]
+    C --> FR["终局复核实际写库的改正稿<br/>claude-fable-5-1；只通过或转人工"]
     FR -->|"全部通过"| W
     FR -->|"仍有问题"| E
     R -->|"无异议"| W["逐条路线生成幂等 ChangeSet"]
@@ -245,7 +247,7 @@ flowchart TD
 3. **apply 前要重新确认结论观点仍是 current。** 路线 job 与下一批观点并行时，它的结论观点可能已被改写；这时按最新版本重新入队，而不是把路线挂到一个过期版本上。
 4. **成员来源是实例覆盖的分母。** 每个持有该观点成员主张、且本 scope 有精确证据绑定的来源，要么产生一条实例，要么成为独立复核对象，由 reviewer 确认该篇只断言结论而没有可绑定路线，或要求唯一 correction 补实例。提议者漏填不能让该来源从分母消失，也不能靠反复重问提议者碰运气。
 
-模型分工与观点那条线一致：`gpt-5.6-sol` 提议、`claude-opus-5` 复核、意见交回提议者仲裁。若发生改正，同一个独立 reviewer 角色再审核一次实际可能写库的 effective proposal；这次任何非 `pass` 都进入人工 exception，不再交回提议者。初审、改正与终局复核分别绑定 proposal SHA，ChangeSet 的批准依据只能指向实际写库版本的复核。模型 policy 写在 `backend/pipeline/policies/wang_route_resolution_policy_v1.json` 里。
+模型分工与观点那条线一致：`gpt-5.6-sol` 提议、`claude-fable-5-1` 复核、意见交回提议者仲裁。若发生改正，同一个独立 reviewer 角色再审核一次实际可能写库的 effective proposal；这次任何非 `pass` 都进入人工 exception，不再交回提议者。初审、改正与终局复核分别绑定 proposal SHA，ChangeSet 的批准依据只能指向实际写库版本的复核。新运行的模型 policy 写在 `backend/pipeline/policies/wang_route_resolution_policy_v2.json` 里；v1 只供历史 artifact 重放与审计。
 
 **实例分完整与部分。** 一篇里把这条路线的必需步骤都讲全了，是完整实例；缺步骤或有含糊的，只能记部分实例。**部分实例不计入「这条路线反复出现」的次数。**
 
@@ -329,5 +331,5 @@ flowchart TD
 > **读者**:Solution architect、Developer。同工不需要读本文；同工要知道的在 [Solution Architecture](../00-overview/solution_architecture.md)。
 > **类型**:规范
 > **状态**:当前。取代 `canonical_viewpoint_design.md`。
-> **与代码对齐**:2026-08-25。第 1、7 节的数字取自当日的 PostgreSQL 快照。
+> **与代码对齐**:2026-09-13。当前模型角色与版本核对到 CVP／Route v2 policy；第 1、7 节的数字仍取自 2026-08-25 的 PostgreSQL 快照。
 > **权威范围**:观点、论证路线、观点关系的语义、身份判定与消费边界。

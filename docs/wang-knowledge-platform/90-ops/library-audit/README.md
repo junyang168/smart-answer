@@ -35,9 +35,10 @@ scripts/audit-library.py --claims 40 --viewpoints 15 --seed 241
 設定從環境變數讀，讀不到就退回 repo 根目錄的 `.env`：`KNOWLEDGE_DATABASE_URL`、
 `DATA_BASE_DIR`、`GEMINI_API_KEY1`。
 
-第 3、4 層用 `gemini-3.7-flash`。提議模型是 `gpt-5.6-sol`、複核模型是
-`claude-opus-5`，兩者都參與過被審的判定，用它們任何一個等於自己審自己。`--model`
-可以換，換掉之前先確認新的那個沒參與過原判定。
+第 3、4 層用 `gemini-3.7-flash`。提議模型是 `gpt-5.6-sol`；新 CVP／Route
+複核模型是 `claude-fable-5-1`，歷史判定也曾使用 `claude-opus-5`。這三者都
+參與過或將參與被審的判定，用它們任何一個等於自己審自己。`--model` 可以換，
+換掉之前先確認新的那個沒參與過原判定。
 
 只讀。不寫入 PostgreSQL，不修改任何記錄。
 

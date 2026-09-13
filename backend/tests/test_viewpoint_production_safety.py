@@ -629,6 +629,40 @@ def test_runner_dry_run_exits_before_any_model_client(tmp_path, monkeypatch):
     assert runner.execute(args) == 0
 
 
+def test_runner_cli_defaults_match_the_fable_v2_policy(tmp_path, monkeypatch):
+    import sys
+
+    from backend.pipeline import viewpoint_batch_resolution_runner as runner
+
+    captured = {}
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "viewpoint_batch_resolution_runner",
+            "--packet",
+            str(tmp_path / "packet.json"),
+            "--output-dir",
+            str(tmp_path / "output"),
+            "--freeze",
+            str(tmp_path / "freeze.json"),
+            "--group",
+        ],
+    )
+    monkeypatch.setattr(
+        runner,
+        "execute",
+        lambda args: captured.update(vars(args)) or 0,
+    )
+
+    assert runner.main() == 0
+    assert captured["review_model"] == "claude-fable-5-1"
+    assert captured["consolidation_model"] == "claude-fable-5-1"
+    assert captured["group_model"] == "claude-fable-5-1"
+    assert captured["cvp_policy"].name == "wang_cvp_resolution_policy_v2.json"
+    assert captured["route_policy"].name == "wang_route_resolution_policy_v2.json"
+
+
 def test_runner_resume_rejects_forged_applied_local_state(tmp_path):
     from backend.pipeline.viewpoint_batch_resolution_runner import (
         _validate_applied_resume,

@@ -231,7 +231,48 @@ def test_versioned_route_policy_fingerprint_binds_prompt_content():
 
     assert first == second
     assert first != changed
+    assert policy["schema_version"] == "wang_route_resolution_policy_v2"
+    assert policy["review"]["model"] == "claude-fable-5-1"
     assert policy["review"]["targets_per_batch"] == 12
+
+
+def test_default_cvp_policy_uses_fable_and_preserves_cross_vendor_review():
+    from backend.pipeline.viewpoint_cvp_policy import (
+        DEFAULT_CVP_POLICY_PATH,
+        load_cvp_policy,
+    )
+
+    policy = load_cvp_policy(DEFAULT_CVP_POLICY_PATH)
+
+    assert policy["schema_version"] == "wang_cvp_resolution_policy_v2"
+    assert policy["proposal"]["provider"] == "codex"
+    assert policy["proposal"]["model"] == "gpt-5.6-sol"
+    assert policy["correction"]["provider"] == "codex"
+    for role in ("grouping", "review", "consolidation"):
+        assert policy[role]["provider"] == "claude"
+        assert policy[role]["model"] == "claude-fable-5-1"
+
+
+def test_legacy_cvp_and_route_policies_remain_loadable_for_artifact_replay():
+    from backend.pipeline.viewpoint_cvp_policy import (
+        DEFAULT_CVP_POLICY_PATH,
+        load_cvp_policy,
+    )
+    from backend.pipeline.viewpoint_route_policy import (
+        DEFAULT_ROUTE_POLICY_PATH,
+        load_route_policy,
+    )
+
+    cvp_v1 = DEFAULT_CVP_POLICY_PATH.with_name("wang_cvp_resolution_policy_v1.json")
+    route_v1 = DEFAULT_ROUTE_POLICY_PATH.with_name(
+        "wang_route_resolution_policy_v1.json"
+    )
+
+    assert load_cvp_policy(cvp_v1)["schema_version"] == "wang_cvp_resolution_policy_v1"
+    assert (
+        load_route_policy(route_v1)["schema_version"]
+        == "wang_route_resolution_policy_v1"
+    )
 
 
 def test_route_policy_rejects_an_unimplemented_validator(tmp_path: Path):
@@ -1884,6 +1925,95 @@ def test_grouping_must_cover_every_claim_exactly_once():
     assert batches_from_groups(grouping, batch_size=20) == [["C1", "C2"], ["C3"]]
     with pytest.raises(BatchResolutionError, match="semantic group has 2 Claims"):
         batches_from_groups(grouping, batch_size=1)
+
+
+def test_canary_selection_uses_a_clean_intact_group_deterministically():
+    from backend.api.canonical_repository.viewpoint_production_safety import (
+        CVP_GROUPING_ENVELOPE_VERSION,
+        CvpProductionBlocked,
+        build_canary_selection,
+        validate_canary_selection,
+    )
+
+    linked = _claim("C1", "已有观点的多步主张", source_id="S1").model_dump(
+        mode="json"
+    )
+    linked["active_full_viewpoint_id"] = "CV-1"
+    second_evidence = _evidence("C1", source_id="S1")
+    second_evidence["evidence_step_id"] = "C1-E2"
+    second_evidence["source_fragment_id"] = "C1-F2"
+    linked["evidence"].append(second_evidence)
+    unlinked = _claim("C2", "尚未链接的主张", source_id="S2").model_dump(
+        mode="json"
+    )
+    singleton = _claim("C3", "太小的分组", source_id="S3").model_dump(mode="json")
+    packet_body = {
+        "scope_label": "matthew-16-current",
+        "claims": [linked, unlinked, singleton],
+    }
+    scope_packet = packet_body | {"packet_sha256": sha256_json(packet_body)}
+    freeze = {
+        "artifact_sha256": "freeze-sha",
+        "scope_packet_sha256": scope_packet["packet_sha256"],
+        "cvp_policy_sha256": "policy-sha",
+    }
+    envelope_body = {
+        "schema_version": CVP_GROUPING_ENVELOPE_VERSION,
+        "freeze_sha256": "freeze-sha",
+        "scope_packet_sha256": scope_packet["packet_sha256"],
+        "cvp_policy_sha256": "policy-sha",
+        "grouping": {
+            "scope_label": "matthew-16-current",
+            "groups": [
+                {
+                    "group_key": "clean_mixed_group",
+                    "claim_ids": ["C1", "C2"],
+                    "rationale": "测试",
+                },
+                {
+                    "group_key": "singleton",
+                    "claim_ids": ["C3"],
+                    "rationale": "测试",
+                },
+            ],
+        },
+    }
+    grouping_envelope = envelope_body | {
+        "artifact_sha256": sha256_json(envelope_body)
+    }
+
+    selection = build_canary_selection(
+        grouping_envelope=grouping_envelope,
+        freeze=freeze,
+        scope_packet=scope_packet,
+        batch_size=20,
+    )
+
+    assert selection["selected_group"]["group_key"] == "clean_mixed_group"
+    assert selection["selected_group"]["source_ids"] == ["S1", "S2"]
+    assert (
+        validate_canary_selection(
+            selection,
+            grouping_envelope=grouping_envelope,
+            freeze=freeze,
+            scope_packet=scope_packet,
+            batch_size=20,
+        )
+        == "clean_mixed_group"
+    )
+
+    altered_body = {key: value for key, value in selection.items() if key != "artifact_sha256"}
+    altered_body["selected_group"] = dict(altered_body["selected_group"])
+    altered_body["selected_group"]["group_key"] = "singleton"
+    altered = altered_body | {"artifact_sha256": sha256_json(altered_body)}
+    with pytest.raises(CvpProductionBlocked, match="not the deterministic choice"):
+        validate_canary_selection(
+            altered,
+            grouping_envelope=grouping_envelope,
+            freeze=freeze,
+            scope_packet=scope_packet,
+            batch_size=20,
+        )
 
 
 def test_a_claim_in_two_groups_is_rejected():

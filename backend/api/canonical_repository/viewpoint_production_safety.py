@@ -31,6 +31,11 @@ from backend.api.canonical_repository.viewpoint_foundation import (
     semantic_record_sha,
     sha256_json,
 )
+from backend.api.canonical_repository.viewpoint_batch_resolution import (
+    ClaimGroupingResponse,
+    RESIDUAL_GROUP_KEY,
+    validate_grouping,
+)
 from backend.api.canonical_repository.viewpoint_resolution import (
     IDENTITY_ELIGIBLE_CLAIM_REVIEW_STATUSES,
     IDENTITY_TERMINALLY_EXCLUDED_CLAIM_REVIEW_STATUSES,
@@ -41,6 +46,7 @@ from backend.api.canonical_repository.viewpoint_resolution import (
 
 CVP_FREEZE_VERSION = "wang_cvp_production_freeze_v1"
 CVP_GROUPING_ENVELOPE_VERSION = "wang_canonical_viewpoint_grouping_envelope_v2"
+CVP_CANARY_SELECTION_VERSION = "wang_cvp_canary_selection_v1"
 CVP_APPLY_AUTHORIZATION_VERSION = "wang_cvp_apply_authorization_v1"
 
 CORPUS_COLLECTIONS = (
@@ -634,6 +640,137 @@ def validate_grouping_envelope(
     if findings:
         raise CvpProductionBlocked(findings)
     return stated
+
+
+def build_canary_selection(
+    *,
+    grouping_envelope: Mapping[str, Any],
+    freeze: Mapping[str, Any],
+    scope_packet: Mapping[str, Any],
+    batch_size: int,
+) -> dict[str, Any]:
+    """Select a small, structurally rich canary without semantic pre-screening.
+
+    The grouping model has already seen the complete frozen scope.  This step
+    may only choose among its intact groups using fields already present in the
+    frozen packet; it cannot regroup Claims or infer identity.
+    """
+
+    grouping_sha256 = validate_grouping_envelope(grouping_envelope, freeze=freeze)
+    try:
+        packet_sha256 = validate_content_addressed(scope_packet, "packet_sha256")
+    except CvpProductionBlocked as exc:
+        raise CvpProductionBlocked(
+            [f"canary scope packet: {finding}" for finding in exc.findings]
+        ) from exc
+    if packet_sha256 != freeze.get("scope_packet_sha256"):
+        raise CvpProductionBlocked(["canary scope packet belongs to another freeze"])
+    if batch_size < 2:
+        raise CvpProductionBlocked(["canary batch ceiling must allow a non-trivial group"])
+
+    claims = {
+        item.claim_id: item
+        for item in (
+            ReviewClaim.model_validate(raw) for raw in scope_packet.get("claims") or []
+        )
+    }
+    grouping = ClaimGroupingResponse.model_validate(grouping_envelope.get("grouping"))
+    validate_grouping(
+        grouping=grouping,
+        scope_label=str(scope_packet.get("scope_label") or ""),
+        claim_ids=list(claims),
+    )
+
+    candidates: list[tuple[tuple[int, int, int, str], dict[str, Any]]] = []
+    for group in grouping.groups:
+        group_claims = [claims[claim_id] for claim_id in group.claim_ids]
+        source_ids = sorted({claim.source_id for claim in group_claims})
+        linked_count = sum(
+            bool(claim.active_full_viewpoint_id) for claim in group_claims
+        )
+        unlinked_count = len(group_claims) - linked_count
+        multi_evidence_count = sum(len(claim.evidence) > 1 for claim in group_claims)
+        if (
+            group.group_key == RESIDUAL_GROUP_KEY
+            or not 2 <= len(group_claims) <= batch_size
+            or len(source_ids) < 2
+            or linked_count < 1
+            or unlinked_count < 1
+            or multi_evidence_count < 1
+        ):
+            continue
+        details = {
+            "group_key": group.group_key,
+            "claim_ids": sorted(group.claim_ids),
+            "claim_count": len(group_claims),
+            "source_ids": source_ids,
+            "source_count": len(source_ids),
+            "already_linked_claim_count": linked_count,
+            "unlinked_claim_count": unlinked_count,
+            "multi_evidence_claim_count": multi_evidence_count,
+        }
+        # Prefer the smallest qualifying intact group, then broader provenance
+        # and more multi-step evidence.  group_key is the stable final tie-break.
+        rank = (
+            len(group_claims),
+            -len(source_ids),
+            -multi_evidence_count,
+            group.group_key,
+        )
+        candidates.append((rank, details))
+
+    if not candidates:
+        raise CvpProductionBlocked(
+            [
+                "no intact canary group has 2+ Claims, 2+ sources, both linked and "
+                "unlinked Claims, and at least one multi-evidence Claim"
+            ]
+        )
+    selected = min(candidates, key=lambda item: item[0])[1]
+    body = {
+        "schema_version": CVP_CANARY_SELECTION_VERSION,
+        "freeze_sha256": freeze["artifact_sha256"],
+        "scope_packet_sha256": packet_sha256,
+        "grouping_sha256": grouping_sha256,
+        "selection_policy": {
+            "excluded_group_keys": [RESIDUAL_GROUP_KEY],
+            "minimum_claim_count": 2,
+            "maximum_claim_count": batch_size,
+            "minimum_source_count": 2,
+            "requires_linked_and_unlinked_claims": True,
+            "minimum_multi_evidence_claim_count": 1,
+            "ranking": [
+                "claim_count_ascending",
+                "source_count_descending",
+                "multi_evidence_claim_count_descending",
+                "group_key_ascending",
+            ],
+        },
+        "qualifying_group_count": len(candidates),
+        "selected_group": selected,
+    }
+    return body | {"artifact_sha256": sha256_json(body)}
+
+
+def validate_canary_selection(
+    selection: Mapping[str, Any],
+    *,
+    grouping_envelope: Mapping[str, Any],
+    freeze: Mapping[str, Any],
+    scope_packet: Mapping[str, Any],
+    batch_size: int,
+) -> str:
+    expected = build_canary_selection(
+        grouping_envelope=grouping_envelope,
+        freeze=freeze,
+        scope_packet=scope_packet,
+        batch_size=batch_size,
+    )
+    if dict(selection) != expected:
+        raise CvpProductionBlocked(
+            ["canary selection is stale, altered, or not the deterministic choice"]
+        )
+    return str(expected["selected_group"]["group_key"])
 
 
 def validate_apply_authorization(
