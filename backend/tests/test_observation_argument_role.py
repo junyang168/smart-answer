@@ -17,6 +17,7 @@ from backend.pipeline.detailed_knowledge_extraction_runner import (
     compile_package,
 )
 from backend.pipeline.knowledge_source import markdown_source_document
+from backend.pipeline.source_projection import project_script
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -35,7 +36,7 @@ def _transcript():
 
 def _anchor(excerpt):
     return [{
-        "segment_index": "S0001", "start_time": 1.0, "end_time": 9.0,
+        "segment_index": "S0001", "start_time": None, "end_time": None,
         "verbatim_excerpt": excerpt,
     }]
 
@@ -164,13 +165,19 @@ def test_the_observation_edge_survives_id_namespacing():
     """The runner rewrites short model ids into corpus-unique ones; an
     observation-sourced relation must be remapped with the observation map,
     not the evidence map, or compiling raises KeyError."""
+    transcript = _transcript()
+    projection = project_script(transcript["script"])
     package = compile_package(
         transcript_id="notes_manuscript:16",
         transcript_path=Path("16.json"),
-        transcript=_transcript(),
+        transcript=transcript,
         raw=b"{}",
         response=_response(),
-        extraction={"fingerprint_sha256": "x"},
+        extraction={
+            "fingerprint_sha256": "x",
+            "source_sha256": projection.body_sha256,
+            "source_text_sha256": projection.spoken_text_sha256,
+        },
         source_descriptor={"source_id": "notes_manuscript:16"},
     )
     relation = package["knowledge_relations"][0]

@@ -8,6 +8,15 @@ import re
 from pathlib import Path
 from typing import Any
 
+from backend.pipeline.source_projection import (
+    SOFT_DELETION,
+    assert_locator_space_compatible,
+    live_script,
+    live_text,
+    project_script,
+    script_from_markdown_blocks,
+    validate_visual_source_attestations,
+)
 from backend.pipeline.transcript_source import resolve_transcript_path
 
 
@@ -17,57 +26,6 @@ PUBLICATION_READINESS_DECISIONS = {
     "source_index_only",
     "insufficient_material",
 }
-
-
-#: A proofreader deletes from a transcript by striking the text through rather
-#: than removing it, so the cut stays reversible. Everything between the two
-#: markers is to be read as absent.
-#:
-#: The pattern is `SurmonEditor`'s own (`FALLBACK_STRIKETHROUGH_PATTERN`),
-#: deliberately, because what the proofreader saw struck through on screen is
-#: the definition of what was deleted. Two consequences follow from copying it
-#: rather than inventing a looser one, and both were measured on the 115
-#: published transcripts:
-#:
-#: * The editor renders each segment as its own Markdown document, so a marker
-#:   opened in one segment and closed in another strikes nothing and shows as
-#:   literal tildes. Matching across segments would have deleted 39,282
-#:   characters nobody deleted.
-#: * `[^~]+?` means an unpaired marker deletes nothing at all. 11 segments in
-#:   the corpus carry one; under a greedier rule each would swallow the rest of
-#:   its segment.
-SOFT_DELETION = re.compile(r"~~([^~]+?)~~", re.S)
-
-
-def live_text(text: str) -> str:
-    """One segment with its soft-deleted spans removed.
-
-    The span becomes a newline, never nothing. Deleting from the middle of
-    `甲~~乙~~丙` and closing the gap yields `甲丙` -- a string the professor
-    never said, which `verbatim_excerpt` validation would then happily accept
-    as contiguous source text. A newline is also where `sentence_spans` breaks,
-    so the two survivors cannot be read as one sentence either.
-    """
-
-    return SOFT_DELETION.sub("\n", str(text or ""))
-
-
-def live_script(script: Any) -> list[dict[str, Any]]:
-    """A transcript's segments with the deleted text gone, positions intact.
-
-    A segment struck in full stays in the list as an empty one. Dropping it
-    would renumber every segment after it, and `S0007` is a position -- every
-    anchor, every exclusion id and every section boundary in the claim layer
-    resolves through it. An empty segment contributes no sentences and no
-    anchors, which is the whole of what "deleted" has to mean here.
-    """
-
-    rows: list[dict[str, Any]] = []
-    for segment in script or []:
-        row = dict(segment) if isinstance(segment, dict) else {"text": str(segment or "")}
-        row["text"] = live_text(row.get("text"))
-        rows.append(row)
-    return rows
 
 
 def markdown_blocks(markdown: str) -> list[str]:
@@ -81,6 +39,7 @@ def markdown_source_document(source: dict[str, Any]) -> tuple[dict[str, Any], by
     raw = path.read_bytes()
     text = raw.decode("utf-8")
     blocks = markdown_blocks(text)
+    script = script_from_markdown_blocks(blocks)
     payload = {
         "metadata": {
             "title": source.get("title") or path.stem,
@@ -91,15 +50,7 @@ def markdown_source_document(source: dict[str, Any]) -> tuple[dict[str, Any], by
             "source_url": source.get("source_url"),
             "lineage": source.get("lineage") or {},
         },
-        "script": [
-            {
-                "index": index,
-                "start_time": None,
-                "end_time": None,
-                "text": block,
-            }
-            for index, block in enumerate(blocks, start=1)
-        ],
+        "script": script,
     }
     return payload, raw, path
 
@@ -136,10 +87,48 @@ def load_knowledge_source_document(
         else:
             raise ValueError(f"{path}: transcript JSON must be an object or an array")
 
-    expected_sha256 = str(source.get("source_sha256") or "")
-    actual_sha256 = hashlib.sha256(raw).hexdigest()
-    if expected_sha256 and expected_sha256 != actual_sha256:
-        raise ValueError(f"source hash mismatch: {path}")
+    actual_file_sha256 = hashlib.sha256(raw).hexdigest()
+    projection = project_script(payload.get("script"))
+    try:
+        validate_visual_source_attestations(
+            projection, source.get("visual_source_attestations")
+        )
+    except ValueError as exc:
+        raise ValueError(f"visual source attestation mismatch: {exc}: {path}") from exc
+    try:
+        uses_body_coordinates = assert_locator_space_compatible(
+            source, payload.get("script")
+        )
+    except ValueError as exc:
+        raise ValueError(f"{exc}: {path}") from exc
+    expected_file_sha256 = str(source.get("source_file_sha256") or "")
+    expected_body_sha256 = str(source.get("source_body_sha256") or "")
+    expected_visual_sha256 = source.get("source_visual_sha256")
+    legacy_sha256 = str(source.get("source_sha256") or "")
+    # For a new semantic descriptor the physical SHA is provenance, not the
+    # staleness key: a comment-only editor save changes the bytes but neither
+    # model input nor evidence. Legacy/file-only descriptors still require the
+    # exact bytes they were originally bound to.
+    if (
+        expected_file_sha256
+        and not uses_body_coordinates
+        and expected_file_sha256 != actual_file_sha256
+    ):
+        raise ValueError(f"source file hash mismatch: {path}")
+    if uses_body_coordinates and expected_body_sha256 != projection.body_sha256:
+        raise ValueError(f"source body hash mismatch: {path}")
+    if expected_visual_sha256 is not None and (
+        str(expected_visual_sha256) != str(projection.visual_content_sha256 or "")
+    ):
+        raise ValueError(f"source visual hash mismatch: {path}")
+    # Editorial structure is provenance and model/cache input, not a source
+    # validity gate. Callers that show headings include the current rendered
+    # structure in their own fingerprint; body-only consumers remain usable
+    # after a heading typo is fixed.
+    if legacy_sha256:
+        expected = projection.body_sha256 if uses_body_coordinates else actual_file_sha256
+        if legacy_sha256 != expected:
+            raise ValueError(f"source hash mismatch: {path}")
     return payload, raw, path
 
 

@@ -30,7 +30,14 @@ from typing import Any, Iterable, Optional
 from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
 from backend.pipeline.base_contract_coverage import sentence_spans
 from backend.pipeline.sentence_ledger import PROSE, classify_sentence
-from backend.pipeline.knowledge_source import live_script, markdown_blocks
+from backend.pipeline.knowledge_source import markdown_blocks
+from backend.pipeline.source_projection import (
+    assert_locator_space_compatible,
+    project_script,
+    script_from_markdown_blocks,
+    source_uses_body_locator_space,
+    visual_fragment_display_text,
+)
 
 # Collections that can carry a `source_fragment_id`, i.e. that can be placed on
 # the source text.  `claims` deliberately is not one of them: a claim reaches
@@ -122,21 +129,57 @@ def load_segments(document: dict[str, Any], path: Path) -> tuple[list[dict[str, 
     raw = path.read_bytes()
     if str(document.get("source_type") or "") == "notes_manuscript":
         blocks = markdown_blocks(raw.decode("utf-8"))
-        script: list[dict[str, Any]] = [
-            {"index": position + 1, "text": block} for position, block in enumerate(blocks)
-        ]
+        script = script_from_markdown_blocks(blocks)
     else:
         parsed = json.loads(raw)
         script = parsed.get("script", []) if isinstance(parsed, dict) else parsed
         if not isinstance(script, list):
             raise ValueError(f"{path}: transcript has no script list")
-        # A struck-through span was deleted by a proofreader, so it is not a
-        # gap in coverage and must not be shown to a reviewer as one.
-        script = live_script(script)
+    assert_locator_space_compatible(document, script)
+    projection = project_script(script)
+    visuals_by_segment: dict[str, list[Any]] = defaultdict(list)
+    for block in projection.visual_blocks:
+        visuals_by_segment[block.segment_index].append(block)
 
     segments = []
-    for position, item in enumerate(script):
-        text = str((item or {}).get("text") or "")
+    for position, item in enumerate(projection.body_rows):
+        source_text = str((item or {}).get("text") or "")
+        segment_visuals: list[dict[str, Any]] = []
+        projected_parts: list[str] = []
+        projected_length = 0
+        source_cursor = 0
+        blocks = sorted(
+            visuals_by_segment.get(segment_key(position), []),
+            key=lambda block: block.char_start,
+        )
+        for block in blocks:
+            if block.char_start < source_cursor:
+                raise ValueError(f"{block.locator}: overlapping visual source blocks")
+            prefix = source_text[source_cursor : block.char_start]
+            projected_parts.append(prefix)
+            projected_length += len(prefix)
+            display = visual_fragment_display_text(
+                {
+                    "source_modality": "visual",
+                    "visual_locator": block.locator,
+                    "visual_facts": list(block.facts),
+                }
+            )
+            replacement = f"\n{display}\n"
+            start = projected_length + 1
+            projected_parts.append(replacement)
+            projected_length += len(replacement)
+            segment_visuals.append(
+                {
+                    "locator": block.locator,
+                    "raw_sha256": block.raw_sha256,
+                    "start": start,
+                    "end": start + len(display),
+                }
+            )
+            source_cursor = block.char_end
+        projected_parts.append(source_text[source_cursor:])
+        text = "".join(projected_parts)
         stripped = text.strip()
         segments.append(
             {
@@ -150,9 +193,10 @@ def load_segments(document: dict[str, Any], path: Path) -> tuple[list[dict[str, 
                 "type": (item or {}).get("type") or "",
                 "spans": [],
                 "fragment_ids": [],
+                "visuals": segment_visuals,
             }
         )
-    return segments, hashlib.sha256(raw).hexdigest()
+    return segments, projection.body_sha256
 
 
 class _SegmentIndex:
@@ -176,6 +220,16 @@ class _SegmentIndex:
             for segment in segments
             if counts[str(segment["index"])] == 1
         }
+        self.by_visual = {
+            str(visual["locator"]): (
+                int(segment["ordinal"]),
+                int(visual["start"]),
+                int(visual["end"]),
+                str(visual["raw_sha256"]),
+            )
+            for segment in segments
+            for visual in segment.get("visuals") or []
+        }
 
     def _by_text(self, excerpt: str) -> list[int]:
         return [position for position, text in enumerate(self.texts) if excerpt in text]
@@ -197,6 +251,17 @@ class _SegmentIndex:
         found = self._by_text(excerpt)
         return found[0] if len(found) == 1 else None
 
+    def place_visual(
+        self, locator: str, raw_sha256: str
+    ) -> tuple[Optional[int], Optional[int], Optional[int], str]:
+        found = self.by_visual.get(locator)
+        if found is None:
+            return None, None, None, "visual_locator_missing"
+        ordinal, start, end, current_sha256 = found
+        if not raw_sha256 or raw_sha256 != current_sha256:
+            return None, None, None, "visual_source_drifted"
+        return ordinal, start, end, "visual_locator"
+
 
 def _place_fragments(
     fragments: list[dict[str, Any]], segments: list[dict[str, Any]]
@@ -206,8 +271,19 @@ def _place_fragments(
     placed: dict[str, dict[str, Any]] = {}
     for payload in fragments:
         fragment_id = str(payload.get("fragment_id") or "")
-        excerpt = str(payload.get("verbatim_excerpt") or "").strip()
-        ordinal, method = index.place(str(payload.get("paragraph_key") or ""), excerpt)
+        source_modality = str(payload.get("source_modality") or "spoken")
+        if source_modality == "visual":
+            excerpt = visual_fragment_display_text(payload)
+            ordinal, visual_start, visual_end, method = index.place_visual(
+                str(payload.get("visual_locator") or payload.get("paragraph_key") or ""),
+                str(payload.get("visual_block_sha256") or ""),
+            )
+        else:
+            excerpt = str(payload.get("verbatim_excerpt") or "").strip()
+            ordinal, method = index.place(
+                str(payload.get("paragraph_key") or ""), excerpt
+            )
+            visual_start = visual_end = None
         entry = {
             "id": fragment_id,
             "excerpt": excerpt,
@@ -224,13 +300,25 @@ def _place_fragments(
             "found_at_ordinal": None,
             "node_ids": [],
         }
+        if source_modality == "visual":
+            entry["source_modality"] = "visual"
+            entry["visual_locator"] = payload.get("visual_locator")
         if ordinal is not None:
             text = segments[ordinal]["text"]
-            start = text.find(excerpt) if excerpt else -1
+            start = (
+                int(visual_start)
+                if source_modality == "visual" and visual_start is not None
+                else (text.find(excerpt) if excerpt else -1)
+            )
+            end = (
+                int(visual_end)
+                if source_modality == "visual" and visual_end is not None
+                else start + len(excerpt)
+            )
             if start >= 0:
                 entry["char_start"] = start
-                entry["char_end"] = start + len(excerpt)
-                segments[ordinal]["spans"].append((start, start + len(excerpt), fragment_id))
+                entry["char_end"] = end
+                segments[ordinal]["spans"].append((start, end, fragment_id))
                 segments[ordinal]["fragment_ids"].append(fragment_id)
             else:
                 # The anchor still names a segment, but the words are no longer
@@ -340,22 +428,33 @@ class SourceCoverageReader:
             "project_id": document.get("project_id"),
             "source_path": str(path) if path else str(document.get("source_path") or ""),
             "recorded_sha256": document.get("source_sha256"),
+            "recorded_body_sha256": document.get("source_body_sha256"),
             "file_state": "missing",
             "file_sha256": None,
+            "body_sha256": None,
         }
         if path is None:
             return {"source": {**meta, "stats": _empty_stats()}, "segments": [], "fragments": {}, "nodes": {}, "claims": {}}
 
-        segments, file_sha256 = load_segments(document, path)
-        meta["file_sha256"] = file_sha256
+        segments, body_sha256 = load_segments(document, path)
+        meta["file_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+        meta["body_sha256"] = body_sha256
         # A source edited after extraction does not merely lose a few anchors;
         # every offset in it is now a guess.  The page has to say which it is.
-        meta["file_state"] = "current" if file_sha256 == meta["recorded_sha256"] else "drifted"
+        uses_body_coordinates = source_uses_body_locator_space(document)
+        expected_sha256 = (
+            meta["recorded_body_sha256"]
+            if uses_body_coordinates
+            else meta["recorded_sha256"]
+        )
+        actual_sha256 = body_sha256 if uses_body_coordinates else meta["file_sha256"]
+        meta["file_state"] = "current" if actual_sha256 == expected_sha256 else "drifted"
 
         fragments = _place_fragments(corpus["fragments_by_source"].get(source_id, []), segments)
         nodes, claims = self._attach(corpus, fragments)
 
         for segment in segments:
+            segment.pop("visuals", None)
             runs = _flatten_spans(segment.pop("spans"))
             segment["runs"] = runs
             segment["sentences"] = _sentence_rows(segment["text"], runs)

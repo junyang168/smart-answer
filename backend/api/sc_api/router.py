@@ -23,7 +23,7 @@ from backend.api.service import (
 
 from .copilot import ChatMessage
 from .qaManager import QAItem, qaManager
-from .sermon_manager import Permission, sermonManager
+from .sermon_manager import Permission, ScriptConflictError, sermonManager
 from backend.api.models import GenerateSubtitlesRequest, SubtitleInsertion
 
 
@@ -59,6 +59,7 @@ class UpdateRequest(BaseModel):
     item: str
     type: str
     data: List[Union[Slide, Paragraph]]
+    expected_script_sha256: Optional[str] = None
 
 
 class BibleVerse(BaseModel):
@@ -247,12 +248,27 @@ def load(user_id: str, file_type: str, item: str, ext: str = "txt") -> str:
 
 @router.post("/update_script")
 def update_script(request: UpdateRequest):
+    if request.type not in {"scripts", "slides"}:
+        raise HTTPException(status_code=400, detail=f"unsupported update type: {request.type}")
+    if request.type == "scripts" and not request.expected_script_sha256:
+        raise HTTPException(
+            status_code=400,
+            detail="expected_script_sha256 is required for script updates",
+        )
     try:
         return sermon_manager.update_sermon(
-            request.user_id or "", request.type, request.item, request.data
+            request.user_id or "",
+            request.type,
+            request.item,
+            request.data,
+            expected_script_sha256=request.expected_script_sha256,
         )
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ScriptConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/update_header")
@@ -378,8 +394,14 @@ def generate_subtitles(payload: GenerateSubtitlesRequest):
 
 @router.get("/sermon/{user_id}/{item}/{changes}")
 def get_sermon(user_id: str, item: str, changes: Optional[str] = None):
-    header, script = sermon_manager.get_sermon_detail(user_id, item, changes)
-    return {"header": header, "script": script}
+    header, script, script_sha256 = sermon_manager.get_sermon_detail(
+        user_id, item, changes
+    )
+    return {
+        "header": header,
+        "script": script,
+        "script_sha256": script_sha256,
+    }
 
 
 @router.get("/sermons/{user_id}/{item}/history")

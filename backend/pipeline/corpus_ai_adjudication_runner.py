@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
+import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -32,15 +33,75 @@ from backend.pipeline.corpus_ai_adjudication import (
 from backend.pipeline.corpus_ai_review_runner import (
     DEFAULT_TRANSCRIPT_DIRS,
     _claim_layer_input,
+    _matching_review_artifact,
     _normalize_claim_layer,
     _sha256_bytes,
+    _validate_claim_layer_package,
 )
+from backend.pipeline.corpus_ai_review import validate_review_response
 from backend.pipeline.llm_usage import usage_row
 from backend.pipeline.run_ledger import RunRecord, run_record
 from backend.pipeline.corpus_survey_runner import PROJECT_ROOT, _load
 from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 from backend.pipeline.knowledge_source import load_knowledge_source_document
+from backend.pipeline.source_projection import project_script
 from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
+
+
+def _atomic_artifact_write(path: Path, encoded: bytes) -> None:
+    """Install one complete current or historical adjudication artifact."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _atomic_json_write(path: Path, payload: dict[str, Any]) -> None:
+    """Install one complete adjudication artifact atomically."""
+
+    _atomic_artifact_write(
+        path,
+        (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+    )
+
+
+def _adjudication_artifact_sha256(artifact: dict[str, Any]) -> str:
+    candidate = json.loads(json.dumps(artifact, ensure_ascii=False))
+    (candidate.get("adjudicator") or {}).pop("artifact_sha256", None)
+    return _sha256_bytes(
+        json.dumps(
+            candidate,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+
+
+def _overrides_artifact_sha256(artifact: dict[str, Any]) -> str:
+    candidate = json.loads(json.dumps(artifact, ensure_ascii=False))
+    candidate.pop("artifact_sha256", None)
+    return _sha256_bytes(
+        json.dumps(
+            candidate,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
 
 
 CLAIM_LAYER_ROOT = wang_platform_paths().claim_layer_staging
@@ -54,9 +115,10 @@ ADJUDICATION_VALIDATION_ATTEMPTS = 3
 
 
 def _transcript_segments(payload: dict[str, Any]) -> dict[str, str]:
+    rows = project_script(payload.get("script", [])).body_rows
     return {
         str(segment.get("index")): str(segment.get("text") or "")
-        for segment in payload.get("script", [])
+        for segment in rows
     }
 
 
@@ -65,6 +127,7 @@ def _load_context(
     transcript_dirs: list[Path],
 ) -> tuple[dict[str, Any], dict[str, dict[str, Any]], list[tuple[str, dict[str, Any]]], dict[str, dict[str, str]]]:
     package = json.loads(package_path.read_text(encoding="utf-8"))
+    _validate_claim_layer_package(package)
     survey = _normalize_claim_layer(package)
     claims_by_id = {item["claim_id"]: item for item in survey["candidate_claims"]}
     transcripts: list[tuple[str, dict[str, Any]]] = []
@@ -80,6 +143,69 @@ def _load_context(
         transcripts.append((transcript_id, payload))
         segments[transcript_id] = _transcript_segments(payload)
     return survey, claims_by_id, transcripts, segments
+
+
+def _validated_review_context(
+    package_path: Path,
+    review_path: Path,
+    transcript_dirs: list[Path],
+) -> tuple[
+    dict[str, Any],
+    dict[str, dict[str, Any]],
+    list[tuple[str, dict[str, Any]]],
+    dict[str, dict[str, str]],
+    dict[str, Any],
+    bytes,
+]:
+    """Load the exact package/review pair before either a cache hit or a call."""
+
+    survey, current_claims_by_id, transcripts, transcript_segments = _load_context(
+        package_path, transcript_dirs
+    )
+    review_bytes = review_path.read_bytes()
+    review_artifact = json.loads(review_bytes.decode("utf-8"))
+    package_sha256 = _sha256_bytes(package_path.read_bytes())
+    reviewed_package_sha256 = str(
+        (review_artifact.get("source") or {}).get("package_sha256") or ""
+    )
+    if not reviewed_package_sha256 or reviewed_package_sha256 != package_sha256:
+        raise AIAdjudicationValidationError(
+            "review package snapshot no longer matches current package; rerun Claude review"
+        )
+    reviewed_claims = review_artifact.get("reviewed_claims")
+    if not isinstance(reviewed_claims, list) or not reviewed_claims:
+        raise AIAdjudicationValidationError(
+            "review artifact has no ordered claim snapshot; rerun Claude review"
+        )
+    if reviewed_claims != survey.get("candidate_claims"):
+        raise AIAdjudicationValidationError(
+            "reviewed claim snapshot no longer matches current package"
+        )
+    reviewer = review_artifact.get("reviewer") or {}
+    reviewer_fingerprint = str(reviewer.get("fingerprint_sha256") or "")
+    spot_check_percent = review_artifact.get("spot_check_percent")
+    if (
+        not reviewer_fingerprint
+        or not isinstance(spot_check_percent, int)
+        or not _matching_review_artifact(
+            review_artifact,
+            survey=survey,
+            expected_fingerprint=reviewer_fingerprint,
+            spot_check_percent=spot_check_percent,
+        )
+    ):
+        raise AIAdjudicationValidationError(
+            "review artifact is incomplete, modified, or inconsistently routed; "
+            "rerun Claude review"
+        )
+    return (
+        survey,
+        current_claims_by_id,
+        transcripts,
+        transcript_segments,
+        review_artifact,
+        review_bytes,
+    )
 
 
 def _openai_input(
@@ -121,16 +247,17 @@ def _claude_reconsideration_input(
 def _archive(path: Path) -> Path | None:
     if not path.is_file():
         return None
+    raw = path.read_bytes()
     archive_dir = path.parent / "adjudication-generations"
     archive_dir.mkdir(parents=True, exist_ok=True)
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(raw)
         fingerprint = str((payload.get("adjudicator") or {}).get("fingerprint_sha256") or "legacy")[:12]
     except (OSError, json.JSONDecodeError):
         fingerprint = "unreadable"
-    target = archive_dir / f"{path.stem}.{fingerprint}.json"
+    target = archive_dir / f"{path.stem}.{fingerprint}.{_sha256_bytes(raw)[:8]}.json"
     if not target.exists():
-        shutil.copy2(path, target)
+        _atomic_artifact_write(target, raw)
     return target
 
 
@@ -141,13 +268,9 @@ def _archive_rejected_adjudication(
     target_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     target = target_dir / f"attempt-{attempt:02d}-{timestamp}.json"
-    target.write_text(
-        json.dumps(
-            {"validation_error": str(error), "candidate": response},
-            ensure_ascii=False,
-            indent=2,
-        ) + "\n",
-        encoding="utf-8",
+    _atomic_json_write(
+        target,
+        {"validation_error": str(error), "candidate": response},
     )
 
 
@@ -173,6 +296,99 @@ def _has_matching_generation(
     )
 
 
+def _valid_adjudication_artifact(
+    artifact: dict[str, Any],
+    *,
+    expected_fingerprint: str,
+    reviews: list[dict[str, Any]],
+    claims_by_id: dict[str, dict[str, Any]],
+    transcript_segments: dict[str, dict[str, str]],
+) -> bool:
+    """Prove a same-fingerprint current file is a complete validated result."""
+
+    try:
+        if artifact.get("schema_version") != ADJUDICATION_VERSION:
+            return False
+        if (
+            str((artifact.get("adjudicator") or {}).get("fingerprint_sha256") or "")
+            != expected_fingerprint
+        ):
+            return False
+        if (artifact.get("adjudicator") or {}).get(
+            "artifact_sha256"
+        ) != _adjudication_artifact_sha256(artifact):
+            return False
+        openai_response = artifact["openai_adjudication"]
+        validate_openai_adjudication(
+            openai_response,
+            reviews=reviews,
+            claims_by_id=claims_by_id,
+            transcript_segments=transcript_segments,
+        )
+        rejected_ids = {
+            row["claim_id"]
+            for row in openai_response["adjudications"]
+            if row["decision"] == "reject"
+        }
+        reconsideration = artifact.get("claude_reconsideration")
+        if rejected_ids:
+            if not isinstance(reconsideration, dict):
+                return False
+            validate_claude_reconsideration(
+                reconsideration,
+                rejected_claim_ids=rejected_ids,
+                claims_by_id=claims_by_id,
+            )
+        elif reconsideration is not None:
+            return False
+        expected = compile_outcome(
+            openai_response, reconsideration, reviews=reviews
+        )
+        return all(artifact.get(key) == value for key, value in expected.items())
+    except (AIAdjudicationValidationError, KeyError, TypeError, ValueError):
+        return False
+
+
+def _recover_matching_overrides(
+    *,
+    output_path: Path,
+    overrides_path: Path,
+    expected_fingerprint: str,
+    claims_by_id: dict[str, dict[str, Any]],
+) -> bool:
+    """Finish the deterministic half of an interrupted adjudication commit.
+
+    The validated adjudication is written before its mechanically compiled
+    overrides. A process death between those two atomic replaces must not
+    trigger two more model calls: when the current adjudication carries the
+    exact expected fingerprint, the missing/stale overrides can be rebuilt
+    from that artifact and the exact claim snapshot Claude reviewed.
+    """
+
+    if not output_path.is_file():
+        return False
+    try:
+        outcome = json.loads(output_path.read_text(encoding="utf-8"))
+        fingerprint = outcome.get("adjudicator") or {}
+        if str(fingerprint.get("fingerprint_sha256") or "") != expected_fingerprint:
+            return False
+        if not isinstance(outcome.get("claim_overrides"), dict):
+            return False
+        _write_overrides(
+            path=overrides_path,
+            outcome=outcome,
+            claims_by_id=claims_by_id,
+            fingerprint=fingerprint,
+        )
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+        return False
+    return _has_matching_generation(
+        output_path=output_path,
+        overrides_path=overrides_path,
+        expected_fingerprint=expected_fingerprint,
+    )
+
+
 def _anchor_signature(anchor: dict[str, Any]) -> dict[str, Any]:
     return {
         "transcript_id": anchor.get("transcript_id"),
@@ -189,6 +405,30 @@ def _write_overrides(
     claims_by_id: dict[str, dict[str, Any]],
     fingerprint: dict[str, str],
 ) -> None:
+    artifact = _compile_overrides(
+        outcome=outcome,
+        claims_by_id=claims_by_id,
+        fingerprint=fingerprint,
+        generated_at=datetime.now(timezone.utc).isoformat(),
+    )
+    _archive(path)
+    _atomic_json_write(path, artifact)
+
+
+def _compile_overrides(
+    *,
+    outcome: dict[str, Any],
+    claims_by_id: dict[str, dict[str, Any]],
+    fingerprint: dict[str, str],
+    generated_at: str,
+) -> dict[str, Any]:
+    """Compile the deterministic override sidecar for integrity checks/recovery."""
+
+    fingerprint = {
+        key: value
+        for key, value in fingerprint.items()
+        if key not in {"generated_at", "artifact_sha256"}
+    }
     claims: dict[str, Any] = {}
     for claim_id, patch in outcome["claim_overrides"].items():
         source_claim = claims_by_id[claim_id]
@@ -216,14 +456,35 @@ def _write_overrides(
         }
     artifact = {
         "schema_version": ADJUDICATION_VERSION,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": generated_at,
         "adjudication_fingerprint": fingerprint,
         "claims": claims,
         "note": "OpenAI accepted Claude fidelity corrections. These are candidate overrides, not human approval or publication.",
     }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    _archive(path)
-    path.write_text(json.dumps(artifact, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    artifact["artifact_sha256"] = _overrides_artifact_sha256(artifact)
+    return artifact
+
+
+def _valid_overrides_artifact(
+    artifact: dict[str, Any],
+    *,
+    outcome: dict[str, Any],
+    claims_by_id: dict[str, dict[str, Any]],
+    fingerprint: dict[str, str],
+) -> bool:
+    generated_at = artifact.get("generated_at")
+    if not isinstance(generated_at, str) or not generated_at:
+        return False
+    try:
+        expected = _compile_overrides(
+            outcome=outcome,
+            claims_by_id=claims_by_id,
+            fingerprint=fingerprint,
+            generated_at=generated_at,
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
+    return artifact == expected
 
 
 def _adjudication_subject(review_path: Path, package_path: Path) -> str:
@@ -282,21 +543,15 @@ def _run_adjudication(
     openai_prompt: str,
     claude_prompt: str,
 ) -> dict[str, Any]:
-    survey, current_claims_by_id, transcripts, transcript_segments = _load_context(
-        package_path, transcript_dirs
-    )
-    review_artifact = json.loads(review_path.read_text(encoding="utf-8"))
-    package_sha256 = _sha256_bytes(package_path.read_bytes())
-    reviewed_package_sha256 = str((review_artifact.get("source") or {}).get("package_sha256") or "")
-    if reviewed_package_sha256 and reviewed_package_sha256 != package_sha256:
-        raise AIAdjudicationValidationError(
-            "review package snapshot no longer matches current package; rerun Claude review"
-        )
-    reviewed_claims = review_artifact.get("reviewed_claims")
-    if not reviewed_claims:
-        raise AIAdjudicationValidationError(
-            "review artifact has no ordered claim snapshot; rerun Claude review"
-        )
+    (
+        survey,
+        current_claims_by_id,
+        transcripts,
+        transcript_segments,
+        review_artifact,
+        review_bytes,
+    ) = _validated_review_context(package_path, review_path, transcript_dirs)
+    reviewed_claims = review_artifact["reviewed_claims"]
     claims_by_id = {item["claim_id"]: item for item in reviewed_claims}
     reviews = actionable_reviews(review_artifact)
     review_ids = {item["claim_id"] for item in reviews}
@@ -328,16 +583,20 @@ def _run_adjudication(
                 + "\n请保留其余裁决，只修复所有机械错误并重新输出完整 JSON。"
                 "新增 anchor 的 verbatim_excerpt 必须从指定 source_index 连续逐字复制。"
             )
+        record.model_call_started()
         candidate = openai_client.generate_json(
             openai_prompt,
             current_feedback,
             OPENAI_ADJUDICATION_SCHEMA,
             cache_prefix=openai_input,
         )
-        usage_rows.append({
+        call_usage = {
             **usage_row(getattr(openai_client, "last_usage", None), attempt),
             "model_id": openai_client.model, "role": "openai_adjudication",
-        })
+        }
+        usage_rows.append(call_usage)
+        record.usage([call_usage])
+        record.model_call_completed()
         try:
             validate_openai_adjudication(
                 candidate,
@@ -363,6 +622,7 @@ def _run_adjudication(
     rejected = [item for item in openai_response["adjudications"] if item["decision"] == "reject"]
     reconsideration: dict[str, Any] | None = None
     if rejected:
+        record.model_call_started()
         reconsideration = claude_client.generate_json(
             claude_prompt,
             _claude_reconsideration_input(
@@ -375,10 +635,13 @@ def _run_adjudication(
         )
         # The two adjudicators are different families at different prices, so
         # each row carries its own `model_id` rather than inheriting the run's.
-        usage_rows.append({
+        call_usage = {
             **usage_row(getattr(claude_client, "last_usage", None), 1),
             "model_id": claude_client.model, "role": "claude_reconsideration",
-        })
+        }
+        usage_rows.append(call_usage)
+        record.usage([call_usage])
+        record.model_call_completed()
         validate_claude_reconsideration(
             reconsideration,
             rejected_claim_ids={item["claim_id"] for item in rejected},
@@ -387,17 +650,20 @@ def _run_adjudication(
 
     fingerprint = adjudication_fingerprint(
         review_fingerprint=str((review_artifact.get("reviewer") or {}).get("fingerprint_sha256") or ""),
+        review_artifact_sha256=_sha256_bytes(review_bytes),
         openai_prompt=openai_prompt,
         openai_model=openai_client.model,
         openai_reasoning_effort=openai_client.reasoning_effort,
+        openai_max_output_tokens=openai_client.max_output_tokens,
         openai_backend=getattr(openai_client, "backend", "api").replace("_", "-"),
         claude_prompt=claude_prompt,
         claude_model=claude_client.model,
+        claude_max_output_tokens=claude_client.max_output_tokens,
         claude_backend=getattr(claude_client, "backend", "api").replace("_", "-"),
+        source_package_sha256=_sha256_bytes(package_path.read_bytes()),
     )
     outcome = compile_outcome(openai_response, reconsideration, reviews=reviews)
     record.inputs({"fingerprint_sha256": fingerprint.get("fingerprint_sha256")})
-    record.usage(usage_rows)
     # `human_disagreement_required` is the number that matters here: the two
     # models could not settle it and a person has to. It is not a failure, but a
     # source whose adjudication routes everything to a person has not been
@@ -417,9 +683,11 @@ def _run_adjudication(
         "claude_reconsideration": reconsideration,
         **outcome,
     }
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact["adjudicator"]["artifact_sha256"] = _adjudication_artifact_sha256(
+        artifact
+    )
     _archive(output_path)
-    output_path.write_text(json.dumps(artifact, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _atomic_json_write(output_path, artifact)
     _write_overrides(
         path=overrides_path,
         outcome=outcome,
@@ -457,20 +725,30 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     transcript_dirs = args.transcript_dirs or DEFAULT_TRANSCRIPT_DIRS
-    survey, claims_by_id, transcripts, _ = _load_context(args.package, transcript_dirs)
-    review_artifact = json.loads(args.review.read_text(encoding="utf-8"))
+    (
+        survey,
+        claims_by_id,
+        transcripts,
+        transcript_segments,
+        review_artifact,
+        review_bytes,
+    ) = _validated_review_context(args.package, args.review, transcript_dirs)
     reviews = actionable_reviews(review_artifact)
     openai_prompt = OPENAI_PROMPT.read_text(encoding="utf-8")
     claude_prompt = CLAUDE_PROMPT.read_text(encoding="utf-8")
     fingerprint = adjudication_fingerprint(
         review_fingerprint=str((review_artifact.get("reviewer") or {}).get("fingerprint_sha256") or ""),
+        review_artifact_sha256=_sha256_bytes(review_bytes),
         openai_prompt=openai_prompt,
         openai_model=args.openai_model,
         openai_reasoning_effort=args.openai_reasoning_effort,
+        openai_max_output_tokens=args.max_output_tokens,
         openai_backend=args.openai_backend,
         claude_prompt=claude_prompt,
         claude_model=args.claude_model,
+        claude_max_output_tokens=args.max_output_tokens,
         claude_backend=args.claude_backend,
+        source_package_sha256=_sha256_bytes(args.package.read_bytes()),
     )
     if args.dry_run:
         print(
@@ -487,10 +765,31 @@ def main() -> int:
             )
         )
         return 0
-    if _has_matching_generation(
-        output_path=args.output,
-        overrides_path=args.overrides,
-        expected_fingerprint=fingerprint["fingerprint_sha256"],
+    current_adjudication: dict[str, Any] | None = None
+    if args.output.is_file():
+        try:
+            candidate = json.loads(args.output.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            candidate = {}
+        if _valid_adjudication_artifact(
+            candidate,
+            expected_fingerprint=fingerprint["fingerprint_sha256"],
+            reviews=reviews,
+            claims_by_id=claims_by_id,
+            transcript_segments=transcript_segments,
+        ):
+            current_adjudication = candidate
+    current_overrides: dict[str, Any] = {}
+    if args.overrides.is_file():
+        try:
+            current_overrides = json.loads(args.overrides.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            current_overrides = {}
+    if current_adjudication is not None and _valid_overrides_artifact(
+        current_overrides,
+        outcome=current_adjudication,
+        claims_by_id=claims_by_id,
+        fingerprint=current_adjudication["adjudicator"],
     ):
         print(
             json.dumps(
@@ -503,6 +802,33 @@ def main() -> int:
             )
         )
         return 0
+    if current_adjudication is not None:
+        recovered = _recover_matching_overrides(
+            output_path=args.output,
+            overrides_path=args.overrides,
+            expected_fingerprint=fingerprint["fingerprint_sha256"],
+            claims_by_id=claims_by_id,
+        )
+        if recovered:
+            load_dotenv(PROJECT_ROOT / ".env")
+            with run_record(
+                subject=_adjudication_subject(args.review, args.package),
+                stage="adjudication",
+            ) as record:
+                record.inputs({"fingerprint_sha256": fingerprint["fingerprint_sha256"]})
+                record.quality({"recovered_interrupted_artifact_commit": True})
+                record.outputs(args.output, args.overrides)
+            print(
+                json.dumps(
+                    {
+                        "status": "recovered",
+                        "reason": "rebuilt overrides from matching adjudication artifact",
+                        "fingerprint_sha256": fingerprint["fingerprint_sha256"],
+                    },
+                    ensure_ascii=False,
+                )
+            )
+            return 0
     load_dotenv(PROJECT_ROOT / ".env")
     openai_client = (
         CodexSubscriptionClient(

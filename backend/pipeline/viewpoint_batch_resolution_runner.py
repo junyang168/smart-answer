@@ -328,9 +328,23 @@ def build_consolidation_packet(
                         {
                             item.verbatim_excerpt
                             for item in claim.evidence
-                            if item.evidence_step_id in steps and item.verbatim_excerpt
+                            if item.evidence_step_id in steps
+                            and item.source_modality != "visual"
+                            and item.verbatim_excerpt
                         }
                     ),
+                    "visual_sources": [
+                        {
+                            "source_modality": "visual",
+                            "visual_locator": item.visual_locator,
+                            "visual_block_sha256": item.visual_block_sha256,
+                            "literal_facts": item.visual_facts,
+                            "quotation_status": "not_spoken_verbatim",
+                        }
+                        for item in claim.evidence
+                        if item.evidence_step_id in steps
+                        and item.source_modality == "visual"
+                    ],
                 }
             )
 

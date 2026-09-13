@@ -8,6 +8,7 @@ import pytest
 
 from backend.pipeline.matthew_exposition_authoring import (
     _anchor_present,
+    _sermon_transcript_slices,
     AuthoringContractError,
     EDITORIAL_REVIEW_PACKET_MAX_BYTES,
     build_authoring_packet,
@@ -32,6 +33,7 @@ from backend.pipeline.matthew_exposition_authoring import (
     validate_strict_schema,
     AUTHOR_RESULT_SCHEMA,
 )
+from backend.pipeline.source_projection import LOCATOR_SPACE, project_script
 from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.api.canonical_repository.viewpoint_runtime_projection import (
@@ -41,6 +43,7 @@ from backend.pipeline.matthew_exposition_authoring_runner import (
     _build_program_audit_manifest,
     _call_final_reviewer,
     _require_audit_draft,
+    _prompt_for_packet,
     _run_program_audit_stage,
     run_authoring,
     validate_viewpoint_projection_for_generation,
@@ -63,6 +66,171 @@ PUBLICATION_PROFILE_PATH = ROOT / "backend/config/publication_profiles/PP-matthe
 
 def load_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_authoring_transcript_slice_removes_visual_from_professor_speech(
+    tmp_path: Path,
+) -> None:
+    svg = "<svg><text>图中文字</text></svg>"
+    payload = {
+        "script": [
+            {"index": 10, "text": "教授在图前说的话。" + svg + "教授在图后说的话。"}
+        ]
+    }
+    source_path = tmp_path / "visual.json"
+    source_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    projection = project_script(payload["script"])
+    source = {
+        "source_id": "SRC-V",
+        "source_type": "sermon_transcript",
+        "source_path": str(source_path),
+        "locator_space": LOCATOR_SPACE,
+        "source_sha256": projection.body_sha256,
+        "source_body_sha256": projection.body_sha256,
+    }
+    manifest: dict = {}
+
+    slices = _sermon_transcript_slices(
+        source_documents=[source],
+        scoped_fragments=[
+            {"source_id": "SRC-V", "source_segment_index": 10}
+        ],
+        sources_manifest=manifest,
+    )
+
+    assert slices == {
+        "SRC-V": {"10": "教授在图前说的话。\n教授在图后说的话。"}
+    }
+    assert "<svg" not in str(slices)
+
+
+def test_authoring_transcript_slice_accepts_exact_legacy_published_source(
+    tmp_path: Path,
+) -> None:
+    payload = {
+        "script": [
+            {"index": "subtitle-1", "type": "subtitle", "text": "## 编辑标题"},
+            {"index": 10, "text": "教授的原话。"},
+        ]
+    }
+    raw = json.dumps(payload, ensure_ascii=False)
+    source_path = tmp_path / "published.json"
+    source_path.write_text(raw, encoding="utf-8")
+    source = {
+        "source_id": "SRC-LEGACY-PUBLISHED",
+        "source_type": "sermon_transcript",
+        "source_path": str(source_path),
+        "source_sha256": sha256_text(raw),
+    }
+
+    slices = _sermon_transcript_slices(
+        source_documents=[source],
+        scoped_fragments=[
+            {"source_id": source["source_id"], "source_segment_index": 10}
+        ],
+        sources_manifest={},
+    )
+
+    assert slices == {source["source_id"]: {"10": "教授的原话。"}}
+    assert "编辑标题" not in str(slices)
+
+
+@pytest.mark.parametrize("declared_sha", [None, "0" * 64])
+def test_authoring_transcript_slice_requires_exact_legacy_source_sha(
+    tmp_path: Path,
+    declared_sha: str | None,
+) -> None:
+    payload = {"script": [{"index": 10, "text": "教授的原话。"}]}
+    raw = json.dumps(payload, ensure_ascii=False)
+    source_path = tmp_path / "published.json"
+    source_path.write_text(raw, encoding="utf-8")
+    source = {
+        "source_id": "SRC-LEGACY",
+        "source_type": "sermon_transcript",
+        "source_path": str(source_path),
+    }
+    if declared_sha is not None:
+        source["source_sha256"] = declared_sha
+
+    with pytest.raises(AuthoringContractError):
+        _sermon_transcript_slices(
+            source_documents=[source],
+            scoped_fragments=[
+                {"source_id": source["source_id"], "source_segment_index": 10}
+            ],
+            sources_manifest={},
+        )
+
+
+def test_authoring_transcript_slice_rejects_duplicate_referenced_index(
+    tmp_path: Path,
+) -> None:
+    payload = {
+        "script": [
+            {"index": 10, "text": "第一段。"},
+            {"index": 10, "text": "第二段。"},
+        ]
+    }
+    raw = json.dumps(payload, ensure_ascii=False)
+    source_path = tmp_path / "published.json"
+    source_path.write_text(raw, encoding="utf-8")
+    source = {
+        "source_id": "SRC-DUPLICATE",
+        "source_type": "sermon_transcript",
+        "source_path": str(source_path),
+        "source_sha256": sha256_text(raw),
+    }
+
+    with pytest.raises(AuthoringContractError, match="duplicate referenced"):
+        _sermon_transcript_slices(
+            source_documents=[source],
+            scoped_fragments=[
+                {"source_id": source["source_id"], "source_segment_index": 10}
+            ],
+            sources_manifest={},
+        )
+
+
+def test_authoring_transcript_slice_rejects_review_when_published_exists(
+    tmp_path: Path,
+) -> None:
+    review_dir = tmp_path / "script_review"
+    published_dir = tmp_path / "script_published"
+    review_dir.mkdir()
+    published_dir.mkdir()
+    payload = {"script": [{"index": 10, "text": "教授的原话。"}]}
+    raw = json.dumps(payload, ensure_ascii=False)
+    review_path = review_dir / "SERMON.json"
+    review_path.write_text(raw, encoding="utf-8")
+    (published_dir / review_path.name).write_text(raw, encoding="utf-8")
+    source = {
+        "source_id": "SRC-REVIEW",
+        "source_type": "sermon_transcript",
+        "source_path": str(review_path),
+        "source_sha256": sha256_text(raw),
+    }
+
+    with pytest.raises(AuthoringContractError, match="published version"):
+        _sermon_transcript_slices(
+            source_documents=[source],
+            scoped_fragments=[
+                {"source_id": source["source_id"], "source_segment_index": 10}
+            ],
+            sources_manifest={},
+        )
+
+
+def test_visual_authoring_rule_is_conditional() -> None:
+    prompt = "base prompt"
+    ordinary = {"knowledge": {"source_fragments": []}}
+    visual = {
+        "knowledge": {
+            "source_fragments": [{"source_modality": "visual"}]
+        }
+    }
+
+    assert _prompt_for_packet(prompt, ordinary) == prompt
+    assert "不是教授口述逐字稿" in _prompt_for_packet(prompt, visual)
 
 
 def contract():

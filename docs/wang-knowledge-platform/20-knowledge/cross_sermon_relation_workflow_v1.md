@@ -158,11 +158,12 @@ PYTHONPATH=. .venv/bin/python -m backend.pipeline.cross_sermon_relation_runner \
 
 `reviewed-relations.json` 不是流程终点。通过复核的关系必须经由统一整合程序回写 PostgreSQL authoring store；否则后续释经、专题、问答、搜索和微讲道仍看不到这批跨讲知识。整合程序负责：
 
-1. 验证每条关系的起点、终点和证据是否存在；
-2. 把双模型共识与持续分歧分流；
-3. 生成关系增量包与候选合并快照，供写入前审计；
-4. 以 ChangeSet 写入同一个主库，并保留既有人工审核状态；
-5. 以内容指纹保证同一批资料可安全重跑。
+1. 在模型调用、integration output 或数据库读取前，验证 `scope_kind=research_batch_aggregate` 的 sealed aggregate reviewed candidate、完整 final resolutions、成员 artifact lineage、self-hash 与全 graph；
+2. 验证每条关系的起点、终点和证据是否存在；
+3. 把双模型共识与持续分歧分流；
+4. 生成关系增量包与候选合并快照，供写入前审计；
+5. 以 ChangeSet 写入同一个主库，并保留绑定当前 revision 的人工审核权威；
+6. 以内容指纹保证同一批资料可安全重跑。
 
 ```bash
 PYTHONPATH=. .venv/bin/python \
@@ -177,6 +178,10 @@ PYTHONPATH=. .venv/bin/python \
 ```
 
 `candidate-shared-knowledge.json` 是审计 artifact，不是另一个主库；`incremental-package.json` 是关系写入载体；真正的编辑权威仍是 PostgreSQL。AI 共识关系写入后保持候选状态，只有通过批准与完整性门槛的对象才会进入 Active Snapshot。
+
+`--base-package` 不能使用 raw extraction、旧版无 seal merge 或只删除了 `consensus_application` 的包。research-batch merge 必须先逐篇认证 reviewed candidate，再进行 legacy relation-ID 迁移，并为合并产物生成新的 stage seal。复审后不得再用 `source_fidelity_corrections` 改 claim；来源忠实度错误应回到 extraction 输入，或生成一轮新的 review→adjudication→override chain。
+
+跨讲模型和后续 candidate projection 只接收 `live_claims()` 返回且已经是 `ai_consensus_reviewed` 的主张。带 `superseded_by` 的历史 loser 不进入投影；任何仍为 `human_review_required` 的活跃主张会在数据库读取或模型调用前阻断整批，而不是静默遗漏或带入未决内容。candidate projection 还必须验证 reviewed-relations 的 `source_knowledge_sha256` 正好绑定当前 aggregate bytes，并在访问数据库前拒绝缺失端点、重复 candidate ID 或不存在的 evidence。
 
 关系图本身仍然**不是专题目录**。关系审核完成后，`candidate_projection_runner.py` 以共识关系图和共享主张为输入，提出彼此独立的释经候选与专题候选。OpenAI 先建立候选编排，Claude 按候选逐项独立复核；有修改意见时由 OpenAI 仲裁，若 OpenAI 不接受，再交 Claude 复审。只有两个模型持续不同意的单项候选进入人工队列。
 

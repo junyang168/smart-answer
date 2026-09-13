@@ -19,7 +19,10 @@ what still needs a person, how wide the human queue is -- gets an answer drawn
 from the 6 claims a person happened to approve by hand.
 
 This module reads the verdicts and nothing else. Applying them is
-`knowledge_store_runner sync-ai-review`, and only with `--apply`.
+This module is retained only for inspecting the legacy first-round-review
+backlog.  Its former `knowledge_store_runner sync-ai-review` write path is
+retired: first-round verdicts cannot represent post-adjudication truth, and
+per-claim transactions cannot atomically accompany a candidate ChangeSet.
 """
 
 from __future__ import annotations

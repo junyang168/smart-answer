@@ -1,0 +1,35 @@
+{
+  "schema_version": "wang_research_batch_v1",
+  "batch_id": "RB-CLAIM-REPAIR-TAKEOVER-358-20260911",
+  "purpose": "Issue #358 takeover of the unresolved claim-layer sources and the two sources previously excluded from its normal batch; no CVR or topic induction.",
+  "semantic_assumption": "none",
+  "transcript_ids": [
+    "2019-4-14 罗4 1-25 因信成义",
+    "2017 NYSC 專題：馬太福音釋經（六）3",
+    "S 200621",
+    "2019-3-31 宗主国与附庸国的约",
+    "2022年 NYSC 專題 馬太福音釋經（九）王守仁 教授  第二堂"
+  ],
+  "candidate_generation_policy": {
+    "derive_after_independent_extraction": true,
+    "allow_unassigned_material": true
+  },
+  "visual_source_attestations": {
+    "2019-3-31 宗主国与附庸国的约": {
+      "S0001/V01": "a66f307dfcea3b6b513d28cafae9e20c2626866bc4eac1a1b468e817b3ad78e5",
+      "S0008/V01": "91e98179e0572541466d1f41517b0ce64fe8ba85d23733c9b48fb09dddcb847f"
+    }
+  },
+  "review_batch_size": 20,
+  "review_spot_check_percent": 0,
+  "models": {
+    "extraction": "gpt-5.6-sol",
+    "extraction_reasoning_effort": "medium",
+    "cross_section": "gpt-5.6-sol",
+    "independent_review": "claude-sonnet-5",
+    "review_max_output_tokens": 64000,
+    "adjudicator": "gpt-5.6-sol",
+    "adjudicator_max_output_tokens": 64000,
+    "reconsideration": "claude-sonnet-5"
+  }
+}

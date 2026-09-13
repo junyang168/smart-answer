@@ -87,6 +87,31 @@ def test_one_failing_source_does_not_take_the_others_down(tmp_path, monkeypatch,
     assert report["status"] == "partial"
 
 
+def test_exclude_preserves_order_and_keeps_another_session_out_of_the_run(
+    tmp_path, monkeypatch, capsys,
+) -> None:
+    batch = _batch_file(tmp_path)
+    transcripts = _transcripts(tmp_path, "甲", "乙", "丙")
+
+    code, calls = _run(
+        monkeypatch,
+        [
+            "--batch", str(batch),
+            "--transcript-dir", str(transcripts),
+            "--output-root", str(tmp_path / "out"),
+            "--stage", "extract",
+            "--exclude", "乙",
+        ],
+    )
+
+    assert code == 0
+    assert [next(name for name in ("甲", "丙") if name in command) for command in calls] == [
+        "甲", "丙"
+    ]
+    report = json.loads(capsys.readouterr().out)
+    assert [row["source"] for row in report["members"]] == ["甲", "丙"]
+
+
 def test_a_failed_source_skips_its_own_later_stages(tmp_path, monkeypatch, capsys) -> None:
     """Reviewing an extraction that was never written is a second, noisier error."""
 
@@ -385,7 +410,7 @@ def test_batch_cli_requires_actor_for_subtitle_writeback(tmp_path, monkeypatch) 
         )
 
 
-def test_batch_stops_before_any_command_for_untitled_review_without_writeback(
+def test_batch_stops_before_any_command_for_headingless_review_without_writeback(
     tmp_path, monkeypatch
 ) -> None:
     batch = _batch_file(tmp_path)
@@ -400,6 +425,108 @@ def test_batch_stops_before_any_command_for_untitled_review_without_writeback(
             ["--batch", str(batch), "--transcript-dir", str(review),
              "--output-root", str(tmp_path / "out"), "--stage", "extract"],
         )
+
+
+def test_batch_stops_before_any_command_for_inline_editor_payload(
+    tmp_path, monkeypatch
+) -> None:
+    batch = _batch_file(tmp_path)
+    published = tmp_path / "script_published"
+    published.mkdir()
+    for name in ("甲", "乙", "丙"):
+        rows = [{"index": 1, "text": "教授正文。"}]
+        if name == "乙":
+            rows[0]["text"] += "\n<svg><text>编辑图形</text></svg>"
+        (published / f"{name}.json").write_text(
+            json.dumps(rows, ensure_ascii=False), encoding="utf-8"
+        )
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        runner.subprocess,
+        "run",
+        lambda command, **_kwargs: calls.append(command),
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "research_batch_runner",
+            "--batch", str(batch),
+            "--transcript-dir", str(published),
+            "--output-root", str(tmp_path / "out"),
+            "--stage", "extract",
+        ],
+    )
+    with pytest.raises(SystemExit):
+        runner.main()
+    assert calls == []
+
+
+def test_batch_allows_exactly_attested_visual_source(
+    tmp_path, monkeypatch
+) -> None:
+    batch = _batch_file(tmp_path)
+    published = tmp_path / "script_published"
+    published.mkdir()
+    svg = "<svg><text>教授展示的图</text></svg>"
+    for name in ("甲", "乙", "丙"):
+        text = "教授正文。" + (svg if name == "乙" else "")
+        (published / f"{name}.json").write_text(
+            json.dumps([{"index": 1, "text": text}], ensure_ascii=False),
+            encoding="utf-8",
+        )
+    payload = json.loads(batch.read_text(encoding="utf-8"))
+    payload["visual_source_attestations"] = {
+        "乙": {
+            "S0001/V01": hashlib.sha256(svg.encode("utf-8")).hexdigest()
+        }
+    }
+    batch.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    code, calls = _run(
+        monkeypatch,
+        [
+            "--batch", str(batch),
+            "--transcript-dir", str(published),
+            "--output-root", str(tmp_path / "out"),
+            "--stage", "extract",
+        ],
+    )
+
+    assert code == 0
+    command = next(command for command in calls if "乙" in command)
+    assert "--visual-source-attestation" in command
+
+
+def test_notes_payload_stops_batch_before_any_member_command(
+    tmp_path, monkeypatch
+) -> None:
+    manuscript = tmp_path / "notes.md"
+    manuscript.write_text(
+        "## 标题\n\n教授笔记。\n\n<!-- editor payload -->",
+        encoding="utf-8",
+    )
+    batch = _batch_file(tmp_path, manuscript=manuscript)
+    transcripts = _transcripts(tmp_path, "甲", "乙", "丙")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        runner.subprocess,
+        "run",
+        lambda command, **_kwargs: calls.append(command),
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "research_batch_runner",
+            "--batch", str(batch),
+            "--transcript-dir", str(transcripts),
+            "--output-root", str(tmp_path / "out"),
+            "--stage", "extract",
+        ],
+    )
+    with pytest.raises(SystemExit):
+        runner.main()
+    assert calls == []
 
 
 def test_a_genuinely_missing_transcript_still_stops_the_run(tmp_path, monkeypatch) -> None:
@@ -455,4 +582,35 @@ def test_only_does_not_overwrite_a_whole_batch_merge(tmp_path, monkeypatch, caps
     assert report["status"] == "partial_selection"
     assert "merge skipped" in report["merge_error"]
     # Narrowing the run on purpose is not a failure.
+    assert code == 0
+
+
+def test_exclude_does_not_overwrite_a_whole_batch_merge(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    batch = _batch_file(tmp_path)
+    transcripts = _transcripts(tmp_path, "甲", "乙", "丙")
+    output = tmp_path / "out"
+    merged = output / "merged" / "research-batch-knowledge.json"
+    merged.parent.mkdir(parents=True)
+    merged.write_text('{"note": "full merge"}', encoding="utf-8")
+    for name, suffix in [("甲", "A"), ("丙", "C")]:
+        _reviewed_package(
+            runner.artifact_paths(output, name)["reviewed"], name, suffix
+        )
+
+    code, _ = _run(
+        monkeypatch,
+        [
+            "--batch", str(batch),
+            "--transcript-dir", str(transcripts),
+            "--output-root", str(output),
+            "--exclude", "乙",
+        ],
+    )
+    report = json.loads(capsys.readouterr().out)
+
+    assert json.loads(merged.read_text(encoding="utf-8")) == {"note": "full merge"}
+    assert report["status"] == "partial_selection"
+    assert "merge skipped" in report["merge_error"]
     assert code == 0

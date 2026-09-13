@@ -4,14 +4,20 @@ import json
 import pytest
 
 from backend.pipeline.corpus_synthesis_runner import (
+    _artifact_sha256,
     _batch_theme_catalog,
     _expand_system_evidence,
+    _generation_digest,
     _load_current_surveys,
     _normalize_claim_refs,
+    _validate_batch_artifact,
     _validate_batch_theme_refs,
     _validate_refs,
 )
-from backend.pipeline.corpus_survey_runner import _extraction_metadata
+from backend.pipeline.corpus_survey_runner import (
+    _extraction_metadata,
+    _survey_artifact_sha256,
+)
 
 
 def test_normalize_claim_refs_repairs_only_unique_local_id_variation() -> None:
@@ -114,7 +120,7 @@ def test_load_current_surveys_combines_published_and_reviewed_without_duplicates
             reasoning_effort="medium",
             max_output_tokens=6000,
         )
-        return {
+        result = {
             "survey_version": "wang_corpus_first_pass_v1",
             "source": {
                 "transcript_id": transcript_id,
@@ -133,6 +139,8 @@ def test_load_current_surveys_combines_published_and_reviewed_without_duplicates
                 "editorial_inference_count": 0,
             },
         }
+        result["extraction"]["artifact_sha256"] = _survey_artifact_sha256(result)
+        return result
 
     for name, payload in [
         ("shared", survey("shared", published_raw, "published", "已发布内容", 1, 2)),
@@ -145,6 +153,14 @@ def test_load_current_surveys_combines_published_and_reviewed_without_duplicates
     loaded = _load_current_surveys([published_dir, reviewed_dir], survey_dir)
 
     assert [item["source"]["transcript_id"] for item in loaded] == ["shared", "review-only"]
+
+
+def test_load_current_surveys_ignores_wrong_shape_json_without_attribute_error(tmp_path) -> None:
+    survey_dir = tmp_path / "surveys"
+    survey_dir.mkdir()
+    (survey_dir / "wrong.first-pass.json").write_text("[]", encoding="utf-8")
+
+    assert _load_current_surveys([], survey_dir) == []
 
 
 def test_load_current_surveys_rejects_legacy_generation(tmp_path) -> None:
@@ -182,7 +198,7 @@ def test_load_current_surveys_rejects_legacy_generation(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    with pytest.raises(RuntimeError, match="legacy survey without extraction generation"):
+    with pytest.raises(RuntimeError, match="legacy survey without extraction identity"):
         _load_current_surveys([transcript_dir], survey_dir)
 
 
@@ -228,9 +244,151 @@ def test_load_current_surveys_rejects_mixed_generations(tmp_path) -> None:
                 "editorial_inference_count": 0,
             },
         }
+        survey["extraction"]["artifact_sha256"] = _survey_artifact_sha256(survey)
         (survey_dir / f"{transcript_id}.first-pass.json").write_text(
             json.dumps(survey), encoding="utf-8"
         )
 
-    with pytest.raises(RuntimeError, match="mixed extraction generations"):
+    with pytest.raises(RuntimeError, match="mixed extraction contracts"):
         _load_current_surveys([transcript_dir], survey_dir)
+
+
+def test_load_current_surveys_allows_source_specific_generations_under_one_contract(
+    tmp_path,
+) -> None:
+    transcript_dir = tmp_path / "published"
+    survey_dir = tmp_path / "surveys"
+    transcript_dir.mkdir()
+    survey_dir.mkdir()
+
+    for number in (1, 2):
+        transcript_id = f"sermon-{number}"
+        transcript = {
+            "metadata": {"status": "published"},
+            "script": [
+                {"index": 1, "text": f"内容{number}", "start_time": 1, "end_time": 2}
+            ],
+        }
+        raw = json.dumps(transcript, ensure_ascii=False).encode()
+        (transcript_dir / f"{transcript_id}.json").write_bytes(raw)
+        extraction = _extraction_metadata(
+            source_sha256=hashlib.sha256(raw).hexdigest(),
+            system_prompt="same-contract",
+            model_id="model-a",
+            reasoning_effort="medium",
+            max_output_tokens=6000,
+            user_prompt_sha256=hashlib.sha256(f"input-{number}".encode()).hexdigest(),
+        )
+        survey = {
+            "survey_version": "wang_corpus_first_pass_v1",
+            "source": {
+                "transcript_id": transcript_id,
+                "publication_status": "published",
+                "segment_count": 1,
+                "sha256": hashlib.sha256(raw).hexdigest(),
+            },
+            "extraction": extraction,
+            "content_clusters": [],
+            "candidate_claims": [],
+            "survey_summary": {
+                "cluster_count": 0,
+                "candidate_claim_count": 0,
+                "high_confidence_claim_count": 0,
+                "medium_confidence_claim_count": 0,
+                "editorial_inference_count": 0,
+            },
+        }
+        survey["extraction"]["artifact_sha256"] = _survey_artifact_sha256(survey)
+        (survey_dir / f"{transcript_id}.first-pass.json").write_text(
+            json.dumps(survey), encoding="utf-8"
+        )
+
+    loaded = _load_current_surveys([transcript_dir], survey_dir)
+
+    assert len(loaded) == 2
+    assert (
+        loaded[0]["extraction"]["contract_fingerprint_sha256"]
+        == loaded[1]["extraction"]["contract_fingerprint_sha256"]
+    )
+    assert (
+        loaded[0]["extraction"]["generation_fingerprint_sha256"]
+        != loaded[1]["extraction"]["generation_fingerprint_sha256"]
+    )
+
+
+def test_batch_artifact_rejects_tamper_and_duplicate_theme_ids() -> None:
+    cards = [
+        {
+            "transcript_id": "S1",
+            "source_extraction_generation_sha256": "generation-1",
+        }
+    ]
+    payload = {
+        "theme_candidates": [
+            {"theme_id": "T1", "claim_refs": ["S1::C1"]},
+            {"theme_id": "T1", "claim_refs": ["S1::C1"]},
+        ],
+        "design_observations": [],
+        "analysis": {
+            "source_digest": "digest",
+            "batch_number": 1,
+            "transcript_ids": ["S1"],
+            "source_extraction_generation_digest_sha256": _generation_digest(cards),
+        },
+    }
+    payload["analysis"]["artifact_sha256"] = _artifact_sha256(payload)
+
+    with pytest.raises(RuntimeError, match="duplicate theme_id"):
+        _validate_batch_artifact(
+            payload,
+            digest="digest",
+            number=1,
+            transcript_ids=["S1"],
+            source_generation_digest=_generation_digest(cards),
+            valid_refs={"S1::C1"},
+            require_self_hash=True,
+        )
+
+    payload["theme_candidates"] = [{"theme_id": "T1", "claim_refs": ["S1::C1"]}]
+    with pytest.raises(RuntimeError, match="self-hash mismatch"):
+        _validate_batch_artifact(
+            payload,
+            digest="digest",
+            number=1,
+            transcript_ids=["S1"],
+            source_generation_digest=_generation_digest(cards),
+            valid_refs={"S1::C1"},
+            require_self_hash=True,
+        )
+
+
+def test_generation_digest_rejects_duplicate_transcript_membership() -> None:
+    with pytest.raises(RuntimeError, match="duplicate transcript_id"):
+        _generation_digest([
+            {
+                "transcript_id": "S1",
+                "source_extraction_generation_sha256": "generation-1",
+            },
+            {
+                "transcript_id": "S1",
+                "source_extraction_generation_sha256": "generation-2",
+            },
+        ])
+
+
+def test_synthesis_rejects_multiple_current_survey_files_for_one_transcript(
+    tmp_path,
+) -> None:
+    survey_dir = tmp_path / "surveys"
+    survey_dir.mkdir()
+    for name, sha in (("one", "a" * 64), ("two", "b" * 64)):
+        (survey_dir / f"{name}.first-pass.json").write_text(
+            json.dumps(
+                {"source": {"transcript_id": "S1", "sha256": sha}},
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+    with pytest.raises(RuntimeError, match="multiple current survey artifacts"):
+        _load_current_surveys([], survey_dir)

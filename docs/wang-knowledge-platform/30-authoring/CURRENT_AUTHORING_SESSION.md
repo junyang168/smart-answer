@@ -6,7 +6,22 @@
 > **與代碼對齊**：不適用
 > **權威範圍**：無。本文只說明此刻已發布什麼，不定規則。
 
-Updated: 2026-09-01 (America/Chicago)
+Updated: 2026-09-10 (America/Chicago)
+
+## 2026-09-10 Matthew authoring-line decision
+
+The owner has now also retired `CompositionPlan` for Matthew exposition and
+replaced that authoring entry with draft-first. This supersedes the narrower
+2026-09-01 statement below. Historical plans, manuscripts, and review artifacts
+remain readable as records, but no new Matthew run may use a `CompositionPlan`
+as its current authoring or downstream-impact authority.
+
+The existing Matthew runner still implements the retired entry. Until a
+passage-specific draft-first adapter is implemented and verified, stop rather
+than fall back to `matthew_exposition_authoring_runner --plan-id`. Extraction
+and re-extraction remain runnable independently. Their downstream impact
+preview must read current `ProductDependency` records, not infer consumers from
+historical plans.
 
 ## 2026-09-01 authoring-line decision
 
@@ -19,11 +34,9 @@ into one SHA-bound packet before any author model is called. Historical Brief
 artifacts and their admin review rendering remain readable, but no live runner,
 prompt, or operator command can create another Brief-based essay.
 
-This decision does **not** retire `CompositionPlan` from Matthew exposition or
-micro-sermons. Their current authoring flows and the Matthew progress read model
-continue unchanged. Only the theological-topic Brief writer and the generic
-article workbench's use of every stored plan as an unwritten-topic queue are
-retired.
+At that date this decision did **not** retire `CompositionPlan` from Matthew
+exposition or micro-sermons. The owner superseded the Matthew part on
+2026-09-10; this paragraph remains only as the earlier session record.
 
 ## Project boundary
 
@@ -126,8 +139,11 @@ Four issues carry what the 2026-08-18 session found but did not finish. #64 is t
 
 Matthew exposition articles now publish automatically when the program verifies that every applicable rubric dimension reached its own minimum, that no hard failure was declared, and that the Program Audit is `pass` or `pass_with_warnings` with zero errors. The dimension minimums live in the quality profile (revision 4: 80% of each weight); no total score gates publication. The workflow creates `automated-publication-decision.v1`; it must not claim human approval. Repository publication is part of the authoring workflow, but source-code push and production deployment remain separate operations.
 
-For a new article, start from its existing fast-passage CompositionPlan and knowledge snapshot, confirm the article's authoring contract on that plan (base source, required argument steps, allowed/ineligible operations), and invoke `backend.pipeline.matthew_exposition_authoring_runner` with `--plan-id <CompositionPlan id>`, `--program-audit-manifest`, `--program-audit-draft-id`, `--auto-accept-maintained-findings`, `--max-revision-rounds 2`, and `--max-grounding-attempts 4`. Omitting `--knowledge` compiles the snapshot from the store and writes it to the run directory as `compiled-knowledge-snapshot.json`, which is what the Program Audit reads; the two must be the same snapshot or the audit judges material the author never saw. Long runs get reaped when started as a tracked background task — launch detached and poll instead.
-
-The authoring contract now lives on the CompositionPlan in PostgreSQL, not in a `base-manuscript-contract-input.json` beside the staging artifacts. `--plan` / `--base-contract` still read those files for articles not yet migrated, and are mutually exclusive with `--plan-id`. Migrate an existing contract with `backend.pipeline.authoring_contract_migration`, which verifies every `source_excerpt` is still a verbatim substring of the manuscript it names before writing anything.
+The former operator entry used a fast-passage CompositionPlan, `--plan-id`, and
+the PostgreSQL authoring contract. That entry is historical as of the
+2026-09-10 decision above. Do not invoke it for a new or revised Matthew
+article, do not migrate another base contract onto a CompositionPlan, and do
+not use those records to compute extraction impact. The next Matthew article
+must wait for the passage-specific draft-first adapter described above.
 
 Reviewer-call invariant: one Independent Editorial Review for the initial draft, then exactly one Final Delta Review per revision. A Delta Review must return any next-round findings in the same response. Never add a Score-Gap Review or send a revised manuscript back through full Editorial Review.

@@ -9,9 +9,12 @@ Nothing produced here is automatically approved or published.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
+import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +22,11 @@ from dotenv import load_dotenv
 
 from backend.config.wang_platform_paths import wang_platform_paths
 from backend.pipeline.corpus_survey import validate_survey
-from backend.pipeline.corpus_survey_runner import _load as _load_transcript
+from backend.pipeline.corpus_survey_runner import (
+    _load as _load_transcript,
+    _survey_artifact_sha256,
+)
+from backend.pipeline.source_projection import project_script
 from backend.pipeline.stage1 import Stage1OpenAIClient
 
 
@@ -152,18 +159,116 @@ FINAL_SCHEMA: dict[str, Any] = {
 }
 
 
+def _artifact_sha256(payload: dict[str, Any]) -> str:
+    candidate = copy.deepcopy(payload)
+    (candidate.get("analysis") or {}).pop("artifact_sha256", None)
+    encoded = json.dumps(
+        candidate, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _stamp_artifact(payload: dict[str, Any]) -> None:
+    payload.setdefault("analysis", {})["artifact_sha256"] = _artifact_sha256(payload)
+
+
+def _atomic_write(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            try:
+                os.fsync(directory_fd)
+            except OSError:
+                # The complete file was already fsynced and atomically
+                # installed. Do not invite a duplicate retry after commit.
+                pass
+        finally:
+            os.close(directory_fd)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    _atomic_write(
+        path,
+        (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+    )
+
+
+def _archive_artifact(path: Path) -> Path | None:
+    if not path.is_file():
+        return None
+    raw = path.read_bytes()
+    content_sha256 = hashlib.sha256(raw).hexdigest()
+    archive = path.parent / "generations" / f"{path.stem}.{content_sha256[:16]}.json"
+    if not archive.exists():
+        _atomic_write(archive, raw)
+    return archive
+
+
+def _generation_digest(cards: list[dict[str, Any]]) -> str:
+    transcript_ids = [str(card.get("transcript_id") or "") for card in cards]
+    if any(not value for value in transcript_ids):
+        raise RuntimeError("synthesis card is missing transcript_id")
+    if len(transcript_ids) != len(set(transcript_ids)):
+        raise RuntimeError("synthesis cards contain duplicate transcript_id")
+    generations = {
+        card["transcript_id"]: card["source_extraction_generation_sha256"]
+        for card in cards
+    }
+    return hashlib.sha256(
+        json.dumps(
+            generations, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    ).hexdigest()
+
+
 def _load_current_surveys(transcript_dirs: list[Path], survey_dir: Path) -> list[dict[str, Any]]:
     by_source: dict[tuple[str, str], dict[str, Any]] = {}
+    paths_by_transcript: dict[str, list[Path]] = {}
     for path in survey_dir.glob("*.first-pass.json"):
         try:
             survey = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
+        if not isinstance(survey, dict):
+            continue
         source = survey.get("source", {})
-        by_source[(str(source.get("transcript_id")), str(source.get("sha256")))] = survey
+        transcript_id = str(source.get("transcript_id") or "")
+        source_sha256 = str(source.get("sha256") or "")
+        key = (transcript_id, source_sha256)
+        if key in by_source:
+            raise RuntimeError(
+                f"duplicate survey artifacts for {transcript_id}@{source_sha256}"
+            )
+        by_source[key] = survey
+        paths_by_transcript.setdefault(transcript_id, []).append(path)
+
+    ambiguous_surveys = {
+        transcript_id: paths
+        for transcript_id, paths in paths_by_transcript.items()
+        if transcript_id and len(paths) > 1
+    }
+    if ambiguous_surveys:
+        transcript_id = sorted(ambiguous_surveys)[0]
+        raise RuntimeError(
+            f"multiple current survey artifacts name {transcript_id}: "
+            + ", ".join(sorted(path.name for path in ambiguous_surveys[transcript_id]))
+        )
 
     surveys: list[dict[str, Any]] = []
-    generation_fingerprints: set[str] = set()
+    contract_fingerprints: set[str] = set()
     seen_transcript_ids: set[str] = set()
     for transcript_dir in transcript_dirs:
         for transcript_path in sorted(transcript_dir.glob("*.json")):
@@ -173,16 +278,25 @@ def _load_current_surveys(transcript_dirs: list[Path], survey_dir: Path) -> list
                 transcript, raw = _load_transcript(transcript_path)
             except (OSError, json.JSONDecodeError, ValueError):
                 continue
-            source_hash = hashlib.sha256(raw).hexdigest()
-            survey = by_source.get((transcript_path.stem, source_hash))
+            file_hash = hashlib.sha256(raw).hexdigest()
+            body_hash = project_script(transcript.get("script")).body_sha256
+            survey = by_source.get((transcript_path.stem, body_hash)) or by_source.get(
+                (transcript_path.stem, file_hash)
+            )
             if survey is None:
                 raise RuntimeError(f"missing current survey: {transcript_path.name}")
             extraction = survey.get("extraction") or {}
             extraction_fingerprint = extraction.get("fingerprint_sha256")
             generation_fingerprint = extraction.get("generation_fingerprint_sha256")
-            if not extraction_fingerprint or not generation_fingerprint:
+            contract_fingerprint = extraction.get("contract_fingerprint_sha256")
+            if not extraction_fingerprint or not generation_fingerprint or not contract_fingerprint:
                 raise RuntimeError(
-                    f"legacy survey without extraction generation: {transcript_path.name}; "
+                    f"legacy survey without extraction identity: {transcript_path.name}; "
+                    "rerun the first-pass survey before synthesis"
+                )
+            if extraction.get("artifact_sha256") != _survey_artifact_sha256(survey):
+                raise RuntimeError(
+                    f"survey artifact self-hash mismatch: {transcript_path.name}; "
                     "rerun the first-pass survey before synthesis"
                 )
             validate_survey(
@@ -191,13 +305,13 @@ def _load_current_surveys(transcript_dirs: list[Path], survey_dir: Path) -> list
                 raw,
                 expected_extraction_fingerprint=extraction_fingerprint,
             )
-            generation_fingerprints.add(generation_fingerprint)
+            contract_fingerprints.add(contract_fingerprint)
             surveys.append(survey)
             seen_transcript_ids.add(transcript_path.stem)
-    if len(generation_fingerprints) > 1:
+    if len(contract_fingerprints) > 1:
         raise RuntimeError(
-            "mixed extraction generations are not allowed in one synthesis: "
-            + ", ".join(sorted(generation_fingerprints))
+            "mixed extraction contracts are not allowed in one synthesis: "
+            + ", ".join(sorted(contract_fingerprints))
         )
     return surveys
 
@@ -297,6 +411,106 @@ def _validate_refs(payload: dict[str, Any], valid_refs: set[str], fields: list[s
                     raise RuntimeError(f"{field}: unknown claim_ref {ref}")
 
 
+def _require_unique_values(
+    payload: dict[str, Any], collection: str, field: str
+) -> None:
+    records = payload.get(collection)
+    if not isinstance(records, list) or not all(isinstance(item, dict) for item in records):
+        raise RuntimeError(f"{collection}: expected a list of objects")
+    values = [item.get(field) for item in records]
+    if any(not isinstance(value, str) or not value for value in values):
+        raise RuntimeError(f"{collection}: every {field} must be a non-empty string")
+    if len(values) != len(set(values)):
+        raise RuntimeError(f"{collection}: duplicate {field}")
+    for item in records:
+        refs = item.get("claim_refs")
+        if not isinstance(refs, list) or not all(isinstance(ref, str) for ref in refs):
+            raise RuntimeError(f"{collection}: claim_refs must be a list of strings")
+        if len(refs) != len(set(refs)):
+            raise RuntimeError(f"{collection}: duplicate claim_ref within {item[field]}")
+
+
+def _validate_batch_artifact(
+    payload: dict[str, Any],
+    *,
+    digest: str,
+    number: int,
+    transcript_ids: list[str],
+    source_generation_digest: str,
+    valid_refs: set[str],
+    require_self_hash: bool,
+) -> None:
+    analysis = payload.get("analysis")
+    if not isinstance(analysis, dict):
+        raise RuntimeError("batch analysis metadata is missing")
+    if analysis.get("source_digest") != digest:
+        raise RuntimeError("batch source digest mismatch")
+    if analysis.get("batch_number") != number:
+        raise RuntimeError("batch number mismatch")
+    if analysis.get("transcript_ids") != transcript_ids:
+        raise RuntimeError("batch transcript membership mismatch")
+    if analysis.get("source_extraction_generation_digest_sha256") != source_generation_digest:
+        raise RuntimeError("batch source extraction generation digest mismatch")
+    if require_self_hash and analysis.get("artifact_sha256") != _artifact_sha256(payload):
+        raise RuntimeError("batch artifact self-hash mismatch")
+    _require_unique_values(payload, "theme_candidates", "theme_id")
+    observations = payload.get("design_observations")
+    if not isinstance(observations, list) or not all(
+        isinstance(item, dict) for item in observations
+    ):
+        raise RuntimeError("design_observations: expected a list of objects")
+    for item in observations:
+        refs = item.get("claim_refs")
+        if not isinstance(refs, list) or not all(isinstance(ref, str) for ref in refs):
+            raise RuntimeError("design_observations: claim_refs must be a list of strings")
+        if len(refs) != len(set(refs)):
+            raise RuntimeError("design_observations: duplicate claim_ref")
+    _validate_refs(payload, valid_refs, ["theme_candidates", "design_observations"])
+
+
+def _validate_final_artifact(
+    payload: dict[str, Any],
+    *,
+    digest: str,
+    source_generation_digest: str,
+    valid_refs: set[str],
+    batch_theme_catalog: dict[str, dict[str, Any]],
+    require_self_hash: bool,
+) -> None:
+    analysis = payload.get("analysis")
+    if not isinstance(analysis, dict):
+        raise RuntimeError("final analysis metadata is missing")
+    if analysis.get("source_digest") != digest:
+        raise RuntimeError("final source digest mismatch")
+    if analysis.get("source_extraction_generation_digest_sha256") != source_generation_digest:
+        raise RuntimeError("final source extraction generation digest mismatch")
+    if require_self_hash and analysis.get("artifact_sha256") != _artifact_sha256(payload):
+        raise RuntimeError("final artifact self-hash mismatch")
+    _require_unique_values(payload, "candidate_systems", "system_id")
+    _require_unique_values(payload, "design_findings", "finding_id")
+    tensions = payload.get("unresolved_tensions")
+    if not isinstance(tensions, list) or not all(isinstance(item, dict) for item in tensions):
+        raise RuntimeError("unresolved_tensions: expected a list of objects")
+    for item in tensions:
+        refs = item.get("claim_refs")
+        if not isinstance(refs, list) or not all(isinstance(ref, str) for ref in refs):
+            raise RuntimeError("unresolved_tensions: claim_refs must be a list of strings")
+        if len(refs) != len(set(refs)):
+            raise RuntimeError("unresolved_tensions: duplicate claim_ref")
+    _validate_refs(
+        payload,
+        valid_refs,
+        ["candidate_systems", "design_findings", "unresolved_tensions"],
+    )
+    _validate_batch_theme_refs(payload, batch_theme_catalog)
+    for system in payload.get("candidate_systems", []):
+        refs = system.get("batch_theme_refs")
+        if len(refs) != len(set(refs)):
+            raise RuntimeError(
+                f"{system.get('system_id')}: duplicate batch_theme_ref"
+            )
+
+
 def _batch_theme_catalog(
     batches: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
@@ -392,9 +606,22 @@ def _run_batches(
         )
         cache_path = _batch_cache_path(output_dir, number)
         if cache_path.exists() and not force:
-            cached = json.loads(cache_path.read_text(encoding="utf-8"))
-            if cached.get("analysis", {}).get("source_digest") == digest:
-                _validate_refs(cached, valid_refs, ["theme_candidates", "design_observations"])
+            try:
+                cached = json.loads(cache_path.read_text(encoding="utf-8"))
+                if not isinstance(cached, dict):
+                    raise RuntimeError("batch cache top level must be an object")
+                _validate_batch_artifact(
+                    cached,
+                    digest=digest,
+                    number=number,
+                    transcript_ids=[card["transcript_id"] for card in batch],
+                    source_generation_digest=_generation_digest(batch),
+                    valid_refs=valid_refs,
+                    require_self_hash=True,
+                )
+            except (OSError, json.JSONDecodeError, RuntimeError, TypeError):
+                pass
+            else:
                 results.append(cached)
                 print(f"batch {number}: skipped")
                 continue
@@ -418,8 +645,20 @@ def _run_batches(
             "max_output_tokens": client.max_output_tokens,
             "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
             "transcript_ids": [card["transcript_id"] for card in batch],
+            "source_extraction_generation_digest_sha256": _generation_digest(batch),
         }
-        cache_path.write_text(json.dumps(response, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        _validate_batch_artifact(
+            response,
+            digest=digest,
+            number=number,
+            transcript_ids=[card["transcript_id"] for card in batch],
+            source_generation_digest=_generation_digest(batch),
+            valid_refs=valid_refs,
+            require_self_hash=False,
+        )
+        _stamp_artifact(response)
+        _archive_artifact(cache_path)
+        _atomic_write_json(cache_path, response)
         results.append(response)
         print(f"batch {number}: created")
     return results
@@ -513,8 +752,8 @@ def main() -> int:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     transcript_dirs = args.transcript_dirs or [DEFAULT_TRANSCRIPT_DIR]
     surveys = _load_current_surveys(transcript_dirs, args.survey_dir)
-    extraction_generation = surveys[0]["extraction"]["generation_fingerprint_sha256"] if surveys else None
     cards = [_sermon_card(survey) for survey in surveys]
+    source_generation_digest = _generation_digest(cards)
     valid_refs = _all_claim_refs(cards)
     baseline = json.loads(args.baseline.read_text(encoding="utf-8"))
     prompt = PROMPT_PATH.read_text(encoding="utf-8")
@@ -551,8 +790,25 @@ def main() -> int:
         ).encode("utf-8")
     ).hexdigest()
     if final_path.exists() and not args.force_final:
-        final = json.loads(final_path.read_text(encoding="utf-8"))
-        if final.get("analysis", {}).get("source_digest") == final_digest:
+        try:
+            final = json.loads(final_path.read_text(encoding="utf-8"))
+            if not isinstance(final, dict):
+                raise RuntimeError("final cache top level must be an object")
+            _validate_final_artifact(
+                final,
+                digest=final_digest,
+                source_generation_digest=source_generation_digest,
+                valid_refs=valid_refs,
+                batch_theme_catalog=batch_theme_catalog,
+                require_self_hash=True,
+            )
+        except (OSError, json.JSONDecodeError, RuntimeError, TypeError):
+            pass
+        else:
+            markdown_path = args.output_dir / "full-corpus-thought-map-candidate-v1.md"
+            rendered = _render_markdown(final).encode("utf-8")
+            if not markdown_path.exists() or markdown_path.read_bytes() != rendered:
+                _atomic_write(markdown_path, rendered)
             print("final: skipped")
             return 0
 
@@ -619,11 +875,21 @@ def main() -> int:
         "batch_count": len(batches),
         "model": args.model,
         "reasoning_effort": args.reasoning_effort,
-        "source_extraction_generation_sha256": extraction_generation,
+        "source_extraction_generation_digest_sha256": source_generation_digest,
     }
-    final_path.write_text(json.dumps(final, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _validate_final_artifact(
+        final,
+        digest=final_digest,
+        source_generation_digest=source_generation_digest,
+        valid_refs=valid_refs,
+        batch_theme_catalog=batch_theme_catalog,
+        require_self_hash=False,
+    )
+    _stamp_artifact(final)
+    _archive_artifact(final_path)
+    _atomic_write_json(final_path, final)
     markdown_path = args.output_dir / "full-corpus-thought-map-candidate-v1.md"
-    markdown_path.write_text(_render_markdown(final), encoding="utf-8")
+    _atomic_write(markdown_path, _render_markdown(final).encode("utf-8"))
     print(f"final: created -> {final_path}")
     return 0
 

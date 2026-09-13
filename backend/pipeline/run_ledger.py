@@ -131,6 +131,8 @@ class RunRecord:
         self._metadata: dict[str, Any] = {}
         self._source_ids: list[str] = []
         self._model_id: Optional[str] = None
+        self._model_calls_started = 0
+        self._model_calls_completed = 0
         self._stop = threading.Event()
         self._beat: Optional[threading.Thread] = None
 
@@ -172,6 +174,16 @@ class RunRecord:
     def model(self, model_id: Optional[str]) -> None:
         if model_id:
             self._model_id = str(model_id)
+
+    def model_call_started(self) -> None:
+        """Record intent before transport, so a timeout cannot look free."""
+
+        self._model_calls_started += 1
+
+    def model_call_completed(self) -> None:
+        """Mark one transport call as returned after its usage was captured."""
+
+        self._model_calls_completed += 1
 
     def _recorded_sources(self) -> list[str]:
         """A source-stage run always touches its own subject.
@@ -245,6 +257,17 @@ class RunRecord:
     def finish(self, status: str, error_message: Optional[str] = None) -> None:
         self._stop.set()
         cost = price_usage(self._usage, self._model_id)
+        usage_complete = self._model_calls_started == self._model_calls_completed
+        if self._model_calls_started:
+            self._metadata.update({
+                "model_calls_started": self._model_calls_started,
+                "model_calls_completed": self._model_calls_completed,
+                "usage_complete": usage_complete,
+            })
+        if not usage_complete:
+            # A transport timeout may follow several priced calls. Summing only
+            # the returned calls would present a lower bound as the total.
+            cost = RunCost(cost_usd=None, price_version=cost.price_version, unpriced=())
         if not self._usage and self.stage in MODEL_STAGES and status != "succeeded":
             # A run that died partway very likely made calls it never got to
             # report -- the extraction runner hands over its usage rows at the

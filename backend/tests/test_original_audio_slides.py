@@ -9,6 +9,7 @@ from backend.pipeline.original_audio_index import (
     build_sermon_slides,
     judgement_during,
     original_language_during,
+    segment_time,
     stretch,
 )
 
@@ -74,6 +75,20 @@ def test_minimum_slide_duration_is_clamped_at_eof() -> None:
     result = stretch([(4120, 4121, "最后一句")], media_duration=4135.2)
 
     assert result == [(4112, 4135.2, "最后一句")]
+
+
+def test_visual_source_never_manufactures_an_original_audio_excerpt() -> None:
+    sermon = _sermon("教授讲话。<svg><text>图示</text></svg>")
+    fragment = {
+        "source_modality": "visual",
+        "visual_locator": "S0001/V01",
+        "paragraph_key": "S0001/V01",
+        "verbatim_excerpt": "<svg><text>图示</text></svg>",
+        "media_time": 0,
+        "media_end_time": 120,
+    }
+
+    assert segment_time(sermon, fragment) is None
 
 
 def test_normalized_slide_title_keeps_claim_and_evidence_provenance() -> None:

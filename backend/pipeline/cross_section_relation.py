@@ -1,7 +1,8 @@
 """Recover the argument links that no single extraction window could see.
 
-Section extraction (#88) asks about one `##` section at a time, so a relation
-whose two ends sit in different sections is one no call could see. Measured on
+Section extraction (#88) asks about one editorial or generated section at a
+time, so a relation whose two ends sit in different sections is one no call
+could see, even when the source segments are adjacent. Measured on
 the 太16:21–23 母本, that is a small but real set: 0 of 264 relations extraction
 produced cross a `##`, while the whole-document pass produced 7 that span 11–21
 segments -- every one of them the editorial pattern the notes prompt warns
@@ -13,9 +14,12 @@ about, the fact filed under 釋經 and the inference under 神學意義.
           →  太16:20 的保密命令要放在事工处境中解释
 
 Sectioning trades those for a rise in local coverage from 50% to 100%. This
-stage buys them back, and it can be cheap because it does not re-read the source: by the
-time it runs, every record is a statement with a known position, so the question
-is 289 short statements wide instead of a whole manuscript.
+stage buys them back, and it can be cheap because it does not re-read the
+source: by the time it runs, every record is a statement with a known section
+and position, so the question is 289 short statements wide instead of a whole
+manuscript. The old overlapping-window implementation used a minimum segment
+span; section-based extraction does not, and carrying that old threshold into
+the prompt suppresses every relation in a short, coarsely segmented sermon.
 
 Two properties keep it from becoming a second extraction:
 
@@ -32,11 +36,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any, Sequence
 
 from backend.pipeline.knowledge_package import live_claim_ids, live_claims
-from backend.pipeline.relation_id_namespace import namespaced_relation_id, package_source_key
+from backend.pipeline.relation_id_namespace import (
+    generation_namespace,
+    namespaced_id,
+    package_record_namespace,
+    package_source_key,
+)
 
 PROMPT_PATH = Path(__file__).with_name("prompts") / "cross_section_relation_discovery.md"
 
@@ -113,8 +123,11 @@ def record_positions(package: dict[str, Any]) -> dict[str, int]:
     fragment_position = {}
     for fragment in package.get("source_fragments") or []:
         key = str(fragment.get("paragraph_key") or "")
-        if key[1:].isdigit():
-            fragment_position[str(fragment.get("fragment_id"))] = int(key[1:]) - 1
+        match = re.fullmatch(r"S([0-9]+)(?:/V[0-9]+)?", key)
+        if match:
+            fragment_position[str(fragment.get("fragment_id"))] = (
+                int(match.group(1)) - 1
+            )
     positions: dict[str, int] = {}
     for collection in ("observations", "evidence_steps", "questions", "position_nodes"):
         for record in package.get(collection) or []:
@@ -137,6 +150,60 @@ def record_positions(package: dict[str, Any]) -> dict[str, int]:
         if spots:
             positions[str(claim.get("claim_id"))] = min(spots)
     return positions
+
+
+def record_section_indexes(
+    package: dict[str, Any],
+    *,
+    positions: dict[str, int],
+    boundaries: Sequence[int],
+) -> dict[str, int]:
+    """Map anchored records to the extraction call that produced them.
+
+    Row-aligned sections can be reconstructed from a fragment's paragraph
+    position. Sentence-range transport chunks can share the same paragraph, so
+    new split packages stamp the producing section on each fragment. Legacy
+    packages retain the position-based fallback.
+    """
+
+    fragment_sections: dict[str, int] = {}
+    for fragment in package.get("source_fragments") or []:
+        fragment_id = str(fragment.get("fragment_id") or "")
+        value = fragment.get("extraction_section_index")
+        if fragment_id and isinstance(value, int) and value > 0:
+            fragment_sections[fragment_id] = value
+
+    sections: dict[str, int] = {}
+    for collection, id_key in (
+        ("observations", "observation_id"),
+        ("evidence_steps", "evidence_step_id"),
+        ("questions", "question_id"),
+        ("position_nodes", "position_id"),
+    ):
+        for record in package.get(collection) or []:
+            record_id = str(record.get(id_key) or "")
+            candidates = {
+                fragment_sections[value]
+                for value in record.get("source_fragment_ids") or []
+                if value in fragment_sections
+            }
+            if len(candidates) == 1:
+                sections[record_id] = next(iter(candidates))
+            elif record_id in positions:
+                sections[record_id] = _section_of(positions[record_id], boundaries)
+
+    for claim in live_claims(package):
+        claim_id = str(claim.get("claim_id") or "")
+        candidates = {
+            sections[value]
+            for value in claim.get("evidence_step_ids") or []
+            if value in sections
+        }
+        if len(candidates) == 1:
+            sections[claim_id] = next(iter(candidates))
+        elif claim_id in positions:
+            sections[claim_id] = _section_of(positions[claim_id], boundaries)
+    return sections
 
 
 def existing_edges(package: dict[str, Any]) -> set[tuple[str, str]]:
@@ -181,6 +248,8 @@ def validate_proposals(
     *,
     positions: dict[str, int],
     boundaries: Sequence[int],
+    sections: dict[str, int] | None = None,
+    identity: dict[str, Any] | None = None,
 ) -> None:
     """Reject anything that adds material, restates an edge, or stays in one section.
 
@@ -198,8 +267,69 @@ def validate_proposals(
     edges = existing_edges(package)
     errors: list[str] = []
     seen: set[tuple[str, str, str]] = set()
+    seen_relation_ids: set[str] = set()
+    existing_relation_ids: set[str] = set()
+    # A real cross-section extraction package has exactly one source and its
+    # model-local IDs must be interpreted in that source namespace. Some graph
+    # validation callers deliberately pass only records (no source descriptor);
+    # there the raw IDs are already the only available identity and endpoint
+    # errors must not be hidden behind a non-applicable migration error.
+    source_key = ""
+    proposal_namespace = ""
+    if package.get("source_documents"):
+        try:
+            source_key = package_source_key(package)
+            if identity is not None:
+                proposal_namespace, _ = cross_section_generation_identity(
+                    package, response, identity
+                )
+        except ValueError as exc:
+            errors.append(str(exc))
+    if source_key:
+        for rows, field in (
+            (package.get("knowledge_relations") or [], "relation_id"),
+            (package.get("claim_relations") or [], "claim_relation_id"),
+        ):
+            for row in rows:
+                effective = str(row.get(field) or "").strip()
+                if not effective:
+                    errors.append(f"existing {field}: relation has no id")
+                    continue
+                if effective in existing_relation_ids:
+                    errors.append(f"existing duplicate relationship id {effective}")
+                existing_relation_ids.add(effective)
 
-    def check(row: dict[str, Any], label: str, allowed_from: set[str], allowed_to: set[str]) -> None:
+    def check(
+        row: dict[str, Any],
+        label: str,
+        allowed_from: set[str],
+        allowed_to: set[str],
+        relation_kind: str,
+    ) -> None:
+        raw_value = (
+            row.get("relation_id")
+            if relation_kind == "evidence"
+            else row.get("claim_relation_id")
+        )
+        raw_id = str(raw_value or "")
+        if proposal_namespace:
+            try:
+                effective_id = namespaced_id(proposal_namespace, raw_id)
+            except ValueError as exc:
+                errors.append(f"{label}: {exc}")
+                return
+        else:
+            effective_id = raw_id.strip()
+            if not effective_id:
+                errors.append(f"{label}: cross-section relation has no id")
+                return
+        if effective_id in seen_relation_ids:
+            errors.append(f"{label}: duplicate relationship id {effective_id}")
+            return
+        seen_relation_ids.add(effective_id)
+        if effective_id in existing_relation_ids:
+            errors.append(f"{label}: relationship id already exists {effective_id}")
+            return
         from_id, to_id = str(row["from_id"]), str(row["to_id"])
         if from_id not in allowed_from:
             errors.append(f"{label}: {from_id} is not a record this stage may relate from")
@@ -218,9 +348,13 @@ def validate_proposals(
             errors.append(f"{label}: duplicate proposal")
             return
         seen.add(signature)
-        if _section_of(positions.get(from_id, 0), boundaries) == _section_of(
-            positions.get(to_id, 0), boundaries
-        ):
+        from_section = (sections or {}).get(
+            from_id, _section_of(positions.get(from_id, 0), boundaries)
+        )
+        to_section = (sections or {}).get(
+            to_id, _section_of(positions.get(to_id, 0), boundaries)
+        )
+        if from_section == to_section:
             errors.append(
                 f"{label}: both ends are in the same section, which extraction "
                 f"could already see"
@@ -231,9 +365,21 @@ def validate_proposals(
     for row in response.get("evidence_relations") or []:
         # Same rule as extraction: an observation may reason into a step, and a
         # step into a step, but nothing supports an observation.
-        check(row, str(row.get("relation_id") or "?"), observation_ids | evidence_ids, evidence_ids)
+        check(
+            row,
+            str(row.get("relation_id") or "?"),
+            observation_ids | evidence_ids,
+            evidence_ids,
+            "evidence",
+        )
     for row in response.get("claim_relations") or []:
-        check(row, str(row.get("claim_relation_id") or "?"), claim_ids, claim_ids)
+        check(
+            row,
+            str(row.get("claim_relation_id") or "?"),
+            claim_ids,
+            claim_ids,
+            "claim",
+        )
     if errors:
         raise CrossSectionValidationError("cross-window validation failed: " + " | ".join(errors))
 
@@ -253,23 +399,30 @@ def apply_proposals(
 
     updated = json.loads(json.dumps(package, ensure_ascii=False))
     try:
-        source_key = package_source_key(updated)
+        parent_namespace = package_record_namespace(updated)
+        namespace, generation = cross_section_generation_identity(
+            updated, response, identity
+        )
     except ValueError as exc:
         raise CrossSectionValidationError(str(exc)) from exc
 
     for row in response.get("evidence_relations") or []:
         updated.setdefault("knowledge_relations", []).append({
             **row,
-            "relation_id": namespaced_relation_id(source_key, row.get("relation_id")),
+            "relation_id": namespaced_id(namespace, row.get("relation_id")),
+            "record_namespace": namespace,
+            "parent_extraction_record_namespace": parent_namespace,
             "discovered_by": SCHEMA_VERSION,
             "review_status": "candidate",
         })
     for row in response.get("claim_relations") or []:
         updated.setdefault("claim_relations", []).append({
             **row,
-            "claim_relation_id": namespaced_relation_id(
-                source_key, row.get("claim_relation_id")
+            "claim_relation_id": namespaced_id(
+                namespace, row.get("claim_relation_id")
             ),
+            "record_namespace": namespace,
+            "parent_extraction_record_namespace": parent_namespace,
             "discovered_by": SCHEMA_VERSION,
             "review_status": "candidate",
         })
@@ -277,21 +430,54 @@ def apply_proposals(
     summary["evidence_relation_count"] = len(updated.get("knowledge_relations") or [])
     summary["claim_relation_count"] = len(updated.get("claim_relations") or [])
     updated["cross_section_relations"] = {
-        **identity,
+        **generation,
         "evidence_relations_added": len(response.get("evidence_relations") or []),
         "claim_relations_added": len(response.get("claim_relations") or []),
     }
     return updated
 
 
+def cross_section_generation_identity(
+    package: dict[str, Any], response: dict[str, Any], identity: dict[str, Any]
+) -> tuple[str, dict[str, Any]]:
+    """Bind model-local edge ordinals to this exact second-stage response.
+
+    Extraction and cross-section discovery are separate model calls. Reusing
+    the extraction namespace here would let a later ``XER001`` overwrite an
+    earlier, semantically different ``XER001``. The parent namespace, discovery
+    input fingerprint, and canonical response hash make identical retries
+    stable and different responses disjoint.
+    """
+
+    parent_namespace = package_record_namespace(package)
+    fingerprint = str(identity.get("fingerprint_sha256") or "").strip()
+    model_output_sha256 = hashlib.sha256(
+        json.dumps(
+            response, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    ).hexdigest()
+    namespace = generation_namespace(
+        parent_namespace, fingerprint, model_output_sha256
+    )
+    return namespace, {
+        **identity,
+        "parent_extraction_record_namespace": parent_namespace,
+        "record_namespace": namespace,
+        "model_output_sha256": model_output_sha256,
+    }
+
+
 def discovery_identity(
     *, package_sha256: str, prompt: str, model_id: str, section_count: int,
+    reasoning_effort: str = "medium", max_output_tokens: int = 16000,
     backend: str = "api",
 ) -> dict[str, Any]:
     generation = {
         "package_sha256": package_sha256,
         "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
         "model_id": model_id,
+        "reasoning_effort": reasoning_effort,
+        "max_output_tokens": max_output_tokens,
         "section_count": section_count,
         "schema_version": SCHEMA_VERSION,
     }

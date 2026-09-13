@@ -14,6 +14,18 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from backend.api.canonical_repository.postgres_store import sha256_json
+from backend.api.canonical_repository.reviewed_candidate_contract import (
+    CONSENSUS_APPLICATION_VERSION,
+    RESEARCH_BATCH_AGGREGATE,
+    ConsensusApplicationError,
+    reseal_after_relation_id_migration,
+    reviewed_candidate_artifact_sha256,
+    validate_reviewed_candidate_artifact,
+)
+from backend.pipeline.knowledge_package_merge import (
+    KnowledgePackageMergeError,
+    validate_merged_package,
+)
 from backend.pipeline.relation_id_namespace import (
     migrate_legacy_cross_section_relation_ids,
 )
@@ -182,6 +194,49 @@ def validate_research_batch(payload: dict[str, Any]) -> None:
         raise ResearchBatchValidationError(
             "every extraction_max_section_sentences value must be a positive integer"
         )
+    visual_attestations = payload.get("visual_source_attestations") or {}
+    if not isinstance(visual_attestations, dict):
+        raise ResearchBatchValidationError(
+            "visual_source_attestations must be an object"
+        )
+    unknown_visual_sources = sorted(set(visual_attestations).difference(keys))
+    if unknown_visual_sources:
+        raise ResearchBatchValidationError(
+            "visual_source_attestations contains members outside the batch: "
+            + ", ".join(unknown_visual_sources)
+        )
+    for member_key, rows in visual_attestations.items():
+        if not isinstance(rows, dict) or not rows:
+            raise ResearchBatchValidationError(
+                f"visual_source_attestations[{member_key!r}] must be a non-empty object"
+            )
+        for locator, raw_sha256 in rows.items():
+            if not re.fullmatch(r"S[0-9]{4,}/V[0-9]{2,}", str(locator)):
+                raise ResearchBatchValidationError(
+                    f"invalid visual source locator for {member_key}: {locator!r}"
+                )
+            if not re.fullmatch(r"[0-9a-f]{64}", str(raw_sha256)):
+                raise ResearchBatchValidationError(
+                    f"invalid visual source SHA256 for {member_key}#{locator}"
+                )
+    review_batch_size = payload.get("review_batch_size", 20)
+    if (
+        not isinstance(review_batch_size, int)
+        or isinstance(review_batch_size, bool)
+        or review_batch_size <= 0
+    ):
+        raise ResearchBatchValidationError(
+            "review_batch_size must be a positive integer"
+        )
+    review_spot_check_percent = payload.get("review_spot_check_percent", 0)
+    if (
+        not isinstance(review_spot_check_percent, int)
+        or isinstance(review_spot_check_percent, bool)
+        or not 0 <= review_spot_check_percent <= 100
+    ):
+        raise ResearchBatchValidationError(
+            "review_spot_check_percent must be an integer from 0 through 100"
+        )
     policy = payload.get("candidate_generation_policy") or {}
     if policy.get("derive_after_independent_extraction") is not True:
         raise ResearchBatchValidationError(
@@ -194,26 +249,11 @@ def validate_research_batch(payload: dict[str, Any]) -> None:
     corrections = payload.get("source_fidelity_corrections") or []
     if not isinstance(corrections, list):
         raise ResearchBatchValidationError("source_fidelity_corrections must be a list")
-    correction_ids: set[str] = set()
-    for correction in corrections:
-        if not isinstance(correction, dict):
-            raise ResearchBatchValidationError(
-                "every source_fidelity_correction must be an object"
-            )
-        claim_id = str(correction.get("claim_id") or "").strip()
-        replacement_title = str(correction.get("replacement_title") or "").strip()
-        reason = str(correction.get("reason") or "").strip()
-        verbatim_basis = str(correction.get("verbatim_basis") or "").strip()
-        if not claim_id or not replacement_title or not reason or not verbatim_basis:
-            raise ResearchBatchValidationError(
-                "source_fidelity_corrections require claim_id, replacement_title, "
-                "reason and verbatim_basis"
-            )
-        if claim_id in correction_ids:
-            raise ResearchBatchValidationError(
-                f"duplicate source_fidelity_correction claim_id: {claim_id}"
-            )
-        correction_ids.add(claim_id)
+    if corrections:
+        raise ResearchBatchValidationError(
+            "source_fidelity_corrections after independent review are retired; "
+            "correct the extraction input or create a new review/adjudication generation"
+        )
 
 
 def load_research_batch(path: Path) -> dict[str, Any]:
@@ -257,14 +297,33 @@ def merge_reviewed_packages(
     merged: dict[str, list[dict[str, Any]]] = {name: [] for name in COLLECTIONS}
     seen: dict[str, set[str]] = {name: set() for name in COLLECTIONS}
     lineage: list[dict[str, Any]] = []
+    review_resolutions: list[dict[str, Any]] = []
+    applied_claim_ids: set[str] = set()
+    merged_claim_ids: dict[str, str] = {}
     actual: list[str] = []
 
     for path in package_paths:
         raw = path.read_bytes()
         original_package = json.loads(raw)
+        try:
+            validate_reviewed_candidate_artifact(original_package)
+            validate_merged_package(original_package)
+        except (ConsensusApplicationError, KnowledgePackageMergeError) as exc:
+            raise ResearchBatchValidationError(
+                f"invalid reviewed package {path}: {exc}"
+            ) from exc
         package, relation_id_migration = migrate_legacy_cross_section_relation_ids(
             original_package
         )
+        package = reseal_after_relation_id_migration(
+            original_package, package, relation_id_migration
+        )
+        try:
+            validate_merged_package(package)
+        except KnowledgePackageMergeError as exc:
+            raise ResearchBatchValidationError(
+                f"reviewed package migration produced an invalid graph {path}: {exc}"
+            ) from exc
         sources = package.get("source_documents") or []
         if len(sources) != 1:
             raise ResearchBatchValidationError(
@@ -275,6 +334,7 @@ def merge_reviewed_packages(
         transcript_id = str(sources[0].get("transcript_id") or sources[0].get("source_id") or "")
         actual.append(transcript_id)
         consensus = package.get("consensus_application") or {}
+        original_consensus = original_package.get("consensus_application") or {}
         if consensus.get("approval_status") not in {None, "not_human_approved"}:
             raise ResearchBatchValidationError(
                 f"unexpected approval status in reviewed package: {path}"
@@ -284,6 +344,40 @@ def merge_reviewed_packages(
                 merged[name], package.get(name) or [],
                 id_field=ID_FIELDS[name], seen=seen[name],
             )
+        for resolution in consensus.get("review_resolutions") or []:
+            review_resolutions.append(
+                {
+                    **dict(resolution),
+                    "source_transcript_id": transcript_id,
+                    "source_reviewed_candidate_artifact_sha256": consensus.get(
+                        "artifact_sha256"
+                    ),
+                    "source_review_artifact_sha256": consensus.get(
+                        "review_artifact_sha256"
+                    ),
+                    "source_review_fingerprint": consensus.get(
+                        "review_fingerprint"
+                    ),
+                    "source_adjudication_artifact_sha256": consensus.get(
+                        "adjudication_artifact_sha256"
+                    ),
+                    "source_overrides_artifact_sha256": consensus.get(
+                        "overrides_artifact_sha256"
+                    ),
+                    "source_adjudication_fingerprint": consensus.get(
+                        "adjudication_fingerprint"
+                    ),
+                }
+            )
+        applied_claim_ids.update(consensus.get("applied_claim_ids") or [])
+        for claim_id, survivor_id in (
+            consensus.get("merged_claim_ids") or {}
+        ).items():
+            prior = merged_claim_ids.setdefault(str(claim_id), str(survivor_id))
+            if prior != str(survivor_id):
+                raise ResearchBatchValidationError(
+                    f"conflicting merged claim target: {claim_id}"
+                )
         lineage.append(
             {
                 "transcript_id": transcript_id,
@@ -295,7 +389,22 @@ def merge_reviewed_packages(
                 "extraction_fingerprint": (package.get("extraction") or {}).get(
                     "fingerprint_sha256"
                 ),
+                "review_fingerprint": consensus.get("review_fingerprint"),
                 "adjudication_fingerprint": consensus.get("adjudication_fingerprint"),
+                "upstream_reviewed_candidate_artifact_sha256": (
+                    original_consensus.get("artifact_sha256")
+                ),
+                "reviewed_candidate_artifact_sha256": consensus.get("artifact_sha256"),
+                "review_artifact_sha256": consensus.get("review_artifact_sha256"),
+                "adjudication_artifact_sha256": consensus.get(
+                    "adjudication_artifact_sha256"
+                ),
+                "overrides_artifact_sha256": consensus.get(
+                    "overrides_artifact_sha256"
+                ),
+                "review_resolution_count": len(
+                    consensus.get("review_resolutions") or []
+                ),
             }
         )
 
@@ -317,57 +426,28 @@ def merge_reviewed_packages(
                         f"{relation_name} has unresolved {endpoint}: {endpoint_id!r}"
                     )
 
-    corrections_applied: list[dict[str, Any]] = []
-    claims_by_id = {str(row.get("claim_id") or ""): row for row in merged["claims"]}
-    fragments_by_id = {
-        str(row.get("fragment_id") or ""): row for row in merged["source_fragments"]
-    }
-    evidence_by_id = {
-        str(row.get("evidence_step_id") or ""): row for row in merged["evidence_steps"]
-    }
-    for correction in batch.get("source_fidelity_corrections") or []:
-        claim_id = str(correction["claim_id"])
-        claim = claims_by_id.get(claim_id)
-        if claim is None:
-            raise ResearchBatchValidationError(
-                f"source_fidelity_correction references unknown claim: {claim_id}"
-            )
-        basis = str(correction["verbatim_basis"])
-        fragment_ids = {
-            fragment_id
-            for evidence_id in claim.get("evidence_step_ids") or []
-            for fragment_id in (evidence_by_id.get(str(evidence_id), {}).get("source_fragment_ids") or [])
+    aggregate_refs = [
+        {
+            "transcript_id": row["transcript_id"],
+            "reviewed_candidate_artifact_sha256": row[
+                "reviewed_candidate_artifact_sha256"
+            ],
+            "review_artifact_sha256": row["review_artifact_sha256"],
+            "adjudication_artifact_sha256": row[
+                "adjudication_artifact_sha256"
+            ],
+            "overrides_artifact_sha256": row["overrides_artifact_sha256"],
+            "review_fingerprint": row["review_fingerprint"],
+            "adjudication_fingerprint": row["adjudication_fingerprint"],
+            "review_resolution_count": row["review_resolution_count"],
         }
-        matching_fragments = [
-            fragment_id
-            for fragment_id in fragment_ids
-            if basis in str(fragments_by_id.get(str(fragment_id), {}).get("verbatim_excerpt") or "")
-        ]
-        if not matching_fragments:
-            raise ResearchBatchValidationError(
-                f"source_fidelity_correction is not supported by a claim fragment: {claim_id}"
-            )
-        original_title = str(claim.get("title") or "")
-        claim["title"] = str(correction["replacement_title"])
-        claim["source_fidelity_correction"] = {
-            "status": "source_verified_candidate",
-            "reason": correction["reason"],
-            "verbatim_basis": basis,
-            "supporting_fragment_ids": sorted(matching_fragments),
-            "original_title": original_title,
-        }
-        corrections_applied.append(
-            {
-                "claim_id": claim_id,
-                "original_title": original_title,
-                "replacement_title": claim["title"],
-                "reason": correction["reason"],
-                "supporting_fragment_ids": sorted(matching_fragments),
-                "approval_status": "not_human_approved",
-            }
-        )
-
-    return {
+        for row in lineage
+    ]
+    review_counts: dict[str, int] = {}
+    for claim in merged["claims"]:
+        status = str(claim.get("review_status") or "candidate")
+        review_counts[status] = review_counts.get(status, 0) + 1
+    result = {
         "schema_version": MERGED_SCHEMA_VERSION,
         "batch": {
             "batch_id": batch["batch_id"],
@@ -385,7 +465,59 @@ def merge_reviewed_packages(
             "policy": batch["candidate_generation_policy"],
         },
         "lineage": lineage,
-        "source_fidelity_corrections": corrections_applied,
+        "source_fidelity_corrections": [],
+        "consensus_application": {
+            "schema_version": CONSENSUS_APPLICATION_VERSION,
+            "scope_kind": RESEARCH_BATCH_AGGREGATE,
+            "review_completion": "complete",
+            "review_artifact_sha256": sha256_json(
+                [
+                    (row["transcript_id"], row["review_artifact_sha256"])
+                    for row in aggregate_refs
+                ]
+            ),
+            "review_fingerprint": sha256_json(
+                [
+                    (row["transcript_id"], row.get("review_fingerprint"))
+                    for row in lineage
+                ]
+            ),
+            "adjudication_artifact_sha256": sha256_json(
+                [
+                    (row["transcript_id"], row["adjudication_artifact_sha256"])
+                    for row in aggregate_refs
+                ]
+            ),
+            "adjudication_fingerprint": sha256_json(
+                [
+                    (row["transcript_id"], row["adjudication_fingerprint"])
+                    for row in aggregate_refs
+                ]
+            ),
+            "overrides_artifact_sha256": sha256_json(
+                [
+                    (row["transcript_id"], row["overrides_artifact_sha256"])
+                    for row in aggregate_refs
+                ]
+            ),
+            "applied_claim_ids": sorted(applied_claim_ids),
+            "merged_claim_ids": dict(sorted(merged_claim_ids.items())),
+            "final_review_status_counts": dict(sorted(review_counts.items())),
+            "review_resolutions": review_resolutions,
+            "member_artifact_lineage": aggregate_refs,
+            "approval_status": "not_human_approved",
+        },
         "approval_status": "not_human_approved",
         "summary": {name: len(items) for name, items in merged.items()},
     }
+    result["consensus_application"]["artifact_sha256"] = (
+        reviewed_candidate_artifact_sha256(result)
+    )
+    try:
+        validate_merged_package(result)
+        validate_reviewed_candidate_artifact(result)
+    except (KnowledgePackageMergeError, ConsensusApplicationError) as exc:
+        raise ResearchBatchValidationError(
+            f"merged reviewed package is internally inconsistent: {exc}"
+        ) from exc
+    return result

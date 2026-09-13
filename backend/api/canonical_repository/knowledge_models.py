@@ -41,6 +41,32 @@ class KnowledgeSourceDocument(EvolvingKnowledgeRecord):
     source_url: Optional[str] = None
     canonical_source_id: Optional[str] = None
     source_sha256: Optional[str] = None
+    # ``source_sha256`` remains the compatibility name for the semantic body
+    # identity.  Physical/editorial identities are separate provenance because
+    # co-located subtitle and comment rows are not professor-spoken source.
+    source_body_sha256: Optional[str] = None
+    source_file_sha256: Optional[str] = None
+    editorial_structure_sha256: Optional[str] = None
+    locator_space: Optional[str] = None
+    extraction_record_namespace: Optional[str] = None
+
+    @model_validator(mode="after")
+    def locator_identity_is_explicit(self) -> "KnowledgeSourceDocument":
+        from backend.pipeline.source_projection import LOCATOR_SPACE
+
+        if self.locator_space not in {None, "", LOCATOR_SPACE}:
+            raise ValueError(f"unsupported source locator space {self.locator_space!r}")
+        if self.locator_space == LOCATOR_SPACE and not self.source_body_sha256:
+            raise ValueError(f"{LOCATOR_SPACE} requires source_body_sha256")
+        if self.source_body_sha256 and self.locator_space != LOCATOR_SPACE:
+            raise ValueError("source_body_sha256 requires explicit locator_space")
+        if (
+            self.locator_space == LOCATOR_SPACE
+            and self.source_sha256
+            and self.source_sha256 != self.source_body_sha256
+        ):
+            raise ValueError("source_sha256 must equal source_body_sha256")
+        return self
 
 
 class SourceFragmentRecord(EvolvingKnowledgeRecord):
@@ -163,6 +189,8 @@ class KnowledgeRelationRecord(EvolvingKnowledgeRecord):
     to_id: str = Field(validation_alias=AliasChoices("to_id", "target_id"))
     relation_type: str
     reason: str = ""
+    record_namespace: Optional[str] = None
+    parent_extraction_record_namespace: Optional[str] = None
 
 
 class ClaimRelationRecord(EvolvingKnowledgeRecord):
@@ -171,6 +199,8 @@ class ClaimRelationRecord(EvolvingKnowledgeRecord):
     to_id: str = Field(validation_alias=AliasChoices("to_id", "target_id", "to_claim_id"))
     relation_type: str
     reason: str = ""
+    record_namespace: Optional[str] = None
+    parent_extraction_record_namespace: Optional[str] = None
 
 
 class ClaimRelationConstraintRecord(EvolvingKnowledgeRecord):
@@ -345,6 +375,15 @@ class SentenceInventoryRecord(EvolvingKnowledgeRecord):
     char_start: int
     char_end: int
     source_sha256: Optional[str] = None
+    source_modality: Optional[Literal["visual"]] = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    visual_locator: Optional[str] = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    visual_fact_id: Optional[str] = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class SentenceReconciliationRecord(EvolvingKnowledgeRecord):

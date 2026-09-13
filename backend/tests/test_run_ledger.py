@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
 import pytest
@@ -195,6 +196,32 @@ def test_a_draft_run_does_not_invent_itself_as_a_source():
         subject_kind="draft", conn=None,
     )
     assert record._recorded_sources() == []
+
+
+def test_transport_timeout_marks_usage_incomplete_and_never_reports_partial_cost() -> None:
+    record = RunRecord(
+        run_id="RUN-timeout",
+        subject_id="S",
+        stage="extraction",
+        subject_kind="source",
+        conn=None,
+    )
+    captured: list[tuple] = []
+    record._execute = lambda _sql, params: captured.append(tuple(params))  # type: ignore[method-assign]
+    record.model("gpt-5.6-sol")
+    record.model_call_started()
+    record.usage([{"prompt_tokens": 1000, "completion_tokens": 100}])
+    record.model_call_completed()
+    record.model_call_started()  # transport times out before usage returns
+
+    record.finish("failed", "TimeoutError")
+
+    params = captured[-1]
+    assert params[6] is None
+    metadata = json.loads(params[12])
+    assert metadata["model_calls_started"] == 2
+    assert metadata["model_calls_completed"] == 1
+    assert metadata["usage_complete"] is False
 
 
 def test_missing_database_does_not_break_the_work(monkeypatch):

@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from backend.pipeline.base_contract_coverage import sentence_spans, split_sentences
+from backend.pipeline.knowledge_source import markdown_blocks
 from backend.pipeline.source_coverage_view import (
     SourceCoverageReader,
     _flatten_spans,
@@ -16,6 +17,12 @@ from backend.pipeline.source_coverage_view import (
     load_segments,
     resolve_source_path,
     segment_key,
+)
+from backend.pipeline.source_projection import (
+    LOCATOR_SPACE,
+    project_script,
+    script_from_markdown_blocks,
+    visual_fragment_display_text,
 )
 
 
@@ -95,7 +102,8 @@ def test_load_segments_keeps_a_manuscript_and_a_transcript_on_one_scheme(tmp_pat
     segments, sha256 = load_segments({"source_type": "sermon_transcript"}, transcript)
     assert [item["key"] for item in segments] == ["S0001", "S0002", "S0003"]
     assert segments[0]["index"] == 7 and segments[0]["start_time"] == 0
-    assert sha256 == _sha256(transcript)
+    payload = json.loads(transcript.read_text())
+    assert sha256 == project_script(payload["script"]).body_sha256
 
     manuscript = tmp_path / "final.md"
     manuscript.write_text("第一段。\n仍是第一段。\n\n第二段。\n", encoding="utf-8")
@@ -104,20 +112,107 @@ def test_load_segments_keeps_a_manuscript_and_a_transcript_on_one_scheme(tmp_pat
     assert [item["index"] for item in blocks] == [1, 2]
 
 
-def test_a_heading_is_labelled_rather_than_filtered_out(tmp_path: Path) -> None:
-    """Half a manuscript's segments are headings.
-
-    Counting them as material the claim layer failed to take would roughly
-    double the apparent gap; dropping them from the inventory would be an
-    exclusion nobody recorded.  So they are kept and labelled.
-    """
+def test_editorial_headings_are_not_source_coverage_segments(tmp_path: Path) -> None:
     manuscript = tmp_path / "final.md"
     manuscript.write_text(
         "## 一、試探神蹟\n\n太 16:1 記載，法利賽人來試探。\n\n### 釋經\n\n# 不是標題\n仍是同一段。\n",
         encoding="utf-8",
     )
-    segments, _ = load_segments({"source_type": "notes_manuscript"}, manuscript)
-    assert [item["is_heading"] for item in segments] == [True, False, True, False]
+    script = script_from_markdown_blocks(markdown_blocks(manuscript.read_text(encoding="utf-8")))
+    projection = project_script(script)
+    segments, _ = load_segments({
+        "source_type": "notes_manuscript",
+        "source_sha256": projection.body_sha256,
+        "source_body_sha256": projection.body_sha256,
+        "locator_space": LOCATOR_SPACE,
+    }, manuscript)
+    assert [item["text"] for item in segments] == [
+        "太 16:1 記載，法利賽人來試探。",
+        "# 不是標題\n仍是同一段。",
+    ]
+    assert [item["is_heading"] for item in segments] == [False, False]
+
+
+def test_visual_sources_are_projected_as_non_spoken_labels_with_exact_offsets(
+    tmp_path: Path,
+) -> None:
+    """Raw SVG is source evidence, but it is neither prose nor a safe UI label.
+
+    Two diagrams with the same visible label also prove that placement is based
+    on each exact source range instead of ``str.find`` guessing the first one.
+    """
+    first_svg = '<svg><text x="1">约</text></svg>'
+    second_svg = '<svg><text x="2">约</text></svg>'
+    payload = {
+        "script": [
+            {
+                "index": 7,
+                "text": f"前一句。{first_svg}中间一句。{second_svg}后一句。",
+            }
+        ]
+    }
+    path = tmp_path / "visual.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    projection = project_script(payload["script"])
+    segments, body_sha256 = load_segments(
+        {"source_type": "sermon_transcript"}, path
+    )
+    segment = segments[0]
+
+    assert body_sha256 == projection.body_sha256
+    assert "<svg" not in segment["text"]
+    assert len(segment["visuals"]) == 2
+    assert segment["visuals"][0]["start"] < segment["visuals"][1]["start"]
+    for block, placed in zip(projection.visual_blocks, segment["visuals"]):
+        expected = visual_fragment_display_text(
+            {
+                "source_modality": "visual",
+                "visual_locator": block.locator,
+                "visual_facts": list(block.facts),
+            }
+        )
+        assert segment["text"][placed["start"] : placed["end"]] == expected
+        assert placed["raw_sha256"] == block.raw_sha256
+
+
+def test_visual_fragment_placement_requires_exact_locator_and_svg_sha(
+    tmp_path: Path,
+) -> None:
+    svg = '<svg><text x="1">摩西律法</text></svg>'
+    payload = {"script": [{"index": 7, "text": f"前一句。{svg}后一句。"}]}
+    path = tmp_path / "visual.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    projection = project_script(payload["script"])
+    block = projection.visual_blocks[0]
+    fragment = {
+        "fragment_id": "FR-V1",
+        "paragraph_key": block.locator,
+        "source_modality": "visual",
+        "visual_locator": block.locator,
+        "visual_block_sha256": block.raw_sha256,
+        "visual_facts": [dict(block.facts[-1])],
+        "verbatim_excerpt": block.raw_svg,
+    }
+
+    segments, _ = load_segments({"source_type": "sermon_transcript"}, path)
+    placed = _place_fragments([fragment], segments)["FR-V1"]
+    assert placed["anchor_method"] == "visual_locator"
+    assert placed["source_modality"] == "visual"
+    assert placed["visual_locator"] == block.locator
+    assert "<svg" not in placed["excerpt"]
+    assert (
+        segments[0]["text"][placed["char_start"] : placed["char_end"]]
+        == placed["excerpt"]
+    )
+
+    drifted = {**fragment, "fragment_id": "FR-V2", "visual_block_sha256": "0" * 64}
+    drifted_segments, _ = load_segments(
+        {"source_type": "sermon_transcript"}, path
+    )
+    drifted_placement = _place_fragments([drifted], drifted_segments)["FR-V2"]
+    assert drifted_placement["anchor_method"] == "visual_source_drifted"
+    assert drifted_placement["segment_ordinal"] is None
 
 
 def test_resolve_source_path_falls_back_to_the_transcript_id(tmp_path: Path, transcript: Path) -> None:

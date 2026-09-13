@@ -12,14 +12,24 @@ from backend.pipeline.corpus_ai_adjudication import (
     validate_claude_reconsideration,
     validate_openai_adjudication,
 )
-from backend.pipeline.corpus_ai_adjudication_runner import _has_matching_generation, _load_context
+from backend.pipeline.corpus_ai_adjudication_runner import (
+    _adjudication_artifact_sha256,
+    _archive,
+    _compile_overrides,
+    _has_matching_generation,
+    _load_context,
+    _recover_matching_overrides,
+    _valid_adjudication_artifact,
+    _valid_overrides_artifact,
+)
 from backend.pipeline.shared_knowledge_pilot import _apply_claim_overrides
 from backend.pipeline.stage1 import Stage1AnthropicClient
 
 
 def test_subscription_adjudication_has_a_distinct_backend_bound_fingerprint() -> None:
     kwargs = {
-        "review_fingerprint": "review", "openai_prompt": "primary",
+        "review_fingerprint": "review", "review_artifact_sha256": "review-sha",
+        "openai_prompt": "primary",
         "openai_model": "gpt-5.6-sol", "openai_reasoning_effort": "medium",
         "claude_prompt": "reconsider", "claude_model": "claude-sonnet-5",
     }
@@ -33,6 +43,60 @@ def test_subscription_adjudication_has_a_distinct_backend_bound_fingerprint() ->
     )
     assert claude_subscription["claude_backend"] == "claude-subscription"
     assert claude_subscription["fingerprint_sha256"] != api["fingerprint_sha256"]
+
+
+def test_adjudication_generation_binds_both_output_budgets() -> None:
+    kwargs = {
+        "review_fingerprint": "review", "review_artifact_sha256": "review-sha",
+        "openai_prompt": "primary",
+        "openai_model": "gpt-5.6-sol", "openai_reasoning_effort": "medium",
+        "claude_prompt": "reconsider", "claude_model": "claude-sonnet-5",
+    }
+    baseline = adjudication_fingerprint(**kwargs)
+
+    assert adjudication_fingerprint(**kwargs, openai_max_output_tokens=64000)[
+        "fingerprint_sha256"
+    ] != baseline["fingerprint_sha256"]
+    assert adjudication_fingerprint(**kwargs, claude_max_output_tokens=64000)[
+        "fingerprint_sha256"
+    ] != baseline["fingerprint_sha256"]
+
+
+def test_adjudication_generation_binds_exact_routed_review_artifact() -> None:
+    kwargs = {
+        "review_fingerprint": "same-reviewer-call",
+        "review_artifact_sha256": "spot-check-10-percent",
+        "openai_prompt": "primary",
+        "openai_model": "gpt-5.6-sol",
+        "openai_reasoning_effort": "medium",
+        "claude_prompt": "reconsider",
+        "claude_model": "claude-sonnet-5",
+    }
+
+    baseline = adjudication_fingerprint(**kwargs)
+    rerouted = adjudication_fingerprint(
+        **{**kwargs, "review_artifact_sha256": "spot-check-20-percent"}
+    )
+
+    assert rerouted["fingerprint_sha256"] != baseline["fingerprint_sha256"]
+
+
+def test_same_adjudicator_fingerprint_keeps_each_distinct_generation(tmp_path) -> None:
+    output = tmp_path / "adjudication.json"
+    output.write_text(
+        '{"adjudicator":{"fingerprint_sha256":"abcdef1234567890"},"run":1}',
+        encoding="utf-8",
+    )
+    first = _archive(output)
+    output.write_text(
+        '{"adjudicator":{"fingerprint_sha256":"abcdef1234567890"},"run":2}',
+        encoding="utf-8",
+    )
+
+    second = _archive(output)
+
+    assert first != second
+    assert first.is_file() and second.is_file()
 
 
 def _claims() -> dict[str, dict]:
@@ -145,6 +209,41 @@ def test_accept_requires_executable_patch_and_verbatim_new_anchor() -> None:
             reviews=_reviews(),
             claims_by_id=_claims(),
             transcript_segments={"L3": {"10": "教授原话"}},
+        )
+
+
+def test_adjudication_cannot_add_anchor_inside_inline_markup() -> None:
+    response = {
+        "scope_confirmation": "source_fidelity_only_no_theological_critique",
+        "adjudications": [
+            {
+                "claim_id": "CL-1",
+                "decision": "accept",
+                "rationale": "来源支持",
+                "source_anchor_indexes": [0],
+                "patch": _patch(
+                    anchor_additions=[
+                        {
+                            "transcript_id": "L3",
+                            "source_index": "10",
+                            "verbatim_excerpt": "投影片结论",
+                            "evidence_type": "reasoning",
+                        }
+                    ]
+                ),
+            }
+        ],
+    }
+
+    with pytest.raises(
+        AIAdjudicationValidationError,
+        match="provenance-ambiguous inline markup",
+    ):
+        validate_openai_adjudication(
+            response,
+            reviews=_reviews(),
+            claims_by_id=_claims(),
+            transcript_segments={"L3": {"10": "> 投影片结论\n教授正文。"}},
         )
 
 
@@ -444,7 +543,6 @@ def test_matching_adjudication_generation_requires_output_and_overrides(tmp_path
         overrides_path=overrides_path,
         expected_fingerprint="same",
     )
-
     overrides_path.write_text(
         '{"adjudication_fingerprint":{"fingerprint_sha256":"same"}}', encoding="utf-8"
     )
@@ -462,6 +560,54 @@ def test_matching_adjudication_generation_requires_output_and_overrides(tmp_path
         overrides_path=overrides_path,
         expected_fingerprint="same",
     )
+
+
+def test_matching_adjudication_recovers_stale_overrides_without_a_model_call(
+    tmp_path,
+) -> None:
+    output_path = tmp_path / "adjudication.json"
+    overrides_path = tmp_path / "overrides.json"
+    fingerprint = {
+        "fingerprint_sha256": "same",
+        "review_fingerprint": "review",
+    }
+    output_path.write_text(
+        json.dumps(
+            {
+                "adjudicator": fingerprint,
+                "claim_overrides": {
+                    "CL-1": {
+                        "statement": "修订主张",
+                        "claim_kind": "explicit_claim",
+                        "route_type": "unchanged",
+                        "scripture_refs": [],
+                        "excluded_anchor_indexes": [],
+                        "excluded_claim_relation_ids": [],
+                        "anchor_additions": [],
+                        "structural_notes": [],
+                    }
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    overrides_path.write_text(
+        '{"adjudication_fingerprint":{"fingerprint_sha256":"old"}}',
+        encoding="utf-8",
+    )
+
+    recovered = _recover_matching_overrides(
+        output_path=output_path,
+        overrides_path=overrides_path,
+        expected_fingerprint="same",
+        claims_by_id={"CL-1": {"claim_id": "CL-1", "anchors": []}},
+    )
+
+    assert recovered is True
+    artifact = json.loads(overrides_path.read_text(encoding="utf-8"))
+    assert artifact["adjudication_fingerprint"]["fingerprint_sha256"] == "same"
+    assert artifact["claims"]["CL-1"]["title"] == "修订主张"
 
 
 def _merge_context() -> tuple[dict[str, dict], list[dict]]:
@@ -499,6 +645,64 @@ def test_merge_is_an_executable_patch_on_its_own() -> None:
 
     validate_openai_adjudication(
         _merge_response(), reviews=reviews, claims_by_id=claims, transcript_segments={},
+    )
+
+
+def test_same_fingerprint_does_not_hide_tampered_adjudication_or_overrides() -> None:
+    claims, reviews = _merge_context()
+    response = _merge_response()
+    outcome = compile_outcome(response, None, reviews=reviews)
+    fingerprint = {"fingerprint_sha256": "same"}
+    artifact = {
+        "schema_version": "wang_corpus_ai_adjudication_v1",
+        "adjudicator": fingerprint,
+        "openai_adjudication": response,
+        "claude_reconsideration": None,
+        **outcome,
+    }
+    artifact["adjudicator"]["artifact_sha256"] = _adjudication_artifact_sha256(
+        artifact
+    )
+    assert _valid_adjudication_artifact(
+        artifact,
+        expected_fingerprint="same",
+        reviews=reviews,
+        claims_by_id=claims,
+        transcript_segments={},
+    )
+
+    tampered = json.loads(json.dumps(artifact))
+    tampered["claim_overrides"]["CL-1"]["superseded_by_claim_id"] = "CL-404"
+    assert not _valid_adjudication_artifact(
+        tampered,
+        expected_fingerprint="same",
+        reviews=reviews,
+        claims_by_id=claims,
+        transcript_segments={},
+    )
+
+    overrides = _compile_overrides(
+        outcome=artifact,
+        claims_by_id=claims,
+        fingerprint=fingerprint,
+        generated_at="2026-09-10T00:00:00+00:00",
+    )
+    assert _valid_overrides_artifact(
+        overrides,
+        outcome=artifact,
+        claims_by_id=claims,
+        fingerprint={
+            **fingerprint,
+            "generated_at": "2026-09-10T00:00:00+00:00",
+            "artifact_sha256": "artifact-sha",
+        },
+    )
+    overrides["claims"]["CL-1"]["superseded_by"] = "CL-404"
+    assert not _valid_overrides_artifact(
+        overrides,
+        outcome=artifact,
+        claims_by_id=claims,
+        fingerprint=fingerprint,
     )
 
 

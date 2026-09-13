@@ -7,7 +7,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from backend.pipeline.knowledge_source import live_script
+from backend.pipeline.source_projection import (
+    LOCATOR_SPACE,
+    LocatorSpaceError,
+    assert_locator_space_compatible,
+    project_script,
+)
 from backend.api.canonical_repository.postgres_store import (
     PostgresKnowledgeStore,
     sha256_json,
@@ -26,7 +31,10 @@ def build_anchor_binding_package(
     updated_sources: dict[str, dict[str, Any]] = {}
     updated_fragments: list[dict[str, Any]] = []
     unresolved: list[dict[str, Any]] = []
-    transcript_cache: dict[str, tuple[bytes, dict[str, Any], dict[str, dict[str, Any]]]] = {}
+    transcript_cache: dict[
+        str,
+        tuple[bytes, dict[str, Any], dict[str, dict[str, Any]], list[dict[str, Any]]],
+    ] = {}
 
     for fragment in fragments:
         if fragment.get("anchor_state") in {"source_version_bound", "canonical_citation_bound"}:
@@ -43,17 +51,46 @@ def build_anchor_binding_package(
             continue
         if transcript_id not in transcript_cache:
             raw = path.read_bytes()
-            transcript = json.loads(raw)
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                transcript = {
+                    "metadata": {"title": path.stem, "status": "reviewed"},
+                    "script": parsed,
+                }
+            elif isinstance(parsed, dict):
+                transcript = parsed
+            else:
+                unresolved.append({
+                    "fragment_id": fragment.get("fragment_id"),
+                    "reason": "invalid_transcript_shape",
+                })
+                continue
+            physical_script = transcript.get("script")
             # An excerpt that survives only in struck-through text is not
             # bound to this source any more; the proofreader deleted it.
-            transcript["script"] = live_script(transcript.get("script"))
+            projection = project_script(physical_script)
+            transcript["script"] = list(projection.body_rows)
             paragraphs = {
                 str(item.get("index")): item
                 for item in transcript.get("script", [])
                 if item.get("index") is not None and item.get("text")
             }
-            transcript_cache[transcript_id] = (raw, transcript, paragraphs)
-        raw, transcript, paragraphs = transcript_cache[transcript_id]
+            transcript_cache[transcript_id] = (
+                raw, transcript, paragraphs, list(physical_script or [])
+            )
+        raw, transcript, paragraphs, physical_script = transcript_cache[transcript_id]
+        # Two current SourceDocument ids may temporarily resolve to the same
+        # transcript during alias repair. Locator compatibility belongs to the
+        # source identity, so it must be checked per source instead of inherited
+        # from whichever alias populated the transcript cache first.
+        try:
+            assert_locator_space_compatible(source, physical_script)
+        except LocatorSpaceError:
+            unresolved.append({
+                "fragment_id": fragment.get("fragment_id"),
+                "reason": "legacy_locator_space_requires_reextraction",
+            })
+            continue
         paragraph = paragraphs.get(str(fragment.get("paragraph_key")))
         excerpt = str(fragment.get("verbatim_excerpt") or "")
         if not paragraph or not excerpt or excerpt not in str(paragraph.get("text") or ""):
@@ -62,12 +99,16 @@ def build_anchor_binding_package(
                 "reason": "paragraph_or_verbatim_mismatch",
             })
             continue
-        source_sha = hashlib.sha256(raw).hexdigest()
+        source_file_sha = hashlib.sha256(raw).hexdigest()
+        source_sha = project_script(transcript.get("script")).body_sha256
         paragraph_text = str(paragraph["text"])
         source_row = dict(source)
         source_row.update(
             {
                 "source_sha256": source_sha,
+                "source_body_sha256": source_sha,
+                "source_file_sha256": source_file_sha,
+                "locator_space": LOCATOR_SPACE,
                 "title": source_row.get("title") or (transcript.get("metadata") or {}).get("title"),
                 "canonical_source_id": f"script_published/{transcript_id}.json",
             }

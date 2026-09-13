@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +29,16 @@ from backend.pipeline.base_contract_coverage import (
     ScriptureRef,
     parse_passage_range,
 )
-from backend.pipeline.knowledge_source import live_script, markdown_blocks
+from backend.pipeline.knowledge_source import markdown_blocks
+from backend.pipeline.source_projection import (
+    SourceProjection,
+    assert_locator_space_compatible,
+    project_script,
+    script_from_markdown_blocks,
+    source_uses_body_locator_space,
+    validate_visual_fragment_against_block,
+    visual_source_blocks,
+)
 from backend.pipeline.sentence_ledger import (
     AnchoredSpan,
     build_inventory,
@@ -42,6 +52,26 @@ from backend.pipeline.sentence_ledger import (
 #: one: a claim reaches the text only through the evidence steps that produced
 #: it, and pretending otherwise invents an anchor the package does not hold.
 ANCHORED_COLLECTIONS = ("evidence_steps", "observations", "questions", "position_nodes")
+
+
+def load_source_script(source_path: Path) -> list[dict[str, Any]]:
+    """Load the physical script so locator compatibility can be checked."""
+    if source_path.suffix == ".json":
+        payload = json.loads(source_path.read_text(encoding="utf-8"))
+        script = payload.get("script") if isinstance(payload, dict) else payload
+    else:
+        script = script_from_markdown_blocks(
+            markdown_blocks(source_path.read_text(encoding="utf-8"))
+        )
+    if not isinstance(script, list):
+        raise ValueError(f"{source_path}: source has no script list")
+    return [dict(row) for row in script]
+
+
+def load_source_projection(source_path: Path) -> SourceProjection:
+    """Load the source/editorial projections without mixing their identities."""
+
+    return project_script(load_source_script(source_path))
 
 
 def load_segments(source_path: Path) -> list[tuple[int, str]]:
@@ -60,17 +90,11 @@ def load_segments(source_path: Path) -> list[tuple[int, str]]:
     keys on position; this is the same scheme, not a new one.
     """
 
-    if source_path.suffix == ".json":
-        payload = json.loads(source_path.read_text(encoding="utf-8"))
-        script = payload.get("script") if isinstance(payload, dict) else payload
-        # Soft-deleted text is not in the denominator. It is not material the
-        # claim layer failed to take; it is material a proofreader removed.
-        return [
-            (position, str(row.get("text") or ""))
-            for position, row in enumerate(live_script(script), start=1)
-        ]
-    text = source_path.read_text(encoding="utf-8")
-    return list(enumerate(markdown_blocks(text), start=1))
+    projection = load_source_projection(source_path)
+    return [
+        (position, str(row.get("text") or ""))
+        for position, row in enumerate(projection.body_rows, start=1)
+    ]
 
 
 def place_fragments(
@@ -101,6 +125,49 @@ def place_fragments(
         excerpt = fragment.get("verbatim_excerpt") or ""
         if fragment_id not in cited or not excerpt:
             continue
+        if fragment.get("source_modality") == "visual":
+            locator = str(fragment.get("visual_locator") or "")
+            match = re.fullmatch(r"S([0-9]{4,})/V([0-9]{2,})", locator)
+            if match is None:
+                unplaced.append(fragment_id)
+                continue
+            segment_index = int(match.group(1))
+            segment_text = dict(segments).get(segment_index)
+            if segment_text is None:
+                unplaced.append(fragment_id)
+                continue
+            visuals = visual_source_blocks(
+                segment_text, segment_index=f"S{segment_index:04d}"
+            )
+            visual = next((row for row in visuals if row.locator == locator), None)
+            if (
+                visual is None
+                or not visual.readable
+                or excerpt != visual.raw_svg
+                or fragment.get("visual_block_sha256") != visual.raw_sha256
+            ):
+                unplaced.append(fragment_id)
+                continue
+            try:
+                validate_visual_fragment_against_block(fragment, visual)
+            except ValueError:
+                unplaced.append(fragment_id)
+                continue
+            visual_fact_ids = tuple(
+                str(fact.get("fact_id") or "")
+                for fact in fragment.get("visual_facts") or []
+                if str(fact.get("fact_id") or "")
+            )
+            spans.append(
+                AnchoredSpan(
+                    owner.get(fragment_id, fragment_id),
+                    segment_index,
+                    visual.char_start,
+                    visual.char_end,
+                    visual_fact_ids,
+                )
+            )
+            continue
         hits = [
             (index, text.find(excerpt))
             for index, text in segments
@@ -118,7 +185,8 @@ def place_fragments(
             # trusted exactly when the fragment's own `source_sha256` matches
             # the file in hand, and never otherwise.
             claimed = str(fragment.get("paragraph_key") or "")
-            wanted = int(claimed[1:]) if claimed[1:].isdigit() else None
+            match = re.fullmatch(r"S([0-9]{4,})(?:/V[0-9]{2,})?", claimed)
+            wanted = int(match.group(1)) if match else None
             hits = [hit for hit in hits if wanted is not None and hit[0] == wanted] or hits
         if len(hits) != 1:
             unplaced.append(fragment_id)
@@ -155,6 +223,10 @@ def terminal_exclusions(package: dict[str, Any]) -> dict[str, str]:
 
     terminal: dict[str, str] = {}
     for row in package.get("sentence_exclusions") or []:
+        if row.get("source_modality") == "visual" or "/V" in str(
+            row.get("segment_index") or ""
+        ):
+            continue
         reason_code = str(row.get("reason_code") or "")
         if not reason_code:
             continue
@@ -165,12 +237,34 @@ def terminal_exclusions(package: dict[str, Any]) -> dict[str, str]:
     return terminal
 
 
-def run(source_path: Path, package_path: Path, passage: str | None = None) -> dict[str, Any]:
-    package = json.loads(package_path.read_text(encoding="utf-8"))
-    source_id = str(package["source_documents"][0]["source_id"])
-    segments = load_segments(source_path)
-    source_sha256 = hashlib.sha256(source_path.read_bytes()).hexdigest()
-    inventory = build_inventory(segments, source_id=source_id)
+def coverage_for_package(
+    *,
+    source_document: dict[str, Any],
+    script: list[dict[str, Any]],
+    package: dict[str, Any],
+    source_file_sha256: str | None = None,
+    passage: str | None = None,
+    reconciled_against: str = "in-memory-package",
+) -> dict[str, Any]:
+    """Compute coverage from the final in-memory package and physical script."""
+
+    source_id = str(source_document["source_id"])
+    assert_locator_space_compatible(source_document, script)
+    projection = project_script(script)
+    segments = [
+        (position, str(row.get("text") or ""))
+        for position, row in enumerate(projection.body_rows, start=1)
+    ]
+    source_sha256 = (
+        projection.body_sha256
+        if source_uses_body_locator_space(source_document)
+        else source_file_sha256
+    )
+    if not source_sha256:
+        raise ValueError("legacy coverage calculation requires source file SHA256")
+    inventory = build_inventory(
+        segments, source_id=source_id, source_sha256=source_sha256
+    )
     spans, unplaced = place_fragments(package, segments, source_sha256)
 
     target = None
@@ -183,7 +277,7 @@ def run(source_path: Path, package_path: Path, passage: str | None = None) -> di
     rows = reconcile(
         inventory, spans,
         exclusions_by_sentence=terminal_exclusions(package),
-        target=target, reconciled_against=package_path.name,
+        target=target, reconciled_against=reconciled_against,
     )
     summary = summarise(rows)
     categories = summarise_by_category(inventory, rows, dict(segments))
@@ -200,9 +294,8 @@ def run(source_path: Path, package_path: Path, passage: str | None = None) -> di
         "exclusions_recorded": len(package.get("sentence_exclusions") or []),
         "exclusions_terminal": len(terminal_exclusions(package)),
         "blocks": summary.blocks,
-        # The total is not the score. Headings are represented 0% of the time
-        # by design and are a quarter of the sentences, so a change in prose
-        # coverage is invisible in the total it is averaged into.
+        # Editorial rows are not source sentences, so every category here is a
+        # verdict over professor-spoken material only.
         "by_category": {
             name: {
                 "total": category.total,
@@ -216,6 +309,18 @@ def run(source_path: Path, package_path: Path, passage: str | None = None) -> di
             for name, category in categories.items()
         },
     }
+
+
+def run(source_path: Path, package_path: Path, passage: str | None = None) -> dict[str, Any]:
+    package = json.loads(package_path.read_text(encoding="utf-8"))
+    return coverage_for_package(
+        source_document=package["source_documents"][0],
+        script=load_source_script(source_path),
+        package=package,
+        source_file_sha256=hashlib.sha256(source_path.read_bytes()).hexdigest(),
+        passage=passage,
+        reconciled_against=package_path.name,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

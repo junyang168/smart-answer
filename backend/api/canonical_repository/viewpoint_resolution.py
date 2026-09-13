@@ -56,7 +56,12 @@ IDENTITY_ELIGIBLE_CLAIM_REVIEW_STATUSES = frozenset(
 )
 IDENTITY_TERMINALLY_EXCLUDED_CLAIM_REVIEW_STATUSES = frozenset({"superseded"})
 VALID_ANCHOR_STATES = frozenset(
-    {"source_version_bound", "canonical_citation_bound", "verified", "valid"}
+    {
+        "source_version_bound",
+        "canonical_citation_bound",
+        "verified",
+        "valid",
+    }
 )
 VALID_EVIDENCE_STATES = frozenset({"eligible", "eligible_with_label"})
 MATERIAL_RELATION_TYPES = frozenset(
@@ -151,6 +156,21 @@ class ReviewEvidence(StrictArtifact):
     discourse_role: str | None = None
     scripture_refs: list[str] = Field(default_factory=list)
     verbatim_excerpt: str
+    # Absence means the legacy spoken-evidence shape.  These fields are emitted
+    # only for visual evidence so adding SVG support cannot rewrite every
+    # pre-existing review packet or semantic hash in the corpus.
+    source_modality: Literal["visual"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    visual_locator: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    visual_block_sha256: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    visual_facts: list[dict[str, Any]] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     citation_id: str
     citation_revision: int = Field(ge=1)
     citation_status: str
@@ -181,6 +201,22 @@ class ReviewEvidence(StrictArtifact):
             citation_valid or attestation_valid
         ):
             raise ValueError("evidence cannot self-report identity-review validity")
+        if self.source_modality == "visual":
+            if (
+                not self.visual_locator
+                or not self.visual_block_sha256
+                or not self.visual_facts
+            ):
+                raise ValueError("visual review evidence lacks visual provenance")
+        elif any(
+            value is not None
+            for value in (
+                self.visual_locator,
+                self.visual_block_sha256,
+                self.visual_facts,
+            )
+        ):
+            raise ValueError("spoken review evidence cannot carry visual provenance")
         return self
 
 
@@ -845,6 +881,26 @@ def compile_review_claim(
                 discourse_role=evidence.discourse_role,
                 scripture_refs=sorted({_scripture_ref(value) for value in evidence.scripture_refs}),
                 verbatim_excerpt=fragment.verbatim_excerpt,
+                source_modality=(
+                    "visual"
+                    if getattr(fragment, "source_modality", None) == "visual"
+                    else None
+                ),
+                visual_locator=(
+                    getattr(fragment, "visual_locator", None)
+                    if getattr(fragment, "source_modality", None) == "visual"
+                    else None
+                ),
+                visual_block_sha256=(
+                    getattr(fragment, "visual_block_sha256", None)
+                    if getattr(fragment, "source_modality", None) == "visual"
+                    else None
+                ),
+                visual_facts=(
+                    list(getattr(fragment, "visual_facts", None) or [])
+                    if getattr(fragment, "source_modality", None) == "visual"
+                    else None
+                ),
                 citation_id=citation_id,
                 citation_revision=citation.revision if citation else 1,
                 citation_status=citation.status if citation else "unresolved",

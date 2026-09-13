@@ -166,7 +166,7 @@ def test_the_extraction_validator_rejects_a_type_outside_the_vocabulary():
     )
 
     transcript = {"script": [{"index": 1, "start_time": 0.0, "end_time": 1.0, "text": "原文是 φρονέω。"}]}
-    anchors = [{"segment_index": "S0001", "start_time": 0.0, "end_time": 1.0, "verbatim_excerpt": "原文是 φρονέω。"}]
+    anchors = [{"segment_index": "S0001", "start_time": None, "end_time": None, "verbatim_excerpt": "原文是 φρονέω。"}]
     response = {
         "questions": [], "positions": [], "evidence_steps": [], "claims": [],
         "evidence_relations": [], "claim_relations": [],

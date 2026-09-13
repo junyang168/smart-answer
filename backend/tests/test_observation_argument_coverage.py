@@ -20,6 +20,19 @@ def _fragment(fragment_id: str, excerpt: str, paragraph: str = "S0001", source: 
     }
 
 
+def _visual_fragment(fragment_id: str, *fact_ids: str):
+    return {
+        **_fragment(
+            fragment_id,
+            "<svg><text>同一张完整图</text></svg>",
+            paragraph="S0001/V01",
+        ),
+        "source_modality": "visual",
+        "visual_locator": "S0001/V01",
+        "visual_facts": [{"fact_id": fact_id} for fact_id in fact_ids],
+    }
+
+
 def _package(*, fragments, observations, evidence_steps):
     return {
         "source_fragments": fragments,
@@ -78,6 +91,25 @@ def test_unrelated_evidence_in_the_same_paragraph_is_not_a_pairing():
     ))
     assert report["status_counts"][SAME_PARAGRAPH_UNPAIRED] == 1
     assert report["totals"]["reached_argument_layer"] == 0
+
+
+def test_visual_pairing_uses_fact_ids_not_the_shared_raw_svg() -> None:
+    report = measure_coverage(_package(
+        fragments=[
+            _visual_fragment("FR-OBS", "VF002"),
+            _visual_fragment("FR-E", "VF009"),
+        ],
+        observations=[{
+            "observation_id": "OBS-V", "observation_type": "diagram",
+            "source_fragment_ids": ["FR-OBS"],
+        }],
+        evidence_steps=[{
+            "evidence_step_id": "E-V", "source_fragment_ids": ["FR-E"],
+        }],
+    ))
+
+    assert report["status_counts"][PAIRED_BY_EXCERPT] == 0
+    assert report["status_counts"][SAME_PARAGRAPH_UNPAIRED] == 1
 
 
 def test_a_paragraph_with_no_evidence_is_reported_as_such():

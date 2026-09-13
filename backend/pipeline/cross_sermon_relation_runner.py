@@ -12,6 +12,10 @@ from typing import Any, Callable
 
 from dotenv import load_dotenv
 
+from backend.api.canonical_repository.reviewed_candidate_contract import (
+    ConsensusApplicationError,
+    validate_reviewed_candidate_artifact,
+)
 from backend.config.wang_platform_paths import wang_platform_paths
 from backend.pipeline.cross_sermon_relation import (
     ADJUDICATION_SCHEMA,
@@ -28,6 +32,11 @@ from backend.pipeline.cross_sermon_relation import (
     validate_discovery,
     validate_reconsideration,
     validate_review,
+)
+from backend.pipeline.knowledge_package import live_claims
+from backend.pipeline.knowledge_package_merge import (
+    KnowledgePackageMergeError,
+    validate_merged_package,
 )
 from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
 
@@ -100,7 +109,7 @@ def build_projection(knowledge: dict[str, Any]) -> dict[str, Any]:
         for row in knowledge.get("source_documents", [])
     }
     claims = []
-    for claim in knowledge.get("claims", []):
+    for claim in live_claims(knowledge):
         transcripts = sorted(
             {
                 str(row.get("transcript_id") or "")
@@ -111,6 +120,7 @@ def build_projection(knowledge: dict[str, Any]) -> dict[str, Any]:
         claims.append(
             {
                 "claim_id": claim["claim_id"],
+                "review_status": claim.get("review_status"),
                 "source_transcript_ids": transcripts,
                 "source_titles": [source_titles.get(value, value) for value in transcripts],
                 "title": claim.get("title"),
@@ -301,9 +311,26 @@ def run(
 ) -> dict[str, Any]:
     raw = knowledge_path.read_bytes()
     knowledge = json.loads(raw)
+    try:
+        validate_reviewed_candidate_artifact(knowledge)
+        validate_merged_package(knowledge)
+    except (ConsensusApplicationError, KnowledgePackageMergeError) as exc:
+        raise CrossSermonRelationValidationError(
+            f"cross-sermon input is not an authenticated reviewed batch: {exc}"
+        ) from exc
     if (knowledge.get("batch") or {}).get("semantic_assumption") != "none":
         raise CrossSermonRelationValidationError(
             "cross-sermon comparison requires a neutral merged research batch"
+        )
+    unresolved_claim_ids = sorted(
+        str(claim.get("claim_id") or "")
+        for claim in live_claims(knowledge)
+        if claim.get("review_status") != "ai_consensus_reviewed"
+    )
+    if unresolved_claim_ids:
+        raise CrossSermonRelationValidationError(
+            "cross-sermon comparison requires every live claim to have final AI "
+            "consensus review: " + ", ".join(unresolved_claim_ids)
         )
     projection = build_projection(knowledge)
     projection_text = json.dumps(projection, ensure_ascii=False, indent=2)

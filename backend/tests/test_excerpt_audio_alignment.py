@@ -9,6 +9,7 @@ from backend.pipeline.excerpt_audio_alignment import (
     align_transcript_excerpt,
     project_excerpt_timings,
 )
+from backend.pipeline.source_projection import LOCATOR_SPACE, project_script
 
 
 def _write(path: Path, value: dict) -> str:
@@ -368,3 +369,103 @@ def test_source_sha_mismatch_never_claims_precise_alignment(tmp_path: Path) -> N
     assert timing["status"] == "unresolved"
     assert timing["excerpt_start_time"] is None
     assert "SHA" in timing["reason"]
+
+
+def test_visual_source_uses_display_row_interval_not_audio_quote_alignment(
+    tmp_path: Path,
+) -> None:
+    svg = '<svg><ellipse cx="20" cy="20" rx="10" ry="8"/></svg>'
+    payload = {
+        "script": [
+            {
+                "index": 10,
+                "start_time": 31.0,
+                "end_time": 38.5,
+                "text": "教授解释这张图。" + svg,
+            }
+        ]
+    }
+    published = tmp_path / "script_published" / "图示讲道.json"
+    _write(published, payload)
+    projection = project_script(payload["script"])
+    visual = projection.visual_blocks[0]
+
+    timing = align_excerpt(
+        fragment={
+            "source_modality": "visual",
+            "paragraph_key": visual.locator,
+            "visual_locator": visual.locator,
+            "visual_block_sha256": visual.raw_sha256,
+            "visual_canonical_sha256": visual.canonical_sha256,
+            "visual_renderer_version": "svg_literal_facts_v3_cjk_white",
+            "visual_facts": list(visual.facts),
+            "verbatim_excerpt": svg,
+        },
+        source={
+            "locator_space": LOCATOR_SPACE,
+            "source_sha256": projection.body_sha256,
+            "source_body_sha256": projection.body_sha256,
+            "source_visual_sha256": projection.visual_content_sha256,
+        },
+        published_path=published,
+        raw_path=tmp_path / "script" / "图示讲道.json",
+    )
+
+    assert timing["status"] == "visual_source"
+    assert timing["method"] == "published_visual_row_interval"
+    assert (timing["excerpt_start_time"], timing["excerpt_end_time"]) == (
+        31.0,
+        38.5,
+    )
+    assert timing["raw_start_index"] is None
+
+
+def test_visual_source_requires_visual_identity_and_valid_display_interval(
+    tmp_path: Path,
+) -> None:
+    svg = '<svg><text x="1" y="2">图</text></svg>'
+    payload = {
+        "script": [
+            {"index": 10, "start_time": 40.0, "end_time": 30.0, "text": svg}
+        ]
+    }
+    published = tmp_path / "script_published" / "图示讲道.json"
+    _write(published, payload)
+    projection = project_script(payload["script"])
+    visual = projection.visual_blocks[0]
+    fragment = {
+        "source_modality": "visual",
+        "paragraph_key": visual.locator,
+        "visual_locator": visual.locator,
+        "visual_block_sha256": visual.raw_sha256,
+        "visual_canonical_sha256": visual.canonical_sha256,
+        "visual_renderer_version": "svg_literal_facts_v3_cjk_white",
+        "visual_facts": list(visual.facts),
+        "verbatim_excerpt": svg,
+    }
+    source = {
+        "locator_space": LOCATOR_SPACE,
+        "source_sha256": projection.body_sha256,
+        "source_body_sha256": projection.body_sha256,
+    }
+
+    missing_identity = align_excerpt(
+        fragment=fragment,
+        source=source,
+        published_path=published,
+        raw_path=tmp_path / "script" / "图示讲道.json",
+    )
+    assert missing_identity["status"] == "unresolved"
+    assert missing_identity["reason"] == "SourceDocument lacks visual-source identity"
+
+    invalid_interval = align_excerpt(
+        fragment=fragment,
+        source={
+            **source,
+            "source_visual_sha256": projection.visual_content_sha256,
+        },
+        published_path=published,
+        raw_path=tmp_path / "script" / "图示讲道.json",
+    )
+    assert invalid_interval["status"] == "unresolved"
+    assert invalid_interval["reason"] == "visual source row has an invalid display time range"

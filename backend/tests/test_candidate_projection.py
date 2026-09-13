@@ -1,5 +1,11 @@
+import hashlib
+import json
+
 import pytest
 
+from backend.api.canonical_repository.reviewed_candidate_contract import (
+    reviewed_candidate_artifact_sha256,
+)
 from backend.pipeline.candidate_projection import (
     SCOPE,
     build_incremental_package,
@@ -7,7 +13,38 @@ from backend.pipeline.candidate_projection import (
     scripture_targets,
     validate_candidates,
 )
-from backend.pipeline.candidate_projection_runner import _validate_plan_review
+from backend.pipeline.candidate_projection_runner import _validate_plan_review, run
+from backend.tests.test_cross_sermon_relation import _authenticated_knowledge
+
+
+class _NeverStore:
+    def compile_package(self, **_kwargs):
+        pytest.fail("invalid projection input must fail before DB access")
+
+    def ingest_package(self, *_args, **_kwargs):
+        pytest.fail("invalid projection input must never reach ingest")
+
+
+class _NeverClient:
+    model = "never-called"
+
+    def generate_json(self, *_args, **_kwargs):
+        pytest.fail("invalid projection input must fail before model access")
+
+
+def _projection_paths(tmp_path, knowledge):
+    knowledge_path = tmp_path / "knowledge.json"
+    relations_path = tmp_path / "relations.json"
+    knowledge_path.write_text(json.dumps(knowledge, ensure_ascii=False), encoding="utf-8")
+    relations_path.write_text(json.dumps({
+        "generation": {
+            "source_knowledge_sha256": hashlib.sha256(
+                knowledge_path.read_bytes()
+            ).hexdigest()
+        },
+        "result": {},
+    }), encoding="utf-8")
+    return knowledge_path, relations_path
 
 
 def _knowledge():
@@ -137,3 +174,101 @@ def test_plan_review_replacement_must_preserve_exact_claim_set():
     }
     with pytest.raises(ValueError, match="omitted claims"):
         _validate_plan_review(response, source, original)
+
+
+def test_runner_rejects_unsealed_aggregate_before_db_or_model(tmp_path):
+    knowledge = _authenticated_knowledge()
+    knowledge["consensus_application"].pop("artifact_sha256")
+    knowledge_path, relations_path = _projection_paths(tmp_path, knowledge)
+
+    with pytest.raises(ValueError, match="does not authenticate"):
+        run(
+            knowledge_path=knowledge_path,
+            relations_path=relations_path,
+            output_dir=tmp_path / "out",
+            store=_NeverStore(),
+            openai_client=_NeverClient(),
+            claude_client=_NeverClient(),
+            apply=False,
+            force=False,
+        )
+
+
+def test_runner_rejects_unresolved_live_claim_before_db_or_model(tmp_path):
+    knowledge = _authenticated_knowledge()
+    knowledge["claims"][0]["review_status"] = "human_review_required"
+    resolution = knowledge["consensus_application"]["review_resolutions"][0]
+    resolution["adjudication_status"] = "human_spot_check"
+    resolution["target_review_status"] = "human_review_required"
+    knowledge["consensus_application"]["final_review_status_counts"] = {
+        "ai_consensus_reviewed": 2,
+        "human_review_required": 1,
+    }
+    knowledge["consensus_application"]["artifact_sha256"] = (
+        reviewed_candidate_artifact_sha256(knowledge)
+    )
+    knowledge_path, relations_path = _projection_paths(tmp_path, knowledge)
+
+    with pytest.raises(ValueError, match="every live claim"):
+        run(
+            knowledge_path=knowledge_path,
+            relations_path=relations_path,
+            output_dir=tmp_path / "out",
+            store=_NeverStore(),
+            openai_client=_NeverClient(),
+            claude_client=_NeverClient(),
+            apply=False,
+            force=False,
+        )
+
+
+def test_runner_rejects_relations_from_another_aggregate_before_db_or_model(
+    tmp_path,
+):
+    knowledge_path, relations_path = _projection_paths(
+        tmp_path, _authenticated_knowledge()
+    )
+    relations = json.loads(relations_path.read_text(encoding="utf-8"))
+    relations["generation"]["source_knowledge_sha256"] = "0" * 64
+    relations_path.write_text(json.dumps(relations), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="exact reviewed aggregate"):
+        run(
+            knowledge_path=knowledge_path,
+            relations_path=relations_path,
+            output_dir=tmp_path / "out",
+            store=_NeverStore(),
+            openai_client=_NeverClient(),
+            claude_client=_NeverClient(),
+            apply=False,
+            force=False,
+        )
+
+
+def test_runner_rejects_invalid_reviewed_relation_before_db_or_model(tmp_path):
+    knowledge_path, relations_path = _projection_paths(
+        tmp_path, _authenticated_knowledge()
+    )
+    relations = json.loads(relations_path.read_text(encoding="utf-8"))
+    relations["result"] = {
+        "reviewed_relations": [{
+            "candidate_id": "XSR-MISSING",
+            "source_claim_id": "CL-404",
+            "target_claim_id": "CL-A",
+            "relation_type": "supports",
+            "review_status": "ai_consensus",
+        }]
+    }
+    relations_path.write_text(json.dumps(relations), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="relation_endpoint_missing"):
+        run(
+            knowledge_path=knowledge_path,
+            relations_path=relations_path,
+            output_dir=tmp_path / "out",
+            store=_NeverStore(),
+            openai_client=_NeverClient(),
+            claude_client=_NeverClient(),
+            apply=False,
+            force=False,
+        )

@@ -27,6 +27,7 @@ from backend.pipeline.record_withdrawal import (  # noqa: F401  (re-exported)
     Withdrawal,
     closure_from_fragments,
 )
+from backend.pipeline.source_projection import is_editorial_row
 
 
 def struck_spans(text: str) -> list[tuple[int, int]]:
@@ -36,11 +37,21 @@ def struck_spans(text: str) -> list[tuple[int, int]]:
 
 
 def segment_texts(transcript_path: Path) -> list[str]:
-    """The segments of one transcript, markers and all."""
+    """The professor-spoken segments, with deletion markers intact.
+
+    ``project_script`` cannot be used here because it removes the struck text
+    this audit exists to find. The authorship boundary still applies: an
+    editorial subtitle or comment that repeats a deleted phrase is not a
+    surviving occurrence in the professor's source body.
+    """
 
     payload = json.loads(transcript_path.read_text(encoding="utf-8"))
     script = payload.get("script") if isinstance(payload, dict) else payload
-    return [str((row or {}).get("text") or "") for row in (script or [])]
+    return [
+        str(row.get("text") or "")
+        for row in (script or [])
+        if isinstance(row, Mapping) and not is_editorial_row(row)
+    ]
 
 
 def excerpt_is_deleted(excerpt: str, segments: Sequence[str], paragraph_key: str) -> bool:

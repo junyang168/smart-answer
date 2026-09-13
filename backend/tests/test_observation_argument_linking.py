@@ -34,6 +34,12 @@ def _store(**overrides):
         },
         "evidence_steps": {"E-1": {"evidence_step_id": "E-1"}},
         "claims": {},
+        "source_documents": {
+            "SRC-1": {
+                "source_id": "SRC-1",
+                "source_type": "sermon_transcript",
+            }
+        },
         "source_fragments": {},
         "knowledge_relations": {},
     }

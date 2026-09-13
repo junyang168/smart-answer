@@ -17,6 +17,14 @@ from backend.api.canonical_repository.viewpoint_foundation import (
 from backend.api.canonical_repository.viewpoint_source_attestation import (
     build_source_eligibility_artifact,
 )
+from backend.api.canonical_repository.reviewed_candidate_contract import (
+    ConsensusApplicationError,
+    validate_reviewed_candidate_artifact,
+)
+from backend.pipeline.knowledge_package_merge import (
+    KnowledgePackageMergeError,
+    validate_merged_package,
+)
 
 
 def _read(path: Path) -> dict[str, Any]:
@@ -41,22 +49,11 @@ def _write_immutable(path: Path, payload: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
-def build_attestations(
-    *,
-    claim_manifest_path: Path,
-    lineage_manifest_path: Path,
-    output_path: Path,
-    database_url: str | None = None,
-) -> dict[str, Any]:
-    manifest = _read(claim_manifest_path)
-    manifest_claim_ids = {
-        str(row["claim_id"]) for row in manifest.get("claims") or []
-    }
-    store = PostgresKnowledgeStore(database_url)
-    current_claims = {
-        row["claim_id"]: ClaimRecord.model_validate(row)
-        for row in store.list_records("claims")
-    }
+def _validated_lineage_inputs(
+    *, manifest_claim_ids: set[str], lineage_manifest_path: Path
+) -> dict[str, dict[str, Any]]:
+    """Authenticate the exact selected lineage before the first database read."""
+
     lineage_manifest = _read(lineage_manifest_path)
     lineage_body = {
         key: value for key, value in lineage_manifest.items() if key != "artifact_sha256"
@@ -76,50 +73,110 @@ def build_attestations(
             f"extra={sorted(set(rows_by_claim) - manifest_claim_ids)}"
         )
 
+    validated: dict[str, dict[str, Any]] = {}
+    for claim_id, lineage in sorted(rows_by_claim.items()):
+        paths = {
+            "path": Path(str(lineage.get("reviewed_candidate_path") or "")),
+            "review_path": Path(str(lineage.get("independent_review_path") or "")),
+            "adjudication_path": Path(str(lineage.get("adjudication_path") or "")),
+            "overrides_path": Path(str(lineage.get("overrides_path") or "")),
+        }
+        if not all(path.is_file() for path in paths.values()):
+            raise ValueError(f"{claim_id}: selected lineage artifact is missing")
+        expected_shas = {
+            "path": lineage.get("reviewed_candidate_sha256"),
+            "review_path": lineage.get("independent_review_sha256"),
+            "adjudication_path": lineage.get("adjudication_sha256"),
+            "overrides_path": lineage.get("overrides_sha256"),
+        }
+        for role, path in paths.items():
+            if _file_sha(path) != expected_shas[role]:
+                raise ValueError(f"{claim_id}: selected {role} SHA drift")
+        payload = _read(paths["path"])
+        try:
+            validate_reviewed_candidate_artifact(payload)
+            validate_merged_package(payload)
+        except (ConsensusApplicationError, KnowledgePackageMergeError) as exc:
+            raise ValueError(
+                f"{claim_id}: selected reviewed candidate does not authenticate: {exc}"
+            ) from exc
+        application = payload["consensus_application"]
+        if (
+            application.get("review_artifact_sha256")
+            != expected_shas["review_path"]
+            or application.get("adjudication_artifact_sha256")
+            != expected_shas["adjudication_path"]
+            or application.get("overrides_artifact_sha256")
+            != expected_shas["overrides_path"]
+        ):
+            raise ValueError(
+                f"{claim_id}: selected consensus chain does not bind lineage artifacts"
+            )
+        review_payload = _read(paths["review_path"])
+        source = review_payload.get("source") or {}
+        review_input_path = Path(str(source.get("package_path") or ""))
+        review_input_sha = str(source.get("package_sha256") or "")
+        if (
+            not review_input_path.is_file()
+            or not review_input_sha
+            or _file_sha(review_input_path) != review_input_sha
+        ):
+            raise ValueError(
+                f"{paths['review_path']}: independent review input package does not bind"
+            )
+        validated[claim_id] = {
+            **paths,
+            "payload": payload,
+            "application": application,
+            "review_payload": review_payload,
+            "review_input_payload": _read(review_input_path),
+            "review_input_sha256": review_input_sha,
+            "adjudication_payload": _read(paths["adjudication_path"]),
+        }
+    return validated
+
+
+def build_attestations(
+    *,
+    claim_manifest_path: Path,
+    lineage_manifest_path: Path,
+    output_path: Path,
+    database_url: str | None = None,
+) -> dict[str, Any]:
+    manifest = _read(claim_manifest_path)
+    manifest_claim_ids = {
+        str(row["claim_id"]) for row in manifest.get("claims") or []
+    }
+    lineage_inputs = _validated_lineage_inputs(
+        manifest_claim_ids=manifest_claim_ids,
+        lineage_manifest_path=lineage_manifest_path,
+    )
+    store = PostgresKnowledgeStore(database_url)
+    current_claims = {
+        row["claim_id"]: ClaimRecord.model_validate(row)
+        for row in store.list_records("claims")
+    }
     package_bindings: dict[str, dict[str, Any]] = {}
     review_bindings: dict[str, dict[str, Any]] = {}
-    for claim_id, lineage in sorted(rows_by_claim.items()):
-        path = Path(str(lineage.get("reviewed_candidate_path") or ""))
-        review_path = Path(str(lineage.get("independent_review_path") or ""))
-        adjudication_value = str(lineage.get("adjudication_path") or "")
-        adjudication_path = Path(adjudication_value) if adjudication_value else None
-        if not path.is_file() or not review_path.is_file():
-            raise ValueError(f"{claim_id}: selected lineage artifact is missing")
-        if _file_sha(path) != lineage.get("reviewed_candidate_sha256"):
-            raise ValueError(f"{claim_id}: selected reviewed candidate SHA drift")
-        if _file_sha(review_path) != lineage.get("independent_review_sha256"):
-            raise ValueError(f"{claim_id}: selected independent review SHA drift")
-        if adjudication_path is not None and not adjudication_path.is_file():
-            raise ValueError(f"{claim_id}: selected adjudication is missing")
-        if (
-            adjudication_path is not None
-            and _file_sha(adjudication_path) != lineage.get("adjudication_sha256")
-        ):
-            raise ValueError(f"{claim_id}: selected adjudication SHA drift")
-        payload = _read(path)
-        review_payload = _read(review_path)
-        adjudication_payload = (
-            _read(adjudication_path)
-            if adjudication_path is not None and adjudication_path.is_file()
-            else None
-        )
+    for claim_id, item in sorted(lineage_inputs.items()):
+        path = item["path"]
+        review_path = item["review_path"]
+        adjudication_path = item["adjudication_path"]
+        overrides_path = item["overrides_path"]
+        payload = item["payload"]
+        application = item["application"]
+        review_payload = item["review_payload"]
+        adjudication_payload = item["adjudication_payload"]
         adjudication_results = {
             str(row.get("claim_id") or ""): row
             for row in ((adjudication_payload or {}).get("results") or [])
         }
-        source = review_payload.get("source") or {}
-        review_input_path = Path(str(source.get("package_path") or ""))
-        stated_input_sha = str(source.get("package_sha256") or "")
-        if (
-            not review_input_path.is_file()
-            or not stated_input_sha
-            or _file_sha(review_input_path) != stated_input_sha
-        ):
-            raise ValueError(f"{review_path}: independent review input package does not bind")
-        review_input_payload = _read(review_input_path)
+        stated_input_sha = item["review_input_sha256"]
+        review_input_payload = item["review_input_payload"]
         package_binding = {
             "payload": payload,
-            "artifact_sha256": _file_sha(path),
+            "artifact_sha256": application["artifact_sha256"],
+            "file_sha256": _file_sha(path),
             "path": str(path),
         }
         reviews = {
@@ -171,9 +228,8 @@ def build_attestations(
             "adjudication_result": adjudication_results.get(claim_id),
             "adjudication_artifact_sha256": (
                 _file_sha(adjudication_path)
-                if adjudication_payload is not None and adjudication_path is not None
-                else None
             ),
+            "overrides_artifact_sha256": _file_sha(overrides_path),
         }
     artifact = build_source_eligibility_artifact(
         claim_manifest=manifest,

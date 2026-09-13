@@ -5,6 +5,8 @@ import json
 from copy import deepcopy
 from typing import Any
 
+from backend.pipeline.source_projection import excerpt_overlaps_inline_markup
+
 
 ADJUDICATION_VERSION = "wang_corpus_ai_adjudication_v1"
 RECONSIDERATION_VERSION = "wang_corpus_claude_reconsideration_v1"
@@ -232,6 +234,10 @@ def validate_openai_adjudication(
             source_text = transcript_segments.get(str(transcript_id), {}).get(source_index)
             _require(source_text is not None, f"{claim_id}: added anchor source does not exist")
             _require(excerpt and excerpt in source_text, f"{claim_id}: added anchor is not verbatim")
+            _require(
+                not excerpt_overlaps_inline_markup(source_text or "", excerpt),
+                f"{claim_id}: added anchor lands in provenance-ambiguous inline markup",
+            )
         outgoing_relation_ids = {
             str(item.get("relation_id") or "")
             for item in claim.get("relations", [])
@@ -315,23 +321,35 @@ def validate_claude_reconsideration(
 def adjudication_fingerprint(
     *,
     review_fingerprint: str,
+    review_artifact_sha256: str,
     openai_prompt: str,
     openai_model: str,
     openai_reasoning_effort: str,
+    openai_max_output_tokens: int = 32000,
     claude_prompt: str,
     claude_model: str,
+    claude_max_output_tokens: int = 32000,
     openai_backend: str = "api",
     claude_backend: str = "api",
+    source_package_sha256: str | None = None,
 ) -> dict[str, str]:
     identity = {
         "review_fingerprint": review_fingerprint,
+        # The reviewer call identity does not include deterministic routing
+        # such as spot-check selection. Adjudication consumes the routed
+        # artifact, so its exact bytes are an independent required input.
+        "review_artifact_sha256": review_artifact_sha256,
         "openai_prompt_sha256": hashlib.sha256(openai_prompt.encode()).hexdigest(),
         "openai_model": openai_model,
         "openai_reasoning_effort": openai_reasoning_effort,
+        "openai_max_output_tokens": openai_max_output_tokens,
         "claude_reconsideration_prompt_sha256": hashlib.sha256(claude_prompt.encode()).hexdigest(),
         "claude_model": claude_model,
+        "claude_max_output_tokens": claude_max_output_tokens,
         "schema_version": ADJUDICATION_VERSION,
     }
+    if source_package_sha256 is not None:
+        identity["source_package_sha256"] = source_package_sha256
     # Existing API adjudications retain their fingerprint. A subscription run
     # must not reuse one that was paid for through the API account.
     if openai_backend != "api":

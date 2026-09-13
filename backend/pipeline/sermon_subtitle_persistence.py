@@ -13,7 +13,11 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from backend.pipeline.extraction_sections import heading_level
+from backend.pipeline.source_projection import (
+    heading_level,
+    source_body_sha256,
+    spoken_source_rows,
+)
 
 
 class SubtitlePersistenceError(RuntimeError):
@@ -24,23 +28,10 @@ class SubtitleBodyMutationError(SubtitlePersistenceError):
     """A proposed or saved transcript changed something besides subtitles."""
 
 
-def payload_sha256(payload: Any) -> str:
-    return hashlib.sha256(
-        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
-            "utf-8"
-        )
-    ).hexdigest()
-
-
 def body_rows(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Return all non-subtitle rows exactly, for before/after proof."""
+    """Return professor-spoken rows; editorial rows are not source body."""
 
-    return [
-        dict(row)
-        for row in rows
-        if str(row.get("type") or "") != "subtitle"
-        and heading_level(str(row.get("text") or "")) is None
-    ]
+    return spoken_source_rows(rows)
 
 
 def _heading_text(text: str, level: int) -> str:
@@ -77,8 +68,10 @@ def apply_insertions(
     known = set(indexes)
     grouped: dict[str, list[dict[str, Any]]] = {}
     accepted: list[dict[str, Any]] = []
+    seen_boundaries: set[tuple[str, int]] = set()
     for ordinal, insertion in enumerate(insertions, start=1):
-        after = str(insertion.get("after_index") or "").strip()
+        raw_after = insertion.get("after_index")
+        after = "" if raw_after is None else str(raw_after).strip()
         after = "START" if after.upper() == "START" else after
         if after != "START" and after not in known:
             raise SubtitlePersistenceError(
@@ -88,6 +81,12 @@ def apply_insertions(
             level = int(insertion.get("level"))
         except (TypeError, ValueError) as exc:
             raise SubtitlePersistenceError("generated subtitle level is not an integer") from exc
+        boundary = (after, level)
+        if boundary in seen_boundaries:
+            raise SubtitlePersistenceError(
+                f"duplicate generated subtitle boundary {boundary!r}"
+            )
+        seen_boundaries.add(boundary)
         generated_index = f"subtitle-pipeline-{source_sha256[:12]}-{ordinal:02d}"
         if generated_index in known:
             raise SubtitlePersistenceError(
@@ -175,24 +174,56 @@ def write_back_generated_subtitles(
         source_sha256=before_sha256,
         user_id=actor_id,
     )
+    verify_saved_result(before, updated, expected_insertions=len(insertions))
 
     # Imported lazily so deterministic insertion tests do not initialize the
     # web application. This writer preserves every mapping field and replaces
     # the file atomically.
     from backend.api.sc_api.script_delta import ScriptDelta
 
-    ScriptDelta.save_rows(
-        str(source_path.parent.parent), source_path.stem, "script_review", updated
+    written_sha256 = ScriptDelta.save_rows(
+        str(source_path.parent.parent),
+        source_path.stem,
+        "script_review",
+        updated,
+        expected_current_sha256=before_sha256,
     )
-    after_raw = source_path.read_bytes()
-    after = json.loads(after_raw)
-    verify_saved_result(before, after, expected_insertions=len(insertions))
+    if not str(written_sha256 or ""):
+        raise SubtitlePersistenceError("atomic sermon save did not return its committed SHA")
+    expected_committed_sha256 = hashlib.sha256(
+        json.dumps(updated, ensure_ascii=False, indent=4).encode("UTF-8")
+    ).hexdigest()
+    if written_sha256 != expected_committed_sha256:
+        # This is a broken writer contract, not an ordinary later commit.
+        # Reload only on this exceptional path so validation can still report
+        # whether source text or the authorized heading was altered.
+        committed_raw = source_path.read_bytes()
+        try:
+            committed = json.loads(committed_raw)
+        except json.JSONDecodeError as exc:
+            raise SubtitlePersistenceError("committed sermon is not valid JSON") from exc
+        if not isinstance(committed, list):
+            raise SubtitlePersistenceError("committed script_review sermon is not a JSON array")
+        verify_saved_result(before, committed, expected_insertions=len(insertions))
+        if committed != updated:
+            raise SubtitlePersistenceError(
+                "committed sermon differs from the exact authorized subtitle application"
+            )
+        raise SubtitlePersistenceError(
+            "atomic sermon save returned a SHA for different bytes"
+        )
+    # ``save_rows`` verifies the exact bytes while it still holds the shared
+    # writer lock.  Re-reading here would be a race: a later legitimate editor
+    # save could land after our commit and make this completed operation look
+    # failed, inviting a duplicate retry.  The returned SHA names this commit,
+    # not whichever newer commit happens to be current when the caller resumes.
+    committed_sha256 = written_sha256
     return {
         "source_path": str(source_path),
         "before_source_sha256": before_sha256,
-        "after_source_sha256": hashlib.sha256(after_raw).hexdigest(),
-        "before_body_sha256": payload_sha256(body_rows(before)),
-        "after_body_sha256": payload_sha256(body_rows(after)),
+        "after_source_sha256": committed_sha256,
+        "before_body_sha256": source_body_sha256(before),
+        "after_body_sha256": source_body_sha256(updated),
         "insertions": len(insertions),
         "actor_id": actor_id,
     }

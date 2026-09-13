@@ -270,6 +270,27 @@ def test_evidence_packet_contains_every_complete_scoped_original():
     ]
 
 
+def test_authoring_source_originals_do_not_expose_editorial_titles_as_source():
+    records = _records()
+
+    def reader(source):
+        return {
+            **_source_reader(source),
+            "editorial_structure": [
+                {"boundary": 0, "level": 2, "title": "编辑所加标题"}
+            ],
+        }
+
+    originals = build_scoped_source_originals(
+        records["source_documents"], reader=reader
+    )
+
+    assert all(
+        "editorial_structure" not in original
+        for original in originals["originals"]
+    )
+
+
 def test_complete_originals_fail_closed_instead_of_truncating():
     records = _records()
     with pytest.raises(
