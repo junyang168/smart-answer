@@ -1737,6 +1737,7 @@ def _execute_locked(
         freeze_sha256=freeze["artifact_sha256"],
         grouping_sha256=grouping_sha256,
         blocked_claims=scope_packet.get("blocked_claims") or [],
+        excluded_claims=scope_packet.get("excluded_claims") or [],
     )
     _write_derived(
         args.output_dir / "scope-disposition-ledger.json", disposition_ledger

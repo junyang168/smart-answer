@@ -33,6 +33,7 @@ from backend.api.canonical_repository.viewpoint_foundation import (
 )
 from backend.api.canonical_repository.viewpoint_resolution import (
     IDENTITY_ELIGIBLE_CLAIM_REVIEW_STATUSES,
+    IDENTITY_TERMINALLY_EXCLUDED_CLAIM_REVIEW_STATUSES,
     ReviewClaim,
     claim_evidence_integrity_findings,
 )
@@ -161,8 +162,14 @@ def _validate_scope_packet(scope_packet: Mapping[str, Any], store: Any) -> list[
     except CvpProductionBlocked as exc:
         findings.extend(exc.findings)
         return findings
-    if scope_packet.get("blocked_claims"):
+    blocked_claim_ids = [
+        str(item.get("claim_id") or "")
+        for item in scope_packet.get("blocked_claims") or []
+    ]
+    if blocked_claim_ids:
         findings.append("scope packet contains blocked Claims")
+    if len(blocked_claim_ids) != len(set(blocked_claim_ids)):
+        findings.append("scope packet contains duplicate blocked Claim IDs")
 
     current_claims = {
         row.claim_id: row
@@ -295,6 +302,33 @@ def _validate_scope_packet(scope_packet: Mapping[str, Any], store: Any) -> list[
             findings.append(f"{claim.claim_id}: source SHA drift")
     if len(packet_claim_ids) != len(set(packet_claim_ids)):
         findings.append("scope packet contains duplicate Claim IDs")
+    excluded_claim_ids: list[str] = []
+    for raw in scope_packet.get("excluded_claims") or []:
+        claim_id = str(raw.get("claim_id") or "")
+        excluded_claim_ids.append(claim_id)
+        current = current_claims.get(claim_id)
+        if not claim_id or current is None:
+            findings.append(f"{claim_id or '<empty>'}: excluded Claim missing from corpus")
+            continue
+        if (
+            raw.get("reason_code") != "superseded_claim"
+            or raw.get("review_status") != current.review_status
+            or current.review_status
+            not in IDENTITY_TERMINALLY_EXCLUDED_CLAIM_REVIEW_STATUSES
+            or raw.get("claim_revision") != current.revision
+            or raw.get("claim_revision_sha256") != semantic_record_sha(current)
+        ):
+            findings.append(
+                f"{claim_id}: excluded Claim is not bound to a current superseded record"
+            )
+    if len(excluded_claim_ids) != len(set(excluded_claim_ids)):
+        findings.append("scope packet contains duplicate excluded Claim IDs")
+    overlap = sorted(set(packet_claim_ids) & set(excluded_claim_ids))
+    if overlap:
+        findings.append(f"scope packet includes and excludes the same Claims: {overlap}")
+    overlap = sorted(set(blocked_claim_ids) & set(excluded_claim_ids))
+    if overlap:
+        findings.append(f"scope packet blocks and excludes the same Claims: {overlap}")
     findings.extend(
         claim_evidence_integrity_findings(
             claim_ids=packet_claim_ids,

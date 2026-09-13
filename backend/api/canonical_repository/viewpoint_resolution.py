@@ -54,6 +54,7 @@ APPROVED_STATUSES = frozenset({"system_approved", "human_approved", "approved"})
 IDENTITY_ELIGIBLE_CLAIM_REVIEW_STATUSES = frozenset(
     {"ai_consensus_reviewed", "human_approved", "approved"}
 )
+IDENTITY_TERMINALLY_EXCLUDED_CLAIM_REVIEW_STATUSES = frozenset({"superseded"})
 VALID_ANCHOR_STATES = frozenset(
     {"source_version_bound", "canonical_citation_bound", "verified", "valid"}
 )

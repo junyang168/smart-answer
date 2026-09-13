@@ -41,6 +41,7 @@ from backend.api.canonical_repository.viewpoint_foundation import (
 )
 from backend.api.canonical_repository.viewpoint_resolution import (
     IDENTITY_ELIGIBLE_CLAIM_REVIEW_STATUSES,
+    IDENTITY_TERMINALLY_EXCLUDED_CLAIM_REVIEW_STATUSES,
     claim_evidence_integrity_findings,
     compile_review_claim,
 )
@@ -274,6 +275,7 @@ def build_scope_packet(
     )
     review_claims = []
     blocked: list[dict[str, Any]] = []
+    excluded: list[dict[str, Any]] = []
     advanced_review_pins: list[dict[str, Any]] = []
     scope_graph_findings = claim_evidence_integrity_findings(
         claim_ids=in_scope,
@@ -299,6 +301,15 @@ def build_scope_packet(
         if claim is None:
             blocked.append({"claim_id": claim_id, "reason_code": "missing_claim",
                             "detail": "Claim is not in the authoring store."})
+            continue
+        if claim.review_status in IDENTITY_TERMINALLY_EXCLUDED_CLAIM_REVIEW_STATUSES:
+            excluded.append({
+                "claim_id": claim_id,
+                "reason_code": "superseded_claim",
+                "review_status": claim.review_status,
+                "claim_revision": claim.revision,
+                "claim_revision_sha256": semantic_record_sha(claim),
+            })
             continue
         if claim.review_status not in IDENTITY_ELIGIBLE_CLAIM_REVIEW_STATUSES:
             blocked.append({
@@ -375,6 +386,7 @@ def build_scope_packet(
         raise ValueError("scope packet needs at least two resolvable Claims")
 
     blocked.sort(key=lambda item: item["claim_id"])
+    excluded.sort(key=lambda item: item["claim_id"])
     packet = {
         "schema_version": SCOPE_PACKET_VERSION,
         "scope_label": scope_label,
@@ -393,6 +405,7 @@ def build_scope_packet(
             store.list_records("argument_route_revisions"),
         ),
         "blocked_claims": blocked,
+        "excluded_claims": excluded,
         # Named, not silent: the manifest and the store disagree on these
         # Claims' revisions, and the packet says so even though the difference
         # is review metadata and the pin still holds.
@@ -401,6 +414,7 @@ def build_scope_packet(
             "scope_claim_count": len(in_scope),
             "resolvable_claim_count": len(review_claims),
             "blocked_claim_count": len(blocked),
+            "excluded_claim_count": len(excluded),
             "advanced_review_pin_count": len(advanced_review_pins),
         },
         "semantic_prefilter_applied": False,

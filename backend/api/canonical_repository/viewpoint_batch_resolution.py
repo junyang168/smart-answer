@@ -1863,6 +1863,7 @@ def scope_disposition_ledger(
     freeze_sha256: str,
     grouping_sha256: str,
     blocked_claims: Sequence[Mapping[str, Any]] = (),
+    excluded_claims: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Build the authoritative exact-once scope denominator from dispositions."""
 
@@ -1913,6 +1914,10 @@ def scope_disposition_ledger(
             [dict(item) for item in blocked_claims],
             key=lambda item: str(item.get("claim_id") or ""),
         ),
+        "excluded_claims": sorted(
+            [dict(item) for item in excluded_claims],
+            key=lambda item: str(item.get("claim_id") or ""),
+        ),
         "findings": findings,
         "status": "complete" if complete else "incomplete",
     }
@@ -1924,6 +1929,7 @@ def group_coverage_report(
     grouping: ClaimGroupingResponse,
     linked_claim_ids: Sequence[str],
     blocked_claims: Sequence[Mapping[str, Any]] = (),
+    excluded_claims: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Measure Registry coverage against the grouping plan, not against a batch.
 
@@ -1998,7 +2004,27 @@ def group_coverage_report(
                 ).items()
             )
         ),
-        "scope_claim_count": len(planned) + len(blocked_claims),
+        "excluded_claims": sorted(
+            (
+                {
+                    "claim_id": str(item["claim_id"]),
+                    "reason_code": str(item.get("reason_code") or "unspecified"),
+                }
+                for item in excluded_claims
+            ),
+            key=lambda item: item["claim_id"],
+        ),
+        "excluded_claim_counts": dict(
+            sorted(
+                Counter(
+                    str(item.get("reason_code") or "unspecified")
+                    for item in excluded_claims
+                ).items()
+            )
+        ),
+        "scope_claim_count": (
+            len(planned) + len(blocked_claims) + len(excluded_claims)
+        ),
     }
     report["artifact_sha256"] = sha256_json(report)
     return report

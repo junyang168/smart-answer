@@ -2102,18 +2102,25 @@ def test_claims_stopped_before_grouping_are_counted_in_the_same_ledger():
             {"claim_id": "C8", "reason_code": "invalid_source_evidence"},
             {"claim_id": "C7", "reason_code": "missing_reviewed_candidate"},
         ],
+        excluded_claims=[
+            {"claim_id": "C6", "reason_code": "superseded_claim"},
+        ],
     )
 
     assert report["covered_group_count"] == 1
     assert report["planned_claim_count"] == 1
-    # The scope is four Claims, not one, and the ledger says which three the
-    # pipeline will never route.
-    assert report["scope_claim_count"] == 4
+    # The scope is five Claims, not one: the ledger distinguishes the three
+    # blocked Claims from the governed superseded exclusion.
+    assert report["scope_claim_count"] == 5
     assert report["blocked_claim_counts"] == {
         "invalid_source_evidence": 2,
         "missing_reviewed_candidate": 1,
     }
     assert [item["claim_id"] for item in report["blocked_claims"]] == ["C7", "C8", "C9"]
+    assert report["excluded_claim_counts"] == {"superseded_claim": 1}
+    assert report["excluded_claims"] == [
+        {"claim_id": "C6", "reason_code": "superseded_claim"}
+    ]
 
 
 def test_group_coverage_names_links_the_plan_does_not_account_for():

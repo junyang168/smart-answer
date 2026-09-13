@@ -28,6 +28,7 @@ from backend.api.canonical_repository.viewpoint_production_safety import (
     validate_plan_readback_receipt,
     validate_execution_boundary,
     validate_registry_transition,
+    _validate_scope_packet,
 )
 
 
@@ -124,6 +125,7 @@ def _fixture(tmp_path: Path):
             }
         ],
         "blocked_claims": [],
+        "excluded_claims": [],
     }
     packet["packet_sha256"] = sha256_json(packet)
     packet_path = _write_json(tmp_path / "scope.json", packet)
@@ -282,6 +284,39 @@ def test_freeze_blocks_self_consistent_but_forged_scope_projection(tmp_path):
         )
     assert "scope packet Claim projection differs" in str(exc_info.value)
     assert "scope packet evidence projection drift" in str(exc_info.value)
+
+
+def test_freeze_accepts_only_sha_bound_current_superseded_exclusions(tmp_path):
+    store, packet_path, _ = _fixture(tmp_path)
+    superseded = ClaimRecord(
+        claim_id="C2",
+        statement="已经被最终裁定取代的命题",
+        claim_type="teaching",
+        revision=3,
+        review_status="superseded",
+    )
+    store.rows["claims"].append(superseded.model_dump(mode="json"))
+    packet = json.loads(packet_path.read_text(encoding="utf-8"))
+    packet["excluded_claims"] = [
+        {
+            "claim_id": "C2",
+            "reason_code": "superseded_claim",
+            "review_status": "superseded",
+            "claim_revision": 3,
+            "claim_revision_sha256": semantic_record_sha(superseded),
+        }
+    ]
+    packet["packet_sha256"] = sha256_json(
+        {key: value for key, value in packet.items() if key != "packet_sha256"}
+    )
+    _write_json(packet_path, packet)
+    assert _validate_scope_packet(packet, store) == []
+
+    store.rows["claims"][-1]["review_status"] = "approved"
+    assert any(
+        "not bound to a current superseded" in finding
+        for finding in _validate_scope_packet(packet, store)
+    )
 
     store, packet_path, _ = _fixture(tmp_path / "blocked")
     packet = json.loads(packet_path.read_text(encoding="utf-8"))
