@@ -514,10 +514,10 @@ class SourceCoverageReader:
             for fragment_id in owned:
                 fragments[fragment_id]["node_ids"].append(object_id)
 
-        # A claim also reaches this source through the steps it lists.  The two
-        # directions are not mirrors — a step can omit `produced_claim_ids`
-        # while the claim still names the step — so a claim listed by only one
-        # of them is still this source's claim.
+        # A claim reaches this source through its EvidenceSteps and through
+        # other anchored node types such as a Question's `answer_claim_ids`.
+        # Claim↔EvidenceStep projections are contractually reciprocal; the
+        # broader node→Claim links are intentionally not that same relation.
         for claim_id, payload in corpus["claims"].items():
             steps = _as_list(payload.get("evidence_step_ids"))
             if claim_id not in claim_ids and not any(step in nodes for step in steps):
