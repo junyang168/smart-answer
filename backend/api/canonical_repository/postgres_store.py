@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import tempfile
 import uuid
 from dataclasses import asdict, dataclass
@@ -20,6 +21,10 @@ from typing import Any, Iterable, Mapping, Optional, Sequence
 
 from .knowledge_importer import KnowledgePackageImporter
 from .knowledge_models import KNOWLEDGE_COLLECTIONS
+from .reviewed_candidate_contract import (
+    ConsensusApplicationError,
+    validate_store_package_authorization,
+)
 
 
 MIGRATIONS_DIR = Path(__file__).with_name("migrations")
@@ -30,6 +35,16 @@ EDGE_COLLECTIONS = {
     "viewpoint_claim_links",
     "viewpoint_proposition_unit_links",
     "viewpoint_relations",
+}
+EDGE_ENDPOINT_COLLECTIONS = {
+    "knowledge_relations": ({"evidence_steps", "observations"}, {"evidence_steps"}),
+    "claim_relations": ({"claims"}, {"claims"}),
+    "claim_relation_constraints": ({"claims"}, {"claims"}),
+    "viewpoint_claim_links": ({"canonical_viewpoints"}, {"claims"}),
+    "viewpoint_proposition_unit_links": (
+        {"canonical_viewpoints"}, {"viewpoint_proposition_units"},
+    ),
+    "viewpoint_relations": ({"canonical_viewpoints"}, {"canonical_viewpoints"}),
 }
 VIEWPOINT_VALIDATION_COLLECTIONS = {
     "source_documents",
@@ -55,6 +70,99 @@ VIEWPOINT_VALIDATION_COLLECTIONS = {
     "viewpoint_atomic_resolution_ledgers",
     "viewpoint_atomic_quality_reports",
     "viewpoint_automated_promotion_decisions",
+}
+EXTRACTION_RECORD_COLLECTIONS = {
+    "source_fragments",
+    "questions",
+    "position_nodes",
+    "observations",
+    "evidence_steps",
+    "claims",
+    "knowledge_relations",
+    "claim_relations",
+}
+# Fields that mean a *current semantic dependency* on an extraction record.
+# Searching every string value caused transcript metadata and explicit lineage
+# (for example ``previous_claim_id``) to masquerade as live references. Nested
+# objects are still traversed, but only values under these authoritative field
+# names can block a retirement.
+# Retired CompositionPlan/CompositionDecision rows are historical artifacts,
+# not live authoring authority; draft-first products are protected through
+# ProductDependency invalidation instead.
+SEMANTIC_EXTRACTION_REFERENCE_FIELDS = {
+    "topic_identity_reconciliations": {"claim_ids"},
+    "claim_relation_constraints": {"source_id", "target_id"},
+    "knowledge_routes": {"claim_id"},
+    "editorial_syntheses": {"claim_ids"},
+    "viewpoint_coverage_snapshots": {"source_id"},
+    "viewpoint_structure_revisions": {"basis_claim_ids"},
+    "viewpoint_claim_links": {
+        "claim_id", "supporting_relation_ids", "evidence_step_id", "source_fragment_id",
+    },
+    "viewpoint_proposition_units": {
+        "parent_claim_id", "source_id", "evidence_step_id", "source_fragment_id",
+    },
+    "viewpoint_atomic_coverage_snapshots": {"claim_ids", "source_ids"},
+    "viewpoint_atomic_resolution_ledgers": {"parent_claim_id"},
+    "argument_route_revisions": {"evidence_step_ids", "source_fragment_ids"},
+    "argument_route_attestations": {
+        "source_id", "claim_ids", "evidence_step_ids", "source_fragment_ids",
+    },
+    "viewpoint_relations": {
+        "supporting_claim_relation_ids", "supporting_claim_ids",
+        "correction_evidence_claim_ids",
+    },
+    "viewpoint_identity_candidates": {"candidate_claim_ids", "seed_relation_ids"},
+    "viewpoint_resolution_ledgers": {"claim_id"},
+}
+SEMANTIC_REFERENCE_COLLECTIONS = set(SEMANTIC_EXTRACTION_REFERENCE_FIELDS)
+OBSOLETE_CANDIDATE_RETIREMENT_COLLECTIONS = (
+    "composition_decisions",
+    "composition_plans",
+    "editorial_syntheses",
+    "knowledge_routes",
+)
+PACKAGE_REFERENCE_FIELDS = {
+    "source_fragments": {"source_id"},
+    "questions": {"source_fragment_id", "source_fragment_ids", "answer_claim_ids"},
+    "position_nodes": {"source_fragment_ids"},
+    "observations": {"source_fragment_id", "source_fragment_ids"},
+    "evidence_steps": {
+        "source_fragment_id", "source_fragment_ids", "produced_claim_ids",
+    },
+    "claims": {
+        "evidence_step_ids", "opposed_position_ids", "superseded_by",
+        "source_id", "evidence_id",
+    },
+}
+# Every registered collection is deliberately classified as extraction,
+# current semantic master data, or non-live/history. The test over this set
+# forces a new collection to choose before it can silently escape the guard.
+NON_LIVE_EXTRACTION_REFERENCE_COLLECTIONS = {
+    "argument_routes",
+    "canonical_viewpoints",
+    "composition_decisions",
+    "composition_plans",
+    "editorial_checks",
+    "impact_events",
+    "product_dependencies",
+    "tensions",
+    "topic_nodes",
+    "viewpoint_atomic_quality_reports",
+    "viewpoint_automated_promotion_decisions",
+    "viewpoint_identity_decisions",
+    "viewpoint_proposition_unit_links",
+    "viewpoint_quality_reports",
+    "viewpoint_revisions",
+    "viewpoint_structures",
+}
+# These fields preserve history or source lookup identity; they do not assert
+# that the referenced extraction object remains live. Every other previously
+# unclassified exact object-id occurrence fails closed during retirement so a
+# new schema field cannot silently bypass the allowlist above.
+NON_LIVE_EXTRACTION_ID_FIELDS = {
+    "previous_claim_id",
+    "transcript_id",
 }
 REVIEW_FIELDS = {
     "review_status",
@@ -402,6 +510,8 @@ def _normalize_records(
     records = KnowledgePackageImporter._model_records(dict(payload))
     normalized: dict[str, dict[str, dict[str, Any]]] = {}
     stated: dict[tuple[str, str], frozenset[str]] = {}
+    id_owners: dict[str, str] = {}
+    source_identity_owners: dict[tuple[str, str], str] = {}
     for collection, values in records.items():
         normalized[collection] = {}
         for value in values:
@@ -411,6 +521,24 @@ def _normalize_records(
                 raise PostgresKnowledgeStoreError(
                     f"Duplicate record {collection}/{record_id} in package"
                 )
+            prior_collection = id_owners.setdefault(record_id, collection)
+            if prior_collection != collection:
+                raise PostgresKnowledgeStoreError(
+                    "Record IDs are globally unique; "
+                    f"{record_id!r} appears in both {prior_collection} and {collection}"
+                )
+            if collection == "source_documents":
+                identity = (
+                    str(row.get("source_type") or "").strip(),
+                    str(row.get("transcript_id") or record_id).strip(),
+                )
+                prior_source = source_identity_owners.setdefault(identity, record_id)
+                if prior_source != record_id:
+                    raise PostgresKnowledgeStoreError(
+                        "Current SourceDocument identity is unique; "
+                        f"{identity!r} is declared by both {prior_source!r} "
+                        f"and {record_id!r}"
+                    )
             normalized[collection][record_id] = row
             stated[(collection, record_id)] = frozenset(value.model_fields_set)
     return normalized, stated
@@ -422,22 +550,50 @@ def normalize_package(payload: Mapping[str, Any]) -> dict[str, dict[str, dict[st
 
 
 def preserve_human_review(
-    incoming: Mapping[str, Any], existing: Optional[Mapping[str, Any]]
+    incoming: Mapping[str, Any],
+    existing: Optional[Mapping[str, Any]],
+    *,
+    existing_reviewer_kind: str | None = None,
 ) -> dict[str, Any]:
     result = dict(incoming)
-    # An explicit owner ruling is allowed to promote a record that was
-    # previously system-approved.  The old blanket preservation rule kept the
-    # system status and made the ruling provenance contradict the status that
-    # answers "who approved this?".  Lower-authority reimports still cannot
-    # erase an existing reviewed decision below.
-    if result.get("review_status") == "human_approved":
+    # Package ingest cannot make an owner ruling; that authority belongs to
+    # record_review, which writes the record revision and human event together.
+    # Here we only carry forward a ruling already bound to current store state.
+    if not existing:
         return result
-    if not existing or existing.get("review_status", "candidate") == "candidate":
+    existing_status = existing.get("review_status", "candidate")
+    human_settled = _is_human_settled(
+        existing_status, existing_reviewer_kind=existing_reviewer_kind
+    )
+    # ``superseded`` is not an authority level: both the AI consensus applier
+    # and a human reviewer can produce it.  Preserve it only when the event
+    # ledger proves that the current ruling was human; otherwise a later exact
+    # review generation must be allowed to revive or reclassify the claim.
+    if not human_settled:
         return result
     for field in REVIEW_FIELDS:
         if field in existing:
             result[field] = existing[field]
     return result
+
+
+def _is_human_settled(
+    review_status: Any, *, existing_reviewer_kind: str | None
+) -> bool:
+    status = str(review_status or "candidate")
+    return status in {"approved", "human_approved"} or (
+        status == "superseded" and existing_reviewer_kind == "human"
+    )
+
+
+def _substantive_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """The revision content that an old review decision actually covered."""
+
+    return {
+        key: value
+        for key, value in payload.items()
+        if key not in REVIEW_FIELDS
+    }
 
 
 def _is_empty(value: Any) -> bool:
@@ -517,6 +673,19 @@ class ChangeOperation:
     removed_fields: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class PlannedReviewEvent:
+    review_event_id: str
+    collection: str
+    object_id: str
+    object_revision: int
+    reviewer_kind: str
+    reviewer_id: str
+    decision: str
+    reason: str
+    artifact: dict[str, Any]
+
+
 def stored_operation_payload(operation: ChangeOperation) -> dict[str, Any]:
     """Return the exact payload persisted for one ChangeSet operation.
 
@@ -531,6 +700,124 @@ def stored_operation_payload(operation: ChangeOperation) -> dict[str, Any]:
     return payload
 
 
+def operation_fingerprint_rows(
+    operations: Sequence[ChangeOperation],
+) -> list[dict[str, Any]]:
+    """Bind ChangeSet identity to the exact store snapshot it intends to change."""
+
+    return [
+        {
+            "operation": row.operation,
+            "collection": row.collection,
+            "object_id": row.object_id,
+            "before_sha256": row.before_sha256,
+            "after_sha256": row.after_sha256,
+            "before_revision": row.before_revision,
+            "after_revision": row.after_revision,
+        }
+        for row in operations
+    ]
+
+
+def review_event_fingerprint_rows(
+    events: Sequence[PlannedReviewEvent],
+) -> list[dict[str, Any]]:
+    return [asdict(row) for row in events]
+
+
+def planned_ai_review_events(
+    package: Mapping[str, Any],
+    operations: Sequence[ChangeOperation],
+    *,
+    source_sha256: str,
+) -> tuple[PlannedReviewEvent, ...]:
+    """Compile exact-once review events from a sealed candidate manifest."""
+
+    application = package.get("consensus_application")
+    if not isinstance(application, Mapping) or application.get("review_completion") != "complete":
+        return ()
+    rows = application.get("review_resolutions")
+    if not isinstance(rows, list):
+        raise PostgresKnowledgeStoreError(
+            "complete consensus application lacks review_resolutions"
+        )
+    resolutions = {
+        str(row.get("claim_id") or ""): row
+        for row in rows
+        if isinstance(row, Mapping)
+    }
+    if len(resolutions) != len(rows) or "" in resolutions:
+        raise PostgresKnowledgeStoreError(
+            "review_resolutions contain a missing or duplicate claim id"
+        )
+    events: list[PlannedReviewEvent] = []
+    for operation in operations:
+        if operation.collection != "claims" or operation.operation not in {"create", "update"}:
+            continue
+        resolution = resolutions.get(operation.object_id)
+        if resolution is None:
+            raise PostgresKnowledgeStoreError(
+                f"claims/{operation.object_id}: complete review manifest has no resolution"
+            )
+        target = str(resolution.get("target_review_status") or "")
+        actual = str(operation.payload.get("review_status") or "candidate")
+        # An existing human ruling outranks this AI run. preserve_human_review
+        # has already put it back into operation.payload, so no lower-authority
+        # event may contradict it.
+        if actual in {"approved", "human_approved", "superseded"} and actual != target:
+            continue
+        if actual != target or target not in {
+            "ai_consensus_reviewed",
+            "human_review_required",
+            "superseded",
+        }:
+            raise PostgresKnowledgeStoreError(
+                f"claims/{operation.object_id}: review resolution disagrees with final payload"
+            )
+        superseded_by = str(operation.payload.get("superseded_by") or "")
+        if (target == "superseded") != bool(superseded_by):
+            raise PostgresKnowledgeStoreError(
+                f"claims/{operation.object_id}: superseded target and survivor link disagree"
+            )
+        reviewer_id = str(resolution.get("reviewer_id") or "").strip()
+        reason = str(resolution.get("reason") or "").strip()
+        if not reviewer_id or not reason:
+            raise PostgresKnowledgeStoreError(
+                f"claims/{operation.object_id}: review resolution lacks reviewer or reason"
+            )
+        artifact = {
+            "reviewed_candidate_sha256": source_sha256,
+            "reviewed_candidate_artifact_sha256": application.get("artifact_sha256"),
+            "review_artifact_sha256": application.get("review_artifact_sha256"),
+            "review_fingerprint": application.get("review_fingerprint"),
+            "adjudication_artifact_sha256": application.get("adjudication_artifact_sha256"),
+            "adjudication_fingerprint": application.get("adjudication_fingerprint"),
+            "overrides_artifact_sha256": application.get("overrides_artifact_sha256"),
+            "resolution": dict(resolution),
+        }
+        identity = {
+            "collection": "claims",
+            "object_id": operation.object_id,
+            "object_revision": operation.after_revision,
+            "after_sha256": operation.after_sha256,
+            "artifact": artifact,
+        }
+        events.append(
+            PlannedReviewEvent(
+                review_event_id=f"REV-AI-{sha256_json(identity)[:32]}",
+                collection="claims",
+                object_id=operation.object_id,
+                object_revision=operation.after_revision,
+                reviewer_kind="ai",
+                reviewer_id=reviewer_id,
+                decision=target,
+                reason=reason,
+                artifact=artifact,
+            )
+        )
+    return tuple(events)
+
+
 @dataclass(frozen=True)
 class ChangeSetPlan:
     change_set_id: str
@@ -541,6 +828,7 @@ class ChangeSetPlan:
     operations: tuple[ChangeOperation, ...]
     unchanged: int
     ignored_keys: tuple[str, ...]
+    review_events: tuple[PlannedReviewEvent, ...] = ()
 
     @property
     def removals(self) -> tuple[dict[str, Any], ...]:
@@ -575,7 +863,213 @@ class ChangeSetPlan:
             "fields_removed": sum(len(item["fields"]) for item in removals),
             "removals": [dict(item) for item in removals],
         }
+        if self.review_events:
+            value["summary"]["review_events"] = len(self.review_events)
         return value
+
+
+def validate_change_set_plan_integrity(plan: ChangeSetPlan) -> None:
+    """Reject mutation of nested plan payloads before opening PostgreSQL."""
+
+    operation_index: dict[tuple[str, str, int], ChangeOperation] = {}
+    for operation in plan.operations:
+        if operation.operation not in {"create", "update"}:
+            continue
+        actual_sha = record_content_sha(stored_operation_payload(operation))
+        if actual_sha != operation.after_sha256:
+            raise PostgresKnowledgeStoreError(
+                f"planned payload changed after fingerprinting: "
+                f"{operation.collection}/{operation.object_id}"
+            )
+        key = (
+            operation.collection,
+            operation.object_id,
+            operation.after_revision,
+        )
+        if key in operation_index:
+            raise PostgresKnowledgeStoreError(
+                f"change set repeats one target revision: {key}"
+            )
+        operation_index[key] = operation
+
+    event_ids: set[str] = set()
+    for event in plan.review_events:
+        operation = operation_index.get(
+            (event.collection, event.object_id, event.object_revision)
+        )
+        resolution = event.artifact.get("resolution")
+        if (
+            operation is None
+            or not isinstance(resolution, Mapping)
+            or event.reviewer_kind != "ai"
+            or event.decision != resolution.get("target_review_status")
+            or event.reviewer_id != resolution.get("reviewer_id")
+            or event.reason != resolution.get("reason")
+        ):
+            raise PostgresKnowledgeStoreError(
+                f"planned review event no longer matches its claim operation: "
+                f"{event.review_event_id}"
+            )
+        identity = {
+            "collection": event.collection,
+            "object_id": event.object_id,
+            "object_revision": event.object_revision,
+            "after_sha256": operation.after_sha256,
+            "artifact": event.artifact,
+        }
+        expected_id = f"REV-AI-{sha256_json(identity)[:32]}"
+        if event.review_event_id != expected_id or expected_id in event_ids:
+            raise PostgresKnowledgeStoreError(
+                f"planned review event identity changed or repeats: "
+                f"{event.review_event_id}"
+            )
+        event_ids.add(expected_id)
+
+
+def uncoordinated_semantic_reference_blockers(
+    plan: ChangeSetPlan,
+    rows: Sequence[tuple[str, str, Mapping[str, Any]]],
+) -> list[str]:
+    """Describe live semantic rows a re-extraction ChangeSet would strand.
+
+    This is deliberately a pure function shared by preview and the locked
+    apply guard. A preview that only reports draft-product dependencies can
+    otherwise say a replacement is clear even though apply later discovers
+    current CVR/topic master data pinned to the retiring extraction generation.
+    """
+
+    retired_ids = {
+        operation.object_id
+        for operation in plan.operations
+        if (
+            operation.collection in EXTRACTION_RECORD_COLLECTIONS
+            or operation.collection == "source_documents"
+        )
+        and operation.operation == "retire"
+    }
+    if not retired_ids:
+        return []
+    planned_operations = {
+        (operation.collection, operation.object_id): operation
+        for operation in plan.operations
+    }
+
+    def strings(value: Any) -> set[str]:
+        if isinstance(value, Mapping):
+            found: set[str] = set()
+            for key, child in value.items():
+                if isinstance(key, str):
+                    found.add(key)
+                found.update(strings(child))
+            return found
+        if isinstance(value, (list, tuple, set)):
+            found = set()
+            for child in value:
+                found.update(strings(child))
+            return found
+        return {value} if isinstance(value, str) else set()
+
+    def exact_references(collection: str, value: Any) -> set[str]:
+        fields = SEMANTIC_EXTRACTION_REFERENCE_FIELDS.get(collection, set())
+        if not fields or not isinstance(value, (Mapping, list, tuple, set)):
+            return set()
+        if isinstance(value, Mapping):
+            found: set[str] = set()
+            for key, child in value.items():
+                if str(key) in fields:
+                    found.update(strings(child) & retired_ids)
+                else:
+                    found.update(exact_references(collection, child))
+            return found
+        found = set()
+        for child in value:
+            found.update(exact_references(collection, child))
+        return found
+
+    def unclassified_references(
+        collection: str, value: Any, *, path: tuple[str, ...] = ()
+    ) -> set[str]:
+        fields = SEMANTIC_EXTRACTION_REFERENCE_FIELDS.get(collection, set())
+        found: set[str] = set()
+        if isinstance(value, Mapping):
+            for key, child in value.items():
+                field = str(key)
+                if field in retired_ids:
+                    found.add(f"{'.'.join(path) or '<root>'}.<key>={field}")
+                if field in fields or field in NON_LIVE_EXTRACTION_ID_FIELDS:
+                    continue
+                found.update(
+                    unclassified_references(
+                        collection, child, path=(*path, field)
+                    )
+                )
+            return found
+        if isinstance(value, (list, tuple, set)):
+            for child in value:
+                found.update(
+                    unclassified_references(collection, child, path=path)
+                )
+            return found
+        if isinstance(value, str) and value in retired_ids:
+            found.add(f"{'.'.join(path) or '<root>'}={value}")
+        return found
+
+    blockers: list[str] = []
+    for collection, object_id, payload in rows:
+        key = (str(collection), str(object_id))
+        planned = planned_operations.get(key)
+        if planned is not None:
+            if planned.operation != "retire":
+                planned_payload = stored_operation_payload(planned)
+                references = exact_references(key[0], planned_payload)
+                if references:
+                    blockers.append(
+                        f"planned {key[0]}/{key[1]} still -> "
+                        f"{','.join(sorted(references))}"
+                    )
+                unknown = unclassified_references(key[0], planned_payload)
+                if unknown:
+                    blockers.append(
+                        f"planned {key[0]}/{key[1]} has unclassified id field "
+                        f"{','.join(sorted(unknown))}"
+                    )
+            continue
+        references = exact_references(key[0], payload)
+        if references:
+            blockers.append(
+                f"{key[0]}/{key[1]} -> {','.join(sorted(references))}"
+            )
+        unknown = unclassified_references(key[0], payload)
+        if unknown:
+            blockers.append(
+                f"{key[0]}/{key[1]} has unclassified id field "
+                f"{','.join(sorted(unknown))}"
+            )
+    # Newly created semantic rows are absent from the live-row input.
+    for key, planned in planned_operations.items():
+        if key[0] not in SEMANTIC_REFERENCE_COLLECTIONS:
+            continue
+        if planned.operation == "retire":
+            continue
+        planned_payload = stored_operation_payload(planned)
+        references = exact_references(key[0], planned_payload)
+        if references and not any(
+            item.startswith(f"planned {key[0]}/{key[1]} ") for item in blockers
+        ):
+            blockers.append(
+                f"planned {key[0]}/{key[1]} still -> "
+                f"{','.join(sorted(references))}"
+            )
+        unknown = unclassified_references(key[0], planned_payload)
+        if unknown and not any(
+            item.startswith(f"planned {key[0]}/{key[1]} has unclassified ")
+            for item in blockers
+        ):
+            blockers.append(
+                f"planned {key[0]}/{key[1]} has unclassified id field "
+                f"{','.join(sorted(unknown))}"
+            )
+    return sorted(blockers)
 
 
 def build_change_set_plan(
@@ -583,8 +1077,27 @@ def build_change_set_plan(
     existing: Mapping[tuple[str, str], Mapping[str, Any]],
     *,
     source_kind: str = "knowledge_package",
+    existing_review_authorities: Mapping[tuple[str, str], str] | None = None,
 ) -> ChangeSetPlan:
+    try:
+        validate_store_package_authorization(package)
+    except ConsensusApplicationError as exc:
+        raise PostgresKnowledgeStoreError(
+            f"reviewed candidate cannot enter the canonical store: {exc}"
+        ) from exc
     normalized, stated = _normalize_records(package)
+    review_targets = {
+        str(row.get("claim_id") or ""): str(
+            row.get("target_review_status") or ""
+        )
+        for row in (
+            (package.get("consensus_application") or {}).get(
+                "review_resolutions"
+            )
+            or []
+        )
+        if isinstance(row, Mapping)
+    }
     # The generic JSONB tables deliberately accept new collections without a
     # DDL migration, but viewpoint master data has cross-record invariants the
     # shape validator cannot see.  Refuse the ChangeSet before it receives an
@@ -598,12 +1111,96 @@ def build_change_set_plan(
         for object_id in sorted(normalized[collection]):
             current = existing.get((collection, object_id))
             current_payload = (current or {}).get("payload")
+            declared_status = str(
+                normalized[collection][object_id].get("review_status")
+                or "candidate"
+            )
+            current_status = str(
+                (current_payload or {}).get("review_status") or "candidate"
+            )
+            if (
+                collection == "claims"
+                and declared_status in {"approved", "human_approved"}
+                and declared_status != current_status
+            ):
+                raise PostgresKnowledgeStoreError(
+                    f"{collection}/{object_id}: package ingest cannot create or "
+                    "change a human approval; use record_review"
+                )
             merged = merge_over_existing(
                 normalized[collection][object_id],
                 current_payload,
                 stated[(collection, object_id)],
             )
-            incoming = preserve_human_review(merged, current_payload)
+            existing_reviewer_kind = (existing_review_authorities or {}).get(
+                (collection, object_id)
+            )
+            if (
+                collection == "claims"
+                and current_payload
+                and current_payload.get("review_status") == "superseded"
+                and review_targets.get(object_id) not in {None, "", "superseded"}
+            ):
+                # `superseded_by` is substantive and normally survives an
+                # omitted field.  Here the sealed next-generation resolution
+                # explicitly revives the claim, so retaining the old AI merge
+                # target would contradict that exact reviewed candidate.
+                if existing_reviewer_kind == "ai":
+                    merged.pop("superseded_by", None)
+                elif existing_reviewer_kind != "human":
+                    raise PostgresKnowledgeStoreError(
+                        f"claims/{object_id}: cannot replace superseded status "
+                        "without a review event bound to the current revision"
+                    )
+            if (
+                collection == "claims"
+                and current_payload
+                and current_payload.get("review_status") == "superseded"
+                and existing_reviewer_kind not in {"ai", "human"}
+                and _substantive_payload(merged)
+                != _substantive_payload(current_payload)
+            ):
+                raise PostgresKnowledgeStoreError(
+                    f"claims/{object_id}: cannot change a superseded claim "
+                    "whose review authority is unknown"
+                )
+            if (
+                current_payload
+                and _is_human_settled(
+                    current_payload.get("review_status"),
+                    existing_reviewer_kind=existing_reviewer_kind,
+                )
+                and _substantive_payload(merged)
+                != _substantive_payload(current_payload)
+            ):
+                raise PostgresKnowledgeStoreError(
+                    f"{collection}/{object_id}: incoming package changes content "
+                    "covered by an existing human review; a new human ruling is required"
+                )
+            if collection == "source_documents" and current_payload:
+                incoming_identity = (
+                    str(merged.get("source_type") or "").strip(),
+                    str(merged.get("transcript_id") or object_id).strip(),
+                )
+                current_identity = (
+                    str(current_payload.get("source_type") or "").strip(),
+                    str(current_payload.get("transcript_id") or object_id).strip(),
+                )
+                completing_legacy_type = (
+                    not current_identity[0]
+                    and bool(incoming_identity[0])
+                    and incoming_identity[1] == current_identity[1]
+                )
+                if incoming_identity != current_identity and not completing_legacy_type:
+                    raise PostgresKnowledgeStoreError(
+                        f"SourceDocument id {object_id!r} cannot change identity "
+                        f"from {current_identity!r} to {incoming_identity!r}"
+                    )
+            incoming = preserve_human_review(
+                merged,
+                current_payload,
+                existing_reviewer_kind=existing_reviewer_kind,
+            )
             removed_fields = fields_removed(current_payload, incoming)
             after_sha = record_content_sha(incoming)
             before_sha = str((current or {}).get("content_sha256") or "") or None
@@ -626,17 +1223,23 @@ def build_change_set_plan(
             )
 
     source_sha = sha256_json(package)
+    review_events = planned_ai_review_events(
+        package, operations, source_sha256=source_sha
+    )
     fingerprint_payload = {
-        "planner_schema": "wang_postgres_changeset_v1",
+        "planner_schema": "wang_postgres_changeset_v2",
         "source_kind": source_kind,
         "source_sha256": source_sha,
         "package_id": str(package.get("package_id") or ""),
+        "operations": operation_fingerprint_rows(operations),
+        "review_events": review_event_fingerprint_rows(review_events),
     }
     fingerprint = sha256_json(fingerprint_payload)
     recognized = set(KnowledgePackageImporter.SOURCE_COLLECTION_KEYS) | {
         "product_plans", "schema_version", "package_id", "title", "corpus_scope",
         "framework_candidate", "validation_experiments", "summary", "batch",
         "candidate_generation", "lineage", "approval_status",
+        "consensus_application",
     }
     ignored = tuple(sorted(set(package) - recognized))
     return ChangeSetPlan(
@@ -648,6 +1251,7 @@ def build_change_set_plan(
         operations=tuple(operations),
         unchanged=unchanged,
         ignored_keys=ignored,
+        review_events=review_events,
     )
 
 
@@ -695,10 +1299,11 @@ def build_retirement_plan(
             )
         )
     fingerprint = sha256_json({
-        "planner_schema": "wang_postgres_retirement_v1",
+        "planner_schema": "wang_postgres_retirement_v2",
         "source_kind": source_kind,
         "reason": reason,
         "keys": [list(key) for key in sorted({(c, o) for c, o in keys})],
+        "operations": operation_fingerprint_rows(operations),
     })
     return ChangeSetPlan(
         change_set_id=f"KCS-{fingerprint[:20]}",
@@ -755,10 +1360,11 @@ def build_revival_plan(
             )
         )
     fingerprint = sha256_json({
-        "planner_schema": "wang_postgres_revival_v1",
+        "planner_schema": "wang_postgres_revival_v2",
         "source_kind": source_kind,
         "reason": reason,
         "keys": [list(key) for key in sorted({(c, o) for c, o in keys})],
+        "operations": operation_fingerprint_rows(operations),
     })
     return ChangeSetPlan(
         change_set_id=f"KCS-{fingerprint[:20]}",
@@ -780,14 +1386,21 @@ def combined_plan(arrival: ChangeSetPlan, withdrawal: ChangeSetPlan) -> ChangeSe
     fingerprint covers both halves, so re-running the same arrival against the
     same predecessor plans the same change set and applies once.
 
-    Arrivals come first. The withdrawal is built to exclude every id the
-    package carries, so the two halves never touch the same row.
+    Withdrawals come first inside the transaction. The withdrawal is built to
+    exclude every id the package carries, so the halves never touch the same
+    row; retiring an old SourceDocument alias first also lets the database's
+    current-transcript uniqueness constraint admit its replacement without an
+    observable gap outside the transaction.
     """
 
     fingerprint = sha256_json({
-        "planner_schema": "wang_postgres_arrival_with_withdrawal_v1",
+        "planner_schema": "wang_postgres_arrival_with_withdrawal_v2",
         "arrival": arrival.fingerprint_sha256,
         "withdrawal": withdrawal.fingerprint_sha256,
+        "operations": operation_fingerprint_rows(
+            withdrawal.operations + arrival.operations
+        ),
+        "review_events": review_event_fingerprint_rows(arrival.review_events),
     })
     return ChangeSetPlan(
         change_set_id=f"KCS-{fingerprint[:20]}",
@@ -795,9 +1408,10 @@ def combined_plan(arrival: ChangeSetPlan, withdrawal: ChangeSetPlan) -> ChangeSe
         package_id=arrival.package_id,
         source_kind=arrival.source_kind,
         source_sha256=arrival.source_sha256,
-        operations=arrival.operations + withdrawal.operations,
+        operations=withdrawal.operations + arrival.operations,
         unchanged=arrival.unchanged + withdrawal.unchanged,
         ignored_keys=arrival.ignored_keys,
+        review_events=arrival.review_events,
     )
 
 
@@ -1045,6 +1659,13 @@ class PostgresKnowledgeStore:
         Retiring afterwards is too late: nothing was ever planned.
         """
 
+        try:
+            validate_store_package_authorization(package)
+        except ConsensusApplicationError as exc:
+            raise PostgresKnowledgeStoreError(
+                f"reviewed candidate cannot enter the canonical store: {exc}"
+            ) from exc
+
         normalized = normalize_package(package)
         keys = [
             (collection, object_id)
@@ -1052,7 +1673,55 @@ class PostgresKnowledgeStore:
             for object_id in rows
         ]
         with self.connect() as conn:
+            # The schema's global unique index is the final concurrency guard;
+            # this read gives a useful fail-closed error before a plan is made
+            # and also protects installations until migration 005 is applied.
+            incoming_owner = {object_id: collection for collection, object_id in keys}
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """SELECT collection, object_id FROM wang_knowledge.objects
+                       WHERE object_id = ANY(%s)""",
+                    (sorted(incoming_owner),),
+                )
+                for existing_collection, object_id in cursor.fetchall():
+                    expected_collection = incoming_owner[str(object_id)]
+                    if str(existing_collection) != expected_collection:
+                        raise PostgresKnowledgeStoreError(
+                            "Record IDs are globally unique; "
+                            f"{object_id!r} already belongs to {existing_collection}, "
+                            f"not {expected_collection}"
+                        )
+                cursor.execute(
+                    """SELECT DISTINCT ON (collection, object_id)
+                              collection, object_id, reviewer_kind, decision,
+                              object_revision
+                       FROM wang_knowledge.review_events
+                       WHERE object_id = ANY(%s)
+                       ORDER BY collection, object_id,
+                                object_revision DESC, created_at DESC,
+                                review_event_id DESC""",
+                    (sorted(incoming_owner),),
+                )
+                existing_review_events = {
+                    (str(collection), str(object_id)): (
+                        str(reviewer_kind), str(decision), int(object_revision)
+                    )
+                    for collection, object_id, reviewer_kind, decision,
+                    object_revision
+                    in cursor.fetchall()
+                    if incoming_owner.get(str(object_id)) == str(collection)
+                }
             existing = self._existing(conn, keys)
+            existing_review_authorities = {
+                key: reviewer_kind
+                for key, (reviewer_kind, decision, object_revision)
+                in existing_review_events.items()
+                if str(((existing.get(key) or {}).get("payload") or {}).get(
+                    "review_status"
+                ) or "") == decision
+                and int((existing.get(key) or {}).get("revision") or 0)
+                == object_revision
+            }
             if any(
                 collection in VIEWPOINT_VALIDATION_COLLECTIONS - {
                     "source_documents", "source_fragments", "claims",
@@ -1078,6 +1747,7 @@ class PostgresKnowledgeStore:
             package,
             {key: row for key, row in existing.items() if key not in set(retiring_keys)},
             source_kind=source_kind,
+            existing_review_authorities=existing_review_authorities,
         )
         return combined_plan(arrival, withdrawal) if withdrawal else arrival
 
@@ -1126,8 +1796,18 @@ class PostgresKnowledgeStore:
                 str(payload["relation_type"]),
             )
         return (
-            str(payload.get("from_id") or payload.get("source_id") or payload.get("from_claim_id")),
-            str(payload.get("to_id") or payload.get("target_id") or payload.get("to_claim_id")),
+            str(
+                payload.get("from_id")
+                or payload.get("source_id")
+                or payload.get("from_claim_id")
+                or ""
+            ),
+            str(
+                payload.get("to_id")
+                or payload.get("target_id")
+                or payload.get("to_claim_id")
+                or ""
+            ),
             str(payload["relation_type"]),
         )
 
@@ -1160,8 +1840,23 @@ class PostgresKnowledgeStore:
         metadata: Optional[dict[str, Any]] = None,
         expected_current_viewpoint_revisions: Optional[Mapping[str, str]] = None,
     ) -> dict[str, Any]:
+        validate_change_set_plan_integrity(plan)
+        if not plan.operations:
+            return {
+                "status": "unchanged",
+                "change_set_id": None,
+                "summary": plan.as_dict()["summary"],
+            }
         with self.connect() as conn:
             with conn.cursor() as cursor:
+                # ChangeSets share cross-record invariants that row locks alone
+                # cannot protect (most importantly a new CVR link racing a
+                # source re-extraction). Serialize the short apply transaction;
+                # model work and planning happen before this lock is taken.
+                cursor.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                    ("wang_knowledge.apply_plan.v1",),
+                )
                 cursor.execute(
                     "SELECT status, summary FROM wang_knowledge.change_sets WHERE fingerprint_sha256=%s",
                     (plan.fingerprint_sha256,),
@@ -1169,6 +1864,41 @@ class PostgresKnowledgeStore:
                 prior = cursor.fetchone()
                 if prior and prior[0] == "applied":
                     return {"status": "already_applied", "change_set_id": plan.change_set_id, "summary": prior[1]}
+
+                self._assert_obsolete_candidate_retirement(
+                    cursor,
+                    plan,
+                    (metadata or {}).get("obsolete_candidate_batch_retirement"),
+                )
+                self._assert_stale_pending_topic_identity_retirement(
+                    cursor,
+                    plan,
+                    (metadata or {}).get(
+                        "stale_pending_topic_identity_retirement"
+                    ),
+                )
+                self._assert_stale_candidate_projection_retirement(
+                    cursor,
+                    plan,
+                    (metadata or {}).get(
+                        "stale_candidate_projection_retirement"
+                    ),
+                    (metadata or {}).get(
+                        "obsolete_candidate_batch_retirement"
+                    ),
+                )
+                self._assert_stale_ai_cross_sermon_constraint_retirement(
+                    cursor,
+                    plan,
+                    (metadata or {}).get(
+                        "stale_ai_cross_sermon_constraint_retirement"
+                    ),
+                )
+                self._assert_global_id_uniqueness(cursor, plan)
+                self._assert_source_identity_uniqueness(cursor, plan)
+                self._assert_edge_integrity(cursor, plan)
+                self._assert_no_dangling_package_references(cursor, plan)
+                self._assert_no_uncoordinated_semantic_references(cursor, plan)
 
                 self._assert_current_viewpoint_revisions(
                     cursor, expected_current_viewpoint_revisions or {}
@@ -1294,6 +2024,26 @@ class PostgresKnowledgeStore:
                              operation.before_revision or 0, operation.after_revision)
                         )
 
+                for review_event in plan.review_events:
+                    cursor.execute(
+                        """INSERT INTO wang_knowledge.review_events
+                           (review_event_id, collection, object_id,
+                            object_revision, reviewer_kind, reviewer_id,
+                            decision, reason, artifact)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)""",
+                        (
+                            review_event.review_event_id,
+                            review_event.collection,
+                            review_event.object_id,
+                            review_event.object_revision,
+                            review_event.reviewer_kind,
+                            review_event.reviewer_id,
+                            review_event.decision,
+                            review_event.reason,
+                            canonical_json(review_event.artifact),
+                        ),
+                    )
+
                 invalidated = self._invalidate_dependencies(cursor, plan, changed_records, len(plan.operations))
                 summary["invalidated_dependencies"] = invalidated
                 cursor.execute(
@@ -1303,6 +2053,1517 @@ class PostgresKnowledgeStore:
                     (canonical_json(summary), plan.change_set_id),
                 )
         return {"status": "applied", "change_set_id": plan.change_set_id, "summary": summary}
+
+    @staticmethod
+    def _assert_global_id_uniqueness(cursor: Any, plan: ChangeSetPlan) -> None:
+        """Repeat the planning check under the global apply lock.
+
+        Migration 005 is the permanent database backstop, but an installation
+        with pre-existing source-identity duplicates cannot install it until
+        those rows are repaired. Two plans made before either apply must still
+        not create the same object id in different collections meanwhile.
+        """
+
+        incoming: dict[str, str] = {}
+        for operation in plan.operations:
+            if operation.operation == "retire":
+                continue
+            prior = incoming.setdefault(operation.object_id, operation.collection)
+            if prior != operation.collection:
+                raise ChangeSetConflict(
+                    "Record IDs are globally unique; "
+                    f"{operation.object_id!r} arrives in both {prior} "
+                    f"and {operation.collection}"
+                )
+        if not incoming:
+            return
+        cursor.execute(
+            """SELECT collection, object_id FROM wang_knowledge.objects
+               WHERE object_id = ANY(%s) FOR UPDATE""",
+            (sorted(incoming),),
+        )
+        conflicts = [
+            (str(object_id), str(collection), incoming[str(object_id)])
+            for collection, object_id in cursor.fetchall()
+            if str(collection) != incoming[str(object_id)]
+        ]
+        if conflicts:
+            object_id, existing, arriving = sorted(conflicts)[0]
+            raise ChangeSetConflict(
+                "Record IDs are globally unique; "
+                f"{object_id!r} already belongs to {existing}, not {arriving}"
+            )
+
+    @staticmethod
+    def _assert_source_identity_uniqueness(cursor: Any, plan: ChangeSetPlan) -> None:
+        """Lock and reject a second current source for one transcript identity."""
+
+        retiring = {
+            operation.object_id
+            for operation in plan.operations
+            if operation.collection == "source_documents"
+            and operation.operation == "retire"
+        }
+        incoming_identities: dict[tuple[str, str], str] = {}
+        for operation in plan.operations:
+            if operation.collection != "source_documents" or operation.operation == "retire":
+                continue
+            payload = stored_operation_payload(operation)
+            source_type = str(payload.get("source_type") or "").strip()
+            transcript_id = str(
+                payload.get("transcript_id") or operation.object_id
+            ).strip()
+            if not source_type:
+                raise ChangeSetConflict(
+                    f"SourceDocument {operation.object_id} has no stable source_type identity"
+                )
+            identity = (source_type, transcript_id)
+            prior_source = incoming_identities.setdefault(identity, operation.object_id)
+            if prior_source != operation.object_id:
+                raise ChangeSetConflict(
+                    "Multiple incoming SourceDocuments would name "
+                    f"{identity}: {prior_source}, {operation.object_id}"
+                )
+            cursor.execute(
+                """SELECT object_id,
+                          btrim(COALESCE(payload->>'source_type','')),
+                          btrim(COALESCE(NULLIF(payload->>'transcript_id',''), object_id))
+                   FROM wang_knowledge.objects
+                   WHERE collection='source_documents' AND retired_at IS NULL
+                     AND object_id<>%s
+                     AND (
+                       (
+                         btrim(COALESCE(payload->>'source_type',''))=''
+                         AND btrim(COALESCE(NULLIF(payload->>'transcript_id',''), object_id))=%s
+                       )
+                       OR (
+                         btrim(payload->>'source_type')=%s
+                         AND btrim(COALESCE(NULLIF(payload->>'transcript_id',''), object_id))=%s
+                       )
+                     )
+                   FOR UPDATE""",
+                (operation.object_id, transcript_id, source_type, transcript_id),
+            )
+            conflicts: set[str] = set()
+            for object_id, existing_type, _existing_transcript in cursor.fetchall():
+                if str(object_id) in retiring:
+                    continue
+                if not str(existing_type or "").strip():
+                    raise ChangeSetConflict(
+                        "Cannot prove transcript identity uniqueness while current "
+                        f"SourceDocument {object_id!r} has no source_type"
+                    )
+                conflicts.add(str(object_id))
+            if conflicts:
+                raise ChangeSetConflict(
+                    "Multiple current SourceDocuments would name "
+                    f"({source_type}, {transcript_id}): " + ", ".join(sorted(conflicts))
+                )
+
+    @classmethod
+    def _assert_edge_integrity(cls, cursor: Any, plan: ChangeSetPlan) -> None:
+        """Validate every arriving edge against the transaction's final graph.
+
+        Model validators are useful early feedback, but the database write is
+        the chokepoint shared by extraction, consensus, CVR and imported
+        increments. Recheck here under the global apply lock so no path can
+        create a self-edge, dangling endpoint, or the same semantic edge under
+        a second identifier.
+        """
+
+        retiring_keys = {
+            (operation.collection, operation.object_id)
+            for operation in plan.operations
+            if operation.operation == "retire"
+        }
+        retiring_ids = {object_id for _, object_id in retiring_keys}
+        planned_edge_operations = {
+            (operation.collection, operation.object_id): operation
+            for operation in plan.operations
+            if operation.collection in EDGE_COLLECTIONS
+        }
+        arriving_owners = {
+            operation.object_id: operation.collection
+            for operation in plan.operations
+            if operation.operation != "retire"
+        }
+        incoming_edges: list[tuple[str, str, str, str, str]] = []
+        incoming_signatures: dict[tuple[str, str, str, str], str] = {}
+        endpoint_ids: set[str] = set()
+        for operation in plan.operations:
+            if operation.collection not in EDGE_COLLECTIONS or operation.operation == "retire":
+                continue
+            payload = stored_operation_payload(operation)
+            from_id, to_id, relation_type = cls._edge_values(
+                operation.collection, payload
+            )
+            if not from_id or not to_id:
+                raise ChangeSetConflict(
+                    f"Edge {operation.collection}/{operation.object_id} has an empty endpoint"
+                )
+            if not relation_type:
+                raise ChangeSetConflict(
+                    f"Edge {operation.collection}/{operation.object_id} has no relation type"
+                )
+            if from_id == to_id:
+                raise ChangeSetConflict(
+                    f"Edge {operation.collection}/{operation.object_id} points to itself"
+                )
+            signature = (operation.collection, from_id, to_id, relation_type)
+            prior = incoming_signatures.setdefault(signature, operation.object_id)
+            if prior != operation.object_id:
+                raise ChangeSetConflict(
+                    "Duplicate semantic edge in one ChangeSet: "
+                    f"{operation.collection}/{prior} and {operation.object_id} "
+                    f"both name {from_id}->{to_id} ({relation_type})"
+                )
+            incoming_edges.append(
+                (operation.collection, operation.object_id, from_id, to_id, relation_type)
+            )
+            endpoint_ids.update((from_id, to_id))
+        if retiring_ids:
+            cursor.execute(
+                """SELECT edge_collection, edge_id, from_id, to_id
+                   FROM wang_knowledge.edges
+                   WHERE retired_at IS NULL
+                     AND (from_id = ANY(%s) OR to_id = ANY(%s))
+                   FOR UPDATE""",
+                (sorted(retiring_ids), sorted(retiring_ids)),
+            )
+            surviving_references = []
+            for collection, edge_id, from_id, to_id in cursor.fetchall():
+                key = (str(collection), str(edge_id))
+                planned = planned_edge_operations.get(key)
+                if planned is not None:
+                    if planned.operation == "retire":
+                        continue
+                    from_id, to_id, _ = cls._edge_values(
+                        key[0], stored_operation_payload(planned)
+                    )
+                if str(from_id) in retiring_ids or str(to_id) in retiring_ids:
+                    surviving_references.append(
+                        (key[0], key[1], str(from_id), str(to_id))
+                    )
+            if surviving_references:
+                collection, edge_id, from_id, to_id = sorted(
+                    surviving_references
+                )[0]
+                raise ChangeSetConflict(
+                    f"Retirement would leave current edge {collection}/{edge_id} "
+                    f"with non-current endpoint {from_id}->{to_id}"
+                )
+        if not incoming_edges:
+            return
+
+        cursor.execute(
+            """SELECT collection, object_id FROM wang_knowledge.objects
+               WHERE object_id = ANY(%s) AND retired_at IS NULL FOR UPDATE""",
+            (sorted(endpoint_ids),),
+        )
+        current_owner_sets: dict[str, set[str]] = {}
+        for collection, object_id in cursor.fetchall():
+            object_id = str(object_id)
+            if object_id in retiring_ids:
+                continue
+            current_owner_sets.setdefault(object_id, set()).add(str(collection))
+        ambiguous = {
+            object_id: owners
+            for object_id, owners in current_owner_sets.items()
+            if len(owners) > 1
+        }
+        if ambiguous:
+            object_id = sorted(ambiguous)[0]
+            raise ChangeSetConflict(
+                f"Edge endpoint {object_id} has ambiguous global ownership: "
+                + ", ".join(sorted(ambiguous[object_id]))
+            )
+        current_owners = {
+            object_id: next(iter(owners))
+            for object_id, owners in current_owner_sets.items()
+        }
+        final_owners = {**current_owners, **arriving_owners}
+        for collection, edge_id, from_id, to_id, _ in incoming_edges:
+            missing = {from_id, to_id} - set(final_owners)
+            if missing:
+                raise ChangeSetConflict(
+                    f"Edge {collection}/{edge_id} has non-current endpoints: "
+                    + ", ".join(sorted(missing))
+                )
+            allowed_from, allowed_to = EDGE_ENDPOINT_COLLECTIONS[collection]
+            if final_owners[from_id] not in allowed_from:
+                raise ChangeSetConflict(
+                    f"Edge {collection}/{edge_id} from endpoint {from_id} belongs to "
+                    f"{final_owners[from_id]}, expected {sorted(allowed_from)}"
+                )
+            if final_owners[to_id] not in allowed_to:
+                raise ChangeSetConflict(
+                    f"Edge {collection}/{edge_id} to endpoint {to_id} belongs to "
+                    f"{final_owners[to_id]}, expected {sorted(allowed_to)}"
+                )
+
+        cursor.execute(
+            """SELECT edge_collection, edge_id, from_id, to_id, relation_type
+               FROM wang_knowledge.edges WHERE retired_at IS NULL FOR UPDATE"""
+        )
+        existing: dict[tuple[str, str, str, str], set[str]] = {}
+        for collection, edge_id, from_id, to_id, relation_type in cursor.fetchall():
+            key = (str(collection), str(edge_id))
+            planned = planned_edge_operations.get(key)
+            if planned is not None:
+                if planned.operation == "retire":
+                    continue
+                from_id, to_id, relation_type = cls._edge_values(
+                    key[0], stored_operation_payload(planned)
+                )
+            signature = (
+                key[0], str(from_id), str(to_id), str(relation_type)
+            )
+            existing.setdefault(signature, set()).add(key[1])
+        for collection, edge_id, from_id, to_id, relation_type in incoming_edges:
+            other_owners = existing.get(
+                (collection, from_id, to_id, relation_type), set()
+            ) - {edge_id}
+            if other_owners:
+                owner = sorted(other_owners)[0]
+                raise ChangeSetConflict(
+                    "Semantic edge already has another current ID: "
+                    f"{collection}/{owner}, not {edge_id}, names "
+                    f"{from_id}->{to_id} ({relation_type})"
+                )
+
+    @staticmethod
+    def _assert_no_uncoordinated_semantic_references(
+        cursor: Any, plan: ChangeSetPlan
+    ) -> None:
+        """Do not retire extraction identity under current CVR records.
+
+        Model-local ordinals are not semantic identity. Re-extraction therefore
+        creates a disjoint generation and retires its predecessor. If current
+        viewpoint/route master data still cites that predecessor, a coordinated
+        CVR ChangeSet must update or retire those records in the same plan;
+        silently leaving them attached to retired content is forbidden. An
+        ``update`` preserves the same object id and is therefore deliberately
+        not included: references to an identity-preserving update remain valid.
+        """
+
+        if not any(
+            (
+                operation.collection in EXTRACTION_RECORD_COLLECTIONS
+                or operation.collection == "source_documents"
+            )
+            and operation.operation == "retire"
+            for operation in plan.operations
+        ):
+            return
+        cursor.execute(
+            """SELECT collection, object_id, payload
+               FROM wang_knowledge.objects
+               WHERE collection = ANY(%s) AND retired_at IS NULL
+               FOR UPDATE""",
+            (sorted(SEMANTIC_REFERENCE_COLLECTIONS),),
+        )
+        blockers = uncoordinated_semantic_reference_blockers(
+            plan, cursor.fetchall()
+        )
+        if blockers:
+            raise ChangeSetConflict(
+                "re-extraction requires a coordinated CVR update; current semantic "
+                "master data still references the predecessor: "
+                + " | ".join(sorted(blockers)[:20])
+            )
+
+    @staticmethod
+    def _assert_obsolete_candidate_retirement(
+        cursor: Any,
+        plan: ChangeSetPlan,
+        audit: Mapping[str, Any] | None,
+    ) -> None:
+        """Recheck an opt-in legacy candidate cleanup under the apply lock."""
+
+        if audit is None:
+            return
+        if (
+            audit.get("schema_version")
+            != "wang_obsolete_candidate_batch_retirement_v1"
+            or audit.get("reason_code")
+            != "composition_plan_candidate_retired_by_draft_first"
+        ):
+            raise ChangeSetConflict(
+                "obsolete candidate retirement audit is missing its governed identity"
+            )
+        canonical_audit = dict(audit)
+        stored_scope_sha256 = str(canonical_audit.pop("scope_sha256", ""))
+        if stored_scope_sha256 != sha256_json(canonical_audit):
+            raise ChangeSetConflict(
+                "obsolete candidate retirement audit scope SHA does not match"
+            )
+        batch_id = str(audit.get("batch_id") or "")
+        if not batch_id.startswith("RB-") or len(batch_id) <= 3:
+            raise ChangeSetConflict(
+                "obsolete candidate retirement audit has an invalid batch id"
+            )
+        batch_key = re.escape(batch_id[3:])
+        plan_pattern = re.compile(rf"^CP-{batch_key}-[ST]-[0-9a-f]{{12}}$")
+        synthesis_pattern = re.compile(
+            rf"^SYN-{batch_key}-[ST]-[0-9a-f]{{12}}$"
+        )
+        known_plan_ids = {
+            str(object_id)
+            for object_id in audit.get("known_plan_ids") or []
+            if plan_pattern.fullmatch(str(object_id))
+        }
+
+        def belongs_to_obsolete_batch(
+            collection: str, object_id: str, payload: Mapping[str, Any]
+        ) -> bool:
+            if collection == "composition_plans":
+                return bool(plan_pattern.fullmatch(object_id))
+            if collection == "composition_decisions":
+                plan_id = str(payload.get("plan_id") or "")
+                return plan_id in known_plan_ids or bool(plan_pattern.fullmatch(plan_id))
+            if collection == "knowledge_routes":
+                plan_id = str(payload.get("target_id") or "")
+                return plan_id in known_plan_ids or bool(plan_pattern.fullmatch(plan_id))
+            if collection == "editorial_syntheses":
+                return bool(synthesis_pattern.fullmatch(object_id))
+            return False
+
+        status = audit.get("status")
+        if status == "already_retired":
+            if audit.get("records") not in ([], None) or any(
+                operation.operation == "retire"
+                and operation.collection
+                in OBSOLETE_CANDIDATE_RETIREMENT_COLLECTIONS
+                for operation in plan.operations
+            ):
+                raise ChangeSetConflict(
+                    "already-retired candidate audit conflicts with planned retires"
+                )
+            cursor.execute(
+                """SELECT collection, object_id, payload
+                   FROM wang_knowledge.objects
+                   WHERE retired_at IS NULL FOR UPDATE"""
+            )
+            resurrected = sorted(
+                f"{collection}/{object_id}"
+                for collection, object_id, payload in cursor.fetchall()
+                if belongs_to_obsolete_batch(
+                    str(collection), str(object_id), payload
+                )
+            )
+            if resurrected:
+                raise ChangeSetConflict(
+                    "already-retired candidate batch has live rows again: "
+                    + ", ".join(resurrected[:20])
+                )
+            return
+        if status != "planned":
+            raise ChangeSetConflict(
+                "obsolete candidate retirement audit has an invalid status"
+            )
+        records = audit.get("records")
+        if not isinstance(records, list) or not records:
+            raise ChangeSetConflict(
+                "obsolete candidate retirement audit has no records"
+            )
+        audited: dict[tuple[str, str], Mapping[str, Any]] = {}
+        for row in records:
+            if not isinstance(row, Mapping):
+                raise ChangeSetConflict(
+                    "obsolete candidate retirement audit contains a malformed record"
+                )
+            key = (
+                str(row.get("collection") or ""),
+                str(row.get("object_id") or ""),
+            )
+            if (
+                key in audited
+                or key[0] not in OBSOLETE_CANDIDATE_RETIREMENT_COLLECTIONS
+                or not key[1]
+            ):
+                raise ChangeSetConflict(
+                    "obsolete candidate retirement audit has a duplicate or invalid key"
+                )
+            audited[key] = row
+
+        planned = {
+            (operation.collection, operation.object_id): operation
+            for operation in plan.operations
+        }
+        for key, row in audited.items():
+            operation = planned.get(key)
+            if operation is None or operation.operation != "retire":
+                raise ChangeSetConflict(
+                    f"obsolete candidate retirement omits planned retire {key[0]}/{key[1]}"
+                )
+            if (
+                operation.before_revision != row.get("expected_revision")
+                or operation.before_sha256 != row.get("expected_content_sha256")
+            ):
+                raise ChangeSetConflict(
+                    f"obsolete candidate retirement snapshot drifted for {key[0]}/{key[1]}"
+                )
+        unexpected = sorted(
+            key
+            for key, operation in planned.items()
+            if operation.operation == "retire"
+            and key[0] in OBSOLETE_CANDIDATE_RETIREMENT_COLLECTIONS
+            and key not in audited
+        )
+        if unexpected:
+            raise ChangeSetConflict(
+                "obsolete candidate retirement audit omits candidate-workflow retires: "
+                + ", ".join(f"{collection}/{object_id}" for collection, object_id in unexpected)
+            )
+
+        def strings(value: Any) -> set[str]:
+            if isinstance(value, Mapping):
+                found = {str(key) for key in value if isinstance(key, str)}
+                for child in value.values():
+                    found.update(strings(child))
+                return found
+            if isinstance(value, (list, tuple, set)):
+                found: set[str] = set()
+                for child in value:
+                    found.update(strings(child))
+                return found
+            return {value} if isinstance(value, str) else set()
+
+        cursor.execute(
+            """SELECT collection, object_id, payload
+               FROM wang_knowledge.objects
+               WHERE retired_at IS NULL FOR UPDATE"""
+        )
+        audited_ids = {object_id for _collection, object_id in audited}
+        blockers: list[str] = []
+        seen_current: set[tuple[str, str]] = set()
+        seen_rows: set[tuple[str, str]] = set()
+        for collection, object_id, payload in cursor.fetchall():
+            key = (str(collection), str(object_id))
+            seen_rows.add(key)
+            operation = planned.get(key)
+            if key in audited:
+                seen_current.add(key)
+                if (
+                    not belongs_to_obsolete_batch(key[0], key[1], payload)
+                    or str(payload.get("review_status") or "") != "candidate"
+                    or str(payload.get("visibility") or "") != "internal"
+                ):
+                    blockers.append(f"{key[0]}/{key[1]} is no longer pending candidate data")
+                continue
+            if operation is not None:
+                if operation.operation == "retire":
+                    continue
+                payload = stored_operation_payload(operation)
+            if belongs_to_obsolete_batch(key[0], key[1], payload):
+                prefix = "planned " if operation is not None else ""
+                blockers.append(
+                    f"{prefix}{key[0]}/{key[1]} is an omitted obsolete candidate"
+                )
+            references = strings(payload) & audited_ids
+            if references:
+                prefix = "planned " if operation is not None else ""
+                blockers.append(
+                    f"{prefix}{key[0]}/{key[1]} -> {','.join(sorted(references))}"
+                )
+        missing = sorted(set(audited) - seen_current)
+        blockers.extend(
+            f"{collection}/{object_id} is no longer current"
+            for collection, object_id in missing
+        )
+        # Creates are absent from the locked current-row query. Check every
+        # non-retire arrival so one ChangeSet cannot introduce the dangling
+        # reference it claims to have ruled out.
+        for key, operation in planned.items():
+            if key in seen_rows or operation.operation == "retire":
+                continue
+            payload = stored_operation_payload(operation)
+            if belongs_to_obsolete_batch(key[0], key[1], payload):
+                blockers.append(
+                    f"planned {key[0]}/{key[1]} is an omitted obsolete candidate"
+                )
+            references = strings(payload) & audited_ids
+            if references:
+                blockers.append(
+                    f"planned {key[0]}/{key[1]} -> {','.join(sorted(references))}"
+                )
+        if blockers:
+            raise ChangeSetConflict(
+                "obsolete candidate retirement changed after preview or has current "
+                "external references: " + " | ".join(sorted(set(blockers))[:20])
+            )
+
+    @staticmethod
+    def _assert_stale_pending_topic_identity_retirement(
+        cursor: Any,
+        plan: ChangeSetPlan,
+        audit: Mapping[str, Any] | None,
+    ) -> None:
+        """Recheck pending topic identities invalidated by re-extraction."""
+
+        if audit is None:
+            unaudited = sorted(
+                (operation.collection, operation.object_id)
+                for operation in plan.operations
+                if operation.operation == "retire"
+                and operation.collection == "topic_identity_reconciliations"
+            )
+            has_extraction_retirement = any(
+                operation.operation == "retire"
+                and (
+                    operation.collection in EXTRACTION_RECORD_COLLECTIONS
+                    or operation.collection == "source_documents"
+                )
+                for operation in plan.operations
+            )
+            if unaudited and has_extraction_retirement:
+                raise ChangeSetConflict(
+                    "stale topic identity retirement is missing its audit: "
+                    + ", ".join(
+                        f"{collection}/{object_id}"
+                        for collection, object_id in unaudited[:20]
+                    )
+                )
+            return
+        if (
+            audit.get("schema_version")
+            != "wang_stale_pending_topic_identity_retirement_v1"
+            or audit.get("reason_code")
+            != "pending_topic_identity_invalidated_by_extraction_supersession"
+        ):
+            raise ChangeSetConflict(
+                "stale topic identity retirement audit is missing its governed identity"
+            )
+        canonical_audit = dict(audit)
+        stored_scope_sha256 = str(canonical_audit.pop("scope_sha256", ""))
+        if stored_scope_sha256 != sha256_json(canonical_audit):
+            raise ChangeSetConflict(
+                "stale topic identity retirement audit scope SHA does not match"
+            )
+        batch_id = str(audit.get("batch_id") or "")
+        if not batch_id.startswith("RB-") or len(batch_id) <= 3:
+            raise ChangeSetConflict(
+                "stale topic identity retirement audit has an invalid batch id"
+            )
+        retired_ids = {
+            operation.object_id
+            for operation in plan.operations
+            if operation.operation == "retire"
+            and (
+                operation.collection in EXTRACTION_RECORD_COLLECTIONS
+                or operation.collection == "source_documents"
+            )
+        }
+        if audit.get("retired_extraction_ids_sha256") != sha256_json(
+            sorted(retired_ids)
+        ):
+            raise ChangeSetConflict(
+                "stale topic identity audit does not match retiring extraction ids"
+            )
+        status = str(audit.get("status") or "")
+        records = audit.get("records")
+        if status == "not_needed":
+            if records not in ([], None):
+                raise ChangeSetConflict(
+                    "not-needed topic identity audit contains retirement records"
+                )
+            records = []
+        elif status == "planned":
+            if not isinstance(records, list) or not records:
+                raise ChangeSetConflict(
+                    "stale topic identity retirement audit has no records"
+                )
+        else:
+            raise ChangeSetConflict(
+                "stale topic identity retirement audit has an invalid status"
+            )
+
+        audited: dict[tuple[str, str], Mapping[str, Any]] = {}
+        for row in records:
+            if not isinstance(row, Mapping):
+                raise ChangeSetConflict(
+                    "stale topic identity retirement audit contains a malformed record"
+                )
+            key = (
+                str(row.get("collection") or ""),
+                str(row.get("object_id") or ""),
+            )
+            if (
+                key in audited
+                or key[0] != "topic_identity_reconciliations"
+                or not key[1]
+            ):
+                raise ChangeSetConflict(
+                    "stale topic identity retirement audit has a duplicate or invalid key"
+                )
+            audited[key] = row
+
+        planned = {
+            (operation.collection, operation.object_id): operation
+            for operation in plan.operations
+        }
+        unexpected_retires = sorted(
+            key
+            for key, operation in planned.items()
+            if operation.operation == "retire"
+            and key[0] == "topic_identity_reconciliations"
+            and key not in audited
+        )
+        if unexpected_retires:
+            raise ChangeSetConflict(
+                "stale topic identity audit does not exactly cover planned retires: "
+                + ", ".join(
+                    f"{collection}/{object_id}"
+                    for collection, object_id in unexpected_retires[:20]
+                )
+            )
+        for key, row in audited.items():
+            operation = planned.get(key)
+            if operation is None or operation.operation != "retire":
+                raise ChangeSetConflict(
+                    f"stale topic identity retirement omits {key[0]}/{key[1]}"
+                )
+            if (
+                operation.before_revision != row.get("expected_revision")
+                or operation.before_sha256 != row.get("expected_content_sha256")
+            ):
+                raise ChangeSetConflict(
+                    f"stale topic identity retirement snapshot drifted for {key[0]}/{key[1]}"
+                )
+
+        def strings(value: Any) -> set[str]:
+            if isinstance(value, Mapping):
+                found = {str(key) for key in value if isinstance(key, str)}
+                for child in value.values():
+                    found.update(strings(child))
+                return found
+            if isinstance(value, (list, tuple, set)):
+                found: set[str] = set()
+                for child in value:
+                    found.update(strings(child))
+                return found
+            return {value} if isinstance(value, str) else set()
+
+        cursor.execute(
+            """SELECT collection, object_id, payload
+               FROM wang_knowledge.objects
+               WHERE retired_at IS NULL FOR UPDATE"""
+        )
+        rows = [
+            (str(collection), str(object_id), payload)
+            for collection, object_id, payload in cursor.fetchall()
+        ]
+        audited_ids = {object_id for _collection, object_id in audited}
+        seen: set[tuple[str, str]] = set()
+        blockers: list[str] = []
+
+        def inspect(
+            key: tuple[str, str], payload: Mapping[str, Any], *, planned_row: bool
+        ) -> None:
+            stale_refs = sorted(
+                set(map(str, payload.get("claim_ids") or [])) & retired_ids
+            )
+            is_scoped_identity = (
+                key[0] == "topic_identity_reconciliations"
+                and str(payload.get("origin_batch_id") or "") == batch_id
+                and bool(stale_refs)
+            )
+            if key in audited:
+                seen.add(key)
+                expected_refs = sorted(
+                    map(str, audited[key].get("stale_claim_ids") or [])
+                )
+                if (
+                    not is_scoped_identity
+                    or stale_refs != expected_refs
+                    or str(payload.get("review_status") or "") != "candidate"
+                    or str(payload.get("visibility") or "") != "internal"
+                    or str(payload.get("status") or "")
+                    not in {"pending_match", "pending_new"}
+                ):
+                    blockers.append(
+                        f"{key[0]}/{key[1]} is no longer the audited pending candidate"
+                    )
+                return
+            if is_scoped_identity:
+                prefix = "planned " if planned_row else ""
+                blockers.append(
+                    f"{prefix}{key[0]}/{key[1]} is an omitted stale identity"
+                )
+            references = strings(payload) & audited_ids
+            if references:
+                prefix = "planned " if planned_row else ""
+                blockers.append(
+                    f"{prefix}{key[0]}/{key[1]} -> {','.join(sorted(references))}"
+                )
+
+        seen_rows: set[tuple[str, str]] = set()
+        for collection, object_id, payload in rows:
+            key = (collection, object_id)
+            seen_rows.add(key)
+            operation = planned.get(key)
+            if operation is not None:
+                if operation.operation == "retire":
+                    if key in audited:
+                        inspect(key, payload, planned_row=False)
+                    continue
+                payload = stored_operation_payload(operation)
+                inspect(key, payload, planned_row=True)
+                continue
+            inspect(key, payload, planned_row=False)
+        for key, operation in planned.items():
+            if key in seen_rows or operation.operation == "retire":
+                continue
+            inspect(key, stored_operation_payload(operation), planned_row=True)
+        blockers.extend(
+            f"{collection}/{object_id} is no longer current"
+            for collection, object_id in sorted(set(audited) - seen)
+        )
+        if blockers:
+            raise ChangeSetConflict(
+                "stale pending topic identity retirement changed after preview, "
+                "omitted an eligible row, or has current external references: "
+                + " | ".join(sorted(set(blockers))[:20])
+            )
+
+    @staticmethod
+    def _assert_stale_candidate_projection_retirement(
+        cursor: Any,
+        plan: ChangeSetPlan,
+        audit: Mapping[str, Any] | None,
+        whole_batch_audit: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Recheck the narrow old-workflow projection retirement under lock."""
+
+        if audit is None:
+            whole_batch_keys = {
+                (str(row.get("collection") or ""), str(row.get("object_id") or ""))
+                for row in (whole_batch_audit or {}).get("records") or []
+                if isinstance(row, Mapping)
+            }
+            unaudited = sorted(
+                (operation.collection, operation.object_id)
+                for operation in plan.operations
+                if operation.operation == "retire"
+                and operation.collection in OBSOLETE_CANDIDATE_RETIREMENT_COLLECTIONS
+                and (operation.collection, operation.object_id) not in whole_batch_keys
+            )
+            has_extraction_retirement = any(
+                operation.operation == "retire"
+                and (
+                    operation.collection in EXTRACTION_RECORD_COLLECTIONS
+                    or operation.collection == "source_documents"
+                )
+                for operation in plan.operations
+            )
+            if unaudited and has_extraction_retirement:
+                raise ChangeSetConflict(
+                    "stale candidate projection retirement is missing its audit: "
+                    + ", ".join(
+                        f"{collection}/{object_id}"
+                        for collection, object_id in unaudited[:20]
+                    )
+                )
+            return
+        if (
+            audit.get("schema_version")
+            != "wang_stale_candidate_projection_retirement_v1"
+            or audit.get("reason_code")
+            != "retired_composition_projection_invalidated_by_extraction_supersession"
+        ):
+            raise ChangeSetConflict(
+                "stale candidate projection audit is missing its governed identity"
+            )
+        canonical_audit = dict(audit)
+        stored_scope_sha256 = str(canonical_audit.pop("scope_sha256", ""))
+        if stored_scope_sha256 != sha256_json(canonical_audit):
+            raise ChangeSetConflict(
+                "stale candidate projection audit scope SHA does not match"
+            )
+        batch_ids = audit.get("batch_ids")
+        if (
+            not isinstance(batch_ids, list)
+            or not batch_ids
+            or batch_ids != sorted(set(map(str, batch_ids)))
+            or any(
+                not str(batch_id).startswith("RB-") or len(str(batch_id)) <= 3
+                for batch_id in batch_ids
+            )
+        ):
+            raise ChangeSetConflict(
+                "stale candidate projection audit has invalid batch ids"
+            )
+        retired_ids = {
+            operation.object_id
+            for operation in plan.operations
+            if operation.operation == "retire"
+            and (
+                operation.collection in EXTRACTION_RECORD_COLLECTIONS
+                or operation.collection == "source_documents"
+            )
+        }
+        if audit.get("retired_extraction_ids_sha256") != sha256_json(
+            sorted(retired_ids)
+        ):
+            raise ChangeSetConflict(
+                "stale candidate projection audit does not match retiring extraction ids"
+            )
+        status = str(audit.get("status") or "")
+        records = audit.get("records")
+        if status == "not_needed":
+            if records not in ([], None):
+                raise ChangeSetConflict(
+                    "not-needed candidate projection audit contains retirement records"
+                )
+            records = []
+        elif status == "planned":
+            if not isinstance(records, list) or not records:
+                raise ChangeSetConflict(
+                    "stale candidate projection audit has no records"
+                )
+        else:
+            raise ChangeSetConflict(
+                "stale candidate projection audit has an invalid status"
+            )
+
+        audited: dict[tuple[str, str], Mapping[str, Any]] = {}
+        for row in records:
+            if not isinstance(row, Mapping):
+                raise ChangeSetConflict(
+                    "stale candidate projection audit contains a malformed record"
+                )
+            key = (
+                str(row.get("collection") or ""),
+                str(row.get("object_id") or ""),
+            )
+            if (
+                key in audited
+                or key[0] not in {"knowledge_routes", "editorial_syntheses"}
+                or not key[1]
+                or str(row.get("batch_id") or "") not in batch_ids
+            ):
+                raise ChangeSetConflict(
+                    "stale candidate projection audit has a duplicate or invalid key"
+                )
+            audited[key] = row
+        expected_summary = {
+            "knowledge_routes": sum(
+                key[0] == "knowledge_routes" for key in audited
+            ),
+            "editorial_syntheses": sum(
+                key[0] == "editorial_syntheses" for key in audited
+            ),
+            "total": len(audited),
+        }
+        if audit.get("summary") != expected_summary:
+            raise ChangeSetConflict(
+                "stale candidate projection audit summary does not match its records"
+            )
+
+        planned = {
+            (operation.collection, operation.object_id): operation
+            for operation in plan.operations
+        }
+        whole_batch_keys = {
+            (str(row.get("collection") or ""), str(row.get("object_id") or ""))
+            for row in (whole_batch_audit or {}).get("records") or []
+            if isinstance(row, Mapping)
+        }
+        unexpected_retires = sorted(
+            key
+            for key, operation in planned.items()
+            if operation.operation == "retire"
+            and key[0] in OBSOLETE_CANDIDATE_RETIREMENT_COLLECTIONS
+            and key not in audited
+            and key not in whole_batch_keys
+        )
+        if unexpected_retires:
+            raise ChangeSetConflict(
+                "stale candidate projection audit does not exactly cover planned retires: "
+                + ", ".join(
+                    f"{collection}/{object_id}"
+                    for collection, object_id in unexpected_retires[:20]
+                )
+            )
+        for key, row in audited.items():
+            operation = planned.get(key)
+            if operation is None or operation.operation != "retire":
+                raise ChangeSetConflict(
+                    f"stale candidate projection omits {key[0]}/{key[1]}"
+                )
+            if (
+                operation.before_revision != row.get("expected_revision")
+                or operation.before_sha256 != row.get("expected_content_sha256")
+            ):
+                raise ChangeSetConflict(
+                    f"stale candidate projection snapshot drifted for {key[0]}/{key[1]}"
+                )
+
+        plan_patterns = {
+            batch_id: re.compile(
+                rf"^CP-{re.escape(batch_id[3:])}-[ST]-[0-9a-f]{{12}}$"
+            )
+            for batch_id in batch_ids
+        }
+        synthesis_patterns = {
+            batch_id: re.compile(
+                rf"^SYN-{re.escape(batch_id[3:])}-[ST]-[0-9a-f]{{12}}$"
+            )
+            for batch_id in batch_ids
+        }
+
+        def projection_owner(
+            collection: str, object_id: str, payload: Mapping[str, Any]
+        ) -> tuple[str, str, list[str]] | None:
+            if collection == "knowledge_routes":
+                claim_id = str(payload.get("claim_id") or "")
+                stale_claim_ids = [claim_id] if claim_id in retired_ids else []
+                owner_plan_id = str(payload.get("target_id") or "")
+                matches = [
+                    batch_id
+                    for batch_id, pattern in plan_patterns.items()
+                    if pattern.fullmatch(owner_plan_id)
+                ]
+            elif collection == "editorial_syntheses":
+                stale_claim_ids = sorted(
+                    set(map(str, payload.get("claim_ids") or [])) & retired_ids
+                )
+                matches = [
+                    batch_id
+                    for batch_id, pattern in synthesis_patterns.items()
+                    if pattern.fullmatch(object_id)
+                    and str(payload.get("corpus_scope") or "") == batch_id
+                ]
+                owner_plan_id = (
+                    f"CP{object_id[3:]}" if object_id.startswith("SYN-") else ""
+                )
+            else:
+                return None
+            if not stale_claim_ids:
+                return None
+            if len(matches) != 1:
+                raise ChangeSetConflict(
+                    "stale candidate projection has ambiguous or mismatched ownership: "
+                    f"{collection}/{object_id}"
+                )
+            return matches[0], owner_plan_id, stale_claim_ids
+
+        def strings(value: Any) -> set[str]:
+            if isinstance(value, Mapping):
+                found = {str(key) for key in value if isinstance(key, str)}
+                for child in value.values():
+                    found.update(strings(child))
+                return found
+            if isinstance(value, (list, tuple, set)):
+                found: set[str] = set()
+                for child in value:
+                    found.update(strings(child))
+                return found
+            return {value} if isinstance(value, str) else set()
+
+        cursor.execute(
+            """SELECT collection, object_id, payload
+               FROM wang_knowledge.objects
+               WHERE retired_at IS NULL FOR UPDATE"""
+        )
+        current_rows = [
+            (str(collection), str(object_id), payload)
+            for collection, object_id, payload in cursor.fetchall()
+        ]
+        current_by_key = {
+            (collection, object_id): payload
+            for collection, object_id, payload in current_rows
+        }
+        cursor.execute(
+            """SELECT object_id, payload FROM wang_knowledge.objects
+               WHERE collection='composition_plans' FOR UPDATE"""
+        )
+        historical_plans = {
+            str(object_id): payload for object_id, payload in cursor.fetchall()
+        }
+        seen_current: set[tuple[str, str]] = set()
+        blockers: list[str] = []
+        effective_rows: dict[tuple[str, str], Mapping[str, Any]] = {}
+        for collection, object_id, current_payload in current_rows:
+            key = (collection, object_id)
+            operation = planned.get(key)
+            owned = projection_owner(collection, object_id, current_payload)
+            if key in audited:
+                seen_current.add(key)
+                expected = audited[key]
+                if (
+                    owned is None
+                    or owned[0] != str(expected.get("batch_id") or "")
+                    or owned[1] != str(expected.get("owner_plan_id") or "")
+                    or owned[2]
+                    != sorted(map(str, expected.get("stale_claim_ids") or []))
+                    or str(current_payload.get("review_status") or "") != "candidate"
+                    or str(current_payload.get("visibility") or "") != "internal"
+                ):
+                    blockers.append(
+                        f"{collection}/{object_id} is no longer the audited candidate projection"
+                    )
+            elif owned is not None and (
+                operation is None or operation.operation != "retire"
+            ):
+                prefix = "planned " if operation is not None else ""
+                blockers.append(
+                    f"{prefix}{collection}/{object_id} is an omitted stale projection"
+                )
+            elif owned is not None and operation is not None:
+                blockers.append(
+                    f"{collection}/{object_id} is retired without projection audit"
+                )
+            if operation is None:
+                effective_rows[key] = current_payload
+            elif operation.operation != "retire":
+                effective_rows[key] = stored_operation_payload(operation)
+        for key, operation in planned.items():
+            if key in current_by_key or operation.operation == "retire":
+                continue
+            payload = stored_operation_payload(operation)
+            effective_rows[key] = payload
+            if projection_owner(key[0], key[1], payload) is not None:
+                blockers.append(
+                    f"planned {key[0]}/{key[1]} is an omitted stale projection"
+                )
+        blockers.extend(
+            f"{collection}/{object_id} is no longer current"
+            for collection, object_id in sorted(set(audited) - seen_current)
+        )
+
+        final_plans = {
+            object_id: payload
+            for (collection, object_id), payload in effective_rows.items()
+            if collection == "composition_plans"
+        }
+        final_decisions: dict[str, list[tuple[str, Mapping[str, Any]]]] = {}
+        for (collection, object_id), payload in effective_rows.items():
+            if collection == "composition_decisions":
+                final_decisions.setdefault(
+                    str(payload.get("plan_id") or ""), []
+                ).append((object_id, payload))
+        for row in audited.values():
+            owner_plan_id = str(row.get("owner_plan_id") or "")
+            historical_plan = historical_plans.get(owner_plan_id)
+            if (
+                historical_plan is None
+                or str(historical_plan.get("plan_id") or "") != owner_plan_id
+            ):
+                blockers.append(
+                    f"composition_plans/{owner_plan_id} lacks historical ownership proof"
+                )
+            current_plan = final_plans.get(owner_plan_id)
+            if current_plan is not None and (
+                str(current_plan.get("review_status") or "") != "candidate"
+                or str(current_plan.get("visibility") or "") != "internal"
+            ):
+                blockers.append(
+                    f"composition_plans/{owner_plan_id} is current plan authority"
+                )
+            blockers.extend(
+                f"composition_decisions/{decision_id} is current decision authority"
+                for decision_id, decision in final_decisions.get(owner_plan_id, [])
+                if str(decision.get("review_status") or "") != "candidate"
+                or str(decision.get("visibility") or "") != "internal"
+            )
+
+        audited_ids = {object_id for _collection, object_id in audited}
+        for key, payload in effective_rows.items():
+            referenced = strings(payload) & audited_ids
+            if referenced:
+                blockers.append(
+                    f"{key[0]}/{key[1]} -> {','.join(sorted(referenced))}"
+                )
+        if blockers:
+            raise ChangeSetConflict(
+                "stale candidate projection retirement changed after preview, "
+                "omitted an eligible row, reached current authority, or has current "
+                "external references: "
+                + " | ".join(sorted(set(blockers))[:20])
+            )
+
+    @staticmethod
+    def _assert_stale_ai_cross_sermon_constraint_retirement(
+        cursor: Any,
+        plan: ChangeSetPlan,
+        audit: Mapping[str, Any] | None,
+    ) -> None:
+        """Recheck exact stale AI constraints without retargeting judgments."""
+
+        if audit is None:
+            unaudited = sorted(
+                (operation.collection, operation.object_id)
+                for operation in plan.operations
+                if operation.operation == "retire"
+                and operation.collection == "claim_relation_constraints"
+            )
+            has_extraction_retirement = any(
+                operation.operation == "retire"
+                and (
+                    operation.collection in EXTRACTION_RECORD_COLLECTIONS
+                    or operation.collection == "source_documents"
+                )
+                for operation in plan.operations
+            )
+            if unaudited and has_extraction_retirement:
+                raise ChangeSetConflict(
+                    "stale cross-sermon constraint retirement is missing its audit: "
+                    + ", ".join(
+                        f"{collection}/{object_id}"
+                        for collection, object_id in unaudited[:20]
+                    )
+                )
+            return
+        if (
+            audit.get("schema_version")
+            != "wang_stale_ai_cross_sermon_constraint_retirement_v1"
+            or audit.get("reason_code")
+            != "cross_sermon_judgment_invalidated_by_claim_supersession"
+        ):
+            raise ChangeSetConflict(
+                "stale cross-sermon constraint audit is missing its governed identity"
+            )
+        canonical_audit = dict(audit)
+        stored_scope_sha256 = str(canonical_audit.pop("scope_sha256", ""))
+        if stored_scope_sha256 != sha256_json(canonical_audit):
+            raise ChangeSetConflict(
+                "stale cross-sermon constraint audit scope SHA does not match"
+            )
+        constraint_ids = audit.get("constraint_ids")
+        if (
+            not isinstance(constraint_ids, list)
+            or not constraint_ids
+            or constraint_ids != sorted(set(map(str, constraint_ids)))
+            or any(
+                re.fullmatch(r"CRC-XSR-[0-9a-f]{16}", str(value)) is None
+                for value in constraint_ids
+            )
+        ):
+            raise ChangeSetConflict(
+                "stale cross-sermon constraint audit has invalid constraint ids"
+            )
+        retired_ids = {
+            operation.object_id
+            for operation in plan.operations
+            if operation.operation == "retire"
+            and (
+                operation.collection in EXTRACTION_RECORD_COLLECTIONS
+                or operation.collection == "source_documents"
+            )
+        }
+        if audit.get("retired_extraction_ids_sha256") != sha256_json(
+            sorted(retired_ids)
+        ):
+            raise ChangeSetConflict(
+                "stale cross-sermon constraint audit does not match retiring extraction ids"
+            )
+        records = audit.get("records")
+        if not isinstance(records, list):
+            raise ChangeSetConflict(
+                "stale cross-sermon constraint audit records are malformed"
+            )
+        already_retired_ids = audit.get("already_retired_ids")
+        if (
+            not isinstance(already_retired_ids, list)
+            or already_retired_ids != sorted(set(map(str, already_retired_ids)))
+        ):
+            raise ChangeSetConflict(
+                "stale cross-sermon constraint audit has invalid retired ids"
+            )
+        if set(already_retired_ids) | {
+            str(row.get("object_id") or "")
+            for row in records
+            if isinstance(row, Mapping)
+        } != set(constraint_ids):
+            raise ChangeSetConflict(
+                "stale cross-sermon constraint audit does not cover its exact ids"
+            )
+        expected_status = "planned" if records else "already_retired"
+        if audit.get("status") != expected_status:
+            raise ChangeSetConflict(
+                "stale cross-sermon constraint audit has an invalid status"
+            )
+
+        audited: dict[tuple[str, str], Mapping[str, Any]] = {}
+        for row in records:
+            if not isinstance(row, Mapping):
+                raise ChangeSetConflict(
+                    "stale cross-sermon constraint audit contains a malformed record"
+                )
+            key = (
+                str(row.get("collection") or ""),
+                str(row.get("object_id") or ""),
+            )
+            if (
+                key in audited
+                or key[0] != "claim_relation_constraints"
+                or key[1] not in constraint_ids
+            ):
+                raise ChangeSetConflict(
+                    "stale cross-sermon constraint audit has a duplicate or invalid key"
+                )
+            audited[key] = row
+        expected_summary = {
+            "claim_relation_constraints": len(audited),
+            "total": len(audited),
+        }
+        if audit.get("summary") != expected_summary:
+            raise ChangeSetConflict(
+                "stale cross-sermon constraint audit summary does not match records"
+            )
+
+        planned = {
+            (operation.collection, operation.object_id): operation
+            for operation in plan.operations
+        }
+        unexpected_retires = sorted(
+            key
+            for key, operation in planned.items()
+            if operation.operation == "retire"
+            and key[0] == "claim_relation_constraints"
+            and key not in audited
+        )
+        if unexpected_retires:
+            raise ChangeSetConflict(
+                "stale cross-sermon constraint audit does not exactly cover planned retires: "
+                + ", ".join(
+                    f"{collection}/{object_id}"
+                    for collection, object_id in unexpected_retires[:20]
+                )
+            )
+        governed_ids = set(map(str, constraint_ids))
+        governed_non_retires = sorted(
+            key
+            for key, operation in planned.items()
+            if key[0] == "claim_relation_constraints"
+            and key[1] in governed_ids
+            and operation.operation != "retire"
+        )
+        if governed_non_retires:
+            raise ChangeSetConflict(
+                "stale cross-sermon constraint audit cannot create, update, or revive "
+                "a governed id: "
+                + ", ".join(
+                    f"{collection}/{object_id}"
+                    for collection, object_id in governed_non_retires[:20]
+                )
+            )
+        for key, row in audited.items():
+            operation = planned.get(key)
+            if operation is None or operation.operation != "retire":
+                raise ChangeSetConflict(
+                    f"stale cross-sermon constraint omits {key[0]}/{key[1]}"
+                )
+            if (
+                operation.before_revision != row.get("expected_revision")
+                or operation.before_sha256 != row.get("expected_content_sha256")
+            ):
+                raise ChangeSetConflict(
+                    f"stale cross-sermon constraint snapshot drifted for {key[0]}/{key[1]}"
+                )
+
+        def strings(value: Any) -> set[str]:
+            if isinstance(value, Mapping):
+                found = {str(key) for key in value if isinstance(key, str)}
+                for child in value.values():
+                    found.update(strings(child))
+                return found
+            if isinstance(value, (list, tuple, set)):
+                found: set[str] = set()
+                for child in value:
+                    found.update(strings(child))
+                return found
+            return {value} if isinstance(value, str) else set()
+
+        cursor.execute(
+            """SELECT collection, object_id, payload
+               FROM wang_knowledge.objects
+               WHERE retired_at IS NULL FOR UPDATE"""
+        )
+        current_rows = [
+            (str(collection), str(object_id), payload)
+            for collection, object_id, payload in cursor.fetchall()
+        ]
+        current_by_key = {
+            (collection, object_id): payload
+            for collection, object_id, payload in current_rows
+        }
+        blockers: list[str] = []
+        seen: set[tuple[str, str]] = set()
+        effective_rows: dict[tuple[str, str], Mapping[str, Any]] = {}
+        for collection, object_id, current_payload in current_rows:
+            key = (collection, object_id)
+            operation = planned.get(key)
+            if object_id in constraint_ids and collection == "claim_relation_constraints":
+                if object_id in already_retired_ids:
+                    blockers.append(
+                        f"claim_relation_constraints/{object_id} is current again"
+                    )
+                row = audited.get(key)
+                if row is None:
+                    blockers.append(
+                        f"claim_relation_constraints/{object_id} is omitted from audit"
+                    )
+                else:
+                    seen.add(key)
+                    stale_claim_ids = sorted(
+                        {
+                            str(current_payload.get("source_id") or ""),
+                            str(current_payload.get("target_id") or ""),
+                        }
+                        & retired_ids
+                    )
+                    if (
+                        not stale_claim_ids
+                        or stale_claim_ids
+                        != sorted(map(str, row.get("stale_claim_ids") or []))
+                        or str(current_payload.get("constraint_id") or "") != object_id
+                        or str(current_payload.get("review_artifact_id") or "")
+                        != object_id.removeprefix("CRC-")
+                        or str(row.get("review_artifact_id") or "")
+                        != object_id.removeprefix("CRC-")
+                        or str(current_payload.get("source_id") or "")
+                        != str(row.get("source_id") or "")
+                        or str(current_payload.get("target_id") or "")
+                        != str(row.get("target_id") or "")
+                        or str(current_payload.get("reason") or "")
+                        != str(row.get("reason") or "")
+                        or str(current_payload.get("review_status") or "")
+                        != "ai_consensus"
+                        or str(current_payload.get("visibility") or "") != "internal"
+                    ):
+                        blockers.append(
+                            f"claim_relation_constraints/{object_id} is no longer the audited AI judgment"
+                        )
+            if operation is None:
+                effective_rows[key] = current_payload
+            elif operation.operation != "retire":
+                effective_rows[key] = stored_operation_payload(operation)
+        for key, operation in planned.items():
+            if key in current_by_key or operation.operation == "retire":
+                continue
+            effective_rows[key] = stored_operation_payload(operation)
+        blockers.extend(
+            f"{collection}/{object_id} is no longer current"
+            for collection, object_id in sorted(set(audited) - seen)
+        )
+        audited_ids = governed_ids
+        for key, payload in effective_rows.items():
+            referenced = strings(payload) & audited_ids
+            if referenced:
+                blockers.append(
+                    f"{key[0]}/{key[1]} -> {','.join(sorted(referenced))}"
+                )
+        if blockers:
+            raise ChangeSetConflict(
+                "stale cross-sermon constraint retirement changed after preview, "
+                "lost exact authority, or has current external references: "
+                + " | ".join(sorted(set(blockers))[:20])
+            )
+
+    @staticmethod
+    def _assert_no_dangling_package_references(
+        cursor: Any, plan: ChangeSetPlan
+    ) -> None:
+        """Do not retire a package object while a current package row cites it.
+
+        Supersession retires a whole extraction generation.  Its closure must
+        include every current owner of a retiring id, or update that owner in
+        the same ChangeSet so the retired id is removed.  Otherwise a retry can
+        appear successful while leaving a package that cannot be traversed.
+        """
+
+        retired_ids = {
+            operation.object_id
+            for operation in plan.operations
+            if (
+                operation.collection in EXTRACTION_RECORD_COLLECTIONS
+                or operation.collection == "source_documents"
+            )
+            and operation.operation == "retire"
+        }
+        if not retired_ids:
+            return
+
+        planned_operations = {
+            (operation.collection, operation.object_id): operation
+            for operation in plan.operations
+        }
+
+        def strings(value: Any) -> set[str]:
+            if isinstance(value, Mapping):
+                found: set[str] = set()
+                for child in value.values():
+                    found.update(strings(child))
+                return found
+            if isinstance(value, (list, tuple, set)):
+                found: set[str] = set()
+                for child in value:
+                    found.update(strings(child))
+                return found
+            return {value} if isinstance(value, str) else set()
+
+        def references(collection: str, value: Any) -> set[str]:
+            fields = PACKAGE_REFERENCE_FIELDS.get(collection, set())
+            if not fields or not isinstance(value, (Mapping, list, tuple, set)):
+                return set()
+            if isinstance(value, Mapping):
+                found: set[str] = set()
+                for key, child in value.items():
+                    if str(key) in fields:
+                        found.update(strings(child) & retired_ids)
+                    else:
+                        found.update(references(collection, child))
+                return found
+            found: set[str] = set()
+            for child in value:
+                found.update(references(collection, child))
+            return found
+
+        cursor.execute(
+            """SELECT collection, object_id, payload
+               FROM wang_knowledge.objects
+               WHERE collection = ANY(%s) AND retired_at IS NULL
+               FOR UPDATE""",
+            (sorted(PACKAGE_REFERENCE_FIELDS),),
+        )
+        blockers: list[str] = []
+        seen_planned: set[tuple[str, str]] = set()
+        for collection, object_id, payload in cursor.fetchall():
+            key = (str(collection), str(object_id))
+            planned = planned_operations.get(key)
+            if planned is not None:
+                seen_planned.add(key)
+                if planned.operation == "retire":
+                    continue
+                payload = stored_operation_payload(planned)
+            found = references(key[0], payload)
+            if found:
+                prefix = "planned " if planned is not None else ""
+                blockers.append(
+                    f"{prefix}{key[0]}/{key[1]} -> {','.join(sorted(found))}"
+                )
+
+        # Creates and restores are absent from the current-row query. Updates
+        # are normally seen there, but including unseen ones is fail-closed for
+        # malformed plans and test doubles.
+        for key, planned in planned_operations.items():
+            if key in seen_planned or key[0] not in PACKAGE_REFERENCE_FIELDS:
+                continue
+            if planned.operation == "retire":
+                continue
+            found = references(key[0], stored_operation_payload(planned))
+            if found:
+                blockers.append(
+                    f"planned {key[0]}/{key[1]} -> {','.join(sorted(found))}"
+                )
+
+        if blockers:
+            raise ChangeSetConflict(
+                "retirement would leave current extraction records pointing to "
+                "non-current objects: " + " | ".join(sorted(blockers)[:20])
+            )
 
     def _set_retirement(
         self, cursor: Any, plan: ChangeSetPlan, index: int, operation: ChangeOperation
@@ -1366,7 +3627,8 @@ class PostgresKnowledgeStore:
         changed_records: list[tuple[str, str, int, int]],
         operation_offset: int,
     ) -> int:
-        count = 0
+        matched_by_change: dict[tuple[str, str, int, int], list[str]] = {}
+        dependencies: dict[str, tuple[int, dict[str, Any]]] = {}
         for changed_collection, changed_id, from_revision, to_revision in changed_records:
             manifest_ref = canonical_json([{
                 "collection": changed_collection,
@@ -1385,48 +3647,100 @@ class PostgresKnowledgeStore:
                 (changed_collection, changed_id, manifest_ref),
             )
             rows = cursor.fetchall()
-            affected_ids: list[str] = []
             for dependency_id, revision, payload in rows:
-                updated = dict(payload)
-                updated["status"] = "invalidated"
-                updated.setdefault("invalidation_change_set_ids", []).append(plan.change_set_id)
-                next_revision = int(revision) + 1
-                updated["revision"] = next_revision
-                content_sha = record_content_sha(updated)
-                cursor.execute(
-                    """UPDATE wang_knowledge.objects SET revision=%s, review_status=%s,
-                       visibility=%s, content_sha256=%s, payload=%s::jsonb, updated_at=now()
-                       WHERE collection='product_dependencies' AND object_id=%s""",
-                    (
-                        next_revision, updated.get("review_status", "candidate"),
-                        updated.get("visibility", "internal"), content_sha,
-                        canonical_json(updated), dependency_id,
-                    ),
-                )
-                cursor.execute(
-                    """INSERT INTO wang_knowledge.object_versions
-                       (collection, object_id, revision, content_sha256, payload, change_set_id)
-                       VALUES ('product_dependencies',%s,%s,%s,%s::jsonb,%s)""",
-                    (dependency_id, next_revision, content_sha, canonical_json(updated), plan.change_set_id),
-                )
-                cursor.execute(
-                    """INSERT INTO wang_knowledge.change_operations
-                       (change_set_id, operation_index, operation, collection, object_id,
-                        after_sha256, before_revision, after_revision, details)
-                       VALUES (%s,%s,'invalidate','product_dependencies',%s,%s,%s,%s,%s::jsonb)""",
-                    (
-                        plan.change_set_id, operation_offset + count, dependency_id,
-                        content_sha, revision, next_revision,
-                        canonical_json({
-                            "changed_collection": changed_collection,
-                            "changed_record_id": changed_id,
-                        }),
-                    ),
-                )
-                affected_ids.append(dependency_id)
-                count += 1
+                dependency_id = str(dependency_id)
+                dependencies.setdefault(dependency_id, (int(revision), dict(payload)))
+                matched_by_change.setdefault(
+                    (changed_collection, changed_id, from_revision, to_revision), []
+                ).append(dependency_id)
+
+        # Scan all change reasons before mutating status. Otherwise the first
+        # matched record flips a dependency to invalidated and later records in
+        # the same ChangeSet can no longer see it, leaving the impact ledger
+        # with only one of several true causes.
+        for count, dependency_id in enumerate(sorted(dependencies)):
+            revision, payload = dependencies[dependency_id]
+            reasons = [
+                change
+                for change, affected in matched_by_change.items()
+                if dependency_id in affected
+            ]
+            event_ids = [
+                f"IMPACT-{plan.change_set_id}-{collection}-{record_id}"
+                for collection, record_id, _, _ in reasons
+            ]
+            updated = dict(payload)
+            updated["status"] = "invalidated"
+            updated["invalidation_change_set_ids"] = sorted({
+                *updated.get("invalidation_change_set_ids", []),
+                plan.change_set_id,
+            })
+            updated["invalidation_event_ids"] = sorted({
+                *updated.get("invalidation_event_ids", []),
+                *event_ids,
+            })
+            next_revision = revision + 1
+            updated["revision"] = next_revision
+            content_sha = record_content_sha(updated)
+            cursor.execute(
+                """UPDATE wang_knowledge.objects SET revision=%s, review_status=%s,
+                   visibility=%s, content_sha256=%s, payload=%s::jsonb, updated_at=now()
+                   WHERE collection='product_dependencies' AND object_id=%s""",
+                (
+                    next_revision, updated.get("review_status", "candidate"),
+                    updated.get("visibility", "internal"), content_sha,
+                    canonical_json(updated), dependency_id,
+                ),
+            )
+            cursor.execute(
+                """INSERT INTO wang_knowledge.object_versions
+                   (collection, object_id, revision, content_sha256, payload, change_set_id)
+                   VALUES ('product_dependencies',%s,%s,%s,%s::jsonb,%s)""",
+                (
+                    dependency_id, next_revision, content_sha,
+                    canonical_json(updated), plan.change_set_id,
+                ),
+            )
+            cursor.execute(
+                """INSERT INTO wang_knowledge.change_operations
+                   (change_set_id, operation_index, operation, collection, object_id,
+                    after_sha256, before_revision, after_revision, details)
+                   VALUES (%s,%s,'invalidate','product_dependencies',%s,%s,%s,%s,%s::jsonb)""",
+                (
+                    plan.change_set_id, operation_offset + count, dependency_id,
+                    content_sha, revision, next_revision,
+                    canonical_json({
+                        "changed_records": [
+                            {"collection": collection, "record_id": record_id}
+                            for collection, record_id, _, _ in reasons
+                        ],
+                    }),
+                ),
+            )
+
+        for change, affected_ids in matched_by_change.items():
+            changed_collection, changed_id, from_revision, to_revision = change
+            affected_ids = sorted(set(affected_ids))
             if affected_ids:
                 event_id = f"IMPACT-{plan.change_set_id}-{changed_collection}-{changed_id}"
+                # ``impact_events`` are derived inside the apply transaction,
+                # after the incoming package's global-ID preflight has run.
+                # They still live in the same global object-id namespace.  Do
+                # not let this internal insertion become a bypass while an
+                # installation is waiting to apply migration 005.
+                cursor.execute(
+                    """SELECT collection FROM wang_knowledge.objects
+                       WHERE object_id=%s FOR UPDATE""",
+                    (event_id,),
+                )
+                owners = {str(row[0]) for row in cursor.fetchall()}
+                foreign_owners = owners - {"impact_events"}
+                if foreign_owners:
+                    raise ChangeSetConflict(
+                        "Record IDs are globally unique; generated impact event "
+                        f"{event_id!r} already belongs to "
+                        + ", ".join(sorted(foreign_owners))
+                    )
                 event = {
                     "impact_event_id": event_id,
                     "changed_record_type": changed_collection,
@@ -1459,7 +3773,7 @@ class PostgresKnowledgeStore:
                        ON CONFLICT DO NOTHING""",
                     (event_id, content_sha, canonical_json(event), plan.change_set_id),
                 )
-        return count
+        return len(dependencies)
 
     def ingest_package(
         self,
@@ -1533,6 +3847,14 @@ class PostgresKnowledgeStore:
         )
         change_set_id = f"KCS-REVIEW-{uuid.uuid4().hex[:20]}"
         with self.connect() as conn, conn.cursor() as cursor:
+            # Review decisions can invalidate ProductDependency rows and create
+            # ImpactEvent objects. They therefore participate in the same
+            # cross-record invariants as ``apply_plan`` and must serialize on
+            # the same transaction lock.
+            cursor.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                ("wang_knowledge.apply_plan.v1",),
+            )
             cursor.execute(
                 """SELECT revision, content_sha256, payload
                    FROM wang_knowledge.objects

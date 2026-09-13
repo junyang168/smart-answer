@@ -12,7 +12,10 @@ from typing import Any, Iterable, Sequence
 from backend.api.canonical_repository.viewpoint_runtime_projection import (
     ViewpointKnowledgeProjection,
 )
-from backend.pipeline.knowledge_source import live_script
+from backend.pipeline.source_projection import (
+    project_script,
+    source_uses_body_locator_space,
+)
 from backend.pipeline.base_contract_coverage import (
     BOOK_CODE_TO_CHINESE,
     FLAG_CROSS_REFERENCE,
@@ -1214,6 +1217,7 @@ def _exegetical_source_slice(
     scoped_fragments: list[dict[str, Any]],
     passage: str,
     step_excerpts: Sequence[str],
+    source_documents: Sequence[dict[str, Any]] = (),
 ) -> dict[str, list[dict[str, Any]]]:
     """Return the source sentences the three source-judged dimensions need.
 
@@ -1258,7 +1262,37 @@ def _exegetical_source_slice(
                     )
 
     cited_excerpts: list[dict[str, Any]] = []
+    visual_sources: list[dict[str, Any]] = []
+    visual_descriptors = {
+        (str(source.get("source_id") or ""), str(visual.get("locator") or "")): visual
+        for source in source_documents
+        if isinstance(source, dict)
+        for visual in source.get("visual_sources") or []
+        if isinstance(visual, dict)
+    }
     for fragment in scoped_fragments:
+        if fragment.get("source_modality") == "visual":
+            source_id = str(fragment.get("source_id") or "")
+            locator = str(fragment.get("visual_locator") or "")
+            descriptor = visual_descriptors.get((source_id, locator), {})
+            visual_sources.append(
+                {
+                    "fragment_id": fragment.get("fragment_id"),
+                    "source_id": source_id,
+                    "source_modality": "visual",
+                    "visual_locator": locator,
+                    "visual_block_sha256": fragment.get("visual_block_sha256"),
+                    "visual_facts": list(fragment.get("visual_facts") or []),
+                    "complete_literal_facts": list(
+                        descriptor.get("literal_facts")
+                        or fragment.get("visual_facts")
+                        or []
+                    ),
+                    "raw_svg": descriptor.get("raw_svg"),
+                    "quotation_status": "not_spoken_verbatim",
+                }
+            )
+            continue
         excerpt = fragment.get("verbatim_excerpt") or ""
         flags = [
             flag
@@ -1273,10 +1307,13 @@ def _exegetical_source_slice(
                     "verbatim_excerpt": excerpt,
                 }
             )
-    return {
+    result = {
         "base_manuscript_exegesis": base_sentences,
         "cited_source_excerpts": cited_excerpts,
     }
+    if visual_sources:
+        result["cited_visual_sources"] = visual_sources
+    return result
 
 
 def build_editorial_review_packet(
@@ -1327,6 +1364,7 @@ def build_editorial_review_packet(
         if (fragment := next(
             (f for f in knowledge.get("source_fragments", [])
              if f.get("fragment_id") == fragment_id), None))
+        and fragment.get("source_modality") != "visual"
         and (excerpt := fragment.get("verbatim_excerpt"))
     ]
     source_slice = _exegetical_source_slice(
@@ -1334,6 +1372,7 @@ def build_editorial_review_packet(
         scoped_fragments=knowledge.get("source_fragments", []),
         passage=_require_nonempty_string(contract.get("passage"), "passage"),
         step_excerpts=step_excerpts,
+        source_documents=knowledge.get("source_documents", []),
     )
     # A tension the contract registered is the material the reviewer checks
     # `theological_tension_and_attribution` against: an article that quietly
@@ -1800,13 +1839,18 @@ def _sermon_transcript_slices(
     for source_id, indices in referenced_indices.items():
         document = documents_by_id[source_id]
         transcript_path = Path(document["source_path"])
-        raw_transcript = transcript_path.read_text(encoding="utf-8")
-        actual_sha256 = sha256_text(raw_transcript)
-        declared_sha256 = document.get("source_sha256")
-        if declared_sha256 and declared_sha256 != actual_sha256:
-            raise AuthoringContractError(
-                f"stale sermon transcript source: {source_id}"
+        if transcript_path.parent.name == "script_review":
+            published_path = (
+                transcript_path.parent.parent
+                / "script_published"
+                / transcript_path.name
             )
+            if published_path.is_file():
+                raise AuthoringContractError(
+                    f"non-authoritative review source has a published version: {source_id}"
+                )
+        raw_transcript = transcript_path.read_text(encoding="utf-8")
+        actual_file_sha256 = sha256_text(raw_transcript)
         transcript = json.loads(raw_transcript)
         if isinstance(transcript, list):
             # `script_review/` transcripts are a bare segment list; only
@@ -1814,10 +1858,43 @@ def _sermon_transcript_slices(
             segments = transcript
         else:
             segments = transcript.get("script") or transcript.get("segments") or []
-        # An article must never quote text a proofreader struck through: this
-        # is the one reader whose output is prose a person will publish.
-        segments = live_script(segments)
-        segments_by_index = {segment.get("index"): segment for segment in segments}
+        projection = project_script(segments)
+        uses_body_coordinates = source_uses_body_locator_space(document)
+        identity_field = (
+            "source_body_sha256" if uses_body_coordinates else "source_sha256"
+        )
+        expected_sha256 = str(document.get(identity_field) or "").strip()
+        if not expected_sha256:
+            raise AuthoringContractError(
+                f"sermon transcript source is missing {identity_field}: {source_id}"
+            )
+        actual_sha256 = (
+            projection.body_sha256
+            if uses_body_coordinates
+            else actual_file_sha256
+        )
+        if expected_sha256 != actual_sha256:
+            raise AuthoringContractError(
+                f"stale sermon transcript source: {source_id}"
+            )
+        # Editorial subtitles/comments are co-located in the JSON but are not
+        # professor speech and therefore cannot enter an authoring packet.
+        # This reader resolves the source's stable, original row ``index`` via
+        # ``source_segment_index``; it never interprets legacy Sxxxx locators.
+        # A legacy descriptor is therefore safe here only under its exact
+        # published-file SHA, while new descriptors use the body projection SHA.
+        segments = list(projection.spoken_rows)
+        segments_by_index: dict[Any, dict[str, Any]] = {}
+        for segment in segments:
+            segment_index = segment.get("index")
+            if segment_index not in indices:
+                continue
+            if segment_index in segments_by_index:
+                raise AuthoringContractError(
+                    f"duplicate referenced sermon segment index: "
+                    f"{source_id}#{segment_index}"
+                )
+            segments_by_index[segment_index] = segment
 
         segment_texts: dict[str, str] = {}
         for segment_index in sorted(indices):
@@ -1832,6 +1909,7 @@ def _sermon_transcript_slices(
             "source_id": source_id,
             "path": str(transcript_path.resolve()),
             "sha256": actual_sha256,
+            "file_sha256": actual_file_sha256,
             "segment_indices": sorted(str(index) for index in indices),
         }
     return slices

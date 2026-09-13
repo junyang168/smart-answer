@@ -9,6 +9,14 @@ import json
 from pathlib import Path
 from typing import Any
 
+from backend.pipeline.source_projection import (
+    LOCATOR_SPACE,
+    assert_locator_space_compatible,
+    excerpt_overlaps_inline_markup,
+    project_script,
+    source_uses_body_locator_space,
+)
+
 
 def _stable_id(prefix: str, *parts: str) -> str:
     digest = hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()[:12]
@@ -24,10 +32,18 @@ def build_timed_sermon_evidence(
     result = copy.deepcopy(knowledge)
     raw = transcript_path.read_bytes()
     parsed = json.loads(raw)
-    segments = parsed.get("script", []) if isinstance(parsed, dict) else parsed
-    source_sha = hashlib.sha256(raw).hexdigest()
-    declared_sha = str(source.get("source_sha256") or "")
-    if declared_sha and declared_sha != source_sha:
+    physical_segments = parsed.get("script", []) if isinstance(parsed, dict) else parsed
+    assert_locator_space_compatible(source, physical_segments)
+    projection = project_script(physical_segments)
+    segments = list(projection.body_rows)
+    source_file_sha = hashlib.sha256(raw).hexdigest()
+    source_sha = projection.body_sha256
+    uses_body_identity = source_uses_body_locator_space(source)
+    expected_sha = str(
+        source.get("source_body_sha256") or source.get("source_sha256") or ""
+    )
+    actual_sha = source_sha if uses_body_identity else source_file_sha
+    if expected_sha and expected_sha != actual_sha:
         raise ValueError("transcript source hash mismatch")
 
     source_id = str(source["source_id"])
@@ -37,6 +53,9 @@ def build_timed_sermon_evidence(
         "source_type": "sermon_transcript",
         "source_path": str(transcript_path.resolve()),
         "source_sha256": source_sha,
+        "source_body_sha256": source_sha,
+        "source_file_sha256": source_file_sha,
+        "locator_space": LOCATOR_SPACE,
         "review_status": source.get("review_status") or "candidate",
     }
     documents = {str(row.get("source_id")): row for row in result.get("source_documents", [])}
@@ -67,6 +86,11 @@ def build_timed_sermon_evidence(
         text = str(segment.get("text") or "")
         if not excerpt or excerpt not in text:
             raise ValueError(f"excerpt is not verbatim: {claim_id}")
+        if excerpt_overlaps_inline_markup(text, excerpt):
+            raise ValueError(
+                f"excerpt overlaps non-spoken inline structure: {claim_id}; "
+                "visual evidence must come from extraction"
+            )
         start = segment.get("start_time")
         end = segment.get("end_time")
         if not isinstance(start, (int, float)) or not isinstance(end, (int, float)) or end <= start:

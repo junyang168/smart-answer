@@ -13,7 +13,11 @@ from backend.api.canonical_repository.knowledge_models import (
     ViewpointIdentityDecisionRecord,
     ViewpointRevisionRecord,
 )
-from backend.api.canonical_repository.postgres_store import build_change_set_plan
+from backend.api.canonical_repository.postgres_store import (
+    build_change_set_plan,
+    normalize_package,
+    record_content_sha,
+)
 from backend.api.canonical_repository.viewpoint_foundation import (
     build_coverage_snapshot,
     build_foundation_quality_report,
@@ -387,14 +391,14 @@ def _fixture(
         "viewpoint_resolution_ledgers": [ledger.model_dump(mode="json")],
         "viewpoint_quality_reports": [quality.model_dump(mode="json")],
     }
-    plan = build_change_set_plan(existing_package, {})
     existing = {
-        (operation.collection, operation.object_id): {
-            "revision": operation.after_revision,
-            "content_sha256": operation.after_sha256,
-            "payload": operation.payload,
+        (collection, object_id): {
+            "revision": int(payload.get("revision") or 1),
+            "content_sha256": record_content_sha(payload),
+            "payload": payload,
         }
-        for operation in plan.operations
+        for collection, records in normalize_package(existing_package).items()
+        for object_id, payload in records.items()
     }
     return packet, existing
 

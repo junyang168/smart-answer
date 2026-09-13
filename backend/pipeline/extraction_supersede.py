@@ -1,40 +1,28 @@
-"""Retire the extraction a new one replaces, in the change set that lands it.
+"""Retire the extraction a new one replaces in the ChangeSet that lands it.
 
-Ingesting a re-extraction does not overwrite its predecessor. Record ids are
-derived from the ids of the records that produced them -- `E001`, `CL007` --
-and a second extraction of the same source renumbers all of them, so
-`ingest_package` upserts nothing and simply adds. Measured on the two packages
-that prompted this: 0 of 185 and 0 of 317 incoming fragment ids already
-existed in the store. Left alone, the store holds both extractions of the same
-source, live, with no field that says which one replaced which.
+Model-local ordinals such as ``E001`` and ``CL007`` are not record identity.
+New packages place them in an exact generation namespace; predecessor
+namespaces and source-fragment ownership make the complete old generation
+explicit. Left alone, the store would hold both generations live, with no
+field saying which one replaced which.
 
-So the withdrawal has to happen in the same change set as the arrival, and it
-is computed the same way as any other: the predecessor's fragments are the
-seed, and `record_withdrawal` closes it over what depended on them.
-
-"0 of 185 and 0 of 317 already existed" was measured on a first sectioned
-re-extraction, where the predecessor was a whole-document package: its ids
-were `CL007`, the new ones `P01-CL007`, and the two generations could not
-collide. They do collide from the second sectioned re-extraction onward --
-same sections, same numbering -- and the first source to reach that point
-shared 82 of 93 evidence-step ids with its predecessor. Such a record arrives
-and is withdrawn in the same change set: the arrival writes it, the retirement
-still expects the sha it had before, and the whole change set aborts on its own
-work. Anything the package carries is therefore an update and never a casualty,
-whichever way the closure reaches it.
+The predecessor is found in two independent ways. Its fragments seed the
+dependency closure, while its generation namespace finds records that an old
+or malformed package left unreachable from a fragment. Agreement is not
+assumed: the union is retired atomically with the arrival, excluding every key
+the incoming package itself carries.
 """
 
 from __future__ import annotations
 
+import re
 from typing import Any, Mapping
 
 from backend.pipeline.record_withdrawal import Withdrawal, closure_from_fragments
 from backend.pipeline.relation_id_namespace import (
-    is_source_extraction_relation_id,
-    package_source_key,
+    is_namespaced_extraction_relation_id,
+    package_record_namespace,
 )
-
-
 #: Where each collection keeps its object id, for the collections a knowledge
 #: package can carry. `source_fragments` is handled separately and earlier.
 PACKAGE_ID_FIELDS = {
@@ -47,6 +35,18 @@ PACKAGE_ID_FIELDS = {
     "claim_relations": "claim_relation_id",
 }
 RELATION_COLLECTIONS = {"knowledge_relations", "claim_relations"}
+GENERATED_RECORD_SUFFIX = {
+    # Historical models occasionally appended one discriminator letter when
+    # they split a numbered object (E020G/E020H, OBS006A, CL020H). The old
+    # compiler still prefixed those IDs with the source generation namespace.
+    # Match that observed dialect precisely; a broad namespace-prefix delete
+    # could sweep up later curated IDs such as ``...-MERGED-001``.
+    "questions": r"Q\d+[A-Z]?",
+    "position_nodes": r"POS\d+[A-Z]?",
+    "observations": r"OBS\d+[A-Z]?",
+    "evidence_steps": r"E\d+[A-Z]?",
+    "claims": r"CL\d+[A-Z]?",
+}
 
 
 def arriving_keys(package: Mapping[str, Any]) -> set[tuple[str, str]]:
@@ -83,6 +83,8 @@ def superseded(
     owners: Mapping[str, Mapping[str, Mapping[str, Any]]],
     claims: Mapping[str, Mapping[str, Any]],
     relations: Mapping[str, Mapping[str, Mapping[str, Any]]] | None = None,
+    source_alias_ids: set[str] | None = None,
+    predecessor_namespaces: set[str] | None = None,
 ) -> Withdrawal:
     """What this package replaces: live records of its sources that it does not carry.
 
@@ -92,7 +94,9 @@ def superseded(
     and `ingest_package` handles it as it always did.
     """
 
-    sources = package_source_ids(package)
+    incoming_sources = package_source_ids(package)
+    aliases = set(source_alias_ids or ()) - incoming_sources
+    sources = incoming_sources | aliases
     arriving = {
         str(row.get("fragment_id"))
         for row in (package.get("source_fragments") or [])
@@ -106,30 +110,133 @@ def superseded(
     withdrawal = closure_from_fragments(
         replaced, owners=owners, claims=claims, relations=relations
     )
-    # Relations are repository objects too. Cross-section v2 exposed why they
-    # cannot be retired only as collateral damage from removed fragments: a
-    # re-run can keep every fragment and endpoint while replacing a source-
-    # local edge id (for example XER001) with its globally namespaced form.
-    # In that case fragment closure is empty and the predecessor edge otherwise
-    # remains live forever.
-    #
-    # Endpoint locality is not ownership: a later curated relation can connect
-    # two records from this source without belonging to extraction.  The ID
-    # dialect is the explicit ownership marker, so only a relation in this
-    # source's extraction namespace can be superseded here.  One-time bare v2
-    # IDs are handled by the incident migration, not inferred from endpoints.
+    withdrawal.superseded_sources.extend(sorted(aliases))
+    # Fragment reachability alone is insufficient. A malformed predecessor can
+    # contain an unanchored question/position, and a cross-section edge can keep
+    # both endpoints while being replaced by another model response. Exact
+    # generation ownership closes both gaps without inferring ownership merely
+    # because endpoints happen to be local to this sermon.
     incoming_keys = arriving_keys(package)
-    source_key = package_source_key(package)
-    for collection, rows in (relations or {}).items():
-        id_field = PACKAGE_ID_FIELDS.get(collection)
-        if id_field is None:
-            continue
-        for relation_id in rows:
-            key = (collection, str(relation_id))
-            if key in incoming_keys or key in withdrawal.dangling_relations:
+    declared_extraction_namespace = str(
+        (package.get("extraction") or {}).get("record_namespace") or ""
+    ).strip()
+    declared_parent_namespace = str(
+        (package.get("cross_section_relations") or {}).get(
+            "parent_extraction_record_namespace"
+        ) or ""
+    ).strip()
+    if (
+        declared_extraction_namespace
+        and declared_parent_namespace
+        and declared_extraction_namespace != declared_parent_namespace
+    ):
+        raise ValueError(
+            "cross-section parent namespace does not match extraction namespace"
+        )
+    try:
+        package_namespace = package_record_namespace(package)
+    except ValueError:
+        package_namespace = ""
+    incoming_extraction_namespace = (
+        declared_extraction_namespace or declared_parent_namespace or package_namespace
+    )
+    if predecessor_namespaces is None:
+        predecessor_namespaces = {
+            value for value in (incoming_extraction_namespace,) if value
+        }
+    namespaces = {
+        str(value) for value in predecessor_namespaces if str(value)
+    }
+    incoming_cross_section_namespace = str(
+        (package.get("cross_section_relations") or {}).get("record_namespace") or ""
+    ).strip()
+
+    def owned_by_predecessor(
+        collection: str, object_id: str, payload: Mapping[str, Any]
+    ) -> bool:
+        record_namespace = str(payload.get("record_namespace") or "").strip()
+        extraction_namespace = str(
+            payload.get("extraction_record_namespace") or ""
+        ).strip()
+        parent_namespace = str(
+            payload.get("parent_extraction_record_namespace") or ""
+        ).strip()
+        if {record_namespace, extraction_namespace} & namespaces:
+            return True
+        if parent_namespace in namespaces:
+            # A child cross-section generation belongs to its parent only when
+            # the parent itself is being superseded. Replaying extraction G1
+            # must leave its still-current child X1 alone. A new cross-section
+            # response X2 for the same G1 does supersede X1, while replaying X1
+            # remains an exact no-op because it arrives under the same child
+            # namespace.
+            if parent_namespace != incoming_extraction_namespace:
+                return True
+            if (
+                incoming_cross_section_namespace
+                and record_namespace
+                and record_namespace != incoming_cross_section_namespace
+            ):
+                return True
+        if collection in RELATION_COLLECTIONS:
+            matching_namespaces = {
+                namespace
+                for namespace in namespaces
+                if is_namespaced_extraction_relation_id(namespace, object_id)
+            }
+            if not matching_namespaces:
+                return False
+            # Before cross-section received its own child namespace, XER/XCR
+            # ids were minted directly under the extraction namespace and did
+            # not carry a parent field. An exact extraction replay without a
+            # cross-section result must not delete that still-current child.
+            # A new parent generation or an explicit new cross-section child
+            # does replace it.
+            belongs_to_older_parent = any(
+                namespace != incoming_extraction_namespace
+                for namespace in matching_namespaces
+            )
+            if belongs_to_older_parent:
+                return True
+            legacy_cross_section = any(
+                re.fullmatch(
+                    rf"{re.escape(namespace)}-(?:P\d+-)?X(?:ER|CR)\d+",
+                    object_id,
+                )
+                is not None
+                for namespace in matching_namespaces
+            )
+            if legacy_cross_section and not incoming_cross_section_namespace:
+                return False
+            return True
+        suffix = GENERATED_RECORD_SUFFIX.get(collection)
+        if suffix is None:
+            return False
+        return any(
+            re.fullmatch(
+                rf"{re.escape(namespace)}-(?:P\d+-)?{suffix}", object_id
+            )
+            is not None
+            for namespace in namespaces
+        )
+
+    generation_rows: dict[str, Mapping[str, Mapping[str, Any]]] = {
+        **{collection: rows for collection, rows in owners.items()},
+        "claims": claims,
+        **dict(relations or {}),
+    }
+    existing_closure = set(withdrawal.closure())
+    for collection, rows in generation_rows.items():
+        for object_id, payload in rows.items():
+            key = (collection, str(object_id))
+            if key in incoming_keys or key in existing_closure:
                 continue
-            if is_source_extraction_relation_id(source_key, relation_id):
+            if not owned_by_predecessor(collection, str(object_id), payload):
+                continue
+            if collection in RELATION_COLLECTIONS:
                 withdrawal.superseded_relations.append(key)
+            else:
+                withdrawal.superseded_records.append(key)
     # The same rule the fragments already got, applied to everything the
     # closure walked to. A record the new extraction reproduces under the same
     # id is an update; retiring it in the change set that writes it makes the

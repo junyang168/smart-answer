@@ -34,16 +34,26 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from backend.config.wang_platform_paths import wang_platform_paths
+from backend.pipeline.corpus_survey_runner import _load
 from backend.pipeline.detailed_knowledge_extraction_runner import _slug
+from backend.pipeline.extraction_sections import leading_untitled_body_end
+from backend.pipeline.knowledge_source import markdown_source_document
 from backend.pipeline.research_batch import (
     batch_members,
     load_research_batch,
     merge_reviewed_packages,
+)
+from backend.pipeline.source_projection import (
+    VisualSourceAttestationError,
+    project_script,
+    provably_nonspoken_inline_markup,
+    validate_visual_source_attestations,
 )
 from backend.pipeline.transcript_source import resolve_transcript_path
 
@@ -70,6 +80,12 @@ STAGES = MEMBER_STAGES + BATCH_STAGES
 #: anybody may ask; with it, the run writes. One flag, one decision, at the
 #: only step that touches the authoring authority.
 DEFAULT_STAGES = STAGES
+
+# Measured subscription boundary: a 162-sentence section exhausted the 900s
+# per-call timeout while the 125-sentence canary completed in about four
+# minutes. The extraction runner applies this only when it must actually split;
+# normal section plans and their fingerprints remain unchanged.
+DEFAULT_CODEX_FALLBACK_SECTION_SENTENCE_LIMIT = 125
 
 
 def artifact_paths(output_root: Path, member_key: str) -> dict[str, Path]:
@@ -130,6 +146,82 @@ def resolve_transcript_dir(member: dict[str, Any], transcript_dirs: list[Path]) 
     return path.parent if path is not None else None
 
 
+def review_members_with_untitled_leading_sections(
+    members: list[dict[str, Any]], transcript_dirs: list[Path]
+) -> list[str]:
+    """Review transcripts that require governed subtitle persistence.
+
+    Published transcripts are immutable and may use SHA-bound internal section
+    plans. Markdown sources carry their own compatibility path. A review transcript
+    is the one governed source type where silently generating internal-only titles
+    would bypass the editable source-of-record workflow.
+    """
+
+    untitled: list[str] = []
+    for member in members:
+        if member["source_type"] != "sermon_transcript":
+            continue
+        source_path = resolve_transcript_path(member["key"], transcript_dirs)
+        if source_path is None or source_path.parent.name != "script_review":
+            continue
+        source, _ = _load(source_path)
+        projection = project_script(source.get("script"))
+        if not projection.body_rows or leading_untitled_body_end(
+            projection.headings, len(projection.body_rows)
+        ) is not None:
+            untitled.append(member["key"])
+    return untitled
+
+
+def members_with_inline_editor_payload(
+    members: list[dict[str, Any]],
+    transcript_dirs: list[Path],
+    visual_source_attestations: dict[str, dict[str, str]] | None = None,
+) -> list[str]:
+    """Return sources with malformed visuals or untyped inline editor payload."""
+
+    unsafe: list[str] = []
+    for member in members:
+        if member["source_type"] == "sermon_transcript":
+            source_path = resolve_transcript_path(member["key"], transcript_dirs)
+            if source_path is None:
+                continue
+            source, _ = _load(source_path)
+        else:
+            source = markdown_source_document(member)[0]
+        projection = project_script(source.get("script"))
+        try:
+            validate_visual_source_attestations(
+                projection,
+                (visual_source_attestations or {}).get(member["key"]),
+            )
+            invalid = False
+        except VisualSourceAttestationError:
+            invalid = True
+        visuals_by_segment: dict[str, list[Any]] = {}
+        for visual in projection.visual_blocks:
+            visuals_by_segment.setdefault(visual.segment_index, []).append(visual)
+        for position, row in enumerate(projection.body_rows, start=1):
+            locator = f"S{position:04d}"
+            ranges = [
+                (visual.char_start, visual.char_end)
+                for visual in visuals_by_segment.get(locator, [])
+            ]
+            for span in provably_nonspoken_inline_markup(
+                str(row.get("text") or "")
+            ):
+                if any(
+                    left <= span.start and span.end <= right
+                    for left, right in ranges
+                ):
+                    continue
+                invalid = True
+                break
+        if invalid:
+            unsafe.append(member["key"])
+    return unsafe
+
+
 def _member_source_manifest(member: dict[str, Any], path: Path) -> None:
     """Write the one-row source manifest the extraction runner reads.
 
@@ -140,11 +232,7 @@ def _member_source_manifest(member: dict[str, Any], path: Path) -> None:
     """
 
     row = {key: value for key, value in member.items() if key != "key"}
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps({"sources": [row]}, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    _write_manifest(path, {"sources": [row]})
 
 
 def build_command_plan(
@@ -167,6 +255,7 @@ def build_command_plan(
     # exists to end.
     review_budget = models.get("review_max_output_tokens")
     adjudicator_budget = models.get("adjudicator_max_output_tokens")
+    review_spot_check_percent = int(batch.get("review_spot_check_percent", 0))
     section_limits = batch.get("extraction_max_section_sentences") or {}
     plan: list[dict[str, Any]] = []
     reused = set((batch.get("reviewed_package_reuse") or {}).keys())
@@ -186,13 +275,26 @@ def build_command_plan(
             "--model", extraction_model, "--reasoning-effort", extraction_effort,
             "--backend", extraction_backend,
         ]
-        if key in section_limits:
-            limit = int(section_limits[key])
+        configured_limit = section_limits.get(key)
+        if configured_limit is not None:
+            limit = int(configured_limit)
             if limit <= 0:
                 raise ValueError(
                     f"extraction_max_section_sentences[{key!r}] must be positive"
                 )
             extract += ["--max-section-sentences", str(limit)]
+        elif extraction_backend == "codex-subscription":
+            extract += [
+                "--fallback-max-section-sentences",
+                str(DEFAULT_CODEX_FALLBACK_SECTION_SENTENCE_LIMIT),
+            ]
+        for locator, raw_sha256 in sorted(
+            ((batch.get("visual_source_attestations") or {}).get(key) or {}).items()
+        ):
+            extract += [
+                "--visual-source-attestation",
+                f"{locator}={raw_sha256}",
+            ]
         # The two source kinds differ here and nowhere else downstream: every
         # later stage reads `source_documents` out of the package and resolves
         # the source through `load_knowledge_source_document`.
@@ -223,11 +325,23 @@ def build_command_plan(
         # holds for every member and no stage has to be conditional.
         source = str(paths["cross_section"])
         review = [
-            sys.executable, "-m", "backend.pipeline.corpus_ai_review_runner",
-            "--claim-layer-package", source,
-            "--claim-layer-output", str(paths["review"]),
-            "--transcript-dir", str(member_dir), "--model", review_model,
-            "--backend", anthropic_backend,
+            sys.executable,
+            "-m",
+            "backend.pipeline.claim_layer_review_batch_runner",
+            "--package",
+            source,
+            "--output",
+            str(paths["review"]),
+            "--batch-size",
+            str(int(batch.get("review_batch_size", 20))),
+            "--spot-check-percent",
+            str(review_spot_check_percent),
+            "--transcript-dir",
+            str(member_dir),
+            "--model",
+            review_model,
+            "--backend",
+            anthropic_backend,
         ]
         if review_budget:
             review += ["--max-output-tokens", str(int(review_budget))]
@@ -269,7 +383,10 @@ def build_command_plan(
                     "command": [
                         sys.executable, "-m", "backend.pipeline.knowledge_consensus_applier",
                         "--package", source, "--overrides", str(paths["overrides"]),
-                        "--output", str(paths["reviewed"]), "--transcript-dir", str(member_dir),
+                        "--output", str(paths["reviewed"]),
+                        "--review", str(paths["review"]),
+                        "--adjudication", str(paths["adjudication"]),
+                        "--transcript-dir", str(member_dir),
                     ],
                 },
                 # Ingest supersedes the extraction it replaces in the same
@@ -282,8 +399,25 @@ def build_command_plan(
 
 
 def _write_manifest(path: Path, payload: dict[str, Any]) -> None:
+    """Install one complete batch artifact without exposing partial JSON."""
+
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    encoded = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    descriptor, temporary = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 #: The batch runner's stage name -> the name that stage files in the ledger,
@@ -296,6 +430,7 @@ LEDGER_STAGE = {
     "review": "review",
     "adjudicate": "adjudication",
     "apply": "merge",
+    "ingest": "ingest",
 }
 
 
@@ -364,6 +499,16 @@ def _member_status(plan: list[dict[str, Any]], results: dict[str, Any]) -> list[
     return rows
 
 
+def failed_member_runs(results: dict[str, dict[str, Any]]) -> list[str]:
+    """Members whose current invocation cannot authorize a batch merge."""
+
+    return sorted(
+        str(key)
+        for key, result in results.items()
+        if key is not None and result.get("status") in {"failed", "interrupted"}
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--batch", type=Path, required=True)
@@ -377,6 +522,10 @@ def main() -> int:
     parser.add_argument(
         "--only", nargs="+", metavar="SOURCE",
         help="run only these members (transcript id or source_id)",
+    )
+    parser.add_argument(
+        "--exclude", nargs="+", metavar="SOURCE",
+        help="exclude these members while preserving the batch's frozen order",
     )
     parser.add_argument(
         "--apply", action="store_true",
@@ -412,12 +561,24 @@ def main() -> int:
         / batch["batch_id"]
     )
     members = batch_members(batch)
+    known = {member["key"] for member in members}
+    if args.only and args.exclude:
+        overlap = sorted(set(args.only) & set(args.exclude))
+        if overlap:
+            parser.error("members cannot be both --only and --exclude: " + ", ".join(overlap))
     if args.only:
-        known = {member["key"] for member in members}
         unknown = sorted(set(args.only).difference(known))
         if unknown:
             parser.error("--only names members outside the batch: " + ", ".join(unknown))
         members = [member for member in members if member["key"] in set(args.only)]
+    if args.exclude:
+        unknown = sorted(set(args.exclude).difference(known))
+        if unknown:
+            parser.error("--exclude names members outside the batch: " + ", ".join(unknown))
+        excluded = set(args.exclude)
+        members = [member for member in members if member["key"] not in excluded]
+    if not members:
+        parser.error("member selection is empty")
     transcript_dirs = args.transcript_dirs or [DEFAULT_TRANSCRIPT_DIR]
     missing = [
         member["key"] for member in members
@@ -429,6 +590,27 @@ def main() -> int:
             + ", ".join(str(directory) for directory in transcript_dirs)
             + ": " + ", ".join(missing)
         )
+    wanted = set(DEFAULT_STAGES) if args.stage == "all" else {args.stage}
+    if "extract" in wanted:
+        unsafe = members_with_inline_editor_payload(
+            members,
+            transcript_dirs,
+            batch.get("visual_source_attestations") or {},
+        )
+        if unsafe:
+            parser.error(
+                "source-bearing rows contain malformed visual source or untyped "
+                "HTML editor payload; correct it through the source editor before extraction: "
+                + ", ".join(unsafe)
+            )
+    if "extract" in wanted and not args.write_back_generated_subtitles:
+        untitled = review_members_with_untitled_leading_sections(members, transcript_dirs)
+        if untitled:
+            parser.error(
+                "script_review members with an untitled leading section require "
+                "--write-back-generated-subtitles and --subtitle-user-id before extraction: "
+                + ", ".join(untitled)
+            )
 
     selected_batch = {**batch, "transcript_ids": [], "sources": []}
     for member in members:
@@ -447,7 +629,6 @@ def main() -> int:
         write_back_generated_subtitles=args.write_back_generated_subtitles,
         subtitle_user_id=args.subtitle_user_id,
     )
-    wanted = set(DEFAULT_STAGES) if args.stage == "all" else {args.stage}
     selected = [row for row in plan if row["stage"] in wanted]
     merged_output = output_root / "merged" / "research-batch-knowledge.json"
     preview = {
@@ -539,14 +720,20 @@ def main() -> int:
     # of it must not write one. Merging what `--only` selected would replace a
     # full merge with a one-member file and report success -- silently wrong in
     # exactly the way this orchestration exists to stop.
-    partial_selection = bool(args.only) and len(members) < len(batch_members(batch))
+    partial_selection = len(members) < len(batch_members(batch))
+    failed_current_members = failed_member_runs(results)
     if partial_selection and "merge" in wanted:
         merge_error = (
             "merge skipped: --only selected "
             f"{len(members)} of {len(batch_members(batch))} members, and the "
             "merged package describes the whole batch"
         )
-    elif "merge" in wanted and not interrupted:
+    elif "merge" in wanted and (interrupted or failed_current_members):
+        merge_error = (
+            "merge skipped: current run failed or was interrupted for "
+            + ", ".join(failed_current_members)
+        )
+    elif "merge" in wanted:
         reviewed_paths = reviewed_package_paths(selected_batch, output_root=output_root)
         absent = [str(path) for path in reviewed_paths if not path.is_file()]
         if absent:
@@ -556,15 +743,16 @@ def main() -> int:
             merge_error = "missing reviewed packages: " + ", ".join(absent)
         else:
             merged = merge_reviewed_packages(selected_batch, reviewed_paths)
-            merged_output.parent.mkdir(parents=True, exist_ok=True)
-            merged_output.write_text(
-                json.dumps(merged, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-            )
+            _write_manifest(merged_output, merged)
 
     # What ran, per member, so the check asks only about stages this batch
     # actually executed.
     ran: dict[str, list[str]] = {}
     for row in selected:
+        # A non-apply ingest is deliberately only a read-only ChangeSet plan;
+        # the ingest runner correctly writes no ledger row for that question.
+        if row["stage"] == "ingest" and not args.apply:
+            continue
         if results.get(row["transcript_id"], {}).get("status") in {"completed", "running"}:
             ran.setdefault(row["transcript_id"], []).append(row["stage"])
     unrecorded = unrecorded_stages(ran)

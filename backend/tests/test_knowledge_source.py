@@ -15,6 +15,11 @@ from backend.pipeline.knowledge_source import (
     markdown_blocks,
     markdown_source_document,
 )
+from backend.pipeline.source_projection import (
+    LOCATOR_SPACE,
+    project_script,
+    script_from_markdown_blocks,
+)
 
 
 def test_markdown_blocks_are_stable_and_verbatim() -> None:
@@ -81,11 +86,17 @@ def test_publication_readiness_requires_four_tier_enum(tmp_path: Path) -> None:
 def test_load_knowledge_source_document_resolves_notes_and_checks_hash(tmp_path: Path) -> None:
     path = tmp_path / "final.md"
     path.write_text("# 十六章\n\n正文。\n", encoding="utf-8")
+    projection = project_script(
+        script_from_markdown_blocks(markdown_blocks(path.read_text(encoding="utf-8")))
+    )
     source = {
         "source_id": "notes_manuscript:m16",
         "source_type": "notes_manuscript",
         "source_path": str(path),
-        "source_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "source_sha256": projection.body_sha256,
+        "source_body_sha256": projection.body_sha256,
+        "source_file_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "locator_space": LOCATOR_SPACE,
     }
     payload, raw, resolved = load_knowledge_source_document(source, [])
     assert resolved == path
@@ -132,6 +143,95 @@ def test_load_knowledge_source_document_normalizes_review_array(tmp_path: Path) 
     assert payload["metadata"]["title"] == "人工審閱逐字稿"
     assert payload["metadata"]["status"] == "reviewed"
     assert payload["script"][0]["text"] == "逐字稿內容"
+
+
+def test_visual_source_document_requires_persisted_locator_sha_attestation(
+    tmp_path: Path,
+) -> None:
+    transcript_dir = tmp_path / "script_published"
+    transcript_dir.mkdir()
+    transcript_path = transcript_dir / "visual-sermon.json"
+    svg = "<svg><text>教授的图</text></svg>"
+    payload = {"script": [{"index": 1, "text": "说明。" + svg}]}
+    transcript_path.write_text(
+        json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+    )
+    projection = project_script(payload["script"])
+    visual = projection.visual_blocks[0]
+    source = {
+        "source_id": "SRC-visual",
+        "source_type": "sermon_transcript",
+        "transcript_id": "visual-sermon",
+        "source_sha256": projection.body_sha256,
+        "source_body_sha256": projection.body_sha256,
+        "source_visual_sha256": projection.visual_content_sha256,
+        "locator_space": LOCATOR_SPACE,
+    }
+
+    with pytest.raises(ValueError, match="not attested"):
+        load_knowledge_source_document(source, [transcript_dir])
+
+    source["visual_source_attestations"] = [
+        {"locator": visual.locator, "raw_sha256": visual.raw_sha256}
+    ]
+    load_knowledge_source_document(source, [transcript_dir])
+
+
+def test_new_source_identity_ignores_comments_but_detects_titles_and_body(tmp_path: Path) -> None:
+    transcript_dir = tmp_path / "script_review"
+    transcript_dir.mkdir()
+    transcript_path = transcript_dir / "semantic-source.json"
+    rows = [
+        {"index": "subtitle-a", "type": "subtitle", "text": "## 第一部分"},
+        {"index": "comment-a", "type": "comment", "text": "内部备注"},
+        {"index": 1, "text": "教授正文。"},
+    ]
+    transcript_path.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+    projection = project_script(rows)
+    source = {
+        "source_id": "SRC-semantic-source",
+        "source_type": "sermon_transcript",
+        "transcript_id": "semantic-source",
+        "source_sha256": projection.body_sha256,
+        "source_body_sha256": projection.body_sha256,
+        "source_file_sha256": hashlib.sha256(transcript_path.read_bytes()).hexdigest(),
+        "editorial_structure_sha256": projection.editorial_structure_sha256,
+        "locator_space": LOCATOR_SPACE,
+    }
+
+    rows[1]["text"] = "改过的内部备注"
+    transcript_path.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+    load_knowledge_source_document(source, [transcript_dir])
+
+    rows[0]["text"] = "## 改名后的第一部分"
+    transcript_path.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+    load_knowledge_source_document(source, [transcript_dir])
+
+    rows[0]["text"] = "## 第一部分"
+    rows[2]["text"] = "被改掉的正文。"
+    transcript_path.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(ValueError, match="source body hash mismatch"):
+        load_knowledge_source_document(source, [transcript_dir])
+
+
+def test_legacy_mixed_source_refuses_ambiguous_s_locator_space(tmp_path: Path) -> None:
+    transcript_dir = tmp_path / "script_review"
+    transcript_dir.mkdir()
+    transcript_path = transcript_dir / "legacy-titled.json"
+    rows = [
+        {"index": "subtitle-a", "type": "subtitle", "text": "## 编辑标题"},
+        {"index": 1, "text": "教授正文。"},
+    ]
+    transcript_path.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+    source = {
+        "source_id": "SRC-legacy-titled",
+        "source_type": "sermon_transcript",
+        "transcript_id": "legacy-titled",
+        "source_sha256": hashlib.sha256(transcript_path.read_bytes()).hexdigest(),
+    }
+
+    with pytest.raises(ValueError, match="no locator_space"):
+        load_knowledge_source_document(source, [transcript_dir])
 
 
 # ---------------------------------------------------------------------------

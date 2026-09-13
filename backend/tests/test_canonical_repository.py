@@ -12,6 +12,13 @@ from backend.api.canonical_repository.models import (
     TopicAssignment,
 )
 from backend.api.canonical_repository.service import CanonicalRepositoryService
+from backend.api.canonical_repository.source_maps import build_transcript_source_map
+from backend.api.canonical_repository.knowledge_models import (
+    EvidenceStepRecord,
+    KnowledgeSourceDocument,
+    SourceFragmentRecord,
+)
+from backend.pipeline.source_projection import visual_source_blocks
 
 
 @pytest.fixture
@@ -93,7 +100,7 @@ def test_transcript_source_map_and_exact_citation_resolution(repository_workspac
     project_id, _ = _write_transcript_project(repository_workspace)
 
     registered = service.register_project_source(project_id)
-    assert registered["mapped_count"] == 3
+    assert registered["mapped_count"] == 2
     assert registered["missing"] == []
     assert registered["source"]["title"] == "第四講"
     source_id = registered["source"]["source_id"]
@@ -116,6 +123,101 @@ def test_transcript_source_map_and_exact_citation_resolution(repository_workspac
     assert resolution.locator.start_time == 130
     assert "citation=" in resolution.deep_link_url
     assert "t=130" in resolution.deep_link_url
+
+
+def test_visual_fragment_binds_to_parent_transcript_row_without_becoming_speech(
+    repository_workspace,
+) -> None:
+    service = repository_workspace["service"]
+    project_id, transcript_id = _write_transcript_project(repository_workspace)
+    transcript_path = repository_workspace["published"] / f"{transcript_id}.json"
+    payload = json.loads(transcript_path.read_text(encoding="utf-8"))
+    svg = '<svg><text x="4">约的结构</text></svg>'
+    payload["script"][1]["text"] += svg
+    transcript_path.write_text(
+        json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+    )
+    service.register_project_source(project_id)
+    visual = visual_source_blocks(
+        payload["script"][1]["text"],
+        segment_index="S0001",
+        source_segment_index=31,
+    )[0]
+    fragment = SourceFragmentRecord(
+        fragment_id="FR-VISUAL",
+        source_id="SRC-LOGICAL",
+        paragraph_key=visual.locator,
+        source_segment_index=31,
+        verbatim_excerpt=visual.raw_svg,
+        source_modality="visual",
+        visual_locator=visual.locator,
+        visual_block_sha256=visual.raw_sha256,
+        visual_canonical_sha256=visual.canonical_sha256,
+        visual_renderer_version="svg_literal_facts_v3_cjk_white",
+        visual_facts=list(visual.facts),
+    )
+    records = {
+        "source_documents": [
+            KnowledgeSourceDocument(
+                source_id="SRC-LOGICAL",
+                source_type="sermon_transcript",
+                transcript_id=transcript_id,
+            )
+        ],
+        "source_fragments": [fragment],
+        "evidence_steps": [
+            EvidenceStepRecord(
+                evidence_step_id="EV-VISUAL",
+                source_fragment_id=fragment.fragment_id,
+                statement="图示列出约的结构。",
+            )
+        ],
+        "knowledge_routes": [],
+    }
+
+    service._bind_knowledge_provenance(records)
+
+    assert fragment.anchor_state == "canonical_citation_bound"
+    citation = service.store.get_citation(str(fragment.citation_id))
+    assert citation.locator.paragraph_keys == ["31"]
+    assert citation.role == "visual_evidence"
+
+
+def test_transcript_source_map_skips_empty_non_visual_rows(repository_workspace) -> None:
+    service = repository_workspace["service"]
+    project_id, transcript_id = _write_transcript_project(repository_workspace)
+    transcript_path = repository_workspace["published"] / f"{transcript_id}.json"
+    payload = json.loads(transcript_path.read_text(encoding="utf-8"))
+    payload["script"].insert(1, {"index": 999, "text": ""})
+    transcript_path.write_text(
+        json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+    )
+
+    registered = service.register_project_source(project_id)
+    source_map = service.store.get_source_map(registered["source"]["source_id"])
+
+    assert all(row["paragraph_key"] != "999" for row in source_map.entries)
+    assert source_map.ambiguous == []
+
+
+def test_transcript_source_map_prefers_complete_svg_row_when_unified_preserves_it(
+    tmp_path,
+) -> None:
+    row = "前一句。\n<svg>\n<text>图</text>\n</svg>\n後一句。"
+    transcript = tmp_path / "sermon.json"
+    unified = tmp_path / "unified.md"
+    transcript.write_text(
+        json.dumps({"script": [{"index": 7, "text": row}]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    unified.write_text(f"## 标题\n\n{row}\n", encoding="utf-8")
+
+    source_map = build_transcript_source_map("SRC", transcript, unified)
+
+    assert source_map.missing == []
+    assert source_map.ambiguous == []
+    assert source_map.entries[0]["source_line_start"] == 3
+    assert source_map.entries[0]["source_line_end"] == 7
 
 
 def test_authoring_unit_detail_includes_renderable_manuscript_markdown(repository_workspace):
@@ -621,46 +723,15 @@ def test_seed_import_backfills_transcript_citation(repository_workspace, tmp_pat
     assert any(item.locator.start_time == 130 for item in resolutions)
 
 
-def test_heading_only_transcript_citations_are_skipped_and_can_be_detached(repository_workspace):
+def test_editorial_heading_is_not_mapped_as_citable_source(repository_workspace):
     service = repository_workspace["service"]
     project_id, _ = _write_transcript_project(repository_workspace)
     source_id = service.register_project_source(project_id)["source"]["source_id"]
     source_map = service.store.get_source_map(source_id)
-    heading_entry, content_entry = source_map.entries[:2]
-    heading = service.create_citation_from_source_range(
-        source_id,
-        heading_entry["source_line_start"],
-        heading_entry["source_line_end"],
-    )
-    content = service.create_citation_from_source_range(
-        source_id,
-        content_entry["source_line_start"],
-        content_entry["source_line_end"],
-    )
-    unit = CanonicalUnit(
-        unit_id="CU-heading-cleanup",
-        title="登山變像",
-        unit_type="passage",
-        manuscript=ManuscriptLocator(
-            project_id=project_id,
-            project_type="transcript",
-            heading_title="一、登山變像",
-            heading_anchor="一-登山變像",
-        ),
-        citation_ids=[heading.citation_id, content.citation_id],
-    )
-    service.store.save_unit(unit)
 
     assert service._is_heading_only_excerpt("## 登山變像") is True
     assert service._is_heading_only_excerpt("## 登山變像\n\n耶穌帶著門徒上山。") is False
-
-    result = service.detach_heading_only_citations()
-    cleaned = service.store.get_unit(unit.unit_id)
-
-    assert result["removed_links"] == 1
-    assert result["units_without_substantive_sources"] == []
-    assert cleaned.citation_ids == [content.citation_id]
-    assert service.store.get_citation(heading.citation_id).citation_id == heading.citation_id
+    assert [entry["paragraph_key"] for entry in source_map.entries] == ["31", "49"]
 
 
 def test_transcript_backfill_uses_evidence_ranges_not_generated_draft_lines(repository_workspace, tmp_path):

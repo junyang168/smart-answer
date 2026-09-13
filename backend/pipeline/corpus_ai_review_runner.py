@@ -10,7 +10,8 @@ import argparse
 import copy
 import hashlib
 import json
-import shutil
+import os
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -30,11 +31,23 @@ from backend.pipeline.corpus_ai_review import (
 from backend.pipeline.corpus_survey import validate_survey
 from backend.pipeline.corpus_survey_runner import PROJECT_ROOT, _load, _slug, _transcript_for_prompt
 from backend.pipeline.knowledge_package import live_claims
+from backend.pipeline.knowledge_package_merge import (
+    KnowledgePackageMergeError,
+    validate_merged_package,
+)
 from backend.pipeline.knowledge_source import load_knowledge_source_document
 from backend.pipeline.llm_usage import usage_row, usage_summary
 from backend.pipeline.run_ledger import run_record
 from backend.pipeline.source_keys import package_row_key
+from backend.pipeline.source_projection import (
+    project_script,
+    validate_visual_fragment_against_block,
+)
 from backend.pipeline.stage1 import Stage1AnthropicClient
+from backend.pipeline.cross_section_relation_runner import _artifact_sha256
+from backend.pipeline.detailed_knowledge_extraction_runner import (
+    _package_artifact_sha256,
+)
 from backend.pipeline.transcript_source import resolve_transcript_path
 
 
@@ -45,6 +58,49 @@ DEFAULT_TRANSCRIPT_DIRS = [
     Path("/opt/homebrew/var/www/church/web/data/script_published"),
     Path("/opt/homebrew/var/www/church/web/data/script_review"),
 ]
+
+
+def _atomic_artifact_write(path: Path, encoded: bytes) -> None:
+    """Install a complete current or historical review artifact."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _atomic_json_write(path: Path, payload: dict[str, Any]) -> None:
+    """Install a complete current review without exposing partial JSON."""
+
+    _atomic_artifact_write(
+        path,
+        (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+    )
+
+
+def _review_artifact_sha256(artifact: dict[str, Any]) -> str:
+    candidate = json.loads(json.dumps(artifact, ensure_ascii=False))
+    (candidate.get("reviewer") or {}).pop("artifact_sha256", None)
+    return _sha256_bytes(
+        json.dumps(
+            candidate,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
 PROMPT_PATH = Path("backend/pipeline/prompts/corpus_independent_ai_review.md")
 DEFAULT_CLAIM_LAYER_OUTPUT = (
     wang_platform_paths().claim_layer_staging / "independent_ai_review_v1.json"
@@ -52,6 +108,42 @@ DEFAULT_CLAIM_LAYER_OUTPUT = (
 # v3 drops claims an accepted merge retired and carries the ids the other
 # batches hold, so what the reviewer saw is no longer the same projection.
 CLAIM_LAYER_PROJECTION_VERSION = "wang_claim_layer_review_projection_v3"
+
+
+def _validate_claim_layer_package(package: dict[str, Any]) -> None:
+    """Prove a package is a coherent, unmodified upstream stage artifact."""
+
+    if package.get("review_batch"):
+        from backend.pipeline.claim_layer_review_batch import (
+            ClaimLayerReviewBatchError,
+            validate_split_claim_layer_package,
+        )
+
+        try:
+            validate_split_claim_layer_package(package)
+        except ClaimLayerReviewBatchError as exc:
+            raise AIReviewValidationError(str(exc)) from exc
+        return
+
+    try:
+        validate_merged_package(package)
+    except KnowledgePackageMergeError as exc:
+        raise AIReviewValidationError(
+            f"claim-layer package violates graph integrity: {exc}"
+        ) from exc
+    cross_section = package.get("cross_section_relations")
+    if isinstance(cross_section, dict):
+        if cross_section.get("artifact_sha256") != _artifact_sha256(package):
+            raise AIReviewValidationError(
+                "claim-layer cross-section artifact is incomplete or was modified"
+            )
+        return
+    extraction = package.get("extraction")
+    if isinstance(extraction, dict) and extraction.get("artifact_sha256"):
+        if extraction.get("artifact_sha256") != _package_artifact_sha256(package):
+            raise AIReviewValidationError(
+                "claim-layer extraction artifact is incomplete or was modified"
+            )
 
 
 def _find_transcript(transcript_id: str, transcript_dirs: list[Path]) -> Path:
@@ -111,8 +203,53 @@ def _archive_existing_review(output_path: Path) -> Path | None:
         archive_dir / f"{output_path.stem}.{fingerprint}.{_sha256_bytes(raw)[:8]}.json"
     )
     if not archive_path.exists():
-        shutil.copy2(output_path, archive_path)
+        _atomic_artifact_write(archive_path, raw)
     return archive_path
+
+
+def _matching_review_artifact(
+    artifact: dict[str, Any],
+    *,
+    survey: dict[str, Any],
+    expected_fingerprint: str,
+    spot_check_percent: int,
+) -> bool:
+    """Accept a cache hit only when the whole routed review is coherent."""
+
+    try:
+        if artifact.get("schema_version") != AI_REVIEW_VERSION:
+            return False
+        if (
+            str((artifact.get("reviewer") or {}).get("fingerprint_sha256") or "")
+            != expected_fingerprint
+            or artifact.get("spot_check_percent") != spot_check_percent
+        ):
+            return False
+        if (artifact.get("reviewer") or {}).get(
+            "artifact_sha256"
+        ) != _review_artifact_sha256(artifact):
+            return False
+        assessment = artifact.get("sermon_assessment")
+        if not isinstance(assessment, dict):
+            return False
+        if not isinstance(assessment.get("summary"), str) or not isinstance(
+            assessment.get("systemic_risks"), list
+        ):
+            return False
+        if artifact.get("reviewed_claims") != survey.get("candidate_claims"):
+            return False
+        validate_review_response(artifact, survey)
+        expected_routing = apply_risk_routing(
+            {"claim_reviews": artifact["claim_reviews"]},
+            reviewer_fingerprint_sha256=expected_fingerprint,
+            spot_check_percent=spot_check_percent,
+        )
+        return (
+            artifact.get("claim_reviews") == expected_routing["claim_reviews"]
+            and artifact.get("routing_summary") == expected_routing["routing_summary"]
+        )
+    except (AIReviewValidationError, KeyError, TypeError, ValueError):
+        return False
 
 
 def _normalize_claim_layer(package: dict[str, Any]) -> dict[str, Any]:
@@ -159,6 +296,21 @@ def _normalize_claim_layer(package: dict[str, Any]) -> dict[str, Any]:
                         "highlight_status": highlight.get("status"),
                         "review_note": highlight.get("review_note")
                         or highlight.get("rejection_reason"),
+                        **(
+                            {
+                                "source_modality": "visual",
+                                "visual_locator": anchor.get("visual_locator")
+                                or anchor.get("paragraph_key"),
+                                "visual_block_sha256": anchor.get(
+                                    "visual_block_sha256"
+                                ),
+                                "visual_fact_ids": list(
+                                    anchor.get("visual_fact_ids") or []
+                                ),
+                            }
+                            if anchor.get("source_modality") == "visual"
+                            else {}
+                        ),
                     }
                 )
         claims.append(
@@ -193,7 +345,12 @@ def _claim_layer_input(
     sections = []
     for source_id, source_document in source_documents:
         sections.append(
-            f"===== 完整来源：{source_id} =====\n{_transcript_for_prompt(source_document)}"
+            "===== 完整来源：{source_id} =====\n{transcript}".format(
+                source_id=source_id,
+                transcript=_transcript_for_prompt(
+                    source_document, visual_source_attested=True
+                ),
+            )
         )
     other_batch_claims = survey.get("other_batch_claims") or []
     duplicate_scope = ""
@@ -203,11 +360,24 @@ def _claim_layer_input(
             "只有判定重复时，`duplicate_of_claim_id` 可以指名其中一条）：\n"
             + json.dumps(other_batch_claims, ensure_ascii=False, indent=2)
         )
+    has_visual = any(
+        anchor.get("source_modality") == "visual"
+        for claim in survey.get("candidate_claims") or []
+        for anchor in claim.get("anchors") or []
+    )
+    visual_guidance = (
+        "\n\n本包含视觉来源锚点：SVG 是王教授展示或画出的图示转录，属于第一等来源，"
+        "但不是口述逐字引文。请审核 claim 是否忠实保留图中文字及几何关系、是否与相邻"
+        "口述解释一致；不得仅因它不是口述而删除，也不得把它描述成教授逐字说过的话。"
+        if has_visual
+        else ""
+    )
     return (
         "以下是已经精编的跨讲 claim layer。现有人工标签和状态只是待复核资料，"
         "不得因此默认正确。\n\n候选主张：\n"
         + json.dumps(survey["candidate_claims"], ensure_ascii=False, indent=2)
         + duplicate_scope
+        + visual_guidance
         + "\n\n"
         + "\n\n".join(sections)
     )
@@ -220,6 +390,7 @@ def _generate_valid_review(
     user_input: str,
     survey: dict[str, Any],
     validation_attempts: int = 2,
+    record: Any | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Retry a structurally invalid review without hiding the failed attempt.
 
@@ -231,13 +402,19 @@ def _generate_valid_review(
     feedback = ""
     usage_rows: list[dict[str, Any]] = []
     for attempt in range(1, validation_attempts + 1):
+        if record is not None:
+            record.model_call_started()
         response = client.generate_json(
             prompt,
             feedback,
             AI_REVIEW_RESPONSE_SCHEMA,
             cache_prefix=user_input,
         )
-        usage_rows.append(usage_row(getattr(client, "last_usage", None), attempt))
+        call_usage = usage_row(getattr(client, "last_usage", None), attempt)
+        usage_rows.append(call_usage)
+        if record is not None:
+            record.usage([call_usage])
+            record.model_call_completed()
         try:
             validate_review_response(response, survey)
             return response, usage_rows
@@ -291,11 +468,15 @@ def run_one(
     )
     output_path = output_dir / f"{_slug(transcript_id)}.independent-review.json"
     if output_path.is_file() and not force:
-        existing = json.loads(output_path.read_text(encoding="utf-8"))
-        if (
-            existing.get("reviewer", {}).get("fingerprint_sha256")
-            == identity["fingerprint_sha256"]
-            and existing.get("spot_check_percent") == spot_check_percent
+        try:
+            existing = json.loads(output_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            existing = {}
+        if _matching_review_artifact(
+            existing,
+            survey=survey,
+            expected_fingerprint=identity["fingerprint_sha256"],
+            spot_check_percent=spot_check_percent,
         ):
             return "skipped", output_path
 
@@ -310,8 +491,8 @@ def run_one(
             prompt=prompt,
             user_input=_review_input(survey, transcript),
             survey=survey,
+            record=record,
         )
-        record.usage(usage_rows)
         routed = apply_risk_routing(
             response,
             reviewer_fingerprint_sha256=identity["fingerprint_sha256"],
@@ -344,12 +525,10 @@ def run_one(
             "reviewed_claims": survey["candidate_claims"],
             **routed,
         }
+        artifact["reviewer"]["artifact_sha256"] = _review_artifact_sha256(artifact)
         output_dir.mkdir(parents=True, exist_ok=True)
         _archive_existing_review(output_path)
-        output_path.write_text(
-            json.dumps(artifact, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
+        _atomic_json_write(output_path, artifact)
         record.outputs(output_path)
         return "created", output_path
 
@@ -367,6 +546,7 @@ def run_claim_layer(
     """Review the curated third/fourth-lecture package without re-extraction."""
     package_bytes = package_path.read_bytes()
     package = json.loads(package_bytes)
+    _validate_claim_layer_package(package)
     survey = _normalize_claim_layer(package)
     if not survey["candidate_claims"]:
         raise AIReviewValidationError("claim-layer package has no claims")
@@ -379,8 +559,52 @@ def run_claim_layer(
         source_payload, raw, source_path = load_knowledge_source_document(
             source, transcript_dirs
         )
+        projection = project_script(source_payload.get("script"))
+        visual_blocks = {row.locator: row for row in projection.visual_blocks}
+        for fragment in package.get("source_fragments") or []:
+            if (
+                fragment.get("source_id") != source_id
+                or fragment.get("source_modality") != "visual"
+            ):
+                continue
+            locator = str(fragment.get("visual_locator") or "")
+            block = visual_blocks.get(locator)
+            if block is None:
+                raise AIReviewValidationError(
+                    f"{source_id}: visual fragment locator does not resolve: {locator}"
+                )
+            try:
+                validate_visual_fragment_against_block(fragment, block)
+            except ValueError as exc:
+                raise AIReviewValidationError(
+                    f"{source_id}: invalid visual fragment: {exc}"
+                ) from exc
+        expected_structure = str(
+            source.get("editorial_structure_sha256") or ""
+        )
+        current_title = str(
+            (source_payload.get("metadata") or {}).get("title")
+            or source.get("transcript_id")
+            or source_id
+        )
+        expected_title = str(source.get("title") or current_title)
+        if (
+            expected_structure
+            and expected_structure != projection.editorial_structure_sha256
+        ) or expected_title != current_title:
+            raise AIReviewValidationError(
+                f"{source_id}: editorial model context changed after extraction; "
+                "rerun extraction before review"
+            )
         transcripts.append((source_id, source_payload))
-        transcript_hashes[source_id] = _sha256_bytes(raw)
+        # Key the review on the exact semantic projection shown to the model.
+        # A comment-only edit is not a new review input; a body or editorial
+        # heading edit is. The physical file SHA remains source provenance.
+        transcript_hashes[source_id] = _sha256_bytes(
+            _transcript_for_prompt(
+                source_payload, visual_source_attested=True
+            ).encode("utf-8")
+        )
         transcript_paths[source_id] = str(source_path)
     if not transcripts:
         raise AIReviewValidationError("claim-layer package has no source documents")
@@ -417,11 +641,15 @@ def run_claim_layer(
         backend=getattr(client, "backend", "api").replace("_", "-"),
     )
     if output_path.is_file() and not force:
-        existing = json.loads(output_path.read_text(encoding="utf-8"))
-        if (
-            existing.get("reviewer", {}).get("fingerprint_sha256")
-            == identity["fingerprint_sha256"]
-            and existing.get("spot_check_percent") == spot_check_percent
+        try:
+            existing = json.loads(output_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            existing = {}
+        if _matching_review_artifact(
+            existing,
+            survey=survey,
+            expected_fingerprint=identity["fingerprint_sha256"],
+            spot_check_percent=spot_check_percent,
         ):
             return "skipped", output_path
 
@@ -458,8 +686,8 @@ def _write_claim_layer_review(
         prompt=prompt,
         user_input=_claim_layer_input(survey, transcripts),
         survey=survey,
+        record=record,
     )
-    record.usage(usage_rows)
     routed = apply_risk_routing(
         response,
         reviewer_fingerprint_sha256=identity["fingerprint_sha256"],
@@ -484,12 +712,10 @@ def _write_claim_layer_review(
         "reviewed_claims": survey["candidate_claims"],
         **routed,
     }
+    artifact["reviewer"]["artifact_sha256"] = _review_artifact_sha256(artifact)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     _archive_existing_review(output_path)
-    output_path.write_text(
-        json.dumps(artifact, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    _atomic_json_write(output_path, artifact)
     record.quality({
         key: value for key, value in (routed.get("routing_summary") or {}).items()
     })

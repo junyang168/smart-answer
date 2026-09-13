@@ -64,6 +64,7 @@ def _fragment(claim_id: str) -> dict:
 
 def _schedule(candidates: list[dict], claims: list[dict], **kwargs) -> SemanticBundleSchedule:
     include_recall = kwargs.pop("include_recall", False)
+    source_fragments = kwargs.pop("source_fragments", None)
     claim_ids = [row["claim_id"] for row in claims]
     manifest = {
         "schema_version": "test_claim_manifest_v1",
@@ -89,7 +90,11 @@ def _schedule(candidates: list[dict], claims: list[dict], **kwargs) -> SemanticB
         candidates=candidates,
         claims=claims,
         evidence_steps=[_evidence(value) for value in claim_ids],
-        source_fragments=[_fragment(value) for value in claim_ids],
+        source_fragments=(
+            source_fragments
+            if source_fragments is not None
+            else [_fragment(value) for value in claim_ids]
+        ),
         recall_blocking=recall,
         **kwargs,
     )
@@ -116,6 +121,41 @@ def test_independent_singletons_share_transport_bundles_without_becoming_a_clust
     assert all(item.priority_lane == "singleton_discovery" for item in schedule.bundles)
     assert all(len(work.claim_ids) == 1 for work in schedule.work_items)
     SemanticBundleSchedule.model_validate(schedule.model_dump(mode="json"))
+
+
+def test_spoken_semantic_input_keeps_legacy_fragment_shape() -> None:
+    schedule = _schedule([_candidate("VIC-A", "CL-A")], [_claim("CL-A")])
+
+    fragment = schedule.work_items[0].semantic_input["claims"][0]["evidence"][0][
+        "fragments"
+    ][0]
+    assert "source_modality" not in fragment
+    assert "visual_locator" not in fragment
+    assert "visual_block_sha256" not in fragment
+    assert "visual_facts" not in fragment
+    assert "quotation_status" not in fragment
+
+
+def test_visual_semantic_input_is_explicitly_non_spoken() -> None:
+    visual_fragment = {
+        **_fragment("CL-A"),
+        "source_modality": "visual",
+        "visual_locator": "S0008/V01",
+        "visual_block_sha256": "v" * 64,
+        "visual_facts": [{"fact_id": "VF-1", "kind": "text", "text": "新约"}],
+    }
+    schedule = _schedule(
+        [_candidate("VIC-A", "CL-A")],
+        [_claim("CL-A")],
+        source_fragments=[visual_fragment],
+    )
+
+    fragment = schedule.work_items[0].semantic_input["claims"][0]["evidence"][0][
+        "fragments"
+    ][0]
+    assert fragment["source_modality"] == "visual"
+    assert fragment["quotation_status"] == "not_spoken_verbatim"
+    assert fragment["visual_locator"] == "S0008/V01"
 
 
 def test_recall_neighborhood_is_bound_into_semantic_input_and_reuse_key() -> None:

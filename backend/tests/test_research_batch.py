@@ -5,6 +5,12 @@ from pathlib import Path
 
 import pytest
 
+from backend.pipeline.knowledge_consensus_applier import (
+    ConsensusApplicationError,
+    reviewed_candidate_artifact_sha256,
+    validate_reviewed_candidate_artifact,
+)
+
 from backend.pipeline.research_batch import (
     ResearchBatchValidationError,
     merge_reviewed_packages,
@@ -13,7 +19,9 @@ from backend.pipeline.research_batch import (
 from backend.pipeline.research_batch_runner import (
     artifact_paths,
     build_command_plan,
+    failed_member_runs,
     resolve_transcript_dir,
+    review_members_with_untitled_leading_sections,
     reviewed_package_paths,
 )
 
@@ -38,8 +46,10 @@ def _batch() -> dict:
 
 
 def _package(path: Path, transcript_id: str, suffix: str) -> Path:
+    claim_id = f"CL-{suffix}"
     payload = {
         "schema_version": "wang_shared_knowledge_v1.2",
+        "complete": True,
         "source_documents": [
             {"source_id": f"SRC-{suffix}", "transcript_id": transcript_id}
         ],
@@ -48,28 +58,72 @@ def _package(path: Path, transcript_id: str, suffix: str) -> Path:
         ],
         "questions": [],
         "position_nodes": [],
-        "observations": [],
+        "observations": [
+            {"observation_id": f"O-{suffix}", "source_fragment_ids": [f"FR-{suffix}"]}
+        ],
         "evidence_steps": [
-            {"evidence_step_id": f"E-{suffix}", "statement": "证据"}
+            {
+                "evidence_step_id": f"E-{suffix}", "statement": "证据",
+                "source_fragment_ids": [f"FR-{suffix}"],
+                "produced_claim_ids": [claim_id],
+            }
         ],
         "claims": [
-            {"claim_id": f"CL-{suffix}", "title": "主张", "evidence_step_ids": [f"E-{suffix}"]}
+            {
+                "claim_id": claim_id, "title": "主张",
+                "evidence_step_ids": [f"E-{suffix}"],
+                "review_status": "ai_consensus_reviewed",
+                "reviewed_by": "claude-sonnet-5",
+                "reviewed_at": "2026-09-12T00:00:00+00:00",
+                "review_note": "独立 AI 复审：pass；仲裁：not_required",
+            }
         ],
         "knowledge_relations": [
             {
-                "relation_id": f"ER-{suffix}", "from_id": f"E-{suffix}",
-                "to_id": f"CL-{suffix}", "relation_type": "supports",
+                "relation_id": f"ER-{suffix}", "from_id": f"O-{suffix}",
+                "to_id": f"E-{suffix}", "relation_type": "supports",
             }
         ],
         "claim_relations": [],
         "extraction": {"fingerprint_sha256": f"extract-{suffix}"},
         "consensus_application": {
+            "schema_version": "wang_ai_consensus_application_v2",
+            "scope_kind": "source_scoped",
             "approval_status": "not_human_approved",
             "adjudication_fingerprint": f"adjudicate-{suffix}",
+            "review_completion": "complete",
+            "review_artifact_sha256": "a" * 64,
+            "review_fingerprint": f"review-{suffix}",
+            "adjudication_artifact_sha256": "b" * 64,
+            "overrides_artifact_sha256": "c" * 64,
+            "applied_claim_ids": [],
+            "merged_claim_ids": {},
+            "final_review_status_counts": {"ai_consensus_reviewed": 1},
+            "review_resolutions": [{
+                "schema_version": "wang_claim_ai_review_provenance_v1",
+                "claim_id": claim_id,
+                "independent_review_decision": "pass",
+                "adjudication_status": "not_required",
+                "target_review_status": "ai_consensus_reviewed",
+                "reviewer_id": "claude-sonnet-5",
+                "reason": "独立 AI 复审：pass；仲裁：not_required",
+                "approval_status": "not_human_approved",
+            }],
         },
     }
+    payload["consensus_application"]["artifact_sha256"] = (
+        reviewed_candidate_artifact_sha256(payload)
+    )
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     return path
+
+
+def _reseal(path: Path) -> None:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["consensus_application"]["artifact_sha256"] = (
+        reviewed_candidate_artifact_sha256(payload)
+    )
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
 def test_batch_rejects_preassigned_topic() -> None:
@@ -118,6 +172,35 @@ def test_batch_rejects_section_limit_for_member_outside_batch() -> None:
         validate_research_batch(batch)
 
 
+def test_visual_source_attestation_is_validated_and_forwarded(tmp_path: Path) -> None:
+    batch = _batch()
+    batch["visual_source_attestations"] = {
+        "讲道甲": {"S0003/V01": "a" * 64}
+    }
+
+    validate_research_batch(batch)
+    plan = build_command_plan(
+        batch,
+        transcript_dir=tmp_path / "transcripts",
+        output_root=tmp_path / "output",
+        force=False,
+        extraction_backend="codex-subscription",
+    )
+    command = next(
+        row["command"]
+        for row in plan
+        if row["stage"] == "extract" and row["transcript_id"] == "讲道甲"
+    )
+    index = command.index("--visual-source-attestation")
+    assert command[index + 1] == f"S0003/V01={'a' * 64}"
+
+    batch["visual_source_attestations"] = {
+        "讲道丙": {"S0003/V01": "a" * 64}
+    }
+    with pytest.raises(ResearchBatchValidationError, match="outside the batch"):
+        validate_research_batch(batch)
+
+
 def test_command_plan_propagates_subscription_and_governed_subtitle_writeback(
     tmp_path: Path,
 ) -> None:
@@ -141,6 +224,12 @@ def test_command_plan_propagates_subscription_and_governed_subtitle_writeback(
     assert extracts["讲道甲"][extracts["讲道甲"].index("--backend") + 1] == (
         "codex-subscription"
     )
+    assert extracts["讲道甲"][
+        extracts["讲道甲"].index("--fallback-max-section-sentences") + 1
+    ] == "125"
+    assert extracts["讲道乙"][
+        extracts["讲道乙"].index("--fallback-max-section-sentences") + 1
+    ] == "125"
     cross_sections = {
         row["transcript_id"]: row["command"]
         for row in plan if row["stage"] == "cross_section"
@@ -158,9 +247,14 @@ def test_command_plan_propagates_subscription_and_governed_subtitle_writeback(
     reviews = {
         row["transcript_id"]: row["command"] for row in plan if row["stage"] == "review"
     }
+    assert "backend.pipeline.claim_layer_review_batch_runner" in reviews["讲道甲"]
     assert reviews["讲道甲"][reviews["讲道甲"].index("--backend") + 1] == (
         "claude-subscription"
     )
+    assert reviews["讲道甲"][reviews["讲道甲"].index("--batch-size") + 1] == "20"
+    assert reviews["讲道甲"][
+        reviews["讲道甲"].index("--spot-check-percent") + 1
+    ] == "0"
     assert adjudications["讲道甲"][
         adjudications["讲道甲"].index("--claude-backend") + 1
     ] == "claude-subscription"
@@ -171,6 +265,30 @@ def test_command_plan_propagates_subscription_and_governed_subtitle_writeback(
     assert "--write-back-generated-subtitles" not in extracts["讲道乙"]
 
 
+def test_batch_may_explicitly_request_a_review_spot_check_rate(tmp_path: Path) -> None:
+    batch = _batch()
+    batch["review_spot_check_percent"] = 7
+
+    plan = build_command_plan(
+        batch,
+        transcript_dir=tmp_path,
+        output_root=tmp_path / "output",
+        force=False,
+    )
+    review = next(row["command"] for row in plan if row["stage"] == "review")
+
+    assert review[review.index("--spot-check-percent") + 1] == "7"
+
+
+@pytest.mark.parametrize("value", [-1, 101, 2.5, True])
+def test_review_spot_check_rate_is_bounded(value) -> None:
+    batch = _batch()
+    batch["review_spot_check_percent"] = value
+
+    with pytest.raises(ResearchBatchValidationError, match="review_spot_check_percent"):
+        validate_research_batch(batch)
+
+
 def test_batch_source_resolution_prefers_published_regardless_of_argument_order(
     tmp_path: Path,
 ) -> None:
@@ -179,11 +297,42 @@ def test_batch_source_resolution_prefers_published_regardless_of_argument_order(
     review.mkdir()
     published.mkdir()
     member = {"key": "讲道甲", "source_type": "sermon_transcript"}
-    (review / "讲道甲.json").write_text("review", encoding="utf-8")
-    (published / "讲道甲.json").write_text("published", encoding="utf-8")
+    (review / "讲道甲.json").write_text(
+        json.dumps(
+            [
+                {"index": "subtitle-review", "type": "subtitle", "text": "## Review 标题"},
+                {"index": 1, "text": "review 正文不得参与。"},
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (published / "讲道甲.json").write_text(
+        json.dumps(
+            {
+                "metadata": {"status": "published"},
+                "script": [{"index": 1, "text": "published 权威正文。"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
 
     assert resolve_transcript_dir(member, [review, published]) == published
     assert resolve_transcript_dir(member, [published, review]) == published
+    assert review_members_with_untitled_leading_sections(
+        [member], [review, published]
+    ) == []
+
+
+def test_a_failed_current_member_blocks_merge_even_when_old_artifacts_exist() -> None:
+    assert failed_member_runs(
+        {
+            "讲道甲": {"status": "completed"},
+            "讲道乙": {"status": "failed", "failed_stage": "review"},
+            "讲道丙": {"status": "interrupted", "failed_stage": "extract"},
+        }
+    ) == ["讲道丙", "讲道乙"]
 
 
 def test_command_plan_reuses_explicit_reviewed_package(tmp_path: Path) -> None:
@@ -218,6 +367,168 @@ def test_merge_preserves_unassigned_material_without_topics(tmp_path: Path) -> N
     assert merged["candidate_generation"]["status"] == "pending_cross_sermon_comparison"
     assert [row["transcript_id"] for row in merged["lineage"]] == ["讲道甲", "讲道乙"]
     assert merged["summary"]["claims"] == 2
+    assert len(merged["consensus_application"]["review_resolutions"]) == 2
+    validate_reviewed_candidate_artifact(merged)
+
+
+def test_merged_candidate_rejects_resealed_member_resolution_mismatch(
+    tmp_path: Path,
+) -> None:
+    merged = merge_reviewed_packages(
+        _batch(),
+        [
+            _package(tmp_path / "a.json", "讲道甲", "A"),
+            _package(tmp_path / "b.json", "讲道乙", "B"),
+        ],
+    )
+    merged["consensus_application"]["review_resolutions"][0][
+        "source_review_artifact_sha256"
+    ] = "f" * 64
+    merged["consensus_application"]["artifact_sha256"] = (
+        reviewed_candidate_artifact_sha256(merged)
+    )
+
+    with pytest.raises(ConsensusApplicationError, match="member artifacts"):
+        validate_reviewed_candidate_artifact(merged)
+
+
+def test_merged_candidate_rejects_swapped_claim_source_bindings(
+    tmp_path: Path,
+) -> None:
+    merged = merge_reviewed_packages(
+        _batch(),
+        [
+            _package(tmp_path / "a.json", "讲道甲", "A"),
+            _package(tmp_path / "b.json", "讲道乙", "B"),
+        ],
+    )
+    first, second = merged["consensus_application"]["review_resolutions"]
+    source_fields = [
+        "source_transcript_id",
+        "source_reviewed_candidate_artifact_sha256",
+        "source_review_artifact_sha256",
+        "source_review_fingerprint",
+        "source_adjudication_artifact_sha256",
+        "source_adjudication_fingerprint",
+        "source_overrides_artifact_sha256",
+    ]
+    first_values = {field: first[field] for field in source_fields}
+    second_values = {field: second[field] for field in source_fields}
+    first.update(second_values)
+    second.update(first_values)
+    merged["consensus_application"]["artifact_sha256"] = (
+        reviewed_candidate_artifact_sha256(merged)
+    )
+
+    with pytest.raises(
+        ConsensusApplicationError, match="does not match claim evidence"
+    ):
+        validate_reviewed_candidate_artifact(merged)
+
+
+def test_aggregate_scope_cannot_be_hidden_by_removing_batch_lineage(
+    tmp_path: Path,
+) -> None:
+    merged = merge_reviewed_packages(
+        _batch(),
+        [
+            _package(tmp_path / "a.json", "讲道甲", "A"),
+            _package(tmp_path / "b.json", "讲道乙", "B"),
+        ],
+    )
+    merged.pop("batch")
+    merged.pop("lineage")
+    merged["consensus_application"].pop("member_artifact_lineage")
+    merged["consensus_application"]["artifact_sha256"] = (
+        reviewed_candidate_artifact_sha256(merged)
+    )
+
+    with pytest.raises(ConsensusApplicationError, match="batch identity"):
+        validate_reviewed_candidate_artifact(merged)
+
+
+def test_aggregate_rejects_empty_batch_identity_after_reseal(tmp_path: Path) -> None:
+    merged = merge_reviewed_packages(
+        _batch(),
+        [
+            _package(tmp_path / "a.json", "讲道甲", "A"),
+            _package(tmp_path / "b.json", "讲道乙", "B"),
+        ],
+    )
+    merged["batch"] = {}
+    merged["consensus_application"]["artifact_sha256"] = (
+        reviewed_candidate_artifact_sha256(merged)
+    )
+
+    with pytest.raises(ConsensusApplicationError, match="batch identity"):
+        validate_reviewed_candidate_artifact(merged)
+
+
+def test_aggregate_rejects_duplicate_top_lineage_after_reseal(
+    tmp_path: Path,
+) -> None:
+    merged = merge_reviewed_packages(
+        _batch(),
+        [
+            _package(tmp_path / "a.json", "讲道甲", "A"),
+            _package(tmp_path / "b.json", "讲道乙", "B"),
+        ],
+    )
+    merged["lineage"].insert(0, dict(merged["lineage"][0]))
+    merged["consensus_application"]["artifact_sha256"] = (
+        reviewed_candidate_artifact_sha256(merged)
+    )
+
+    with pytest.raises(ConsensusApplicationError, match="merge-stage lineage"):
+        validate_reviewed_candidate_artifact(merged)
+
+
+def test_aggregate_rejects_duplicate_source_transcript_identity_after_reseal(
+    tmp_path: Path,
+) -> None:
+    merged = merge_reviewed_packages(
+        _batch(),
+        [
+            _package(tmp_path / "a.json", "讲道甲", "A"),
+            _package(tmp_path / "b.json", "讲道乙", "B"),
+        ],
+    )
+    merged["source_documents"][1]["transcript_id"] = "讲道甲"
+    merged["consensus_application"]["artifact_sha256"] = (
+        reviewed_candidate_artifact_sha256(merged)
+    )
+
+    with pytest.raises(ConsensusApplicationError, match="source transcript identities"):
+        validate_reviewed_candidate_artifact(merged)
+
+
+def test_merge_rejects_tampered_reviewed_package_before_id_migration(
+    tmp_path: Path,
+) -> None:
+    batch = _batch()
+    first = _package(tmp_path / "a.json", "讲道甲", "A")
+    second = _package(tmp_path / "b.json", "讲道乙", "B")
+    payload = json.loads(first.read_text(encoding="utf-8"))
+    payload["claims"][0]["title"] = "graph-valid tampering"
+    payload["knowledge_relations"][0]["relation_id"] = "XER001"
+    first.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(ResearchBatchValidationError, match="modified"):
+        merge_reviewed_packages(batch, [first, second])
+
+
+def test_merge_rejects_reviewed_package_without_final_self_seal(
+    tmp_path: Path,
+) -> None:
+    batch = _batch()
+    first = _package(tmp_path / "a.json", "讲道甲", "A")
+    second = _package(tmp_path / "b.json", "讲道乙", "B")
+    payload = json.loads(first.read_text(encoding="utf-8"))
+    payload["consensus_application"].pop("artifact_sha256")
+    first.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(ResearchBatchValidationError, match="modified"):
+        merge_reviewed_packages(batch, [first, second])
 
 
 def test_merge_globalizes_legacy_relation_ids_before_duplicate_check(tmp_path: Path) -> None:
@@ -230,9 +541,37 @@ def test_merge_globalizes_legacy_relation_ids_before_duplicate_check(tmp_path: P
         payload["claim_relations"] = [{
             "claim_relation_id": "XCR001",
             "from_id": payload["claims"][0]["claim_id"],
-            "to_id": payload["claims"][0]["claim_id"],
+            "to_id": f"CL-{path.stem}-OTHER",
             "relation_type": "qualifies",
         }]
+        payload["claims"].append({
+            "claim_id": f"CL-{path.stem}-OTHER",
+            "title": "另一主张",
+            "evidence_step_ids": [payload["evidence_steps"][0]["evidence_step_id"]],
+            "review_status": "ai_consensus_reviewed",
+            "reviewed_by": "claude-sonnet-5",
+            "reviewed_at": "2026-09-12T00:00:00+00:00",
+            "review_note": "独立 AI 复审：pass；仲裁：not_required",
+        })
+        payload["evidence_steps"][0]["produced_claim_ids"].append(
+            f"CL-{path.stem}-OTHER"
+        )
+        payload["consensus_application"]["review_resolutions"].append({
+            "schema_version": "wang_claim_ai_review_provenance_v1",
+            "claim_id": f"CL-{path.stem}-OTHER",
+            "independent_review_decision": "pass",
+            "adjudication_status": "not_required",
+            "target_review_status": "ai_consensus_reviewed",
+            "reviewer_id": "claude-sonnet-5",
+            "reason": "独立 AI 复审：pass；仲裁：not_required",
+            "approval_status": "not_human_approved",
+        })
+        payload["consensus_application"]["final_review_status_counts"] = {
+            "ai_consensus_reviewed": 2
+        }
+        payload["consensus_application"]["artifact_sha256"] = (
+            reviewed_candidate_artifact_sha256(payload)
+        )
         path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
     merged = merge_reviewed_packages(batch, [first, second])
@@ -251,9 +590,14 @@ def test_merge_globalizes_legacy_relation_ids_before_duplicate_check(tmp_path: P
         row["package_canonical_sha256"] != row["effective_package_sha256"]
         for row in merged["lineage"]
     )
+    assert all(
+        row["upstream_reviewed_candidate_artifact_sha256"]
+        != row["reviewed_candidate_artifact_sha256"]
+        for row in merged["lineage"]
+    )
 
 
-def test_merge_applies_only_source_bound_fidelity_correction(tmp_path: Path) -> None:
+def test_merge_rejects_post_review_source_fidelity_correction(tmp_path: Path) -> None:
     batch = _batch()
     first = _package(tmp_path / "a.json", "讲道甲", "A")
     second = _package(tmp_path / "b.json", "讲道乙", "B")
@@ -261,6 +605,7 @@ def test_merge_applies_only_source_bound_fidelity_correction(tmp_path: Path) -> 
     payload["source_fragments"][0]["verbatim_excerpt"] = "教授明确说：因信成为义。"
     payload["evidence_steps"][0]["source_fragment_ids"] = ["FR-A"]
     first.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    _reseal(first)
     batch["source_fidelity_corrections"] = [
         {
             "claim_id": "CL-A",
@@ -270,28 +615,7 @@ def test_merge_applies_only_source_bound_fidelity_correction(tmp_path: Path) -> 
         }
     ]
 
-    merged = merge_reviewed_packages(batch, [first, second])
-
-    claim = next(row for row in merged["claims"] if row["claim_id"] == "CL-A")
-    assert claim["title"] == "因信成为义"
-    assert claim["source_fidelity_correction"]["original_title"] == "主张"
-    assert merged["source_fidelity_corrections"][0]["approval_status"] == "not_human_approved"
-
-
-def test_merge_rejects_fidelity_correction_without_verbatim_support(tmp_path: Path) -> None:
-    batch = _batch()
-    batch["source_fidelity_corrections"] = [
-        {
-            "claim_id": "CL-A",
-            "replacement_title": "因信成为义",
-            "reason": "自动摘要误写",
-            "verbatim_basis": "逐字稿里不存在",
-        }
-    ]
-    first = _package(tmp_path / "a.json", "讲道甲", "A")
-    second = _package(tmp_path / "b.json", "讲道乙", "B")
-
-    with pytest.raises(ResearchBatchValidationError, match="not supported by a claim fragment"):
+    with pytest.raises(ResearchBatchValidationError, match="after independent review are retired"):
         merge_reviewed_packages(batch, [first, second])
 
 

@@ -15,7 +15,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-#: Records that reach the source text directly, through `source_fragment_ids`.
+#: Records that reach the source text directly, through either the legacy
+#: singular or current plural source-fragment field.
 ANCHORED_COLLECTIONS = ("evidence_steps", "observations", "questions", "position_nodes")
 
 
@@ -33,6 +34,10 @@ class Withdrawal:
     dangling_relations: list[tuple[str, str]] = field(default_factory=list)
     #: Source-local predecessor edges omitted by the incoming package.
     superseded_relations: list[tuple[str, str]] = field(default_factory=list)
+    #: Other records explicitly stamped as belonging to a predecessor generation.
+    superseded_records: list[tuple[str, str]] = field(default_factory=list)
+    #: Legacy SourceDocument aliases for the same stable transcript.
+    superseded_sources: list[str] = field(default_factory=list)
     #: Fragments whose source could not be read, so nothing can be said of them.
     unresolved_fragments: int = 0
 
@@ -57,12 +62,22 @@ class Withdrawal:
         citation, not its footing.
         """
 
-        keys = [("source_fragments", fragment) for fragment in sorted(self.withdrawn_fragments)]
-        keys += sorted(self.orphaned_owners)
-        keys += [("claims", claim) for claim in sorted(self.orphaned_claims)]
-        keys += sorted(self.dangling_relations)
-        keys += sorted(self.superseded_relations)
-        return keys
+        ordered = [("source_fragments", fragment) for fragment in sorted(self.withdrawn_fragments)]
+        ordered += sorted(self.orphaned_owners)
+        ordered += [("claims", claim) for claim in sorted(self.orphaned_claims)]
+        ordered += sorted(self.dangling_relations)
+        ordered += sorted(self.superseded_relations)
+        ordered += sorted(self.superseded_records)
+        ordered += [("source_documents", source_id) for source_id in sorted(self.superseded_sources)]
+        # Dependency closure and explicit generation ownership may identify the
+        # same row independently. A ChangeSet must still retire it exactly once.
+        result: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for key in ordered:
+            if key not in seen:
+                seen.add(key)
+                result.append(key)
+        return result
 
     def excluding(self, keys: "set[tuple[str, str]]") -> "Withdrawal":
         """This withdrawal without the records named in `keys`.
@@ -91,6 +106,14 @@ class Withdrawal:
             superseded_relations=[
                 key for key in self.superseded_relations if key not in keys
             ],
+            superseded_records=[
+                key for key in self.superseded_records if key not in keys
+            ],
+            superseded_sources=[
+                source_id
+                for source_id in self.superseded_sources
+                if ("source_documents", source_id) not in keys
+            ],
             unresolved_fragments=self.unresolved_fragments,
         )
 
@@ -107,6 +130,8 @@ class Withdrawal:
             "claims_with_no_live_evidence": len(self.orphaned_claims),
             "relations_left_dangling": len(self.dangling_relations),
             "relations_superseded": len(self.superseded_relations),
+            "generation_records_superseded": len(self.superseded_records),
+            "source_aliases_superseded": len(self.superseded_sources),
             "unresolved_fragments": self.unresolved_fragments,
             "closure": len(self.closure()),
         }
@@ -131,7 +156,16 @@ def closure_from_fragments(
     )
     for collection in ANCHORED_COLLECTIONS:
         for object_id, payload in (owners.get(collection) or {}).items():
-            cited = [str(value) for value in (payload.get("source_fragment_ids") or [])]
+            cited = list(
+                dict.fromkeys(
+                    str(value)
+                    for value in [
+                        payload.get("source_fragment_id"),
+                        *(payload.get("source_fragment_ids") or []),
+                    ]
+                    if value
+                )
+            )
             gone = [value for value in cited if value in result.withdrawn_fragments]
             if gone:
                 result.owners[(collection, object_id)] = (len(gone), len(cited))

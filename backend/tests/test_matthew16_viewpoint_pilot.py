@@ -310,6 +310,11 @@ def test_master_promotion_preserves_atomic_membership_boundary():
         source_eligibility_attestation_sha256="a" * 64,
         valid_for_identity_review=True,
     )
+    serialized_evidence = evidence.model_dump(mode="json")
+    assert "source_modality" not in serialized_evidence
+    assert "visual_locator" not in serialized_evidence
+    assert "visual_block_sha256" not in serialized_evidence
+    assert "visual_facts" not in serialized_evidence
 
     def unit(start: int, end: int, text: str) -> PropositionUnitCandidate:
         payload = {

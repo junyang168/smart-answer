@@ -538,6 +538,34 @@ def test_omitting_declared_ids_keeps_every_claim_at_full_depth():
     assert material[0]["evidence"][0]["source_excerpt"] == "原話"
 
 
+def test_visual_evidence_is_never_presented_as_a_verbatim_excerpt():
+    knowledge = {
+        "claims": [
+            {"claim_id": "CL-V", "statement": "两种律法有重叠。", "evidence_step_ids": ["E-V"]}
+        ],
+        "evidence_steps": [
+            {"evidence_step_id": "E-V", "statement": "图中两个圆有重叠。", "source_fragment_id": "FR-V"}
+        ],
+        "source_fragments": [
+            {
+                "fragment_id": "FR-V",
+                "source_modality": "visual",
+                "visual_locator": "S0008/V01",
+                "visual_block_sha256": "a" * 64,
+                "visual_facts": [{"fact_id": "VF001", "tag": "ellipse"}],
+                "verbatim_excerpt": "<svg><ellipse/></svg>",
+            }
+        ],
+    }
+
+    material = build_paragraph_material(["CL-V"], knowledge)
+    evidence = material[0]["evidence"][0]
+
+    assert evidence["source_excerpt"] is None
+    assert evidence["visual_sources"][0]["quotation_status"] == "not_spoken_verbatim"
+    assert "<svg" not in str(evidence)
+
+
 def test_an_unchanged_paragraph_keeps_the_verdict_it_was_given(tmp_path):
     """Regression: these calls are not deterministic -- Sonnet 5 rejects
     `temperature` and thinks adaptively -- and grounding was the only stage

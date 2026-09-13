@@ -146,6 +146,14 @@ def test_occurrence_projection_inherits_only_inside_exact_source_section():
     verify_projection_artifact(result)
 
 
+def test_visual_locator_maps_to_its_parent_paragraph_section() -> None:
+    result = _build(mutate_fragment={"paragraph_key": "S0002/V01"})
+    row = next(item for item in result["claims"] if item["claim_id"] == "C-SAME")
+
+    assert row["projection_status"] == "proved_by_occurrence_section"
+    assert row["admissions"][0]["source_fragment_id"] == "F-SAME"
+
+
 def test_stale_fragment_fails_closed_instead_of_inheriting_section():
     result = _build(mutate_fragment={"source_sha256": "c" * 64})
     row = next(item for item in result["claims"] if item["claim_id"] == "C-SAME")

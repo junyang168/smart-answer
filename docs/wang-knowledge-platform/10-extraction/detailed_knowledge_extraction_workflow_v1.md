@@ -48,7 +48,9 @@ flowchart LR
 
 ## 三、数据对象
 
-一次详细整理产生以下对象，并为模型生成的短 ID 加入讲道命名空间，避免多篇讲道的 `CL001`、`E001` 相互冲突：
+一次详细整理产生以下对象。模型生成的 `CL001`、`E001` 只是一次响应内的序号，不能证明跨次抽取的对象身份。存储前必须用「来源稳定键 + model-generation fingerprint + 规范化模型输出 SHA256」组成的 generation namespace 将所有对象和关系 ID 全局化：同一模型输入、同一输出的精确重跑得到同一组 ID；输入或输出不同就得到互不相交的一代 ID，绝不能用相同序号更新旧语义并继承它的 review/CVR 状态。物理 JSON 的 SHA 只是读取时审计信息，不能因 editor comment 改动而制造一代新的教授主张。
+
+cross-section 是第二次模型调用，不能借用第一遍 extraction 的 generation namespace。它的 relation ID 使用「父 extraction generation + cross-section 输入 fingerprint + 规范化 cross-section 模型输出 SHA256」组成的子代 namespace；因此两次不同回答里的 `XER001` 也绝不会被解释为同一条边。
 
 - `Question`：教授或听众实际提出的问题；
 - `PositionNode`：教授转述并赞同、限定或反驳的立场；
@@ -77,9 +79,9 @@ flowchart LR
 
 **起作用的不是把材料切碎，是把问题问死。** 整块 1391 字一次给模型仍是 100%——「整理出论证层」是开放问题，无法从内部验证；「这 42 句，一句一句交代」有答案，而且答案可以核对。滑动窗口那一整套切碎、重叠、归属去重、跨窗口补边的机器，解决的是一个列句子清单就能解决的问题，因此退场。
 
-### 为什么切在 `##`
+### 为什么以 `##` 作为分组边界
 
-因为那是它当初被撰写的地方。笔记管线一个 `##` 生成一个 unit（`stage1_units.json` 记录本母本四个 unit，正好是四个 `##`），实测也印证：抽取产出的 264 条关系，**0 条跨 `##`**。
+`##` 是 editorial structure，不是教授原话；runner 用它决定每次模型调用的起止边界，但标题文字和 breadcrumb 本身不进入模型输入，也不进入来源句子、locator、anchor 或 SourceFragment。对已有编辑结构的母本，笔记管线一个 `##` 生成一个 unit（`stage1_units.json` 记录本母本四个 unit，正好是四个 `##`），实测也印证：抽取产出的 264 条关系，**0 条跨 `##`**。
 
 `###` 以下不是边界，是单元**内部**的编辑骨架——釋經 / 神學意義 / 生活應用 / 附錄。20 条远距离关系**全部**跨 `###`：编辑把事实放在「釋經」，把由它推出的一步放在「神學意義」。按 `###` 切，切的正是 `load_bearing` 要保住的那条边。
 
@@ -94,19 +96,35 @@ flowchart LR
 
 章节不重叠，所以合并就是拼接：`combine_sections` 加上各章节的 ID 前缀，没有归属规则、没有跨度匹配、没有去重。`load_bearing` 校验也不再延后——章节内含它所推出的那一步，完整合约在单次调用内就能判。
 
+### Subscription transport 分片
+
+一次 Codex subscription 调用的 900 秒上限是每个 section 的边界，不是整篇讲道的边界。实测 125 句的 section 约四分钟完成，而 162 句的 section 用满 900 秒仍未返回。批次因此对 subscription extraction 使用 125 句 fallback guard；这不是内容阈值，也不改变教授讲了什么。runner 先用原 plan 验证既有完整 package：若 artifact、fingerprint 與 coverage 均 current，直接 skip，guard 不得使成功历史失效；只有新来源、stale 或损坏的 package 才启用分片。
+
+guard 只处理超限 section，顺序固定：先使用已有 `###` 边界；不足时使用 spoken body row 边界；若一个存储 row 自己仍超限，才在该 row 的逐句 audit 序列上建立不重叠的内部 sentence range。后两种都是 **internal transport split**，不写入 subtitle、不修改 source JSON、body SHA、S locator 或 editorial-structure SHA，也不得显示成教授的篇章划分。正常 section 没有发生分片时，plan identity 与既有 extraction fingerprint 必须保持完全相同。
+
+sentence-range 分片可能落在同一个 S locator 内，因此新分片 package 的 SourceFragment 另记 `extraction_section_index`。这只是产生该对象的调用归属，不是 source coordinate。跨 section runner 优先用它区分分片，旧 package 没有该字段时仍按 paragraph position 读取；由此同一个 source row 的两个分片可以补关系，而不会把重复的 S locator 误判成同一 extraction section。
+
 ### 没有 `##` 的来源
 
 115 份已发布逐字稿有 90 份完全没有标题。这些由抽取管线自己调用编辑器已有的加小标题功能取得边界。
 
-已发布的历史快照仍只生成内部边界，不反写不可变来源。以 `script_review` 为来源、明确传入 `--write-back-generated-subtitles` 时则走正式写回阶段：保存全部一级、二级 insertion，核对旧 SHA，写入后重新加载，再从带标题的新来源开始抽取。
+已发布的历史快照仍只生成内部边界，不反写不可变来源。以 `script_review` 为来源、明确传入 `--write-back-generated-subtitles` 时则走正式写回阶段：核对旧 SHA，保存标题，写入后重新加载，再从带标题的新来源开始抽取。若同一来源已有与旧 SHA 绑定的 generated section plan，写回必须复用其中已经冻结的 `##` 边界和标题，不得再调一次模型产生第二套切分；没有可复用 plan 时才生成新的一级、二级 insertion。
 
-三个设计约束：
+设计约束：
 
-- **写回必须由 operator 明确要求。** 本机 pipeline 不冒充网页用户，也不改变讲道认领状态；只有同时传入 `--write-back-generated-subtitles` 与有写权限的 `--subtitle-user-id`，并通过讲道 ACL，才可修改 `script_review`，其他来源拒绝写回。
+- **写回必须由 operator 明确要求。** 本机 pipeline 不冒充网页用户，也不改变讲道认领状态；只有同时传入 `--write-back-generated-subtitles` 与 `--subtitle-user-id`，并通过讲道 ACL，才可修改 `script_review`，其他来源拒绝写回。加小标题是 editor 权限，不要求该讲道已被该 editor 认领；reader 仍无权写入。
 - **原有 row 逐列不变。** 保存后移除本次新增的 subtitle rows，剩余内容必须与写入前逐列、逐序完全相同；任何正文或既有标题差异都在抽取前失败。
-- **抽取只认写入后的来源。** 保存后重新读取档案，新的 `source_sha256`、S 编号、section plan 与 extraction fingerprint 全部从带标题版本重算。旧来源的 section cache 不会被误用。
+- **所有 `script_review` 写入都必须 compare-and-swap。** API 只接受 `scripts` / `slides` 两种明确类型，不能用近似 type 绕过；`scripts` 从路由、service 到最底层 writer 都必须携带读取时的文件 SHA。编辑器的 debounce 请求按顺序等待，后一笔只能使用前一笔成功返回的 SHA；换讲道或重新加载会使旧队列失效。
+- **开头也必须有标题。** 只在后半篇看见一个 `##` 不算完成标题流程；否则标题前的正文仍会成为匿名 extraction section。批次 preflight 与单篇 runner 都必须在模型调用前挡住这种来源。
+- **标题不是来源。** `type=subtitle` 可以与正文存在同一个 `script_review` JSON，但它属于 editorial structure；comment 也属于编辑数据。两者都不得取得 S 编号、source locator、SourceFragment、证据 anchor 或来源正文身份。标题文字、metadata title、source ID、原始 row index 与 media timing 都不得进入 detailed-extraction 模型输入；标题只由 runner 用来决定调用边界。
+- **正文 row 不是编辑内容的逃生门。** 若普通 body row 内嵌 `<svg>…</svg>` 或 HTML comment，这些语法已经足以证明它混入了非口述 editor payload；单篇 runner、dry-run 与 batch preflight 都必须在任何模型调用前失败，直到数据被迁移到带 provenance 的独立 editorial row。讲道 JSON 内的 Markdown blockquote 既可能是教授朗读的经文，也可能是编辑加入的投影片，旧存储无法机械判断；系统不得静默删除，但任何讲道证据 anchor 也不得落在 blockquote、inline heading、SVG 或 HTML comment span。已经人工审核的 notes manuscript 可以把 blockquote 经文锚定为 `scripture_text` observation 或 `speaker=quoted_source` evidence；仍不得标成教授原话。需要保留的讲道经文必须由教授的口述解释或显式 provenance 来源承载，不能把 `>` 行冒充教授原话。
+- **写回后分开计算身份。** 保存后重新读取档案；物理文件 SHA 与 editorial-structure SHA 会改变，来源 body SHA 和 S 编号必须保持不变。标题改名、comment-only 与 timing-only 改动不得改变 model-generation fingerprint、逐 section cache 或 claim ID；它们只触发 deterministic package provenance/locator refresh。移动 section boundary 会改变受影响 section 的精确模型输入，但未受影响 section 的 content-addressed cache 继续可用。
 
-未开启写入模式时，内部 section plan 仍按来源雜湊快取，其指纹进入 `extraction_identity`；这是给不可变已发布快照与 Markdown 来源的兼容路径，不会让网页出现标题。
+旧 package 不得 silent locator 重绑。只有显式 migration/rebind 阶段能够证明旧、现两版 spoken text 逐 row 相同、每个逐字 excerpt 仍在对应 spoken row、旧 physical locator 到 `spoken_body_v1` 的映射唯一，并写出同时绑定两版 SHA 的审计 artifact，才可不调用模型而重新编译 locator metadata；任一证明失败就重新抽取。新 model-input contract 与旧 contract 不同则属于新的语义 generation，不能把旧响应改写成新 fingerprint。重抽取的到达和旧代退休必须在同一个数据库事务内完成。
+旧的物理行 locator 与 `spoken_body_v1` 不得混用：新 SourceDocument 必须同时携带 `source_body_sha256`、`source_text_sha256` 和显式 `locator_space=spoken_body_v1`；缺任一项都失败。含 subtitle/comment 的旧 SourceDocument 只有通过上述逐项映射审计才可迁移，`source_anchor_binding` 不得只补 metadata 后把旧 `S` 编号冒充为 body locator。同 ID 的 review/status 更新不破坏引用；只有将对象退休时，current CVR/ArgumentRoute 对它的 live reference 才必须在同一 ChangeSet 中迁移或退休。历史 CompositionPlan/CompositionDecision 不再是下游影响权威；draft-first 产品由 ProductDependency 失效机制保护。
+
+未开启写入模式时，内部 section plan 仍按 spoken-body 与 editorial-topology 身份快取；plan 的 label-free topology 进入 generation identity，标题文字只保存在审计/display identity。这是给不可变已发布快照与 Markdown 来源的兼容路径，不会让网页出现标题。
+批次或单篇命令若尝试在未开启写入模式时抽取无标题的 `script_review`，必须在任何模型调用前失败，不能静默借用这条兼容路径。
 
 ### 每次抽取自带计分板
 
@@ -122,7 +140,7 @@ ledger 是对包的算术，不调模型、不批准任何东西，所以可以�
 
 **它报告，不设闸。** ledger 自己的设计文件写着：一个通向排不干的队列的红灯，一个月内就会被关掉。谁有权拿这个分数挡住流程，是另一个决定，不由抽取 runner 代做。
 
-计分板出错也不会让抽取失败——包在此之前已经写到磁盘、已经通过全部机械校验，分数是可选的那一部分。算不出来就记 `{"available": false, "reason": ...}`。
+计分板出错也不会让抽取失败——程序先在私有临时文件上计算，算不出来就记 `{"available": false, "reason": ...}`，再将带完整计分板与 artifact self-hash 的 package 一次性原子写入 current 路径。current 路径不会短暂暴露一份 fingerprint 已匹配、coverage 却尚未完成的半成品。
 
 ### 模型
 
@@ -156,7 +174,13 @@ DeepSeek v4 pro 作备用（`--model deepseek-v4-pro`），约 gpt 的三分之�
 6. 没有证据的主张；
 7. 来源、prompt、模型、生成设置或 schema 世代不一致的 cache。
 
-抽取指纹包含来源 SHA256、prompt SHA256、模型 ID、reasoning effort、token budget、schema 版本及 response schema SHA256。旧结果在覆盖前归档，不能把不同抽取世代静默混合。
+抽取有三层身份。逐 section cache fingerprint 由 model contract fingerprint 与该 section 的精确、无标题模型输入 SHA256 组成；因此改标题或 timing 不调模型，而正文或边界只使输入真正改变的 section 失效。整篇 model-generation fingerprint 再绑定 spoken-text SHA256、label-free section topology 与全部 section 输入 SHA。artifact fingerprint 加入 anchor-binding body SHA256、editorial-structure SHA256、物理文件 SHA256、package compiler 版本和可选的 `--only-sections` 范围；这些变化可只重编译 package，不能冒充新的教授主张。局部 section 探针必须标记 `complete=false`，其 artifact identity 与完整运行不同；cross-section、review、merge 与 ingest 不得接受它。旧结果按 artifact 内容 SHA 归档，不能把不同抽取世代静默混合。
+
+“fingerprint 相同”只是 cache 候选，不是完整性证明。跳过模型或进入下游阶段前仍须逐跳验证 current JSON 的 graph、完整性标记与 artifact self-hash、review 的逐 claim 覆盖与 deterministic routing、adjudication 与 override 的机械一致性。override 还必须绑定它所裁决的 exact package SHA；缺失的纯派生 sidecar 可从已经验证的主 artifact 恢复，不能借同一个 fingerprint 接受残缺、被改写或配错上游的 current 文件。合法 JSON 若顶层不是该阶段要求的 object 也视为损坏 cache，不能因 `.get()` 异常中止整个批次。逐字稿 loader 保留物理 JSON，soft deletion、正文过滤与 editorial structure 分离只由统一 source projection 执行一次。
+
+Consensus override 若新增、移除或迁移 source fragment，reviewed candidate 必须从最终 graph 与同一 SHA-bound source 重新计算 coverage；不得沿用 extraction package 的 `anchored_spans` 或 sentence reconciliation 摘要。重算只更新派生报告，不把 editorial rows 放回来源分母。
+
+数据库 ChangeSet 的 identity 还必须绑定 planning 时每项 operation 的 before/after SHA 与 revision。只按 package fingerprint 判断“已经执行过”是不够的：同一 package 在数据库后来发生合法变化后再次执行，必须产生针对新 before-state 的计划，不能误报 `already_applied`。精确重跑若计划为零 operation，则在打开数据库连接、run ledger 或 artifact writer 前直接返回 `unchanged`。
 
 ## 五、双模型复审与最小修正规则
 
@@ -294,9 +318,13 @@ PYTHONPATH=. .venv/bin/python -m backend.pipeline.corpus_ai_adjudication_runner 
 
 PYTHONPATH=. .venv/bin/python -m backend.pipeline.knowledge_consensus_applier \
   --package "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.detailed-knowledge.json" \
+  --review "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.independent-review.json" \
+  --adjudication "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.adjudication.json" \
   --overrides "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.overrides.json" \
   --output "$DATA_BASE_DIR/wang-knowledge-platform/staging/claim-layer/detailed-extractions/011WSR01-f0eac41a4244.reviewed-candidate.json"
 ```
+
+`--review` 与 `--adjudication` 不可省略。输出包必须以 sealed `scope_kind=source_scoped` 记录单篇身份、完整 extraction identity 与 complete per-claim resolutions，绑定四个 exact 输入 SHA（package、review、adjudication、overrides），并以 consensus-stage self-hash 覆盖最终 graph 与状态。缺失或 partial 的中间包使用不同路径，不得替换 current reviewed candidate。
 
 ## 八、中立 ResearchBatch：批次不是专题
 

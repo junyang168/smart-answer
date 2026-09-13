@@ -14,6 +14,7 @@ from ..canonical_repository.knowledge_models import (
     evidence_fragment_ids,
 )
 from ..canonical_repository.viewpoint_foundation import semantic_record_sha, sha256_json
+from ...pipeline.source_projection import visual_fragment_display_text
 from .embeddings import EMBEDDING_PROJECTION_VERSION, EmbeddingProjection
 
 if TYPE_CHECKING:
@@ -257,6 +258,14 @@ def build_evidence_embedding_projection(
             f"经文范围：{_sorted_text(evidence.scripture_refs)}"
             if evidence.scripture_refs
             else "",
-            f"来源摘录：{fragment.verbatim_excerpt}" if fragment is not None else "",
+            (
+                (
+                    f"来源证据：{visual_fragment_display_text(_dump(fragment))}"
+                    if getattr(fragment, "source_modality", None) == "visual"
+                    else f"来源摘录：{fragment.verbatim_excerpt}"
+                )
+                if fragment is not None
+                else ""
+            ),
         ],
     )

@@ -2,9 +2,14 @@
 
 > **读者**：Developer
 > **类型**：规范
-> **状态**：当前（AGENTS.md 必读）
+> **状态**：已被 [Draft-first 文章流程 v1](./draft_first_workflow_v1.md) 取代；因 AGENTS.md 过渡引用暂留原路径
 > **与代码对齐**：未核对
 > **权威范围**：写一篇释经文章的 agent 状态机、packet 边界，以及发布决定的产生条件。
+
+> **停止提示（2026-09-10）**：负责人已退役本流程的
+> `CompositionPlan` 入口。以下内容只用于解释历史 artifact，不得据此启动新的
+> Matthew authoring run。Reviewer-call invariant 与自动发布门槛由仓库根目录
+> `AGENTS.md` 继续直接约束；新的写稿入口以 draft-first 为准。
 
 ## 1. 原則
 

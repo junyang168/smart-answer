@@ -3,11 +3,13 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Sequence
 
 from backend.pipeline.observation_type_vocabulary import OBSERVATION_TYPES
 from backend.pipeline.sentence_ledger_vocabulary import REASON_CODES
+from backend.pipeline.source_projection import excerpt_overlaps_inline_markup, project_script
 
 # v2 closes `observation_type` to the six categories the prompt already names.
 # v3 moved the unit of extraction from the document to an overlapping window.
@@ -57,8 +59,11 @@ ANCHOR_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
     "properties": {
         "segment_index": {"type": "string"},
-        "start_time": {"type": ["number", "null"]},
-        "end_time": {"type": ["number", "null"]},
+        # Media timing is compiled deterministically from the authoritative
+        # source row.  Letting a content model copy it made a timing-only
+        # publish change the model input/output and therefore claim identity.
+        "start_time": {"type": "null"},
+        "end_time": {"type": "null"},
         "verbatim_excerpt": {"type": "string"},
     },
     "required": ["segment_index", "start_time", "end_time", "verbatim_excerpt"],
@@ -228,6 +233,41 @@ DETAILED_RESPONSE_SCHEMA: dict[str, Any] = {
 }
 
 
+def detailed_response_schema(*, has_visual_source: bool = False) -> dict[str, Any]:
+    """Return the unchanged base schema or its visual-source-only extension.
+
+    The base object is returned byte-for-byte for ordinary sources. This keeps
+    the existing corpus fingerprint stable; only a source that actually has a
+    visual block receives the additional anchor contract.
+    """
+
+    if not has_visual_source:
+        return DETAILED_RESPONSE_SCHEMA
+    schema = deepcopy(DETAILED_RESPONSE_SCHEMA)
+    schema["name"] = f"{EXTRACTION_VERSION}_visual_v1"
+    properties = schema["schema"]["properties"]
+    extended: set[int] = set()
+    for collection in ("questions", "positions", "observations", "evidence_steps"):
+        anchor = properties[collection]["items"]["properties"]["anchors"]["items"]
+        if id(anchor) in extended:
+            continue
+        extended.add(id(anchor))
+        anchor["properties"].update(
+            {
+                "source_modality": {
+                    "type": "string",
+                    "enum": ["spoken", "visual"],
+                },
+                "visual_fact_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            }
+        )
+        anchor["required"].extend(["source_modality", "visual_fact_ids"])
+    return schema
+
+
 class DetailedExtractionValidationError(ValueError):
     pass
 
@@ -239,6 +279,9 @@ class AuditedSentence:
     sentence_id: str
     segment_index: str
     text: str
+    source_modality: str = "spoken"
+    char_start: int | None = None
+    char_end: int | None = None
 
 
 def anchor_spans(response: dict[str, Any], transcript: dict[str, Any]) -> dict[str, list[tuple[int, int]]]:
@@ -248,14 +291,19 @@ def anchor_spans(response: dict[str, Any], transcript: dict[str, Any]) -> dict[s
     exact here; a missing excerpt simply contributes no span.
     """
 
+    projection = project_script(transcript.get("script", []))
     segments = {f"S{index + 1:04d}": str(segment.get("text") or "")
-                for index, segment in enumerate(transcript.get("script", []))}
+                for index, segment in enumerate(projection.spoken_rows)}
+    visual_locators = {block.locator for block in projection.visual_blocks}
     spans: dict[str, list[tuple[int, int]]] = {}
     for collection in ("questions", "positions", "observations", "evidence_steps"):
         for row in response.get(collection, []) or []:
             for anchor in row.get("anchors") or []:
                 locator = str(anchor.get("segment_index") or "")
                 excerpt = str(anchor.get("verbatim_excerpt") or "")
+                if locator in visual_locators:
+                    spans.setdefault(locator, []).append((0, 1))
+                    continue
                 text = segments.get(locator)
                 if not excerpt or text is None:
                     continue
@@ -283,8 +331,9 @@ def validate_sentence_audit(
         only the latter is what every downstream gate can see.
     """
 
+    projection = project_script(transcript.get("script", []))
     segments = {f"S{index + 1:04d}": str(segment.get("text") or "")
-                for index, segment in enumerate(transcript.get("script", []))}
+                for index, segment in enumerate(projection.spoken_rows)}
     spans = anchor_spans(response, transcript)
     rows = response.get("sentence_audit") or []
     by_id: dict[str, dict[str, Any]] = {}
@@ -303,21 +352,29 @@ def validate_sentence_audit(
         if row is None:
             errors.append(f"{sentence.sentence_id}: no verdict for this sentence")
             continue
-        text = segments.get(sentence.segment_index, "")
-        start = text.find(sentence.text)
-        covered = False
-        if start >= 0:
-            end = start + len(sentence.text)
-            covered = any(
-                left < end and start < right
-                for left, right in spans.get(sentence.segment_index, [])
-            )
+        if sentence.source_modality == "visual":
+            covered = bool(spans.get(sentence.segment_index))
+        else:
+            text = segments.get(sentence.segment_index, "")
+            start = text.find(sentence.text)
+            covered = False
+            if start >= 0:
+                end = start + len(sentence.text)
+                covered = any(
+                    left < end and start < right
+                    for left, right in spans.get(sentence.segment_index, [])
+                )
         if row.get("status") == "extracted" and not covered:
             errors.append(
                 f"{sentence.sentence_id}: reported extracted, but no anchor lands on it; "
                 f"either anchor a record to this sentence or report it not_extracted"
             )
         if row.get("status") == "not_extracted":
+            if sentence.source_modality == "visual":
+                errors.append(
+                    f"{sentence.sentence_id}: visual source cannot be excluded; "
+                    "anchor it as visual evidence"
+                )
             if not str(row.get("reason") or "").strip():
                 errors.append(f"{sentence.sentence_id}: not_extracted without a reason")
             if row.get("reason_code") not in REASON_CODES:
@@ -345,16 +402,25 @@ def extraction_identity(
     max_output_tokens: int,
     section_plan: dict[str, Any] | None = None,
     source_text_sha256: str | None = None,
+    editorial_structure_sha256: str | None = None,
+    model_context_sha256: str | None = None,
+    model_input_contract_version: str | None = None,
+    section_model_input_sha256s: list[dict[str, Any]] | None = None,
+    source_file_sha256: str | None = None,
+    package_compiler_version: str | None = None,
+    section_scope: list[int] | None = None,
     backend: str | None = None,
+    response_schema: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    selected_schema = response_schema or DETAILED_RESPONSE_SCHEMA
     generation = {
         "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
         "model_id": model_id,
         "reasoning_effort": reasoning_effort,
         "max_output_tokens": max_output_tokens,
-        "schema_version": EXTRACTION_VERSION,
+        "schema_version": str(selected_schema.get("name") or EXTRACTION_VERSION),
         "response_schema_sha256": hashlib.sha256(
-            json.dumps(DETAILED_RESPONSE_SCHEMA, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            json.dumps(selected_schema, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest(),
     }
     # How the source was cut is part of what the run was asked for.  Left out,
@@ -371,15 +437,67 @@ def extraction_identity(
     # failure the `section_plan` note above describes, one level down.
     if source_text_sha256 is not None:
         generation["source_text_sha256"] = source_text_sha256
+    # The model header and renderer contract affect the exact bytes shown to
+    # the model.  The caller deliberately keeps editorial titles, source ids,
+    # paragraph indexes and media timing out of that header/input.
+    if model_context_sha256 is not None:
+        generation["model_context_sha256"] = model_context_sha256
+    if model_input_contract_version is not None:
+        generation["model_input_contract_version"] = model_input_contract_version
+    if section_model_input_sha256s is not None:
+        generation["section_model_input_sha256s"] = json.loads(
+            json.dumps(section_model_input_sha256s, sort_keys=True)
+        )
     # Preserve every existing API fingerprint byte-for-byte. The opt-in Codex
     # backend is added only when selected, both to identify its artifacts and
     # to prevent API and subscription runs from sharing a semantic cache.
     if backend is not None:
         generation["backend"] = backend
+    model_contract = {
+        key: generation[key]
+        for key in (
+            "prompt_sha256",
+            "model_id",
+            "reasoning_effort",
+            "max_output_tokens",
+            "schema_version",
+            "response_schema_sha256",
+            "model_context_sha256",
+            "model_input_contract_version",
+            "backend",
+        )
+        if key in generation
+    }
+    generation["model_contract_fingerprint_sha256"] = hashlib.sha256(
+        json.dumps(
+            model_contract,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
     generation_fingerprint = hashlib.sha256(
         json.dumps(generation, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
-    full = {"source_sha256": source_sha256, **generation, "generation_fingerprint_sha256": generation_fingerprint}
+    full = {
+        "source_sha256": source_sha256,
+        **generation,
+        "generation_fingerprint_sha256": generation_fingerprint,
+    }
+    # These inputs change the compiled artifact, not what any individual
+    # section model call sees. Keep them out of `generation_fingerprint` so a
+    # compiler-only rebuild can reuse the exact validated section responses
+    # without spending another model call. Editorial labels and the physical
+    # mixed-container SHA belong here: changing either refreshes package
+    # provenance/display data but must not mint a new claim generation.
+    if editorial_structure_sha256 is not None:
+        full["editorial_structure_sha256"] = editorial_structure_sha256
+    if source_file_sha256 is not None:
+        full["source_file_sha256"] = source_file_sha256
+    if package_compiler_version is not None:
+        full["package_compiler_version"] = package_compiler_version
+    if section_scope is not None:
+        full["section_scope"] = sorted(set(section_scope))
     full["fingerprint_sha256"] = hashlib.sha256(
         json.dumps(full, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
@@ -391,6 +509,7 @@ def validate_response(
     transcript: dict[str, Any],
     *,
     visible_locators: set[str] | None = None,
+    visible_visual_locators: set[str] | None = None,
     require_load_bearing_relations: bool = True,
 ) -> None:
     """Check one response against the source it claims to come from.
@@ -399,8 +518,9 @@ def validate_response(
     whole-document behaviour so the merged package is still held to the full
     contract.
 
-    `visible_locators` restricts anchors to the slice a window was shown, which
-    is the only way to catch a locator invented outside the frame.
+    `visible_locators` restricts spoken anchors to rows the slice was shown.
+    `visible_visual_locators` does the same at exact Sxxxx/Vnn granularity and
+    prevents a transport slice from citing another visual in the same row.
 
     `require_load_bearing_relations` is switched off *per window* because the
     rule is unanswerable there: the step a load_bearing observation reasons to
@@ -410,7 +530,18 @@ def validate_response(
     rule moves to where it can be answered: the merged package.
     """
 
-    segments = {f"S{index + 1:04d}": segment for index, segment in enumerate(transcript.get("script", []))}
+    projection = project_script(transcript.get("script", []))
+    # A spoken excerpt must also be contiguous in the authoritative body row.
+    # Validating only against the SVG-stripped projection allowed a model to
+    # concatenate words from opposite sides of a displayed diagram, after
+    # which package compilation correctly failed to bind the invented span.
+    source_rows = projection.body_rows
+    source_type = str(
+        (transcript.get("metadata") or {}).get("source_type")
+        or "sermon_transcript"
+    )
+    segments = {f"S{index + 1:04d}": segment for index, segment in enumerate(source_rows)}
+    visual_blocks = {block.locator: block for block in projection.visual_blocks}
     collections = {
         "question": (response.get("questions", []), "question_id"),
         "position": (response.get("positions", []), "position_id"),
@@ -426,15 +557,96 @@ def validate_response(
         _require(all(values), f"{label}: missing ID")
         _require(len(values) == len(set(values)), f"{label}: duplicate ID")
         ids[label] = set(values)
+    owners: dict[str, str] = {}
+    cross_collection_duplicates: list[str] = []
+    for label, values in ids.items():
+        for value in values:
+            prior = owners.setdefault(value, label)
+            if prior != label:
+                cross_collection_duplicates.append(f"{value} ({prior}, {label})")
+    _require(
+        not cross_collection_duplicates,
+        "IDs must be globally unique across extraction collections: "
+        + ", ".join(sorted(cross_collection_duplicates)),
+    )
 
     anchor_errors: list[str] = []
+    cited_visual_facts: dict[str, set[str]] = {
+        locator: set() for locator in visual_blocks
+    }
 
-    def check_anchors(owner: str, anchors: list[dict[str, Any]]) -> None:
+    def check_anchors(
+        owner: str,
+        anchors: list[dict[str, Any]],
+        *,
+        allow_reviewed_notes_blockquote: bool = False,
+    ) -> None:
         if not anchors:
             anchor_errors.append(f"{owner}: at least one source anchor is required")
             return
+        anchor_keys = [
+            (
+                str(anchor.get("segment_index") or ""),
+                str(anchor.get("verbatim_excerpt") or ""),
+                str(anchor.get("source_modality") or "spoken"),
+                tuple(str(value) for value in anchor.get("visual_fact_ids") or []),
+            )
+            for anchor in anchors
+        ]
+        if len(anchor_keys) != len(set(anchor_keys)):
+            anchor_errors.append(f"{owner}: duplicate source anchor")
         for anchor in anchors:
+            if anchor.get("start_time") is not None or anchor.get("end_time") is not None:
+                anchor_errors.append(
+                    f"{owner}: model anchor timing must be null; the compiler derives it"
+                )
             locator = str(anchor.get("segment_index") or "")
+            modality = str(anchor.get("source_modality") or "spoken")
+            visual_fact_ids = [str(value) for value in anchor.get("visual_fact_ids") or []]
+            visual = visual_blocks.get(locator)
+            if visual is not None:
+                if modality != "visual":
+                    anchor_errors.append(
+                        f"{owner}: visual locator {locator} requires source_modality=visual"
+                    )
+                parent_locator = visual.segment_index
+                if visible_locators is not None and parent_locator not in visible_locators:
+                    anchor_errors.append(f"{owner}: {locator} is outside this window")
+                if (
+                    visible_visual_locators is not None
+                    and locator not in visible_visual_locators
+                ):
+                    anchor_errors.append(f"{owner}: {locator} is outside this visual window")
+                if str(anchor.get("verbatim_excerpt") or ""):
+                    anchor_errors.append(
+                        f"{owner}: visual anchor {locator} must leave verbatim_excerpt empty; "
+                        "the compiler binds the raw SVG"
+                    )
+                known_fact_ids = {str(fact["fact_id"]) for fact in visual.facts}
+                if not visual_fact_ids:
+                    anchor_errors.append(
+                        f"{owner}: visual anchor {locator} requires visual_fact_ids"
+                    )
+                elif not set(visual_fact_ids) <= known_fact_ids:
+                    unknown = sorted(set(visual_fact_ids) - known_fact_ids)
+                    anchor_errors.append(
+                        f"{owner}: visual anchor {locator} names unknown facts {unknown}"
+                    )
+                elif len(visual_fact_ids) != len(set(visual_fact_ids)):
+                    anchor_errors.append(
+                        f"{owner}: visual anchor {locator} repeats visual_fact_ids"
+                    )
+                else:
+                    cited_visual_facts[locator].update(visual_fact_ids)
+                continue
+            if modality != "spoken":
+                anchor_errors.append(
+                    f"{owner}: source_modality=visual requires a valid visual locator"
+                )
+            if visual_fact_ids:
+                anchor_errors.append(
+                    f"{owner}: spoken anchor {locator} cannot name visual_fact_ids"
+                )
             if locator not in segments:
                 anchor_errors.append(f"{owner}: missing segment {locator}")
                 continue
@@ -447,6 +659,19 @@ def validate_response(
                 anchor_errors.append(f"{owner}: empty verbatim excerpt in {locator}")
             elif excerpt not in str(segment.get("text") or ""):
                 anchor_errors.append(f"{owner}: excerpt is not verbatim in {locator}")
+            elif excerpt_overlaps_inline_markup(
+                str(segment.get("text") or ""),
+                excerpt,
+                blocked_kinds=(
+                    {"svg", "html_comment", "inline_heading"}
+                    if allow_reviewed_notes_blockquote
+                    else None
+                ),
+            ):
+                anchor_errors.append(
+                    f"{owner}: excerpt lands in provenance-ambiguous inline markup "
+                    f"in {locator}"
+                )
 
     for collection_name, id_key in (
         ("questions", "question_id"),
@@ -455,7 +680,37 @@ def validate_response(
         ("evidence_steps", "evidence_step_id"),
     ):
         for row in response.get(collection_name, []):
-            check_anchors(str(row.get(id_key) or collection_name), row.get("anchors") or [])
+            allow_notes_quote = source_type == "notes_manuscript" and (
+                (
+                    collection_name == "observations"
+                    and row.get("observation_type") == "scripture_text"
+                )
+                or (
+                    collection_name == "evidence_steps"
+                    and row.get("speaker") == "quoted_source"
+                )
+            )
+            check_anchors(
+                str(row.get(id_key) or collection_name),
+                row.get("anchors") or [],
+                allow_reviewed_notes_blockquote=allow_notes_quote,
+            )
+    required_visuals = (
+        set(visual_blocks)
+        if visible_visual_locators is None
+        else set(visible_visual_locators)
+    )
+    for locator in sorted(required_visuals):
+        visual = visual_blocks.get(locator)
+        if visual is None:
+            anchor_errors.append(f"visual window names missing source {locator}")
+            continue
+        known = {str(fact["fact_id"]) for fact in visual.facts}
+        missing = sorted(known - cited_visual_facts.get(locator, set()))
+        if missing:
+            anchor_errors.append(
+                f"visual source {locator} has uncited literal facts {missing}"
+            )
     validation_errors = list(anchor_errors)
 
     def collect(condition: bool, message: str) -> None:
@@ -475,10 +730,18 @@ def validate_response(
         )
     for row in response.get("questions", []):
         collect(
+            len(row["answer_claim_ids"]) == len(set(row["answer_claim_ids"])),
+            f"{row['question_id']}: duplicate answer claim",
+        )
+        collect(
             set(row["answer_claim_ids"]) <= ids["claim"],
             f"{row['question_id']}: unknown answer claim",
         )
     for row in response.get("evidence_steps", []):
+        collect(
+            len(row["produced_claim_ids"]) == len(set(row["produced_claim_ids"])),
+            f"{row['evidence_step_id']}: duplicate produced claim",
+        )
         collect(
             set(row["produced_claim_ids"]) <= ids["claim"],
             f"{row['evidence_step_id']}: unknown claim",
@@ -491,29 +754,68 @@ def validate_response(
     for row in response.get("claims", []):
         collect(row["review_status"] == "candidate", f"{row['claim_id']}: extraction cannot approve")
         collect(
+            len(row["evidence_step_ids"]) == len(set(row["evidence_step_ids"])),
+            f"{row['claim_id']}: duplicate evidence",
+        )
+        collect(
             set(row["evidence_step_ids"]) <= ids["evidence"],
             f"{row['claim_id']}: unknown evidence",
+        )
+        collect(
+            len(row["opposed_position_ids"])
+            == len(set(row["opposed_position_ids"])),
+            f"{row['claim_id']}: duplicate opposed position",
         )
         collect(
             set(row["opposed_position_ids"]) <= ids["position"],
             f"{row['claim_id']}: unknown opposed position",
         )
         collect(bool(row["evidence_step_ids"]), f"{row['claim_id']}: claim has no evidence")
+
+    # A Claim's evidence_step_ids and an EvidenceStep's produced_claim_ids are
+    # the two projections of the same many-to-many connection.  Neither side
+    # is authoritative on its own, so a disagreement must make the extraction
+    # retry rather than being guessed into a package.
+    claim_evidence_pairs = {
+        (str(claim["claim_id"]), str(evidence_id))
+        for claim in response.get("claims", [])
+        for evidence_id in claim.get("evidence_step_ids") or []
+    }
+    evidence_claim_pairs = {
+        (str(claim_id), str(evidence["evidence_step_id"]))
+        for evidence in response.get("evidence_steps", [])
+        for claim_id in evidence.get("produced_claim_ids") or []
+    }
+    collect(
+        claim_evidence_pairs == evidence_claim_pairs,
+        "claim/evidence bindings must be reciprocal; "
+        f"claim_only={sorted(claim_evidence_pairs - evidence_claim_pairs)}, "
+        f"evidence_only={sorted(evidence_claim_pairs - claim_evidence_pairs)}",
+    )
     # An observation may be the source of a relation into the argument: that
     # edge is how "the professor reasoned from this" is recorded at all.  The
     # target stays an evidence step -- observations do not support each other.
     supported_by_observation: set[str] = set()
+    evidence_relation_signatures: set[tuple[str, str, str]] = set()
     for row in response.get("evidence_relations", []):
         from_id = row["from_id"]
+        to_id = row["to_id"]
         collect(
             from_id in ids["evidence"] or from_id in ids["observation"],
             f"{row['relation_id']}: unknown relation source",
         )
         collect(
-            row["to_id"] in ids["evidence"],
+            to_id in ids["evidence"],
             f"{row['relation_id']}: unknown evidence endpoint",
         )
-        if from_id in ids["observation"] and row["to_id"] in ids["evidence"]:
+        collect(from_id != to_id, f"{row['relation_id']}: relation cannot point to itself")
+        signature = (from_id, to_id, str(row.get("relation_type") or ""))
+        collect(
+            signature not in evidence_relation_signatures,
+            f"{row['relation_id']}: duplicate evidence relation {signature!r}",
+        )
+        evidence_relation_signatures.add(signature)
+        if from_id in ids["observation"] and to_id in ids["evidence"]:
             supported_by_observation.add(from_id)
 
     # The rule this whole schema change exists for.  An observation the
@@ -531,11 +833,24 @@ def validate_response(
             f"to an evidence step; either record the step the professor reasoned "
             f"to, or mark it background",
         )
+    claim_relation_signatures: set[tuple[str, str, str]] = set()
     for row in response.get("claim_relations", []):
+        from_id = row["from_id"]
+        to_id = row["to_id"]
         collect(
-            row["from_id"] in ids["claim"] and row["to_id"] in ids["claim"],
+            from_id in ids["claim"] and to_id in ids["claim"],
             f"{row['claim_relation_id']}: unknown claim endpoint",
         )
+        collect(
+            from_id != to_id,
+            f"{row['claim_relation_id']}: relation cannot point to itself",
+        )
+        signature = (from_id, to_id, str(row.get("relation_type") or ""))
+        collect(
+            signature not in claim_relation_signatures,
+            f"{row['claim_relation_id']}: duplicate claim relation {signature!r}",
+        )
+        claim_relation_signatures.add(signature)
     if validation_errors:
         raise DetailedExtractionValidationError(
             "mechanical validation failed: " + " | ".join(validation_errors)
@@ -546,10 +861,23 @@ def validate_response(
 #: text alone settles it -- `AuditedSentence` does not carry the block it came
 #: from, and for these two categories it does not need to.
 _STRUCTURAL_MARKUP = re.compile(r"^\s*(#{1,6}\s|([-*+]|\d+[.)])\s)")
+_MACHINE_MARKUP_SYNTAX = re.compile(
+    r"^\s*(?:"
+    r"<!--|--[^>]*-->|"
+    r"</?(?:svg|style|defs|marker|path|line|rect|ellipse|circle|text|tspan|"
+    r"polygon|polyline|g)\b[^>]*>|"
+    r"[.#][A-Za-z_][\w.-]*\s*\{"
+    r"(?=[^}]*(?:fill|stroke|font-family|font-size|text-anchor)\s*:)[^}]*\}"
+    r")",
+    re.I | re.S,
+)
 
 
 def _is_structural_markup(text: str) -> bool:
-    return bool(_STRUCTURAL_MARKUP.match(str(text or "")))
+    value = str(text or "")
+    return bool(
+        _STRUCTURAL_MARKUP.match(value) or _MACHINE_MARKUP_SYNTAX.match(value)
+    )
 
 
 def exclusions_from_audit(

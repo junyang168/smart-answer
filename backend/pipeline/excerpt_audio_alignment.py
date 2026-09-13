@@ -20,6 +20,13 @@ from typing import Any
 
 from opencc import OpenCC
 
+from backend.pipeline.source_projection import (
+    LocatorSpaceError,
+    assert_locator_space_compatible,
+    project_script,
+    validate_visual_fragment_against_block,
+)
+
 
 SCHEMA_VERSION = "wang_excerpt_audio_alignment.v1"
 # Reviewed transcripts repair ASR omissions as well as punctuation.  Requiring
@@ -34,6 +41,7 @@ MIN_CONTEXT_BOUNDARY_MATCH = 8
 MAX_CONTEXT_BOUNDARY_GAP = 24
 _TO_SIMPLIFIED = OpenCC("t2s")
 _PARAGRAPH_KEY = re.compile(r"^S(\d+)$")
+_VISUAL_KEY = re.compile(r"^S(\d+)/V(\d+)$")
 
 
 def _sha256(path: Path) -> str:
@@ -92,9 +100,17 @@ def _seconds(entry: dict[str, Any], edge: str) -> float | None:
 
 
 def _published_segment(
-    published: dict[str, Any] | list[Any], fragment: dict[str, Any]
+    published: dict[str, Any] | list[Any],
+    fragment: dict[str, Any],
+    *,
+    body_coordinates: bool,
 ) -> dict[str, Any] | None:
-    script = published if isinstance(published, list) else published.get("script") or []
+    physical_script = published if isinstance(published, list) else published.get("script") or []
+    script = (
+        list(project_script(physical_script).body_rows)
+        if body_coordinates
+        else physical_script
+    )
     key = str(fragment.get("paragraph_key") or "")
     match = _PARAGRAPH_KEY.match(key)
     if match:
@@ -267,6 +283,14 @@ def align_excerpt(
 ) -> dict[str, Any]:
     """Return auditable timing metadata without mutating the fragment."""
 
+    if fragment.get("source_modality") == "visual":
+        return _align_visual_source(
+            fragment=fragment,
+            source=source,
+            published_path=published_path,
+            raw_path=raw_path,
+        )
+
     base: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "status": "unresolved",
@@ -293,14 +317,34 @@ def align_excerpt(
         return base
     base["published_source_sha256"] = published_sha
     base["raw_timed_source_sha256"] = raw_sha
-    expected_sha = str(source.get("source_sha256") or "")
-    if expected_sha and expected_sha != published_sha:
+    published_script = (
+        published
+        if isinstance(published, list)
+        else published.get("script") or []
+        if isinstance(published, dict)
+        else []
+    )
+    published_body_sha = project_script(published_script).body_sha256
+    try:
+        body_coordinates = assert_locator_space_compatible(source, published_script)
+    except LocatorSpaceError as exc:
+        base["reason"] = str(exc)
+        return base
+    expected_sha = str(
+        source.get("source_body_sha256") or source.get("source_sha256") or ""
+    )
+    actual_sha = published_body_sha if body_coordinates else published_sha
+    if expected_sha and expected_sha != actual_sha:
         base["reason"] = "published transcript SHA does not match SourceDocument"
         return base
     if not isinstance(published, (dict, list)) or not isinstance(raw, dict):
         base["reason"] = "transcript shape cannot provide paragraph lineage"
         return base
-    segment = _published_segment(published, fragment)
+    segment = _published_segment(
+        published,
+        fragment,
+        body_coordinates=body_coordinates,
+    )
     if segment is None:
         base["reason"] = "published paragraph cannot be resolved"
         return base
@@ -395,6 +439,117 @@ def align_excerpt(
     return base
 
 
+def _align_visual_source(
+    *,
+    fragment: dict[str, Any],
+    source: dict[str, Any],
+    published_path: Path,
+    raw_path: Path,
+) -> dict[str, Any]:
+    """Bind a visual to its displayed row without calling it an audio quote."""
+
+    base: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "status": "unresolved",
+        "method": "unresolved",
+        "excerpt_start_time": None,
+        "excerpt_end_time": None,
+        "match_ratio": 0.0,
+        "reviewed_text_differs_from_raw": None,
+        "published_source_sha256": None,
+        "raw_timed_source_sha256": None,
+        "raw_start_index": None,
+        "raw_end_index": None,
+        "lineage_window_expanded": False,
+        "reason": None,
+    }
+    if not published_path.is_file():
+        base["reason"] = "published transcript is unavailable"
+        return base
+    try:
+        published_sha, published = _read_transcript(published_path)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        base["reason"] = f"transcript cannot be read: {exc}"
+        return base
+    base["published_source_sha256"] = published_sha
+    if raw_path.is_file():
+        try:
+            base["raw_timed_source_sha256"] = _sha256(raw_path)
+        except OSError:
+            pass
+    physical_script = (
+        published
+        if isinstance(published, list)
+        else published.get("script") or []
+        if isinstance(published, dict)
+        else []
+    )
+    projection = project_script(physical_script)
+    try:
+        body_coordinates = assert_locator_space_compatible(source, physical_script)
+    except LocatorSpaceError as exc:
+        base["reason"] = str(exc)
+        return base
+    expected_sha = str(
+        source.get("source_body_sha256") or source.get("source_sha256") or ""
+    )
+    actual_sha = projection.body_sha256 if body_coordinates else published_sha
+    if expected_sha and expected_sha != actual_sha:
+        base["reason"] = "published transcript SHA does not match SourceDocument"
+        return base
+    expected_visual_sha = str(source.get("source_visual_sha256") or "")
+    if not expected_visual_sha:
+        base["reason"] = "SourceDocument lacks visual-source identity"
+        return base
+    if expected_visual_sha != str(projection.visual_content_sha256 or ""):
+        base["reason"] = "published visual SHA does not match SourceDocument"
+        return base
+    locator = str(fragment.get("visual_locator") or fragment.get("paragraph_key") or "")
+    match = _VISUAL_KEY.fullmatch(locator)
+    block = next(
+        (item for item in projection.visual_blocks if item.locator == locator),
+        None,
+    )
+    if match is None or block is None or not block.readable:
+        base["reason"] = "visual source locator cannot be resolved"
+        return base
+    try:
+        validate_visual_fragment_against_block(fragment, block)
+    except ValueError:
+        base["reason"] = "visual source payload does not match SourceFragment"
+        return base
+    row = projection.body_rows[int(match.group(1)) - 1]
+    start = row.get("start_time")
+    end = row.get("end_time")
+    if not isinstance(start, (int, float)):
+        start = fragment.get("media_time")
+    if not isinstance(end, (int, float)):
+        end = fragment.get("media_end_time")
+    if not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
+        base["reason"] = "visual source row has no display time range"
+        return base
+    if float(end) < float(start):
+        base["reason"] = "visual source row has an invalid display time range"
+        return base
+    base.update(
+        {
+            "status": "visual_source",
+            "method": "published_visual_row_interval",
+            "excerpt_start_time": float(start),
+            "excerpt_end_time": float(end),
+            "match_ratio": 1.0,
+            "reviewed_text_differs_from_raw": False,
+            "reason": None,
+        }
+    )
+    base["alignment_sha256"] = hashlib.sha256(
+        json.dumps(
+            base, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    ).hexdigest()
+    return base
+
+
 def align_transcript_excerpt(
     *,
     excerpt: str,
@@ -416,7 +571,8 @@ def align_transcript_excerpt(
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         published = {}
     excerpt_normalized = _normalized(excerpt)
-    script = published if isinstance(published, list) else published.get("script") or []
+    physical_script = published if isinstance(published, list) else published.get("script") or []
+    script = project_script(physical_script).body_rows
     candidates = [
         row
         for row in script

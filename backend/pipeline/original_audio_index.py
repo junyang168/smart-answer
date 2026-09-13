@@ -40,6 +40,7 @@ from backend.api.scripture import (
     reference_slugs,
     spoken_references,
 )
+from backend.pipeline.source_projection import assert_locator_space_compatible, project_script
 
 
 #: 同一篇讲道里，两段录音相隔多久之内算「接着讲」。
@@ -137,7 +138,9 @@ class Sermons:
         raw = json.loads(path.read_text(encoding="utf-8"))
         # 两种格式都有：有的逐字稿是 {"metadata":…, "script":[…]}，有的直接是
         # 段落数组。只认前者会让整篇讲道无声无息地消失。
-        script = raw["script"] if isinstance(raw, dict) else raw
+        physical_script = raw["script"] if isinstance(raw, dict) else raw
+        assert_locator_space_compatible(document, physical_script)
+        script = list(project_script(physical_script).body_rows)
         transcript_id = str(document.get("transcript_id") or source_id)
         media = self._media_for(transcript_id)
         full_text = "".join(
@@ -292,6 +295,12 @@ def segment_time(sermon: dict[str, Any], fragment: dict[str, Any]) -> tuple[floa
     先按引文在逐字稿里的字位置插值（见 `_timeline`）。定位不到就退回片段自己记
     的 `media_time`——那是它所在段落的段首，会早好几分钟，但总比没有强。
     """
+
+    # A diagram may be shown while the professor is speaking, but it is not a
+    # spoken excerpt.  This module promises an index of his original audio, so
+    # a visual-only anchor must not manufacture an audio quotation interval.
+    if fragment.get("source_modality") == "visual":
+        return None
 
     located = _locate(sermon, fragment)
     anchors = _timeline(sermon)
