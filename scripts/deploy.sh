@@ -221,6 +221,15 @@ restart_frontend() {
     pm2 start "$PM2_CONFIG" --only "$PM2_APP" --update-env
 }
 
+verify_and_persist_frontend() {
+  wait_for_health frontend "$FRONTEND_HEALTH" || return 1
+  if ! pm2 save; then
+    printf 'deploy: failed to save PM2 process list\n' >&2
+    return 1
+  fi
+  log "PM2 resurrection state saved"
+}
+
 link_web_runtime_data() {
   local release="$1"
   local link_path="$release/web/data"
@@ -298,7 +307,7 @@ switch_services() {
   activate_fellowship_reminder "$release" || return 1
 
   restart_frontend "$release" || return 1
-  wait_for_health frontend "$FRONTEND_HEALTH" || return 1
+  verify_and_persist_frontend || return 1
 }
 
 rollback() {
@@ -503,7 +512,7 @@ if [[ "$PREVIOUS_RELEASE" == "$RELEASE_DIR" ]]; then
   log "Commit is already active; reconciling the fellowship reminder and verifying health"
   activate_fellowship_reminder "$RELEASE_DIR"
   wait_for_health backend "$BACKEND_HEALTH"
-  wait_for_health frontend "$FRONTEND_HEALTH"
+  verify_and_persist_frontend
   exit 0
 fi
 
