@@ -2263,6 +2263,8 @@ def build_claim_evidence_reciprocity_guard(
     expected_freeze_binding: Mapping[str, Any] | None = None,
     expected_source_lineage_snapshot: Mapping[str, Any] | None = None,
     expected_pair_adjudication_authorization: Mapping[str, Any] | None = None,
+    *,
+    expected_final_source_lineage_snapshot: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Bind one sealed full active snapshot to exactly one ChangeSet plan."""
 
@@ -2291,6 +2293,10 @@ def build_claim_evidence_reciprocity_guard(
     if expected_source_lineage_snapshot is None:
         expected_source_lineage_snapshot = build_source_lineage_identity_snapshot(())
     _validate_source_lineage_identity_snapshot(expected_source_lineage_snapshot)
+    if expected_final_source_lineage_snapshot is not None:
+        _validate_source_lineage_identity_snapshot(
+            expected_final_source_lineage_snapshot
+        )
     snapshot = json.loads(canonical_json(expected_active_snapshot))
     guard = {
         "schema_version": CLAIM_EVIDENCE_RECIPROCITY_GUARD_SCHEMA_VERSION,
@@ -2316,6 +2322,14 @@ def build_claim_evidence_reciprocity_guard(
             else None
         ),
     }
+    # Dedicated pair repairs do not change source lineage, so their established
+    # guard remains byte-for-byte compatible. A source extraction can create a
+    # new SourceDocument/SourceFragment denominator in the same ChangeSet; bind
+    # that post-state separately from the current production denominator.
+    if expected_final_source_lineage_snapshot is not None:
+        guard["expected_final_source_lineage_snapshot"] = json.loads(
+            canonical_json(expected_final_source_lineage_snapshot)
+        )
     guard["guard_sha256"] = sha256_json(guard)
     return guard
 
@@ -2369,6 +2383,15 @@ def _validate_claim_evidence_reciprocity_guard(
             "Claim/Evidence repair guard lacks source-lineage snapshot"
         )
     _validate_source_lineage_identity_snapshot(source_lineage_snapshot)
+    final_source_lineage_snapshot = guard.get(
+        "expected_final_source_lineage_snapshot"
+    )
+    if final_source_lineage_snapshot is not None:
+        if not isinstance(final_source_lineage_snapshot, Mapping):
+            raise PostgresKnowledgeStoreError(
+                "Claim/Evidence repair guard has malformed final source-lineage snapshot"
+            )
+        _validate_source_lineage_identity_snapshot(final_source_lineage_snapshot)
     pair_authorization = guard.get("expected_pair_adjudication_authorization")
     if plan.source_kind == CLAIM_EVIDENCE_PAIR_ADJUDICATION_SOURCE_KIND:
         if not isinstance(pair_authorization, Mapping):
@@ -3351,12 +3374,159 @@ class PostgresKnowledgeStore:
             source_snapshot = build_source_lineage_identity_snapshot(
                 [*fragment_rows, *document_rows]
             )
+
+            # A fresh extraction creates its source lineage and endpoints in one
+            # ChangeSet. Simulate that exact post-state here: apply first proves
+            # the current production denominator, then proves this final one.
+            final_active_rows = dict(active_rows)
+            for operation in plan.operations:
+                if operation.collection not in CLAIM_EVIDENCE_COLLECTIONS:
+                    continue
+                key = (operation.collection, operation.object_id)
+                if operation.operation == "retire":
+                    final_active_rows.pop(key, None)
+                else:
+                    final_active_rows[key] = (
+                        operation.collection,
+                        operation.object_id,
+                        operation.after_revision,
+                        operation.after_sha256,
+                        stored_operation_payload(operation),
+                    )
+
+            final_fragment_ids: set[str] = set()
+            final_document_ids: set[str] = set()
+            for row in final_active_rows.values():
+                payload = row[4]
+                add_many(
+                    payload,
+                    "source_fragment_ids",
+                    "source_fragment_id",
+                    final_fragment_ids,
+                )
+                add_many(
+                    payload,
+                    "source_document_ids",
+                    "source_document_id",
+                    final_document_ids,
+                )
+                if payload.get("source_id"):
+                    final_document_ids.add(str(payload["source_id"]))
+
+            final_fragments = {str(row[1]): row for row in fragment_rows}
+            extra_fragment_ids = final_fragment_ids - set(final_fragments)
+            if extra_fragment_ids:
+                cursor.execute(
+                    """SELECT collection, object_id, revision, content_sha256,
+                              payload, retired_at
+                       FROM wang_knowledge.objects
+                       WHERE collection='source_fragments' AND object_id = ANY(%s)
+                       ORDER BY object_id FOR SHARE""",
+                    (sorted(extra_fragment_ids),),
+                )
+                final_fragments.update(
+                    (str(row[1]), row) for row in cursor.fetchall()
+                )
+            for operation in plan.operations:
+                if operation.collection != "source_fragments":
+                    continue
+                if operation.operation == "retire":
+                    current = final_fragments.get(operation.object_id)
+                    if current is not None:
+                        final_fragments[operation.object_id] = (*current[:5], True)
+                else:
+                    final_fragments[operation.object_id] = (
+                        "source_fragments",
+                        operation.object_id,
+                        operation.after_revision,
+                        operation.after_sha256,
+                        stored_operation_payload(operation),
+                        None,
+                    )
+
+            missing_fragments = final_fragment_ids - set(final_fragments)
+            if missing_fragments:
+                raise PostgresKnowledgeStoreError(
+                    "Claim/Evidence final graph references missing SourceFragments: "
+                    + ", ".join(sorted(missing_fragments)[:10])
+                )
+            for fragment_id in final_fragment_ids:
+                row = final_fragments[fragment_id]
+                payload = row[4]
+                if (
+                    not isinstance(payload, Mapping)
+                    or record_content_sha(payload) != str(row[3])
+                ):
+                    raise PostgresKnowledgeStoreError(
+                        f"SourceFragment {fragment_id} content SHA differs from payload"
+                    )
+                source_id = str(payload.get("source_id") or "")
+                if not source_id:
+                    raise PostgresKnowledgeStoreError(
+                        f"SourceFragment {fragment_id} lacks its SourceDocument lineage"
+                    )
+                final_document_ids.add(source_id)
+
+            final_documents = {str(row[1]): row for row in document_rows}
+            extra_document_ids = final_document_ids - set(final_documents)
+            if extra_document_ids:
+                cursor.execute(
+                    """SELECT collection, object_id, revision, content_sha256,
+                              payload, retired_at
+                       FROM wang_knowledge.objects
+                       WHERE collection='source_documents' AND object_id = ANY(%s)
+                       ORDER BY object_id FOR SHARE""",
+                    (sorted(extra_document_ids),),
+                )
+                final_documents.update(
+                    (str(row[1]), row) for row in cursor.fetchall()
+                )
+            for operation in plan.operations:
+                if operation.collection != "source_documents":
+                    continue
+                if operation.operation == "retire":
+                    current = final_documents.get(operation.object_id)
+                    if current is not None:
+                        final_documents[operation.object_id] = (*current[:5], True)
+                else:
+                    final_documents[operation.object_id] = (
+                        "source_documents",
+                        operation.object_id,
+                        operation.after_revision,
+                        operation.after_sha256,
+                        stored_operation_payload(operation),
+                        None,
+                    )
+
+            missing_documents = final_document_ids - set(final_documents)
+            if missing_documents:
+                raise PostgresKnowledgeStoreError(
+                    "Claim/Evidence final graph references missing SourceDocuments: "
+                    + ", ".join(sorted(missing_documents)[:10])
+                )
+            for document_id in final_document_ids:
+                row = final_documents[document_id]
+                if (
+                    not isinstance(row[4], Mapping)
+                    or record_content_sha(row[4]) != str(row[3])
+                ):
+                    raise PostgresKnowledgeStoreError(
+                        f"SourceDocument {document_id} content SHA differs from payload"
+                    )
+
+            final_source_snapshot = build_source_lineage_identity_snapshot(
+                [
+                    *(final_fragments[object_id] for object_id in final_fragment_ids),
+                    *(final_documents[object_id] for object_id in final_document_ids),
+                ]
+            )
             guard = build_claim_evidence_reciprocity_guard(
                 plan,
                 active_snapshot,
                 dependency_snapshot,
                 review_snapshot,
                 expected_source_lineage_snapshot=source_snapshot,
+                expected_final_source_lineage_snapshot=final_source_snapshot,
             )
             # Reuse the apply-time validator here so preview proves the exact
             # final graph before returning a plan to an operator.
@@ -4245,7 +4415,8 @@ class PostgresKnowledgeStore:
         PostgresKnowledgeStore._assert_claim_evidence_source_lineage_snapshot(
             cursor,
             active_rows,
-            validated_guard["expected_source_lineage_snapshot"],
+            validated_guard.get("expected_final_source_lineage_snapshot")
+            or validated_guard["expected_source_lineage_snapshot"],
         )
         authority_rows = dict(active_rows)
         for operation in plan.operations:
@@ -5388,7 +5559,10 @@ class PostgresKnowledgeStore:
                     PostgresKnowledgeStore._assert_claim_evidence_source_lineage_snapshot(
                         cursor,
                         written_active_rows,
-                        claim_evidence_guard["expected_source_lineage_snapshot"],
+                        claim_evidence_guard.get(
+                            "expected_final_source_lineage_snapshot"
+                        )
+                        or claim_evidence_guard["expected_source_lineage_snapshot"],
                     )
                 cursor.execute(
                     """UPDATE wang_knowledge.change_sets
