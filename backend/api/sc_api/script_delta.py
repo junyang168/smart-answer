@@ -424,7 +424,6 @@ class ScriptDelta:
         author: str,
         *,
         expected_review_sha256: str | None = None,
-        expected_published_sha256: str | None = None,
     ) -> str:
         """Atomically publish one exact review snapshot.
 
@@ -484,18 +483,6 @@ class ScriptDelta:
 
             with open(published_lock_path, "a+b") as published_lock:
                 fcntl.flock(published_lock.fileno(), fcntl.LOCK_EX)
-                if expected_published_sha256 is not None:
-                    actual_published_sha256 = (
-                        hashlib.sha256(Path(published_target).read_bytes()).hexdigest()
-                        if os.path.exists(published_target)
-                        else None
-                    )
-                    if actual_published_sha256 != expected_published_sha256:
-                        raise ScriptConflictError(
-                            "published script changed before publish: "
-                            f"expected {expected_published_sha256}, "
-                            f"found {actual_published_sha256 or 'missing'}"
-                        )
                 target_mode = (
                     os.stat(published_target).st_mode & 0o777
                     if os.path.exists(published_target)
