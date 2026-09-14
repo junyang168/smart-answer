@@ -388,6 +388,7 @@ def build_dry_run(
         placeholder_retire_keys: list[tuple[str, str]] = []
         placeholder_records: list[dict[str, Any]] = []
         findings: list[dict[str, Any]] = []
+        preserved_human_claims: list[str] = []
         claim_anchor_changes = 0
         for fragment in fragments_by_source[source_id]:
             migrated, resolution = migrate_source_fragment(
@@ -484,13 +485,13 @@ def build_dry_run(
                 assert_claim_semantics_unchanged(claim, migrated)
                 claim_id = str(claim["claim_id"])
                 if claim_id in human_settled:
-                    findings.append(
-                        {
-                            "collection": "claims",
-                            "object_id": claim_id,
-                            "status": "human_settled_coordinate_change",
-                        }
-                    )
+                    # Numeric legacy keys in these pilot Claims are the source
+                    # segment index, not an editorial/physical ordinal.  The
+                    # resolver has just proved every exact highlight against
+                    # the current professor body.  Preserve the human-settled
+                    # record byte-for-byte instead of advancing its revision
+                    # merely to spell the same body coordinate as Sxxxx.
+                    preserved_human_claims.append(claim_id)
                     continue
                 coordinate_replacements[("claims", claim_id)] = migrated
                 claim_anchor_changes += sum(
@@ -566,6 +567,7 @@ def build_dry_run(
             "source_file_sha256": hashlib.sha256(raw).hexdigest(),
             "source_body_sha256": projection.body_sha256,
             "claim_anchor_changes": claim_anchor_changes,
+            "preserved_human_claim_ids": sorted(preserved_human_claims),
             "cleanup_kind": cleanup_kind,
             "placeholder_retirements": placeholder_records,
             "operation_counts": dict(
