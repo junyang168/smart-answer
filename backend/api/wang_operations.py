@@ -467,6 +467,22 @@ def _is_rejected_obsolete_ingest(run: dict[str, Any]) -> bool:
     )
 
 
+def _is_no_output_extraction_timeout(
+    run: dict[str, Any], current_source_sha: Optional[str]
+) -> bool:
+    """Whether a retry timed out before replacing a current extraction."""
+
+    error = str(run.get("error_message") or "")
+    attempted_sha = (run.get("input_sha256") or {}).get("source_sha256")
+    return (
+        run.get("effective_status") == "failed"
+        and not run.get("output_paths")
+        and bool(current_source_sha)
+        and attempted_sha == current_source_sha
+        and "Codex subscription transport failed: TimeoutExpired:" in error
+    )
+
+
 def _cell(
     runs: list[dict[str, Any]],
     *,
@@ -508,6 +524,7 @@ def _cell(
     )
     summary = _run_summary(latest)
     rejected_obsolete_attempt: Optional[dict[str, Any]] = None
+    failed_transport_attempt: Optional[dict[str, Any]] = None
     # A cancelled attempt produced no replacement. When an earlier successful
     # extraction is still bound to the current body, cancellation cannot erase
     # that lineage. Real failures remain visible because they are a verdict.
@@ -524,6 +541,19 @@ def _cell(
         and _is_rejected_obsolete_ingest(latest)
     ):
         rejected_obsolete_attempt = _run_summary(latest)
+        latest = last_success
+        summary = _run_summary(last_success)
+    # A timed-out extraction retry produced no candidate package. When a
+    # deterministic migration has since bound the existing successful
+    # extraction to this exact body, the timeout remains history rather than
+    # replacing the source's current lineage.
+    if (
+        stage == "extraction"
+        and last_success is not None
+        and current_store_source_sha == current_source_sha
+        and _is_no_output_extraction_timeout(latest, current_source_sha)
+    ):
+        failed_transport_attempt = _run_summary(latest)
         latest = last_success
         summary = _run_summary(last_success)
     if latest["effective_status"] in {"failed", "interrupted", "cancelled"}:
@@ -560,6 +590,11 @@ def _cell(
         }
 
     if stage == "extraction":
+        attempt = (
+            {"failed_transport_attempt": failed_transport_attempt}
+            if failed_transport_attempt is not None
+            else {}
+        )
         recorded = (last_success.get("input_sha256") or {}).get("source_sha256")
         if not recorded:
             # Nothing to compare against. Not evidence of freshness -- evidence
@@ -572,9 +607,11 @@ def _cell(
             # applied SourceDocument is the durable proof of that migration;
             # comparing its body SHA remains independent of raw-file bytes.
             if current_store_source_sha == current_source_sha:
-                return {"state": "current", "quality": quality, "run": success}
+                return {
+                    "state": "current", "quality": quality, "run": success, **attempt
+                }
             return stale("source_changed")
-        return {"state": "current", "quality": quality, "run": success}
+        return {"state": "current", "quality": quality, "run": success, **attempt}
 
     finished = last_success.get("finished_at")
     if upstream_finished and finished and upstream_finished > finished:

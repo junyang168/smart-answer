@@ -160,6 +160,48 @@ def test_cancelled_attempt_does_not_overwrite_successful_lineage() -> None:
     assert cell["run"]["run_id"] == success["run_id"]
 
 
+def test_no_output_extraction_timeout_does_not_overwrite_migrated_lineage() -> None:
+    success = _run("extraction", finished=NOW - timedelta(hours=1))
+    success["run_id"] = "RUN-success"
+    success["input_sha256"] = {"source_sha256": "legacy-raw-sha"}
+    failed = _run("extraction", finished=NOW, status="failed")
+    failed.update({
+        "run_id": "RUN-timeout",
+        "input_sha256": {"source_sha256": "body-sha"},
+        "output_paths": [],
+        "error_message": (
+            "CodexSubscriptionError: Codex subscription transport failed: "
+            "TimeoutExpired: command timed out"
+        ),
+    })
+
+    cell = _cell(
+        [success, failed], stage="extraction", current_source_sha="body-sha",
+        current_store_source_sha="body-sha", upstream_finished=None,
+    )
+
+    assert cell["state"] == "current"
+    assert cell["run"]["run_id"] == "RUN-success"
+    assert cell["failed_transport_attempt"]["run_id"] == "RUN-timeout"
+
+
+def test_other_failed_extraction_still_overwrites_successful_lineage() -> None:
+    success = _run("extraction", finished=NOW - timedelta(hours=1))
+    failed = _run("extraction", finished=NOW, status="failed")
+    failed.update({
+        "input_sha256": {"source_sha256": "body-sha"},
+        "output_paths": [],
+        "error_message": "schema validation failed",
+    })
+
+    cell = _cell(
+        [success, failed], stage="extraction", current_source_sha="body-sha",
+        current_store_source_sha="body-sha", upstream_finished=None,
+    )
+
+    assert cell["state"] == "failed"
+
+
 def test_rejected_obsolete_ingest_does_not_overwrite_successful_lineage() -> None:
     success = _run("ingest", finished=NOW - timedelta(days=10))
     success["run_id"] = "RUN-success"
