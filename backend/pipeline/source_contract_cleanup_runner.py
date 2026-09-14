@@ -241,6 +241,26 @@ def _source_material(
     raise ValueError(f"invalid transcript shape: {path}")
 
 
+def _needs_canonical_source_path_repair(
+    source: Mapping[str, Any], data_base_path: Path
+) -> bool:
+    if source.get("source_type") != "sermon_transcript":
+        return False
+    transcript_id = str(source.get("transcript_id") or "")
+    path = resolve_transcript_path(
+        transcript_id,
+        [data_base_path / name for name in TRANSCRIPT_DIR_NAMES],
+    )
+    if path is None or str(source.get("source_path") or "") == str(path):
+        return False
+    payload, _, selected_path = _source_material(source, data_base_path)
+    return (
+        selected_path == path
+        and project_script(payload.get("script")).body_sha256
+        == str(source.get("source_body_sha256") or "")
+    )
+
+
 def _claim_matches_source(
     claim: Mapping[str, Any], *, source_id: str, transcript_id: str
 ) -> bool:
@@ -374,7 +394,11 @@ def build_dry_run(
     for source in sorted(sources, key=lambda row: str(row.get("source_id") or "")):
         source_id = str(source.get("source_id") or "")
         transcript_id = str(source.get("transcript_id") or "")
-        if source.get("locator_space") == LOCATOR_SPACE:
+        canonical_path_repair = (
+            source.get("locator_space") == LOCATOR_SPACE
+            and _needs_canonical_source_path_repair(source, data_base_path)
+        )
+        if source.get("locator_space") == LOCATOR_SPACE and not canonical_path_repair:
             scenarios["already_modern"].append(
                 {"source_id": source_id, "transcript_id": transcript_id}
             )
@@ -412,7 +436,10 @@ def build_dry_run(
         index = BodyLocatorIndex(script)
         coordinate_replacements: dict[tuple[str, str], dict[str, Any]] = {
             ("source_documents", source_id): migrate_source_document(
-                source, raw_source=raw, projection=projection
+                source,
+                raw_source=raw,
+                projection=projection,
+                source_path=str(source_path),
             )
         }
         placeholder_replacements: dict[tuple[str, str], dict[str, Any]] = {}
@@ -422,7 +449,9 @@ def build_dry_run(
         preserved_human_claims: list[str] = []
         claim_anchor_changes = 0
         fragment_locators: dict[str, str] = {}
-        for fragment in fragments_by_source[source_id]:
+        for fragment in (
+            () if canonical_path_repair else fragments_by_source[source_id]
+        ):
             fragment_id = str(fragment.get("fragment_id") or "")
             migrated, resolution = migrate_source_fragment(
                 fragment,
@@ -505,7 +534,7 @@ def build_dry_run(
         evidence_locator_proofs = _evidence_fragment_locator_proofs(
             placeholder_owners, fragment_locators
         )
-        for claim in claims:
+        for claim in (() if canonical_path_repair else claims):
             if not _claim_matches_source(
                 claim, source_id=source_id, transcript_id=transcript_id
             ):
@@ -542,7 +571,7 @@ def build_dry_run(
                 claim_anchor_changes += sum(
                     item.get("status") == "changed" for item in claim_findings
                 )
-        for attestation in attestations:
+        for attestation in (() if canonical_path_repair else attestations):
             if str(attestation.get("source_id") or "") != source_id:
                 continue
             migrated = migrate_route_attestation(
@@ -571,7 +600,11 @@ def build_dry_run(
         else:
             replacements = {**coordinate_replacements, **placeholder_replacements}
             retire_keys = placeholder_retire_keys
-            cleanup_kind = "full_source_coordinate_cleanup"
+            cleanup_kind = (
+                "canonical_source_path_repair"
+                if canonical_path_repair
+                else "full_source_coordinate_cleanup"
+            )
 
         for key in replacements:
             prior = replacement_owner.get(key)

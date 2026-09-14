@@ -172,7 +172,11 @@ class BodyLocatorIndex:
 
 
 def migrate_source_document(
-    source: Mapping[str, Any], *, raw_source: bytes, projection: SourceProjection
+    source: Mapping[str, Any],
+    *,
+    raw_source: bytes,
+    projection: SourceProjection,
+    source_path: str | None = None,
 ) -> dict[str, Any]:
     """Return the same source identity expressed in the body-coordinate contract."""
 
@@ -190,6 +194,8 @@ def migrate_source_document(
             "locator_space": LOCATOR_SPACE,
         }
     )
+    if source_path is not None:
+        row["source_path"] = source_path
     return row
 
 
@@ -410,6 +416,7 @@ _ALLOWED_COLLECTIONS = frozenset(
 )
 _ALLOWED_SOURCE_FIELDS = frozenset(
     {
+        "source_path",
         "source_sha256",
         "source_body_sha256",
         "source_file_sha256",

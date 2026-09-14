@@ -182,11 +182,13 @@ def test_source_document_uses_body_identity_not_file_identity():
         {"source_id": "SRC-1", "source_sha256": "old"},
         raw_source=raw,
         projection=projection,
+        source_path="/canonical/sermon.json",
     )
     assert migrated["source_sha256"] == projection.body_sha256
     assert migrated["source_body_sha256"] == projection.body_sha256
     assert migrated["source_file_sha256"] == hashlib.sha256(raw).hexdigest()
     assert migrated["locator_space"] == "spoken_body_v1"
+    assert migrated["source_path"] == "/canonical/sermon.json"
 
 
 def test_claim_migration_changes_only_occurrence_locator():
