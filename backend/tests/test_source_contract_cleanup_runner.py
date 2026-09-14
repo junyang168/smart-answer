@@ -16,6 +16,19 @@ def test_parse_only_sources_uses_manifest_to_recover_space_bearing_argv():
     assert parse_only_sources(command, known) == {"S 210101 extended", "plain"}
 
 
+def test_parse_only_sources_accepts_shell_quoted_argv_from_wrapper_process():
+    known = ["S 210101", "S 210101 extended", "plain"]
+    command = (
+        "python -m runner --batch batch.json --only "
+        "\"S 210101\" 'S 210101 extended' plain"
+    )
+    assert parse_only_sources(command, known) == {
+        "S 210101",
+        "S 210101 extended",
+        "plain",
+    }
+
+
 def test_parse_only_sources_without_only_owns_the_whole_batch():
     assert parse_only_sources("python -m runner --batch batch.json", ["a", "b"]) == {
         "a",

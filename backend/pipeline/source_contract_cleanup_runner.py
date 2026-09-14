@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -178,6 +179,13 @@ def parse_only_sources(command: str, known_sources: list[str]) -> set[str]:
     if marker not in command:
         return set(known_sources)
     remaining = command.split(marker, 1)[1].strip()
+    if remaining[:1] in {"'", '"'}:
+        try:
+            quoted = shlex.split(remaining)
+        except ValueError as exc:
+            raise ValueError(f"cannot parse live --only list: {exc}") from exc
+        if quoted and all(source in known_sources for source in quoted):
+            return set(quoted)
     selected: set[str] = set()
     while remaining:
         matches = [
