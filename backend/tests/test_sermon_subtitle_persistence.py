@@ -71,7 +71,6 @@ def test_publish_is_atomic_and_bound_to_the_exact_review_snapshot(
         {"index": "subtitle-1", "type": "subtitle", "text": "## 图示"}
     ]
 
-
 def test_apply_insertions_preserves_every_body_row_and_all_subtitle_levels() -> None:
     before = _rows()
     after = apply_insertions(

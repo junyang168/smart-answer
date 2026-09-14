@@ -27,6 +27,7 @@ from fastapi import APIRouter, HTTPException
 
 from backend.config.wang_platform_paths import wang_platform_paths
 from backend.pipeline.model_prices import price_table_for
+from backend.pipeline.source_projection import project_script, script_from_markdown_blocks
 from backend.pipeline.source_keys import document_row_key
 from backend.pipeline.transcript_source import resolve_transcript_path
 
@@ -66,6 +67,26 @@ def _sha256_file(path: Path) -> Optional[str]:
     try:
         return hashlib.sha256(path.read_bytes()).hexdigest()
     except OSError:
+        return None
+
+
+def _source_body_sha256(path: Path, kind: str) -> Optional[str]:
+    """Identity of source-bearing rows, excluding editor-only structure."""
+
+    try:
+        if kind == "notes":
+            text = path.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+            blocks = [
+                block.strip()
+                for block in re.split(r"\n[ \t]*\n+", text)
+                if block.strip()
+            ]
+            script = script_from_markdown_blocks(blocks)
+        else:
+            parsed = json.loads(path.read_text(encoding="utf-8"))
+            script = parsed.get("script") if isinstance(parsed, dict) else parsed
+        return project_script(script).body_sha256
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
         return None
 
 
@@ -373,6 +394,7 @@ def _ingested_sources() -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]
             "fragments": found.get("fragments") or 0,
             "updated_at": written.isoformat() if written else None,
             "document_updated_at": updated_at.isoformat() if updated_at else None,
+            "source_body_sha256": document.get("source_body_sha256"),
         }
     return held, []
 
@@ -432,6 +454,35 @@ def _effective_status(run: dict[str, Any], now: datetime) -> str:
     return status
 
 
+def _is_rejected_obsolete_ingest(run: dict[str, Any]) -> bool:
+    """Whether the store rejected an old generation before it wrote anything."""
+
+    error = str(run.get("error_message") or "")
+    return (
+        run.get("effective_status") == "failed"
+        and not run.get("output_paths")
+        and "ChangeSetConflict:" in error
+        and "was retired at" in error
+        and "re-ingesting the package that produced it would bring it back" in error
+    )
+
+
+def _is_no_output_extraction_timeout(
+    run: dict[str, Any], current_source_sha: Optional[str]
+) -> bool:
+    """Whether a retry timed out before replacing a current extraction."""
+
+    error = str(run.get("error_message") or "")
+    attempted_sha = (run.get("input_sha256") or {}).get("source_sha256")
+    return (
+        run.get("effective_status") == "failed"
+        and not run.get("output_paths")
+        and bool(current_source_sha)
+        and attempted_sha == current_source_sha
+        and "Codex subscription transport failed: TimeoutExpired:" in error
+    )
+
+
 def _cell(
     runs: list[dict[str, Any]],
     *,
@@ -439,6 +490,7 @@ def _cell(
     current_source_sha: Optional[str],
     upstream_finished: Optional[datetime],
     upstream_in_flight: bool = False,
+    current_store_source_sha: Optional[str] = None,
 ) -> dict[str, Any]:
     """One stage's cell for one source: a state, a quality, and the last run.
 
@@ -471,6 +523,39 @@ def _cell(
         runs[-1],
     )
     summary = _run_summary(latest)
+    rejected_obsolete_attempt: Optional[dict[str, Any]] = None
+    failed_transport_attempt: Optional[dict[str, Any]] = None
+    # A cancelled attempt produced no replacement. When an earlier successful
+    # extraction is still bound to the current body, cancellation cannot erase
+    # that lineage. Real failures remain visible because they are a verdict.
+    if latest["effective_status"] == "cancelled" and last_success is not None:
+        latest = last_success
+        summary = _run_summary(last_success)
+    # The retirement gate can correctly reject an obsolete package after the
+    # current generation was already ingested. That failed command remains in
+    # run history, but it is not the ingest state of the source: it wrote
+    # nothing and the earlier successful lineage still owns the store row.
+    if (
+        stage == "ingest"
+        and last_success is not None
+        and _is_rejected_obsolete_ingest(latest)
+    ):
+        rejected_obsolete_attempt = _run_summary(latest)
+        latest = last_success
+        summary = _run_summary(last_success)
+    # A timed-out extraction retry produced no candidate package. When a
+    # deterministic migration has since bound the existing successful
+    # extraction to this exact body, the timeout remains history rather than
+    # replacing the source's current lineage.
+    if (
+        stage == "extraction"
+        and last_success is not None
+        and current_store_source_sha == current_source_sha
+        and _is_no_output_extraction_timeout(latest, current_source_sha)
+    ):
+        failed_transport_attempt = _run_summary(latest)
+        latest = last_success
+        summary = _run_summary(last_success)
     if latest["effective_status"] in {"failed", "interrupted", "cancelled"}:
         return {
             "state": "failed",
@@ -487,11 +572,29 @@ def _cell(
     quality = last_success.get("quality") or None
 
     def stale(reason: str) -> dict[str, Any]:
+        attempt = (
+            {"rejected_obsolete_attempt": rejected_obsolete_attempt}
+            if rejected_obsolete_attempt is not None
+            else {}
+        )
         if upstream_in_flight:
-            return _pending({"state": "stale", "quality": quality, "run": success})
-        return {"state": "stale", "reason": reason, "quality": quality, "run": success}
+            return _pending(
+                {"state": "stale", "quality": quality, "run": success, **attempt}
+            )
+        return {
+            "state": "stale",
+            "reason": reason,
+            "quality": quality,
+            "run": success,
+            **attempt,
+        }
 
     if stage == "extraction":
+        attempt = (
+            {"failed_transport_attempt": failed_transport_attempt}
+            if failed_transport_attempt is not None
+            else {}
+        )
         recorded = (last_success.get("input_sha256") or {}).get("source_sha256")
         if not recorded:
             # Nothing to compare against. Not evidence of freshness -- evidence
@@ -499,15 +602,43 @@ def _cell(
             # input. Every package produced before the ledger existed lands here.
             return stale("no_recorded_input")
         if current_source_sha and recorded != current_source_sha:
+            # A coordinate migration may bind a legacy extraction to the
+            # current spoken body without rewriting the old run row. The
+            # applied SourceDocument is the durable proof of that migration;
+            # comparing its body SHA remains independent of raw-file bytes.
+            if current_store_source_sha == current_source_sha:
+                return {
+                    "state": "current", "quality": quality, "run": success, **attempt
+                }
             return stale("source_changed")
-        return {"state": "current", "quality": quality, "run": success}
+        return {"state": "current", "quality": quality, "run": success, **attempt}
 
     finished = last_success.get("finished_at")
     if upstream_finished and finished and upstream_finished > finished:
         return stale("upstream_rerun")
     if upstream_in_flight:
-        return _pending({"state": "current", "quality": quality, "run": success})
-    return {"state": "current", "quality": quality, "run": success}
+        return _pending(
+            {
+                "state": "current",
+                "quality": quality,
+                "run": success,
+                **(
+                    {"rejected_obsolete_attempt": rejected_obsolete_attempt}
+                    if rejected_obsolete_attempt is not None
+                    else {}
+                ),
+            }
+        )
+    return {
+        "state": "current",
+        "quality": quality,
+        "run": success,
+        **(
+            {"rejected_obsolete_attempt": rejected_obsolete_attempt}
+            if rejected_obsolete_attempt is not None
+            else {}
+        ),
+    }
 
 
 def _pending(cell: dict[str, Any]) -> dict[str, Any]:
@@ -528,6 +659,11 @@ def _pending(cell: dict[str, Any]) -> dict[str, Any]:
         "run": cell.get("run"),
         "superseded": {"state": cell["state"], "quality": cell.get("quality")},
         **({"store": cell["store"]} if cell.get("store") else {}),
+        **(
+            {"rejected_obsolete_attempt": cell["rejected_obsolete_attempt"]}
+            if cell.get("rejected_obsolete_attempt")
+            else {}
+        ),
     }
 
 
@@ -706,7 +842,10 @@ def overview() -> dict[str, Any]:
     payload_rows: list[dict[str, Any]] = []
     for row in rows:
         source_path: Optional[Path] = row.pop("source_path")
-        source_sha = _sha256_file(source_path) if source_path else None
+        source_sha = (
+            _source_body_sha256(source_path, str(row.get("kind") or ""))
+            if source_path else None
+        )
         stage_runs = by_source.get(row["source_id"], {})
         stages: dict[str, Any] = {}
         # The most recent upstream success, carried forward down the chain so
@@ -725,6 +864,9 @@ def overview() -> dict[str, Any]:
                 current_source_sha=source_sha,
                 upstream_finished=upstream_finished,
                 upstream_in_flight=upstream_in_flight,
+                current_store_source_sha=(ingested.get(row["source_id"]) or {}).get(
+                    "source_body_sha256"
+                ),
             )
             if stage == "ingest" and cell["state"] == "never":
                 # The store outranks an empty ledger here: it is the authority

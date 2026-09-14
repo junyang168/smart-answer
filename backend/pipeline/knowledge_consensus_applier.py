@@ -799,6 +799,7 @@ def main() -> int:
     # still read ✗. A stage name is part of the user-facing contract, not an
     # internal label.
     with run_record(subject=subject, stage="merge") as record:
+        record.input_artifacts(args.package, args.review, args.adjudication, args.overrides)
         record.inputs({
             "package_sha256": hashlib.sha256(args.package.read_bytes()).hexdigest(),
             "review_sha256": hashlib.sha256(review_bytes).hexdigest(),

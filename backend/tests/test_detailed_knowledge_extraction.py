@@ -1383,6 +1383,9 @@ def test_consensus_cli_exact_replay_writes_no_artifact_or_second_run(
         def inputs(self, *_args):
             return None
 
+        def input_artifacts(self, *_args):
+            return None
+
         def quality(self, *_args):
             return None
 

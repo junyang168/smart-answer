@@ -664,6 +664,7 @@ def _run_adjudication(
     )
     outcome = compile_outcome(openai_response, reconsideration, reviews=reviews)
     record.inputs({"fingerprint_sha256": fingerprint.get("fingerprint_sha256")})
+    record.input_artifacts(package_path, review_path)
     # `human_disagreement_required` is the number that matters here: the two
     # models could not settle it and a person has to. It is not a failure, but a
     # source whose adjudication routes everything to a person has not been
@@ -815,6 +816,7 @@ def main() -> int:
                 subject=_adjudication_subject(args.review, args.package),
                 stage="adjudication",
             ) as record:
+                record.input_artifacts(args.package, args.review)
                 record.inputs({"fingerprint_sha256": fingerprint["fingerprint_sha256"]})
                 record.quality({"recovered_interrupted_artifact_commit": True})
                 record.outputs(args.output, args.overrides)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from datetime import datetime, timezone
 
 import pytest
@@ -222,6 +223,30 @@ def test_transport_timeout_marks_usage_incomplete_and_never_reports_partial_cost
     assert metadata["model_calls_started"] == 2
     assert metadata["model_calls_completed"] == 1
     assert metadata["usage_complete"] is False
+
+
+def test_ledger_snapshots_input_and_output_artifact_hashes(tmp_path) -> None:
+    source = tmp_path / "source.json"
+    output = tmp_path / "package.json"
+    source.write_bytes(b"source-v1")
+    output.write_bytes(b"package-v1")
+    record = RunRecord(
+        run_id="RUN-artifacts", subject_id="S", stage="merge",
+        subject_kind="source", conn=None,
+    )
+    captured: list[tuple] = []
+    record._execute = lambda _sql, params: captured.append(tuple(params))  # type: ignore[method-assign]
+
+    record.input_artifacts(source)
+    source.write_bytes(b"source-overwritten-after-read")
+    record.outputs(output)
+    record.finish("succeeded")
+
+    metadata = json.loads(captured[-1][12])
+    assert metadata["input_artifacts"][0]["sha256"] == hashlib.sha256(b"source-v1").hexdigest()
+    assert metadata["output_artifacts"][0]["sha256"] == hashlib.sha256(b"package-v1").hexdigest()
+    output.write_bytes(b"package-overwritten-later")
+    assert metadata["output_artifacts"][0]["sha256"] == hashlib.sha256(b"package-v1").hexdigest()
 
 
 def test_missing_database_does_not_break_the_work(monkeypatch):
