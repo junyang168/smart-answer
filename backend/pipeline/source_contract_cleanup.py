@@ -254,6 +254,22 @@ def migrate_claim_occurrence_anchors(
     return (row if changed else None), findings
 
 
+def remap_claim_occurrence_source(
+    claim: Mapping[str, Any], *, old_source_id: str, canonical_source_id: str
+) -> dict[str, Any] | None:
+    """Replace one retired SourceDocument alias without changing Claim meaning."""
+
+    row = json.loads(_canonical_json(claim))
+    changed = False
+    for occurrence in row.get("occurrences") or []:
+        if not isinstance(occurrence, dict):
+            continue
+        if str(occurrence.get("source_id") or "") == old_source_id:
+            occurrence["source_id"] = canonical_source_id
+            changed = True
+    return row if changed else None
+
+
 def migrate_route_attestation(
     attestation: Mapping[str, Any], *, source_sha256: str
 ) -> dict[str, Any] | None:
@@ -389,6 +405,7 @@ def build_source_contract_cleanup_plan(
     current: Mapping[tuple[str, str], Mapping[str, Any]],
     replacements: Mapping[tuple[str, str], Mapping[str, Any]],
     human_settled_claim_ids: Iterable[str] = (),
+    source_kind: str = SOURCE_CONTRACT_CLEANUP_KIND,
 ) -> ChangeSetPlan:
     """Build a CAS-bound plan without impersonating a reviewed Claim package.
 
@@ -450,7 +467,7 @@ def build_source_contract_cleanup_plan(
     fingerprint = sha256_json(
         {
             "planner_schema": "wang_source_contract_cleanup_plan_v1",
-            "source_kind": SOURCE_CONTRACT_CLEANUP_KIND,
+            "source_kind": source_kind,
             "source_sha256": source_sha,
             "package_id": package_id,
             "operations": operation_fingerprint_rows(operations),
@@ -461,7 +478,7 @@ def build_source_contract_cleanup_plan(
         change_set_id=f"KCS-{fingerprint[:20]}",
         fingerprint_sha256=fingerprint,
         package_id=package_id,
-        source_kind=SOURCE_CONTRACT_CLEANUP_KIND,
+        source_kind=source_kind,
         source_sha256=source_sha,
         operations=tuple(operations),
         unchanged=unchanged,

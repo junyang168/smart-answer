@@ -10,6 +10,7 @@ from backend.pipeline.source_contract_cleanup import (
     migrate_claim_occurrence_anchors,
     migrate_source_document,
     migrate_source_fragment,
+    remap_claim_occurrence_source,
 )
 from backend.api.canonical_repository.postgres_store import record_content_sha
 from backend.pipeline.source_projection import project_script
@@ -153,6 +154,23 @@ def test_claim_migration_rejects_non_coordinate_change():
     after = {"statement": "editor changed this", "occurrences": []}
     with pytest.raises(ValueError, match="outside coordinate provenance"):
         assert_claim_semantics_unchanged(before, after)
+
+
+def test_claim_source_alias_remap_changes_only_matching_occurrences():
+    claim = {
+        "claim_id": "CL-1",
+        "statement": "reader-visible claim",
+        "occurrences": [
+            {"source_id": "SRC-OLD", "anchors": [{"paragraph_key": "S0003"}]},
+            {"source_id": "SRC-OTHER", "anchors": []},
+        ],
+    }
+    migrated = remap_claim_occurrence_source(
+        claim, old_source_id="SRC-OLD", canonical_source_id="SRC-CANONICAL"
+    )
+    assert migrated["occurrences"][0]["source_id"] == "SRC-CANONICAL"
+    assert migrated["occurrences"][1]["source_id"] == "SRC-OTHER"
+    assert_claim_semantics_unchanged(claim, migrated)
 
 
 def test_dedicated_plan_allows_only_coordinate_provenance_changes():

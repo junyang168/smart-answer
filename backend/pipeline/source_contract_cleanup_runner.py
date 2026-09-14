@@ -252,6 +252,7 @@ def _plan_record_audit(
     for operation in plan.operations:
         before = dict(current[(operation.collection, operation.object_id)]["payload"])
         row = {
+            "operation": operation.operation,
             "collection": operation.collection,
             "object_id": operation.object_id,
             "before_revision": operation.before_revision,
@@ -582,7 +583,7 @@ def _readback(store: PostgresKnowledgeStore, plan: ChangeSetPlan) -> None:
                 row is None
                 or int(row[0]) != operation.after_revision
                 or str(row[1]) != operation.after_sha256
-                or row[2] is not None
+                or (row[2] is not None) != (operation.operation == "retire")
             ):
                 raise ValueError(
                     f"post-apply readback failed: {operation.collection}/{operation.object_id}"
