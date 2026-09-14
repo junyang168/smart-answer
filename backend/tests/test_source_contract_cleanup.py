@@ -74,7 +74,23 @@ def test_physical_locator_disambiguates_a_repeated_source_row_index():
     )
     assert resolution.status == "resolved"
     assert resolution.locator == "S0002"
-    assert resolution.proof == "physical_ordinal+source_segment_index"
+    assert resolution.proof == (
+        "body_locator+physical_ordinal+source_segment_index"
+    )
+
+
+def test_body_locator_disambiguates_repeated_text_after_editorial_row():
+    script = [
+        {"index": 1, "text": "same short answer"},
+        {"index": "subtitle-1", "type": "subtitle", "text": "# Editorial title"},
+        {"index": 2, "text": "same short answer"},
+    ]
+    resolution = BodyLocatorIndex(script).resolve(
+        paragraph_key="S0002", exact_text="same short answer"
+    )
+    assert resolution.status == "resolved"
+    assert resolution.locator == "S0002"
+    assert resolution.proof == "body_locator"
 
 
 def test_legacy_paragraph_key_can_name_the_source_segment_index():

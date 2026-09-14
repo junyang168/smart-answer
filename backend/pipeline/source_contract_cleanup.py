@@ -75,6 +75,7 @@ class BodyLocatorIndex:
                 )
             )
         self.rows = tuple(rows)
+        self.by_locator = {row.locator: row for row in rows}
         self.by_physical_ordinal = {row.physical_ordinal: row for row in rows}
         self.by_source_segment_index: dict[str, tuple[BodyRow, ...]] = {}
         for row in rows:
@@ -105,6 +106,9 @@ class BodyLocatorIndex:
         coordinate_matches: list[tuple[str, BodyRow]] = []
         match = LEGACY_LOCATOR.fullmatch(str(paragraph_key or ""))
         if match:
+            row = self.by_locator.get(str(paragraph_key))
+            if row is not None and excerpt in row.text:
+                coordinate_matches.append(("body_locator", row))
             row = self.by_physical_ordinal.get(int(match.group(1)))
             if row is not None and excerpt in row.text:
                 coordinate_matches.append(("physical_ordinal", row))
