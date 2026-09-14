@@ -109,18 +109,31 @@ class BodyLocatorIndex:
             if row is not None and excerpt in row.text:
                 coordinate_matches.append(("physical_ordinal", row))
 
+        legacy_source_index = None
+        if paragraph_key not in {None, ""} and match is None:
+            legacy_source_index = paragraph_key
+
         source_index_ambiguous = False
+        source_indices = []
         if source_segment_index not in {None, ""}:
+            source_indices.append(("source_segment_index", source_segment_index))
+        if legacy_source_index is not None and str(legacy_source_index) != str(
+            source_segment_index
+        ):
+            source_indices.append(
+                ("legacy_paragraph_source_segment_index", legacy_source_index)
+            )
+        for coordinate_kind, coordinate_value in source_indices:
             candidates = tuple(
                 row
                 for row in self.by_source_segment_index.get(
-                    str(source_segment_index), ()
+                    str(coordinate_value), ()
                 )
                 if excerpt in row.text
             )
-            source_index_ambiguous = len(candidates) > 1
+            source_index_ambiguous = source_index_ambiguous or len(candidates) > 1
             if len(candidates) == 1:
-                coordinate_matches.append(("source_segment_index", candidates[0]))
+                coordinate_matches.append((coordinate_kind, candidates[0]))
 
         coordinate_rows = {row.locator: row for _, row in coordinate_matches}
         if len(coordinate_rows) > 1:

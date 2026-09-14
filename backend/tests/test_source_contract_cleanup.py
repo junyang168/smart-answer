@@ -76,6 +76,15 @@ def test_physical_locator_disambiguates_a_repeated_source_row_index():
     assert resolution.proof == "physical_ordinal+source_segment_index"
 
 
+def test_legacy_paragraph_key_can_name_the_source_segment_index():
+    resolution = BodyLocatorIndex(SCRIPT).resolve(
+        paragraph_key="20", exact_text="exact evidence"
+    )
+    assert resolution.status == "resolved"
+    assert resolution.locator == "S0002"
+    assert resolution.proof == "legacy_paragraph_source_segment_index"
+
+
 def test_empty_excerpt_fails_closed():
     migrated, resolution = migrate_source_fragment(
         {"fragment_id": "FR-1", "verbatim_excerpt": ""},
