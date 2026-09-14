@@ -11,6 +11,7 @@ from backend.pipeline.source_contract_cleanup import (
     migrate_source_document,
     migrate_source_fragment,
     remap_claim_occurrence_source,
+    remove_source_fragment_reference,
 )
 from backend.api.canonical_repository.postgres_store import record_content_sha
 from backend.pipeline.source_projection import project_script
@@ -258,3 +259,84 @@ def test_changed_paths_distinguishes_missing_field_from_explicit_null():
     assert changed_paths({}, {"source_visual_sha256": None}) == [
         "source_visual_sha256"
     ]
+
+
+def test_placeholder_owner_cleanup_removes_only_fragment_pointer():
+    before = {
+        "evidence_step_id": "E-1",
+        "statement": "candidate content remains unchanged",
+        "source_fragment_id": "FR-MISSING",
+        "support_eligibility": "withheld_missing_anchor",
+        "review_status": "candidate",
+        "visibility": "internal",
+    }
+    after = remove_source_fragment_reference(before, fragment_id="FR-MISSING")
+    assert after == {
+        "evidence_step_id": "E-1",
+        "statement": "candidate content remains unchanged",
+        "support_eligibility": "withheld_missing_anchor",
+        "review_status": "candidate",
+        "visibility": "internal",
+    }
+
+    current = {
+        ("evidence_steps", "E-1"): {
+            "revision": 2,
+            "content_sha256": record_content_sha(before),
+            "payload": before,
+        }
+    }
+    plan = build_source_contract_cleanup_plan(
+        package_id="CLEANUP-PLACEHOLDER",
+        current=current,
+        replacements={("evidence_steps", "E-1"): after},
+    )
+    assert plan.operations[0].collection == "evidence_steps"
+    assert changed_paths(before, after) == ["source_fragment_id"]
+
+
+def test_placeholder_owner_cleanup_rejects_content_change():
+    before = {
+        "question_id": "Q-1",
+        "text": "original candidate question",
+        "source_fragment_id": "FR-MISSING",
+        "review_status": "candidate",
+        "visibility": "internal",
+    }
+    changed = {**before, "text": "rewritten question"}
+    state = {
+        "revision": 1,
+        "content_sha256": record_content_sha(before),
+        "payload": before,
+    }
+    with pytest.raises(ValueError, match="outside the source-coordinate contract"):
+        build_source_contract_cleanup_plan(
+            package_id="CLEANUP-PLACEHOLDER",
+            current={("questions", "Q-1"): state},
+            replacements={("questions", "Q-1"): changed},
+        )
+
+
+def test_placeholder_owner_cleanup_cannot_rebind_or_touch_non_candidate():
+    before = {
+        "question_id": "Q-1",
+        "text": "candidate question",
+        "source_fragment_id": "FR-OLD",
+        "review_status": "approved",
+        "visibility": "internal",
+    }
+    state = {
+        "revision": 1,
+        "content_sha256": record_content_sha(before),
+        "payload": before,
+    }
+    for changed in (
+        {**before, "source_fragment_id": "FR-NEW"},
+        {key: value for key, value in before.items() if key != "source_fragment_id"},
+    ):
+        with pytest.raises(ValueError, match="outside the source-coordinate contract"):
+            build_source_contract_cleanup_plan(
+                package_id="CLEANUP-PLACEHOLDER",
+                current={("questions", "Q-1"): state},
+                replacements={("questions", "Q-1"): changed},
+            )

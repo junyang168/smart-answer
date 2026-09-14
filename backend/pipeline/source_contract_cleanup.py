@@ -355,6 +355,9 @@ _ALLOWED_COLLECTIONS = frozenset(
     {
         "source_documents",
         "source_fragments",
+        "evidence_steps",
+        "observations",
+        "questions",
         "claims",
         "argument_route_attestations",
     }
@@ -383,6 +386,35 @@ _ALLOWED_FRAGMENT_FIELDS = frozenset(
         "anchor_state",
     }
 )
+_ALLOWED_PLACEHOLDER_OWNER_FIELDS = frozenset(
+    {"source_fragment_id", "source_fragment_ids"}
+)
+
+
+def remove_source_fragment_reference(
+    owner: Mapping[str, Any], *, fragment_id: str
+) -> dict[str, Any] | None:
+    """Drop one technical pointer without changing the owner's content.
+
+    This is intentionally narrower than retiring an EvidenceStep, Question, or
+    Observation.  Legacy pilot records can carry a placeholder SourceFragment
+    whose excerpt is empty and whose anchor was explicitly unresolved.  Such a
+    fragment is not evidence.  Its candidate owner remains readable, with its
+    existing missing-anchor status, after this pointer is removed.
+    """
+
+    row = json.loads(_canonical_json(owner))
+    changed = False
+    if str(row.get("source_fragment_id") or "") == fragment_id:
+        row.pop("source_fragment_id", None)
+        changed = True
+    if isinstance(row.get("source_fragment_ids"), list):
+        before = list(row["source_fragment_ids"])
+        row["source_fragment_ids"] = [
+            value for value in before if str(value) != fragment_id
+        ]
+        changed = changed or row["source_fragment_ids"] != before
+    return row if changed else None
 
 
 def _assert_allowed_record_change(
@@ -402,6 +434,31 @@ def _assert_allowed_record_change(
         allowed = all(path in _ALLOWED_SOURCE_FIELDS for path in paths)
     elif collection == "source_fragments":
         allowed = all(path in _ALLOWED_FRAGMENT_FIELDS for path in paths)
+    elif collection in {"evidence_steps", "observations", "questions"}:
+        allowed = all(path in _ALLOWED_PLACEHOLDER_OWNER_FIELDS for path in paths)
+        before_refs = {
+            str(value)
+            for value in (
+                [before.get("source_fragment_id")]
+                + list(before.get("source_fragment_ids") or [])
+            )
+            if value
+        }
+        after_refs = {
+            str(value)
+            for value in (
+                [after.get("source_fragment_id")]
+                + list(after.get("source_fragment_ids") or [])
+            )
+            if value
+        }
+        allowed = allowed and after_refs < before_refs
+        allowed = allowed and str(before.get("review_status") or "") == "candidate"
+        allowed = allowed and str(before.get("visibility") or "") == "internal"
+        if collection == "evidence_steps":
+            allowed = allowed and str(
+                before.get("support_eligibility") or ""
+            ) == "withheld_missing_anchor"
     elif collection == "argument_route_attestations":
         allowed = all(path in {"source_id", "source_revision_sha256"} for path in paths)
     else:
@@ -442,6 +499,9 @@ def build_source_contract_cleanup_plan(
         expected_id = {
             "source_documents": "source_id",
             "source_fragments": "fragment_id",
+            "evidence_steps": "evidence_step_id",
+            "observations": "observation_id",
+            "questions": "question_id",
             "claims": "claim_id",
             "argument_route_attestations": "argument_route_attestation_id",
         }[collection]

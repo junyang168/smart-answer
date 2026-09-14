@@ -17,7 +17,9 @@ from backend.api.canonical_repository.postgres_store import (
     ChangeOperation,
     ChangeSetPlan,
     PostgresKnowledgeStore,
+    build_retirement_plan,
     canonical_json,
+    combined_plan,
     sha256_json,
     validate_change_set_plan_integrity,
 )
@@ -32,6 +34,7 @@ from backend.pipeline.source_contract_cleanup import (
     migrate_route_attestation,
     migrate_source_document,
     migrate_source_fragment,
+    remove_source_fragment_reference,
     unresolved_statuses,
 )
 from backend.pipeline.source_projection import (
@@ -52,6 +55,9 @@ TARGETED_TRANSCRIPTS = frozenset(
 COLLECTIONS = (
     "source_documents",
     "source_fragments",
+    "evidence_steps",
+    "observations",
+    "questions",
     "claims",
     "argument_route_attestations",
 )
@@ -308,6 +314,11 @@ def build_dry_run(
         row["payload"] for key, row in current.items() if key[0] == "source_fragments"
     ]
     claims = [row["payload"] for key, row in current.items() if key[0] == "claims"]
+    placeholder_owners = [
+        row["payload"]
+        for key, row in current.items()
+        if key[0] in {"evidence_steps", "observations", "questions"}
+    ]
     attestations = [
         row["payload"]
         for key, row in current.items()
@@ -326,6 +337,7 @@ def build_dry_run(
     scenarios: dict[str, list[dict[str, Any]]] = collections.defaultdict(list)
     source_plans: list[tuple[dict[str, Any], ChangeSetPlan, dict[str, Any]]] = []
     all_replacements: dict[tuple[str, str], dict[str, Any]] = {}
+    all_retire_keys: list[tuple[str, str]] = []
     replacement_owner: dict[tuple[str, str], str] = {}
 
     for source in sorted(sources, key=lambda row: str(row.get("source_id") or "")):
@@ -367,11 +379,14 @@ def build_dry_run(
         script = payload.get("script")
         projection = project_script(script)
         index = BodyLocatorIndex(script)
-        replacements: dict[tuple[str, str], dict[str, Any]] = {
+        coordinate_replacements: dict[tuple[str, str], dict[str, Any]] = {
             ("source_documents", source_id): migrate_source_document(
                 source, raw_source=raw, projection=projection
             )
         }
+        placeholder_replacements: dict[tuple[str, str], dict[str, Any]] = {}
+        placeholder_retire_keys: list[tuple[str, str]] = []
+        placeholder_records: list[dict[str, Any]] = []
         findings: list[dict[str, Any]] = []
         claim_anchor_changes = 0
         for fragment in fragments_by_source[source_id]:
@@ -379,15 +394,75 @@ def build_dry_run(
                 fragment, index, source_sha256=projection.body_sha256
             )
             if migrated is None:
-                findings.append(
-                    {
-                        "collection": "source_fragments",
-                        "object_id": fragment.get("fragment_id"),
-                        "status": resolution.status,
-                    }
+                fragment_id = str(fragment.get("fragment_id") or "")
+                owners: list[tuple[str, str, dict[str, Any]]] = []
+                for owner in placeholder_owners:
+                    owner_collection = (
+                        "evidence_steps"
+                        if owner.get("evidence_step_id")
+                        else "observations"
+                        if owner.get("observation_id")
+                        else "questions"
+                    )
+                    owner_id_field = {
+                        "evidence_steps": "evidence_step_id",
+                        "observations": "observation_id",
+                        "questions": "question_id",
+                    }[owner_collection]
+                    replacement = remove_source_fragment_reference(
+                        placeholder_replacements.get(
+                            (owner_collection, str(owner.get(owner_id_field) or "")),
+                            owner,
+                        ),
+                        fragment_id=fragment_id,
+                    )
+                    if replacement is not None:
+                        owners.append(
+                            (
+                                owner_collection,
+                                str(owner.get(owner_id_field) or ""),
+                                replacement,
+                            )
+                        )
+                strict_placeholder = (
+                    resolution.status == "no_excerpt"
+                    and str(fragment.get("anchor_state") or "") == "unresolved"
+                    and not str(fragment.get("verbatim_excerpt") or "")
+                    and bool(owners)
+                    and all(
+                        str(owner.get("review_status") or "") == "candidate"
+                        and str(owner.get("visibility") or "") == "internal"
+                        and (
+                            collection != "evidence_steps"
+                            or str(owner.get("support_eligibility") or "")
+                            == "withheld_missing_anchor"
+                        )
+                        for collection, owner_id, _ in owners
+                        for owner in [current[(collection, owner_id)]["payload"]]
+                    )
                 )
+                if strict_placeholder:
+                    for collection, owner_id, replacement in owners:
+                        placeholder_replacements[(collection, owner_id)] = replacement
+                    placeholder_retire_keys.append(("source_fragments", fragment_id))
+                    placeholder_records.append(
+                        {
+                            "fragment_id": fragment_id,
+                            "owner_ids": [owner_id for _, owner_id, _ in owners],
+                        }
+                    )
+                else:
+                    findings.append(
+                        {
+                            "collection": "source_fragments",
+                            "object_id": fragment.get("fragment_id"),
+                            "status": resolution.status,
+                        }
+                    )
             else:
-                replacements[("source_fragments", str(fragment["fragment_id"]))] = migrated
+                coordinate_replacements[
+                    ("source_fragments", str(fragment["fragment_id"]))
+                ] = migrated
         for claim in claims:
             if not _claim_matches_source(
                 claim, source_id=source_id, transcript_id=transcript_id
@@ -407,7 +482,17 @@ def build_dry_run(
                 )
             elif migrated is not None:
                 assert_claim_semantics_unchanged(claim, migrated)
-                replacements[("claims", str(claim["claim_id"]))] = migrated
+                claim_id = str(claim["claim_id"])
+                if claim_id in human_settled:
+                    findings.append(
+                        {
+                            "collection": "claims",
+                            "object_id": claim_id,
+                            "status": "human_settled_coordinate_change",
+                        }
+                    )
+                    continue
+                coordinate_replacements[("claims", claim_id)] = migrated
                 claim_anchor_changes += sum(
                     item.get("status") == "changed" for item in claim_findings
                 )
@@ -418,7 +503,7 @@ def build_dry_run(
                 attestation, source_sha256=projection.body_sha256
             )
             if migrated is not None:
-                replacements[
+                coordinate_replacements[
                     (
                         "argument_route_attestations",
                         str(attestation["argument_route_attestation_id"]),
@@ -432,7 +517,15 @@ def build_dry_run(
                     "findings": findings,
                 }
             )
-            continue
+            replacements = placeholder_replacements
+            retire_keys = placeholder_retire_keys
+            cleanup_kind = "unresolved_placeholder_retirement"
+            if not replacements and not retire_keys:
+                continue
+        else:
+            replacements = {**coordinate_replacements, **placeholder_replacements}
+            retire_keys = placeholder_retire_keys
+            cleanup_kind = "full_source_coordinate_cleanup"
 
         for key in replacements:
             prior = replacement_owner.get(key)
@@ -450,12 +543,20 @@ def build_dry_run(
                 ],
             }
         )[:20]
-        plan = build_source_contract_cleanup_plan(
+        arrival = build_source_contract_cleanup_plan(
             package_id=package_id,
             current=current,
             replacements=replacements,
             human_settled_claim_ids=human_settled,
         )
+        withdrawal = build_retirement_plan(
+            retire_keys,
+            current,
+            reason="Retire unresolved empty SourceFragment placeholders after clearing candidate owner pointers",
+            package_id=package_id,
+            source_kind="wkp368_source_contract_cleanup",
+        )
+        plan = combined_plan(arrival, withdrawal)
         validate_change_set_plan_integrity(plan)
         summary = {
             "source_id": source_id,
@@ -465,14 +566,17 @@ def build_dry_run(
             "source_file_sha256": hashlib.sha256(raw).hexdigest(),
             "source_body_sha256": projection.body_sha256,
             "claim_anchor_changes": claim_anchor_changes,
+            "cleanup_kind": cleanup_kind,
+            "placeholder_retirements": placeholder_records,
             "operation_counts": dict(
                 sorted(collections.Counter(op.collection for op in plan.operations).items())
             ),
         }
         source_plans.append((summary, plan, replacements))
         all_replacements.update(replacements)
+        all_retire_keys.extend(retire_keys)
 
-    combined = build_source_contract_cleanup_plan(
+    combined_arrival = build_source_contract_cleanup_plan(
         package_id="WKP368-SAFE-COHORT-" + sha256_json(
             [summary["source_id"] for summary, _, _ in source_plans]
         )[:20],
@@ -480,6 +584,14 @@ def build_dry_run(
         replacements=all_replacements,
         human_settled_claim_ids=human_settled,
     )
+    combined_withdrawal = build_retirement_plan(
+        all_retire_keys,
+        current,
+        reason="Retire unresolved empty SourceFragment placeholders after clearing candidate owner pointers",
+        package_id="WKP368-SAFE-COHORT",
+        source_kind="wkp368_source_contract_cleanup",
+    )
+    combined = combined_plan(combined_arrival, combined_withdrawal)
     validate_change_set_plan_integrity(combined)
     preflight_checks = _preflight(store, combined)
 
