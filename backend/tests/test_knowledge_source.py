@@ -50,6 +50,64 @@ def test_markdown_source_document_binds_lineage(tmp_path: Path) -> None:
     assert payload["script"][1]["start_time"] is None
 
 
+def test_markdown_source_document_materializes_sha_bound_svg_asset(
+    tmp_path: Path,
+) -> None:
+    svg_path = tmp_path / "structure.svg"
+    svg = '<svg><text x="10">教授画出的结构</text></svg>'
+    svg_path.write_text(svg, encoding="utf-8")
+    markdown_path = tmp_path / "final.md"
+    markdown_url = "/web/data/full_article/images/structure.svg"
+    markdown_path.write_text(
+        f"## 标题\n\n正文。\n\n![结构图]({markdown_url})\n",
+        encoding="utf-8",
+    )
+    descriptor = {
+        "source_id": "notes_manuscript:visual",
+        "source_type": "notes_manuscript",
+        "source_path": str(markdown_path),
+        "visual_source_assets": [{
+            "markdown_url": markdown_url,
+            "source_path": str(svg_path),
+            "source_sha256": hashlib.sha256(svg.encode("utf-8")).hexdigest(),
+        }],
+    }
+
+    payload, raw, resolved = markdown_source_document(descriptor)
+
+    assert resolved == markdown_path
+    assert raw == markdown_path.read_bytes()
+    projection = project_script(payload["script"])
+    assert projection.spoken_rows[-1]["text"].strip() == ""
+    assert len(projection.visual_blocks) == 1
+    visual = projection.visual_blocks[0]
+    assert visual.locator == "S0002/V01"
+    assert visual.raw_svg == svg
+    assert visual.raw_sha256 == descriptor["visual_source_assets"][0]["source_sha256"]
+
+
+def test_markdown_source_document_rejects_visual_asset_sha_drift(
+    tmp_path: Path,
+) -> None:
+    svg_path = tmp_path / "structure.svg"
+    svg_path.write_text("<svg/>", encoding="utf-8")
+    markdown_path = tmp_path / "final.md"
+    markdown_url = "/web/data/full_article/images/structure.svg"
+    markdown_path.write_text(f"![结构图]({markdown_url})\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="visual source asset hash mismatch"):
+        markdown_source_document({
+            "source_id": "notes_manuscript:visual",
+            "source_type": "notes_manuscript",
+            "source_path": str(markdown_path),
+            "visual_source_assets": [{
+                "markdown_url": markdown_url,
+                "source_path": str(svg_path),
+                "source_sha256": "0" * 64,
+            }],
+        })
+
+
 def test_source_manifest_rejects_hash_drift(tmp_path: Path) -> None:
     source_path = tmp_path / "final.md"
     source_path.write_text("原文", encoding="utf-8")

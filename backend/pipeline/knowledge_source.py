@@ -27,6 +27,10 @@ PUBLICATION_READINESS_DECISIONS = {
     "insufficient_material",
 }
 
+MARKDOWN_IMAGE = re.compile(
+    r'!\[(?P<alt>[^\]]*)\]\((?P<url>[^)\s]+)\)'
+)
+
 
 def markdown_blocks(markdown: str) -> list[str]:
     """Return deterministic Markdown blocks without rewriting source text."""
@@ -34,11 +38,80 @@ def markdown_blocks(markdown: str) -> list[str]:
     return [block.strip() for block in re.split(r"\n[ \t]*\n+", normalized) if block.strip()]
 
 
+def _materialize_markdown_visual_assets(
+    blocks: list[str], source: dict[str, Any]
+) -> list[str]:
+    """Replace explicitly bound Markdown SVG links with their exact SVG bytes.
+
+    Notes manuscripts keep reader-facing images as Markdown links.  Claim
+    extraction, however, needs the same inline SVG representation used by
+    sermon transcripts so the diagram receives a locator, literal facts and a
+    visual-content SHA.  The source manifest therefore has to bind each link
+    to a local file and its physical SHA; no network fetch or filename guess is
+    allowed here.
+    """
+
+    assets = source.get("visual_source_assets") or []
+    if not assets:
+        return blocks
+    if not isinstance(assets, list):
+        raise ValueError("visual_source_assets must be a list")
+
+    by_url: dict[str, dict[str, Any]] = {}
+    for index, asset in enumerate(assets):
+        if not isinstance(asset, dict):
+            raise ValueError(f"visual_source_assets row {index} is not an object")
+        url = str(asset.get("markdown_url") or "").strip()
+        path_value = str(asset.get("source_path") or "").strip()
+        expected_sha256 = str(asset.get("source_sha256") or "").strip()
+        if not url or not path_value or not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
+            raise ValueError(
+                f"visual_source_assets row {index} requires markdown_url, "
+                "source_path and a lowercase SHA256"
+            )
+        if url in by_url:
+            raise ValueError(f"duplicate visual source asset URL: {url}")
+        by_url[url] = asset
+
+    materialized: set[str] = set()
+    result: list[str] = []
+    for block in blocks:
+        def replace(match: re.Match[str]) -> str:
+            url = match.group("url")
+            asset = by_url.get(url)
+            if asset is None:
+                return match.group(0)
+            path = Path(str(asset["source_path"]))
+            raw = path.read_bytes()
+            actual_sha256 = hashlib.sha256(raw).hexdigest()
+            expected_sha256 = str(asset["source_sha256"])
+            if actual_sha256 != expected_sha256:
+                raise ValueError(f"visual source asset hash mismatch: {path}")
+            try:
+                svg = raw.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ValueError(f"visual source asset is not UTF-8 SVG: {path}") from exc
+            if not re.search(r"<svg\b", svg, flags=re.I):
+                raise ValueError(f"visual source asset is not SVG: {path}")
+            materialized.add(url)
+            return svg
+
+        result.append(MARKDOWN_IMAGE.sub(replace, block))
+
+    unresolved = sorted(set(by_url) - materialized)
+    if unresolved:
+        raise ValueError(
+            "visual source asset URL does not resolve to a Markdown image: "
+            + ", ".join(unresolved)
+        )
+    return result
+
+
 def markdown_source_document(source: dict[str, Any]) -> tuple[dict[str, Any], bytes, Path]:
     path = Path(str(source["source_path"]))
     raw = path.read_bytes()
     text = raw.decode("utf-8")
-    blocks = markdown_blocks(text)
+    blocks = _materialize_markdown_visual_assets(markdown_blocks(text), source)
     script = script_from_markdown_blocks(blocks)
     payload = {
         "metadata": {

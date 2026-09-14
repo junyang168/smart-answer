@@ -893,6 +893,125 @@ class _Connection:
         return self._cursor
 
 
+def test_source_resume_guard_reads_current_graph_and_preserves_existing_bindings() -> None:
+    claim = _claim(["E-1"])
+    claim["review_status"] = "ai_consensus_reviewed"
+    evidence = _evidence(["CL-1"])
+    rows = _rows(claim, evidence)
+    after = {**evidence, "statement": "freshly reviewed evidence"}
+    plan = _plan(
+        _evidence_update(evidence, after),
+        source_kind="knowledge_package",
+    )
+    cursor = _ApplyCursor(rows, (1, "unused", None), written_rows=rows)
+    store = PostgresKnowledgeStore.__new__(PostgresKnowledgeStore)
+    store.connect = lambda: _Connection(cursor)
+
+    guard = store.read_claim_evidence_reciprocity_guard(plan)
+
+    assert guard["expected_active_snapshot"]["counts"] == {
+        "active_claims": 1,
+        "active_evidence_steps": 1,
+        "claim_evidence_pairs": 1,
+        "evidence_claim_pairs": 1,
+        "reciprocal_pairs": 1,
+        "claim_only_pairs": 0,
+        "evidence_only_pairs": 0,
+        "duplicate_array_references": 0,
+        "dangling_claim_evidence_refs": 0,
+        "dangling_evidence_claim_refs": 0,
+        "dangling_endpoints": 0,
+    }
+    assert "pg_advisory_xact_lock" in cursor.statements[0][0]
+
+
+def test_source_resume_guard_rejects_an_old_package_binding_projection() -> None:
+    claim = _claim(["E-1"])
+    claim["review_status"] = "ai_consensus_reviewed"
+    evidence = _evidence(["CL-1"])
+    rows = _rows(claim, evidence)
+    plan = _plan(
+        _evidence_update(evidence, _evidence([])),
+        source_kind="knowledge_package",
+    )
+    cursor = _ApplyCursor(rows, (1, "unused", None), written_rows=rows)
+    store = PostgresKnowledgeStore.__new__(PostgresKnowledgeStore)
+    store.connect = lambda: _Connection(cursor)
+
+    with pytest.raises(
+        PostgresKnowledgeStoreError,
+        match="source resume would replace current produced_claim_ids",
+    ):
+        store.read_claim_evidence_reciprocity_guard(plan)
+
+
+def test_source_resume_guard_binds_new_lineage_as_a_separate_final_snapshot() -> None:
+    source_document = {
+        "source_id": "SRC-NEW",
+        "source_type": "sermon_transcript",
+        "transcript_id": "SERMON-NEW",
+    }
+    source_fragment = {
+        "fragment_id": "FR-NEW",
+        "source_id": "SRC-NEW",
+        "verbatim_excerpt": "source excerpt",
+    }
+    claim = {
+        **_claim(["E-NEW"], claim_id="CL-NEW"),
+        "review_status": "ai_consensus_reviewed",
+    }
+    evidence = {
+        **_evidence(["CL-NEW"], evidence_id="E-NEW"),
+        "source_fragment_ids": ["FR-NEW"],
+    }
+
+    def create(collection: str, object_id: str, payload: Mapping[str, Any]):
+        return ChangeOperation(
+            operation="create",
+            collection=collection,
+            object_id=object_id,
+            before_sha256=None,
+            after_sha256=record_content_sha(payload),
+            before_revision=None,
+            after_revision=1,
+            payload=dict(payload),
+        )
+
+    operations = (
+        create("source_documents", "SRC-NEW", source_document),
+        create("source_fragments", "FR-NEW", source_fragment),
+        create("claims", "CL-NEW", claim),
+        create("evidence_steps", "E-NEW", evidence),
+    )
+    fingerprint = sha256_json(
+        {"test": "source-resume-new-lineage", "operations": len(operations)}
+    )
+    plan = ChangeSetPlan(
+        change_set_id=f"KCS-{fingerprint[:20]}",
+        fingerprint_sha256=fingerprint,
+        package_id="SOURCE-RESUME-NEW-LINEAGE",
+        source_kind="knowledge_package",
+        source_sha256=fingerprint,
+        operations=operations,
+        unchanged=0,
+        ignored_keys=(),
+    )
+    cursor = _ApplyCursor([], (1, "unused", None), written_rows=[])
+    store = PostgresKnowledgeStore.__new__(PostgresKnowledgeStore)
+    store.connect = lambda: _Connection(cursor)
+
+    guard = store.read_claim_evidence_reciprocity_guard(plan)
+
+    assert guard["expected_source_lineage_snapshot"]["records"] == []
+    assert {
+        (row["collection"], row["object_id"])
+        for row in guard["expected_final_source_lineage_snapshot"]["records"]
+    } == {
+        ("source_documents", "SRC-NEW"),
+        ("source_fragments", "FR-NEW"),
+    }
+
+
 def test_apply_runs_metadata_guard_after_advisory_lock_and_before_writes() -> None:
     claim = _claim(["E-1"])
     evidence = _evidence([])

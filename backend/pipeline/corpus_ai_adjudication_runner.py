@@ -214,11 +214,59 @@ def _openai_input(
     transcripts: list[tuple[str, dict[str, Any]]],
     reviews: list[dict[str, Any]],
 ) -> str:
+    anchor_constraints = _actionable_anchor_constraints(
+        survey=survey,
+        reviews=reviews,
+    )
     return (
         _claim_layer_input(survey, transcripts)
         + "\n\n===== Claude 第一轮意见（只审理这些非 pass 项）=====\n"
         + json.dumps(reviews, ensure_ascii=False, indent=2)
+        + "\n\n===== 每条裁决允许使用的现有 anchor 索引（机械硬约束）=====\n"
+        + json.dumps(anchor_constraints, ensure_ascii=False, indent=2)
+        + "\n`source_anchor_indexes` 与 `excluded_anchor_indexes` 只能使用"
+        "对应 claim 的 `valid_anchor_indexes`；不得根据其他 artifact、"
+        "原始 package 或记忆推测索引。"
     )
+
+
+def _actionable_anchor_constraints(
+    *,
+    survey: dict[str, Any],
+    reviews: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Expose the exact reviewed-anchor ordinal space to adjudication.
+
+    Package normalization can remove duplicate anchors before Claude review.
+    Adjudication patches are applied to that reviewed snapshot, not the raw
+    package occurrence array, so the model must not infer the ordinal range
+    from another representation of the same claim.
+    """
+
+    claims_by_id = {
+        str(claim.get("claim_id") or ""): claim
+        for claim in survey.get("candidate_claims") or []
+    }
+    return [
+        {
+            "claim_id": str(review.get("claim_id") or ""),
+            "anchor_count": len(
+                claims_by_id[str(review.get("claim_id") or "")].get("anchors")
+                or []
+            ),
+            "valid_anchor_indexes": list(
+                range(
+                    len(
+                        claims_by_id[
+                            str(review.get("claim_id") or "")
+                        ].get("anchors")
+                        or []
+                    )
+                )
+            ),
+        }
+        for review in reviews
+    ]
 
 
 def _claude_reconsideration_input(
@@ -580,6 +628,8 @@ def _run_adjudication(
                 + json.dumps(previous_response, ensure_ascii=False)
                 + "\n\n===== 机械验证反馈 =====\n"
                 + str(last_validation_error)
+                + "\n\n再次核对每条 claim 的 `valid_anchor_indexes` 硬约束；"
+                "删除所有超出该列表的 ordinal，不得保留或猜测。"
                 + "\n请保留其余裁决，只修复所有机械错误并重新输出完整 JSON。"
                 "新增 anchor 的 verbatim_excerpt 必须从指定 source_index 连续逐字复制。"
             )

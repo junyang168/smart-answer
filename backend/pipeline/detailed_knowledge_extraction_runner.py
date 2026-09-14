@@ -39,7 +39,6 @@ from backend.pipeline.extraction_sections import (
     SectionPlan,
     apply_section_limit,
     combine_sections,
-    generated_plan_insertions,
     has_transport_splits,
     leading_untitled_body_end,
     load_cached_plan,
@@ -63,8 +62,11 @@ from backend.pipeline.sentence_ledger_runner import run as run_ledger
 from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
 from backend.pipeline.subtitle_generation import generate_subtitles
 from backend.pipeline.sermon_subtitle_persistence import (
+    SUPPORTED_TRANSCRIPT_STAGES,
     SubtitlePersistenceError,
     apply_insertions,
+    payload_with_rows,
+    transcript_rows,
     verify_saved_result,
 )
 from backend.pipeline.source_projection import (
@@ -881,13 +883,13 @@ def _persist_generated_subtitles(
     client: CodexSubscriptionClient | None = None,
     writer: Callable[..., dict[str, Any]] | None = None,
     scope_end: int | None = None,
-    cached_generated_plan: SectionPlan | None = None,
 ) -> dict[str, Any]:
-    """Persist governed subtitles, reusing the frozen generated plan when safe."""
+    """Generate and persist governed subtitles before extraction."""
 
-    if source_path.parent.name != "script_review":
+    stage = source_path.parent.name
+    if stage not in SUPPORTED_TRANSCRIPT_STAGES:
         raise SubtitlePersistenceError(
-            "generated subtitles can only be persisted to a script_review source"
+            "generated subtitles can only be persisted to a governed transcript source"
         )
     source_sha256 = hashlib.sha256(raw).hexdigest()
     segments = list(project_script(source.get("script")).body_rows)
@@ -905,30 +907,17 @@ def _persist_generated_subtitles(
     if len(indexes) != len(set(indexes)):
         raise SubtitlePersistenceError("sermon paragraph indexes are not unique")
 
-    if cached_generated_plan is not None:
-        try:
-            insertions = generated_plan_insertions(cached_generated_plan, paragraphs)
-        except SectionBoundaryError as exc:
-            raise SubtitlePersistenceError(str(exc)) from exc
-        insertion_origin = "cached_generated_section_plan"
-        print(json.dumps({
-            "phase": "subtitle_generation", "source": source_id,
-            "paragraphs": len(paragraphs), "status": "reused_cached_section_plan",
-            "model_called": False,
-        }, ensure_ascii=False), flush=True)
-    else:
-        insertion_origin = "new_model_generation"
-        print(json.dumps({
-            "phase": "subtitle_generation", "source": source_id,
-            "paragraphs": len(paragraphs), "status": "started",
-        }, ensure_ascii=False), flush=True)
-        insertions = generate_subtitles(
-            paragraphs,
-            subject=source_id,
-            consumer="extraction_persisted_subtitles",
-            client=client,
-            require_leading_title=True,
-        )
+    print(json.dumps({
+        "phase": "subtitle_generation", "source": source_id,
+        "paragraphs": len(paragraphs), "status": "started",
+    }, ensure_ascii=False), flush=True)
+    insertions = generate_subtitles(
+        paragraphs,
+        subject=source_id,
+        consumer="extraction_persisted_subtitles",
+        client=client,
+        require_leading_title=True,
+    )
     if not insertions:
         raise SubtitlePersistenceError(
             f"{source_id}: subtitle generator returned no insertions; extraction not started"
@@ -976,16 +965,18 @@ def _persist_generated_subtitles(
     audit_path = audit_dir / "application.json"
     _atomic_artifact_write(audit_dir / "before-source.json", raw)
     before_payload = json.loads(raw)
-    if not isinstance(before_payload, list):
-        raise SubtitlePersistenceError("script_review sermon must be a JSON array")
+    before_rows = transcript_rows(before_payload, stage=stage)
     expected_after = apply_insertions(
-        before_payload,
+        before_rows,
         insertions,
         source_sha256=source_sha256,
         user_id=actor_id,
     )
+    expected_after_payload = payload_with_rows(
+        before_payload, expected_after, stage=stage
+    )
     expected_after_raw = json.dumps(
-        expected_after, ensure_ascii=False, indent=4
+        expected_after_payload, ensure_ascii=False, indent=4
     ).encode("UTF-8")
     audit: dict[str, Any] = {
         "schema_version": "wang_sermon_subtitle_application_v1",
@@ -995,10 +986,7 @@ def _persist_generated_subtitles(
         "actor_id": actor_id,
         "scope_end": scope_end,
         "scope_paragraphs": len(paragraphs),
-        "insertion_origin": insertion_origin,
-        "cached_section_plan": (
-            cached_generated_plan.identity() if cached_generated_plan is not None else None
-        ),
+        "insertion_origin": "new_model_generation",
         "insertions": insertions,
         "expected_after_source_sha256": hashlib.sha256(expected_after_raw).hexdigest(),
         "expected_after_body_sha256": project_script(expected_after).body_sha256,
@@ -1046,13 +1034,15 @@ def _persist_generated_subtitles(
     return {
         **report,
         "audit_path": str(audit_path),
-        "insertion_origin": insertion_origin,
+        "insertion_origin": "new_model_generation",
     }
 
 
 def _assert_subtitle_persistence_authorized(
     actor_id: str,
     *,
+    source_id: str,
+    source_path: Path,
     writer: Callable[..., dict[str, Any]] | None,
     authorizer: Callable[[str], bool] | None,
 ) -> None:
@@ -1068,6 +1058,11 @@ def _assert_subtitle_persistence_authorized(
         # of the web application's file-watcher initialization.
         from backend.api.sc_api.sermon_manager import sermonManager
 
+        authoritative_path = sermonManager.authoritative_transcript_path(source_id)
+        if authoritative_path.resolve() != source_path.resolve():
+            raise SubtitlePersistenceError(
+                "subtitle generation source is not the published-first authoritative document"
+            )
         allowed = sermonManager.can_persist_generated_subtitles(actor_id)
     else:
         if authorizer is None:
@@ -1094,11 +1089,13 @@ def reconcile_subtitle_application(
     root = output_dir / "subtitle-applications" / _slug(source_id)
     if not root.is_dir():
         return None
-    try:
-        current_rows = json.loads(current_raw)
-    except json.JSONDecodeError:
+    stage = source_path.parent.name
+    if stage not in SUPPORTED_TRANSCRIPT_STAGES:
         return None
-    if not isinstance(current_rows, list):
+    try:
+        current_payload = json.loads(current_raw)
+        current_rows = transcript_rows(current_payload, stage=stage)
+    except (json.JSONDecodeError, SubtitlePersistenceError):
         return None
     candidates = sorted(
         root.glob("*/application.json"),
@@ -1119,16 +1116,20 @@ def reconcile_subtitle_application(
         if hashlib.sha256(before_raw).hexdigest() != audit.get("before_source_sha256"):
             continue
         try:
-            before_rows = json.loads(before_raw)
+            before_payload = json.loads(before_raw)
+            before_rows = transcript_rows(before_payload, stage=stage)
             expected_rows = apply_insertions(
                 before_rows,
                 audit.get("insertions") or [],
                 source_sha256=str(audit.get("before_source_sha256") or ""),
                 user_id=str(audit.get("actor_id") or ""),
             )
+            expected_payload = payload_with_rows(
+                before_payload, expected_rows, stage=stage
+            )
         except (json.JSONDecodeError, SubtitlePersistenceError):
             continue
-        if expected_rows != current_rows:
+        if expected_payload != current_payload:
             continue
         current_sha256 = hashlib.sha256(current_raw).hexdigest()
         expected_sha256 = str(audit.get("expected_after_source_sha256") or "")
@@ -1311,35 +1312,6 @@ def resolve_section_plan(
         headings=projection.headings,
         max_section_sentences=max_section_sentences,
     )
-
-
-def reusable_generated_plan(
-    *, source: dict[str, Any], source_id: str, source_sha256: str,
-    output_dir: Path, level: int, max_section_sentences: int | None,
-) -> SectionPlan | None:
-    """Return the frozen generated plan only when it can title this exact source."""
-
-    path = output_dir / "section-plans" / f"{_slug(source_id)}.json"
-    projection = project_script(source.get("script"))
-    plan = load_cached_plan(
-        path, source_sha256, level=level,
-        max_section_sentences=None,
-        editorial_structure_sha256=projection.editorial_structure_sha256,
-        editorial_topology_sha256=projection.editorial_topology_sha256,
-        accept_any_max=True,
-    )
-    if plan is None or plan.origin != FROM_GENERATOR:
-        return None
-    if has_transport_splits(plan):
-        raise SubtitlePersistenceError(
-            "legacy transport-split cache cannot be written back as editorial "
-            "subtitles; an explicit cache migration is required"
-        )
-    try:
-        generated_plan_insertions(plan, list(projection.body_rows))
-    except SectionBoundaryError:
-        return None
-    return plan
 
 
 def published_source_id(source_id: str, source_descriptor: dict[str, Any] | None) -> str:
@@ -2058,9 +2030,9 @@ class SectionSettings:
     #: policy from invalidating successful corpus history while still bounding
     #: every new, stale or damaged extraction.
     fallback_max_sentences: int | None = None
-    #: Whether a source with no headings may have boundaries generated for it.
-    #: Off makes the run offline and deterministic; on covers the 90 published
-    #: transcripts that carry no headings at all.
+    #: Whether missing editorial headings may be generated. ``run_one`` uses
+    #: this only for governed title persistence, then disables it before sermon
+    #: extraction; an internal plan cannot substitute for saved sermon titles.
     allow_generated: bool = True
     #: Section numbers to run, or None for all of them. Checking a prompt or
     #: schema change costs one call this way instead of one per section, which
@@ -2447,6 +2419,7 @@ def run_source(
     client: Stage1OpenAIClient | Stage1AnthropicClient | CodexSubscriptionClient,
     prompt: str, reasoning_effort: str, force: bool,
     sections: SectionSettings | None = None,
+    visual_source_attestations: Mapping[str, str] | None = None,
     record_run_ledger: bool = True,
 ) -> tuple[str, Path]:
     source, raw, source_path = markdown_source_document(source_descriptor)
@@ -2461,10 +2434,27 @@ def run_source(
         output_dir=output_dir, client=client, prompt=prompt, reasoning_effort=reasoning_effort,
         sections=sections or SectionSettings(), force=force, source_descriptor=source_descriptor,
         visual_source_attestations=(
-            source_descriptor.get("visual_source_attestations") or {}
+            visual_source_attestations
+            if visual_source_attestations is not None
+            else source_descriptor.get("visual_source_attestations") or {}
         ),
         record_run_ledger=record_run_ledger,
     )
+
+
+def _assert_authoritative_transcript_path(transcript_path: Path) -> None:
+    """Reject review whenever the published-first sibling exists."""
+
+    if transcript_path.parent.name != "script_review":
+        return
+    published_path = (
+        transcript_path.parent.parent / "script_published" / transcript_path.name
+    )
+    if published_path.is_file():
+        raise SubtitlePersistenceError(
+            "script_review is not authoritative while a same-name "
+            f"script_published document exists: {published_path}"
+        )
 
 
 def run_one(
@@ -2479,9 +2469,10 @@ def run_one(
     visual_source_attestations: Mapping[str, str] | None = None,
     record_run_ledger: bool = True,
 ) -> tuple[str, Path]:
+    _assert_authoritative_transcript_path(transcript_path)
     transcript, raw = _load(transcript_path)
     transcript_id = transcript_path.stem
-    if transcript_path.parent.name == "script_review":
+    if transcript_path.parent.name in SUPPORTED_TRANSCRIPT_STAGES:
         reconcile_subtitle_application(
             source_id=transcript_id,
             source_path=transcript_path,
@@ -2506,20 +2497,15 @@ def run_one(
         raise SubtitlePersistenceError(
             "subtitle persistence requires an authenticated --subtitle-user-id"
         )
-    if (
-        transcript_path.parent.name == "script_review"
-        and leading_untitled_end is not None
-        and not write_back_subtitles
-    ):
+    if leading_untitled_end is not None and not write_back_subtitles:
         raise SubtitlePersistenceError(
-            "script_review sermon with an untitled leading section requires "
+            "sermon with an untitled leading section requires "
             "--write-back-generated-subtitles and --subtitle-user-id before extraction"
         )
     if write_back_subtitles and not projection.body_rows:
         raise SubtitlePersistenceError(
-            "empty script_review sermon cannot receive generated subtitles"
+            "empty sermon cannot receive generated subtitles"
         )
-    preferred_plan: SectionPlan | None = None
     if (
         write_back_subtitles
         and section_settings.allow_generated
@@ -2527,44 +2513,12 @@ def run_one(
     ):
         _assert_subtitle_persistence_authorized(
             str(subtitle_actor_id),
+            source_id=transcript_id,
+            source_path=transcript_path,
             writer=subtitle_writer,
             authorizer=subtitle_authorizer,
         )
-        before_source_sha256 = hashlib.sha256(raw).hexdigest()
-        cached_plan = (
-            reusable_generated_plan(
-                source=transcript,
-                source_id=transcript_id,
-                source_sha256=projection.body_sha256,
-                output_dir=output_dir,
-                level=section_settings.level,
-                max_section_sentences=section_settings.max_sentences,
-            )
-            if leading_untitled_end == len(projection.body_rows)
-            else None
-        )
-        # Plans written before the body/editorial identity split were bound to
-        # the physical file SHA. Accept one only through the same full-plan
-        # validation as a current cache; after persistence `_run` rewrites its
-        # metadata with the body identity. This is a compatibility read, not a
-        # second source identity.
-        legacy_plan_is_coordinate_safe = not any(
-            is_editorial_row(row) for row in live_script(transcript.get("script"))
-        )
-        if (
-            cached_plan is None
-            and leading_untitled_end == len(projection.body_rows)
-            and legacy_plan_is_coordinate_safe
-        ):
-            cached_plan = reusable_generated_plan(
-                source=transcript,
-                source_id=transcript_id,
-                source_sha256=before_source_sha256,
-                output_dir=output_dir,
-                level=section_settings.level,
-                max_section_sentences=section_settings.max_sentences,
-            )
-        before_payload = json.loads(raw)
+        before_rows = [dict(row) for row in transcript.get("script") or []]
         report = _persist_generated_subtitles(
             source_id=transcript_id,
             source=transcript,
@@ -2575,17 +2529,12 @@ def run_one(
             client=client if isinstance(client, CodexSubscriptionClient) else None,
             writer=subtitle_writer,
             scope_end=leading_untitled_end,
-            cached_generated_plan=cached_plan,
         )
         transcript, raw = _load(transcript_path)
-        after_payload = json.loads(raw)
-        if not isinstance(before_payload, list) or not isinstance(after_payload, list):
-            raise SubtitlePersistenceError(
-                "persisted script_review sermon must remain a JSON array"
-            )
+        after_rows = [dict(row) for row in transcript.get("script") or []]
         verify_saved_result(
-            before_payload,
-            after_payload,
+            before_rows,
+            after_rows,
             expected_insertions=int(report["insertions"]),
         )
         reloaded_sha256 = hashlib.sha256(raw).hexdigest()
@@ -2602,8 +2551,6 @@ def run_one(
             raise SubtitlePersistenceError(
                 "saved sermon still has an untitled leading section; extraction not started"
             )
-        if cached_plan is not None:
-            preferred_plan = cached_plan
         # The generator has completed its job. From here onward headings are
         # persisted editorial structure. They may guide section grouping, but
         # the source projection keeps them out of sentences and evidence.
@@ -2623,7 +2570,6 @@ def run_one(
         source_id=transcript_id, source=transcript, raw=raw, source_path=transcript_path,
         header=header, output_dir=output_dir, client=client, prompt=prompt,
         reasoning_effort=reasoning_effort, sections=section_settings, force=force,
-        preferred_plan=preferred_plan,
         visual_source_attestations=visual_source_attestations,
         record_run_ledger=record_run_ledger,
     )
@@ -2719,13 +2665,13 @@ def main() -> int:
                         help="run only these section numbers (1-based); the package "
                              "is then marked incomplete")
     parser.add_argument("--no-generated-sections", action="store_true",
-                        help="never ask the subtitle generator for boundaries; "
-                             "a source with no headings is then one section")
+                        help="never ask the subtitle generator for headings; "
+                             "an untitled sermon then fails before extraction")
     parser.add_argument(
         "--write-back-generated-subtitles",
         action="store_true",
-        help="for headingless script_review sermons, write generated subtitles to the "
-             "review transcript, verify body preservation, and reload before extraction",
+        help="for headingless sermons, write generated subtitles to the authoritative "
+             "published-or-review transcript, verify body preservation, and reload before extraction",
     )
     parser.add_argument(
         "--subtitle-user-id",
@@ -2783,12 +2729,42 @@ def main() -> int:
     missing = [str(path) for path in paths if not path.is_file()]
     if missing:
         parser.error("missing transcripts: " + ", ".join(missing))
+    for path in paths:
+        try:
+            _assert_authoritative_transcript_path(path)
+        except SubtitlePersistenceError as exc:
+            parser.error(str(exc))
+    transcript_projections: dict[str, SourceProjection] = {}
+    for path in paths:
+        projection = project_script(_load(path)[0].get("script"))
+        try:
+            _assert_inline_source_readable(
+                path.stem, projection, visual_source_attestations
+            )
+        except DetailedExtractionValidationError as exc:
+            parser.error(str(exc))
+        transcript_projections[path.stem] = projection
+    if paths and not args.write_back_generated_subtitles:
+        untitled = []
+        for path in paths:
+            projection = transcript_projections[path.stem]
+            if not projection.body_rows or leading_untitled_body_end(
+                projection.headings, len(projection.body_rows), level=sections.level
+            ) is not None:
+                untitled.append(path.stem)
+        if untitled:
+            parser.error(
+                "sermons with an untitled leading section require "
+                "--write-back-generated-subtitles and --subtitle-user-id before extraction: "
+                + ", ".join(untitled)
+            )
     if args.dry_run:
         def section_plan_summary(
             source_id: str, source: dict[str, Any]
         ) -> list[dict[str, Any]]:
-            # Dry run never calls the generator; a source with no headings
-            # reports one section, which is what an offline run would do.
+            # Dry run never calls the generator. Batch/single-source preflight
+            # separately prevents this fallback from becoming permission to
+            # extract an untitled sermon.
             projection = project_script(source.get("script"))
             _assert_inline_source_readable(
                 source_id, projection, visual_source_attestations
@@ -2901,6 +2877,7 @@ def main() -> int:
             status, output = run_source(
                 source_row, output_dir=args.output_dir, client=client, prompt=prompt,
                 reasoning_effort=args.reasoning_effort, force=args.force, sections=sections,
+                visual_source_attestations=visual_source_attestations,
                 record_run_ledger=not args.no_run_ledger,
             )
             counts[status] += 1

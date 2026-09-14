@@ -13,6 +13,7 @@ from backend.pipeline.corpus_ai_adjudication import (
     validate_openai_adjudication,
 )
 from backend.pipeline.corpus_ai_adjudication_runner import (
+    _actionable_anchor_constraints,
     _adjudication_artifact_sha256,
     _archive,
     _compile_overrides,
@@ -125,6 +126,21 @@ def _claims() -> dict[str, dict]:
 
 def _reviews() -> list[dict]:
     return [{"claim_id": "CL-1", "decision": "changes_suggested", "issues": [{}]}]
+
+
+def test_adjudication_exposes_exact_reviewed_anchor_ordinal_space() -> None:
+    survey = {"candidate_claims": list(_claims().values())}
+
+    assert _actionable_anchor_constraints(
+        survey=survey,
+        reviews=_reviews(),
+    ) == [
+        {
+            "claim_id": "CL-1",
+            "anchor_count": 1,
+            "valid_anchor_indexes": [0],
+        }
+    ]
 
 
 def _patch(**updates) -> dict:

@@ -106,25 +106,24 @@ sentence-range 分片可能落在同一个 S locator 内，因此新分片 packa
 
 ### 没有 `##` 的来源
 
-115 份已发布逐字稿有 90 份完全没有标题。这些由抽取管线自己调用编辑器已有的加小标题功能取得边界。
+115 份已发布逐字稿有 90 份完全没有标题。这些由抽取管线自己调用编辑器已有的加小标题功能，把标题写入权威 document 后再抽取。
 
-已发布的历史快照仍只生成内部边界，不反写不可变来源。以 `script_review` 为来源、明确传入 `--write-back-generated-subtitles` 时则走正式写回阶段：核对旧 SHA，保存标题，写入后重新加载，再从带标题的新来源开始抽取。若同一来源已有与旧 SHA 绑定的 generated section plan，写回必须复用其中已经冻结的 `##` 边界和标题，不得再调一次模型产生第二套切分；没有可复用 plan 时才生成新的一级、二级 insertion。
+来源选择固定为 published-first：有同名 `script_published` 时，它就是唯一权威 document，`script_review` 与本次标题、抽取均无关；没有 published 时才使用 review。权威 document 无标题就走正式写回阶段：核对旧 SHA，生成并保存标题，写入后重新加载，再从带标题的新来源开始抽取。旧 extraction internal plan 不能被提升成 editorial structure；标题生成的 insertion 与写回结果另存 SHA-bound application audit。
 
 设计约束：
 
-- **写回必须由 operator 明确要求。** 本机 pipeline 不冒充网页用户，也不改变讲道认领状态；只有同时传入 `--write-back-generated-subtitles` 与 `--subtitle-user-id`，并通过讲道 ACL，才可修改 `script_review`，其他来源拒绝写回。加小标题是 editor 权限，不要求该讲道已被该 editor 认领；reader 仍无权写入。
+- **写回必须由 operator 明确要求。** 本机 pipeline 不冒充网页用户，也不改变讲道认领状态；只有同时传入 `--write-back-generated-subtitles` 与 `--subtitle-user-id`，并通过讲道 ACL，才可修改本次 resolved 的 `script_published` 或 `script_review`。加小标题是 editor 权限，不要求该讲道已被该 editor 认领；reader 仍无权写入。
 - **原有 row 逐列不变。** 保存后移除本次新增的 subtitle rows，剩余内容必须与写入前逐列、逐序完全相同；任何正文或既有标题差异都在抽取前失败。
-- **所有 `script_review` 写入都必须 compare-and-swap。** API 只接受 `scripts` / `slides` 两种明确类型，不能用近似 type 绕过；`scripts` 从路由、service 到最底层 writer 都必须携带读取时的文件 SHA。编辑器的 debounce 请求按顺序等待，后一笔只能使用前一笔成功返回的 SHA；换讲道或重新加载会使旧队列失效。
+- **所有标题写入都必须 compare-and-swap。** `script_published` 与 `script_review` 从 service 到最底层 writer 都必须携带读取时的完整文件 SHA；published 外层 metadata 原值也必须保留。编辑器的 debounce 请求按顺序等待，后一笔只能使用前一笔成功返回的 SHA；换讲道或重新加载会使旧队列失效。
 - **开头也必须有标题。** 只在后半篇看见一个 `##` 不算完成标题流程；否则标题前的正文仍会成为匿名 extraction section。批次 preflight 与单篇 runner 都必须在模型调用前挡住这种来源。
-- **标题不是来源。** `type=subtitle` 可以与正文存在同一个 `script_review` JSON，但它属于 editorial structure；comment 也属于编辑数据。两者都不得取得 S 编号、source locator、SourceFragment、证据 anchor 或来源正文身份。标题文字、metadata title、source ID、原始 row index 与 media timing 都不得进入 detailed-extraction 模型输入；标题只由 runner 用来决定调用边界。
+- **标题不是来源。** `type=subtitle` 可以与正文存在同一个 transcript JSON，但它属于 editorial structure；comment 也属于编辑数据。两者都不得取得 S 编号、source locator、SourceFragment、证据 anchor 或来源正文身份。标题文字、metadata title、source ID、原始 row index 与 media timing 都不得进入 detailed-extraction 模型输入；标题只由 runner 用来决定调用边界。
 - **正文 row 不是编辑内容的逃生门。** 若普通 body row 内嵌 `<svg>…</svg>` 或 HTML comment，这些语法已经足以证明它混入了非口述 editor payload；单篇 runner、dry-run 与 batch preflight 都必须在任何模型调用前失败，直到数据被迁移到带 provenance 的独立 editorial row。讲道 JSON 内的 Markdown blockquote 既可能是教授朗读的经文，也可能是编辑加入的投影片，旧存储无法机械判断；系统不得静默删除，但任何讲道证据 anchor 也不得落在 blockquote、inline heading、SVG 或 HTML comment span。已经人工审核的 notes manuscript 可以把 blockquote 经文锚定为 `scripture_text` observation 或 `speaker=quoted_source` evidence；仍不得标成教授原话。需要保留的讲道经文必须由教授的口述解释或显式 provenance 来源承载，不能把 `>` 行冒充教授原话。
 - **写回后分开计算身份。** 保存后重新读取档案；物理文件 SHA 与 editorial-structure SHA 会改变，来源 body SHA 和 S 编号必须保持不变。标题改名、comment-only 与 timing-only 改动不得改变 model-generation fingerprint、逐 section cache 或 claim ID；它们只触发 deterministic package provenance/locator refresh。移动 section boundary 会改变受影响 section 的精确模型输入，但未受影响 section 的 content-addressed cache 继续可用。
 
 旧 package 不得 silent locator 重绑。只有显式 migration/rebind 阶段能够证明旧、现两版 spoken text 逐 row 相同、每个逐字 excerpt 仍在对应 spoken row、旧 physical locator 到 `spoken_body_v1` 的映射唯一，并写出同时绑定两版 SHA 的审计 artifact，才可不调用模型而重新编译 locator metadata；任一证明失败就重新抽取。新 model-input contract 与旧 contract 不同则属于新的语义 generation，不能把旧响应改写成新 fingerprint。重抽取的到达和旧代退休必须在同一个数据库事务内完成。
 旧的物理行 locator 与 `spoken_body_v1` 不得混用：新 SourceDocument 必须同时携带 `source_body_sha256`、`source_text_sha256` 和显式 `locator_space=spoken_body_v1`；缺任一项都失败。含 subtitle/comment 的旧 SourceDocument 只有通过上述逐项映射审计才可迁移，`source_anchor_binding` 不得只补 metadata 后把旧 `S` 编号冒充为 body locator。同 ID 的 review/status 更新不破坏引用；只有将对象退休时，current CVR/ArgumentRoute 对它的 live reference 才必须在同一 ChangeSet 中迁移或退休。历史 CompositionPlan/CompositionDecision 不再是下游影响权威；draft-first 产品由 ProductDependency 失效机制保护。
 
-未开启写入模式时，内部 section plan 仍按 spoken-body 与 editorial-topology 身份快取；plan 的 label-free topology 进入 generation identity，标题文字只保存在审计/display identity。这是给不可变已发布快照与 Markdown 来源的兼容路径，不会让网页出现标题。
-批次或单篇命令若尝试在未开启写入模式时抽取无标题的 `script_review`，必须在任何模型调用前失败，不能静默借用这条兼容路径。
+Internal plan 唯一合理的用途是技术性 transport split：一个**已有标题**的章节过长、可能超过单次 900 秒边界时，runner 可以把它临时拆成多个模型调用块。这种分片不代表教授的篇章结构，不得产生或持久化 subtitle，也不能成为无标题 document 的替代方案。批次或单篇命令若尝试在未开启写入模式时抽取无标题的 sermon document，必须在任何模型调用前失败。
 
 ### 每次抽取自带计分板
 
@@ -181,6 +180,8 @@ DeepSeek v4 pro 作备用（`--model deepseek-v4-pro`），约 gpt 的三分之�
 Consensus override 若新增、移除或迁移 source fragment，reviewed candidate 必须从最终 graph 与同一 SHA-bound source 重新计算 coverage；不得沿用 extraction package 的 `anchored_spans` 或 sentence reconciliation 摘要。重算只更新派生报告，不把 editorial rows 放回来源分母。
 
 数据库 ChangeSet 的 identity 还必须绑定 planning 时每项 operation 的 before/after SHA 与 revision。只按 package fingerprint 判断“已经执行过”是不够的：同一 package 在数据库后来发生合法变化后再次执行，必须产生针对新 before-state 的计划，不能误报 `already_applied`。精确重跑若计划为零 operation，则在打开数据库连接、run ledger 或 artifact writer 前直接返回 `unchanged`。
+
+暂停后恢复 source supersession 时，来源 SHA 绑定的逐 section 模型 cache 可以复用，但暂停前生成的 extraction、review、adjudication 或 reviewed-candidate artifact 不能作为当前生产数据库快照。每次 preview 都必须重新读取 PostgreSQL 中完整的 active Claim/Evidence 互反图；普通来源重跑不得用旧 package 改写现有 `Claim.evidence_step_ids` 或 `EvidenceStep.produced_claim_ids`，这类绑定变化必须来自新近、明确授权的 Claim/Evidence 裁决。preview 须在当前快照上模拟最终图并证明互反、无悬空、无重复；apply 还须在全局写锁内重新校验同一快照，任何漂移都必须回滚并重新规划。
 
 ## 五、双模型复审与最小修正规则
 
@@ -267,7 +268,7 @@ schema、model、generation fingerprint 與輸出 SHA 的既有審計鏈。
 Claude 獨立複審仍使用 Anthropic provider，仍可能產生 Anthropic API 費用；它不會因
 `--backend codex-subscription` 改走 Codex。
 
-对仍在 `script_review` 的无标题讲道，先由 pipeline 通过正式服务写入标题，再抽取：
+对无标题讲道，先由 pipeline 通过正式服务写入 resolved 的权威 document，再抽取。以下示例的来源尚未 published，因此使用 review：
 
 ```bash
 PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.detailed_knowledge_extraction_runner \
@@ -360,8 +361,8 @@ PYTHONPATH=. .venv/bin/python -m backend.pipeline.research_batch_runner \
   --dry-run
 ```
 
-批次中若同时包含母本、`script_review` 与不可变的 `script_published` 讲道，可明确让详细
-抽取走 subscription，并只对 `script_review` 成员执行 ACL 检查后的标题写回：
+批次中若同时包含母本、`script_review` 与 `script_published` 讲道，可明确让详细
+抽取走 subscription，并对每篇无标题讲道的 resolved 权威 document 执行 ACL 检查后的标题写回：
 
 ```bash
 PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.research_batch_runner \
@@ -374,8 +375,8 @@ PYTHONPATH=. backend/.venv/bin/python -m backend.pipeline.research_batch_runner 
   --dry-run
 ```
 
-`--dry-run` 只显示逐成员命令，不调用模型或写档。正式运行时，母本照常抽取；已发布讲道
-只使用内部 section plan；只有仍在 review 区且没有可用标题的讲道会进入 governed save。
+`--dry-run` 只显示逐成员命令，不调用模型或写档。正式运行时，母本照常抽取；讲道一律
+published-first，权威 document 无标题就先进入 governed save。内部 transport split 只处理已经有标题但单次调用过长的章节。
 
 实际执行可用 `--stage extract|review|adjudicate|apply|merge` 分阶段恢复，也可使用默认 `all`。抽取、复审与仲裁都以来源、prompt、模型和 schema 指纹判断是否可以跳过；相同世代不会重复消耗模型调用。`--force` 只应用于明确要求重做的抽取与 Claude 复审。
 
