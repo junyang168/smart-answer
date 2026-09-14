@@ -50,8 +50,11 @@ PLAN_ARTIFACT_VERSION = "wang_source_contract_cleanup_source_plan_v1"
 APPLY_RECEIPT_VERSION = "wang_source_contract_cleanup_apply_receipt_v1"
 APPLY_SUMMARY_VERSION = "wang_source_contract_cleanup_apply_summary_v1"
 TARGETED_TRANSCRIPTS = frozenset(
-    {"2017 NYSC 專題：馬太福音釋經（六）1", "S 210711"}
+    {"S 210711"}
 )
+ATTESTED_FRAGMENT_LOCATORS = {
+    "FR-2017_NYSC_1-1004660290a2-DK-1004660290a2-P02-E014-01": "S0006",
+}
 COLLECTIONS = (
     "source_documents",
     "source_fragments",
@@ -294,6 +297,34 @@ def _preflight(store: PostgresKnowledgeStore, plan: ChangeSetPlan) -> list[str]:
     return list(checks)
 
 
+def _evidence_fragment_locator_proofs(
+    owners: list[dict[str, Any]], fragment_locators: Mapping[str, str]
+) -> dict[str, str]:
+    """Return EvidenceStep locators proved by all of their SourceFragments."""
+
+    result: dict[str, str] = {}
+    for owner in owners:
+        evidence_id = str(owner.get("evidence_step_id") or "")
+        if not evidence_id:
+            continue
+        fragment_ids = [
+            str(value)
+            for value in owner.get("source_fragment_ids") or []
+            if str(value)
+        ]
+        singular = str(owner.get("source_fragment_id") or "")
+        if singular:
+            fragment_ids.append(singular)
+        if not fragment_ids or any(
+            fragment_id not in fragment_locators for fragment_id in fragment_ids
+        ):
+            continue
+        locators = {fragment_locators[fragment_id] for fragment_id in fragment_ids}
+        if len(locators) == 1:
+            result[evidence_id] = next(iter(locators))
+    return result
+
+
 def build_dry_run(
     *,
     store: PostgresKnowledgeStore,
@@ -390,12 +421,16 @@ def build_dry_run(
         findings: list[dict[str, Any]] = []
         preserved_human_claims: list[str] = []
         claim_anchor_changes = 0
+        fragment_locators: dict[str, str] = {}
         for fragment in fragments_by_source[source_id]:
+            fragment_id = str(fragment.get("fragment_id") or "")
             migrated, resolution = migrate_source_fragment(
-                fragment, index, source_sha256=projection.body_sha256
+                fragment,
+                index,
+                source_sha256=projection.body_sha256,
+                attested_locator=ATTESTED_FRAGMENT_LOCATORS.get(fragment_id),
             )
             if migrated is None:
-                fragment_id = str(fragment.get("fragment_id") or "")
                 owners: list[tuple[str, str, dict[str, Any]]] = []
                 for owner in placeholder_owners:
                     owner_collection = (
@@ -461,16 +496,26 @@ def build_dry_run(
                         }
                     )
             else:
+                fragment_locators[str(fragment["fragment_id"])] = str(
+                    migrated["paragraph_key"]
+                )
                 coordinate_replacements[
                     ("source_fragments", str(fragment["fragment_id"]))
                 ] = migrated
+        evidence_locator_proofs = _evidence_fragment_locator_proofs(
+            placeholder_owners, fragment_locators
+        )
         for claim in claims:
             if not _claim_matches_source(
                 claim, source_id=source_id, transcript_id=transcript_id
             ):
                 continue
             migrated, claim_findings = migrate_claim_occurrence_anchors(
-                claim, index, source_id=source_id, transcript_id=transcript_id
+                claim,
+                index,
+                source_id=source_id,
+                transcript_id=transcript_id,
+                anchor_locator_by_evidence_id=evidence_locator_proofs,
             )
             unresolved = unresolved_statuses(claim_findings)
             if unresolved:

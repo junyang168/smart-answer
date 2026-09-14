@@ -194,7 +194,11 @@ def migrate_source_document(
 
 
 def migrate_source_fragment(
-    fragment: Mapping[str, Any], index: BodyLocatorIndex, *, source_sha256: str
+    fragment: Mapping[str, Any],
+    index: BodyLocatorIndex,
+    *,
+    source_sha256: str,
+    attested_locator: str | None = None,
 ) -> tuple[dict[str, Any] | None, AnchorResolution]:
     if fragment.get("source_modality") == "visual" or "/V" in str(
         fragment.get("paragraph_key") or ""
@@ -207,6 +211,25 @@ def migrate_source_fragment(
         source_segment_index=fragment.get("source_segment_index"),
         exact_text=str(fragment.get("verbatim_excerpt") or ""),
     )
+    if (
+        resolution.status
+        in {"coordinate_conflict", "ambiguous_exact_text"}
+        and attested_locator
+    ):
+        attested_row = index.by_locator.get(attested_locator)
+        if (
+            attested_row is not None
+            and str(fragment.get("source_segment_index"))
+            == str(attested_row.source_segment_index)
+            and str(fragment.get("verbatim_excerpt") or "") in attested_row.text
+        ):
+            resolution = AnchorResolution(
+                status="resolved",
+                locator=attested_row.locator,
+                source_segment_index=attested_row.source_segment_index,
+                paragraph_text=attested_row.text,
+                proof="attested_source_segment_index",
+            )
     if resolution.status != "resolved":
         return None, resolution
     excerpt = str(fragment.get("verbatim_excerpt") or "")
@@ -230,6 +253,7 @@ def migrate_claim_occurrence_anchors(
     *,
     source_id: str,
     transcript_id: str,
+    anchor_locator_by_evidence_id: Mapping[str, str] | None = None,
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
     """Move only locator provenance inside matching Claim occurrences."""
 
@@ -256,6 +280,24 @@ def migrate_claim_occurrence_anchors(
             resolution = index.resolve(
                 paragraph_key=anchor.get("paragraph_key"), exact_text=exact_text
             )
+            evidence_id = str(anchor.get("evidence_id") or "")
+            evidence_locator = str(
+                (anchor_locator_by_evidence_id or {}).get(evidence_id) or ""
+            )
+            if (
+                resolution.status
+                in {"coordinate_conflict", "ambiguous_exact_text"}
+                and evidence_locator
+            ):
+                evidence_row = index.by_locator.get(evidence_locator)
+                if evidence_row is not None and exact_text in evidence_row.text:
+                    resolution = AnchorResolution(
+                        status="resolved",
+                        locator=evidence_row.locator,
+                        source_segment_index=evidence_row.source_segment_index,
+                        paragraph_text=evidence_row.text,
+                        proof="evidence_source_fragments",
+                    )
             path = f"occurrences[{occurrence_index}].anchors[{anchor_index}].paragraph_key"
             if resolution.status != "resolved":
                 findings.append({"path": path, "status": resolution.status})

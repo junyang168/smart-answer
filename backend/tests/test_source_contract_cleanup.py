@@ -47,6 +47,54 @@ def test_legacy_physical_locator_moves_past_editorial_row():
     ).hexdigest()
 
 
+def test_attested_locator_resolves_one_proved_source_segment_conflict():
+    script = [
+        {"index": 1, "text": "first"},
+        {"index": "subtitle-1", "type": "subtitle", "text": "# Editorial"},
+        {"index": 236, "text": "same short answer"},
+        {"index": 320, "text": "same short answer"},
+    ]
+    migrated, resolution = migrate_source_fragment(
+        {
+            "fragment_id": "FR-attested",
+            "source_id": "SRC-1",
+            "paragraph_key": "S0003",
+            "source_segment_index": 236,
+            "verbatim_excerpt": "same short answer",
+        },
+        BodyLocatorIndex(script),
+        source_sha256="b" * 64,
+        attested_locator="S0002",
+    )
+
+    assert resolution.proof == "attested_source_segment_index"
+    assert migrated["paragraph_key"] == "S0002"
+    assert migrated["source_segment_index"] == 236
+
+
+def test_attested_locator_still_fails_when_source_segment_does_not_match():
+    script = [
+        {"index": 1, "text": "first"},
+        {"index": "subtitle-1", "type": "subtitle", "text": "# Editorial"},
+        {"index": 236, "text": "same short answer"},
+        {"index": 320, "text": "same short answer"},
+    ]
+    migrated, resolution = migrate_source_fragment(
+        {
+            "fragment_id": "FR-attested",
+            "paragraph_key": "S0003",
+            "source_segment_index": 999,
+            "verbatim_excerpt": "same short answer",
+        },
+        BodyLocatorIndex(script),
+        source_sha256="b" * 64,
+        attested_locator="S0002",
+    )
+
+    assert migrated is None
+    assert resolution.status == "coordinate_conflict"
+
+
 def test_unique_exact_text_is_the_only_fallback():
     index = BodyLocatorIndex(SCRIPT)
     resolved = index.resolve(paragraph_key="S9999", exact_text="exact evidence")
@@ -171,6 +219,50 @@ def test_claim_migration_changes_only_occurrence_locator():
     ]
     assert changed_paths(claim, migrated) == [
         "occurrences[0].anchors[0].paragraph_key"
+    ]
+    assert_claim_semantics_unchanged(claim, migrated)
+
+
+def test_claim_migration_uses_source_fragments_to_resolve_short_answer_conflict():
+    script = [
+        {"index": 1, "text": "first"},
+        {"index": "subtitle-1", "type": "subtitle", "text": "# Editorial"},
+        {"index": 2, "text": "same short answer"},
+        {"index": 3, "text": "same short answer"},
+    ]
+    claim = {
+        "claim_id": "CL-1",
+        "statement": "reader-visible claim",
+        "occurrences": [
+            {
+                "source_id": "SRC-1",
+                "transcript_id": "sermon",
+                "anchors": [
+                    {
+                        "evidence_id": "E-1",
+                        "paragraph_key": "S0003",
+                        "proposed_highlight": {"text": "same short answer"},
+                    }
+                ],
+            }
+        ],
+    }
+
+    migrated, findings = migrate_claim_occurrence_anchors(
+        claim,
+        BodyLocatorIndex(script),
+        source_id="SRC-1",
+        transcript_id="sermon",
+        anchor_locator_by_evidence_id={"E-1": "S0002"},
+    )
+
+    assert migrated["occurrences"][0]["anchors"][0]["paragraph_key"] == "S0002"
+    assert findings == [
+        {
+            "path": "occurrences[0].anchors[0].paragraph_key",
+            "status": "changed",
+            "proof": "evidence_source_fragments",
+        }
     ]
     assert_claim_semantics_unchanged(claim, migrated)
 
