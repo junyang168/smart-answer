@@ -50,9 +50,6 @@ SCHEMA_VERSION = "wang_source_contract_cleanup_dry_run_v1"
 PLAN_ARTIFACT_VERSION = "wang_source_contract_cleanup_source_plan_v1"
 APPLY_RECEIPT_VERSION = "wang_source_contract_cleanup_apply_receipt_v1"
 APPLY_SUMMARY_VERSION = "wang_source_contract_cleanup_apply_summary_v1"
-TARGETED_TRANSCRIPTS = frozenset(
-    {"S 210711"}
-)
 ATTESTED_FRAGMENT_LOCATORS = {
     "FR-2017_NYSC_1-1004660290a2-DK-1004660290a2-P02-E014-01": "S0006",
 }
@@ -422,12 +419,6 @@ def build_dry_run(
                 {"source_id": source_id, "transcript_id": transcript_id}
             )
             continue
-        if source_id in TARGETED_TRANSCRIPTS or transcript_id in TARGETED_TRANSCRIPTS:
-            scenarios["targeted_rerun"].append(
-                {"source_id": source_id, "transcript_id": transcript_id}
-            )
-            continue
-
         try:
             payload, raw, source_path = _source_material(source, data_base_path)
         except Exception as exc:
