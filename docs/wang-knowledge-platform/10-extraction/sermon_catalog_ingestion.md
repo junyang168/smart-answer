@@ -65,7 +65,7 @@ notes-to-manuscript 系列合併為 `$DATA_BASE_DIR/wang-knowledge-platform/cata
 
 - 講道只以普查中的 `content_clusters.scripture_refs` 與 `candidate_claims.scripture_refs` 建立章節歸屬；
 - 第一至十六章的筆記轉講稿，以 Project `meta.json` 的 `bible_verse` 建立章節歸屬；
-- `project_type=transcript` 的 Project 不進入筆記轉講稿來源；其所連結的講道仍由原始講道／逐字稿來源管線進入，避免同一份口述材料重複計證；
+- `project_type=transcript` 的 Project 是供查經使用、由既有講道逐字稿生成的編輯視圖，不進入筆記轉講稿來源；其所連結的講道仍由原始講道／逐字稿來源管線進入，避免同一份口述材料重複計證。判定以每個 Project 自己的 `meta.json` 為準：即使它位於 `sermon_note` 系列或 `notes_to_surmon/` 目錄，只要自身標為 `transcript` 就必須排除；
 - 若 `bible_verse` 缺失或不完整，只有在已審核 `final.md` 中某一馬太福音章至少出現三次、且占全部明確馬太引用 60% 以上時，才以該正文主導章補足範圍；混合材料仍留待人工定章；
 - 沒有明確章節範圍的全書結構、登山寶訓結構等 Project，不會消失，而是列在 `book_level_sources` 並標為待補章節範圍；
 - `source_directory` 是去重後的全部來源總表；每個來源只出現一次，並列出 `assigned_chapters`。逐章使用時則讀 `chapters[].sources`；

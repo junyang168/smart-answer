@@ -19,12 +19,13 @@ def _project(
     *,
     title: str,
     bible_verse: str | None = None,
+    project_type: str = "sermon_note",
     final: bool = False,
     unified: bool = False,
 ) -> None:
     project = root / project_id
     project.mkdir(parents=True)
-    meta = {"id": project_id, "title": title, "project_type": "sermon_note"}
+    meta = {"id": project_id, "title": title, "project_type": project_type}
     if bible_verse is not None:
         meta["bible_verse"] = bible_verse
     _write_json(project / "meta.json", meta)
@@ -48,6 +49,13 @@ def test_notes_rows_follow_sermon_note_series_membership(tmp_path: Path) -> None
     _project(root, "unlinked-final", title="孤立定稿", final=True)
     _project(root, "unlinked-unified", title="孤立草稿", unified=True)
     _project(root, "transcript-view", title="逐字稿衍生", final=True)
+    _project(
+        root,
+        "mislinked-transcript-view",
+        title="掛在母本系列下的查經視圖",
+        project_type="transcript",
+        final=True,
+    )
 
     _write_json(
         root / "series_db.json",
@@ -56,7 +64,14 @@ def test_notes_rows_follow_sermon_note_series_membership(tmp_path: Path) -> None
                 "id": "public-notes",
                 "project_type": "sermon_note",
                 "lectures": [
-                    {"id": "one", "project_ids": ["published", "awaiting-final"]},
+                    {
+                        "id": "one",
+                        "project_ids": [
+                            "published",
+                            "awaiting-final",
+                            "mislinked-transcript-view",
+                        ],
+                    },
                     # A duplicate link must not produce a duplicate overview row.
                     {"id": "two", "project_ids": ["published"]},
                 ],

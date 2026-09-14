@@ -125,11 +125,16 @@ def _notes_rows(data_base: Path) -> list[dict[str, Any]]:
     Otherwise abandoned local projects with a ``unified_source.md`` become
     phantom sources even though no reader-facing series includes them.
 
-    Membership and availability are intentionally separate: a linked project
-    stays visible while it awaits ``final.md``, just as a catalogued sermon
-    stays visible while its transcript awaits publication.  ``final.md`` is
-    the only manuscript the extraction pipeline reads and therefore the only
-    file that can supply the row's source SHA.
+    Series membership is not enough to establish source type. A project's own
+    ``meta.json`` may mark it ``project_type=transcript``: that is a Bible-study
+    editorial view derived from a sermon transcript, not a second independent
+    notes manuscript. It must stay out even when a legacy series also links it.
+
+    Membership and availability are intentionally separate for eligible notes
+    projects: a linked project stays visible while it awaits ``final.md``, just
+    as a catalogued sermon stays visible while its transcript awaits
+    publication. ``final.md`` is the only manuscript the extraction pipeline
+    reads and therefore the only file that can supply the row's source SHA.
     """
 
     root = data_base / "notes_to_surmon"
@@ -163,9 +168,11 @@ def _notes_rows(data_base: Path) -> list[dict[str, Any]]:
 
     for project_id in project_ids:
         project = root / project_id
+        meta = _load_json(project / "meta.json") or {}
+        if str(meta.get("project_type") or "").strip().lower() == "transcript":
+            continue
         manuscript_path = project / "final.md"
         manuscript = manuscript_path if manuscript_path.is_file() else None
-        meta = _load_json(project / "meta.json") or {}
         placement = _notes_placement(str(meta.get("bible_verse") or ""))
         rows.append({
             "source_id": project_id,
