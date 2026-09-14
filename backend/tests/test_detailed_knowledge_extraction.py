@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from backend.pipeline import detailed_knowledge_extraction_runner as extraction_runner
 from backend.pipeline.corpus_ai_review_runner import _normalize_claim_layer
 from backend.pipeline.detailed_knowledge_extraction import (
     DetailedExtractionValidationError,
@@ -95,6 +96,50 @@ def _response() -> dict:
         ],
         "claim_relations": [],
     }
+
+
+def test_notes_source_forwards_batch_visual_attestation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    svg_path = tmp_path / "diagram.svg"
+    svg = "<svg><text>结构</text></svg>"
+    svg_path.write_text(svg, encoding="utf-8")
+    markdown_path = tmp_path / "final.md"
+    markdown_url = "/web/data/full_article/images/diagram.svg"
+    markdown_path.write_text(
+        f"## 标题\n\n![结构]({markdown_url})\n", encoding="utf-8"
+    )
+    descriptor = {
+        "source_id": "notes_manuscript:visual",
+        "source_type": "notes_manuscript",
+        "source_path": str(markdown_path),
+        "visual_source_assets": [{
+            "markdown_url": markdown_url,
+            "source_path": str(svg_path),
+            "source_sha256": hashlib.sha256(svg.encode("utf-8")).hexdigest(),
+        }],
+    }
+    captured: dict = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return "created", tmp_path / "package.json"
+
+    monkeypatch.setattr(extraction_runner, "_run", fake_run)
+    expected = {"S0001/V01": hashlib.sha256(svg.encode("utf-8")).hexdigest()}
+
+    extraction_runner.run_source(
+        descriptor,
+        output_dir=tmp_path,
+        client=object(),
+        prompt="prompt",
+        reasoning_effort="medium",
+        force=False,
+        visual_source_attestations=expected,
+    )
+
+    assert captured["visual_source_attestations"] == expected
+    assert project_script(captured["source"]["script"]).visual_blocks[0].locator == "S0001/V01"
 
 
 def _bound_extraction_identity(

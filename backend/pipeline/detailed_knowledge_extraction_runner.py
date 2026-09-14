@@ -2417,6 +2417,7 @@ def run_source(
     client: Stage1OpenAIClient | Stage1AnthropicClient | CodexSubscriptionClient,
     prompt: str, reasoning_effort: str, force: bool,
     sections: SectionSettings | None = None,
+    visual_source_attestations: Mapping[str, str] | None = None,
     record_run_ledger: bool = True,
 ) -> tuple[str, Path]:
     source, raw, source_path = markdown_source_document(source_descriptor)
@@ -2431,7 +2432,9 @@ def run_source(
         output_dir=output_dir, client=client, prompt=prompt, reasoning_effort=reasoning_effort,
         sections=sections or SectionSettings(), force=force, source_descriptor=source_descriptor,
         visual_source_attestations=(
-            source_descriptor.get("visual_source_attestations") or {}
+            visual_source_attestations
+            if visual_source_attestations is not None
+            else source_descriptor.get("visual_source_attestations") or {}
         ),
         record_run_ledger=record_run_ledger,
     )
@@ -2872,6 +2875,7 @@ def main() -> int:
             status, output = run_source(
                 source_row, output_dir=args.output_dir, client=client, prompt=prompt,
                 reasoning_effort=args.reasoning_effort, force=args.force, sections=sections,
+                visual_source_attestations=visual_source_attestations,
                 record_run_ledger=not args.no_run_ledger,
             )
             counts[status] += 1
