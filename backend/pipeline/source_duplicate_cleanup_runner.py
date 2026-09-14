@@ -176,10 +176,15 @@ def build_dry_run(
         index = BodyLocatorIndex(script)
         canonical_fragments = fragments_by_source[canonical_source_id]
         alias_fragments = fragments_by_source[old_source_id]
+        reassigned_alias_fragments = []
+        for fragment in alias_fragments:
+            reassigned = dict(fragment)
+            reassigned["source_id"] = canonical_source_id
+            reassigned_alias_fragments.append(reassigned)
 
         migrated_fragments: dict[tuple[str, str], dict[str, Any]] = {}
         fragment_blockers: list[dict[str, Any]] = []
-        for fragment in canonical_fragments:
+        for fragment in [*canonical_fragments, *reassigned_alias_fragments]:
             migrated, resolution = migrate_source_fragment(
                 fragment, index, source_sha256=projection.body_sha256
             )
@@ -293,14 +298,16 @@ def build_dry_run(
             replacements.update(coordinate_claims)
             replacements.update(coordinate_attestations)
         else:
+            replacements.update(
+                {
+                    ("source_fragments", str(fragment["fragment_id"])): fragment
+                    for fragment in reassigned_alias_fragments
+                }
+            )
             replacements.update(alias_claims)
             replacements.update(alias_attestations)
 
         retire_keys.append(("source_documents", old_source_id))
-        retire_keys.extend(
-            ("source_fragments", str(fragment["fragment_id"]))
-            for fragment in alias_fragments
-        )
         frozen_sources.append(
             {
                 "transcript_id": transcript_id,
@@ -314,7 +321,7 @@ def build_dry_run(
                 **specification,
                 "transcript_id": transcript_id,
                 "canonical_fragment_count": len(canonical_fragments),
-                "retired_alias_fragment_count": len(alias_fragments),
+                "reassigned_alias_fragment_count": len(alias_fragments),
                 "related_claim_count": related_claim_count,
                 "claim_anchor_changes_if_ready": claim_anchor_changes,
                 "coordinate_ready": coordinate_ready,
@@ -336,7 +343,7 @@ def build_dry_run(
     withdrawal = build_retirement_plan(
         retire_keys,
         current,
-        reason="Retire three duplicate SourceDocument aliases and their unreferenced fragments",
+        reason="Retire three duplicate SourceDocument aliases after reassigning their fragments",
         package_id="WKP368-DUPLICATE-CONSOLIDATION",
         source_kind=SOURCE_KIND,
     )
