@@ -160,6 +160,50 @@ def test_cancelled_attempt_does_not_overwrite_successful_lineage() -> None:
     assert cell["run"]["run_id"] == success["run_id"]
 
 
+def test_rejected_obsolete_ingest_does_not_overwrite_successful_lineage() -> None:
+    success = _run("ingest", finished=NOW - timedelta(days=10))
+    success["run_id"] = "RUN-success"
+    failed = _run("ingest", finished=NOW, status="failed")
+    failed.update(
+        {
+            "run_id": "RUN-obsolete",
+            "output_paths": [],
+            "error_message": (
+                "ChangeSetConflict: claims/CL-old was retired at 2026-08-20; "
+                "re-ingesting the package that produced it would bring it back."
+            ),
+        }
+    )
+
+    cell = _cell(
+        [success, failed],
+        stage="ingest",
+        current_source_sha=None,
+        upstream_finished=success["finished_at"] - timedelta(seconds=1),
+    )
+
+    assert cell["state"] == "current"
+    assert cell["run"]["run_id"] == "RUN-success"
+    assert cell["rejected_obsolete_attempt"]["run_id"] == "RUN-obsolete"
+    assert cell["rejected_obsolete_attempt"]["status"] == "failed"
+
+
+def test_other_failed_ingest_still_overwrites_successful_lineage() -> None:
+    success = _run("ingest", finished=NOW - timedelta(hours=1))
+    failed = _run("ingest", finished=NOW, status="failed")
+    failed["error_message"] = "database unavailable"
+
+    cell = _cell(
+        [success, failed],
+        stage="ingest",
+        current_source_sha=None,
+        upstream_finished=None,
+    )
+
+    assert cell["state"] == "failed"
+    assert cell["had_earlier_success"] is True
+
+
 def test_a_run_that_names_no_module_and_wrote_nothing_is_not_evidence() -> None:
     """A 母本 whose extraction has succeeded three times was reading 失敗.
 

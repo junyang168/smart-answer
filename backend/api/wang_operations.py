@@ -454,6 +454,19 @@ def _effective_status(run: dict[str, Any], now: datetime) -> str:
     return status
 
 
+def _is_rejected_obsolete_ingest(run: dict[str, Any]) -> bool:
+    """Whether the store rejected an old generation before it wrote anything."""
+
+    error = str(run.get("error_message") or "")
+    return (
+        run.get("effective_status") == "failed"
+        and not run.get("output_paths")
+        and "ChangeSetConflict:" in error
+        and "was retired at" in error
+        and "re-ingesting the package that produced it would bring it back" in error
+    )
+
+
 def _cell(
     runs: list[dict[str, Any]],
     *,
@@ -494,10 +507,23 @@ def _cell(
         runs[-1],
     )
     summary = _run_summary(latest)
+    rejected_obsolete_attempt: Optional[dict[str, Any]] = None
     # A cancelled attempt produced no replacement. When an earlier successful
     # extraction is still bound to the current body, cancellation cannot erase
     # that lineage. Real failures remain visible because they are a verdict.
     if latest["effective_status"] == "cancelled" and last_success is not None:
+        latest = last_success
+        summary = _run_summary(last_success)
+    # The retirement gate can correctly reject an obsolete package after the
+    # current generation was already ingested. That failed command remains in
+    # run history, but it is not the ingest state of the source: it wrote
+    # nothing and the earlier successful lineage still owns the store row.
+    if (
+        stage == "ingest"
+        and last_success is not None
+        and _is_rejected_obsolete_ingest(latest)
+    ):
+        rejected_obsolete_attempt = _run_summary(latest)
         latest = last_success
         summary = _run_summary(last_success)
     if latest["effective_status"] in {"failed", "interrupted", "cancelled"}:
@@ -516,9 +542,22 @@ def _cell(
     quality = last_success.get("quality") or None
 
     def stale(reason: str) -> dict[str, Any]:
+        attempt = (
+            {"rejected_obsolete_attempt": rejected_obsolete_attempt}
+            if rejected_obsolete_attempt is not None
+            else {}
+        )
         if upstream_in_flight:
-            return _pending({"state": "stale", "quality": quality, "run": success})
-        return {"state": "stale", "reason": reason, "quality": quality, "run": success}
+            return _pending(
+                {"state": "stale", "quality": quality, "run": success, **attempt}
+            )
+        return {
+            "state": "stale",
+            "reason": reason,
+            "quality": quality,
+            "run": success,
+            **attempt,
+        }
 
     if stage == "extraction":
         recorded = (last_success.get("input_sha256") or {}).get("source_sha256")
@@ -541,8 +580,28 @@ def _cell(
     if upstream_finished and finished and upstream_finished > finished:
         return stale("upstream_rerun")
     if upstream_in_flight:
-        return _pending({"state": "current", "quality": quality, "run": success})
-    return {"state": "current", "quality": quality, "run": success}
+        return _pending(
+            {
+                "state": "current",
+                "quality": quality,
+                "run": success,
+                **(
+                    {"rejected_obsolete_attempt": rejected_obsolete_attempt}
+                    if rejected_obsolete_attempt is not None
+                    else {}
+                ),
+            }
+        )
+    return {
+        "state": "current",
+        "quality": quality,
+        "run": success,
+        **(
+            {"rejected_obsolete_attempt": rejected_obsolete_attempt}
+            if rejected_obsolete_attempt is not None
+            else {}
+        ),
+    }
 
 
 def _pending(cell: dict[str, Any]) -> dict[str, Any]:
@@ -563,6 +622,11 @@ def _pending(cell: dict[str, Any]) -> dict[str, Any]:
         "run": cell.get("run"),
         "superseded": {"state": cell["state"], "quality": cell.get("quality")},
         **({"store": cell["store"]} if cell.get("store") else {}),
+        **(
+            {"rejected_obsolete_attempt": cell["rejected_obsolete_attempt"]}
+            if cell.get("rejected_obsolete_attempt")
+            else {}
+        ),
     }
 
 
