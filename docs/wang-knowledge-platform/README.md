@@ -103,6 +103,7 @@
 | --- | --- |
 | [王教授文庫營運總表 v1](./90-ops/operational_dashboard_v1.md) | 讲道线与文章线的运营台账 |
 | [思想与篇章审核工作台使用说明](./90-ops/reviewer_ui_guide.md) | 非技术同工怎样使用 `/admin/thought-review` |
+| [Claim–Evidence 互反修复流程](./90-ops/claim_evidence_reciprocity_repair_v1.md) | 历史单向 Claim/Evidence 投影怎样冻结、分流并原子修复 |
 | [base-contract-coverage/](./90-ops/base-contract-coverage/README.md) | 基础契约覆盖率量测输出（由代码生成） |
 | [observation-argument-coverage/](./90-ops/observation-argument-coverage/README.md) | observation→argument 覆盖率量测输出（由代码生成） |
 | [library-audit/](./90-ops/library-audit/README.md) | 文库独立完整性与正确性审计：怎么跑、四层查什么、输出长什么样 |

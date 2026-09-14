@@ -76,9 +76,10 @@ need its own deploy.
    reports the commit just deployed**
 9. Rebinds and reloads the fellowship-reminder LaunchAgent, then verifies its
    interpreter, script and working directory all belong to the same release
-10. Recreates the pm2 app, waits for frontend health
+10. Recreates the pm2 app, waits for frontend health, then saves the verified
+    release binding for PM2 resurrection after a host reboot
 11. On any failure in 8–10, rolls back every release-bound service to the
-    previous release automatically
+    previous release automatically and saves that verified rollback binding
 12. Writes `.deploy-complete`, `active-release`, and a line in `deployments.log`
 
 `.deploy-complete` means *this release has served healthy traffic*, not *the
@@ -86,6 +87,12 @@ build finished*. A release that builds and then fails its health check is
 rebuilt on the next attempt rather than reused. It used to be written after the
 build, which meant a broken release was cached as complete and retrying could
 never recover it.
+
+PM2 resurrection state is written only after the frontend health check passes.
+A save failure fails the service switch and triggers rollback rather than
+leaving a deployment that works until the next reboot. Deploying an already
+active, healthy commit also refreshes the saved state without restarting the
+frontend.
 
 ### Wang article publication identity
 

@@ -155,14 +155,39 @@ else:
         "  printf '%s\\n' '{\"metadata\":{\"vulnerabilities\":{\"critical\":0}}}'\n"
         "fi\n",
     )
-    _write_executable(bin_dir / "pm2", "#!/usr/bin/env bash\nexit 0\n")
+    _write_executable(
+        bin_dir / "pm2",
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "printf 'pm2 %s root=%s\\n' \"$*\" \"${SMART_ANSWER_WEB_ROOT:-}\" >> \"$TEST_DEPLOY_EVENT_LOG\"\n"
+        "if [[ \"${1:-}\" == 'start' ]]; then\n"
+        "  printf '%s\\n' \"$SMART_ANSWER_WEB_ROOT\" > \"$TEST_PM2_WEB_ROOT\"\n"
+        "fi\n"
+        "if [[ \"${1:-}\" == 'save' && -n \"${TEST_FAIL_PM2_SAVE_ONCE:-}\" && ! -e \"$TEST_PM2_SAVE_FAIL_MARKER\" ]]; then\n"
+        "  touch \"$TEST_PM2_SAVE_FAIL_MARKER\"\n"
+        "  exit 1\n"
+        "fi\n",
+    )
     _write_executable(
         bin_dir / "curl",
         "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "url=''\n"
+        "for argument in \"$@\"; do url=\"$argument\"; done\n"
+        "if [[ \"$url\" == \"$SMART_ANSWER_FRONTEND_HEALTH\" ]]; then\n"
+        "  web_root=''\n"
+        "  [[ ! -f \"$TEST_PM2_WEB_ROOT\" ]] || web_root=$(<\"$TEST_PM2_WEB_ROOT\")\n"
+        "  printf 'frontend-health root=%s\\n' \"$web_root\" >> \"$TEST_DEPLOY_EVENT_LOG\"\n"
+        "  if [[ -n \"${TEST_FAIL_TARGET_FRONTEND:-}\" && \"$web_root\" == *\"/$TEST_TARGET_SHA/web\" ]]; then\n"
+        "    exit 1\n"
+        "  fi\n"
+        "  exit 0\n"
+        "fi\n"
         "backend_program=$(\"$SMART_ANSWER_PLIST_BUDDY\" -c 'Print :ProgramArguments:0' \"$TEST_BACKEND_PLIST\")\n"
         "release=${backend_program%/backend/.venv/bin/python3}\n"
         "printf '{\"status\":\"ok\",\"release\":\"%s\"}\\n' \"${release##*/}\"\n",
     )
+    _write_executable(bin_dir / "sleep", "#!/usr/bin/env bash\nexit 0\n")
     _write_executable(
         bin_dir / "launchctl",
         "#!/usr/bin/env bash\n"
@@ -204,6 +229,9 @@ else:
         "TEST_BACKEND_PLIST": str(backend_plist),
         "TEST_REMINDER_PLIST": str(reminder_plist),
         "TEST_LAUNCHCTL_LOG": str(logs / "launchctl.log"),
+        "TEST_DEPLOY_EVENT_LOG": str(logs / "deploy-events.log"),
+        "TEST_PM2_WEB_ROOT": str(logs / "pm2-web-root"),
+        "TEST_PM2_SAVE_FAIL_MARKER": str(logs / "pm2-save-failed"),
         "TEST_TARGET_SHA": target_sha,
         "TEST_FAIL_MARKER": str(logs / "failed-reminder-load"),
     }
@@ -214,6 +242,8 @@ else:
         "backend_plist": backend_plist,
         "reminder_plist": reminder_plist,
         "launchctl_log": logs / "launchctl.log",
+        "deploy_event_log": logs / "deploy-events.log",
+        "pm2_web_root": logs / "pm2-web-root",
         "target_sha": target_sha,
         "target_release": target_release,
         "previous_release": previous_release,
@@ -237,10 +267,12 @@ def test_deploy_binds_loaded_fellowship_reminder_to_new_release(
     target_release = deploy_fixture["target_release"]
     deploy_root = deploy_fixture["deploy_root"]
     launchctl_log = deploy_fixture["launchctl_log"]
+    deploy_event_log = deploy_fixture["deploy_event_log"]
     assert isinstance(reminder_plist, Path)
     assert isinstance(target_release, Path)
     assert isinstance(deploy_root, Path)
     assert isinstance(launchctl_log, Path)
+    assert isinstance(deploy_event_log, Path)
 
     with reminder_plist.open("rb") as handle:
         reminder = plistlib.load(handle)
@@ -257,6 +289,168 @@ def test_deploy_binds_loaded_fellowship_reminder_to_new_release(
     assert f"load {reminder_plist}" in launchctl_calls
     assert "kickstart" not in launchctl_calls
     assert "Fellowship reminder is bound to" in result.stdout
+    events = deploy_event_log.read_text(encoding="utf-8").splitlines()
+    frontend_start = next(
+        index
+        for index, event in enumerate(events)
+        if event.startswith("pm2 start ") and f"root={target_release / 'web'}" in event
+    )
+    frontend_health = next(
+        index
+        for index, event in enumerate(events)
+        if event == f"frontend-health root={target_release / 'web'}"
+    )
+    pm2_save = next(index for index, event in enumerate(events) if event.startswith("pm2 save"))
+    assert frontend_start < frontend_health < pm2_save
+    assert sum(event.startswith("pm2 save") for event in events) == 1
+
+
+def test_unhealthy_frontend_is_not_saved_and_rollback_is_persisted(
+    deploy_fixture: dict[str, object],
+) -> None:
+    source = deploy_fixture["source"]
+    deploy = deploy_fixture["deploy"]
+    env = deploy_fixture["env"]
+    previous_release = deploy_fixture["previous_release"]
+    deploy_root = deploy_fixture["deploy_root"]
+    deploy_event_log = deploy_fixture["deploy_event_log"]
+    assert isinstance(source, Path)
+    assert isinstance(deploy, Path)
+    assert isinstance(env, dict)
+    assert isinstance(previous_release, Path)
+    assert isinstance(deploy_root, Path)
+    assert isinstance(deploy_event_log, Path)
+
+    result = _run(
+        "bash",
+        deploy,
+        cwd=source,
+        env={**env, "TEST_FAIL_TARGET_FRONTEND": "1"},
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert (deploy_root / "active-release").read_text(encoding="utf-8").strip() == str(
+        previous_release
+    )
+    events = deploy_event_log.read_text(encoding="utf-8").splitlines()
+    rollback_start = next(
+        index
+        for index, event in enumerate(events)
+        if event.startswith("pm2 start ") and f"root={previous_release / 'web'}" in event
+    )
+    rollback_health = next(
+        index
+        for index, event in enumerate(events)
+        if event == f"frontend-health root={previous_release / 'web'}"
+    )
+    save_indexes = [index for index, event in enumerate(events) if event.startswith("pm2 save")]
+    assert len(save_indexes) == 1
+    assert rollback_start < rollback_health < save_indexes[0]
+    assert not any(event.startswith("pm2 save") for event in events[:rollback_start])
+
+
+def test_pm2_save_failure_rolls_back_and_persists_previous_release(
+    deploy_fixture: dict[str, object],
+) -> None:
+    source = deploy_fixture["source"]
+    deploy = deploy_fixture["deploy"]
+    env = deploy_fixture["env"]
+    previous_release = deploy_fixture["previous_release"]
+    deploy_root = deploy_fixture["deploy_root"]
+    deploy_event_log = deploy_fixture["deploy_event_log"]
+    assert isinstance(source, Path)
+    assert isinstance(deploy, Path)
+    assert isinstance(env, dict)
+    assert isinstance(previous_release, Path)
+    assert isinstance(deploy_root, Path)
+    assert isinstance(deploy_event_log, Path)
+
+    result = _run(
+        "bash",
+        deploy,
+        cwd=source,
+        env={**env, "TEST_FAIL_PM2_SAVE_ONCE": "1"},
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "failed to save PM2 process list" in result.stderr
+    assert (deploy_root / "active-release").read_text(encoding="utf-8").strip() == str(
+        previous_release
+    )
+    events = deploy_event_log.read_text(encoding="utf-8").splitlines()
+    save_indexes = [index for index, event in enumerate(events) if event.startswith("pm2 save")]
+    assert len(save_indexes) == 2
+    rollback_start = next(
+        index
+        for index, event in enumerate(events)
+        if event.startswith("pm2 start ") and f"root={previous_release / 'web'}" in event
+    )
+    rollback_health = next(
+        index
+        for index, event in enumerate(events)
+        if event == f"frontend-health root={previous_release / 'web'}"
+    )
+    assert save_indexes[0] < rollback_start < rollback_health < save_indexes[1]
+
+
+def test_already_active_release_refreshes_pm2_state_without_restart(
+    deploy_fixture: dict[str, object],
+) -> None:
+    source = deploy_fixture["source"]
+    deploy = deploy_fixture["deploy"]
+    env = deploy_fixture["env"]
+    deploy_root = deploy_fixture["deploy_root"]
+    target_release = deploy_fixture["target_release"]
+    deploy_event_log = deploy_fixture["deploy_event_log"]
+    assert isinstance(source, Path)
+    assert isinstance(deploy, Path)
+    assert isinstance(env, dict)
+    assert isinstance(deploy_root, Path)
+    assert isinstance(target_release, Path)
+    assert isinstance(deploy_event_log, Path)
+    (deploy_root / "active-release").write_text(f"{target_release}\n", encoding="utf-8")
+
+    result = _run("bash", deploy, cwd=source, env=env)
+
+    events = deploy_event_log.read_text(encoding="utf-8").splitlines()
+    assert not any(event.startswith(("pm2 delete", "pm2 start")) for event in events)
+    assert events[-1].startswith("pm2 save")
+    assert "PM2 resurrection state saved" in result.stdout
+
+
+def test_already_active_unhealthy_frontend_is_not_saved(
+    deploy_fixture: dict[str, object],
+) -> None:
+    source = deploy_fixture["source"]
+    deploy = deploy_fixture["deploy"]
+    env = deploy_fixture["env"]
+    deploy_root = deploy_fixture["deploy_root"]
+    target_release = deploy_fixture["target_release"]
+    deploy_event_log = deploy_fixture["deploy_event_log"]
+    pm2_web_root = deploy_fixture["pm2_web_root"]
+    assert isinstance(source, Path)
+    assert isinstance(deploy, Path)
+    assert isinstance(env, dict)
+    assert isinstance(deploy_root, Path)
+    assert isinstance(target_release, Path)
+    assert isinstance(deploy_event_log, Path)
+    assert isinstance(pm2_web_root, Path)
+    (deploy_root / "active-release").write_text(f"{target_release}\n", encoding="utf-8")
+    pm2_web_root.write_text(f"{target_release / 'web'}\n", encoding="utf-8")
+
+    result = _run(
+        "bash",
+        deploy,
+        cwd=source,
+        env={**env, "TEST_FAIL_TARGET_FRONTEND": "1"},
+        check=False,
+    )
+
+    assert result.returncode == 1
+    events = deploy_event_log.read_text(encoding="utf-8").splitlines()
+    assert not any(event.startswith("pm2 save") for event in events)
 
 
 def test_reminder_activation_failure_rolls_back_its_release_binding(
