@@ -1454,6 +1454,7 @@ def main(argv: list[str] | None = None) -> int:
                     stale_cross_sermon_constraint_retirement
                 ),
             })
+            record.input_artifacts(args.package)
             record.outputs(args.package)
     print(json.dumps(output, ensure_ascii=False, indent=2))
     return 0

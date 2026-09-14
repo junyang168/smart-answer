@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
-from backend.api.wang_operations import _cell, _sermon_rows, _sha256_file
+from backend.api.wang_operations import _cell, _sermon_rows, _source_body_sha256
 
 
 def _catalog(tmp_path: Path) -> Path:
@@ -23,16 +23,16 @@ def test_operations_status_uses_published_then_reviewed_fallback(tmp_path: Path)
     reviewed.mkdir()
     reviewed_path = reviewed / "lecture.json"
     published_path = published / "lecture.json"
-    reviewed_path.write_text("reviewed", encoding="utf-8")
+    reviewed_path.write_text(json.dumps({"script": [{"index": 1, "text": "正文"}]}), encoding="utf-8")
     paths = SimpleNamespace(sermon_catalog=_catalog(tmp_path))
 
     assert _sermon_rows(paths, tmp_path)[0]["source_path"] == reviewed_path
 
-    published_path.write_text("published", encoding="utf-8")
+    published_path.write_text(json.dumps({"script": [{"index": 1, "text": "正文"}]}), encoding="utf-8")
     assert _sermon_rows(paths, tmp_path)[0]["source_path"] == published_path
 
 
-def test_publishing_a_review_only_source_makes_its_old_extraction_stale(
+def test_editorial_only_publishing_does_not_make_extraction_stale(
     tmp_path: Path,
 ) -> None:
     published = tmp_path / "script_published"
@@ -40,9 +40,9 @@ def test_publishing_a_review_only_source_makes_its_old_extraction_stale(
     published.mkdir()
     reviewed.mkdir()
     reviewed_path = reviewed / "lecture.json"
-    reviewed_path.write_text("reviewed", encoding="utf-8")
+    reviewed_path.write_text(json.dumps({"script": [{"index": 1, "text": "正文"}]}), encoding="utf-8")
     paths = SimpleNamespace(sermon_catalog=_catalog(tmp_path))
-    reviewed_sha = _sha256_file(reviewed_path)
+    reviewed_sha = _source_body_sha256(reviewed_path, "sermon")
     run = {
         "effective_status": "succeeded", "status": "succeeded",
         "finished_at": datetime.now(timezone.utc),
@@ -58,14 +58,25 @@ def test_publishing_a_review_only_source_makes_its_old_extraction_stale(
     )["state"] == "current"
 
     published_path = published / "lecture.json"
-    published_path.write_text("published", encoding="utf-8")
+    published_path.write_text(json.dumps({"script": [
+        {"index": "subtitle-1", "type": "subtitle", "text": "## 编辑标题"},
+        {"index": 1, "text": "正文"},
+    ]}), encoding="utf-8")
     current_path = _sermon_rows(paths, tmp_path)[0]["source_path"]
     cell = _cell(
-        [run], stage="extraction", current_source_sha=_sha256_file(current_path),
+        [run], stage="extraction", current_source_sha=_source_body_sha256(current_path, "sermon"),
         upstream_finished=None,
     )
-    assert cell["state"] == "stale"
-    assert cell["reason"] == "source_changed"
+    assert cell["state"] == "current"
+
+    published_path.write_text(json.dumps({"script": [{"index": 1, "text": "正文已改"}]}), encoding="utf-8")
+    changed = _cell(
+        [run], stage="extraction",
+        current_source_sha=_source_body_sha256(published_path, "sermon"),
+        upstream_finished=None,
+    )
+    assert changed["state"] == "stale"
+    assert changed["reason"] == "source_changed"
 
 
 def test_operations_status_has_no_source_only_when_both_are_missing(tmp_path: Path) -> None:

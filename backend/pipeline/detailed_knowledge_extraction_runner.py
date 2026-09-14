@@ -2202,6 +2202,7 @@ def _run(
             with _extraction_run_record(
                 source_id, enabled=record_run_ledger
             ) as record:
+                record.input_artifacts(source_path)
                 record.inputs({"fingerprint_sha256": identity["fingerprint_sha256"]})
                 existing["coverage"] = _coverage(source_path, output_path)
                 _archive(output_path)
@@ -2264,6 +2265,7 @@ def _run(
     with _extraction_run_record(
         source_id, enabled=record_run_ledger
     ) as record:
+        record.input_artifacts(source_path)
         record.model(client.model)
         if isinstance(client, CodexSubscriptionClient):
             record.metadata({"backend": client.backend})

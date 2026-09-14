@@ -445,6 +445,7 @@ def main(argv: list[str] | None = None) -> int:
                 timeout_seconds=600, max_retries=3, max_output_tokens=16000,
             )
         )
+        record.input_artifacts(args.package)
         updated = run(
             package_path=args.package,
             output_path=args.output,

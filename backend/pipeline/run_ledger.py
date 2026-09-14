@@ -21,6 +21,7 @@ ten-minute extraction would be a worse bargain than an incomplete one.
 from __future__ import annotations
 
 import getpass
+import hashlib
 import json
 import os
 import secrets
@@ -102,6 +103,24 @@ def current_command() -> str:
     return shlex.join([Path(sys.argv[0]).name, *sys.argv[1:]]) if sys.argv else ""
 
 
+def _artifact_identity(path: Any) -> dict[str, Any]:
+    """Snapshot a path now, so later overwrites cannot rewrite run history."""
+
+    artifact = Path(path)
+    result: dict[str, Any] = {"path": str(artifact)}
+    try:
+        data = artifact.read_bytes()
+    except OSError:
+        result.update({"sha256": None, "size_bytes": None, "state": "missing"})
+    else:
+        result.update({
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "size_bytes": len(data),
+            "state": "present",
+        })
+    return result
+
+
 class RunRecord:
     """A single row being written as the work happens.
 
@@ -127,6 +146,7 @@ class RunRecord:
         self._usage: list[dict[str, Any]] = []
         self._quality: dict[str, Any] = {}
         self._outputs: list[str] = []
+        self._input_artifacts: list[dict[str, Any]] = []
         self._inputs: dict[str, Any] = {}
         self._metadata: dict[str, Any] = {}
         self._source_ids: list[str] = []
@@ -155,6 +175,13 @@ class RunRecord:
     def inputs(self, values: Mapping[str, Any]) -> None:
         """Which inputs this run read, so a later read can tell current from stale."""
         self._inputs.update({k: v for k, v in dict(values or {}).items() if v is not None})
+
+    def input_artifacts(self, *paths: Any) -> None:
+        """Record the exact files read, at the moment the runner reads them."""
+
+        for path in paths:
+            if path is not None:
+                self._input_artifacts.append(_artifact_identity(path))
 
     def metadata(self, values: Mapping[str, Any]) -> None:
         self._metadata.update(dict(values or {}))
@@ -281,6 +308,12 @@ class RunRecord:
                 "records tokens but not a cost"
             )
         metadata = dict(self._metadata)
+        if self._input_artifacts:
+            metadata["input_artifacts"] = list(self._input_artifacts)
+        if self._outputs:
+            metadata["output_artifacts"] = [
+                _artifact_identity(path) for path in self._outputs
+            ]
         if cost.unpriced:
             metadata["unpriced_models"] = list(cost.unpriced)
         self._execute(

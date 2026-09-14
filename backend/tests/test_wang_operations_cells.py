@@ -58,6 +58,16 @@ def test_extraction_without_a_recorded_input_cannot_claim_freshness() -> None:
     assert cell["reason"] == "no_recorded_input"
 
 
+def test_applied_body_coordinate_migration_proves_legacy_run_is_current() -> None:
+    run = _run("extraction", finished=NOW)
+    run["input_sha256"] = {"source_sha256": "legacy-raw-sha"}
+    cell = _cell(
+        [run], stage="extraction", current_source_sha="body-sha",
+        current_store_source_sha="body-sha", upstream_finished=None,
+    )
+    assert cell["state"] == "current"
+
+
 def test_as_datetime_reads_a_stored_timestamp_and_survives_a_bad_one() -> None:
     assert _as_datetime("2026-08-13T18:42:00+00:00") == datetime(
         2026, 8, 13, 18, 42, tzinfo=timezone.utc
@@ -133,6 +143,21 @@ def test_a_failed_stage_keeps_saying_failed_while_upstream_reruns() -> None:
         upstream_in_flight=True,
     )
     assert cell["state"] == "failed"
+
+
+def test_cancelled_attempt_does_not_overwrite_successful_lineage() -> None:
+    success = _run("extraction", finished=NOW - timedelta(hours=1))
+    success["run_id"] = "RUN-success"
+    success["input_sha256"] = {"source_sha256": "body-sha"}
+    cancelled = _run("extraction", finished=NOW, status="cancelled")
+    cancelled["run_id"] = "RUN-cancelled"
+
+    cell = _cell(
+        [success, cancelled], stage="extraction", current_source_sha="body-sha",
+        upstream_finished=None,
+    )
+    assert cell["state"] == "current"
+    assert cell["run"]["run_id"] == success["run_id"]
 
 
 def test_a_run_that_names_no_module_and_wrote_nothing_is_not_evidence() -> None:
