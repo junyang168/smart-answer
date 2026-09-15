@@ -128,7 +128,7 @@ def _build(*, mutate_fragment=None, plans=None):
         direct_admissions_by_claim={
             "C-SEED": [
                 {
-                    "signal": "primary_scripture_exegesis",
+                    "signal": "claim_level_passage_exegesis",
                     "passage_unit_ids": ["16:13-18"],
                 }
             ]
@@ -187,7 +187,7 @@ def test_section_labels_use_current_claim_revision_not_stale_parent_refs():
         direct_admissions_by_claim={
             "C-SEED": [
                 {
-                    "signal": "primary_scripture_exegesis",
+                    "signal": "claim_level_passage_exegesis",
                     "passage_unit_ids": ["16:13-18"],
                 }
             ]

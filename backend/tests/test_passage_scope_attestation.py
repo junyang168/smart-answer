@@ -21,9 +21,9 @@ def _claims():
     ]
 
 
-def _payload(*, role="primary_passage", review_status="human_approved", references=True):
+def _payload(*, role="passage_exegesis", review_status="human_approved", references=True):
     body = {
-        "schema_version": "wang_passage_scope_attestation_v1",
+        "schema_version": "wang_passage_scope_attestation_v2",
         "claim_manifest_sha256": "manifest-sha",
         "passage_units_sha256": passage_units_sha256(PASSAGE_UNITS),
         "references": (
@@ -47,14 +47,14 @@ def _payload(*, role="primary_passage", review_status="human_approved", referenc
     return body | {"artifact_sha256": sha256_json(body)}
 
 
-def test_only_reviewed_primary_passage_can_seed_scope():
+def test_only_reviewed_claim_level_exegesis_can_seed_scope():
     admissions = validate_passage_scope_attestation(
         _payload(),
         claims=_claims(),
         claim_manifest_sha256="manifest-sha",
         passage_units=PASSAGE_UNITS,
     )
-    assert admissions["C-1"][0]["signal"] == "primary_scripture_exegesis"
+    assert admissions["C-1"][0]["signal"] == "claim_level_passage_exegesis"
     assert admissions["C-1"][0]["passage_unit_ids"] == ["16:13-18"]
 
     support_only = validate_passage_scope_attestation(
@@ -64,6 +64,14 @@ def test_only_reviewed_primary_passage_can_seed_scope():
         passage_units=PASSAGE_UNITS,
     )
     assert support_only == {}
+
+    sermon_primary_without_claim_exegesis = validate_passage_scope_attestation(
+        _payload(role="primary_passage"),
+        claims=_claims(),
+        claim_manifest_sha256="manifest-sha",
+        passage_units=PASSAGE_UNITS,
+    )
+    assert sermon_primary_without_claim_exegesis == {}
 
 
 @pytest.mark.parametrize(

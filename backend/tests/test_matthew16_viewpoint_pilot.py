@@ -143,11 +143,11 @@ def _fixture(tmp_path):
     return catalog, selection, manifest, sources, claims, article
 
 
-def _role_attestation(manifest, claims, *, role="primary_passage"):
+def _role_attestation(manifest, claims, *, role="passage_exegesis"):
     claim = claims[0]
     pin = next(row for row in manifest["claims"] if row["claim_id"] == claim["claim_id"])
     body = {
-        "schema_version": "wang_passage_scope_attestation_v1",
+        "schema_version": "wang_passage_scope_attestation_v2",
         "claim_manifest_sha256": manifest["manifest_sha256"],
         "passage_units_sha256": passage_units_sha256(PASSAGE_UNITS),
         "references": [

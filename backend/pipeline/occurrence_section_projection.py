@@ -414,7 +414,7 @@ def build_occurrence_section_projection(
         "current_claim_manifest": current_claim_manifest,
         "claim_universe_sha256": claim_universe_sha256(current_pins),
         "policy": {
-            "section_label_authority": "approved_primary_scripture_exegesis_only",
+            "section_label_authority": "approved_claim_level_passage_exegesis_only",
             "inheritance_path": "claim_evidence_step_source_fragment_paragraph_section",
             "section_interval": "zero_based_half_open",
             "title_semantics_used": False,

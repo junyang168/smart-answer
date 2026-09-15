@@ -3,7 +3,9 @@
 ``Claim.scripture_refs`` records which passages a Claim mentions.  It does not
 say whether the professor is interpreting that passage.  This artifact supplies
 that missing, reviewable occurrence-level judgment without changing Claim master
-data.  Only an approved ``primary_passage`` occurrence may seed a passage scope.
+data.  Only an approved ``passage_exegesis`` occurrence may seed a passage scope.
+That judgment is Claim-level: a sermon need not use Matthew as its primary
+passage when one of its Claims directly asserts what a Matthew text means.
 """
 
 from __future__ import annotations
@@ -14,11 +16,12 @@ from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.pipeline.passage_knowledge_slice import reference_overlaps
 
 
-SCHEMA_VERSION = "wang_passage_scope_attestation_v1"
-PRIMARY_EXEGESIS_ROLE = "primary_passage"
+SCHEMA_VERSION = "wang_passage_scope_attestation_v2"
+PASSAGE_EXEGESIS_ROLE = "passage_exegesis"
 ALLOWED_ROLES = frozenset(
     {
-        PRIMARY_EXEGESIS_ROLE,
+        PASSAGE_EXEGESIS_ROLE,
+        "primary_passage",
         "parallel_passage",
         "lexical_support",
         "historical_background",
@@ -108,10 +111,10 @@ def validate_passage_scope_attestation(
         )
         if overlapping_units and role == "unclassified":
             raise ValueError(f"{claim_id}: overlapping scripture reference is unclassified")
-        if overlapping_units and role == PRIMARY_EXEGESIS_ROLE:
+        if overlapping_units and role == PASSAGE_EXEGESIS_ROLE:
             admissions.setdefault(claim_id, []).append(
                 {
-                    "signal": "primary_scripture_exegesis",
+                    "signal": "claim_level_passage_exegesis",
                     "passage_unit_ids": overlapping_units,
                     "source_ref_index": ref_index,
                     "scripture_ref": scripture_ref,
