@@ -187,12 +187,12 @@ with run_record(subject="2016_NYSC_3", stage="extraction", trigger="cli") as run
 
 現在的首頁是四張連結卡，導覽列已經叫「總覽」卻沒有總覽的內容。改成表。四張卡縮成頁尾一行連結。
 
-行的全集是 **240**：`sermon_catalog.json` 的 205 篇講道，加上 `notes_to_surmon/` 裡 35 個帶 `unified_source.md` 的筆記母本。其中約 90 篇講道還沒有已發布逐字稿，沒有可抽取的穩定原文——這些列**照樣在表上**，抽取格顯示「無原文」。藏掉它們，表就從「全庫的工作佇列」退化成「已經動過的那部分的進度條」。
+行的全集按來源身分重算，當前是 **225**：`sermon_catalog.json` 的 205 篇講道，加上 20 篇合格母本。母本不能用 `notes_to_surmon/` 的目錄數量代替；Project 自己的 `meta.json` 若為 `project_type=transcript`，它是供查經使用、由既有講道逐字稿生成的編輯視圖，必須排除，其所連結的原始講道已在 205 篇中。即使 Project 位於 `sermon_note` 系列，也不能忽略自己的 `project_type`。沒有明確 `bible_verse` 的筆記結構母本仍是來源，只進 `book_level_sources`，不能因未定章而從總表消失。
 
 ```
 王教授文庫  [總覽] 文章  馬太進度  論證層  來源覆蓋
 ─────────────────────────────────────────────────────────────────────
-系列 [全部 ▾]  狀態 [全部 ▾]  [ ] 只看有問題的               240 篇
+系列 [全部 ▾]  狀態 [全部 ▾]  [ ] 只看有問題的               225 篇
 ─────────────────────────────────────────────────────────────────────
       來源                      抽取        複審      仲裁     合併  入庫       文章
  [ ]  2016_NYSC_1 …             舊          舊 14/17  舊 3修正  ✗    ✓ 無變化   1 篇
@@ -324,8 +324,8 @@ API：`GET /admin/wang/operations/runs?stage=&status=&trigger=&since=&limit=`。
 ### 一句話的結論
 
 ```
-242 篇文件 · 25 篇量過 · 5 篇需要處理，其餘都在正常範圍。
-217 篇從未抽取，所以從未量過 · 量測於 2026/8/21 15:40
+225 篇文件 · N 篇量過 · M 篇需要處理，其餘都在正常範圍。
+未抽取數與量測時間均由當次 read model 顯示，不寫死在頁面。
 ```
 
 第二行是重點。綠燈儀表板最典型的失敗是**因為什麼都沒跑所以是綠的**；沒量到的數字如果不顯示，「安靜」和「健康」長得一模一樣。分母與講道總表同一份來源清單（第 16 節），由 `wang_operations.corpus_rows` 產生——兩頁各自數一次語料，遲早會數出不同的數字。
@@ -435,7 +435,7 @@ API：`GET /admin/wang/operations/runs?stage=&status=&trigger=&since=&limit=`。
 
 ## 16. 行的全集
 
-**講道總表：240（已定）。** 卡上寫 131 行，量不出來：`sermon_catalog.json` 有 205 筆、`source_coverage_catalog.py` 說語料 203 篇、`script_published/` 有 115 個逐字稿、`notes_to_surmon/` 有 35 個帶 `unified_source.md` 的母本、PostgreSQL 裡有 25 個 `source_documents`——沒有一個組合等於 131。負責人已定案：全庫都要 ingest。所以全集取最完整的一份——205 篇講道加 35 個母本，讀 `sermon_catalog.json` 與 `notes_to_surmon/*/meta.json`，兩者都是既有的可重跑 read model，不新造名單。90 篇還沒有逐字稿的講道以「無原文」留在表上（第 6 節），因為「要先把原文弄出來」也是這張表要排的工作。
+**講道總表：按來源身分重算，當前為 225。** 讲道全集讀 `sermon_catalog.json`，母本全集讀 notes-to-manuscript Series membership 與每個 Project 自己的 `meta.json`；只算非 `project_type=transcript` 且有當前 `final.md` 的 Project。`project_type=transcript` 是查經用的講道編輯視圖，即使被掛在 `sermon_note` Series 下也必須排除，不能與其所連結的原始講道各算一次。目錄數、檔案數、資料庫已入庫數與 run ledger 都不是來源全集，因為它們分別會包含非來源 Project、歷史產物或只跑過的子集。沒有逐字稿的講道以「無原文」留在表上，因為「要先把原文弄出來」也是這張表要排的工作。
 
 **文章總表：計劃加文章。** PostgreSQL 裡的 CompositionPlan（今天 44 個）加上已有 draft 的文章（今天 3 篇，都有計劃）。計劃是文章的起點，還沒寫的計劃就是文章線的「✗」，跟講道線的 90 篇「無原文」同一個道理：還沒動的工作要在表上，不然沒人去動。
 

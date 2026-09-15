@@ -34,6 +34,7 @@ from backend.pipeline.knowledge_consensus_applier import (
     ConsensusApplicationError,
     validate_reviewed_candidate_artifact,
 )
+from backend.pipeline.knowledge_source import validate_package_current_source_provenance
 from backend.api.canonical_repository.reviewed_candidate_contract import (
     reseal_after_relation_id_migration,
     validate_store_package_authorization,
@@ -47,6 +48,10 @@ from backend.pipeline.relation_id_namespace import (
 )
 
 RELATION_COLLECTIONS = ("claim_relations", "knowledge_relations")
+DEFAULT_TRANSCRIPT_DIRS = [
+    Path("/opt/homebrew/var/www/church/web/data/script_published"),
+    Path("/opt/homebrew/var/www/church/web/data/script_review"),
+]
 
 
 def _seal_audit(audit: dict[str, Any]) -> dict[str, Any]:
@@ -1303,6 +1308,16 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument(
+        "--transcript-dir",
+        action="append",
+        type=Path,
+        dest="transcript_dirs",
+        help=(
+            "repeatable current transcript root used for the final provenance "
+            "read before planning or applying"
+        ),
+    )
     args = parser.parse_args(argv)
 
     original_package = json.loads(args.package.read_text(encoding="utf-8"))
@@ -1324,6 +1339,14 @@ def main(argv: list[str] | None = None) -> int:
         package = reseal_after_relation_id_migration(
             original_package, package, relation_id_migration
         )
+    try:
+        validate_package_current_source_provenance(
+            package, args.transcript_dirs or DEFAULT_TRANSCRIPT_DIRS
+        )
+    except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            f"supersede package no longer matches its current source: {exc}"
+        ) from exc
     store = PostgresKnowledgeStore(args.database_url)
     (
         change_set,
@@ -1349,6 +1372,22 @@ def main(argv: list[str] | None = None) -> int:
             args.retire_stale_ai_cross_sermon_constraint
         ),
     )
+    claim_evidence_guard = (
+        store.read_claim_evidence_reciprocity_guard(change_set)
+        if change_set.operations
+        else None
+    )
+    claim_evidence_snapshot = (
+        {
+            "guard_sha256": claim_evidence_guard["guard_sha256"],
+            "snapshot_sha256": claim_evidence_guard[
+                "expected_active_snapshot"
+            ]["snapshot_sha256"],
+            "counts": claim_evidence_guard["expected_active_snapshot"]["counts"],
+        }
+        if claim_evidence_guard is not None
+        else None
+    )
     output: dict[str, Any] = {
         "package": str(args.package),
         "sources": sorted(package_source_ids(package)),
@@ -1369,6 +1408,7 @@ def main(argv: list[str] | None = None) -> int:
         "products_to_rebuild": products,
         "semantic_rebind_required": bool(semantic_blockers),
         "semantic_references_to_rebind": semantic_blockers,
+        "current_claim_evidence_snapshot": claim_evidence_snapshot,
     }
     if obsolete_retirement is not None:
         output["obsolete_candidate_batch_retirement"] = obsolete_retirement
@@ -1433,7 +1473,9 @@ def main(argv: list[str] | None = None) -> int:
                     "stale_ai_cross_sermon_constraint_retirement": (
                         stale_cross_sermon_constraint_retirement
                     ),
+                    "current_claim_evidence_snapshot": claim_evidence_snapshot,
                 },
+                expected_claim_evidence_guard=claim_evidence_guard,
             )
             record.quality({
                 "status": (output["result"] or {}).get("status"),
@@ -1453,6 +1495,7 @@ def main(argv: list[str] | None = None) -> int:
                 "stale_ai_cross_sermon_constraint_retirement": (
                     stale_cross_sermon_constraint_retirement
                 ),
+                "current_claim_evidence_snapshot": claim_evidence_snapshot,
             })
             record.input_artifacts(args.package)
             record.outputs(args.package)

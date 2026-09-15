@@ -49,6 +49,10 @@ class KnowledgeSourceDocument(EvolvingKnowledgeRecord):
     editorial_structure_sha256: Optional[str] = None
     locator_space: Optional[str] = None
     extraction_record_namespace: Optional[str] = None
+    source_visual_sha256: Optional[str] = None
+    visual_source_assets: list[dict[str, Any]] = Field(default_factory=list)
+    visual_sources: list[dict[str, Any]] = Field(default_factory=list)
+    visual_source_attestations: list[dict[str, Any]] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def locator_identity_is_explicit(self) -> "KnowledgeSourceDocument":
@@ -81,6 +85,15 @@ class SourceFragmentRecord(EvolvingKnowledgeRecord):
     paragraph_text_sha256: Optional[str] = None
     verbatim_excerpt_sha256: Optional[str] = None
     anchor_state: str = "unresolved"
+    source_modality: Optional[Literal["visual"]] = None
+    visual_locator: Optional[str] = None
+    visual_block_sha256: Optional[str] = None
+    visual_canonical_sha256: Optional[str] = None
+    visual_renderer_version: Optional[str] = None
+    visual_facts: list[dict[str, Any]] = Field(default_factory=list)
+    visual_source_path: Optional[str] = None
+    visual_source_file_sha256: Optional[str] = None
+    visual_source_url: Optional[str] = None
 
 
 class QuestionRecord(EvolvingKnowledgeRecord):

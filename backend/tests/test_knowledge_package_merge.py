@@ -160,6 +160,44 @@ def test_merge_rejects_duplicate_reference_edges() -> None:
         validate_merged_package(package)
 
 
+def test_merge_rejects_linked_visual_fragment_without_exact_svg_path() -> None:
+    package = _package(1)
+    package["source_documents"][0].update({
+        "source_sha256": "a" * 64,
+        "source_body_sha256": "a" * 64,
+        "visual_source_assets": [{
+            "source_path": "/source/diagram.svg",
+            "source_sha256": "b" * 64,
+        }],
+        "visual_sources": [{
+            "locator": "S0001/V01",
+            "raw_sha256": "b" * 64,
+            "binding_kind": "linked_svg_asset",
+            "source_path": "/source/diagram.svg",
+            "source_file_sha256": "b" * 64,
+        }],
+    })
+    package["source_fragments"][0].update({
+        "source_sha256": "a" * 64,
+        "source_modality": "visual",
+        "paragraph_key": "S0001/V01",
+        "visual_locator": "S0001/V01",
+        "visual_block_sha256": "b" * 64,
+        "visual_source_file_sha256": "b" * 64,
+    })
+
+    with pytest.raises(
+        KnowledgePackageMergeError,
+        match="does not point to its exact SVG source file",
+    ):
+        validate_merged_package(package)
+
+    package["source_fragments"][0]["visual_source_path"] = (
+        "/source/diagram.svg"
+    )
+    validate_merged_package(package)
+
+
 def test_merge_can_record_neutral_comparison_scope(tmp_path: Path) -> None:
     paths = _write_packages(tmp_path, count=1)
     merged = merge_packages(

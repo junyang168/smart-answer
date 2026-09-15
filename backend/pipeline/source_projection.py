@@ -13,6 +13,7 @@ import json
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 
@@ -20,6 +21,9 @@ SOFT_DELETION = re.compile(r"~~([^~]+?)~~", re.S)
 HEADING_PATTERN = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 SVG_BLOCK_PATTERN = re.compile(r"<svg\b[^>]*>.*?</svg\s*>", re.I | re.S)
 SVG_OPEN_PATTERN = re.compile(r"<svg\b", re.I)
+MARKDOWN_IMAGE_PATTERN = re.compile(
+    r'!\[(?P<alt>[^\]]*)\]\((?P<url>[^)\s]+)\)'
+)
 SVG_ELEMENT_PATTERN = re.compile(
     r"</?(?:style|defs|marker|path|line|rect|ellipse|circle|text|tspan|polygon|"
     r"polyline|g)\b[^>]*>",
@@ -33,6 +37,7 @@ INLINE_HEADING_LINE_PATTERN = re.compile(
 )
 EDITORIAL_ROW_TYPES = frozenset({"subtitle", "comment"})
 EDITORIAL_ONLY_FIELDS = frozenset({"type", "user_id"})
+PROJECTION_ONLY_FIELDS = frozenset({"_visual_source_assets"})
 LOCATOR_SPACE = "spoken_body_v1"
 VISUAL_RENDERER_VERSION = "svg_literal_facts_v3_cjk_white"
 _UNSAFE_SVG_TAGS = frozenset(
@@ -89,13 +94,17 @@ class VisualSourceBlock:
     canonical_sha256: str | None
     facts: tuple[dict[str, Any], ...]
     parse_error: str | None = None
+    source_path: str | None = None
+    source_file_sha256: str | None = None
+    source_url: str | None = None
+    binding_kind: str = "inline_svg"
 
     @property
     def readable(self) -> bool:
         return self.parse_error is None
 
     def descriptor(self) -> dict[str, Any]:
-        return {
+        result = {
             "locator": self.locator,
             "segment_index": self.segment_index,
             "source_segment_index": self.source_segment_index,
@@ -110,7 +119,15 @@ class VisualSourceBlock:
             "raw_svg": self.raw_svg,
             "parse_status": "readable" if self.readable else "invalid",
             "parse_error": self.parse_error,
+            "binding_kind": self.binding_kind,
         }
+        if self.source_path is not None:
+            result["source_path"] = self.source_path
+        if self.source_file_sha256 is not None:
+            result["source_file_sha256"] = self.source_file_sha256
+        if self.source_url is not None:
+            result["source_url"] = self.source_url
+        return result
 
 
 def validate_visual_source_attestations(
@@ -249,6 +266,10 @@ def _parse_visual_block(
     ordinal: int,
     char_start: int,
     char_end: int,
+    source_path: str | None = None,
+    source_file_sha256: str | None = None,
+    source_url: str | None = None,
+    binding_kind: str = "inline_svg",
 ) -> VisualSourceBlock:
     raw_sha256 = hashlib.sha256(raw_svg.encode("utf-8")).hexdigest()
     try:
@@ -289,6 +310,10 @@ def _parse_visual_block(
         canonical_sha256=canonical_sha256,
         facts=facts,
         parse_error=error,
+        source_path=source_path,
+        source_file_sha256=source_file_sha256,
+        source_url=source_url,
+        binding_kind=binding_kind,
     )
 
 
@@ -323,6 +348,61 @@ def visual_source_blocks(
             )
         )
     return tuple(rows)
+
+
+def bound_visual_source_blocks(
+    row: Mapping[str, Any], *, segment_index: str
+) -> tuple[VisualSourceBlock, ...]:
+    """Resolve SVG assets explicitly bound to links in one source row.
+
+    The Markdown link remains part of the original notes file and therefore of
+    the body identity.  The SVG bytes come from their own SHA-bound file.  This
+    keeps extraction's multimodal projection reproducible without pretending
+    those bytes were embedded in the notes manuscript.
+    """
+
+    text = str(row.get("text") or "")
+    values = row.get("_visual_source_assets") or []
+    if not isinstance(values, list):
+        raise ValueError("_visual_source_assets must be a list")
+    blocks: list[VisualSourceBlock] = []
+    for ordinal, value in enumerate(values, start=1):
+        if not isinstance(value, Mapping):
+            raise ValueError("_visual_source_assets rows must be objects")
+        start = value.get("char_start")
+        end = value.get("char_end")
+        raw_svg = str(value.get("raw_svg") or "")
+        source_path = str(value.get("source_path") or "")
+        source_file_sha256 = str(value.get("source_file_sha256") or "")
+        source_url = str(value.get("source_url") or "")
+        if (
+            not isinstance(start, int)
+            or not isinstance(end, int)
+            or start < 0
+            or end <= start
+            or end > len(text)
+        ):
+            raise ValueError("bound visual source has an invalid Markdown span")
+        if not raw_svg or not source_path or not re.fullmatch(
+            r"[0-9a-f]{64}", source_file_sha256
+        ):
+            raise ValueError("bound visual source lacks exact SVG file provenance")
+        blocks.append(
+            _parse_visual_block(
+                raw_svg=raw_svg,
+                locator=f"{segment_index}/V{ordinal:02d}",
+                segment_index=segment_index,
+                source_segment_index=row.get("index"),
+                ordinal=ordinal,
+                char_start=start,
+                char_end=end,
+                source_path=source_path,
+                source_file_sha256=source_file_sha256,
+                source_url=source_url or None,
+                binding_kind="linked_svg_asset",
+            )
+        )
+    return tuple(blocks)
 
 
 def spoken_text_without_visuals(
@@ -385,6 +465,19 @@ def validate_visual_fragment_against_block(
         raise ValueError("visual fragment canonical SHA does not match source")
     if str(fragment.get("visual_renderer_version") or "") != VISUAL_RENDERER_VERSION:
         raise ValueError("visual fragment renderer version is unsupported")
+    if block.binding_kind == "linked_svg_asset":
+        if str(fragment.get("visual_source_path") or "") != str(
+            block.source_path or ""
+        ):
+            raise ValueError("visual fragment does not point to the SVG source path")
+        if str(fragment.get("visual_source_file_sha256") or "") != str(
+            block.source_file_sha256 or ""
+        ):
+            raise ValueError("visual fragment does not bind the SVG file SHA")
+        if str(fragment.get("visual_source_url") or "") != str(
+            block.source_url or ""
+        ):
+            raise ValueError("visual fragment does not bind the Markdown image URL")
     rows = fragment.get("visual_facts")
     if not isinstance(rows, list) or not rows:
         raise ValueError("visual fragment must cite at least one literal fact")
@@ -400,6 +493,91 @@ def validate_visual_fragment_against_block(
             raise ValueError(
                 f"visual fragment fact {fact_id!r} does not match the SVG block"
             )
+
+
+def resolve_visual_source_descriptor(
+    descriptor: Mapping[str, Any], *, paragraph_text: str
+) -> VisualSourceBlock:
+    """Reopen and verify one persisted visual source against its real origin."""
+
+    locator = str(descriptor.get("locator") or "")
+    segment_index = str(descriptor.get("segment_index") or locator.split("/", 1)[0])
+    binding_kind = str(descriptor.get("binding_kind") or "inline_svg")
+    if binding_kind == "linked_svg_asset":
+        path_value = str(descriptor.get("source_path") or "")
+        expected_file_sha = str(descriptor.get("source_file_sha256") or "")
+        source_url = str(descriptor.get("source_url") or "")
+        if not path_value or not re.fullmatch(r"[0-9a-f]{64}", expected_file_sha):
+            raise ValueError("linked visual source lacks SVG path or physical SHA")
+        path = Path(path_value)
+        raw = path.read_bytes()
+        actual_file_sha = hashlib.sha256(raw).hexdigest()
+        if actual_file_sha != expected_file_sha:
+            raise ValueError("linked visual source file SHA does not match")
+        try:
+            raw_svg = raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("linked visual source is not UTF-8 SVG") from exc
+        start = descriptor.get("char_start")
+        end = descriptor.get("char_end")
+        if (
+            not isinstance(start, int)
+            or not isinstance(end, int)
+            or start < 0
+            or end <= start
+            or end > len(paragraph_text)
+        ):
+            raise ValueError("linked visual source has an invalid Markdown span")
+        match = MARKDOWN_IMAGE_PATTERN.fullmatch(paragraph_text[start:end])
+        if match is None or not source_url or match.group("url") != source_url:
+            raise ValueError("linked visual source does not match the Markdown image")
+        block = _parse_visual_block(
+            raw_svg=raw_svg,
+            locator=locator,
+            segment_index=segment_index,
+            source_segment_index=descriptor.get("source_segment_index"),
+            ordinal=int(descriptor.get("ordinal") or 0),
+            char_start=start,
+            char_end=end,
+            source_path=path_value,
+            source_file_sha256=actual_file_sha,
+            source_url=source_url,
+            binding_kind=binding_kind,
+        )
+    elif binding_kind == "inline_svg":
+        block = next(
+            (
+                value
+                for value in visual_source_blocks(
+                    paragraph_text,
+                    segment_index=segment_index,
+                    source_segment_index=descriptor.get("source_segment_index"),
+                )
+                if value.locator == locator
+            ),
+            None,
+        )
+        if block is None:
+            raise ValueError("inline visual source locator does not resolve")
+    else:
+        raise ValueError(f"unsupported visual source binding kind {binding_kind!r}")
+
+    persisted_raw = str(descriptor.get("raw_svg") or "")
+    if persisted_raw != block.raw_svg:
+        raise ValueError("visual source raw SVG does not match its origin")
+    if str(descriptor.get("raw_sha256") or "") != block.raw_sha256:
+        raise ValueError("visual source raw SHA does not match its origin")
+    if str(descriptor.get("canonical_sha256") or "") != str(
+        block.canonical_sha256 or ""
+    ):
+        raise ValueError("visual source canonical SHA does not match its origin")
+    if str(descriptor.get("renderer_version") or "") != VISUAL_RENDERER_VERSION:
+        raise ValueError("visual source renderer version is unsupported")
+    if list(descriptor.get("literal_facts") or []) != [
+        dict(row) for row in block.facts
+    ]:
+        raise ValueError("visual source literal facts do not match its origin")
+    return block
 
 
 def inline_markup_spans(text: str) -> tuple[InlineMarkupSpan, ...]:
@@ -576,7 +754,7 @@ def _canonical_body_row(row: Mapping[str, Any]) -> dict[str, Any]:
     return {
         str(key): value
         for key, value in row.items()
-        if str(key) not in EDITORIAL_ONLY_FIELDS
+        if str(key) not in EDITORIAL_ONLY_FIELDS | PROJECTION_ONLY_FIELDS
     }
 
 
@@ -617,11 +795,17 @@ def project_script(script: Any) -> SourceProjection:
                 )
             continue
         locator = f"S{len(body) + 1:04d}"
-        row_visuals = visual_source_blocks(
+        inline_visuals = visual_source_blocks(
             str(row.get("text") or ""),
             segment_index=locator,
             source_segment_index=row.get("index"),
         )
+        bound_visuals = bound_visual_source_blocks(row, segment_index=locator)
+        if inline_visuals and bound_visuals:
+            raise ValueError(
+                f"{locator}: inline SVG and linked SVG assets cannot share one row"
+            )
+        row_visuals = inline_visuals or bound_visuals
         spoken_row = dict(row)
         spoken_row["text"] = spoken_text_without_visuals(
             str(row.get("text") or ""), row_visuals

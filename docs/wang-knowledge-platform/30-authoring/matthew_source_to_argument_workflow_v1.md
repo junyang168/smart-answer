@@ -33,7 +33,10 @@ $DATA_BASE_DIR/wang-knowledge-platform/catalog/matthew_source_coverage.md
 
 該檔以第一至二十八章為檢索骨架，同時列出兩條來源管線：講道逐字稿，以及「馬太福音釋經」
 notes-to-manuscript 系列中非 `project_type=transcript` 的 Projects。`transcript` Project 是由講道逐字稿
-生成的編輯視圖，不再作為獨立的「筆記轉講稿」來源；它所連結的講道仍由原始講道來源管線進入。
+生成、供查經使用的編輯視圖，不再作為獨立的「筆記轉講稿」來源；它所連結的講道仍由原始講道來源管線進入。
+這項排除以 Project 自己的 `meta.json` 為準，不能只看 parent Series 的 `project_type`：位於
+`sermon_note` 系列或 `notes_to_surmon/` 目錄，不足以把一個 `project_type=transcript` 的 Project
+改判成母本。
 `source_directory` 是去重後的完整來源清單，
 `chapters[].sources` 是按章節使用的來源，`book_level_sources` 則保存尚未明確定章的全書或結構性材料。
 這是一份來源地圖，不是出版目錄或完成率報表；某章有來源，也不表示材料已足以成篇。
