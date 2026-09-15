@@ -1545,6 +1545,7 @@ def _anchored_fragment(
     source_id: str,
     anchor: dict[str, Any],
     source_rows: Sequence[dict[str, Any]],
+    visual_blocks: Mapping[str, VisualSourceBlock],
     source_sha256: str,
     extraction_section_index: int | None = None,
 ) -> dict[str, Any]:
@@ -1554,18 +1555,7 @@ def _anchored_fragment(
     modality = str(anchor.get("source_modality") or "spoken")
     visual = None
     if modality == "visual":
-        visual = next(
-            (
-                row
-                for row in visual_source_blocks(
-                    paragraph_text,
-                    segment_index=locator.split("/", 1)[0],
-                    source_segment_index=paragraph.get("index"),
-                )
-                if row.locator == locator
-            ),
-            None,
-        )
+        visual = visual_blocks.get(locator)
         if visual is None or not visual.readable:
             raise DetailedExtractionValidationError(
                 f"visual source locator {locator!r} cannot be bound"
@@ -1603,6 +1593,12 @@ def _anchored_fragment(
                 "visual_facts": [facts[fact_id] for fact_id in requested],
             }
         )
+        if visual.source_path is not None:
+            fragment["visual_source_path"] = visual.source_path
+        if visual.source_file_sha256 is not None:
+            fragment["visual_source_file_sha256"] = visual.source_file_sha256
+        if visual.source_url is not None:
+            fragment["visual_source_url"] = visual.source_url
     if extraction_section_index is not None:
         fragment["extraction_section_index"] = extraction_section_index
     return fragment
@@ -1652,6 +1648,9 @@ def compile_package(
     except VisualSourceAttestationError as exc:
         raise DetailedExtractionValidationError(str(exc)) from exc
     source_rows = projection.body_rows
+    visual_blocks_by_locator = {
+        block.locator: block for block in projection.visual_blocks
+    }
     declared_body_bindings = [
         value
         for value in (
@@ -1810,7 +1809,8 @@ def compile_package(
         fragment_by_anchor[key] = fragment_id
         fragments.append(_anchored_fragment(
             fragment_id=fragment_id, source_id=source_id, anchor=anchor,
-            source_rows=source_rows, source_sha256=source_sha256,
+            source_rows=source_rows, visual_blocks=visual_blocks_by_locator,
+            source_sha256=source_sha256,
             extraction_section_index=extraction_section_index,
         ))
         return fragment_id
@@ -1860,15 +1860,7 @@ def compile_package(
                 highlight = str(anchor.get("verbatim_excerpt") or "")
                 visual_fields: dict[str, Any] = {}
                 if modality == "visual":
-                    visual = next(
-                        row
-                        for row in visual_source_blocks(
-                            str(paragraph.get("text") or ""),
-                            segment_index=str(anchor["segment_index"]).split("/", 1)[0],
-                            source_segment_index=paragraph.get("index"),
-                        )
-                        if row.locator == anchor["segment_index"]
-                    )
+                    visual = visual_blocks_by_locator[str(anchor["segment_index"])]
                     highlight = visual.raw_svg
                     visual_fields = {
                         "source_modality": "visual",
@@ -1876,6 +1868,14 @@ def compile_package(
                         "visual_block_sha256": visual.raw_sha256,
                         "visual_fact_ids": list(anchor.get("visual_fact_ids") or []),
                     }
+                    if visual.source_path is not None:
+                        visual_fields["visual_source_path"] = visual.source_path
+                    if visual.source_file_sha256 is not None:
+                        visual_fields["visual_source_file_sha256"] = (
+                            visual.source_file_sha256
+                        )
+                    if visual.source_url is not None:
+                        visual_fields["visual_source_url"] = visual.source_url
                 anchors.append({
                     "paragraph_key": anchor["segment_index"],
                     "media_time": paragraph.get("start_time"),

@@ -346,6 +346,8 @@ def build_command_plan(
             sys.executable, "-m", "backend.pipeline.extraction_supersede_runner",
             str(paths["reviewed"]),
         ]
+        for transcript_dir in transcript_dirs:
+            ingest += ["--transcript-dir", str(transcript_dir)]
         if apply_ingest:
             ingest.append("--apply")
 

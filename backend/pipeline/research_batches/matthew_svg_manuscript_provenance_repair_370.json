@@ -1,18 +1,11 @@
 {
   "schema_version": "wang_research_batch_v1",
-  "batch_id": "RB-MATTHEW-THREE-UNRUN-MANUSCRIPTS-358-20260914",
-  "purpose": "Process the three eligible Matthew notes manuscripts that have never entered the claim pipeline, ahead of the remaining-sermon batch so Matthew CVP construction has their evidence.",
-  "selection_note": "This is a disjoint priority sub-batch owned by issue #358. It does not mutate the frozen 69-member run manifest and makes no chapter, topic, or viewpoint assignment.",
+  "batch_id": "RB-MATTHEW-SVG-MANUSCRIPT-PROVENANCE-REPAIR-370-20260914",
+  "purpose": "Re-extract the two Matthew notes manuscripts whose prior packages bound fragments to a processed projection instead of the independently SHA-bound SVG originals.",
+  "selection_note": "Issue #370 repair batch. It contains only the two affected notes manuscripts and does not reuse or overwrite issue #358 artifacts.",
   "semantic_assumption": "none",
   "transcript_ids": [],
   "sources": [
-    {
-      "source_id": "notes_manuscript:馬太福音結構",
-      "source_type": "notes_manuscript",
-      "source_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/馬太福音結構/final.md",
-      "source_sha256": "15c758c99623c9a3fad6411297c5a1e21f95fab6e002c63acd1a635b4d161d85",
-      "title": "福音書的可信性與馬太福音的結構"
-    },
     {
       "source_id": "notes_manuscript:登山寶訓的結構",
       "source_type": "notes_manuscript",
