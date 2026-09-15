@@ -15,6 +15,9 @@ from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.pipeline.occurrence_section_projection import (
     build_occurrence_section_projection,
 )
+from backend.pipeline.passage_scope_attestation import (
+    validate_passage_scope_attestation,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -64,12 +67,24 @@ def main() -> int:
     load_dotenv(PROJECT_ROOT / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scope-artifact", type=Path, required=True)
+    parser.add_argument("--scripture-role-attestation", type=Path, required=True)
     parser.add_argument("--section-plan-root", type=Path, action="append", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--database-url")
     args = parser.parse_args()
 
     scope, scope_sha = _verified_artifact(args.scope_artifact)
+    role_attestation = _read(args.scripture_role_attestation)
+    if scope.get("scripture_role_attestation_sha256") != role_attestation.get(
+        "artifact_sha256"
+    ):
+        raise ValueError("scope and scripture-role attestation do not match")
+    direct_admissions = validate_passage_scope_attestation(
+        role_attestation,
+        claims=[dict(row) for row in scope.get("claims") or []],
+        claim_manifest_sha256=str(scope.get("parent_claim_manifest_sha256") or ""),
+        passage_units=PASSAGE_UNITS,
+    )
     store = PostgresKnowledgeStore(args.database_url)
     projection = build_occurrence_section_projection(
         scope_claims=[dict(row) for row in scope.get("claims") or []],
@@ -83,6 +98,7 @@ def main() -> int:
         source_fragments=store.list_records("source_fragments"),
         source_documents=store.list_records("source_documents"),
         section_plans=_section_plans(args.section_plan_root),
+        direct_admissions_by_claim=direct_admissions,
     )
     _write_immutable(args.output, projection)
     print(

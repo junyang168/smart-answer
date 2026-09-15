@@ -28,7 +28,8 @@ def main() -> int:
     parser.add_argument("--source-map", type=Path, required=True)
     parser.add_argument("--source-selection", type=Path, required=True)
     parser.add_argument("--claim-manifest", type=Path, required=True)
-    parser.add_argument("--occurrence-projection", type=Path, required=True)
+    parser.add_argument("--occurrence-projection", type=Path)
+    parser.add_argument("--scripture-role-attestation", type=Path, required=True)
     parser.add_argument("--article-dir", type=Path, action="append", default=[])
     parser.add_argument("--thematic-source-id", action="append", default=[])
     parser.add_argument("--output", type=Path, required=True)
@@ -79,6 +80,7 @@ def main() -> int:
             if occurrence is not None
             else None
         ),
+        scripture_role_attestation=_read(args.scripture_role_attestation),
         article_dirs=args.article_dir,
         thematic_source_ids=args.thematic_source_id,
     )
