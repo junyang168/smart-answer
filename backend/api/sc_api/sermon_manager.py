@@ -236,7 +236,7 @@ class SermonManager:
             write_back_generated_subtitles,
         )
 
-        source_path = Path(self.base_folder) / "script_review" / f"{item}.json"
+        source_path = self.authoritative_transcript_path(item)
         report = write_back_generated_subtitles(
             source_path,
             expected_source_sha256=expected_source_sha256,
@@ -249,6 +249,17 @@ class SermonManager:
         # failed, callers could report the operation as failed even though the
         # governed transcript had already changed.
         return report
+
+    def authoritative_transcript_path(self, item: str) -> Path:
+        """Resolve the exact document an editor and extraction must share."""
+
+        published_path = Path(self.base_folder) / "script_published" / f"{item}.json"
+        if published_path.is_file():
+            return published_path
+        review_path = Path(self.base_folder) / "script_review" / f"{item}.json"
+        if review_path.is_file():
+            return review_path
+        raise FileNotFoundError(f"sermon transcript not found: {item}")
 
     def can_persist_generated_subtitles(self, user_id: str) -> bool:
         """Any editor or administrator may add headings without sermon ownership."""

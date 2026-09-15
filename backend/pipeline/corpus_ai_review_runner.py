@@ -481,6 +481,7 @@ def run_one(
             return "skipped", output_path
 
     with run_record(subject=transcript_id, stage="review") as record:
+        record.input_artifacts(survey_path, transcript_path)
         record.model(client.model)
         record.inputs({
             "fingerprint_sha256": identity["fingerprint_sha256"],
@@ -663,6 +664,7 @@ def run_claim_layer(
         subject_kind="source" if row_key else "batch",
         sources=[row_key] if row_key else [],
     ) as record:
+        record.input_artifacts(package_path, *transcript_paths)
         record.model(client.model)
         record.inputs({"package_sha256": source_identity["package_sha256"]})
         return _write_claim_layer_review(

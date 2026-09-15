@@ -83,6 +83,9 @@ def validate_merged_package(package: dict[str, Any]) -> None:
             "record IDs must be globally unique: " + ", ".join(sorted(collisions))
         )
     source_ids = ids["source_documents"]
+    source_documents = {
+        str(row["source_id"]): row for row in package.get("source_documents", [])
+    }
     fragment_ids = ids["source_fragments"]
     evidence_ids = ids["evidence_steps"]
     claim_ids = ids["claims"]
@@ -90,10 +93,62 @@ def validate_merged_package(package: dict[str, Any]) -> None:
     observation_ids = ids["observations"]
 
     for row in package.get("source_fragments", []):
-        if str(row.get("source_id") or "") not in source_ids:
+        source_id = str(row.get("source_id") or "")
+        if source_id not in source_ids:
             raise KnowledgePackageMergeError(
                 f"{row['fragment_id']}: unknown source_id {row.get('source_id')}"
             )
+        source = source_documents[source_id]
+        expected_source_sha = str(
+            source.get("source_body_sha256") or source.get("source_sha256") or ""
+        )
+        if expected_source_sha and str(row.get("source_sha256") or "") != expected_source_sha:
+            raise KnowledgePackageMergeError(
+                f"{row['fragment_id']}: fragment source generation does not match "
+                f"SourceDocument {source_id}"
+            )
+        if str(row.get("source_modality") or "spoken") != "visual":
+            continue
+        locator = str(row.get("visual_locator") or row.get("paragraph_key") or "")
+        visual_matches = [
+            value
+            for value in source.get("visual_sources") or []
+            if str(value.get("locator") or "") == locator
+        ]
+        if len(visual_matches) != 1:
+            raise KnowledgePackageMergeError(
+                f"{row['fragment_id']}: visual locator {locator!r} must resolve "
+                f"exactly once in SourceDocument {source_id}"
+            )
+        visual = visual_matches[0]
+        if str(row.get("visual_block_sha256") or "") != str(
+            visual.get("raw_sha256") or ""
+        ):
+            raise KnowledgePackageMergeError(
+                f"{row['fragment_id']}: visual fragment SHA does not match "
+                f"SourceDocument visual source {locator}"
+            )
+        if source.get("visual_source_assets"):
+            if str(visual.get("binding_kind") or "") != "linked_svg_asset":
+                raise KnowledgePackageMergeError(
+                    f"{row['fragment_id']}: linked visual source lacks an explicit "
+                    "SVG asset binding"
+                )
+            visual_path = str(visual.get("source_path") or "")
+            visual_file_sha = str(visual.get("source_file_sha256") or "")
+            if not visual_path or not visual_file_sha:
+                raise KnowledgePackageMergeError(
+                    f"{row['fragment_id']}: linked visual source lacks SVG path or SHA"
+                )
+            if (
+                str(row.get("visual_source_path") or "") != visual_path
+                or str(row.get("visual_source_file_sha256") or "")
+                != visual_file_sha
+            ):
+                raise KnowledgePackageMergeError(
+                    f"{row['fragment_id']}: visual fragment does not point to its "
+                    "exact SVG source file"
+                )
     for collection in ("questions", "position_nodes", "observations", "evidence_steps"):
         for row in package.get(collection, []):
             referenced_fragments = _reference_ids(

@@ -14,7 +14,9 @@ from backend.pipeline.source_projection import (
     live_script,
     live_text,
     project_script,
+    resolve_visual_source_descriptor,
     script_from_markdown_blocks,
+    validate_visual_fragment_against_block,
     validate_visual_source_attestations,
 )
 from backend.pipeline.transcript_source import resolve_transcript_path
@@ -27,6 +29,10 @@ PUBLICATION_READINESS_DECISIONS = {
     "insufficient_material",
 }
 
+MARKDOWN_IMAGE = re.compile(
+    r'!\[(?P<alt>[^\]]*)\]\((?P<url>[^)\s]+)\)'
+)
+
 
 def markdown_blocks(markdown: str) -> list[str]:
     """Return deterministic Markdown blocks without rewriting source text."""
@@ -34,12 +40,94 @@ def markdown_blocks(markdown: str) -> list[str]:
     return [block.strip() for block in re.split(r"\n[ \t]*\n+", normalized) if block.strip()]
 
 
+def _bind_markdown_visual_assets(
+    script: list[dict[str, Any]], source: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Attach SHA-bound SVG files without rewriting the notes manuscript.
+
+    The Markdown image token remains the textual source.  A projection-only
+    row field carries the exact SVG bytes, path and physical SHA so visual
+    evidence can be rendered and verified against that file.  The field is
+    excluded from body identity by ``source_projection``; replacing the link
+    with SVG here would create a body that ``source_path`` cannot reproduce.
+    """
+
+    assets = source.get("visual_source_assets") or []
+    if not assets:
+        return script
+    if not isinstance(assets, list):
+        raise ValueError("visual_source_assets must be a list")
+
+    by_url: dict[str, dict[str, Any]] = {}
+    for index, asset in enumerate(assets):
+        if not isinstance(asset, dict):
+            raise ValueError(f"visual_source_assets row {index} is not an object")
+        url = str(asset.get("markdown_url") or "").strip()
+        path_value = str(asset.get("source_path") or "").strip()
+        expected_sha256 = str(asset.get("source_sha256") or "").strip()
+        if not url or not path_value or not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
+            raise ValueError(
+                f"visual_source_assets row {index} requires markdown_url, "
+                "source_path and a lowercase SHA256"
+            )
+        if url in by_url:
+            raise ValueError(f"duplicate visual source asset URL: {url}")
+        by_url[url] = asset
+
+    materialized: set[str] = set()
+    result: list[dict[str, Any]] = []
+    for original in script:
+        row = dict(original)
+        text = str(row.get("text") or "")
+        bindings: list[dict[str, Any]] = []
+        for match in MARKDOWN_IMAGE.finditer(text):
+            url = match.group("url")
+            asset = by_url.get(url)
+            if asset is None:
+                continue
+            path = Path(str(asset["source_path"]))
+            raw = path.read_bytes()
+            actual_sha256 = hashlib.sha256(raw).hexdigest()
+            expected_sha256 = str(asset["source_sha256"])
+            if actual_sha256 != expected_sha256:
+                raise ValueError(f"visual source asset hash mismatch: {path}")
+            try:
+                svg = raw.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ValueError(f"visual source asset is not UTF-8 SVG: {path}") from exc
+            if not re.search(r"<svg\b", svg, flags=re.I):
+                raise ValueError(f"visual source asset is not SVG: {path}")
+            materialized.add(url)
+            bindings.append(
+                {
+                    "char_start": match.start(),
+                    "char_end": match.end(),
+                    "markdown_url": url,
+                    "source_url": url,
+                    "source_path": str(path),
+                    "source_file_sha256": actual_sha256,
+                    "raw_svg": svg,
+                }
+            )
+        if bindings:
+            row["_visual_source_assets"] = bindings
+        result.append(row)
+
+    unresolved = sorted(set(by_url) - materialized)
+    if unresolved:
+        raise ValueError(
+            "visual source asset URL does not resolve to a Markdown image: "
+            + ", ".join(unresolved)
+        )
+    return result
+
+
 def markdown_source_document(source: dict[str, Any]) -> tuple[dict[str, Any], bytes, Path]:
     path = Path(str(source["source_path"]))
     raw = path.read_bytes()
     text = raw.decode("utf-8")
-    blocks = markdown_blocks(text)
-    script = script_from_markdown_blocks(blocks)
+    script = script_from_markdown_blocks(markdown_blocks(text))
+    script = _bind_markdown_visual_assets(script, source)
     payload = {
         "metadata": {
             "title": source.get("title") or path.stem,
@@ -130,6 +218,97 @@ def load_knowledge_source_document(
         if legacy_sha256 != expected:
             raise ValueError(f"source hash mismatch: {path}")
     return payload, raw, path
+
+
+def validate_package_current_source_provenance(
+    package: dict[str, Any], transcript_dirs: list[Path]
+) -> None:
+    """Re-read every current source before a reviewed package may be stored.
+
+    Review is not a durable source lock.  A Markdown manuscript, transcript, or
+    separately bound SVG can change after review and before ingestion.  This
+    boundary therefore resolves the package's own SourceDocument descriptors
+    again and verifies every visual fragment against the freshly read visual
+    block.  ``load_knowledge_source_document`` performs the body/file/visual
+    identity checks; the fragment check proves that the stored visual locator
+    still names the exact SVG asset rather than merely a processed projection.
+    """
+
+    sources = {
+        str(row.get("source_id") or ""): row
+        for row in package.get("source_documents") or []
+        if isinstance(row, dict)
+    }
+    projections: dict[str, Any] = {}
+    for source_id, source in sources.items():
+        if not source_id:
+            raise ValueError("package SourceDocument is missing source_id")
+        payload, _raw, _path = load_knowledge_source_document(
+            source, transcript_dirs
+        )
+        projection = project_script(payload.get("script"))
+        projections[source_id] = projection
+        current_visuals = {
+            block.locator: block for block in projection.visual_blocks
+        }
+        persisted_visuals = source.get("visual_sources") or []
+        if not isinstance(persisted_visuals, list):
+            raise ValueError(f"{source_id}: visual_sources must be a list")
+        if len(persisted_visuals) != len(current_visuals):
+            raise ValueError(
+                f"{source_id}: persisted and current visual-source counts differ"
+            )
+        for descriptor in persisted_visuals:
+            if not isinstance(descriptor, dict):
+                raise ValueError(f"{source_id}: visual source is not an object")
+            locator = str(descriptor.get("locator") or "")
+            current = current_visuals.get(locator)
+            if current is None:
+                raise ValueError(
+                    f"{source_id}: persisted visual locator {locator!r} is not current"
+                )
+            row_index = int(current.segment_index[1:]) - 1
+            paragraph_text = str(projection.body_rows[row_index].get("text") or "")
+            resolved = resolve_visual_source_descriptor(
+                descriptor, paragraph_text=paragraph_text
+            )
+            expected_descriptor = current.descriptor()
+            for key, value in expected_descriptor.items():
+                if descriptor.get(key) != value:
+                    raise ValueError(
+                        f"{source_id}: visual source {locator} has stale {key}"
+                    )
+            if resolved != current:
+                raise ValueError(
+                    f"{source_id}: persisted visual source {locator} differs from "
+                    "the current source binding"
+                )
+
+    for fragment in package.get("source_fragments") or []:
+        if not isinstance(fragment, dict):
+            raise ValueError("package source fragment is not an object")
+        source_id = str(fragment.get("source_id") or "")
+        projection = projections.get(source_id)
+        if projection is None:
+            raise ValueError(
+                f"{fragment.get('fragment_id')}: source fragment has no current "
+                f"SourceDocument {source_id!r}"
+            )
+        if str(fragment.get("source_modality") or "spoken") != "visual":
+            continue
+        locator = str(
+            fragment.get("visual_locator") or fragment.get("paragraph_key") or ""
+        )
+        matches = [
+            block for block in projection.visual_blocks
+            if block.locator == locator
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                f"{fragment.get('fragment_id')}: current visual locator "
+                f"{locator!r} resolves {len(matches)} times"
+            )
+        validate_visual_fragment_against_block(fragment, matches[0])
 
 
 def load_source_manifest(path: Path) -> list[dict[str, Any]]:

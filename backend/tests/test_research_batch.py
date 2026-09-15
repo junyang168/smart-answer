@@ -21,7 +21,7 @@ from backend.pipeline.research_batch_runner import (
     build_command_plan,
     failed_member_runs,
     resolve_transcript_dir,
-    review_members_with_untitled_leading_sections,
+    authoritative_members_with_untitled_leading_sections,
     reviewed_package_paths,
 )
 
@@ -262,7 +262,34 @@ def test_command_plan_propagates_subscription_and_governed_subtitle_writeback(
     assert extracts["讲道甲"][extracts["讲道甲"].index("--subtitle-user-id") + 1] == (
         "editor@example.org"
     )
-    assert "--write-back-generated-subtitles" not in extracts["讲道乙"]
+    assert "--write-back-generated-subtitles" in extracts["讲道乙"]
+    assert extracts["讲道乙"][extracts["讲道乙"].index("--subtitle-user-id") + 1] == (
+        "editor@example.org"
+    )
+
+
+def test_batch_may_explicitly_request_a_review_spot_check_rate(tmp_path: Path) -> None:
+    batch = _batch()
+    batch["review_spot_check_percent"] = 7
+
+    plan = build_command_plan(
+        batch,
+        transcript_dir=tmp_path,
+        output_root=tmp_path / "output",
+        force=False,
+    )
+    review = next(row["command"] for row in plan if row["stage"] == "review")
+
+    assert review[review.index("--spot-check-percent") + 1] == "7"
+
+
+@pytest.mark.parametrize("value", [-1, 101, 2.5, True])
+def test_review_spot_check_rate_is_bounded(value) -> None:
+    batch = _batch()
+    batch["review_spot_check_percent"] = value
+
+    with pytest.raises(ResearchBatchValidationError, match="review_spot_check_percent"):
+        validate_research_batch(batch)
 
 
 def test_batch_may_explicitly_request_a_review_spot_check_rate(tmp_path: Path) -> None:
@@ -320,9 +347,9 @@ def test_batch_source_resolution_prefers_published_regardless_of_argument_order(
 
     assert resolve_transcript_dir(member, [review, published]) == published
     assert resolve_transcript_dir(member, [published, review]) == published
-    assert review_members_with_untitled_leading_sections(
+    assert authoritative_members_with_untitled_leading_sections(
         [member], [review, published]
-    ) == []
+    ) == ["讲道甲"]
 
 
 def test_a_failed_current_member_blocks_merge_even_when_old_artifacts_exist() -> None:

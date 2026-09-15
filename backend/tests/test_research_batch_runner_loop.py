@@ -47,7 +47,16 @@ def _transcripts(tmp_path: Path, *names: str) -> Path:
     directory = tmp_path / "transcripts"
     directory.mkdir(parents=True, exist_ok=True)
     for name in names:
-        (directory / f"{name}.json").write_text("[]", encoding="utf-8")
+        (directory / f"{name}.json").write_text(
+            json.dumps(
+                [
+                    {"index": f"subtitle-{name}", "type": "subtitle", "text": "## 标题"},
+                    {"index": 1, "text": "正文。"},
+                ],
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
     return directory
 
 
@@ -381,9 +390,16 @@ def test_a_transcript_is_found_across_several_directories(tmp_path, monkeypatch,
     review = tmp_path / "review"
     published.mkdir()
     review.mkdir()
-    (published / "甲.json").write_text("[]", encoding="utf-8")
-    (review / "乙.json").write_text("[]", encoding="utf-8")
-    (review / "丙.json").write_text("[]", encoding="utf-8")
+    titled = json.dumps(
+        [
+            {"index": "subtitle", "type": "subtitle", "text": "## 标题"},
+            {"index": 1, "text": "正文。"},
+        ],
+        ensure_ascii=False,
+    )
+    (published / "甲.json").write_text(titled, encoding="utf-8")
+    (review / "乙.json").write_text(titled, encoding="utf-8")
+    (review / "丙.json").write_text(titled, encoding="utf-8")
 
     code, calls = _run(
         monkeypatch,
@@ -410,19 +426,27 @@ def test_batch_cli_requires_actor_for_subtitle_writeback(tmp_path, monkeypatch) 
         )
 
 
-def test_batch_stops_before_any_command_for_headingless_review_without_writeback(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize("stage", ["script_published", "script_review"])
+def test_batch_stops_before_any_command_for_headingless_sermon_without_writeback(
+    tmp_path, monkeypatch, stage
 ) -> None:
     batch = _batch_file(tmp_path)
-    review = tmp_path / "script_review"
-    review.mkdir()
+    source_dir = tmp_path / stage
+    source_dir.mkdir()
     for name in ("甲", "乙", "丙"):
-        (review / f"{name}.json").write_text("[]", encoding="utf-8")
+        payload = (
+            {"metadata": {"status": "published"}, "script": []}
+            if stage == "script_published"
+            else []
+        )
+        (source_dir / f"{name}.json").write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+        )
 
     with pytest.raises(SystemExit):
         _run(
             monkeypatch,
-            ["--batch", str(batch), "--transcript-dir", str(review),
+            ["--batch", str(batch), "--transcript-dir", str(source_dir),
              "--output-root", str(tmp_path / "out"), "--stage", "extract"],
         )
 
@@ -434,9 +458,12 @@ def test_batch_stops_before_any_command_for_inline_editor_payload(
     published = tmp_path / "script_published"
     published.mkdir()
     for name in ("甲", "乙", "丙"):
-        rows = [{"index": 1, "text": "教授正文。"}]
+        rows = [
+            {"index": "subtitle", "type": "subtitle", "text": "## 标题"},
+            {"index": 1, "text": "教授正文。"},
+        ]
         if name == "乙":
-            rows[0]["text"] += "\n<svg><text>编辑图形</text></svg>"
+            rows[1]["text"] += "\n<svg><text>编辑图形</text></svg>"
         (published / f"{name}.json").write_text(
             json.dumps(rows, ensure_ascii=False), encoding="utf-8"
         )
@@ -472,7 +499,13 @@ def test_batch_allows_exactly_attested_visual_source(
     for name in ("甲", "乙", "丙"):
         text = "教授正文。" + (svg if name == "乙" else "")
         (published / f"{name}.json").write_text(
-            json.dumps([{"index": 1, "text": text}], ensure_ascii=False),
+            json.dumps(
+                [
+                    {"index": "subtitle", "type": "subtitle", "text": "## 标题"},
+                    {"index": 1, "text": text},
+                ],
+                ensure_ascii=False,
+            ),
             encoding="utf-8",
         )
     payload = json.loads(batch.read_text(encoding="utf-8"))

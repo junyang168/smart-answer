@@ -14,9 +14,11 @@ from backend.pipeline.knowledge_source import (
     load_source_manifest,
     markdown_blocks,
     markdown_source_document,
+    validate_package_current_source_provenance,
 )
 from backend.pipeline.source_projection import (
     LOCATOR_SPACE,
+    VISUAL_RENDERER_VERSION,
     project_script,
     script_from_markdown_blocks,
 )
@@ -48,6 +50,141 @@ def test_markdown_source_document_binds_lineage(tmp_path: Path) -> None:
     assert payload["metadata"]["lineage"]["transformation"] == "notes_to_manuscript"
     assert payload["script"][1]["text"] == "正文。"
     assert payload["script"][1]["start_time"] is None
+
+
+def test_markdown_source_document_materializes_sha_bound_svg_asset(
+    tmp_path: Path,
+) -> None:
+    svg_path = tmp_path / "structure.svg"
+    svg = '<svg><text x="10">教授画出的结构</text></svg>'
+    svg_path.write_text(svg, encoding="utf-8")
+    markdown_path = tmp_path / "final.md"
+    markdown_url = "/web/data/full_article/images/structure.svg"
+    markdown_path.write_text(
+        f"## 标题\n\n正文。\n\n![结构图]({markdown_url})\n",
+        encoding="utf-8",
+    )
+    descriptor = {
+        "source_id": "notes_manuscript:visual",
+        "source_type": "notes_manuscript",
+        "source_path": str(markdown_path),
+        "visual_source_assets": [{
+            "markdown_url": markdown_url,
+            "source_path": str(svg_path),
+            "source_sha256": hashlib.sha256(svg.encode("utf-8")).hexdigest(),
+        }],
+    }
+
+    payload, raw, resolved = markdown_source_document(descriptor)
+
+    assert resolved == markdown_path
+    assert raw == markdown_path.read_bytes()
+    projection = project_script(payload["script"])
+    unbound_payload, _, _ = markdown_source_document({
+        key: value for key, value in descriptor.items()
+        if key != "visual_source_assets"
+    })
+    assert projection.body_sha256 == project_script(
+        unbound_payload["script"]
+    ).body_sha256
+    assert projection.body_rows[-1]["text"] == f"![结构图]({markdown_url})"
+    assert projection.spoken_rows[-1]["text"].strip() == ""
+    assert len(projection.visual_blocks) == 1
+    visual = projection.visual_blocks[0]
+    assert visual.locator == "S0002/V01"
+    assert visual.raw_svg == svg
+    assert visual.raw_sha256 == descriptor["visual_source_assets"][0]["source_sha256"]
+    assert visual.binding_kind == "linked_svg_asset"
+    assert visual.source_path == str(svg_path)
+    assert visual.source_file_sha256 == hashlib.sha256(
+        svg.encode("utf-8")
+    ).hexdigest()
+
+
+def test_markdown_source_document_rejects_visual_asset_sha_drift(
+    tmp_path: Path,
+) -> None:
+    svg_path = tmp_path / "structure.svg"
+    svg_path.write_text("<svg/>", encoding="utf-8")
+    markdown_path = tmp_path / "final.md"
+    markdown_url = "/web/data/full_article/images/structure.svg"
+    markdown_path.write_text(f"![结构图]({markdown_url})\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="visual source asset hash mismatch"):
+        markdown_source_document({
+            "source_id": "notes_manuscript:visual",
+            "source_type": "notes_manuscript",
+            "source_path": str(markdown_path),
+            "visual_source_assets": [{
+                "markdown_url": markdown_url,
+                "source_path": str(svg_path),
+                "source_sha256": "0" * 64,
+            }],
+        })
+
+
+def test_final_ingest_provenance_reopens_linked_svg_asset(tmp_path: Path) -> None:
+    svg_path = tmp_path / "structure.svg"
+    svg = '<svg><text x="10">教授画出的结构</text></svg>'
+    svg_path.write_text(svg, encoding="utf-8")
+    markdown_path = tmp_path / "final.md"
+    markdown_url = "/web/data/full_article/images/structure.svg"
+    markdown_path.write_text(
+        f"正文。\n\n![结构图]({markdown_url})\n", encoding="utf-8"
+    )
+    asset_sha = hashlib.sha256(svg.encode("utf-8")).hexdigest()
+    descriptor = {
+        "source_id": "notes_manuscript:visual",
+        "source_type": "notes_manuscript",
+        "source_path": str(markdown_path),
+        "visual_source_assets": [{
+            "markdown_url": markdown_url,
+            "source_path": str(svg_path),
+            "source_sha256": asset_sha,
+        }],
+    }
+    payload, raw, _ = markdown_source_document(descriptor)
+    projection = project_script(payload["script"])
+    visual = projection.visual_blocks[0]
+    source = {
+        **descriptor,
+        "source_sha256": projection.body_sha256,
+        "source_body_sha256": projection.body_sha256,
+        "source_file_sha256": hashlib.sha256(raw).hexdigest(),
+        "source_visual_sha256": projection.visual_content_sha256,
+        "locator_space": LOCATOR_SPACE,
+        "visual_sources": [visual.descriptor()],
+        "visual_source_attestations": [{
+            "locator": visual.locator,
+            "raw_sha256": visual.raw_sha256,
+        }],
+    }
+    fragment = {
+        "fragment_id": "FR-VISUAL",
+        "source_id": source["source_id"],
+        "source_sha256": projection.body_sha256,
+        "source_modality": "visual",
+        "paragraph_key": visual.locator,
+        "visual_locator": visual.locator,
+        "visual_block_sha256": visual.raw_sha256,
+        "visual_canonical_sha256": visual.canonical_sha256,
+        "visual_renderer_version": VISUAL_RENDERER_VERSION,
+        "visual_facts": list(visual.facts),
+        "verbatim_excerpt": visual.raw_svg,
+        "visual_source_path": str(svg_path),
+        "visual_source_file_sha256": asset_sha,
+        "visual_source_url": markdown_url,
+    }
+    package = {
+        "source_documents": [source],
+        "source_fragments": [fragment],
+    }
+
+    validate_package_current_source_provenance(package, [])
+
+    svg_path.write_text("<svg><text>后来改过</text></svg>", encoding="utf-8")
+    with pytest.raises(ValueError, match="visual source asset hash mismatch"):
+        validate_package_current_source_provenance(package, [])
 
 
 def test_source_manifest_rejects_hash_drift(tmp_path: Path) -> None:

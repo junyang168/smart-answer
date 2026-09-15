@@ -323,6 +323,38 @@ class ScriptDelta:
             raise ValueError(
                 "expected_current_sha256 is required for script_review writes"
             )
+        return ScriptDelta.save_json_payload(
+            base_folder,
+            item_name,
+            folder,
+            list(rows),
+            expected_current_sha256=expected_current_sha256,
+        )
+
+    @staticmethod
+    def save_json_payload(
+        base_folder: str,
+        item_name: str,
+        folder: str,
+        payload,
+        *,
+        expected_current_sha256: str | None = None,
+    ):
+        """Atomically save an exact JSON payload under the shared script lock.
+
+        Published transcripts wrap their rows in ``metadata``/``script`` and
+        therefore cannot use ``save_rows`` without losing publication
+        metadata.  Governed pipeline updates use this entry point with an
+        exact compare-and-swap SHA; ordinary editor row saves keep using the
+        historical list-only method above.
+        """
+
+        if folder not in ('slide', 'script_review', 'script_published'):
+            raise ValueError(f"unsupported script folder: {folder}")
+        if folder in ('script_review', 'script_published') and not expected_current_sha256:
+            raise ValueError(
+                f"expected_current_sha256 is required for {folder} writes"
+            )
         target = os.path.join(base_folder, folder, item_name + '.json')
         os.makedirs(os.path.dirname(target), exist_ok=True)
         lock_path = os.path.join(
@@ -342,7 +374,7 @@ class ScriptDelta:
                         f"expected {expected_current_sha256}, found {actual or 'missing'}"
                     )
             target_mode = os.stat(target).st_mode & 0o777 if os.path.exists(target) else 0o644
-            encoded = json.dumps(list(rows), ensure_ascii=False, indent=4).encode("UTF-8")
+            encoded = json.dumps(payload, ensure_ascii=False, indent=4).encode("UTF-8")
             written_sha256 = hashlib.sha256(encoded).hexdigest()
             descriptor, temporary = tempfile.mkstemp(
                 prefix=f".{item_name}.", suffix=".tmp", dir=os.path.dirname(target)

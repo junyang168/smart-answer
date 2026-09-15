@@ -302,23 +302,17 @@ def resolve_transcript_dir(member: dict[str, Any], transcript_dirs: list[Path]) 
     return path.parent if path is not None else None
 
 
-def review_members_with_untitled_leading_sections(
+def authoritative_members_with_untitled_leading_sections(
     members: list[dict[str, Any]], transcript_dirs: list[Path]
 ) -> list[str]:
-    """Review transcripts that require governed subtitle persistence.
-
-    Published transcripts are immutable and may use SHA-bound internal section
-    plans. Markdown sources carry their own compatibility path. A review transcript
-    is the one governed source type where silently generating internal-only titles
-    would bypass the editable source-of-record workflow.
-    """
+    """Authoritative sermon transcripts that require subtitle persistence."""
 
     untitled: list[str] = []
     for member in members:
         if member["source_type"] != "sermon_transcript":
             continue
         source_path = resolve_transcript_path(member["key"], transcript_dirs)
-        if source_path is None or source_path.parent.name != "script_review":
+        if source_path is None:
             continue
         source, _ = _load(source_path)
         projection = project_script(source.get("script"))
@@ -458,9 +452,7 @@ def build_command_plan(
             extract += ["--source-manifest", str(paths["source_manifest"])]
         else:
             extract += ["--transcript-dir", str(member_dir), "--ids", key]
-            # Published transcripts are immutable historical snapshots. Only
-            # review transcripts can receive reader-visible generated titles.
-            if write_back_generated_subtitles and member_dir.name == "script_review":
+            if write_back_generated_subtitles:
                 if not subtitle_user_id:
                     raise ValueError(
                         "subtitle_user_id is required for generated subtitle write-back"
@@ -510,6 +502,8 @@ def build_command_plan(
             sys.executable, "-m", "backend.pipeline.extraction_supersede_runner",
             str(paths["reviewed"]),
         ]
+        for transcript_dir in transcript_dirs:
+            ingest += ["--transcript-dir", str(transcript_dir)]
         if apply_ingest:
             ingest.append("--apply")
 
@@ -703,7 +697,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--write-back-generated-subtitles", action="store_true",
-        help="persist generated headings for headingless script_review sermon members",
+        help="persist generated headings to each headingless authoritative sermon document",
     )
     parser.add_argument(
         "--subtitle-user-id",
@@ -765,10 +759,12 @@ def main() -> int:
                 + ", ".join(unsafe)
             )
     if "extract" in wanted and not args.write_back_generated_subtitles:
-        untitled = review_members_with_untitled_leading_sections(members, transcript_dirs)
+        untitled = authoritative_members_with_untitled_leading_sections(
+            members, transcript_dirs
+        )
         if untitled:
             parser.error(
-                "script_review members with an untitled leading section require "
+                "sermon members with an untitled leading section require "
                 "--write-back-generated-subtitles and --subtitle-user-id before extraction: "
                 + ", ".join(untitled)
             )

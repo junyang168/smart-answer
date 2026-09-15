@@ -220,7 +220,11 @@ def validate_openai_adjudication(
             f"{claim_id}: fidelity adjudication cannot change product route without route_error",
         )
         for index in row.get("source_anchor_indexes", []):
-            _require(0 <= index < anchor_count, f"{claim_id}: invalid source anchor index {index}")
+            _require(
+                0 <= index < anchor_count,
+                f"{claim_id}: invalid source anchor index {index}; "
+                f"valid indexes are {list(range(anchor_count))}",
+            )
         for index in patch.get("excluded_anchor_indexes", []):
             _require(0 <= index < anchor_count, f"{claim_id}: invalid excluded anchor index {index}")
             _require(

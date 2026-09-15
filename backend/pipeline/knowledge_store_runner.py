@@ -173,6 +173,7 @@ def main() -> None:
             with run_record(
                 subject=_package_subject(package, args.package), stage="ingest"
             ) as record:
+                record.input_artifacts(args.package)
                 record.inputs({"package_sha256": _sha256_file(args.package)})
                 result = store.ingest_package(
                     package,

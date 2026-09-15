@@ -95,6 +95,9 @@ TRANSCRIPT_DIRS = ("script_published", "script_review", "script_patched")
 #:
 #: `[^~]+?` 表示落單的標記什麼都不刪——與其猜它想刪到哪裡，不如不刪。
 STRIKETHROUGH = re.compile(r"~~([^~]+?)~~", re.S)
+HEADING_PATTERN = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
+SVG_BLOCK_PATTERN = re.compile(r"<svg\b[^>]*>.*?</svg\s*>", re.I | re.S)
+EDITORIAL_ROW_TYPES = {"subtitle", "comment"}
 
 #: 逐字比對失敗時唯一允許的放寬：把連續的省略號收成一個、把連續空白收成一個。
 #:
@@ -219,6 +222,29 @@ class Store:
         )
         return {(row["c"], row["i"]) for row in rows}
 
+    def change_set_readback_findings(self) -> list[dict[str, Any]]:
+        """Every applied operation for an active object must read back exactly."""
+
+        return self._query(
+            "select json_build_object("
+            "'kind', q.kind, 'change_set_id', q.change_set_id, "
+            "'collection', q.collection, 'object_id', q.object_id, "
+            "'revision', q.revision, 'detail', q.detail)::text from ("
+            "select 'operation_version_mismatch' kind, co.change_set_id, "
+            "co.collection, co.object_id, co.after_revision revision, "
+            "'applied operation has no identical object version' detail "
+            "from wang_knowledge.change_operations co "
+            "join wang_knowledge.change_sets cs using (change_set_id) "
+            "join wang_knowledge.objects o on o.collection=co.collection "
+            "and o.object_id=co.object_id "
+            "left join wang_knowledge.object_versions ov "
+            "on ov.change_set_id=co.change_set_id and ov.collection=co.collection "
+            "and ov.object_id=co.object_id and ov.revision=co.after_revision "
+            "and ov.content_sha256=co.after_sha256 "
+            "where cs.status='applied' and ov.object_id is null "
+            ") q order by q.kind, q.collection, q.object_id"
+        )
+
 
 # ---------------------------------------------------------------------------
 # 原件：磁碟上的逐字稿與母本
@@ -235,20 +261,50 @@ def live_text(text: str) -> str:
     return STRIKETHROUGH.sub("\n", str(text or ""))
 
 
+def _is_editorial_row(row: dict[str, Any]) -> bool:
+    return (
+        str(row.get("type") or "").strip().lower() in EDITORIAL_ROW_TYPES
+        or str(row.get("index") or "").strip().startswith("subtitle-")
+        or HEADING_PATTERN.match(str(row.get("text") or "").strip()) is not None
+    )
+
+
+def _body_sha256(rows: list[dict[str, Any]]) -> str:
+    canonical = [
+        {str(key): value for key, value in row.items() if str(key) not in {"type", "user_id"}}
+        for row in rows
+    ]
+    encoded = json.dumps(
+        canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 class SourceFile:
     """磁碟上一份原件，以及審計自己算出來的雜湊與段落。"""
 
-    def __init__(self, path: Path, source_type: str) -> None:
+    def __init__(self, path: Path, source_type: str, source_document: dict[str, Any]) -> None:
         self.path = path
         self.source_type = source_type
         raw = path.read_bytes()
         self.sha256 = hashlib.sha256(raw).hexdigest()
+        self.body_coordinates = str(source_document.get("locator_space") or "") == "spoken_body_v1"
         if source_type == "notes_manuscript":
-            self.segments = self._markdown_segments(raw)
+            physical = self._markdown_segments(raw)
         else:
-            self.segments = self._transcript_segments(raw)
-        self.live_whole = "\n".join(live_text(s["text"]) for s in self.segments)
-        self.raw_whole = "\n".join(s["text"] for s in self.segments)
+            physical = self._transcript_segments(raw)
+        live_physical = []
+        for segment in physical:
+            row = dict(segment)
+            row["text"] = live_text(str(row.get("text") or ""))
+            live_physical.append(row)
+        body = [row for row in live_physical if not _is_editorial_row(row)]
+        raw_body = [row for row in physical if not _is_editorial_row(row)]
+        self.body_sha256 = _body_sha256(body)
+        self.segments = body if self.body_coordinates else live_physical
+        comparison_raw = raw_body if self.body_coordinates else physical
+        self.live_whole = "\n".join(str(s.get("text") or "") for s in self.segments)
+        self.raw_whole = "\n".join(str(s.get("text") or "") for s in comparison_raw)
         self._by_index: dict[str, dict[str, Any]] = {}
         for segment in self.segments:
             if segment.get("index") is not None:
@@ -269,7 +325,24 @@ class SourceFile:
     def _markdown_segments(raw: bytes) -> list[dict[str, Any]]:
         text = raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
         blocks = [b.strip() for b in re.split(r"\n[ \t]*\n+", text) if b.strip()]
-        return [{"text": block, "index": i + 1} for i, block in enumerate(blocks)]
+        rows: list[dict[str, Any]] = []
+        body_index = 0
+        heading_index = 0
+        for block in blocks:
+            if HEADING_PATTERN.match(block.strip()):
+                heading_index += 1
+                index: int | str = f"heading-{heading_index}"
+            else:
+                body_index += 1
+                index = body_index
+            rows.append({
+                "index": index, "start_time": None, "end_time": None, "text": block,
+            })
+        return rows
+
+    @property
+    def current_sha256(self) -> str:
+        return self.body_sha256 if self.body_coordinates else self.sha256
 
     def by_ordinal(self, ordinal: int) -> dict[str, Any] | None:
         """第 n 段（1-based）。`paragraph_key` 的 `S0016` 就是這個 n。"""
@@ -290,6 +363,28 @@ class SourceFile:
         """`index` 欄位等於這個值的那一段，也就是 `source_segment_index`。"""
 
         return self._by_index.get(str(index))
+
+    @staticmethod
+    def excerpt_matches(
+        segment: dict[str, Any] | None,
+        excerpt: str,
+        *,
+        visual_ordinal: int | None = None,
+        visual_sha256: str = "",
+    ) -> bool:
+        if segment is None:
+            return False
+        text = str(segment.get("text") or "")
+        if visual_ordinal is None:
+            return excerpt in text
+        visuals = list(SVG_BLOCK_PATTERN.finditer(text))
+        if not 1 <= visual_ordinal <= len(visuals):
+            return False
+        visual = visuals[visual_ordinal - 1].group(0)
+        return excerpt == visual and (
+            not visual_sha256
+            or visual_sha256 == hashlib.sha256(visual.encode("utf-8")).hexdigest()
+        )
 
 
 class SourceIndex:
@@ -340,7 +435,9 @@ class SourceIndex:
             self._files[source_id] = None
             return None
         try:
-            source_file = SourceFile(path, str(payload.get("source_type") or "sermon_transcript"))
+            source_file = SourceFile(
+                path, str(payload.get("source_type") or "sermon_transcript"), payload
+            )
         except Exception as error:  # 壞掉的原件本身就是審計結果，不是崩潰的理由
             self.unresolved[source_id] = f"unreadable: {error}"
             self._files[source_id] = None
@@ -411,7 +508,7 @@ def audit_verbatim(store: Store, sources: SourceIndex) -> dict[str, Any]:
         claimed_sha = str(payload.get("source_sha256") or "")
         if not claimed_sha:
             version_state = "unclaimed"
-        elif claimed_sha == source_file.sha256:
+        elif claimed_sha == source_file.current_sha256:
             version_state = "current"
         else:
             version_state = "stale"
@@ -429,18 +526,33 @@ def audit_verbatim(store: Store, sources: SourceIndex) -> dict[str, Any]:
 
         located_by: list[str] = []
         paragraph_key = str(payload.get("paragraph_key") or "")
-        ordinal_match = re.match(r"^S(\d+)$", paragraph_key)
+        ordinal_match = re.match(r"^S(\d+)(?:/V(\d+))?$", paragraph_key)
         segment = None
         if ordinal_match:
             segment = source_file.by_ordinal(int(ordinal_match.group(1)))
         elif paragraph_key:
             segment = source_file.by_index(paragraph_key)
-        if segment is not None and excerpt in live_text(segment.get("text", "")):
-            located_by.append("paragraph_key")
+        visual_ordinal = (
+            int(ordinal_match.group(2))
+            if ordinal_match and ordinal_match.group(2)
+            else None
+        )
+        if source_file.excerpt_matches(
+            segment,
+            excerpt,
+            visual_ordinal=visual_ordinal,
+            visual_sha256=str(payload.get("visual_block_sha256") or ""),
+        ):
+            located_by.append("visual_locator" if visual_ordinal else "paragraph_key")
 
         segment_index = payload.get("source_segment_index")
         by_index = source_file.by_index(segment_index) if segment_index is not None else None
-        if by_index is not None and excerpt in live_text(by_index.get("text", "")):
+        if source_file.excerpt_matches(
+            by_index,
+            excerpt,
+            visual_ordinal=visual_ordinal,
+            visual_sha256=str(payload.get("visual_block_sha256") or ""),
+        ):
             located_by.append("source_segment_index")
 
         if located_by:
@@ -655,6 +767,9 @@ def audit_coverage(store: Store, sources: SourceIndex) -> dict[str, Any]:
     locator_findings = _audit_component_locators(store)
     for entry in locator_findings:
         objects_with_gap.add(("viewpoint_claim_links", entry["object_id"]))
+    claim_anchor_audit = _audit_claim_occurrence_anchors(store, sources)
+    reciprocity_audit = _audit_claim_evidence_reciprocity(store)
+    change_set_readback = store.change_set_readback_findings()
 
     # 原件本身：source_documents 說的雜湊，與磁碟上這份檔案現在的雜湊。
     document_findings: list[dict[str, Any]] = []
@@ -667,12 +782,17 @@ def audit_coverage(store: Store, sources: SourceIndex) -> dict[str, Any]:
                 "detail": sources.unresolved.get(source_id, "unknown"),
             })
             continue
-        claimed = str(payload.get("source_sha256") or "")
-        if claimed and claimed != source_file.sha256:
+        claimed_value = (
+            payload.get("source_body_sha256")
+            if source_file.body_coordinates
+            else payload.get("source_sha256")
+        )
+        claimed = str(claimed_value or "")
+        if claimed and claimed != source_file.current_sha256:
             document_findings.append({
                 "source_id": source_id,
                 "verdict": "sha_mismatch",
-                "detail": f"記錄 {claimed[:12]}…，磁碟 {source_file.sha256[:12]}…",
+                "detail": f"記錄 {claimed[:12]}…，磁碟 {source_file.current_sha256[:12]}…",
             })
 
     return {
@@ -695,6 +815,125 @@ def audit_coverage(store: Store, sources: SourceIndex) -> dict[str, Any]:
         "retired_evidence_findings": retired_evidence,
         "struck_evidence_findings": struck_evidence,
         "source_document_findings": document_findings,
+        "claim_occurrence_anchors": claim_anchor_audit,
+        "claim_evidence_reciprocity": reciprocity_audit,
+        "change_set_readback_findings": change_set_readback[:200],
+        "change_set_readback_error_count": len(change_set_readback),
+    }
+
+
+def _audit_claim_occurrence_anchors(
+    store: Store, sources: SourceIndex
+) -> dict[str, Any]:
+    """Resolve every Claim occurrence anchor against its declared source."""
+
+    by_transcript: defaultdict[str, list[str]] = defaultdict(list)
+    by_alias: defaultdict[str, list[str]] = defaultdict(list)
+    for source_id, document in sources.documents.items():
+        transcript_id = str(document.get("transcript_id") or "").strip()
+        if transcript_id and source_id not in by_transcript[transcript_id]:
+            by_transcript[transcript_id].append(source_id)
+        for value in (source_id, transcript_id, document.get("title")):
+            name = str(value or "").strip()
+            if name and source_id not in by_alias[name]:
+                by_alias[name].append(source_id)
+
+    checked = 0
+    findings: list[dict[str, Any]] = []
+    for row in store.collection("claims"):
+        for occurrence_index, occurrence in enumerate(row["payload"].get("occurrences") or []):
+            if not isinstance(occurrence, dict):
+                continue
+            declared = str(
+                occurrence.get("source_id") or occurrence.get("transcript_id") or ""
+            ).strip()
+            # An exact transcript identity outranks a display-title alias. One
+            # historical title contains a private-use glyph and is also the
+            # title of its normalized successor; treating both as equal makes
+            # 169 valid anchors look ambiguous.
+            candidates = by_transcript.get(declared) or by_alias.get(declared, [])
+            for anchor_index, anchor in enumerate(occurrence.get("anchors") or []):
+                if not isinstance(anchor, dict):
+                    continue
+                checked += 1
+                base = {
+                    "claim_id": row["object_id"],
+                    "occurrence_index": occurrence_index,
+                    "anchor_index": anchor_index,
+                    "source": declared,
+                    "paragraph_key": anchor.get("paragraph_key"),
+                }
+                if len(candidates) != 1:
+                    findings.append({
+                        **base,
+                        "verdict": "source_unresolved" if not candidates else "source_ambiguous",
+                    })
+                    continue
+                source_id = candidates[0]
+                if not sources.covers(source_id):
+                    checked -= 1
+                    continue
+                source_file = sources.file_for(source_id)
+                if source_file is None:
+                    findings.append({**base, "verdict": "no_source_file"})
+                    continue
+                key = str(anchor.get("paragraph_key") or "")
+                match = re.match(r"^S(\d+)(?:/V(\d+))?$", key)
+                segment = (
+                    source_file.by_ordinal(int(match.group(1)))
+                    if match
+                    else source_file.by_index(key) if key else None
+                )
+                highlight = anchor.get("proposed_highlight") or {}
+                excerpt = str(highlight.get("text") or "") if isinstance(highlight, dict) else ""
+                visual_ordinal = int(match.group(2)) if match and match.group(2) else None
+                if segment is None:
+                    findings.append({**base, "verdict": "locator_unresolved"})
+                elif excerpt and not source_file.excerpt_matches(
+                    segment,
+                    excerpt,
+                    visual_ordinal=visual_ordinal,
+                    visual_sha256=str(anchor.get("visual_block_sha256") or ""),
+                ):
+                    findings.append({**base, "verdict": "excerpt_mismatch", "excerpt": excerpt[:120]})
+    return {"checked": checked, "resolved": checked - len(findings), "findings": findings[:200]}
+
+
+def _audit_claim_evidence_reciprocity(store: Store) -> dict[str, Any]:
+    """Compare both directions of the active Claim/Evidence graph exactly."""
+
+    claims = {row["object_id"]: row["payload"] for row in store.collection("claims")}
+    evidence = {
+        row["object_id"]: row["payload"] for row in store.collection("evidence_steps")
+    }
+    claim_pairs: set[tuple[str, str]] = set()
+    evidence_pairs: set[tuple[str, str]] = set()
+    duplicates: list[dict[str, Any]] = []
+    for claim_id, payload in claims.items():
+        values = [str(value) for value in payload.get("evidence_step_ids") or []]
+        if len(values) != len(set(values)):
+            duplicates.append({"collection": "claims", "object_id": claim_id})
+        claim_pairs.update((claim_id, evidence_id) for evidence_id in values)
+    for evidence_id, payload in evidence.items():
+        values = [str(value) for value in payload.get("produced_claim_ids") or []]
+        if len(values) != len(set(values)):
+            duplicates.append({"collection": "evidence_steps", "object_id": evidence_id})
+        evidence_pairs.update((claim_id, evidence_id) for claim_id in values)
+    claim_only = sorted(claim_pairs - evidence_pairs)
+    evidence_only = sorted(evidence_pairs - claim_pairs)
+    dangling = sorted(
+        pair for pair in claim_pairs | evidence_pairs
+        if pair[0] not in claims or pair[1] not in evidence
+    )
+    return {
+        "claim_pairs": len(claim_pairs),
+        "evidence_pairs": len(evidence_pairs),
+        "reciprocal_pairs": len(claim_pairs & evidence_pairs),
+        "claim_only": [list(pair) for pair in claim_only[:200]],
+        "evidence_only": [list(pair) for pair in evidence_only[:200]],
+        "dangling": [list(pair) for pair in dangling[:200]],
+        "duplicate_arrays": duplicates[:200],
+        "error_count": len(claim_only) + len(evidence_only) + len(dangling) + len(duplicates),
     }
 
 
@@ -1248,7 +1487,7 @@ def _segment_for(source_file: SourceFile, payload: dict[str, Any]) -> dict[str, 
     """片段記的位置，兩種寫法都認得。"""
 
     key = str(payload.get("paragraph_key") or "")
-    match = re.match(r"^S(\d+)$", key)
+    match = re.match(r"^S(\d+)(?:/V\d+)?$", key)
     segment = None
     if match:
         segment = source_file.by_ordinal(int(match.group(1)))
@@ -1905,6 +2144,17 @@ def render_report(
         )
         lines.append(
             f"          原件雜湊與記錄不符 {len(layer['source_document_findings']):>4,}"
+        )
+        claim_anchors = layer["claim_occurrence_anchors"]
+        lines.append(
+            f"          Claim 錨點可解析 {claim_anchors['resolved']:,}/{claim_anchors['checked']:,}"
+        )
+        reciprocity = layer["claim_evidence_reciprocity"]
+        lines.append(
+            f"          Claim–Evidence 雙向不一致 {reciprocity['error_count']:>4,}"
+        )
+        lines.append(
+            f"          ChangeSet 回讀不一致 {layer['change_set_readback_error_count']:>4,}"
         )
         for entry in layer["ambiguous_paths"][:4]:
             lines.append(

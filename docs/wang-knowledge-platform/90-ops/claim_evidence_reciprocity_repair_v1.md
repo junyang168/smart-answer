@@ -1,9 +1,9 @@
 # Claim–Evidence 互反修复流程
 
-> **读者**：Wang Knowledge Platform 运维人员与 Developer  
-> **类型**：流程  
-> **状态**：当前  
-> **与代码对齐**：未核对  
+> **读者**：Wang Knowledge Platform 运维人员与 Developer
+> **类型**：流程
+> **状态**：当前
+> **与代码对齐**：未核对
 > **权威范围**：历史 `Claim.evidence_step_ids` 与
 > `EvidenceStep.produced_claim_ids` 互反事故的冻结、来源重放/重跑、原子修复与验收顺序。
 

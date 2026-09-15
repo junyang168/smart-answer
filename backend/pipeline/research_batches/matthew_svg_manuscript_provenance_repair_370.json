@@ -1,0 +1,65 @@
+{
+  "schema_version": "wang_research_batch_v1",
+  "batch_id": "RB-MATTHEW-SVG-MANUSCRIPT-PROVENANCE-REPAIR-370-20260914",
+  "purpose": "Re-extract the two Matthew notes manuscripts whose prior packages bound fragments to a processed projection instead of the independently SHA-bound SVG originals.",
+  "selection_note": "Issue #370 repair batch. It contains only the two affected notes manuscripts and does not reuse or overwrite issue #358 artifacts.",
+  "semantic_assumption": "none",
+  "transcript_ids": [],
+  "sources": [
+    {
+      "source_id": "notes_manuscript:登山寶訓的結構",
+      "source_type": "notes_manuscript",
+      "source_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/登山寶訓的結構/final.md",
+      "source_sha256": "ad84945b2e05dee72cf2e2be7579253707260f52f4ad208a5b50fddd06726f56",
+      "title": "引言：登山寶訓的結構",
+      "visual_source_assets": [
+        {
+          "markdown_url": "https://dallas-hlc.org/web/data/full_article/images/sermon-on-the-mount-overview.svg",
+          "source_path": "/opt/homebrew/var/www/church/web/data/full_article/images/sermon-on-the-mount-overview.svg",
+          "source_sha256": "7b8b37ffd4cd26fa19174a58449fc0cdee8faad9d9d73902dbf72e99dbf5e291"
+        }
+      ]
+    },
+    {
+      "source_id": "notes_manuscript:登山寶訓的文學結構",
+      "source_type": "notes_manuscript",
+      "source_path": "/opt/homebrew/var/www/church/web/data/notes_to_surmon/登山寶訓的文學結構/final.md",
+      "source_sha256": "fdae70c0f3746c50ee10627f5b2e44872e105c1033a21aca4095a7031d8b4ee5",
+      "title": "總結：登山寶訓的文學結構",
+      "visual_source_assets": [
+        {
+          "markdown_url": "/web/data/full_article/images/sermon-on-the-mount-structure.svg",
+          "source_path": "/opt/homebrew/var/www/church/web/data/full_article/images/sermon-on-the-mount-structure.svg",
+          "source_sha256": "1aa653acb0e88de71becd04f76678b9fee6a062631d479b7834dcbe6c8e4939f"
+        }
+      ]
+    }
+  ],
+  "candidate_generation_policy": {
+    "derive_after_independent_extraction": true,
+    "allow_unassigned_material": true,
+    "allow_multiple_topic_candidates": true,
+    "preserve_scripture_context": true,
+    "separate_questions_from_topic_exposition": true
+  },
+  "visual_source_attestations": {
+    "notes_manuscript:登山寶訓的結構": {
+      "S0004/V01": "7b8b37ffd4cd26fa19174a58449fc0cdee8faad9d9d73902dbf72e99dbf5e291"
+    },
+    "notes_manuscript:登山寶訓的文學結構": {
+      "S0013/V01": "1aa653acb0e88de71becd04f76678b9fee6a062631d479b7834dcbe6c8e4939f"
+    }
+  },
+  "review_batch_size": 20,
+  "review_spot_check_percent": 0,
+  "models": {
+    "extraction": "gpt-5.6-sol",
+    "extraction_reasoning_effort": "medium",
+    "cross_section": "gpt-5.6-sol",
+    "independent_review": "claude-sonnet-5",
+    "review_max_output_tokens": 64000,
+    "adjudicator": "gpt-5.6-sol",
+    "adjudicator_max_output_tokens": 64000,
+    "reconsideration": "claude-sonnet-5"
+  }
+}

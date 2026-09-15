@@ -17,6 +17,8 @@ from backend.pipeline.sermon_subtitle_persistence import (
     SubtitlePersistenceError,
     apply_insertions,
     body_rows,
+    payload_with_rows,
+    transcript_rows,
     verify_saved_result,
     write_back_generated_subtitles,
 )
@@ -70,7 +72,6 @@ def test_publish_is_atomic_and_bound_to_the_exact_review_snapshot(
     assert json.loads(published_path.read_text(encoding="utf-8"))["script"] == [
         {"index": "subtitle-1", "type": "subtitle", "text": "## 图示"}
     ]
-
 
 def test_apply_insertions_preserves_every_body_row_and_all_subtitle_levels() -> None:
     before = _rows()
@@ -191,13 +192,18 @@ class _SavingWriter:
             raise RuntimeError("write failed")
         raw = self.path.read_bytes()
         assert hashlib.sha256(raw).hexdigest() == expected_source_sha256
-        rows = json.loads(raw)
+        payload = json.loads(raw)
+        stage = self.path.parent.name
+        rows = transcript_rows(payload, stage=stage)
         updated = apply_insertions(
             rows, insertions, source_sha256=expected_source_sha256, user_id=actor_id
         )
         if self.mutate_body:
             updated[-1]["text"] = "正文被保存层改坏。"
-        self.path.write_text(json.dumps(updated, ensure_ascii=False, indent=2), encoding="utf-8")
+        updated_payload = payload_with_rows(payload, updated, stage=stage)
+        self.path.write_text(
+            json.dumps(updated_payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         after_sha256 = hashlib.sha256(self.path.read_bytes()).hexdigest()
         return {
             "source_path": str(self.path),
@@ -229,6 +235,118 @@ def _published_source(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+def test_published_subtitle_write_preserves_wrapper_and_every_existing_row(
+    tmp_path: Path,
+) -> None:
+    source_path = _published_source(tmp_path)
+    before_payload = json.loads(source_path.read_text(encoding="utf-8"))
+    before_sha = hashlib.sha256(source_path.read_bytes()).hexdigest()
+
+    report = write_back_generated_subtitles(
+        source_path,
+        expected_source_sha256=before_sha,
+        insertions=_insertions(),
+        actor_id="editor@example.org",
+    )
+
+    after_payload = json.loads(source_path.read_text(encoding="utf-8"))
+    assert after_payload["metadata"] == before_payload["metadata"]
+    verify_saved_result(
+        before_payload["script"], after_payload["script"], expected_insertions=2
+    )
+    assert body_rows(after_payload["script"]) == body_rows(before_payload["script"])
+    assert report["before_body_sha256"] == report["after_body_sha256"]
+    assert report["after_source_sha256"] == hashlib.sha256(
+        source_path.read_bytes()
+    ).hexdigest()
+
+
+def test_published_subtitle_write_refuses_a_concurrent_metadata_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = _published_source(tmp_path)
+    before_sha = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    original_save = ScriptDelta.save_json_payload
+
+    def metadata_editor_wins(
+        base_folder: str, item: str, stage: str, payload: Any, **kwargs: Any
+    ) -> str:
+        current = json.loads(source_path.read_text(encoding="utf-8"))
+        current["metadata"]["last_updated"] = "concurrent-editor"
+        source_path.write_text(
+            json.dumps(current, ensure_ascii=False), encoding="utf-8"
+        )
+        return original_save(base_folder, item, stage, payload, **kwargs)
+
+    monkeypatch.setattr(ScriptDelta, "save_json_payload", metadata_editor_wins)
+
+    with pytest.raises(ScriptConflictError, match="changed before atomic save"):
+        write_back_generated_subtitles(
+            source_path,
+            expected_source_sha256=before_sha,
+            insertions=_insertions(),
+            actor_id="editor@example.org",
+        )
+
+    current = json.loads(source_path.read_text(encoding="utf-8"))
+    assert current["metadata"]["last_updated"] == "concurrent-editor"
+    assert not any(row.get("type") == "subtitle" for row in current["script"])
+
+
+def test_headingless_published_stops_before_extraction_without_writeback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = _published_source(tmp_path)
+    captured = _capture_run(monkeypatch)
+    monkeypatch.setattr(
+        runner,
+        "generate_subtitles",
+        lambda *_args, **_kwargs: pytest.fail(
+            "an internal section plan must not bypass title persistence"
+        ),
+    )
+
+    with pytest.raises(SubtitlePersistenceError, match="untitled leading section"):
+        runner.run_one(
+            source_path,
+            output_dir=tmp_path / "out",
+            client=object(),
+            prompt="prompt",
+            reasoning_effort="medium",
+            force=False,
+        )
+
+    assert captured == {}
+
+
+def test_run_one_persists_published_titles_before_extraction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = _published_source(tmp_path)
+    before_payload = json.loads(source_path.read_text(encoding="utf-8"))
+    captured = _capture_run(monkeypatch)
+    monkeypatch.setattr(runner, "generate_subtitles", lambda *_args, **_kwargs: _insertions())
+
+    runner.run_one(
+        source_path,
+        output_dir=tmp_path / "out",
+        client=object(),
+        prompt="prompt",
+        reasoning_effort="medium",
+        force=False,
+        write_back_subtitles=True,
+        subtitle_actor_id="editor@example.org",
+        subtitle_writer=_SavingWriter(source_path),
+        subtitle_authorizer=lambda _actor_id: True,
+    )
+
+    after_payload = json.loads(source_path.read_text(encoding="utf-8"))
+    assert after_payload["metadata"] == before_payload["metadata"]
+    assert body_rows(after_payload["script"]) == body_rows(before_payload["script"])
+    assert captured["source"]["script"][0]["text"] == "## 第一部分"
+    assert captured["sections"].allow_generated is False
 
 
 def test_write_boundary_reloads_and_rejects_a_corrupt_committed_row(
@@ -522,7 +640,7 @@ def test_custom_subtitle_writer_requires_an_authorization_preflight(
     assert writer.calls == 0
 
 
-def test_write_back_reuses_the_frozen_generated_plan_without_a_model_call(
+def test_internal_generated_plan_never_substitutes_for_title_persistence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source_path = _source(tmp_path)
@@ -539,10 +657,14 @@ def test_write_back_reuses_the_frozen_generated_plan_without_a_model_call(
     )
     plan_path = output_dir / "section-plans" / f"{runner._slug(source_path.stem)}.json"
     runner.save_plan(plan_path, plan, before_sha)
-    monkeypatch.setattr(
-        runner, "generate_subtitles",
-        lambda *_args, **_kwargs: pytest.fail("a frozen plan must not be regenerated"),
-    )
+    calls = 0
+
+    def generate(*_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
+        nonlocal calls
+        calls += 1
+        return _insertions()
+
+    monkeypatch.setattr(runner, "generate_subtitles", generate)
 
     runner.run_one(
         source_path,
@@ -557,15 +679,16 @@ def test_write_back_reuses_the_frozen_generated_plan_without_a_model_call(
         subtitle_authorizer=lambda _actor_id: True,
     )
 
+    assert calls == 1
     assert [
         row["text"] for row in captured["source"]["script"]
         if row.get("type") == "subtitle"
-    ] == ["## 冻结的第一部分", "## 冻结的第二部分"]
+    ] == ["## 第一部分", "### 内部说明"]
     audit = json.loads(
         next((output_dir / "subtitle-applications").rglob("application.json")).read_text()
     )
-    assert audit["insertion_origin"] == "cached_generated_section_plan"
-    assert audit["cached_section_plan"] == plan.identity()
+    assert audit["insertion_origin"] == "new_model_generation"
+    assert "cached_section_plan" not in audit
 
 
 def test_legacy_physical_coordinate_plan_is_not_reused_when_comments_exist(
@@ -1116,8 +1239,8 @@ def test_new_cap_reuses_uncapped_generated_plan_without_resegmenting(
     assert {row["boundary_kind"] for row in capped.split_lineage} == {"spoken_row"}
 
 
-def test_old_capped_generated_plan_fails_closed_without_subtitle_regeneration(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_old_capped_generated_plan_requires_explicit_transport_migration(
+    tmp_path: Path,
 ) -> None:
     source = {"script": _rows()}
     projection = runner.project_script(source["script"])
@@ -1138,21 +1261,6 @@ def test_old_capped_generated_plan_fails_closed_without_subtitle_regeneration(
         source_sha256=projection.body_sha256,
         editorial_structure_sha256=projection.editorial_structure_sha256,
     )
-    monkeypatch.setattr(
-        runner,
-        "generate_subtitles",
-        lambda *_args, **_kwargs: pytest.fail("cached capped plan must not regenerate"),
-    )
-    with pytest.raises(SubtitlePersistenceError, match="explicit cache migration"):
-        runner.reusable_generated_plan(
-            source=source,
-            source_id="S legacy capped",
-            source_sha256=projection.body_sha256,
-            output_dir=output_dir,
-            level=2,
-            max_section_sentences=125,
-        )
-
     with pytest.raises(runner.SectionBoundaryError, match="explicit migration"):
         runner.resolve_section_plan(
             source=source,
@@ -1270,6 +1378,9 @@ def test_pipeline_default_writer_uses_governed_service_and_stops_on_acl_denial(
     calls: list[tuple[str, str]] = []
 
     class DenyingManager:
+        def authoritative_transcript_path(self, _item: str) -> Path:
+            return source_path
+
         def can_persist_generated_subtitles(self, _actor_id: str) -> bool:
             return False
 
@@ -1293,6 +1404,114 @@ def test_pipeline_default_writer_uses_governed_service_and_stops_on_acl_denial(
     assert calls == []
     assert captured == {}
     assert not (output_dir / "subtitle-applications").exists()
+
+
+def test_review_path_is_rejected_before_title_model_when_published_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    review_path = _source(tmp_path)
+    published_dir = tmp_path / "script_published"
+    published_dir.mkdir()
+    published_path = published_dir / review_path.name
+    published_path.write_text(
+        json.dumps(
+            {"metadata": {"status": "published"}, "script": _rows()},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        runner,
+        "generate_subtitles",
+        lambda *_args, **_kwargs: pytest.fail(
+            "wrong source must fail before the title model"
+        ),
+    )
+
+    with pytest.raises(SubtitlePersistenceError, match="not authoritative"):
+        runner.run_one(
+            review_path,
+            output_dir=tmp_path / "out",
+            client=object(),
+            prompt="prompt",
+            reasoning_effort="medium",
+            force=False,
+            write_back_subtitles=True,
+            subtitle_actor_id="editor@example.org",
+        )
+
+
+def test_titled_review_cannot_bypass_same_name_published_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    review_path = _source(tmp_path, heading=True)
+    published_dir = tmp_path / "script_published"
+    published_dir.mkdir()
+    published_path = published_dir / review_path.name
+    published_path.write_text(
+        json.dumps(
+            {
+                "metadata": {"status": "published"},
+                "script": [
+                    {"index": "published-title", "type": "subtitle", "text": "## Published"},
+                    {"index": 1, "text": "published authority"},
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        runner,
+        "_run",
+        lambda **_kwargs: pytest.fail("review must not reach extraction"),
+    )
+
+    with pytest.raises(SubtitlePersistenceError, match="not authoritative"):
+        runner.run_one(
+            review_path,
+            output_dir=tmp_path / "out",
+            client=object(),
+            prompt="prompt",
+            reasoning_effort="medium",
+            force=False,
+        )
+
+
+def test_dry_run_cannot_report_review_as_source_when_published_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    review_path = _source(tmp_path, heading=True)
+    published_dir = tmp_path / "script_published"
+    published_dir.mkdir()
+    (published_dir / review_path.name).write_text(
+        json.dumps(
+            {
+                "metadata": {"status": "published"},
+                "script": [
+                    {"index": "published-title", "type": "subtitle", "text": "## Published"},
+                    {"index": 1, "text": "published authority"},
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "detailed_knowledge_extraction_runner",
+            "--transcript-dir", str(review_path.parent),
+            "--ids", review_path.stem,
+            "--output-dir", str(tmp_path / "out"),
+            "--dry-run",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        runner.main()
+
+    assert exc_info.value.code == 2
 
 
 def test_saved_result_rejects_mutation_of_an_existing_subtitle_row() -> None:
@@ -1472,6 +1691,53 @@ def test_sermon_manager_save_service_preserves_body_and_returns_post_save_sha(
     assert report["before_source_sha256"] == before_sha
     assert report["after_source_sha256"] == hashlib.sha256(source_path.read_bytes()).hexdigest()
     assert report["before_body_sha256"] == report["after_body_sha256"]
+
+
+def test_sermon_manager_updates_published_and_never_same_name_review(
+    tmp_path: Path,
+) -> None:
+    from backend.api.sc_api.sermon_manager import SermonManager
+
+    item = "S authoritative"
+    review = tmp_path / "script_review"
+    published = tmp_path / "script_published"
+    review.mkdir()
+    published.mkdir()
+    review_path = review / f"{item}.json"
+    review_path.write_text(
+        json.dumps(
+            [{"index": "review-title", "type": "subtitle", "text": "## Review 标题"}, *_rows()],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    review_before = review_path.read_bytes()
+    published_path = published / f"{item}.json"
+    published_before = {
+        "metadata": {"status": "published", "title": item},
+        "script": _rows(),
+    }
+    published_path.write_text(
+        json.dumps(published_before, ensure_ascii=False), encoding="utf-8"
+    )
+    manager = SermonManager.__new__(SermonManager)
+    manager.base_folder = str(tmp_path)
+    manager._acl = SimpleNamespace(
+        get_user_permissions=lambda *_args: ["read_any_item", "write_owned_item"]
+    )
+
+    report = manager.persist_generated_subtitles(
+        "editor@example.org",
+        item,
+        expected_source_sha256=hashlib.sha256(published_path.read_bytes()).hexdigest(),
+        insertions=_insertions(),
+    )
+
+    assert review_path.read_bytes() == review_before
+    published_after = json.loads(published_path.read_text(encoding="utf-8"))
+    assert published_after["metadata"] == published_before["metadata"]
+    assert body_rows(published_after["script"]) == _rows()
+    assert report["source_path"] == str(published_path)
 
 
 def test_subtitle_commit_is_not_reported_failed_when_a_later_writer_wins(

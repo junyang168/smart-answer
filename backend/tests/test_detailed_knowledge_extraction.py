@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from backend.pipeline import detailed_knowledge_extraction_runner as extraction_runner
 from backend.pipeline.corpus_ai_review_runner import _normalize_claim_layer
 from backend.pipeline.detailed_knowledge_extraction import (
     DetailedExtractionValidationError,
@@ -95,6 +96,50 @@ def _response() -> dict:
         ],
         "claim_relations": [],
     }
+
+
+def test_notes_source_forwards_batch_visual_attestation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    svg_path = tmp_path / "diagram.svg"
+    svg = "<svg><text>结构</text></svg>"
+    svg_path.write_text(svg, encoding="utf-8")
+    markdown_path = tmp_path / "final.md"
+    markdown_url = "/web/data/full_article/images/diagram.svg"
+    markdown_path.write_text(
+        f"## 标题\n\n![结构]({markdown_url})\n", encoding="utf-8"
+    )
+    descriptor = {
+        "source_id": "notes_manuscript:visual",
+        "source_type": "notes_manuscript",
+        "source_path": str(markdown_path),
+        "visual_source_assets": [{
+            "markdown_url": markdown_url,
+            "source_path": str(svg_path),
+            "source_sha256": hashlib.sha256(svg.encode("utf-8")).hexdigest(),
+        }],
+    }
+    captured: dict = {}
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return "created", tmp_path / "package.json"
+
+    monkeypatch.setattr(extraction_runner, "_run", fake_run)
+    expected = {"S0001/V01": hashlib.sha256(svg.encode("utf-8")).hexdigest()}
+
+    extraction_runner.run_source(
+        descriptor,
+        output_dir=tmp_path,
+        client=object(),
+        prompt="prompt",
+        reasoning_effort="medium",
+        force=False,
+        visual_source_attestations=expected,
+    )
+
+    assert captured["visual_source_attestations"] == expected
+    assert project_script(captured["source"]["script"]).visual_blocks[0].locator == "S0001/V01"
 
 
 def _bound_extraction_identity(
@@ -219,6 +264,86 @@ def test_visual_anchor_compiles_raw_svg_and_literal_fact_provenance(tmp_path: Pa
     occurrence = package["claims"][0]["occurrences"][0]["anchors"]
     visual_occurrence = next(row for row in occurrence if row.get("source_modality") == "visual")
     assert visual_occurrence["proposed_highlight"]["text"] == svg
+
+
+def test_linked_svg_fragment_points_to_svg_file_not_markdown_body(
+    tmp_path: Path,
+) -> None:
+    svg_path = tmp_path / "diagram.svg"
+    svg = '<svg><text x="10">结构图</text></svg>'
+    svg_path.write_text(svg, encoding="utf-8")
+    markdown_url = "/images/diagram.svg"
+    transcript = _transcript()
+    row = transcript["script"][0]
+    row["text"] += f"\n![结构图]({markdown_url})"
+    link_start = row["text"].index("![结构图]")
+    row["_visual_source_assets"] = [{
+        "char_start": link_start,
+        "char_end": len(row["text"]),
+        "markdown_url": markdown_url,
+        "source_url": markdown_url,
+        "source_path": str(svg_path),
+        "source_file_sha256": hashlib.sha256(svg.encode("utf-8")).hexdigest(),
+        "raw_svg": svg,
+    }]
+    projection = project_script(transcript["script"])
+    visual = projection.visual_blocks[0]
+    response = _response()
+    response["evidence_steps"][0]["anchors"].append({
+        "segment_index": visual.locator,
+        "start_time": None,
+        "end_time": None,
+        "verbatim_excerpt": "",
+        "source_modality": "visual",
+        "visual_fact_ids": [row["fact_id"] for row in visual.facts],
+    })
+    extraction = extraction_identity(
+        source_sha256=projection.body_sha256,
+        source_text_sha256=projection.spoken_text_sha256,
+        prompt="prompt",
+        model_id="gpt-5.6-sol",
+        reasoning_effort="medium",
+        max_output_tokens=32000,
+        response_schema=detailed_response_schema(has_visual_source=True),
+    )
+    extraction["source_body_sha256"] = projection.body_sha256
+    extraction["source_visual_sha256"] = projection.visual_content_sha256
+    source_descriptor = {
+        "source_id": "notes_manuscript:visual",
+        "source_type": "notes_manuscript",
+        "visual_source_assets": [{
+            "markdown_url": markdown_url,
+            "source_path": str(svg_path),
+            "source_sha256": visual.raw_sha256,
+        }],
+    }
+
+    package = compile_package(
+        transcript_id="notes_manuscript:visual",
+        transcript_path=tmp_path / "final.md",
+        transcript=transcript,
+        raw=b"notes body",
+        response=response,
+        extraction=extraction,
+        source_descriptor=source_descriptor,
+        visual_source_attestations={visual.locator: visual.raw_sha256},
+    )
+
+    fragment = next(
+        row for row in package["source_fragments"]
+        if row.get("source_modality") == "visual"
+    )
+    assert fragment["verbatim_excerpt"] == svg
+    assert fragment["visual_source_path"] == str(svg_path)
+    assert fragment["visual_source_file_sha256"] == visual.raw_sha256
+    assert svg not in transcript["script"][0]["text"]
+    assert package["source_documents"][0]["source_path"] == str(
+        tmp_path / "final.md"
+    )
+    assert package["source_documents"][0]["visual_sources"][0][
+        "source_path"
+    ] == str(svg_path)
+    validate_merged_package(package)
 
 
 def test_visual_extraction_must_account_for_every_literal_fact() -> None:
@@ -1381,6 +1506,9 @@ def test_consensus_cli_exact_replay_writes_no_artifact_or_second_run(
             return False
 
         def inputs(self, *_args):
+            return None
+
+        def input_artifacts(self, *_args):
             return None
 
         def quality(self, *_args):
