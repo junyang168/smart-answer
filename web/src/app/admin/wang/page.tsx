@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { FileCheck2, HeartPulse, Highlighter, Network, ShieldCheck } from "lucide-react";
 import { SermonOverview } from "./SermonOverview";
+import { operationStageSummary } from "./operations-copy";
 
 // The three existing views stay where they are and are not rebuilt; they move
 // off the home page because the nav already calls this tab 總覽 and it had no
@@ -22,7 +23,7 @@ export default function WangAdminHome() {
             <p className="text-sm font-bold tracking-wide text-indigo-300">Wang Knowledge Platform</p>
             <h1 className="mt-2 text-3xl font-black tracking-tight">講道進知識庫：總表</h1>
             <p className="mt-3 text-base leading-7 text-slate-300">
-              一行一篇來源，五個階段：抽取 → 複審 → 仲裁 → 合併 → 入庫。每一格的狀態與品質都來自執行記錄表。
+              一行一篇來源，{operationStageSummary}。每一格的狀態與品質都來自執行記錄表。
               寫文章是另一條線，在馬太進度。
             </p>
           </div>
