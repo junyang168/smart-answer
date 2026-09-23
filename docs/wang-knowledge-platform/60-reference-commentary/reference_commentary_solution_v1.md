@@ -8,7 +8,7 @@
 
 ## 目标
 
-> **负责人用 iPhone 拍下 Carson 的马太福音释经，每一页都变成可校对、可按页码找回的英文文字，只在登录后可读，永远不和教授的话混在一起。**
+> **负责人用 iPhone 拍下 Carson 的马太福音释经，每一页都变成可校对、可按页码找回的英文文字，永远不和教授的话混在一起。**
 
 周末查经目前只基于王教授的讲道。负责人要加入其他释经材料来丰富查经，第一本是 D. A. Carson 的马太福音释经。这份文档定下这类材料怎样进入系统、放在哪里、谁能读，以及它和教授知识库之间的界线。
 
@@ -20,7 +20,7 @@
 | [2. 与既有裁定的关系](#2-与既有裁定的关系) | 使命、Solution Architecture、仓库公开 |
 | [3. 来源身份与逐页记录](#3-来源身份与逐页记录) | 一本书、一册、一页各用什么标识 |
 | [4. OCR 流程](#4-ocr-流程) | 从拍照到存档的每一步，以及转写规则 |
-| [5. 存放与访问边界](#5-存放与访问边界) | 放在哪里、谁能读、为什么不能放在现在的位置 |
+| [5. 存放与访问边界](#5-存放与访问边界) | 放在哪里，以及不能越过的两条线 |
 | [6. 研读界面](#6-研读界面) | admin 页面上看到什么、能改什么 |
 | [7. 收编已有的马太福音 18 章](#7-收编已有的马太福音-18-章) | 七月那批 12 张照片怎么处理 |
 | [8. 里程碑](#8-里程碑) | 三张实现卡 |
@@ -46,7 +46,7 @@
 | 其他方案 | 在 `source_documents` 加 `source_type = reference_commentary`，靠字段区分 | 抽取、覆盖率、Program Audit、问答召回都按 `source_documents` 取数。每一处都得记得过滤掉 Carson，漏一处，Carson 的一句话就会被抽成「教授明确主张」 |
 | **本设计** | 独立存放，`wang_knowledge` 的任何读取器都读不到它 | 混淆在结构上不可能发生，不靠每个调用方自觉 |
 
-代价是：以后若要在同一段经文下并排显示「教授怎么讲」和「Carson 怎么讲」，需要一个明确的连接层按经文范围取两边。这是查经那一步的设计（见[开放问题 3](#9-开放问题)），现在不做。
+代价是：以后若要在同一段经文下并排显示「教授怎么讲」和「Carson 怎么讲」，需要一个明确的连接层按经文范围取两边。这是查经那一步的设计（见[开放问题 2](#9-开放问题)），现在不做。
 
 **D2（不用 RAG 作答）** 不受影响：本设计不做问答。
 
@@ -85,7 +85,7 @@ flowchart LR
     PHOTO["iPhone 拍照"] --> UPLOAD["上传进 Claude Code 会话"]
     UPLOAD --> READ["会话读图、按规则转写"]
     READ --> FILE["建档脚本：校验、算 SHA、写记录"]
-    FILE --> STORE["私有数据目录"]
+    FILE --> STORE["数据目录"]
     STORE --> VIEW["admin 研读页：原图与文字对照、校对"]
 ```
 
@@ -111,28 +111,20 @@ flowchart LR
 
 ## 5. 存放与访问边界
 
-### 5.1 不能放在现在的位置
+负责人 2026-09-23 裁定：这份材料**不需要严格保密**。所以不另设私有目录、不加额外的访问控制，和其他数据一样放在 `$DATA_BASE_DIR` 下。只守两条线：
 
-七月那份马太福音 18 章的转写和照片在 `$DATA_BASE_DIR/full_article/images/carson matthew/`。`$DATA_BASE_DIR` 是 `/opt/homebrew/var/www/church/web/data`，而 nginx（`holylogos*.conf`）有：
+| 线 | 为什么 |
+| --- | --- |
+| **不进 git** | 仓库是公开的，提交进去就是把整本书的转写公开发布 |
+| **不上公开页面** | 研读页放在 `/admin` 下，不在 `/resources` 或 Wang repository 出现；查经引用见 §5.2 |
 
-```nginx
-location /web/ {
-    root /opt/homebrew/var/www/church;
-}
-```
+### 5.1 存放
 
-所以 `$DATA_BASE_DIR` 下的每个文件都能不经登录按路径下载。2026-09-23 在本机实测：`http://localhost/web/data/full_article/images/carson%20matthew/chapter18.md` 返回 200、40,409 字节，正是那份全文。
+- 目录 `$DATA_BASE_DIR/reference-commentary/<volume_id>/`，下分 `images/`、`text/`、`pages.json`
+- 读写经后端 API，和其他 admin 工具一样
+- 纳入既有备份（见[运维手册](../../operations-runbook.md)）
 
-版权页写明「No part of this publication may be reproduced, stored in a retrieval system, or transmitted in any form」。个人研读的转写可以接受；放在一个任何人拿到路径就能下载的位置不行。
-
-### 5.2 本设计的存放
-
-- 新环境变量 `REFERENCE_COMMENTARY_DIR`，默认值在 nginx 任何 `root` 之外
-- 目录布局：`<REFERENCE_COMMENTARY_DIR>/<volume_id>/images/`、`text/`、`pages.json`
-- 读取只经后端 API。API 自己校验调用者身份与角色（`editor`／`admin`），**不依赖** `web/src/app/admin/layout.tsx` 的页面跳转：后端经 nginx `/sc_api/` 可直接访问，页面守卫挡不住直接调用。可沿用 `backend/api/wang_article_reviews.py` 中 `_verified_publication_actor` 的签名头做法
-- 纳入既有备份（见[运维手册](../../operations-runbook.md)），但备份同样不能落在 web root 下
-
-### 5.3 查经里怎样用
+### 5.2 查经里怎样用
 
 查经材料引用 Carson 时：短引文，标明「D. A. Carson, *EBC Matthew*, v. 1, p. 123」；其余用我们自己的话转述，并同样标明出处。**不把 Carson 的话写成教授的话，也不写成编辑的话。** 具体的生成流程另开卡设计。
 
@@ -158,14 +150,14 @@ HEIC 原图在建档时用 macOS `sips` 转一份 JPEG 供浏览器显示，原 
 3. 页码对上的照片与文字一起建档，状态为 `ocr`
 4. 开头的注明说转写从第 396 页中间开始，18:1–2 的开头部分不在其中，大概在第 395 页，记为缺页
 5. 这批属于 v. 2（13–28 章）。v. 2 的版权页还没拍，册身份先记为待确认（[开放问题 1](#9-开放问题)）
-6. 建档核对无误后，从 `full_article/images/` 移走原文件
+6. 建档核对无误后，从 `full_article/images/` 移走原文件，免得同一页有两份文字各自被改
 
 ## 8. 里程碑
 
 | 卡 | 交付 | 完成标准 |
 | --- | --- | --- |
-| F11.02 存放与建档 | `REFERENCE_COMMENTARY_DIR`、页记录格式、建档脚本；收编马太福音 18 章 | 18 章 12 页可按印刷页码取回原图与文字；旧位置的文件已移走，原 URL 返回 404 |
-| F11.03 研读界面 | 后端只读 + 校对 API（自带身份校验）、`/admin/reference-commentary` 四个视图 | 未登录直接调用 API 返回 401；负责人能在单页视图里校对一页并看到版本 |
+| F11.02 存放与建档 | `$DATA_BASE_DIR/reference-commentary/`、页记录格式、建档脚本；收编马太福音 18 章 | 18 章 12 页可按印刷页码取回原图与文字；旧位置只剩一份 |
+| F11.03 研读界面 | 后端读取 + 校对 API、`/admin/reference-commentary` 四个视图 | 负责人能在单页视图里校对一页并看到版本 |
 | F11.04 查经取用 | 查经材料按经文范围取 Carson 相关页，引用带册与页码 | 另写设计后再定 |
 
 F11.02 不依赖界面：建档之后，负责人在 F11.03 做好之前就可以在会话里拿到转写文字研读。
@@ -173,9 +165,8 @@ F11.02 不依赖界面：建档之后，负责人在 F11.03 做好之前就可�
 ## 9. 开放问题
 
 1. **v. 2 的册身份。** 马太福音 18 章那批来自 v. 2，需要 v. 2 的版权页照片确认 ISBN，以及它的页码是否接着 v. 1 往下编
-2. **`REFERENCE_COMMENTARY_DIR` 放在哪里。** 建议在 `/opt/homebrew/var/www/` 之外，例如 `/opt/homebrew/var/church-private/reference-commentary`。需要负责人确认生产机与开发机是否都用这个位置
-3. **查经怎样并排使用教授与 Carson。** 是查经讲稿里单列「其他释经」一节，还是按经文段落逐段并列。留给 F11.04 的设计
-4. **以后的其他释经书。** 本设计按「书／册／页」建模，第二本书只需要新的 `work_id`。是否需要书目以外的分类（注释书、辞典、专著），等第二本出现再定
+2. **查经怎样并排使用教授与 Carson。** 是查经讲稿里单列「其他释经」一节，还是按经文段落逐段并列。留给 F11.04 的设计
+3. **以后的其他释经书。** 本设计按「书／册／页」建模，第二本书只需要新的 `work_id`。是否需要书目以外的分类（注释书、辞典、专著），等第二本出现再定
 
 ## 关于本文档
 
