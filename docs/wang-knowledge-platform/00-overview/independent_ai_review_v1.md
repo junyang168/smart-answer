@@ -182,6 +182,15 @@ constraint 只有在确认是 internal `ai_consensus`、端点正被本次 Chang
 row revision、content SHA 和精确 scope，并在同一事务的数据库锁内重算；缺 audit、出现
 approved/public authority、范围漂移或外部引用时一律失败。
 
+已经进入 CVR 的来源若发生真正的 extraction generation replacement，不得把旧 Claim ID
+猜测性映射到新 Claim。`--retire-stale-source-cvr <SOURCE_ID>` 只可在同一 supersede
+ChangeSet 中退役该来源失效的 internal `ViewpointClaimLink`、
+`ArgumentRouteAttestation` 与尚未裁定的 `ViewpointIdentityCandidate`；canonical
+Viewpoint 与 ArgumentRoute revision 保持不变，待新 Claim 入库后从 intelligent grouping
+重新建立来源绑定。预览必须列出 exact revision、content SHA、跨来源 candidate 中一并需要
+重新 grouping 的 Claim，并证明没有 current external reference；public row、其他来源的
+attestation 或遗漏的 semantic blocker 一律 fail closed。
+
 旧的 `knowledge_store_runner sync-ai-review` 已退役：它只读取第一轮 review，并按 mtime 选择文件，无法证明仲裁与 override 是否属于同一条 exact artifact chain。人已经裁定的 revision 不接受低权限 AI 的语义改写；若 statement、evidence 或其他实质内容变化，ChangeSet fail closed，要求新的人工裁定。`superseded` 本身不是权限级别，系统依据最新、与当前状态匹配的 `review_event.reviewer_kind` 区分人工合并与 AI 合并。
 
 默认使用 `gpt-5.6-sol` medium 仲裁、`claude-sonnet-5` 复审／再审。Sonnet 5 调用不发送旧版 temperature 与 disabled-thinking 参数，使用模型默认 adaptive thinking；复审 runner 的输出预算为 32,000 tokens，因为 thinking 与最终 JSON 共用 `max_tokens`，旧的 10,000 上限会在模型输出 JSON 前耗尽。
