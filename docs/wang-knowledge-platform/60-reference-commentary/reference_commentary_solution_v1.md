@@ -32,7 +32,7 @@
 | --- | --- |
 | 版本 | *The Expositor's Bible Commentary*, Matthew / D. A. Carson，Zondervan 1995 softcover 分册版。v. 1 = *Matthew 1–12*，ISBN 0-310-49961-5；13–28 章在 v. 2 |
 | 语言 | 只要英文原文，不译中文 |
-| 上传 | iPhone 拍照（HEIC），拷进本机一个文件夹，由脚本读取。不建网页上传 |
+| 上传 | iPhone「文件」App 的「扫描文稿」存进 iCloud Drive 收件夹，Mac 自动 OCR，文字写回同一文件夹（负责人 2026-09-23）。不经 Claude Code 会话，不建网页上传 |
 | OCR 模型 | Vertex `gemini-3.8-flash`（负责人 2026-09-23）。`gemini-3.1-pro-preview` 太旧，不用 |
 | 归属 | 新开 epic WKP-E11（#378），作为一种新的知识来源 |
 
@@ -71,7 +71,7 @@
 | --- | --- |
 | `printed_page` | 印刷页码 |
 | `passage` | 本页讨论的经文范围，如 `Matt 18:3-9`；从页内的节号标题读出 |
-| `image` | 原图文件名与 `image_sha256`。同一页重拍时保留旧图，记录新图为当前 |
+| `image` | 原图文件名与 `image_sha256`；来自扫描 PDF 时另记 PDF 文件名与页序。同一页重拍时保留旧图，记录新图为当前 |
 | `text` | 转写文字文件名与 `text_sha256` |
 | `status` | `ocr`（机器转写，未校对）→ `proofread`（负责人校对过） |
 | `gaps` | 转写时标出的缺口：手指遮住、出框、模糊。每条带位置 |
@@ -83,8 +83,9 @@
 
 ```mermaid
 flowchart LR
-    PHOTO["iPhone 拍照"] --> UPLOAD["拷进本机文件夹"]
-    UPLOAD --> READ["OCR 脚本：gemini-3.8-flash 逐张转写"]
+    PHOTO["iPhone「扫描文稿」"] --> UPLOAD["iCloud Drive 收件夹"]
+    UPLOAD --> READ["Mac 监视任务：gemini-3.8-flash 逐页转写"]
+    READ --> BACK["文字写回收件夹，iPhone 上即可读"]
     READ --> FILE["建档脚本：校验、算 SHA、写记录"]
     FILE --> STORE["数据目录"]
     STORE --> VIEW["admin 研读页：原图与文字对照、校对"]
@@ -92,13 +93,14 @@ flowchart LR
 
 | 步骤 | 做什么 |
 | --- | --- |
-| 拍照 | 一张一页，页面摊平，手指不压正文 |
-| 上传 | 负责人把 HEIC 拷进一个文件夹（如 `~/Downloads`），说明是哪一册、哪一章 |
-| 转写 | OCR 脚本把每张 HEIC 连同转写规则发给 Vertex `gemini-3.8-flash`，文字直接写进文件。复用 `backend/api/sermon_converter_service.py` 里 notes-to-sermon 已有的 `genai.Client(vertexai=True)` 调用方式，模型名单独配置，不改 notes-to-sermon 的 `OCR_MODEL` |
-| 建档 | 一个脚本接收原图与转写文字，校验页码不冲突、算 SHA、写页记录。**同一页已存在时不覆盖**，而是追加新版本 |
+| 扫描 | 在「文件」App 打开收件夹（如 `iCloud Drive/Carson/Matthew/ch21/`），点右上角 ⋯ →「扫描文稿」，逐页翻拍，存成一份多页 PDF。相机照片（HEIC）直接放进收件夹也收。手指不压正文 |
+| 同步与触发 | iCloud 把收件夹同步到 Mac；Mac 上一个 launchd 任务监视收件夹，发现新文件就处理。「优化 Mac 存储空间」会把文件留成云端占位，处理前先强制下载。册由收件夹路径决定（`Matthew/ch21` → v. 2），不用每次说明 |
+| 转写 | PDF 先逐页拆成图片；每页连同转写规则发给 Vertex `gemini-3.8-flash`，文字直接写进文件。复用 `backend/api/sermon_converter_service.py` 里 notes-to-sermon 已有的 `genai.Client(vertexai=True)` 调用方式，模型名单独配置，不改 notes-to-sermon 的 `OCR_MODEL` |
+| 回写 | 每页文字写回收件夹（`page-427.md`），另拼一份按页码排序的 `chapter21.md`，负责人在 iPhone 上直接读。页码读不出或有缺口时写一份 `_problems.md` 在同一文件夹 |
+| 建档 | 同一任务把原图与转写文字建档，校验页码不冲突、算 SHA、写页记录。**同一页已存在时不覆盖**，而是追加新版本 |
 | 校对 | 负责人在研读页对照原图修正，状态改为 `proofread` |
 
-一次多张时，脚本逐张转写、逐张建档；每张的页码从模型输出的 `<!-- Page N -->` 读出，读不出就列出来等负责人确认，不猜。页码有缺口（如第 20 章从 427 页开始、缺 426）也列出来。遇到 Vertex 429 限流就退避重试。
+一次多页时，逐页转写、逐页建档；每张的页码从模型输出的 `<!-- Page N -->` 读出，读不出就列出来等负责人确认，不猜。页码有缺口（如第 20 章从 427 页开始、缺 426）也列出来。遇到 Vertex 429 限流就退避重试。
 
 **为什么不让 Claude 会话转写。** 2026-09-23 第一次试：负责人上传第 20 章的照片，会话每一轮都返回 `API Error: 400 Output blocked by content filtering policy`。Claude 逐字输出受版权保护的书页会被输出过滤拦下；照片留在会话上下文里，之后连「hello」也被拦，整个会话作废。Gemini 的文字直接落盘，不经过 Claude 的输出。这是「模型调用走订阅 CLI」约定的例外，由负责人裁定。
 
@@ -125,7 +127,7 @@ flowchart LR
 
 ### 5.1 存放
 
-- 目录 `$DATA_BASE_DIR/reference-commentary/<volume_id>/`，下分 `images/`、`text/`、`pages.json`
+- 目录 `$DATA_BASE_DIR/reference-commentary/<volume_id>/`，下分 `images/`、`text/`、`pages.json`。这里是正本；iCloud 收件夹只是投递和阅读用的副本，校对以正本为准
 - 读写经后端 API，和其他 admin 工具一样
 - 纳入既有备份（见[运维手册](../../operations-runbook.md)）
 
@@ -144,7 +146,7 @@ flowchart LR
 | 单页 | 左边原图，右边转写文字；`gaps` 在文字里高亮；可编辑文字并标为已校对，每次保存留版本 |
 | 搜索 | 在已转写文字里按词搜索（英文、希腊文） |
 
-HEIC 原图在建档时用 macOS `sips` 转一份 JPEG 供浏览器显示，原 HEIC 保留。
+HEIC 原图在建档时用 macOS `sips` 转一份 JPEG 供浏览器显示，原 HEIC 保留；扫描 PDF 拆出的每页图片直接显示，原 PDF 保留。
 
 ## 7. 收编已有的马太福音 18 章
 
@@ -161,7 +163,7 @@ HEIC 原图在建档时用 macOS `sips` 转一份 JPEG 供浏览器显示，原 
 
 | 卡 | 交付 | 完成标准 |
 | --- | --- | --- |
-| F11.02 存放与建档 | `$DATA_BASE_DIR/reference-commentary/`、页记录格式、建档脚本；收编马太福音 18 章 | 18 章 12 页可按印刷页码取回原图与文字；旧位置只剩一份 |
+| F11.02 收件夹、OCR 与建档 | iCloud 收件夹 + launchd 监视任务（PDF 与 HEIC 都收）、`gemini-3.8-flash` 转写与回写、`$DATA_BASE_DIR/reference-commentary/`、页记录格式；收编马太福音 18、20 章 | 负责人在 iPhone 扫一章，几分钟内同一文件夹出现逐页文字与整章文件；18、20 章可按印刷页码取回原图与文字 |
 | F11.03 研读界面 | 后端读取 + 校对 API、`/admin/reference-commentary` 四个视图 | 负责人能在单页视图里校对一页并看到版本 |
 | F11.04 查经取用 | 查经材料按经文范围取 Carson 相关页，引用带册与页码 | 另写设计后再定 |
 
