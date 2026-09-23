@@ -85,6 +85,14 @@ def main(argv: list[str] | None = None) -> int:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--pages-md", type=Path, help="one file with <!-- Page N --> markers")
     source.add_argument("--per-image-md", type=Path, help="directory of <photo stem>.md files")
+    parser.add_argument(
+        "--assign",
+        action="append",
+        default=[],
+        metavar="STEM=PAGE",
+        help="page of a photo whose number is not printed in frame, matched by hand (e.g. IMG_2043=396)",
+    )
+    parser.add_argument("--assign-note", default="matched by hand", help="how --assign pages were decided")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 
@@ -105,6 +113,12 @@ def main(argv: list[str] | None = None) -> int:
         # Only the photos that have a transcription: the folder may hold
         # anything else (the pilot sat in ~/Downloads).
         images = [p for p in images if p.stem in per_image]
+
+    assigned: dict[str, str] = {}
+    for item in args.assign:
+        stem, _, page = item.partition("=")
+        assigned[stem] = normalize_page(page)
+    per_image.update(assigned)
 
     # Every photo without its own text file is sent to Gemini for its page
     # number, so a folder that is mostly something else must be refused, not
@@ -130,7 +144,12 @@ def main(argv: list[str] | None = None) -> int:
             printed_page=page,
             image=jpeg,
             text=texts[page],
-            source={"legacy_file": str(photo), "legacy_sha256": sha256_bytes(original), "pdf_page": None},
+            source={
+                "legacy_file": str(photo),
+                "legacy_sha256": sha256_bytes(original),
+                "pdf_page": None,
+                **({"page_assigned": args.assign_note} if photo.stem in assigned else {}),
+            },
             original=original,
             original_suffix=photo.suffix,
             chapter=chapter,
