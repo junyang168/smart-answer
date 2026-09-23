@@ -32,9 +32,12 @@ STATUS_PROOFREAD = "proofread"
 GAP_MARK = "[…]"
 
 _ROMAN = re.compile(r"^[ivxlcdm]+$", re.IGNORECASE)
-# Section headings carry the verse range: `#### 20:20–28`, `###### 21:1–11`.
+# Section headings carry the verse range: `#### 20:20–28` from Gemini, or a
+# bold line `**18:3-4**` in the July transcription. A bare `20:3` line is not
+# a heading, so one of the two markers is required.
+_RANGE = r"(\d{1,2}):(\d{1,3})(?:\s*[–-]\s*(?:(\d{1,2}):)?(\d{1,3}))?"
 _SECTION_RANGE = re.compile(
-    r"^#{1,6}\s*(?:\*\*)?(\d{1,2}):(\d{1,3})(?:\s*[–-]\s*(?:(\d{1,2}):)?(\d{1,3}))?(?:\*\*)?\s*$",
+    rf"^(?:#{{1,6}}\s*(?:\*\*)?{_RANGE}(?:\*\*)?|\*\*{_RANGE}\*\*)\s*$",
     re.MULTILINE,
 )
 
@@ -79,7 +82,8 @@ def find_passages(text: str) -> list[str]:
     """Verse ranges named by the section headings on this page, e.g. `20:20-28`."""
 
     passages = []
-    for chapter, verse, end_chapter, end_verse in _SECTION_RANGE.findall(text):
+    for match in _SECTION_RANGE.findall(text):
+        chapter, verse, end_chapter, end_verse = match[:4] if match[0] else match[4:]
         ref = f"{int(chapter)}:{int(verse)}"
         if end_verse:
             ref += f"-{int(end_chapter)}:{int(end_verse)}" if end_chapter else f"-{int(end_verse)}"
@@ -224,6 +228,20 @@ class VolumeStore:
         record["gaps"] = find_gaps(text)
         self._save(data)
         return IngestResult(self.volume_id, page, "updated")
+
+    def refresh_passages(self) -> int:
+        """Recompute every page's verse ranges from its current text."""
+
+        data = self.load()
+        changed = 0
+        for record in data["pages"].values():
+            passages = find_passages((self.directory / record["text"]["file"]).read_text(encoding="utf-8"))
+            if passages != record.get("passages"):
+                record["passages"] = passages
+                changed += 1
+        if changed:
+            self._save(data)
+        return changed
 
     def proofread(self, printed_page: str | int, text: str, *, expected_sha256: str) -> dict[str, Any]:
         """Save a proofread text as a new version. Refuses a stale edit."""

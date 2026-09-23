@@ -45,6 +45,7 @@ def test_parse_output_reads_and_strips_page_mark():
 def test_find_passages_from_section_headings():
     text = "#### 20:17–19\nbody\n### 20:29-34\n###### 21:1–11\n## Notes\n### ²⁰Then the mother"
     assert find_passages(text) == ["20:17-19", "20:29-34", "21:1-11"]
+    assert find_passages("## 2. Humility\n**18:3-4**\nbody **18:5** inline\n20:3\n") == ["18:3-4"]
 
 
 def test_ocr_retries_rate_limit_then_gives_up():
