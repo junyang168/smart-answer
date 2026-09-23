@@ -36,6 +36,7 @@ const groups: AdminGroup[] = [
       { title: "筆記與逐字稿生成講稿", description: "執行 AI 整理、審閱、合併與發布流程。", href: "/admin/notes-to-sermon/series" },
       { title: "Wang 釋經與思想文庫", description: "統一查看文章進度、內容候選、知識審核與出版單元。", href: "/admin/wang" },
       { title: "完整文章", description: "編輯並發布由講道產生的全文內容。", href: "/admin/full_article" },
+      { title: "參考釋經書", description: "Carson 馬太福音掃描頁的轉寫：按章閱讀、對照原圖校對。", href: "/admin/reference-commentary" },
     ],
   },
   {

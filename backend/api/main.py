@@ -33,6 +33,7 @@ from .canonical_repository.router import (
 from .argument_layer import router as argument_layer_router
 from .extraction_health import router as extraction_health_router
 from .library_audit import router as library_audit_router
+from .reference_commentary import router as reference_commentary_router
 from .original_audio import router as original_audio_router
 from .source_coverage import router as source_coverage_router
 from .public_wang_articles import router as public_wang_articles_router
@@ -78,6 +79,7 @@ app.include_router(canonical_repository_admin_router)
 app.include_router(argument_layer_router)
 app.include_router(extraction_health_router)
 app.include_router(library_audit_router)
+app.include_router(reference_commentary_router)
 app.include_router(original_audio_router)
 app.include_router(source_coverage_router)
 app.include_router(public_wang_articles_router)
