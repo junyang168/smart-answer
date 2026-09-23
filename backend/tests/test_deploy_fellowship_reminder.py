@@ -50,6 +50,7 @@ def deploy_fixture(tmp_path: Path) -> dict[str, object]:
     logs = tmp_path / "logs"
     backend_plist = tmp_path / "backend.plist"
     reminder_plist = tmp_path / "reminder.plist"
+    inbox_plist = tmp_path / "inbox.plist"
 
     for path in (source, deploy_root / "releases", runtime_data / "config", legacy, bin_dir, logs):
         path.mkdir(parents=True)
@@ -73,7 +74,7 @@ def deploy_fixture(tmp_path: Path) -> dict[str, object]:
     target_sha = _git(source, "rev-parse", "HEAD").stdout.strip()
     previous_sha = "a" * 40
 
-    def make_release(sha: str) -> Path:
+    def make_release(sha: str, *, with_inbox: bool = True) -> Path:
         release = deploy_root / "releases" / sha
         (release / "backend" / ".venv" / "bin").mkdir(parents=True)
         (release / "web" / ".next").mkdir(parents=True)
@@ -85,6 +86,11 @@ def deploy_fixture(tmp_path: Path) -> dict[str, object]:
             "raise AssertionError('deployment must not run the reminder job')\n",
             encoding="utf-8",
         )
+        if with_inbox:
+            (release / "backend" / "reference_commentary_inbox_job.py").write_text(
+                "raise AssertionError('deployment must not run the inbox job')\n",
+                encoding="utf-8",
+            )
         (release / ".deploy-complete").touch()
         return release
 
@@ -113,6 +119,14 @@ def deploy_fixture(tmp_path: Path) -> dict[str, object]:
         plistlib.dump(backend_data, handle)
     with reminder_plist.open("wb") as handle:
         plistlib.dump(reminder_data, handle)
+    inbox_data = {
+        "Label": "com.smart_answer.referencecommentaryinbox",
+        "ProgramArguments": ["/old/python", "/old/reference_commentary_inbox_job.py"],
+        "WorkingDirectory": "/old/release",
+        "StartInterval": 180,
+    }
+    with inbox_plist.open("wb") as handle:
+        plistlib.dump(inbox_data, handle)
 
     _write_executable(
         bin_dir / "plist-buddy",
@@ -206,9 +220,11 @@ else:
         "    exit 0\n"
         "    ;;\n"
         "  print)\n"
-        "    program=$(\"$SMART_ANSWER_PLIST_BUDDY\" -c 'Print :ProgramArguments:0' \"$TEST_REMINDER_PLIST\")\n"
-        "    script=$(\"$SMART_ANSWER_PLIST_BUDDY\" -c 'Print :ProgramArguments:1' \"$TEST_REMINDER_PLIST\")\n"
-        "    workdir=$(\"$SMART_ANSWER_PLIST_BUDDY\" -c 'Print :WorkingDirectory' \"$TEST_REMINDER_PLIST\")\n"
+        "    plist=\"$TEST_REMINDER_PLIST\"\n"
+        "    [[ \"${2:-}\" != *referencecommentaryinbox ]] || plist=\"$TEST_INBOX_PLIST\"\n"
+        "    program=$(\"$SMART_ANSWER_PLIST_BUDDY\" -c 'Print :ProgramArguments:0' \"$plist\")\n"
+        "    script=$(\"$SMART_ANSWER_PLIST_BUDDY\" -c 'Print :ProgramArguments:1' \"$plist\")\n"
+        "    workdir=$(\"$SMART_ANSWER_PLIST_BUDDY\" -c 'Print :WorkingDirectory' \"$plist\")\n"
         "    printf 'program = %s\\narguments = {\\n%s\\n}\\nworking directory = %s\\n' \"$program\" \"$script\" \"$workdir\"\n"
         "    ;;\n"
         "esac\n",
@@ -222,12 +238,14 @@ else:
         "SMART_ANSWER_WEB_DATA_DIR": str(runtime_data),
         "SMART_ANSWER_BACKEND_PLIST": str(backend_plist),
         "SMART_ANSWER_FELLOWSHIP_REMINDER_PLIST": str(reminder_plist),
+        "SMART_ANSWER_REFERENCE_INBOX_PLIST": str(inbox_plist),
         "SMART_ANSWER_PLIST_BUDDY": str(bin_dir / "plist-buddy"),
         "SMART_ANSWER_MIN_FREE_MB": "1",
         "SMART_ANSWER_BACKEND_HEALTH": "http://backend.test/healthz",
         "SMART_ANSWER_FRONTEND_HEALTH": "http://frontend.test/",
         "TEST_BACKEND_PLIST": str(backend_plist),
         "TEST_REMINDER_PLIST": str(reminder_plist),
+        "TEST_INBOX_PLIST": str(inbox_plist),
         "TEST_LAUNCHCTL_LOG": str(logs / "launchctl.log"),
         "TEST_DEPLOY_EVENT_LOG": str(logs / "deploy-events.log"),
         "TEST_PM2_WEB_ROOT": str(logs / "pm2-web-root"),
@@ -241,6 +259,8 @@ else:
         "deploy_root": deploy_root,
         "backend_plist": backend_plist,
         "reminder_plist": reminder_plist,
+        "inbox_plist": inbox_plist,
+        "make_release": make_release,
         "launchctl_log": logs / "launchctl.log",
         "deploy_event_log": logs / "deploy-events.log",
         "pm2_web_root": logs / "pm2-web-root",
@@ -504,3 +524,46 @@ def test_deploy_fails_closed_when_reminder_launchagent_is_missing(
 
     assert result.returncode == 1
     assert "fellowship reminder LaunchAgent not found" in result.stderr
+
+
+def test_deploy_binds_reference_inbox_to_new_release(deploy_fixture: dict[str, object]) -> None:
+    env = deploy_fixture["env"]
+    result = _run("bash", deploy_fixture["deploy"], cwd=deploy_fixture["source"], env=env)
+
+    target_release = deploy_fixture["target_release"]
+    with deploy_fixture["inbox_plist"].open("rb") as handle:
+        inbox = plistlib.load(handle)
+    assert inbox["ProgramArguments"] == [
+        str(target_release / "backend" / ".venv" / "bin" / "python3"),
+        str(target_release / "backend" / "reference_commentary_inbox_job.py"),
+    ]
+    assert inbox["WorkingDirectory"] == str(target_release)
+    assert inbox["StartInterval"] == 180
+    assert f"load {deploy_fixture['inbox_plist']}" in deploy_fixture["launchctl_log"].read_text(encoding="utf-8")
+    assert "Reference commentary inbox is bound to" in result.stdout
+
+
+def test_rollback_to_release_without_inbox_stops_the_agent(deploy_fixture: dict[str, object]) -> None:
+    previous_release = deploy_fixture["previous_release"]
+    (previous_release / "backend" / "reference_commentary_inbox_job.py").unlink()
+    env = {**deploy_fixture["env"], "TEST_FAIL_TARGET_REMINDER_LOAD": "1"}
+
+    result = _run("bash", deploy_fixture["deploy"], cwd=deploy_fixture["source"], env=env, check=False)
+
+    assert result.returncode == 1
+    assert "Rollback complete" in result.stdout
+    assert "Reference commentary inbox is not in" in result.stdout
+    calls = deploy_fixture["launchctl_log"].read_text(encoding="utf-8").splitlines()
+    assert calls[-1] == f"unload {deploy_fixture['inbox_plist']}"
+
+
+def test_deploy_fails_closed_when_inbox_launchagent_is_missing(deploy_fixture: dict[str, object]) -> None:
+    deploy_fixture["inbox_plist"].unlink()
+
+    result = _run(
+        "bash", deploy_fixture["deploy"], "--dry-run", cwd=deploy_fixture["source"], env=deploy_fixture["env"], check=False
+    )
+
+    assert result.returncode == 1
+    assert "reference commentary inbox LaunchAgent not found" in result.stderr
+    assert "install-reference-inbox-agent.sh" in result.stderr

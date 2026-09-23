@@ -174,6 +174,7 @@ that way. `.github/pull_request_template.md` carries the rule.
 | 8555 | FastAPI backend, `backend.api.main:app` | LaunchAgent `com.smart_answer.fullarticleservice` | no |
 | 3000 | Next.js frontend | pm2 app `smart-answer` | yes, via nginx 443/80 |
 | — | Fellowship email reminder, daily schedule check at 10:00 | LaunchAgent `com.smartanswer.fellowshipreminder` | no |
+| — | Reference commentary scan inbox, every 3 minutes | LaunchAgent `com.smart_answer.referencecommentaryinbox` | no |
 | 3003 | Next.js, older build | not in any deploy path (#78) | via nginx 8888 |
 | 8000 | legacy backend | processes dating from 2026-07-13 | `/sc_api/`, `/public`, `/static` |
 | 60000 | legacy QA service | LaunchAgent `smart_answer.service` | `/get_answer` |
@@ -221,6 +222,28 @@ launchctl print "gui/$(id -u)/com.smartanswer.fellowshipreminder" \
 
 Do not run the reminder with `--force` while diagnosing: that sends mail. The
 normal deploy path never passes `--force` and never invokes the reminder job.
+
+### Reference commentary scan inbox
+
+The owner scans Carson pages with the iPhone Files app into
+`iCloud Drive/Carson/<Book>/ch<N>/`. Every three minutes this LaunchAgent OCRs
+new scans with Vertex `gemini-3.8-flash` and records each printed page under
+`$DATA_BASE_DIR/reference-commentary/<volume_id>/`. The only file it writes
+back to iCloud is `_problems.md` (unreadable page numbers, missing pages).
+Design: `docs/wang-knowledge-platform/60-reference-commentary/reference_commentary_solution_v1.md`.
+
+- Plist and label are both `com.smart_answer.referencecommentaryinbox`. It holds
+  no secrets: `DATA_BASE_DIR`, the Vertex service-account path and the inbox
+  path. Create it once with `scripts/install-reference-inbox-agent.sh`; a
+  deploy fails closed while it is missing.
+- `scripts/deploy.sh` rebinds and checks it exactly like the fellowship
+  reminder (`ProgramArguments[0..1]`, `WorkingDirectory`). Rolling back to a
+  release without `backend/reference_commentary_inbox_job.py` unloads it.
+- Log: `~/Library/Logs/smart-answer/reference-commentary-inbox.log`.
+- A scan is processed once, keyed by SHA-256 in
+  `$DATA_BASE_DIR/reference-commentary/inbox-ledger.json`. To redo one, delete
+  its ledger entry; page records are never overwritten, so a rerun adds a
+  version rather than replacing one.
 
 ---
 
