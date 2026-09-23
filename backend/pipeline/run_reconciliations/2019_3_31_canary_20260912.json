@@ -1,0 +1,43 @@
+{
+  "schema_version": "wang_pipeline_run_reconciliation_v1",
+  "reconciliation_id": "RECON-2019-3-31-CANARY-20260912",
+  "source_id": "2019-3-31 宗主国与附庸国的约",
+  "triggered_by": "junyang",
+  "artifact_root": "claim-layer/research-batches/RB-CLAIM-REPAIR-TAKEOVER-358-20260911/canary-markup-prompt-20260912",
+  "artifacts": [
+    {
+      "stage": "extraction",
+      "path": "detailed-extractions/2019_3_31-61585a6f4eab.detailed-knowledge.json",
+      "sha256": "f6bba6c295295a9ee4fed2f644f36cdd9b551beece0e4961e250547014ca1a3b",
+      "model_id": "gpt-5.6-sol"
+    },
+    {
+      "stage": "cross_section",
+      "path": "cross-section/2019_3_31-61585a6f4eab.cross-section.json",
+      "sha256": "e29517090d10f72079ca17aefd1167123698720b6cb46b7ee0baac2e85d78761",
+      "model_id": "gpt-5.6-sol"
+    },
+    {
+      "stage": "review",
+      "path": "reviews/2019_3_31-61585a6f4eab.independent-review.json",
+      "sha256": "fe09040fbe1d72de6ce46ca2677907e54c837e07c22de04f05a3280c891edae7",
+      "model_id": "claude-sonnet-5"
+    },
+    {
+      "stage": "adjudication",
+      "path": "adjudications/2019_3_31-61585a6f4eab.adjudication.json",
+      "sha256": "2f9bbfc2a13f73a15fc6b234daa5cb173cb68bd146040f5f4339d7940d9677db",
+      "model_id": "gpt-5.6-sol"
+    }
+  ],
+  "adjudication_companion": {
+    "path": "overrides/2019_3_31-61585a6f4eab.overrides.json",
+    "sha256": "fd0fed4b831b2a5602469f5f6c7bee24b551e8ee85cde208bae3a9db2ed1edb0"
+  },
+  "consumer": {
+    "merge_run_id": "RUN-eac31bf1f24b003d05436c9bd7",
+    "ingest_run_id": "RUN-3b3e8e9a488dd619ac3b2ff327",
+    "merged_output": "reviewed/2019_3_31-61585a6f4eab.reviewed-candidate.json",
+    "merged_output_sha256": "70e641279959e2e3e163c33f8c6b1267c51dcdfe3b22f7de8aa48096a7118384"
+  }
+}
