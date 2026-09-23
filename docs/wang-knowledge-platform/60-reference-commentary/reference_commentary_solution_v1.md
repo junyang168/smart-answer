@@ -32,7 +32,8 @@
 | --- | --- |
 | 版本 | *The Expositor's Bible Commentary*, Matthew / D. A. Carson，Zondervan 1995 softcover 分册版。v. 1 = *Matthew 1–12*，ISBN 0-310-49961-5；13–28 章在 v. 2 |
 | 语言 | 只要英文原文，不译中文 |
-| 上传 | iPhone 拍照，经 Claude Code 会话上传。不建网页上传 |
+| 上传 | iPhone 拍照（HEIC），拷进本机一个文件夹，由脚本读取。不建网页上传 |
+| OCR 模型 | Vertex `gemini-3.8-flash`（负责人 2026-09-23）。`gemini-3.1-pro-preview` 太旧，不用 |
 | 归属 | 新开 epic WKP-E11（#378），作为一种新的知识来源 |
 
 ## 2. 与既有裁定的关系
@@ -82,8 +83,8 @@
 
 ```mermaid
 flowchart LR
-    PHOTO["iPhone 拍照"] --> UPLOAD["上传进 Claude Code 会话"]
-    UPLOAD --> READ["会话读图、按规则转写"]
+    PHOTO["iPhone 拍照"] --> UPLOAD["拷进本机文件夹"]
+    UPLOAD --> READ["OCR 脚本：gemini-3.8-flash 逐张转写"]
     READ --> FILE["建档脚本：校验、算 SHA、写记录"]
     FILE --> STORE["数据目录"]
     STORE --> VIEW["admin 研读页：原图与文字对照、校对"]
@@ -92,12 +93,16 @@ flowchart LR
 | 步骤 | 做什么 |
 | --- | --- |
 | 拍照 | 一张一页，页面摊平，手指不压正文 |
-| 上传 | 负责人把照片贴进 Claude Code 会话，说明是哪一册 |
-| 转写 | 会话中的模型直接读图转写。符合「模型调用走订阅 CLI」的约定：不接 API client |
+| 上传 | 负责人把 HEIC 拷进一个文件夹（如 `~/Downloads`），说明是哪一册、哪一章 |
+| 转写 | OCR 脚本把每张 HEIC 连同转写规则发给 Vertex `gemini-3.8-flash`，文字直接写进文件。复用 `backend/api/sermon_converter_service.py` 里 notes-to-sermon 已有的 `genai.Client(vertexai=True)` 调用方式，模型名单独配置，不改 notes-to-sermon 的 `OCR_MODEL` |
 | 建档 | 一个脚本接收原图与转写文字，校验页码不冲突、算 SHA、写页记录。**同一页已存在时不覆盖**，而是追加新版本 |
 | 校对 | 负责人在研读页对照原图修正，状态改为 `proofread` |
 
-一次上传多张时，会话逐张转写、逐张建档；每张的页码从图中读出，读不出就停下来问，不猜。
+一次多张时，脚本逐张转写、逐张建档；每张的页码从模型输出的 `<!-- Page N -->` 读出，读不出就列出来等负责人确认，不猜。页码有缺口（如第 20 章从 427 页开始、缺 426）也列出来。遇到 Vertex 429 限流就退避重试。
+
+**为什么不让 Claude 会话转写。** 2026-09-23 第一次试：负责人上传第 20 章的照片，会话每一轮都返回 `API Error: 400 Output blocked by content filtering policy`。Claude 逐字输出受版权保护的书页会被输出过滤拦下；照片留在会话上下文里，之后连「hello」也被拦，整个会话作废。Gemini 的文字直接落盘，不经过 Claude 的输出。这是「模型调用走订阅 CLI」约定的例外，由负责人裁定。
+
+**试跑结果（2026-09-23）。** 第 20 章 10 张 HEIC（`IMG_3822`–`IMG_3831`），印刷页 427–436，10 张全部转出，页码连续无缺口；3 张遇 429 后重试成功；单张 25 秒到 2.5 分钟。负责人看过，认为可用。已知毛病，留给校对：个别经文行被标成了标题（20:20），各页标题层级不一致。
 
 **转写规则**（这些都是能机械核对的版式要求）：
 
@@ -160,7 +165,7 @@ HEIC 原图在建档时用 macOS `sips` 转一份 JPEG 供浏览器显示，原 
 | F11.03 研读界面 | 后端读取 + 校对 API、`/admin/reference-commentary` 四个视图 | 负责人能在单页视图里校对一页并看到版本 |
 | F11.04 查经取用 | 查经材料按经文范围取 Carson 相关页，引用带册与页码 | 另写设计后再定 |
 
-F11.02 不依赖界面：建档之后，负责人在 F11.03 做好之前就可以在会话里拿到转写文字研读。
+F11.02 不依赖界面：建档之后，负责人在 F11.03 做好之前就可以直接打开转写出的 Markdown 研读。
 
 ## 9. 开放问题
 
