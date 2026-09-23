@@ -32,8 +32,9 @@
 | --- | --- |
 | 版本 | *The Expositor's Bible Commentary*, Matthew / D. A. Carson，Zondervan 1995 softcover 分册版。v. 1 = *Matthew 1–12*，ISBN 0-310-49961-5；13–28 章在 v. 2 |
 | 语言 | 只要英文原文，不译中文 |
-| 上传 | iPhone「文件」App 的「扫描文稿」存进 iCloud Drive 收件夹，Mac 自动 OCR，文字写回同一文件夹（负责人 2026-09-23）。不经 Claude Code 会话，不建网页上传 |
+| 上传 | iPhone「文件」App 的「扫描文稿」存进 iCloud Drive 收件夹，Mac 自动 OCR 并建档（负责人 2026-09-23）。不经 Claude Code 会话，不建网页上传 |
 | OCR 模型 | Vertex `gemini-3.8-flash`（负责人 2026-09-23）。`gemini-3.1-pro-preview` 太旧，不用 |
+| 阅读 | 转写文字在网站的研读页里看，手机和电脑都能用。不在文件夹里另生成可读文件（负责人 2026-09-23：不做一次性方案） |
 | 归属 | 新开 epic WKP-E11（#378），作为一种新的知识来源 |
 
 ## 2. 与既有裁定的关系
@@ -85,7 +86,6 @@
 flowchart LR
     PHOTO["iPhone「扫描文稿」"] --> UPLOAD["iCloud Drive 收件夹"]
     UPLOAD --> READ["Mac 监视任务：gemini-3.8-flash 逐页转写"]
-    READ --> BACK["文字写回收件夹，iPhone 上即可读"]
     READ --> FILE["建档脚本：校验、算 SHA、写记录"]
     FILE --> STORE["数据目录"]
     STORE --> VIEW["admin 研读页：原图与文字对照、校对"]
@@ -96,7 +96,7 @@ flowchart LR
 | 扫描 | 在「文件」App 打开收件夹（如 `iCloud Drive/Carson/Matthew/ch21/`），点右上角 ⋯ →「扫描文稿」，逐页翻拍，存成一份多页 PDF。相机照片（HEIC）直接放进收件夹也收。手指不压正文 |
 | 同步与触发 | iCloud 把收件夹同步到 Mac；Mac 上一个 launchd 任务监视收件夹，发现新文件就处理。「优化 Mac 存储空间」会把文件留成云端占位，处理前先强制下载。册由收件夹路径决定（`Matthew/ch21` → v. 2），不用每次说明 |
 | 转写 | PDF 先逐页拆成图片；每页连同转写规则发给 Vertex `gemini-3.8-flash`，文字直接写进文件。复用 `backend/api/sermon_converter_service.py` 里 notes-to-sermon 已有的 `genai.Client(vertexai=True)` 调用方式，模型名单独配置，不改 notes-to-sermon 的 `OCR_MODEL` |
-| 回写 | 每页文字写回收件夹（`page-427.md`），另拼一份按页码排序的 `chapter21.md`，负责人在 iPhone 上直接读。页码读不出或有缺口时写一份 `_problems.md` 在同一文件夹 |
+| 报告问题 | 页码读不出或有缺口时，在研读页的书架视图标出；同时在收件夹写一份 `_problems.md`，负责人在手机上也看得到。收件夹里不放转写文字，避免出现第二份会走样的副本 |
 | 建档 | 同一任务把原图与转写文字建档，校验页码不冲突、算 SHA、写页记录。**同一页已存在时不覆盖**，而是追加新版本 |
 | 校对 | 负责人在研读页对照原图修正，状态改为 `proofread` |
 
@@ -137,13 +137,14 @@ flowchart LR
 
 ## 6. 研读界面
 
-路径 `/admin/reference-commentary`，只有 `editor`／`admin` 可进。
+路径 `/admin/reference-commentary`，只有 `editor`／`admin` 可进。这是读转写文字的唯一地方：扫描完一章，几分钟后刷新这里就能读。
 
 | 视图 | 内容 |
 | --- | --- |
-| 书架 | 各册、已建档页数、已校对页数、缺页（按印刷页码的空档算出） |
+| 书架 | 各册、各章、已建档页数、已校对页数、缺页（按印刷页码的空档算出）、刚扫描完还在转写的页 |
+| 章节阅读 | **默认视图。** 一章连续排版阅读：标题、斜体、希腊文按原样显示，每页开头标印刷页码；点页码切到该页的单页视图。手机上单栏，字号可调 |
 | 按经文 | 马太福音章节列表，点开一段经文看 Carson 讨论它的所有页 |
-| 单页 | 左边原图，右边转写文字；`gaps` 在文字里高亮；可编辑文字并标为已校对，每次保存留版本 |
+| 单页 | 左边原图，右边转写文字（手机上上下排列）；`gaps` 在文字里高亮；可编辑文字并标为已校对，每次保存留版本 |
 | 搜索 | 在已转写文字里按词搜索（英文、希腊文） |
 
 HEIC 原图在建档时用 macOS `sips` 转一份 JPEG 供浏览器显示，原 HEIC 保留；扫描 PDF 拆出的每页图片直接显示，原 PDF 保留。
@@ -163,11 +164,11 @@ HEIC 原图在建档时用 macOS `sips` 转一份 JPEG 供浏览器显示，原 
 
 | 卡 | 交付 | 完成标准 |
 | --- | --- | --- |
-| F11.02 收件夹、OCR 与建档 | iCloud 收件夹 + launchd 监视任务（PDF 与 HEIC 都收）、`gemini-3.8-flash` 转写与回写、`$DATA_BASE_DIR/reference-commentary/`、页记录格式；收编马太福音 18、20 章 | 负责人在 iPhone 扫一章，几分钟内同一文件夹出现逐页文字与整章文件；18、20 章可按印刷页码取回原图与文字 |
-| F11.03 研读界面 | 后端读取 + 校对 API、`/admin/reference-commentary` 四个视图 | 负责人能在单页视图里校对一页并看到版本 |
+| F11.02 收件夹、OCR 与建档 | iCloud 收件夹 + launchd 监视任务（PDF 与 HEIC 都收）、`gemini-3.8-flash` 转写、`$DATA_BASE_DIR/reference-commentary/`、页记录格式；收编马太福音 18、20 章 | 负责人在 iPhone 扫一章，几分钟内该章建档完成；18、20 章可按印刷页码取回原图与文字 |
+| F11.03 研读界面 | 后端读取 + 校对 API、`/admin/reference-commentary` 五个视图，章节阅读先做 | 负责人在手机上打开第 20 章连续读完；能在单页视图里校对一页并看到版本 |
 | F11.04 查经取用 | 查经材料按经文范围取 Carson 相关页，引用带册与页码 | 另写设计后再定 |
 
-F11.02 不依赖界面：建档之后，负责人在 F11.03 做好之前就可以直接打开转写出的 Markdown 研读。
+F11.02 与 F11.03 一起上线才算能用：只有建档没有研读页，扫描出的文字没有地方读。
 
 ## 9. 开放问题
 
