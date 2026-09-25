@@ -25,7 +25,7 @@ from typing import Any, Callable, Iterable
 from backend.api.reference_commentary import chapters_of, missing_pages
 from backend.bible_study import cuv
 from backend.bible_study.passage import Passage, find_passages, parse_passage
-from backend.bible_study.paths import studies_dir
+from backend.bible_study.paths import load_env, studies_dir
 from backend.config.reference_commentary_paths import reference_commentary_paths
 from backend.reference_commentary.store import VolumeStore, page_sort_key
 from backend.reference_commentary.volumes import VOLUMES
@@ -105,11 +105,10 @@ def load_claim_rows(passage: Passage) -> ClaimRows:
     """Live claims whose refs mention a chapter the passage touches (prefilter only)."""
 
     import psycopg
-    from dotenv import load_dotenv
 
     from backend.api.canonical_repository.postgres_store import database_url_from_env
 
-    load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+    load_env()
     patterns = [f"%{c}:%" for c in passage.chapters] + [f"%{c}：%" for c in passage.chapters]
     with psycopg.connect(database_url_from_env()) as conn:
         rows = conn.execute(
