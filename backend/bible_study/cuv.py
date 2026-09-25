@@ -60,3 +60,35 @@ def ensure_cached(passage: Passage, *, root: Path | None = None, fetch: Fetch = 
         chapter(passage.book, number, root=root, fetch=fetch)
         keys.append(f"{passage.book.upper()}/{number}")
     return keys
+
+
+def refs_in_slides(spec: dict) -> set[tuple[str, int]]:
+    """(BOOK, chapter) for every `refs`/`left`/`right` entry in a slides.json."""
+
+    found = set()
+    for slide in spec.get("slides", []):
+        for key in ("refs", "left", "right"):
+            for ref in slide.get(key) or []:
+                book, rest = ref.split(" ", 1)
+                found.add((book, int(rest.split(":")[0])))
+    return found
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Cache every chapter a study's slides.json quotes: `python -m backend.bible_study.cuv <folder>`."""
+
+    import sys
+
+    args = sys.argv[1:] if argv is None else argv
+    if len(args) != 1:
+        print("usage: python -m backend.bible_study.cuv <study folder>", file=sys.stderr)
+        return 2
+    spec = json.loads((Path(args[0]) / "slides.json").read_text(encoding="utf-8"))
+    for book, number in sorted(refs_in_slides(spec)):
+        chapter(book, number)
+        print(f"{book}/{number}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

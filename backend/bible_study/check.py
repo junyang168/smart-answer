@@ -223,8 +223,9 @@ def stage_of(folder: Path) -> str:
     if has["script.md"]:
         outline = (folder / "outline.md").read_text(encoding="utf-8") if has["outline.md"] else ""
         written = len(_blocks((folder / "script.md").read_text(encoding="utf-8"), _SECTION))
-        total = len(_blocks(outline, _SECTION))
-        return f"script ({written}/{total} sections)"
+        if not outline:
+            return f"script ({written} sections, no outline)"
+        return f"script ({written}/{len(_blocks(outline, _SECTION))} sections)"
     if has["outline.md"]:
         approved = _APPROVED_TAG.search((folder / "outline.md").read_text(encoding="utf-8"))
         return f"outline approved {approved.group(1)}" if approved else "outline (not approved)"
