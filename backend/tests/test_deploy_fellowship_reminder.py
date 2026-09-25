@@ -55,6 +55,14 @@ def deploy_fixture(tmp_path: Path) -> dict[str, object]:
     for path in (source, deploy_root / "releases", runtime_data / "config", legacy, bin_dir, logs):
         path.mkdir(parents=True)
 
+    # The web's own configuration: every release links web/.env.local here.
+    web_data = tmp_path / "web-data"
+    (web_data / "fellowship" / "docs" / "2026-09-25").mkdir(parents=True)
+    (web_data / "fellowship" / "docs" / "2026-09-25" / "study.pptx").write_bytes(b"deck")
+    (legacy / "web").mkdir()
+    web_env = legacy / "web" / ".env.local"
+    web_env.write_text(f"NEXTAUTH_URL=https://example.test\nDATA_BASE_DIR={web_data}\n", encoding="utf-8")
+
     _run("git", "init", "--bare", "--initial-branch=main", remote, cwd=tmp_path)
     _run("git", "init", "--initial-branch=main", source, cwd=tmp_path)
     _git(source, "config", "user.email", "test@example.com")
@@ -173,7 +181,7 @@ else:
         bin_dir / "pm2",
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
-        "printf 'pm2 %s root=%s\\n' \"$*\" \"${SMART_ANSWER_WEB_ROOT:-}\" >> \"$TEST_DEPLOY_EVENT_LOG\"\n"
+        "printf 'pm2 %s root=%s data=%s\\n' \"$*\" \"${SMART_ANSWER_WEB_ROOT:-}\" \"${DATA_BASE_DIR:-}\" >> \"$TEST_DEPLOY_EVENT_LOG\"\n"
         "if [[ \"${1:-}\" == 'start' ]]; then\n"
         "  printf '%s\\n' \"$SMART_ANSWER_WEB_ROOT\" > \"$TEST_PM2_WEB_ROOT\"\n"
         "fi\n"
@@ -195,6 +203,13 @@ else:
         "  if [[ -n \"${TEST_FAIL_TARGET_FRONTEND:-}\" && \"$web_root\" == *\"/$TEST_TARGET_SHA/web\" ]]; then\n"
         "    exit 1\n"
         "  fi\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [[ \"$url\" == */api/fellowship-documents/* ]]; then\n"
+        "  printf 'fellowship-document %s\\n' \"$url\" >> \"$TEST_DEPLOY_EVENT_LOG\"\n"
+        "  web_root=''\n"
+        "  [[ ! -f \"$TEST_PM2_WEB_ROOT\" ]] || web_root=$(<\"$TEST_PM2_WEB_ROOT\")\n"
+        "  if [[ -n \"${TEST_FAIL_FELLOWSHIP_DOCUMENT:-}\" && \"$web_root\" == *\"/$TEST_TARGET_SHA/web\" ]]; then exit 22; fi\n"
         "  exit 0\n"
         "fi\n"
         "backend_program=$(\"$SMART_ANSWER_PLIST_BUDDY\" -c 'Print :ProgramArguments:0' \"$TEST_BACKEND_PLIST\")\n"
@@ -231,7 +246,7 @@ else:
     )
 
     env = {
-        **os.environ,
+        **{k: v for k, v in os.environ.items() if k != "DATA_BASE_DIR"},
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "SMART_ANSWER_DEPLOY_ROOT": str(deploy_root),
         "SMART_ANSWER_LEGACY_ROOT": str(legacy),
@@ -268,6 +283,8 @@ else:
         "target_release": target_release,
         "previous_release": previous_release,
         "env": env,
+        "web_env": web_env,
+        "web_data": web_data,
     }
 
 
@@ -567,3 +584,42 @@ def test_deploy_fails_closed_when_inbox_launchagent_is_missing(deploy_fixture: d
     assert result.returncode == 1
     assert "reference commentary inbox LaunchAgent not found" in result.stderr
     assert "install-reference-inbox-agent.sh" in result.stderr
+
+
+def test_web_gets_data_base_dir_from_its_config_not_the_deploying_shell(deploy_fixture: dict[str, object]) -> None:
+    result = _run("bash", deploy_fixture["deploy"], cwd=deploy_fixture["source"], env=deploy_fixture["env"])
+
+    events = deploy_fixture["deploy_event_log"].read_text(encoding="utf-8").splitlines()
+    start = next(e for e in events if e.startswith("pm2 start "))
+    assert start.endswith(f"data={deploy_fixture['web_data']}")
+    assert any(e.startswith("fellowship-document ") and e.endswith("/api/fellowship-documents/2026-09-25/study.pptx") for e in events)
+    assert "Web serves fellowship documents (2026-09-25/study.pptx)" in result.stdout
+
+
+def test_deploy_fails_closed_when_web_config_lacks_data_base_dir(deploy_fixture: dict[str, object]) -> None:
+    deploy_fixture["web_env"].write_text("NEXTAUTH_URL=https://example.test\n", encoding="utf-8")
+
+    result = _run("bash", deploy_fixture["deploy"], "--dry-run", cwd=deploy_fixture["source"], env=deploy_fixture["env"], check=False)
+
+    assert result.returncode == 1
+    assert "DATA_BASE_DIR is not set in" in result.stderr
+
+
+def test_deploy_fails_closed_when_web_data_dir_is_missing(deploy_fixture: dict[str, object]) -> None:
+    deploy_fixture["web_env"].write_text("DATA_BASE_DIR=/nonexistent/web-data\n", encoding="utf-8")
+
+    result = _run("bash", deploy_fixture["deploy"], "--dry-run", cwd=deploy_fixture["source"], env=deploy_fixture["env"], check=False)
+
+    assert result.returncode == 1
+    assert "is not a directory: /nonexistent/web-data" in result.stderr
+
+
+def test_unservable_fellowship_document_rolls_back(deploy_fixture: dict[str, object]) -> None:
+    env = {**deploy_fixture["env"], "TEST_FAIL_FELLOWSHIP_DOCUMENT": "1"}
+
+    result = _run("bash", deploy_fixture["deploy"], cwd=deploy_fixture["source"], env=env, check=False)
+
+    assert result.returncode == 1
+    assert "web cannot serve fellowship document 2026-09-25/study.pptx" in result.stderr
+    assert "Rollback complete" in result.stdout
+    assert (deploy_fixture["deploy_root"] / "active-release").read_text(encoding="utf-8").strip() == str(deploy_fixture["previous_release"])

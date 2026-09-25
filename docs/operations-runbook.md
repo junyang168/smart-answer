@@ -191,6 +191,23 @@ use`, and the cycle writes roughly 8 MB of stderr a day. It had reached 283 MB.
 The service itself answers. Do not "fix" it by killing whatever holds port
 60000 without reading #76 first.
 
+### Web data directory
+
+The web mostly reads data through the backend, but two places read the disk
+directly: public fellowship documents (`/api/fellowship-documents/…`) and the
+Markdown documents on the fellowship page. Both find `fellowship/docs` through
+`DATA_BASE_DIR`.
+
+- The backend gets `DATA_BASE_DIR` from its LaunchAgent plist. The web gets it
+  from `/opt/homebrew/var/www/smart-answer/web/.env.local`, which every release
+  links as `web/.env.local`.
+- `scripts/deploy.sh` reads it from that file, refuses to deploy when it is
+  missing or not a directory, and passes it to pm2 explicitly. Before #385, pm2
+  inherited it from the deploying shell: a deploy on 2026-09-23 from a shell
+  without it made every fellowship document return 404 for two days.
+- After switching, the deploy downloads one real fellowship document through
+  the new web process; if that fails, it rolls back.
+
 ### Fellowship reminder
 
 The fellowship reminder is a separate LaunchAgent, not part of the FastAPI
