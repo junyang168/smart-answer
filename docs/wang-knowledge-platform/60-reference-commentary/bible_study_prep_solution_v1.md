@@ -93,7 +93,7 @@ flowchart LR
 | 材料清单 | `python -m backend.bible_study.sources <日期> <经文>` | 读 `reference-commentary/*/pages.json` 和 `wang_knowledge`（只读），写 `sources.json` |
 | 工作说明 | 仓库内的 Claude Code skill `.claude/skills/bible-study/SKILL.md`，用 `/bible-study` 启动 | 第 4 节的流程、准备档格式、语气要求、Carson 引用规则、5.1 的 PPT 要求。规则写在仓库里，换一个会话也不会丢；改规则走 PR |
 | 检查器 | `python -m backend.bible_study.check <目录名>`；`… check status` 列出各次查经的进度 | 第 4 节「机器查什么」那一栏，全部可机械判断。纪要、大纲、逐字稿的标记格式写在 `backend/bible_study/check.py` 开头 |
-| PPT 生成器 | `tools/bible-study-ppt/`（Node，pptxgenjs） | 从这次的 scratchpad 版本搬进来：`slides.json` 进、`.pptx` 与对照出；经文从和合本缓存取；用 PowerPoint 渲染出图供检查 |
+| PPT 生成器 | `node tools/bible-study-ppt/build.js <目录>`；`qa.sh` 用 PowerPoint 渲染；`python -m backend.bible_study.publish <目录>` 发布 | `slides.json` 进，`out/` 里的 `.pptx` 与对照出；经文从和合本缓存取 |
 | 和合本缓存 | `$DATA_BASE_DIR/bible/cuv/` | 繁体和合本，公有领域。这次从 bible-api.com 按章取，存下来以后不再联网 |
 
 ### 5.1 PPT 生成器必须保留的做法
@@ -107,7 +107,7 @@ flowchart LR
 3. **PPT 要 cover 逐字稿的所有内容，不能跳过**：逐字稿的每个要点都在某一页上
 4. **每张投影片只呈现要点**：短句，不是逐字稿的句子；完整的话放在备忘稿和对照文件里。第 3 条和这一条一起才是负责人要的：要点一个不漏，句子一句不搬
 
-下表每一条都是这次返工换来的，搬的时候一条都不能丢：
+下表每一条都是这次返工换来的，F11.07 已全部写进生成器：
 
 | | 做法 | 这次出过的问题 |
 | --- | --- | --- |
@@ -125,6 +125,8 @@ flowchart LR
 | 12 | 用 **PowerPoint** 渲染检查（AppleScript 另存 PDF → 拆页 → 缩略图），不用 Keynote 或 LibreOffice | 负责人用 PowerPoint 放映；其他软件的字宽不同，查不出真正的溢出 |
 | 13 | 发布前查目标文件是否在 PowerPoint 里开着 | 负责人开着旧版，页码对不上，以为生成错了 |
 | 14 | 文件校验用装了 `defusedxml` 的 Python（仓库的 `.venv`） | 系统 Python 缺这个库，校验跑不起来 |
+| 15 | 一张经文卡放了不同章的几段经文（太 16:21；17:22–23）：每段第一节都标章号，段与段之间空一行。读经段落跨章接下去（19:30 → 20:1）不算 | 负责人发布后在 PowerPoint 里自己改的 |
+| 16 | 发布时，已发布的文件若在上次发布后被改过，停下，不覆盖 | 负责人 2026-09-25 直接改了两份已发布的 PPT；重建后照旧复制就会把改动冲掉 |
 
 和合本从 bible-api.com 的 `cuv` 译本按章取（繁体），快照里的 `cuv.json` 是这次用到的几章。
 

@@ -104,12 +104,28 @@ description: 准备周末查经：以 Carson 释经书和王教授的相关讲�
 3. **PPT 要 cover 逐字稿的所有内容，不能跳过**：每个要点都在某一页上
 4. **每张投影片只呈现要点**：短句，不是逐字稿的句子；完整的话放备忘稿和对照文件
 
-具体做法（字号、zh-TW 断行、经文拆页、关键经节、表格行高、PowerPoint 渲染检查……）见设计文档 5.1 节的十四条，一条都不能丢。生成器在 `tools/bible-study-ppt/`（WKP-F11.07）；在它进仓库之前，用 `$DATA_BASE_DIR/bible-study/_generator-snapshot-2026-09-25/`。
+具体做法（字号、zh-TW 断行、经文拆页、关键经节、表格行高、PowerPoint 渲染检查……）见设计文档 5.1 节，都已写进生成器；第 3、4 条生成器会直接报错。
+
+写 `slides.json`（格式见 `tools/bible-study-ppt/build.js` 开头；参考 `$DATA_BASE_DIR/bible-study/2026-09-25-mat-20-17-34/slides.json`），然后：
+
+```bash
+.venv/bin/python -m backend.bible_study.cuv <目录>          # 缓存 slides.json 引到的每一章
+(cd tools/bible-study-ppt && npm install)                   # 第一次
+node tools/bible-study-ppt/build.js <目录>                  # 写 <目录>/out/
+tools/bible-study-ppt/qa.sh <目录>/out/<名称>.pptx <qa 目录>  # PowerPoint 渲染，看 sheetNN.jpg
+```
+
+逐页看缩略图：文字溢出、行首标点、经文卡是否挤。有问题改 `slides.json` 重建，不手改 pptx。
 
 ## 7. 发布
 
-复制 `.pptx`、逐字稿和（投影片對照）.md 到 `$DATA_BASE_DIR/fellowship/docs/<日期>/`（即 OneDrive `团契/<日期>/`，网站公开可下载）。
+```bash
+.venv/bin/python -m backend.bible_study.publish <目录>
+```
 
-**复制前先查目标文件是否在 PowerPoint 里开着**；开着就停下，请负责人关掉（不要存）再继续。2026-09-25 负责人开着旧版，以为新版页码错了。
+把 `out/` 里的 PPT、逐字稿、（投影片對照）.md 复制到 `$DATA_BASE_DIR/fellowship/docs/<日期>/`（即 OneDrive `团契/<日期>/`，网站公开可下载）。它在两种情况下停下、什么都不复制：
+
+- **PowerPoint 开着目标 PPT**：请负责人关掉（不要存）再发布。2026-09-25 负责人开着旧版，以为新版页码错了
+- **已发布的文件在上次发布后被改过**：多半是负责人在 PowerPoint 里直接改了。先看改了什么（逐页比对文字和备忘稿），把改动写进 `slides.json` 或生成器，重建，再加 `--overwrite`。2026-09-25 负责人改了两处：多段经文卡的章号、讨论页的一行提示
 
 发布后告诉负责人每个文件的位置，和 PPT 的页数。
