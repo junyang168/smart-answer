@@ -18,6 +18,12 @@ REFERENCE_INBOX_JOB="backend/reference_commentary_inbox_job.py"
 PLIST_BUDDY="${SMART_ANSWER_PLIST_BUDDY:-/usr/libexec/PlistBuddy}"
 BACKEND_HEALTH="${SMART_ANSWER_BACKEND_HEALTH:-http://127.0.0.1:8555/healthz}"
 FRONTEND_HEALTH="${SMART_ANSWER_FRONTEND_HEALTH:-http://127.0.0.1:3000/}"
+FRONTEND_ORIGIN="${FRONTEND_HEALTH%/}"
+# Every release links web/.env.local to this file. The web reads DATA_BASE_DIR
+# from it; the deploying shell's environment must not decide where the web
+# looks for files (#385: a deploy from a shell without it made every
+# fellowship document 404).
+WEB_ENV_FILE="${SMART_ANSWER_WEB_ENV_FILE:-$LEGACY_RELEASE/web/.env.local}"
 PM2_APP="${SMART_ANSWER_PM2_APP:-smart-answer}"
 PM2_CONFIG="$SOURCE_REPO/scripts/pm2.production.config.cjs"
 
@@ -248,13 +254,44 @@ restart_frontend() {
   # PM2 restart/startOrRestart preserves the original cwd for an existing app.
   # Delete and recreate the process so the immutable release path really takes
   # effect. A failed start is handled by switch_services -> rollback.
+  # --update-env hands PM2 this shell's environment, so DATA_BASE_DIR is set
+  # here from the web's own config rather than inherited from whoever deploys.
   pm2 delete "$PM2_APP" 2>/dev/null || true
-  SMART_ANSWER_WEB_ROOT="$release/web" SMART_ANSWER_PM2_APP="$PM2_APP" \
+  DATA_BASE_DIR="$WEB_DATA_BASE_DIR" SMART_ANSWER_WEB_ROOT="$release/web" SMART_ANSWER_PM2_APP="$PM2_APP" \
     pm2 start "$PM2_CONFIG" --only "$PM2_APP" --update-env
+}
+
+# DATA_BASE_DIR as the web will see it: the last assignment in its .env.local.
+web_data_base_dir() {
+  [[ -f "$WEB_ENV_FILE" ]] || return 1
+  sed -n 's/^[[:space:]]*DATA_BASE_DIR[[:space:]]*=[[:space:]]*//p' "$WEB_ENV_FILE" \
+    | tail -1 | sed "s/^[\"']//; s/[\"'][[:space:]]*$//; s/[[:space:]]*$//"
+}
+
+# The web reads fellowship documents straight from disk (the only web code
+# that does). Answering / is not enough: fetch one real document through the
+# new process, or roll back.
+assert_fellowship_document() {
+  local docs="$WEB_DATA_BASE_DIR/fellowship/docs" sample relative url
+  sample="$(find "$docs"/ -mindepth 2 -maxdepth 2 -type f \( -name '*.pptx' -o -name '*.md' \) \
+    ! -name '主題與查經重點.md' ! -name 'recording.transcript.generated.md' 2>/dev/null \
+    | grep -E '/[0-9]{4}-[0-9]{2}-[0-9]{2}/[^/]+$' | sort | tail -1)"
+  if [[ -z "$sample" ]]; then
+    log "No fellowship document on disk to probe; skipping the document check"
+    return 0
+  fi
+  relative="${sample#"$docs"/}"
+  url="$FRONTEND_ORIGIN/api/fellowship-documents/$("$PYTHON_BIN" -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$relative")"
+  if ! curl -fsS --max-time 10 -o /dev/null "$url"; then
+    printf 'deploy: web cannot serve fellowship document %s (is DATA_BASE_DIR reaching the web?)\n' "$relative" >&2
+    return 1
+  fi
+  log "Web serves fellowship documents ($relative)"
 }
 
 verify_and_persist_frontend() {
   wait_for_health frontend "$FRONTEND_HEALTH" || return 1
+  assert_fellowship_document || return 1
   if ! pm2 save; then
     printf 'deploy: failed to save PM2 process list\n' >&2
     return 1
@@ -414,6 +451,12 @@ validate_fellowship_reminder_plist \
 validate_job_plist "reference commentary inbox" "$REFERENCE_INBOX_PLIST" :StartInterval \
   || fail "reference commentary inbox LaunchAgent is incomplete"
 [[ -f "$PM2_CONFIG" ]] || fail "PM2 config not found: $PM2_CONFIG"
+WEB_DATA_BASE_DIR="$(web_data_base_dir)" \
+  || fail "web configuration not found: $WEB_ENV_FILE"
+[[ -n "$WEB_DATA_BASE_DIR" ]] \
+  || fail "DATA_BASE_DIR is not set in $WEB_ENV_FILE; the web cannot find fellowship documents without it"
+[[ -d "$WEB_DATA_BASE_DIR" ]] \
+  || fail "DATA_BASE_DIR in $WEB_ENV_FILE is not a directory: $WEB_DATA_BASE_DIR"
 
 log "Fetching Git refs"
 git -C "$SOURCE_REPO" fetch --prune origin
@@ -450,6 +493,7 @@ printf '   python:           %s (%s)\n' "$REQUIRED_PYTHON" "$PYTHON_BIN"
 printf '   web runtime data: %s\n' "$WEB_RUNTIME_DATA_DIR"
 printf '   backend health:   %s\n' "$BACKEND_HEALTH"
 printf '   frontend health:  %s\n' "$FRONTEND_HEALTH"
+printf '   web data dir:     %s (from %s)\n' "$WEB_DATA_BASE_DIR" "$WEB_ENV_FILE"
 printf '   reminder agent:   %s\n' "$FELLOWSHIP_REMINDER_PLIST"
 printf '   inbox agent:      %s\n' "$REFERENCE_INBOX_PLIST"
 
