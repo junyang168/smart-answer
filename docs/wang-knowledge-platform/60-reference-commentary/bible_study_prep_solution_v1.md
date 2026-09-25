@@ -46,7 +46,7 @@
 
 ## 3. 查经准备档
 
-一次查经一个目录：`$DATA_BASE_DIR/bible-study/<日期>-<经文>/`，例如 `2026-09-25-matt-20-17-34/`。**不进 git**：里面有 Carson 的页码与摘录。
+一次查经一个目录：`$DATA_BASE_DIR/bible-study/<日期>-<经文>/`，例如 `2026-09-25-mat-20-17-34/`（书卷用 `backend/api/scripture.py` 的简称）。**不进 git**：里面有 Carson 的页码与摘录。
 
 | 文件 | 内容 | 谁写 |
 | --- | --- | --- |
@@ -90,7 +90,7 @@ flowchart LR
 
 | 组件 | 位置 | 做什么 |
 | --- | --- | --- |
-| 材料清单 | `backend/bible_study/sources.py`，命令行 | 读 `reference-commentary/*/pages.json` 和 `wang_knowledge`（只读），写 `sources.json` |
+| 材料清单 | `python -m backend.bible_study.sources <日期> <经文>` | 读 `reference-commentary/*/pages.json` 和 `wang_knowledge`（只读），写 `sources.json` |
 | 工作说明 | 仓库内的 Claude Code skill `.claude/skills/bible-study/SKILL.md`，用 `/bible-study` 启动 | 第 4 节的流程、准备档格式、语气要求、Carson 引用规则、5.1 的 PPT 要求。规则写在仓库里，换一个会话也不会丢；改规则走 PR |
 | 检查器 | `backend/bible_study/check.py`，命令行 | 第 4 节「机器查什么」那一栏，全部可机械判断 |
 | PPT 生成器 | `tools/bible-study-ppt/`（Node，pptxgenjs） | 从这次的 scratchpad 版本搬进来：`slides.json` 进、`.pptx` 与对照出；经文从和合本缓存取；用 PowerPoint 渲染出图供检查 |
