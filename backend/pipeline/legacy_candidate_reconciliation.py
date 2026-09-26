@@ -529,6 +529,7 @@ def plan_review_migration(
     current_claims: Mapping[str, Mapping[str, Any]],
     *,
     freeze_sha256: str,
+    source_kind: str = "legacy_candidate_review_reconciliation_v1",
 ) -> ChangeSetPlan:
     """Build a status-only ChangeSet for one source's verified decisions."""
 
@@ -541,8 +542,20 @@ def plan_review_migration(
         if row.get("reason") not in {
             "pass_ready_for_legacy_migration", "human_spot_check_required",
             "human_confirmation_required", "human_disagreement_required",
+            "withdrawn_unchanged_graph_verified",
         }:
             raise ValueError(f"not a verified status decision: {row['claim_id']}")
+        if row.get("reason") == "withdrawn_unchanged_graph_verified":
+            if (
+                source_kind != "legacy_adjudicated_withdrawn_review_reconciliation_v1"
+                or row.get("adjudication_status") != "withdrawn"
+                or row.get("review_decision") != "changes_suggested"
+                or row.get("target_review_status") != "ai_consensus_reviewed"
+                or not row.get("graph_guard_sha256")
+            ):
+                raise ValueError(f"withdrawn decision lacks graph proof: {row['claim_id']}")
+        elif source_kind != "legacy_candidate_review_reconciliation_v1":
+            raise ValueError(f"invalid legacy migration source kind: {source_kind}")
         claim_id = str(row["claim_id"])
         current = current_claims.get(claim_id)
         if current is None:
@@ -608,6 +621,8 @@ def plan_review_migration(
             "reviewed_candidate_sha256": row["reviewed_candidate_sha256"],
             "resolution": resolution,
         }
+        if row.get("graph_guard_sha256"):
+            artifact["graph_guard_sha256"] = row["graph_guard_sha256"]
         event_id = "REV-AI-" + sha256_json({
             "collection": "claims", "object_id": claim_id,
             "object_revision": revision, "after_sha256": after_sha,
@@ -626,7 +641,7 @@ def plan_review_migration(
     })
     fingerprint = sha256_json({
         "planner_schema": "wang_postgres_changeset_v2",
-        "source_kind": "legacy_candidate_review_reconciliation_v1",
+        "source_kind": source_kind,
         "source_sha256": source_sha,
         "package_id": f"LEGACY-REVIEW-{source_id}",
         "operations": operation_fingerprint_rows(operations),
@@ -635,7 +650,7 @@ def plan_review_migration(
     return ChangeSetPlan(
         change_set_id=f"KCS-{fingerprint[:20]}", fingerprint_sha256=fingerprint,
         package_id=f"LEGACY-REVIEW-{source_id}",
-        source_kind="legacy_candidate_review_reconciliation_v1",
+        source_kind=source_kind,
         source_sha256=source_sha, operations=tuple(operations), unchanged=0,
         ignored_keys=(), review_events=tuple(events),
     )
@@ -682,7 +697,10 @@ def _decode_plan(data: Mapping[str, Any]) -> ChangeSetPlan:
         "review_events": review_event_fingerprint_rows(plan.review_events),
     })
     if (
-        plan.source_kind != "legacy_candidate_review_reconciliation_v1"
+        plan.source_kind not in {
+            "legacy_candidate_review_reconciliation_v1",
+            "legacy_adjudicated_withdrawn_review_reconciliation_v1",
+        }
         or expected != plan.fingerprint_sha256
         or plan.change_set_id != f"KCS-{expected[:20]}"
     ):
@@ -769,6 +787,7 @@ def apply_frozen(
         raise ValueError("frozen preflight or plan binding is invalid")
     rows_by_id = {str(row["claim_id"]): row for row in report["rows"]}
     plans = [_decode_plan(data) for data in document["plans"]]
+    graph_guards = document.get("claim_related_graph_guards") or {}
     backup_sha = _sha(backup_path)
     applied = already = 0
     selected = plans[:max_source_units] if max_source_units is not None else plans
@@ -785,6 +804,23 @@ def apply_frozen(
         }
         if len(expected_sources) != 1:
             raise ValueError("migration plan crosses source units")
+        expected_graph = None
+        if plan.source_kind == "legacy_adjudicated_withdrawn_review_reconciliation_v1":
+            expected_graph = {}
+            for row in source_rows:
+                guard = graph_guards.get(row["claim_id"])
+                if (
+                    not isinstance(guard, list)
+                    or sha256_json(guard) != row.get("graph_guard_sha256")
+                ):
+                    raise ValueError(f"frozen graph guard differs: {row['claim_id']}")
+                expected_graph[row["claim_id"]] = [
+                    (str(item["collection"]), str(item["object_id"]),
+                     int(item["revision"]), str(item["content_sha256"]))
+                    for item in guard
+                ]
+        elif graph_guards:
+            raise ValueError("graph guards supplied for ordinary legacy migration")
         verified_bundles: dict[str, dict[str, Any]] = {}
         for row in source_rows:
             for field, path_field in (
@@ -815,6 +851,7 @@ def apply_frozen(
                 "legacy_unsealed": True,
             },
             expected_current_source_records=expected_sources,
+            expected_current_claim_related_records=expected_graph,
         )
         _readback(store, plan)
         if result["status"] == "already_applied":
