@@ -25,6 +25,9 @@ SUNDAY_WORSHIP_DIR: Final[Path] = DATA_BASE_PATH / "sunday_worship"
 METADATA_FILE: Final[Path] = FULL_ARTICLE_ROOT / "full_articles.json"
 PROMPT_FILE: Final[Path] = FULL_ARTICLE_ROOT / "full_article_prompt.md"
 FELLOWSHIP_FILE: Final[Path] = CONFIG_DIR / "fellowship.json"
+# The owner's choice of PPT / transcript / recording per fellowship date, kept
+# apart from fellowship.json: saving an entry replaces it whole (OPS-30).
+FELLOWSHIP_ANALYSIS_SOURCES_FILE: Final[Path] = CONFIG_DIR / "fellowship_analysis_sources.json"
 FELLOWSHIP_DOCS_DIR: Final[Path] = DATA_BASE_PATH / "fellowship" / "docs"
 SCRIPTS_DIR: Final[Path] = FULL_ARTICLE_ROOT / "scripts"
 ARTICLES_DIR: Final[Path] = FULL_ARTICLE_ROOT / "articles"
