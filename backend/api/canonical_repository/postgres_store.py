@@ -5206,6 +5206,7 @@ class PostgresKnowledgeStore:
         *,
         metadata: Optional[dict[str, Any]] = None,
         expected_current_viewpoint_revisions: Optional[Mapping[str, str]] = None,
+        expected_current_source_records: Optional[Mapping[str, tuple[int, str]]] = None,
         expected_claim_evidence_guard: Optional[Mapping[str, Any]] = None,
         _claim_evidence_source_queue_context: Optional[
             _ClaimEvidenceSourceQueueApplyContext
@@ -5254,6 +5255,21 @@ class PostgresKnowledgeStore:
                     "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
                     (POSTGRES_APPLY_ADVISORY_LOCK_KEY,),
                 )
+                for source_id, (expected_revision, expected_sha) in sorted(
+                    (expected_current_source_records or {}).items()
+                ):
+                    cursor.execute(
+                        """SELECT revision, content_sha256
+                           FROM wang_knowledge.objects
+                           WHERE collection='source_documents' AND object_id=%s
+                             AND retired_at IS NULL FOR SHARE""",
+                        (source_id,),
+                    )
+                    source_row = cursor.fetchone()
+                    if source_row != (expected_revision, expected_sha):
+                        raise ChangeSetConflict(
+                            f"Source generation changed before apply: {source_id}"
+                        )
                 cursor.execute(
                     """SELECT change_set_id, status, summary, metadata
                        FROM wang_knowledge.change_sets
