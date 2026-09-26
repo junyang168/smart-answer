@@ -9,8 +9,12 @@ from backend.pipeline.legacy_candidate_reconciliation import (
     _decode_plan,
     classify_candidate,
     plan_review_migration,
+    review_source_binding_mode,
 )
 from dataclasses import asdict
+import hashlib
+
+from backend.pipeline.corpus_survey_runner import _transcript_for_prompt
 
 import pytest
 
@@ -103,3 +107,16 @@ def test_classification_rejects_substantive_drift_before_review_status():
     }}
     result = classify_candidate(current, [bundle], source)
     assert result["reason"] == "claim_payload_changed"
+
+
+def test_review_source_hash_supports_both_historical_meanings():
+    source_bytes = b'{"script": []}'
+    payload = {"script": []}
+    raw_sha = hashlib.sha256(source_bytes).hexdigest()
+    rendered_sha = hashlib.sha256(
+        _transcript_for_prompt(payload, visual_source_attested=True).encode()
+    ).hexdigest()
+    assert raw_sha != rendered_sha
+    assert review_source_binding_mode(raw_sha, source_bytes, payload) == "file_bytes"
+    assert review_source_binding_mode(rendered_sha, source_bytes, payload) == "rendered_review_input"
+    assert review_source_binding_mode("0" * 64, source_bytes, payload) is None

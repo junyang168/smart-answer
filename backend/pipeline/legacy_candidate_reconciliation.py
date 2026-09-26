@@ -48,6 +48,7 @@ from backend.pipeline.corpus_ai_adjudication_runner import (
     _transcript_segments,
 )
 from backend.pipeline.corpus_ai_review import apply_risk_routing
+from backend.pipeline.corpus_survey_runner import _transcript_for_prompt
 
 
 def _sha(path: Path) -> str:
@@ -70,6 +71,26 @@ def _related(path: Path, suffix: str) -> Path:
     # directories.  Match the exact stem within this batch only.
     matches = sorted(candidate for candidate in path.parent.parent.glob(f"*/{name}") if candidate.is_file())
     return matches[0] if len(matches) == 1 else direct
+
+
+def review_source_binding_mode(
+    reviewed_hash: str, source_bytes: bytes, payload: Mapping[str, Any]
+) -> str | None:
+    """Accept both historical raw-file and current rendered-input fingerprints.
+
+    Review runner 1091f4b (2026-09-10) changed ``transcript_sha256`` from
+    physical bytes to the exact prompt projection. Comparing it only to a
+    SourceDocument's file SHA falsely reports source drift for new reviews.
+    """
+
+    if reviewed_hash == hashlib.sha256(source_bytes).hexdigest():
+        return "file_bytes"
+    rendered = _transcript_for_prompt(
+        dict(payload), visual_source_attested=True
+    ).encode("utf-8")
+    if reviewed_hash == hashlib.sha256(rendered).hexdigest():
+        return "rendered_review_input"
+    return None
 
 
 def inspect_legacy_bundle(path: Path) -> dict[str, Any]:
@@ -209,6 +230,7 @@ def inspect_legacy_bundle(path: Path) -> dict[str, Any]:
         reviewed_source_hashes = (review.get("source") or {}).get("transcript_sha256") or {}
         transcript_segments = {}
         current_source_matches = True
+        source_binding_modes: dict[str, str] = {}
         for source in package.get("source_documents") or []:
             source_id = str(source.get("source_id") or "")
             transcript_id = str(source.get("transcript_id") or source_id)
@@ -217,9 +239,6 @@ def inspect_legacy_bundle(path: Path) -> dict[str, Any]:
                 current_source_matches = False
                 break
             path_obj = Path(source_path)
-            if _sha(path_obj) != reviewed_source_hashes.get(source_id):
-                current_source_matches = False
-                break
             if source.get("source_type") == "notes_manuscript":
                 payload, _, _ = markdown_source_document(source)
             else:
@@ -227,6 +246,14 @@ def inspect_legacy_bundle(path: Path) -> dict[str, Any]:
                 payload = {"script": parsed} if isinstance(parsed, list) else parsed
                 if not isinstance(payload, dict):
                     raise ValueError("source JSON is neither object nor array")
+            reviewed_hash = str(reviewed_source_hashes.get(source_id) or "")
+            binding_mode = review_source_binding_mode(
+                reviewed_hash, path_obj.read_bytes(), payload
+            )
+            if binding_mode is None:
+                current_source_matches = False
+                break
+            source_binding_modes[source_id] = binding_mode
             transcript_segments[transcript_id] = _transcript_segments(payload)
         if current_source_matches:
             claim_snapshots = {
@@ -253,6 +280,7 @@ def inspect_legacy_bundle(path: Path) -> dict[str, Any]:
                 result["reason"] = "unexpected_claude_reconsideration"
                 return result
         result["adjudication_structurally_validated"] = current_source_matches
+        result["review_source_binding_modes"] = source_binding_modes
         result["adjudication_path"] = str(adjudication_path)
         result["adjudication_sha256"] = _sha(adjudication_path)
         result["adjudicated_at"] = str(adjudicator.get("generated_at") or "")
@@ -312,10 +340,12 @@ def classify_candidate(
             failures.append("source_generation_changed")
             continue
         reviewed_transcripts = bundle["review_transcript_sha256"]
-        if len(reviewed_transcripts) != 1 or next(iter(reviewed_transcripts.values())) != current_source.get(
-            "source_file_sha256"
+        if (
+            len(reviewed_transcripts) != 1
+            or bundle["review_source_binding_modes"].get(source_id)
+            not in {"file_bytes", "rendered_review_input"}
         ):
-            failures.append("reviewed_source_file_changed")
+            failures.append("reviewed_source_input_changed")
             continue
         if not bundle["adjudication_structurally_validated"]:
             failures.append("adjudication_validation_unavailable")
@@ -371,6 +401,7 @@ def classify_candidate(
             "package_sha256": bundle["package_sha256"],
             "review_sha256": bundle["review_sha256"],
             "review_fingerprint": bundle["review_fingerprint"],
+            "review_source_binding_mode": bundle["review_source_binding_modes"][source_id],
             "reviewer_id": bundle["reviewer_id"],
             "adjudicator_id": bundle["adjudicator_id"],
             "adjudicated_at": bundle["adjudicated_at"],
@@ -382,7 +413,7 @@ def classify_candidate(
         # Give a stable high-priority reason without hiding secondary failures.
         priority = [
             "claim_payload_changed", "source_binding_not_unique",
-            "source_generation_changed", "reviewed_source_file_changed",
+            "source_generation_changed", "reviewed_source_input_changed",
         ]
         reason = next((item for item in priority if item in failures), sorted(failures)[0])
         return {
