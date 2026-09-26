@@ -564,6 +564,15 @@ def test_runner_dry_run_exits_before_any_model_client(tmp_path, monkeypatch):
     grouping = grouping_body | {"artifact_sha256": sha256_json(grouping_body)}
     grouping_path = _write_json(tmp_path / "grouping.json", grouping)
     freeze_path = _write_json(tmp_path / "freeze.json", freeze)
+    partition_policy = {"max_request_bytes": 500000}
+    partition_path = _write_json(
+        tmp_path / "partition.json",
+        {
+            "partition_policy": partition_policy,
+            "partition_policy_sha256": sha256_json(partition_policy),
+            "partitions": [{"partition_id": "p00001", "claims": [{"claim_id": "C1"}]}],
+        },
+    )
     policy = {
         "batch_size": 20,
         "max_request_bytes": 500000,
@@ -582,6 +591,13 @@ def test_runner_dry_run_exits_before_any_model_client(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "_repository_commit", lambda: "abc123")
     monkeypatch.setattr(runner, "PostgresKnowledgeStore", lambda url: store)
     monkeypatch.setattr(runner, "PROJECT_ROOT", tmp_path / "worktree")
+    monkeypatch.setattr(runner, "load_partition_policy", lambda path: partition_policy)
+    partition_checks = []
+    monkeypatch.setattr(
+        runner,
+        "validate_partition_manifest",
+        lambda *args, **kwargs: partition_checks.append(kwargs) or {"status": "valid"},
+    )
     for name in (
         "build_grouper",
         "build_proposer",
@@ -601,6 +617,9 @@ def test_runner_dry_run_exits_before_any_model_client(tmp_path, monkeypatch):
         route_policy=tmp_path / "route.json",
         database_url=None,
         freeze=freeze_path,
+        global_freeze=freeze_path,
+        partition_manifest=partition_path,
+        partition_id="p00001",
         packet=packet_path,
         output_dir=tmp_path / "output",
         batch_size=None,
@@ -627,6 +646,19 @@ def test_runner_dry_run_exits_before_any_model_client(tmp_path, monkeypatch):
     )
 
     assert runner.execute(args) == 0
+    assert len(partition_checks) == 1
+    assert partition_checks[0]["partition_id"] == "p00001"
+
+
+def test_runner_rejects_missing_partition_before_store_or_models(monkeypatch):
+    from backend.pipeline import viewpoint_batch_resolution_runner as runner
+
+    monkeypatch.setattr(
+        runner, "PostgresKnowledgeStore",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("DB accessed")),
+    )
+    with pytest.raises(CvpProductionBlocked, match="--partition-manifest"):
+        runner.execute(Namespace(global_freeze=None, partition_manifest=None, partition_id=None))
 
 
 def test_runner_cli_defaults_match_the_fable_v2_policy(tmp_path, monkeypatch):

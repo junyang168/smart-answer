@@ -136,7 +136,11 @@ def subscription_client(
 def call_model(
     adapter: Any, payload: dict[str, Any], cache: Path
 ) -> tuple[dict[str, Any], int, float]:
-    request_bytes = len(canonical_json(payload).encode("utf-8"))
+    request_bytes = (
+        adapter.request_bytes(payload)
+        if callable(getattr(adapter, "request_bytes", None))
+        else len(canonical_json(payload).encode("utf-8"))
+    )
     max_request_bytes = getattr(adapter, "max_request_bytes", None)
     if max_request_bytes is not None and request_bytes > int(max_request_bytes):
         raise ValueError(

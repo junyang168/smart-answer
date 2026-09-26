@@ -8,11 +8,12 @@
 
 ## 术语
 
-本文用到的词，凡是这个项目里已经在用的就照用；下面五个是本文新引入的，先定义再使用。已有的词(论证路线、反方立场、真值条件、推理骨架)不在此列。
+本文用到的词，凡是这个项目里已经在用的就照用；下面七个是本文新引入的，先定义再使用。已有的词(论证路线、反方立场、真值条件、推理骨架)不在此列。
 
 | 本文的说法 | 定义 | 代码里 |
 | --- | --- | --- |
 | **scope（一轮的范围）** | 「这一轮要处理哪些主张」——一份**冻结的**主张清单，带名字、覆盖的经文段落、取来当上下文的已有观点，以及明确排除的部分。真实例子：`matt16-full`（190 条主张）、`matt16-13-18-rock-poc`（31 条）。清单的哈希用来确认后续每一步做的还是当初定的那一批 | `scope-packet.json` |
+| **partition（执行分区）** | 全库冻结主张在进入智能分组前，按容量分配的一次执行归属。每条可处理主张恰好有一个主分区；其他分区只能把它当只读上下文。归属不代表两条主张是同一个观点 | `wang_cvp_partition_manifest_v1` |
 | **观点修订** | 一个观点在某一时刻的表述与适用范围。改写会产生新修订，旧的保留并注明由谁取代 | `viewpoint_revisions` |
 | **成员连接** | 把一条主张挂到一个观点上的记录，并说明是哪一种关系 | `viewpoint_claim_links` |
 | **路线实例** | 某一条论证路线在**某一篇讲道里实际出现的那一次**，带该篇的证据步骤 | `argument_route_attestations` |
@@ -23,7 +24,7 @@
 
 | 节 | |
 | --- | --- |
-| [术语](#术语) | 本文新引入的五个词 |
+| [术语](#术语) | 本文新引入的七个词 |
 | [1. 观点是什么](#1-观点是什么) | 一个真实例子，以及它不是什么 |
 | [2. 数据模型](#2-数据模型) | 图，以及每个对象的白话解释 |
 | [3. 观点怎样产生](#3-观点怎样产生) | 流水线的图，人在哪一步出现 |
@@ -136,9 +137,19 @@ flowchart TD
     RB --> B
 ```
 
+### 全库执行分区
+
+先从全库 Claim manifest 编译全库 scope packet，完成来源清账与审计后冻结，再生成内容寻址的 partition manifest。每个分区由 manifest 指定的 Claim ID 编译自己的 scope packet 和本地 freeze，然后进入智能分组。分母包含冻结清单内每条 Claim：可处理者恰好有一个主分区，未能处理者进入带理由的 disposition ledger。`S 230205` 本轮暂时排除时，来源本身也要留下明确的排除记录；没有 Claim 行不等于来源已处理。
+
+分区只决定执行容量与顺序，不判断观点身份。经文引用不能自动成为马太释经核心；只有 Claim 本身对该经文作释经、且这一用途已经审核，才能进入相应 passage 分区。其余内容可以按实际 Claim 文本发现的可修订词项或来源组织，不预设教授的神学分类。多经文、多主题 Claim 仍只有一个主归属；跨分区引用是带修订哈希的只读上下文，不产生第二次身份裁定。
+
+每个分区的 grouping 请求按实际送给 client 的 prompt、schema 与 Claim payload 的 UTF-8 序列化字节数检查。目标值、硬上限和单分区 Claim 数量上限来自版本化 partition policy；超限时确定性拆分，并保留原路由与拆分记录。预览可以报告尚未清账的 Claim，但不能授权模型调用；最终 manifest 必须与当前数据库指纹、来源清账、独立审计、CVP policy 和代码版本绑定。runner 在模型调用之前核对分区主归属、scope packet 和本地 freeze。
+
+全库共用一个 Registry。分区按顺序处理，后续分区读取当时最新的 Registry；写入由同一把全局锁串行保护。全部分区完成后，还要审查跨分区重复观点并核对全库 disposition，不能凭每个分区各自完成就宣布全库完成。
+
 ### 分组
 
-一个 scope 的主张一次处理不完，所以先分组。这一步由模型做（默认 `claude-fable-5-1`），但**它的结果在覆盖率上不被信任**：程序随后强制每条主张恰好属于一组，并逐条记录修补——
+每个完整分区内部仍做智能分组。这一步由模型做（默认 `claude-fable-5-1`），但**它的结果在覆盖率上不被信任**：程序随后强制每条主张恰好属于一组，并逐条记录修补——
 
 | 情况 | 程序怎么办 |
 | --- | --- |
@@ -297,6 +308,7 @@ flowchart TD
 13. 每条被路线结论引用的观点，其 scope 内可 attesting 成员来源必须 exact-once 落在 `attestation` 或经独立 reviewer 确认的无路线 disposition；缺席与重复都失败。
 14. ArgumentRoute correction 后写库的 effective proposal SHA 必须与终局复核绑定的 proposal SHA 相同；终局复核有任一非 `pass`，该 effective proposal 不得产生 ChangeSet。
 15. source eligibility attestation 若依据 `withdrawn` 或 `auto_applied` 裁定，row 与顶层 artifact hash 必须覆盖 exact adjudication SHA、状态以及适用时的 overrides SHA；不含这些字段的 legacy hash 只兼容无需仲裁的旧 `pass` 行。
+16. 全库 partition manifest 的主归属必须覆盖每条可处理 Claim 恰好一次；缺失、重复、外来 ID、修订漂移、请求超限或未说明的剩余项均不得进入模型。只读跨分区上下文不得成为第二个主归属。
 
 ## 9. 谁读观点
 
@@ -331,5 +343,5 @@ flowchart TD
 > **读者**:Solution architect、Developer。同工不需要读本文；同工要知道的在 [Solution Architecture](../00-overview/solution_architecture.md)。
 > **类型**:规范
 > **状态**:当前。取代 `canonical_viewpoint_design.md`。
-> **与代码对齐**:2026-09-13。当前模型角色与版本核对到 CVP／Route v2 policy；第 1、7 节的数字仍取自 2026-08-25 的 PostgreSQL 快照。
+> **与代码对齐**:未核对。第 1、7 节的数字仍取自 2026-08-25 的 PostgreSQL 快照；partition 实施以 #395 的验证记录为准。
 > **权威范围**:观点、论证路线、观点关系的语义、身份判定与消费边界。
