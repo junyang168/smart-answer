@@ -295,6 +295,7 @@ def test_analysis_assets_selects_drive_recording_and_ignores_empty_chat(monkeypa
         )
 
     monkeypatch.setattr(service, "_list_drive_folder_assets", fake_drive_assets)
+    monkeypatch.setattr(service, "_search_drive_meet_assets", lambda date: [])
     monkeypatch.setattr(service, "_download_drive_recording_to_docs", fake_download_drive_recording)
 
     assets = service.resolve_fellowship_analysis_assets("2026-06-19")
@@ -381,3 +382,103 @@ def test_run_ffmpeg_command_reports_non_transient_oserror(monkeypatch, tmp_path)
         assert "test stage" in getattr(exc, "detail", "")
     else:
         raise AssertionError("Expected ffmpeg OSError to be reported")
+
+
+class _FakeDrive:
+    """files().list / files().get as the Drive API client chains them."""
+
+    def __init__(self, items=(), visible=()):
+        self.items, self.visible, self.queries = list(items), set(visible), []
+
+    def files(self):
+        return self
+
+    def list(self, **kwargs):
+        self.queries.append(kwargs["q"])
+        items = self.items
+        return type("R", (), {"execute": lambda _self: {"files": items}})()
+
+    def get(self, fileId, **kwargs):
+        visible = self.visible
+
+        def execute(_self):
+            if fileId not in visible:
+                raise RuntimeError("404 File not found")
+            return {"id": fileId}
+
+        return type("R", (), {"execute": execute})()
+
+
+def test_meet_files_are_found_by_name_wherever_meet_saved_them(monkeypatch, tmp_path):
+    # OPS-28: on 2026-09-25 Meet saved the recording in
+    # `Google Meet/達拉斯聖道教會團契查經 (recurring)`, not `Meet Recordings`.
+    service = _load_service_with_data_dir(monkeypatch, tmp_path)
+    owner = _FakeDrive(
+        items=[
+            {"id": "rec", "name": "達拉斯聖道教會團契查經 - 2026/09/25 19:24 CDT - Recording", "mimeType": "video/mp4", "size": "100"},
+            {"id": "notes", "name": "達拉斯聖道教會團契查經 - 2026/09/25 19:24 CDT - Gemini 提供的会议记录", "mimeType": "application/vnd.google-apps.document"},
+            {"id": "deck", "name": "查經 2026/09/25 講義.pptx", "mimeType": "application/vnd.openxmlformats"},  # not a Meet file
+            {"id": "other-day", "name": "達拉斯聖道教會團契查經 - 2026/09/26 10:00 CDT - Recording", "mimeType": "video/mp4"},
+        ]
+    )
+    monkeypatch.setattr(service, "_get_owner_drive_service", lambda: owner)
+
+    assets = service._search_drive_meet_assets("2026-09-25")
+
+    assert {(a.drive_file_id, a.kind) for a in assets} == {("rec", "recording"), ("notes", "transcript")}
+    assert "name contains '2026/09/25'" in owner.queries[0]
+    assert "trashed=false" in owner.queries[0]
+
+
+def test_search_and_folder_results_are_merged_once(monkeypatch, tmp_path):
+    service = _load_service_with_data_dir(monkeypatch, tmp_path)
+    (tmp_path / "data" / "config" / "fellowship.json").write_text(
+        '[{"date": "09/25/2026", "title": "你們不知道所求的是甚麼", "sourceLinks": []}]', encoding="utf-8"
+    )
+    recording = service.FellowshipAnalysisAsset(
+        name="達拉斯聖道教會團契查經 - 2026/09/25 19:24 CDT - Recording",
+        source="drive", kind="recording", size=100, usable=True, driveFileId="rec",
+    )
+    monkeypatch.setattr(service, "_list_drive_folder_assets", lambda folder_id, date: [recording])
+    monkeypatch.setattr(service, "_search_drive_meet_assets", lambda date: [recording])
+    downloaded = []
+
+    def download(date, asset):
+        downloaded.append(asset.drive_file_id)
+        return service.FellowshipAnalysisAsset(name="達拉斯聖道教會團契查經 - 2026_09_25 19_24 CDT - Recording.mp4", source="local", kind="recording", size=100, usable=True)
+
+    monkeypatch.setattr(service, "_download_drive_recording_to_docs", download)
+
+    assets = service.resolve_fellowship_analysis_assets("2026-09-25")
+
+    assert [a.drive_file_id for a in assets.candidates if a.source == "drive"] == ["rec"]
+    assert downloaded == ["rec"]
+    assert assets.recording is not None and assets.recording.source == "local"
+
+
+def test_a_failed_search_is_reported_not_fatal(monkeypatch, tmp_path):
+    service = _load_service_with_data_dir(monkeypatch, tmp_path)
+    (tmp_path / "data" / "config" / "fellowship.json").write_text(
+        '[{"date": "09/25/2026", "title": "t", "sourceLinks": []}]', encoding="utf-8"
+    )
+    monkeypatch.setattr(service, "_list_drive_folder_assets", lambda folder_id, date: [])
+
+    def dead_token(date):
+        raise RuntimeError("invalid_grant")
+
+    monkeypatch.setattr(service, "_search_drive_meet_assets", dead_token)
+
+    assets = service.resolve_fellowship_analysis_assets("2026-09-25")
+
+    assert any("Unable to search Drive for Meet files: invalid_grant" in m for m in assets.messages)
+
+
+def test_downloads_use_the_owner_when_the_service_account_cannot_see_the_file(monkeypatch, tmp_path):
+    service = _load_service_with_data_dir(monkeypatch, tmp_path)
+    service_account = _FakeDrive(visible={"shared"})
+    owner = _FakeDrive()
+    monkeypatch.setattr(service, "_get_drive_service", lambda scopes: service_account)
+    monkeypatch.setattr(service, "_get_owner_drive_service", lambda: owner)
+
+    assert service._drive_service_for_file("shared", ["scope"]) is service_account
+    assert service._drive_service_for_file("in-new-folder", ["scope"]) is owner

@@ -462,57 +462,112 @@ def _get_drive_service(scopes: Sequence[str] | None = None):
     return build("drive", "v3", credentials=credentials)
 
 
-def _list_drive_folder_assets(folder_id: str, date: str) -> list[FellowshipAnalysisAsset]:
-    normalized = _normalize_fellowship_date(date)
-    iso = _fellowship_iso_date(normalized)
-    slash_date = iso.replace("-", "/")
-    underscore_date = iso.replace("-", "_")
-    service = _get_drive_service(["https://www.googleapis.com/auth/drive.metadata.readonly"])
-    assets: list[FellowshipAnalysisAsset] = []
+_DRIVE_FILE_FIELDS = "nextPageToken, files(id, name, mimeType, size, modifiedTime, webViewLink)"
+
+
+def _fellowship_date_forms(date: str) -> tuple[str, str, str]:
+    iso = _fellowship_iso_date(_normalize_fellowship_date(date))
+    return iso, iso.replace("-", "/"), iso.replace("-", "_")
+
+
+def _drive_item_to_asset(item: dict) -> FellowshipAnalysisAsset:
+    name = str(item.get("name") or "")
+    mime_type = item.get("mimeType")
+    kind = _classify_fellowship_asset_name(name, mime_type)
+    size_value = item.get("size")
+    size = int(size_value) if str(size_value or "").isdigit() else None
+    usable = kind != "generated"
+    reason = None
+    if kind == "chat" and (size or 0) < FELLOWSHIP_CHAT_MIN_BYTES:
+        usable = False
+        reason = "emptyChat"
+    modified_at = None
+    if item.get("modifiedTime"):
+        modified_at = datetime.fromisoformat(str(item["modifiedTime"]).replace("Z", "+00:00"))
+    return FellowshipAnalysisAsset(
+        name=name,
+        source="drive",
+        kind=kind,
+        url=item.get("webViewLink"),
+        size=size,
+        modifiedAt=modified_at,
+        driveFileId=item.get("id"),
+        mimeType=mime_type,
+        usable=usable,
+        reason=reason,
+    )
+
+
+def _list_drive_files(service, query: str) -> list[dict]:
+    items: list[dict] = []
     page_token = None
     while True:
         response = service.files().list(
-            q=f"'{folder_id}' in parents and trashed=false",
+            q=query,
             spaces="drive",
-            fields="nextPageToken, files(id, name, mimeType, size, modifiedTime, webViewLink)",
+            fields=_DRIVE_FILE_FIELDS,
             pageToken=page_token,
             includeItemsFromAllDrives=True,
             supportsAllDrives=True,
         ).execute()
-        for item in response.get("files", []):
-            name = str(item.get("name") or "")
-            if iso not in name and slash_date not in name and underscore_date not in name:
-                continue
-            mime_type = item.get("mimeType")
-            kind = _classify_fellowship_asset_name(name, mime_type)
-            size_value = item.get("size")
-            size = int(size_value) if str(size_value or "").isdigit() else None
-            usable = kind != "generated"
-            reason = None
-            if kind == "chat" and (size or 0) < FELLOWSHIP_CHAT_MIN_BYTES:
-                usable = False
-                reason = "emptyChat"
-            modified_at = None
-            if item.get("modifiedTime"):
-                modified_at = datetime.fromisoformat(str(item["modifiedTime"]).replace("Z", "+00:00"))
-            assets.append(
-                FellowshipAnalysisAsset(
-                    name=name,
-                    source="drive",
-                    kind=kind,
-                    url=item.get("webViewLink"),
-                    size=size,
-                    modifiedAt=modified_at,
-                    driveFileId=item.get("id"),
-                    mimeType=mime_type,
-                    usable=usable,
-                    reason=reason,
-                )
-            )
+        items.extend(response.get("files", []))
         page_token = response.get("nextPageToken")
         if not page_token:
-            break
-    return assets
+            return items
+
+
+def _list_drive_folder_assets(folder_id: str, date: str) -> list[FellowshipAnalysisAsset]:
+    forms = _fellowship_date_forms(date)
+    service = _get_drive_service(["https://www.googleapis.com/auth/drive.metadata.readonly"])
+    items = _list_drive_files(service, f"'{folder_id}' in parents and trashed=false")
+    return [_drive_item_to_asset(item) for item in items if any(form in str(item.get("name") or "") for form in forms)]
+
+
+def _get_owner_drive_service():
+    """Drive as the owner (OAuth token): sees every file in the owner's Drive,
+    not only folders shared with the service account."""
+
+    from googleapiclient.discovery import build
+    from backend import google_oauth_token
+
+    return build("drive", "v3", credentials=google_oauth_token.load_credentials())
+
+
+# The suffixes Google Meet gives its files: "<meeting> - 2026/09/25 19:24 CDT - Recording",
+# "… - Gemini 提供的会议记录", "… - Chat", "… - Transcript".
+_MEET_FILE_SUFFIX = re.compile(r" - (Recording|Chat|Transcript|Gemini)", re.IGNORECASE)
+
+
+def _search_drive_meet_assets(date: str) -> list[FellowshipAnalysisAsset]:
+    """A week's Meet files wherever Meet saved them (OPS-28).
+
+    Until 2026-08-28 Meet saved recordings in the `Meet Recordings` folder; on
+    2026-09-25 it saved them in `Google Meet/<meeting> (recurring)` instead,
+    a folder the service account cannot see. The file name keeps the meeting
+    date, so search by name as the owner.
+    """
+
+    forms = _fellowship_date_forms(date)
+    names = " or ".join(f"name contains '{form}'" for form in forms)
+    query = f"({names}) and trashed=false and mimeType != 'application/vnd.google-apps.folder'"
+    items = _list_drive_files(_get_owner_drive_service(), query)
+    return [
+        _drive_item_to_asset(item)
+        for item in items
+        if _MEET_FILE_SUFFIX.search(str(item.get("name") or ""))
+        and any(form in str(item.get("name") or "") for form in forms)
+    ]
+
+
+def _drive_service_for_file(file_id: str, scopes: Sequence[str]):
+    """The service account where the file is shared with it, else the owner."""
+
+    service = _get_drive_service(scopes)
+    try:
+        service.files().get(fileId=file_id, fields="id", supportsAllDrives=True).execute()
+        return service
+    except Exception:
+        return _get_owner_drive_service()
 
 
 def _find_fellowship_entry(date: str) -> FellowshipEntry:
@@ -577,7 +632,7 @@ def _download_drive_recording_to_docs(date: str, asset: FellowshipAnalysisAsset)
                 usable=True,
             )
 
-    service = _get_drive_service(["https://www.googleapis.com/auth/drive.readonly"])
+    service = _drive_service_for_file(asset.drive_file_id, ["https://www.googleapis.com/auth/drive.readonly"])
     request = service.files().get_media(fileId=asset.drive_file_id)
     from googleapiclient.http import MediaIoBaseDownload
 
@@ -642,6 +697,16 @@ def resolve_fellowship_analysis_assets(date: str) -> FellowshipAnalysisAssets:
                 drive_candidates.extend(_list_drive_folder_assets(folder_id, entry.date))
             except Exception as exc:
                 drive_errors.append(f"Unable to read Drive folder {folder_id}: {exc}")
+        try:
+            drive_candidates.extend(_search_drive_meet_assets(entry.date))
+        except Exception as exc:
+            drive_errors.append(f"Unable to search Drive for Meet files: {exc}")
+        seen: set[str] = set()
+        drive_candidates = [
+            asset
+            for asset in drive_candidates
+            if not asset.drive_file_id or not (asset.drive_file_id in seen or seen.add(asset.drive_file_id))
+        ]
         candidates.extend(drive_candidates)
         drive_assets = _select_analysis_assets(entry.date, drive_candidates)
         if drive_assets.recording and drive_assets.recording.source == "drive":
@@ -824,7 +889,7 @@ def _read_analysis_asset_text(date: str, asset: FellowshipAnalysisAsset) -> str:
             return _extract_text_from_pptx(path)
         return ""
     if asset.source == "drive" and asset.drive_file_id:
-        service = _get_drive_service(["https://www.googleapis.com/auth/drive.readonly"])
+        service = _drive_service_for_file(asset.drive_file_id, ["https://www.googleapis.com/auth/drive.readonly"])
         if asset.mime_type == "application/vnd.google-apps.document":
             return service.files().export(fileId=asset.drive_file_id, mimeType="text/plain").execute().decode("utf-8", "ignore")
         request = service.files().get_media(fileId=asset.drive_file_id)
@@ -850,7 +915,7 @@ def _download_recording_asset(date: str, asset: FellowshipAnalysisAsset) -> Path
     if asset.source == "local":
         return _local_path_for_analysis_asset(date, asset)
     if asset.source == "drive" and asset.drive_file_id:
-        service = _get_drive_service(["https://www.googleapis.com/auth/drive.readonly"])
+        service = _drive_service_for_file(asset.drive_file_id, ["https://www.googleapis.com/auth/drive.readonly"])
         request = service.files().get_media(fileId=asset.drive_file_id)
         from googleapiclient.http import MediaIoBaseDownload
 
