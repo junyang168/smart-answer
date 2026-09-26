@@ -433,10 +433,9 @@ def _drive_folder_ids_for_entry(_entry: FellowshipEntry) -> list[str]:
 
 def _get_drive_service(scopes: Sequence[str] | None = None):
     from googleapiclient.discovery import build
-    from google.auth.transport.requests import Request
-    from google.oauth2.credentials import Credentials
     from google.oauth2 import service_account
     import google.auth
+    import logging
 
     requested_scopes = list(scopes or ["https://www.googleapis.com/auth/drive.metadata.readonly"])
     credentials = None
@@ -450,14 +449,13 @@ def _get_drive_service(scopes: Sequence[str] | None = None):
             )
         except Exception:
             credentials = None
-    token_path = Path(os.environ.get("GOOGLE_OAUTH_TOKEN_FILE", "") or Path(__file__).resolve().parents[2] / "token.json")
-    if credentials is None and token_path.exists():
+    if credentials is None:
+        from backend import google_oauth_token
+
         try:
-            credentials = Credentials.from_authorized_user_file(str(token_path), requested_scopes)
-            if credentials.expired and credentials.refresh_token:
-                credentials.refresh(Request())
-                token_path.write_text(credentials.to_json(), encoding="utf-8")
-        except Exception:
+            credentials = google_oauth_token.load_credentials()
+        except google_oauth_token.OAuthTokenError as exc:
+            logging.getLogger(__name__).warning("%s", exc)
             credentials = None
     if credentials is None:
         credentials, _project = google.auth.default(scopes=requested_scopes)

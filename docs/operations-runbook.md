@@ -208,6 +208,36 @@ Markdown documents on the fellowship page. Both find `fellowship/docs` through
 - After switching, the deploy downloads one real fellowship document through
   the new web process; if that fails, it rolls back.
 
+### Google OAuth token
+
+Exporting a sermon to a Google Doc uses the owner's own Google sign-in, stored
+in `/opt/homebrew/var/www/smart-answer-config/token.json`. Releases do not
+contain it.
+
+- The backend finds it through `GOOGLE_OAUTH_TOKEN_FILE` on its LaunchAgent,
+  which `scripts/deploy.sh` sets. Refreshed tokens are written back to that file.
+- Before switching, the deploy refreshes the token with the new release's code
+  (`python -m backend.google_oauth_token check <file>`). If Google refuses it,
+  the deploy stops with services unchanged. `--skip-google-token-check` deploys
+  anyway; exports then fail with a message saying to sign in again.
+- **Signing in again** (after `invalid_grant`). This opens a browser; approve
+  with the account that owns the Drive folders:
+
+  ```bash
+  cd /opt/homebrew/var/www/smart-answer-config
+  cp token.json token.json.bak-$(date +%Y%m%d)
+  /Users/junyang/app/smart-answer/.venv/bin/python /Users/junyang/app/smart-answer/generate_user_token.py
+  ```
+
+- **Before OPS-27** (#399), the export looked for `token.json` in its working
+  directory. That worked while production ran from one fixed directory. Once
+  deploys switched to release directories, it found nothing and silently used
+  the service account instead. Nothing refreshed the token after 2026-07-28,
+  and by September Google had revoked it.
+- If the OAuth app in Google Cloud Console is in **Testing** publishing
+  status, Google expires refresh tokens after 7 days. "In production" status
+  avoids that.
+
 ### Fellowship reminder
 
 The fellowship reminder is a separate LaunchAgent, not part of the FastAPI

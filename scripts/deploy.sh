@@ -24,22 +24,32 @@ FRONTEND_ORIGIN="${FRONTEND_HEALTH%/}"
 # looks for files (#385: a deploy from a shell without it made every
 # fellowship document 404).
 WEB_ENV_FILE="${SMART_ANSWER_WEB_ENV_FILE:-$LEGACY_RELEASE/web/.env.local}"
+# The owner's Google OAuth token (Docs export, Drive). Releases do not contain
+# it; the backend is told where it is. Before releases existed the code found
+# it in its working directory, and after the switch nothing read or refreshed
+# it until Google revoked it (OPS-27).
+GOOGLE_OAUTH_TOKEN_FILE="${SMART_ANSWER_GOOGLE_OAUTH_TOKEN_FILE:-$LEGACY_RELEASE/token.json}"
 PM2_APP="${SMART_ANSWER_PM2_APP:-smart-answer}"
 PM2_CONFIG="$SOURCE_REPO/scripts/pm2.production.config.cjs"
 
 TARGET_REF="origin/main"
 DRY_RUN=false
 ALLOW_NON_MAIN=false
+SKIP_GOOGLE_TOKEN_CHECK=false
 
 usage() {
   cat <<'EOF'
-Usage: scripts/deploy.sh [--ref GIT_REF] [--dry-run] [--allow-non-main]
+Usage: scripts/deploy.sh [--ref GIT_REF] [--dry-run] [--allow-non-main] [--skip-google-token-check]
 
 Defaults to the exact commit currently at origin/main.
 
   --ref GIT_REF       Deploy a specific commit or remote ref.
   --dry-run           Resolve and validate without changing production.
   --allow-non-main    Permit a commit that is not contained in origin/main.
+  --skip-google-token-check
+                      Deploy even though the Google OAuth token cannot be
+                      refreshed (Docs export stays broken until the owner
+                      signs in again).
 
 Examples:
   scripts/deploy.sh --dry-run
@@ -61,6 +71,10 @@ while (($#)); do
       ;;
     --allow-non-main)
       ALLOW_NON_MAIN=true
+      shift
+      ;;
+    --skip-google-token-check)
+      SKIP_GOOGLE_TOKEN_CHECK=true
       shift
       ;;
     -h|--help)
@@ -242,6 +256,37 @@ validate_job_plist() {
         return 1
       }
   done
+}
+
+# Prove Google still accepts the token by refreshing it with the new release's
+# own code. A revoked token (invalid_grant) otherwise surfaces weeks later as a
+# failed export.
+check_google_oauth_token() {
+  local release="$1"
+  if [[ -n "${SMART_ANSWER_GOOGLE_TOKEN_CHECK:-}" ]]; then
+    "$SMART_ANSWER_GOOGLE_TOKEN_CHECK" "$GOOGLE_OAUTH_TOKEN_FILE"
+  else
+    (cd "$release" && "$release/backend/.venv/bin/python3" -m backend.google_oauth_token check "$GOOGLE_OAUTH_TOKEN_FILE")
+  fi
+}
+
+# The backend finds the token through GOOGLE_OAUTH_TOKEN_FILE on its LaunchAgent.
+# Sets BACKEND_ENV_CHANGED when the value was new: a running backend only sees
+# it after a restart.
+BACKEND_ENV_CHANGED=false
+set_backend_oauth_env() {
+  local key=":EnvironmentVariables:GOOGLE_OAUTH_TOKEN_FILE" current
+  if current="$("$PLIST_BUDDY" -c "Print $key" "$BACKEND_PLIST" 2>/dev/null)"; then
+    [[ "$current" == "$GOOGLE_OAUTH_TOKEN_FILE" ]] && return 0
+    BACKEND_ENV_CHANGED=true
+    "$PLIST_BUDDY" -c "Set $key $GOOGLE_OAUTH_TOKEN_FILE" "$BACKEND_PLIST"
+  else
+    "$PLIST_BUDDY" -c "Print :EnvironmentVariables" "$BACKEND_PLIST" >/dev/null 2>&1 \
+      || "$PLIST_BUDDY" -c "Add :EnvironmentVariables dict" "$BACKEND_PLIST" \
+      || return 1
+    BACKEND_ENV_CHANGED=true
+    "$PLIST_BUDDY" -c "Add $key string $GOOGLE_OAUTH_TOKEN_FILE" "$BACKEND_PLIST"
+  fi
 }
 
 validate_fellowship_reminder_plist() {
@@ -457,6 +502,8 @@ WEB_DATA_BASE_DIR="$(web_data_base_dir)" \
   || fail "DATA_BASE_DIR is not set in $WEB_ENV_FILE; the web cannot find fellowship documents without it"
 [[ -d "$WEB_DATA_BASE_DIR" ]] \
   || fail "DATA_BASE_DIR in $WEB_ENV_FILE is not a directory: $WEB_DATA_BASE_DIR"
+[[ "$SKIP_GOOGLE_TOKEN_CHECK" == true || -f "$GOOGLE_OAUTH_TOKEN_FILE" ]] \
+  || fail "Google OAuth token not found: $GOOGLE_OAUTH_TOKEN_FILE (sign in with generate_user_token.py there, or --skip-google-token-check)"
 
 log "Fetching Git refs"
 git -C "$SOURCE_REPO" fetch --prune origin
@@ -494,6 +541,7 @@ printf '   web runtime data: %s\n' "$WEB_RUNTIME_DATA_DIR"
 printf '   backend health:   %s\n' "$BACKEND_HEALTH"
 printf '   frontend health:  %s\n' "$FRONTEND_HEALTH"
 printf '   web data dir:     %s (from %s)\n' "$WEB_DATA_BASE_DIR" "$WEB_ENV_FILE"
+printf '   google token:     %s\n' "$GOOGLE_OAUTH_TOKEN_FILE"
 printf '   reminder agent:   %s\n' "$FELLOWSHIP_REMINDER_PLIST"
 printf '   inbox agent:      %s\n' "$REFERENCE_INBOX_PLIST"
 
@@ -590,8 +638,21 @@ else
   log "Reusing previously built immutable release"
 fi
 
+if [[ "$SKIP_GOOGLE_TOKEN_CHECK" == true ]]; then
+  log "Skipping the Google OAuth token check (--skip-google-token-check)"
+else
+  log "Checking the Google OAuth token"
+  check_google_oauth_token "$RELEASE_DIR" \
+    || fail "Google OAuth token cannot be refreshed: $GOOGLE_OAUTH_TOKEN_FILE; services were not changed. Sign in again (generate_user_token.py in that directory) or deploy with --skip-google-token-check"
+fi
+set_backend_oauth_env || fail "could not set GOOGLE_OAUTH_TOKEN_FILE on $BACKEND_PLIST"
+
 if [[ "$PREVIOUS_RELEASE" == "$RELEASE_DIR" ]]; then
   log "Commit is already active; reconciling scheduled jobs and verifying health"
+  if [[ "$BACKEND_ENV_CHANGED" == true ]]; then
+    log "Backend environment changed; restarting it"
+    restart_backend
+  fi
   activate_fellowship_reminder "$RELEASE_DIR"
   activate_reference_inbox "$RELEASE_DIR"
   wait_for_health backend "$BACKEND_HEALTH"
