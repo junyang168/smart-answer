@@ -1839,6 +1839,18 @@ def _substantive_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _contains_exact_value(value: Any, target: str) -> bool:
+    """Find an object ID as a JSON value, not as a substring of prose or another ID."""
+
+    if isinstance(value, str):
+        return value == target
+    if isinstance(value, Mapping):
+        return any(_contains_exact_value(child, target) for child in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_contains_exact_value(child, target) for child in value)
+    return False
+
+
 def _is_empty(value: Any) -> bool:
     return value is None or value == "" or value == [] or value == {}
 
@@ -5206,6 +5218,10 @@ class PostgresKnowledgeStore:
         *,
         metadata: Optional[dict[str, Any]] = None,
         expected_current_viewpoint_revisions: Optional[Mapping[str, str]] = None,
+        expected_current_source_records: Optional[Mapping[str, tuple[int, str]]] = None,
+        expected_current_claim_related_records: Optional[
+            Mapping[str, Sequence[tuple[str, str, int, str]]]
+        ] = None,
         expected_claim_evidence_guard: Optional[Mapping[str, Any]] = None,
         _claim_evidence_source_queue_context: Optional[
             _ClaimEvidenceSourceQueueApplyContext
@@ -5254,6 +5270,101 @@ class PostgresKnowledgeStore:
                     "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
                     (POSTGRES_APPLY_ADVISORY_LOCK_KEY,),
                 )
+                for source_id, (expected_revision, expected_sha) in sorted(
+                    (expected_current_source_records or {}).items()
+                ):
+                    cursor.execute(
+                        """SELECT revision, content_sha256
+                           FROM wang_knowledge.objects
+                           WHERE collection='source_documents' AND object_id=%s
+                             AND retired_at IS NULL FOR SHARE""",
+                        (source_id,),
+                    )
+                    source_row = cursor.fetchone()
+                    if source_row != (expected_revision, expected_sha):
+                        raise ChangeSetConflict(
+                            f"Source generation changed before apply: {source_id}"
+                        )
+                if expected_current_claim_related_records is not None:
+                    if plan.source_kind not in {
+                        "legacy_adjudicated_withdrawn_review_reconciliation_v1",
+                        "legacy_adjudicated_auto_applied_review_reconciliation_v1",
+                        "legacy_relation_id_only_review_reconciliation_v1",
+                    }:
+                        raise PostgresKnowledgeStoreError(
+                            "Claim-related graph guard is restricted to adjudicated legacy review reconciliation"
+                        )
+                    claim_ids = sorted(expected_current_claim_related_records)
+                    if not claim_ids or set(claim_ids) != {
+                        operation.object_id for operation in plan.operations
+                    }:
+                        raise PostgresKnowledgeStoreError(
+                            "Claim-related graph guard must cover every planned Claim"
+                        )
+                    expected_keys = {
+                        claim_id: {
+                            (str(item[0]), str(item[1]))
+                            for item in expected_current_claim_related_records[claim_id]
+                        }
+                        for claim_id in claim_ids
+                    }
+                    related_evidence_ids = {
+                        claim_id: {
+                            object_id for collection, object_id in expected_keys[claim_id]
+                            if collection == "evidence_steps"
+                        }
+                        for claim_id in claim_ids
+                    }
+                    all_related_ids = sorted({
+                        object_id for keys in expected_keys.values()
+                        for _, object_id in keys
+                    })
+                    lookup_values = claim_ids + sorted({
+                        evidence_id for ids in related_evidence_ids.values()
+                        for evidence_id in ids
+                    })
+                    cursor.execute(
+                        """SELECT collection, object_id, revision, content_sha256, payload
+                           FROM wang_knowledge.objects
+                           WHERE retired_at IS NULL AND collection <> 'claims'
+                             AND (payload::text LIKE ANY(%s) OR object_id = ANY(%s))""",
+                        ([f"%{value}%" for value in lookup_values], all_related_ids),
+                    )
+                    observed: dict[str, list[tuple[str, str, int, str]]] = {
+                        claim_id: [] for claim_id in claim_ids
+                    }
+                    for collection, object_id, revision, content_sha, payload in cursor.fetchall():
+                        for claim_id in claim_ids:
+                            if (
+                                _contains_exact_value(payload, claim_id)
+                                or (str(collection), str(object_id)) in expected_keys[claim_id]
+                                or (
+                                    collection == "knowledge_relations"
+                                    and any(
+                                        _contains_exact_value(payload, evidence_id)
+                                        for evidence_id in related_evidence_ids[claim_id]
+                                    )
+                                )
+                            ):
+                                observed[claim_id].append(
+                                    (str(collection), str(object_id), int(revision), str(content_sha))
+                                )
+                    for claim_id in claim_ids:
+                        expected = sorted(
+                            tuple(item) for item in expected_current_claim_related_records[claim_id]
+                        )
+                        if sorted(observed[claim_id]) != expected:
+                            raise ChangeSetConflict(
+                                f"Claim-related graph changed before apply: {claim_id}"
+                            )
+                elif plan.source_kind in {
+                    "legacy_adjudicated_withdrawn_review_reconciliation_v1",
+                    "legacy_adjudicated_auto_applied_review_reconciliation_v1",
+                    "legacy_relation_id_only_review_reconciliation_v1",
+                }:
+                    raise PostgresKnowledgeStoreError(
+                        "Adjudicated legacy review reconciliation requires a graph guard"
+                    )
                 cursor.execute(
                     """SELECT change_set_id, status, summary, metadata
                        FROM wang_knowledge.change_sets
