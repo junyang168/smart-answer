@@ -544,6 +544,7 @@ def plan_review_migration(
             "human_confirmation_required", "human_disagreement_required",
             "withdrawn_unchanged_graph_verified",
             "auto_applied_historical_replay_graph_verified",
+            "relation_id_only_graph_verified",
         }:
             raise ValueError(f"not a verified status decision: {row['claim_id']}")
         if row.get("reason") == "withdrawn_unchanged_graph_verified":
@@ -566,6 +567,23 @@ def plan_review_migration(
                 or not row.get("overrides_sha256")
             ):
                 raise ValueError(f"auto-applied decision lacks replay proof: {row['claim_id']}")
+        elif row.get("reason") == "relation_id_only_graph_verified":
+            if (
+                source_kind != "legacy_relation_id_only_review_reconciliation_v1"
+                or row.get("adjudication_status") not in {"auto_applied", "withdrawn"}
+                or row.get("review_decision") != "changes_suggested"
+                or row.get("target_review_status") != "ai_consensus_reviewed"
+                or not row.get("graph_guard_sha256")
+                or not row.get("relation_id_manifest_sha256")
+                or not row.get("effective_package_sha256")
+                or (row.get("adjudication_status") == "auto_applied" and not all(
+                    row.get(key) for key in (
+                        "historical_replay_sha256", "historical_replay_code_sha256",
+                        "overrides_sha256",
+                    )
+                ))
+            ):
+                raise ValueError(f"relation-id decision lacks proof: {row['claim_id']}")
         elif source_kind != "legacy_candidate_review_reconciliation_v1":
             raise ValueError(f"invalid legacy migration source kind: {source_kind}")
         claim_id = str(row["claim_id"])
@@ -639,6 +657,9 @@ def plan_review_migration(
             artifact["historical_replay_sha256"] = row["historical_replay_sha256"]
             artifact["historical_replay_code_sha256"] = row["historical_replay_code_sha256"]
             artifact["overrides_sha256"] = row["overrides_sha256"]
+        if row.get("relation_id_manifest_sha256"):
+            artifact["relation_id_manifest_sha256"] = row["relation_id_manifest_sha256"]
+            artifact["effective_package_sha256"] = row["effective_package_sha256"]
         event_id = "REV-AI-" + sha256_json({
             "collection": "claims", "object_id": claim_id,
             "object_revision": revision, "after_sha256": after_sha,
@@ -717,6 +738,7 @@ def _decode_plan(data: Mapping[str, Any]) -> ChangeSetPlan:
             "legacy_candidate_review_reconciliation_v1",
             "legacy_adjudicated_withdrawn_review_reconciliation_v1",
             "legacy_adjudicated_auto_applied_review_reconciliation_v1",
+            "legacy_relation_id_only_review_reconciliation_v1",
         }
         or expected != plan.fingerprint_sha256
         or plan.change_set_id != f"KCS-{expected[:20]}"
@@ -825,6 +847,7 @@ def apply_frozen(
         if plan.source_kind in {
             "legacy_adjudicated_withdrawn_review_reconciliation_v1",
             "legacy_adjudicated_auto_applied_review_reconciliation_v1",
+            "legacy_relation_id_only_review_reconciliation_v1",
         }:
             expected_graph = {}
             for row in source_rows:
@@ -860,6 +883,15 @@ def apply_frozen(
                     )
                 ):
                     raise ValueError(f"historical replay changed: {path}")
+        if plan.source_kind == "legacy_relation_id_only_review_reconciliation_v1":
+            from backend.pipeline.legacy_relation_id_review_reconciliation import verify_relation_id_candidate
+            for row in source_rows:
+                proof = verify_relation_id_candidate(
+                    Path(row["reviewed_candidate_path"]), row["claim_id"],
+                    row["adjudication_status"],
+                )
+                if proof is None or any(row.get(key) != value for key, value in proof.items()):
+                    raise ValueError(f"relation-id proof changed: {row['claim_id']}")
         verified_bundles: dict[str, dict[str, Any]] = {}
         for row in source_rows:
             for field, path_field in (
