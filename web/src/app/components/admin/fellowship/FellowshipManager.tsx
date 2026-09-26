@@ -7,6 +7,7 @@ import {
   createFellowship,
   deleteFellowship,
   fetchFellowshipAnalysisAssets,
+  updateFellowshipAnalysisSources,
   fetchFellowshipAnalysisJob,
   fetchFellowshipDocumentText,
   fetchFellowshipDocuments,
@@ -24,6 +25,7 @@ import {
   FellowshipEmailContent,
   FellowshipEntry,
   FellowshipAnalysisAssets,
+  FellowshipAnalysisSources,
   FellowshipAnalysisContent,
   FellowshipAnalysisJob,
   FellowshipLearningContent,
@@ -177,6 +179,7 @@ export function FellowshipManager() {
   const [learningGenerating, setLearningGenerating] = useState(false);
   const [learningError, setLearningError] = useState<string | null>(null);
   const [analysisAssets, setAnalysisAssets] = useState<FellowshipAnalysisAssets | null>(null);
+  const [analysisSourceSaving, setAnalysisSourceSaving] = useState(false);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisGenerating, setAnalysisGenerating] = useState(false);
   const [analysisJob, setAnalysisJob] = useState<FellowshipAnalysisJob | null>(null);
@@ -887,13 +890,62 @@ export function FellowshipManager() {
     }
   };
 
+  // Which candidate files each slot may use; the automatic pick is shown as the default.
+  const SOURCE_SLOT_KINDS: Record<keyof FellowshipAnalysisSources, string[]> = {
+    pptx: ["pptx"],
+    transcript: ["transcript", "document"],
+    recording: ["recording"],
+  };
+
+  const handleAnalysisSourceChange = async (slot: keyof FellowshipAnalysisSources, value: string) => {
+    if (!editingDate || !analysisAssets) {
+      return;
+    }
+    const sources: FellowshipAnalysisSources = { ...(analysisAssets.sources ?? {}), [slot]: value || null };
+    setAnalysisSourceSaving(true);
+    setAnalysisError(null);
+    try {
+      setAnalysisAssets(await updateFellowshipAnalysisSources(editingDate, sources));
+    } catch (err) {
+      setAnalysisError(err instanceof Error ? err.message : "儲存資料來源失敗");
+    } finally {
+      setAnalysisSourceSaving(false);
+    }
+  };
+
   const renderAssetSummary = (
     label: string,
     asset: FellowshipAnalysisAssets["pptx"] | FellowshipAnalysisAssets["transcript"] | FellowshipAnalysisAssets["recording"],
+    slot: keyof FellowshipAnalysisSources,
     loaded = analysisAssets !== null,
-  ) => (
+  ) => {
+    const choice = analysisAssets?.sources?.[slot] ?? "";
+    const options = (analysisAssets?.candidates ?? []).filter(
+      (candidate) =>
+        candidate.key &&
+        ((candidate.usable && SOURCE_SLOT_KINDS[slot].includes(candidate.kind)) || candidate.key === choice),
+    );
+    return (
     <div className="rounded-md border border-sky-100 bg-white p-3">
       <p className="text-xs font-semibold uppercase tracking-wide text-sky-700">{label}</p>
+      {loaded && (
+        <select
+          aria-label={`${label} 來源`}
+          value={choice}
+          disabled={!editingDate || analysisSourceSaving || analysisGenerating}
+          onChange={(event) => void handleAnalysisSourceChange(slot, event.target.value)}
+          className="mt-2 w-full rounded-md border border-sky-200 bg-white px-2 py-1 text-sm text-gray-800 disabled:bg-gray-50"
+        >
+          <option value="">自動選擇</option>
+          <option value="none">不使用</option>
+          {options.map((candidate) => (
+            <option key={candidate.key!} value={candidate.key!}>
+              {candidate.source === "drive" ? "［Drive］" : ""}
+              {candidate.name}
+            </option>
+          ))}
+        </select>
+      )}
       {asset ? (
         <div className="mt-1 space-y-1 text-sm text-gray-700">
           <p className="break-all font-medium">{asset.name}</p>
@@ -903,10 +955,13 @@ export function FellowshipManager() {
           </p>
         </div>
       ) : (
-        <p className="mt-1 text-sm text-gray-500">{loaded ? "未找到" : "尚未載入"}</p>
+        <p className="mt-1 text-sm text-gray-500">
+          {!loaded ? "尚未載入" : choice === "none" ? "不使用" : "未找到"}
+        </p>
       )}
     </div>
-  );
+    );
+  };
 
   const displayedAnalysisMarkdown = analysisContent?.markdown || analysisMarkdown;
 
@@ -1163,7 +1218,7 @@ export function FellowshipManager() {
                   <div>
                     <h3 className="text-sm font-semibold text-sky-950">分析資料來源</h3>
                     <p className="mt-1 text-xs text-sky-700">
-                      從團契 metadata、本地文件資料夾與固定 Meet Recordings 資料夾解析 PPT、逐字稿與錄音。
+                      從本地文件資料夾與 Google Drive 找出 PPT、逐字稿與錄音；預設自動選擇，也可以在下拉選單裡指定。
                     </p>
                   </div>
                   <button
@@ -1186,9 +1241,9 @@ export function FellowshipManager() {
                   <p className="text-sm text-sky-700">分析資料來源載入中…</p>
                 ) : (
                   <div className="grid gap-3 md:grid-cols-3">
-                    {renderAssetSummary("PPT", analysisAssets?.pptx)}
-                    {renderAssetSummary("逐字稿 / 講稿", analysisAssets?.transcript)}
-                    {renderAssetSummary("錄音", analysisAssets?.recording)}
+                    {renderAssetSummary("PPT", analysisAssets?.pptx, "pptx")}
+                    {renderAssetSummary("逐字稿 / 講稿", analysisAssets?.transcript, "transcript")}
+                    {renderAssetSummary("錄音", analysisAssets?.recording, "recording")}
                   </div>
                 )}
 

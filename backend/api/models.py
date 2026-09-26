@@ -189,8 +189,18 @@ class FellowshipAnalysisAsset(BaseModel):
     mime_type: Optional[str] = Field(None, alias="mimeType")
     usable: bool = True
     reason: Optional[str] = None
+    # Stable id for choosing this file: "local:<relative path>" or "drive:<file id>".
+    key: Optional[str] = None
 
     model_config = ConfigDict(populate_by_name=True)
+
+
+class FellowshipAnalysisSources(BaseModel):
+    """The owner's choice per slot: None = automatic, "none" = do not use, else an asset key."""
+
+    pptx: Optional[str] = None
+    transcript: Optional[str] = None
+    recording: Optional[str] = None
 
 
 class FellowshipAnalysisAssets(BaseModel):
@@ -201,6 +211,7 @@ class FellowshipAnalysisAssets(BaseModel):
     empty_chat: Optional[FellowshipAnalysisAsset] = Field(None, alias="emptyChat")
     candidates: List[FellowshipAnalysisAsset] = Field(default_factory=list)
     messages: List[str] = Field(default_factory=list)
+    sources: FellowshipAnalysisSources = Field(default_factory=FellowshipAnalysisSources)
 
     model_config = ConfigDict(populate_by_name=True)
 

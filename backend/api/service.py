@@ -39,6 +39,7 @@ from .models import (
     FellowshipAnalysisAssets,
     FellowshipAnalysisContent,
     FellowshipAnalysisJob,
+    FellowshipAnalysisSources,
     FellowshipDocument,
     FellowshipEntry,
     FellowshipEmailContent,
@@ -82,6 +83,7 @@ from .sunday_service_email import (
 )
 from .config import (
     FELLOWSHIP_ANALYSIS_MODEL,
+    FELLOWSHIP_ANALYSIS_SOURCES_FILE,
     FELLOWSHIP_CHAT_MIN_BYTES,
     FELLOWSHIP_DOCS_DIR,
     FELLOWSHIP_MEET_RECORDINGS_FOLDER_ID,
@@ -716,7 +718,84 @@ def resolve_fellowship_analysis_assets(date: str) -> FellowshipAnalysisAssets:
                 drive_errors.append(f"Unable to download Drive recording {drive_assets.recording.name}: {exc}")
     assets = _select_analysis_assets(entry.date, candidates)
     assets.messages.extend(drive_errors)
+    _apply_analysis_sources(entry.date, assets)
     return assets
+
+
+# --- the owner's choice of sources (OPS-30) ------------------------------------
+
+_SOURCE_SLOTS = {"pptx": "PPT", "transcript": "逐字稿 / 講稿", "recording": "錄音"}
+NO_SOURCE = "none"
+
+
+def _asset_key(asset: FellowshipAnalysisAsset) -> str:
+    return f"drive:{asset.drive_file_id}" if asset.source == "drive" and asset.drive_file_id else f"{asset.source}:{asset.name}"
+
+
+def _read_all_analysis_sources() -> dict:
+    try:
+        return json.loads(FELLOWSHIP_ANALYSIS_SOURCES_FILE.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+
+
+def get_fellowship_analysis_sources(date: str) -> FellowshipAnalysisSources:
+    folder = _fellowship_date_to_folder_name(_normalize_fellowship_date(date))
+    return FellowshipAnalysisSources(**_read_all_analysis_sources().get(folder, {}))
+
+
+def _apply_analysis_sources(date: str, assets: FellowshipAnalysisAssets) -> None:
+    """Replace the automatic picks with the owner's, where the owner chose."""
+
+    for asset in assets.candidates:
+        asset.key = _asset_key(asset)
+    for slot in (assets.pptx, assets.transcript, assets.recording):
+        if slot is not None:
+            slot.key = _asset_key(slot)
+    sources = get_fellowship_analysis_sources(date)
+    assets.sources = sources
+    by_key = {asset.key: asset for asset in assets.candidates}
+    for slot, label in _SOURCE_SLOTS.items():
+        choice = getattr(sources, slot)
+        if not choice:
+            continue
+        if choice == NO_SOURCE:
+            setattr(assets, slot, None)
+            continue
+        chosen = by_key.get(choice)
+        if chosen is None:
+            assets.messages.append(f"指定的{label}「{choice.split(':', 1)[-1]}」已找不到，改用自動選擇。")
+            continue
+        if slot == "recording" and chosen.source == "drive":
+            try:
+                chosen = _download_drive_recording_to_docs(date, chosen)
+                chosen.key = _asset_key(chosen)
+            except Exception as exc:
+                assets.messages.append(f"Unable to download Drive recording {chosen.name}: {exc}")
+                continue
+        setattr(assets, slot, chosen)
+
+
+def update_fellowship_analysis_sources(date: str, payload: FellowshipAnalysisSources) -> FellowshipAnalysisAssets:
+    entry = _find_fellowship_entry(date)
+    current = resolve_fellowship_analysis_assets(entry.date)
+    keys = {asset.key for asset in current.candidates}
+    for slot, label in _SOURCE_SLOTS.items():
+        choice = getattr(payload, slot)
+        if choice and choice != NO_SOURCE and choice not in keys:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{label}: no such file for this date: {choice}")
+    folder = _fellowship_date_to_folder_name(entry.date)
+    all_sources = _read_all_analysis_sources()
+    chosen = {slot: value for slot, value in payload.model_dump().items() if value}
+    if chosen:
+        all_sources[folder] = chosen
+    else:
+        all_sources.pop(folder, None)
+    FELLOWSHIP_ANALYSIS_SOURCES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = FELLOWSHIP_ANALYSIS_SOURCES_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(all_sources, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(FELLOWSHIP_ANALYSIS_SOURCES_FILE)
+    return resolve_fellowship_analysis_assets(entry.date)
 
 
 def _normalize_fellowship_date(value: str) -> str:

@@ -19,6 +19,7 @@ from .models import (
     FellowshipDocument,
     FellowshipEntry,
     FellowshipAnalysisAssets,
+    FellowshipAnalysisSources,
     FellowshipAnalysisJob,
     FellowshipEmailContent,
     FellowshipEmailResult,
@@ -64,6 +65,7 @@ from .service import (
     get_fellowship_analysis_job,
     list_public_fellowship_documents,
     resolve_fellowship_analysis_assets,
+    update_fellowship_analysis_sources,
     run_fellowship_analysis_job,
     start_fellowship_analysis_job,
     list_sermon_series,
@@ -269,6 +271,11 @@ def generate_fellowship_learning(date: str) -> FellowshipLearningContent:
 @fellowship_router.get("/{date:path}/analysis/assets", response_model=FellowshipAnalysisAssets)
 def read_fellowship_analysis_assets(date: str) -> FellowshipAnalysisAssets:
     return resolve_fellowship_analysis_assets(date)
+
+
+@fellowship_router.put("/{date:path}/analysis/sources", response_model=FellowshipAnalysisAssets)
+def write_fellowship_analysis_sources(date: str, payload: FellowshipAnalysisSources) -> FellowshipAnalysisAssets:
+    return update_fellowship_analysis_sources(date, payload)
 
 
 @fellowship_router.post("/{date:path}/analysis/generate", response_model=FellowshipAnalysisJob)

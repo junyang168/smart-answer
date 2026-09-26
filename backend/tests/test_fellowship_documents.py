@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import errno
 import importlib
+import json
 import os
 import sys
 import types
+
+import pytest
 
 
 def _load_service_with_data_dir(monkeypatch, tmp_path):
@@ -482,3 +485,71 @@ def test_downloads_use_the_owner_when_the_service_account_cannot_see_the_file(mo
 
     assert service._drive_service_for_file("shared", ["scope"]) is service_account
     assert service._drive_service_for_file("in-new-folder", ["scope"]) is owner
+
+
+def _two_studies(monkeypatch, tmp_path):
+    """2026-09-25: two studies in one folder, where the automatic pick went wrong (OPS-30)."""
+
+    service = _load_service_with_data_dir(monkeypatch, tmp_path)
+    (tmp_path / "data" / "config" / "fellowship.json").write_text('[{"date": "09/25/2026", "title": "t"}]', encoding="utf-8")
+    docs = tmp_path / "data" / "fellowship" / "docs" / "2026-09-25"
+    docs.mkdir(parents=True)
+    (docs / "葡萄園的工人 太19-27至20-16.pptx").write_bytes(b"deck one")
+    (docs / "你們不知道所求的是甚麼 太20-17至34.pptx").write_bytes(b"deck two, the bigger one")
+    (docs / "马太福音 20-17至34 你們不知道所求的是甚麼 查經逐字稿.md").write_text("講稿 " * 50, encoding="utf-8")
+    (docs / "马太福音 20-17至34 你們不知道所求的是甚麼 查經逐字稿（投影片對照）.md").write_text("對照 " * 400, encoding="utf-8")
+    (docs / "達拉斯聖道教會團契查經 - 2026_09_25 19_24 CDT - Recording.mp4").write_bytes(b"mp4")
+    monkeypatch.setattr(service, "_search_drive_meet_assets", lambda date: [])
+    return service
+
+
+def test_owner_can_pick_the_transcript_and_ppt(monkeypatch, tmp_path):
+    service = _two_studies(monkeypatch, tmp_path)
+    auto = service.resolve_fellowship_analysis_assets("2026-09-25")
+    script = "local:马太福音 20-17至34 你們不知道所求的是甚麼 查經逐字稿.md"
+    deck = "local:你們不知道所求的是甚麼 太20-17至34.pptx"
+    assert auto.transcript.key != script  # the automatic pick is the cross-reference
+
+    picked = service.update_fellowship_analysis_sources(
+        "2026-09-25", service.FellowshipAnalysisSources(transcript=script, pptx=deck)
+    )
+
+    assert picked.transcript.key == script
+    assert picked.pptx.key == deck
+    assert picked.sources.transcript == script
+    # Stored apart from fellowship.json, so saving the entry form cannot erase it.
+    stored = json.loads((tmp_path / "data" / "config" / "fellowship_analysis_sources.json").read_text(encoding="utf-8"))
+    assert stored == {"2026-09-25": {"pptx": deck, "transcript": script}}
+    assert "analysis" not in (tmp_path / "data" / "config" / "fellowship.json").read_text(encoding="utf-8")
+    # And the analysis run sees the same picks.
+    assert service.resolve_fellowship_analysis_assets("09/25/2026").transcript.key == script
+
+
+def test_none_means_do_not_use_and_empty_means_automatic(monkeypatch, tmp_path):
+    service = _two_studies(monkeypatch, tmp_path)
+    none = service.update_fellowship_analysis_sources("2026-09-25", service.FellowshipAnalysisSources(transcript="none"))
+    assert none.transcript is None
+    back = service.update_fellowship_analysis_sources("2026-09-25", service.FellowshipAnalysisSources())
+    assert back.transcript is not None
+    assert json.loads((tmp_path / "data" / "config" / "fellowship_analysis_sources.json").read_text()) == {}
+
+
+def test_unknown_file_is_refused_and_a_vanished_pick_falls_back(monkeypatch, tmp_path):
+    service = _two_studies(monkeypatch, tmp_path)
+    with pytest.raises(service.HTTPException) as refused:
+        service.update_fellowship_analysis_sources("2026-09-25", service.FellowshipAnalysisSources(pptx="local:nope.pptx"))
+    assert refused.value.status_code == 400
+
+    deck = "local:葡萄園的工人 太19-27至20-16.pptx"
+    service.update_fellowship_analysis_sources("2026-09-25", service.FellowshipAnalysisSources(pptx=deck))
+    (tmp_path / "data" / "fellowship" / "docs" / "2026-09-25" / "葡萄園的工人 太19-27至20-16.pptx").unlink()
+
+    assets = service.resolve_fellowship_analysis_assets("2026-09-25")
+    assert assets.pptx is not None and assets.pptx.key != deck
+    assert any("已找不到，改用自動選擇" in message for message in assets.messages)
+
+
+def test_every_candidate_has_a_key(monkeypatch, tmp_path):
+    service = _two_studies(monkeypatch, tmp_path)
+    assets = service.resolve_fellowship_analysis_assets("2026-09-25")
+    assert all(candidate.key for candidate in assets.candidates)

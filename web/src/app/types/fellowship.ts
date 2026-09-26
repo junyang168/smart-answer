@@ -59,6 +59,15 @@ export interface FellowshipAnalysisAsset {
   mimeType?: string | null;
   usable: boolean;
   reason?: string | null;
+  /** "local:<relative path>" or "drive:<file id>"; what a source choice refers to. */
+  key?: string | null;
+}
+
+/** Per slot: null = automatic, "none" = do not use, else an asset key. */
+export interface FellowshipAnalysisSources {
+  pptx?: string | null;
+  transcript?: string | null;
+  recording?: string | null;
 }
 
 export interface FellowshipAnalysisAssets {
@@ -69,6 +78,7 @@ export interface FellowshipAnalysisAssets {
   emptyChat?: FellowshipAnalysisAsset | null;
   candidates: FellowshipAnalysisAsset[];
   messages: string[];
+  sources?: FellowshipAnalysisSources;
 }
 
 export interface FellowshipInteraction {
