@@ -5286,9 +5286,12 @@ class PostgresKnowledgeStore:
                             f"Source generation changed before apply: {source_id}"
                         )
                 if expected_current_claim_related_records is not None:
-                    if plan.source_kind != "legacy_adjudicated_withdrawn_review_reconciliation_v1":
+                    if plan.source_kind not in {
+                        "legacy_adjudicated_withdrawn_review_reconciliation_v1",
+                        "legacy_adjudicated_auto_applied_review_reconciliation_v1",
+                    }:
                         raise PostgresKnowledgeStoreError(
-                            "Claim-related graph guard is restricted to withdrawn legacy review reconciliation"
+                            "Claim-related graph guard is restricted to adjudicated legacy review reconciliation"
                         )
                     claim_ids = sorted(expected_current_claim_related_records)
                     if not claim_ids or set(claim_ids) != {
@@ -5353,9 +5356,12 @@ class PostgresKnowledgeStore:
                             raise ChangeSetConflict(
                                 f"Claim-related graph changed before apply: {claim_id}"
                             )
-                elif plan.source_kind == "legacy_adjudicated_withdrawn_review_reconciliation_v1":
+                elif plan.source_kind in {
+                    "legacy_adjudicated_withdrawn_review_reconciliation_v1",
+                    "legacy_adjudicated_auto_applied_review_reconciliation_v1",
+                }:
                     raise PostgresKnowledgeStoreError(
-                        "Withdrawn legacy review reconciliation requires a graph guard"
+                        "Adjudicated legacy review reconciliation requires a graph guard"
                     )
                 cursor.execute(
                     """SELECT change_set_id, status, summary, metadata

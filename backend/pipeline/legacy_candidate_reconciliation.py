@@ -543,6 +543,7 @@ def plan_review_migration(
             "pass_ready_for_legacy_migration", "human_spot_check_required",
             "human_confirmation_required", "human_disagreement_required",
             "withdrawn_unchanged_graph_verified",
+            "auto_applied_historical_replay_graph_verified",
         }:
             raise ValueError(f"not a verified status decision: {row['claim_id']}")
         if row.get("reason") == "withdrawn_unchanged_graph_verified":
@@ -554,6 +555,17 @@ def plan_review_migration(
                 or not row.get("graph_guard_sha256")
             ):
                 raise ValueError(f"withdrawn decision lacks graph proof: {row['claim_id']}")
+        elif row.get("reason") == "auto_applied_historical_replay_graph_verified":
+            if (
+                source_kind != "legacy_adjudicated_auto_applied_review_reconciliation_v1"
+                or row.get("adjudication_status") != "auto_applied"
+                or row.get("review_decision") != "changes_suggested"
+                or row.get("target_review_status") != "ai_consensus_reviewed"
+                or not row.get("graph_guard_sha256")
+                or not row.get("historical_replay_sha256")
+                or not row.get("overrides_sha256")
+            ):
+                raise ValueError(f"auto-applied decision lacks replay proof: {row['claim_id']}")
         elif source_kind != "legacy_candidate_review_reconciliation_v1":
             raise ValueError(f"invalid legacy migration source kind: {source_kind}")
         claim_id = str(row["claim_id"])
@@ -623,6 +635,10 @@ def plan_review_migration(
         }
         if row.get("graph_guard_sha256"):
             artifact["graph_guard_sha256"] = row["graph_guard_sha256"]
+        if row.get("historical_replay_sha256"):
+            artifact["historical_replay_sha256"] = row["historical_replay_sha256"]
+            artifact["historical_replay_code_sha256"] = row["historical_replay_code_sha256"]
+            artifact["overrides_sha256"] = row["overrides_sha256"]
         event_id = "REV-AI-" + sha256_json({
             "collection": "claims", "object_id": claim_id,
             "object_revision": revision, "after_sha256": after_sha,
@@ -700,6 +716,7 @@ def _decode_plan(data: Mapping[str, Any]) -> ChangeSetPlan:
         plan.source_kind not in {
             "legacy_candidate_review_reconciliation_v1",
             "legacy_adjudicated_withdrawn_review_reconciliation_v1",
+            "legacy_adjudicated_auto_applied_review_reconciliation_v1",
         }
         or expected != plan.fingerprint_sha256
         or plan.change_set_id != f"KCS-{expected[:20]}"
@@ -805,7 +822,10 @@ def apply_frozen(
         if len(expected_sources) != 1:
             raise ValueError("migration plan crosses source units")
         expected_graph = None
-        if plan.source_kind == "legacy_adjudicated_withdrawn_review_reconciliation_v1":
+        if plan.source_kind in {
+            "legacy_adjudicated_withdrawn_review_reconciliation_v1",
+            "legacy_adjudicated_auto_applied_review_reconciliation_v1",
+        }:
             expected_graph = {}
             for row in source_rows:
                 guard = graph_guards.get(row["claim_id"])
@@ -821,6 +841,25 @@ def apply_frozen(
                 ]
         elif graph_guards:
             raise ValueError("graph guards supplied for ordinary legacy migration")
+        if plan.source_kind == "legacy_adjudicated_auto_applied_review_reconciliation_v1":
+            from backend.pipeline.legacy_auto_applied_review_reconciliation import (
+                verify_historical_replay,
+            )
+            replay_proofs: dict[str, dict[str, str] | None] = {}
+            for row in source_rows:
+                path = str(row["reviewed_candidate_path"])
+                if path not in replay_proofs:
+                    replay_proofs[path] = verify_historical_replay(Path(path))
+                proof = replay_proofs[path]
+                if proof is None or any(
+                    row.get(key) != proof.get(key)
+                    for key in (
+                        "historical_replay_sha256",
+                        "historical_replay_code_sha256",
+                        "overrides_sha256",
+                    )
+                ):
+                    raise ValueError(f"historical replay changed: {path}")
         verified_bundles: dict[str, dict[str, Any]] = {}
         for row in source_rows:
             for field, path_field in (
