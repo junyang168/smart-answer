@@ -30,6 +30,7 @@ pipeline and overturn the decision `run_ledger` documents.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -68,6 +69,13 @@ MEMBER_STAGES = ("extract", "cross_section", "review", "adjudicate", "apply", "i
 BATCH_STAGES = ("merge",)
 STAGES = MEMBER_STAGES + BATCH_STAGES
 
+ARTIFACT_REUSE_SCHEMA_VERSION = "wang_research_batch_artifact_reuse_v1"
+REUSE_RESUME_STAGES = {
+    "extract": (),
+    "cross_section": ("package",),
+    "review": ("package", "cross_section"),
+}
+
 #: `--stage all` means all of them, ingest included. It excluded ingest at
 #: first, behind a second `--ingest` flag, and the cost of that was the whole
 #: point of the exercise: getting one 母本 from its file to the store took five
@@ -105,6 +113,154 @@ def artifact_paths(output_root: Path, member_key: str) -> dict[str, Path]:
         "overrides": output_root / "overrides" / f"{slug}.consensus-overrides.json",
         "reviewed": output_root / "reviewed" / f"{slug}.reviewed-candidate.json",
     }
+
+
+def _sha256_path(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _current_member_source_path(
+    member: dict[str, Any], transcript_dirs: list[Path]
+) -> Path:
+    if member["source_type"] == "notes_manuscript":
+        return Path(str(member["source_path"])).expanduser().resolve()
+    resolved = resolve_transcript_path(member["key"], transcript_dirs)
+    if resolved is None:
+        raise ValueError(f"artifact reuse source is unavailable: {member['key']}")
+    return resolved.resolve()
+
+
+def _validate_reused_package(path: Path, *, member_key: str, source_sha256: str) -> None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"artifact reuse package is unreadable: {path}: {exc}") from exc
+    documents = payload.get("source_documents") or []
+    if len(documents) != 1:
+        raise ValueError(f"artifact reuse package must contain one source: {path}")
+    document = documents[0]
+    package_key = str(document.get("transcript_id") or document.get("source_id") or "")
+    if package_key.startswith("notes_manuscript:"):
+        package_key = package_key.split(":", 1)[1]
+    if package_key != member_key:
+        raise ValueError(
+            f"artifact reuse package source mismatch for {member_key}: {package_key}"
+        )
+    if document.get("source_sha256") != source_sha256:
+        raise ValueError(
+            f"artifact reuse package source SHA mismatch for {member_key}: {path}"
+        )
+
+
+def load_artifact_reuse_manifest(
+    path: Path,
+    *,
+    batch: dict[str, Any],
+    output_root: Path,
+    members: list[dict[str, Any]],
+    transcript_dirs: list[Path],
+) -> tuple[dict[str, str], str]:
+    """Validate materialized incident artifacts and return per-member resume stages.
+
+    A copied package is not authority merely because it exists at the canonical
+    path. The manifest binds the original and materialized bytes, the current
+    source SHA, and the first stage that is still allowed to run.
+    """
+
+    raw = path.read_bytes()
+    payload = json.loads(raw)
+    if payload.get("schema_version") != ARTIFACT_REUSE_SCHEMA_VERSION:
+        raise ValueError(
+            f"artifact reuse schema must be {ARTIFACT_REUSE_SCHEMA_VERSION}"
+        )
+    if payload.get("batch_id") != batch.get("batch_id"):
+        raise ValueError("artifact reuse batch_id does not match the research batch")
+    declared_root = Path(str(payload.get("output_root") or "")).expanduser().resolve()
+    if declared_root != output_root.resolve():
+        raise ValueError("artifact reuse output_root does not match --output-root")
+
+    member_by_key = {member["key"]: member for member in members}
+    resume: dict[str, str] = {}
+    for entry in payload.get("entries") or []:
+        key = str(entry.get("source_key") or "")
+        if key not in member_by_key:
+            raise ValueError(f"artifact reuse names a member outside the batch: {key}")
+        if key in resume:
+            raise ValueError(f"artifact reuse repeats source_key: {key}")
+        stage = str(entry.get("resume_from_stage") or "")
+        if stage not in REUSE_RESUME_STAGES:
+            raise ValueError(
+                f"artifact reuse resume_from_stage for {key} must be one of "
+                f"{sorted(REUSE_RESUME_STAGES)}"
+            )
+
+        source_path = _current_member_source_path(member_by_key[key], transcript_dirs)
+        source_sha256 = _sha256_path(source_path)
+        if entry.get("source_sha256") != source_sha256:
+            raise ValueError(f"artifact reuse current source SHA mismatch for {key}")
+
+        artifacts = entry.get("artifacts") or []
+        by_kind: dict[str, dict[str, Any]] = {}
+        expected_paths = artifact_paths(output_root, key)
+        slug = _slug(key)
+        cache_root = (output_root / "detailed-extractions" / "section-cache" / slug).resolve()
+        plan_path = (
+            output_root / "detailed-extractions" / "section-plans" / f"{slug}.json"
+        ).resolve()
+        for artifact in artifacts:
+            kind = str(artifact.get("artifact_kind") or "")
+            if kind in by_kind and kind != "section_cache":
+                raise ValueError(f"artifact reuse repeats {kind} for {key}")
+            source = Path(str(artifact.get("source_path") or "")).expanduser().resolve()
+            target = Path(str(artifact.get("target_path") or "")).expanduser().resolve()
+            if kind in {"package", "cross_section"}:
+                if target != expected_paths[kind].resolve():
+                    raise ValueError(f"artifact reuse target path mismatch for {key} {kind}")
+            elif kind == "section_plan":
+                if target != plan_path:
+                    raise ValueError(f"artifact reuse section plan path mismatch for {key}")
+            elif kind == "section_cache":
+                try:
+                    target.relative_to(cache_root)
+                except ValueError as exc:
+                    raise ValueError(f"artifact reuse cache path escapes {key} cache root") from exc
+            else:
+                raise ValueError(f"artifact reuse has unknown artifact kind for {key}: {kind}")
+            if not source.is_file() or not target.is_file():
+                raise ValueError(f"artifact reuse file is missing for {key} {kind}")
+            source_sha = _sha256_path(source)
+            target_sha = _sha256_path(target)
+            declared_source_sha = str(artifact.get("source_artifact_sha256") or "")
+            declared_target_sha = str(artifact.get("target_artifact_sha256") or "")
+            if not (
+                source_sha == target_sha == declared_source_sha == declared_target_sha
+            ):
+                raise ValueError(f"artifact reuse byte SHA mismatch for {key} {kind}")
+            if kind in {"package", "cross_section"}:
+                _validate_reused_package(
+                    target, member_key=key, source_sha256=source_sha256
+                )
+            elif kind == "section_plan":
+                plan = json.loads(target.read_text(encoding="utf-8"))
+                if plan.get("source_sha256") != source_sha256:
+                    raise ValueError(f"artifact reuse section plan source SHA mismatch for {key}")
+            else:
+                cached = json.loads(target.read_text(encoding="utf-8"))
+                if not isinstance(cached.get("section"), dict) or not isinstance(
+                    cached.get("response"), dict
+                ):
+                    raise ValueError(f"artifact reuse section cache is incomplete for {key}")
+            if kind != "section_cache":
+                by_kind[kind] = artifact
+
+        missing = sorted(set(REUSE_RESUME_STAGES[stage]).difference(by_kind))
+        if missing:
+            raise ValueError(
+                f"artifact reuse for {key} cannot resume from {stage}; missing "
+                + ", ".join(missing)
+            )
+        resume[key] = stage
+    return resume, hashlib.sha256(raw).hexdigest()
 
 
 def reviewed_package_paths(
@@ -512,6 +668,10 @@ def main() -> int:
              "in the order given",
     )
     parser.add_argument("--output-root", type=Path)
+    parser.add_argument(
+        "--artifact-reuse-manifest", type=Path,
+        help="SHA-bound incident artifact materialization and per-source resume stages",
+    )
     parser.add_argument("--stage", choices=("all", *STAGES), default="all")
     parser.add_argument(
         "--only", nargs="+", metavar="SOURCE",
@@ -554,7 +714,8 @@ def main() -> int:
         / "research-batches"
         / batch["batch_id"]
     )
-    members = batch_members(batch)
+    all_members = batch_members(batch)
+    members = all_members
     known = {member["key"] for member in members}
     if args.only and args.exclude:
         overlap = sorted(set(args.only) & set(args.exclude))
@@ -608,6 +769,22 @@ def main() -> int:
                 + ", ".join(untitled)
             )
 
+    resume_from: dict[str, str] = {}
+    reuse_manifest_sha256: str | None = None
+    if args.artifact_reuse_manifest:
+        if args.stage != "all":
+            parser.error("--artifact-reuse-manifest requires --stage all")
+        try:
+            resume_from, reuse_manifest_sha256 = load_artifact_reuse_manifest(
+                args.artifact_reuse_manifest,
+                batch=batch,
+                output_root=output_root,
+                members=all_members,
+                transcript_dirs=transcript_dirs,
+            )
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            parser.error(str(exc))
+
     selected_batch = {**batch, "transcript_ids": [], "sources": []}
     for member in members:
         if member["source_type"] == "sermon_transcript":
@@ -625,7 +802,12 @@ def main() -> int:
         write_back_generated_subtitles=args.write_back_generated_subtitles,
         subtitle_user_id=args.subtitle_user_id,
     )
-    selected = [row for row in plan if row["stage"] in wanted]
+    selected = [
+        row for row in plan
+        if row["stage"] in wanted
+        and MEMBER_STAGES.index(row["stage"])
+        >= MEMBER_STAGES.index(resume_from.get(row["transcript_id"], "extract"))
+    ]
     merged_output = output_root / "merged" / "research-batch-knowledge.json"
     preview = {
         "batch_id": batch["batch_id"],
@@ -636,6 +818,14 @@ def main() -> int:
         ],
         "selected_stage": args.stage,
         "commands": selected,
+        "artifact_reuse_manifest": (
+            {
+                "path": str(args.artifact_reuse_manifest),
+                "sha256": reuse_manifest_sha256,
+                "resume_from_stage": resume_from,
+            }
+            if args.artifact_reuse_manifest else None
+        ),
         "reused_reviewed_packages": {
             member["key"]: str(path)
             for member, path in zip(

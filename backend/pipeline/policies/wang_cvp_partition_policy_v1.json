@@ -1,0 +1,6 @@
+{
+  "schema_version": "wang_cvp_partition_policy_v1",
+  "target_request_bytes": 380000,
+  "max_request_bytes": 500000,
+  "max_claims_per_partition": 300
+}

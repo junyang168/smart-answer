@@ -13,6 +13,7 @@ from backend.api.canonical_repository.knowledge_models import (
     ViewpointIdentityCandidateRecord,
 )
 from backend.api.canonical_repository.matthew16_viewpoint_pilot import (
+    PASSAGE_UNITS,
     build_matthew16_pilot_scope,
 )
 from backend.api.canonical_repository.matthew16_viewpoint_candidate import (
@@ -51,6 +52,7 @@ from backend.api.canonical_repository.viewpoint_foundation import (
     sha256_json,
 )
 from backend.pipeline.occurrence_section_projection import claim_universe_sha256
+from backend.pipeline.passage_scope_attestation import passage_units_sha256
 
 
 def _fixture(tmp_path):
@@ -141,6 +143,30 @@ def _fixture(tmp_path):
     return catalog, selection, manifest, sources, claims, article
 
 
+def _role_attestation(manifest, claims, *, role="passage_exegesis"):
+    claim = claims[0]
+    pin = next(row for row in manifest["claims"] if row["claim_id"] == claim["claim_id"])
+    body = {
+        "schema_version": "wang_passage_scope_attestation_v2",
+        "claim_manifest_sha256": manifest["manifest_sha256"],
+        "passage_units_sha256": passage_units_sha256(PASSAGE_UNITS),
+        "references": [
+            {
+                "claim_id": claim["claim_id"],
+                "claim_revision": pin["pinned_claim_revision"],
+                "claim_revision_sha256": pin["claim_revision_sha256"],
+                "source_ref_index": 0,
+                "scripture_ref": claim["scripture_refs"][0],
+                "passage_unit_ids": ["16:13-18"],
+                "role": role,
+                "role_reason": "The Claim directly interprets this passage.",
+                "review_status": "human_approved",
+            }
+        ],
+    }
+    return body | {"artifact_sha256": sha256_json(body)}
+
+
 def test_pilot_scope_preserves_context_and_reports_source_gap(tmp_path):
     catalog, selection, manifest, sources, claims, article = _fixture(tmp_path)
     result = build_matthew16_pilot_scope(
@@ -151,6 +177,7 @@ def test_pilot_scope_preserves_context_and_reports_source_gap(tmp_path):
         claim_manifest=manifest,
         source_documents=sources,
         claims=claims,
+        scripture_role_attestation=_role_attestation(manifest, claims),
         article_dirs=[article],
         thematic_source_ids=["sermon:missing"],
     )
@@ -172,6 +199,27 @@ def test_pilot_scope_preserves_context_and_reports_source_gap(tmp_path):
     assert result.apply_allowed is False
 
 
+def test_pilot_scope_does_not_treat_supporting_reference_as_exegesis(tmp_path):
+    catalog, selection, manifest, sources, claims, article = _fixture(tmp_path)
+    result = build_matthew16_pilot_scope(
+        source_catalog=catalog,
+        source_catalog_sha256="1" * 64,
+        source_map_sha256="2" * 64,
+        source_selection=selection,
+        claim_manifest=manifest,
+        source_documents=sources,
+        claims=claims,
+        scripture_role_attestation=_role_attestation(
+            manifest, claims, role="theological_support"
+        ),
+        article_dirs=[article],
+        thematic_source_ids=["sermon:missing"],
+    )
+
+    assert all(item.lane == "source_context_candidate" for item in result.claims)
+    assert result.direct_scripture_signal_authority == "reviewed_scripture_use_role"
+
+
 def test_pilot_scope_sha_binds_article_bytes(tmp_path):
     catalog, selection, manifest, sources, claims, article = _fixture(tmp_path)
     result = build_matthew16_pilot_scope(
@@ -182,6 +230,7 @@ def test_pilot_scope_sha_binds_article_bytes(tmp_path):
         claim_manifest=manifest,
         source_documents=sources,
         claims=claims,
+        scripture_role_attestation=_role_attestation(manifest, claims),
         article_dirs=[article],
         thematic_source_ids=["sermon:missing"],
     )
@@ -209,6 +258,7 @@ def test_pilot_scope_producer_uses_argument_dependency_selector(tmp_path):
         claim_manifest=manifest,
         source_documents=sources,
         claims=claims,
+        scripture_role_attestation=_role_attestation(manifest, claims),
         claim_relations=[
             {
                 "claim_relation_id": "CR-CONTEXT-CORE",
@@ -243,6 +293,7 @@ def test_pilot_scope_producer_consumes_sha_bound_occurrence_admissions(tmp_path)
         claim_manifest=manifest,
         source_documents=sources,
         claims=claims,
+        scripture_role_attestation=_role_attestation(manifest, claims),
         occurrence_admissions_by_claim={
             "C-CONTEXT": [
                 {

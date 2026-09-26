@@ -8,11 +8,12 @@
 
 ## 术语
 
-本文用到的词，凡是这个项目里已经在用的就照用；下面五个是本文新引入的，先定义再使用。已有的词(论证路线、反方立场、真值条件、推理骨架)不在此列。
+本文用到的词，凡是这个项目里已经在用的就照用；下面七个是本文新引入的，先定义再使用。已有的词(论证路线、反方立场、真值条件、推理骨架)不在此列。
 
 | 本文的说法 | 定义 | 代码里 |
 | --- | --- | --- |
 | **scope（一轮的范围）** | 「这一轮要处理哪些主张」——一份**冻结的**主张清单，带名字、覆盖的经文段落、取来当上下文的已有观点，以及明确排除的部分。真实例子：`matt16-full`（190 条主张）、`matt16-13-18-rock-poc`（31 条）。清单的哈希用来确认后续每一步做的还是当初定的那一批 | `scope-packet.json` |
+| **partition（执行分区）** | 全库冻结主张在进入智能分组前，按容量分配的一次执行归属。每条可处理主张恰好有一个主分区；其他分区只能把它当只读上下文。归属不代表两条主张是同一个观点 | `wang_cvp_partition_manifest_v1` |
 | **观点修订** | 一个观点在某一时刻的表述与适用范围。改写会产生新修订，旧的保留并注明由谁取代 | `viewpoint_revisions` |
 | **成员连接** | 把一条主张挂到一个观点上的记录，并说明是哪一种关系 | `viewpoint_claim_links` |
 | **路线实例** | 某一条论证路线在**某一篇讲道里实际出现的那一次**，带该篇的证据步骤 | `argument_route_attestations` |
@@ -23,7 +24,7 @@
 
 | 节 | |
 | --- | --- |
-| [术语](#术语) | 本文新引入的五个词 |
+| [术语](#术语) | 本文新引入的七个词 |
 | [1. 观点是什么](#1-观点是什么) | 一个真实例子，以及它不是什么 |
 | [2. 数据模型](#2-数据模型) | 图，以及每个对象的白话解释 |
 | [3. 观点怎样产生](#3-观点怎样产生) | 流水线的图，人在哪一步出现 |
@@ -118,17 +119,17 @@ erDiagram
 
 ```mermaid
 flowchart TD
-    SC["scope 内的全部主张"] --> G["智能分组<br/>claude-opus-5"]
+    SC["scope 内的全部主张"] --> G["智能分组<br/>claude-fable-5-1"]
     G --> RP["程序强制覆盖<br/>每条主张恰好属于一组"]
     RP --> B["逐批处理，串行"]
     B --> S["一批主张 + 相关的已有观点<br/>（取来当上下文，不建立任何东西）"]
     S --> P["提议<br/>gpt-5.6-sol"]
     P --> V["程序验证<br/>主张是否全部处理、ID 是否存在、成分定位是否可解析"]
     V -->|"不通过"| F["整批失败"]
-    V -->|"通过"| R["独立复核<br/>claude-opus-5"]
+    V -->|"通过"| R["独立复核<br/>claude-fable-5-1"]
     R -->|"无异议"| W["写入：观点、路线、关系"]
     R -->|"有异议"| C["仲裁：意见交回提议者<br/>最多一轮"]
-    C -->|"确定性验证通过"| FR["终局复核实际写库的改正稿 B<br/>claude-opus-5"]
+    C -->|"确定性验证通过"| FR["终局复核实际写库的改正稿 B<br/>claude-fable-5-1"]
     C -->|"仍不一致"| H["转人工"]
     FR -->|"全部通过"| W
     FR -->|"仍有问题"| H
@@ -136,9 +137,19 @@ flowchart TD
     RB --> B
 ```
 
+### 全库执行分区
+
+先从全库 Claim manifest 编译全库 scope packet，完成来源清账与审计后冻结，再生成内容寻址的 partition manifest。每个分区由 manifest 指定的 Claim ID 编译自己的 scope packet 和本地 freeze，然后进入智能分组。分母包含冻结清单内每条 Claim：可处理者恰好有一个主分区，未能处理者进入带理由的 disposition ledger。`S 230205` 本轮暂时排除时，来源本身也要留下明确的排除记录；没有 Claim 行不等于来源已处理。
+
+分区只决定执行容量与顺序，不判断观点身份。经文引用不能自动成为马太释经核心；只有 Claim 本身对该经文作释经、且这一用途已经审核，才能进入相应 passage 分区。其余内容可以按实际 Claim 文本发现的可修订词项或来源组织，不预设教授的神学分类。多经文、多主题 Claim 仍只有一个主归属；跨分区引用是带修订哈希的只读上下文，不产生第二次身份裁定。
+
+每个分区的 grouping 请求按实际送给 client 的 prompt、schema 与 Claim payload 的 UTF-8 序列化字节数检查。目标值、硬上限和单分区 Claim 数量上限来自版本化 partition policy；超限时确定性拆分，并保留原路由与拆分记录。预览可以报告尚未清账的 Claim，但不能授权模型调用；最终 manifest 必须与当前数据库指纹、来源清账、独立审计、CVP policy 和代码版本绑定。runner 在模型调用之前核对分区主归属、scope packet 和本地 freeze。
+
+全库共用一个 Registry。分区按顺序处理，后续分区读取当时最新的 Registry；写入由同一把全局锁串行保护。全部分区完成后，还要审查跨分区重复观点并核对全库 disposition，不能凭每个分区各自完成就宣布全库完成。
+
 ### 分组
 
-一个 scope 的主张一次处理不完，所以先分组。这一步由模型做（默认 `claude-opus-5`），但**它的结果在覆盖率上不被信任**：程序随后强制每条主张恰好属于一组，并逐条记录修补——
+每个完整分区内部仍做智能分组。这一步由模型做（默认 `claude-fable-5-1`），但**它的结果在覆盖率上不被信任**：程序随后强制每条主张恰好属于一组，并逐条记录修补——
 
 | 情况 | 程序怎么办 |
 | --- | --- |
@@ -149,6 +160,8 @@ flowchart TD
 **分组只决定「哪些主张一起看」，不决定任何身份。** 同一组不代表同一个观点，不同组也不妨碍它们后来被判为同一个观点。
 
 **批次串行。** 第 N+1 批必须看得见第 N 批已经写入的观点，否则同一个观点会在两批里各建一个。所以上图末尾回到「逐批处理」，而不是并行铺开。
+
+**Canary 不凭印象手挑。** 完整 scope 的 grouping 冻结并通过 exact-once 后，程序才生成一份绑定 freeze、scope packet 与 grouping SHA 的选择 artifact。候选组必须完整、不属于 residual、在批次上限以内，并至少有两条 Claim、两个来源；程序选最小的合格组，平手时取 scope 中最早出现的组。Claim 是否可用由上游 freeze 负责，不再用「已有／未有观点链接」或「多证据」间接猜测难度。若没有合格组，canary 入口关闭；不能另算或手改 grouping。
 
 ### 其余各步
 
@@ -218,9 +231,9 @@ flowchart TD
     P --> V["程序逐条验证<br/>结论观点、成分键、必需步骤、来源是否越界"]
     V -->|"个别目标确定性无效"| I["隔离该目标后重验<br/>（剩余部分必须仍满足全部不变量）"]
     I --> V
-    V -->|"通过"| R["分批独立复核<br/>claude-opus-5，每批 12 个目标"]
+    V -->|"通过"| R["分批独立复核<br/>claude-fable-5-1，每批 12 个目标"]
     R -->|"有异议"| C["仲裁：交回提议者<br/>gpt-5.6-sol，最多一轮"]
-    C --> FR["终局复核实际写库的改正稿<br/>claude-opus-5；只通过或转人工"]
+    C --> FR["终局复核实际写库的改正稿<br/>claude-fable-5-1；只通过或转人工"]
     FR -->|"全部通过"| W
     FR -->|"仍有问题"| E
     R -->|"无异议"| W["逐条路线生成幂等 ChangeSet"]
@@ -245,7 +258,7 @@ flowchart TD
 3. **apply 前要重新确认结论观点仍是 current。** 路线 job 与下一批观点并行时，它的结论观点可能已被改写；这时按最新版本重新入队，而不是把路线挂到一个过期版本上。
 4. **成员来源是实例覆盖的分母。** 每个持有该观点成员主张、且本 scope 有精确证据绑定的来源，要么产生一条实例，要么成为独立复核对象，由 reviewer 确认该篇只断言结论而没有可绑定路线，或要求唯一 correction 补实例。提议者漏填不能让该来源从分母消失，也不能靠反复重问提议者碰运气。
 
-模型分工与观点那条线一致：`gpt-5.6-sol` 提议、`claude-opus-5` 复核、意见交回提议者仲裁。若发生改正，同一个独立 reviewer 角色再审核一次实际可能写库的 effective proposal；这次任何非 `pass` 都进入人工 exception，不再交回提议者。初审、改正与终局复核分别绑定 proposal SHA，ChangeSet 的批准依据只能指向实际写库版本的复核。模型 policy 写在 `backend/pipeline/policies/wang_route_resolution_policy_v1.json` 里。
+模型分工与观点那条线一致：`gpt-5.6-sol` 提议、`claude-fable-5-1` 复核、意见交回提议者仲裁。若发生改正，同一个独立 reviewer 角色再审核一次实际可能写库的 effective proposal；这次任何非 `pass` 都进入人工 exception，不再交回提议者。初审、改正与终局复核分别绑定 proposal SHA，ChangeSet 的批准依据只能指向实际写库版本的复核。新运行的模型 policy 写在 `backend/pipeline/policies/wang_route_resolution_policy_v2.json` 里；v1 只供历史 artifact 重放与审计。
 
 **实例分完整与部分。** 一篇里把这条路线的必需步骤都讲全了，是完整实例；缺步骤或有含糊的，只能记部分实例。**部分实例不计入「这条路线反复出现」的次数。**
 
@@ -295,6 +308,7 @@ flowchart TD
 13. 每条被路线结论引用的观点，其 scope 内可 attesting 成员来源必须 exact-once 落在 `attestation` 或经独立 reviewer 确认的无路线 disposition；缺席与重复都失败。
 14. ArgumentRoute correction 后写库的 effective proposal SHA 必须与终局复核绑定的 proposal SHA 相同；终局复核有任一非 `pass`，该 effective proposal 不得产生 ChangeSet。
 15. source eligibility attestation 若依据 `withdrawn` 或 `auto_applied` 裁定，row 与顶层 artifact hash 必须覆盖 exact adjudication SHA、状态以及适用时的 overrides SHA；不含这些字段的 legacy hash 只兼容无需仲裁的旧 `pass` 行。
+16. 全库 partition manifest 的主归属必须覆盖每条可处理 Claim 恰好一次；缺失、重复、外来 ID、修订漂移、请求超限或未说明的剩余项均不得进入模型。只读跨分区上下文不得成为第二个主归属。
 
 ## 9. 谁读观点
 
@@ -329,5 +343,5 @@ flowchart TD
 > **读者**:Solution architect、Developer。同工不需要读本文；同工要知道的在 [Solution Architecture](../00-overview/solution_architecture.md)。
 > **类型**:规范
 > **状态**:当前。取代 `canonical_viewpoint_design.md`。
-> **与代码对齐**:2026-08-25。第 1、7 节的数字取自当日的 PostgreSQL 快照。
+> **与代码对齐**:未核对。第 1、7 节的数字仍取自 2026-08-25 的 PostgreSQL 快照；partition 实施以 #395 的验证记录为准。
 > **权威范围**:观点、论证路线、观点关系的语义、身份判定与消费边界。

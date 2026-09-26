@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from backend.api.canonical_repository.viewpoint_foundation import sha256_json
+from backend.api.canonical_repository.viewpoint_foundation import canonical_json, sha256_json
 from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
 from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 
@@ -136,6 +136,17 @@ def subscription_client(
 def call_model(
     adapter: Any, payload: dict[str, Any], cache: Path
 ) -> tuple[dict[str, Any], int, float]:
+    request_bytes = (
+        adapter.request_bytes(payload)
+        if callable(getattr(adapter, "request_bytes", None))
+        else len(canonical_json(payload).encode("utf-8"))
+    )
+    max_request_bytes = getattr(adapter, "max_request_bytes", None)
+    if max_request_bytes is not None and request_bytes > int(max_request_bytes):
+        raise ValueError(
+            f"model request is {request_bytes} bytes, exceeding the frozen ceiling "
+            f"{int(max_request_bytes)}; refreeze a smaller semantic scope"
+        )
     request_sha = sha256_json(payload)
     if cache.exists():
         artifact = read_artifact(cache)

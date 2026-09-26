@@ -39,7 +39,12 @@ from backend.api.canonical_repository.viewpoint_foundation import (
     semantic_record_sha,
     sha256_json,
 )
-from backend.api.canonical_repository.viewpoint_resolution import compile_review_claim
+from backend.api.canonical_repository.viewpoint_resolution import (
+    IDENTITY_ELIGIBLE_CLAIM_REVIEW_STATUSES,
+    IDENTITY_TERMINALLY_EXCLUDED_CLAIM_REVIEW_STATUSES,
+    claim_evidence_integrity_findings,
+    compile_review_claim,
+)
 from backend.api.canonical_repository.viewpoint_claim_repin import (
     substantive_difference,
 )
@@ -184,19 +189,40 @@ def _pinned_claim_payloads(
 
 def build_scope_packet(
     *,
-    scope: dict[str, Any],
+    scope: dict[str, Any] | None,
     scope_label: str,
     passage_unit_ids: list[str],
     claim_manifest: dict[str, Any],
     source_attestation: IdentitySourceEligibilityArtifact,
     repository_root: Path,
     database_url: str | None,
+    partition_claim_ids: Sequence[str] | None = None,
+    partition_manifest_sha256: str | None = None,
+    all_corpus: bool = False,
 ) -> dict[str, Any]:
-    scope_sha = _validate_sha(scope)
-    # The SHA proves the artifact was not altered; conformance is proved by
-    # the model. A non-conforming hand-derived scope once rode a valid SHA
-    # straight into resolution (#327).
-    validate_pilot_scope_artifact(scope)
+    if all_corpus:
+        if scope is not None or partition_claim_ids is not None or passage_unit_ids:
+            raise ValueError("all-corpus packet cannot mix scope selections")
+        scope_sha = str(claim_manifest.get("manifest_sha256") or "")
+        in_scope = sorted(str(row["claim_id"]) for row in claim_manifest.get("claims") or [])
+    elif partition_claim_ids is None:
+        if scope is None:
+            raise ValueError("passage scope is required without a partition manifest")
+        scope_sha = _validate_sha(scope)
+        # The SHA proves the artifact was not altered; conformance is proved by
+        # the model. A non-conforming hand-derived scope once rode a valid SHA
+        # straight into resolution (#327).
+        validate_pilot_scope_artifact(scope)
+        in_scope = scope_claim_ids(scope, passage_unit_ids)
+    else:
+        if scope is not None or passage_unit_ids:
+            raise ValueError("partition scope cannot mix passage-scope selection")
+        if partition_claim_ids != sorted(set(partition_claim_ids)):
+            raise ValueError("partition Claim IDs must be sorted and unique")
+        if not partition_manifest_sha256 or len(partition_manifest_sha256) != 64:
+            raise ValueError("partition manifest SHA is required")
+        scope_sha = partition_manifest_sha256
+        in_scope = list(partition_claim_ids)
     manifest_body = {
         key: value for key, value in claim_manifest.items() if key != "manifest_sha256"
     }
@@ -212,7 +238,6 @@ def build_scope_packet(
     if not coverage_snapshot_id:
         raise ValueError("Claim manifest is not bound to a coverage snapshot")
 
-    in_scope = scope_claim_ids(scope, passage_unit_ids)
     if not in_scope:
         raise ValueError("scope selects no core Claims")
 
@@ -270,7 +295,22 @@ def build_scope_packet(
     )
     review_claims = []
     blocked: list[dict[str, Any]] = []
+    excluded: list[dict[str, Any]] = []
     advanced_review_pins: list[dict[str, Any]] = []
+    scope_graph_findings = claim_evidence_integrity_findings(
+        claim_ids=in_scope,
+        claims=claims,
+        evidence_steps=evidence_index,
+    )
+    graph_findings_by_claim = {
+        claim_id: [
+            finding
+            for finding in scope_graph_findings
+            if finding.startswith(f"{claim_id}:")
+            or finding.startswith(f"{claim_id}/")
+        ]
+        for claim_id in in_scope
+    }
     for claim_id in in_scope:
         manifest_row = manifest_rows.get(claim_id)
         claim = claims.get(claim_id)
@@ -281,6 +321,33 @@ def build_scope_packet(
         if claim is None:
             blocked.append({"claim_id": claim_id, "reason_code": "missing_claim",
                             "detail": "Claim is not in the authoring store."})
+            continue
+        if claim.review_status in IDENTITY_TERMINALLY_EXCLUDED_CLAIM_REVIEW_STATUSES:
+            excluded.append({
+                "claim_id": claim_id,
+                "reason_code": "superseded_claim",
+                "review_status": claim.review_status,
+                "claim_revision": claim.revision,
+                "claim_revision_sha256": semantic_record_sha(claim),
+            })
+            continue
+        if claim.review_status not in IDENTITY_ELIGIBLE_CLAIM_REVIEW_STATUSES:
+            blocked.append({
+                "claim_id": claim_id,
+                "reason_code": "claim_review_not_final",
+                "detail": (
+                    f"Claim review status {claim.review_status!r} is not eligible "
+                    "for identity resolution."
+                ),
+            })
+            continue
+        graph_findings = graph_findings_by_claim[claim_id]
+        if graph_findings:
+            blocked.append({
+                "claim_id": claim_id,
+                "reason_code": "claim_evidence_graph_invalid",
+                "detail": "; ".join(graph_findings),
+            })
             continue
         pinned_revision = int(manifest_row["pinned_claim_revision"])
         pin_moved = (
@@ -325,7 +392,7 @@ def build_scope_packet(
             coverage_source_sha256=source_sha256,
             attestation_sha=attestation_sha,
         )
-        if review_claim is None:
+        if review_claim is None or findings:
             blocked.append({"claim_id": claim_id, "reason_code": "invalid_source_evidence",
                             "detail": "; ".join(findings) or "Claim evidence is unusable."})
             continue
@@ -335,10 +402,13 @@ def build_scope_packet(
             continue
         review_claims.append(review_claim)
 
-    if len(review_claims) < 2:
-        raise ValueError("scope packet needs at least two resolvable Claims")
+    if partition_claim_ids is not None and (blocked or excluded):
+        raise ValueError("partition packet contains blocked or excluded Claims")
+    if len(review_claims) < (1 if partition_claim_ids is not None else 2):
+        raise ValueError("scope packet needs resolvable Claims")
 
     blocked.sort(key=lambda item: item["claim_id"])
+    excluded.sort(key=lambda item: item["claim_id"])
     packet = {
         "schema_version": SCOPE_PACKET_VERSION,
         "scope_label": scope_label,
@@ -357,6 +427,7 @@ def build_scope_packet(
             store.list_records("argument_route_revisions"),
         ),
         "blocked_claims": blocked,
+        "excluded_claims": excluded,
         # Named, not silent: the manifest and the store disagree on these
         # Claims' revisions, and the packet says so even though the difference
         # is review metadata and the pin still holds.
@@ -365,12 +436,17 @@ def build_scope_packet(
             "scope_claim_count": len(in_scope),
             "resolvable_claim_count": len(review_claims),
             "blocked_claim_count": len(blocked),
+            "excluded_claim_count": len(excluded),
             "advanced_review_pin_count": len(advanced_review_pins),
         },
         "semantic_prefilter_applied": False,
         "model_calls_executed": 0,
         "master_data_mutations": 0,
     }
+    if partition_claim_ids is not None:
+        packet["partition_manifest_sha256"] = partition_manifest_sha256
+    if all_corpus:
+        packet["scope_kind"] = "all_corpus"
     packet["packet_sha256"] = sha256_json(packet)
     return packet
 
@@ -378,8 +454,12 @@ def build_scope_packet(
 def main() -> int:
     load_dotenv(PROJECT_ROOT / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scope", type=Path, required=True)
-    parser.add_argument("--scope-label", required=True)
+    parser.add_argument("--scope", type=Path)
+    parser.add_argument("--scope-label")
+    parser.add_argument("--partition-manifest", type=Path)
+    parser.add_argument("--partition-id")
+    parser.add_argument("--global-freeze", type=Path)
+    parser.add_argument("--all-corpus", action="store_true")
     parser.add_argument(
         "--passage-unit-id",
         action="append",
@@ -392,9 +472,48 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
+    partition_claim_ids = None
+    partition_manifest_sha256 = None
+    if args.all_corpus:
+        if args.scope or args.partition_manifest or args.partition_id or args.global_freeze or args.passage_unit_id:
+            parser.error("--all-corpus cannot mix passage or partition selection")
+        scope_label = args.scope_label or "all-corpus"
+    elif args.partition_manifest or args.partition_id or args.global_freeze:
+        if not all((args.partition_manifest, args.partition_id, args.global_freeze)):
+            parser.error("partition packet requires manifest, partition ID and global freeze")
+        if args.scope or args.passage_unit_id:
+            parser.error("partition packet cannot also select a passage scope")
+        from backend.pipeline.viewpoint_partition_validation import validate_partition_manifest
+
+        manifest = _read(args.partition_manifest)
+        freeze = _read(args.global_freeze)
+        claim_manifest = _read(args.claim_manifest)
+        validate_partition_manifest(
+            manifest,
+            claim_manifest=claim_manifest,
+            freeze=freeze,
+            cvp_policy_sha256=str(freeze.get("cvp_policy_sha256") or ""),
+            store=PostgresKnowledgeStore(args.database_url),
+        )
+        if manifest.get("mode") != "final":
+            raise ValueError("preview partition manifest cannot create execution packets")
+        selected = next(
+            (row for row in manifest["partitions"] if row["partition_id"] == args.partition_id),
+            None,
+        )
+        if selected is None:
+            raise ValueError(f"unknown partition ID: {args.partition_id}")
+        partition_claim_ids = sorted(row["claim_id"] for row in selected["claims"])
+        partition_manifest_sha256 = str(manifest["artifact_sha256"])
+        scope_label = args.partition_id
+    else:
+        if not args.scope or not args.scope_label:
+            parser.error("passage packet requires --scope and --scope-label")
+        scope_label = args.scope_label
+
     packet = build_scope_packet(
-        scope=_read(args.scope),
-        scope_label=args.scope_label,
+        scope=_read(args.scope) if args.scope else None,
+        scope_label=scope_label,
         passage_unit_ids=args.passage_unit_id or [],
         claim_manifest=_read(args.claim_manifest),
         source_attestation=IdentitySourceEligibilityArtifact.model_validate(
@@ -402,6 +521,9 @@ def main() -> int:
         ),
         repository_root=args.repository_root,
         database_url=args.database_url,
+        partition_claim_ids=partition_claim_ids,
+        partition_manifest_sha256=partition_manifest_sha256,
+        all_corpus=args.all_corpus,
     )
     _write_immutable(args.output, packet)
     print(
