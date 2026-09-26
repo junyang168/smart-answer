@@ -231,7 +231,48 @@ def test_versioned_route_policy_fingerprint_binds_prompt_content():
 
     assert first == second
     assert first != changed
+    assert policy["schema_version"] == "wang_route_resolution_policy_v2"
+    assert policy["review"]["model"] == "claude-fable-5-1"
     assert policy["review"]["targets_per_batch"] == 12
+
+
+def test_default_cvp_policy_uses_fable_and_preserves_cross_vendor_review():
+    from backend.pipeline.viewpoint_cvp_policy import (
+        DEFAULT_CVP_POLICY_PATH,
+        load_cvp_policy,
+    )
+
+    policy = load_cvp_policy(DEFAULT_CVP_POLICY_PATH)
+
+    assert policy["schema_version"] == "wang_cvp_resolution_policy_v2"
+    assert policy["proposal"]["provider"] == "codex"
+    assert policy["proposal"]["model"] == "gpt-5.6-sol"
+    assert policy["correction"]["provider"] == "codex"
+    for role in ("grouping", "review", "consolidation"):
+        assert policy[role]["provider"] == "claude"
+        assert policy[role]["model"] == "claude-fable-5-1"
+
+
+def test_legacy_cvp_and_route_policies_remain_loadable_for_artifact_replay():
+    from backend.pipeline.viewpoint_cvp_policy import (
+        DEFAULT_CVP_POLICY_PATH,
+        load_cvp_policy,
+    )
+    from backend.pipeline.viewpoint_route_policy import (
+        DEFAULT_ROUTE_POLICY_PATH,
+        load_route_policy,
+    )
+
+    cvp_v1 = DEFAULT_CVP_POLICY_PATH.with_name("wang_cvp_resolution_policy_v1.json")
+    route_v1 = DEFAULT_ROUTE_POLICY_PATH.with_name(
+        "wang_route_resolution_policy_v1.json"
+    )
+
+    assert load_cvp_policy(cvp_v1)["schema_version"] == "wang_cvp_resolution_policy_v1"
+    assert (
+        load_route_policy(route_v1)["schema_version"]
+        == "wang_route_resolution_policy_v1"
+    )
 
 
 def test_route_policy_rejects_an_unimplemented_validator(tmp_path: Path):
@@ -424,6 +465,212 @@ def test_file_route_queue_recovers_expired_lease_and_preserves_history(tmp_path:
     assert old_state["status"] == "superseded"
     assert new_state["status"] == "resolved"
     assert new_state["attempt"] == 2
+
+
+def test_route_lease_heartbeat_delays_recovery_and_owner_epoch_fences_old_worker(
+    tmp_path: Path,
+):
+    receipt = build_cvp_batch_readback_receipt(
+        scope_label="matthew-16",
+        scope_manifest_sha256="scope-sha",
+        triggering_cvp_batch_id="CVB-1",
+        cvp_changeset_id="KCS-1",
+        cvp_changeset_sha256="changeset-1",
+        expected_current_revisions={"CV-1": "CVR-1"},
+        observed_current_revisions={"CV-1": "CVR-1"},
+    )
+    job = build_route_resolution_job(
+        receipt=receipt,
+        evidence_scope_sha256="evidence-scope-sha",
+        route_policy_fingerprint_sha256="route-policy-sha",
+    )
+    queue = FileRouteResolutionQueue(tmp_path / "queue")
+    queue.enqueue(job)
+    started = datetime(2026, 8, 24, 13, 0, tzinfo=timezone.utc)
+    current = {"CV-1": "CVR-1"}
+    work = queue.claim(
+        worker_id="stable-worker-id",
+        current_viewpoint_revisions=current,
+        now=started,
+        lease_seconds=60,
+    )
+    assert work is not None
+    old_lease = queue.capture_lease(
+        work, worker_id="stable-worker-id", now=started
+    )
+
+    queue.renew(
+        work,
+        lease=old_lease,
+        lease_seconds=60,
+        now=started + timedelta(seconds=50),
+    )
+    assert queue.claim(
+        worker_id="another-worker",
+        current_viewpoint_revisions=current,
+        now=started + timedelta(seconds=61),
+    ) is None
+
+    with pytest.raises(ValueError, match="route lease expired"):
+        queue.finish(
+            work,
+            worker_id="stable-worker-id",
+            status="resolved",
+            finished_at=(started + timedelta(seconds=111)).isoformat(),
+            owner_epochs=old_lease.epoch_map(),
+        )
+
+    # With no further heartbeat, the work remains recoverable. Reusing the
+    # configured worker id demonstrates that fencing depends on owner epoch,
+    # not merely on a process label.
+    recovered = queue.claim(
+        worker_id="stable-worker-id",
+        current_viewpoint_revisions=current,
+        now=started + timedelta(seconds=111),
+        lease_seconds=60,
+    )
+    assert recovered is not None
+    new_lease = queue.capture_lease(
+        recovered,
+        worker_id="stable-worker-id",
+        now=started + timedelta(seconds=111),
+    )
+    assert new_lease.epoch_map()[job.job_id] == old_lease.epoch_map()[job.job_id] + 1
+
+    with pytest.raises(ValueError, match="stale route lease fencing token"):
+        queue.assert_lease(
+            recovered,
+            lease=old_lease,
+            now=started + timedelta(seconds=112),
+        )
+    with pytest.raises(ValueError, match="stale route lease fencing token"):
+        queue.finish(
+            recovered,
+            worker_id="stable-worker-id",
+            status="resolved",
+            owner_epochs=old_lease.epoch_map(),
+        )
+    queue.assert_lease(
+        recovered,
+        lease=new_lease,
+        now=started + timedelta(seconds=112),
+    )
+
+
+def test_route_worker_lease_floor_covers_policy_call_and_apply_buffer():
+    from backend.pipeline.viewpoint_route_resolution_worker import (
+        ROUTE_APPLY_LEASE_BUFFER_SECONDS,
+        required_route_lease_seconds,
+        select_route_lease_seconds,
+    )
+
+    assert ROUTE_APPLY_LEASE_BUFFER_SECONDS == 300
+    assert required_route_lease_seconds(1800) == 2100
+    assert select_route_lease_seconds(1800, None) == 2100
+    assert select_route_lease_seconds(1800, 2100) == 2100
+    with pytest.raises(ValueError, match="cannot be shorter"):
+        select_route_lease_seconds(1800, 2099)
+
+
+def test_route_lease_heartbeat_renews_while_worker_is_running():
+    from threading import Event
+    from types import SimpleNamespace
+
+    from backend.api.canonical_repository.viewpoint_route_queue import RouteQueueLease
+    from backend.pipeline.viewpoint_route_resolution_worker import RouteLeaseHeartbeat
+
+    renewed_twice = Event()
+
+    class RecordingQueue:
+        def __init__(self) -> None:
+            self.renew_count = 0
+
+        def renew(self, work, *, lease, lease_seconds):
+            self.renew_count += 1
+            if self.renew_count >= 2:
+                renewed_twice.set()
+
+        def assert_lease(self, work, *, lease):
+            return None
+
+    queue = RecordingQueue()
+    heartbeat = RouteLeaseHeartbeat(
+        queue=queue,
+        work=SimpleNamespace(artifact_sha256="a" * 64),
+        lease=RouteQueueLease(
+            work_unit_sha256="a" * 64,
+            worker_id="worker-a",
+            owner_epochs=(("job-a", 1),),
+        ),
+        lease_seconds=2100,
+        heartbeat_seconds=0.01,
+    )
+
+    heartbeat.start()
+    try:
+        assert renewed_twice.wait(timeout=1)
+        heartbeat.assert_owned()
+    finally:
+        heartbeat.stop()
+    assert queue.renew_count >= 2
+
+
+def test_route_worker_ownership_guard_fails_before_first_artifact(tmp_path: Path):
+    from backend.pipeline.viewpoint_route_resolution_worker import (
+        RouteLeaseLost,
+        process_work_unit,
+    )
+
+    def stale_owner() -> None:
+        raise RouteLeaseLost("stale owner epoch")
+
+    with pytest.raises(RouteLeaseLost, match="stale owner epoch"):
+        process_work_unit(
+            work=None,  # guard runs before any work-unit field is consumed
+            scope_packet={},
+            output_dir=tmp_path,
+            store=None,
+            proposer=None,
+            reviewer=None,
+            reconsiderer=None,
+            apply=True,
+            ownership_guard=stale_owner,
+        )
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_route_adapter_fences_response_before_raw_artifact_write(tmp_path: Path):
+    from backend.pipeline.viewpoint_resolution_runtime import call_model
+    from backend.pipeline.viewpoint_route_resolution_worker import (
+        OwnershipGuardedAdapter,
+        RouteLeaseLost,
+    )
+
+    class StubAdapter:
+        model_id = "stub-model"
+        backend = "stub-backend"
+        prompt_sha256 = "prompt-sha"
+        generation_config_sha256 = "config-sha"
+
+        def generate(self, payload):
+            return {"result": "completed after lease was lost"}
+
+    guard_calls = 0
+
+    def lose_lease_during_call() -> None:
+        nonlocal guard_calls
+        guard_calls += 1
+        if guard_calls == 2:
+            raise RouteLeaseLost("owner epoch changed during call")
+
+    raw_path = tmp_path / "raw-route-proposal.json"
+    with pytest.raises(RouteLeaseLost, match="owner epoch changed during call"):
+        call_model(
+            OwnershipGuardedAdapter(StubAdapter(), lose_lease_during_call),
+            {"packet": "sha-bound"},
+            raw_path,
+        )
+    assert not raw_path.exists()
 
 
 def test_the_route_queue_can_be_taken_in_bounded_bites(tmp_path: Path):
@@ -1261,6 +1508,17 @@ def test_cached_call_is_bound_to_provider_and_model(tmp_path: Path):
         )
 
 
+def test_request_ceiling_blocks_before_model_call(tmp_path: Path):
+    from backend.pipeline.viewpoint_batch_resolution_runner import _call
+
+    adapter = _StubAdapter({"ok": True})
+    adapter.max_request_bytes = 10
+    with pytest.raises(ValueError, match="exceeding the frozen ceiling"):
+        _call(adapter, {"input": "payload is too large"}, tmp_path / "raw.json")
+    assert adapter.calls == 0
+    assert not (tmp_path / "raw.json").exists()
+
+
 def test_explicit_model_roles_use_separate_subscription_providers():
     from backend.pipeline.viewpoint_batch_resolution_runner import (
         build_proposer,
@@ -1663,9 +1921,104 @@ def test_grouping_must_cover_every_claim_exactly_once():
             grouping=grouping, scope_label="matt16-13-18", claim_ids=["C1", "C2", "C3", "C4"]
         )
 
-    # Grouping decides composition; the size ceiling stays the program's call.
+    # A semantic group is atomic; the ceiling must reject rather than split it.
     assert batches_from_groups(grouping, batch_size=20) == [["C1", "C2"], ["C3"]]
-    assert batches_from_groups(grouping, batch_size=1) == [["C1"], ["C2"], ["C3"]]
+    with pytest.raises(BatchResolutionError, match="semantic group has 2 Claims"):
+        batches_from_groups(grouping, batch_size=1)
+
+
+def test_canary_selection_uses_the_smallest_multisource_group_deterministically():
+    from backend.api.canonical_repository.viewpoint_production_safety import (
+        CVP_GROUPING_ENVELOPE_VERSION,
+        CvpProductionBlocked,
+        build_canary_selection,
+        validate_canary_selection,
+    )
+
+    early_one = _claim("C1", "较早小组之一", source_id="S1").model_dump(
+        mode="json"
+    )
+    early_two = _claim("C2", "较早小组之二", source_id="S2").model_dump(
+        mode="json"
+    )
+    late_one = _claim("C3", "较晚小组之一", source_id="S3").model_dump(mode="json")
+    late_two = _claim("C4", "较晚小组之二", source_id="S4").model_dump(mode="json")
+    singleton = _claim("C5", "太小的分组", source_id="S5").model_dump(mode="json")
+    packet_body = {
+        "scope_label": "matthew-16-current",
+        "claims": [early_one, early_two, late_one, late_two, singleton],
+    }
+    scope_packet = packet_body | {"packet_sha256": sha256_json(packet_body)}
+    freeze = {
+        "artifact_sha256": "freeze-sha",
+        "scope_packet_sha256": scope_packet["packet_sha256"],
+        "cvp_policy_sha256": "policy-sha",
+    }
+    envelope_body = {
+        "schema_version": CVP_GROUPING_ENVELOPE_VERSION,
+        "freeze_sha256": "freeze-sha",
+        "scope_packet_sha256": scope_packet["packet_sha256"],
+        "cvp_policy_sha256": "policy-sha",
+        "grouping": {
+            "scope_label": "matthew-16-current",
+            "groups": [
+                {
+                    "group_key": "a_later_multisource_group",
+                    "claim_ids": ["C3", "C4"],
+                    "rationale": "测试",
+                },
+                {
+                    "group_key": "z_earlier_multisource_group",
+                    "claim_ids": ["C1", "C2"],
+                    "rationale": "测试",
+                },
+                {
+                    "group_key": "singleton",
+                    "claim_ids": ["C5"],
+                    "rationale": "测试",
+                },
+            ],
+        },
+    }
+    grouping_envelope = envelope_body | {
+        "artifact_sha256": sha256_json(envelope_body)
+    }
+
+    selection = build_canary_selection(
+        grouping_envelope=grouping_envelope,
+        freeze=freeze,
+        scope_packet=scope_packet,
+        batch_size=20,
+    )
+
+    assert selection["schema_version"] == "wang_cvp_canary_selection_v2"
+    assert selection["qualifying_group_count"] == 2
+    assert selection["selected_group"]["group_key"] == "z_earlier_multisource_group"
+    assert selection["selected_group"]["source_ids"] == ["S1", "S2"]
+    assert selection["selected_group"]["first_scope_position"] == 0
+    assert (
+        validate_canary_selection(
+            selection,
+            grouping_envelope=grouping_envelope,
+            freeze=freeze,
+            scope_packet=scope_packet,
+            batch_size=20,
+        )
+        == "z_earlier_multisource_group"
+    )
+
+    altered_body = {key: value for key, value in selection.items() if key != "artifact_sha256"}
+    altered_body["selected_group"] = dict(altered_body["selected_group"])
+    altered_body["selected_group"]["group_key"] = "singleton"
+    altered = altered_body | {"artifact_sha256": sha256_json(altered_body)}
+    with pytest.raises(CvpProductionBlocked, match="not the deterministic choice"):
+        validate_canary_selection(
+            altered,
+            grouping_envelope=grouping_envelope,
+            freeze=freeze,
+            scope_packet=scope_packet,
+            batch_size=20,
+        )
 
 
 def test_a_claim_in_two_groups_is_rejected():
@@ -1685,6 +2038,100 @@ def test_a_claim_in_two_groups_is_rejected():
     )
     with pytest.raises(BatchResolutionError, match="in both group"):
         validate_grouping(grouping=grouping, scope_label="s", claim_ids=["C1"])
+
+
+def test_disposition_ledger_counts_terminal_no_link_outcomes():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ClaimGroupingResponse,
+        build_batch_disposition,
+        scope_disposition_ledger,
+    )
+
+    proposal = _proposal()
+    proposal = proposal.model_copy(
+        update={
+            "claim_decisions": [
+                proposal.claim_decisions[0].model_copy(
+                    update={
+                        "components": [
+                            ProposedComponent.model_validate(
+                                _component(
+                                    ROCK_STATEMENT,
+                                    "磐石不是彼得这个人",
+                                    "no_registry_assertion",
+                                )
+                            )
+                        ]
+                    }
+                )
+            ],
+            "new_viewpoint_candidates": [],
+        }
+    )
+    grouping = ClaimGroupingResponse.model_validate(
+        {
+            "scope_label": "matthew",
+            "groups": [{"group_key": "g", "claim_ids": ["C1"], "rationale": "r"}],
+        }
+    )
+    identity = {
+        "batch_id": "CVB-stable",
+        "batch_key_sha256": "batch-sha",
+        "scope_label": "matthew",
+    }
+    batch = build_batch_disposition(
+        proposal=proposal,
+        batch_identity=identity,
+        effective_proposal_sha256="proposal-sha",
+        apply_status="applied",
+        readback_receipt_sha256="receipt-sha",
+    )
+    ledger = scope_disposition_ledger(
+        grouping=grouping,
+        batch_dispositions=[batch],
+        freeze_sha256="freeze",
+        grouping_sha256="grouping",
+    )
+
+    assert ledger["status"] == "complete"
+    assert ledger["claim_dispositions"][0]["components"][0]["disposition"] == "no_registry_assertion"
+
+
+def test_disposition_ledger_invalidates_old_or_duplicate_completion():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ClaimGroupingResponse,
+        build_batch_disposition,
+        scope_disposition_ledger,
+    )
+
+    grouping = ClaimGroupingResponse.model_validate(
+        {
+            "scope_label": "matthew",
+            "groups": [{"group_key": "g", "claim_ids": ["C1"], "rationale": "r"}],
+        }
+    )
+    batch = build_batch_disposition(
+        proposal=_proposal(),
+        batch_identity={"batch_id": "CVB-stable"},
+        effective_proposal_sha256="proposal-sha",
+        apply_status="planned",
+    )
+    planned = scope_disposition_ledger(
+        grouping=grouping,
+        batch_dispositions=[batch],
+        freeze_sha256="freeze",
+        grouping_sha256="grouping",
+    )
+    duplicate = scope_disposition_ledger(
+        grouping=grouping,
+        batch_dispositions=[batch, batch],
+        freeze_sha256="freeze",
+        grouping_sha256="grouping",
+    )
+
+    assert planned["status"] == "incomplete"
+    assert duplicate["status"] == "incomplete"
+    assert duplicate["findings"] == ["C1: duplicate disposition"]
 
 
 def test_grouping_coverage_is_repaired_not_thrown_away():
@@ -1790,18 +2237,25 @@ def test_claims_stopped_before_grouping_are_counted_in_the_same_ledger():
             {"claim_id": "C8", "reason_code": "invalid_source_evidence"},
             {"claim_id": "C7", "reason_code": "missing_reviewed_candidate"},
         ],
+        excluded_claims=[
+            {"claim_id": "C6", "reason_code": "superseded_claim"},
+        ],
     )
 
     assert report["covered_group_count"] == 1
     assert report["planned_claim_count"] == 1
-    # The scope is four Claims, not one, and the ledger says which three the
-    # pipeline will never route.
-    assert report["scope_claim_count"] == 4
+    # The scope is five Claims, not one: the ledger distinguishes the three
+    # blocked Claims from the governed superseded exclusion.
+    assert report["scope_claim_count"] == 5
     assert report["blocked_claim_counts"] == {
         "invalid_source_evidence": 2,
         "missing_reviewed_candidate": 1,
     }
     assert [item["claim_id"] for item in report["blocked_claims"]] == ["C7", "C8", "C9"]
+    assert report["excluded_claim_counts"] == {"superseded_claim": 1}
+    assert report["excluded_claims"] == [
+        {"claim_id": "C6", "reason_code": "superseded_claim"}
+    ]
 
 
 def test_group_coverage_names_links_the_plan_does_not_account_for():

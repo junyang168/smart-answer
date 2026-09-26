@@ -1,0 +1,25 @@
+{
+  "schema_version": "wang_research_batch_v1",
+  "batch_id": "RB-SOURCE-CORRECTION-357-S211212-2-20260920",
+  "purpose": "Issue #357 governed correction and full Claim-lineage regeneration for the single corrected transcript S 211212 (2); no CVR or topic induction.",
+  "semantic_assumption": "none",
+  "transcript_ids": [
+    "S 211212 (2)"
+  ],
+  "candidate_generation_policy": {
+    "derive_after_independent_extraction": true,
+    "allow_unassigned_material": true
+  },
+  "review_batch_size": 20,
+  "review_spot_check_percent": 0,
+  "models": {
+    "extraction": "gpt-5.6-sol",
+    "extraction_reasoning_effort": "medium",
+    "cross_section": "gpt-5.6-sol",
+    "independent_review": "claude-sonnet-5",
+    "review_max_output_tokens": 64000,
+    "adjudicator": "gpt-5.6-sol",
+    "adjudicator_max_output_tokens": 64000,
+    "reconsideration": "claude-sonnet-5"
+  }
+}

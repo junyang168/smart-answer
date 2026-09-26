@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 from pathlib import Path
 from collections.abc import Sequence
 from typing import Any
@@ -32,6 +33,7 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     apply_consolidation,
     apply_reconsideration_patches,
     batches_from_groups,
+    build_batch_disposition,
     build_batch_packet,
     build_cvp_batch_readback_receipt,
     build_route_resolution_job,
@@ -39,6 +41,7 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     canonicalize_review,
     component_key,
     repair_grouping,
+    scope_disposition_ledger,
     split_batches,
     validate_grouping,
     validate_consolidation,
@@ -51,11 +54,33 @@ from backend.api.canonical_repository.viewpoint_batch_changeset import (
     compile_cvp_batch_package,
     load_revision_dependents,
 )
-from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+from backend.api.canonical_repository.postgres_store import (
+    ChangeOperation,
+    ChangeSetPlan,
+    PostgresKnowledgeStore,
+)
 from backend.api.canonical_repository.viewpoint_route_queue import (
     FileRouteResolutionQueue,
 )
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
+from backend.api.canonical_repository.viewpoint_production_safety import (
+    CVP_GROUPING_ENVELOPE_VERSION,
+    CvpProductionBlocked,
+    build_batch_identity,
+    build_apply_intent,
+    build_plan_readback_receipt,
+    claim_output_ownership,
+    exclusive_cvp_run_lock,
+    validate_apply_authorization,
+    validate_canary_selection,
+    validate_content_addressed,
+    validate_cvp_freeze,
+    validate_execution_boundary,
+    validate_grouping_envelope,
+    validate_plan_readback_receipt,
+    validate_registry_transition,
+    REGISTRY_COLLECTIONS,
+)
 from backend.api.canonical_repository.viewpoint_resolution import (
     ReviewClaim,
     StructuredJsonReviewerAdapter,
@@ -69,6 +94,12 @@ from backend.pipeline.viewpoint_route_policy import (
     load_route_policy,
     route_policy_fingerprint,
     route_policy_prompt_sha256s,
+)
+from backend.pipeline.viewpoint_cvp_policy import (
+    DEFAULT_CVP_POLICY_PATH,
+    cvp_policy_fingerprint,
+    cvp_policy_prompt_sha256s,
+    load_cvp_policy,
 )
 from backend.pipeline.viewpoint_resolution_runtime import (
     CALL_TIMEOUT_SECONDS,
@@ -125,11 +156,7 @@ def build_consolidator(
 
 def build_grouper(model: str, reasoning_effort: str) -> StructuredJsonReviewerAdapter:
     return StructuredJsonReviewerAdapter(
-        client=ClaudeSubscriptionClient(
-            model=model,
-            reasoning_effort=reasoning_effort,
-            timeout_seconds=CALL_TIMEOUT_SECONDS,
-        ),
+        client=_subscription_client("claude", model, reasoning_effort),
         prompt=(PROMPT_DIR / "canonical_viewpoint_claim_grouping.md").read_text(
             encoding="utf-8"
         ),
@@ -149,6 +176,126 @@ def build_reconsiderer(
         response_model=CanonicalViewpointReconsiderationResponse,
         schema_name="wang_canonical_viewpoint_reconsideration_v3",
     )
+
+
+def _plan_from_document(payload: dict[str, Any]) -> ChangeSetPlan:
+    validate_content_addressed(payload, "artifact_sha256")
+    return ChangeSetPlan(
+        change_set_id=str(payload["change_set_id"]),
+        fingerprint_sha256=str(payload["fingerprint_sha256"]),
+        package_id=str(payload["package_id"]),
+        source_kind=str(payload["source_kind"]),
+        source_sha256=str(payload["source_sha256"]),
+        operations=tuple(
+            ChangeOperation(
+                operation=str(item["operation"]),
+                collection=str(item["collection"]),
+                object_id=str(item["object_id"]),
+                before_sha256=item.get("before_sha256"),
+                after_sha256=str(item["after_sha256"]),
+                before_revision=item.get("before_revision"),
+                after_revision=int(item["after_revision"]),
+                payload=dict(item["payload"]),
+                removed_fields=tuple(item.get("removed_fields") or ()),
+            )
+            for item in payload.get("operations") or []
+        ),
+        unchanged=int(payload.get("unchanged") or 0),
+        ignored_keys=tuple(payload.get("ignored_keys") or ()),
+    )
+
+
+def _effective_proposal_from_artifacts(batch_dir: Path) -> CanonicalViewpointProposalResponse:
+    reconsideration_path = batch_dir / "reconsideration.json"
+    if reconsideration_path.is_file():
+        payload = _read(reconsideration_path)
+        return CanonicalViewpointProposalResponse.model_validate(
+            payload["effective_proposal"]
+        )
+    return CanonicalViewpointProposalResponse.model_validate(
+        _read(batch_dir / "proposal.json")["proposal"]
+    )
+
+
+def _route_receipt_from_package(
+    *,
+    store: PostgresKnowledgeStore,
+    package: dict[str, Any],
+    scope_label: str,
+    scope_manifest_sha256: str,
+    batch_id: str,
+    plan: ChangeSetPlan,
+):
+    expected = {
+        str(item["viewpoint_id"]): str(item["current_revision_id"])
+        for item in package["canonical_viewpoints"]
+    }
+    for decision in package["viewpoint_identity_decisions"]:
+        viewpoint_id = str(decision["resolved_viewpoint_id"])
+        if viewpoint_id in expected:
+            continue
+        record = store.get_record("canonical_viewpoints", viewpoint_id)
+        if not record:
+            raise CvpProductionBlocked(
+                [f"{batch_id}: resolved viewpoint {viewpoint_id} is missing"]
+            )
+        expected[viewpoint_id] = str(record["current_revision_id"])
+    observed = {}
+    for viewpoint_id in expected:
+        record = store.get_record("canonical_viewpoints", viewpoint_id)
+        if record:
+            observed[viewpoint_id] = str(record["current_revision_id"])
+    return build_cvp_batch_readback_receipt(
+        scope_label=scope_label,
+        scope_manifest_sha256=scope_manifest_sha256,
+        triggering_cvp_batch_id=batch_id,
+        cvp_changeset_id=plan.change_set_id,
+        cvp_changeset_sha256=plan.fingerprint_sha256,
+        expected_current_revisions=expected,
+        observed_current_revisions=observed,
+    )
+
+
+def _validate_applied_resume(
+    *,
+    state: dict[str, Any],
+    batch_dir: Path,
+    batch_identity: dict[str, Any],
+    store: PostgresKnowledgeStore,
+    expected_pre_registry_fingerprint_sha256: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    batch_id = str(batch_identity["batch_id"])
+    validate_content_addressed(state, "artifact_sha256")
+    if any(state.get(key) != value for key, value in batch_identity.items()):
+        raise CvpProductionBlocked(
+            [f"{batch_id}: current-state belongs to another batch identity"]
+        )
+    artifact_name = str(state.get("authoritative_artifact") or "")
+    receipt_path = batch_dir / artifact_name
+    if receipt_path.parent.resolve() != batch_dir.resolve() or not receipt_path.is_file():
+        raise CvpProductionBlocked(
+            [f"{batch_id}: authoritative readback receipt is missing"]
+        )
+    receipt = _read(receipt_path)
+    if state.get("authoritative_artifact_sha256") != receipt.get("artifact_sha256"):
+        raise CvpProductionBlocked(
+            [f"{batch_id}: current-state receipt binding is invalid"]
+        )
+    validate_plan_readback_receipt(
+        receipt,
+        store=store,
+        batch_identity=batch_identity,
+        expected_pre_registry_fingerprint_sha256=(
+            expected_pre_registry_fingerprint_sha256
+        ),
+        validate_current_records=False,
+    )
+    disposition_path = batch_dir / "batch-disposition-applied.json"
+    if not disposition_path.is_file():
+        raise CvpProductionBlocked(
+            [f"{batch_id}: applied batch disposition is missing"]
+        )
+    return receipt, _read(disposition_path)
 
 
 def build_consolidation_packet(
@@ -745,7 +892,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--packet", type=Path, required=True, help="scope packet from viewpoint_scope_packet_runner")
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
+    parser.add_argument("--batch-size", type=int, help=argparse.SUPPRESS)
     parser.add_argument(
         "--proposal-provider",
         choices=("claude", "codex"),
@@ -760,7 +907,7 @@ def main() -> int:
         default="claude",
         help="subscription CLI used for CVP review; never falls back",
     )
-    parser.add_argument("--review-model", default="claude-opus-5")
+    parser.add_argument("--review-model", default="claude-fable-5-1")
     parser.add_argument("--review-effort", choices=("high", "xhigh"), default="high")
     parser.add_argument(
         "--max-batches",
@@ -772,6 +919,28 @@ def main() -> int:
         type=Path,
         default=DEFAULT_ROUTE_POLICY_PATH,
         help="versioned policy used to fingerprint every enqueued Route job",
+    )
+    parser.add_argument(
+        "--cvp-policy",
+        type=Path,
+        default=DEFAULT_CVP_POLICY_PATH,
+        help="versioned production policy binding every CVP model role and prompt",
+    )
+    parser.add_argument(
+        "--freeze",
+        type=Path,
+        required=True,
+        help="SHA-bound production freeze produced after reconciliation and audit",
+    )
+    parser.add_argument(
+        "--apply-authorization",
+        type=Path,
+        help="SHA-bound backup/apply authorization; mandatory with --apply",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="validate every available production gate and exit before constructing a model client",
     )
     parser.add_argument(
         "--apply",
@@ -797,37 +966,64 @@ def main() -> int:
     )
     parser.add_argument(
         "--consolidation-model",
-        default="claude-opus-5",
-        help=(
-            "identity-only pass; on the 2026-08-25 calibration Opus caught the "
-            "duplicate in 3 of 3 runs and Sol in 0 of 3"
-        ),
+        default="claude-fable-5-1",
+        help="identity-only pass using the model pinned by the production policy",
     )
     parser.add_argument(
         "--consolidation-effort", choices=("high", "xhigh"), default="high"
     )
-    parser.add_argument(
+    grouping_source = parser.add_mutually_exclusive_group(required=True)
+    grouping_source.add_argument(
         "--group",
         action="store_true",
-        help="ask the model which Claims belong in a batch together, instead of splitting by id",
+        help="create the one freeze-bound grouping before any proposal call",
     )
-    parser.add_argument(
+    grouping_source.add_argument(
         "--grouping",
         type=Path,
-        help="reuse a grouping plan produced earlier for this scope instead of calling again",
+        help="reuse a validated v2 grouping bound to this exact freeze",
     )
-    parser.add_argument("--group-model", default="claude-opus-5")
-    parser.add_argument("--group-effort", choices=("low", "medium", "high", "xhigh"), default="medium")
+    parser.add_argument(
+        "--canary-selection",
+        type=Path,
+        help="deterministic clean-group selection bound to --freeze and --grouping",
+    )
+    parser.add_argument("--group-model", default="claude-fable-5-1")
+    parser.add_argument("--group-effort", choices=("low", "medium", "high", "xhigh"), default="high")
     parser.add_argument(
         "--group-key",
         action="append",
         help="resolve only these groups; the grouping plan itself still covers the whole scope",
     )
     args = parser.parse_args()
-    scope_packet = _read(args.packet)
-    if scope_packet.get("schema_version") != SCOPE_PACKET_VERSION:
-        raise SystemExit(f"{args.packet} is not a {SCOPE_PACKET_VERSION}")
-    scope_label = str(scope_packet["scope_label"])
+    return execute(args)
+
+
+def _repository_commit() -> str:
+    status = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=PROJECT_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    if status.strip():
+        raise CvpProductionBlocked(["production runner worktree is not clean"])
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=PROJECT_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def execute(args: argparse.Namespace) -> int:
+    cvp_policy = load_cvp_policy(args.cvp_policy)
+    cvp_policy_sha256 = cvp_policy_fingerprint(
+        cvp_policy,
+        prompt_sha256s=cvp_policy_prompt_sha256s(cvp_policy, prompt_dir=PROMPT_DIR),
+    )
     route_policy = load_route_policy(args.route_policy)
     route_policy_sha256 = route_policy_fingerprint(
         route_policy,
@@ -835,13 +1031,93 @@ def main() -> int:
             route_policy, prompt_dir=PROMPT_DIR
         ),
     )
+    runner_commit = _repository_commit()
+    store = PostgresKnowledgeStore(args.database_url)
+    freeze = _read(args.freeze)
+    validate_cvp_freeze(
+        freeze,
+        store=store,
+        cvp_policy_sha256=cvp_policy_sha256,
+        route_policy_sha256=route_policy_sha256,
+        runner_commit=runner_commit,
+        validate_registry=False,
+    )
+    expected_packet_path = Path(str((freeze.get("scope_packet") or {}).get("path") or ""))
+    if args.packet.resolve() != expected_packet_path.resolve():
+        raise CvpProductionBlocked(["--packet is not the scope packet bound by the freeze"])
+    if args.output_dir.resolve() != Path(str(freeze.get("output_root") or "")).resolve():
+        raise CvpProductionBlocked(["--output-dir is not the output root bound by the freeze"])
+    validate_execution_boundary(
+        freeze, worktree_root=PROJECT_ROOT, output_root=args.output_dir
+    )
+    if args.batch_size is not None and args.batch_size != int(cvp_policy["batch_size"]):
+        raise CvpProductionBlocked(["--batch-size cannot override the production CVP policy"])
+    for cli_role, policy_role in (
+        ("proposal", "proposal"),
+        ("review", "review"),
+        ("consolidation", "consolidation"),
+    ):
+        for field in ("provider", "model", "effort"):
+            value = getattr(args, f"{cli_role}_{field}")
+            if value != cvp_policy[policy_role][field]:
+                raise CvpProductionBlocked(
+                    [f"--{cli_role}-{field.replace('_', '-')} cannot override the production CVP policy"]
+                )
+    if args.group_model != cvp_policy["grouping"]["model"] or args.group_effort != cvp_policy["grouping"]["effort"]:
+        raise CvpProductionBlocked(["grouping model settings cannot override the production CVP policy"])
+    if args.no_reconsider or args.no_consolidate:
+        raise CvpProductionBlocked(["production correction and consolidation passes may not be disabled"])
+    if args.apply and args.apply_authorization is None:
+        raise CvpProductionBlocked(["--apply requires --apply-authorization"])
+    if args.apply and args.group:
+        raise CvpProductionBlocked(
+            ["--apply requires an already frozen --grouping artifact"]
+        )
+    if getattr(args, "canary_selection", None) and not args.grouping:
+        raise CvpProductionBlocked(
+            ["--canary-selection requires an already frozen --grouping artifact"]
+        )
+    if args.group_key and not getattr(args, "canary_selection", None):
+        raise CvpProductionBlocked(
+            ["--group-key cannot manually select a production canary"]
+        )
+    claim_output_ownership(
+        output_root=args.output_dir, freeze=freeze, runner_commit=runner_commit
+    )
+    with exclusive_cvp_run_lock(freeze):
+        return _execute_locked(
+            args,
+            freeze=freeze,
+            store=store,
+            cvp_policy=cvp_policy,
+            cvp_policy_sha256=cvp_policy_sha256,
+            route_policy=route_policy,
+            route_policy_sha256=route_policy_sha256,
+            runner_commit=runner_commit,
+        )
+
+
+def _execute_locked(
+    args: argparse.Namespace,
+    *,
+    freeze: dict[str, Any],
+    store: PostgresKnowledgeStore,
+    cvp_policy: dict[str, Any],
+    cvp_policy_sha256: str,
+    route_policy: dict[str, Any],
+    route_policy_sha256: str,
+    runner_commit: str,
+) -> int:
+    scope_packet = _read(args.packet)
+    if scope_packet.get("schema_version") != SCOPE_PACKET_VERSION:
+        raise SystemExit(f"{args.packet} is not a {SCOPE_PACKET_VERSION}")
+    scope_label = str(scope_packet["scope_label"])
     claims = {
         item["claim_id"]: ReviewClaim.model_validate(item)
         for item in scope_packet["claims"]
     }
     registry_context = list(scope_packet.get("registry_context") or [])
-    store = PostgresKnowledgeStore(args.database_url)
-    route_queue = FileRouteResolutionQueue(args.output_dir / "route-queue")
+    batch_size = int(cvp_policy["batch_size"])
     enqueued_route_jobs: list[dict[str, Any]] = []
     awaiting_cvp_apply = False
     master_data_mutations = 0
@@ -851,12 +1127,27 @@ def main() -> int:
         # Re-deriving it per run costs a call and yields different group keys,
         # because the same Claims can be carved into topics more than one way.
         stored = _read(args.grouping)
+        grouping_sha256 = validate_grouping_envelope(stored, freeze=freeze)
         grouping = ClaimGroupingResponse.model_validate(stored["grouping"])
         repairs = list(stored.get("coverage_repairs") or [])
         validate_grouping(
             grouping=grouping, scope_label=scope_label, claim_ids=list(claims)
         )
-        batches = batches_from_groups(grouping, batch_size=args.batch_size)
+        full_grouping = grouping
+        batches = batches_from_groups(grouping, batch_size=batch_size)
+        if getattr(args, "canary_selection", None):
+            selected_group_key = validate_canary_selection(
+                _read(args.canary_selection),
+                grouping_envelope=stored,
+                freeze=freeze,
+                scope_packet=scope_packet,
+                batch_size=batch_size,
+            )
+            if args.group_key and args.group_key != [selected_group_key]:
+                raise CvpProductionBlocked(
+                    ["--group-key differs from the bound canary selection"]
+                )
+            args.group_key = [selected_group_key]
         if args.group_key:
             wanted = set(args.group_key)
             unknown = sorted(wanted - {item.group_key for item in grouping.groups})
@@ -865,12 +1156,43 @@ def main() -> int:
             grouping = grouping.model_copy(
                 update={"groups": [g for g in grouping.groups if g.group_key in wanted]}
             )
-            batches = batches_from_groups(grouping, batch_size=args.batch_size)
+            batches = batches_from_groups(grouping, batch_size=batch_size)
     elif args.group:
         # Grouping decides only what is compared together. Its output is a
         # batching plan; the rationale never reaches the proposer, because
         # telling it these Claims were grouped as related is a merge hint.
-        grouper = build_grouper(args.group_model, args.group_effort)
+        if args.dry_run:
+            validate_cvp_freeze(
+                freeze,
+                store=store,
+                cvp_policy_sha256=cvp_policy_sha256,
+                route_policy_sha256=route_policy_sha256,
+                runner_commit=runner_commit,
+            )
+            print(
+                json.dumps(
+                    {
+                        "status": "preflight_passed_before_grouping",
+                        "freeze_sha256": freeze["artifact_sha256"],
+                        "claim_count": len(claims),
+                        "would_call_models": False,
+                        "master_data_mutations": 0,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+        validate_cvp_freeze(
+            freeze,
+            store=store,
+            cvp_policy_sha256=cvp_policy_sha256,
+            route_policy_sha256=route_policy_sha256,
+            runner_commit=runner_commit,
+        )
+        grouping_role = cvp_policy["grouping"]
+        grouper = build_grouper(grouping_role["model"], grouping_role["effort"])
+        grouper.max_request_bytes = int(cvp_policy["max_request_bytes"])
         grouping_payload = {
             "scope_label": scope_label,
             "claims": [
@@ -893,15 +1215,24 @@ def main() -> int:
         grouping_report = validate_grouping(
             grouping=grouping, scope_label=scope_label, claim_ids=list(claims)
         )
-        _write_immutable(
-            args.output_dir / "grouping.json",
-            {
-                "schema_version": "wang_canonical_viewpoint_grouping_envelope_v1",
-                "scope_label": scope_label,
-                "grouping": grouping.model_dump(mode="json"),
-                "coverage_repairs": repairs,
-                "validation_report": grouping_report,
-            },
+        full_grouping = grouping
+        raw_grouping_artifact = _read(args.output_dir / "raw-grouping.json")
+        grouping_envelope = {
+            "schema_version": CVP_GROUPING_ENVELOPE_VERSION,
+            "scope_label": scope_label,
+            "freeze_sha256": freeze["artifact_sha256"],
+            "scope_packet_sha256": freeze["scope_packet_sha256"],
+            "cvp_policy_sha256": cvp_policy_sha256,
+            "model": dict(grouping_role),
+            "raw_response_artifact_sha256": raw_grouping_artifact["artifact_sha256"],
+            "grouping": grouping.model_dump(mode="json"),
+            "coverage_repairs": repairs,
+            "validation_report": grouping_report,
+        }
+        grouping_envelope["artifact_sha256"] = sha256_json(grouping_envelope)
+        _write_immutable(args.output_dir / "grouping.json", grouping_envelope)
+        grouping_sha256 = validate_grouping_envelope(
+            grouping_envelope, freeze=freeze
         )
         print(
             json.dumps(
@@ -922,49 +1253,108 @@ def main() -> int:
             grouping = grouping.model_copy(
                 update={"groups": [g for g in grouping.groups if g.group_key in wanted]}
             )
-        batches = batches_from_groups(grouping, batch_size=args.batch_size)
-    else:
-        batches = split_batches(sorted(claims), batch_size=args.batch_size)
+        batches = batches_from_groups(grouping, batch_size=batch_size)
     if args.max_batches is not None:
         # 0 is meaningful: group the scope and stop, so the plan can be read
         # before any proposal call is spent against it.
         batches = batches[: args.max_batches]
 
-    proposer = build_proposer(
-        args.proposal_model,
-        args.proposal_effort,
-        provider=args.proposal_provider,
+    validate_cvp_freeze(
+        freeze,
+        store=store,
+        cvp_policy_sha256=cvp_policy_sha256,
+        route_policy_sha256=route_policy_sha256,
+        runner_commit=runner_commit,
+        validate_registry=bool(args.dry_run or not batches),
     )
-    reviewer = build_reviewer(
-        args.review_model,
-        args.review_effort,
-        provider=args.review_provider,
+    apply_authorization = (
+        _read(args.apply_authorization) if args.apply_authorization else None
     )
-    reconsiderer = (
-        None
-        if args.no_reconsider
-        else build_reconsiderer(
-            args.proposal_model,
-            args.proposal_effort,
-            provider=args.proposal_provider,
+    if apply_authorization is not None:
+        validate_apply_authorization(
+            apply_authorization,
+            freeze=freeze,
+            grouping_sha256=grouping_sha256,
         )
-    )
 
-    consolidator = (
-        None
-        if args.no_consolidate
-        else build_consolidator(
-            args.consolidation_model,
-            args.consolidation_effort,
-            provider=args.consolidation_provider,
+    if args.dry_run:
+        print(
+            json.dumps(
+                {
+                    "status": "preflight_passed",
+                    "freeze_sha256": freeze["artifact_sha256"],
+                    "grouping_sha256": grouping_sha256,
+                    "batch_count": len(batches),
+                    "claim_count": sum(len(batch) for batch in batches),
+                    "would_call_models": False,
+                    "master_data_mutations": 0,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
         )
+        return 0
+    if not batches:
+        print(
+            json.dumps(
+                {
+                    "status": "grouping_complete_no_resolution_requested",
+                    "grouping_sha256": grouping_sha256,
+                    "would_call_resolution_models": False,
+                    "master_data_mutations": 0,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+
+    route_queue = FileRouteResolutionQueue(args.output_dir / "route-queue")
+
+    proposal_role = cvp_policy["proposal"]
+    proposer = build_proposer(
+        proposal_role["model"],
+        proposal_role["effort"],
+        provider=proposal_role["provider"],
     )
+    proposer.max_request_bytes = int(cvp_policy["max_request_bytes"])
+    review_role = cvp_policy["review"]
+    reviewer = build_reviewer(
+        review_role["model"],
+        review_role["effort"],
+        provider=review_role["provider"],
+    )
+    reviewer.max_request_bytes = int(cvp_policy["max_request_bytes"])
+    correction_role = cvp_policy["correction"]
+    reconsiderer = build_reconsiderer(
+        correction_role["model"],
+        correction_role["effort"],
+        provider=correction_role["provider"],
+    )
+    reconsiderer.max_request_bytes = int(cvp_policy["max_request_bytes"])
+
+    consolidation_role = cvp_policy["consolidation"]
+    consolidator = build_consolidator(
+        consolidation_role["model"],
+        consolidation_role["effort"],
+        provider=consolidation_role["provider"],
+    )
+    consolidator.max_request_bytes = int(cvp_policy["max_request_bytes"])
 
     reports: list[dict[str, Any]] = []
     completed_batches: list[str] = []
-    for ordinal, batch in enumerate(batches, start=1):
-        batch_id = f"CVB-{scope_label}-{ordinal:03d}"
-        batch_dir = args.output_dir / f"batch-{ordinal:03d}"
+    batch_dispositions: list[dict[str, Any]] = []
+    expected_registry_fingerprint = str(freeze["registry_fingerprint_sha256"])
+    for batch in batches:
+        identity = build_batch_identity(
+            scope_label=scope_label,
+            freeze_sha256=freeze["artifact_sha256"],
+            grouping_sha256=grouping_sha256,
+            claim_ids=batch,
+            cvp_policy_sha256=cvp_policy_sha256,
+        )
+        batch_id = identity["batch_id"]
+        batch_dir = args.output_dir / "batches" / identity["batch_key_sha256"]
 
         # An applied batch is finished master data, not work to redo. Resume
         # runs on the model-call cache, and a prompt edit invalidates it -- so
@@ -975,6 +1365,17 @@ def main() -> int:
         if state_path.exists():
             state = _read(state_path)
             if str(state.get("status", "")).startswith("applied"):
+                receipt_payload, disposition_payload = _validate_applied_resume(
+                    state=state,
+                    batch_dir=batch_dir,
+                    batch_identity=identity,
+                    store=store,
+                    expected_pre_registry_fingerprint_sha256=expected_registry_fingerprint,
+                )
+                batch_dispositions.append(disposition_payload)
+                expected_registry_fingerprint = str(
+                    receipt_payload["post_registry_fingerprint_sha256"]
+                )
                 completed_batches.append(batch_id)
                 # Its records are in the store, and the next batch is entitled
                 # to see them: the serial checkpoint is the whole reason a later
@@ -995,6 +1396,115 @@ def main() -> int:
                     )
                 )
                 continue
+
+        # Crash-safe boundary: the transaction may have committed after the
+        # plan was persisted but before receipts/current-state were written.
+        # Recover from the authoritative ChangeSet and cached artifacts; never
+        # send the now-stale packet through a model again.
+        plan_path = batch_dir / "cvp-change-plan.json"
+        if plan_path.is_file():
+            recovered_plan = _plan_from_document(_read(plan_path))
+            if store.get_change_set_status(recovered_plan.fingerprint_sha256) == "applied":
+                intent_path = batch_dir / "cvp-apply-intent.json"
+                if not intent_path.is_file():
+                    raise CvpProductionBlocked(
+                        [f"{batch_id}: applied ChangeSet has no pre-apply intent"]
+                    )
+                apply_intent = _read(intent_path)
+                validate_content_addressed(apply_intent, "artifact_sha256")
+                if (
+                    apply_intent.get("batch_identity") != identity
+                    or apply_intent.get("change_set_sha256")
+                    != recovered_plan.fingerprint_sha256
+                    or apply_intent.get("pre_registry_fingerprint_sha256")
+                    != expected_registry_fingerprint
+                ):
+                    raise CvpProductionBlocked(
+                        [f"{batch_id}: pre-apply intent binding is invalid"]
+                    )
+                package = _read(batch_dir / "cvp-change-package.json")
+                effective_proposal = _effective_proposal_from_artifacts(batch_dir)
+                post_registry_fingerprint = validate_registry_transition(
+                    apply_intent, store=store
+                )
+                plan_readback = build_plan_readback_receipt(
+                    plan=recovered_plan,
+                    store=store,
+                    batch_identity=identity,
+                    freeze_sha256=freeze["artifact_sha256"],
+                    grouping_sha256=grouping_sha256,
+                    pre_registry_fingerprint_sha256=expected_registry_fingerprint,
+                    post_registry_fingerprint_sha256=post_registry_fingerprint,
+                )
+                _write_immutable(
+                    batch_dir / "cvp-plan-readback-receipt.json", plan_readback
+                )
+                route_receipt = _route_receipt_from_package(
+                    store=store,
+                    package=package,
+                    scope_label=scope_label,
+                    scope_manifest_sha256=str(scope_packet["claim_manifest_sha256"]),
+                    batch_id=batch_id,
+                    plan=recovered_plan,
+                )
+                _write_immutable(
+                    batch_dir / "cvp-readback-receipt.json",
+                    route_receipt.model_dump(mode="json"),
+                )
+                route_job = build_route_resolution_job(
+                    receipt=route_receipt,
+                    evidence_scope_sha256=str(scope_packet["packet_sha256"]),
+                    route_policy_fingerprint_sha256=route_policy_sha256,
+                )
+                route_queue.enqueue(route_job)
+                enqueued_route_jobs.append(route_job.model_dump(mode="json"))
+                disposition = build_batch_disposition(
+                    proposal=effective_proposal,
+                    batch_identity=identity,
+                    effective_proposal_sha256=sha256_json(
+                        effective_proposal.model_dump(mode="json")
+                    ),
+                    apply_status="applied",
+                    readback_receipt_sha256=plan_readback["artifact_sha256"],
+                )
+                _write_immutable(
+                    batch_dir / "batch-disposition-applied.json", disposition
+                )
+                batch_dispositions.append(disposition)
+                _write_current_state(
+                    batch_dir,
+                    schema_version="wang_canonical_viewpoint_batch_current_state_v1",
+                    identity=identity,
+                    status="applied_and_route_enqueued_recovered",
+                    authoritative_artifact="cvp-plan-readback-receipt.json",
+                    authoritative_artifact_sha256=plan_readback["artifact_sha256"],
+                )
+                expected_registry_fingerprint = post_registry_fingerprint
+                completed_batches.append(batch_id)
+                registry_context = load_registry_context(
+                    store.list_records("canonical_viewpoints"),
+                    store.list_records("viewpoint_revisions"),
+                )
+                print(
+                    json.dumps(
+                        {
+                            "batch_id": batch_id,
+                            "recovered": "committed_before_receipt",
+                            "model_calls_executed": 0,
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+                continue
+
+        validate_cvp_freeze(
+            freeze,
+            store=store,
+            cvp_policy_sha256=cvp_policy_sha256,
+            route_policy_sha256=route_policy_sha256,
+            runner_commit=runner_commit,
+            expected_registry_fingerprint_sha256=expected_registry_fingerprint,
+        )
 
         try:
             report = run_batch(
@@ -1034,7 +1544,7 @@ def main() -> int:
             _write_current_state(
                 batch_dir,
                 schema_version="wang_canonical_viewpoint_batch_current_state_v1",
-                identity={"batch_id": batch_id},
+                identity=identity,
                 status="exception",
                 authoritative_artifact=exception_name,
                 authoritative_artifact_sha256=exception_bundle["artifact_sha256"],
@@ -1120,16 +1630,52 @@ def main() -> int:
 
         if not args.apply:
             awaiting_cvp_apply = True
+            disposition = build_batch_disposition(
+                proposal=report["_effective_proposal"],
+                batch_identity=identity,
+                effective_proposal_sha256=sha256_json(
+                    report["_effective_proposal"].model_dump(mode="json")
+                ),
+                apply_status="planned",
+            )
+            _write_immutable(
+                batch_dir / "batch-disposition-planned.json", disposition
+            )
+            batch_dispositions.append(disposition)
             _write_current_state(
                 batch_dir,
                 schema_version="wang_canonical_viewpoint_batch_current_state_v1",
-                identity={"batch_id": batch_id},
+                identity=identity,
                 status="awaiting_cvp_apply",
                 authoritative_artifact="cvp-change-plan.json",
                 authoritative_artifact_sha256=plan_document["artifact_sha256"],
             )
             break
 
+        validate_cvp_freeze(
+            freeze,
+            store=store,
+            cvp_policy_sha256=cvp_policy_sha256,
+            route_policy_sha256=route_policy_sha256,
+            runner_commit=runner_commit,
+            expected_registry_fingerprint_sha256=expected_registry_fingerprint,
+        )
+        if apply_authorization is None:
+            raise CvpProductionBlocked(["apply authorization disappeared before apply"])
+        validate_apply_authorization(
+            apply_authorization,
+            freeze=freeze,
+            grouping_sha256=grouping_sha256,
+        )
+        apply_intent = build_apply_intent(
+            plan=plan,
+            store=store,
+            batch_identity=identity,
+            freeze_sha256=freeze["artifact_sha256"],
+            grouping_sha256=grouping_sha256,
+            expected_pre_registry_fingerprint_sha256=expected_registry_fingerprint,
+        )
+        _write_immutable(batch_dir / "cvp-apply-intent.json", apply_intent)
         apply_result = store.apply_plan(
             plan,
             metadata={
@@ -1138,39 +1684,51 @@ def main() -> int:
                 "proposal_artifact_sha256": effective_raw["artifact_sha256"],
                 "review_artifact_sha256": raw_review["artifact_sha256"],
             },
+            expected_registry_fingerprint_sha256=expected_registry_fingerprint,
+            registry_collections=REGISTRY_COLLECTIONS,
         )
         if apply_result.get("status") == "applied":
             master_data_mutations += len(plan.operations)
-        expected_revisions = {
-            str(item["viewpoint_id"]): str(item["current_revision_id"])
-            for item in package["canonical_viewpoints"]
-        }
-        current_by_viewpoint = {
-            str(item["viewpoint_id"]): str(item["viewpoint_revision_id"])
-            for item in registry_context
-        }
-        for decision in package["viewpoint_identity_decisions"]:
-            viewpoint_id = str(decision["resolved_viewpoint_id"])
-            if viewpoint_id not in expected_revisions:
-                expected_revisions[viewpoint_id] = current_by_viewpoint[viewpoint_id]
-        observed_revisions: dict[str, str] = {}
-        for viewpoint_id in expected_revisions:
-            record = store.get_record("canonical_viewpoints", viewpoint_id)
-            if record:
-                observed_revisions[viewpoint_id] = str(record["current_revision_id"])
-        receipt = build_cvp_batch_readback_receipt(
+        receipt = _route_receipt_from_package(
+            store=store,
+            package=package,
             scope_label=scope_label,
             scope_manifest_sha256=str(scope_packet["claim_manifest_sha256"]),
-            triggering_cvp_batch_id=batch_id,
-            cvp_changeset_id=plan.change_set_id,
-            cvp_changeset_sha256=plan.fingerprint_sha256,
-            expected_current_revisions=expected_revisions,
-            observed_current_revisions=observed_revisions,
+            batch_id=batch_id,
+            plan=plan,
         )
         _write_immutable(
             batch_dir / "cvp-readback-receipt.json",
             receipt.model_dump(mode="json"),
         )
+        post_registry_fingerprint = validate_registry_transition(
+            apply_intent, store=store
+        )
+        plan_readback = build_plan_readback_receipt(
+            plan=plan,
+            store=store,
+            batch_identity=identity,
+            freeze_sha256=freeze["artifact_sha256"],
+            grouping_sha256=grouping_sha256,
+            pre_registry_fingerprint_sha256=expected_registry_fingerprint,
+            post_registry_fingerprint_sha256=post_registry_fingerprint,
+        )
+        _write_immutable(
+            batch_dir / "cvp-plan-readback-receipt.json", plan_readback
+        )
+        disposition = build_batch_disposition(
+            proposal=report["_effective_proposal"],
+            batch_identity=identity,
+            effective_proposal_sha256=sha256_json(
+                report["_effective_proposal"].model_dump(mode="json")
+            ),
+            apply_status=str(apply_result.get("status") or ""),
+            readback_receipt_sha256=plan_readback["artifact_sha256"],
+        )
+        _write_immutable(
+            batch_dir / "batch-disposition-applied.json", disposition
+        )
+        batch_dispositions.append(disposition)
         apply_result_document = {
             "schema_version": "wang_cvp_batch_apply_result_v1",
             "batch_id": batch_id,
@@ -1192,16 +1750,36 @@ def main() -> int:
         _write_current_state(
             batch_dir,
             schema_version="wang_canonical_viewpoint_batch_current_state_v1",
-            identity={"batch_id": batch_id},
+            identity=identity,
             status="applied_and_route_enqueued",
-            authoritative_artifact="cvp-readback-receipt.json",
-            authoritative_artifact_sha256=receipt.artifact_sha256,
+            authoritative_artifact="cvp-plan-readback-receipt.json",
+            authoritative_artifact_sha256=plan_readback["artifact_sha256"],
         )
+        expected_registry_fingerprint = post_registry_fingerprint
         registry_context = load_registry_context(
             store.list_records("canonical_viewpoints"),
             store.list_records("viewpoint_revisions"),
         )
 
+    validate_cvp_freeze(
+        freeze,
+        store=store,
+        cvp_policy_sha256=cvp_policy_sha256,
+        route_policy_sha256=route_policy_sha256,
+        runner_commit=runner_commit,
+        expected_registry_fingerprint_sha256=expected_registry_fingerprint,
+    )
+    disposition_ledger = scope_disposition_ledger(
+        grouping=full_grouping,
+        batch_dispositions=batch_dispositions,
+        freeze_sha256=freeze["artifact_sha256"],
+        grouping_sha256=grouping_sha256,
+        blocked_claims=scope_packet.get("blocked_claims") or [],
+        excluded_claims=scope_packet.get("excluded_claims") or [],
+    )
+    _write_derived(
+        args.output_dir / "scope-disposition-ledger.json", disposition_ledger
+    )
     route_stage: dict[str, Any]
     if awaiting_cvp_apply:
         route_stage = {
@@ -1222,7 +1800,7 @@ def main() -> int:
     summary = {
         "schema_version": "wang_canonical_viewpoint_scope_run_v1",
         "scope_label": scope_label,
-        "batch_size": args.batch_size,
+        "batch_size": batch_size,
         "batch_count": len(reports),
         "claim_count": sum(item["claim_count"] for item in reports),
         "component_count": sum(item["component_count"] for item in reports),
@@ -1255,6 +1833,8 @@ def main() -> int:
         "route_stage": route_stage,
         "master_data_mutations": master_data_mutations,
         "apply_allowed": bool(args.apply),
+        "disposition_ledger_sha256": disposition_ledger["artifact_sha256"],
+        "disposition_status": disposition_ledger["status"],
     }
     summary["artifact_sha256"] = sha256_json(summary)
     # Derived from the batch reports, same as batch-run.json: rewritten.

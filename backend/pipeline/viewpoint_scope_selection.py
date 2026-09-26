@@ -229,6 +229,10 @@ def select_scope_units(
         str, Iterable[Mapping[str, Any]]
     ]
     | None = None,
+    direct_admissions_by_claim: Mapping[
+        str, Iterable[Mapping[str, Any]]
+    ]
+    | None = None,
 ) -> dict[str, Any]:
     """Apply the four legal admission signals to one exact Claim universe."""
 
@@ -236,12 +240,30 @@ def select_scope_units(
     claim_sources = {
         claim_id: str(row.get("source_id") or "") for claim_id, row in rows.items()
     }
-    units = direct_seed_units(rows.values(), passage_units)
+    if direct_admissions_by_claim is None:
+        units = direct_seed_units(rows.values(), passage_units)
+    else:
+        units = {}
     admissions: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for claim_id, claim_units in sorted(units.items()):
-        admissions[claim_id].append(
-            {"signal": "scripture_ref", "passage_unit_ids": sorted(claim_units)}
-        )
+    if direct_admissions_by_claim is None:
+        for claim_id, claim_units in sorted(units.items()):
+            admissions[claim_id].append(
+                {"signal": "scripture_ref", "passage_unit_ids": sorted(claim_units)}
+            )
+    else:
+        for claim_id, raw_admissions in sorted(direct_admissions_by_claim.items()):
+            if claim_id not in rows:
+                continue
+            for raw_admission in raw_admissions:
+                detail = dict(raw_admission)
+                valid_units = set(
+                    str(value) for value in detail.get("passage_unit_ids") or []
+                ) & set(passage_units)
+                if not valid_units:
+                    continue
+                units.setdefault(claim_id, set()).update(valid_units)
+                detail["passage_unit_ids"] = sorted(valid_units)
+                admissions[claim_id].append(detail)
 
     if (
         occurrence_unit_ids_by_claim is not None
@@ -372,5 +394,10 @@ def select_scope_units(
             if occurrence_unit_ids_by_claim is not None
             or occurrence_admissions_by_claim is not None
             else "unavailable"
+        ),
+        "direct_scripture_signal_authority": (
+            "reviewed_scripture_use_role"
+            if direct_admissions_by_claim is not None
+            else "legacy_unclassified_scripture_ref"
         ),
     }

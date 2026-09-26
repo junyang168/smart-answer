@@ -291,6 +291,31 @@ def leading_untitled_body_end(
     return body_length
 
 
+def has_section_headings(
+    segments: Sequence[str], *, level: int = DEFAULT_SECTION_LEVEL
+) -> bool:
+    """Whether the source carries any heading recognized at this level."""
+
+    return any(
+        (depth := heading_level(text)) is not None and depth <= level
+        for text in segments
+    )
+
+
+def leading_untitled_span_end(
+    segments: Sequence[str], *, level: int = DEFAULT_SECTION_LEVEL
+) -> int | None:
+    """Return the exclusive end of an untitled leading span, if one exists."""
+
+    if not segments:
+        return None
+    for position, text in enumerate(segments):
+        depth = heading_level(text)
+        if depth is not None and depth <= level:
+            return position or None
+    return len(segments)
+
+
 #: A callable that takes `[{"index": ..., "text": ...}]` and returns
 #: `[{"after_index": ..., "text": "## …", "level": 1}]` -- the shape
 #: `backend.pipeline.subtitle_generation.generate_subtitles` returns.

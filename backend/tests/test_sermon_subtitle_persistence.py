@@ -512,6 +512,102 @@ def test_write_back_subtitle_generation_uses_the_subscription_client(
     assert seen["client"] is client
 
 
+def test_subtitles_only_persists_and_stops_before_extraction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = _source(tmp_path)
+    writer = _SavingWriter(source_path)
+    captured = _capture_run(monkeypatch)
+    monkeypatch.setattr(runner, "generate_subtitles", lambda *_args, **_kwargs: _insertions())
+
+    status, output = runner.run_one(
+        source_path,
+        output_dir=tmp_path / "out",
+        client=object(),
+        prompt="prompt",
+        reasoning_effort="medium",
+        force=False,
+        write_back_subtitles=True,
+        subtitle_actor_id="editor@example.org",
+        subtitle_writer=writer,
+        subtitles_only=True,
+        subtitle_authorizer=lambda _actor_id: True,
+    )
+
+    assert status == "created"
+    assert output == source_path
+    assert writer.calls == 1
+    assert captured == {}
+
+
+def test_subtitles_only_skips_a_source_that_already_has_headings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = _source(tmp_path, heading=True)
+    captured = _capture_run(monkeypatch)
+    monkeypatch.setattr(
+        runner, "generate_subtitles",
+        lambda *_args, **_kwargs: pytest.fail("existing headings must not be regenerated"),
+    )
+
+    status, output = runner.run_one(
+        source_path,
+        output_dir=tmp_path / "out",
+        client=object(),
+        prompt="prompt",
+        reasoning_effort="medium",
+        force=False,
+        write_back_subtitles=True,
+        subtitle_actor_id="editor@example.org",
+        subtitles_only=True,
+        subtitle_authorizer=lambda _actor_id: True,
+    )
+
+    assert status == "skipped"
+    assert output == source_path
+    assert captured == {}
+
+
+def test_subtitles_only_titles_only_the_prefix_before_a_later_heading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = _source(tmp_path)
+    rows = json.loads(source_path.read_text(encoding="utf-8"))
+    rows.append({
+        "index": "subtitle-existing", "type": "subtitle", "text": "## 已有后段标题"
+    })
+    source_path.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+    writer = _SavingWriter(source_path)
+    captured = _capture_run(monkeypatch)
+    seen: dict[str, Any] = {}
+
+    def generate(paragraphs: list[dict[str, Any]], **_kwargs: Any) -> list[dict[str, Any]]:
+        seen["indexes"] = [str(row["index"]) for row in paragraphs]
+        return _insertions()
+
+    monkeypatch.setattr(runner, "generate_subtitles", generate)
+    status, output = runner.run_one(
+        source_path,
+        output_dir=tmp_path / "out",
+        client=object(),
+        prompt="prompt",
+        reasoning_effort="medium",
+        force=False,
+        write_back_subtitles=True,
+        subtitle_actor_id="editor@example.org",
+        subtitle_writer=writer,
+        subtitles_only=True,
+        subtitle_authorizer=lambda _actor_id: True,
+    )
+
+    assert status == "created"
+    assert output == source_path
+    assert writer.calls == 1
+    assert seen["indexes"] == ["1", "21", "37"]
+    assert json.loads(source_path.read_text(encoding="utf-8"))[0]["text"] == "## 第一部分"
+    assert captured == {}
+
+
 def test_subtitle_authorization_fails_before_the_generation_model_call(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

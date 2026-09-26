@@ -1,6 +1,6 @@
 {
-  "schema_version": "wang_route_resolution_policy_v1",
-  "policy_id": "wang-route-resolution-production-v1",
+  "schema_version": "wang_route_resolution_policy_v2",
+  "policy_id": "wang-route-resolution-production-v2",
   "proposal": {
     "provider": "codex",
     "model": "gpt-5.6-sol",
@@ -8,7 +8,7 @@
   },
   "review": {
     "provider": "claude",
-    "model": "claude-opus-5",
+    "model": "claude-fable-5-1",
     "effort": "high",
     "targets_per_batch": 12
   },
