@@ -919,6 +919,25 @@ def _extract_text_from_pptx(path: Path) -> str:
     return "\n\n".join(chunks)
 
 
+def _learning_source_text(date: str) -> str:
+    """The files the learning review is written from: the PPT and transcript
+    chosen under 分析資料來源 (by the owner, or the automatic pick), the same
+    ones the analysis uses. The whole folder only when neither exists (OPS-31:
+    a folder can hold two studies, and reading all of it mixed them)."""
+
+    assets = resolve_fellowship_analysis_assets(date)
+    chunks = []
+    for asset in (assets.transcript, assets.pptx):
+        if asset is None:
+            continue
+        text = _read_analysis_asset_text(date, asset).strip()
+        if text:
+            chunks.append(f"# {Path(asset.name).name}\n{text}")
+    if not chunks:
+        return _extract_text_from_fellowship_docs(date)
+    return "\n\n---\n\n".join(chunks)[:45000]
+
+
 def _extract_text_from_fellowship_docs(date: str) -> str:
     folder = _resolve_fellowship_docs_dir(date)
     if not folder.exists():
@@ -1502,7 +1521,7 @@ def generate_fellowship_learning_content(date: str) -> FellowshipLearningContent
     if entry is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Fellowship date {date} not found")
 
-    docs_text = _extract_text_from_fellowship_docs(normalized_date)
+    docs_text = _learning_source_text(normalized_date)
     prompt = (
         "你是教會團契查經內容整理同工。請根據以下團契文件，產生給公開網頁使用的學習回顧。"
         "受眾包含已參加團契的會眾，以及想了解本教會團契的訪客。\n\n"

@@ -1191,6 +1191,7 @@ export function FellowshipManager() {
                   <button
                     type="button"
                     onClick={handleLearningGenerate}
+                    title="根據下方「分析資料來源」選定的逐字稿／講稿與 PPT 產生"
                     disabled={!editingDate || learningGenerating || learningSaving}
                     className="rounded-md border border-emerald-300 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:border-emerald-200 disabled:text-emerald-300"
                   >
