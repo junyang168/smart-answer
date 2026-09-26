@@ -553,3 +553,30 @@ def test_every_candidate_has_a_key(monkeypatch, tmp_path):
     service = _two_studies(monkeypatch, tmp_path)
     assets = service.resolve_fellowship_analysis_assets("2026-09-25")
     assert all(candidate.key for candidate in assets.candidates)
+
+
+def test_learning_review_reads_only_the_chosen_sources(monkeypatch, tmp_path):
+    # OPS-31: 從文件產生 read every file in the folder, mixing both 09-25 studies.
+    service = _two_studies(monkeypatch, tmp_path)
+    script = "local:马太福音 20-17至34 你們不知道所求的是甚麼 查經逐字稿.md"
+    service.update_fellowship_analysis_sources("2026-09-25", service.FellowshipAnalysisSources(transcript=script))
+    monkeypatch.setattr(service, "_extract_text_from_pptx", lambda path: f"slides of {path.name}")
+
+    text = service._learning_source_text("09/25/2026")
+
+    assert "講稿" in text
+    assert "對照" not in text
+    assert "slides of 你們不知道所求的是甚麼 太20-17至34.pptx" in text
+    assert "葡萄園" not in text
+
+
+def test_learning_review_falls_back_to_the_folder_without_sources(monkeypatch, tmp_path):
+    service = _two_studies(monkeypatch, tmp_path)
+    service.update_fellowship_analysis_sources(
+        "2026-09-25", service.FellowshipAnalysisSources(transcript="none", pptx="none")
+    )
+    monkeypatch.setattr(service, "_extract_text_from_pptx", lambda path: "")
+
+    text = service._learning_source_text("09/25/2026")
+
+    assert "講稿" in text and "對照" in text  # the whole folder, as before
