@@ -545,6 +545,7 @@ def plan_review_migration(
             "withdrawn_unchanged_graph_verified",
             "auto_applied_historical_replay_graph_verified",
             "relation_id_only_graph_verified",
+            "pass_review_projection_id_only_graph_verified",
         }:
             raise ValueError(f"not a verified status decision: {row['claim_id']}")
         if row.get("reason") == "withdrawn_unchanged_graph_verified":
@@ -584,6 +585,21 @@ def plan_review_migration(
                 ))
             ):
                 raise ValueError(f"relation-id decision lacks proof: {row['claim_id']}")
+        elif row.get("reason") == "pass_review_projection_id_only_graph_verified":
+            if (
+                source_kind != "legacy_relation_id_only_review_reconciliation_v1"
+                or row.get("review_decision") != "pass"
+                or row.get("spot_check_selected")
+                or row.get("adjudication_status") != "not_required"
+                or row.get("target_review_status") != "ai_consensus_reviewed"
+                or not all(row.get(key) for key in (
+                    "graph_guard_sha256", "relation_id_manifest_sha256",
+                    "effective_package_sha256", "review_projection_sha256",
+                    "historical_replay_sha256", "historical_replay_code_sha256",
+                    "overrides_sha256",
+                ))
+            ):
+                raise ValueError(f"pass projection decision lacks proof: {row['claim_id']}")
         elif source_kind != "legacy_candidate_review_reconciliation_v1":
             raise ValueError(f"invalid legacy migration source kind: {source_kind}")
         claim_id = str(row["claim_id"])
@@ -660,6 +676,8 @@ def plan_review_migration(
         if row.get("relation_id_manifest_sha256"):
             artifact["relation_id_manifest_sha256"] = row["relation_id_manifest_sha256"]
             artifact["effective_package_sha256"] = row["effective_package_sha256"]
+        if row.get("review_projection_sha256"):
+            artifact["review_projection_sha256"] = row["review_projection_sha256"]
         event_id = "REV-AI-" + sha256_json({
             "collection": "claims", "object_id": claim_id,
             "object_revision": revision, "after_sha256": after_sha,
