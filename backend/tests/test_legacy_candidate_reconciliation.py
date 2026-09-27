@@ -80,6 +80,42 @@ def test_human_required_enters_only_as_human_review_queue():
     assert plan.review_events[0].decision == "human_review_required"
 
 
+def test_coordinate_only_plan_requires_history_and_graph_proof():
+    row = {
+        **_ready_row(),
+        "reason": "coordinate_only_historical_review_graph_verified",
+        "historical_decision_reason": "pass_ready_for_legacy_migration",
+        "graph_guard_sha256": "1" * 64,
+        "coordinate_chain_sha256": "2" * 64,
+        "coordinate_proof_code_sha256": "6" * 64,
+        "reviewed_claim_content_sha256": "3" * 64,
+        "reviewed_claim_substantive_sha256": "4" * 64,
+        "current_anchor_count": 1,
+        "current_fragment_count": 2,
+    }
+    kind = "legacy_coordinate_only_review_reconciliation_v1"
+    plan = plan_review_migration(
+        [row], {"CL-1": _snapshot()}, freeze_sha256="5" * 64,
+        source_kind=kind,
+    )
+    assert _decode_plan(asdict(plan)) == plan
+    assert plan.review_events[0].artifact["coordinate_chain_sha256"] == "2" * 64
+    assert _substantive_payload(plan.operations[0].payload) == _substantive_payload(
+        _snapshot()["payload"]
+    )
+    with pytest.raises(ValueError, match="lacks proof"):
+        plan_review_migration(
+            [{**row, "graph_guard_sha256": ""}], {"CL-1": _snapshot()},
+            freeze_sha256="5" * 64, source_kind=kind,
+        )
+    with pytest.raises(ValueError, match="lacks proof"):
+        plan_review_migration(
+            [{**row, "target_review_status": "human_review_required"}],
+            {"CL-1": _snapshot()}, freeze_sha256="5" * 64,
+            source_kind=kind,
+        )
+
+
 def test_unverified_outcome_cannot_enter_plan():
     row = {**_ready_row(), "reason": "legacy_adjudicated_claim_needs_patch_replay"}
     with pytest.raises(ValueError, match="not a verified status"):

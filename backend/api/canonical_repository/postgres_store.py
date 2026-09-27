@@ -5290,6 +5290,7 @@ class PostgresKnowledgeStore:
                         "legacy_adjudicated_withdrawn_review_reconciliation_v1",
                         "legacy_adjudicated_auto_applied_review_reconciliation_v1",
                         "legacy_relation_id_only_review_reconciliation_v1",
+                        "legacy_coordinate_only_review_reconciliation_v1",
                     }:
                         raise PostgresKnowledgeStoreError(
                             "Claim-related graph guard is restricted to adjudicated legacy review reconciliation"
@@ -5361,6 +5362,7 @@ class PostgresKnowledgeStore:
                     "legacy_adjudicated_withdrawn_review_reconciliation_v1",
                     "legacy_adjudicated_auto_applied_review_reconciliation_v1",
                     "legacy_relation_id_only_review_reconciliation_v1",
+                    "legacy_coordinate_only_review_reconciliation_v1",
                 }:
                     raise PostgresKnowledgeStoreError(
                         "Adjudicated legacy review reconciliation requires a graph guard"

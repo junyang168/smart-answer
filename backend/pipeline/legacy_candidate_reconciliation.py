@@ -546,6 +546,7 @@ def plan_review_migration(
             "auto_applied_historical_replay_graph_verified",
             "relation_id_only_graph_verified",
             "pass_review_projection_id_only_graph_verified",
+            "coordinate_only_historical_review_graph_verified",
         }:
             raise ValueError(f"not a verified status decision: {row['claim_id']}")
         if row.get("reason") == "withdrawn_unchanged_graph_verified":
@@ -600,6 +601,29 @@ def plan_review_migration(
                 ))
             ):
                 raise ValueError(f"pass projection decision lacks proof: {row['claim_id']}")
+        elif row.get("reason") == "coordinate_only_historical_review_graph_verified":
+            if (
+                source_kind != "legacy_coordinate_only_review_reconciliation_v1"
+                or row.get("historical_decision_reason") not in {
+                    "pass_ready_for_legacy_migration", "human_spot_check_required",
+                    "human_confirmation_required", "human_disagreement_required",
+                }
+                or (
+                    row.get("target_review_status")
+                    != ("ai_consensus_reviewed"
+                        if row.get("historical_decision_reason")
+                        == "pass_ready_for_legacy_migration"
+                        else "human_review_required")
+                )
+                or not all(row.get(key) for key in (
+                    "graph_guard_sha256", "coordinate_chain_sha256",
+                    "coordinate_proof_code_sha256",
+                    "reviewed_claim_content_sha256",
+                    "reviewed_claim_substantive_sha256", "current_anchor_count",
+                    "current_fragment_count",
+                ))
+            ):
+                raise ValueError(f"coordinate-only decision lacks proof: {row['claim_id']}")
         elif source_kind != "legacy_candidate_review_reconciliation_v1":
             raise ValueError(f"invalid legacy migration source kind: {source_kind}")
         claim_id = str(row["claim_id"])
@@ -678,6 +702,13 @@ def plan_review_migration(
             artifact["effective_package_sha256"] = row["effective_package_sha256"]
         if row.get("review_projection_sha256"):
             artifact["review_projection_sha256"] = row["review_projection_sha256"]
+        if row.get("coordinate_chain_sha256"):
+            artifact["coordinate_chain_sha256"] = row["coordinate_chain_sha256"]
+            artifact["coordinate_proof_code_sha256"] = row["coordinate_proof_code_sha256"]
+            artifact["reviewed_claim_content_sha256"] = row["reviewed_claim_content_sha256"]
+            artifact["reviewed_claim_substantive_sha256"] = row["reviewed_claim_substantive_sha256"]
+            artifact["current_anchor_count"] = row["current_anchor_count"]
+            artifact["current_fragment_count"] = row["current_fragment_count"]
         event_id = "REV-AI-" + sha256_json({
             "collection": "claims", "object_id": claim_id,
             "object_revision": revision, "after_sha256": after_sha,
@@ -757,6 +788,7 @@ def _decode_plan(data: Mapping[str, Any]) -> ChangeSetPlan:
             "legacy_adjudicated_withdrawn_review_reconciliation_v1",
             "legacy_adjudicated_auto_applied_review_reconciliation_v1",
             "legacy_relation_id_only_review_reconciliation_v1",
+            "legacy_coordinate_only_review_reconciliation_v1",
         }
         or expected != plan.fingerprint_sha256
         or plan.change_set_id != f"KCS-{expected[:20]}"
@@ -866,6 +898,7 @@ def apply_frozen(
             "legacy_adjudicated_withdrawn_review_reconciliation_v1",
             "legacy_adjudicated_auto_applied_review_reconciliation_v1",
             "legacy_relation_id_only_review_reconciliation_v1",
+            "legacy_coordinate_only_review_reconciliation_v1",
         }:
             expected_graph = {}
             for row in source_rows:
@@ -910,6 +943,21 @@ def apply_frozen(
                 )
                 if proof is None or any(row.get(key) != value for key, value in proof.items()):
                     raise ValueError(f"relation-id proof changed: {row['claim_id']}")
+        if plan.source_kind == "legacy_coordinate_only_review_reconciliation_v1":
+            from backend.pipeline.legacy_coordinate_review_preflight import verify_frozen_rows
+            from backend.pipeline.legacy_coordinate_review_migration import proof_code_sha256
+            current_code_sha = proof_code_sha256()
+            if any(row.get("coordinate_proof_code_sha256") != current_code_sha
+                   for row in source_rows):
+                raise ValueError("coordinate proof code changed since dry-run")
+            with store.connect() as conn, conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT 1 FROM wang_knowledge.change_sets WHERE change_set_id=%s",
+                    (plan.change_set_id,),
+                )
+                already_applied = cursor.fetchone() is not None
+            if not already_applied:
+                verify_frozen_rows(source_rows, store)
         verified_bundles: dict[str, dict[str, Any]] = {}
         for row in source_rows:
             for field, path_field in (

@@ -275,6 +275,91 @@ def dry_run(
     return {key: value for key, value in report.items() if key != "rows"}
 
 
+def verify_frozen_rows(
+    rows: list[dict[str, Any]], store: PostgresKnowledgeStore,
+) -> None:
+    """Recompute every coordinate/source/graph proof just before CAS apply."""
+
+    if not rows or any(row.get("reason") != READY_REASON for row in rows):
+        raise ValueError("coordinate replay requires frozen ready rows")
+    versions, sources, evidence, fragments = _current_data(
+        store, [str(row["claim_id"]) for row in rows],
+    )
+    bundles: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
+    indexes: dict[str, BodyLocatorIndex | None] = {}
+    for row in rows:
+        claim_id = str(row["claim_id"])
+        history = versions.get(claim_id) or []
+        if not history or (
+            history[-1]["revision"] != row["revision"]
+            or history[-1]["content_sha256"] != row["content_sha256"]
+            or history[-1]["payload"].get("review_status") != "candidate"
+        ):
+            raise ValueError(f"frozen Claim changed: {claim_id}")
+        path = str(row["reviewed_candidate_path"])
+        if path not in bundles:
+            bundle = inspect_legacy_bundle(Path(path))
+            if bundle.get("reason") is not None:
+                raise ValueError(f"legacy review is no longer valid: {path}")
+            package, _ = _normalize_records(json.loads(Path(path).read_text(encoding="utf-8")))
+            bundles[path] = (bundle, package)
+        bundle, package = bundles[path]
+        reviewed_claim = bundle.get("claims", {}).get(claim_id)
+        if reviewed_claim is None or (
+            sha256_json(_substantive_payload(reviewed_claim))
+            != row["reviewed_claim_substantive_sha256"]
+        ):
+            raise ValueError(f"reviewed Claim changed: {claim_id}")
+        proof = coordinate_chain_proof(reviewed_claim, history)
+        if proof is None or any(row.get(key) != value for key, value in proof.items()):
+            raise ValueError(f"coordinate history changed: {claim_id}")
+        historical = next(item for item in history
+                          if item["revision"] == proof["reviewed_claim_revision"])
+        classified = classify_candidate(
+            {"object_id": claim_id, "revision": historical["revision"],
+             "content_sha256": historical["content_sha256"],
+             "payload": historical["payload"]}, [bundle], sources,
+        )
+        if (
+            classified["reason"] != row["historical_decision_reason"]
+            or classified["reason"] not in HISTORICAL_DECISIONS
+            or any(classified.get(key) != row.get(key) for key in (
+                "target_review_status", "review_decision", "spot_check_selected",
+                "adjudication_status", "source_id", "source_revision",
+                "source_content_sha256", "package_sha256", "review_sha256",
+                "adjudication_sha256", "reviewed_candidate_sha256",
+            ))
+        ):
+            raise ValueError(f"historical decision changed: {claim_id}")
+        if not related_package_content_unchanged(
+            claim_id, reviewed_claim,
+            package.get("evidence_steps", {}), package.get("source_fragments", {}),
+            evidence, fragments,
+        ):
+            raise ValueError(f"evidence graph changed: {claim_id}")
+        source = sources.get(str(row["source_id"]))
+        if source is None:
+            raise ValueError(f"source missing: {claim_id}")
+        index = _source_index(source, indexes, Path(os.environ["DATA_BASE_DIR"]))
+        if index is None:
+            raise ValueError(f"source bytes changed: {claim_id}")
+        anchor_count = exact_current_anchor_count(
+            history[-1]["payload"], source_id=str(row["source_id"]),
+            transcript_id=str(source["payload"].get("transcript_id") or ""),
+            index=index,
+        )
+        fragment_ok, fragment_count = _fragments_match_source(
+            history[-1]["payload"], source_id=str(row["source_id"]),
+            evidence=evidence, fragments=fragments, index=index,
+        )
+        if (
+            anchor_count != row["current_anchor_count"]
+            or not fragment_ok
+            or fragment_count != row["current_fragment_count"]
+        ):
+            raise ValueError(f"current anchors changed: {claim_id}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--artifact-root", type=Path,
