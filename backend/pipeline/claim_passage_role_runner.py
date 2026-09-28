@@ -25,9 +25,9 @@ from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
 from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 
 
-SCHEMA_VERSION = "wang_claim_passage_role_packet_v3"
-RESPONSE_VERSION = "wang_claim_passage_role_decisions_v4"
-PROMPT = Path(__file__).with_name("prompts") / "claim_passage_role_v4.md"
+SCHEMA_VERSION = "wang_claim_passage_role_packet_v4"
+RESPONSE_VERSION = "wang_claim_passage_role_decisions_v5"
+PROMPT = Path(__file__).with_name("prompts") / "claim_passage_role_v5.md"
 ROLES = {"passage_exegesis", "other", "unresolved"}
 MAX_ROLE_REQUEST_BYTES = 250_000
 def response_schema(claim_ids: list[str]) -> dict[str, Any]:
@@ -324,18 +324,26 @@ def reconcile(primary: list[dict[str, Any]], independent: list[dict[str, Any]],
 
 
 def prepare(manifest_path: Path, output_root: Path, store: PostgresKnowledgeStore,
-            pilot_size: int, pilot_offset: int = 0) -> dict[str, Any]:
+            pilot_size: int, pilot_offset: int = 0,
+            claim_ids: list[str] | None = None) -> dict[str, Any]:
     if output_root.exists() and any(output_root.iterdir()):
         raise ValueError("output root must be empty for prepare")
     manifest, pins = _manifest_rows(manifest_path)
-    if pilot_size:
+    if claim_ids:
+        if pilot_size or pilot_offset or len(claim_ids) != len(set(claim_ids)):
+            raise ValueError("explicit Claim selection must be unique and cannot mix with pilot sampling")
+        pin_index = {str(pin["claim_id"]): pin for pin in pins}
+        if any(claim_id not in pin_index for claim_id in claim_ids):
+            raise ValueError("explicit Claim selection contains an unknown ID")
+        pins = [pin_index[claim_id] for claim_id in sorted(claim_ids)]
+    elif pilot_size:
         pins = select_pilot(pins, pilot_size, pilot_offset)
     elif pilot_offset:
         raise ValueError("pilot offset requires pilot size")
     rows = build_rows(store, pins)
     body = {
         "schema_version": SCHEMA_VERSION,
-        "mode": "pilot" if pilot_size else "all_eligible",
+        "mode": "pilot" if pilot_size or claim_ids else "all_eligible",
         "pilot_offset": pilot_offset,
         "manifest_sha256": manifest["artifact_sha256"],
         "prompt_sha256": hashlib.sha256(PROMPT.read_bytes()).hexdigest(),
@@ -514,6 +522,7 @@ def main() -> int:
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--pilot-size", type=int, default=0)
     parser.add_argument("--pilot-offset", type=int, default=0)
+    parser.add_argument("--claim-id", action="append", default=[])
     parser.add_argument("--review", action="store_true")
     parser.add_argument("--reconcile-only", action="store_true")
     parser.add_argument("--batch-size", type=int, default=16)
@@ -524,11 +533,11 @@ def main() -> int:
     if args.review and args.reconcile_only:
         parser.error("choose --review or --reconcile-only")
     if args.reconcile_only:
-        if args.manifest is not None or args.pilot_size or args.pilot_offset:
+        if args.manifest is not None or args.pilot_size or args.pilot_offset or args.claim_id:
             parser.error("--reconcile-only consumes completed model reviews")
         result = reconcile_existing(args.output_root, store)
     elif args.review:
-        if args.manifest is not None or args.pilot_size or args.pilot_offset:
+        if args.manifest is not None or args.pilot_size or args.pilot_offset or args.claim_id:
             parser.error("--review consumes an already prepared packet")
         result = review(args.output_root, store, batch_size=args.batch_size,
                         primary_model=args.primary_model,
@@ -536,7 +545,8 @@ def main() -> int:
     else:
         if args.manifest is None:
             parser.error("--manifest is required for prepare")
-        result = prepare(args.manifest, args.output_root, store, args.pilot_size, args.pilot_offset)
+        result = prepare(args.manifest, args.output_root, store, args.pilot_size,
+                         args.pilot_offset, args.claim_id)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 
