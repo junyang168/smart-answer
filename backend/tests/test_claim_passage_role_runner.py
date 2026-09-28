@@ -1,9 +1,12 @@
 """Fail-closed, no-model checks for Claim-level exegesis role review."""
 
+import hashlib
+
 import pytest
 
 from backend.pipeline.claim_passage_role_runner import (
-    RESPONSE_VERSION, _claim_matches_pin, reconcile, select_pilot, validate_response,
+    RESPONSE_VERSION, _claim_matches_pin, reconcile, response_schema,
+    select_pilot, validate_cached_decisions, validate_response,
 )
 
 
@@ -24,15 +27,19 @@ ROWS = [
 
 
 def response(decisions):
-    return {"schema_version": RESPONSE_VERSION, "decisions": decisions}
+    return {"schema_version": RESPONSE_VERSION, "decisions": {
+        row["claim_id"]: {key: value for key, value in row.items() if key != "claim_id"}
+        for row in decisions
+    }}
 
 
 def decision(claim_id, role, indices, evidence_refs, quote):
+    del quote  # Text is SHA-bound in the packet; the model does not recopy it.
     return {
         "claim_id": claim_id, "role": role,
         "interpreted_ref_indices": indices,
         "interpreted_evidence_refs": evidence_refs,
-        "evidence_quote": quote, "reason": "直接判斷這段話的意思。",
+        "reason": "直接判斷這段話的意思。",
     }
 
 
@@ -43,6 +50,9 @@ def test_direct_exegesis_and_other_are_distinct():
     ]), ROWS)
     assert [row["claim_id"] for row in rows] == ["CL-1", "CL-2"]
     assert [row["role"] for row in rows] == ["passage_exegesis", "other"]
+    assert rows[0]["claim_statement_sha256"] == hashlib.sha256(
+        ROWS[0]["statement"].encode("utf-8")
+    ).hexdigest()
 
 
 def test_evidence_reference_can_bind_missing_claim_reference():
@@ -58,7 +68,6 @@ def test_evidence_reference_can_bind_missing_claim_reference():
     decision("CL-1", "other", [0], [], "磐石是彼得的認信"),
     decision("CL-1", "passage_exegesis", [1], [], "磐石是彼得的認信"),
     decision("CL-1", "passage_exegesis", [], ["John 1:1"], "磐石是彼得的認信"),
-    decision("CL-1", "passage_exegesis", [0], [], "捏造的來源文字"),
 ])
 def test_invalid_decision_fails_closed(bad):
     with pytest.raises(ValueError):
@@ -67,14 +76,28 @@ def test_invalid_decision_fails_closed(bad):
         ]), ROWS)
 
 
-def test_missing_or_duplicate_claim_fails_closed():
+def test_missing_or_foreign_claim_fails_closed():
     with pytest.raises(ValueError):
         validate_response(response([decision("CL-1", "other", [], [], "磐石")]), ROWS)
     with pytest.raises(ValueError):
         validate_response(response([
             decision("CL-1", "other", [], [], "磐石"),
-            decision("CL-1", "other", [], [], "磐石"),
+            decision("CL-3", "other", [], [], "磐石"),
         ]), ROWS)
+
+
+def test_schema_requires_exact_claim_keys_and_cache_rejects_duplicates():
+    schema = response_schema(["CL-1", "CL-2"])["schema"]["properties"]["decisions"]
+    assert schema["required"] == ["CL-1", "CL-2"]
+    assert schema["additionalProperties"] is False
+    assert "evidence_quote" not in schema["properties"]["CL-1"]["properties"]
+    with pytest.raises(ValueError):
+        response_schema(["CL-1", "CL-1"])
+    with pytest.raises(ValueError):
+        validate_cached_decisions([
+            decision("CL-1", "other", [], [], "磐石"),
+            decision("CL-1", "other", [], [], "磐石"),
+        ], ROWS)
 
 
 def test_review_disagreement_stays_unresolved():
@@ -111,6 +134,10 @@ def test_pilot_selection_is_deterministic_and_covers_both_reference_cases():
     assert selected == select_pilot(list(reversed(rows)), 8)
     assert len(selected) == len({row["claim_id"] for row in selected}) == 8
     assert sum(bool(row["scripture_refs"]) for row in selected) == 4
+    later = select_pilot(rows, 8, offset=8)
+    assert {row["claim_id"] for row in later}.isdisjoint(
+        {row["claim_id"] for row in selected}
+    )
 
 
 def test_claim_pin_allows_only_reference_order_changes():

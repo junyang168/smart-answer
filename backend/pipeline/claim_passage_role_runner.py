@@ -25,36 +25,36 @@ from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
 from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 
 
-SCHEMA_VERSION = "wang_claim_passage_role_packet_v2"
-RESPONSE_VERSION = "wang_claim_passage_role_decisions_v2"
-PROMPT = Path(__file__).with_name("prompts") / "claim_passage_role_v2.md"
+SCHEMA_VERSION = "wang_claim_passage_role_packet_v3"
+RESPONSE_VERSION = "wang_claim_passage_role_decisions_v4"
+PROMPT = Path(__file__).with_name("prompts") / "claim_passage_role_v4.md"
 ROLES = {"passage_exegesis", "other", "unresolved"}
 MAX_ROLE_REQUEST_BYTES = 250_000
-RESPONSE_SCHEMA: dict[str, Any] = {
-    "name": RESPONSE_VERSION,
-    "strict": True,
-    "schema": {
+def response_schema(claim_ids: list[str]) -> dict[str, Any]:
+    """Require one keyed answer per Claim; an array cannot enforce unique IDs."""
+
+    if len(claim_ids) != len(set(claim_ids)):
+        raise ValueError("duplicate Claim IDs in response schema")
+    item = {
+        "type": "object", "additionalProperties": False,
+        "required": ["role", "interpreted_ref_indices", "interpreted_evidence_refs", "reason"],
+        "properties": {
+            "role": {"type": "string", "enum": sorted(ROLES)},
+            "interpreted_ref_indices": {"type": "array", "items": {"type": "integer"}},
+            "interpreted_evidence_refs": {"type": "array", "items": {"type": "string"}},
+            "reason": {"type": "string"},
+        },
+    }
+    return {"name": RESPONSE_VERSION, "strict": True, "schema": {
         "type": "object", "additionalProperties": False,
         "required": ["schema_version", "decisions"],
         "properties": {
             "schema_version": {"type": "string", "enum": [RESPONSE_VERSION]},
-            "decisions": {
-                "type": "array", "items": {
-                    "type": "object", "additionalProperties": False,
-                    "required": ["claim_id", "role", "interpreted_ref_indices", "interpreted_evidence_refs", "evidence_quote", "reason"],
-                    "properties": {
-                        "claim_id": {"type": "string"},
-                        "role": {"type": "string", "enum": sorted(ROLES)},
-                        "interpreted_ref_indices": {"type": "array", "items": {"type": "integer"}},
-                        "interpreted_evidence_refs": {"type": "array", "items": {"type": "string"}},
-                        "evidence_quote": {"type": "string"},
-                        "reason": {"type": "string"},
-                    },
-                },
-            },
+            "decisions": {"type": "object", "additionalProperties": False,
+                          "required": claim_ids,
+                          "properties": {claim_id: item for claim_id in claim_ids}},
         },
-    },
-}
+    }}
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -110,18 +110,20 @@ def _manifest_rows(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     return manifest, rows
 
 
-def select_pilot(rows: list[dict[str, Any]], size: int) -> list[dict[str, Any]]:
+def select_pilot(rows: list[dict[str, Any]], size: int, offset: int = 0) -> list[dict[str, Any]]:
     """Deterministically sample both referenced and non-referenced Claims."""
 
-    if size < 1:
-        raise ValueError("pilot size must be positive")
+    if size < 1 or offset < 0 or offset % 2:
+        raise ValueError("pilot size must be positive and offset must be a nonnegative even number")
     ordered = sorted(rows, key=lambda row: hashlib.sha256(str(row["claim_id"]).encode()).hexdigest())
     with_refs = [row for row in ordered if row.get("scripture_refs")]
     without_refs = [row for row in ordered if not row.get("scripture_refs")]
-    selected = with_refs[: min(len(with_refs), (size + 1) // 2)]
-    selected += without_refs[: min(len(without_refs), size - len(selected))]
+    selected = with_refs[offset // 2:offset // 2 + (size + 1) // 2]
+    selected += without_refs[offset // 2:offset // 2 + size - len(selected)]
     selected_ids = {row["claim_id"] for row in selected}
-    selected += [row for row in ordered if row["claim_id"] not in selected_ids][: size - len(selected)]
+    selected += [row for row in ordered[offset:] if row["claim_id"] not in selected_ids][: size - len(selected)]
+    if len(selected) != size:
+        raise ValueError("pilot size and offset exceed the Claim denominator")
     return sorted(selected, key=lambda row: row["claim_id"])
 
 
@@ -237,20 +239,18 @@ def validate_response(response: Mapping[str, Any], rows: list[dict[str, Any]]) -
         raise ValueError("unsupported role response")
     expected = {row["claim_id"]: row for row in rows}
     decisions = response.get("decisions")
-    if not isinstance(decisions, list) or len(decisions) != len(expected):
+    if not isinstance(decisions, dict) or set(decisions) != set(expected):
         raise ValueError("role response denominator mismatch")
     result: dict[str, dict[str, Any]] = {}
-    for raw in decisions:
-        claim_id = raw.get("claim_id")
-        if claim_id not in expected or claim_id in result:
-            raise ValueError(f"duplicate or foreign Claim decision: {claim_id}")
+    for claim_id, raw in decisions.items():
+        if not isinstance(raw, dict):
+            raise ValueError(f"invalid Claim decision: {claim_id}")
         row = expected[claim_id]
         role = raw.get("role")
         indices = raw.get("interpreted_ref_indices")
         evidence_refs = raw.get("interpreted_evidence_refs")
-        quote = str(raw.get("evidence_quote") or "").strip()
         reason = str(raw.get("reason") or "").strip()
-        if role not in ROLES or not isinstance(indices, list) or not isinstance(evidence_refs, list) or not quote or not reason:
+        if role not in ROLES or not isinstance(indices, list) or not isinstance(evidence_refs, list) or not reason:
             raise ValueError(f"invalid role decision: {claim_id}")
         if any(not isinstance(index, int) or isinstance(index, bool) or index < 0
                or index >= len(row["scripture_refs"]) for index in indices):
@@ -266,19 +266,25 @@ def validate_response(response: Mapping[str, Any], rows: list[dict[str, Any]]) -
             or (role == "passage_exegesis") != bool(indices or evidence_refs)
         ):
             raise ValueError(f"interpreted references disagree with role: {claim_id}")
-        texts = [row["statement"]] + [
-            str(fragment.get("verbatim_excerpt") or "")
-            for step in row["evidence_steps"] for fragment in step["fragments"]
-        ]
-        if not any(quote in text for text in texts):
-            raise ValueError(f"role evidence quote is not exact: {claim_id}")
         result[claim_id] = {
             "claim_id": claim_id, "role": role,
             "interpreted_ref_indices": sorted(indices),
             "interpreted_evidence_refs": sorted(evidence_refs),
-            "evidence_quote": quote, "reason": reason,
+            "claim_statement_sha256": hashlib.sha256(row["statement"].encode("utf-8")).hexdigest(),
+            "reason": reason,
         }
     return [result[claim_id] for claim_id in sorted(expected)]
+
+
+def validate_cached_decisions(decisions: Any, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not isinstance(decisions, list) or any(not isinstance(row, dict) for row in decisions):
+        raise ValueError("cached decisions must be a list")
+    ids = [row.get("claim_id") for row in decisions]
+    if len(ids) != len(set(ids)):
+        raise ValueError("duplicate Claim in cached decisions")
+    keyed = {row["claim_id"]: {key: value for key, value in row.items() if key != "claim_id"}
+             for row in decisions}
+    return validate_response({"schema_version": RESPONSE_VERSION, "decisions": keyed}, rows)
 
 
 def _passage_keys(decision: Mapping[str, Any], row: Mapping[str, Any]) -> list[str]:
@@ -317,16 +323,20 @@ def reconcile(primary: list[dict[str, Any]], independent: list[dict[str, Any]],
     return output
 
 
-def prepare(manifest_path: Path, output_root: Path, store: PostgresKnowledgeStore, pilot_size: int) -> dict[str, Any]:
+def prepare(manifest_path: Path, output_root: Path, store: PostgresKnowledgeStore,
+            pilot_size: int, pilot_offset: int = 0) -> dict[str, Any]:
     if output_root.exists() and any(output_root.iterdir()):
         raise ValueError("output root must be empty for prepare")
     manifest, pins = _manifest_rows(manifest_path)
     if pilot_size:
-        pins = select_pilot(pins, pilot_size)
+        pins = select_pilot(pins, pilot_size, pilot_offset)
+    elif pilot_offset:
+        raise ValueError("pilot offset requires pilot size")
     rows = build_rows(store, pins)
     body = {
         "schema_version": SCHEMA_VERSION,
         "mode": "pilot" if pilot_size else "all_eligible",
+        "pilot_offset": pilot_offset,
         "manifest_sha256": manifest["artifact_sha256"],
         "prompt_sha256": hashlib.sha256(PROMPT.read_bytes()).hexdigest(),
         "runner_code_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
@@ -364,7 +374,8 @@ def review(output_root: Path, store: PostgresKnowledgeStore, *, batch_size: int,
         batch = rows[offset:offset + batch_size]
         batch_id = f"{offset // batch_size + 1:05d}"
         user_payload = json.dumps({"claims": batch}, ensure_ascii=False, sort_keys=True)
-        if len((prompt + user_payload + json.dumps(RESPONSE_SCHEMA, ensure_ascii=False)).encode("utf-8")) > MAX_ROLE_REQUEST_BYTES:
+        schema = response_schema([row["claim_id"] for row in batch])
+        if len((prompt + user_payload + json.dumps(schema, ensure_ascii=False)).encode("utf-8")) > MAX_ROLE_REQUEST_BYTES:
             raise ValueError(f"role review request exceeds byte ceiling: {batch_id}")
         primary_path = output_root / f"primary-{batch_id}.json"
         independent_path = output_root / f"independent-{batch_id}.json"
@@ -380,7 +391,7 @@ def review(output_root: Path, store: PostgresKnowledgeStore, *, batch_size: int,
                 raise ValueError("primary review belongs to another packet")
             primary = primary_artifact["decisions"]
         else:
-            response = primary_client.generate_json(prompt, user_payload, RESPONSE_SCHEMA)
+            response = primary_client.generate_json(prompt, user_payload, schema)
             primary = validate_response(response, batch)
             primary_artifact = _artifact({
                 "schema_version": RESPONSE_VERSION, "role": "primary",
@@ -402,7 +413,7 @@ def review(output_root: Path, store: PostgresKnowledgeStore, *, batch_size: int,
             independent = independent_artifact["decisions"]
         else:
             # The independent reviewer receives the same source packet, never the proposal.
-            response = independent_client.generate_json(prompt, user_payload, RESPONSE_SCHEMA)
+            response = independent_client.generate_json(prompt, user_payload, schema)
             independent = validate_response(response, batch)
             independent_artifact = _artifact({
                 "schema_version": RESPONSE_VERSION, "role": "independent",
@@ -412,8 +423,8 @@ def review(output_root: Path, store: PostgresKnowledgeStore, *, batch_size: int,
             })
             _write_immutable(independent_path, independent_artifact)
         # Validate cached outputs as strictly as fresh model outputs.
-        primary = validate_response({"schema_version": RESPONSE_VERSION, "decisions": primary}, batch)
-        independent = validate_response({"schema_version": RESPONSE_VERSION, "decisions": independent}, batch)
+        primary = validate_cached_decisions(primary, batch)
+        independent = validate_cached_decisions(independent, batch)
         results.extend(reconcile(primary, independent, batch))
     if build_rows(store, pins) != rows:
         raise ValueError("role packet changed during model review")
@@ -472,8 +483,8 @@ def reconcile_existing(output_root: Path, store: PostgresKnowledgeStore) -> dict
         if any(claim_id not in by_id for claim_id in ids):
             raise ValueError("review includes foreign Claim")
         batch = [by_id[claim_id] for claim_id in ids]
-        a = validate_response({"schema_version": RESPONSE_VERSION, "decisions": primary["decisions"]}, batch)
-        b = validate_response({"schema_version": RESPONSE_VERSION, "decisions": independent["decisions"]}, batch)
+        a = validate_cached_decisions(primary["decisions"], batch)
+        b = validate_cached_decisions(independent["decisions"], batch)
         decisions.extend(reconcile(a, b, batch))
         if primary_model not in (None, primary["model"]) or independent_model not in (None, independent["model"]):
             raise ValueError("review model changed between batches")
@@ -502,6 +513,7 @@ def main() -> int:
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--pilot-size", type=int, default=0)
+    parser.add_argument("--pilot-offset", type=int, default=0)
     parser.add_argument("--review", action="store_true")
     parser.add_argument("--reconcile-only", action="store_true")
     parser.add_argument("--batch-size", type=int, default=16)
@@ -512,11 +524,11 @@ def main() -> int:
     if args.review and args.reconcile_only:
         parser.error("choose --review or --reconcile-only")
     if args.reconcile_only:
-        if args.manifest is not None or args.pilot_size:
+        if args.manifest is not None or args.pilot_size or args.pilot_offset:
             parser.error("--reconcile-only consumes completed model reviews")
         result = reconcile_existing(args.output_root, store)
     elif args.review:
-        if args.manifest is not None or args.pilot_size:
+        if args.manifest is not None or args.pilot_size or args.pilot_offset:
             parser.error("--review consumes an already prepared packet")
         result = review(args.output_root, store, batch_size=args.batch_size,
                         primary_model=args.primary_model,
@@ -524,7 +536,7 @@ def main() -> int:
     else:
         if args.manifest is None:
             parser.error("--manifest is required for prepare")
-        result = prepare(args.manifest, args.output_root, store, args.pilot_size)
+        result = prepare(args.manifest, args.output_root, store, args.pilot_size, args.pilot_offset)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 
