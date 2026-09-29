@@ -67,3 +67,42 @@ def test_full_coverage_writes_one_sha_bound_ledger(tmp_path, monkeypatch):
     assert ledger["review_artifact_shas"] == {
         "primary-00001": "primary-sha", "independent-00001": "independent-sha",
     }
+
+
+def test_applies_bounded_resolution_and_preserves_both_model_answers():
+    source = {"claim_id": "C1", "scripture_refs": ["Matt 5:17"]}
+    primary = {"claim_id": "C1", "role": "passage_exegesis",
+               "interpreted_ref_indices": [0], "interpreted_evidence_refs": [],
+               "reason": "interprets the verse"}
+    independent = {"claim_id": "C1", "role": "other",
+                   "interpreted_ref_indices": [], "interpreted_evidence_refs": [],
+                   "reason": "doctrinal inference"}
+    reconciled = base.reconcile([primary], [independent], [source])
+    approved = {"C1": {
+        "role": "passage_exegesis", "disposition": "resolved",
+        "interpreted_passage_keys": ["Matt.5.17"],
+        "primary_artifact_sha256": "p", "independent_artifact_sha256": "i",
+        "analysis_index": 1,
+    }}
+    seen = set()
+    assembler._apply_resolution(reconciled, [source], "p", "i", approved, seen)
+    assert seen == {"C1"}
+    assert reconciled[0]["role"] == "passage_exegesis"
+    assert reconciled[0]["interpreted_passage_keys"] == ["Matt.5.17"]
+    assert reconciled[0]["primary"] == primary
+    assert reconciled[0]["independent"] == independent
+
+
+def test_rejects_resolution_when_the_model_pair_does_not_match():
+    source = {"claim_id": "C1", "scripture_refs": ["Matt 5:17"]}
+    primary = {"claim_id": "C1", "role": "passage_exegesis",
+               "interpreted_ref_indices": [0], "interpreted_evidence_refs": [],
+               "reason": "interprets"}
+    reconciled = base.reconcile([primary], [primary], [source])
+    approved = {"C1": {
+        "role": "other", "disposition": "resolved", "interpreted_passage_keys": [],
+        "primary_artifact_sha256": "p", "independent_artifact_sha256": "i",
+        "analysis_index": 1,
+    }}
+    with pytest.raises(ValueError, match="does not match model pair"):
+        assembler._apply_resolution(reconciled, [source], "p", "i", approved, set())
