@@ -226,3 +226,55 @@ def test_quote_repair_cannot_hide_content_or_binding_changes(tmp_path, failure):
     base._write_immutable(path, base._artifact(repair))
     with pytest.raises(ValueError):
         routing.effective_artifact(raw, rows, path)
+
+
+def test_quote_choice_schema_uses_only_exact_per_claim_input():
+    rows = fixture()["claims"]
+    constrained = routing.schema([r["claim_id"] for r in rows], rows)
+    for row in rows:
+        choices = constrained["schema"]["properties"]["decisions"]["properties"][row["claim_id"]]["properties"]["basis_quote"]["enum"]
+        assert choices
+        assert all(any(c in text for text in [row["statement"], *row["source_excerpts"]]) for c in choices)
+        assert all(len(c) <= 128 for c in choices)
+
+
+def test_quote_choice_reuses_legacy_cache_without_model_calls(tmp_path):
+    packet = fixture()
+    class Client:
+        calls = 0
+        def generate_json(self, *args):
+            self.calls += 1
+            props = args[2]["schema"]["properties"]["decisions"]["properties"]
+            return {"decisions": {c: answer() | {"basis_quote": props[c]["properties"]["basis_quote"].get("enum", [answer()["basis_quote"]])[0]} for c in ("C1", "C2")}}
+    client = Client()
+    legacy = routing.run_batch(packet, packet["claims"], tmp_path, "independent", client)
+    assert routing.run_batch(packet, packet["claims"], tmp_path, "independent", client, quote_choice=True) == legacy
+    assert client.calls == 1
+    modern = routing.run_batch(packet, packet["claims"], tmp_path / "new", "independent", client, quote_choice=True)
+    assert modern["quote_protocol"] == "exact_source_choices_v2"
+    # Independent agreement can consume differently-versioned quote schemas.
+    primary = artifact(packet, "primary", {c: answer() for c in ("C1", "C2")})
+    assert routing.manifest(packet, [primary, modern])["counts"] == {"salvation": 2}
+
+
+def test_inspected_paraphrase_quote_repair_requires_whole_source_and_provenance(tmp_path):
+    packet = fixture()
+    raw = artifact(packet, "independent", {"C1": answer(), "C2": answer()})
+    raw["response"]["decisions"]["C1"]["basis_quote"] = "信心不是力量"
+    raw = base._artifact({k: v for k, v in raw.items() if k != "artifact_sha256"})
+    repair = {"schema_version": "wang_other_claim_quote_repair_v1",
+        "repair_type": "inspected_exact_source_quote", "reviewer": "codex_source_inspection_not_human_approval",
+        "reason": "Inspected source and original rationale; repair evidence only.",
+        "raw_artifact_sha256": raw["artifact_sha256"], "packet_sha256": packet["artifact_sha256"],
+        "changes": [{"claim_id": "C1", "claim_content_sha256": packet["claims"][0]["claim_content_sha256"],
+                     "before": "信心不是力量", "after": "信心不是心理力量。",
+                     "inspection_reason": "Rationale explains faith, not psychological force; original fragment retained."}]}
+    path = tmp_path / "repair.json"
+    base._write_immutable(path, base._artifact(repair))
+    fixed = routing.effective_artifact(raw, packet["claims"], path)
+    assert fixed["response"]["decisions"]["C1"]["partition"] == "salvation"
+    repair["changes"][0]["after"] = "不是心理力量"
+    bad = tmp_path / "bad.json"
+    base._write_immutable(bad, base._artifact(repair))
+    with pytest.raises(ValueError):
+        routing.effective_artifact(raw, packet["claims"], bad)
