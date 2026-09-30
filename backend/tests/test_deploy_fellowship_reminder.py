@@ -54,6 +54,18 @@ def deploy_fixture(tmp_path: Path) -> dict[str, object]:
 
     for path in (source, deploy_root / "releases", runtime_data / "config", legacy, bin_dir, logs):
         path.mkdir(parents=True)
+    _write_executable(
+        bin_dir / "google-token-check",
+        "#!/usr/bin/env bash\n"
+        "printf 'token-check %s\\n' \"$1\" >> \"$TEST_DEPLOY_EVENT_LOG\"\n"
+        "[[ ! -e \"$TEST_DEAD_TOKEN_MARKER\" ]]\n",
+    )
+
+    # The owner's Google OAuth token, and a stand-in for the release's refresh
+    # check: it fails while the dead-token marker exists.
+    google_token = legacy / "token.json"
+    google_token.write_text('{"refresh_token": "fixture"}', encoding="utf-8")
+    token_check = bin_dir / "google-token-check"
 
     # The web's own configuration: every release links web/.env.local here.
     web_data = tmp_path / "web-data"
@@ -166,6 +178,13 @@ elif verb == "Set" and len(parts) == 2:
         current[last] = parts[1]
     with path.open("wb") as handle:
         plistlib.dump(data, handle)
+elif verb == "Add" and len(parts) == 2:
+    kind, _, value = parts[1].partition(" ")
+    if last in current:
+        raise SystemExit(1)
+    current[last] = {} if kind == "dict" else value
+    with path.open("wb") as handle:
+        plistlib.dump(data, handle)
 else:
     raise SystemExit(64)
 """,
@@ -256,6 +275,9 @@ else:
         "SMART_ANSWER_REFERENCE_INBOX_PLIST": str(inbox_plist),
         "SMART_ANSWER_PLIST_BUDDY": str(bin_dir / "plist-buddy"),
         "SMART_ANSWER_MIN_FREE_MB": "1",
+        "SMART_ANSWER_GOOGLE_OAUTH_TOKEN_FILE": str(google_token),
+        "SMART_ANSWER_GOOGLE_TOKEN_CHECK": str(token_check),
+        "TEST_DEAD_TOKEN_MARKER": str(logs / "dead-token"),
         "SMART_ANSWER_BACKEND_HEALTH": "http://backend.test/healthz",
         "SMART_ANSWER_FRONTEND_HEALTH": "http://frontend.test/",
         "TEST_BACKEND_PLIST": str(backend_plist),
@@ -285,6 +307,8 @@ else:
         "env": env,
         "web_env": web_env,
         "web_data": web_data,
+        "google_token": google_token,
+        "dead_token_marker": logs / "dead-token",
     }
 
 
@@ -623,3 +647,53 @@ def test_unservable_fellowship_document_rolls_back(deploy_fixture: dict[str, obj
     assert "web cannot serve fellowship document 2026-09-25/study.pptx" in result.stderr
     assert "Rollback complete" in result.stdout
     assert (deploy_fixture["deploy_root"] / "active-release").read_text(encoding="utf-8").strip() == str(deploy_fixture["previous_release"])
+
+
+def _backend_env(plist: Path) -> dict[str, str]:
+    with plist.open("rb") as handle:
+        return plistlib.load(handle).get("EnvironmentVariables", {})
+
+
+def test_backend_is_told_where_the_google_token_is(deploy_fixture: dict[str, object]) -> None:
+    # OPS-27: releases hold no token.json; the backend looked in its working
+    # directory and silently fell back to the service account.
+    result = _run("bash", deploy_fixture["deploy"], cwd=deploy_fixture["source"], env=deploy_fixture["env"], check=False)
+
+    assert result.returncode == 0, result.stderr
+    assert _backend_env(deploy_fixture["backend_plist"])["GOOGLE_OAUTH_TOKEN_FILE"] == str(deploy_fixture["google_token"])
+    events = deploy_fixture["deploy_event_log"].read_text(encoding="utf-8")
+    assert f"token-check {deploy_fixture['google_token']}" in events
+
+
+def test_dead_google_token_stops_the_deploy_before_switching(deploy_fixture: dict[str, object]) -> None:
+    deploy_fixture["dead_token_marker"].touch()
+
+    result = _run("bash", deploy_fixture["deploy"], cwd=deploy_fixture["source"], env=deploy_fixture["env"], check=False)
+
+    assert result.returncode == 1
+    assert "Google OAuth token cannot be refreshed" in result.stderr
+    assert "services were not changed" in result.stderr
+    with deploy_fixture["backend_plist"].open("rb") as handle:
+        assert plistlib.load(handle)["ProgramArguments"][0] == "/old/python"
+    assert (deploy_fixture["deploy_root"] / "active-release").read_text(encoding="utf-8").strip() == str(deploy_fixture["previous_release"])
+
+
+def test_skip_google_token_check_deploys_anyway(deploy_fixture: dict[str, object]) -> None:
+    deploy_fixture["dead_token_marker"].touch()
+
+    result = _run(
+        "bash", deploy_fixture["deploy"], "--skip-google-token-check",
+        cwd=deploy_fixture["source"], env=deploy_fixture["env"], check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Skipping the Google OAuth token check" in result.stdout
+
+
+def test_deploy_fails_closed_without_a_google_token(deploy_fixture: dict[str, object]) -> None:
+    deploy_fixture["google_token"].unlink()
+
+    result = _run("bash", deploy_fixture["deploy"], cwd=deploy_fixture["source"], env=deploy_fixture["env"], check=False)
+
+    assert result.returncode == 1
+    assert "Google OAuth token not found" in result.stderr

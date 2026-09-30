@@ -2750,46 +2750,19 @@ def export_sermon_to_doc(project_id: str) -> str:
 
     SCOPES = ['https://www.googleapis.com/auth/documents', 'https://www.googleapis.com/auth/drive']
     
-    # Try using OAuth Token First (Desktop App)
-    import os
-    from google.oauth2.credentials import Credentials
-    from google.auth.transport.requests import Request
-    
-    # Locate token.json relative to project root or config
-    # We assume it's in DATA_BASE_PATH's parent or specific location. 
-    # For now, mimic config assumption: base_dir
-    # Best to use consistent path derived from config.
-    token_path = DATA_BASE_PATH.parent / "token.json" 
-    # Or just assume standard working dir if not robust? 
-    # Let's use absolute path logic similar to service_account.json
-    # Users/junyang/app/smart-answer/token.json
-    # DATA_BASE_PATH is /opt/homebrew/var/www/church/web/data ... wait.
-    # User's project root is /Users/junyang/app/smart-answer
-    # We should look in the project root.
-    # But DATA_BASE_PATH is configured to /opt/...
-    # Let's rely on finding it near config.py or CWD?
-    # Safer: Check CWD and Env Var.
-    # Or hardcode for this user's fix first? No, let's use CWD as fallback.
-    
-    creds = None
-    possible_token = Path("token.json").resolve()
-    if possible_token.exists():
-         try:
-             creds = Credentials.from_authorized_user_file(str(possible_token), SCOPES)
-         except Exception as e:
-             print(f"Failed to load token.json: {e}")
-             
-    # Refresh token if expired
-    if creds and creds.expired and creds.refresh_token:
-        try:
-            creds.refresh(Request())
-            # Save refreshed token back to token.json
-            with open(possible_token, "w") as token_file:
-                token_file.write(creds.to_json())
-            print("Refreshed OAuth token successfully.")
-        except Exception as e:
-            print(f"Failed to refresh token: {e}")
-            creds = None
+    # The owner's OAuth token (Docs are created in the owner's Drive). In
+    # production its path is GOOGLE_OAUTH_TOKEN_FILE; when that is set and the
+    # token fails, say so instead of quietly exporting as the service account
+    # (OPS-27: that fallback hid a dead token for two months).
+    from backend import google_oauth_token
+
+    try:
+        creds = google_oauth_token.load_credentials()
+    except google_oauth_token.OAuthTokenError as exc:
+        if google_oauth_token.is_configured():
+            raise RuntimeError(str(exc)) from exc
+        print(f"{exc}; falling back to the service account")
+        creds = None
 
     if not creds:
         # Fallback to Service Account / ADC

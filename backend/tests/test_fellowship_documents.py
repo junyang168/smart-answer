@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import errno
 import importlib
+import json
 import os
 import sys
 import types
+
+import pytest
 
 
 def _load_service_with_data_dir(monkeypatch, tmp_path):
@@ -295,6 +298,7 @@ def test_analysis_assets_selects_drive_recording_and_ignores_empty_chat(monkeypa
         )
 
     monkeypatch.setattr(service, "_list_drive_folder_assets", fake_drive_assets)
+    monkeypatch.setattr(service, "_search_drive_meet_assets", lambda date: [])
     monkeypatch.setattr(service, "_download_drive_recording_to_docs", fake_download_drive_recording)
 
     assets = service.resolve_fellowship_analysis_assets("2026-06-19")
@@ -381,3 +385,198 @@ def test_run_ffmpeg_command_reports_non_transient_oserror(monkeypatch, tmp_path)
         assert "test stage" in getattr(exc, "detail", "")
     else:
         raise AssertionError("Expected ffmpeg OSError to be reported")
+
+
+class _FakeDrive:
+    """files().list / files().get as the Drive API client chains them."""
+
+    def __init__(self, items=(), visible=()):
+        self.items, self.visible, self.queries = list(items), set(visible), []
+
+    def files(self):
+        return self
+
+    def list(self, **kwargs):
+        self.queries.append(kwargs["q"])
+        items = self.items
+        return type("R", (), {"execute": lambda _self: {"files": items}})()
+
+    def get(self, fileId, **kwargs):
+        visible = self.visible
+
+        def execute(_self):
+            if fileId not in visible:
+                raise RuntimeError("404 File not found")
+            return {"id": fileId}
+
+        return type("R", (), {"execute": execute})()
+
+
+def test_meet_files_are_found_by_name_wherever_meet_saved_them(monkeypatch, tmp_path):
+    # OPS-28: on 2026-09-25 Meet saved the recording in
+    # `Google Meet/達拉斯聖道教會團契查經 (recurring)`, not `Meet Recordings`.
+    service = _load_service_with_data_dir(monkeypatch, tmp_path)
+    owner = _FakeDrive(
+        items=[
+            {"id": "rec", "name": "達拉斯聖道教會團契查經 - 2026/09/25 19:24 CDT - Recording", "mimeType": "video/mp4", "size": "100"},
+            {"id": "notes", "name": "達拉斯聖道教會團契查經 - 2026/09/25 19:24 CDT - Gemini 提供的会议记录", "mimeType": "application/vnd.google-apps.document"},
+            {"id": "deck", "name": "查經 2026/09/25 講義.pptx", "mimeType": "application/vnd.openxmlformats"},  # not a Meet file
+            {"id": "other-day", "name": "達拉斯聖道教會團契查經 - 2026/09/26 10:00 CDT - Recording", "mimeType": "video/mp4"},
+        ]
+    )
+    monkeypatch.setattr(service, "_get_owner_drive_service", lambda: owner)
+
+    assets = service._search_drive_meet_assets("2026-09-25")
+
+    assert {(a.drive_file_id, a.kind) for a in assets} == {("rec", "recording"), ("notes", "transcript")}
+    assert "name contains '2026/09/25'" in owner.queries[0]
+    assert "trashed=false" in owner.queries[0]
+
+
+def test_search_and_folder_results_are_merged_once(monkeypatch, tmp_path):
+    service = _load_service_with_data_dir(monkeypatch, tmp_path)
+    (tmp_path / "data" / "config" / "fellowship.json").write_text(
+        '[{"date": "09/25/2026", "title": "你們不知道所求的是甚麼", "sourceLinks": []}]', encoding="utf-8"
+    )
+    recording = service.FellowshipAnalysisAsset(
+        name="達拉斯聖道教會團契查經 - 2026/09/25 19:24 CDT - Recording",
+        source="drive", kind="recording", size=100, usable=True, driveFileId="rec",
+    )
+    monkeypatch.setattr(service, "_list_drive_folder_assets", lambda folder_id, date: [recording])
+    monkeypatch.setattr(service, "_search_drive_meet_assets", lambda date: [recording])
+    downloaded = []
+
+    def download(date, asset):
+        downloaded.append(asset.drive_file_id)
+        return service.FellowshipAnalysisAsset(name="達拉斯聖道教會團契查經 - 2026_09_25 19_24 CDT - Recording.mp4", source="local", kind="recording", size=100, usable=True)
+
+    monkeypatch.setattr(service, "_download_drive_recording_to_docs", download)
+
+    assets = service.resolve_fellowship_analysis_assets("2026-09-25")
+
+    assert [a.drive_file_id for a in assets.candidates if a.source == "drive"] == ["rec"]
+    assert downloaded == ["rec"]
+    assert assets.recording is not None and assets.recording.source == "local"
+
+
+def test_a_failed_search_is_reported_not_fatal(monkeypatch, tmp_path):
+    service = _load_service_with_data_dir(monkeypatch, tmp_path)
+    (tmp_path / "data" / "config" / "fellowship.json").write_text(
+        '[{"date": "09/25/2026", "title": "t", "sourceLinks": []}]', encoding="utf-8"
+    )
+    monkeypatch.setattr(service, "_list_drive_folder_assets", lambda folder_id, date: [])
+
+    def dead_token(date):
+        raise RuntimeError("invalid_grant")
+
+    monkeypatch.setattr(service, "_search_drive_meet_assets", dead_token)
+
+    assets = service.resolve_fellowship_analysis_assets("2026-09-25")
+
+    assert any("Unable to search Drive for Meet files: invalid_grant" in m for m in assets.messages)
+
+
+def test_downloads_use_the_owner_when_the_service_account_cannot_see_the_file(monkeypatch, tmp_path):
+    service = _load_service_with_data_dir(monkeypatch, tmp_path)
+    service_account = _FakeDrive(visible={"shared"})
+    owner = _FakeDrive()
+    monkeypatch.setattr(service, "_get_drive_service", lambda scopes: service_account)
+    monkeypatch.setattr(service, "_get_owner_drive_service", lambda: owner)
+
+    assert service._drive_service_for_file("shared", ["scope"]) is service_account
+    assert service._drive_service_for_file("in-new-folder", ["scope"]) is owner
+
+
+def _two_studies(monkeypatch, tmp_path):
+    """2026-09-25: two studies in one folder, where the automatic pick went wrong (OPS-30)."""
+
+    service = _load_service_with_data_dir(monkeypatch, tmp_path)
+    (tmp_path / "data" / "config" / "fellowship.json").write_text('[{"date": "09/25/2026", "title": "t"}]', encoding="utf-8")
+    docs = tmp_path / "data" / "fellowship" / "docs" / "2026-09-25"
+    docs.mkdir(parents=True)
+    (docs / "葡萄園的工人 太19-27至20-16.pptx").write_bytes(b"deck one")
+    (docs / "你們不知道所求的是甚麼 太20-17至34.pptx").write_bytes(b"deck two, the bigger one")
+    (docs / "马太福音 20-17至34 你們不知道所求的是甚麼 查經逐字稿.md").write_text("講稿 " * 50, encoding="utf-8")
+    (docs / "马太福音 20-17至34 你們不知道所求的是甚麼 查經逐字稿（投影片對照）.md").write_text("對照 " * 400, encoding="utf-8")
+    (docs / "達拉斯聖道教會團契查經 - 2026_09_25 19_24 CDT - Recording.mp4").write_bytes(b"mp4")
+    monkeypatch.setattr(service, "_search_drive_meet_assets", lambda date: [])
+    return service
+
+
+def test_owner_can_pick_the_transcript_and_ppt(monkeypatch, tmp_path):
+    service = _two_studies(monkeypatch, tmp_path)
+    auto = service.resolve_fellowship_analysis_assets("2026-09-25")
+    script = "local:马太福音 20-17至34 你們不知道所求的是甚麼 查經逐字稿.md"
+    deck = "local:你們不知道所求的是甚麼 太20-17至34.pptx"
+    assert auto.transcript.key != script  # the automatic pick is the cross-reference
+
+    picked = service.update_fellowship_analysis_sources(
+        "2026-09-25", service.FellowshipAnalysisSources(transcript=script, pptx=deck)
+    )
+
+    assert picked.transcript.key == script
+    assert picked.pptx.key == deck
+    assert picked.sources.transcript == script
+    # Stored apart from fellowship.json, so saving the entry form cannot erase it.
+    stored = json.loads((tmp_path / "data" / "config" / "fellowship_analysis_sources.json").read_text(encoding="utf-8"))
+    assert stored == {"2026-09-25": {"pptx": deck, "transcript": script}}
+    assert "analysis" not in (tmp_path / "data" / "config" / "fellowship.json").read_text(encoding="utf-8")
+    # And the analysis run sees the same picks.
+    assert service.resolve_fellowship_analysis_assets("09/25/2026").transcript.key == script
+
+
+def test_none_means_do_not_use_and_empty_means_automatic(monkeypatch, tmp_path):
+    service = _two_studies(monkeypatch, tmp_path)
+    none = service.update_fellowship_analysis_sources("2026-09-25", service.FellowshipAnalysisSources(transcript="none"))
+    assert none.transcript is None
+    back = service.update_fellowship_analysis_sources("2026-09-25", service.FellowshipAnalysisSources())
+    assert back.transcript is not None
+    assert json.loads((tmp_path / "data" / "config" / "fellowship_analysis_sources.json").read_text()) == {}
+
+
+def test_unknown_file_is_refused_and_a_vanished_pick_falls_back(monkeypatch, tmp_path):
+    service = _two_studies(monkeypatch, tmp_path)
+    with pytest.raises(service.HTTPException) as refused:
+        service.update_fellowship_analysis_sources("2026-09-25", service.FellowshipAnalysisSources(pptx="local:nope.pptx"))
+    assert refused.value.status_code == 400
+
+    deck = "local:葡萄園的工人 太19-27至20-16.pptx"
+    service.update_fellowship_analysis_sources("2026-09-25", service.FellowshipAnalysisSources(pptx=deck))
+    (tmp_path / "data" / "fellowship" / "docs" / "2026-09-25" / "葡萄園的工人 太19-27至20-16.pptx").unlink()
+
+    assets = service.resolve_fellowship_analysis_assets("2026-09-25")
+    assert assets.pptx is not None and assets.pptx.key != deck
+    assert any("已找不到，改用自動選擇" in message for message in assets.messages)
+
+
+def test_every_candidate_has_a_key(monkeypatch, tmp_path):
+    service = _two_studies(monkeypatch, tmp_path)
+    assets = service.resolve_fellowship_analysis_assets("2026-09-25")
+    assert all(candidate.key for candidate in assets.candidates)
+
+
+def test_learning_review_reads_only_the_chosen_sources(monkeypatch, tmp_path):
+    # OPS-31: 從文件產生 read every file in the folder, mixing both 09-25 studies.
+    service = _two_studies(monkeypatch, tmp_path)
+    script = "local:马太福音 20-17至34 你們不知道所求的是甚麼 查經逐字稿.md"
+    service.update_fellowship_analysis_sources("2026-09-25", service.FellowshipAnalysisSources(transcript=script))
+    monkeypatch.setattr(service, "_extract_text_from_pptx", lambda path: f"slides of {path.name}")
+
+    text = service._learning_source_text("09/25/2026")
+
+    assert "講稿" in text
+    assert "對照" not in text
+    assert "slides of 你們不知道所求的是甚麼 太20-17至34.pptx" in text
+    assert "葡萄園" not in text
+
+
+def test_learning_review_falls_back_to_the_folder_without_sources(monkeypatch, tmp_path):
+    service = _two_studies(monkeypatch, tmp_path)
+    service.update_fellowship_analysis_sources(
+        "2026-09-25", service.FellowshipAnalysisSources(transcript="none", pptx="none")
+    )
+    monkeypatch.setattr(service, "_extract_text_from_pptx", lambda path: "")
+
+    text = service._learning_source_text("09/25/2026")
+
+    assert "講稿" in text and "對照" in text  # the whole folder, as before
