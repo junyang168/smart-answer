@@ -183,3 +183,46 @@ def test_worker_lane_resume_is_absolute_and_rejects_partial_boundaries():
     for count, index, start in ((2, 2, 0), (0, 0, 0), (2, 0, 577)):
         with pytest.raises(ValueError):
             worker_starts(start, 8743, count, index)
+
+
+def test_explicit_script_quote_repair_preserves_raw_and_classification(tmp_path):
+    packet = fixture()
+    raw = artifact(packet, "independent", {"C1": answer(), "C2": answer()})
+    raw["response"]["decisions"]["C1"]["basis_quote"] = "教授認為信心不是心理力量。"
+    raw = base._artifact({k: v for k, v in raw.items() if k != "artifact_sha256"})
+    path = tmp_path / "repair.json"
+    correction = base._artifact({"schema_version": "wang_other_claim_quote_repair_v1",
+        "raw_artifact_sha256": raw["artifact_sha256"], "packet_sha256": packet["artifact_sha256"],
+        "reason": "Only script spelling changed; exact source substring selected.",
+        "changes": [{"claim_id": "C1", "claim_content_sha256": packet["claims"][0]["claim_content_sha256"],
+                     "before": "教授認為信心不是心理力量。", "after": "教授认为信心不是心理力量。"}]})
+    base._write_immutable(path, correction)
+    fixed = routing.effective_artifact(raw, packet["claims"], path)
+    assert raw["response"]["decisions"]["C1"]["basis_quote"] == "教授認為信心不是心理力量。"
+    assert fixed["response"]["decisions"]["C1"] == answer() | {"basis_quote": "教授认为信心不是心理力量。"}
+    assert fixed["raw_artifact_sha256"] == raw["artifact_sha256"]
+    routing.validate(fixed["response"], packet["claims"])
+
+
+@pytest.mark.parametrize("failure", ["binding", "meaning", "ambiguous"])
+def test_quote_repair_cannot_hide_content_or_binding_changes(tmp_path, failure):
+    packet = fixture()
+    rows = packet["claims"]
+    raw = artifact(packet, "independent", {"C1": answer(), "C2": answer()})
+    raw["response"]["decisions"]["C1"]["basis_quote"] = "教授認為信心不是心理力量。"
+    raw = base._artifact({k: v for k, v in raw.items() if k != "artifact_sha256"})
+    repair = {"schema_version": "wang_other_claim_quote_repair_v1",
+        "raw_artifact_sha256": raw["artifact_sha256"], "packet_sha256": packet["artifact_sha256"],
+        "reason": "script spelling", "changes": [{"claim_id": "C1",
+            "claim_content_sha256": rows[0]["claim_content_sha256"],
+            "before": "教授認為信心不是心理力量。", "after": "教授认为信心不是心理力量。"}]}
+    if failure == "binding":
+        repair["raw_artifact_sha256"] = "stale"
+    elif failure == "meaning":
+        repair["changes"][0]["after"] = "教授认为信心只是心理力量。"
+    else:
+        rows[0]["source_excerpts"].append("教授認为信心不是心理力量。")
+    path = tmp_path / "repair.json"
+    base._write_immutable(path, base._artifact(repair))
+    with pytest.raises(ValueError):
+        routing.effective_artifact(raw, rows, path)
