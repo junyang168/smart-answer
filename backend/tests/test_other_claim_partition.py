@@ -165,3 +165,21 @@ def test_independent_audit_detects_even_rehashed_corruption(corruption):
     manifest = base._artifact({k: v for k, v in manifest.items() if k != "artifact_sha256"})
     with pytest.raises(ValueError):
         module.audit(packet, manifest, roles)
+def test_disjoint_worker_lanes_cover_frozen_batches():
+    from backend.pipeline.other_claim_partition import worker_starts
+    a = worker_starts(0, 8743, 2, 0)
+    b = worker_starts(0, 8743, 2, 1)
+    assert not set(a) & set(b)
+    assert sorted(a + b) == list(range(0, 8743, 16))
+    assert len(a) + len(b) == 547
+    assert (a + b).count(8736) == 1
+
+
+def test_worker_lane_resume_is_absolute_and_rejects_partial_boundaries():
+    from backend.pipeline.other_claim_partition import worker_starts
+    import pytest
+    assert worker_starts(576, 640, 2, 0) == [576, 608]
+    assert worker_starts(576, 640, 2, 1) == [592, 624]
+    for count, index, start in ((2, 2, 0), (0, 0, 0), (2, 0, 577)):
+        with pytest.raises(ValueError):
+            worker_starts(start, 8743, count, index)

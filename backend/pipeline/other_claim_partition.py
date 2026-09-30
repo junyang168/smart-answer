@@ -6,6 +6,7 @@ identity. GPT and Claude classify independently; disagreement remains held.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 from collections import Counter
@@ -280,6 +281,8 @@ def main():
     p.add_argument("--role", choices=["primary", "independent"], default="primary")
     p.add_argument("--start", type=int, default=0)
     p.add_argument("--count", type=int, default=16)
+    p.add_argument("--worker-count", type=int, default=1)
+    p.add_argument("--worker-index", type=int, default=0)
     p.add_argument("--output", type=Path)
     args = p.parse_args()
     if args.mode == "prepare":
@@ -321,11 +324,26 @@ def main():
         model = POLICY["primary_model" if args.role == "primary" else "independent_model"]
         client = cls(model=model, reasoning_effort="high")
         stop = args.start + args.count
-        for start in range(args.start, stop, POLICY["batch_size"]):
-            artifact = run_batch(packet, packet["claims"][start:min(start + POLICY["batch_size"], stop)],
-                                 args.root / args.role, args.role, client)
+        for start in worker_starts(args.start, stop, args.worker_count, args.worker_index):
+            # Batch locks also prevent different queue configurations from issuing
+            # the same model request concurrently. Cached answers are validated.
+            role_root = args.root / args.role
+            role_root.mkdir(parents=True, exist_ok=True)
+            with (role_root / f".batch-{start:05d}.lock").open("a+") as lock:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                artifact = run_batch(packet, packet["claims"][start:min(start + POLICY["batch_size"], stop)],
+                                     role_root, args.role, client)
             print(json.dumps({"start": start, "stop": min(start + POLICY["batch_size"], stop),
+                              "worker_index": args.worker_index,
                               "artifact_sha256": artifact["artifact_sha256"]}), flush=True)
+
+
+def worker_starts(start: int, stop: int, count: int, index: int) -> list[int]:
+    """Same disjoint frozen-batch lane allocation as #409 primary prefetch."""
+    size = POLICY["batch_size"]
+    if count not in (1, 2) or not 0 <= index < count or start < 0 or stop <= start or start % size:
+        raise ValueError("invalid frozen worker lane/range")
+    return [offset for offset in range(start, stop, size) if (offset // size) % count == index]
 
 
 if __name__ == "__main__":
