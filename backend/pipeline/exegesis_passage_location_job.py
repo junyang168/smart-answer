@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import subprocess
 
 from dotenv import load_dotenv
 from backend.pipeline import exegesis_passage_location_runner as loc
@@ -230,12 +231,32 @@ def main():
     parser.add_argument("--primary-model", default="gpt-6-sol")
     parser.add_argument("--review-model", default="claude-opus-5-5")
     parser.add_argument("--max-request-bytes", type=int, default=500000)
+    parser.add_argument("--ticket", type=int, help="Post completion/failure status to the authorized ticket")
     args = parser.parse_args()
     lock = (args.output / ".passage-location-job.lock").open("a+")
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     args.job_root.mkdir(parents=True, exist_ok=False)
     sequence = 0
     state = {}
+    def notify_ticket():
+        if args.ticket is None:
+            return
+        text = (f"#411 经文归属后台 job：{state['status']}\n\n"
+                f"已完成审阅：{state.get('completed_claim_count', 0)}/624；"
+                f"结果计数：{json.dumps(state.get('counts', {}), ensure_ascii=False)}。\n\n"
+                f"产物目录：`{args.job_root}`。代码提交与输入／模型／prompt／schema SHA 见 invocation.json；"
+                "原回答、一次有界引文纠正、一次归属仲裁和断点均保留。\n\n"
+                "170 条延期项未处理；未运行 grouping、未生成 CVP、未写 Claim／Registry。"
+                "这不是 #411 全卡完成。\n")
+        if state.get("error"):
+            text += f"\n停止原因：{state['error']}。未跳过失败批次，未继续重试。\n"
+        body = args.job_root / "ticket-status.txt"
+        with body.open("x") as file:
+            file.write(text)
+        result = subprocess.run(["gh", "issue", "comment", str(args.ticket), "--body-file", str(body)],
+                                capture_output=True, text=True, timeout=60)
+        loc.seal(args.job_root / "ticket-update.json", {"returncode": result.returncode,
+                 "stdout": result.stdout, "stderr": result.stderr})
     def progress(status, **fields):
         nonlocal sequence
         state.update(fields)
@@ -260,9 +281,15 @@ def main():
             "bounded_semantic_arbitrations": 1, "api_fallback": False, "grouping_executed": False})
         preflight(args, inputs)
         execute(args, inputs, progress)
+        notify_ticket()
     except Exception as exc:
         progress("stopped_on_failure", error_type=type(exc).__name__, error=str(exc),
                  next_action="inspect retained failure; no additional automatic retry")
+        try:
+            if not (args.job_root / "ticket-status.txt").exists():
+                notify_ticket()
+        except Exception as notify_error:
+            loc.seal(args.job_root / "ticket-notification-failure.json", {"error": str(notify_error)})
         raise
 
 
