@@ -54,11 +54,11 @@ def _checked(path: Path, audit: dict, queue: dict, positions: dict[str, int]) ->
         if (effective["decisions"][cid]["role"] != "unresolved"
                 or effective["decisions"][cid]["disposition"] != disposition):
             masked_holds.append(cid)
-        effective["decisions"][cid] = {
-            "role": "unresolved", "disposition": disposition,
-            "candidate_reference": "", "source_key": "", "source_quote": "",
-            "reason": "Existing reviewed hold preserved; arbitration proposal not applied.",
-        }
+            effective["decisions"][cid] = {
+                "role": "unresolved", "disposition": disposition,
+                "candidate_reference": "", "source_key": "", "source_quote": "",
+                "reason": "Existing reviewed hold preserved; arbitration proposal not applied.",
+            }
     try:
         round1.validate(effective, rows)
         valid = True
@@ -140,6 +140,10 @@ def progress(audit: dict, queue: dict, output_root: Path) -> dict:
         "prompt_sha256s": sorted({row["artifact"]["prompt_sha256"] for row in completed}),
         "role_counts": dict(sorted(Counter(row["role"] for row in decisions).items())),
         "disposition_counts": dict(sorted(Counter(row["disposition"] for row in decisions).items())),
+        "unresolved_candidate_reference_claim_ids": sorted(
+            row["claim_id"] for row in decisions
+            if row["role"] == "unresolved" and row["candidate_reference"]
+        ),
         "decisions": decisions,
     }
     return base._artifact(body)

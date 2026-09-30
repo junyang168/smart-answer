@@ -42,6 +42,11 @@ def test_existing_repair_and_human_holds_cannot_be_promoted() -> None:
     with pytest.raises(ValueError, match="human hold was overridden"):
         round1.validate(_decision(), [human_row])
 
+    # A citation can guide the eventual human review without assigning a role.
+    clue = _decision()
+    clue["decisions"]["CL-1"].update(role="unresolved", disposition="needs_human")
+    round1.validate(clue, [human_row])
+
 
 def test_round_persists_first_raw_answer_before_bounded_retry(tmp_path) -> None:
     audit = base._artifact({"schema_version": "wang_claim_role_source_context_audit_v1",

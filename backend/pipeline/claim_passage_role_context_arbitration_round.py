@@ -92,8 +92,10 @@ def validate(response: dict, rows: list[dict]) -> None:
         ):
             raise ValueError(f"prior repair hold was overridden: {row['claim_id']}")
         if role == "unresolved":
-            if disposition == "resolved" or decision["candidate_reference"]:
-                raise ValueError(f"unresolved disposition/ref mismatch: {row['claim_id']}")
+            # A reference may be offered as a lead for a human reviewer. It is
+            # not an interpreted passage identity while the role is unresolved.
+            if disposition == "resolved":
+                raise ValueError(f"unresolved disposition mismatch: {row['claim_id']}")
         elif disposition != "resolved":
             raise ValueError(f"resolved role has unresolved disposition: {row['claim_id']}")
         if role == "passage_exegesis" and not decision["candidate_reference"]:

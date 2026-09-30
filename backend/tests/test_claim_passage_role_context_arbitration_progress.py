@@ -62,3 +62,19 @@ def test_prior_repair_hold_is_masked_not_promoted(tmp_path) -> None:
     with_retry = progress.progress(audit, queue, tmp_path)
     assert with_retry["completed_claims"] == 1
     assert with_retry["decisions"][0]["arbitration_artifact_sha256"] == retry["artifact_sha256"]
+
+    compliant_root = tmp_path / "compliant"
+    compliant_root.mkdir()
+    compliant_answer = {"decisions": {"CL-1": {
+        "role": "unresolved", "disposition": "repair_required",
+        "candidate_reference": "太 1:1", "source_key": "S0001",
+        "source_quote": "the source says test",
+        "reason": "source repair is still required; reference is only a lead",
+    }}}
+    compliant = base._artifact({key: value for key, value in artifact.items()
+                                if key != "artifact_sha256"} | {"response": compliant_answer})
+    base._write_immutable(compliant_root / "batch-test.json", compliant)
+    preserved = progress.progress(audit, queue, compliant_root)
+    assert preserved["masked_prior_hold_claim_ids"] == []
+    assert preserved["unresolved_candidate_reference_claim_ids"] == ["CL-1"]
+    assert preserved["decisions"][0]["reason"] == compliant_answer["decisions"]["CL-1"]["reason"]
