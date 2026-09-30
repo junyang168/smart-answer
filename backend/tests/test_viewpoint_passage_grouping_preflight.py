@@ -6,11 +6,17 @@ import hashlib
 
 import pytest
 
+from backend.api.canonical_repository.viewpoint_batch_resolution import (
+    BatchResolutionError,
+    ClaimGroupingResponse,
+    ProposedClaimGroup,
+)
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.pipeline.viewpoint_passage_grouping_preflight import (
     build_preview,
     passages_overlap,
     passage_sort_key,
+    plan_reviewed_passage_unit,
 )
 
 
@@ -108,3 +114,51 @@ def test_sha_binding_fails_closed():
 def test_bible_order_is_not_lexicographic():
     assert passage_sort_key("Gen.1.1") < passage_sort_key("Matt.16.19")
     assert passage_sort_key("Matt.16.9") < passage_sort_key("Matt.16.19")
+
+
+def _split(*groups: list[str]) -> ClaimGroupingResponse:
+    return ClaimGroupingResponse(
+        scope_label="Matt.16.19",
+        groups=[
+            ProposedClaimGroup(group_key=f"g{index}", claim_ids=group, rationale="logical boundary")
+            for index, group in enumerate(groups)
+        ],
+    )
+
+
+def test_reviewed_small_unit_is_direct_group_with_no_model():
+    ids = [f"C{index:02}" for index in range(20)]
+    result = plan_reviewed_passage_unit(unit_id="Matt.16.19", claim_ids=ids, batch_size=20)
+    assert [group.claim_ids for group in result.groups] == [ids]
+    with pytest.raises(ValueError, match="must not use a grouping model"):
+        plan_reviewed_passage_unit(
+            unit_id="Matt.16.19", claim_ids=ids, batch_size=20, model_split=_split(ids)
+        )
+
+
+def test_real_size_42_requires_validated_logical_split_not_automatic_chunks():
+    ids = [f"C{index:02}" for index in range(42)]
+    with pytest.raises(ValueError, match="requires a logical model split"):
+        plan_reviewed_passage_unit(unit_id="Matt.16.19", claim_ids=ids, batch_size=20)
+    # The mocked response only exercises the interface; it is not a semantic
+    # judgment about the real 42 Claims.
+    result = plan_reviewed_passage_unit(
+        unit_id="Matt.16.19", claim_ids=ids, batch_size=20,
+        model_split=_split(ids[:18], ids[18:34], ids[34:]),
+    )
+    assert [len(group.claim_ids) for group in result.groups] == [18, 16, 8]
+    with pytest.raises(BatchResolutionError, match="exceeding the atomic batch ceiling"):
+        plan_reviewed_passage_unit(
+            unit_id="Matt.16.19", claim_ids=ids, batch_size=20,
+            model_split=_split(ids[:21], ids[21:]),
+        )
+    with pytest.raises(BatchResolutionError, match="not assigned to any group"):
+        plan_reviewed_passage_unit(
+            unit_id="Matt.16.19", claim_ids=ids, batch_size=20,
+            model_split=_split(ids[:20], ids[20:41]),
+        )
+    with pytest.raises(BatchResolutionError, match="in both group"):
+        plan_reviewed_passage_unit(
+            unit_id="Matt.16.19", claim_ids=ids, batch_size=20,
+            model_split=_split(ids[:20], ids[19:39], ids[39:]),
+        )

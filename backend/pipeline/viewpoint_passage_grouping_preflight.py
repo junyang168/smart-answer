@@ -15,6 +15,12 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from backend.api.canonical_repository.viewpoint_batch_resolution import (
+    ClaimGroupingResponse,
+    ProposedClaimGroup,
+    batches_from_groups,
+    validate_grouping,
+)
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.api.sermon_search.bible_refs import BOOKS
 
@@ -64,6 +70,44 @@ def passages_overlap(left: str, right: str) -> bool:
         int(b["end_verse"] or (b["verse"] if b["end_chapter"] is None else 0) or 999),
     )
     return a_start <= b_end and b_start <= a_end
+
+
+def plan_reviewed_passage_unit(
+    *,
+    unit_id: str,
+    claim_ids: list[str],
+    batch_size: int,
+    model_split: ClaimGroupingResponse | None = None,
+) -> ClaimGroupingResponse:
+    """Enforce the proposed size rule after a passage unit has been reviewed.
+
+    The caller must supply an authoritative, exact-once unit membership. This
+    function does not infer that membership from scripture reference strings.
+    An oversized unit needs a separately obtained logical model split; it is
+    never sliced into arbitrary consecutive chunks here.
+    """
+    if not unit_id or not claim_ids or batch_size < 1:
+        raise ValueError("unit ID, nonempty Claim IDs and positive batch size required")
+    if len(claim_ids) != len(set(claim_ids)):
+        raise ValueError("passage unit has duplicate Claim IDs")
+    if len(claim_ids) <= batch_size:
+        if model_split is not None:
+            raise ValueError("small passage unit must not use a grouping model")
+        grouping = ClaimGroupingResponse(
+            scope_label=unit_id,
+            groups=[ProposedClaimGroup(
+                group_key=f"{unit_id}:whole",
+                claim_ids=sorted(claim_ids),
+                rationale="经审核的完整释经段落不超过容量上限，直接作为比较组。",
+            )],
+        )
+    else:
+        if model_split is None:
+            raise ValueError("oversized passage unit requires a logical model split")
+        grouping = model_split
+    validate_grouping(grouping=grouping, scope_label=unit_id, claim_ids=claim_ids)
+    batches_from_groups(grouping, batch_size=batch_size)
+    return grouping
 
 
 def _verify_artifact(value: dict[str, Any], name: str) -> None:
