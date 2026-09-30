@@ -106,3 +106,49 @@ def test_rejects_resolution_when_the_model_pair_does_not_match():
     }}
     with pytest.raises(ValueError, match="does not match model pair"):
         assembler._apply_resolution(reconciled, [source], "p", "i", approved, set())
+
+
+@pytest.mark.parametrize("primary_role,independent_role", [
+    ("other", "passage_exegesis"),
+    ("passage_exegesis", "other"),
+])
+def test_new_resolution_accepts_either_reviewers_exegesis_and_preserves_answers(
+        primary_role, independent_role):
+    source = {"claim_id": "C1", "scripture_refs": ["Matt 5:17"]}
+    def decision(role):
+        return {"claim_id": "C1", "role": role,
+                "interpreted_ref_indices": [0] if role == "passage_exegesis" else [],
+                "interpreted_evidence_refs": [], "reason": role}
+    primary, independent = decision(primary_role), decision(independent_role)
+    reconciled = base.reconcile([primary], [independent], [source])
+    approved = {"C1": {
+        "role": "passage_exegesis", "disposition": "resolved",
+        "primary_role": primary_role, "independent_role": independent_role,
+        "interpreted_passage_keys": ["Matt.5.17"],
+        "primary_artifact_sha256": "p", "independent_artifact_sha256": "i",
+        "index": 1,
+    }}
+    seen = set()
+    assembler._apply_new_resolution(reconciled, [source], "p", "i", approved, seen)
+    assert seen == {"C1"}
+    assert reconciled[0]["role"] == "passage_exegesis"
+    assert reconciled[0]["primary"] == primary
+    assert reconciled[0]["independent"] == independent
+
+
+def test_new_resolution_rejects_changed_pair_or_sha():
+    source = {"claim_id": "C1", "scripture_refs": []}
+    primary = {"claim_id": "C1", "role": "other", "interpreted_ref_indices": [],
+               "interpreted_evidence_refs": [], "reason": "other"}
+    independent = {"claim_id": "C1", "role": "unresolved", "interpreted_ref_indices": [],
+                   "interpreted_evidence_refs": [], "reason": "uncertain"}
+    reconciled = base.reconcile([primary], [independent], [source])
+    approved = {"C1": {
+        "role": "other", "disposition": "resolved",
+        "primary_role": "other", "independent_role": "passage_exegesis",
+        "interpreted_passage_keys": [],
+        "primary_artifact_sha256": "p", "independent_artifact_sha256": "i",
+        "index": 1,
+    }}
+    with pytest.raises(ValueError, match="does not match model pair"):
+        assembler._apply_new_resolution(reconciled, [source], "p", "i", approved, set())
