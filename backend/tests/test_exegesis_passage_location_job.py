@@ -59,3 +59,21 @@ def test_model_drift_cannot_reuse_existing_answer(tmp_path):
         "response": {"decisions": [row("a", "馬太福音十六章"), row("b", "馬太福音十六章")]}})
     with pytest.raises(ValueError, match="binding differs"):
         job.obtain("gpt", "test-model", batch(), root, 500000)
+
+
+def test_book_only_primary_gets_one_review_not_an_invented_chapter(tmp_path, monkeypatch):
+    root = tmp_path / "review"
+    retain_failure(root)
+    original = {"decisions": [row("a", "馬太福音十六章"), row("b", "馬太福音十六章")]}
+    original["decisions"][1]["primary"] = "Matt"
+    (root / "last-message.raw.txt").write_text(json.dumps(original, ensure_ascii=False))
+    def fake(provider, model, payload, directory, limit):
+        assert [c["claim_id"] for c in payload["claims"]] == ["b"]
+        corrected = row("b", "馬太福音十六章")
+        corrected.update(status="unresolved", primary="", missing="缺少單一主要段落")
+        return loc.seal(directory / "validated.json", {"batch_sha256": loc.digest(payload), "model": model,
+            "provider": provider, "response": {"decisions": [corrected]}})
+    monkeypatch.setattr(loc, "call", fake)
+    result = job.obtain("gpt", "test-model", batch(), root, 500000)
+    assert result["response"]["decisions"][1]["primary"] == ""
+    assert result["response"]["decisions"][1]["status"] == "unresolved"

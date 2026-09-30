@@ -14,11 +14,14 @@ import subprocess
 
 from dotenv import load_dotenv
 from backend.pipeline import exegesis_passage_location_runner as loc
+from backend.pipeline.viewpoint_passage_grouping_preflight import BOOK_ORDER
 
 
-QUOTE_FEEDBACK = """此前逐字引文检查失败。这是仅一次纠正机会，只返回所列Claim。
+QUOTE_FEEDBACK = """此前逐字引文或经文定位结构检查失败。这是仅一次纠正机会，只返回所列Claim。
 quote只复制原文中连续10到30个字符，不改标点，不去除换行，不拼接不同位置。
-重新核验原文支持的primary，不强求旧结论。"""
+重新核验原文支持的primary，不强求旧结论。只有书卷名称不能标resolved：若原文
+只能说明整卷的用语而没有单一主要段落，必须unresolved、primary留空，并说明
+缺少段落定位依据；把已知书卷及跨段关系保留在secondary。不得补猜章或节。"""
 ARBITRATION_FEEDBACK = """这是一次且仅一次的经文归属分歧核对，不做角色分类。
 重新读原件，回应独立复核的具体理由。Claim/EvidenceStep的scripture_refs是提取
 元数据，不能证明原件实际给出了单节号；原件只证明范围就保留范围，不凭常识补
@@ -58,7 +61,7 @@ def verify_cached(path, batch, model):
 
 
 def obtain(provider, model, batch, directory, max_bytes):
-    """Reuse valid answers; repair only invalid quotations once, retaining every original."""
+    """Reuse answers; repair quotation/book-only validation once, retaining every original."""
     target = directory / "validated.json"
     if target.exists():
         return verify_cached(target, batch, model)
@@ -68,7 +71,7 @@ def obtain(provider, model, batch, directory, max_bytes):
         except Exception as exc:
             loc.seal(directory / "failure.json", {"error_type": type(exc).__name__, "error": str(exc),
                 "claim_ids": [c["claim_id"] for c in batch["claims"]],
-                "policy": "only verbatim-quotation failure permits one bounded correction"})
+                "policy": "quotation or book-only ownership validation permits one bounded correction"})
     request = loc.checked(directory / "request.json")
     if (request["batch_sha256"] != loc.digest(batch) or request["model"] != model
             or request["provider"] != provider or request["prompt"] != loc.PROMPT
@@ -84,7 +87,10 @@ def obtain(provider, model, batch, directory, max_bytes):
         try:
             loc.validate({"decisions": [row]}, subset(batch, {row["claim_id"]}))
         except ValueError as exc:
-            if not str(exc).startswith("non-verbatim source evidence:"):
+            quote_error = str(exc).startswith("non-verbatim source evidence:")
+            book_only = (str(exc).startswith("unresolved passage locator:")
+                         and row.get("primary") in BOOK_ORDER)
+            if not (quote_error or book_only):
                 raise
             bad.add(row["claim_id"])
     correction = None
