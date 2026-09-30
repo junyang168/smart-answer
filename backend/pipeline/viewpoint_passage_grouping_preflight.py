@@ -46,6 +46,26 @@ def passage_sort_key(value: str) -> tuple[int, int, int, int, int, int, str]:
     )
 
 
+def passages_overlap(left: str, right: str) -> bool:
+    """Conservatively detect two normalized locators that share Scripture text."""
+    a, b = PASSAGE_RE.fullmatch(left), PASSAGE_RE.fullmatch(right)
+    if a is None or b is None:
+        raise ValueError("overlap check requires normalized passage locators")
+    a_start = (BOOK_ORDER[a["book"]], int(a["chapter"]), int(a["verse"] or 0))
+    b_start = (BOOK_ORDER[b["book"]], int(b["chapter"]), int(b["verse"] or 0))
+    a_end = (
+        BOOK_ORDER[a["end_book"] or a["book"]],
+        int(a["end_chapter"] or a["chapter"]),
+        int(a["end_verse"] or (a["verse"] if a["end_chapter"] is None else 0) or 999),
+    )
+    b_end = (
+        BOOK_ORDER[b["end_book"] or b["book"]],
+        int(b["end_chapter"] or b["chapter"]),
+        int(b["end_verse"] or (b["verse"] if b["end_chapter"] is None else 0) or 999),
+    )
+    return a_start <= b_end and b_start <= a_end
+
+
 def _verify_artifact(value: dict[str, Any], name: str) -> None:
     actual = value.get("artifact_sha256")
     expected = sha256_json({key: item for key, item in value.items() if key != "artifact_sha256"})
@@ -106,17 +126,28 @@ def build_preview(
     if len(seen) != len(packet["claims"]):
         raise ValueError("role ledger does not cover the role packet exactly once")
     passages = []
-    for key in sorted(buckets, key=passage_sort_key):
+    ordered_bucket_keys = sorted(buckets, key=passage_sort_key)
+    overlapping_keys: dict[str, list[str]] = defaultdict(list)
+    for index, left in enumerate(ordered_bucket_keys):
+        for right in ordered_bucket_keys[index + 1:]:
+            if passages_overlap(left, right):
+                overlapping_keys[left].append(right)
+                overlapping_keys[right].append(left)
+    for key in ordered_bucket_keys:
         rows = sorted(buckets[key], key=lambda item: item["claim_id"])
+        needs_passage_unit = bool(overlapping_keys[key]) or any(
+            row["other_interpreted_passage_keys"] for row in rows
+        )
         passages.append(
             {
                 "passage_key": key,
                 "claim_count": len(rows),
                 "grouping_action": (
-                    "one_deterministic_group"
-                    if len(rows) <= batch_size
-                    else "model_split_required"
+                    "passage_unit_required" if needs_passage_unit else
+                    "one_deterministic_group" if len(rows) <= batch_size else
+                    "model_split_required"
                 ),
+                "overlapping_bucket_keys": overlapping_keys[key],
                 "claims": rows,
             }
         )
@@ -141,6 +172,9 @@ def build_preview(
         ),
         "model_split_passage_count": sum(
             p["grouping_action"] == "model_split_required" for p in passages
+        ),
+        "passage_unit_required_count": sum(
+            p["grouping_action"] == "passage_unit_required" for p in passages
         ),
         "model_calls_executed": 0,
         "master_data_mutations": 0,

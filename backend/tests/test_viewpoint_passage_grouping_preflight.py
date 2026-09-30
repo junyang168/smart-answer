@@ -9,6 +9,7 @@ import pytest
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.pipeline.viewpoint_passage_grouping_preflight import (
     build_preview,
+    passages_overlap,
     passage_sort_key,
 )
 
@@ -65,7 +66,7 @@ def test_over_twenty_requires_model_split_without_mechanical_chunking():
     assert len(result["passages"][0]["claims"]) == 21
 
 
-def test_scripture_order_and_multikey_claim_has_one_primary_owner():
+def test_scripture_order_and_multikey_claim_requires_passage_unit():
     ledger, packet = _inputs(
         [["Matt.16.19", "Matt.18.18"], ["Gen.1.1"], ["John.20.23", "Matt.16.19"]]
     )
@@ -74,6 +75,17 @@ def test_scripture_order_and_multikey_claim_has_one_primary_owner():
     assert result["passages"][1]["claim_count"] == 2
     assert result["passages"][1]["claims"][0]["other_interpreted_passage_keys"] == ["Matt.18.18"]
     assert result["owned_claim_count"] == 3
+    assert result["passages"][1]["grouping_action"] == "passage_unit_required"
+
+
+def test_overlapping_range_and_verse_cannot_be_finalized_as_separate_groups():
+    ledger, packet = _inputs([["Matt.16.18-Matt.16.23"], ["Matt.16.19"]])
+    result = build_preview(ledger=ledger, packet=packet, batch_size=20)
+    assert result["passage_unit_required_count"] == 2
+    assert result["deterministic_passage_count"] == 0
+    assert result["passages"][0]["overlapping_bucket_keys"] == ["Matt.16.19"]
+    assert passages_overlap("Matt.16.18-Matt.16.23", "Matt.16.19")
+    assert not passages_overlap("Matt.16.19", "Matt.16.24")
 
 
 def test_disputed_and_raw_locators_are_held_not_guessed():
