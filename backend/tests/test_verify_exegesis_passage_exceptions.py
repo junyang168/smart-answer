@@ -1,4 +1,5 @@
 import hashlib
+import json
 
 import pytest
 
@@ -54,3 +55,15 @@ def test_excerpt_mismatch_fails_closed(tmp_path):
     exceptions["rows"][0]["evidence_steps"][0]["fragments"][0]["verbatim_excerpt"] = "not in original"
     with pytest.raises(ValueError, match="fragment not found"):
         verify(exceptions, packet, {"SRC-1": source})
+
+
+@pytest.mark.parametrize("as_list", [False, True])
+def test_json_script_text_is_checked_without_json_string_escaping(tmp_path, as_list):
+    source, exceptions, packet = fixture(tmp_path)
+    source = tmp_path / "source.json"
+    script = [{"text": '教授说："这一段"。'}]
+    source.write_text(json.dumps(script if as_list else {"script": script}, ensure_ascii=False), encoding="utf-8")
+    packet["claims"][0]["source_file_sha256"] = hashlib.sha256(source.read_bytes()).hexdigest()
+    exceptions["rows"][0]["evidence_steps"][0]["fragments"][0]["verbatim_excerpt"] = '教授说："这一段"。'
+    report = verify(exceptions, packet, {"SRC-1": source})
+    assert report["verified_fragment_count"] == 1
