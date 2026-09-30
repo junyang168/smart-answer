@@ -18,7 +18,8 @@ from backend.pipeline.claim_passage_role_context_arbitration import compact
 from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 
 
-MODEL = "gpt-6-sol"
+MODEL = "gpt-6.1-sol"
+SUPPORTED_MODELS = ("gpt-6-sol", MODEL)
 PROMPT = """This is ONE arbitration round, not a new blind first review. Two
 independent reviewers already classified the Claim from its Claim/EvidenceStep
 packet; their roles and reasons are supplied. You also have a SHA-verified
@@ -125,7 +126,9 @@ def input_row(context: dict, prior: dict) -> dict:
 
 
 def run_batch(*, audit: dict, queue: dict, rows: list[dict], root: Path,
-              client: Any, retry_invalid_once: bool) -> dict:
+              client: Any, retry_invalid_once: bool, model: str = MODEL) -> dict:
+    if model not in SUPPORTED_MODELS:
+        raise ValueError("unsupported arbitration model")
     ids = [row["claim_id"] for row in rows]
     digest = hashlib.sha256("\n".join(ids).encode()).hexdigest()[:16]
     root.mkdir(parents=True, exist_ok=True)
@@ -139,7 +142,7 @@ def run_batch(*, audit: dict, queue: dict, rows: list[dict], root: Path,
         "schema_version": "wang_claim_role_context_arbitration_round_v1",
         "audit_sha256": audit["artifact_sha256"],
         "queue_sha256": queue["artifact_sha256"],
-        "model": MODEL, "claim_ids": ids,
+        "model": model, "claim_ids": ids,
         "prompt_sha256": hashlib.sha256(PROMPT.encode()).hexdigest(),
         "payload_sha256": hashlib.sha256(payload.encode()).hexdigest(),
         "schema_sha256": base.sha256_json(schema(ids)["schema"]),
@@ -200,6 +203,7 @@ def main() -> int:
     parser.add_argument("--count", type=int, default=8)
     parser.add_argument("--stop", type=int)
     parser.add_argument("--retry-invalid-once", action="store_true")
+    parser.add_argument("--model", choices=SUPPORTED_MODELS, default=MODEL)
     args = parser.parse_args()
     audit = base._read_json(args.audit)
     queue = base._read_json(args.queue)
@@ -211,12 +215,12 @@ def main() -> int:
     stop = args.stop if args.stop is not None else args.start + args.count
     if args.start < 0 or args.count < 1 or stop > len(audit["rows"]) or stop <= args.start:
         raise ValueError("invalid bounded arbitration scope")
-    client = CodexSubscriptionClient(model=MODEL, reasoning_effort="high")
+    client = CodexSubscriptionClient(model=args.model, reasoning_effort="high")
     for start in range(args.start, stop, args.count):
         rows = audit["rows"][start:min(start + args.count, stop)]
         result = run_batch(audit=audit, queue=queue, rows=rows,
                            root=args.output_root, client=client,
-                           retry_invalid_once=args.retry_invalid_once)
+                           retry_invalid_once=args.retry_invalid_once, model=args.model)
         print(json.dumps({"start": start, "stop": start + len(rows)} | result,
                          sort_keys=True), flush=True)
     return 0

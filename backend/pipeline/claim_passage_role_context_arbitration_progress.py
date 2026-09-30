@@ -24,7 +24,7 @@ def _checked(path: Path, audit: dict, queue: dict, positions: dict[str, int]) ->
     if (artifact.get("schema_version") != "wang_claim_role_context_arbitration_round_v1"
             or artifact.get("audit_sha256") != audit["artifact_sha256"]
             or artifact.get("queue_sha256") != queue["artifact_sha256"]
-            or artifact.get("model") != round1.MODEL
+            or artifact.get("model") not in round1.SUPPORTED_MODELS
             or not isinstance(ids, list) or not ids or ids[0] not in positions
             or not re.fullmatch(r"[0-9a-f]{64}", str(artifact.get("prompt_sha256") or ""))):
         raise ValueError(f"arbitration binding differs: {path}")
@@ -69,7 +69,8 @@ def _checked(path: Path, audit: dict, queue: dict, positions: dict[str, int]) ->
             "masked_holds": masked_holds}
 
 
-def progress(audit: dict, queue: dict, output_root: Path) -> dict:
+def progress(audit: dict, queue: dict, output_root: Path,
+             additional_output_roots: tuple[Path, ...] = ()) -> dict:
     base._check_artifact(audit)
     base._check_artifact(queue)
     if (audit.get("queue_sha256") != queue["artifact_sha256"]
@@ -78,8 +79,11 @@ def progress(audit: dict, queue: dict, output_root: Path) -> dict:
     positions = {row["claim_id"]: i for i, row in enumerate(audit["rows"])}
     if len(positions) != len(audit["rows"]):
         raise ValueError("source context repeats Claim IDs")
+    roots = (output_root, *additional_output_roots)
+    if len({root.resolve() for root in roots}) != len(roots):
+        raise ValueError("arbitration output roots repeat")
     attempts = [_checked(path, audit, queue, positions)
-                for path in sorted(output_root.glob("batch-*.json"))
+                for root in roots for path in sorted(root.glob("batch-*.json"))
                 if not path.name.endswith(".failure.json")]
     by_start: dict[int, list[dict]] = {}
     for attempt in attempts:
@@ -120,6 +124,7 @@ def progress(audit: dict, queue: dict, output_root: Path) -> dict:
                               "source_content_sha256": source["source_content_sha256"],
                               "source_context_audit_sha256": audit["artifact_sha256"],
                               "arbitration_artifact_sha256": batch["artifact"]["artifact_sha256"],
+                              "model": batch["artifact"]["model"],
                               "prior_hold_masked": cid in batch["masked_holds"],
                               **answer})
     if len(decisions) != cursor or len({row["claim_id"] for row in decisions}) != cursor:
@@ -133,6 +138,7 @@ def progress(audit: dict, queue: dict, output_root: Path) -> dict:
         "completed_claims": cursor,
         "remaining_claims": len(audit["rows"]) - cursor,
         "completed_batches": len(completed),
+        "model_claim_counts": dict(sorted(Counter(row["model"] for row in decisions).items())),
         "raw_attempts": len(attempts),
         "invalid_attempts": [row["path"] for row in attempts if not row["valid"]],
         "masked_prior_hold_claim_ids": sorted({cid for row in completed
@@ -154,10 +160,11 @@ def main() -> int:
     parser.add_argument("--audit", type=Path, required=True)
     parser.add_argument("--queue", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument("--additional-output-root", type=Path, action="append", default=[])
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     report = progress(base._read_json(args.audit), base._read_json(args.queue),
-                      args.output_root)
+                      args.output_root, tuple(args.additional_output_root))
     if args.output:
         if args.output.exists():
             raise ValueError(f"refusing to overwrite: {args.output}")
