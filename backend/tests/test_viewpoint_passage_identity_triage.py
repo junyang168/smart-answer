@@ -6,6 +6,7 @@ import hashlib
 
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.pipeline.viewpoint_passage_identity_triage import (
+    build_exception_packet,
     build_triage,
     strict_normalized_ref,
     strict_normalized_keys,
@@ -81,3 +82,14 @@ def test_triage_separates_primary_agreement_from_evidence_dispute():
     assert by_id["C6"]["candidate_passage_keys"] == ["Matt.16.19"]
     assert by_id["C6"]["additional_reference_dispute_retained"] is True
     assert result["model_calls_executed"] == result["master_data_mutations"] == 0
+
+
+def test_exception_packet_is_only_unresolved_rows_and_keeps_both_reviews():
+    ledger, packet = _inputs()
+    triage = build_triage(ledger=ledger, packet=packet)
+    exception = build_exception_packet(triage=triage, ledger=ledger, packet=packet)
+    assert exception["exception_count"] == 3
+    assert [row["claim_id"] for row in exception["rows"]] == ["C2", "C3", "C5"]
+    assert exception["rows"][1]["primary"]["interpreted_ref_indices"] == [0]
+    assert exception["rows"][1]["independent"]["interpreted_ref_indices"] == [1]
+    assert exception["triage_sha256"] == triage["artifact_sha256"]

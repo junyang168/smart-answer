@@ -172,22 +172,80 @@ def build_triage(*, ledger: dict[str, Any], packet: dict[str, Any]) -> dict[str,
     return result
 
 
+def build_exception_packet(
+    *, triage: dict[str, Any], ledger: dict[str, Any], packet: dict[str, Any]
+) -> dict[str, Any]:
+    """Bundle only remaining ambiguous cases with both judgments and source evidence."""
+    if triage["role_ledger_sha256"] != ledger["artifact_sha256"] or triage["role_packet_sha256"] != packet["artifact_sha256"]:
+        raise ValueError("exception packet inputs differ from triage freeze")
+    if triage["artifact_sha256"] != sha256_json({k: v for k, v in triage.items() if k != "artifact_sha256"}):
+        raise ValueError("triage artifact SHA mismatch")
+    claims = {row["claim_id"]: row for row in packet["claims"]}
+    decisions = {row["claim_id"]: row for row in ledger["decisions"]}
+    rows = []
+    for item in triage["rows"]:
+        if item["status"] not in {"needs_independent_adjudication", "needs_locator_review"}:
+            continue
+        claim_id = item["claim_id"]
+        claim = claims[claim_id]
+        decision = decisions[claim_id]
+        rows.append({
+            "claim_id": claim_id,
+            "reason_code": item["reason_code"],
+            "claim_content_sha256": claim["claim_content_sha256"],
+            "source_id": claim["source_id"],
+            "statement": claim["statement"],
+            "scripture_refs": claim.get("scripture_refs") or [],
+            "evidence_steps": claim.get("evidence_steps") or [],
+            "primary": decision["primary"],
+            "independent": decision["independent"],
+        })
+    result = {
+        "schema_version": "wang_exegesis_passage_exception_packet_v1",
+        "status": "review_only_no_adjudication_performed",
+        "triage_sha256": triage["artifact_sha256"],
+        "role_ledger_sha256": ledger["artifact_sha256"],
+        "role_packet_sha256": packet["artifact_sha256"],
+        "exception_count": len(rows),
+        "reason_counts": dict(sorted(Counter(row["reason_code"] for row in rows).items())),
+        "rows": rows,
+    }
+    result["artifact_sha256"] = sha256_json(result)
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--role-ledger", type=Path, required=True)
     parser.add_argument("--role-packet", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--exception-output", type=Path)
     args = parser.parse_args()
     if args.output.exists():
         raise ValueError(f"refusing to overwrite immutable triage {args.output}")
+    if args.exception_output and args.exception_output.exists():
+        raise ValueError(f"refusing to overwrite immutable exception packet {args.exception_output}")
+    ledger = json.loads(args.role_ledger.read_text(encoding="utf-8"))
+    packet = json.loads(args.role_packet.read_text(encoding="utf-8"))
     result = build_triage(
-        ledger=json.loads(args.role_ledger.read_text(encoding="utf-8")),
-        packet=json.loads(args.role_packet.read_text(encoding="utf-8")),
+        ledger=ledger,
+        packet=packet,
+    )
+    exception_packet = (
+        build_exception_packet(triage=result, ledger=ledger, packet=packet)
+        if args.exception_output else None
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     partial = args.output.with_suffix(args.output.suffix + ".partial")
     partial.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     partial.replace(args.output)
+    if args.exception_output and exception_packet:
+        args.exception_output.parent.mkdir(parents=True, exist_ok=True)
+        exception_partial = args.exception_output.with_suffix(args.exception_output.suffix + ".partial")
+        exception_partial.write_text(
+            json.dumps(exception_packet, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        exception_partial.replace(args.exception_output)
     print(json.dumps({key: value for key, value in result.items() if key != "rows"}, ensure_ascii=False, indent=2))
     return 0
 
