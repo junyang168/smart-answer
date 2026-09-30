@@ -12,6 +12,7 @@ def fixture():
         "claim_id": "CL-1", "claim_revision": 1,
         "claim_content_sha256": "c" * 64,
         "source_id": "SRC-1", "source_content_sha256": "s" * 64,
+        "source_file_sha256": "f" * 64,
         "statement": statement, "scripture_refs": ["太 1:1"],
     }
     packet = base._artifact({"claims": [claim]})
@@ -25,6 +26,8 @@ def fixture():
         "schema_version": "wang_claim_passage_role_ledger_v7",
         "status": "all_eligible_reviewed",
         "packet_sha256": packet["artifact_sha256"],
+        "batch_size": 16,
+        "review_artifact_shas": {"primary-00001": "a" * 64, "independent-00001": "b" * 64},
         "counts": {"unresolved": 1},
         "decisions": [{
             "claim_id": "CL-1", "role": "unresolved",
@@ -43,6 +46,7 @@ def test_exact_once_unresolved_queue_keeps_reviewer_reasons():
     assert result["reason_counts"] == {"BOTH_REVIEWERS_UNRESOLVED": 1}
     assert result["rows"][0]["primary_reason"] == ledger["decisions"][0]["primary"]["reason"]
     assert result["role_ledger_sha256"] == ledger["artifact_sha256"]
+    assert result["rows"][0]["primary_artifact_sha256"] == "a" * 64
 
 
 def test_missing_decision_fails_closed():

@@ -53,7 +53,11 @@ def build_queue(ledger: dict[str, Any], packet: dict[str, Any]) -> dict[str, Any
         raise ValueError("completed role ledger and frozen packet do not match")
     claims = packet["claims"]
     decisions = ledger["decisions"]
+    if not isinstance(ledger.get("batch_size"), int) or ledger["batch_size"] <= 0:
+        raise ValueError("completed ledger has invalid batch size")
     claim_by_id = {row["claim_id"]: row for row in claims}
+    claim_batch = {row["claim_id"]: index // ledger["batch_size"] + 1
+                   for index, row in enumerate(claims)}
     decision_by_id = {row["claim_id"]: row for row in decisions}
     if (len(claim_by_id) != len(claims) or len(decision_by_id) != len(decisions)
             or set(claim_by_id) != set(decision_by_id)):
@@ -61,6 +65,8 @@ def build_queue(ledger: dict[str, Any], packet: dict[str, Any]) -> dict[str, Any
     counts = dict(sorted(Counter(row["role"] for row in decisions).items()))
     if counts != ledger["counts"]:
         raise ValueError("role counts differ from ledger decisions")
+    if not isinstance(ledger.get("review_artifact_shas"), dict):
+        raise ValueError("completed ledger lacks review artifact SHAs")
 
     rows = []
     for claim_id in sorted(claim_by_id):
@@ -73,12 +79,21 @@ def build_queue(ledger: dict[str, Any], packet: dict[str, Any]) -> dict[str, Any
         if (decision["primary"]["claim_statement_sha256"] != decision["independent"]["claim_statement_sha256"]
                 or decision["primary"]["claim_statement_sha256"] != hashlib.sha256(claim["statement"].encode("utf-8")).hexdigest()):
             raise ValueError(f"reviewer statement binding differs: {claim_id}")
+        batch_id = claim_batch[claim_id]
+        primary_sha = ledger["review_artifact_shas"].get(f"primary-{batch_id:05d}")
+        independent_sha = ledger["review_artifact_shas"].get(f"independent-{batch_id:05d}")
+        if not primary_sha or not independent_sha:
+            raise ValueError(f"review artifact SHA missing: {claim_id}")
         rows.append({
             "claim_id": claim_id,
+            "batch_id": batch_id,
             "source_id": claim["source_id"],
             "claim_revision": claim["claim_revision"],
             "claim_content_sha256": claim["claim_content_sha256"],
             "source_content_sha256": claim["source_content_sha256"],
+            "source_file_sha256": claim["source_file_sha256"],
+            "primary_artifact_sha256": primary_sha,
+            "independent_artifact_sha256": independent_sha,
             "reason_code": reason_code(decision),
             "decision_basis": decision["decision_basis"],
             "primary_role": decision["primary"]["role"],
@@ -95,8 +110,9 @@ def build_queue(ledger: dict[str, Any], packet: dict[str, Any]) -> dict[str, Any
     if len(rows) != counts.get("unresolved", 0):
         raise ValueError("unresolved queue denominator differs from ledger")
     report = base._artifact({
-        "schema_version": "wang_claim_passage_role_exception_queue_v1",
+        "schema_version": "wang_claim_passage_role_exception_queue_v2",
         "status": "reviewed_exceptions_not_role_resolutions",
+        "queue_code_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "role_ledger_sha256": ledger["artifact_sha256"],
         "role_packet_sha256": packet["artifact_sha256"],
         "eligible_claim_count": len(claims),
