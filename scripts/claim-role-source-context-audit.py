@@ -20,6 +20,17 @@ import psycopg
 from dotenv import load_dotenv
 
 
+BOOK_CHAPTER = re.compile(
+    r"[\u4e00-\u9fff]{1,12}(?:福音|前書|後書|前书|后书|書|书|記|记|篇|傳|传|錄|录)"
+    r"\s*(?:第)?[一二三四五六七八九十百廿卅0-9]{1,5}\s*章"
+)
+CHAPTER_VERSE = re.compile(
+    r"(?:第)?[一二三四五六七八九十百廿卅0-9]{1,5}\s*章\s*"
+    r"(?:第)?[一二三四五六七八九十百廿卅0-9]{1,5}\s*(?:節|节)"
+)
+SHORT_REF = re.compile(r"(?:太|可|路|約|约|羅|罗|林前|林後|林后|提前|提後|提后)\s*\d{1,3}:\d{1,3}")
+
+
 def sha(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
@@ -64,6 +75,37 @@ def sermon_rows(raw: bytes) -> tuple[list[str], str]:
 def notes_rows(raw: bytes) -> list[str]:
     text = raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
     return [block.strip() for block in re.split(r"\n[ \t]*\n+", text) if block.strip()]
+
+
+def reference_trail(paragraphs: list[str], anchors: list[int],
+                    *, lookback: int = 20, per_anchor: int = 3) -> list[dict]:
+    """Expose earlier citation cues, never infer that the Claim owns them.
+
+    Editorial subtitles are intentionally not retrieval boundaries: they are
+    not professor-spoken evidence and sometimes split one continuing argument.
+    """
+
+    cues = []
+    for anchor in sorted(set(anchors)):
+        for index in range(anchor - 1, max(0, anchor - lookback) - 1, -1):
+            text = paragraphs[index]
+            matches = []
+            for kind, pattern in (("book_chapter", BOOK_CHAPTER),
+                                  ("chapter_verse", CHAPTER_VERSE),
+                                  ("short_ref", SHORT_REF)):
+                matches.extend((match.start(), match.end(), kind) for match in pattern.finditer(text))
+            matches.sort()
+            if not matches:
+                continue
+            start, end, kind = matches[0]
+            cues.append({"for_anchor": f"S{anchor+1:04d}",
+                         "paragraph_key": f"S{index+1:04d}",
+                         "distance_paragraphs": anchor - index,
+                         "cue_kind": kind,
+                         "cue_excerpt": text[max(0, start - 60): min(len(text), end + 100)]})
+            if sum(cue["for_anchor"] == f"S{anchor+1:04d}" for cue in cues) >= per_anchor:
+                break
+    return cues
 
 
 def source_payloads(source_ids: list[str]) -> dict[str, dict]:
@@ -159,10 +201,11 @@ def build(queue: dict, packet: dict, *, include_all: bool = False) -> dict:
             "independent_role": queue_row["independent_role"],
             "fragment_ids": [f["fragment_id"] for f in fragments],
             "anchor_indices": sorted(set(anchors)),
+            "anchor_trail": reference_trail(paragraphs, anchors),
             "context": [{"paragraph_key": f"S{i+1:04d}", "text": paragraphs[i]} for i in window],
         })
     body = {
-        "schema_version": "wang_claim_role_source_context_audit_v1",
+        "schema_version": "wang_claim_role_source_context_audit_v2",
         "status": "source_context_verified_not_role_adjudicated",
         "scope": "all_unresolved" if include_all else "no_claim_or_evidence_scripture_refs",
         "queue_sha256": queue["artifact_sha256"],

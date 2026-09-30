@@ -34,6 +34,12 @@ interpretation is clear but the original source still does not identify which
 passage, use unresolved/needs_human. If the Claim/ref conflicts with the
 original source, use unresolved/repair_required. Never infer a verse from
 general Bible knowledge.
+The anchor_trail lists earlier source citation CUES with paragraph distances;
+it does not prove that this Claim interprets those verses. Use a cue only when
+the professor's spoken argument demonstrably continues from that cited passage
+through the Claim. A new topic, illustration, or general summary breaks that
+link even if the cue is close. Editorial subtitles are neither source evidence
+nor mandatory topic boundaries.
 
 Adjudicate each prior disagreement explicitly in the reason. Quote a SHORT,
 CONTIGUOUS, EXACT original-source substring (roughly 10–30 characters) and

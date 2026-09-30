@@ -62,6 +62,25 @@ def test_context_audit_recovers_exact_old_body_without_accepting_new_body(tmp_pa
         module.matching_source(source, "f" * 64)
 
 
+def test_reference_trail_finds_earlier_source_cue_without_assigning_ownership() -> None:
+    module = _audit_module()
+    rows = ["普通讨论"] * 10
+    rows[2] = "再看哥林多前書十二章24到27節。"
+    rows[8] = "方言不是舌音。"
+    cues = module.reference_trail(rows, [8])
+    assert cues[0]["paragraph_key"] == "S0003"
+    assert cues[0]["for_anchor"] == "S0009"
+    assert cues[0]["distance_paragraphs"] == 6
+    assert "哥林多前書十二章" in cues[0]["cue_excerpt"]
+
+
+def test_compact_adds_trail_only_when_audit_supplies_it() -> None:
+    base_row = {"claim_id": "CL-1", "statement": "x", "claim_scripture_refs": [],
+                "evidence_steps": [], "anchor_indices": [0], "context": []}
+    assert "anchor_trail" not in arb.compact(base_row)
+    assert arb.compact(base_row | {"anchor_trail": []})["anchor_trail"] == []
+
+
 @pytest.fixture
 def source_batch():
     return [{"claim_id": "CL-1", "context": [{"paragraph_key": "S0001",

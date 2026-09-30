@@ -90,9 +90,21 @@ def progress(audit: dict, queue: dict, output_root: Path) -> dict:
         candidates = [row for row in by_start.get(cursor, []) if row["valid"]]
         if not candidates:
             break
-        if len(candidates) != 1:
+        if len(candidates) == 2:
+            retry = next((row for row in candidates
+                          if row["artifact"].get("attempt_number") == 2), None)
+            original = next((row for row in candidates
+                             if row["artifact"].get("attempt_number") is None), None)
+            if (retry is None or original is None
+                    or retry["artifact"].get("retry_of_artifact_sha256")
+                    != original["artifact"]["artifact_sha256"]
+                    or retry["end"] != original["end"]):
+                raise ValueError(f"conflicting valid batches start at {cursor}")
+            selected = retry
+        elif len(candidates) == 1:
+            selected = candidates[0]
+        else:
             raise ValueError(f"duplicate valid batch starts at {cursor}")
-        selected = candidates[0]
         if selected["end"] <= cursor:
             raise ValueError("empty arbitration batch")
         completed.append(selected)

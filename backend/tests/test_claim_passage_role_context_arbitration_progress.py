@@ -52,3 +52,13 @@ def test_prior_repair_hold_is_masked_not_promoted(tmp_path) -> None:
     assert report["decisions"][0]["role"] == "unresolved"
     assert report["decisions"][0]["disposition"] == "repair_required"
     assert report["decisions"][0]["prior_hold_masked"] is True
+
+    retry = base._artifact({key: value for key, value in artifact.items()
+                            if key != "artifact_sha256"} | {
+                                "attempt_number": 2,
+                                "retry_of_artifact_sha256": artifact["artifact_sha256"],
+                            })
+    base._write_immutable(tmp_path / "batch-test.retry-2.json", retry)
+    with_retry = progress.progress(audit, queue, tmp_path)
+    assert with_retry["completed_claims"] == 1
+    assert with_retry["decisions"][0]["arbitration_artifact_sha256"] == retry["artifact_sha256"]

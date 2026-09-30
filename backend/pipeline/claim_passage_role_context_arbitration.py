@@ -57,8 +57,11 @@ def schema(ids: list[str]) -> dict[str, Any]:
 
 
 def compact(row: dict) -> dict:
-    return {key: row[key] for key in ("claim_id", "statement", "claim_scripture_refs",
-                                     "evidence_steps", "anchor_indices", "context")}
+    result = {key: row[key] for key in ("claim_id", "statement", "claim_scripture_refs",
+                                        "evidence_steps", "anchor_indices", "context")}
+    if "anchor_trail" in row:
+        result["anchor_trail"] = row["anchor_trail"]
+    return result
 
 
 def validate(answer: dict, batch: list[dict]) -> None:
