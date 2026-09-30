@@ -48,6 +48,36 @@ def test_existing_repair_and_human_holds_cannot_be_promoted() -> None:
     round1.validate(clue, [human_row])
 
 
+def test_frozen_citation_cue_is_valid_evidence_without_local_paragraph() -> None:
+    row = _row()
+    cue = {"paragraph_key": "S0039", "cue_excerpt": "好，我們再看提摩太書第二章三節。",
+           "for_anchor": "S0045", "distance_paragraphs": 6}
+    row["anchor_trail"] = [cue, cue | {"for_anchor": "S0048"}]
+    answer = _decision()
+    answer["decisions"]["CL-1"].update(
+        role="unresolved", disposition="repair_required", candidate_reference="",
+        source_key="S0039", source_quote=cue["cue_excerpt"])
+    round1.validate(answer, [row])
+    answer["decisions"]["CL-1"]["source_quote"] = "好，我們再看提多書第二章三節。"
+    with pytest.raises(ValueError, match="not verbatim"):
+        round1.validate(answer, [row])
+
+
+def test_citation_cues_cannot_conflict_or_be_concatenated() -> None:
+    row = _row() | {"anchor_trail": [
+        {"paragraph_key": "S0001", "cue_excerpt": "不相容的原文。"}]}
+    with pytest.raises(ValueError, match="conflicting source paragraph"):
+        round1.validate(_decision(), [row])
+    row = _row() | {"anchor_trail": [
+        {"paragraph_key": "S0002", "cue_excerpt": "上文。"}]}
+    with pytest.raises(ValueError, match="not verbatim"):
+        round1.validate(_decision("义是好的关系。上文。"), [row])
+    # Same paragraph's cue may be a substring of its full local context.
+    row = _row() | {"anchor_trail": [
+        {"paragraph_key": "S0001", "cue_excerpt": "好的关系"}]}
+    round1.validate(_decision(), [row])
+
+
 def test_round_persists_first_raw_answer_before_bounded_retry(tmp_path) -> None:
     audit = base._artifact({"schema_version": "wang_claim_role_source_context_audit_v1",
                             "rows": [_row()]})

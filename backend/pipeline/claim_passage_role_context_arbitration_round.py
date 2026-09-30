@@ -77,6 +77,21 @@ def schema(ids: list[str]) -> dict[str, Any]:
                                                    "properties": {cid: item for cid in ids}}}}}
 
 
+def _source_quote_matches(row: dict, key: str, quote: str) -> bool:
+    """Check only text actually supplied, including frozen earlier citation cues.
+
+    Repeated cues for several anchors are one paragraph, not multiple sources.
+    Never concatenate excerpts or accept incompatible text under the same key.
+    """
+    texts = {part["text"] for part in row["context"]
+             if part["paragraph_key"] == key}
+    texts.update(part["cue_excerpt"] for part in row.get("anchor_trail", [])
+                 if part["paragraph_key"] == key)
+    if any(a not in b and b not in a for a in texts for b in texts):
+        raise ValueError(f"conflicting source paragraph: {row['claim_id']}:{key}")
+    return bool(quote) and any(quote in text for text in texts)
+
+
 def validate(response: dict, rows: list[dict]) -> None:
     decisions = response.get("decisions")
     if not isinstance(decisions, dict) or set(decisions) != {row["claim_id"] for row in rows}:
@@ -107,8 +122,7 @@ def validate(response: dict, rows: list[dict]) -> None:
         if disposition == "resolved" and (not key or not quote):
             raise ValueError(f"resolved decision lacks original-source quote: {row['claim_id']}")
         if key or quote:
-            matches = [part for part in row["context"] if part["paragraph_key"] == key]
-            if len(matches) != 1 or not quote or quote not in matches[0]["text"]:
+            if not _source_quote_matches(row, key, quote):
                 raise ValueError(f"source quote is not verbatim: {row['claim_id']}")
         if not str(decision["reason"]).strip():
             raise ValueError(f"arbitration reason is empty: {row['claim_id']}")
