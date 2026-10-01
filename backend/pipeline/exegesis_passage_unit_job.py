@@ -74,6 +74,21 @@ def normalize(response, ids):
     return dict(units=units,assignments=response['assignments'],finding_dispositions=response.get('finding_dispositions',{}))
 
 
+def import_proposal(seed, aliases):
+    """Import an already completed L1 proposal without generating or authorizing it."""
+    units=copy.deepcopy(seed['units']);reverse={cid:alias for alias,cid in aliases.items()}
+    core.exact([cid for u in units for cid in u['claim_ids']],aliases.values(),'completed proposal members')
+    if len({u['unit_id'] for u in units})!=len(units):raise ValueError('duplicate completed unit IDs')
+    assignments={}
+    for n,u in enumerate(units):
+        locator(u['passage_key'])
+        if not u['passage_key'] and not u['needs_context']:raise ValueError('undisclosed completed proposal gap')
+        u['claim_ids']=[reverse[cid] for cid in u['claim_ids']]
+        if not u['claim_ids']:raise ValueError('empty completed passage unit')
+        assignments.update({alias:dict(unit_index=n) for alias in u['claim_ids']})
+    return dict(units=units,assignments=assignments,finding_dispositions={})
+
+
 def atomic_status(root,stage,**extra):
     status=dict(stage=stage,updated_at=time.time(),pid=os.getpid(),workers=1,layer=1,**extra)
     temp=root/'status.tmp';temp.write_text(json.dumps(status,ensure_ascii=False,indent=2)+'\n');temp.replace(root/'status.json')
@@ -169,11 +184,20 @@ def execute(args):
         all_sources=core.checked(args.sources)['sources'];sids={c['source_id'] for c in claims};sources=[s for s in all_sources if s['source_id'] in sids]
         atomic_status(root,'preflight',claims=len(claims),model=args.model)
         core.verify_current([frozen[cid] for cid in aliases.values()]);core.verify_files(sources)
+        seed=core.checked(args.initial_proposal) if args.initial_proposal else None
+        if seed and seed['frozen_claim_graph_sha256']!=alias_art['frozen_claim_graph_sha256']:raise ValueError('completed proposal frozen Claim graph binding mismatch')
         retain(root,'config.json',dict(scope='Matthew candidate set',layer=1,workers=1,model=args.model,effort='high',review_model='claude-opus-5-5',correction_model=args.model,arbitration_model=args.model,
             packet_sha256=packet['artifact_sha256'],ledger_sha256=ledger['artifact_sha256'],alias_sha256=alias_art['artifact_sha256'],input_sha256=base_input['artifact_sha256'],code_sha256=args.code_sha,
-            reviewer_code_sha256=hashlib.sha256(REVIEWER.read_bytes()).hexdigest(),max_gpt_bytes=args.max_gpt_bytes,max_review_bytes=args.max_review_bytes,claims=len(claims),grouping_calls=0,cvp_calls=0,database_writes=0))
-        generated=model_stage(root,'generation',PROMPT,dict(scope='Matt',claims=compact,grouping_authorized=False),plan_schema(aliases),args)
-        proposal=normalize(generated,aliases);retain(root,'generated-proposal.json',proposal)
+            reviewer_code_sha256=hashlib.sha256(REVIEWER.read_bytes()).hexdigest(),max_gpt_bytes=args.max_gpt_bytes,max_review_bytes=args.max_review_bytes,claims=len(claims),grouping_calls=0,cvp_calls=0,database_writes=0,
+            generation_mode='reuse_completed_proposal' if seed else 'generate',initial_proposal_sha256=seed['artifact_sha256'] if seed else None,
+            generation_model=seed.get('model') if seed else args.model))
+        if seed:
+            proposal=import_proposal(seed,aliases)
+            retain(root,'reused-proposal.json',dict(**proposal,parent_proposal_sha256=seed['artifact_sha256'],original_model=seed.get('model'),original_effort=seed.get('effort'),grouping_authorized=False))
+            atomic_status(root,'reused_completed_proposal',claims=len(claims),units=len(proposal['units']),generation_calls=0)
+        else:
+            generated=model_stage(root,'generation',PROMPT,dict(scope='Matt',claims=compact,grouping_authorized=False),plan_schema(aliases),args)
+            proposal=normalize(generated,aliases);retain(root,'generated-proposal.json',proposal)
         initial=review_stage(root,'initial-review',proposal,claims,sources,packet,args)
         issues=problems_from(initial,proposal)
         primaries=initial['response']['primary_reviews']
@@ -231,6 +255,7 @@ def execute(args):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     for flag in ['input','alias-map','sources','ledger','packet','output-root','codex-executable']:parser.add_argument('--'+flag,type=Path,required=True)
+    parser.add_argument('--initial-proposal',type=Path,help='Reuse an existing sealed whole-book proposal; skip generation entirely')
     parser.add_argument('--model',default='gpt-6.1-sol');parser.add_argument('--max-gpt-bytes',type=int,default=2500000)
     parser.add_argument('--max-review-bytes',type=int,default=2000000);parser.add_argument('--timeout',type=int,default=1800)
     args=parser.parse_args();execute(args)

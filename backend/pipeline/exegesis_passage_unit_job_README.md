@@ -7,6 +7,11 @@ book Claim set and complete current proposal in one request. It never runs L2
 grouping, CVP processing, or Claim/Registry writes. Current Matthew input is the
 973-Claim candidate set, not a completion claim for all 3,843 eligible Claims.
 
+Use `--initial-proposal` with the existing sealed whole-book manifest to skip
+generation. The completed 973-Claim/110-unit Matthew proposal is reused in the
+current job; its original model provenance remains recorded. Changing the model
+for future calls never requires regenerating an already completed proposal.
+
 Generation, correction and disputed arbitration use `gpt-6.1-sol/high`.
 Independent initial and final reviews use `claude-opus-5-5/high`. There is one
 worker and one model call at a time. At most one semantic correction and one

@@ -54,3 +54,13 @@ def test_background_stage_accepts_cli_path_and_reuses_bound_response(tmp_path,mo
     assert calls[0]['model']=='gpt-6.1-sol' and calls[0]['effort']=='high'
     with pytest.raises(ValueError,match='cached artifact differs'):
         module.model_stage(tmp_path,'generation','changed prompt',payload,{'type':'object'},args)
+
+
+def test_reuse_completed_whole_book_plan_preserves_every_boundary_and_member():
+    from backend.pipeline.exegesis_passage_unit_job import import_proposal
+    seed=dict(units=[dict(unit_id='u700',passage_key='Matt.16.28-Matt.17.8',rationale='existing reason',needs_context=False,context_reason='',claim_ids=['C1','C2'])])
+    converted=import_proposal(seed,{'a':'C1','b':'C2'})
+    assert converted['units']==[dict(seed['units'][0],claim_ids=['a','b'])]
+    assert converted['assignments']=={'a':dict(unit_index=0),'b':dict(unit_index=0)}
+    assert seed['units'][0]['claim_ids']==['C1','C2']
+    with pytest.raises(ValueError):import_proposal(seed,{'a':'C1','b':'C2','c':'C3'})
