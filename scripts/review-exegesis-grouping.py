@@ -125,6 +125,19 @@ def model_source_text(text):
         return exclude_svg(text)
     return json.dumps(exclude_svg(value), ensure_ascii=False, separators=(',', ':'))
 
+def physical_paragraphs(text):
+    """Stable physical locations; retain verbatim text, including editorial rows."""
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        return [(f'block:{i + 1}', block) for i, block in enumerate(re.split(r'\n[ \t]*\n+', text)) if block.strip()]
+    rows = value if isinstance(value, list) else value.get('script', value.get('paragraphs'))
+    if not isinstance(rows, list):
+        raise ValueError('unsupported source paragraph format')
+    return [(f'row:{i + 1}', str(row.get('text') or '') if isinstance(row, dict) else str(row))
+            for i, row in enumerate(rows)]
+
+
 def original_sources(sources):
     originals, strings = [], {}
     for source in sources:
@@ -140,8 +153,18 @@ def original_sources(sources):
             else:
                 text_parts.extend(p for p in text['model_text_parts'] if isinstance(p, str))
             if item is source:
-                fresh['original_text'] = text
-        fresh['linked_files'] = [{**f, 'original_text': model_source_text(Path(f['path']).read_text())} for f in source.get('linked_files', [])]
+                if 'selected_locations' in source:
+                    paragraphs = dict(physical_paragraphs(data.decode('utf-8')))
+                    locations = source['selected_locations']
+                    if len(locations) != len(set(locations)) or any(loc not in paragraphs for loc in locations):
+                        raise ValueError('invalid physical source context locations')
+                    fresh['source_context'] = [{'location': loc, 'text': exclude_svg(paragraphs[loc])} for loc in locations]
+                    if fresh['source_context'] != source['source_context']:
+                        raise ValueError('physical source context drift')
+                    fresh.pop('original_text', None)
+                else:
+                    fresh['original_text'] = text
+        fresh['linked_files'] = [{**f, **({} if f.get('excluded_from_model') else {'original_text': model_source_text(Path(f['path']).read_text())})} for f in source.get('linked_files', [])]
         strings[source['source_id']] = text_parts
         originals.append(fresh)
     return originals, strings

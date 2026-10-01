@@ -140,9 +140,17 @@ class PassageUnit(BaseModel):
     evidence: list[BoundaryEvidence] = Field(min_length=1)
 
 
+class ContextRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    source_id: str = Field(min_length=1)
+    location: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+
 class PassageUnits(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    units: list[PassageUnit] = Field(min_length=1)
+    units: list[PassageUnit]
+    context_requests: list[ContextRequest] = Field(default_factory=list)
 
 
 def unit_schema():
@@ -152,6 +160,10 @@ def unit_schema():
 
 def validate_units(response, claims):
     PassageUnits.model_validate(response)
+    if response.get('context_requests'):
+        raise ValueError('passage context insufficient; requests preserved in raw response: ' + json.dumps(response['context_requests'], ensure_ascii=False))
+    if not response['units']:
+        raise ValueError('no passage units')
     ids = [c['claim_id'] for c in claims]
     exact([cid for u in response['units'] for cid in u['claim_ids']], ids, 'complete passage membership')
     exact([u['unit_id'] for u in response['units']], {u['unit_id'] for u in response['units']}, 'unit IDs')
@@ -198,18 +210,88 @@ def model_source_text(text):
         return exclude_svg(text)
     return json.dumps(exclude_svg(value), ensure_ascii=False, separators=(',', ':'))
 
+def physical_paragraphs(text):
+    """Stable physical locations; retain verbatim text, including editorial rows."""
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        return [(f'block:{i + 1}', block) for i, block in enumerate(re.split(r'\n[ \t]*\n+', text)) if block.strip()]
+    rows = value if isinstance(value, list) else value.get('script', value.get('paragraphs'))
+    if not isinstance(rows, list):
+        raise ValueError('unsupported source paragraph format')
+    return [(f'row:{i + 1}', str(row.get('text') or '') if isinstance(row, dict) else str(row))
+            for i, row in enumerate(rows)]
+
+
+def scoped_source(source, claims):
+    data = Path(source['path']).read_bytes()
+    if hashlib.sha256(data).hexdigest() != source['file_sha256']:
+        raise ValueError('physical source drift: ' + source['path'])
+    paragraphs = physical_paragraphs(data.decode('utf-8'))
+    # S keys are frozen extraction coordinates, not passage ownership decisions.
+    semantic_indices = list(range(len(paragraphs)))
+    try:
+        raw = json.loads(data)
+    except json.JSONDecodeError:
+        raw = None
+    rows = raw if isinstance(raw, list) else raw.get('script') if isinstance(raw, dict) else None
+    if isinstance(rows, list):
+        semantic_indices = [i for i in semantic_indices if not re.fullmatch(r'#{1,6}\s+.+', paragraphs[i][1].strip()) and
+                            (not isinstance(rows[i], dict) or
+                             (str(rows[i].get('type', '')).lower() not in {'subtitle', 'comment'} and
+                              not str(rows[i].get('index', '')).startswith('subtitle-')))]
+    anchors, unresolved = set(), []
+    for claim in claims:
+        fragments = [f for step in claim.get('evidence_steps', []) for f in step.get('fragments', [])]
+        for fragment in fragments:
+            quote = fragment.get('verbatim_excerpt', '')
+            if re.search(r'<svg\b', quote, re.I):
+                quote = ''  # graphics are unavailable; do not infer their contents
+            matches = [i for i, (_, text) in enumerate(paragraphs) if quote and quote in text]
+            anchors.update(matches)
+            if not matches:
+                key = fragment.get('paragraph_key', '')
+                n = int(key[1:]) - 1 if re.fullmatch(r'S\d{4}', key) else -1
+                if 0 <= n < len(semantic_indices):
+                    anchors.add(semantic_indices[n])
+                unresolved.append({'claim_id': claim['claim_id'], 'fragment_id': fragment.get('fragment_id'),
+                                   'reason': 'exact_quote_not_found_in_visible_physical_source', 'frozen_paragraph_key': key})
+        for evidence in claim.get('ownership', {}).get('evidence', []):
+            quote = evidence.get('quote', '')
+            anchors.update(i for i, (_, text) in enumerate(paragraphs) if isinstance(quote, str) and quote and quote in text)
+    if not anchors:
+        unresolved.append({'reason': 'no_physical_context_anchor', 'claim_ids': [c['claim_id'] for c in claims]})
+    selected = sorted({j for i in anchors for j in range(max(0, i - 2), min(len(paragraphs), i + 3))})
+    return {'source_id': source['source_id'], 'path': source['path'], 'file_sha256': source['file_sha256'],
+            'context_policy': 'evidence_anchors_plus_two_physical_neighbors_v1',
+            'physical_paragraph_count': len(paragraphs), 'selected_locations': [paragraphs[i][0] for i in selected],
+            'source_context': [{'location': paragraphs[i][0], 'text': exclude_svg(paragraphs[i][1])} for i in selected],
+            'context_is_complete_source': len(selected) == len(paragraphs),
+            'unresolved_evidence_locations': unresolved,
+            'linked_files': [{k: v for k, v in f.items() if k != 'original_text'} | {'excluded_from_model': True}
+                             for f in source.get('linked_files', [])]}
+
+
+def model_claims(value):
+    # Full revision/SHA graph remains in frozen input and final claim_packets.
+    # Runtime needs semantic content and stable IDs, not repeated audit fields.
+    audit_fields = {'content_sha256', 'revision', 'claim_content_sha256', 'claim_revision',
+                    'source_content_sha256', 'source_file_sha256', 'source_revision',
+                    'review_artifact_sha256', 'approval_basis', 'status', 'preparation_status'}
+    if isinstance(value, list):
+        return [model_claims(item) for item in value]
+    if isinstance(value, dict):
+        return {key: model_claims(item) for key, item in value.items() if key not in audit_fields}
+    return value
+
+
 def payload_for(claims, sources, **extra):
-    needed = {c['source_id'] for c in claims}
-    full = []
-    for source in sources:
-        if source['source_id'] not in needed:
-            continue
-        fresh = {k: v for k, v in source.items() if k != 'paragraphs'}
-        fresh['original_text'] = model_source_text(Path(source['path']).read_text(encoding='utf-8'))
-        fresh['linked_files'] = [{**f, 'original_text': model_source_text(Path(f['path']).read_text(encoding='utf-8'))}
-                                for f in source.get('linked_files', [])]
-        full.append(fresh)
-    return exclude_svg({'claims': claims, 'sources': full, **extra})
+    by_source = defaultdict(list)
+    for claim in claims:
+        by_source[claim['source_id']].append(claim)
+    contexts = [scoped_source(source, by_source[source['source_id']]) for source in sources if source['source_id'] in by_source]
+    return exclude_svg({'claims': model_claims(claims), 'sources': contexts,
+                        'frozen_claim_graph_sha256': sha256_json(claims), **extra})
 
 
 def obtain(directory, fingerprint, generate):

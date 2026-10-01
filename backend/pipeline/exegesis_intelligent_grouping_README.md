@@ -42,8 +42,17 @@ GPT-only candidates 或未完成的定位 checkpoint。必须包含：
 实际调用使用紧凑 JSON 和 `wang_exegesis_interned_packet_v1`：长的重复字符串只
 存一次，原字段中的 `{"$text": n}` 引用 `texts[n]`，`data` 保存完整原始结构。
 提议 transport 逐字段还原比较；独立 reviewer 有自己的 stdlib 编码器，先重新
-打开物理原件，再编码。完整 Claim、证据、原文、primary/secondary、revision/SHA
-不摘要、不选窗口、不删尾；原始完整 payload 与 wire payload SHA/bytes 同时记录。
+打开物理原件，再编码。运行 packet 保留全部成员、Claim 陈述、证据步骤／逐字片段、
+primary/secondary。完整 revision/SHA 图留在冻结输入及最终 claim_packets，模型视图
+以 frozen_claim_graph_sha256 绑定，不重复携带各层审计字段。
+
+来源按证据逐字匹配定位；没有匹配时，仅用冻结 S 键检索并明确标记定位缺口，
+不把 S 键当作经文归属证据。每个锚点提供相邻两个物理段落，重叠去重，保留
+原文行／块位置；这只是检索上下文，不是释经边界或完整原件。SVG 排除并保留
+标记，非 SVG 文字不摘要。第一层若无法据此确认完整论证，在 context_requests
+报告所缺来源／位置／理由；保存原始回答并停止，不强行定段或启动 grouping。
+独立 reviewer 重新读取 SHA 绑定原件，核验所选位置与文字。输入视图与 wire
+payload SHA/bytes 同时记录。
 
 压缩并不保证请求一定小于500000字节。必须按压缩后的 prompt+schema+payload+
 CLI参数重新测量；仍超限则保存失败并停止，不宣称整书卷不可行，也不自行改为
