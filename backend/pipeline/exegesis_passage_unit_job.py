@@ -95,7 +95,7 @@ def model_stage(root,name,prompt,payload,schema,args):
     retain(root,name+'.fingerprint.json',dict(fingerprint=fingerprint))
     if (directory/'response.json').exists():return core.checked(directory/'response.json')['response']
     if directory.exists():raise ValueError(f'incomplete {name}; preserved; inspect failure before explicit recovery')
-    measured=serialize_request(provider='gpt',executable=args.codex_executable,model=args.model,effort='high',prompt=prompt,payload=payload,schema=schema,directory=directory)
+    measured=serialize_request(provider='gpt',executable=str(args.codex_executable),model=args.model,effort='high',prompt=prompt,payload=payload,schema=schema,directory=directory)
     retain(root,name+'.capacity.json',dict(request_bytes=measured['size'],request_characters=len(measured['wire']),max_request_bytes=args.max_gpt_bytes,max_characters=1048576,all_claims_present=len(payload['claims'])))
     if len(measured['wire'])>1048576:raise ValueError('whole request exceeds GPT character limit; no truncation/splitting')
     atomic_status(root,name,request_bytes=measured['size'],model=args.model,effort='high')
@@ -153,7 +153,7 @@ def supplements(report,review_input):
 def execute(args):
     root=args.output_root.resolve();root.mkdir(parents=True,exist_ok=True)
     lock=(root/'job.lock').open('a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-    global_lock=(Path.cwd()/'.411-passage-unit-job.lock').open('a');fcntl.flock(global_lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    global_lock=(root.parent/'.411-passage-unit-job.lock').open('a');fcntl.flock(global_lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     args.code_sha=hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     os.environ['CODEX_EXECUTABLE']=str(args.codex_executable)
     try:

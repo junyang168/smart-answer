@@ -31,7 +31,7 @@ Use `backend/.venv/bin/python` from the #411 worktree. Pass all paths explicitly
 including `--codex-executable` for the subscription CLI. Launch using a detached
 process with stdout/stderr redirected to an exclusive log in a new output root.
 Monitor `status.json`, `events.jsonl`, the log, and the PID recorded in status.
-A worktree lock and output lock reject duplicate jobs.
+A shared output-parent lock and output lock reject duplicate jobs.
 
 Resume with the same arguments and output root. Input/model/prompt/code-bound
 successful responses and reviews are reused; changed bindings fail closed.

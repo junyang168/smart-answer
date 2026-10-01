@@ -33,3 +33,24 @@ def test_primary_containment_keeps_chapter_only_but_catches_truncated_structural
     assert not primary_fits('Matt.5.17-Matt.7.29','Matt.5.17-Matt.7.12')
     assert not primary_fits('Matt.5-Matt.7','Matt.5-Matt.7.12')
     assert not primary_fits('Luke.12.20','Matt.2.19-Matt.2.23')
+
+
+def test_background_stage_accepts_cli_path_and_reuses_bound_response(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    from pathlib import Path
+    from backend.pipeline import exegesis_passage_unit_job as module
+    from backend.pipeline.exegesis_grouping_transport import write_new
+    args=SimpleNamespace(codex_executable=Path('/fake/codex'),model='gpt-6.1-sol',code_sha='code',max_gpt_bytes=2500000,timeout=1)
+    calls=[]
+    def fake_call(**kwargs):
+        calls.append(kwargs);kwargs['directory'].mkdir()
+        write_new(kwargs['directory']/'response.json',dict(response={'ok':True}))
+        return {'ok':True}
+    monkeypatch.setattr(module,'call',fake_call)
+    payload={'claims':[{'id':'a'}]}
+    assert module.model_stage(tmp_path,'generation','prompt',payload,{'type':'object'},args)=={'ok':True}
+    assert module.model_stage(tmp_path,'generation','prompt',payload,{'type':'object'},args)=={'ok':True}
+    assert len(calls)==1
+    assert calls[0]['model']=='gpt-6.1-sol' and calls[0]['effort']=='high'
+    with pytest.raises(ValueError,match='cached artifact differs'):
+        module.model_stage(tmp_path,'generation','changed prompt',payload,{'type':'object'},args)
