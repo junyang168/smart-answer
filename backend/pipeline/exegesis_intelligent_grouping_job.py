@@ -1,4 +1,4 @@
-"""#411 read-only full scheduling: reviewed ownership -> passage units -> grouping.
+"""#411 read-only full scheduling: L0 Bible book -> L1 passage units -> L2 grouping.
 
 No preview authorization, master-data writes, CVP calls or automatic retries.
 Run `--help`; input format is documented in the companion README.
@@ -225,12 +225,15 @@ def execute(args):
         owned_ids = {r['claim_id'] for r in ownership['decisions']}
         verify_current([c for c in packet['claims'] if c['claim_id'] in owned_ids])
         code_paths = [Path(__file__), REVIEWER, Path(__file__).with_name('exegesis_grouping_transport.py'),
+                      Path(__file__).with_name('exegesis_grouping_packet.py'),
                       Path(__file__).with_name('viewpoint_passage_grouping_sample_runner.py'),
                       Path(__file__).with_name('viewpoint_passage_grouping_preflight.py')]
         config = dict(role_ledger_sha256=ledger['artifact_sha256'], role_packet_sha256=packet['artifact_sha256'],
             ownership_sha256=ownership['artifact_sha256'], provider=args.provider, model=args.model,
             reviewer_provider=args.reviewer_provider, reviewer_model=args.reviewer_model, effort=args.effort,
             max_request_bytes=args.max_request_bytes, max_group_size=20,
+            layers={"L0": "Bible book input boundary", "L1": "source-argument passage units, cross-chapter allowed",
+                    "L2": "argument-boundary grouping, maximum 20"}, packet_encoding="lossless_string_interning_v1",
             code_shas={str(p.relative_to(REVIEWER.parent.parent)): hashlib.sha256(p.read_bytes()).hexdigest() for p in code_paths},
             prompt_shas={p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in [PROMPTS / 'exegesis_passage_unit_planning.md',
                 PROMPTS / 'exegesis_argument_grouping.md', PROMPTS / 'exegesis_matthew_16_19_regression.md']})

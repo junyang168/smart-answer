@@ -59,6 +59,30 @@ def source_strings(text):
     return list(walk(value))
 
 
+def compact_packet(payload):
+    """Independent lossless wire encoder; own implementation, no backend reader."""
+    counts = {}
+    def visit(value):
+        if isinstance(value, str) and len(value.encode()) >= 64:
+            counts[value] = counts.get(value, 0) + 1
+        elif isinstance(value, list):
+            for v in value: visit(v)
+        elif isinstance(value, dict):
+            if '$text' in value: raise ValueError('reserved packet reference key')
+            for v in value.values(): visit(v)
+    visit(payload)
+    texts = [text for text, count in counts.items() if count > 1]
+    ids = {text: i for i, text in enumerate(texts)}
+    def encode(value):
+        if isinstance(value, str) and value in ids: return {'$text': ids[value]}
+        if isinstance(value, list): return [encode(v) for v in value]
+        if isinstance(value, dict): return {k: encode(v) for k, v in value.items()}
+        return value
+    compact = dict(packet_format='wang_exegesis_interned_packet_v1', texts=texts, data=encode(payload))
+    dump = lambda v: json.dumps(v, ensure_ascii=False, separators=(',', ':'))
+    return compact if len(dump(compact).encode()) < len(dump(payload).encode()) else payload
+
+
 def original_sources(sources):
     originals, strings = [], {}
     for source in sources:
@@ -142,7 +166,10 @@ def main():
             'properties': {'status': {'type': 'string', 'enum': ['pass', 'needs_resolution']},
                 'findings': {'type': 'array', 'items': finding_schema}}}
         schema_text = json.dumps(schema, ensure_ascii=False, sort_keys=True)
-        body = json.dumps(payload, ensure_ascii=False, indent=2)
+        wire_payload = compact_packet(payload)
+        body = json.dumps(wire_payload, ensure_ascii=False, separators=(',', ':'))
+        wire_prompt = ('输入为无损去重packet时，texts是字符串表，data内仅含$'
+                       'text的对象引用零起始texts索引；按引用完整阅读，不是摘要。\n') + PROMPT
         env = dict(os.environ)
         # Independent billing boundary: never permit API credentials/providers.
         for key in list(env):
@@ -152,7 +179,7 @@ def main():
         if provider == 'gpt':
             cli = env.get('CODEX_EXECUTABLE') or shutil.which('codex') or 'codex'
             auth_cmd = [cli, 'login', 'status']
-            wire = 'Read-only structured review. Do not use tools.\n' + PROMPT + '\n' + body
+            wire = 'Read-only structured review. Do not use tools.\n' + wire_prompt + '\n' + body
             command = [cli, 'exec', '--ephemeral', '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check',
                 '--sandbox', 'read-only', '--color', 'never', '--model', model, '--config', f'model_reasoning_effort="{effort}"',
                 '--output-schema', str(root / 'schema.json'), '--output-last-message', str(root / 'last-message.raw.txt'), '-']
@@ -162,10 +189,11 @@ def main():
             wire = body
             command = [cli, '--print', '--safe-mode', '--disable-slash-commands', '--no-session-persistence',
                 '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--tools', '', '--permission-mode', 'dontAsk',
-                '--model', model, '--effort', effort, '--system-prompt', PROMPT, '--output-format', 'json', '--json-schema', schema_text]
+                '--model', model, '--effort', effort, '--system-prompt', wire_prompt, '--output-format', 'json', '--json-schema', schema_text]
         size = len(wire.encode()) + sum(len(s.encode()) for s in command) + (len(schema_text.encode()) if provider == 'gpt' else 0)
         seal(root / 'request.json', dict(binding=request['binding'], provider=provider, model=model,
-            effort=effort, payload=payload, prompt=PROMPT, schema=schema, request_bytes=size, max_request_bytes=request['max_request_bytes']))
+            effort=effort, payload=payload, prompt=wire_prompt, wire_payload_sha256=digest(wire_payload),
+            wire_payload_bytes=len(body.encode()), schema=schema, request_bytes=size, max_request_bytes=request['max_request_bytes']))
         if size > request['max_request_bytes']:
             raise ValueError('independent full request exceeds byte limit; no truncation')
         auth = subprocess.run(auth_cmd, capture_output=True, text=True, timeout=30, env=env, check=False)
@@ -199,7 +227,7 @@ def main():
         seal(root / 'response.json', dict(response=response))
         report = validate_report(response, request['proposal'], strings, request['binding'])
         seal(root / 'report.json', report | dict(provider=provider, model=model, input_sha256=request['artifact_sha256'],
-            prompt_sha256=digest({'prompt': PROMPT}), reviewer_code_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest()))
+            prompt_sha256=digest({'prompt': wire_prompt}), reviewer_code_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest()))
     except Exception as exc:
         seal(root / 'failure.json', dict(error=str(exc), error_type=type(exc).__name__))
         raise

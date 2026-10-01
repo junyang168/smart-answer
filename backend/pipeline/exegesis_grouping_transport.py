@@ -6,6 +6,7 @@ from pathlib import Path
 from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
 from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
+from backend.pipeline.exegesis_grouping_packet import pack, compact_json, INSTRUCTION
 
 
 def write_new(path: Path, value: dict) -> dict:
@@ -16,6 +17,35 @@ def write_new(path: Path, value: dict) -> dict:
     return value
 
 
+def serialize_request(*, provider, executable, model, effort, prompt, payload, schema, directory):
+    """Exact generation wire, shared by runtime and read-only capacity measurement."""
+    directory = Path(directory).resolve()
+    wire_payload = pack(payload)
+    body = compact_json(wire_payload)
+    prompt = INSTRUCTION + prompt
+    schema_text = json.dumps(schema, ensure_ascii=False, sort_keys=True)
+    raw = directory / 'last-message.raw.txt'
+    if provider == 'gpt':
+        wire = ('Perform structured extraction without tools or file changes. Return only JSON.\n'
+                + prompt + '\n===== USER INPUT =====\n' + body)
+        command = [executable, 'exec', '--ephemeral', '--ignore-user-config', '--ignore-rules',
+                   '--skip-git-repo-check', '--sandbox', 'read-only', '--color', 'never', '--model', model,
+                   '--config', f'model_reasoning_effort="{effort}"', '--output-schema',
+                   str(directory / 'schema.json'), '--output-last-message', str(raw), '-']
+    else:
+        wire = body
+        command = [executable, '--print', '--safe-mode', '--disable-slash-commands',
+                   '--no-session-persistence', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
+                   '--tools', '', '--permission-mode', 'dontAsk', '--model', model, '--effort', effort,
+                   '--system-prompt', prompt, '--output-format', 'json', '--json-schema', schema_text]
+    # Include every serialized argument plus stdin and externally supplied GPT schema.
+    size = len(wire.encode()) + sum(len(arg.encode()) for arg in command)
+    if provider == 'gpt':
+        size += len(schema_text.encode())
+    return dict(wire_payload=wire_payload, body=body, prompt=prompt, schema_text=schema_text,
+                raw=raw, wire=wire, command=command, size=size)
+
+
 def call(*, provider, model, effort, prompt, payload, schema, directory, max_bytes, timeout=900):
     """Exactly one CLI generation, no API fallback or semantic repair."""
     directory = Path(directory).resolve()
@@ -24,28 +54,14 @@ def call(*, provider, model, effort, prompt, payload, schema, directory, max_byt
         raise ValueError('explicit subscription provider/model required')
     client = (CodexSubscriptionClient(model=model, reasoning_effort=effort) if provider == 'gpt'
               else ClaudeSubscriptionClient(model=model, reasoning_effort=effort))
-    body = json.dumps(payload, ensure_ascii=False, indent=2)
-    schema_text = json.dumps(schema, ensure_ascii=False, sort_keys=True)
-    raw = directory / 'last-message.raw.txt'
-    if provider == 'gpt':
-        wire = ('Perform structured extraction without tools or file changes. Return only JSON.\n'
-                + prompt + '\n===== USER INPUT =====\n' + body)
-        command = [client.executable, 'exec', '--ephemeral', '--ignore-user-config', '--ignore-rules',
-                   '--skip-git-repo-check', '--sandbox', 'read-only', '--color', 'never', '--model', model,
-                   '--config', f'model_reasoning_effort="{effort}"', '--output-schema',
-                   str(directory / 'schema.json'), '--output-last-message', str(raw), '-']
-    else:
-        wire = body
-        command = [client.executable, '--print', '--safe-mode', '--disable-slash-commands',
-                   '--no-session-persistence', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
-                   '--tools', '', '--permission-mode', 'dontAsk', '--model', model, '--effort', effort,
-                   '--system-prompt', prompt, '--output-format', 'json', '--json-schema', schema_text]
-    # Include every serialized argument plus stdin and externally supplied GPT schema.
-    size = len(wire.encode()) + sum(len(arg.encode()) for arg in command)
-    if provider == 'gpt':
-        size += len(schema_text.encode())
+    serialized = serialize_request(provider=provider, executable=client.executable, model=model,
+        effort=effort, prompt=prompt, payload=payload, schema=schema, directory=directory)
+    wire_payload, body, prompt, schema_text, raw, wire, command, size = (
+        serialized[k] for k in ('wire_payload', 'body', 'prompt', 'schema_text', 'raw', 'wire', 'command', 'size'))
     request = write_new(directory / 'request.json', dict(provider=provider, model=model, effort=effort,
-        prompt=prompt, payload=payload, schema=schema, request_bytes=size, max_request_bytes=max_bytes,
+        prompt=prompt, payload=payload, wire_payload_sha256=sha256_json(wire_payload),
+        uncompressed_payload_bytes=len(json.dumps(payload, ensure_ascii=False, indent=2).encode()),
+        wire_payload_bytes=len(body.encode()), schema=schema, request_bytes=size, max_request_bytes=max_bytes,
         prompt_sha256=sha256_json({'prompt': prompt}), payload_sha256=sha256_json(payload), command=command))
     try:
         if size > max_bytes:
