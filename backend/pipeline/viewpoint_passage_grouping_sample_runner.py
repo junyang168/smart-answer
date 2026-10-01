@@ -13,8 +13,6 @@ from pathlib import Path
 
 from backend.api.canonical_repository.viewpoint_batch_resolution import ClaimGroupingResponse
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
-from backend.api.canonical_repository.viewpoint_resolution import StructuredJsonReviewerAdapter
-from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
 from backend.pipeline.viewpoint_passage_grouping_preflight import (
     build_preview,
     plan_reviewed_passage_unit,
@@ -22,7 +20,27 @@ from backend.pipeline.viewpoint_passage_grouping_preflight import (
 
 
 PROMPT = Path(__file__).resolve().parent / "prompts" / "canonical_viewpoint_passage_argument_split_sample.md"
-MODEL = "claude-fable-5-1"
+GENERIC_PROMPT = PROMPT.with_name("exegesis_argument_grouping.md")
+
+
+def split_reviewed_unit(*, unit_id, payload, provider, model, effort, directory,
+                        max_request_bytes, regression_context=False):
+    """Production hook: caller supplies audited membership, never a preview."""
+    from backend.api.canonical_repository.viewpoint_resolution import _strict_json_schema
+    from backend.pipeline.exegesis_grouping_transport import call
+    prompt = GENERIC_PROMPT.read_text(encoding="utf-8")
+    if regression_context:
+        prompt += "\n" + PROMPT.with_name("exegesis_matthew_16_19_regression.md").read_text(encoding="utf-8")
+    ids = [row["claim_id"] for row in payload["claims"]]
+    if len(ids) <= 20:
+        raise ValueError("small reviewed unit must not call grouping model")
+    response = call(provider=provider, model=model, effort=effort, prompt=prompt, payload=payload,
+                    schema=_strict_json_schema(ClaimGroupingResponse.model_json_schema()),
+                    directory=directory, max_bytes=max_request_bytes)
+    grouping = ClaimGroupingResponse.model_validate(response)
+    return plan_reviewed_passage_unit(unit_id=unit_id, claim_ids=ids, batch_size=20,
+                                      model_split=grouping)
+
 
 
 def _write_new(path: Path, value: dict) -> None:
@@ -33,6 +51,7 @@ def _write_new(path: Path, value: dict) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--model", required=True)
     parser.add_argument("--role-ledger", type=Path, required=True)
     parser.add_argument("--role-packet", type=Path, required=True)
     parser.add_argument("--passage-key", required=True)
@@ -67,14 +86,16 @@ def main() -> int:
         ],
     }
     args.output_dir.mkdir(parents=True)
-    prompt = PROMPT.read_text(encoding="utf-8")
+    prompt = GENERIC_PROMPT.read_text(encoding="utf-8")
+    if args.passage_key == "Matt.16.19":
+        prompt += "\n" + PROMPT.with_name("exegesis_matthew_16_19_regression.md").read_text(encoding="utf-8")
     request = {
         "schema_version": "wang_passage_grouping_sample_request_v1",
         "status": "review_only_not_production_grouping",
         "role_ledger_sha256": preview["role_ledger_sha256"],
         "role_packet_sha256": preview["role_packet_sha256"],
         "prompt_sha256": sha256_json({"prompt": prompt}),
-        "model": MODEL,
+        "model": args.model,
         "effort": "high",
         "passage_key": args.passage_key,
         "excluded_overlapping_bucket_keys": passage["overlapping_bucket_keys"],
@@ -82,14 +103,12 @@ def main() -> int:
     }
     request["artifact_sha256"] = sha256_json(request)
     _write_new(args.output_dir / "request.json", request)
-    adapter = StructuredJsonReviewerAdapter(
-        client=ClaudeSubscriptionClient(model=MODEL, reasoning_effort="high"),
-        prompt=prompt,
-        response_model=ClaimGroupingResponse,
-        schema_name="wang_canonical_viewpoint_claim_grouping_v1",
-    )
+    from backend.api.canonical_repository.viewpoint_resolution import _strict_json_schema
+    from backend.pipeline.exegesis_grouping_transport import call
     try:
-        response = dict(adapter.generate(payload))
+        response = call(provider="claude", model=args.model, effort="high", prompt=prompt,
+                        payload=payload, schema=_strict_json_schema(ClaimGroupingResponse.model_json_schema()),
+                        directory=args.output_dir / "call", max_bytes=500_000)
         raw = {
             "schema_version": "wang_passage_grouping_sample_raw_v1",
             "request_sha256": request["artifact_sha256"],
@@ -128,7 +147,7 @@ def main() -> int:
             "request_sha256": request["artifact_sha256"],
             "error_type": type(exc).__name__,
             "error": str(exc),
-            "raw_response_path": "raw-response.json" if (args.output_dir / "raw-response.json").exists() else None,
+            "raw_response_path": "call/transport.raw.json" if (args.output_dir / "call/transport.raw.json").exists() else None,
         }
         failure["artifact_sha256"] = sha256_json(failure)
         _write_new(args.output_dir / "failure.json", failure)
