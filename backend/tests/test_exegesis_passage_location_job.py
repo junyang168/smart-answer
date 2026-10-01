@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import pytest
+from types import SimpleNamespace
 from backend.pipeline import exegesis_passage_location_job as job
 from backend.pipeline import exegesis_passage_location_runner as loc
 
@@ -77,3 +78,27 @@ def test_book_only_primary_gets_one_review_not_an_invented_chapter(tmp_path, mon
     result = job.obtain("gpt", "test-model", batch(), root, 500000)
     assert result["response"]["decisions"][1]["primary"] == ""
     assert result["response"]["decisions"][1]["status"] == "unresolved"
+
+
+def test_primary_only_does_not_invoke_claude_or_arbitration(tmp_path, monkeypatch):
+    args = SimpleNamespace(reuse_first_root=tmp_path, output=tmp_path, job_root=tmp_path,
+                           primary_model="test-model", max_request_bytes=500000)
+    packets = [job.subset(batch(), {cid}) for cid in ["a", "b"]]
+    def artifact(packet):
+        return {"artifact_sha256": "test", "response": {"decisions": [
+            row(c["claim_id"], "馬太福音十六章") for c in packet["claims"]]}}
+    monkeypatch.setattr(job, "verify_cached", lambda path, packet, model: artifact(packet))
+    called = []
+    def obtain(provider, model, packet, directory, limit):
+        assert provider == "gpt"
+        called.append(provider)
+        return artifact(packet)
+    monkeypatch.setattr(job, "obtain", obtain)
+    monkeypatch.setattr(job, "reconcile", lambda *args: pytest.fail("no arbitration in primary-only mode"))
+    events = []
+    job.execute_primary_only(args, {"scope_count": 2, "batches": packets, "artifact_sha256": "input"},
+                             lambda state, **fields: events.append((state, fields)))
+    assert called == ["gpt"]
+    assert events[-1][0] == "primary_candidates_completed"
+    output = loc.checked(tmp_path / "primary-candidates.json")
+    assert all(r["status"] == "candidate_only_not_approved_ownership" for r in output["rows"])

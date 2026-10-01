@@ -181,6 +181,34 @@ def preflight(args, inputs):
         "database_mutations": 0, "deferred_excluded": 170})
 
 
+def execute_primary_only(args, inputs, progress):
+    """Finish GPT candidates without invoking or waiting for the other provider."""
+    rows = []
+    for number, batch in enumerate(inputs["batches"]):
+        progress("primary_reviewing", batch_index=number, completed_claim_count=len(rows))
+        if number == 0:
+            path = args.reuse_first_root / "batch-000/gpt/attempt-3/validated.json"
+            artifact = verify_cached(path, batch, args.primary_model)
+        else:
+            artifact = obtain("gpt", args.primary_model, batch,
+                              args.output / f"batch-{number:03d}/gpt", args.max_request_bytes)
+        decisions = {r["claim_id"]: r for r in artifact["response"]["decisions"]}
+        for claim in batch["claims"]:
+            rows.append({"claim": claim, "primary_candidate": decisions[claim["claim_id"]],
+                         "review_artifact_sha256": artifact["artifact_sha256"],
+                         "status": "candidate_only_not_approved_ownership"})
+        progress("primary_batch_completed", batch_index=number, completed_claim_count=len(rows),
+                 counts=dict(Counter(r["primary_candidate"]["status"] for r in rows)))
+        loc.seal(args.job_root / f"primary-checkpoint-{number:03d}.json",
+                 {"input_sha256": inputs["artifact_sha256"], "rows": rows})
+    assert len(rows) == inputs["scope_count"] and len({r["claim"]["claim_id"] for r in rows}) == len(rows)
+    loc.seal(args.job_root / "primary-candidates.json", {"input_sha256": inputs["artifact_sha256"],
+        "schema_version": "wkp411_passage_primary_candidates_v1", "rows": rows,
+        "status": "candidate_only_independent_review_and_arbitration_required",
+        "database_mutations": 0, "grouping_executed": False, "deferred_excluded": 170})
+    progress("primary_candidates_completed", completed_claim_count=len(rows))
+
+
 def execute(args, inputs, progress):
     final = []
     for number, batch in enumerate(inputs["batches"]):
@@ -238,6 +266,8 @@ def main():
     parser.add_argument("--review-model", default="claude-opus-5-5")
     parser.add_argument("--max-request-bytes", type=int, default=500000)
     parser.add_argument("--ticket", type=int, help="Post completion/failure status to the authorized ticket")
+    parser.add_argument("--primary-only", action="store_true",
+                        help="Run GPT candidates independently; no Claude or semantic arbitration")
     args = parser.parse_args()
     lock = (args.output / ".passage-location-job.lock").open("a+")
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -247,11 +277,14 @@ def main():
     def notify_ticket():
         if args.ticket is None:
             return
+        label = "GPT 初次定位候选（未批准归属，待独立复核）" if args.primary_only else "审阅"
+        mode_note = ("本次只运行 GPT 初次定位，不运行 Claude 或仲裁。" if args.primary_only else
+                     "提议与独立复核齐备后，仅一次归属仲裁。")
         text = (f"#411 经文归属后台 job：{state['status']}\n\n"
-                f"已完成审阅：{state.get('completed_claim_count', 0)}/624；"
+                f"已完成{label}：{state.get('completed_claim_count', 0)}/624；"
                 f"结果计数：{json.dumps(state.get('counts', {}), ensure_ascii=False)}。\n\n"
                 f"产物目录：`{args.job_root}`。代码提交与输入／模型／prompt／schema SHA 见 invocation.json；"
-                "原回答、一次有界引文纠正、一次归属仲裁和断点均保留。\n\n"
+                f"原回答与断点均保留；引文纠正上限一次。{mode_note}\n\n"
                 "170 条延期项未处理；未运行 grouping、未生成 CVP、未写 Claim／Registry。"
                 "这不是 #411 全卡完成。\n")
         if state.get("error"):
@@ -279,14 +312,19 @@ def main():
             raise ValueError("prompt/schema drift")
         progress("preflight", completed_claim_count=0)
         loc.seal(args.job_root / "invocation.json", {"input_sha256": inputs["artifact_sha256"],
-            "pid": os.getpid(), "models": {"primary": args.primary_model, "independent": args.review_model},
+            "pid": os.getpid(), "models": {"primary": args.primary_model,
+                "independent": None if args.primary_only else args.review_model},
             "job_code_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
             "runner_code_sha256": hashlib.sha256(Path(loc.__file__).read_bytes()).hexdigest(),
             "prompt_sha256": inputs["prompt_sha256"], "schema_sha256": inputs["schema_sha256"],
             "arguments": {k: str(v) for k, v in vars(args).items()}, "bounded_quote_corrections": 1,
-            "bounded_semantic_arbitrations": 1, "api_fallback": False, "grouping_executed": False})
+            "bounded_semantic_arbitrations": 0 if args.primary_only else 1,
+            "api_fallback": False, "grouping_executed": False})
         preflight(args, inputs)
-        execute(args, inputs, progress)
+        if args.primary_only:
+            execute_primary_only(args, inputs, progress)
+        else:
+            execute(args, inputs, progress)
         notify_ticket()
     except Exception as exc:
         progress("stopped_on_failure", error_type=type(exc).__name__, error=str(exc),
