@@ -40,7 +40,7 @@ def measure(preparation, sources, root, executable, max_bytes):
     return write_new(root / 'report.json', dict(schema_version='wang_exegesis_book_packet_capacity_v1',
         preparation_sha256=preparation['artifact_sha256'], model='gpt-6-sol', executable=executable,
         grouping_authorized=False, candidate_associations_not_reviewed_primary=True, books=results,
-        unassigned_claim_ids=unassigned, model_calls=0, source_text_omissions=0,
+        unassigned_claim_ids=unassigned, model_calls=0, svg_excluded_from_model_input=True, non_svg_source_text_omissions=0,
         total_exegesis=3843, explanation='Exact GPT generation request bytes; reviewer/proposal capacity must also be checked before execution. Byte fit alone does not establish model token capacity.'))
 
 

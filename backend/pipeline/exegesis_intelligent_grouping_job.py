@@ -9,6 +9,8 @@ from collections import Counter, defaultdict
 import fcntl
 import hashlib
 import json
+import re
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 import subprocess
@@ -159,14 +161,55 @@ def validate_units(response, claims):
             raise ValueError('reversed passage range')
 
 
+
+def exclude_svg(value):
+    """Model view only: retain separate prose spans and bind omitted SVG bytes."""
+    if isinstance(value, list):
+        return [exclude_svg(item) for item in value]
+    if isinstance(value, dict):
+        return {key: exclude_svg(item) for key, item in value.items()}
+    if not isinstance(value, str) or not re.search(r'<svg\b', value, re.I):
+        return value
+    parts, cursor = [], 0
+    pattern = re.compile(r'<svg\b[^>]*?/\s*>|<svg\b[^>]*>.*?</svg\s*>', re.I | re.S)
+    for match in pattern.finditer(value):
+        svg = match.group()
+        element = ET.fromstring(svg)
+        if element.tag.split('}')[-1].lower() != 'svg':
+            raise ValueError('invalid SVG root')
+        if match.start() > cursor:
+            parts.append(value[cursor:match.start()])
+        parts.append({'svg_excluded': True, 'sha256': hashlib.sha256(svg.encode()).hexdigest(),
+                      'start': match.start(), 'end': match.end()})
+        cursor = match.end()
+    if cursor < len(value):
+        parts.append(value[cursor:])
+    if cursor == 0 or any(isinstance(p, str) and re.search(r'<svg\b', p, re.I) for p in parts):
+        raise ValueError('unparsed SVG; refusing model input')
+    return {'model_text_parts': parts}
+
+
+def model_source_text(text):
+    if not re.search(r'<svg\b', text, re.I):
+        return text
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        return exclude_svg(text)
+    return json.dumps(exclude_svg(value), ensure_ascii=False, separators=(',', ':'))
+
 def payload_for(claims, sources, **extra):
     needed = {c['source_id'] for c in claims}
-    selected = [s for s in sources if s['source_id'] in needed]
-    # Entire original files, not just excerpts or transport windows.
-    full = [{**s, 'original_text': Path(s['path']).read_text(encoding='utf-8'),
-        'linked_files': [{**f, 'original_text': Path(f['path']).read_text(encoding='utf-8')} for f in s.get('linked_files', [])]}
-        for s in selected]
-    return {'claims': claims, 'sources': full, **extra}
+    full = []
+    for source in sources:
+        if source['source_id'] not in needed:
+            continue
+        fresh = {k: v for k, v in source.items() if k != 'paragraphs'}
+        fresh['original_text'] = model_source_text(Path(source['path']).read_text(encoding='utf-8'))
+        fresh['linked_files'] = [{**f, 'original_text': model_source_text(Path(f['path']).read_text(encoding='utf-8'))}
+                                for f in source.get('linked_files', [])]
+        full.append(fresh)
+    return exclude_svg({'claims': claims, 'sources': full, **extra})
 
 
 def obtain(directory, fingerprint, generate):

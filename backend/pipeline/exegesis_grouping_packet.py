@@ -10,7 +10,8 @@ import json
 FORMAT = 'wang_exegesis_interned_packet_v1'
 INSTRUCTION = ('输入可能是 wang_exegesis_interned_packet_v1 无损 packet：texts 是字符串表，'
                'data 中仅含 "$text" 的对象引用 texts 对应的零起始索引。先按引用读取完整材料。'
-               '这是重复文本去重，不是摘要；Claim、证据、原文、primary 与 secondary 均完整保留。\n')
+               '这是重复文本去重，不是摘要。model_text_parts 按原文顺序保存独立文字片段；'
+               'svg_excluded 标记的图形不提供给模型，不能推断其内容，不能跨该标记拼接逐字引文。\n')
 
 
 def compact_json(value):
