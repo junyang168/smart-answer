@@ -34,3 +34,11 @@ processing. L1 delivery and its original reviews are never overwritten.
 Pass `--direct-preparation` to reuse sealed direct groups from a previous
 preparation. The L1 SHA, every unit result, exact membership and counts must
 match; imported result SHAs are retained in validation bases.
+
+`split_reviewed_unit` pins `scope_label` to the reviewed unit ID in both payload
+and schema. `--recover-scope-root` supports a narrowly bounded recovery of saved
+raw splits rejected solely for scope label mismatch: verifies parent model/L1,
+request/response SHA, exact original unit and membership, then normalizes only
+that label. Group IDs, members, rationale and ordering must remain identical.
+New root retains normalization provenance and still performs independent review;
+no model split is repeated and the original failed root remains immutable.

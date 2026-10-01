@@ -34,9 +34,11 @@ def split_reviewed_unit(*, unit_id, payload, provider, model, effort, directory,
     ids = [row["claim_id"] for row in payload["claims"]]
     if len(ids) <= 20:
         raise ValueError("small reviewed unit must not call grouping model")
+    payload = dict(payload, scope_label=unit_id)
+    schema = _strict_json_schema(ClaimGroupingResponse.model_json_schema())
+    schema['properties']['scope_label']['const'] = unit_id
     response = call(provider=provider, model=model, effort=effort, prompt=prompt, payload=payload,
-                    schema=_strict_json_schema(ClaimGroupingResponse.model_json_schema()),
-                    directory=directory, max_bytes=max_request_bytes)
+                    schema=schema, directory=directory, max_bytes=max_request_bytes)
     grouping = ClaimGroupingResponse.model_validate(response)
     return plan_reviewed_passage_unit(unit_id=unit_id, claim_ids=ids, batch_size=20,
                                       model_split=grouping)

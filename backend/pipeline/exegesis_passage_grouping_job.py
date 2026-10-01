@@ -18,6 +18,7 @@ from backend.pipeline.exegesis_passage_unit_job import retain
 from backend.pipeline.viewpoint_passage_grouping_preflight import plan_reviewed_passage_unit
 from backend.pipeline.viewpoint_passage_grouping_sample_runner import split_reviewed_unit
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
+from backend.api.canonical_repository.viewpoint_batch_resolution import ClaimGroupingResponse
 
 
 def load_manifest(path):
@@ -62,6 +63,38 @@ def load_direct_preparation(directory, manifest):
     return answers,prepared['artifact_sha256']
 
 
+
+def recover_scope_labels(directory, manifest, model):
+    """Reuse raw successes rejected solely for scope metadata; never change groups."""
+    if directory is None:return {},None
+    config=core.checked(directory/'config.json')
+    if config['input_manifest_sha256']!=manifest['artifact_sha256'] or config['model']!=model or config['provider']!='claude':
+        raise ValueError('scope recovery input/model mismatch')
+    recovered={}
+    for unit in manifest['units']:
+        uid=unit['unit_id'];response_path=directory/'groups'/uid/'response.json'
+        if not response_path.exists():continue
+        failure_path=directory/('failure-'+uid+'.json')
+        if not failure_path.exists():continue
+        failure=core.checked(failure_path)
+        if 'grouping is for scope' not in failure['error'] or not failure['error'].endswith('not '+uid):
+            continue
+        request=core.checked(response_path.with_name('request.json'));raw=core.checked(response_path)
+        if raw['request_sha256']!=request['artifact_sha256'] or request['model']!=model or request['provider']!='claude':
+            raise ValueError('raw scope recovery request binding mismatch')
+        if request['payload']['reviewed_unit']!=unit or request['payload']['input_manifest_sha256']!=manifest['artifact_sha256']:
+            raise ValueError('raw scope recovery unit binding mismatch')
+        core.exact([c['claim_id'] for c in request['payload']['claims']],unit['claim_ids'],'recovery request membership')
+        before=raw['response'];answer=dict(before,scope_label=uid)
+        validated=plan_reviewed_passage_unit(unit_id=uid,claim_ids=unit['claim_ids'],batch_size=20,
+            model_split=ClaimGroupingResponse.model_validate(answer)).model_dump(mode='json')
+        validate_groups(validated,unit)
+        if validated['groups']!=before['groups']:raise ValueError('scope recovery changed argument groups')
+        recovered[uid]=dict(grouping=validated,raw_response_sha256=raw['artifact_sha256'],request_sha256=request['artifact_sha256'],
+            normalization=dict(field='scope_label',before=before['scope_label'],after=uid),groups_unchanged=True)
+    return recovered,config['artifact_sha256']
+
+
 def execute(args):
     root=args.output_root.resolve();root.mkdir(parents=True,exist_ok=True)
     lock=(root/'job.lock').open('a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -71,8 +104,9 @@ def execute(args):
     sids={c['source_id'] for c in manifest['claim_packets']};sources=[s for s in sources_art['sources'] if s['source_id'] in sids]
     core.verify_current(manifest['claim_packets']);core.verify_files(sources)
     direct,preparation_sha=load_direct_preparation(args.direct_preparation,manifest)
+    recovered,recovery_config_sha=recover_scope_labels(args.recover_scope_root,manifest,args.model)
     config=dict(layer=2,input_manifest_sha256=manifest['artifact_sha256'],sources_sha256=sources_art['artifact_sha256'],
-        model=args.model,provider='claude',effort='high',direct_preparation_sha256=preparation_sha,reviewer_model='gpt-6.1-sol',reviewer_provider='gpt',workers=args.workers,
+        model=args.model,provider='claude',effort='high',direct_preparation_sha256=preparation_sha,recovery_config_sha256=recovery_config_sha,reviewer_model='gpt-6.1-sol',reviewer_provider='gpt',workers=args.workers,
         max_request_bytes=args.max_request_bytes,max_group_size=20,code_shas={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in
         [Path(__file__),Path(core.__file__),core.REVIEWER,Path(__file__).with_name('viewpoint_passage_grouping_sample_runner.py'),Path(__file__).with_name('viewpoint_passage_grouping_preflight.py'),Path(__file__).with_name('exegesis_grouping_transport.py'),Path(__file__).with_name('exegesis_grouping_packet.py')]},
         prompt_shas={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in [core.PROMPTS/'exegesis_argument_grouping.md',core.PROMPTS/'exegesis_matthew_16_19_regression.md']})
@@ -103,13 +137,17 @@ def execute(args):
         # Read-only existing ownership view for the existing independent reviewer;
         # blank primary stays blank, and no candidate is promoted to ownership.
         model_members=[dict(c,ownership=dict(primary=manifest['input_primary_ownership'][c['claim_id']],evidence=[],read_only=True)) for c in members]
-        payload=core.payload_for(model_members,sources,reviewed_unit=unit,layer=2,input_manifest_sha256=manifest['artifact_sha256']) if len(members)>20 else dict(reviewed_unit=unit,input_manifest_sha256=manifest['artifact_sha256'])
+        payload=core.payload_for(model_members,sources,scope_label=uid,reviewed_unit=unit,layer=2,input_manifest_sha256=manifest['artifact_sha256']) if len(members)>20 else dict(reviewed_unit=unit,input_manifest_sha256=manifest['artifact_sha256'])
         fingerprint=sha256_json(dict(config=config,payload=payload,stage='grouping'))
         def generate():
             if len(members)<=20:
                 directory.mkdir(parents=True,exist_ok=False)
                 if uid in direct:return direct[uid]['grouping']
                 return plan_reviewed_passage_unit(unit_id=uid,claim_ids=unit['claim_ids'],batch_size=20).model_dump(mode='json')
+            if uid in recovered:
+                directory.mkdir(parents=True,exist_ok=False)
+                retain(directory,'scope-normalization.json',recovered[uid])
+                return recovered[uid]['grouping']
             return split_reviewed_unit(unit_id=uid,payload=payload,provider='claude',model=args.model,effort='high',directory=directory,max_request_bytes=args.max_request_bytes,regression_context=unit['passage_key']=='Matt.16.19').model_dump(mode='json')
         answer=core.obtain(directory,fingerprint,generate);validate_groups(answer,unit)
         if len(members)>20:
@@ -159,6 +197,7 @@ def execute(args):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     for field in ['manifest','sources','output-root','codex-executable','claude-executable']:parser.add_argument('--'+field,type=Path,required=True)
+    parser.add_argument('--recover-scope-root',type=Path,help='Recover SHA-bound raw splits rejected solely for scope label metadata')
     parser.add_argument('--direct-preparation',type=Path,help='Reuse sealed deterministic small-unit outputs bound to this L1 manifest')
     parser.add_argument('--model',default='claude-opus-5-5');parser.add_argument('--workers',type=int,default=3)
     parser.add_argument('--max-request-bytes',type=int,default=2500000)
