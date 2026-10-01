@@ -12,7 +12,7 @@ def test_independent_compiler_reopens_physical_source_and_preserves_svg_gap(tmp_
     claim=dict(claim_id='C',claim_content_sha256='claimsha',source_id='S',evidence_steps=[dict(fragments=[dict(paragraph_key='S0002',verbatim_excerpt='not original')])])
     packet=tmp_path/'freeze.json';frozen=review.reader.seal(packet,dict(claims=[claim]))
     request=dict(stage='passage_membership',role_packet_path=str(packet),role_packet_sha256=frozen['artifact_sha256'],
-        claims=[dict(id='c0001',original_claim_id='C',claim_content_sha256='claimsha',statement='summary')],
+        claims=[dict(id='c0001',original_claim_id='C',claim_content_sha256='claimsha',source_id='S',statement='summary')],
         sources=[dict(source_id='S',path=str(file),file_sha256=hashlib.sha256(file.read_bytes()).hexdigest())],
         targets=[dict(unit_id='u001')],catalog=[],context_radius=1)
     payload,index=review.compile_packet(request)
@@ -34,3 +34,22 @@ def test_schema_requires_each_claim_and_unit_explicitly():
     for field,keys in [('primary_reviews',['c0001','c0002']),('findings',['u001','u002'])]:
         assert schema['properties'][field]['required']==keys
         assert schema['properties'][field]['additionalProperties'] is False
+
+
+def test_exact_fragment_mode_never_promotes_normalized_text_to_original(tmp_path):
+    file=tmp_path/'source.json';file.write_text(json.dumps({'script':[{'text':'original words'},{'text':'before<svg/>after'}]}))
+    claim=dict(claim_id='C',claim_content_sha256='sha',source_id='S',evidence_steps=[dict(fragments=[
+        dict(paragraph_key='S0001',verbatim_excerpt='original words'),
+        dict(paragraph_key='S0002',verbatim_excerpt='beforeafter')])])
+    packet=tmp_path/'freeze.json';freeze=review.reader.seal(packet,dict(claims=[claim]))
+    req=dict(stage='passage_membership',role_packet_path=str(packet),role_packet_sha256=freeze['artifact_sha256'],
+        claims=[dict(id='a',original_claim_id='C',claim_content_sha256='sha',source_id='S')],
+        sources=[dict(source_id='S',path=str(file),file_sha256=hashlib.sha256(file.read_bytes()).hexdigest())],targets=[],catalog=[],
+        context_radius=0,exact_fragments_only=True)
+    payload,index=review.compile_packet(req)
+    assert index=={('S','row:1'):['original words']}
+    assert payload['physical_sources'][0]['whole_source_included'] is False
+    links=payload['physical_sources'][0]['fragment_locations']
+    assert links[1]['frozen_quote_is_verbatim'] is False
+    req['extra_context']=[dict(source_id='S',locations=['row:2'])]
+    assert review.compile_packet(req)[1][('S','row:2')]==['before','after']

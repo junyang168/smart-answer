@@ -97,13 +97,24 @@ def compile_packet(request):
             location,text = rows[i]
             clean = reader.exclude_svg(text)
             pieces = [clean] if isinstance(clean,str) else [p for p in clean['model_text_parts'] if isinstance(p,str)]
+            if request.get('exact_fragments_only') and not any(
+                extra['source_id']==sid and location in extra['locations'] for extra in request.get('extra_context',[])
+            ):
+                excerpts = {f['verbatim_excerpt'] for _,claim in by_source[sid]
+                    for step in claim['evidence_steps'] for f in step.get('fragments',[])
+                    if f['verbatim_excerpt'] and any(f['verbatim_excerpt'] in part for part in pieces)}
+                if not excerpts:
+                    continue
+                pieces = sorted(excerpts, key=lambda quote: (text.index(quote),quote))
+                clean = {'physical_excerpts': pieces, 'complete_paragraph': False}
             quote_index[(sid,location)] = pieces
             selected.append(dict(location=location,text=clean))
         for linked in source.get('linked_files',[]):
             if hashlib.sha256(Path(linked['path']).read_bytes()).hexdigest()!=linked['file_sha256']:
                 raise ValueError('independent linked source drift')
         physical.append(dict(source_id=sid,file_sha256=source['file_sha256'],paragraph_count=len(rows),
-            paragraphs=selected,fragment_locations=fragment_links,whole_source_included=len(chosen)==len(rows)))
+            paragraphs=selected,fragment_locations=fragment_links,
+            whole_source_included=not request.get('exact_fragments_only') and len(chosen)==len(rows)))
     return dict(stage=request['stage'],claims=claims,targets=request['targets'],catalog=request['catalog'],
         physical_sources=physical,previous_findings=request.get('previous_findings',{}),
         final_review=request.get('final_review',False)),quote_index
@@ -113,9 +124,12 @@ def validate(response, request, quote_index):
     if set(response['primary_reviews'])!={c['id'] for c in request['claims']} or set(response['findings'])!={t['unit_id'] for t in request['targets']}:
         raise ValueError('independent review omitted or added Claim/unit')
     errors=[]
+    own_sources = {c['id']:c['source_id'] for c in request['claims']}
     for key,item in [*response['primary_reviews'].items(),*response['findings'].items()]:
         passing = item['status'] in {'verified','pass'}
         if not item['reason'] or (passing and not item['evidence']): errors.append(dict(key=key,error='missing reason/physical evidence'))
+        if key in own_sources and passing and (not item['primary'] or any(e['source_id']!=own_sources[key] for e in item['evidence'])):
+            errors.append(dict(key=key,error='verified primary requires a locator and own-source evidence'))
         for evidence in item['evidence']:
             if not evidence['quote'] or not any(evidence['quote'] in text for text in quote_index.get((evidence['source_id'],evidence['location']),[])):
                 errors.append(dict(key=key,error='non_verbatim_or_unprovided_physical_evidence',evidence=evidence))
@@ -130,21 +144,25 @@ def main():
     try:
         payload,index=compile_packet(request);schema=schema_for([c['id'] for c in request['claims']],[t['unit_id'] for t in request['targets']])
         body=json.dumps(reader.compact_packet(payload),ensure_ascii=False,separators=(',',':'));schema_text=json.dumps(schema,ensure_ascii=False,separators=(',',':'))
-        prompt='无损text引用按texts表还原。\n'+PROMPT
+        prompt='无损text引用按texts表还原。physical_excerpts是独立打开原件后核实的连续摘录，不是完整段落；不足时必须请求具体物理位置。\n'+PROMPT
+        if request.get('review_scope')=='one whole book':
+            prompt+='\n本轮是整卷审核，全部Claim、全部段落及成员在一次请求中提供。保持全局判断，不分局部任务。逐条reason简洁，每处证据只引用足够证明判断的短连续原文，不重复长段。'
         env=dict(os.environ)
         for k in list(env):
             if k.startswith(('ANTHROPIC_','OPENAI_','AZURE_OPENAI_','CLAUDE_CODE_USE_')) or k in {'CLAUDE_CODE_OAUTH_TOKEN','CODEX_API_KEY'}:env.pop(k)
+        env['CLAUDE_CODE_MAX_OUTPUT_TOKENS']=str(request.get('max_output_tokens',64000))
         cli=env.get('CLAUDE_EXECUTABLE') or shutil.which('claude') or 'claude'
         command=[cli,'--print','--safe-mode','--disable-slash-commands','--no-session-persistence','--strict-mcp-config','--mcp-config','{"mcpServers":{}}','--tools','','--permission-mode','dontAsk','--model',request['model'],'--effort','high','--system-prompt',prompt,'--output-format','json','--json-schema',schema_text]
         size=len(body.encode())+sum(len(arg.encode()) for arg in command)
         reader.seal(root/'request.json',dict(payload=payload,schema=schema,prompt=prompt,model=request['model'],effort='high',request_bytes=size,
-            max_request_bytes=request['max_request_bytes'],input_sha256=request['artifact_sha256'],code_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest()))
+            max_request_bytes=request['max_request_bytes'],max_output_tokens=int(env['CLAUDE_CODE_MAX_OUTPUT_TOKENS']),
+            input_sha256=request['artifact_sha256'],code_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest()))
         print(json.dumps(dict(stage='compiled',request_bytes=size,claim_count=len(request['claims']),unit_count=len(request['targets']))),flush=True)
         if a.compile_only:return
         if size>request['max_request_bytes']:raise ValueError('independent complete request exceeds byte limit; no truncation')
         auth=subprocess.run([cli,'auth','status'],env=env,text=True,capture_output=True,timeout=30);state=json.loads(auth.stdout)
         if auth.returncode or not state.get('loggedIn') or state.get('authMethod')!='claude.ai' or state.get('subscriptionType') not in {'pro','max','team','enterprise'}:raise ValueError('Claude subscription login required')
-        try:result=subprocess.run(command,input=body,env=env,text=True,capture_output=True,timeout=900,cwd=root)
+        try:result=subprocess.run(command,input=body,env=env,text=True,capture_output=True,timeout=request.get('timeout_seconds',900),cwd=root)
         except subprocess.TimeoutExpired as e:
             reader.seal(root/'transport.raw.json',dict(stdout=str(e.stdout or ''),stderr=str(e.stderr or ''),timeout=True));raise
         reader.seal(root/'transport.raw.json',dict(stdout=result.stdout,stderr=result.stderr,returncode=result.returncode))
