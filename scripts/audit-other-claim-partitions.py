@@ -58,6 +58,22 @@ def audit_provenance(packet, manifest, input_roots):
                 or attempts[-1] != raw):
             raise ValueError("raw retry provenance differs")
         body = {k: v for k, v in raw.items() if k != "artifact_sha256"}
+        if raw.get("quote_protocol") == "exact_source_quote_ids_v3":
+            if item["quote_repair_sha256"] is not None:
+                raise ValueError("quote ID answer has external quote repair")
+            response = json.loads(json.dumps(raw["response"]))
+            if set(response) != {"decisions"} or set(response["decisions"]) != set(ids):
+                raise ValueError("raw quote ID scope differs")
+            for cid, decision in response["decisions"].items():
+                texts = list(dict.fromkeys(text[:128] for text in
+                    [rows[cid]["statement"], *rows[cid]["source_excerpts"]] if text.strip()))
+                choices = {f"Q{i:04d}": text for i, text in enumerate(texts, 1)}
+                selection = decision["basis_quote"]
+                if selection not in choices:
+                    raise ValueError("invalid raw quote ID")
+                decision["basis_quote"] = choices[selection]
+            body.update(response=response, raw_quote_id_response=raw["response"],
+                        raw_artifact_sha256=raw["artifact_sha256"])
         if item["quote_repair_sha256"] is not None:
             repair = read(item["quote_repair_path"], item["quote_repair_sha256"])
             if (repair["raw_artifact_sha256"] != raw["artifact_sha256"]

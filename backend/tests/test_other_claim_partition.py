@@ -289,6 +289,95 @@ def test_worker_lane_resume_is_absolute_and_rejects_partial_boundaries():
             worker_starts(start, 8743, count, index)
 
 
+def unicode_packet():
+    packet = fixture()
+    packet["claims"][0]["statement"] = "第一行\n動詞的「義 δίκαιος」與『義 δίκαιος』，繁简不改。"
+    packet["claims"][0]["source_excerpts"] = ["原文\r\n保留\t所有字元。", "不同組合音標：δίκαιος"]
+    return base._artifact({k: v for k, v in packet.items() if k != "artifact_sha256"})
+
+
+def test_quote_ids_schema_has_only_ascii_enums_preserves_full_unicode_input():
+    import json
+    packet = unicode_packet()
+    pin, payload, request = routing.binding(packet, packet["claims"], "primary", quote_ids=True)
+    assert pin["quote_protocol"] == routing.QUOTE_ID_PROTOCOL
+    row = json.loads(payload)["claims"][0]
+    assert row["quote_choices"]["Q0001"] == packet["claims"][0]["statement"]
+    assert "\n" in row["statement"] and "δίκαιος" in row["statement"]
+    for props in request["schema"]["properties"]["decisions"]["properties"].values():
+        assert all(v.isascii() and v.startswith("Q") for v in props["properties"]["basis_quote"]["enum"])
+
+
+@pytest.mark.parametrize("role", ["primary", "independent"])
+def test_quote_ids_roundtrip_keeps_raw_ids_and_exact_source_without_extra_call(tmp_path, role):
+    packet = unicode_packet()
+    class Client:
+        calls = 0
+        def generate_json(self, *args):
+            self.calls += 1
+            return {"decisions": {cid: answer() | {"basis_quote": "Q0001"} for cid in ("C1", "C2")}}
+    client = Client()
+    effective = routing.run_batch(packet, packet["claims"], tmp_path, role, client, quote_ids=True)
+    path = next(tmp_path.glob("*.attempt-1.json"))
+    original = path.read_bytes()
+    raw = base._read_json(path)
+    assert raw["response"]["decisions"]["C1"]["basis_quote"] == "Q0001"
+    assert effective["response"]["decisions"]["C1"]["basis_quote"] == packet["claims"][0]["statement"]
+    routing.validate_quote_choice(effective, packet["claims"])
+    assert routing.run_batch(packet, packet["claims"], tmp_path, role, client, quote_ids=True) == effective
+    assert client.calls == 1 and original == path.read_bytes()
+
+
+def test_quote_ids_failed_raw_retained_single_retry_and_no_auto_third_call(tmp_path):
+    packet = fixture()
+    class Invalid:
+        calls = 0
+        def generate_json(self, *args):
+            self.calls += 1
+            return {"decisions": {cid: answer() | {"basis_quote": "Q9999"} for cid in ("C1", "C2")}}
+    client = Invalid()
+    for _ in range(2):
+        with pytest.raises(ValueError, match="quote ID"):
+            routing.run_batch(packet, packet["claims"], tmp_path, "primary", client, quote_ids=True)
+    assert client.calls == 2
+    assert len(list(tmp_path.glob("*.attempt-*.json"))) == 4
+
+
+def test_quote_ids_reuses_legacy_cache_and_binds_mapping_to_frozen_rows(tmp_path):
+    packet = fixture()
+    class Legacy:
+        def generate_json(self, *args):
+            return {"decisions": {cid: answer() for cid in ("C1", "C2")}}
+    a = routing.run_batch(packet, packet["claims"], tmp_path, "primary", Legacy())
+    class NoCall:
+        def generate_json(self, *args):
+            raise AssertionError("duplicate request")
+    assert routing.run_batch(packet, packet["claims"], tmp_path, "primary", NoCall(), quote_ids=True) == a
+    changed = deepcopy(packet["claims"])
+    changed[0]["statement"] += "改变"
+    with pytest.raises(ValueError, match="frozen packet"):
+        routing.binding(packet, changed, "primary", quote_ids=True)
+
+
+def test_quote_ids_multiroot_audit_reconstructs_selection_from_original_response(tmp_path):
+    packet, roles, roots = multi_root_fixture(tmp_path)
+    # Test-only replacement converts one fixture answer to the new protocol.
+    path = roots[1] / "independent"
+    raw_path = next(path.glob("*.attempt-1.json"))
+    old = base._read_json(raw_path)
+    row = packet["claims"][1]
+    binding, _, _ = routing.binding(packet, [row], "independent", quote_ids=True)
+    raw = base._artifact(binding | {"attempt_number": 1, "response": {"decisions": {
+        "C2": answer() | {"basis_quote": "Q0001"}}}})
+    raw_path.write_text(__import__('json').dumps(raw))
+    result = routing.assemble_roots(roots)
+    independent_auditor().audit(packet, result, roles, roots)
+    evidence = result["owners"]["C2"]["independent"]
+    assert evidence["raw_artifact_sha256"] == raw["artifact_sha256"]
+    assert evidence["quote_repair_sha256"] is None
+    assert old["role"] == raw["role"]
+
+
 def test_explicit_script_quote_repair_preserves_raw_and_classification(tmp_path):
     packet = fixture()
     raw = artifact(packet, "independent", {"C1": answer(), "C2": answer()})

@@ -107,7 +107,40 @@ def prepare(roles: dict, packet: dict, relations: list[dict]) -> dict:
     })
 
 
-def schema(ids: list[str], rows: list[dict] | None = None) -> dict:
+QUOTE_ID_PROTOCOL = "exact_source_quote_ids_v3"
+QUOTE_ID_PROMPT = PROMPT.replace(
+    "basis_quote必须从该Claim statement或给定的某一个source_excerpt中逐字复制一个连续短片段，不拼接、不改字。",
+    "basis_quote必须只返回该Claim quote_choices中的一个编号（如Q0001），不要复制引文正文。程序按编号原样取回引文；编号不能跨Claim使用。")
+QUOTE_ID_RETRY = "\n上一回答未通过校验。检查所有Claim、分类和理由；basis_quote只返回本条quote_choices中存在的Q编号，不输出引文正文。\n"
+
+
+def quote_choices(row: dict) -> dict[str, str]:
+    texts = list(dict.fromkeys(text[:128] for text in
+        [row["statement"], *row["source_excerpts"]] if text.strip()))
+    if not texts:
+        raise ValueError("no quote choices")
+    return {f"Q{i:04d}": text for i, text in enumerate(texts, 1)}
+
+
+def resolve_quote_ids(response: dict, rows: list[dict]) -> dict:
+    expected = indexed(rows, "claim_id")
+    if (not isinstance(response, dict) or set(response) != {"decisions"}
+            or not isinstance(response["decisions"], dict) or set(response["decisions"]) != set(expected)):
+        raise ValueError("quote ID response scope differs")
+    resolved = deepcopy(response)
+    for cid, decision in resolved["decisions"].items():
+        if not isinstance(decision, dict):
+            raise ValueError("invalid quote ID decision")
+        choices = quote_choices(expected[cid])
+        selection = decision.get("basis_quote")
+        if not isinstance(selection, str) or selection not in choices:
+            raise ValueError(f"invalid quote ID: {cid}")
+        decision["basis_quote"] = choices[selection]
+    validate(resolved, rows)
+    return resolved
+
+
+def schema(ids: list[str], rows: list[dict] | None = None, *, quote_ids: bool = False) -> dict:
     if len(set(ids)) != len(ids):
         raise ValueError("duplicate requested Claim")
     answer = {"type": "object", "additionalProperties": False,
@@ -122,8 +155,7 @@ def schema(ids: list[str], rows: list[dict] | None = None) -> dict:
         for cid in ids:
             # Limit the citation length, never the classification input. Each
             # choice is an exact contiguous excerpt; the full texts stay in payload.
-            choices = list(dict.fromkeys(text[:128] for text in
-                [scope[cid]["statement"], *scope[cid]["source_excerpts"]] if text.strip()))
+            choices = list(quote_choices(scope[cid])) if quote_ids else list(quote_choices(scope[cid]).values())
             properties[cid]["properties"]["basis_quote"]["enum"] = choices
     return {"name": "other_claim_partition_v1", "strict": True, "schema": {
         "type": "object", "additionalProperties": False,
@@ -149,7 +181,8 @@ def validate(response: dict, rows: list[dict]) -> None:
             raise ValueError(f"non-verbatim routing evidence: {cid}")
 
 
-def binding(packet: dict, rows: list[dict], role: str, *, quote_choice: bool = False) -> tuple[dict, str, dict]:
+def binding(packet: dict, rows: list[dict], role: str, *, quote_choice: bool = False,
+            quote_ids: bool = False) -> tuple[dict, str, dict]:
     base._check_artifact(packet)
     if role not in {"primary", "independent"}:
         raise ValueError("unknown classifier role")
@@ -159,25 +192,34 @@ def binding(packet: dict, rows: list[dict], role: str, *, quote_choice: bool = F
     scope = indexed(packet["claims"], "claim_id")
     if not rows or any(scope.get(r["claim_id"]) != r for r in rows):
         raise ValueError("batch differs from frozen packet")
-    payload = json.dumps({"partitions": POLICY["partitions"], "claims": [
-        {key: r[key] for key in ("claim_id", "statement", "source_excerpts")} for r in rows]},
+    if quote_choice and quote_ids:
+        raise ValueError("conflicting quote protocols")
+    payload_rows = [{key: r[key] for key in ("claim_id", "statement", "source_excerpts")} for r in rows]
+    if quote_ids:
+        for row in payload_rows:
+            row["quote_choices"] = quote_choices(scope[row["claim_id"]])
+    payload = json.dumps({"partitions": POLICY["partitions"], "claims": payload_rows},
                          ensure_ascii=False, separators=(",", ":"))
-    request_schema = schema(ids, rows if quote_choice else None)
-    if len((PROMPT + payload + json.dumps(request_schema, ensure_ascii=False)).encode()) > POLICY["max_request_bytes"]:
+    request_schema = schema(ids, rows if quote_choice or quote_ids else None, quote_ids=quote_ids)
+    prompt = QUOTE_ID_PROMPT if quote_ids else PROMPT
+    if len((prompt + RETRY_GUIDANCE + payload + json.dumps(request_schema, ensure_ascii=False)).encode()) > POLICY["max_request_bytes"]:
         raise ValueError("routing request exceeds byte ceiling")
     model = POLICY["primary_model" if role == "primary" else "independent_model"]
     expected = {"schema_version": "wang_other_claim_partition_batch_v1",
                "packet_sha256": packet["artifact_sha256"], "role": role, "model": model,
-               "claim_ids": ids, "prompt_sha256": hashlib.sha256(PROMPT.encode()).hexdigest(),
+               "claim_ids": ids, "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
                "payload_sha256": hashlib.sha256(payload.encode()).hexdigest(),
                "schema_sha256": base.sha256_json(request_schema)}
     if quote_choice:
         expected["quote_protocol"] = "exact_source_choices_v2"
+    if quote_ids:
+        expected["quote_protocol"] = QUOTE_ID_PROTOCOL
     return expected, payload, request_schema
 
 
-def run_batch(packet: dict, rows: list[dict], root: Path, role: str, client, *, quote_choice: bool = False) -> dict:
-    batch_binding, payload, request_schema = binding(packet, rows, role, quote_choice=quote_choice)
+def run_batch(packet: dict, rows: list[dict], root: Path, role: str, client, *, quote_choice: bool = False,
+              quote_ids: bool = False) -> dict:
+    batch_binding, payload, request_schema = binding(packet, rows, role, quote_choice=quote_choice, quote_ids=quote_ids)
     ids = batch_binding["claim_ids"]
     digest = base.sha256_json(ids)[:16]
     root.mkdir(parents=True, exist_ok=True)
@@ -188,7 +230,8 @@ def run_batch(packet: dict, rows: list[dict], root: Path, role: str, client, *, 
             artifact = base._read_json(path)
             base._check_artifact(artifact)
             cached_binding, _, _ = binding(packet, rows, role,
-                quote_choice=artifact.get("quote_protocol") == "exact_source_choices_v2")
+                quote_choice=artifact.get("quote_protocol") == "exact_source_choices_v2",
+                quote_ids=artifact.get("quote_protocol") == QUOTE_ID_PROTOCOL)
             if any(artifact.get(k) != v for k, v in (cached_binding | {"attempt_number": attempt}).items()):
                 raise ValueError("cached routing batch drift")
             validate_call_prompt(artifact)
@@ -197,7 +240,9 @@ def run_batch(packet: dict, rows: list[dict], root: Path, role: str, client, *, 
             if failure_path.exists():
                 raise ValueError(f"transport failure needs inspection: {failure_path}")
             try:
-                call_prompt = PROMPT if attempt == 1 else PROMPT + RETRY_GUIDANCE
+                prompt = QUOTE_ID_PROMPT if quote_ids else PROMPT
+                retry = QUOTE_ID_RETRY if quote_ids else RETRY_GUIDANCE
+                call_prompt = prompt if attempt == 1 else prompt + retry
                 response = client.generate_json(call_prompt, payload, request_schema)
             except Exception as exc:
                 base._write_immutable(failure_path, base._artifact(expected | {
@@ -221,12 +266,14 @@ def run_batch(packet: dict, rows: list[dict], root: Path, role: str, client, *, 
 
 
 def validate_call_prompt(artifact: dict) -> None:
-    if artifact.get("quote_protocol") not in (None, "exact_source_choices_v2"):
+    if artifact.get("quote_protocol") not in (None, "exact_source_choices_v2", QUOTE_ID_PROTOCOL):
         raise ValueError("unknown quote protocol")
     # Original campaign artifacts predate explicit retry feedback. Their
     # prompt_sha256 already binds the original unchanged base prompt.
     if "call_prompt_sha256" in artifact:
-        prompt = PROMPT + RETRY_GUIDANCE if artifact["attempt_number"] == 2 else PROMPT
+        prompt = QUOTE_ID_PROMPT if artifact.get("quote_protocol") == QUOTE_ID_PROTOCOL else PROMPT
+        if artifact["attempt_number"] == 2:
+            prompt += QUOTE_ID_RETRY if artifact.get("quote_protocol") == QUOTE_ID_PROTOCOL else RETRY_GUIDANCE
         if artifact["call_prompt_sha256"] != hashlib.sha256(prompt.encode()).hexdigest():
             raise ValueError("actual call prompt binding differs")
 
@@ -237,6 +284,13 @@ def effective_artifact(raw: dict, rows: list[dict], repair_path: Path) -> dict:
     Raw answers remain untouched. No role, category or reason may change.
     Validation of the effective quote remains exact substring matching.
     """
+    if raw.get("quote_protocol") == QUOTE_ID_PROTOCOL:
+        if repair_path.exists():
+            raise ValueError("quote ID answers do not accept quote repairs")
+        resolved = resolve_quote_ids(raw["response"], rows)
+        return base._artifact({k: v for k, v in raw.items() if k != "artifact_sha256"} | {
+            "response": resolved, "raw_quote_id_response": raw["response"],
+            "raw_artifact_sha256": raw["artifact_sha256"]})
     if not repair_path.exists():
         validate(raw["response"], rows)
         validate_quote_choice(raw, rows)
@@ -285,6 +339,9 @@ def effective_artifact(raw: dict, rows: list[dict], repair_path: Path) -> dict:
 
 
 def validate_quote_choice(artifact: dict, rows: list[dict]) -> None:
+    if artifact.get("quote_protocol") == QUOTE_ID_PROTOCOL:
+        if resolve_quote_ids(artifact["raw_quote_id_response"], rows) != artifact["response"]:
+            raise ValueError("quote ID resolution differs")
     if artifact.get("quote_protocol") == "exact_source_choices_v2":
         props = schema([r["claim_id"] for r in rows], rows)["schema"]["properties"]["decisions"]["properties"]
         for cid, decision in artifact["response"]["decisions"].items():
@@ -311,7 +368,8 @@ def manifest(packet: dict, artifacts: list[dict]) -> dict:
             raise ValueError("classification model/role differs")
         batch = [rows[cid] for cid in artifact["claim_ids"]]
         expected, _, _ = binding(packet, batch, role,
-                                quote_choice=artifact.get("quote_protocol") == "exact_source_choices_v2")
+                                quote_choice=artifact.get("quote_protocol") == "exact_source_choices_v2",
+                                quote_ids=artifact.get("quote_protocol") == QUOTE_ID_PROTOCOL)
         if any(artifact.get(key) != value for key, value in expected.items()):
             raise ValueError("classifier prompt/input/schema binding differs")
         validate(artifact["response"], batch)
@@ -403,7 +461,8 @@ def assemble_roots(roots: list[Path]) -> dict:
                 ids = a["claim_ids"]
                 batch = [rows[cid] for cid in ids]
                 expected, _, _ = binding(packet, batch, role,
-                    quote_choice=a.get("quote_protocol") == "exact_source_choices_v2")
+                    quote_choice=a.get("quote_protocol") == "exact_source_choices_v2",
+                    quote_ids=a.get("quote_protocol") == QUOTE_ID_PROTOCOL)
                 if any(a.get(k) != v for k, v in expected.items()):
                     raise ValueError("input artifact binding differs")
                 attempt = a["attempt_number"]
@@ -465,6 +524,7 @@ def main():
     p.add_argument("--worker-count", type=int, default=1)
     p.add_argument("--worker-index", type=int, default=0)
     p.add_argument("--quote-choice", action="store_true", help="constrain citations to exact supplied excerpts")
+    p.add_argument("--quote-ids", action="store_true", help="select ASCII quote IDs; preserve exact Unicode source text")
     p.add_argument("--output", type=Path)
     p.add_argument("--additional-root", type=Path, action="append", default=[],
                    help="explicit additional immutable classification root for assembly")
@@ -500,7 +560,7 @@ def main():
             with (role_root / f".batch-{start:05d}.lock").open("a+") as lock:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 artifact = run_batch(packet, packet["claims"][start:min(start + POLICY["batch_size"], stop)],
-                                     role_root, args.role, client, quote_choice=args.quote_choice)
+                                     role_root, args.role, client, quote_choice=args.quote_choice, quote_ids=args.quote_ids)
             print(json.dumps({"start": start, "stop": min(start + POLICY["batch_size"], stop),
                               "worker_index": args.worker_index,
                               "artifact_sha256": artifact["artifact_sha256"]}), flush=True)
