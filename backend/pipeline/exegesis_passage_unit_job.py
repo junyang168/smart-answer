@@ -106,7 +106,7 @@ def retain(root,name,value):
 
 
 def model_stage(root,name,prompt,payload,schema,args):
-    directory=root/name;fingerprint=sha256_json(dict(prompt=prompt,payload=payload,schema=schema,model=args.model,effort='high',code=args.code_sha))
+    directory=root/name;fingerprint=sha256_json(dict(prompt=prompt,payload=payload,schema=schema,model=args.model,effort='high',code=args.code_sha,source_closeout_code=getattr(args,'source_closeout_code_sha',None)))
     retain(root,name+'.fingerprint.json',dict(fingerprint=fingerprint))
     if (directory/'response.json').exists():return core.checked(directory/'response.json')['response']
     if directory.exists():raise ValueError(f'incomplete {name}; preserved; inspect failure before explicit recovery')
@@ -122,7 +122,7 @@ def review_stage(root,name,proposal,claims,sources,packet,args,previous=None,ext
         primary=c['primary']) for c in claims]
     request=dict(stage='passage_membership',review_scope='one whole book',role_packet_path=str(args.packet),role_packet_sha256=packet['artifact_sha256'],
         claims=rows,targets=targets,catalog=targets,sources=sources,context_radius=0,exact_fragments_only=True,membership_only=True,
-        extra_context=extra_context or [],previous_findings=previous or {},final_review=name=='final-review',model='claude-opus-5-5',
+        extra_context=extra_context or [],previous_findings=previous or {},final_review=name in {'final-review','source-closeout-final-review'},model='claude-opus-5-5',
         max_request_bytes=args.max_review_bytes,max_output_tokens=128000,timeout_seconds=args.timeout)
     input_=retain(root,name+'.input.json',request);out=root/name
     if (out/'report.json').exists():
@@ -163,11 +163,66 @@ def supplements(report,review_input):
     return [dict(source_id=sid,locations=sorted(locations)) for sid,locations in sorted(result.items())]
 
 
+def original_source_closeout(root, proposal, final, claims, sources, packet, args):
+    """One terminal original-source pass, followed by at most one whole-book review."""
+    from backend.pipeline import exegesis_passage_source_closeout as closeout
+    reader=closeout.load_reader(REVIEWER)
+    input_path=root/('final-review.input.json' if (root/'final-review.input.json').exists() else 'initial-review.input.json')
+    request=core.checked(input_path)
+    atomic_status(root,'original-source-closeout',claims=len(claims),units=len(proposal['units']))
+    cases,physical,index=closeout.prepare(final,proposal,request,reader)
+    source_art=retain(root,'original-source-context.json',dict(raw_review_sha256=final['artifact_sha256'],cases=cases,physical_sources=physical))
+    derived=copy.deepcopy(final['response']);units={u['unit_id']:u for u in proposal['units']}
+    deterministic={};pending={}
+    for key,finding in cases.items():
+        if closeout.already_applied(finding,units[key],index):
+            deterministic[key]=dict(type='already_applied',reason='Every requested move/range equals current proposal; citations verified against SHA-bound originals',evidence=finding['evidence'])
+            derived['findings'][key].update(status='pass',moves=[],suggested_passage_key=None)
+        elif finding['status']=='pass' and closeout.verbatim(finding['evidence'],index):
+            deterministic[key]=dict(type='physical_citation_confirmed',reason='Existing independent pass and original citation verified; review-packet retrieval gap only',evidence=finding['evidence'])
+        else:pending[key]=finding
+    response=None;needs_review=False
+    if pending:
+        response=model_stage(root,'original-source-adjudication',closeout.PROMPT,
+            dict(claims=claims,current_proposal=proposal,cases=pending,physical_sources=physical),closeout.schema(pending),args)
+        working=dict(final,response=derived)
+        proposal,derived,needs_review=closeout.apply(response,pending,proposal,working,index,claims,locator,primary_fits)
+    explicit_unresolved={k:v for k,v in (response or {}).get('dispositions',{}).items() if v['decision']=='unresolved'}
+    disposition=retain(root,'original-source-disposition.json',dict(raw_review_sha256=final['artifact_sha256'],source_context_sha256=source_art['artifact_sha256'],
+        deterministic_dispositions=deterministic,model_dispositions=response,requires_independent_review=needs_review,raw_review_unchanged=True,
+        primary_ownership_unchanged=True,maximum_closeout_calls=1))
+    if needs_review:
+        retain(root,'source-closed-proposal.json',proposal)
+        extra=[dict(source_id=s['source_id'],locations=[p['location'] for p in s['paragraphs']]) for s in physical]
+        reviewed=review_stage(root,'source-closeout-final-review',proposal,claims,sources,packet,args,
+            previous=dict(raw_final=final['response'],source_disposition_sha256=disposition['artifact_sha256']),extra_context=extra)
+        # No second closeout or correction: remaining findings now require human disposition.
+        unresolved=problems_from(reviewed,proposal)
+    else:
+        _,full_index=reader.compile_packet(request);full_index.update(index)
+        reviewed=reader.validate_membership(derived,request,full_index)
+        reviewed=retain(root,'source-closeout-validation.json',dict(**reviewed,raw_review_sha256=final['artifact_sha256'],
+            source_disposition_sha256=disposition['artifact_sha256'],provenance='derived original-source disposition validation, not a replacement model response'))
+        unresolved=problems_from(reviewed,proposal)
+    independent_review_sha256=reviewed['artifact_sha256'] if needs_review else final['artifact_sha256']
+    if explicit_unresolved:
+        independent_validation=reviewed
+        reviewed=copy.deepcopy(reviewed);reviewed.pop('artifact_sha256',None)
+        reviewed['evidence_errors'].extend(dict(key=k,error='original_source_unresolved',disposition=v) for k,v in explicit_unresolved.items())
+        reviewed.update(status='needs_resolution',validation_passed=False)
+        reviewed=retain(root,'source-closeout-unresolved-validation.json',dict(**reviewed,prior_validation_sha256=independent_validation['artifact_sha256']))
+        unresolved=problems_from(reviewed,proposal)
+    retain(root,'original-source-closeout-result.json',dict(source_disposition_sha256=disposition['artifact_sha256'],
+        validation_sha256=reviewed['artifact_sha256'],independent_review_sha256=independent_review_sha256,unresolved=unresolved,needs_human=bool(unresolved)))
+    return proposal,reviewed,disposition
+
+
 def execute(args):
     root=args.output_root.resolve();root.mkdir(parents=True,exist_ok=True)
     lock=(root/'job.lock').open('a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     global_lock=(root.parent/'.411-passage-unit-job.lock').open('a');fcntl.flock(global_lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     args.code_sha=hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    args.source_closeout_code_sha=hashlib.sha256(Path(__file__).with_name('exegesis_passage_source_closeout.py').read_bytes()).hexdigest()
     os.environ['CODEX_EXECUTABLE']=str(args.codex_executable)
     try:
         ledger=core.checked(args.ledger);packet=core.checked(args.packet);alias_art=core.checked(args.alias_map);base_input=core.checked(args.input)
@@ -185,7 +240,7 @@ def execute(args):
         seed=core.checked(args.initial_proposal) if args.initial_proposal else None
         if seed and seed['frozen_claim_graph_sha256']!=alias_art['frozen_claim_graph_sha256']:raise ValueError('completed proposal frozen Claim graph binding mismatch')
         retain(root,'config.json',dict(scope='Matthew candidate set',layer=1,workers=1,model=args.model,effort='high',review_model='claude-opus-5-5',correction_model=args.model,arbitration_model=args.model,
-            packet_sha256=packet['artifact_sha256'],ledger_sha256=ledger['artifact_sha256'],alias_sha256=alias_art['artifact_sha256'],input_sha256=base_input['artifact_sha256'],code_sha256=args.code_sha,
+            packet_sha256=packet['artifact_sha256'],ledger_sha256=ledger['artifact_sha256'],alias_sha256=alias_art['artifact_sha256'],input_sha256=base_input['artifact_sha256'],code_sha256=args.code_sha,source_closeout_code_sha256=args.source_closeout_code_sha,
             reviewer_code_sha256=hashlib.sha256(REVIEWER.read_bytes()).hexdigest(),max_gpt_bytes=args.max_gpt_bytes,max_review_bytes=args.max_review_bytes,claims=len(claims),grouping_calls=0,cvp_calls=0,database_writes=0,
             generation_mode='reuse_completed_proposal' if seed else 'generate',initial_proposal_sha256=seed['artifact_sha256'] if seed else None,
             generation_model=seed.get('model') if seed else args.model,review_scope='passage boundaries and complete membership only',primary_relocation_calls=0))
@@ -232,6 +287,9 @@ def execute(args):
                 proposal=normalize(resolved,aliases);retain(root,'arbitrated-proposal.json',proposal)
             final=review_stage(root,'final-review',proposal,claims,sources,packet,args,previous=dict(initial=initial['response'],issues=issues),extra_context=extra)
         else:final=initial
+        raw_final=final
+        proposal,final,source_disposition=original_source_closeout(root,proposal,final,claims,sources,packet,args)
+        closeout_result=core.checked(root/'original-source-closeout-result.json')
         unresolved=problems_from(final,proposal)
         for c in claims:
             unit=proposal['units'][proposal['assignments'][c['id']]['unit_index']]
@@ -243,8 +301,8 @@ def execute(args):
         retain(root,'unresolved.json',dict(items=unresolved,not_user_deferred=True))
         retain(root,'passage-unit-manifest.json',dict(schema_version='wang_exegesis_passage_units_v1',status='reviewed' if not unresolved else 'explicit_unresolved',units=units,
             input_primary_ownership={aliases[c['id']]:c['primary'] for c in claims},primary_ownership_unchanged=True,claim_packets=[frozen[cid] for cid in aliases.values()],input_bindings=core.checked(root/'config.json'),
-            final_review_sha256=final['artifact_sha256'],layer_1_semantic_passed=not unresolved,layer_2_authorized=False,layer_2_executed=False))
-        retain(root,'validation-report.json',dict(claim_count=len(claims),unit_count=len(units),missing=0,duplicate=0,foreign=0,unresolved_count=len(unresolved),semantic_passed=not unresolved,
+            final_review_sha256=closeout_result['independent_review_sha256'],final_validation_sha256=final['artifact_sha256'],raw_final_review_sha256=raw_final['artifact_sha256'],source_disposition_sha256=source_disposition['artifact_sha256'],layer_1_semantic_passed=not unresolved,layer_2_authorized=False,layer_2_executed=False))
+        retain(root,'validation-report.json',dict(claim_count=len(claims),unit_count=len(units),missing=0,duplicate=0,foreign=0,unresolved_count=len(unresolved),semantic_passed=not unresolved,source_disposition_sha256=source_disposition['artifact_sha256'],raw_final_review_sha256=raw_final['artifact_sha256'],
             grouping_calls=0,cvp_calls=0,database_writes=0,full_3843_scope_completed=False))
         atomic_status(root,'completed' if not unresolved else 'completed_with_unresolved',claims=len(claims),units=len(units),unresolved=len(unresolved))
     except Exception as e:
