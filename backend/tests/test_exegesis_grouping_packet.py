@@ -43,3 +43,17 @@ def test_actual_wire_size_compact_payload_and_prompt_schema_arguments(tmp_path):
         assert request['size'] == expected
         assert unpack(request['wire_payload']) == payload
         assert len(request['body'].encode()) < len(compact_json(payload).encode())
+
+
+def test_object_field_interning_preserves_all_nested_members_and_values():
+    payload = {'claims': [{'claim_id': f'claim-{i}', 'statement': f'different claim {i}',
+        'evidence_steps': [{'evidence_step_id': f'evidence-{i}', 'statement': f'argument {i}',
+            'fragments': [{'fragment_id': f'fragment-{i}', 'paragraph_key': 'S0001',
+                           'verbatim_excerpt': f'exact original {i}'}]}]} for i in range(973)]}
+    encoded = pack(payload)
+    assert encoded['packet_format'] == 'wang_exegesis_interned_objects_v2'
+    assert unpack(encoded) == payload
+    assert len(compact_json(encoded)) < len(compact_json(payload)) * .7
+    encoded['data']['$o'][0] = -1
+    with pytest.raises(ValueError, match='object reference'):
+        unpack(encoded)

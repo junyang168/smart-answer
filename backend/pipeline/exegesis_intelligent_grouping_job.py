@@ -285,11 +285,17 @@ def model_claims(value):
     return value
 
 
-def payload_for(claims, sources, **extra):
+def payload_for(claims, sources, *, include_source_context=True, **extra):
     by_source = defaultdict(list)
     for claim in claims:
         by_source[claim['source_id']].append(claim)
-    contexts = [scoped_source(source, by_source[source['source_id']]) for source in sources if source['source_id'] in by_source]
+    selected = [source for source in sources if source['source_id'] in by_source]
+    if include_source_context:
+        contexts = [scoped_source(source, by_source[source['source_id']]) for source in selected]
+    else:
+        verify_files(selected)
+        contexts = [{k: source[k] for k in ('source_id', 'path', 'file_sha256', 'source_revision', 'source_content_sha256') if k in source}
+                    | {'source_text_not_provided': True} for source in selected]
     return exclude_svg({'claims': model_claims(claims), 'sources': contexts,
                         'frozen_claim_graph_sha256': sha256_json(claims), **extra})
 

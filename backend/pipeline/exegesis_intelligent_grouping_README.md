@@ -41,6 +41,9 @@ GPT-only candidates 或未完成的定位 checkpoint。必须包含：
 
 实际调用使用紧凑 JSON 和 `wang_exegesis_interned_packet_v1`：长的重复字符串只
 存一次，原字段中的 `{"$text": n}` 引用 `texts[n]`，`data` 保存完整原始结构。
+重复字段名多时选用 `wang_exegesis_interned_objects_v2`：`object_keys` 保存字段名，
+`{"$o": [n, ...values]}` 依序还原对象；两种编码均须逐字段往返一致，仅选较小者。
+这解决 CLI 字符上限，不能替代模型上下文容量验证。
 提议 transport 逐字段还原比较；独立 reviewer 有自己的 stdlib 编码器，先重新
 打开物理原件，再编码。运行 packet 保留全部成员、Claim 陈述、证据步骤／逐字片段、
 primary/secondary。完整 revision/SHA 图留在冻结输入及最终 claim_packets，模型视图
@@ -96,3 +99,8 @@ backend/.venv/bin/python -m backend.pipeline.exegesis_intelligent_grouping_job \
 Claim完整版本／证据包和 ownership.secondary，报告实际3843清账、已分组及未解决数。
 存在未解决项时明确标为 partial，不冒充全库完成。模型代码 ready 不等于产物审核通过，
 不得据此启动 #357 CVP processing。
+
+只试验第一层时可使用 `payload_for(..., include_source_context=False)`：全书卷的
+Claim 陈述、已有证据、经文关系保留，来源只提供审计定位，不附加邻接原文窗口。
+输入必须标明试跑和候选状态，输出不是正式归属授权。上下文不足以支持论证
+边界时报告 context_requests。生产默认检索行为未由一次试验自动更改。

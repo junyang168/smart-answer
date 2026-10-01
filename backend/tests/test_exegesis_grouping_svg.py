@@ -71,3 +71,18 @@ def test_context_request_stops_grouping_and_missing_anchor_is_explicit(tmp_path)
         dict(fragment_id='f', paragraph_key='S0001', verbatim_excerpt='not verbatim')])])], [source])
     assert result['sources'][0]['unresolved_evidence_locations'][0]['fragment_id'] == 'f'
     assert result['sources'][0]['source_context'][0]['text'] == 'original'
+
+
+def test_evidence_first_packet_has_all_claims_and_no_source_windows(tmp_path):
+    file = tmp_path / 'source.json'
+    file.write_text(json.dumps([{'text': 'source-only text'}]))
+    source = dict(source_id='s', path=str(file), file_sha256=hashlib.sha256(file.read_bytes()).hexdigest())
+    claims = [dict(claim_id='c', source_id='s', statement='claim statement', ownership={'primary': 'Matt.16.19', 'secondary': []},
+                   evidence_steps=[dict(evidence_step_id='e', statement='argument', fragments=[
+                       dict(fragment_id='f', paragraph_key='S0001', verbatim_excerpt='quoted evidence')])])]
+    payload = job.payload_for(claims, [source], include_source_context=False)
+    assert payload['claims'] == claims
+    assert payload['sources'][0]['source_text_not_provided'] is True
+    assert 'source_context' not in payload['sources'][0]
+    assert 'source-only text' not in json.dumps(payload)
+    assert 'quoted evidence' in json.dumps(payload)
