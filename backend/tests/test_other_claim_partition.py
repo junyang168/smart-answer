@@ -175,6 +175,110 @@ def test_disjoint_worker_lanes_cover_frozen_batches():
     assert (a + b).count(8736) == 1
 
 
+def saved_batch(root, packet, role, values, attempt=1):
+    directory = root / role
+    directory.mkdir(parents=True, exist_ok=True)
+    raw = artifact(packet, role, values)
+    raw = base._artifact({k: v for k, v in raw.items() if k != "artifact_sha256"} | {"attempt_number": attempt})
+    digest = base.sha256_json(raw["claim_ids"])[:16]
+    path = directory / f"{role}-{digest}.attempt-{attempt}.json"
+    base._write_immutable(path, raw)
+    return path, raw
+
+
+def multi_root_fixture(tmp_path):
+    roles = base._artifact({"counts": {"other": 2}, "decisions": [
+        {"claim_id": "C1", "role": "other"}, {"claim_id": "C2", "role": "other"}]})
+    packet = fixture()
+    packet = base._artifact({k: v for k, v in packet.items() if k != "artifact_sha256"} |
+                            {"role_ledger_sha256": roles["artifact_sha256"]})
+    roots = [tmp_path / "original", tmp_path / "resume"]
+    for root in roots:
+        root.mkdir()
+        base._write_immutable(root / "routing-packet.json", packet)
+    saved_batch(roots[0], packet, "primary", {"C1": answer(), "C2": answer()})
+    saved_batch(roots[0], packet, "independent", {"C1": answer()})
+    saved_batch(roots[1], packet, "independent", {"C2": answer()})
+    return packet, roles, roots
+
+
+def independent_auditor():
+    path = Path(__file__).resolve().parents[2] / "scripts/audit-other-claim-partitions.py"
+    spec = importlib.util.spec_from_file_location("partition_provenance_audit", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_multi_root_assembly_and_independent_raw_provenance_audit(tmp_path):
+    packet, roles, roots = multi_root_fixture(tmp_path)
+    result = routing.assemble_roots(roots)
+    assert result["classification_progress"]["agreed"] == 2
+    assert len(result["input_roots"]) == 2
+    report = independent_auditor().audit(packet, result, roles, roots)
+    assert report["provenance_artifacts_verified"] == 3
+    with pytest.raises(ValueError, match="input roots"):
+        independent_auditor().audit(packet, result, roles, roots[:1])
+
+
+@pytest.mark.parametrize("bad", ["duplicate_batch", "duplicate_root", "packet", "foreign", "attempt"])
+def test_multi_root_assembly_rejects_drift_and_duplicates(tmp_path, bad):
+    packet, _, roots = multi_root_fixture(tmp_path)
+    if bad == "duplicate_batch":
+        saved_batch(roots[1], packet, "independent", {"C1": answer()})
+    elif bad == "duplicate_root":
+        roots.append(roots[0])
+    elif bad == "packet":
+        changed = base._artifact({k: v for k, v in packet.items() if k != "artifact_sha256"} | {"claim_count": 3})
+        (roots[1] / "routing-packet.json").write_text(__import__('json').dumps(changed))
+    elif bad == "foreign":
+        path = roots[1] / "independent" / "fake.attempt-1.json"
+        base._write_immutable(path, base._artifact({"claim_ids": ["foreign"]}))
+    else:
+        saved_batch(roots[0], packet, "primary", {"C1": answer()}, attempt=2)
+    with pytest.raises((ValueError, KeyError)):
+        routing.assemble_roots(roots)
+
+
+def test_multi_root_quota_history_is_pinned_and_attempt2_restart_rejected(tmp_path):
+    packet, roles, roots = multi_root_fixture(tmp_path)
+    row = packet["claims"][1]
+    expected, _, _ = routing.binding(packet, [row], "independent")
+    digest = base.sha256_json([row["claim_id"]])[:16]
+    failure = base._artifact(expected | {"attempt_number": 1, "status": "transport_failure",
+                                       "raw_response": "session limit", "error": "quota"})
+    path = roots[0] / "independent" / f"independent-{digest}.attempt-1.failure.json"
+    base._write_immutable(path, failure)
+    result = routing.assemble_roots(roots)
+    assert result["transport_failure_history"][0]["artifact_sha256"] == failure["artifact_sha256"]
+    independent_auditor().audit(packet, result, roles, roots)
+    failure2 = base._artifact({k: v for k, v in failure.items() if k != "artifact_sha256"} | {"attempt_number": 2})
+    base._write_immutable(path.with_name(f"independent-{digest}.attempt-2.failure.json"), failure2)
+    with pytest.raises(ValueError, match="semantic retry history"):
+        routing.assemble_roots(roots)
+
+
+def test_repaired_answer_provenance_is_reconstructed_not_trusted(tmp_path):
+    packet, roles, roots = multi_root_fixture(tmp_path)
+    path, raw = saved_batch(roots[1], packet, "independent", {"C2": answer() | {
+        "basis_quote": "教授認為信心不是心理力量。"}}, attempt=2)
+    repair = base._artifact({"schema_version": "wang_other_claim_quote_repair_v1",
+        "raw_artifact_sha256": raw["artifact_sha256"], "packet_sha256": packet["artifact_sha256"],
+        "reason": "script only", "changes": [{"claim_id": "C2",
+            "claim_content_sha256": packet["claims"][1]["claim_content_sha256"],
+            "before": "教授認為信心不是心理力量。", "after": "教授认为信心不是心理力量。"}]})
+    base._write_immutable(path.with_suffix(".quote-repair.json"), repair)
+    result = routing.assemble_roots(roots)
+    evidence = result["owners"]["C2"]["independent"]
+    assert evidence["raw_artifact_sha256"] == raw["artifact_sha256"]
+    assert evidence["quote_repair_sha256"] == repair["artifact_sha256"]
+    independent_auditor().audit(packet, result, roles, roots)
+    evidence["quote_repair_sha256"] = "forged"
+    result = base._artifact({k: v for k, v in result.items() if k != "artifact_sha256"})
+    with pytest.raises(ValueError, match="decision provenance"):
+        independent_auditor().audit(packet, result, roles, roots)
+
+
 def test_worker_lane_resume_is_absolute_and_rejects_partial_boundaries():
     from backend.pipeline.other_claim_partition import worker_starts
     import pytest

@@ -319,7 +319,11 @@ def manifest(packet: dict, artifacts: list[dict]) -> dict:
         for cid, decision in artifact["response"]["decisions"].items():
             if cid in paired[role]:
                 raise ValueError("duplicate classification ownership")
-            paired[role][cid] = {"decision": decision, "artifact_sha256": artifact["artifact_sha256"]}
+            paired[role][cid] = {
+                "decision": decision, "artifact_sha256": artifact["artifact_sha256"],
+                "raw_artifact_sha256": artifact.get("raw_artifact_sha256", artifact["artifact_sha256"]),
+                "quote_repair_sha256": artifact.get("quote_repair_sha256"),
+            }
     owners, held = {}, []
     for cid, row in rows.items():
         a, b = paired["primary"].get(cid), paired["independent"].get(cid)
@@ -368,6 +372,86 @@ def manifest(packet: dict, artifacts: list[dict]) -> dict:
     })
 
 
+def assemble_roots(roots: list[Path]) -> dict:
+    """Read immutable answers from explicit campaign roots, never copy/merge them.
+
+    One response batch may have two attempts in one root, never successful
+    responses in multiple roots. Historical quota failures remain provenance.
+    """
+    resolved = [root.resolve(strict=True) for root in roots]
+    if not resolved or len(set(resolved)) != len(resolved):
+        raise ValueError("missing/duplicate input root")
+    packet = base._read_json(resolved[0] / "routing-packet.json")
+    base._check_artifact(packet)
+    rows = indexed(packet["claims"], "claim_id")
+    inputs, groups, failures = [], {}, []
+    for root in resolved:
+        packet_path = root / "routing-packet.json"
+        other = base._read_json(packet_path)
+        base._check_artifact(other)
+        if other != packet:
+            raise ValueError("input root packet differs")
+        inputs.append({"root": str(root), "packet_path": str(packet_path),
+                       "packet_sha256": other["artifact_sha256"],
+                       "packet_file_sha256": hashlib.sha256(packet_path.read_bytes()).hexdigest()})
+        for role in ("primary", "independent"):
+            for path in sorted((root / role).glob("*.attempt-*.json")):
+                if path.name.endswith((".validation-failure.json", ".quote-repair.json")):
+                    continue
+                a = base._read_json(path)
+                base._check_artifact(a)
+                ids = a["claim_ids"]
+                batch = [rows[cid] for cid in ids]
+                expected, _, _ = binding(packet, batch, role,
+                    quote_choice=a.get("quote_protocol") == "exact_source_choices_v2")
+                if any(a.get(k) != v for k, v in expected.items()):
+                    raise ValueError("input artifact binding differs")
+                attempt = a["attempt_number"]
+                digest = base.sha256_json(ids)[:16]
+                suffix = ".failure.json" if path.name.endswith(".failure.json") else ".json"
+                if attempt not in (1, 2) or path.name != f"{role}-{digest}.attempt-{attempt}{suffix}":
+                    raise ValueError("input artifact filename/attempt differs")
+                key = (role, tuple(ids))
+                if suffix == ".failure.json":
+                    if a.get("status") != "transport_failure":
+                        raise ValueError("unexpected failure status")
+                    failures.append({"path": str(path), "artifact_sha256": a["artifact_sha256"],
+                                     "root": str(root), "role": role, "claim_ids": ids,
+                                     "attempt_number": attempt})
+                else:
+                    groups.setdefault(key, []).append((a, path, root))
+    selected, provenance = [], {}
+    for (role, ids), attempts in groups.items():
+        if len({root for _, _, root in attempts}) != 1:
+            raise ValueError("duplicate batch across input roots")
+        attempts.sort(key=lambda item: item[0]["attempt_number"])
+        if [a["attempt_number"] for a, _, _ in attempts] not in ([1], [1, 2]):
+            raise ValueError("duplicate/invalid retry sequence")
+        for failure in failures:
+            if (failure["role"] == role and tuple(failure["claim_ids"]) == ids
+                    and failure["root"] != str(attempts[0][2])
+                    and failure["attempt_number"] != 1):
+                raise ValueError("cross-root resume would reset semantic retry history")
+        raw, path, _ = attempts[-1]
+        validate_call_prompt(raw)
+        repair_path = path.with_suffix(".quote-repair.json")
+        effective = effective_artifact(raw, [rows[cid] for cid in ids], repair_path)
+        selected.append(effective)
+        provenance[effective["artifact_sha256"]] = {
+            "raw_artifact_path": str(path), "raw_artifact_sha256": raw["artifact_sha256"],
+            "quote_repair_path": str(repair_path) if repair_path.exists() else None,
+            "quote_repair_sha256": effective.get("quote_repair_sha256"),
+            "effective_artifact_sha256": effective["artifact_sha256"],
+            "attempt_paths": [str(p) for _, p, _ in attempts],
+        }
+    result = manifest(packet, selected)
+    return base._artifact({k: v for k, v in result.items() if k != "artifact_sha256"} | {
+        "provenance_version": "routing_multi_root_provenance_v1",
+        "input_roots": inputs, "artifact_provenance": provenance,
+        "transport_failure_history": failures,
+    })
+
+
 def main():
     load_dotenv()
     p = argparse.ArgumentParser(description=__doc__)
@@ -382,6 +466,8 @@ def main():
     p.add_argument("--worker-index", type=int, default=0)
     p.add_argument("--quote-choice", action="store_true", help="constrain citations to exact supplied excerpts")
     p.add_argument("--output", type=Path)
+    p.add_argument("--additional-root", type=Path, action="append", default=[],
+                   help="explicit additional immutable classification root for assembly")
     args = p.parse_args()
     if args.mode == "prepare":
         roles, packet = base._read_json(args.role_ledger), base._read_json(args.role_packet)
@@ -392,28 +478,7 @@ def main():
         base._write_immutable(args.root / "routing-packet.json", prepared)
         print(json.dumps({k: v for k, v in prepared.items() if k not in {"claims", "claim_relations", "source_role_by_claim"}}, ensure_ascii=False), flush=True)
     elif args.mode == "assemble":
-        packet = base._read_json(args.root / "routing-packet.json")
-        selected = []
-        for role in ("primary", "independent"):
-            groups = {}
-            for path in sorted((args.root / role).glob("*.attempt-*.json")):
-                if path.name.endswith((".failure.json", ".validation-failure.json", ".quote-repair.json")):
-                    continue
-                a = base._read_json(path)
-                base._check_artifact(a)
-                groups.setdefault(tuple(a["claim_ids"]), []).append(a)
-            for ids, attempts in groups.items():
-                attempts.sort(key=lambda a: a["attempt_number"])
-                if [a["attempt_number"] for a in attempts] not in ([1], [1, 2]):
-                    raise ValueError("duplicate/invalid retry sequence")
-                chosen = attempts[-1]
-                digest = base.sha256_json(list(ids))[:16]
-                source_path = args.root / role / f"{role}-{digest}.attempt-{chosen['attempt_number']}.json"
-                rows_by_id = indexed(packet["claims"], "claim_id")
-                chosen = effective_artifact(chosen, [rows_by_id[cid] for cid in ids],
-                                            source_path.with_suffix(".quote-repair.json"))
-                selected.append(chosen)
-        result = manifest(packet, selected)
+        result = assemble_roots([args.root, *args.additional_root])
         if args.output is None:
             raise ValueError("--output required for immutable assembly")
         base._write_immutable(args.output, result)
