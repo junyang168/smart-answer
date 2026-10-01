@@ -125,6 +125,14 @@ def _build(*, mutate_fragment=None, plans=None):
         source_fragments=fragments,
         source_documents=documents,
         section_plans=plans or default_plans,
+        direct_admissions_by_claim={
+            "C-SEED": [
+                {
+                    "signal": "claim_level_passage_exegesis",
+                    "passage_unit_ids": ["16:13-18"],
+                }
+            ]
+        },
     )
 
 
@@ -176,6 +184,14 @@ def test_section_labels_use_current_claim_revision_not_stale_parent_refs():
         source_fragments=fragments,
         source_documents=documents,
         section_plans=plans,
+        direct_admissions_by_claim={
+            "C-SEED": [
+                {
+                    "signal": "claim_level_passage_exegesis",
+                    "passage_unit_ids": ["16:13-18"],
+                }
+            ]
+        },
     )
 
     same = next(row for row in result["claims"] if row["claim_id"] == "C-SAME")

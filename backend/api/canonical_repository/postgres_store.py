@@ -3219,6 +3219,38 @@ class PostgresKnowledgeStore:
             row = cursor.fetchone()
         return dict(row[0]) if row else None
 
+    def get_record_state(
+        self, collection: str, object_id: str
+    ) -> Optional[dict[str, Any]]:
+        """Read the authoritative row including retirement and storage metadata."""
+
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute(
+                """SELECT payload, revision, content_sha256, retired_at IS NOT NULL
+                   FROM wang_knowledge.objects
+                   WHERE collection=%s AND object_id=%s""",
+                (collection, object_id),
+            )
+            row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "payload": dict(row[0]),
+            "revision": int(row[1]),
+            "content_sha256": str(row[2]),
+            "retired": bool(row[3]),
+        }
+
+    def get_change_set_status(self, fingerprint_sha256: str) -> Optional[str]:
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute(
+                """SELECT status FROM wang_knowledge.change_sets
+                   WHERE fingerprint_sha256=%s""",
+                (fingerprint_sha256,),
+            )
+            row = cursor.fetchone()
+        return str(row[0]) if row else None
+
     def list_records(self, collection: str) -> list[dict[str, Any]]:
         """Read the active collection in stable object-id order."""
 
@@ -5212,12 +5244,41 @@ class PostgresKnowledgeStore:
                     f"{revision_id}, found {observed or 'missing'}"
                 )
 
+    @staticmethod
+    def _assert_registry_fingerprint(
+        cursor: Any,
+        *,
+        expected_sha256: Optional[str],
+        collections: Sequence[str],
+    ) -> None:
+        if expected_sha256 is None:
+            return
+        cuts: dict[str, list[str]] = {}
+        for collection in collections:
+            cursor.execute(
+                """SELECT payload FROM wang_knowledge.objects
+                   WHERE collection=%s AND retired_at IS NULL ORDER BY object_id""",
+                (collection,),
+            )
+            cuts[collection] = sorted(
+                hashlib.sha256(canonical_json(dict(row[0])).encode("utf-8")).hexdigest()
+                for row in cursor.fetchall()
+            )
+        observed = hashlib.sha256(canonical_json(cuts).encode("utf-8")).hexdigest()
+        if observed != expected_sha256:
+            raise ChangeSetConflict(
+                "CanonicalViewpoint Registry cut is stale: expected "
+                f"{expected_sha256}, found {observed}"
+            )
+
     def apply_plan(
         self,
         plan: ChangeSetPlan,
         *,
         metadata: Optional[dict[str, Any]] = None,
         expected_current_viewpoint_revisions: Optional[Mapping[str, str]] = None,
+        expected_registry_fingerprint_sha256: Optional[str] = None,
+        registry_collections: Sequence[str] = (),
         expected_current_source_records: Optional[Mapping[str, tuple[int, str]]] = None,
         expected_current_claim_related_records: Optional[
             Mapping[str, Sequence[tuple[str, str, int, str]]]
@@ -5262,14 +5323,22 @@ class PostgresKnowledgeStore:
             }
         with self.connect() as conn:
             with conn.cursor() as cursor:
-                # ChangeSets share cross-record invariants that row locks alone
-                # cannot protect (most importantly a new CVR link racing a
-                # source re-extraction). Serialize the short apply transaction;
-                # model work and planning happen before this lock is taken.
+                # Serialize every short ChangeSet transaction because source
+                # supersession and CVP writes share cross-record invariants.
                 cursor.execute(
                     "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
                     (POSTGRES_APPLY_ADVISORY_LOCK_KEY,),
                 )
+                if expected_registry_fingerprint_sha256 is not None:
+                    if not registry_collections:
+                        raise ValueError(
+                            "registry_collections are required with a Registry fingerprint"
+                        )
+                    self._assert_registry_fingerprint(
+                        cursor,
+                        expected_sha256=expected_registry_fingerprint_sha256,
+                        collections=registry_collections,
+                    )
                 for source_id, (expected_revision, expected_sha) in sorted(
                     (expected_current_source_records or {}).items()
                 ):

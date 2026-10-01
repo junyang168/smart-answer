@@ -24,10 +24,7 @@ from backend.api.canonical_repository.viewpoint_foundation import (
     semantic_record_sha,
     sha256_json,
 )
-from backend.pipeline.viewpoint_scope_selection import direct_seed_units
-
-
-SCHEMA_VERSION = "wang_occurrence_section_projection_v1"
+SCHEMA_VERSION = "wang_occurrence_section_projection_v2"
 _PARAGRAPH_KEY = re.compile(r"S(\d+)(?:/V\d+)?")
 
 
@@ -190,6 +187,9 @@ def build_occurrence_section_projection(
     source_fragments: Sequence[Mapping[str, Any]],
     source_documents: Sequence[Mapping[str, Any]],
     section_plans: Sequence[tuple[str, Mapping[str, Any]]],
+    direct_admissions_by_claim: Mapping[
+        str, Sequence[Mapping[str, Any]]
+    ],
 ) -> dict[str, Any]:
     """Build one SHA-bound, zero-model occurrence projection."""
 
@@ -317,15 +317,19 @@ def build_occurrence_section_projection(
     # The parent scope freezes identity/source membership, but its Claim pins
     # may be old.  Section labels must come from the same current revisions
     # recorded in this projection's Claim manifest.
-    direct_units = direct_seed_units(
-        [
-            current_claims[str(scoped["claim_id"])].model_dump(mode="json")
-            | {"source_id": str(scoped["source_id"])}
-            for scoped in scope_claims
-            if str(scoped["claim_id"]) in current_claims
-        ],
-        passage_units,
-    )
+    direct_units = {
+        claim_id: {
+            str(unit_id)
+            for admission in admissions
+            for unit_id in admission.get("passage_unit_ids") or []
+            if str(unit_id) in passage_units
+        }
+        for claim_id, admissions in direct_admissions_by_claim.items()
+        if claim_id in current_claims and claim_id not in parent_pin_stale
+    }
+    direct_units = {
+        claim_id: units for claim_id, units in direct_units.items() if units
+    }
     section_units: dict[tuple[str, int], set[str]] = defaultdict(set)
     section_seed_claims: dict[tuple[str, int], set[str]] = defaultdict(set)
     for claim_id, units in direct_units.items():
@@ -410,7 +414,7 @@ def build_occurrence_section_projection(
         "current_claim_manifest": current_claim_manifest,
         "claim_universe_sha256": claim_universe_sha256(current_pins),
         "policy": {
-            "section_label_authority": "direct_scripture_ref_claims_only",
+            "section_label_authority": "approved_claim_level_passage_exegesis_only",
             "inheritance_path": "claim_evidence_step_source_fragment_paragraph_section",
             "section_interval": "zero_based_half_open",
             "title_semantics_used": False,

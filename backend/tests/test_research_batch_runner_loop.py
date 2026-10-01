@@ -8,8 +8,8 @@ and the sources in a batch have no dependency on one another at all.
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import subprocess
 from pathlib import Path
 
@@ -200,6 +200,105 @@ def test_only_runs_the_named_members(tmp_path, monkeypatch, capsys) -> None:
     assert code == 0
     assert len(calls) == 1
     assert "丙" in calls[0]
+
+
+def test_sha_bound_artifact_reuse_resumes_each_source_at_declared_stage(
+    tmp_path, monkeypatch, capsys,
+) -> None:
+    batch = _batch_file(tmp_path)
+    transcripts = _transcripts(tmp_path, "甲", "乙", "丙")
+    output = tmp_path / "out"
+    package = runner.artifact_paths(output, "甲")["package"]
+    package.parent.mkdir(parents=True)
+    source_sha = hashlib.sha256((transcripts / "甲.json").read_bytes()).hexdigest()
+    package.write_text(json.dumps({
+        "source_documents": [{
+            "source_id": "SRC-A",
+            "transcript_id": "甲",
+            "source_sha256": source_sha,
+        }],
+    }), encoding="utf-8")
+    artifact_sha = hashlib.sha256(package.read_bytes()).hexdigest()
+    reuse = tmp_path / "reuse.json"
+    reuse.write_text(json.dumps({
+        "schema_version": runner.ARTIFACT_REUSE_SCHEMA_VERSION,
+        "batch_id": "RB-LOOP-01",
+        "output_root": str(output),
+        "entries": [{
+            "source_key": "甲",
+            "source_sha256": source_sha,
+            "resume_from_stage": "cross_section",
+            "artifacts": [{
+                "artifact_kind": "package",
+                "source_path": str(package),
+                "source_artifact_sha256": artifact_sha,
+                "target_path": str(package),
+                "target_artifact_sha256": artifact_sha,
+            }],
+        }],
+    }), encoding="utf-8")
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "research_batch_runner", "--batch", str(batch),
+            "--transcript-dir", str(transcripts), "--output-root", str(output),
+            "--artifact-reuse-manifest", str(reuse), "--dry-run",
+        ],
+    )
+    assert runner.main() == 0
+    preview = json.loads(capsys.readouterr().out)
+    stages = [
+        row["stage"] for row in preview["commands"]
+        if row["transcript_id"] == "甲"
+    ]
+    assert stages[0] == "cross_section"
+    assert "extract" not in stages
+    assert preview["artifact_reuse_manifest"]["resume_from_stage"] == {
+        "甲": "cross_section"
+    }
+
+
+def test_artifact_reuse_refuses_materialized_bytes_that_drifted(
+    tmp_path, monkeypatch,
+) -> None:
+    batch = _batch_file(tmp_path)
+    transcripts = _transcripts(tmp_path, "甲", "乙", "丙")
+    output = tmp_path / "out"
+    package = runner.artifact_paths(output, "甲")["package"]
+    package.parent.mkdir(parents=True)
+    source_sha = hashlib.sha256((transcripts / "甲.json").read_bytes()).hexdigest()
+    package.write_text(json.dumps({
+        "source_documents": [{
+            "source_id": "SRC-A", "transcript_id": "甲", "source_sha256": source_sha,
+        }],
+    }), encoding="utf-8")
+    original_sha = hashlib.sha256(package.read_bytes()).hexdigest()
+    reuse = tmp_path / "reuse.json"
+    reuse.write_text(json.dumps({
+        "schema_version": runner.ARTIFACT_REUSE_SCHEMA_VERSION,
+        "batch_id": "RB-LOOP-01",
+        "output_root": str(output),
+        "entries": [{
+            "source_key": "甲", "source_sha256": source_sha,
+            "resume_from_stage": "cross_section",
+            "artifacts": [{
+                "artifact_kind": "package", "source_path": str(package),
+                "source_artifact_sha256": original_sha, "target_path": str(package),
+                "target_artifact_sha256": "0" * 64,
+            }],
+        }],
+    }), encoding="utf-8")
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "research_batch_runner", "--batch", str(batch),
+            "--transcript-dir", str(transcripts), "--output-root", str(output),
+            "--artifact-reuse-manifest", str(reuse), "--dry-run",
+        ],
+    )
+    with pytest.raises(SystemExit):
+        runner.main()
 
 
 def test_stage_all_carries_a_source_all_the_way_to_ingest(tmp_path, monkeypatch, capsys) -> None:

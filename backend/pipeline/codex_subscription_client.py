@@ -92,6 +92,7 @@ class CodexSubscriptionClient:
         self.executable = _resolve_executable(executable)
         self.environment = subscription_environment(environment)
         self.last_usage: Any = None
+        self.last_raw_response: Any = None
         self._authenticated = False
 
     def _verify_chatgpt_login(self) -> None:
@@ -129,6 +130,7 @@ class CodexSubscriptionClient:
         image_paths: Sequence[Path] | None = None,
     ) -> dict[str, Any]:
         del temperature  # Codex uses the selected model's supported controls.
+        self.last_raw_response = None
         self._verify_chatgpt_login()
         effective_timeout = timeout_seconds or self.timeout_seconds
         schema = json_schema.get("schema", json_schema)
@@ -193,6 +195,10 @@ class CodexSubscriptionClient:
                 raise CodexSubscriptionError(
                     f"Codex subscription transport failed: {type(exc).__name__}: {exc}"
                 ) from exc
+            self.last_raw_response = {
+                "stdout": completed.stdout, "stderr": completed.stderr,
+                "last_message": output_path.read_text(encoding="utf-8") if output_path.exists() else None,
+            }
             if completed.returncode != 0:
                 raise CodexSubscriptionError(
                     f"Codex subscription generation failed (exit {completed.returncode}): "

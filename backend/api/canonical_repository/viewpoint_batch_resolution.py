@@ -1785,13 +1785,12 @@ def validate_grouping(
 def batches_from_groups(
     grouping: ClaimGroupingResponse, *, batch_size: int = DEFAULT_BATCH_SIZE
 ) -> list[list[str]]:
-    """Order groups into batches, splitting any group past the size ceiling.
+    """Order groups into batches without breaking a semantic comparison set.
 
-    A group larger than the ceiling is split in Claim-id order rather than
-    resized by the model: the ceiling exists because of call latency, and
-    letting a semantic call negotiate it would mix the two concerns.  The split
-    parts stay adjacent, so the serial checkpoint carries the first part's
-    candidates into the second.
+    A group is the smallest identity-resolution unit. Splitting one would let
+    its two halves see different Registry cuts and can manufacture parallel
+    viewpoints. Oversized groups therefore fail before any proposal call; the
+    grouping round must be replaced under a new fingerprint.
     """
 
     if batch_size < 1:
@@ -1799,13 +1798,130 @@ def batches_from_groups(
     ordered = sorted(grouping.groups, key=lambda item: (item.claim_ids[0], item.group_key))
     batches: list[list[str]] = []
     for group in ordered:
-        claim_ids = group.claim_ids
-        for index in range(0, len(claim_ids), batch_size):
-            batches.append(claim_ids[index : index + batch_size])
+        if len(group.claim_ids) > batch_size:
+            raise BatchResolutionError(
+                [
+                    f"{group.group_key}: semantic group has {len(group.claim_ids)} Claims, "
+                    f"exceeding the atomic batch ceiling {batch_size}"
+                ]
+            )
+        batches.append(list(group.claim_ids))
     return batches
 
 
 GROUP_COVERAGE_VERSION = "wang_canonical_viewpoint_group_coverage_v1"
+DISPOSITION_LEDGER_VERSION = "wang_canonical_viewpoint_disposition_ledger_v1"
+
+
+def build_batch_disposition(
+    *,
+    proposal: CanonicalViewpointProposalResponse,
+    batch_identity: Mapping[str, Any],
+    effective_proposal_sha256: str,
+    apply_status: str,
+    readback_receipt_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Record every Claim/component outcome, including outcomes with no link."""
+
+    claims = []
+    for decision in sorted(proposal.claim_decisions, key=lambda item: item.claim_id):
+        components = [
+            {
+                "spans": [span.model_dump(mode="json") for span in component.spans],
+                "disposition": component.disposition,
+                "target_viewpoint_revision_id": component.target_viewpoint_revision_id,
+                "local_new_viewpoint_key": component.local_new_viewpoint_key,
+            }
+            for component in decision.components
+        ]
+        claims.append(
+            {
+                "claim_id": decision.claim_id,
+                "components": components,
+                "resolution_status": (
+                    "deferred"
+                    if any(item["disposition"] == "deferred" for item in components)
+                    else "resolved"
+                ),
+            }
+        )
+    body = {
+        "schema_version": "wang_canonical_viewpoint_batch_disposition_v1",
+        "batch_identity": dict(batch_identity),
+        "effective_proposal_sha256": effective_proposal_sha256,
+        "apply_status": apply_status,
+        "readback_receipt_sha256": readback_receipt_sha256,
+        "claims": claims,
+    }
+    return body | {"artifact_sha256": sha256_json(body)}
+
+
+def scope_disposition_ledger(
+    *,
+    grouping: ClaimGroupingResponse,
+    batch_dispositions: Sequence[Mapping[str, Any]],
+    freeze_sha256: str,
+    grouping_sha256: str,
+    blocked_claims: Sequence[Mapping[str, Any]] = (),
+    excluded_claims: Sequence[Mapping[str, Any]] = (),
+) -> dict[str, Any]:
+    """Build the authoritative exact-once scope denominator from dispositions."""
+
+    planned = sorted(
+        claim_id for group in grouping.groups for claim_id in group.claim_ids
+    )
+    records: dict[str, dict[str, Any]] = {}
+    findings: list[str] = []
+    for artifact in batch_dispositions:
+        validate_sha = str(artifact.get("artifact_sha256") or "")
+        body = {key: value for key, value in artifact.items() if key != "artifact_sha256"}
+        if validate_sha != sha256_json(body):
+            findings.append("batch disposition artifact SHA mismatch")
+            continue
+        for item in artifact.get("claims") or []:
+            claim_id = str(item.get("claim_id") or "")
+            if claim_id in records:
+                findings.append(f"{claim_id}: duplicate disposition")
+            records[claim_id] = {
+                **dict(item),
+                "batch_id": (artifact.get("batch_identity") or {}).get("batch_id"),
+                "apply_status": artifact.get("apply_status"),
+                "batch_disposition_sha256": validate_sha,
+            }
+    outside = sorted(set(records) - set(planned))
+    if outside:
+        findings.append(f"dispositions outside grouping: {outside}")
+    unresolved = sorted(set(planned) - set(records))
+    resolved = [records[claim_id] for claim_id in planned if claim_id in records]
+    complete = (
+        not findings
+        and not unresolved
+        and all(
+            item["resolution_status"] == "resolved"
+            and item["apply_status"] in {"applied", "already_applied"}
+            for item in resolved
+        )
+    )
+    body = {
+        "schema_version": DISPOSITION_LEDGER_VERSION,
+        "scope_label": grouping.scope_label,
+        "freeze_sha256": freeze_sha256,
+        "grouping_sha256": grouping_sha256,
+        "grouping_claim_ids": planned,
+        "claim_dispositions": resolved,
+        "unresolved_claim_ids": unresolved,
+        "blocked_claims": sorted(
+            [dict(item) for item in blocked_claims],
+            key=lambda item: str(item.get("claim_id") or ""),
+        ),
+        "excluded_claims": sorted(
+            [dict(item) for item in excluded_claims],
+            key=lambda item: str(item.get("claim_id") or ""),
+        ),
+        "findings": findings,
+        "status": "complete" if complete else "incomplete",
+    }
+    return body | {"artifact_sha256": sha256_json(body)}
 
 
 def group_coverage_report(
@@ -1813,6 +1929,7 @@ def group_coverage_report(
     grouping: ClaimGroupingResponse,
     linked_claim_ids: Sequence[str],
     blocked_claims: Sequence[Mapping[str, Any]] = (),
+    excluded_claims: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Measure Registry coverage against the grouping plan, not against a batch.
 
@@ -1887,7 +2004,27 @@ def group_coverage_report(
                 ).items()
             )
         ),
-        "scope_claim_count": len(planned) + len(blocked_claims),
+        "excluded_claims": sorted(
+            (
+                {
+                    "claim_id": str(item["claim_id"]),
+                    "reason_code": str(item.get("reason_code") or "unspecified"),
+                }
+                for item in excluded_claims
+            ),
+            key=lambda item: item["claim_id"],
+        ),
+        "excluded_claim_counts": dict(
+            sorted(
+                Counter(
+                    str(item.get("reason_code") or "unspecified")
+                    for item in excluded_claims
+                ).items()
+            )
+        ),
+        "scope_claim_count": (
+            len(planned) + len(blocked_claims) + len(excluded_claims)
+        ),
     }
     report["artifact_sha256"] = sha256_json(report)
     return report

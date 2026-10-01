@@ -11,18 +11,24 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     ROUTE_VALIDATION_VERSION,
 )
 
-ROUTE_POLICY_VERSION = "wang_route_resolution_policy_v1"
+ROUTE_POLICY_VERSION = "wang_route_resolution_policy_v2"
+SUPPORTED_ROUTE_POLICY_VERSIONS = frozenset(
+    {"wang_route_resolution_policy_v1", ROUTE_POLICY_VERSION}
+)
 DEFAULT_ROUTE_POLICY_PATH = (
     Path(__file__).resolve().parent
     / "policies"
-    / "wang_route_resolution_policy_v1.json"
+    / "wang_route_resolution_policy_v2.json"
 )
 
 
 def load_route_policy(path: Path) -> dict[str, Any]:
     policy = json.loads(path.read_text(encoding="utf-8"))
-    if policy.get("schema_version") != ROUTE_POLICY_VERSION:
-        raise ValueError(f"{path} is not a {ROUTE_POLICY_VERSION}")
+    if policy.get("schema_version") not in SUPPORTED_ROUTE_POLICY_VERSIONS:
+        raise ValueError(
+            f"{path} is not a supported Route policy version: "
+            f"{sorted(SUPPORTED_ROUTE_POLICY_VERSIONS)}"
+        )
     required_top = {
         "schema_version",
         "policy_id",
@@ -31,6 +37,7 @@ def load_route_policy(path: Path) -> dict[str, Any]:
         "correction",
         "prompts",
         "validator_version",
+        "max_request_bytes",
         "call_timeout_seconds",
     }
     if set(policy) != required_top:
@@ -63,6 +70,8 @@ def load_route_policy(path: Path) -> dict[str, Any]:
         raise ValueError("Route review batch size must be positive")
     if int(policy["call_timeout_seconds"]) < 1:
         raise ValueError("Route call timeout must be positive")
+    if int(policy["max_request_bytes"]) < 1:
+        raise ValueError("Route request byte ceiling must be positive")
     return policy
 
 

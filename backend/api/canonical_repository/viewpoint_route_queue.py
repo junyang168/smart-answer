@@ -10,6 +10,7 @@ from __future__ import annotations
 import fcntl
 import json
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator, Mapping, Sequence
@@ -23,6 +24,25 @@ from .viewpoint_foundation import sha256_json
 
 QUEUE_STATE_VERSION = "wang_route_resolution_job_current_state_v1"
 QUEUE_EVENT_VERSION = "wang_route_resolution_job_state_event_v1"
+
+
+@dataclass(frozen=True)
+class RouteQueueLease:
+    """Fencing token captured by the worker that owns one work unit.
+
+    ``worker_id`` alone is not a fencing token: a restarted supervisor may reuse
+    the same configured id.  Each claim advances a per-job owner epoch, and every
+    production transition presents the epochs it originally received.  A worker
+    whose lease expired and was reclaimed therefore cannot finish or renew the
+    newer owner's jobs even if its process eventually wakes up.
+    """
+
+    work_unit_sha256: str
+    worker_id: str
+    owner_epochs: tuple[tuple[str, int], ...]
+
+    def epoch_map(self) -> dict[str, int]:
+        return dict(self.owner_epochs)
 
 
 def _read(path: Path) -> dict[str, Any]:
@@ -98,6 +118,7 @@ class FileRouteResolutionQueue:
         status: str,
         occurred_at: str,
         attempt: int,
+        owner_epoch: int | None = None,
         worker_id: str | None = None,
         lease_expires_at: str | None = None,
         work_unit_sha256: str | None = None,
@@ -108,6 +129,7 @@ class FileRouteResolutionQueue:
             "job_id": job_id,
             "status": status,
             "attempt": attempt,
+            "owner_epoch": attempt if owner_epoch is None else owner_epoch,
             "worker_id": worker_id,
             "lease_expires_at": lease_expires_at,
             "work_unit_sha256": work_unit_sha256,
@@ -123,6 +145,7 @@ class FileRouteResolutionQueue:
             "job_id": job_id,
             "status": status,
             "attempt": attempt,
+            "owner_epoch": attempt if owner_epoch is None else owner_epoch,
             "worker_id": worker_id,
             "lease_expires_at": lease_expires_at,
             "work_unit_sha256": work_unit_sha256,
@@ -149,6 +172,7 @@ class FileRouteResolutionQueue:
                 status="queued",
                 occurred_at=timestamp,
                 attempt=0,
+                owner_epoch=0,
             )
 
     def claim(
@@ -282,12 +306,14 @@ class FileRouteResolutionQueue:
             expiry = (claimed_at + timedelta(seconds=lease_seconds)).isoformat()
             for job in available:
                 prior = self._state(job.job_id) or {"attempt": 0}
+                prior_epoch = int(prior.get("owner_epoch", prior["attempt"]))
                 if job.job_id in work.superseded_job_ids:
                     self._transition(
                         job.job_id,
                         status="superseded",
                         occurred_at=claimed_at.isoformat(),
                         attempt=int(prior["attempt"]),
+                        owner_epoch=prior_epoch,
                         work_unit_sha256=work.artifact_sha256,
                         detail="queued conclusion revision was replaced by Registry current",
                     )
@@ -297,11 +323,104 @@ class FileRouteResolutionQueue:
                         status="running",
                         occurred_at=claimed_at.isoformat(),
                         attempt=int(prior["attempt"]) + 1,
+                        owner_epoch=prior_epoch + 1,
                         worker_id=worker_id,
                         lease_expires_at=expiry,
                         work_unit_sha256=work.artifact_sha256,
                     )
             return work
+
+    def capture_lease(
+        self,
+        work: RouteResolutionWorkUnit,
+        *,
+        worker_id: str,
+        now: datetime | None = None,
+    ) -> RouteQueueLease:
+        """Capture the owner epochs assigned by ``claim`` as a fencing token."""
+
+        checked_at = now or datetime.now(timezone.utc)
+        with self._lock():
+            owned = self._owned_running_jobs(
+                work,
+                worker_id=worker_id,
+                now=checked_at,
+                require_unexpired=True,
+            )
+            return RouteQueueLease(
+                work_unit_sha256=work.artifact_sha256,
+                worker_id=worker_id,
+                owner_epochs=tuple(
+                    sorted(
+                        (
+                            job_id,
+                            int(current.get("owner_epoch", current["attempt"])),
+                        )
+                        for job_id, current in owned
+                    )
+                ),
+            )
+
+    def assert_lease(
+        self,
+        work: RouteResolutionWorkUnit,
+        *,
+        lease: RouteQueueLease,
+        now: datetime | None = None,
+    ) -> None:
+        """Reject a stale worker before it writes an artifact or applies."""
+
+        if lease.work_unit_sha256 != work.artifact_sha256:
+            raise ValueError("route lease fencing token belongs to another work unit")
+        checked_at = now or datetime.now(timezone.utc)
+        with self._lock():
+            self._owned_running_jobs(
+                work,
+                worker_id=lease.worker_id,
+                owner_epochs=lease.epoch_map(),
+                now=checked_at,
+                require_unexpired=True,
+            )
+
+    def renew(
+        self,
+        work: RouteResolutionWorkUnit,
+        *,
+        lease: RouteQueueLease,
+        lease_seconds: int,
+        now: datetime | None = None,
+    ) -> str:
+        """Extend an unexpired fenced lease and append a heartbeat event."""
+
+        if lease_seconds < 1:
+            raise ValueError("route queue lease must be positive")
+        if lease.work_unit_sha256 != work.artifact_sha256:
+            raise ValueError("route lease fencing token belongs to another work unit")
+        renewed_at = now or datetime.now(timezone.utc)
+        if renewed_at.tzinfo is None:
+            raise ValueError("route queue time must be timezone-aware")
+        expiry = (renewed_at + timedelta(seconds=lease_seconds)).isoformat()
+        with self._lock():
+            owned = self._owned_running_jobs(
+                work,
+                worker_id=lease.worker_id,
+                owner_epochs=lease.epoch_map(),
+                now=renewed_at,
+                require_unexpired=True,
+            )
+            for job_id, current in owned:
+                self._transition(
+                    job_id,
+                    status="running",
+                    occurred_at=renewed_at.isoformat(),
+                    attempt=int(current["attempt"]),
+                    owner_epoch=int(current.get("owner_epoch", current["attempt"])),
+                    worker_id=lease.worker_id,
+                    lease_expires_at=expiry,
+                    work_unit_sha256=work.artifact_sha256,
+                    detail="lease heartbeat renewed",
+                )
+        return expiry
 
     def finish(
         self,
@@ -311,17 +430,25 @@ class FileRouteResolutionQueue:
         status: str,
         detail: str | None = None,
         finished_at: str | None = None,
+        owner_epochs: Mapping[str, int] | None = None,
     ) -> None:
         if status not in {"resolved", "exception"}:
             raise ValueError("route work may finish only as resolved or exception")
         timestamp = finished_at or datetime.now(timezone.utc).isoformat()
         with self._lock():
-            for job_id, current in self._owned_running_jobs(work, worker_id=worker_id):
+            for job_id, current in self._owned_running_jobs(
+                work,
+                worker_id=worker_id,
+                owner_epochs=owner_epochs,
+                now=datetime.fromisoformat(timestamp) if owner_epochs else None,
+                require_unexpired=owner_epochs is not None,
+            ):
                 self._transition(
                     job_id,
                     status=status,
                     occurred_at=timestamp,
                     attempt=int(current["attempt"]),
+                    owner_epoch=int(current.get("owner_epoch", current["attempt"])),
                     work_unit_sha256=work.artifact_sha256,
                     detail=detail,
                 )
@@ -333,17 +460,25 @@ class FileRouteResolutionQueue:
         worker_id: str,
         detail: str,
         released_at: str | None = None,
+        owner_epochs: Mapping[str, int] | None = None,
     ) -> None:
         """Return an owned plan-only work unit to queued state."""
 
         timestamp = released_at or datetime.now(timezone.utc).isoformat()
         with self._lock():
-            for job_id, current in self._owned_running_jobs(work, worker_id=worker_id):
+            for job_id, current in self._owned_running_jobs(
+                work,
+                worker_id=worker_id,
+                owner_epochs=owner_epochs,
+                now=datetime.fromisoformat(timestamp) if owner_epochs else None,
+                require_unexpired=owner_epochs is not None,
+            ):
                 self._transition(
                     job_id,
                     status="queued",
                     occurred_at=timestamp,
                     attempt=int(current["attempt"]),
+                    owner_epoch=int(current.get("owner_epoch", current["attempt"])),
                     detail=detail,
                 )
 
@@ -354,27 +489,45 @@ class FileRouteResolutionQueue:
         worker_id: str,
         detail: str,
         superseded_at: str | None = None,
+        owner_epochs: Mapping[str, int] | None = None,
     ) -> None:
         """Immediately retire owned work whose conclusion cut lost its CAS."""
 
         timestamp = superseded_at or datetime.now(timezone.utc).isoformat()
         with self._lock():
-            for job_id, current in self._owned_running_jobs(work, worker_id=worker_id):
+            for job_id, current in self._owned_running_jobs(
+                work,
+                worker_id=worker_id,
+                owner_epochs=owner_epochs,
+                now=datetime.fromisoformat(timestamp) if owner_epochs else None,
+                require_unexpired=owner_epochs is not None,
+            ):
                 self._transition(
                     job_id,
                     status="superseded",
                     occurred_at=timestamp,
                     attempt=int(current["attempt"]),
+                    owner_epoch=int(current.get("owner_epoch", current["attempt"])),
                     work_unit_sha256=work.artifact_sha256,
                     detail=detail,
                 )
 
     def _owned_running_jobs(
-        self, work: RouteResolutionWorkUnit, *, worker_id: str
+        self,
+        work: RouteResolutionWorkUnit,
+        *,
+        worker_id: str,
+        owner_epochs: Mapping[str, int] | None = None,
+        now: datetime | None = None,
+        require_unexpired: bool = False,
     ) -> list[tuple[str, dict[str, Any]]]:
         """Return the live source jobs after enforcing one ownership guard."""
 
         owned: list[tuple[str, dict[str, Any]]] = []
+        expected_epochs = dict(owner_epochs or {})
+        live_job_ids = set(work.source_job_ids) - set(work.superseded_job_ids)
+        if owner_epochs is not None and set(expected_epochs) != live_job_ids:
+            raise ValueError("route lease fencing token does not cover this work unit")
         for job_id in work.source_job_ids:
             if job_id in work.superseded_job_ids:
                 continue
@@ -386,6 +539,17 @@ class FileRouteResolutionQueue:
                 or current.get("work_unit_sha256") != work.artifact_sha256
             ):
                 raise ValueError(f"worker does not own route job {job_id}")
+            current_epoch = int(current.get("owner_epoch", current["attempt"]))
+            if owner_epochs is not None and current_epoch != expected_epochs[job_id]:
+                raise ValueError(f"stale route lease fencing token for {job_id}")
+            if require_unexpired:
+                checked_at = now or datetime.now(timezone.utc)
+                expiry_value = current.get("lease_expires_at")
+                expiry = (
+                    datetime.fromisoformat(str(expiry_value)) if expiry_value else None
+                )
+                if expiry is None or expiry <= checked_at:
+                    raise ValueError(f"route lease expired for {job_id}")
             owned.append((job_id, current))
         return owned
 
@@ -397,12 +561,19 @@ class FileRouteResolutionQueue:
         current_viewpoint_revisions: Mapping[str, str],
         detail: str,
         resolved_at: str | None = None,
+        owner_epochs: Mapping[str, int] | None = None,
     ) -> dict[str, Any]:
         """Atomically prove exact successor enqueues or retain work as exception."""
 
         timestamp = resolved_at or datetime.now(timezone.utc).isoformat()
         with self._lock():
-            owned = self._owned_running_jobs(work, worker_id=worker_id)
+            owned = self._owned_running_jobs(
+                work,
+                worker_id=worker_id,
+                owner_epochs=owner_epochs,
+                now=datetime.fromisoformat(timestamp) if owner_epochs else None,
+                require_unexpired=owner_epochs is not None,
+            )
             successors: dict[str, str] = {}
             missing: list[str] = []
             for item in work.current_viewpoint_revisions:
@@ -458,6 +629,7 @@ class FileRouteResolutionQueue:
                     status=status,
                     occurred_at=timestamp,
                     attempt=int(current["attempt"]),
+                    owner_epoch=int(current.get("owner_epoch", current["attempt"])),
                     work_unit_sha256=work.artifact_sha256,
                     detail=transition_detail,
                 )

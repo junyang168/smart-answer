@@ -19,7 +19,7 @@ from backend.api.canonical_repository.reviewed_candidate_contract import (
     reviewed_candidate_artifact_sha256,
 )
 from backend.pipeline.viewpoint_source_attestation_runner import (
-    _validated_candidate_inputs,
+    _validated_lineage_inputs,
 )
 
 
@@ -422,13 +422,31 @@ def test_attestation_runner_binds_overrides_before_database_access(
     )
     candidate_path = batch / "reviewed" / "one.reviewed-candidate.json"
     candidate_path.write_text(json.dumps(package), encoding="utf-8")
+    lineage_body = {
+        "claims": [{
+            "claim_id": "C1",
+            "reviewed_candidate_path": str(candidate_path),
+            "reviewed_candidate_sha256": hashlib.sha256(candidate_path.read_bytes()).hexdigest(),
+            "independent_review_path": str(review_path),
+            "independent_review_sha256": hashlib.sha256(review_path.read_bytes()).hexdigest(),
+            "adjudication_path": str(adjudication_path),
+            "adjudication_sha256": hashlib.sha256(adjudication_path.read_bytes()).hexdigest(),
+            "overrides_path": str(overrides_path),
+            "overrides_sha256": hashlib.sha256(overrides_path.read_bytes()).hexdigest(),
+        }]
+    }
+    lineage_path = tmp_path / "lineage.json"
+    lineage_path.write_text(
+        json.dumps(lineage_body | {"artifact_sha256": sha256_json(lineage_body)}),
+        encoding="utf-8",
+    )
 
-    assert len(_validated_candidate_inputs(
-        manifest_claim_ids={"C1"}, research_batches_root=tmp_path
+    assert len(_validated_lineage_inputs(
+        manifest_claim_ids={"C1"}, lineage_manifest_path=lineage_path
     )) == 1
 
     overrides_path.write_text('{"claims":{"tampered":{}}}\n', encoding="utf-8")
-    with pytest.raises(ValueError, match="overrides SHA does not bind"):
-        _validated_candidate_inputs(
-            manifest_claim_ids={"C1"}, research_batches_root=tmp_path
+    with pytest.raises(ValueError, match="overrides_path SHA drift"):
+        _validated_lineage_inputs(
+            manifest_claim_ids={"C1"}, lineage_manifest_path=lineage_path
         )

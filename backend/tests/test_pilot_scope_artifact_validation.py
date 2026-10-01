@@ -61,7 +61,7 @@ def _scope_payload() -> dict:
         },
     ]
     payload = {
-        "schema_version": "wang_matthew16_viewpoint_pilot_scope_v3",
+        "schema_version": "wang_matthew16_viewpoint_pilot_scope_v4",
         "chapter": 16,
         "passage_units": ["16:13-20"],
         "source_catalog_sha256": "catalog-sha",
@@ -82,6 +82,8 @@ def _scope_payload() -> dict:
         "scope_selection_sha256": "scope-selection-sha",
         "relation_type_allowlist": ["supports"],
         "occurrence_signal_status": "unavailable",
+        "scripture_role_attestation_sha256": "role-sha",
+        "direct_scripture_signal_authority": "reviewed_scripture_use_role",
         "statistics": {
             "claim_total": 2,
             "core_claim_total": 1,

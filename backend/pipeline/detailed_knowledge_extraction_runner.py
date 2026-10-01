@@ -2465,6 +2465,7 @@ def run_one(
     write_back_subtitles: bool = False,
     subtitle_actor_id: str | None = None,
     subtitle_writer: Callable[..., dict[str, Any]] | None = None,
+    subtitles_only: bool = False,
     subtitle_authorizer: Callable[[str], bool] | None = None,
     visual_source_attestations: Mapping[str, str] | None = None,
     record_run_ledger: bool = True,
@@ -2497,6 +2498,11 @@ def run_one(
         raise SubtitlePersistenceError(
             "subtitle persistence requires an authenticated --subtitle-user-id"
         )
+    if subtitles_only and not write_back_subtitles:
+        raise SubtitlePersistenceError(
+            "subtitle-only mode requires --write-back-generated-subtitles"
+        )
+    subtitles_persisted = False
     if leading_untitled_end is not None and not write_back_subtitles:
         raise SubtitlePersistenceError(
             "sermon with an untitled leading section requires "
@@ -2530,6 +2536,7 @@ def run_one(
             writer=subtitle_writer,
             scope_end=leading_untitled_end,
         )
+        subtitles_persisted = True
         transcript, raw = _load(transcript_path)
         after_rows = [dict(row) for row in transcript.get("script") or []]
         verify_saved_result(
@@ -2561,6 +2568,8 @@ def run_one(
             allow_generated=False,
             only=section_settings.only,
         )
+    if subtitles_only:
+        return ("created" if subtitles_persisted else "skipped"), transcript_path
     header = (
         "来源类型：sermon_transcript\n\n"
         "以下是该逐字稿的一个完整章节。S 编号是全文唯一定位码，不因章节而改变。"
@@ -2678,6 +2687,10 @@ def main() -> int:
         help="authenticated sermon editor identity used for ACL-checked subtitle write-back",
     )
     parser.add_argument(
+        "--subtitles-only", action="store_true",
+        help="persist and verify missing review-source subtitles, then stop before extraction",
+    )
+    parser.add_argument(
         "--visual-source-attestation",
         action="append",
         default=[],
@@ -2697,6 +2710,10 @@ def main() -> int:
         parser.error("--write-back-generated-subtitles cannot be combined with --no-generated-sections")
     if args.write_back_generated_subtitles and not args.subtitle_user_id:
         parser.error("--write-back-generated-subtitles requires --subtitle-user-id")
+    if args.subtitles_only and not args.write_back_generated_subtitles:
+        parser.error("--subtitles-only requires --write-back-generated-subtitles")
+    if args.subtitles_only and args.source_manifest:
+        parser.error("--subtitles-only supports sermon review transcripts only")
     if args.max_section_sentences is not None and args.max_section_sentences <= 0:
         parser.error("--max-section-sentences must be positive")
     if (
@@ -2835,6 +2852,15 @@ def main() -> int:
             "allow_generated_sections": sections.allow_generated,
             "write_back_generated_subtitles": args.write_back_generated_subtitles,
             "subtitle_user_id": args.subtitle_user_id,
+            "subtitles_only": args.subtitles_only,
+            "leading_untitled_body_end": {
+                path.stem: leading_untitled_body_end(
+                    project_script(_load(path)[0].get("script")).headings,
+                    len(project_script(_load(path)[0].get("script")).body_rows),
+                    level=sections.level,
+                )
+                for path in paths
+            },
             "sections_per_source": {
                 key: len(value) for key, value in plan_rows.items()
             },
@@ -2861,6 +2887,7 @@ def main() -> int:
                 reasoning_effort=args.reasoning_effort, force=args.force, sections=sections,
                 write_back_subtitles=args.write_back_generated_subtitles,
                 subtitle_actor_id=args.subtitle_user_id,
+                subtitles_only=args.subtitles_only,
                 visual_source_attestations=visual_source_attestations,
                 record_run_ledger=not args.no_run_ledger,
             )
