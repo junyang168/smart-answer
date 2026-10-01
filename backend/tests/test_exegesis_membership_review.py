@@ -53,3 +53,17 @@ def test_exact_fragment_mode_never_promotes_normalized_text_to_original(tmp_path
     assert links[1]['frozen_quote_is_verbatim'] is False
     req['extra_context']=[dict(source_id='S',locations=['row:2'])]
     assert review.compile_packet(req)[1][('S','row:2')]==['before','after']
+
+
+def test_l1_review_contract_has_no_relocation_and_requires_complete_members():
+    schema=review.membership_schema([dict(unit_id='u001',claim_ids=['a','b'])])
+    assert schema['required']==['findings']
+    assert 'primary_reviews' not in schema['properties']
+    req=dict(artifact_sha256='pin',claims=[dict(id='a',source_id='S',primary=''),dict(id='b',source_id='S',primary='')],targets=[dict(unit_id='u001',claim_ids=['a','b'])])
+    finding=dict(status='pass',reason='the command and its following reasons form a continuous passage',evidence=[dict(source_id='S',location='row:1',quote='actual words')],
+        suggested_passage_key=None,moves=[],need_more_context='',reviewed_claim_ids=['a','b'])
+    response=dict(findings={'u001':finding})
+    assert review.validate_membership(response,req,{('S','row:1'):['actual words']})['status']=='pass'
+    finding['reviewed_claim_ids']=['a']
+    import pytest
+    with pytest.raises(ValueError,match='omitted/added passage members'):review.validate_membership(response,req,{})

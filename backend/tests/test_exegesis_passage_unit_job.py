@@ -64,3 +64,10 @@ def test_reuse_completed_whole_book_plan_preserves_every_boundary_and_member():
     assert converted['assignments']=={'a':dict(unit_index=0),'b':dict(unit_index=0)}
     assert seed['units'][0]['claim_ids']==['C1','C2']
     with pytest.raises(ValueError):import_proposal(seed,{'a':'C1','b':'C2','c':'C3'})
+
+
+def test_l1_correction_cannot_request_or_rewrite_primary():
+    schema=plan_schema(['a'],{'u001':{}})
+    assert 'primary' not in schema['$defs']['assignment']['properties']
+    response=plan(['a']);response['assignments']['a']['primary']='Matt.16.19'
+    with pytest.raises(ValueError,match='cannot rewrite primary'):normalize(response,['a'])

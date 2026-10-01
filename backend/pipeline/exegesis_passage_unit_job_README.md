@@ -13,7 +13,11 @@ current job; its original model provenance remains recorded. Changing the model
 for future calls never requires regenerating an already completed proposal.
 
 Generation, correction and disputed arbitration use `gpt-6.1-sol/high`.
-Independent initial and final reviews use `claude-opus-5-5/high`. There is one
+Independent initial and final reviews use `claude-opus-5-5/high`. They review
+whole-book passage boundaries and complete membership only. There are no
+`primary_reviews`, ownership rewriting, or blanket re-localization tasks.
+Correction/arbitration schemas prohibit returning a new primary. Existing
+primary ranges can only expose a passage membership/range conflict. There is one
 worker and one model call at a time. At most one semantic correction and one
 disputed arbitration run; final unresolved items are disclosed explicitly.
 
@@ -45,5 +49,6 @@ successful responses and reviews are reused; changed bindings fail closed.
 An incomplete model stage is preserved and requires inspection before recovery;
 resume never silently retries it or replaces its output. No automatic infinite
 retry occurs. `passage-unit-manifest.json`, `unresolved.json` and
-`validation-report.json` are final outputs. A passing manifest makes L2 eligible
-but this job does not start it.
+`validation-report.json` are final outputs. This job reports L1 semantic review
+and preserves input primary ownership; it does not issue new ownership or L2
+processing authorization and never starts L2.
