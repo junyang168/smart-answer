@@ -39,11 +39,21 @@ def serialize_request(*, provider, executable, model, effort, prompt, payload, s
                    '--tools', '', '--permission-mode', 'dontAsk', '--model', model, '--effort', effort,
                    '--system-prompt', prompt, '--output-format', 'json', '--json-schema', schema_text]
     # Include every serialized argument plus stdin and externally supplied GPT schema.
-    size = len(wire.encode()) + sum(len(arg.encode()) for arg in command)
+    argv_bytes = sum(len(arg.encode()) for arg in command)
+    size = len(wire.encode()) + argv_bytes
     if provider == 'gpt':
         size += len(schema_text.encode())
+    # Three payload sizes: pretty (human artifact), compact without interning
+    # (dedup contribution isolated), and the interned wire actually sent.
     return dict(wire_payload=wire_payload, body=body, prompt=prompt, schema_text=schema_text,
-                raw=raw, wire=wire, command=command, size=size)
+                raw=raw, wire=wire, command=command, size=size, argv_bytes=argv_bytes,
+                prompt_bytes=len(prompt.encode()), schema_bytes=len(schema_text.encode()),
+                pretty_payload_bytes=len(json.dumps(payload, ensure_ascii=False, indent=2).encode()),
+                compact_uninterned_payload_bytes=len(compact_json(payload).encode()),
+                wire_payload_bytes=len(body.encode()),
+                prompt_carried_in='wire' if provider == 'gpt' else 'argv',
+                schema_carried_in='file_argument' if provider == 'gpt' else 'argv',
+                interned=wire_payload is not payload)
 
 
 def call(*, provider, model, effort, prompt, payload, schema, directory, max_bytes, timeout=900):
@@ -60,8 +70,11 @@ def call(*, provider, model, effort, prompt, payload, schema, directory, max_byt
         serialized[k] for k in ('wire_payload', 'body', 'prompt', 'schema_text', 'raw', 'wire', 'command', 'size'))
     request = write_new(directory / 'request.json', dict(provider=provider, model=model, effort=effort,
         prompt=prompt, payload=payload, wire_payload_sha256=sha256_json(wire_payload),
-        uncompressed_payload_bytes=len(json.dumps(payload, ensure_ascii=False, indent=2).encode()),
-        wire_payload_bytes=len(body.encode()), schema=schema, request_bytes=size, max_request_bytes=max_bytes,
+        pretty_payload_bytes=serialized['pretty_payload_bytes'],
+        compact_uninterned_payload_bytes=serialized['compact_uninterned_payload_bytes'],
+        wire_payload_bytes=serialized['wire_payload_bytes'], interned=serialized['interned'],
+        prompt_bytes=serialized['prompt_bytes'], schema_bytes=serialized['schema_bytes'], argv_bytes=serialized['argv_bytes'],
+        schema=schema, request_bytes=size, max_request_bytes=max_bytes, byte_fit_is_not_token_fit=True,
         prompt_sha256=sha256_json({'prompt': prompt}), payload_sha256=sha256_json(payload), command=command))
     try:
         if size > max_bytes:

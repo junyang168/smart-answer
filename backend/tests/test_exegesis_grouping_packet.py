@@ -18,7 +18,11 @@ def test_lossless_multilingual_complete_evidence_and_originals():
     assert len(unpack(encoded)['claims']) == 25
     spec = importlib.util.spec_from_file_location('reviewer', Path(__file__).resolve().parents[2] / 'scripts/review-exegesis-grouping.py')
     reviewer = importlib.util.module_from_spec(spec); spec.loader.exec_module(reviewer)
+    # Both encoders and both expanders agree without either importing the other.
     assert unpack(reviewer.compact_packet(payload)) == payload
+    assert reviewer.expand(encoded) == payload and reviewer.expand(reviewer.compact_packet(payload)) == payload
+    with pytest.raises(ValueError, match='reference'):
+        reviewer.expand({'packet_format': 'wang_exegesis_interned_packet_v1', 'texts': ['t'], 'data': {'$text': True}})
 
 
 def test_no_benefit_uses_original_and_reserved_key_rejected():
@@ -43,3 +47,7 @@ def test_actual_wire_size_compact_payload_and_prompt_schema_arguments(tmp_path):
         assert request['size'] == expected
         assert unpack(request['wire_payload']) == payload
         assert len(request['body'].encode()) < len(compact_json(payload).encode())
+        assert request['wire_payload_bytes'] == len(request['body'].encode()) and request['interned'] is True
+        assert request['compact_uninterned_payload_bytes'] == len(compact_json(payload).encode())
+        assert request['pretty_payload_bytes'] > request['compact_uninterned_payload_bytes']
+        assert request['size'] == len(request['wire'].encode()) + request['argv_bytes'] + (request['schema_bytes'] if provider == 'gpt' else 0)
