@@ -191,6 +191,21 @@ def validate_report(response, proposal, strings, binding):
     return dict(binding=binding, status=status, findings=findings)
 
 
+def review_schema(proposal):
+    items=proposal.get('units',proposal.get('groups'))
+    evidence_schema = {'type': 'object', 'additionalProperties': False,
+        'required': ['source_id', 'location', 'quote'],
+        'properties': {k: {'type': 'string'} for k in ('source_id', 'location', 'quote')}}
+    finding_schema = {'type': 'object', 'additionalProperties': False,
+        'required': ['key', 'status', 'reason', 'evidence'],
+        'properties': {'key': {'type': 'string', 'enum': [item['unit_id' if 'units' in proposal else 'group_key'] for item in items]}, 'status': {'type': 'string', 'enum': ['pass', 'needs_resolution']},
+            'reason': {'type': 'string'}, 'evidence': {'type': 'array', 'items': evidence_schema}}}
+    schema = {'type': 'object', 'additionalProperties': False, 'required': ['status', 'findings'],
+        'properties': {'status': {'type': 'string', 'enum': ['pass', 'needs_resolution']},
+            'findings': {'type': 'array', 'minItems': len(items), 'maxItems': len(items), 'items': finding_schema}}}
+    return schema
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--input', type=Path, required=True)
@@ -223,20 +238,12 @@ def main():
             for evidence in unit['evidence']:
                 if not any(evidence['quote'] in text for text in strings.get(evidence['source_id'], [])):
                     raise ValueError('unit proposal evidence is not verbatim in physical source')
-        evidence_schema = {'type': 'object', 'additionalProperties': False,
-            'required': ['source_id', 'location', 'quote'],
-            'properties': {k: {'type': 'string'} for k in ('source_id', 'location', 'quote')}}
-        finding_schema = {'type': 'object', 'additionalProperties': False,
-            'required': ['key', 'status', 'reason', 'evidence'],
-            'properties': {'key': {'type': 'string'}, 'status': {'type': 'string', 'enum': ['pass', 'needs_resolution']},
-                'reason': {'type': 'string'}, 'evidence': {'type': 'array', 'items': evidence_schema}}}
-        schema = {'type': 'object', 'additionalProperties': False, 'required': ['status', 'findings'],
-            'properties': {'status': {'type': 'string', 'enum': ['pass', 'needs_resolution']},
-                'findings': {'type': 'array', 'items': finding_schema}}}
+        schema = review_schema(request['proposal'])
         schema_text = json.dumps(schema, ensure_ascii=False, sort_keys=True)
         wire_payload = compact_packet(payload)
         body = json.dumps(wire_payload, ensure_ascii=False, separators=(',', ':'))
-        wire_prompt = ('输入为无损去重packet时，texts是字符串表，data内仅含$'
+        scope_prompt = ('本轮仅第二层分组审核。第一层经文段落及成员已经审核冻结，不重新审核unit、primary或要求SVG。findings仅列下列原始group_key，不添加group:前缀、unit或proposal覆盖条目：' + json.dumps([item['group_key'] for item in items],ensure_ascii=False) + '。允许段内不同论证分组；不要要求一个段落必须只含一条论证。\n') if 'groups' in request['proposal'] else ''
+        wire_prompt = scope_prompt + ('输入为无损去重packet时，texts是字符串表，data内仅含$'
                        'text的对象引用零起始texts索引；按引用完整阅读，不是摘要。\n') + PROMPT
         env = dict(os.environ)
         # Independent billing boundary: never permit API credentials/providers.

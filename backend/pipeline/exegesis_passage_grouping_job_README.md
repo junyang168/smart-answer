@@ -42,3 +42,18 @@ request/response SHA, exact original unit and membership, then normalizes only
 that label. Group IDs, members, rationale and ordering must remain identical.
 New root retains normalization provenance and still performs independent review;
 no model split is repeated and the original failed root remains immutable.
+
+L2 reviewer findings now use a schema enum of the exact group keys and an exact
+finding count; the prompt explicitly keeps frozen L1 units/primary outside the
+review scope. `--prior-review-root` can import saved legacy reviews: only a
+`group:` key prefix is normalized, all per-group semantic findings and evidence
+are unchanged, and extra unit/proposal findings are retained separately.
+Bindings and originals are verified; semantic objections remain objections.
+
+A `needs_resolution` review triggers one Opus5.5/high correction of the entire
+passage, with all Claim members and SHA-checked complete original prose for its
+sources (SVG excluded). The correction records argument continuity and cross-group
+support in rationale without new Claim/Registry links. GPT6.1/high then performs
+one terminal independent review. There is no second semantic correction loop;
+remaining objections are saved explicitly. Recovered initial reviews are not
+called again. Each worker reports original-source-correction/final-review phases.
