@@ -133,3 +133,94 @@ def test_physical_source_pin_checked_before_run(tmp_path):
     source.write_text("changed")
     with pytest.raises(ValueError, match="source file changed"):
         runner.check_sources([row])
+
+
+def overlay_fixture(tmp_path):
+    import hashlib
+    from backend.tests.test_other_claim_partition import fixture, artifact, answer
+    from backend.pipeline import other_claim_partition as routing
+    root = tmp_path / "campaign"
+    root.mkdir()
+    source = root / "source.txt"
+    source.write_text("原文\nδίκαιος 與興起，字元不可改变。")
+    roles = base._artifact({"counts": {"other": 2}, "decisions": [
+        {"claim_id": c, "role": "other"} for c in ("C1", "C2")]})
+    rp = fixture()
+    rp = base._artifact({k: v for k, v in rp.items() if k != "artifact_sha256"} |
+                        {"role_ledger_sha256": roles["artifact_sha256"]})
+    parent = routing.manifest(rp, [artifact(rp, "primary", {c: answer() for c in ("C1", "C2")}),
+                                  artifact(rp, "independent", {c: answer("other") for c in ("C1", "C2")})])
+    prior = {r["claim_id"]: r for r in parent["held"]}
+    contexts = [r | {"source_path": str(source), "source_file_sha256": hashlib.sha256(source.read_bytes()).hexdigest()}
+                for r in packet()["rows"]]
+    contexts = [{k: v for k, v in r.items() if not k.startswith("prior_")} for r in contexts]
+    context = base._artifact({"claim_count": 2, "rows": contexts})
+    rows = [r | {"prior_primary": prior[r["claim_id"]]["primary"],
+                 "prior_independent": prior[r["claim_id"]]["independent"]} for r in contexts]
+    p = base._artifact({"model": runner.MODEL, "rows": rows, "claim_count": 2,
+        "manifest_sha256": parent["artifact_sha256"], "source_context_sha256": context["artifact_sha256"],
+        "role_packet_sha256": rp["role_packet_sha256"]})
+    for name, value in (("arbitration-packet.json", p), ("classification-manifest.json", parent),
+                        ("source-context.json", context)):
+        base._write_immutable(root / name, value)
+    class Client:
+        def generate_json(self, *args):
+            a = response()
+            a["decisions"]["C2"].update(partition="unresolved", disposition="needs_human", source_selection="NONE")
+            return a
+    runner.run_batch(p, rows, root / "responses", Client())
+    return p, parent, rp, roles, root
+
+
+def independent_auditor():
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location("overlay_audit", Path(__file__).resolve().parents[2] / "scripts/audit-other-claim-partitions.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_overlay_unique_owner_holds_priors_and_cross_partition_support_preserved(tmp_path):
+    p, parent, rp, roles, root = overlay_fixture(tmp_path)
+    result = runner.assemble_final(p, parent, rp, root, tmp_path / "final")
+    again = runner.assemble_final(p, parent, rp, root, tmp_path / "repeat")
+    assert result == again
+    assert result["counts"] == {"god_trinity": 1}
+    assert result["owners"]["C1"]["primary"] == parent["held"][0]["primary"]
+    assert result["held"][0]["claim_id"] == "C2"
+    assert result["held"][0]["reason_code"] == "arbitration_needs_human"
+    edge = result["preserved_relations"][0]
+    assert edge["review_status"] == "candidate" and edge["cross_partition"]
+    assert edge["from_partition"] == "god_trinity" and edge["to_partition"] == "passage_exegesis"
+    report = independent_auditor().audit(rp, result, roles)
+    assert report["owned"] == 1 and report["held"] == 1 and report["arbitration_batches_verified"] == 1
+
+
+@pytest.mark.parametrize("bad", ["owner", "lost_hold", "prior", "approval", "edge", "counts", "reason", "raw_sha"])
+def test_independent_overlay_audit_rejects_rehashed_corruption(tmp_path, bad):
+    p, parent, rp, roles, root = overlay_fixture(tmp_path)
+    result = runner.assemble_final(p, parent, rp, root, tmp_path / "final")
+    if bad == "owner": result["owners"]["C1"]["partition"] = "other"
+    elif bad == "lost_hold": result["held"] = []
+    elif bad == "prior": result["owners"]["C1"]["primary"]["decision"]["partition"] = "other"
+    elif bad == "approval": result["human_approval"] = True
+    elif bad == "edge": result["preserved_relations"][0]["review_status"] = "approved"
+    elif bad == "counts": result["counts"] = {"god_trinity": 2}
+    elif bad == "reason": result["held"][0]["arbitration"]["reason"] = "fabricated"
+    else: result["arbitration_provenance"]["proposals"][0]["raw_sha256"] = "bad"
+    result = base._artifact({k: v for k, v in result.items() if k != "artifact_sha256"})
+    with pytest.raises(ValueError):
+        independent_auditor().audit(rp, result, roles)
+
+
+def test_overlay_rejects_missing_proposal_and_changed_prior(tmp_path):
+    p, parent, rp, roles, root = overlay_fixture(tmp_path)
+    changed = deepcopy(p)
+    changed["rows"][0]["prior_primary"]["decision"]["partition"] = "other"
+    changed = base._artifact({k: v for k, v in changed.items() if k != "artifact_sha256"})
+    with pytest.raises(ValueError):
+        runner.assemble_final(changed, parent, rp, root, tmp_path / "bad")
+    next((root / "responses").glob("*.proposal.json")).unlink()
+    with pytest.raises(ValueError, match="missing/duplicate"):
+        runner.assemble_final(p, parent, rp, root, tmp_path / "bad")

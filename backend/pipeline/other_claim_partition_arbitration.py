@@ -10,6 +10,7 @@ import fcntl
 import hashlib
 import importlib.util
 import json
+from collections import Counter
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -213,16 +214,137 @@ def prepare(roots, role_packet_path, output_root):
                       "packet_sha256": packet["artifact_sha256"]}), flush=True)
 
 
+def finalize(root, output_root, role_packet_path):
+    """Overlay only source-bound decisions, keeping priors and explicit holds."""
+    if output_root.exists():
+        raise ValueError("refusing to replace final partition")
+    packet = base._read_json(root / "arbitration-packet.json")
+    parent = base._read_json(root / "classification-manifest.json")
+    context = base._read_json(root / "source-context.json")
+    for value in (packet, parent, context):
+        base._check_artifact(value)
+    if (packet["manifest_sha256"] != parent["artifact_sha256"]
+            or packet["source_context_sha256"] != context["artifact_sha256"]
+            or packet["model"] != MODEL or packet["claim_count"] != len(packet["rows"])):
+        raise ValueError("arbitration parent binding differs")
+    roots = [Path(r["root"]) for r in parent["input_roots"]]
+    if routing.assemble_roots(roots) != parent:
+        raise ValueError("classification parent changed")
+    route_packet = base._read_json(roots[0] / "routing-packet.json")
+    original = base._read_json(role_packet_path)
+    base._check_artifact(original)
+    if original["artifact_sha256"] != packet["role_packet_sha256"]:
+        raise ValueError("original role packet differs")
+    original_rows = routing.indexed(original["claims"], "claim_id")
+    _check_graph({"claims": [original_rows[r["claim_id"]] for r in route_packet["claims"]]},
+                 PostgresKnowledgeStore())
+    check_sources(packet["rows"])
+    return assemble_final(packet, parent, route_packet, root, output_root)
+
+
+def assemble_final(packet, parent, route_packet, root, output_root):
+    """Deterministic assembly after current graph/source checks; no model calls."""
+    for value in (packet, parent, route_packet):
+        base._check_artifact(value)
+    rows = routing.indexed(route_packet["claims"], "claim_id")
+    priors = routing.indexed(parent["held"], "claim_id")
+    if (packet["manifest_sha256"] != parent["artifact_sha256"]
+            or parent["packet_sha256"] != route_packet["artifact_sha256"]
+            or len(packet["rows"]) != packet["claim_count"]
+            or {r["claim_id"] for r in packet["rows"]} != set(priors)):
+        raise ValueError("arbitration scope/parent differs")
+    owners = dict(parent["owners"])
+    held, provenance, seen = [], [], set()
+    dispositions = Counter()
+    for start in range(0, len(packet["rows"]), 16):
+        batch = packet["rows"][start:start+16]
+        expected, _, _, _ = binding(packet, batch)
+        digest = base.sha256_json(expected["claim_ids"])[:16]
+        paths = list((root / "responses").glob(f"arbitration-{digest}.attempt-*.proposal.json"))
+        if len(paths) != 1:
+            raise ValueError("missing/duplicate arbitration proposal")
+        proposal = base._read_json(paths[0])
+        raw_path = Path(proposal["raw_artifact_path"]).resolve()
+        if not raw_path.is_relative_to((root / "responses").resolve()):
+            raise ValueError("raw provenance outside arbitration root")
+        raw = base._read_json(raw_path)
+        for value in (proposal, raw):
+            base._check_artifact(value)
+        attempt = raw.get("attempt_number")
+        prompt = PROMPT + (RETRY if attempt == 2 else "")
+        if (attempt not in (1, 2) or any(raw.get(k) != v for k, v in expected.items())
+                or raw["call_prompt_sha256"] != hashlib.sha256(prompt.encode()).hexdigest()
+                or proposal["raw_artifact_sha256"] != raw["artifact_sha256"]
+                or proposal["packet_sha256"] != packet["artifact_sha256"]
+                or proposal["decisions"] != validate(raw["response"], batch)
+                or proposal["human_approval"] is not False
+                or proposal["database_mutations"] != 0 or proposal["grouping_authorization"] is not False):
+            raise ValueError("arbitration proposal binding differs")
+        provenance.append({"proposal_path": str(paths[0].resolve()),
+                           "proposal_sha256": proposal["artifact_sha256"],
+                           "raw_path": str(raw_path), "raw_sha256": raw["artifact_sha256"]})
+        for row in batch:
+            cid = row["claim_id"]
+            if (cid in seen or cid in owners or row["prior_primary"] != priors[cid]["primary"]
+                    or row["prior_independent"] != priors[cid]["independent"]
+                    or row["claim_content_sha256"] != rows[cid]["claim_content_sha256"]):
+                raise ValueError("arbitration prior/content/ownership differs")
+            seen.add(cid)
+            d = proposal["decisions"][cid]
+            dispositions[d["disposition"]] += 1
+            decision = d | {"proposal_sha256": proposal["artifact_sha256"],
+                            "raw_artifact_sha256": raw["artifact_sha256"]}
+            if d["disposition"] == "resolved":
+                owners[cid] = {k: rows[cid][k] for k in ("claim_revision", "claim_content_sha256", "source_id")} | {
+                    "partition": d["partition"], "primary": priors[cid]["primary"],
+                    "independent": priors[cid]["independent"], "arbitration": decision}
+            else:
+                held.append(priors[cid] | {"reason_code": "arbitration_" + d["disposition"],
+                                           "arbitration": decision})
+    if seen != set(priors) or len(owners) + len(held) != len(rows):
+        raise ValueError("final partition coverage differs")
+    def endpoint(cid):
+        if cid in owners:
+            return owners[cid]["partition"]
+        if cid in rows:
+            return "routing_held"
+        return route_packet["source_role_by_claim"].get(cid, "outside_role_scope")
+    links = [rel | {"from_partition": endpoint(rel["from_id"]),
+                    "to_partition": endpoint(rel["to_id"]),
+                    "cross_partition": endpoint(rel["from_id"]) != endpoint(rel["to_id"]),
+                    "ownership_inheritance": False, "read_only_context": True}
+             for rel in route_packet["claim_relations"]]
+    result = base._artifact({k: v for k, v in parent.items() if k != "artifact_sha256"} | {
+        "status": "arbitrated_with_explicit_holds" if held else "all_routed_after_arbitration",
+        "owners": owners, "held": held, "counts": dict(sorted(Counter(o["partition"] for o in owners.values()).items())),
+        "preserved_relations": links, "arbitration_progress": dict(sorted(dispositions.items())),
+        "arbitration_provenance": {"root": str(root.resolve()),
+            "parent_path": str((root / "classification-manifest.json").resolve()),
+            "parent_sha256": parent["artifact_sha256"], "packet_path": str((root / "arbitration-packet.json").resolve()),
+            "packet_sha256": packet["artifact_sha256"], "proposals": provenance},
+        "human_approval": False, "grouping_authorization": False, "database_mutations": 0})
+    output_root.mkdir(parents=True, exist_ok=False)
+    base._write_immutable(output_root / "partition-manifest.json", result)
+    return result
+
+
 def main():
     load_dotenv()
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("mode", choices=["prepare", "run"])
+    p.add_argument("mode", choices=["prepare", "run", "finalize"])
     p.add_argument("--root", type=Path, required=True)
     p.add_argument("--classification-root", type=Path, action="append")
     p.add_argument("--role-packet", type=Path)
+    p.add_argument("--final-root", type=Path)
     p.add_argument("--worker-index", type=int, choices=[0, 1], default=0)
     p.add_argument("--worker-count", type=int, choices=[1, 2], default=1)
     args = p.parse_args()
+    if args.mode == "finalize":
+        if args.final_root is None or args.role_packet is None:
+            p.error("finalize requires --final-root and --role-packet")
+        result = finalize(args.root, args.final_root, args.role_packet)
+        print(json.dumps({k: result[k] for k in ("artifact_sha256", "counts", "arbitration_progress", "status")}))
+        return
     if args.mode == "prepare":
         prepare(args.classification_root, args.role_packet, args.root)
         return

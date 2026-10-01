@@ -130,9 +130,113 @@ def audit_provenance(packet, manifest, input_roots):
     return len(provenance)
 
 
+def audit_arbitrated(packet, manifest, roles, input_roots):
+    """Independently reconstruct the overlay from retained raw source IDs."""
+    meta = manifest["arbitration_provenance"]
+    root = Path(meta["root"]).resolve(strict=True)
+    def read(path, digest=None):
+        path = Path(path).resolve(strict=True)
+        if not path.is_relative_to(root):
+            raise ValueError("arbitration provenance outside root")
+        value = json.loads(path.read_text())
+        checked(value)
+        if digest is not None and value["artifact_sha256"] != digest:
+            raise ValueError("arbitration provenance SHA differs")
+        return value
+    parent = read(meta["parent_path"], meta["parent_sha256"])
+    if "arbitration_provenance" in parent:
+        raise ValueError("multiple semantic arbitration rounds")
+    parent_report = audit(packet, parent, roles, input_roots)
+    arb = read(meta["packet_path"], meta["packet_sha256"])
+    context = read(root / "source-context.json", arb["source_context_sha256"])
+    priors = {r["claim_id"]: r for r in parent["held"]}
+    if (arb["manifest_sha256"] != parent["artifact_sha256"] or arb["model"] != "gpt-6.1-sol"
+            or arb["role_packet_sha256"] != packet["role_packet_sha256"]
+            or arb["claim_count"] != len(arb["rows"]) or arb["claim_count"] != context["claim_count"]
+            or len({r["claim_id"] for r in arb["rows"]}) != len(arb["rows"])
+            or {r["claim_id"] for r in arb["rows"]} != set(priors)):
+        raise ValueError("arbitration freeze scope differs")
+    contexts = {r["claim_id"]: r for r in context["rows"]}
+    rows = {r["claim_id"]: r for r in packet["claims"]}
+    owners, held, counts = dict(parent["owners"]), [], Counter()
+    if len(meta["proposals"]) != (len(arb["rows"]) + 15) // 16:
+        raise ValueError("arbitration batch coverage differs")
+    for index, item in enumerate(meta["proposals"]):
+        batch = arb["rows"][index*16:index*16+16]
+        ids = [r["claim_id"] for r in batch]
+        proposal = read(item["proposal_path"], item["proposal_sha256"])
+        raw = read(item["raw_path"], item["raw_sha256"])
+        if (raw["claim_ids"] != ids or raw["model"] != arb["model"]
+                or raw["packet_sha256"] != arb["artifact_sha256"] or raw["attempt_number"] not in (1, 2)
+                or proposal["raw_artifact_sha256"] != raw["artifact_sha256"]
+                or proposal["raw_artifact_path"] != item["raw_path"]
+                or proposal["packet_sha256"] != arb["artifact_sha256"]
+                or proposal["human_approval"] is not False or proposal["database_mutations"] != 0
+                or proposal["grouping_authorization"] is not False
+                or set(raw["response"]) != {"decisions"}
+                or set(raw["response"]["decisions"]) != set(ids)):
+            raise ValueError("arbitration raw binding differs")
+        resolved = {}
+        for row in batch:
+            cid = row["claim_id"]
+            if (row != contexts[cid] | {"prior_primary": priors[cid]["primary"],
+                                       "prior_independent": priors[cid]["independent"]}
+                    or row["claim_content_sha256"] != rows[cid]["claim_content_sha256"]
+                    or hashlib.sha256(Path(row["source_path"]).read_bytes()).hexdigest() != row["source_file_sha256"]):
+                raise ValueError("arbitration source/prior drift")
+            choices = {f"E{i:04d}": part for i, part in enumerate(row["context"], 1) if part["text"].strip()}
+            d = raw["response"]["decisions"][cid]
+            if (set(d) != {"partition", "disposition", "source_selection", "reason"}
+                    or d["partition"] not in {*packet["policy"]["partitions"], "unresolved"}
+                    or d["disposition"] not in {"resolved", "needs_human", "repair_required"}
+                    or not isinstance(d["reason"], str) or not d["reason"].strip()
+                    or d["source_selection"] not in {"NONE", *choices}
+                    or (d["disposition"] == "resolved" and (d["partition"] == "unresolved" or d["source_selection"] == "NONE"))
+                    or (d["disposition"] != "resolved" and d["partition"] != "unresolved")):
+                raise ValueError("invalid arbitration disposition/source")
+            part = choices.get(d["source_selection"])
+            effective = d | {"source_key": part["paragraph_key"] if part else "",
+                "source_quote": part["text"] if part else "", "claim_content_sha256": row["claim_content_sha256"],
+                "source_file_sha256": row["source_file_sha256"]}
+            resolved[cid] = effective
+            decision = effective | {"proposal_sha256": proposal["artifact_sha256"],
+                                    "raw_artifact_sha256": raw["artifact_sha256"]}
+            counts[d["disposition"]] += 1
+            if d["disposition"] == "resolved":
+                owners[cid] = {k: rows[cid][k] for k in ("claim_revision", "claim_content_sha256", "source_id")} | {
+                    "partition": d["partition"], "primary": priors[cid]["primary"],
+                    "independent": priors[cid]["independent"], "arbitration": decision}
+            else:
+                held.append(priors[cid] | {"reason_code": "arbitration_" + d["disposition"], "arbitration": decision})
+        if proposal["decisions"] != resolved:
+            raise ValueError("arbitration derived answer differs")
+    def endpoint(cid):
+        if cid in owners:
+            return owners[cid]["partition"]
+        if cid in rows:
+            return "routing_held"
+        return packet["source_role_by_claim"].get(cid, "outside_role_scope")
+    links = [rel | {"from_partition": endpoint(rel["from_id"]), "to_partition": endpoint(rel["to_id"]),
+        "cross_partition": endpoint(rel["from_id"]) != endpoint(rel["to_id"]),
+        "ownership_inheritance": False, "read_only_context": True} for rel in packet["claim_relations"]]
+    partition_counts = dict(sorted(Counter(o["partition"] for o in owners.values()).items()))
+    expected = {k: v for k, v in parent.items() if k != "artifact_sha256"} | {
+        "status": "arbitrated_with_explicit_holds" if held else "all_routed_after_arbitration",
+        "owners": owners, "held": held, "counts": partition_counts, "preserved_relations": links,
+        "arbitration_progress": dict(sorted(counts.items())), "arbitration_provenance": meta,
+        "human_approval": False, "grouping_authorization": False, "database_mutations": 0}
+    if {k: v for k, v in manifest.items() if k != "artifact_sha256"} != expected:
+        raise ValueError("final arbitration overlay differs")
+    return parent_report | {"owned": len(owners), "held": len(held), "partition_counts": partition_counts,
+        "manifest_sha256": manifest["artifact_sha256"], "arbitration_progress": dict(counts),
+        "arbitration_batches_verified": len(meta["proposals"])}
+
+
 def audit(packet, manifest, roles, input_roots=None):
     for value in (packet, manifest, roles):
         checked(value)
+    if "arbitration_provenance" in manifest:
+        return audit_arbitrated(packet, manifest, roles, input_roots)
     if (manifest["packet_sha256"] != packet["artifact_sha256"]
             or manifest["role_ledger_sha256"] != roles["artifact_sha256"]
             or packet["role_ledger_sha256"] != roles["artifact_sha256"]):
