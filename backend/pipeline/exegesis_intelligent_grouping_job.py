@@ -15,9 +15,6 @@ import subprocess
 import sys
 
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
-from backend.pipeline.exegesis_grouping_packet import compact_json
-from backend.pipeline.exegesis_grouping_source_packet import (
-    PROJECTION_FORMAT, SOURCE_PACKET_FORMAT, SVG_EXCLUDED, assert_projection_complete, canonical_source, project_for_model)
 from backend.pipeline.exegesis_grouping_transport import call, write_new
 from backend.pipeline.viewpoint_passage_grouping_preflight import passage_sort_key, plan_reviewed_passage_unit
 from backend.pipeline.viewpoint_passage_grouping_sample_runner import split_reviewed_unit
@@ -46,17 +43,9 @@ def verify_files(sources):
     if len({s['source_id'] for s in sources}) != len(sources):
         raise ValueError('duplicate physical source mapping')
     for source in sources:
-        if 'original_text' in source or any('original_text' in f for f in source.get('linked_files', [])):
-            raise ValueError(f"pre-inlined original_text rejected: {source['source_id']}")
         for file in [source, *source.get('linked_files', [])]:
             if hashlib.sha256(Path(file['path']).read_bytes()).hexdigest() != file['file_sha256']:
                 raise ValueError(f"physical source drift: {file['path']}")
-
-
-def canonical_index(sources):
-    """Read every physical original once into the canonical semantic shape."""
-    verify_files(sources)
-    return {s['source_id']: canonical_source(s) for s in sources}
 
 
 def verify_current(claims):
@@ -170,49 +159,14 @@ def validate_units(response, claims):
             raise ValueError('reversed passage range')
 
 
-def audit_payload_for(claims, sources, *, canonical=None, **extra):
-    """Complete audit payload: frozen Claims with every binding plus canonical sources.
-
-    Each source body appears once, in physical structure, read from the original
-    file (never from preparation paragraphs or a caller-inlined original_text).
-    Linked SVG/XML originals are SHA-verified references only; the audit payload
-    keeps path/file SHA, the model projection keeps an explicit exclusion marker.
-    """
-    canonical = canonical if canonical is not None else canonical_index(sources)
+def payload_for(claims, sources, **extra):
     needed = {c['source_id'] for c in claims}
-    missing = sorted(needed - set(canonical))
-    if missing:
-        raise ValueError(f'Claims reference sources without physical originals: {missing}')
-    selected = [canonical[s['source_id']] for s in sources if s['source_id'] in needed]
-    return {'claims': claims, 'sources': selected, **extra}
-
-
-def model_payload_for(audit):
-    """The semantic projection actually sent; completeness is proven, not assumed.
-
-    Proof shape: every non-SVG semantic value preserved and every SVG/XML
-    exclusion explicitly accounted for. No SVG source text reaches a model.
-    """
-    projection = project_for_model(audit)
-    assert_projection_complete(audit, projection)
-    return projection
-
-
-def record_audit_payload(root, phase, key, audit, model):
-    """Persist the full audit payload and the projection SHA; verify on resume."""
-    path = root / 'audit-payloads' / phase / f'{key}.json'
-    record = dict(phase=phase, key=key, audit_payload=audit, audit_payload_sha256=sha256_json(audit),
-        audit_payload_compact_bytes=len(compact_json(audit).encode()),
-        model_payload_sha256=sha256_json(model), model_payload_compact_bytes=len(compact_json(model).encode()),
-        omitted_provenance_fields=model['omitted_provenance_fields'],
-        projection_completeness=assert_projection_complete(audit, model))
-    if path.exists():
-        if {k: v for k, v in checked(path).items() if k != 'artifact_sha256'} != record:
-            raise ValueError(f'audit payload drift on resume: {path}')
-    else:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        write_new(path, record)
-    return record
+    selected = [s for s in sources if s['source_id'] in needed]
+    # Entire original files, not just excerpts or transport windows.
+    full = [{**s, 'original_text': Path(s['path']).read_text(encoding='utf-8'),
+        'linked_files': [{**f, 'original_text': Path(f['path']).read_text(encoding='utf-8')} for f in s.get('linked_files', [])]}
+        for s in selected]
+    return {'claims': claims, 'sources': full, **extra}
 
 
 def obtain(directory, fingerprint, generate):
@@ -235,10 +189,8 @@ def obtain(directory, fingerprint, generate):
         raise
 
 
-def independent_review(payload, proposal, directory, args, binding, model_payload_sha256):
-    # The reviewer receives the full audit payload, rebuilds its own projection
-    # from physical originals and must reproduce this SHA before reviewing.
-    request = dict(payload=payload, proposal=proposal, binding=binding, model_payload_sha256=model_payload_sha256,
+def independent_review(payload, proposal, directory, args, binding):
+    request = dict(payload=payload, proposal=proposal, binding=binding,
         proposer_provider=args.provider, reviewer_provider=args.reviewer_provider, reviewer_model=args.reviewer_model,
         max_request_bytes=args.max_request_bytes, effort=args.effort)
     fingerprint = sha256_json(request | {'reviewer_code_sha256': hashlib.sha256(REVIEWER.read_bytes()).hexdigest()})
@@ -272,10 +224,8 @@ def execute(args):
         # Read-only current graph + physical files checked on every start/resume.
         owned_ids = {r['claim_id'] for r in ownership['decisions']}
         verify_current([c for c in packet['claims'] if c['claim_id'] in owned_ids])
-        canonical = canonical_index(sources)
         code_paths = [Path(__file__), REVIEWER, Path(__file__).with_name('exegesis_grouping_transport.py'),
                       Path(__file__).with_name('exegesis_grouping_packet.py'),
-                      Path(__file__).with_name('exegesis_grouping_source_packet.py'),
                       Path(__file__).with_name('viewpoint_passage_grouping_sample_runner.py'),
                       Path(__file__).with_name('viewpoint_passage_grouping_preflight.py')]
         config = dict(role_ledger_sha256=ledger['artifact_sha256'], role_packet_sha256=packet['artifact_sha256'],
@@ -284,7 +234,6 @@ def execute(args):
             max_request_bytes=args.max_request_bytes, max_group_size=20,
             layers={"L0": "Bible book input boundary", "L1": "source-argument passage units, cross-chapter allowed",
                     "L2": "argument-boundary grouping, maximum 20"}, packet_encoding="lossless_string_interning_v1",
-            source_packet=SOURCE_PACKET_FORMAT, model_projection=PROJECTION_FORMAT, visual_originals=SVG_EXCLUDED,
             code_shas={str(p.relative_to(REVIEWER.parent.parent)): hashlib.sha256(p.read_bytes()).hexdigest() for p in code_paths},
             prompt_shas={p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in [PROMPTS / 'exegesis_passage_unit_planning.md',
                 PROMPTS / 'exegesis_argument_grouping.md', PROMPTS / 'exegesis_matthew_16_19_regression.md']})
@@ -307,12 +256,9 @@ def execute(args):
         units, groups, reviews = [], [], []
         for book in sorted(book_claims, key=lambda b: passage_sort_key(b + '.1')):
             scope = book_claims[book]
-            audit = audit_payload_for(scope, sources, canonical=canonical, scope_label=book)
-            payload = model_payload_for(audit)
-            audit_record = record_audit_payload(root, 'units', book, audit, payload)
+            payload = payload_for(scope, sources, scope_label=book)
             prompt = (PROMPTS / 'exegesis_passage_unit_planning.md').read_text()
-            fingerprint = sha256_json(dict(config=config, audit_payload_sha256=audit_record['audit_payload_sha256'],
-                                           payload=payload, schema=unit_schema(), phase='units'))
+            fingerprint = sha256_json(dict(config=config, payload=payload, schema=unit_schema(), phase='units'))
             directory = root / 'units' / book
             def plan():
                 answer = call(provider=args.provider, model=args.model, effort=args.effort, prompt=prompt,
@@ -321,10 +267,8 @@ def execute(args):
                 return answer
             proposal = obtain(directory, fingerprint, plan)
             validate_units(proposal, scope)
-            binding = sha256_json(dict(audit_payload=audit, model_payload_sha256=audit_record['model_payload_sha256'],
-                                       proposal=proposal, config=config))
-            review = independent_review(audit, proposal, root / 'unit-reviews' / book, args, binding,
-                                        audit_record['model_payload_sha256'])
+            binding = sha256_json(dict(payload=payload, proposal=proposal, config=config))
+            review = independent_review(payload, proposal, root / 'unit-reviews' / book, args, binding)
             reviews.append(review)
             units.extend(proposal['units'])
         index = {c['claim_id']: c for c in claims}
@@ -334,12 +278,9 @@ def execute(args):
         for number, unit in enumerate(units):
             unit['storage_key'] = f'{number:05d}_{unit["unit_id"]}'
             members = [index[cid] for cid in unit['claim_ids']]
-            audit = audit_payload_for(members, sources, canonical=canonical, scope_label=unit['storage_key'], reviewed_unit=unit)
-            payload = model_payload_for(audit)
-            audit_record = record_audit_payload(root, 'groups', unit['storage_key'], audit, payload)
+            payload = payload_for(members, sources, scope_label=unit['storage_key'], reviewed_unit=unit)
             directory = root / 'groups' / unit['storage_key']
-            fingerprint = sha256_json(dict(config=config, audit_payload_sha256=audit_record['audit_payload_sha256'],
-                                           payload=payload, phase='groups'))
+            fingerprint = sha256_json(dict(config=config, payload=payload, phase='groups'))
             def group():
                 if len(members) <= 20:
                     directory.mkdir(parents=True, exist_ok=False)
@@ -359,21 +300,17 @@ def execute(args):
             exact([cid for g in answer['groups'] for cid in g['claim_ids']], unit['claim_ids'], 'retained grouping')
             if any(len(g['claim_ids']) > 20 for g in answer['groups']):
                 raise ValueError('retained group exceeds 20')
-            binding = sha256_json(dict(audit_payload=audit, model_payload_sha256=audit_record['model_payload_sha256'],
-                                       proposal=answer, config=config))
-            review = independent_review(audit, answer, root / 'group-reviews' / unit['storage_key'], args, binding,
-                                        audit_record['model_payload_sha256'])
+            binding = sha256_json(dict(payload=payload, proposal=answer, config=config))
+            review = independent_review(payload, answer, root / 'group-reviews' / unit['storage_key'], args, binding)
             reviews.append(review)
             groups.extend([{**g, 'unit_storage_key': unit['storage_key']} for g in answer['groups']])
         exact([cid for g in groups for cid in g['claim_ids']], index, 'eligible group membership')
         result = dict(schema_version='wang_exegesis_grouping_manifest_v1', status='complete' if not unresolved else 'partial_with_explicit_unresolved',
             config_sha256=checked(root / 'config.json')['artifact_sha256'], units=units, groups=groups,
-            claim_packets=claims, sources=sources,
-            canonical_source_shas={sid: sha256_json(src) for sid, src in sorted(canonical.items())},
-            unresolved=unresolved, deferred_excluded=170, other_excluded=8743,
+            claim_packets=claims, sources=sources, unresolved=unresolved, deferred_excluded=170, other_excluded=8743,
             total_exegesis=3843, eligible_count=len(claims), grouped_count=len(index), unresolved_count=len(unresolved),
             missing=0, duplicate=0, foreign=0, max_group_size=20, master_data_mutations=0, cvp_generated=0,
-            svg_source_in_model_input=False, independent_review_shas=[r['artifact_sha256'] for r in reviews])
+            independent_review_shas=[r['artifact_sha256'] for r in reviews])
         if not (root / 'manifest.json').exists():
             write_new(root / 'manifest.json', result)
         elif {k: v for k, v in checked(root / 'manifest.json').items() if k != 'artifact_sha256'} != result:
@@ -382,8 +319,7 @@ def execute(args):
             write_new(root / 'validation-report.json', dict(manifest_sha256=checked(root / 'manifest.json')['artifact_sha256'],
                 eligible_count=len(claims), unresolved_count=len(unresolved), total_exegesis=3843,
                 missing=0, duplicate=0, foreign=0, group_ceiling_pass=True, provenance_preserved=True,
-                svg_source_in_model_input=False, semantic_review_status='pass',
-                independent_review_shas=result['independent_review_shas']))
+                semantic_review_status='pass', independent_review_shas=result['independent_review_shas']))
         print(json.dumps({k: v for k, v in result.items() if k not in {'units', 'groups', 'claim_packets', 'sources', 'unresolved', 'independent_review_shas'}}, ensure_ascii=False))
 
 
