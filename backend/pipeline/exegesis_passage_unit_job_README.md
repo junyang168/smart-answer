@@ -31,6 +31,8 @@ Use `backend/.venv/bin/python` from the #411 worktree. Pass all paths explicitly
 including `--codex-executable` for the subscription CLI. Launch using a detached
 process with stdout/stderr redirected to an exclusive log in a new output root.
 Monitor `status.json`, `events.jsonl`, the log, and the PID recorded in status.
+Use `backend/.venv/bin/python scripts/monitor-exegesis-passage-job.py OUTPUT_ROOT`
+for a read-only foreground watcher, or add `--once` for a status snapshot.
 A shared output-parent lock and output lock reject duplicate jobs.
 
 Resume with the same arguments and output root. Input/model/prompt/code-bound
