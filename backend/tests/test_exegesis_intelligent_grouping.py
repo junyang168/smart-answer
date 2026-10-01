@@ -205,3 +205,9 @@ def test_generic_prompt_and_matthew_regression_are_scoped(tmp_path, monkeypatch)
             provider='gpt', model='configurable', effort='high', directory=tmp_path / str(regression),
             max_request_bytes=500000, regression_context=regression)
     assert '拉比用语' not in prompts[0] and '拉比用语' in prompts[1]
+
+
+def test_complete_membership_counts_mapping_keys_not_assignment_values():
+    job.exact({'c0001': 'u001', 'c0002': 'u001'}, ['c0001', 'c0002'], 'assignments')
+    with pytest.raises(ValueError, match='assignments'):
+        job.exact({'c0001': 'u001'}, ['c0001', 'c0002'], 'assignments')

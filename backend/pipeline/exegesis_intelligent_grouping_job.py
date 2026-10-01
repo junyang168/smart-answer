@@ -35,6 +35,7 @@ def checked(path):
 
 
 def exact(ids, expected, label):
+    ids = list(ids)
     counts = Counter(ids)
     missing, duplicate, foreign = set(expected) - set(ids), {i for i, n in counts.items() if n > 1}, set(ids) - set(expected)
     if missing or duplicate or foreign:
