@@ -43,6 +43,25 @@ def validate_groups(answer,unit):
         raise ValueError('small reviewed unit must remain a single whole group')
 
 
+
+def load_direct_preparation(directory, manifest):
+    if directory is None:return {},None
+    prepared=core.checked(directory/'preparation.json')
+    if prepared['input_manifest_sha256']!=manifest['artifact_sha256']:
+        raise ValueError('direct preparation belongs to another L1 manifest')
+    expected={u['unit_id']:u for u in manifest['units'] if len(u['claim_ids'])<=20}
+    answers={}
+    for uid,unit in expected.items():
+        artifact=core.checked(directory/(uid+'.json'))
+        if artifact['input_manifest_sha256']!=manifest['artifact_sha256'] or artifact['unit_id']!=uid:
+            raise ValueError('direct prepared unit binding mismatch')
+        validate_groups(artifact['grouping'],unit)
+        answers[uid]=artifact
+    if prepared['completed_direct_units']!=len(answers) or prepared['completed_direct_claims']!=sum(len(u['claim_ids']) for u in expected.values()):
+        raise ValueError('direct preparation counts differ')
+    return answers,prepared['artifact_sha256']
+
+
 def execute(args):
     root=args.output_root.resolve();root.mkdir(parents=True,exist_ok=True)
     lock=(root/'job.lock').open('a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -51,8 +70,9 @@ def execute(args):
     manifest=load_manifest(args.manifest);sources_art=core.checked(args.sources)
     sids={c['source_id'] for c in manifest['claim_packets']};sources=[s for s in sources_art['sources'] if s['source_id'] in sids]
     core.verify_current(manifest['claim_packets']);core.verify_files(sources)
+    direct,preparation_sha=load_direct_preparation(args.direct_preparation,manifest)
     config=dict(layer=2,input_manifest_sha256=manifest['artifact_sha256'],sources_sha256=sources_art['artifact_sha256'],
-        model=args.model,provider='claude',effort='high',reviewer_model='gpt-6.1-sol',reviewer_provider='gpt',workers=args.workers,
+        model=args.model,provider='claude',effort='high',direct_preparation_sha256=preparation_sha,reviewer_model='gpt-6.1-sol',reviewer_provider='gpt',workers=args.workers,
         max_request_bytes=args.max_request_bytes,max_group_size=20,code_shas={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in
         [Path(__file__),Path(core.__file__),core.REVIEWER,Path(__file__).with_name('viewpoint_passage_grouping_sample_runner.py'),Path(__file__).with_name('viewpoint_passage_grouping_preflight.py'),Path(__file__).with_name('exegesis_grouping_transport.py'),Path(__file__).with_name('exegesis_grouping_packet.py')]},
         prompt_shas={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in [core.PROMPTS/'exegesis_argument_grouping.md',core.PROMPTS/'exegesis_matthew_16_19_regression.md']})
@@ -83,11 +103,12 @@ def execute(args):
         # Read-only existing ownership view for the existing independent reviewer;
         # blank primary stays blank, and no candidate is promoted to ownership.
         model_members=[dict(c,ownership=dict(primary=manifest['input_primary_ownership'][c['claim_id']],evidence=[],read_only=True)) for c in members]
-        payload=core.payload_for(model_members,sources,reviewed_unit=unit,layer=2,input_manifest_sha256=manifest['artifact_sha256'])
+        payload=core.payload_for(model_members,sources,reviewed_unit=unit,layer=2,input_manifest_sha256=manifest['artifact_sha256']) if len(members)>20 else dict(reviewed_unit=unit,input_manifest_sha256=manifest['artifact_sha256'])
         fingerprint=sha256_json(dict(config=config,payload=payload,stage='grouping'))
         def generate():
             if len(members)<=20:
                 directory.mkdir(parents=True,exist_ok=False)
+                if uid in direct:return direct[uid]['grouping']
                 return plan_reviewed_passage_unit(unit_id=uid,claim_ids=unit['claim_ids'],batch_size=20).model_dump(mode='json')
             return split_reviewed_unit(unit_id=uid,payload=payload,provider='claude',model=args.model,effort='high',directory=directory,max_request_bytes=args.max_request_bytes,regression_context=unit['passage_key']=='Matt.16.19').model_dump(mode='json')
         answer=core.obtain(directory,fingerprint,generate);validate_groups(answer,unit)
@@ -97,7 +118,7 @@ def execute(args):
             binding=sha256_json(dict(config=config,payload=payload,proposal=answer))
             review=core.independent_review(payload,answer,root/'reviews'/uid,reviewer_args,binding)
             basis=dict(type='independent_argument_boundary_review',review_sha256=review['artifact_sha256'])
-        else:basis=dict(type='deterministic_whole_reviewed_passage',l1_manifest_sha256=manifest['artifact_sha256'])
+        else:basis=dict(type='deterministic_whole_reviewed_passage',l1_manifest_sha256=manifest['artifact_sha256'],reused_prepared_artifact_sha256=direct[uid]['artifact_sha256'] if uid in direct else None)
         result=retain(root,'unit-'+uid+'.json',dict(unit_id=uid,grouping=answer,validation_basis=basis))
         with mutex:states[uid]='completed';results[uid]=result
         status('running')
@@ -138,7 +159,8 @@ def execute(args):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     for field in ['manifest','sources','output-root','codex-executable','claude-executable']:parser.add_argument('--'+field,type=Path,required=True)
-    parser.add_argument('--model',default='claude-opus-5-1');parser.add_argument('--workers',type=int,default=3)
+    parser.add_argument('--direct-preparation',type=Path,help='Reuse sealed deterministic small-unit outputs bound to this L1 manifest')
+    parser.add_argument('--model',default='claude-opus-5-5');parser.add_argument('--workers',type=int,default=3)
     parser.add_argument('--max-request-bytes',type=int,default=2500000)
     args=parser.parse_args()
     if not 1<=args.workers<=3:parser.error('workers must be 1..3')

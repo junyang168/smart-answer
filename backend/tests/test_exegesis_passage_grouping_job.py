@@ -33,3 +33,16 @@ def test_model_groups_must_cover_whole_passage_with_ceiling(bad):
     if bad=='ceiling':groups=[dict(group_key='one',claim_ids=ids,rationale='too many')]
     if bad=='group-key':groups[1]['group_key']='one'
     with pytest.raises(ValueError):validate_groups(dict(groups=groups),u)
+
+
+def test_direct_preparation_is_reused_only_with_exact_manifest_and_members(tmp_path):
+    from backend.pipeline.exegesis_passage_grouping_job import load_direct_preparation
+    unit=dict(unit_id='p001',claim_ids=['a','b'])
+    manifest=dict(artifact_sha256='bound-l1',units=[unit])
+    grouping=plan_reviewed_passage_unit(unit_id='p001',claim_ids=['a','b'],batch_size=20).model_dump(mode='json')
+    artifact=write_new(tmp_path/'p001.json',dict(input_manifest_sha256='bound-l1',unit_id='p001',grouping=grouping))
+    preparation=write_new(tmp_path/'preparation.json',dict(input_manifest_sha256='bound-l1',completed_direct_units=1,completed_direct_claims=2))
+    answers,sha=load_direct_preparation(tmp_path,manifest)
+    assert answers['p001']==artifact and sha==preparation['artifact_sha256']
+    with pytest.raises(ValueError,match='another L1'):load_direct_preparation(tmp_path,dict(manifest,artifact_sha256='different'))
+    with pytest.raises(ValueError):load_direct_preparation(tmp_path,dict(manifest,units=[dict(unit,claim_ids=['a'])]))

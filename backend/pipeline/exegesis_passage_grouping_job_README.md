@@ -12,7 +12,7 @@ membership. Units >20 use the existing `split_reviewed_unit` implementation and
 argument-boundary prompt with all unit members. Matthew 16:19 regression context
 is used only for that actual passage. No fixed member count or mechanical split.
 
-Default: three bounded parallel passage workers, `claude-opus-5-1/high` split,
+Default: three bounded parallel passage workers, `claude-opus-5-5/high` split,
 `gpt-6.1-sol/high` independent per-passage group review. The exact requested
 Claude model is probed through subscription CLI and its returned model IDs are
 checked before work. No downgrade or API fallback. Parallel workers hold separate
@@ -30,3 +30,7 @@ model or input requires a new root.
 Run detached from the #411 worktree with explicit manifest, sources, output root,
 CLI paths, model and workers. No Claim/Registry writes, no CVP calls, no #357
 processing. L1 delivery and its original reviews are never overwritten.
+
+Pass `--direct-preparation` to reuse sealed direct groups from a previous
+preparation. The L1 SHA, every unit result, exact membership and counts must
+match; imported result SHAs are retained in validation bases.
