@@ -48,6 +48,8 @@ def verify_historical_review_bridge(
     versions: Sequence[Mapping[str, Any]],
     current_evidence: Mapping[str, Mapping[str, Any]],
     current_fragments: Mapping[str, Mapping[str, Any]],
+    human_closure_binding: Mapping[str, str] | None = None,
+    sealed_lineage_binding: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Verify one read-only DB version chain; never ignore arbitrary drift."""
     review = _read_binding(review_binding)
@@ -58,16 +60,43 @@ def verify_historical_review_bridge(
     if review.get("reviewed_claims") != projection["candidate_claims"]:
         raise CvpProductionBlocked([f"{claim_id}: historical review does not cover its input projection"])
     reviewer = review.get("reviewer") or {}
+    sealed_model = None
+    if reviewer.get("provider") == "anthropic_batched":
+        if sealed_lineage_binding is None:
+            raise CvpProductionBlocked([f"{claim_id}: batched review requires authenticated sealed lineage"])
+        lineage = _read_binding(sealed_lineage_binding)
+        from backend.pipeline.viewpoint_source_attestation_runner import _validated_lineage_inputs
+        items = _validated_lineage_inputs(manifest_claim_ids={row["claim_id"] for row in lineage["claims"]}, lineage_manifest_path=Path(sealed_lineage_binding["path"]))
+        item = items.get(claim_id)
+        if item is None or item["review_payload"] != review or item["review_input_payload"] != package:
+            raise CvpProductionBlocked([f"{claim_id}: sealed lineage binds another review generation"])
+        resolution = next((row for row in item["application"]["review_resolutions"] if row["claim_id"] == claim_id), {})
+        if resolution.get("target_review_status") != "ai_consensus_reviewed" or resolution.get("adjudication_status") != "not_required" or resolution.get("independent_review_decision") != "pass":
+            raise CvpProductionBlocked([f"{claim_id}: sealed review does not resolve this passing Claim"])
+        sealed_model = resolution.get("reviewer_id")
     identity = {key: value for key, value in reviewer.items() if key not in {"fingerprint_sha256", "generated_at", "artifact_sha256", "provider"}}
-    if sha256_json(identity) != reviewer.get("fingerprint_sha256"):
+    if sealed_model is None and sha256_json(identity) != reviewer.get("fingerprint_sha256"):
         raise CvpProductionBlocked([f"{claim_id}: historical reviewer fingerprint mismatch"])
     rows = [row for row in review.get("claim_reviews") or [] if row.get("claim_id") == claim_id]
+    human_confirmed = False
+    if human_closure_binding is not None:
+        closure = _read_binding(human_closure_binding)
+        validate_content_addressed(closure, "artifact_sha256")
+        approvals = [row for row in closure.get("claims") or [] if row.get("claim_id") == claim_id]
+        if closure.get("schema_version") != "wang_claim_human_spot_check_closure_v1" or closure.get("confirmed_by") != "human_user" or closure.get("user_message") != "确认" or len(approvals) != 1:
+            raise CvpProductionBlocked([f"{claim_id}: invalid human spot-check closure"])
+        approved = approvals[0]
+        if approved.get("decision") != "pass" or approved.get("claim_revision_sha256") != record_content_sha(current_claim) or approved.get("pinned_claim_revision") != current_claim["revision"] or approved.get("review_binding") != dict(review_binding):
+            raise CvpProductionBlocked([f"{claim_id}: human closure does not bind current Claim/review"])
+        if approved.get("evidence_dependency_sha256") != sha256_json({eid: record_content_sha(raw) for eid, raw in sorted(current_evidence.items())}) or approved.get("fragment_dependency_sha256") != sha256_json({fid: record_content_sha(raw) for fid, raw in sorted(current_fragments.items())}):
+            raise CvpProductionBlocked([f"{claim_id}: human closure evidence drift"])
+        human_confirmed = True
     if len(rows) != 1 or any((
         rows[0].get("decision") != "pass", bool(rows[0].get("issues")),
-        rows[0].get("routing_status") != "ai_reviewed", bool(rows[0].get("human_review_reason")),
+        rows[0].get("routing_status") != ("human_spot_check" if human_confirmed else "ai_reviewed"), bool(rows[0].get("human_review_reason")),
         rows[0].get("reviewer_fingerprint") != reviewer.get("fingerprint_sha256"),
-        reviewer.get("provider") != "anthropic", not reviewer.get("review_model_id"),
-        bool(rows[0].get("spot_check_selected")),
+        reviewer.get("provider") not in ({"anthropic_batched"} if sealed_model else {"anthropic"}), not (sealed_model or reviewer.get("review_model_id")),
+        bool(rows[0].get("spot_check_selected")) != human_confirmed,
     )):
         raise CvpProductionBlocked([f"{claim_id}: historical review is not a resolved independent pass"])
     normalized, _ = _normalize_records(package)
@@ -131,7 +160,7 @@ def verify_historical_review_bridge(
         "claim_id": claim_id, "pinned_claim_revision": current_claim["revision"],
         "claim_revision_sha256": record_content_sha(current_claim),
         "review_binding": dict(review_binding), "review_input_binding": dict(review_input_binding),
-        "review_model_id": reviewer["review_model_id"], "review_provider": reviewer["provider"],
+        "review_model_id": sealed_model or reviewer["review_model_id"], "review_provider": reviewer["provider"],
         "reviewer_fingerprint_sha256": reviewer["fingerprint_sha256"],
         "reviewed_applied_revision": baseline["revision"],
         "reviewed_applied_change_set_id": baseline["change_set_id"], "coordinate_repairs": repairs,
@@ -139,6 +168,11 @@ def verify_historical_review_bridge(
         "fragment_dependency_sha256": sha256_json({fid: record_content_sha(current_fragments[fid]) for eid in reviewed["evidence_step_ids"] for fid in evidence_fragment_ids(EvidenceStepRecord.model_validate(current_evidence[eid]))}),
         "master_data_mutations": 0, "model_calls_executed": 0, "approval_status": "not_human_approved",
     }
+    if human_closure_binding is not None:
+        body["human_spot_check_closure_binding"] = dict(human_closure_binding)
+        body["human_spot_check_confirmed"] = True
+    if sealed_lineage_binding is not None:
+        body["sealed_lineage_binding"] = dict(sealed_lineage_binding)
     return body | {"artifact_sha256": sha256_json(body)}
 
 
@@ -182,6 +216,8 @@ def main() -> None:
                 claim_id=cid, current_claim=current[0], versions=[dict(zip(columns, row)) for row in history],
                 review_binding=selected["review_binding"], review_input_binding=selected["review_input_binding"],
                 current_evidence=evidence, current_fragments=fragments,
+                human_closure_binding=selected.get("human_closure_binding"),
+                sealed_lineage_binding=selected.get("sealed_lineage_binding"),
             ))
     body = {"schema_version": "wang_historical_claim_review_bridges_v1", "status": "verified",
             "selection_file_sha256": hashlib.sha256(args.selection.read_bytes()).hexdigest(),

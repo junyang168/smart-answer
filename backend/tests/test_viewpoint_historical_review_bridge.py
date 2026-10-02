@@ -88,3 +88,56 @@ def test_no_semantic_drift_can_hide_as_coordinate_repair(tmp_path, mutation):
 def test_spoken_empty_facts_normalization_never_erases_visual_evidence():
     assert _fragment_meaning({"visual_facts": []}) == _fragment_meaning({"visual_facts": None, "source_modality": "spoken"})
     assert _fragment_meaning({"visual_facts": [], "source_modality": "visual"}) != _fragment_meaning({"visual_facts": [], "source_modality": "spoken"})
+
+
+def human_inputs(tmp_path):
+    args = inputs(tmp_path)
+    review = json.loads((tmp_path / "review.json").read_text())
+    review["claim_reviews"][0].update(spot_check_selected=True, routing_status="human_spot_check")
+    args["review_binding"] = write_binding(tmp_path / "review.json", review)
+    row = {"claim_id": "C1", "decision": "pass", "pinned_claim_revision": args["current_claim"]["revision"],
+           "claim_revision_sha256": record_content_sha(args["current_claim"]), "review_binding": args["review_binding"],
+           "evidence_dependency_sha256": sha256_json({eid: record_content_sha(raw) for eid, raw in sorted(args["current_evidence"].items())}),
+           "fragment_dependency_sha256": sha256_json({fid: record_content_sha(raw) for fid, raw in sorted(args["current_fragments"].items())})}
+    closure = {"schema_version": "wang_claim_human_spot_check_closure_v1", "confirmed_by": "human_user", "user_message": "确认", "claims": [row]}
+    closure["artifact_sha256"] = sha256_json(closure)
+    args["human_closure_binding"] = write_binding(tmp_path / "closure.json", closure)
+    return args
+
+
+def test_human_spot_check_requires_explicit_current_version_confirmation(tmp_path):
+    args = human_inputs(tmp_path)
+    proof = verify_historical_review_bridge(**args)
+    assert proof["human_spot_check_confirmed"] is True
+    assert proof["approval_status"] == "not_human_approved"  # no CVP approval implied
+    args.pop("human_closure_binding")
+    with pytest.raises(CvpProductionBlocked, match="resolved independent pass"):
+        verify_historical_review_bridge(**args)
+
+
+@pytest.mark.parametrize("mutation", ["actor", "decision", "revision", "sha", "evidence", "fragments", "review", "duplicate"])
+def test_human_confirmation_cannot_release_other_versions_or_evidence(tmp_path, mutation):
+    args = human_inputs(tmp_path)
+    closure = json.loads((tmp_path / "closure.json").read_text())
+    row = closure["claims"][0]
+    if mutation == "actor":
+        closure["confirmed_by"] = "ai"
+    elif mutation == "duplicate":
+        closure["claims"].append(deepcopy(row))
+    else:
+        key = {"decision": "decision", "revision": "pinned_claim_revision", "sha": "claim_revision_sha256", "evidence": "evidence_dependency_sha256", "fragments": "fragment_dependency_sha256", "review": "review_binding"}[mutation]
+        row[key] = "wrong"
+    closure.pop("artifact_sha256")
+    closure["artifact_sha256"] = sha256_json(closure)
+    args["human_closure_binding"] = write_binding(tmp_path / "closure.json", closure)
+    with pytest.raises(CvpProductionBlocked):
+        verify_historical_review_bridge(**args)
+
+
+def test_batched_review_without_sealed_lineage_is_rejected(tmp_path):
+    args = inputs(tmp_path)
+    review = json.loads((tmp_path / "review.json").read_text())
+    review["reviewer"]["provider"] = "anthropic_batched"
+    args["review_binding"] = write_binding(tmp_path / "review.json", review)
+    with pytest.raises(CvpProductionBlocked, match="authenticated sealed lineage"):
+        verify_historical_review_bridge(**args)
