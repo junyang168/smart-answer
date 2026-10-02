@@ -220,3 +220,50 @@ def test_pair_index_repair_never_grants_unreviewed_content(tmp_path, mutation):
         args["versions"][-1]["content_sha256"] = record_content_sha(args["current_claim"])
     with pytest.raises(CvpProductionBlocked):
         verify_historical_review_bridge(**args)
+
+
+def random_sample_inputs(tmp_path):
+    args = human_inputs(tmp_path)
+    args.pop('human_closure_binding')
+    policy = {'schema_version': 'wang_resolved_random_spot_check_policy_v1',
+        'authorized_by': 'human_user', 'user_message': 'AI 已通过、无问题的随机抽查不再询问',
+        'rule': 'pass_no_issues_random_sample_only', 'claim_ids': ['C1'],
+        'grants_human_content_approval': False}
+    policy['artifact_sha256'] = sha256_json(policy)
+    args['random_spot_check_policy_binding'] = write_binding(tmp_path/'policy.json', policy)
+    return args
+
+
+def test_explicit_owner_policy_releases_random_pass_without_fabricating_human_approval(tmp_path):
+    proof = verify_historical_review_bridge(**random_sample_inputs(tmp_path))
+    assert proof['random_spot_check_waived_by_owner_policy'] is True
+    assert proof['human_content_approval'] is False
+    assert 'human_spot_check_confirmed' not in proof
+    assert proof['approval_status'] == 'not_human_approved'
+    assert proof['model_calls_executed'] == 0
+
+
+@pytest.mark.parametrize('mutation', ['actor', 'scope', 'rule', 'human_approval', 'physical_sha',
+                                     'issues', 'decision', 'reason', 'candidate_status', 'fingerprint'])
+def test_random_sample_policy_does_not_waive_actual_content_or_lineage_problems(tmp_path, mutation):
+    args = random_sample_inputs(tmp_path)
+    if mutation in {'actor', 'scope', 'rule', 'human_approval'}:
+        p = json.loads((tmp_path/'policy.json').read_text())
+        key = {'actor': 'authorized_by', 'scope': 'claim_ids', 'rule': 'rule',
+               'human_approval': 'grants_human_content_approval'}[mutation]
+        p[key] = [] if mutation == 'scope' else 'bad'
+        p.pop('artifact_sha256'); p['artifact_sha256'] = sha256_json(p)
+        args['random_spot_check_policy_binding'] = write_binding(tmp_path/'policy.json', p)
+    elif mutation == 'physical_sha':
+        args['random_spot_check_policy_binding']['file_sha256'] = 'bad'
+    elif mutation == 'candidate_status':
+        args['current_claim']['review_status'] = 'candidate'
+        args['versions'][-1]['content_sha256'] = record_content_sha(args['current_claim'])
+    else:
+        r = json.loads((tmp_path/'review.json').read_text())
+        row = r['claim_reviews'][0]
+        row[{'issues':'issues', 'decision':'decision', 'reason':'human_review_reason',
+             'fingerprint':'reviewer_fingerprint'}[mutation]] = ['problem'] if mutation == 'issues' else 'problem'
+        args['review_binding'] = write_binding(tmp_path/'review.json', r)
+    with pytest.raises(CvpProductionBlocked):
+        verify_historical_review_bridge(**args)

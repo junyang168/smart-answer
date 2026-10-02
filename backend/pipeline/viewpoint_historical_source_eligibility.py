@@ -97,6 +97,7 @@ def build_historical_source_eligibility(*, claim_manifest: dict[str, Any], bridg
                 review_binding=prior_proof["review_binding"], review_input_binding=prior_proof["review_input_binding"],
                 current_evidence=evidence, current_fragments=fragments,
                 human_closure_binding=prior_proof.get("human_spot_check_closure_binding"),
+                random_spot_check_policy_binding=prior_proof.get("random_spot_check_policy_binding"),
                 sealed_lineage_binding=prior_proof.get("sealed_lineage_binding"),
             )
             if actual_proof != prior_proof:

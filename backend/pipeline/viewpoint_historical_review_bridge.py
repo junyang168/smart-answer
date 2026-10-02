@@ -113,6 +113,7 @@ def verify_historical_review_bridge(
     current_fragments: Mapping[str, Mapping[str, Any]],
     human_closure_binding: Mapping[str, str] | None = None,
     sealed_lineage_binding: Mapping[str, str] | None = None,
+    random_spot_check_policy_binding: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Verify one read-only DB version chain; never ignore arbitrary drift."""
     review = _read_binding(review_binding)
@@ -160,12 +161,30 @@ def verify_historical_review_bridge(
         if approved.get("evidence_dependency_sha256") != sha256_json({eid: record_content_sha(raw) for eid, raw in sorted(current_evidence.items())}) or approved.get("fragment_dependency_sha256") != sha256_json({fid: record_content_sha(raw) for fid, raw in sorted(current_fragments.items())}):
             raise CvpProductionBlocked([f"{claim_id}: human closure evidence drift"])
         human_confirmed = True
+    random_sample_waived = False
+    if random_spot_check_policy_binding is not None:
+        policy = _read_binding(random_spot_check_policy_binding)
+        validate_content_addressed(policy, "artifact_sha256")
+        if (policy.get("schema_version") != "wang_resolved_random_spot_check_policy_v1"
+                or policy.get("authorized_by") != "human_user"
+                or not policy.get("user_message")
+                or policy.get("rule") != "pass_no_issues_random_sample_only"
+                or claim_id not in policy.get("claim_ids", [])
+                or policy.get("grants_human_content_approval") is not False):
+            raise CvpProductionBlocked([f"{claim_id}: invalid random spot-check policy"])
+        random_sample_waived = (len(rows) == 1 and rows[0].get("decision") == "pass"
+            and rows[0].get("issues") == [] and not rows[0].get("human_review_reason")
+            and rows[0].get("spot_check_selected") is True
+            and rows[0].get("routing_status") == "human_spot_check"
+            and current_claim.get("review_status") == "ai_consensus_reviewed"
+            and not human_confirmed)
+    sample_released = human_confirmed or random_sample_waived
     if len(rows) != 1 or any((
         rows[0].get("decision") != "pass", bool(rows[0].get("issues")),
-        rows[0].get("routing_status") != ("human_spot_check" if human_confirmed else "ai_reviewed"), bool(rows[0].get("human_review_reason")),
+        rows[0].get("routing_status") != ("human_spot_check" if sample_released else "ai_reviewed"), bool(rows[0].get("human_review_reason")),
         rows[0].get("reviewer_fingerprint") != reviewer.get("fingerprint_sha256"),
         reviewer.get("provider") not in ({"anthropic_batched"} if sealed_model else {"anthropic"}), not (sealed_model or reviewer.get("review_model_id")),
-        bool(rows[0].get("spot_check_selected")) != human_confirmed,
+        bool(rows[0].get("spot_check_selected")) != sample_released,
     )):
         raise CvpProductionBlocked([f"{claim_id}: historical review is not a resolved independent pass"])
     normalized, _ = _normalize_records(package)
@@ -276,6 +295,10 @@ def verify_historical_review_bridge(
         body["sealed_lineage_binding"] = dict(sealed_lineage_binding)
     if evidence_index_repairs:
         body["evidence_index_repairs"] = evidence_index_repairs
+    if random_sample_waived:
+        body["random_spot_check_policy_binding"] = dict(random_spot_check_policy_binding)
+        body["random_spot_check_waived_by_owner_policy"] = True
+        body["human_content_approval"] = False
     return body | {"artifact_sha256": sha256_json(body)}
 
 
@@ -321,6 +344,7 @@ def main() -> None:
                 current_evidence=evidence, current_fragments=fragments,
                 human_closure_binding=selected.get("human_closure_binding"),
                 sealed_lineage_binding=selected.get("sealed_lineage_binding"),
+                random_spot_check_policy_binding=selected.get("random_spot_check_policy_binding"),
             ))
     body = {"schema_version": "wang_historical_claim_review_bridges_v1", "status": "verified",
             "selection_file_sha256": hashlib.sha256(args.selection.read_bytes()).hexdigest(),

@@ -98,7 +98,7 @@ def investigate_deferred(root):
     return read(root / "deferred-source-check/handoff.json")
 
 
-def build_selection(group, inventory, root):
+def build_selection(group, inventory, root, random_spot_check_policy=None):
     """Discover physical inputs; proof verification is performed by the adapter.
 
     A matching filename or inventory status never counts as review approval.
@@ -124,6 +124,8 @@ def build_selection(group, inventory, root):
         review = read(review_path)
         input_path = Path(review["source"]["package_path"])
         row = {"claim_id": cid, "review_binding": binding(review_path), "review_input_binding": binding(input_path)}
+        if random_spot_check_policy is not None:
+            row["random_spot_check_policy_binding"] = binding(random_spot_check_policy)
         if variant["contract"] == "sealed_valid":
             paths = {"reviewed_candidate": candidate, "independent_review": review_path,
                      "adjudication": batch / "adjudications" / (name + ".ai-adjudication.json"),
@@ -160,7 +162,7 @@ def qualify(row, group, inventory, root, args):
     if (inputs / "freeze.json").exists():
         # Existing immutable phase is revalidated by the normal runner.
         return
-    build_selection(group, inventory, root)
+    build_selection(group, inventory, root, getattr(args, 'random_spot_check_policy', None))
     command([PYTHON, "-m", "backend.pipeline.viewpoint_historical_review_bridge", "--selection", root / "review-selection.json", "--output", root / "historical-bridges.json"])
     # One verified full snapshot before this serialized campaign, plus the
     # normal per-group compensatable ChangeSets/readback history. Repeating a
@@ -211,6 +213,7 @@ def execute(args):
               "grouping_repository": str(args.grouping_repository.resolve()), "wang_repository": str(args.wang_repository.resolve()),
               "global_lock": str(args.global_lock.resolve()), "runner_commit": commit, "authorized_by": args.authorized_by,
               "completed_source_repairs": [binding(p) for p in getattr(args,'completed_source_repair',None) or []],
+              "random_spot_check_policy": binding(args.random_spot_check_policy) if getattr(args,'random_spot_check_policy',None) else None,
               "route_execution": False, "already_complete": schedule["completed_groups"]}
     _write_immutable(args.output_root / "campaign.json", config)
     seed = read(args.completed_proofs)
@@ -299,6 +302,7 @@ def main():
         parser.add_argument("--" + key, required=True)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument('--completed-source-repair',type=Path,action='append')
+    parser.add_argument('--random-spot-check-policy',type=Path)
     args = parser.parse_args()
     args.output_root.mkdir(parents=True, exist_ok=True)
     with (args.output_root / "campaign.lock").open("a") as lock:
