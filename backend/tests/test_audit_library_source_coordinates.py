@@ -19,6 +19,15 @@ def test_independent_audit_default_model_is_gemini_38_flash() -> None:
     assert AUDIT.DEFAULT_MODEL == "gemini-3.8-flash"
 
 
+def test_viewpoint_audit_distinguishes_support_from_equivalent_membership() -> None:
+    prompt = AUDIT._viewpoint_prompt("CV-test", {}, ["連結類型 supports"])
+    assert '只有 `equivalent_full` 和 `equivalent_component`' in prompt
+    assert '`supports` 只宣稱提供論據或支持背景，不宣稱同一命題' in prompt
+    assert '不得僅因真值條件不同就判錯' in prompt
+    assert '不符合標明關係時用 `other` 報錯' in prompt
+    assert '不表示它是成員' in prompt
+
+
 def test_modern_audit_uses_body_coordinates_and_body_identity(tmp_path: Path) -> None:
     script = [
         {"index": "subtitle-1", "type": "subtitle", "text": "## 编辑标题"},

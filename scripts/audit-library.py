@@ -1939,11 +1939,13 @@ def _viewpoint_prompt(viewpoint_id: str, revision: dict[str, Any], blocks: list[
         for key in ("subject", "predicate", "object", "polarity", "modality")
     )
     conditions = "、".join(signature.get("conditions") or []) or "無"
-    return f"""你在審計一個講道知識庫的觀點層。庫裡把來自不同講道的多條「主張」判定為同一個「觀點」的成員。
+    return f"""你在審計一個講道知識庫的觀點層。下面列出主張與觀點的連結，每條都標有連結類型；不是所有連結都代表成員資格。
 
-判成成員的意思是**等價**：不是「相關」、不是「支持」、不是「加了限定」，而是真值條件相同。每條主張下面標出的「被歸入的成分」，就是庫裡宣稱與這個觀點等價的那一段；主張的其餘部分不在這次判斷之內。
+只有 `equivalent_full` 和 `equivalent_component` 才宣稱**等價**：不是「相關」、不是「支持」、不是「加了限定」，而是真值條件相同。對這兩種連結，標出的成分必須與觀點等價。
 
-你的任務只有一件：**判斷這些成分是不是真的與觀點的核心命題具有相同的真值條件**——也就是，它們會不會在同樣的情況下為真、同樣的情況下為假。
+`supports` 只宣稱提供論據或支持背景，不宣稱同一命題；檢查所列成分及原文是否確實支持這個觀點，不得僅因真值條件不同就判錯。`extends`、`qualifies`、`applies`、`tension_evidence`、`superseding_evidence` 也不宣稱等價，分別按延伸、限定、應用、張力、後期修正的關係檢查；不符合標明關係時用 `other` 報錯並說明。
+
+你的任務是按每條連結的類型判斷它是否成立。對等價連結，要檢查會不會在同樣的情況下為真、同樣的情況下為假；其餘連結不得冒充等價成員。主張的未定位部分不作等價判定，但可讀原文核實支持背景。
 
 不要判斷這個觀點在神學上對不對。只判斷「把這幾條放在一起，算不算同一個觀點」。
 
@@ -1953,7 +1955,7 @@ def _viewpoint_prompt(viewpoint_id: str, revision: dict[str, Any], blocks: list[
 - `over_merge`——觀點的表述把兩個可以分開的命題用「和」「以及」併在一起，而有些主張只支持其中一半；
 - `other`——其他你說得出理由的問題。
 
-都對得上就判 `same`，`issue` 填 `none`。
+所有連結均符合各自標明的關係就判 `same`（這是既有結果欄位，對非等價連結只表示關係檢查通過，不表示它是成員），`issue` 填 `none`。
 
 ---
 
@@ -1963,7 +1965,7 @@ def _viewpoint_prompt(viewpoint_id: str, revision: dict[str, Any], blocks: list[
 限定條件：{conditions}
 經文範圍：{'、'.join(revision.get('scope', {}).get('scripture_scope') or []) or '未限定'}
 
-被判定為同一觀點的主張：
+主張與觀點的連結（按各自連結類型審核）：
 {chr(10).join(blocks)}
 
 ---
