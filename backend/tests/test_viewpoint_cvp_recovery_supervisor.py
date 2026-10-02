@@ -81,10 +81,13 @@ def test_subscription_raw_logs_retained_not_reported_as_production_success(tmp_p
     state(root)
     monkeypatch.setattr(m.subprocess, "check_output", lambda *a, **kw: "")
     monkeypatch.setattr(m.CodexSubscriptionClient, "_verify_chatgpt_login", lambda s: None)
+    monkeypatch.setattr(m.executor, "snapshot", lambda *a: {"head": "frozen"})
     monkeypatch.setenv("OPENAI_API_KEY", "never-forward")
     def run(command, **kw):
         assert "OPENAI_API_KEY" not in kw["env"]
-        assert command[command.index("--sandbox") + 1] == "workspace-write"
+        assert command[command.index("--sandbox") + 1] == "read-only"
+        assert "--add-dir" not in command
+        assert "--output-schema" in command
         assert command[command.index("--model") + 1] == "gpt-6.1-sol"
         assert "--dangerously-bypass-approvals-and-sandbox" not in command
         kw["stdout"].write('{"raw":"failure or result"}\n')
@@ -101,6 +104,7 @@ def test_auth_failure_is_saved_and_not_retried(tmp_path, monkeypatch):
     _, root, recovery = roots(tmp_path, monkeypatch)
     state(root)
     monkeypatch.setattr(m.subprocess, "check_output", lambda *a, **kw: "")
+    monkeypatch.setattr(m.executor, "snapshot", lambda *a: {"head": "frozen"})
     def fail(s):
         raise RuntimeError("quota/login unavailable")
     monkeypatch.setattr(m.CodexSubscriptionClient, "_verify_chatgpt_login", fail)
