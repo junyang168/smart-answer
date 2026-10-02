@@ -12,6 +12,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 
@@ -146,9 +147,12 @@ def qualify(row, group, inventory, root, args):
         return
     build_selection(group, inventory, root)
     command([PYTHON, "-m", "backend.pipeline.viewpoint_historical_review_bridge", "--selection", root / "review-selection.json", "--output", root / "historical-bridges.json"])
-    backup = root / "backup.json"
+    # One verified full snapshot before this serialized campaign, plus the
+    # normal per-group compensatable ChangeSets/readback history. Repeating a
+    # full 129MB snapshot 154 times would exhaust the local machine's disk.
+    backup = args.output_root / "backup.json"
     if not backup.exists():
-        label = f"before-cvp-357-{args.output_root.name}-g{row['sequence']:03d}"
+        label = f"before-cvp-357-{args.output_root.name}"
         result = subprocess.run(["scripts/backup-registry.sh", label], cwd=PROJECT_ROOT, check=True, capture_output=True, text=True)
         print(result.stdout, flush=True)
         match = re.search(r"backup-registry: wrote (.+\.dump) \(", result.stdout)
@@ -158,6 +162,8 @@ def qualify(row, group, inventory, root, args):
         subprocess.run(["pg_restore", "--list", str(dump)], check=True, capture_output=True)
         _write_immutable(backup, binding(dump))
     b = read(backup)
+    if binding(b["path"]) != b:
+        raise ValueError("campaign baseline backup SHA drift")
     command([PYTHON, "-m", "backend.pipeline.viewpoint_reviewed_cvp_prepare",
              "--group-key", group["group_key"], "--grouping-repository", args.grouping_repository,
              "--accepted-grouping-sha", args.accepted_grouping_sha, "--historical-bridges", root / "historical-bridges.json",
@@ -215,6 +221,8 @@ def execute(args):
         state = {"status": "qualifying", "group_key": row["group_key"], "sequence": row["sequence"], "completed_new_groups": len(done), "remaining_groups": 154-len(done)}
         save_state(args.output_root / "progress.json", state)
         try:
+            if shutil.disk_usage(args.output_root).free < 2 * 1024**3:
+                raise ValueError("less than 2 GiB free disk; stop safely before another group")
             qualify(row, groups[row["group_key"]], inventory, root, args)
             command(runner_args(root, args) + ["--dry-run"])
             if args.dry_run:
