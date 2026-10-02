@@ -36,6 +36,8 @@ export const Footer = () => {
       <div className="bg-gray-900 py-4">
         <div className="container mx-auto px-6 text-center text-gray-500 text-sm">
           © {new Date().getFullYear()} Dallas Holy Logos Church. All Rights Reserved.
+          <span className="mx-2">·</span>
+          <Link href="/privacy" className="hover:text-[#D4AF37]">隱私權政策 Privacy Policy</Link>
         </div>
       </div>
     </footer>

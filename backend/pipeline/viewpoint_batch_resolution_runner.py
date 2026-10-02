@@ -101,6 +101,12 @@ from backend.pipeline.viewpoint_cvp_policy import (
     cvp_policy_prompt_sha256s,
     load_cvp_policy,
 )
+from backend.pipeline.viewpoint_partition_validation import validate_partition_manifest
+from backend.pipeline.viewpoint_partition_manifest import (
+    DEFAULT_PARTITION_POLICY,
+    grouping_payload as build_grouping_payload,
+    load_partition_policy,
+)
 from backend.pipeline.viewpoint_resolution_runtime import (
     CALL_TIMEOUT_SECONDS,
     PROJECT_ROOT,
@@ -932,6 +938,10 @@ def main() -> int:
         required=True,
         help="SHA-bound production freeze produced after reconciliation and audit",
     )
+    parser.add_argument("--global-freeze", type=Path, help="all-corpus freeze bound to the partition plan")
+    parser.add_argument("--partition-manifest", type=Path, help="validated all-corpus primary ownership plan")
+    parser.add_argument("--partition-id", help="partition authorized for this scope packet")
+    parser.add_argument("--partition-policy", type=Path, default=DEFAULT_PARTITION_POLICY)
     parser.add_argument(
         "--apply-authorization",
         type=Path,
@@ -1019,6 +1029,10 @@ def _repository_commit() -> str:
 
 
 def execute(args: argparse.Namespace) -> int:
+    if not all(
+        (getattr(args, "global_freeze", None), getattr(args, "partition_manifest", None), getattr(args, "partition_id", None))
+    ):
+        raise CvpProductionBlocked(["--global-freeze, --partition-manifest and --partition-id are required"])
     cvp_policy = load_cvp_policy(args.cvp_policy)
     cvp_policy_sha256 = cvp_policy_fingerprint(
         cvp_policy,
@@ -1081,6 +1095,45 @@ def execute(args: argparse.Namespace) -> int:
         raise CvpProductionBlocked(
             ["--group-key cannot manually select a production canary"]
         )
+    global_freeze = _read(args.global_freeze)
+    validate_cvp_freeze(
+        global_freeze,
+        store=store,
+        cvp_policy_sha256=cvp_policy_sha256,
+        route_policy_sha256=route_policy_sha256,
+        runner_commit=str(global_freeze.get("runner_commit") or ""),
+        validate_registry=False,
+    )
+    manifest = _read(args.partition_manifest)
+    current_partition_policy = load_partition_policy(
+        getattr(args, "partition_policy", DEFAULT_PARTITION_POLICY)
+    )
+    if manifest.get("partition_policy_sha256") != sha256_json(current_partition_policy):
+        raise CvpProductionBlocked(["partition policy drift"])
+    claim_manifest_path = Path(
+        str(((global_freeze.get("prerequisites") or {}).get("claim_manifest") or {}).get("path") or "")
+    )
+    if not claim_manifest_path.is_file():
+        raise CvpProductionBlocked(["global freeze Claim manifest is missing"])
+    scope_packet = _read(args.packet)
+    validate_partition_manifest(
+        manifest,
+        claim_manifest=_read(claim_manifest_path),
+        freeze=global_freeze,
+        cvp_policy_sha256=cvp_policy_sha256,
+        store=store,
+        partition_id=args.partition_id,
+        scope_packet=scope_packet,
+        partition_freeze=freeze,
+    )
+    if int(manifest["partition_policy"]["max_request_bytes"]) != int(cvp_policy["max_request_bytes"]):
+        raise CvpProductionBlocked(["partition ceiling differs from CVP policy"])
+    args.partition_claim_ids = [
+        row["claim_id"]
+        for partition in manifest["partitions"]
+        if partition["partition_id"] == args.partition_id
+        for row in partition["claims"]
+    ]
     claim_output_ownership(
         output_root=args.output_dir, freeze=freeze, runner_commit=runner_commit
     )
@@ -1116,6 +1169,8 @@ def _execute_locked(
         item["claim_id"]: ReviewClaim.model_validate(item)
         for item in scope_packet["claims"]
     }
+    if getattr(args, "partition_claim_ids", None):
+        claims = {claim_id: claims[claim_id] for claim_id in args.partition_claim_ids}
     registry_context = list(scope_packet.get("registry_context") or [])
     batch_size = int(cvp_policy["batch_size"])
     enqueued_route_jobs: list[dict[str, Any]] = []
@@ -1193,18 +1248,9 @@ def _execute_locked(
         grouping_role = cvp_policy["grouping"]
         grouper = build_grouper(grouping_role["model"], grouping_role["effort"])
         grouper.max_request_bytes = int(cvp_policy["max_request_bytes"])
-        grouping_payload = {
-            "scope_label": scope_label,
-            "claims": [
-                {
-                    "claim_id": item.claim_id,
-                    "statement": item.statement,
-                    "source_id": item.source_id,
-                    "scripture_refs": item.scripture_refs,
-                }
-                for item in claims.values()
-            ],
-        }
+        grouping_payload = build_grouping_payload(
+            scope_label, [item.model_dump(mode="json") for item in claims.values()]
+        )
         raw_grouping, grouping_calls, grouping_seconds = _call(
             grouper, grouping_payload, args.output_dir / "raw-grouping.json"
         )

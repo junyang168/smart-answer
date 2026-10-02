@@ -13,25 +13,43 @@ LEGACY_RELEASE="${SMART_ANSWER_LEGACY_ROOT:-/opt/homebrew/var/www/smart-answer}"
 WEB_RUNTIME_DATA_DIR="${SMART_ANSWER_WEB_DATA_DIR:-$LEGACY_RELEASE/web/data}"
 BACKEND_PLIST="${SMART_ANSWER_BACKEND_PLIST:-$HOME/Library/LaunchAgents/com.smart_answer.fullarticleservice.plist}"
 FELLOWSHIP_REMINDER_PLIST="${SMART_ANSWER_FELLOWSHIP_REMINDER_PLIST:-$HOME/Library/LaunchAgents/com.smart_answer.fellowshipreminder.plist}"
+REFERENCE_INBOX_PLIST="${SMART_ANSWER_REFERENCE_INBOX_PLIST:-$HOME/Library/LaunchAgents/com.smart_answer.referencecommentaryinbox.plist}"
+REFERENCE_INBOX_JOB="backend/reference_commentary_inbox_job.py"
 PLIST_BUDDY="${SMART_ANSWER_PLIST_BUDDY:-/usr/libexec/PlistBuddy}"
 BACKEND_HEALTH="${SMART_ANSWER_BACKEND_HEALTH:-http://127.0.0.1:8555/healthz}"
 FRONTEND_HEALTH="${SMART_ANSWER_FRONTEND_HEALTH:-http://127.0.0.1:3000/}"
+FRONTEND_ORIGIN="${FRONTEND_HEALTH%/}"
+# Every release links web/.env.local to this file. The web reads DATA_BASE_DIR
+# from it; the deploying shell's environment must not decide where the web
+# looks for files (#385: a deploy from a shell without it made every
+# fellowship document 404).
+WEB_ENV_FILE="${SMART_ANSWER_WEB_ENV_FILE:-$LEGACY_RELEASE/web/.env.local}"
+# The owner's Google OAuth token (Docs export, Drive). Releases do not contain
+# it; the backend is told where it is. Before releases existed the code found
+# it in its working directory, and after the switch nothing read or refreshed
+# it until Google revoked it (OPS-27).
+GOOGLE_OAUTH_TOKEN_FILE="${SMART_ANSWER_GOOGLE_OAUTH_TOKEN_FILE:-$LEGACY_RELEASE/token.json}"
 PM2_APP="${SMART_ANSWER_PM2_APP:-smart-answer}"
 PM2_CONFIG="$SOURCE_REPO/scripts/pm2.production.config.cjs"
 
 TARGET_REF="origin/main"
 DRY_RUN=false
 ALLOW_NON_MAIN=false
+SKIP_GOOGLE_TOKEN_CHECK=false
 
 usage() {
   cat <<'EOF'
-Usage: scripts/deploy.sh [--ref GIT_REF] [--dry-run] [--allow-non-main]
+Usage: scripts/deploy.sh [--ref GIT_REF] [--dry-run] [--allow-non-main] [--skip-google-token-check]
 
 Defaults to the exact commit currently at origin/main.
 
   --ref GIT_REF       Deploy a specific commit or remote ref.
   --dry-run           Resolve and validate without changing production.
   --allow-non-main    Permit a commit that is not contained in origin/main.
+  --skip-google-token-check
+                      Deploy even though the Google OAuth token cannot be
+                      refreshed (Docs export stays broken until the owner
+                      signs in again).
 
 Examples:
   scripts/deploy.sh --dry-run
@@ -53,6 +71,10 @@ while (($#)); do
       ;;
     --allow-non-main)
       ALLOW_NON_MAIN=true
+      shift
+      ;;
+    --skip-google-token-check)
+      SKIP_GOOGLE_TOKEN_CHECK=true
       shift
       ;;
     -h|--help)
@@ -115,14 +137,21 @@ set_backend_release() {
     || return 1
 }
 
+# Scheduled jobs are LaunchAgents that run one script from the active release.
+# Each deploy rebinds interpreter, script and working directory to the new
+# release, reloads the agent, and checks that launchd really picked it up.
+set_job_release() {
+  local plist="$1" script="$2" release="$3"
+  "$PLIST_BUDDY" -c "Set :ProgramArguments:0 $release/backend/.venv/bin/python3" "$plist" \
+    || return 1
+  "$PLIST_BUDDY" -c "Set :ProgramArguments:1 $release/$script" "$plist" \
+    || return 1
+  "$PLIST_BUDDY" -c "Set :WorkingDirectory $release" "$plist" \
+    || return 1
+}
+
 set_fellowship_reminder_release() {
-  local release="$1"
-  "$PLIST_BUDDY" -c "Set :ProgramArguments:0 $release/backend/.venv/bin/python3" "$FELLOWSHIP_REMINDER_PLIST" \
-    || return 1
-  "$PLIST_BUDDY" -c "Set :ProgramArguments:1 $release/backend/fellowship_reminder_job.py" "$FELLOWSHIP_REMINDER_PLIST" \
-    || return 1
-  "$PLIST_BUDDY" -c "Set :WorkingDirectory $release" "$FELLOWSHIP_REMINDER_PLIST" \
-    || return 1
+  set_job_release "$FELLOWSHIP_REMINDER_PLIST" backend/fellowship_reminder_job.py "$1"
 }
 
 restart_backend() {
@@ -130,59 +159,68 @@ restart_backend() {
   launchctl load "$BACKEND_PLIST"
 }
 
-restart_fellowship_reminder() {
-  launchctl unload "$FELLOWSHIP_REMINDER_PLIST" 2>/dev/null || true
-  launchctl load "$FELLOWSHIP_REMINDER_PLIST"
+restart_job() {
+  launchctl unload "$1" 2>/dev/null || true
+  launchctl load "$1"
 }
 
-assert_fellowship_reminder_release() {
-  local release="$1" expected_python expected_script configured_python configured_script configured_workdir
+restart_fellowship_reminder() {
+  restart_job "$FELLOWSHIP_REMINDER_PLIST"
+}
+
+assert_job_release() {
+  local name="$1" title="$2" plist="$3" script="$4" release="$5" expected_python expected_script configured_python configured_script configured_workdir
   local label loaded
   expected_python="$release/backend/.venv/bin/python3"
-  expected_script="$release/backend/fellowship_reminder_job.py"
+  expected_script="$release/$script"
 
-  configured_python="$("$PLIST_BUDDY" -c 'Print :ProgramArguments:0' "$FELLOWSHIP_REMINDER_PLIST")" \
+  configured_python="$("$PLIST_BUDDY" -c 'Print :ProgramArguments:0' "$plist")" \
     || return 1
-  configured_script="$("$PLIST_BUDDY" -c 'Print :ProgramArguments:1' "$FELLOWSHIP_REMINDER_PLIST")" \
+  configured_script="$("$PLIST_BUDDY" -c 'Print :ProgramArguments:1' "$plist")" \
     || return 1
-  configured_workdir="$("$PLIST_BUDDY" -c 'Print :WorkingDirectory' "$FELLOWSHIP_REMINDER_PLIST")" \
+  configured_workdir="$("$PLIST_BUDDY" -c 'Print :WorkingDirectory' "$plist")" \
     || return 1
 
   [[ "$configured_python" == "$expected_python" ]] || {
-    printf 'deploy: fellowship reminder interpreter is %s, expected %s\n' \
-      "$configured_python" "$expected_python" >&2
+    printf 'deploy: %s interpreter is %s, expected %s\n' \
+      "$name" "$configured_python" "$expected_python" >&2
     return 1
   }
   [[ "$configured_script" == "$expected_script" ]] || {
-    printf 'deploy: fellowship reminder script is %s, expected %s\n' \
-      "$configured_script" "$expected_script" >&2
+    printf 'deploy: %s script is %s, expected %s\n' \
+      "$name" "$configured_script" "$expected_script" >&2
     return 1
   }
   [[ "$configured_workdir" == "$release" ]] || {
-    printf 'deploy: fellowship reminder working directory is %s, expected %s\n' \
-      "$configured_workdir" "$release" >&2
+    printf 'deploy: %s working directory is %s, expected %s\n' \
+      "$name" "$configured_workdir" "$release" >&2
     return 1
   }
 
-  label="$("$PLIST_BUDDY" -c 'Print :Label' "$FELLOWSHIP_REMINDER_PLIST")" \
+  label="$("$PLIST_BUDDY" -c 'Print :Label' "$plist")" \
     || return 1
   loaded="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null)" || {
-    printf 'deploy: fellowship reminder LaunchAgent is not loaded: %s\n' "$label" >&2
+    printf 'deploy: %s LaunchAgent is not loaded: %s\n' "$name" "$label" >&2
     return 1
   }
   [[ "$loaded" == *"program = $expected_python"* ]] || {
-    printf 'deploy: loaded fellowship reminder does not use %s\n' "$expected_python" >&2
+    printf 'deploy: loaded %s does not use %s\n' "$name" "$expected_python" >&2
     return 1
   }
   [[ "$loaded" == *"$expected_script"* ]] || {
-    printf 'deploy: loaded fellowship reminder does not use %s\n' "$expected_script" >&2
+    printf 'deploy: loaded %s does not use %s\n' "$name" "$expected_script" >&2
     return 1
   }
   [[ "$loaded" == *"working directory = $release"* ]] || {
-    printf 'deploy: loaded fellowship reminder does not use working directory %s\n' "$release" >&2
+    printf 'deploy: loaded %s does not use working directory %s\n' "$name" "$release" >&2
     return 1
   }
-  log "Fellowship reminder is bound to $(basename "$release")"
+  log "$title is bound to $(basename "$release")"
+}
+
+assert_fellowship_reminder_release() {
+  assert_job_release "fellowship reminder" "Fellowship reminder" \
+    "$FELLOWSHIP_REMINDER_PLIST" backend/fellowship_reminder_job.py "$1"
 }
 
 activate_fellowship_reminder() {
@@ -192,23 +230,68 @@ activate_fellowship_reminder() {
   assert_fellowship_reminder_release "$release" || return 1
 }
 
-validate_fellowship_reminder_plist() {
-  local key
-  for key in \
-    :Label \
-    :ProgramArguments:0 \
-    :ProgramArguments:1 \
-    :WorkingDirectory \
-    :StartCalendarInterval:Hour \
-    :StartCalendarInterval:Minute
-  do
-    "$PLIST_BUDDY" -c "Print $key" "$FELLOWSHIP_REMINDER_PLIST" >/dev/null \
+# The scan inbox (WKP-F11.02) runs every few minutes. A release from before it
+# existed has no job script: rolling back to one stops the agent instead of
+# failing the rollback.
+activate_reference_inbox() {
+  local release="$1"
+  if [[ ! -f "$release/$REFERENCE_INBOX_JOB" ]]; then
+    launchctl unload "$REFERENCE_INBOX_PLIST" 2>/dev/null || true
+    log "Reference commentary inbox is not in $(basename "$release"); agent stopped"
+    return 0
+  fi
+  set_job_release "$REFERENCE_INBOX_PLIST" "$REFERENCE_INBOX_JOB" "$release" || return 1
+  restart_job "$REFERENCE_INBOX_PLIST" || return 1
+  assert_job_release "reference commentary inbox" "Reference commentary inbox" \
+    "$REFERENCE_INBOX_PLIST" "$REFERENCE_INBOX_JOB" "$release" || return 1
+}
+
+validate_job_plist() {
+  local name="$1" plist="$2" key
+  shift 2
+  for key in :Label :ProgramArguments:0 :ProgramArguments:1 :WorkingDirectory "$@"; do
+    "$PLIST_BUDDY" -c "Print $key" "$plist" >/dev/null \
       || {
-        printf 'deploy: fellowship reminder LaunchAgent is missing required key %s: %s\n' \
-          "$key" "$FELLOWSHIP_REMINDER_PLIST" >&2
+        printf 'deploy: %s LaunchAgent is missing required key %s: %s\n' "$name" "$key" "$plist" >&2
         return 1
       }
   done
+}
+
+# Prove Google still accepts the token by refreshing it with the new release's
+# own code. A revoked token (invalid_grant) otherwise surfaces weeks later as a
+# failed export.
+check_google_oauth_token() {
+  local release="$1"
+  if [[ -n "${SMART_ANSWER_GOOGLE_TOKEN_CHECK:-}" ]]; then
+    "$SMART_ANSWER_GOOGLE_TOKEN_CHECK" "$GOOGLE_OAUTH_TOKEN_FILE"
+  else
+    (cd "$release" && "$release/backend/.venv/bin/python3" -m backend.google_oauth_token check "$GOOGLE_OAUTH_TOKEN_FILE")
+  fi
+}
+
+# The backend finds the token through GOOGLE_OAUTH_TOKEN_FILE on its LaunchAgent.
+# Sets BACKEND_ENV_CHANGED when the value was new: a running backend only sees
+# it after a restart.
+BACKEND_ENV_CHANGED=false
+set_backend_oauth_env() {
+  local key=":EnvironmentVariables:GOOGLE_OAUTH_TOKEN_FILE" current
+  if current="$("$PLIST_BUDDY" -c "Print $key" "$BACKEND_PLIST" 2>/dev/null)"; then
+    [[ "$current" == "$GOOGLE_OAUTH_TOKEN_FILE" ]] && return 0
+    BACKEND_ENV_CHANGED=true
+    "$PLIST_BUDDY" -c "Set $key $GOOGLE_OAUTH_TOKEN_FILE" "$BACKEND_PLIST"
+  else
+    "$PLIST_BUDDY" -c "Print :EnvironmentVariables" "$BACKEND_PLIST" >/dev/null 2>&1 \
+      || "$PLIST_BUDDY" -c "Add :EnvironmentVariables dict" "$BACKEND_PLIST" \
+      || return 1
+    BACKEND_ENV_CHANGED=true
+    "$PLIST_BUDDY" -c "Add $key string $GOOGLE_OAUTH_TOKEN_FILE" "$BACKEND_PLIST"
+  fi
+}
+
+validate_fellowship_reminder_plist() {
+  validate_job_plist "fellowship reminder" "$FELLOWSHIP_REMINDER_PLIST" \
+    :StartCalendarInterval:Hour :StartCalendarInterval:Minute
 }
 
 restart_frontend() {
@@ -216,13 +299,44 @@ restart_frontend() {
   # PM2 restart/startOrRestart preserves the original cwd for an existing app.
   # Delete and recreate the process so the immutable release path really takes
   # effect. A failed start is handled by switch_services -> rollback.
+  # --update-env hands PM2 this shell's environment, so DATA_BASE_DIR is set
+  # here from the web's own config rather than inherited from whoever deploys.
   pm2 delete "$PM2_APP" 2>/dev/null || true
-  SMART_ANSWER_WEB_ROOT="$release/web" SMART_ANSWER_PM2_APP="$PM2_APP" \
+  DATA_BASE_DIR="$WEB_DATA_BASE_DIR" SMART_ANSWER_WEB_ROOT="$release/web" SMART_ANSWER_PM2_APP="$PM2_APP" \
     pm2 start "$PM2_CONFIG" --only "$PM2_APP" --update-env
+}
+
+# DATA_BASE_DIR as the web will see it: the last assignment in its .env.local.
+web_data_base_dir() {
+  [[ -f "$WEB_ENV_FILE" ]] || return 1
+  sed -n 's/^[[:space:]]*DATA_BASE_DIR[[:space:]]*=[[:space:]]*//p' "$WEB_ENV_FILE" \
+    | tail -1 | sed "s/^[\"']//; s/[\"'][[:space:]]*$//; s/[[:space:]]*$//"
+}
+
+# The web reads fellowship documents straight from disk (the only web code
+# that does). Answering / is not enough: fetch one real document through the
+# new process, or roll back.
+assert_fellowship_document() {
+  local docs="$WEB_DATA_BASE_DIR/fellowship/docs" sample relative url
+  sample="$(find "$docs"/ -mindepth 2 -maxdepth 2 -type f \( -name '*.pptx' -o -name '*.md' \) \
+    ! -name '主題與查經重點.md' ! -name 'recording.transcript.generated.md' 2>/dev/null \
+    | grep -E '/[0-9]{4}-[0-9]{2}-[0-9]{2}/[^/]+$' | sort | tail -1)"
+  if [[ -z "$sample" ]]; then
+    log "No fellowship document on disk to probe; skipping the document check"
+    return 0
+  fi
+  relative="${sample#"$docs"/}"
+  url="$FRONTEND_ORIGIN/api/fellowship-documents/$("$PYTHON_BIN" -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$relative")"
+  if ! curl -fsS --max-time 10 -o /dev/null "$url"; then
+    printf 'deploy: web cannot serve fellowship document %s (is DATA_BASE_DIR reaching the web?)\n' "$relative" >&2
+    return 1
+  fi
+  log "Web serves fellowship documents ($relative)"
 }
 
 verify_and_persist_frontend() {
   wait_for_health frontend "$FRONTEND_HEALTH" || return 1
+  assert_fellowship_document || return 1
   if ! pm2 save; then
     printf 'deploy: failed to save PM2 process list\n' >&2
     return 1
@@ -305,6 +419,7 @@ switch_services() {
   assert_backend_release "$(basename "$release")" || return 1
 
   activate_fellowship_reminder "$release" || return 1
+  activate_reference_inbox "$release" || return 1
 
   restart_frontend "$release" || return 1
   verify_and_persist_frontend || return 1
@@ -376,7 +491,19 @@ resolve_python() {
   || fail "fellowship reminder LaunchAgent not found: $FELLOWSHIP_REMINDER_PLIST"
 validate_fellowship_reminder_plist \
   || fail "fellowship reminder LaunchAgent is incomplete"
+[[ -f "$REFERENCE_INBOX_PLIST" ]] \
+  || fail "reference commentary inbox LaunchAgent not found: $REFERENCE_INBOX_PLIST (create it with scripts/install-reference-inbox-agent.sh)"
+validate_job_plist "reference commentary inbox" "$REFERENCE_INBOX_PLIST" :StartInterval \
+  || fail "reference commentary inbox LaunchAgent is incomplete"
 [[ -f "$PM2_CONFIG" ]] || fail "PM2 config not found: $PM2_CONFIG"
+WEB_DATA_BASE_DIR="$(web_data_base_dir)" \
+  || fail "web configuration not found: $WEB_ENV_FILE"
+[[ -n "$WEB_DATA_BASE_DIR" ]] \
+  || fail "DATA_BASE_DIR is not set in $WEB_ENV_FILE; the web cannot find fellowship documents without it"
+[[ -d "$WEB_DATA_BASE_DIR" ]] \
+  || fail "DATA_BASE_DIR in $WEB_ENV_FILE is not a directory: $WEB_DATA_BASE_DIR"
+[[ "$SKIP_GOOGLE_TOKEN_CHECK" == true || -f "$GOOGLE_OAUTH_TOKEN_FILE" ]] \
+  || fail "Google OAuth token not found: $GOOGLE_OAUTH_TOKEN_FILE (sign in with generate_user_token.py there, or --skip-google-token-check)"
 
 log "Fetching Git refs"
 git -C "$SOURCE_REPO" fetch --prune origin
@@ -413,7 +540,10 @@ printf '   python:           %s (%s)\n' "$REQUIRED_PYTHON" "$PYTHON_BIN"
 printf '   web runtime data: %s\n' "$WEB_RUNTIME_DATA_DIR"
 printf '   backend health:   %s\n' "$BACKEND_HEALTH"
 printf '   frontend health:  %s\n' "$FRONTEND_HEALTH"
+printf '   web data dir:     %s (from %s)\n' "$WEB_DATA_BASE_DIR" "$WEB_ENV_FILE"
+printf '   google token:     %s\n' "$GOOGLE_OAUTH_TOKEN_FILE"
 printf '   reminder agent:   %s\n' "$FELLOWSHIP_REMINDER_PLIST"
+printf '   inbox agent:      %s\n' "$REFERENCE_INBOX_PLIST"
 
 if [[ "$DRY_RUN" == true ]]; then
   log "Dry run complete; production was not changed"
@@ -508,9 +638,23 @@ else
   log "Reusing previously built immutable release"
 fi
 
+if [[ "$SKIP_GOOGLE_TOKEN_CHECK" == true ]]; then
+  log "Skipping the Google OAuth token check (--skip-google-token-check)"
+else
+  log "Checking the Google OAuth token"
+  check_google_oauth_token "$RELEASE_DIR" \
+    || fail "Google OAuth token cannot be refreshed: $GOOGLE_OAUTH_TOKEN_FILE; services were not changed. Sign in again (generate_user_token.py in that directory) or deploy with --skip-google-token-check"
+fi
+set_backend_oauth_env || fail "could not set GOOGLE_OAUTH_TOKEN_FILE on $BACKEND_PLIST"
+
 if [[ "$PREVIOUS_RELEASE" == "$RELEASE_DIR" ]]; then
-  log "Commit is already active; reconciling the fellowship reminder and verifying health"
+  log "Commit is already active; reconciling scheduled jobs and verifying health"
+  if [[ "$BACKEND_ENV_CHANGED" == true ]]; then
+    log "Backend environment changed; restarting it"
+    restart_backend
+  fi
   activate_fellowship_reminder "$RELEASE_DIR"
+  activate_reference_inbox "$RELEASE_DIR"
   wait_for_health backend "$BACKEND_HEALTH"
   verify_and_persist_frontend
   exit 0

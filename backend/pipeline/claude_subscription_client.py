@@ -84,6 +84,7 @@ class ClaudeSubscriptionClient:
         # Subscription calls are not API-billed per invocation. Feeding their
         # token metadata to API pricing would invent a dollar charge.
         self.last_usage: Any = None
+        self.last_raw_response: Any = None
         self.last_metadata: dict[str, Any] = {}
         self._authenticated = False
 
@@ -132,6 +133,7 @@ class ClaudeSubscriptionClient:
         cache_prefix: str | None = None,
     ) -> dict[str, Any]:
         del temperature
+        self.last_raw_response = None
         self._verify_subscription_login()
         schema = json_schema.get("schema", json_schema)
         prompt = "".join((cache_prefix or "", user_prompt))
@@ -173,6 +175,7 @@ class ClaudeSubscriptionClient:
             raise ClaudeSubscriptionError(
                 f"Claude subscription transport failed: {type(exc).__name__}: {exc}"
             ) from exc
+        self.last_raw_response = {"stdout": completed.stdout, "stderr": completed.stderr}
         if completed.returncode != 0:
             raise ClaudeSubscriptionError(
                 f"Claude subscription generation failed (exit {completed.returncode}): "

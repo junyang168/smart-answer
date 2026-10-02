@@ -97,6 +97,15 @@
 | --- | --- |
 | [微讲道：三至五分钟短篇教导 Use Case](./50-micro-sermon/micro_sermon_product_use_case.md) | 微讲道产品的目标设计。**不在 Phase 1 之内**，见 [Solution Architecture D5](./00-overview/solution_architecture.md#d5implementation-phasesphase-1-只做文章与问答) |
 
+## 60-reference-commentary —— 参考释经书
+
+教授之外的释经书。不进文库，与教授的讲论分开署名。
+
+| 文档 | 它回答什么 |
+| --- | --- |
+| [参考释经书：Carson 马太福音扫描页的 OCR 与研读](./60-reference-commentary/reference_commentary_solution_v1.md) | 扫描页怎样变成可校对的文字、放在哪里、谁能读、与文库的分界（草案，待批准） |
+| [查经准备：从 Carson 与教授讲道到逐字稿和 PPT](./60-reference-commentary/bible_study_prep_solution_v1.md) | 讨论纪要怎样进逐字稿、逐字稿怎样追到来源、PPT 只放重点 |
+
 ## 90-ops —— 运营与工作台
 
 | 文档 | 它回答什么 |

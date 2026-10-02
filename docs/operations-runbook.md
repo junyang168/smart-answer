@@ -174,6 +174,7 @@ that way. `.github/pull_request_template.md` carries the rule.
 | 8555 | FastAPI backend, `backend.api.main:app` | LaunchAgent `com.smart_answer.fullarticleservice` | no |
 | 3000 | Next.js frontend | pm2 app `smart-answer` | yes, via nginx 443/80 |
 | — | Fellowship email reminder, daily schedule check at 10:00 | LaunchAgent `com.smartanswer.fellowshipreminder` | no |
+| — | Reference commentary scan inbox, every 3 minutes | LaunchAgent `com.smart_answer.referencecommentaryinbox` | no |
 | 3003 | Next.js, older build | not in any deploy path (#78) | via nginx 8888 |
 | 8000 | legacy backend | processes dating from 2026-07-13 | `/sc_api/`, `/public`, `/static` |
 | 60000 | legacy QA service | LaunchAgent `smart_answer.service` | `/get_answer` |
@@ -189,6 +190,53 @@ local machine.
 use`, and the cycle writes roughly 8 MB of stderr a day. It had reached 283 MB.
 The service itself answers. Do not "fix" it by killing whatever holds port
 60000 without reading #76 first.
+
+### Web data directory
+
+The web mostly reads data through the backend, but two places read the disk
+directly: public fellowship documents (`/api/fellowship-documents/…`) and the
+Markdown documents on the fellowship page. Both find `fellowship/docs` through
+`DATA_BASE_DIR`.
+
+- The backend gets `DATA_BASE_DIR` from its LaunchAgent plist. The web gets it
+  from `/opt/homebrew/var/www/smart-answer/web/.env.local`, which every release
+  links as `web/.env.local`.
+- `scripts/deploy.sh` reads it from that file, refuses to deploy when it is
+  missing or not a directory, and passes it to pm2 explicitly. Before #385, pm2
+  inherited it from the deploying shell: a deploy on 2026-09-23 from a shell
+  without it made every fellowship document return 404 for two days.
+- After switching, the deploy downloads one real fellowship document through
+  the new web process; if that fails, it rolls back.
+
+### Google OAuth token
+
+Exporting a sermon to a Google Doc uses the owner's own Google sign-in, stored
+in `/opt/homebrew/var/www/smart-answer-config/token.json`. Releases do not
+contain it.
+
+- The backend finds it through `GOOGLE_OAUTH_TOKEN_FILE` on its LaunchAgent,
+  which `scripts/deploy.sh` sets. Refreshed tokens are written back to that file.
+- Before switching, the deploy refreshes the token with the new release's code
+  (`python -m backend.google_oauth_token check <file>`). If Google refuses it,
+  the deploy stops with services unchanged. `--skip-google-token-check` deploys
+  anyway; exports then fail with a message saying to sign in again.
+- **Signing in again** (after `invalid_grant`). This opens a browser; approve
+  with the account that owns the Drive folders:
+
+  ```bash
+  cd /opt/homebrew/var/www/smart-answer-config
+  cp token.json token.json.bak-$(date +%Y%m%d)
+  /Users/junyang/app/smart-answer/.venv/bin/python /Users/junyang/app/smart-answer/generate_user_token.py
+  ```
+
+- **Before OPS-27** (#399), the export looked for `token.json` in its working
+  directory. That worked while production ran from one fixed directory. Once
+  deploys switched to release directories, it found nothing and silently used
+  the service account instead. Nothing refreshed the token after 2026-07-28,
+  and by September Google had revoked it.
+- If the OAuth app in Google Cloud Console is in **Testing** publishing
+  status, Google expires refresh tokens after 7 days. "In production" status
+  avoids that.
 
 ### Fellowship reminder
 
@@ -221,6 +269,28 @@ launchctl print "gui/$(id -u)/com.smartanswer.fellowshipreminder" \
 
 Do not run the reminder with `--force` while diagnosing: that sends mail. The
 normal deploy path never passes `--force` and never invokes the reminder job.
+
+### Reference commentary scan inbox
+
+The owner scans Carson pages with the iPhone Files app into
+`iCloud Drive/Carson/<Book>/ch<N>/`. Every three minutes this LaunchAgent OCRs
+new scans with Vertex `gemini-3.8-flash` and records each printed page under
+`$DATA_BASE_DIR/reference-commentary/<volume_id>/`. The only file it writes
+back to iCloud is `_problems.md` (unreadable page numbers, missing pages).
+Design: `docs/wang-knowledge-platform/60-reference-commentary/reference_commentary_solution_v1.md`.
+
+- Plist and label are both `com.smart_answer.referencecommentaryinbox`. It holds
+  no secrets: `DATA_BASE_DIR`, the Vertex service-account path and the inbox
+  path. Create it once with `scripts/install-reference-inbox-agent.sh`; a
+  deploy fails closed while it is missing.
+- `scripts/deploy.sh` rebinds and checks it exactly like the fellowship
+  reminder (`ProgramArguments[0..1]`, `WorkingDirectory`). Rolling back to a
+  release without `backend/reference_commentary_inbox_job.py` unloads it.
+- Log: `~/Library/Logs/smart-answer/reference-commentary-inbox.log`.
+- A scan is processed once, keyed by SHA-256 in
+  `$DATA_BASE_DIR/reference-commentary/inbox-ledger.json`. To redo one, delete
+  its ledger entry; page records are never overwritten, so a rerun adds a
+  version rather than replacing one.
 
 ---
 

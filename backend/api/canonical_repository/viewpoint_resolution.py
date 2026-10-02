@@ -2075,14 +2075,45 @@ class StructuredJsonReviewerAdapter:
         )
 
     def generate(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
-        schema = {
-            "name": self._schema_name,
-            "strict": True,
-            "schema": _strict_json_schema(self._response_model.model_json_schema()),
-        }
-        return self._client.generate_json(
-            system_prompt=self._prompt,
-            user_prompt=json.dumps(payload, ensure_ascii=False, indent=2),
-            json_schema=schema,
-            temperature=0.0,
+        request = structured_json_request(
+            payload,
+            prompt=self._prompt,
+            response_model=self._response_model,
+            schema_name=self._schema_name,
         )
+        return self._client.generate_json(
+            **request,
+        )
+
+    def request_bytes(self, payload: Mapping[str, Any]) -> int:
+        return len(
+            canonical_json(
+                structured_json_request(
+                    payload,
+                    prompt=self._prompt,
+                    response_model=self._response_model,
+                    schema_name=self._schema_name,
+                )
+            ).encode("utf-8")
+        )
+
+
+def structured_json_request(
+    payload: Mapping[str, Any],
+    *,
+    prompt: str,
+    response_model: type[BaseModel],
+    schema_name: str,
+) -> dict[str, Any]:
+    """The exact arguments passed to generate_json, before transport wrapping."""
+
+    return {
+        "system_prompt": prompt,
+        "user_prompt": json.dumps(payload, ensure_ascii=False, indent=2),
+        "json_schema": {
+            "name": schema_name,
+            "strict": True,
+            "schema": _strict_json_schema(response_model.model_json_schema()),
+        },
+        "temperature": 0.0,
+    }

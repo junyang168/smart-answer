@@ -50,9 +50,30 @@ def deploy_fixture(tmp_path: Path) -> dict[str, object]:
     logs = tmp_path / "logs"
     backend_plist = tmp_path / "backend.plist"
     reminder_plist = tmp_path / "reminder.plist"
+    inbox_plist = tmp_path / "inbox.plist"
 
     for path in (source, deploy_root / "releases", runtime_data / "config", legacy, bin_dir, logs):
         path.mkdir(parents=True)
+    _write_executable(
+        bin_dir / "google-token-check",
+        "#!/usr/bin/env bash\n"
+        "printf 'token-check %s\\n' \"$1\" >> \"$TEST_DEPLOY_EVENT_LOG\"\n"
+        "[[ ! -e \"$TEST_DEAD_TOKEN_MARKER\" ]]\n",
+    )
+
+    # The owner's Google OAuth token, and a stand-in for the release's refresh
+    # check: it fails while the dead-token marker exists.
+    google_token = legacy / "token.json"
+    google_token.write_text('{"refresh_token": "fixture"}', encoding="utf-8")
+    token_check = bin_dir / "google-token-check"
+
+    # The web's own configuration: every release links web/.env.local here.
+    web_data = tmp_path / "web-data"
+    (web_data / "fellowship" / "docs" / "2026-09-25").mkdir(parents=True)
+    (web_data / "fellowship" / "docs" / "2026-09-25" / "study.pptx").write_bytes(b"deck")
+    (legacy / "web").mkdir()
+    web_env = legacy / "web" / ".env.local"
+    web_env.write_text(f"NEXTAUTH_URL=https://example.test\nDATA_BASE_DIR={web_data}\n", encoding="utf-8")
 
     _run("git", "init", "--bare", "--initial-branch=main", remote, cwd=tmp_path)
     _run("git", "init", "--initial-branch=main", source, cwd=tmp_path)
@@ -73,7 +94,7 @@ def deploy_fixture(tmp_path: Path) -> dict[str, object]:
     target_sha = _git(source, "rev-parse", "HEAD").stdout.strip()
     previous_sha = "a" * 40
 
-    def make_release(sha: str) -> Path:
+    def make_release(sha: str, *, with_inbox: bool = True) -> Path:
         release = deploy_root / "releases" / sha
         (release / "backend" / ".venv" / "bin").mkdir(parents=True)
         (release / "web" / ".next").mkdir(parents=True)
@@ -85,6 +106,11 @@ def deploy_fixture(tmp_path: Path) -> dict[str, object]:
             "raise AssertionError('deployment must not run the reminder job')\n",
             encoding="utf-8",
         )
+        if with_inbox:
+            (release / "backend" / "reference_commentary_inbox_job.py").write_text(
+                "raise AssertionError('deployment must not run the inbox job')\n",
+                encoding="utf-8",
+            )
         (release / ".deploy-complete").touch()
         return release
 
@@ -113,6 +139,14 @@ def deploy_fixture(tmp_path: Path) -> dict[str, object]:
         plistlib.dump(backend_data, handle)
     with reminder_plist.open("wb") as handle:
         plistlib.dump(reminder_data, handle)
+    inbox_data = {
+        "Label": "com.smart_answer.referencecommentaryinbox",
+        "ProgramArguments": ["/old/python", "/old/reference_commentary_inbox_job.py"],
+        "WorkingDirectory": "/old/release",
+        "StartInterval": 180,
+    }
+    with inbox_plist.open("wb") as handle:
+        plistlib.dump(inbox_data, handle)
 
     _write_executable(
         bin_dir / "plist-buddy",
@@ -144,6 +178,13 @@ elif verb == "Set" and len(parts) == 2:
         current[last] = parts[1]
     with path.open("wb") as handle:
         plistlib.dump(data, handle)
+elif verb == "Add" and len(parts) == 2:
+    kind, _, value = parts[1].partition(" ")
+    if last in current:
+        raise SystemExit(1)
+    current[last] = {} if kind == "dict" else value
+    with path.open("wb") as handle:
+        plistlib.dump(data, handle)
 else:
     raise SystemExit(64)
 """,
@@ -159,7 +200,7 @@ else:
         bin_dir / "pm2",
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
-        "printf 'pm2 %s root=%s\\n' \"$*\" \"${SMART_ANSWER_WEB_ROOT:-}\" >> \"$TEST_DEPLOY_EVENT_LOG\"\n"
+        "printf 'pm2 %s root=%s data=%s\\n' \"$*\" \"${SMART_ANSWER_WEB_ROOT:-}\" \"${DATA_BASE_DIR:-}\" >> \"$TEST_DEPLOY_EVENT_LOG\"\n"
         "if [[ \"${1:-}\" == 'start' ]]; then\n"
         "  printf '%s\\n' \"$SMART_ANSWER_WEB_ROOT\" > \"$TEST_PM2_WEB_ROOT\"\n"
         "fi\n"
@@ -181,6 +222,13 @@ else:
         "  if [[ -n \"${TEST_FAIL_TARGET_FRONTEND:-}\" && \"$web_root\" == *\"/$TEST_TARGET_SHA/web\" ]]; then\n"
         "    exit 1\n"
         "  fi\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [[ \"$url\" == */api/fellowship-documents/* ]]; then\n"
+        "  printf 'fellowship-document %s\\n' \"$url\" >> \"$TEST_DEPLOY_EVENT_LOG\"\n"
+        "  web_root=''\n"
+        "  [[ ! -f \"$TEST_PM2_WEB_ROOT\" ]] || web_root=$(<\"$TEST_PM2_WEB_ROOT\")\n"
+        "  if [[ -n \"${TEST_FAIL_FELLOWSHIP_DOCUMENT:-}\" && \"$web_root\" == *\"/$TEST_TARGET_SHA/web\" ]]; then exit 22; fi\n"
         "  exit 0\n"
         "fi\n"
         "backend_program=$(\"$SMART_ANSWER_PLIST_BUDDY\" -c 'Print :ProgramArguments:0' \"$TEST_BACKEND_PLIST\")\n"
@@ -206,28 +254,35 @@ else:
         "    exit 0\n"
         "    ;;\n"
         "  print)\n"
-        "    program=$(\"$SMART_ANSWER_PLIST_BUDDY\" -c 'Print :ProgramArguments:0' \"$TEST_REMINDER_PLIST\")\n"
-        "    script=$(\"$SMART_ANSWER_PLIST_BUDDY\" -c 'Print :ProgramArguments:1' \"$TEST_REMINDER_PLIST\")\n"
-        "    workdir=$(\"$SMART_ANSWER_PLIST_BUDDY\" -c 'Print :WorkingDirectory' \"$TEST_REMINDER_PLIST\")\n"
+        "    plist=\"$TEST_REMINDER_PLIST\"\n"
+        "    [[ \"${2:-}\" != *referencecommentaryinbox ]] || plist=\"$TEST_INBOX_PLIST\"\n"
+        "    program=$(\"$SMART_ANSWER_PLIST_BUDDY\" -c 'Print :ProgramArguments:0' \"$plist\")\n"
+        "    script=$(\"$SMART_ANSWER_PLIST_BUDDY\" -c 'Print :ProgramArguments:1' \"$plist\")\n"
+        "    workdir=$(\"$SMART_ANSWER_PLIST_BUDDY\" -c 'Print :WorkingDirectory' \"$plist\")\n"
         "    printf 'program = %s\\narguments = {\\n%s\\n}\\nworking directory = %s\\n' \"$program\" \"$script\" \"$workdir\"\n"
         "    ;;\n"
         "esac\n",
     )
 
     env = {
-        **os.environ,
+        **{k: v for k, v in os.environ.items() if k != "DATA_BASE_DIR"},
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "SMART_ANSWER_DEPLOY_ROOT": str(deploy_root),
         "SMART_ANSWER_LEGACY_ROOT": str(legacy),
         "SMART_ANSWER_WEB_DATA_DIR": str(runtime_data),
         "SMART_ANSWER_BACKEND_PLIST": str(backend_plist),
         "SMART_ANSWER_FELLOWSHIP_REMINDER_PLIST": str(reminder_plist),
+        "SMART_ANSWER_REFERENCE_INBOX_PLIST": str(inbox_plist),
         "SMART_ANSWER_PLIST_BUDDY": str(bin_dir / "plist-buddy"),
         "SMART_ANSWER_MIN_FREE_MB": "1",
+        "SMART_ANSWER_GOOGLE_OAUTH_TOKEN_FILE": str(google_token),
+        "SMART_ANSWER_GOOGLE_TOKEN_CHECK": str(token_check),
+        "TEST_DEAD_TOKEN_MARKER": str(logs / "dead-token"),
         "SMART_ANSWER_BACKEND_HEALTH": "http://backend.test/healthz",
         "SMART_ANSWER_FRONTEND_HEALTH": "http://frontend.test/",
         "TEST_BACKEND_PLIST": str(backend_plist),
         "TEST_REMINDER_PLIST": str(reminder_plist),
+        "TEST_INBOX_PLIST": str(inbox_plist),
         "TEST_LAUNCHCTL_LOG": str(logs / "launchctl.log"),
         "TEST_DEPLOY_EVENT_LOG": str(logs / "deploy-events.log"),
         "TEST_PM2_WEB_ROOT": str(logs / "pm2-web-root"),
@@ -241,6 +296,8 @@ else:
         "deploy_root": deploy_root,
         "backend_plist": backend_plist,
         "reminder_plist": reminder_plist,
+        "inbox_plist": inbox_plist,
+        "make_release": make_release,
         "launchctl_log": logs / "launchctl.log",
         "deploy_event_log": logs / "deploy-events.log",
         "pm2_web_root": logs / "pm2-web-root",
@@ -248,6 +305,10 @@ else:
         "target_release": target_release,
         "previous_release": previous_release,
         "env": env,
+        "web_env": web_env,
+        "web_data": web_data,
+        "google_token": google_token,
+        "dead_token_marker": logs / "dead-token",
     }
 
 
@@ -504,3 +565,135 @@ def test_deploy_fails_closed_when_reminder_launchagent_is_missing(
 
     assert result.returncode == 1
     assert "fellowship reminder LaunchAgent not found" in result.stderr
+
+
+def test_deploy_binds_reference_inbox_to_new_release(deploy_fixture: dict[str, object]) -> None:
+    env = deploy_fixture["env"]
+    result = _run("bash", deploy_fixture["deploy"], cwd=deploy_fixture["source"], env=env)
+
+    target_release = deploy_fixture["target_release"]
+    with deploy_fixture["inbox_plist"].open("rb") as handle:
+        inbox = plistlib.load(handle)
+    assert inbox["ProgramArguments"] == [
+        str(target_release / "backend" / ".venv" / "bin" / "python3"),
+        str(target_release / "backend" / "reference_commentary_inbox_job.py"),
+    ]
+    assert inbox["WorkingDirectory"] == str(target_release)
+    assert inbox["StartInterval"] == 180
+    assert f"load {deploy_fixture['inbox_plist']}" in deploy_fixture["launchctl_log"].read_text(encoding="utf-8")
+    assert "Reference commentary inbox is bound to" in result.stdout
+
+
+def test_rollback_to_release_without_inbox_stops_the_agent(deploy_fixture: dict[str, object]) -> None:
+    previous_release = deploy_fixture["previous_release"]
+    (previous_release / "backend" / "reference_commentary_inbox_job.py").unlink()
+    env = {**deploy_fixture["env"], "TEST_FAIL_TARGET_REMINDER_LOAD": "1"}
+
+    result = _run("bash", deploy_fixture["deploy"], cwd=deploy_fixture["source"], env=env, check=False)
+
+    assert result.returncode == 1
+    assert "Rollback complete" in result.stdout
+    assert "Reference commentary inbox is not in" in result.stdout
+    calls = deploy_fixture["launchctl_log"].read_text(encoding="utf-8").splitlines()
+    assert calls[-1] == f"unload {deploy_fixture['inbox_plist']}"
+
+
+def test_deploy_fails_closed_when_inbox_launchagent_is_missing(deploy_fixture: dict[str, object]) -> None:
+    deploy_fixture["inbox_plist"].unlink()
+
+    result = _run(
+        "bash", deploy_fixture["deploy"], "--dry-run", cwd=deploy_fixture["source"], env=deploy_fixture["env"], check=False
+    )
+
+    assert result.returncode == 1
+    assert "reference commentary inbox LaunchAgent not found" in result.stderr
+    assert "install-reference-inbox-agent.sh" in result.stderr
+
+
+def test_web_gets_data_base_dir_from_its_config_not_the_deploying_shell(deploy_fixture: dict[str, object]) -> None:
+    result = _run("bash", deploy_fixture["deploy"], cwd=deploy_fixture["source"], env=deploy_fixture["env"])
+
+    events = deploy_fixture["deploy_event_log"].read_text(encoding="utf-8").splitlines()
+    start = next(e for e in events if e.startswith("pm2 start "))
+    assert start.endswith(f"data={deploy_fixture['web_data']}")
+    assert any(e.startswith("fellowship-document ") and e.endswith("/api/fellowship-documents/2026-09-25/study.pptx") for e in events)
+    assert "Web serves fellowship documents (2026-09-25/study.pptx)" in result.stdout
+
+
+def test_deploy_fails_closed_when_web_config_lacks_data_base_dir(deploy_fixture: dict[str, object]) -> None:
+    deploy_fixture["web_env"].write_text("NEXTAUTH_URL=https://example.test\n", encoding="utf-8")
+
+    result = _run("bash", deploy_fixture["deploy"], "--dry-run", cwd=deploy_fixture["source"], env=deploy_fixture["env"], check=False)
+
+    assert result.returncode == 1
+    assert "DATA_BASE_DIR is not set in" in result.stderr
+
+
+def test_deploy_fails_closed_when_web_data_dir_is_missing(deploy_fixture: dict[str, object]) -> None:
+    deploy_fixture["web_env"].write_text("DATA_BASE_DIR=/nonexistent/web-data\n", encoding="utf-8")
+
+    result = _run("bash", deploy_fixture["deploy"], "--dry-run", cwd=deploy_fixture["source"], env=deploy_fixture["env"], check=False)
+
+    assert result.returncode == 1
+    assert "is not a directory: /nonexistent/web-data" in result.stderr
+
+
+def test_unservable_fellowship_document_rolls_back(deploy_fixture: dict[str, object]) -> None:
+    env = {**deploy_fixture["env"], "TEST_FAIL_FELLOWSHIP_DOCUMENT": "1"}
+
+    result = _run("bash", deploy_fixture["deploy"], cwd=deploy_fixture["source"], env=env, check=False)
+
+    assert result.returncode == 1
+    assert "web cannot serve fellowship document 2026-09-25/study.pptx" in result.stderr
+    assert "Rollback complete" in result.stdout
+    assert (deploy_fixture["deploy_root"] / "active-release").read_text(encoding="utf-8").strip() == str(deploy_fixture["previous_release"])
+
+
+def _backend_env(plist: Path) -> dict[str, str]:
+    with plist.open("rb") as handle:
+        return plistlib.load(handle).get("EnvironmentVariables", {})
+
+
+def test_backend_is_told_where_the_google_token_is(deploy_fixture: dict[str, object]) -> None:
+    # OPS-27: releases hold no token.json; the backend looked in its working
+    # directory and silently fell back to the service account.
+    result = _run("bash", deploy_fixture["deploy"], cwd=deploy_fixture["source"], env=deploy_fixture["env"], check=False)
+
+    assert result.returncode == 0, result.stderr
+    assert _backend_env(deploy_fixture["backend_plist"])["GOOGLE_OAUTH_TOKEN_FILE"] == str(deploy_fixture["google_token"])
+    events = deploy_fixture["deploy_event_log"].read_text(encoding="utf-8")
+    assert f"token-check {deploy_fixture['google_token']}" in events
+
+
+def test_dead_google_token_stops_the_deploy_before_switching(deploy_fixture: dict[str, object]) -> None:
+    deploy_fixture["dead_token_marker"].touch()
+
+    result = _run("bash", deploy_fixture["deploy"], cwd=deploy_fixture["source"], env=deploy_fixture["env"], check=False)
+
+    assert result.returncode == 1
+    assert "Google OAuth token cannot be refreshed" in result.stderr
+    assert "services were not changed" in result.stderr
+    with deploy_fixture["backend_plist"].open("rb") as handle:
+        assert plistlib.load(handle)["ProgramArguments"][0] == "/old/python"
+    assert (deploy_fixture["deploy_root"] / "active-release").read_text(encoding="utf-8").strip() == str(deploy_fixture["previous_release"])
+
+
+def test_skip_google_token_check_deploys_anyway(deploy_fixture: dict[str, object]) -> None:
+    deploy_fixture["dead_token_marker"].touch()
+
+    result = _run(
+        "bash", deploy_fixture["deploy"], "--skip-google-token-check",
+        cwd=deploy_fixture["source"], env=deploy_fixture["env"], check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Skipping the Google OAuth token check" in result.stdout
+
+
+def test_deploy_fails_closed_without_a_google_token(deploy_fixture: dict[str, object]) -> None:
+    deploy_fixture["google_token"].unlink()
+
+    result = _run("bash", deploy_fixture["deploy"], cwd=deploy_fixture["source"], env=deploy_fixture["env"], check=False)
+
+    assert result.returncode == 1
+    assert "Google OAuth token not found" in result.stderr

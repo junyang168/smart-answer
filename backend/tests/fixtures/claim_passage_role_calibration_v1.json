@@ -1,0 +1,31 @@
+{
+  "purpose": "Human calibration examples for #409; role concerns Claim function, not theological correctness.",
+  "expected": {
+    "DK-06605dde6cd4-P01-CL011": "passage_exegesis",
+    "DK-0bdf88fe8565-P07-CL003": "passage_exegesis",
+    "DK-160529097a2b-P03-CL006": "passage_exegesis",
+    "DK-17e43590a16730d02bed-P03-CL001": "passage_exegesis",
+    "DK-4c6e7a609f365a3a83d7-P05-CL006": "passage_exegesis",
+    "DK-d73cacc8caf0-P01-CL007": "passage_exegesis",
+    "DK-09f939659c943940602a-P03-CL006": "other",
+    "DK-37da0020b41f610a21d1-P09-CL002": "other",
+    "DK-9d9afd271050-P05-CL001": "other",
+    "DK-c74cb859371aca6b7082-P02-CL007": "other",
+    "DK-16d78246e856-P03-CL005": "other",
+    "DK-0d5b2062b148-P05-CL001": "other"
+  },
+  "notes": {
+    "DK-06605dde6cd4-P01-CL011": "Identifies what Matthew 24:15-21 refers to.",
+    "DK-0bdf88fe8565-P07-CL003": "Explains the request meant by Matthew 6:13.",
+    "DK-160529097a2b-P03-CL006": "Distinguishes analogy from prediction/fulfillment in Hosea 11:1 and Matthew 2:15.",
+    "DK-17e43590a16730d02bed-P03-CL001": "Identifies the speaker/viewpoint of words in 1 Corinthians 8:1.",
+    "DK-4c6e7a609f365a3a83d7-P05-CL006": "Resolves how Greek kai functions in identified verses.",
+    "DK-d73cacc8caf0-P01-CL007": "Explains a translation/term in 2 Corinthians 5:5; the Claim lacks a ref but an EvidenceStep supplies it.",
+    "DK-09f939659c943940602a-P03-CL006": "Summarizes a biblical command without explaining its meaning.",
+    "DK-37da0020b41f610a21d1-P09-CL002": "Evaluates not eating meat as an act of love; application, not passage meaning.",
+    "DK-9d9afd271050-P05-CL001": "Observes that Joseph's burial request was unusual; historical observation.",
+    "DK-c74cb859371aca6b7082-P02-CL007": "Restates the teacher's task from Ephesians 4:12 without resolving interpretation.",
+    "DK-16d78246e856-P03-CL005": "Draws a broad conclusion about Jesus' ministry, not the meaning of an identified clause.",
+    "DK-0d5b2062b148-P05-CL001": "States an exegetical method, not an interpretation of a particular passage."
+  }
+}

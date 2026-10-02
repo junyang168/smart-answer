@@ -1,5 +1,6 @@
 import {
   FellowshipAnalysisAssets,
+  FellowshipAnalysisSources,
   FellowshipAnalysisJob,
   FellowshipDocument,
   FellowshipEmailContent,
@@ -129,6 +130,21 @@ export async function fetchFellowshipAnalysisAssets(date: string): Promise<Fello
   const response = await fetch(
     resolveApiUrl(`${API_BASE_PATH}/${encodeDateSegment(date)}/analysis/assets`),
     { cache: "no-store" },
+  );
+  return parseJson(response);
+}
+
+export async function updateFellowshipAnalysisSources(
+  date: string,
+  sources: FellowshipAnalysisSources,
+): Promise<FellowshipAnalysisAssets> {
+  const response = await fetch(
+    resolveApiUrl(`${API_BASE_PATH}/${encodeDateSegment(date)}/analysis/sources`),
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(sources),
+    },
   );
   return parseJson(response);
 }

@@ -48,6 +48,11 @@ from backend.pipeline.relation_id_namespace import (
 )
 
 RELATION_COLLECTIONS = ("claim_relations", "knowledge_relations")
+SOURCE_BOUND_CVR_COLLECTIONS = {
+    "argument_route_attestations",
+    "viewpoint_claim_links",
+    "viewpoint_identity_candidates",
+}
 DEFAULT_TRANSCRIPT_DIRS = [
     Path("/opt/homebrew/var/www/church/web/data/script_published"),
     Path("/opt/homebrew/var/www/church/web/data/script_review"),
@@ -69,6 +74,136 @@ def _retiring_extraction_ids(change_set: Any) -> set[str]:
             or operation.collection == "source_documents"
         )
     }
+
+
+def stale_source_cvr_retirement(
+    *,
+    source_id: str,
+    change_set: Any,
+    semantic_rows: Sequence[tuple[str, str, Mapping[str, Any]]],
+    record_states: Mapping[tuple[str, str], Mapping[str, Any]],
+) -> tuple[list[tuple[str, str]], dict[str, Any]]:
+    """Retire source-bound CVR rows invalidated by a new extraction generation.
+
+    This never maps an old extraction ID to a new one.  It removes only the
+    source occurrence/link/candidate layer, leaving canonical viewpoints and
+    route revisions intact for a later CVR rebuild from the new Claims.
+    """
+
+    source_id = str(source_id or "").strip()
+    if not source_id.startswith("SRC-"):
+        raise ValueError("stale source CVR retirement requires an exact SRC- source id")
+    retired_ids = _retiring_extraction_ids(change_set)
+    retiring_claim_ids = {
+        operation.object_id
+        for operation in change_set.operations
+        if operation.operation == "retire" and operation.collection == "claims"
+    }
+    blocker_keys = {
+        tuple(item.split(" ->", 1)[0].split("/", 1))
+        for item in uncoordinated_semantic_reference_blockers(change_set, semantic_rows)
+    }
+    if not blocker_keys:
+        audit = {
+            "schema_version": "wang_stale_source_cvr_retirement_v1",
+            "source_id": source_id,
+            "reason_code": "source_extraction_generation_superseded",
+            "status": "not_needed",
+            "retired_extraction_ids_sha256": sha256_json(sorted(retired_ids)),
+            "summary": {collection: 0 for collection in sorted(SOURCE_BOUND_CVR_COLLECTIONS)},
+            "records": [],
+        }
+        audit["summary"]["total"] = 0
+        return [], _seal_audit(audit)
+
+    unexpected = sorted(key for key in blocker_keys if key[0] not in SOURCE_BOUND_CVR_COLLECTIONS)
+    if unexpected:
+        raise ValueError(
+            "source CVR retirement cannot retire unrelated semantic authority: "
+            + ", ".join(f"{collection}/{object_id}" for collection, object_id in unexpected)
+        )
+    rows = {
+        (str(collection), str(object_id)): payload
+        for collection, object_id, payload in semantic_rows
+    }
+    records: list[dict[str, Any]] = []
+    for key in sorted(blocker_keys):
+        payload = rows.get(key)
+        if payload is None or str(payload.get("visibility") or "") != "internal":
+            raise ValueError(f"source CVR retirement row is absent or public: {key[0]}/{key[1]}")
+        if key[0] == "argument_route_attestations":
+            if str(payload.get("source_id") or "") != source_id:
+                raise ValueError(f"route attestation belongs to another source: {key[1]}")
+        elif key[0] == "viewpoint_claim_links":
+            if str(payload.get("claim_id") or "") not in retiring_claim_ids:
+                raise ValueError(f"viewpoint link does not pin a retiring Claim: {key[1]}")
+        else:
+            candidate_claim_ids = set(map(str, payload.get("candidate_claim_ids") or []))
+            if (
+                not candidate_claim_ids
+                or not candidate_claim_ids.intersection(retiring_claim_ids)
+                or str(payload.get("review_status") or "") != "candidate"
+            ):
+                raise ValueError(
+                    "identity candidate is not a pending affected candidate: "
+                    f"{key[1]}"
+                )
+        state = record_states.get(key) or {}
+        content_sha256 = str(state.get("content_sha256") or record_content_sha(payload))
+        if content_sha256 != record_content_sha(payload):
+            raise ValueError(f"source CVR row has inconsistent stored SHA: {key[0]}/{key[1]}")
+        record = {
+            "collection": key[0],
+            "object_id": key[1],
+            "expected_revision": state.get("revision", payload.get("revision")),
+            "expected_content_sha256": content_sha256,
+            "review_status": str(payload.get("review_status") or ""),
+        }
+        if key[0] == "viewpoint_identity_candidates":
+            record["other_claim_ids_requiring_regroup"] = sorted(
+                candidate_claim_ids - retiring_claim_ids
+            )
+        records.append(record)
+
+    def strings(value: Any) -> set[str]:
+        if isinstance(value, Mapping):
+            found = {str(key) for key in value if isinstance(key, str)}
+            for child in value.values():
+                found.update(strings(child))
+            return found
+        if isinstance(value, (list, tuple, set)):
+            found: set[str] = set()
+            for child in value:
+                found.update(strings(child))
+            return found
+        return {value} if isinstance(value, str) else set()
+
+    selected_ids = {row["object_id"] for row in records}
+    external = sorted(
+        f"{collection}/{object_id}"
+        for collection, object_id, payload in semantic_rows
+        if (str(collection), str(object_id)) not in blocker_keys
+        and strings(payload) & selected_ids
+    )
+    if external:
+        raise ValueError(
+            "source CVR rows still have current external references: " + ", ".join(external)
+        )
+    summary = {
+        collection: sum(row["collection"] == collection for row in records)
+        for collection in sorted(SOURCE_BOUND_CVR_COLLECTIONS)
+    }
+    summary["total"] = len(records)
+    audit = {
+        "schema_version": "wang_stale_source_cvr_retirement_v1",
+        "source_id": source_id,
+        "reason_code": "source_extraction_generation_superseded",
+        "status": "planned",
+        "retired_extraction_ids_sha256": sha256_json(sorted(retired_ids)),
+        "summary": summary,
+        "records": records,
+    }
+    return [(row["collection"], row["object_id"]) for row in records], _seal_audit(audit)
 
 def products_to_rebuild(
     changed_records: set[tuple[str, str]],
@@ -1056,6 +1191,8 @@ def plan(
     retire_stale_pending_topic_identity_batch: str | None = None,
     retire_stale_candidate_projection_batches: Sequence[str] = (),
     retire_stale_ai_cross_sermon_constraint_ids: Sequence[str] = (),
+    retire_stale_source_cvr: str | None = None,
+    return_stale_source_cvr_audit: bool = False,
 ):
     """The one change set that lands `package` and withdraws its predecessor.
 
@@ -1204,10 +1341,22 @@ def plan(
                 record_states=record_states,
             )
         )
+    stale_source_cvr_retirement_audit = None
+    stale_source_cvr_keys: list[tuple[str, str]] = []
+    if retire_stale_source_cvr:
+        stale_source_cvr_keys, stale_source_cvr_retirement_audit = (
+            stale_source_cvr_retirement(
+                source_id=retire_stale_source_cvr,
+                change_set=change_set,
+                semantic_rows=semantic_rows,
+                record_states=record_states,
+            )
+        )
     extra_keys = {
         *stale_projection_keys,
         *stale_topic_keys,
         *stale_constraint_keys,
+        *stale_source_cvr_keys,
     }
     if extra_keys:
         keys = sorted(set(keys) | extra_keys)
@@ -1233,7 +1382,7 @@ def plan(
     semantic_blockers = uncoordinated_semantic_reference_blockers(
         change_set, semantic_rows
     )
-    return (
+    result = (
         change_set,
         withdrawal,
         products,
@@ -1243,6 +1392,7 @@ def plan(
         stale_projection_retirement,
         stale_cross_sermon_constraint_retirement,
     )
+    return (*result, stale_source_cvr_retirement_audit) if return_stale_source_cvr_audit else result
 
 
 def no_op_result(change_set: Any) -> dict[str, Any] | None:
@@ -1307,6 +1457,15 @@ def main(argv: list[str] | None = None) -> int:
             "retargeting the old judgment"
         ),
     )
+    parser.add_argument(
+        "--retire-stale-source-cvr",
+        metavar="SOURCE_ID",
+        help=(
+            "retire the exact internal source-bound CVR links, route attestations, "
+            "and unresolved identity candidates invalidated by this source generation; "
+            "canonical viewpoints and route revisions remain active"
+        ),
+    )
     parser.add_argument("--apply", action="store_true")
     parser.add_argument(
         "--transcript-dir",
@@ -1357,6 +1516,7 @@ def main(argv: list[str] | None = None) -> int:
         stale_topic_identity_retirement,
         stale_projection_retirement,
         stale_cross_sermon_constraint_retirement,
+        stale_source_cvr_retirement_audit,
     ) = plan(
         store,
         package,
@@ -1371,6 +1531,8 @@ def main(argv: list[str] | None = None) -> int:
         retire_stale_ai_cross_sermon_constraint_ids=(
             args.retire_stale_ai_cross_sermon_constraint
         ),
+        retire_stale_source_cvr=args.retire_stale_source_cvr,
+        return_stale_source_cvr_audit=True,
     )
     claim_evidence_guard = (
         store.read_claim_evidence_reciprocity_guard(change_set)
@@ -1424,6 +1586,8 @@ def main(argv: list[str] | None = None) -> int:
         output["stale_ai_cross_sermon_constraint_retirement"] = (
             stale_cross_sermon_constraint_retirement
         )
+    if stale_source_cvr_retirement_audit is not None:
+        output["stale_source_cvr_retirement"] = stale_source_cvr_retirement_audit
     if args.apply:
         if semantic_blockers:
             output["result"] = {
@@ -1473,6 +1637,9 @@ def main(argv: list[str] | None = None) -> int:
                     "stale_ai_cross_sermon_constraint_retirement": (
                         stale_cross_sermon_constraint_retirement
                     ),
+                    "stale_source_cvr_retirement": (
+                        stale_source_cvr_retirement_audit
+                    ),
                     "current_claim_evidence_snapshot": claim_evidence_snapshot,
                 },
                 expected_claim_evidence_guard=claim_evidence_guard,
@@ -1494,6 +1661,9 @@ def main(argv: list[str] | None = None) -> int:
                 ),
                 "stale_ai_cross_sermon_constraint_retirement": (
                     stale_cross_sermon_constraint_retirement
+                ),
+                "stale_source_cvr_retirement": (
+                    stale_source_cvr_retirement_audit
                 ),
                 "current_claim_evidence_snapshot": claim_evidence_snapshot,
             })

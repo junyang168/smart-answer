@@ -15,6 +15,7 @@ from typing import Any
 
 from backend.pipeline.source_projection import (
     heading_level,
+    is_editorial_row,
     source_body_sha256,
     spoken_source_rows,
 )
@@ -98,11 +99,12 @@ def apply_insertions(
     """Insert every generated heading and preserve every original row verbatim."""
 
     original = [dict(row) for row in rows]
-    indexes = [str(row.get("index")) for row in original]
-    if len(indexes) != len(set(indexes)):
+    source_indexes = [str(row.get("index")) for row in body_rows(original)]
+    if len(source_indexes) != len(set(source_indexes)):
         raise SubtitlePersistenceError("sermon paragraph indexes are not unique")
 
-    known = set(indexes)
+    known = set(source_indexes)
+    physical_indexes = {str(row.get("index")) for row in original}
     grouped: dict[str, list[dict[str, Any]]] = {}
     accepted: list[dict[str, Any]] = []
     seen_boundaries: set[tuple[str, int]] = set()
@@ -125,7 +127,7 @@ def apply_insertions(
             )
         seen_boundaries.add(boundary)
         generated_index = f"subtitle-pipeline-{source_sha256[:12]}-{ordinal:02d}"
-        if generated_index in known:
+        if generated_index in physical_indexes:
             raise SubtitlePersistenceError(
                 f"generated subtitle index {generated_index!r} already exists"
             )
@@ -142,7 +144,10 @@ def apply_insertions(
     result: list[dict[str, Any]] = [dict(row) for row in grouped.get("START", [])]
     for row in original:
         result.append(row)
-        result.extend(dict(heading) for heading in grouped.get(str(row.get("index")), []))
+        if not is_editorial_row(row):
+            result.extend(
+                dict(heading) for heading in grouped.get(str(row.get("index")), [])
+            )
 
     if body_rows(result) != body_rows(original):
         raise SubtitleBodyMutationError("subtitle insertion changed existing sermon body rows")
@@ -161,11 +166,12 @@ def verify_saved_result(
     after_rows = [dict(row) for row in after]
     before_indexes = [str(row.get("index")) for row in before_rows]
     after_indexes = [str(row.get("index")) for row in after_rows]
-    if len(after_indexes) != len(set(after_indexes)):
-        raise SubtitlePersistenceError("saved sermon paragraph indexes are not unique")
     known = set(before_indexes)
     inserted = [row for row in after_rows if str(row.get("index")) not in known]
     preserved = [row for row in after_rows if str(row.get("index")) in known]
+    inserted_indexes = [str(row.get("index")) for row in inserted]
+    if len(inserted_indexes) != len(set(inserted_indexes)):
+        raise SubtitlePersistenceError("saved subtitle indexes are not unique")
     if preserved != before_rows:
         raise SubtitleBodyMutationError("saved sermon differs from the pre-save sermon rows")
     if len(inserted) != expected_insertions or any(

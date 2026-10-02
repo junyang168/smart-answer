@@ -86,6 +86,34 @@ def test_apply_insertions_preserves_every_body_row_and_all_subtitle_levels() -> 
     assert after[0]["index"] == "subtitle-pipeline-aaaaaaaaaaaa-01"
 
 
+def test_apply_insertions_allows_editorial_row_to_share_spoken_anchor_index() -> None:
+    before = [
+        {"index": 1, "type": "comment", "text": "编辑引用"},
+        {"index": 1, "text": "第一段正文。"},
+        {"index": 2, "text": "第二段正文。"},
+    ]
+
+    after = apply_insertions(
+        before,
+        [{"after_index": "1", "text": "## 第二部分", "level": 1}],
+        source_sha256="f" * 64,
+        user_id="pipeline@example.org",
+    )
+
+    assert body_rows(after) == body_rows(before)
+    assert after[:3] == [
+        before[0],
+        before[1],
+        {
+            "index": "subtitle-pipeline-ffffffffffff-01",
+            "type": "subtitle",
+            "text": "## 第二部分",
+            "user_id": "pipeline@example.org",
+        },
+    ]
+    verify_saved_result(before, after, expected_insertions=1)
+
+
 def test_apply_insertions_rejects_unknown_anchor_without_partial_output() -> None:
     with pytest.raises(SubtitlePersistenceError, match="does not name"):
         apply_insertions(

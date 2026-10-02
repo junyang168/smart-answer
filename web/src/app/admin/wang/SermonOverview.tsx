@@ -4,16 +4,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
 import type { CellState, Overview, OverviewRow, StageCell, StageId } from "./operations-types";
+import { operationStageLabels } from "./operations-copy";
 import { ScriptureGroups, TopicGroups } from "./OverviewGroups";
-
-const stageLabels: Record<StageId, string> = {
-  extraction: "抽取",
-  cross_section: "跨段關係",
-  review: "複審",
-  adjudication: "仲裁",
-  merge: "合併",
-  ingest: "入庫",
-};
 
 const stateLabels: Record<CellState, string> = {
   current: "✓",
@@ -309,7 +301,7 @@ export function SermonOverview() {
           <div className="flex items-center gap-2 px-4 pb-1 pl-10 text-[11px] font-bold text-slate-500">
             <span className="min-w-0 flex-1">來源</span>
             {data.stages.map((stage) => (
-              <span key={stage} className="w-[6.25rem] shrink-0 text-center">{stageLabels[stage]}</span>
+              <span key={stage} className="w-[6.25rem] shrink-0 text-center">{operationStageLabels[stage]}</span>
             ))}
             <span className="w-14 shrink-0 text-center">文章</span>
           </div>
@@ -324,7 +316,7 @@ export function SermonOverview() {
       <p className="text-xs leading-6 text-slate-500">
         每一格都來自執行記錄表，不掃描 staging 目錄。<strong>入庫是例外</strong>：那一格直接讀主庫——物件在不在庫裡，主庫自己知道，
         而且記錄表上線之前就知道。標成 <code>✓*</code> 的入庫格就是這種：確實在庫裡，但那次入庫早於記錄表，所以沒有時間與花費。
-        其他四個階段只認記錄表，所以磁碟上已有產出的來源在這裡仍然顯示「✗ 沒跑過」——這是實話，不是漏抓。價目表 <code>{data.price_version}</code>（{data.price_effective} 起）：{data.price_source}。
+        其餘 {data.stages.length - 1} 個階段只認記錄表，所以磁碟上已有產出的來源在這裡仍然顯示「✗ 沒跑過」——這是實話，不是漏抓。價目表 <code>{data.price_version}</code>（{data.price_effective} 起）：{data.price_source}。
       </p>
     </section>
   );

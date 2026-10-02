@@ -1,0 +1,12 @@
+{
+  "name": "bible-study-ppt",
+  "private": true,
+  "description": "查經 PPT from a study folder's slides.json (WKP-F11.07)",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "jszip": "3.10.2",
+    "pptxgenjs": "3.12.0"
+  }
+}
