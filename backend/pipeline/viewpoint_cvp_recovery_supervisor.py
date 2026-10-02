@@ -118,10 +118,17 @@ def dispatch(event, recovery_root, executable, *, run=subprocess.run):
     client = CodexSubscriptionClient(model="gpt-6.1-sol", executable=executable)
     try:
         client._verify_chatgpt_login()
+        git_common = Path(subprocess.check_output(
+            ["git", "rev-parse", "--git-common-dir"], cwd=PROJECT_ROOT, text=True).strip())
+        if not git_common.is_absolute():
+            git_common = (PROJECT_ROOT / git_common).resolve()
         command = [client.executable, "exec", "--ephemeral", "--ignore-user-config",
                    "--sandbox", "workspace-write", "--cd", str(PROJECT_ROOT),
-                   "--add-dir", str(recovery_root.parent), "--model", "gpt-6.1-sol",
+                   "--add-dir", str(recovery_root.parent), "--add-dir", str(git_common),
+                   "--add-dir", str(recovery_root.parent.parent / "viewpoint-backfill"),
+                   "--model", "gpt-6.1-sol",
                    "--config", 'model_reasoning_effort="high"',
+                   "--config", 'sandbox_workspace_write.network_access=true',
                    "--config", 'approval_policy="never"', "--json",
                    "--output-last-message", str(attempt / "last-message.txt"), "-"]
         # Streaming files preserve partial responses on timeout/quota/CLI failure.
