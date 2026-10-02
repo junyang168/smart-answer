@@ -123,3 +123,4 @@ proposal 若提出 `viewpoint_relations`，每一条都要有一条 `relation_re
 宁可标出问题让人来看，也不要为了让批次通过而放行有疑问的判断。
 
 用中文。术语（Claim、viewpoint、component、disposition 等）保持英文。
+证据若带 `source_context`，应连同原引文阅读：它是 SHA-bound 同来源同段上下文，专门用于解析「这一」「因此」等回指，不是新增 EvidenceStep、Claim 或成员资格。仍核对本 Claim 的原有证据 ID，不借用其他 Claim 的证据，不补充上下文没有的前提。

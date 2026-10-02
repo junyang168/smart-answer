@@ -116,10 +116,11 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
              "scope_audit_disposition_sha256": disposition["artifact_sha256"],
              "full_corpus_source_eligibility_asserted": False, "master_data_mutations": 0}
     phase["artifact_sha256"] = sha256_json(phase)
-    packet = build_scope_packet(scope=None, scope_label="Matthew accepted grouping: deterministic first group",
+    packet = build_scope_packet(scope=None, scope_label="Matthew accepted group: " + canary["group_key"],
                                passage_unit_ids=[], claim_manifest=claim_manifest, source_attestation=eligibility,
                                repository_root=args.wang_repository, database_url=None,
-                               partition_claim_ids=selected_ids, partition_manifest_sha256=args.accepted_grouping_sha)
+                               partition_claim_ids=selected_ids, partition_manifest_sha256=args.accepted_grouping_sha,
+                               include_source_context=True)
     packet.update(scope_kind="accepted_grouping_canary", accepted_grouping_stage=stage)
     packet.pop("packet_sha256")
     packet["packet_sha256"] = sha256_json(packet)

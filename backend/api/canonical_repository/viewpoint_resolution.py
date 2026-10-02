@@ -146,6 +146,31 @@ class StrictArtifact(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class EvidenceSourceContext(StrictArtifact):
+    schema_version: Literal["wang_evidence_same_paragraph_context_v1"] = "wang_evidence_same_paragraph_context_v1"
+    role: Literal["resolve_excerpt_context_not_new_evidence"] = "resolve_excerpt_context_not_new_evidence"
+    source_id: str
+    source_path: str
+    source_file_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_body_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    paragraph_key: str = Field(pattern=r"^S[0-9]{4,}$")
+    paragraph_text: str = Field(min_length=1, max_length=20000)
+    paragraph_text_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    excerpt_start_char: int = Field(ge=0)
+    excerpt_end_char: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def check_context(self):
+        import hashlib
+        if not Path(self.source_path).is_absolute():
+            raise ValueError("source context path must be absolute")
+        if hashlib.sha256(self.paragraph_text.encode("utf-8")).hexdigest() != self.paragraph_text_sha256:
+            raise ValueError("source context paragraph SHA mismatch")
+        if not self.excerpt_start_char < self.excerpt_end_char <= len(self.paragraph_text):
+            raise ValueError("source context excerpt offsets invalid")
+        return self
+
+
 class ReviewEvidence(StrictArtifact):
     evidence_step_id: str
     source_fragment_id: str
@@ -156,6 +181,9 @@ class ReviewEvidence(StrictArtifact):
     discourse_role: str | None = None
     scripture_refs: list[str] = Field(default_factory=list)
     verbatim_excerpt: str
+    source_context: EvidenceSourceContext | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     # Absence means the legacy spoken-evidence shape.  These fields are emitted
     # only for visual evidence so adding SVG support cannot rewrite every
     # pre-existing review packet or semantic hash in the corpus.
@@ -182,6 +210,11 @@ class ReviewEvidence(StrictArtifact):
 
     @model_validator(mode="after")
     def validate_eligibility(self) -> "ReviewEvidence":
+        if self.source_context is not None:
+            ctx = self.source_context
+            if (ctx.source_id != self.source_id or ctx.paragraph_key != self.paragraph_key
+                    or ctx.paragraph_text[ctx.excerpt_start_char:ctx.excerpt_end_char] != self.verbatim_excerpt):
+                raise ValueError("source context must bind this exact source/paragraph/excerpt")
         if self.scripture_refs != sorted(set(self.scripture_refs)):
             raise ValueError("review evidence scripture refs must be sorted and unique")
         citation_valid = bool(

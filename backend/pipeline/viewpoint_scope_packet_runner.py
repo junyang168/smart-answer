@@ -206,6 +206,7 @@ def build_scope_packet(
     partition_claim_ids: Sequence[str] | None = None,
     partition_manifest_sha256: str | None = None,
     all_corpus: bool = False,
+    include_source_context: bool = False,
 ) -> dict[str, Any]:
     if all_corpus:
         if scope is not None or partition_claim_ids is not None or passage_unit_ids:
@@ -301,6 +302,8 @@ def build_scope_packet(
         ],
     )
     review_claims = []
+    context_sources = {row["source_id"]: row for row in store.list_records("source_documents")} if include_source_context else {}
+    context_cache = {}
     blocked: list[dict[str, Any]] = []
     excluded: list[dict[str, Any]] = []
     advanced_review_pins: list[dict[str, Any]] = []
@@ -407,6 +410,12 @@ def build_scope_packet(
             blocked.append({"claim_id": claim_id, "reason_code": "no_identity_eligible_evidence",
                             "detail": "No evidence pair is citation- or attestation-bound."})
             continue
+        if include_source_context:
+            from backend.pipeline.viewpoint_evidence_source_context import attach_source_context, load_context_source
+            source = context_sources[review_claim.source_id]
+            if review_claim.source_id not in context_cache:
+                context_cache[review_claim.source_id] = load_context_source(source)
+            review_claim = attach_source_context(review_claim, source, context_cache[review_claim.source_id])
         review_claims.append(review_claim)
 
     if partition_claim_ids is not None and (blocked or excluded):
@@ -452,6 +461,8 @@ def build_scope_packet(
     }
     if partition_claim_ids is not None:
         packet["partition_manifest_sha256"] = partition_manifest_sha256
+    if include_source_context:
+        packet["source_context_policy"] = "same_registered_live_paragraph_v1"
     if all_corpus:
         packet["scope_kind"] = "all_corpus"
     packet["packet_sha256"] = sha256_json(packet)

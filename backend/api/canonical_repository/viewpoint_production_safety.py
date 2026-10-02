@@ -198,9 +198,12 @@ def _validate_scope_packet(scope_packet: Mapping[str, Any], store: Any) -> list[
             for raw in store.list_records("source_fragments")
         )
     }
+    source_records = store.list_records("source_documents")
+    context_sources = {str(row.get("source_id") or ""): row for row in source_records}
+    context_cache = {}
     current_sources = {
         str(row.get("source_id") or ""): str(row.get("source_sha256") or "")
-        for row in store.list_records("source_documents")
+        for row in source_records
     }
     packet_claim_ids: list[str] = []
     for raw in scope_packet.get("claims") or []:
@@ -258,6 +261,18 @@ def _validate_scope_packet(scope_packet: Mapping[str, Any], store: Any) -> list[
                 "from current corpus"
             )
         for item in claim.evidence:
+            if (scope_packet.get("source_context_policy") == "same_registered_live_paragraph_v1"
+                    and item.source_modality != "visual" and item.source_context is None):
+                findings.append(f"{claim.claim_id}: required source paragraph context missing")
+            if item.source_context is not None:
+                from backend.pipeline.viewpoint_evidence_source_context import verify_source_context, load_context_source
+                try:
+                    source = context_sources[item.source_id]
+                    if item.source_id not in context_cache:
+                        context_cache[item.source_id] = load_context_source(source)
+                    verify_source_context(item, source, context_cache[item.source_id])
+                except (KeyError, OSError, ValueError) as exc:
+                    findings.append(f"{claim.claim_id}: source context validation failed: {exc}")
             evidence = current_evidence.get(item.evidence_step_id)
             fragment = current_fragments.get(item.source_fragment_id)
             if evidence is None or fragment is None:

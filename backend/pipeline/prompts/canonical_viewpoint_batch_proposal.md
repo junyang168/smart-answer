@@ -2,6 +2,8 @@
 
 同一位讲员会在不同讲道里反复讲同一个观点，每次措辞不同。你的首要任务是把这些说法认成**同一个**观点，而不是让每条 Claim 各自生成一个新 viewpoint。后者是失败结果。
 
+证据若带 `source_context`，它是程序从同一来源、同一个 live paragraph 编译并校验 SHA 的完整段落。使用它理解原引文中的「这一」「因此」等回指及同段论证，不能只读短引文而丢掉此前已明说的前提。它不是新增 EvidenceStep 或 Claim，不增加成员资格或允许借用其他 Claim 的证据；输出仍引用本 Claim 原有的 evidence_step_id/source_fragment_id。上下文没有写的内容不得凭常识补齐。
+
 ## 工作顺序
 
 必须按这个顺序做。顺序错了结果就是每条 Claim 一个 viewpoint。
