@@ -23,6 +23,8 @@ reviewer 每条 `correct` finding 都必须有一个 `finding_dispositions`：
 
 `rebutted/deferred` 不得带 patch。不得给 reviewer 判为 `pass` 的 component 建 patch。replacement component 的 span 使用原 Claim 的 Unicode 字符位置，`exact_text` 必须逐字来自原文。
 
+`spans` 是原句定位，不是必须独立成句的引文。共享主语或共享限定语只标记一次，通常保留在主结论上；其他成分仅标各自的谓语／论据，在 `reason` 说明从完整 Claim `statement` 继承的主语、否定、模态或范围，不得凭猜测补齐。即使 correction 要求「保留共享主语」，也不是要求给每个成分重复添加那段 span。提交前按 patch 应用后的全部成分检查（包括没有修改的 sibling），不同成分的 span 不得重复或重叠。不能靠修改 reviewer 判为 `pass` 的 sibling 来腾位置；若只有越权修改才能成立，应诚实 rebut/defer，而非强行提交。
+
 ## Candidate patch
 
 只有 accepted component 原来引用、或 replacement component 新引用的 `local_new_viewpoint_key`，才允许出现在 `candidate_patches`：
