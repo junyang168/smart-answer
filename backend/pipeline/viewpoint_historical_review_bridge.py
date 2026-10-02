@@ -184,9 +184,38 @@ def verify_historical_review_bridge(
     if [row["revision"] for row in chain] != list(range(baseline["revision"], int(current_claim["revision"]) + 1)) or chain[-1]["payload"] != dict(current_claim):
         raise CvpProductionBlocked([f"{claim_id}: historical chain is discontinuous or not current"])
     repairs = []
+    evidence_index_repairs = []
     for before, after in zip(chain, chain[1:]):
         if _meaning(before["payload"]) == _meaning(after["payload"]) and after.get("source_kind") == "review_decision":
             continue
+        if after.get("source_kind") == "wkp364_claim_evidence_pair_adjudication":
+            # Existing verifier binds the exact applied ChangeSet and guard,
+            # requires independent include decisions for every added ID, and
+            # rejects deletion, reordering or any non-index content change.
+            from backend.pipeline.viewpoint_link_history_repair import verify_transition
+            try:
+                proof = verify_transition(before, after, collection="claims", object_id=claim_id)
+                authorization = after["metadata"]["claim_evidence_reciprocity_repair"]["store_guard"]["expected_pair_adjudication_authorization"]
+                for eid in proof["authorized_added_evidence_ids"]:
+                    action = next(a for a in authorization["actions"]
+                                  if a.get("claim_id") == claim_id and a.get("evidence_step_id") == eid)
+                    old_step = normalized.get("evidence_steps", {}).get(eid)
+                    live_step = current_evidence.get(eid)
+                    if (not old_step or not live_step
+                            or record_content_sha(old_step) != action["evidence_content_sha256"]
+                            or _meaning(old_step) != _meaning(live_step)
+                            or claim_id not in live_step.get("produced_claim_ids", [])):
+                        raise ValueError("adjudicated evidence is not the exact reviewed, reciprocal step")
+                    for fid in evidence_fragment_ids(EvidenceStepRecord.model_validate(live_step)):
+                        fragment = current_fragments.get(fid)
+                        if not fragment or fragment.get("source_id") not in {
+                            o.get("source_id") for o in current_claim.get("occurrences", [])
+                        }:
+                            raise ValueError("adjudicated evidence crosses Claim source")
+                evidence_index_repairs.append(proof)
+                continue
+            except (ValueError, KeyError, StopIteration) as exc:
+                raise CvpProductionBlocked([f"{claim_id}: invalid applied evidence-index repair: {exc}"]) from exc
         if after.get("source_kind") != "wkp368_source_contract_cleanup":
             raise CvpProductionBlocked([f"{claim_id}: post-review change is not a supported coordinate repair"])
         metadata = after.get("metadata") or {}
@@ -216,8 +245,11 @@ def verify_historical_review_bridge(
         repairs.append({"change_set_id": after["change_set_id"], "plan_binding": plan_binding,
                         "before_revision": before["revision"], "after_revision": after["revision"],
                         "before_sha256": before["content_sha256"], "after_sha256": after["content_sha256"]})
-    for evidence_id in reviewed["evidence_step_ids"]:
-        if evidence_id not in current_evidence or _meaning(current_evidence[evidence_id]) != _meaning(normalized["evidence_steps"][evidence_id]):
+    # Include the separately adjudicated additions in dependency proof, not
+    # just the original Claim's forward index. Their fragments were already
+    # in this independently reviewed source package; no new wording is admitted.
+    for evidence_id in current_claim["evidence_step_ids"]:
+        if evidence_id not in current_evidence or evidence_id not in normalized["evidence_steps"] or _meaning(current_evidence[evidence_id]) != _meaning(normalized["evidence_steps"][evidence_id]):
             raise CvpProductionBlocked([f"{claim_id}: reviewed EvidenceStep changed after review"])
         for fragment_id in evidence_fragment_ids(EvidenceStepRecord.model_validate(current_evidence[evidence_id])):
             old = normalized["source_fragments"].get(fragment_id)
@@ -233,8 +265,8 @@ def verify_historical_review_bridge(
         "reviewer_fingerprint_sha256": reviewer["fingerprint_sha256"],
         "reviewed_applied_revision": baseline["revision"],
         "reviewed_applied_change_set_id": baseline["change_set_id"], "coordinate_repairs": repairs,
-        "evidence_dependency_sha256": sha256_json({eid: record_content_sha(current_evidence[eid]) for eid in sorted(reviewed["evidence_step_ids"])}),
-        "fragment_dependency_sha256": sha256_json({fid: record_content_sha(current_fragments[fid]) for eid in reviewed["evidence_step_ids"] for fid in evidence_fragment_ids(EvidenceStepRecord.model_validate(current_evidence[eid]))}),
+        "evidence_dependency_sha256": sha256_json({eid: record_content_sha(current_evidence[eid]) for eid in sorted(current_claim["evidence_step_ids"])}),
+        "fragment_dependency_sha256": sha256_json({fid: record_content_sha(current_fragments[fid]) for eid in current_claim["evidence_step_ids"] for fid in evidence_fragment_ids(EvidenceStepRecord.model_validate(current_evidence[eid]))}),
         "master_data_mutations": 0, "model_calls_executed": 0, "approval_status": "not_human_approved",
     }
     if human_closure_binding is not None:
@@ -242,6 +274,8 @@ def verify_historical_review_bridge(
         body["human_spot_check_confirmed"] = True
     if sealed_lineage_binding is not None:
         body["sealed_lineage_binding"] = dict(sealed_lineage_binding)
+    if evidence_index_repairs:
+        body["evidence_index_repairs"] = evidence_index_repairs
     return body | {"artifact_sha256": sha256_json(body)}
 
 

@@ -107,7 +107,11 @@ def build_selection(group, inventory, root):
     selected, sealed = [], []
     for cid in sorted(group["claim_ids"]):
         variants = inventory[cid]["variants"]
-        usable = [v for v in variants if v["changed_substantive_fields"] in ([], ["occurrences"])]
+        # Discovery is not approval: the historical bridge authenticates every
+        # applied coordinate / independently adjudicated evidence-index change.
+        # Never discard that lineage merely because the index gained an ID.
+        usable = [v for v in variants if set(v["changed_substantive_fields"])
+                  <= {"occurrences", "evidence_step_ids"}]
         if len(usable) != 1:
             raise ValueError(f"{cid}: need unique current review lineage, found {len(usable)}")
         variant = usable[0]

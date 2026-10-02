@@ -141,3 +141,82 @@ def test_batched_review_without_sealed_lineage_is_rejected(tmp_path):
     args["review_binding"] = write_binding(tmp_path / "review.json", review)
     with pytest.raises(CvpProductionBlocked, match="authenticated sealed lineage"):
         verify_historical_review_bridge(**args)
+
+
+def pair_inputs(tmp_path):
+    args = inputs(tmp_path)
+    package = json.loads((tmp_path / "input.json").read_text())
+    package["evidence_steps"].append({"evidence_step_id": "E2", "source_fragment_id": "F2",
+        "statement": "已有原文論據", "produced_claim_ids": ["C1"], "support_eligibility": "eligible_candidate"})
+    package["source_fragments"].append(dict(package["source_fragments"][0], fragment_id="F2"))
+    args["review_input_binding"] = write_binding(tmp_path / "input.json", package)
+    review = json.loads((tmp_path / "review.json").read_text())
+    review["source"]["package_sha256"] = args["review_input_binding"]["file_sha256"]
+    review["reviewed_claims"] = _normalize_claim_layer(package)["candidate_claims"]
+    args["review_binding"] = write_binding(tmp_path / "review.json", review)
+    normalized, _ = _normalize_records(package)
+    args["current_evidence"] = normalized["evidence_steps"]
+    args["current_fragments"] = normalized["source_fragments"]
+    before = args["versions"][0]
+    after = deepcopy(before["payload"])
+    after["revision"] = 2
+    after["evidence_step_ids"].append("E2")
+    auth = {"actions": [{"claim_id": "C1", "evidence_step_id": "E2",
+        "effective_decision": "include", "reviewed_decision": "include",
+        "decision_basis": "independent_model_consensus_include",
+        "claim_content_sha256": before["content_sha256"],
+        "evidence_content_sha256": record_content_sha(normalized["evidence_steps"]["E2"])}]}
+    auth["artifact_sha256"] = sha256_json(auth)
+    guard = {"expected_pair_adjudication_authorization": auth,
+        "plan_identity": {"change_set_id": "KCS-pair", "source_sha256": "pair-source",
+                          "source_kind": "wkp364_claim_evidence_pair_adjudication"}}
+    guard["guard_sha256"] = sha256_json(guard)
+    args["versions"] = [before, dict(revision=2, payload=after,
+        content_sha256=record_content_sha(after), change_set_id="KCS-pair", status="applied",
+        source_kind="wkp364_claim_evidence_pair_adjudication", source_sha256="pair-source",
+        metadata={"claim_evidence_reciprocity_repair": {
+            "store_guard": guard, "pair_adjudication_authorization_sha256": auth["artifact_sha256"]}})]
+    args["current_claim"] = after
+    return args
+
+
+def test_adjudicated_existing_evidence_index_is_authenticated_not_reapproved(tmp_path):
+    proof = verify_historical_review_bridge(**pair_inputs(tmp_path))
+    assert proof["evidence_index_repairs"][0]["authorized_added_evidence_ids"] == ["E2"]
+    assert proof["model_calls_executed"] == proof["master_data_mutations"] == 0
+    assert proof["approval_status"] == "not_human_approved"
+
+
+@pytest.mark.parametrize("mutation", ["guard_sha", "decision", "basis", "claim_sha", "step_sha",
+                                     "foreign_source", "step_text", "fragment_text", "nonreciprocal",
+                                     "unapplied", "statement"])
+def test_pair_index_repair_never_grants_unreviewed_content(tmp_path, mutation):
+    args = pair_inputs(tmp_path)
+    repair = args["versions"][-1]["metadata"]["claim_evidence_reciprocity_repair"]
+    guard = repair["store_guard"]
+    auth = guard["expected_pair_adjudication_authorization"]
+    action = auth["actions"][0]
+    if mutation == "guard_sha":
+        guard["guard_sha256"] = "bad"
+    elif mutation in {"decision", "basis", "claim_sha", "step_sha"}:
+        key = {"decision": "reviewed_decision", "basis": "decision_basis",
+               "claim_sha": "claim_content_sha256", "step_sha": "evidence_content_sha256"}[mutation]
+        action[key] = "bad"
+        auth.pop("artifact_sha256")
+        auth["artifact_sha256"] = sha256_json(auth)
+        repair["pair_adjudication_authorization_sha256"] = auth["artifact_sha256"]
+        guard.pop("guard_sha256")
+        guard["guard_sha256"] = sha256_json(guard)
+    elif mutation in {"foreign_source", "fragment_text"}:
+        args["current_fragments"]["F2"]["source_id" if mutation == "foreign_source" else "verbatim_excerpt"] = "bad"
+    elif mutation == "step_text":
+        args["current_evidence"]["E2"]["statement"] = "未審新論據"
+    elif mutation == "nonreciprocal":
+        args["current_evidence"]["E2"]["produced_claim_ids"] = []
+    elif mutation == "unapplied":
+        args["versions"][-1]["status"] = "planned"
+    else:
+        args["current_claim"]["statement"] = "換了主張"
+        args["versions"][-1]["content_sha256"] = record_content_sha(args["current_claim"])
+    with pytest.raises(CvpProductionBlocked):
+        verify_historical_review_bridge(**args)
