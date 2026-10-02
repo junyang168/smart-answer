@@ -113,7 +113,7 @@ def normalized(text: str) -> str:
     return WHITESPACE_RUN.sub(" ", ELLIPSIS_RUN.sub("…", text or "")).strip()
 
 
-DEFAULT_MODEL = "gemini-3.7-flash"
+DEFAULT_MODEL = "gemini-3.8-flash"
 GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
 

@@ -15,6 +15,10 @@ AUDIT = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(AUDIT)
 
 
+def test_independent_audit_default_model_is_gemini_38_flash() -> None:
+    assert AUDIT.DEFAULT_MODEL == "gemini-3.8-flash"
+
+
 def test_modern_audit_uses_body_coordinates_and_body_identity(tmp_path: Path) -> None:
     script = [
         {"index": "subtitle-1", "type": "subtitle", "text": "## 编辑标题"},
