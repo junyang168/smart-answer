@@ -286,6 +286,7 @@ class SourceFile:
     def __init__(self, path: Path, source_type: str, source_document: dict[str, Any]) -> None:
         self.path = path
         self.source_type = source_type
+        self.visual_sources = list(source_document.get("visual_sources") or [])
         raw = path.read_bytes()
         self.sha256 = hashlib.sha256(raw).hexdigest()
         self.body_coordinates = str(source_document.get("locator_space") or "") == "spoken_body_v1"
@@ -384,6 +385,53 @@ class SourceFile:
         return excerpt == visual and (
             not visual_sha256
             or visual_sha256 == hashlib.sha256(visual.encode("utf-8")).hexdigest()
+        )
+
+    def linked_visual_matches(
+        self, segment: dict[str, Any] | None, excerpt: str, payload: dict[str, Any]
+    ) -> bool:
+        """Check a linked SVG against both the manuscript link and physical asset.
+
+        A descriptor is a locator, not proof. Reopen its file and verify the
+        exact Markdown span, URL, file hash and raw block instead of treating
+        SVG bytes as spoken text in the manuscript. No backend reader is used.
+        """
+        if segment is None or payload.get("source_modality") != "visual":
+            return False
+        locator = str(payload.get("visual_locator") or "")
+        matches = [v for v in self.visual_sources if v.get("locator") == locator]
+        if len(matches) != 1:
+            return False
+        visual = matches[0]
+        if visual.get("binding_kind") != "linked_svg_asset":
+            return False
+        for fragment_key, descriptor_key in (
+            ("visual_source_path", "source_path"),
+            ("visual_source_file_sha256", "source_file_sha256"),
+            ("visual_source_url", "source_url"),
+            ("visual_block_sha256", "raw_sha256"),
+        ):
+            if not payload.get(fragment_key) or payload[fragment_key] != visual.get(descriptor_key):
+                return False
+        text = str(segment.get("text") or "")
+        start, end = visual.get("char_start"), visual.get("char_end")
+        if not isinstance(start, int) or not isinstance(end, int) or not 0 <= start < end <= len(text):
+            return False
+        link = text[start:end]
+        url = str(visual.get("source_url") or "")
+        if not re.fullmatch(r"!?\[[^\]]*\]\(" + re.escape(url) + r"\)", link):
+            return False
+        try:
+            raw = Path(str(visual["source_path"])).read_bytes()
+            svg = raw.decode("utf-8")
+        except (OSError, UnicodeError):
+            return False
+        digest = hashlib.sha256(raw).hexdigest()
+        return bool(
+            digest == visual.get("source_file_sha256")
+            and digest == visual.get("raw_sha256")
+            and svg == visual.get("raw_svg") == excerpt
+            and SVG_BLOCK_PATTERN.fullmatch(svg.strip())
         )
 
 
@@ -542,7 +590,7 @@ def audit_verbatim(store: Store, sources: SourceIndex) -> dict[str, Any]:
             excerpt,
             visual_ordinal=visual_ordinal,
             visual_sha256=str(payload.get("visual_block_sha256") or ""),
-        ):
+        ) or source_file.linked_visual_matches(segment, excerpt, payload):
             located_by.append("visual_locator" if visual_ordinal else "paragraph_key")
 
         segment_index = payload.get("source_segment_index")
@@ -552,7 +600,7 @@ def audit_verbatim(store: Store, sources: SourceIndex) -> dict[str, Any]:
             excerpt,
             visual_ordinal=visual_ordinal,
             visual_sha256=str(payload.get("visual_block_sha256") or ""),
-        ):
+        ) or source_file.linked_visual_matches(by_index, excerpt, payload):
             located_by.append("source_segment_index")
 
         if located_by:

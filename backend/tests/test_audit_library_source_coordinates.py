@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import hashlib
 from pathlib import Path
 
 from backend.pipeline.source_projection import project_script
@@ -46,3 +47,37 @@ def test_visual_locator_requires_exact_block_and_sha(tmp_path: Path) -> None:
     sha = hashlib.sha256(svg.encode("utf-8")).hexdigest()
     assert source.excerpt_matches(segment, svg, visual_ordinal=1, visual_sha256=sha)
     assert not source.excerpt_matches(segment, svg, visual_ordinal=1, visual_sha256="0" * 64)
+
+
+def test_linked_svg_audit_reopens_asset_and_requires_exact_link(tmp_path: Path) -> None:
+    svg = '<svg><text>图</text></svg>'
+    asset = tmp_path / "diagram.svg"
+    asset.write_text(svg)
+    digest = hashlib.sha256(asset.read_bytes()).hexdigest()
+    url = "https://example.org/diagram.svg"
+    link = f"![图]({url})"
+    manuscript = tmp_path / "final.md"
+    manuscript.write_text(link)
+    descriptor = {
+        "locator": "S0001/V01", "binding_kind": "linked_svg_asset",
+        "source_path": str(asset), "source_url": url,
+        "source_file_sha256": digest, "raw_sha256": digest, "raw_svg": svg,
+        "char_start": 0, "char_end": len(link),
+    }
+    payload = {
+        "source_modality": "visual", "visual_locator": "S0001/V01",
+        "visual_source_path": str(asset), "visual_source_url": url,
+        "visual_source_file_sha256": digest, "visual_block_sha256": digest,
+    }
+    source = AUDIT.SourceFile(manuscript, "notes_manuscript", {"visual_sources": [descriptor]})
+    segment = source.by_ordinal(1)
+    assert source.linked_visual_matches(segment, svg, payload)
+    assert not source.linked_visual_matches({"text": "没有链接"}, svg, payload)
+    assert not source.linked_visual_matches(segment, svg, {**payload, "visual_block_sha256": "0" * 64})
+    assert not source.linked_visual_matches(segment, svg, {**payload, "visual_source_path": "/wrong.svg"})
+    assert not source.linked_visual_matches(segment, svg, {**payload, "source_modality": "spoken"})
+    source.visual_sources.append(descriptor)
+    assert not source.linked_visual_matches(segment, svg, payload)
+    source.visual_sources.pop()
+    asset.write_text('<svg><text>改图</text></svg>')
+    assert not source.linked_visual_matches(segment, svg, payload)
