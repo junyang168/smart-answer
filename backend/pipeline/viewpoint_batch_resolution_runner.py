@@ -1042,10 +1042,34 @@ def load_production_grouping(args: argparse.Namespace, *, scope_packet: dict[str
     return _read(args.grouping)
 
 
+def validate_shared_grouping_execution(
+    args: argparse.Namespace, *, scope_packet: dict[str, Any], freeze: dict[str, Any],
+) -> None:
+    """Accepted semantic grouping replaces the old capacity-partition plan.
+
+    It does not replace source qualification, corpus/Registry freezing, backup
+    authorization or exclusive execution. The accepted reference itself must
+    already be part of that production freeze.
+    """
+    repository = SharedGroupingRepository(args.grouping_repository)
+    path = repository.entry_path(args.accepted_grouping_sha)
+    binding = (freeze.get("prerequisites") or {}).get("reviewed_grouping_reference") or {}
+    import hashlib
+    if Path(str(binding.get("path") or "")).resolve() != path.resolve() or not path.is_file():
+        raise CvpProductionBlocked(["shared grouping reference is not bound into this production freeze"])
+    if hashlib.sha256(path.read_bytes()).hexdigest() != binding.get("sha256"):
+        raise CvpProductionBlocked(["freeze-bound shared grouping reference SHA drift"])
+    repository.admit(args.accepted_grouping_sha, scope_packet=scope_packet, freeze=freeze)
+
+
 def execute(args: argparse.Namespace) -> int:
     if bool(getattr(args, "accepted_grouping_sha", None)) != bool(getattr(args, "grouping_repository", None)):
         raise CvpProductionBlocked(["--accepted-grouping-sha and --grouping-repository must be supplied together"])
-    if not all(
+    accepted_mode = bool(getattr(args, "accepted_grouping_sha", None))
+    legacy_inputs = (getattr(args, "global_freeze", None), getattr(args, "partition_manifest", None), getattr(args, "partition_id", None))
+    if accepted_mode and any(legacy_inputs):
+        raise CvpProductionBlocked(["accepted semantic grouping cannot be mixed with the legacy capacity partition entrance"])
+    if not accepted_mode and not all(
         (getattr(args, "global_freeze", None), getattr(args, "partition_manifest", None), getattr(args, "partition_id", None))
     ):
         raise CvpProductionBlocked(["--global-freeze, --partition-manifest and --partition-id are required"])
@@ -1111,45 +1135,32 @@ def execute(args: argparse.Namespace) -> int:
         raise CvpProductionBlocked(
             ["--group-key cannot manually select a production canary"]
         )
-    global_freeze = _read(args.global_freeze)
-    validate_cvp_freeze(
-        global_freeze,
-        store=store,
-        cvp_policy_sha256=cvp_policy_sha256,
-        route_policy_sha256=route_policy_sha256,
-        runner_commit=str(global_freeze.get("runner_commit") or ""),
-        validate_registry=False,
-    )
-    manifest = _read(args.partition_manifest)
-    current_partition_policy = load_partition_policy(
-        getattr(args, "partition_policy", DEFAULT_PARTITION_POLICY)
-    )
-    if manifest.get("partition_policy_sha256") != sha256_json(current_partition_policy):
-        raise CvpProductionBlocked(["partition policy drift"])
-    claim_manifest_path = Path(
-        str(((global_freeze.get("prerequisites") or {}).get("claim_manifest") or {}).get("path") or "")
-    )
-    if not claim_manifest_path.is_file():
-        raise CvpProductionBlocked(["global freeze Claim manifest is missing"])
     scope_packet = _read(args.packet)
-    validate_partition_manifest(
-        manifest,
-        claim_manifest=_read(claim_manifest_path),
-        freeze=global_freeze,
-        cvp_policy_sha256=cvp_policy_sha256,
-        store=store,
-        partition_id=args.partition_id,
-        scope_packet=scope_packet,
-        partition_freeze=freeze,
-    )
-    if int(manifest["partition_policy"]["max_request_bytes"]) != int(cvp_policy["max_request_bytes"]):
-        raise CvpProductionBlocked(["partition ceiling differs from CVP policy"])
-    args.partition_claim_ids = [
-        row["claim_id"]
-        for partition in manifest["partitions"]
-        if partition["partition_id"] == args.partition_id
-        for row in partition["claims"]
-    ]
+    if accepted_mode:
+        validate_shared_grouping_execution(args, scope_packet=scope_packet, freeze=freeze)
+        args.partition_claim_ids = [row["claim_id"] for row in scope_packet["claims"]]
+    else:
+        global_freeze = _read(args.global_freeze)
+        validate_cvp_freeze(
+            global_freeze, store=store, cvp_policy_sha256=cvp_policy_sha256,
+            route_policy_sha256=route_policy_sha256,
+            runner_commit=str(global_freeze.get("runner_commit") or ""), validate_registry=False,
+        )
+        manifest = _read(args.partition_manifest)
+        current_partition_policy = load_partition_policy(getattr(args, "partition_policy", DEFAULT_PARTITION_POLICY))
+        if manifest.get("partition_policy_sha256") != sha256_json(current_partition_policy):
+            raise CvpProductionBlocked(["partition policy drift"])
+        claim_manifest_path = Path(str(((global_freeze.get("prerequisites") or {}).get("claim_manifest") or {}).get("path") or ""))
+        if not claim_manifest_path.is_file():
+            raise CvpProductionBlocked(["global freeze Claim manifest is missing"])
+        validate_partition_manifest(
+            manifest, claim_manifest=_read(claim_manifest_path), freeze=global_freeze,
+            cvp_policy_sha256=cvp_policy_sha256, store=store, partition_id=args.partition_id,
+            scope_packet=scope_packet, partition_freeze=freeze,
+        )
+        if int(manifest["partition_policy"]["max_request_bytes"]) != int(cvp_policy["max_request_bytes"]):
+            raise CvpProductionBlocked(["partition ceiling differs from CVP policy"])
+        args.partition_claim_ids = [row["claim_id"] for partition in manifest["partitions"] if partition["partition_id"] == args.partition_id for row in partition["claims"]]
     claim_output_ownership(
         output_root=args.output_dir, freeze=freeze, runner_commit=runner_commit
     )

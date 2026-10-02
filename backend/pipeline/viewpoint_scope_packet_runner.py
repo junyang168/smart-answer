@@ -51,9 +51,16 @@ from backend.api.canonical_repository.viewpoint_claim_repin import (
 from backend.api.canonical_repository.viewpoint_source_attestation import (
     IdentitySourceEligibilityArtifact,
 )
+from backend.pipeline.viewpoint_historical_source_eligibility import HistoricalSourceEligibilityArtifact
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SCOPE_PACKET_VERSION = "wang_canonical_viewpoint_scope_packet_v3"
+
+
+def load_source_eligibility(payload: dict[str, Any]):
+    if payload.get("schema_version") == "wang_historical_viewpoint_source_eligibility_v1":
+        return HistoricalSourceEligibilityArtifact.model_validate(payload)
+    return IdentitySourceEligibilityArtifact.model_validate(payload)
 
 
 def _read(path: Path) -> dict[str, Any]:
@@ -193,7 +200,7 @@ def build_scope_packet(
     scope_label: str,
     passage_unit_ids: list[str],
     claim_manifest: dict[str, Any],
-    source_attestation: IdentitySourceEligibilityArtifact,
+    source_attestation: IdentitySourceEligibilityArtifact | HistoricalSourceEligibilityArtifact,
     repository_root: Path,
     database_url: str | None,
     partition_claim_ids: Sequence[str] | None = None,
@@ -516,9 +523,7 @@ def main() -> int:
         scope_label=scope_label,
         passage_unit_ids=args.passage_unit_id or [],
         claim_manifest=_read(args.claim_manifest),
-        source_attestation=IdentitySourceEligibilityArtifact.model_validate(
-            _read(args.source_attestation)
-        ),
+        source_attestation=load_source_eligibility(_read(args.source_attestation)),
         repository_root=args.repository_root,
         database_url=args.database_url,
         partition_claim_ids=partition_claim_ids,

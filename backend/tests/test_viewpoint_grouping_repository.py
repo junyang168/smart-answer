@@ -7,7 +7,7 @@ import pytest
 
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.api.canonical_repository.viewpoint_production_safety import CvpProductionBlocked
-from backend.pipeline.viewpoint_batch_resolution_runner import load_production_grouping
+from backend.pipeline.viewpoint_batch_resolution_runner import load_production_grouping, validate_shared_grouping_execution
 from backend.pipeline.viewpoint_grouping_repository import SharedGroupingRepository
 from backend.tests.test_viewpoint_reviewed_grouping import inputs
 
@@ -76,7 +76,7 @@ def test_runner_reads_same_shared_groups_without_model_call(tmp_path):
     args, repository, digest = setup_repository(tmp_path)
     namespace = argparse.Namespace(accepted_grouping_sha=digest, grouping_repository=repository.root)
     envelope = load_production_grouping(namespace, scope_packet=args["scope_packet"], freeze=args["freeze"])
-    assert envelope["grouping"]["groups"] == args["manifest"]["groups"]
+    assert envelope["grouping"]["groups"] == [{key: group[key] for key in ("group_key", "claim_ids", "rationale")} for group in args["manifest"]["groups"]]
     assert envelope["grouping_reexecuted"] is False
     assert envelope["freeze_sha256"] == args["freeze"]["artifact_sha256"]
 
@@ -101,3 +101,19 @@ def test_repository_denominator_tampering_rejected_even_if_resealed(tmp_path):
     path.write_text(json.dumps(entry), encoding="utf-8")
     with pytest.raises(CvpProductionBlocked, match="denominator"):
         repository.load(digest)
+
+
+def test_shared_execution_requires_freeze_bound_repository_reference(tmp_path):
+    import hashlib
+    args, repository, digest = setup_repository(tmp_path)
+    namespace = argparse.Namespace(accepted_grouping_sha=digest, grouping_repository=repository.root)
+    with pytest.raises(CvpProductionBlocked, match="not bound"):
+        validate_shared_grouping_execution(namespace, scope_packet=args["scope_packet"], freeze=args["freeze"])
+    path = repository.entry_path(digest)
+    freeze = args["freeze"] | {"prerequisites": {"reviewed_grouping_reference": {
+        "path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+    }}}
+    validate_shared_grouping_execution(namespace, scope_packet=args["scope_packet"], freeze=freeze)
+    freeze["prerequisites"]["reviewed_grouping_reference"]["sha256"] = "different"
+    with pytest.raises(CvpProductionBlocked, match="SHA drift"):
+        validate_shared_grouping_execution(namespace, scope_packet=args["scope_packet"], freeze=freeze)

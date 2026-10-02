@@ -20,10 +20,11 @@ def inputs(tmp_path):
     source.write_text("原母本", encoding="utf-8")
     asset = tmp_path / "diagram.svg"
     asset.write_text("<svg>原圖</svg>", encoding="utf-8")
-    groups = [{"group_key": "p001", "claim_ids": ["C1"], "rationale": "原論證邊界"}]
+    groups = [{"group_key": "p001", "claim_ids": ["C1"], "rationale": "原論證邊界", "unit_id": "u1"}]
     manifest = seal({
         "schema_version": "wang_exegesis_grouping_manifest_v1", "status": "complete",
         "scope": "Matthew only", "groups": groups, "unresolved": [], "unprocessed_unit_ids": [],
+        "units": [{"unit_id": "u1", "passage_key": "Matt.1.1-Matt.1.17"}],
         "sources": [{"source_id": "S1", "path": str(source), "file_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
                      "linked_files": [{"path": str(asset), "file_sha256": hashlib.sha256(asset.read_bytes()).hexdigest()}]}],
         "claim_packets": [{"claim_id": "C1", "source_id": "S1", "statement": "原主張",
@@ -60,7 +61,7 @@ def inputs(tmp_path):
 def test_lossless_admission_retains_boundaries_and_order(tmp_path):
     args = inputs(tmp_path)
     envelope = admit_reviewed_grouping(**args)
-    assert envelope["grouping"]["groups"] == args["manifest"]["groups"]
+    assert envelope["grouping"]["groups"] == [{key: group[key] for key in ("group_key", "claim_ids", "rationale")} for group in args["manifest"]["groups"]]
     assert envelope["grouping_reexecuted"] is False
     assert envelope["coverage_repairs"] == []
     assert envelope["upstream_reviewer_model"] == "gpt-6.1-sol"
