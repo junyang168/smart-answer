@@ -399,6 +399,9 @@ class SourceFile:
         if segment is None or payload.get("source_modality") != "visual":
             return False
         locator = str(payload.get("visual_locator") or "")
+        parent = re.fullmatch(r"S(\d+)/V\d+", locator)
+        if not parent or segment is not self.by_ordinal(int(parent.group(1))):
+            return False
         matches = [v for v in self.visual_sources if v.get("locator") == locator]
         if len(matches) != 1:
             return False
@@ -937,12 +940,15 @@ def _audit_claim_occurrence_anchors(
                 visual_ordinal = int(match.group(2)) if match and match.group(2) else None
                 if segment is None:
                     findings.append({**base, "verdict": "locator_unresolved"})
-                elif excerpt and not source_file.excerpt_matches(
+                elif excerpt and not (source_file.excerpt_matches(
                     segment,
                     excerpt,
                     visual_ordinal=visual_ordinal,
                     visual_sha256=str(anchor.get("visual_block_sha256") or ""),
-                ):
+                ) or (
+                    anchor.get("visual_locator") == key
+                    and source_file.linked_visual_matches(segment, excerpt, anchor)
+                )):
                     findings.append({**base, "verdict": "excerpt_mismatch", "excerpt": excerpt[:120]})
     return {"checked": checked, "resolved": checked - len(findings), "findings": findings[:200]}
 

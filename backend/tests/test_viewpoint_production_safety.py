@@ -40,6 +40,31 @@ class FakeStore:
         return [dict(row) for row in self.rows[collection]]
 
 
+@pytest.mark.parametrize("changed", [None, "source_modality", "visual_locator", "visual_block_sha256", "visual_facts"])
+def test_scope_validation_preserves_visual_evidence(tmp_path, changed):
+    store, packet_path, _ = _fixture(tmp_path)
+    packet = json.loads(packet_path.read_text(encoding="utf-8"))
+    visual = {
+        "source_modality": "visual", "visual_locator": "SVG01",
+        "visual_block_sha256": "svg-sha", "visual_facts": [{"kind": "label", "text": "八福"}],
+    }
+    store.rows["source_fragments"][0].update(visual)
+    evidence = packet["claims"][0]["evidence"][0]
+    evidence.update(visual)
+    if changed == "source_modality":
+        for field in visual:
+            evidence.pop(field)
+    elif changed:
+        evidence[changed] = [{"kind": "label", "text": "改寫"}] if changed == "visual_facts" else "changed"
+    packet.pop("packet_sha256")
+    packet["packet_sha256"] = sha256_json(packet)
+    findings = _validate_scope_packet(packet, store)
+    if changed:
+        assert any("evidence projection drift" in finding for finding in findings)
+    else:
+        assert findings == []
+
+
 def _write_json(path: Path, payload: dict) -> Path:
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     return path

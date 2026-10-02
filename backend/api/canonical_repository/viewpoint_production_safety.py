@@ -290,6 +290,18 @@ def _validate_scope_packet(scope_packet: Mapping[str, Any], store: Any) -> list[
                 "source_sha256": item.source_sha256,
                 "anchor_state": item.anchor_state,
             }
+            # SVG evidence must not silently become a spoken quotation. Compare
+            # the typed provenance, including literal facts, on every freeze
+            # validation, not only when initially compiling the packet.
+            for field in ("source_modality", "visual_locator", "visual_block_sha256", "visual_facts"):
+                expected_evidence_projection[field] = getattr(fragment, field, None)
+                actual_evidence_projection[field] = getattr(item, field, None)
+            # Historical spoken fragments use either None or "spoken"; the
+            # review projection deliberately omits that default.
+            if expected_evidence_projection["source_modality"] != "visual":
+                expected_evidence_projection["source_modality"] = None
+                if not expected_evidence_projection["visual_facts"]:
+                    expected_evidence_projection["visual_facts"] = None
             if actual_evidence_projection != expected_evidence_projection:
                 findings.append(
                     f"{claim.claim_id}/{item.evidence_step_id}/"
@@ -620,6 +632,52 @@ def build_batch_identity(
     }
 
 
+def validate_reviewed_grouping_bindings(
+    bindings: Mapping[str, Any], *, manifest_sha256: str,
+) -> dict[str, dict[str, Any]]:
+    """Reopen the four upstream artifacts; a cached acceptance is not enough."""
+    roles = {"manifest", "validation", "acceptance", "physical_review"}
+    if not isinstance(bindings, Mapping) or set(bindings) != roles:
+        raise CvpProductionBlocked(["reviewed grouping requires all four upstream bindings"])
+    artifacts: dict[str, dict[str, Any]] = {}
+    for role in sorted(roles):
+        binding = bindings[role]
+        try:
+            path = Path(binding["path"])
+            if not path.is_absolute() or file_sha256(path) != binding["file_sha256"]:
+                raise CvpProductionBlocked([f"reviewed grouping {role}: physical SHA drift"])
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            validate_content_addressed(payload, "artifact_sha256")
+            if payload["artifact_sha256"] != binding["artifact_sha256"]:
+                raise CvpProductionBlocked([f"reviewed grouping {role}: artifact SHA drift"])
+            artifacts[role] = payload
+        except (KeyError, TypeError, OSError, json.JSONDecodeError) as exc:
+            raise CvpProductionBlocked([f"reviewed grouping {role}: unreadable binding"]) from exc
+    manifest, acceptance = artifacts["manifest"], artifacts["acceptance"]
+    if (
+        manifest["artifact_sha256"] != manifest_sha256
+        or acceptance.get("manifest_sha256") != manifest_sha256
+        or artifacts["physical_review"].get("manifest_sha256") != manifest_sha256
+        or acceptance.get("job_validation_sha256") != artifacts["validation"]["artifact_sha256"]
+        or acceptance.get("physical_review_evidence_sha256") != artifacts["physical_review"]["artifact_sha256"]
+    ):
+        raise CvpProductionBlocked(["reviewed grouping upstream lineage drift"])
+    source_rows = manifest.get("sources") or []
+    source_ids = [row.get("source_id") for row in source_rows]
+    selected_sources = {row["source_id"] for row in manifest["claim_packets"]}
+    if set(source_ids) != selected_sources or len(source_ids) != len(set(source_ids)):
+        raise CvpProductionBlocked(["reviewed grouping physical source denominator differs"])
+    for source in source_rows:
+        for binding in [source, *(source.get("linked_files") or [])]:
+            try:
+                path = Path(binding["path"])
+                if not path.is_absolute() or file_sha256(path) != binding["file_sha256"]:
+                    raise CvpProductionBlocked([f"{source['source_id']}: physical source/linked asset SHA drift"])
+            except (KeyError, TypeError, OSError) as exc:
+                raise CvpProductionBlocked([f"{source['source_id']}: missing physical source/linked asset"]) from exc
+    return artifacts
+
+
 def validate_grouping_envelope(
     envelope: Mapping[str, Any], *, freeze: Mapping[str, Any]
 ) -> str:
@@ -637,6 +695,26 @@ def validate_grouping_envelope(
         findings.append("grouping belongs to another scope packet")
     if envelope.get("cvp_policy_sha256") != freeze.get("cvp_policy_sha256"):
         findings.append("grouping belongs to another CVP policy")
+    if "upstream_bindings" in envelope and envelope.get("admission_kind") != "independently_accepted_exegesis_grouping":
+        findings.append("reviewed grouping admission kind may not be removed or changed")
+    if envelope.get("admission_kind") == "independently_accepted_exegesis_grouping":
+        try:
+            upstream = validate_reviewed_grouping_bindings(
+                envelope.get("upstream_bindings"),
+                manifest_sha256=str(envelope.get("upstream_manifest_sha256") or ""),
+            )
+            original_groups = [
+                {key: row[key] for key in ("group_key", "claim_ids", "rationale")}
+                for row in upstream["manifest"]["groups"]
+            ]
+            if (envelope.get("grouping") or {}).get("groups") != original_groups:
+                findings.append("reviewed grouping boundaries/order differ from accepted manifest")
+            if envelope.get("grouping_reexecuted") is not False:
+                findings.append("reviewed grouping must not be reexecuted")
+        except CvpProductionBlocked as exc:
+            findings.extend(exc.findings)
+        except (KeyError, TypeError):
+            findings.append("reviewed grouping upstream shape is invalid")
     if findings:
         raise CvpProductionBlocked(findings)
     return stated
