@@ -42,6 +42,69 @@ def _read_binding(binding: Mapping[str, str]) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _sealed_adjudicated_bridge(*, claim_id, current_claim, item, resolution, versions,
+                              current_evidence, current_fragments, review_binding,
+                              review_input_binding, sealed_lineage_binding):
+    """Reuse modern source eligibility, not an imaginary historical pass.
+
+    This branch only accepts the exact applied sealed final candidate; it
+    does not extend coordinate/semantic drift privileges to adjudicated data.
+    """
+    from backend.api.canonical_repository.knowledge_models import ClaimRecord
+    from backend.api.canonical_repository.viewpoint_foundation import semantic_record_sha
+    from backend.api.canonical_repository.viewpoint_source_attestation import build_source_eligibility_artifact
+    final=item['payload']; normalized,_=_normalize_records(final)
+    reviewed=normalized.get('claims',{}).get(claim_id)
+    if not reviewed or _meaning(reviewed)!=_meaning(current_claim):
+        raise CvpProductionBlocked([f'{claim_id}: sealed adjudicated final Claim differs from current generation'])
+    for eid in reviewed['evidence_step_ids']:
+        if eid not in current_evidence or _meaning(current_evidence[eid])!=_meaning(normalized['evidence_steps'][eid]):
+            raise CvpProductionBlocked([f'{claim_id}: sealed adjudicated evidence drift'])
+        for fid in evidence_fragment_ids(EvidenceStepRecord.model_validate(current_evidence[eid])):
+            if fid not in current_fragments or _fragment_meaning(current_fragments[fid])!=_fragment_meaning(normalized['source_fragments'].get(fid,{})):
+                raise CvpProductionBlocked([f'{claim_id}: sealed adjudicated fragment drift'])
+    chain=sorted(versions,key=lambda v:v['revision'])
+    for row in chain:
+        if row.get('status')!='applied' or record_content_sha(row['payload'])!=row['content_sha256'] or row['payload'].get('revision')!=row['revision']:
+            raise CvpProductionBlocked([f'{claim_id}: adjudicated history is not an authenticated applied chain'])
+    if not chain or chain[-1]['payload']!=dict(current_claim) or chain[-1]['revision']!=current_claim['revision']:
+        raise CvpProductionBlocked([f'{claim_id}: adjudicated history is not current'])
+    review=item['review_payload']; adjudication=item['adjudication_payload']
+    review_rows=[r for r in review.get('claim_reviews',[]) if r.get('claim_id')==claim_id]
+    results=[r for r in adjudication.get('results',[]) if r.get('claim_id')==claim_id]
+    if len(review_rows)!=1 or len(results)!=1:
+        raise CvpProductionBlocked([f'{claim_id}: adjudicated review coverage is not exact-once'])
+    if review_rows[0].get('spot_check_selected') or review_rows[0].get('human_review_reason') or review_rows[0].get('routing_status')=='human_spot_check':
+        raise CvpProductionBlocked([f'{claim_id}: adjudication cannot override historical human hold'])
+    manifest={'claims':[{'claim_id':claim_id,'pinned_claim_revision':current_claim['revision'],
+                        'claim_revision_sha256':semantic_record_sha(ClaimRecord.model_validate(current_claim))}]}
+    manifest['manifest_sha256']=sha256_json(manifest)
+    sha=lambda key:hashlib.sha256(Path(item[key]).read_bytes()).hexdigest()
+    artifact=build_source_eligibility_artifact(claim_manifest=manifest,claims=[dict(current_claim)],
+        evidence_steps=list(current_evidence.values()),source_fragments=list(current_fragments.values()),
+        reviewed_packages_by_claim_id={claim_id:{'payload':final,'artifact_sha256':item['application']['artifact_sha256'],'file_sha256':sha('path'),'path':str(item['path'])}},
+        reviews_by_claim_id={claim_id:{'payload':review,'claim_review':review_rows[0],
+            'review_input_artifact_sha256':item['review_input_sha256'],'artifact_sha256':sha('review_path'),'path':str(item['review_path']),
+            'adjudication_payload':adjudication,'adjudication_result':results[0],
+            'adjudication_artifact_sha256':sha('adjudication_path'),'overrides_artifact_sha256':sha('overrides_path')}})
+    if artifact.exceptions or len(artifact.attestations)!=1:
+        raise CvpProductionBlocked([f'{claim_id}: modern sealed source eligibility rejected: {artifact.exceptions}'])
+    body={'schema_version':'wang_historical_claim_review_bridge_v1','status':'verified','claim_id':claim_id,
+        'pinned_claim_revision':current_claim['revision'],'claim_revision_sha256':record_content_sha(current_claim),
+        'review_binding':dict(review_binding),'review_input_binding':dict(review_input_binding),
+        'sealed_lineage_binding':dict(sealed_lineage_binding),
+        'review_model_id':resolution['reviewer_id'],'review_provider':review['reviewer']['provider'],
+        'reviewer_fingerprint_sha256':review['reviewer']['fingerprint_sha256'],
+        'reviewed_applied_revision':chain[-1]['revision'],'reviewed_applied_change_set_id':chain[-1]['change_set_id'],
+        'coordinate_repairs':[],'authority_kind':'sealed_adjudicated_final_candidate_not_initial_review_pass',
+        'independent_review_decision':resolution['independent_review_decision'],'adjudication_status':resolution['adjudication_status'],
+        'modern_source_eligibility':artifact.model_dump(mode='json'),
+        'evidence_dependency_sha256':sha256_json({eid:record_content_sha(p) for eid,p in sorted(current_evidence.items())}),
+        'fragment_dependency_sha256':sha256_json({fid:record_content_sha(p) for fid,p in sorted(current_fragments.items())}),
+        'master_data_mutations':0,'model_calls_executed':0,'approval_status':'not_human_approved'}
+    return body|{'artifact_sha256':sha256_json(body)}
+
+
 def verify_historical_review_bridge(
     *, claim_id: str, current_claim: Mapping[str, Any],
     review_binding: Mapping[str, str], review_input_binding: Mapping[str, str],
@@ -71,6 +134,12 @@ def verify_historical_review_bridge(
         if item is None or item["review_payload"] != review or item["review_input_payload"] != package:
             raise CvpProductionBlocked([f"{claim_id}: sealed lineage binds another review generation"])
         resolution = next((row for row in item["application"]["review_resolutions"] if row["claim_id"] == claim_id), {})
+        if resolution.get('target_review_status')=='ai_consensus_reviewed' and resolution.get('adjudication_status')=='auto_applied' and resolution.get('independent_review_decision')=='changes_suggested':
+            if human_closure_binding is not None:
+                raise CvpProductionBlocked([f'{claim_id}: automatic adjudication cannot override a human hold'])
+            return _sealed_adjudicated_bridge(claim_id=claim_id,current_claim=current_claim,item=item,resolution=resolution,versions=versions,
+                current_evidence=current_evidence,current_fragments=current_fragments,review_binding=review_binding,
+                review_input_binding=review_input_binding,sealed_lineage_binding=sealed_lineage_binding)
         if resolution.get("target_review_status") != "ai_consensus_reviewed" or resolution.get("adjudication_status") != "not_required" or resolution.get("independent_review_decision") != "pass":
             raise CvpProductionBlocked([f"{claim_id}: sealed review does not resolve this passing Claim"])
         sealed_model = resolution.get("reviewer_id")
