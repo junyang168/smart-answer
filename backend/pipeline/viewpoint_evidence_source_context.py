@@ -53,8 +53,12 @@ def compile_source_context(evidence, source, loaded=None):
         raise ValueError("context paragraph is outside registered source")
     text = str(projection.spoken_rows[index].get("text") or "")
     quote = evidence.verbatim_excerpt
-    if not quote or text.count(quote) != 1:
-        raise ValueError("context excerpt must occur exactly once in its own live paragraph")
+    if not quote or quote not in text:
+        raise ValueError("context excerpt must occur in its own live paragraph")
+    # A speaker may repeat the same sentence in one paragraph. These offsets
+    # locate an exact copy for context validation, not a new source occurrence
+    # or citation authority. Select the first copy deterministically; retain
+    # the entire paragraph and all original evidence/fragment identities.
     start = text.index(quote)
     return EvidenceSourceContext(source_id=evidence.source_id, source_path=str(path),
         source_file_sha256=file_sha, source_body_sha256=projection.body_sha256,

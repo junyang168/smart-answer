@@ -41,6 +41,39 @@ def test_file_drift_stops(tmp_path):
         compile_source_context(evidence, source)
 
 
+def test_repeated_quote_in_same_paragraph_keeps_full_context(tmp_path):
+    source, evidence, path, _ = fixture(tmp_path)
+    quote = evidence.verbatim_excerpt
+    text = quote + "這裡再次強調：" + quote
+    path.write_text("## 標題\n\n" + text + "\n", encoding="utf-8")
+    source["source_file_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    payload, _, _ = markdown_source_document(source)
+    source["source_body_sha256"] = project_script(payload["script"]).body_sha256
+    context = compile_source_context(evidence, source)
+    assert context.paragraph_text == text
+    assert context.paragraph_text.count(quote) == 2
+    assert context.excerpt_start_char == 0
+    assert context.excerpt_end_char == len(quote)
+    assert evidence.verbatim_excerpt == quote
+    evidence.source_context = context
+    verify_source_context(evidence, source)
+    # Another literal copy is not the deterministic packet binding.
+    evidence.source_context = context.model_copy(update={
+        "excerpt_start_char": text.rindex(quote), "excerpt_end_char": len(text)})
+    with pytest.raises(ValueError, match="registered physical"):
+        verify_source_context(evidence, source)
+
+
+def test_quote_in_other_paragraph_cannot_supply_context(tmp_path):
+    source, evidence, path, _ = fixture(tmp_path)
+    path.write_text("這是第一段。\n\n" + evidence.verbatim_excerpt + "\n", encoding="utf-8")
+    source["source_file_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    payload, _, _ = markdown_source_document(source)
+    source["source_body_sha256"] = project_script(payload["script"]).body_sha256
+    with pytest.raises(ValueError, match="own live paragraph"):
+        compile_source_context(evidence, source)
+
+
 @pytest.mark.parametrize("mutation", ["source", "paragraph", "quote", "body", "locator"])
 def test_wrong_binding_stops(tmp_path, mutation):
     source, evidence, _, _ = fixture(tmp_path)
