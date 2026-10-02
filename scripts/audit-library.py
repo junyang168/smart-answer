@@ -1895,7 +1895,10 @@ def audit_viewpoints(
                 for b in link.get("evidence_bindings") or []
                 if b.get("source_fragment_id")
             ]
-            paragraphs = _paragraphs_for_fragments(fragment_ids, fragments, sources, limit=2)
+            # Identity review needs the complete bound originals, just as Claim
+            # review does. A two-paragraph window can omit later bound evidence
+            # and turn our own truncation into an apparent content disagreement.
+            paragraphs, _ = _whole_sources_for_claim(fragment_ids, fragments, sources)
             source_block = "\n".join(f"    【原文】{p}" for p in paragraphs) or "    （沒有可讀的原文段落）"
             blocks.append(
                 f"- 主張 [{claim_id}]（連結類型 {link.get('link_type')}）\n"
