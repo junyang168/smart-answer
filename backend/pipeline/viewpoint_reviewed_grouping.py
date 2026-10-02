@@ -18,7 +18,7 @@ from backend.api.canonical_repository.viewpoint_production_safety import (
     CVP_GROUPING_ENVELOPE_VERSION, CvpProductionBlocked,
     validate_content_addressed, validate_grouping_envelope,
     validate_reviewed_grouping_bindings,
-    accepted_grouping_canary,
+    accepted_grouping_canary, accepted_grouping_phase_group,
     accepted_grouping_in_passage_order,
 )
 
@@ -96,9 +96,9 @@ def admit_reviewed_grouping(
     all_frozen_claims = dict(frozen_claims)
     stage = scope_packet.get("accepted_grouping_stage")
     if stage is not None:
-        if stage != "canary" or freeze.get("accepted_grouping_stage") != stage:
+        if freeze.get("accepted_grouping_stage") != stage:
             raise CvpProductionBlocked(["canary admission requires an explicitly phased freeze"])
-        selected_group = accepted_grouping_canary(manifest)
+        selected_group = accepted_grouping_phase_group(manifest, stage)
         frozen_claims = {cid: frozen_claims[cid] for cid in selected_group["claim_ids"]}
     current_claims = {row["claim_id"]: row for row in scope_packet["claims"]}
     if len(all_frozen_claims) != len(manifest["claim_packets"]) or len(current_claims) != len(scope_packet["claims"]):
@@ -131,7 +131,7 @@ def admit_reviewed_grouping(
             old = prior_steps[step["evidence_step_id"]]
             if old.get("statement") != step.get("evidence_statement") or sorted(set(old.get("scripture_refs") or [])) != step.get("scripture_refs", []):
                 raise CvpProductionBlocked([f"{claim_id}: reviewed EvidenceStep semantics drift"])
-    group_rows = [selected_group] if stage == "canary" else accepted_grouping_in_passage_order(manifest)
+    group_rows = [selected_group] if stage is not None else accepted_grouping_in_passage_order(manifest)
     groups = [{key: group[key] for key in ("group_key", "claim_ids", "rationale")} for group in group_rows]
     counts = Counter(claim_id for group in groups for claim_id in group["claim_ids"])
     if set(counts) != set(current_claims) or any(count != 1 for count in counts.values()):
@@ -159,8 +159,8 @@ def admit_reviewed_grouping(
         "upstream_reviewer_model": acceptance["reviewer_model"],
         "grouping_reexecuted": False,
     }
-    if stage == "canary":
-        body.update(accepted_grouping_stage="canary", parent_claim_count=len(all_frozen_claims),
+    if stage is not None:
+        body.update(accepted_grouping_stage=stage, parent_claim_count=len(all_frozen_claims),
                     parent_group_count=len(manifest["groups"]),
                     deferred_claim_ids=sorted(set(all_frozen_claims) - set(current_claims)))
     result = body | {"artifact_sha256": sha256_json(body)}

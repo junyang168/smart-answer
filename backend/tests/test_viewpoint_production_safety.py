@@ -6,6 +6,21 @@ from types import SimpleNamespace
 
 import pytest
 
+
+def test_single_group_phase_preserves_accepted_boundary_and_parent():
+    from backend.api.canonical_repository.viewpoint_production_safety import accepted_grouping_phase_group, accepted_grouping_audit_scope
+    manifest = {'units':[{'unit_id':'a','passage_key':'Matt.1.1-Matt.1.17'}, {'unit_id':'b','passage_key':'Matt.1.1-Matt.4.17'}],
+                'groups':[{'group_key':'first','unit_id':'a','claim_ids':['c1','c2']}, {'group_key':'second','unit_id':'b','claim_ids':['c3']}],
+                'claim_packets':[{'claim_id':'c1','source_id':'s1'}, {'claim_id':'c2','source_id':'s2'}, {'claim_id':'c3','source_id':'s1'}], 'artifact_sha256':'parent'}
+    assert accepted_grouping_phase_group(manifest,'group:second') == manifest['groups'][1]
+    scoped = accepted_grouping_audit_scope(manifest,'group:second')
+    assert [r['claim_id'] for r in scoped['claim_packets']] == ['c3']
+    assert scoped['artifact_sha256'] == 'parent' and len(manifest['claim_packets']) == 3
+    with pytest.raises(CvpProductionBlocked):
+        accepted_grouping_phase_group(manifest,'group:missing')
+    with pytest.raises(CvpProductionBlocked):
+        accepted_grouping_phase_group(manifest,'unsupported')
+
 from backend.api.canonical_repository.knowledge_models import ClaimRecord
 from backend.api.canonical_repository.viewpoint_foundation import (
     semantic_record_sha,

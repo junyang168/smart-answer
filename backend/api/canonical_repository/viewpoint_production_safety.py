@@ -412,12 +412,23 @@ def accepted_grouping_canary(manifest: Mapping[str, Any]) -> dict[str, Any]:
     return first
 
 
+def accepted_grouping_phase_group(manifest: Mapping[str, Any], stage: str) -> dict[str, Any]:
+    """Select one intact accepted group, never an operator-edited Claim subset."""
+    if stage == "canary":
+        return accepted_grouping_canary(manifest)
+    if not stage.startswith("group:"):
+        raise CvpProductionBlocked(["unsupported accepted grouping admission stage"])
+    key = stage[len("group:"):]
+    rows = [g for g in accepted_grouping_in_passage_order(manifest) if g["group_key"] == key]
+    if len(rows) != 1 or key == RESIDUAL_GROUP_KEY or not 1 <= len(rows[0]["claim_ids"]) <= 20:
+        raise CvpProductionBlocked(["invalid intact accepted group phase"])
+    return rows[0]
+
+
 def accepted_grouping_audit_scope(manifest: Mapping[str, Any], stage: str | None) -> dict[str, Any]:
     if stage is None:
         return dict(manifest)
-    if stage != "canary":
-        raise CvpProductionBlocked(["unsupported accepted grouping admission stage"])
-    ids = set(accepted_grouping_canary(manifest)["claim_ids"])
+    ids = set(accepted_grouping_phase_group(manifest, stage)["claim_ids"])
     # This is a derived scope over the original manifest, not a new manifest.
     # Its artifact_sha256 deliberately names the unchanged parent artifact.
     return dict(manifest) | {"claim_packets": [row for row in manifest["claim_packets"] if row["claim_id"] in ids]}
@@ -590,9 +601,9 @@ def build_cvp_freeze(
         "status": "frozen",
     }
     if "accepted_grouping_stage" in scope_packet:
-        if scope_packet["accepted_grouping_stage"] != "canary":
+        if scope_packet["accepted_grouping_stage"] != "canary" and not str(scope_packet["accepted_grouping_stage"]).startswith("group:"):
             raise CvpProductionBlocked(["unsupported accepted grouping admission stage"])
-        body["accepted_grouping_stage"] = "canary"
+        body["accepted_grouping_stage"] = scope_packet["accepted_grouping_stage"]
     return body | {"artifact_sha256": sha256_json(body)}
 
 
@@ -824,10 +835,11 @@ def validate_grouping_envelope(
                 {key: row[key] for key in ("group_key", "claim_ids", "rationale")}
                 for row in accepted_grouping_in_passage_order(upstream["manifest"])
             ]
-            if envelope.get("accepted_grouping_stage") == "canary":
-                if freeze.get("accepted_grouping_stage") != "canary":
+            stage = envelope.get("accepted_grouping_stage")
+            if stage is not None:
+                if freeze.get("accepted_grouping_stage") != stage:
                     findings.append("canary grouping requires an explicitly phased freeze")
-                canary = accepted_grouping_canary(upstream["manifest"])
+                canary = accepted_grouping_phase_group(upstream["manifest"], stage)
                 original_groups = [{key: canary[key] for key in ("group_key", "claim_ids", "rationale")}]
                 if envelope.get("parent_claim_count") != len(upstream["manifest"]["claim_packets"]) or envelope.get("parent_group_count") != len(upstream["manifest"]["groups"]):
                     findings.append("canary parent denominator drift")
