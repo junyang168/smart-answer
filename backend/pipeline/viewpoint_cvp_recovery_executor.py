@@ -284,7 +284,7 @@ def continuation_inputs(root, output, extra_completion=None):
     return argv
 
 
-def resume_after_repair(root, attempt, recovery_root, executable):
+def resume_after_repair(root, attempt, recovery_root, executable, *, additional_proof_bindings=()):
     cfg, schedule, manifest, groups = load_campaign(root)
     state = read(root / "progress.json")
     group_root = root / f"g{state['sequence']:03d}"
@@ -305,6 +305,11 @@ def resume_after_repair(root, attempt, recovery_root, executable):
                     "--viewpoint-ids", ",".join(targets), "--workers", "2", "--model", "gemini-3.8-flash",
                     "--out", audit_dir, "--no-status-file"], attempt, "independent-reaudit")
         extra = verify_group_audit(root, cfg, schedule, manifest, groups, audit_dir / "audit.json", attempt / "verified-group")
+        if additional_proof_bindings:
+            for b in additional_proof_bindings:
+                verify_binding(b)
+            extra = extra | {"bindings": extra["bindings"] + list(additional_proof_bindings)}
+            write_immutable(attempt / 'verified-group/completion-with-content-repair.json', extra)
     output = root.parent / (root.name + "-recovery-" + attempt.name[:12])
     if output.exists():
         raise ValueError("continuation root already exists; never overwrite/retry")
@@ -327,7 +332,7 @@ def resume_after_repair(root, attempt, recovery_root, executable):
         raise ValueError("fresh backup SHA drift")
     run_logged(["pg_restore", "--list", backup["path"]], attempt, "backup-restore-list")
     from backend.pipeline.viewpoint_cvp_recovery_supervisor import process_table, remaining_producers
-    if remaining_producers(process_table(), root.parent):
+    if [p for p in remaining_producers(process_table(), root.parent) if p != os.getpid()]:
         raise ValueError("producer active; do not start another")
     # macOS ships screen 4.00.03: it has no -Logfile option. Supply a fixed
     # config so logging begins before the first production command.
