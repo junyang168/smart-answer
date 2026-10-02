@@ -21,20 +21,14 @@ from backend.api.canonical_repository.viewpoint_production_safety import (
 )
 
 
-def admit_reviewed_grouping(
+def validate_accepted_grouping(
     *, manifest: Mapping[str, Any], validation: Mapping[str, Any],
     acceptance: Mapping[str, Any], physical_review: Mapping[str, Any],
-    expected_manifest_sha256: str, scope_packet: Mapping[str, Any],
-    freeze: Mapping[str, Any], bindings: Mapping[str, Mapping[str, str]],
-) -> dict[str, Any]:
-    """Rebind accepted groups to a current scope without regrouping or trimming.
-
-    The expected digest is an explicit input, not discovered from the same
-    object being validated. Group order and boundaries remain unchanged.
-    """
+    expected_manifest_sha256: str, bindings: Mapping[str, Mapping[str, str]],
+) -> None:
+    """Validate repository input; this grants no production/source eligibility."""
     for artifact in (manifest, validation, acceptance, physical_review):
         validate_content_addressed(artifact, "artifact_sha256")
-    validate_content_addressed(scope_packet, "packet_sha256")
     upstream = validate_reviewed_grouping_bindings(bindings, manifest_sha256=expected_manifest_sha256)
     for role, artifact in (("manifest", manifest), ("validation", validation), ("acceptance", acceptance), ("physical_review", physical_review)):
         if upstream[role] != artifact:
@@ -71,6 +65,31 @@ def admit_reviewed_grouping(
         raise CvpProductionBlocked(["reviewed grouping physical quotation checks did not pass"])
     if manifest.get("unresolved") or manifest.get("unprocessed_unit_ids"):
         raise CvpProductionBlocked(["reviewed grouping retains unfinished units"])
+    ids = [row["claim_id"] for row in manifest["claim_packets"]]
+    groups = manifest["groups"]
+    keys = [row["group_key"] for row in groups]
+    counts = Counter(cid for row in groups for cid in row["claim_ids"])
+    if len(ids) != len(set(ids)) or len(keys) != len(set(keys)) or set(counts) != set(ids) or any(n != 1 for n in counts.values()):
+        raise CvpProductionBlocked(["reviewed grouping is not exact-once"])
+    if any(not 1 <= len(row["claim_ids"]) <= 20 for row in groups):
+        raise CvpProductionBlocked(["reviewed grouping exceeds the Claim ceiling"])
+    if len(groups) != acceptance["groups"] or len(ids) != acceptance["claims"]:
+        raise CvpProductionBlocked(["reviewed grouping denominator differs from acceptance"])
+
+
+def admit_reviewed_grouping(
+    *, manifest: Mapping[str, Any], validation: Mapping[str, Any],
+    acceptance: Mapping[str, Any], physical_review: Mapping[str, Any],
+    expected_manifest_sha256: str, scope_packet: Mapping[str, Any],
+    freeze: Mapping[str, Any], bindings: Mapping[str, Mapping[str, str]],
+) -> dict[str, Any]:
+    """Rebind accepted groups to a qualified current scope without regrouping."""
+    validate_accepted_grouping(
+        manifest=manifest, validation=validation, acceptance=acceptance,
+        physical_review=physical_review, expected_manifest_sha256=expected_manifest_sha256,
+        bindings=bindings,
+    )
+    validate_content_addressed(scope_packet, "packet_sha256")
     frozen_claims = {row["claim_id"]: row for row in manifest["claim_packets"]}
     current_claims = {row["claim_id"]: row for row in scope_packet["claims"]}
     if len(frozen_claims) != len(manifest["claim_packets"]) or len(current_claims) != len(scope_packet["claims"]):

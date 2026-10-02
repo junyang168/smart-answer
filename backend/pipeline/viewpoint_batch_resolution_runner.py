@@ -102,6 +102,7 @@ from backend.pipeline.viewpoint_cvp_policy import (
     load_cvp_policy,
 )
 from backend.pipeline.viewpoint_partition_validation import validate_partition_manifest
+from backend.pipeline.viewpoint_grouping_repository import SharedGroupingRepository
 from backend.pipeline.viewpoint_partition_manifest import (
     DEFAULT_PARTITION_POLICY,
     grouping_payload as build_grouping_payload,
@@ -993,10 +994,14 @@ def main() -> int:
         type=Path,
         help="reuse a validated v2 grouping bound to this exact freeze",
     )
+    grouping_source.add_argument(
+        "--accepted-grouping-sha", help="reuse accepted groups from the shared repository without model regrouping",
+    )
+    parser.add_argument("--grouping-repository", type=Path, help="absolute shared grouping repository root")
     parser.add_argument(
         "--canary-selection",
         type=Path,
-        help="deterministic clean-group selection bound to --freeze and --grouping",
+        help="deterministic clean-group selection bound to --freeze and the selected grouping",
     )
     parser.add_argument("--group-model", default="claude-fable-5-1")
     parser.add_argument("--group-effort", choices=("low", "medium", "high", "xhigh"), default="high")
@@ -1028,7 +1033,18 @@ def _repository_commit() -> str:
     ).stdout.strip()
 
 
+def load_production_grouping(args: argparse.Namespace, *, scope_packet: dict[str, Any], freeze: dict[str, Any]) -> dict[str, Any]:
+    """Resolve shared accepted groups only after normal production admission."""
+    if getattr(args, "accepted_grouping_sha", None):
+        return SharedGroupingRepository(args.grouping_repository).admit(
+            args.accepted_grouping_sha, scope_packet=scope_packet, freeze=freeze,
+        )
+    return _read(args.grouping)
+
+
 def execute(args: argparse.Namespace) -> int:
+    if bool(getattr(args, "accepted_grouping_sha", None)) != bool(getattr(args, "grouping_repository", None)):
+        raise CvpProductionBlocked(["--accepted-grouping-sha and --grouping-repository must be supplied together"])
     if not all(
         (getattr(args, "global_freeze", None), getattr(args, "partition_manifest", None), getattr(args, "partition_id", None))
     ):
@@ -1085,11 +1101,11 @@ def execute(args: argparse.Namespace) -> int:
         raise CvpProductionBlocked(["--apply requires --apply-authorization"])
     if args.apply and args.group:
         raise CvpProductionBlocked(
-            ["--apply requires an already frozen --grouping artifact"]
+            ["--apply requires an existing grouping, not --group"]
         )
-    if getattr(args, "canary_selection", None) and not args.grouping:
+    if getattr(args, "canary_selection", None) and not (args.grouping or getattr(args, "accepted_grouping_sha", None)):
         raise CvpProductionBlocked(
-            ["--canary-selection requires an already frozen --grouping artifact"]
+            ["--canary-selection requires --grouping or --accepted-grouping-sha"]
         )
     if args.group_key and not getattr(args, "canary_selection", None):
         raise CvpProductionBlocked(
@@ -1177,11 +1193,11 @@ def _execute_locked(
     awaiting_cvp_apply = False
     master_data_mutations = 0
 
-    if args.grouping:
+    if args.grouping or getattr(args, "accepted_grouping_sha", None):
         # A grouping plan belongs to the scope, not to one resolution run.
         # Re-deriving it per run costs a call and yields different group keys,
         # because the same Claims can be carved into topics more than one way.
-        stored = _read(args.grouping)
+        stored = load_production_grouping(args, scope_packet=scope_packet, freeze=freeze)
         grouping_sha256 = validate_grouping_envelope(stored, freeze=freeze)
         grouping = ClaimGroupingResponse.model_validate(stored["grouping"])
         repairs = list(stored.get("coverage_repairs") or [])
