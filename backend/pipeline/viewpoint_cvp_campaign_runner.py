@@ -87,6 +87,17 @@ def save_state(path, data):
     tmp.replace(path)
 
 
+def investigate_deferred(root):
+    dispositions = list((root / "production/run/batches").glob("*/batch-disposition-applied.json"))
+    if len(dispositions) != 1 or not any(c["disposition"] == "deferred"
+            for item in read(dispositions[0])["claims"] for c in item["components"]):
+        return None
+    command([PYTHON, "-m", "backend.pipeline.viewpoint_deferred_source_check",
+        "--packet", dispositions[0].parent / "batch-packet.json",
+        "--disposition", dispositions[0], "--output-root", root / "deferred-source-check"])
+    return read(root / "deferred-source-check/handoff.json")
+
+
 def build_selection(group, inventory, root):
     """Discover physical inputs; proof verification is performed by the adapter.
 
@@ -232,6 +243,11 @@ def execute(args):
             command(runner_args(root, args) + ["--apply"])
             run = read(root / "production/run/scope-run.json")
             if run["disposition_status"] != "complete":
+                save_state(args.output_root / "progress.json", state | {"status": "investigating_deferred_source"})
+                handoff = investigate_deferred(root)
+                if handoff is not None:
+                    raise ValueError("source investigation completed; required actions: " +
+                                     ", ".join(sorted({a["next_action"] for a in handoff["actions"]})))
                 raise ValueError("scope not completely applied/readback verified")
             plans = list((root / "production/run/batches").glob("*/cvp-change-plan.json"))
             if len(plans) != 1:

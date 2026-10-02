@@ -71,3 +71,23 @@ def test_wrong_audit_model_stops():
     audit["meta"]["model"] = "other"
     with pytest.raises(ValueError):
         validate_audit(audit, ["c"], ["v"])
+
+
+def test_campaign_invokes_source_investigation_for_deferred_items(tmp_path,monkeypatch):
+    from backend.pipeline import viewpoint_cvp_campaign_runner as module
+    from backend.pipeline.viewpoint_resolution_runtime import write_immutable
+    batch=tmp_path/'production/run/batches/b'
+    write_immutable(batch/'batch-disposition-applied.json',{'claims':[{'components':[{'disposition':'deferred'}]}]})
+    calls=[]
+    def command(args):
+        calls.append(args)
+        write_immutable(tmp_path/'deferred-source-check/handoff.json',{'status':'investigated_not_resolved'})
+    monkeypatch.setattr(module,'command',command)
+    assert module.investigate_deferred(tmp_path)['status']=='investigated_not_resolved'
+    assert len(calls)==1 and 'backend.pipeline.viewpoint_deferred_source_check' in calls[0]
+
+
+def test_campaign_does_not_investigate_non_deferred_failure(tmp_path,monkeypatch):
+    from backend.pipeline import viewpoint_cvp_campaign_runner as module
+    monkeypatch.setattr(module,'command',lambda args:pytest.fail('no source investigation without deferred item'))
+    assert module.investigate_deferred(tmp_path) is None
