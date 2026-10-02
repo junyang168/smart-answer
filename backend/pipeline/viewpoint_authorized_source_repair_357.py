@@ -116,6 +116,32 @@ def build(states, root):
 def step_template_fragment(states, claim):
     return states[('evidence_steps',claim['evidence_step_ids'][0])]['source_fragment_ids'][0]
 
+def verify_applied(store, root):
+    """Read-only recovery after a committed write; never replay the change set.
+
+    Compare the normalized dry-run post-image, not input records that omit
+    schema defaults such as SourceFragment.visual_facts=[].
+    """
+    plan=read_artifact(root/'dry-run-plan.json'); proof=read_artifact(root/'before.json')
+    receipt=read_artifact(root/'apply-receipt.json')
+    assert receipt['status']=='applied' and receipt['change_set_id']==plan['change_set_id']
+    live=snapshot(store)
+    before={(r['collection'],r['object_id']):r['payload'] for r in proof['before_records']}
+    for op in plan['operations']:
+        key=(op['collection'],op['object_id'])
+        assert live[key]==op['payload'], f'Readback differs: {key}'
+        if op['operation']=='create': del live[key]
+        else: live[key]=before[key]
+    assert fingerprint(live,proof['collections'])==proof['pre_fingerprint_sha256'], 'Unexpected non-target change'
+    packet=read_artifact(root/'packet.json')
+    assert file_sha256(Path(packet['source_path']))==FILE_SHA
+    result={'status':'applied_readback_verified','change_set_id':plan['change_set_id'],'claims_repaired':2,
+        'new_evidence_steps':2,'new_source_fragments':2,'updated_links':5,
+        'all_other_records_and_mother_unchanged':True,'independent_reaudit':'pending',
+        'readback_basis':'exact normalized dry-run operation payloads'}
+    write_immutable(root/'verified-result.json',result)
+    return result
+
 class Verdict(BaseModel):
     model_config=ConfigDict(extra='forbid')
     claim_id:str
@@ -127,6 +153,16 @@ class Review(BaseModel):
     model_config=ConfigDict(extra='forbid')
     verdicts:list[Verdict]
 
+def review_call(adapter, packet, root, label):
+    try:
+        return call_model(adapter,packet,root/f'raw-{label}.json')
+    except Exception as exc:
+        raw=getattr(getattr(adapter,'_client',None),'last_raw_response',None)
+        write_immutable(root/f'failed-review-{label}.json',{
+            'packet_sha256':sha256_json(packet),'error':str(exc),
+            'model_id':adapter.model_id,'raw_response':raw,'retry_started':False})
+        raise
+
 PROMPT='''独立核查两条明确授权的 Claim 来源修复。只判断是否忠于给定教授原文，不评价神学对错。
 对每个 item 恰好返回一个 verdict。检查 after 完整主张能否由现有及新增逐字证据推出、是否保留相对/更是等限定、是否加入未讲内容。
 新增证据必须只支持本 Claim。updated_links 必须仍正确支持或等同 target_viewpoints 中相应观点，不能把 support 当 equivalent。
@@ -137,14 +173,19 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output-root',type=Path,required=True)
     parser.add_argument('--review',action='store_true'); parser.add_argument('--apply',action='store_true')
+    parser.add_argument('--verify-applied',action='store_true')
     parser.add_argument('--backup',type=Path)
     args=parser.parse_args(); root=args.output_root.resolve()
     load_dotenv(Path(__file__).resolve().parents[2]/'.env'); store=PostgresKnowledgeStore()
+    if args.verify_applied:
+        with exclusive_cvp_run_lock({'global_lock_path':str(root.parent/'registry-cvp.lock')}):
+            print(json.dumps(verify_applied(store,root)))
+        return
     if args.review:
         packet=read_artifact(root/'packet.json'); reviews={}
         for label,provider,model in [('gpt','codex','gpt-6.1-sol'),('opus','claude','claude-opus-5-5')]:
             adapter=StructuredJsonReviewerAdapter(client=subscription_client(provider,model,'high'),prompt=PROMPT,response_model=Review,schema_name='authorized_claim_source_repair_review_v1')
-            raw,_,_=call_model(adapter,packet,root/f'raw-{label}.json')
+            raw,_,_=review_call(adapter,packet,root,label)
             review=Review.model_validate(raw)
             assert len(review.verdicts)==2 and {v.claim_id for v in review.verdicts}=={s[0] for s in SPECS}
             reviews[label]=review.model_dump(mode='json')
@@ -182,14 +223,6 @@ def main():
         write_immutable(root/'apply-intent.json',intent)
         receipt=store.apply_plan(plan,metadata={'authorized_source_repair':intent},expected_registry_fingerprint_sha256=pre,registry_collections=collections)
         write_immutable(root/'apply-receipt.json',receipt)
-        keyfields={'claims':'claim_id','evidence_steps':'evidence_step_id','source_fragments':'fragment_id','viewpoint_claim_links':'viewpoint_claim_link_id'}
-        for c,key in keyfields.items():
-            for payload in package[c]:
-                oid=payload[key]; assert store.get_record_state(c,oid)['payload']==payload
-                states[c,oid]=payload
-        assert collection_fingerprint(store,collections)==fingerprint(states,collections)
-        assert file_sha256(Path(packet['source_path']))==FILE_SHA
-        result={'status':'applied_readback_verified','change_set_id':plan.change_set_id,'claims_repaired':2,'new_evidence_steps':2,'new_source_fragments':2,'updated_links':5,'all_other_records_and_mother_unchanged':True,'independent_reaudit':'pending'}
-        write_immutable(root/'verified-result.json',result); print(json.dumps(result))
+        print(json.dumps(verify_applied(store,root)))
 
 if __name__=='__main__': main()

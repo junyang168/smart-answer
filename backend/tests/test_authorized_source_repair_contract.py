@@ -8,7 +8,7 @@ from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 
 
 def fixture_package():
-    old={'claim_id':'C1','revision':3,'statement':'old','review_status':'ai_consensus_reviewed',
+    old={'claim_id':'C1','claim_type':'interpretive_judgment','revision':3,'statement':'old','review_status':'ai_consensus_reviewed',
          'evidence_step_ids':['E1'],'occurrences':[{'source_id':'S1','anchors':[{'evidence_id':'E1'}]}]}
     new=deepcopy(old); new.update(revision=4,statement='new')
     new['evidence_step_ids'].append('E2'); new['occurrences'][0]['anchors'].append({'evidence_id':'E2'})

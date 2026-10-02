@@ -175,7 +175,7 @@ def qualify(row, group, inventory, root, args):
     b = read(backup)
     if binding(b["path"]) != b:
         raise ValueError("campaign baseline backup SHA drift")
-    command([PYTHON, "-m", "backend.pipeline.viewpoint_reviewed_cvp_prepare",
+    prepare_command=[PYTHON, "-m", "backend.pipeline.viewpoint_reviewed_cvp_prepare",
              "--group-key", group["group_key"], "--grouping-repository", args.grouping_repository,
              "--accepted-grouping-sha", args.accepted_grouping_sha, "--historical-bridges", root / "historical-bridges.json",
              "--independent-audit", args.entrance_audit, "--output-root", root / "production",
@@ -184,7 +184,12 @@ def qualify(row, group, inventory, root, args):
              "--route-policy", "backend/pipeline/policies/wang_route_resolution_policy_v1.json",
              "--backup-dump", b["path"], "--backup-sha256", b["file_sha256"],
              "--global-lock", args.global_lock, "--scope-authorized-by", args.authorized_by,
-             "--created-at", datetime.now(timezone.utc).isoformat()])
+             "--created-at", datetime.now(timezone.utc).isoformat()]
+    for path in getattr(args,'completed_source_repair',None) or []:
+        prepare_command.extend(['--completed-source-repair',path])
+    if getattr(args,'completed_source_repair',None):
+        prepare_command.extend(['--parent-completed-proofs',args.completed_proofs])
+    command(prepare_command)
 
 
 def execute(args):
@@ -201,6 +206,7 @@ def execute(args):
               "entrance_audit": binding(args.entrance_audit), "completed_proofs": binding(args.completed_proofs),
               "grouping_repository": str(args.grouping_repository.resolve()), "wang_repository": str(args.wang_repository.resolve()),
               "global_lock": str(args.global_lock.resolve()), "runner_commit": commit, "authorized_by": args.authorized_by,
+              "completed_source_repairs": [binding(p) for p in getattr(args,'completed_source_repair',None) or []],
               "route_execution": False, "already_complete": schedule["completed_groups"]}
     _write_immutable(args.output_root / "campaign.json", config)
     seed = read(args.completed_proofs)
@@ -217,6 +223,7 @@ def execute(args):
         validate_audit({"meta": audited["meta"], "layers": {"3": claim_audit["layers"]["3"], "4": audited["layers"]["4"]}},
                        groups[row["group_key"]]["claim_ids"], row["viewpoint_ids"])
     done = []
+    pending_count=sum(row['state']=='pending' for row in schedule['schedule'])
     for row in schedule["schedule"]:
         if row["state"] == "already_complete":
             continue
@@ -229,7 +236,7 @@ def execute(args):
             validate_audit(read(proof["audit_path"]), groups[row["group_key"]]["claim_ids"], proof["viewpoint_ids"])
             done.append(row["group_key"])
             continue
-        state = {"status": "qualifying", "group_key": row["group_key"], "sequence": row["sequence"], "completed_new_groups": len(done), "remaining_groups": 154-len(done)}
+        state = {"status": "qualifying", "group_key": row["group_key"], "sequence": row["sequence"], "completed_new_groups": len(done), "remaining_groups": pending_count-len(done)}
         save_state(args.output_root / "progress.json", state)
         try:
             if shutil.disk_usage(args.output_root).free < 2 * 1024**3:
@@ -272,7 +279,7 @@ def execute(args):
                 raise ValueError("post-apply mechanical audit has in-scope/global Registry findings")
             _write_immutable(completion, {"group_key": row["group_key"], "viewpoint_ids": target_ids, "audit_path": str(audit_path), "bindings": [binding(audit_path), binding(plans[0]), binding(root / "production/run/scope-run.json")], "argument_routes_completed": False})
             done.append(row["group_key"])
-            save_state(args.output_root / "progress.json", state | {"status": "group_complete", "completed_new_groups": len(done), "remaining_groups": 154-len(done)})
+            save_state(args.output_root / "progress.json", state | {"status": "group_complete", "completed_new_groups": len(done), "remaining_groups": pending_count-len(done)})
         except Exception as exc:
             save_state(args.output_root / "progress.json", state | {"status": "blocked", "error": str(exc), "no_next_group_started": True})
             raise
@@ -287,6 +294,7 @@ def main():
     for key in ("schedule-sha256", "accepted-grouping-sha", "authorized-by"):
         parser.add_argument("--" + key, required=True)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument('--completed-source-repair',type=Path,action='append')
     args = parser.parse_args()
     args.output_root.mkdir(parents=True, exist_ok=True)
     with (args.output_root / "campaign.lock").open("a") as lock:

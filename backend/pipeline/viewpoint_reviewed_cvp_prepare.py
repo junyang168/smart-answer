@@ -7,6 +7,7 @@ asserts that the remaining groups have been processed or qualified for CVP.
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 import hashlib
 import json
 from pathlib import Path
@@ -15,8 +16,10 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
-from backend.api.canonical_repository.viewpoint_foundation import build_coverage_snapshot, build_input_claim_manifest, sha256_json
+from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore, normalize_package
+from backend.api.canonical_repository.reviewed_candidate_contract import validate_store_package_authorization
+from backend.api.canonical_repository.viewpoint_foundation import build_coverage_snapshot, build_input_claim_manifest, sha256_json, semantic_record_sha
+from backend.pipeline.viewpoint_evidence_source_context import load_context_source
 from backend.api.canonical_repository.viewpoint_production_safety import (
     CvpProductionBlocked, accepted_grouping_canary, accepted_grouping_audit_scope,
     build_cvp_freeze, build_canary_selection, validate_apply_authorization, accepted_grouping_phase_group,
@@ -55,6 +58,42 @@ def verify_parent_current_pins(manifest: dict[str, Any], records: dict[tuple[str
             raise CvpProductionBlocked([f"{key[0]}/{key[1]}: accepted parent current pin drift"])
 
 
+def completed_repair_parent_snapshot(manifest, records, packages, completed_ids, selected_ids):
+    """Keep the accepted historical membership without granting stale authority.
+
+    Only already independently completed Claims may carry a fresh source repair.
+    Their exact reviewed current records and physical additions are validated;
+    the accepted predecessor pins remain explicit historical membership proof.
+    No repaired Claim can enter a new runtime scope through this adapter.
+    """
+    checked=deepcopy(records); rows={c['claim_id']:c for c in manifest['claim_packets']}
+    used=set()
+    for package in packages:
+        validate_store_package_authorization(package)
+        app=package.get('source_repair_application')
+        if not app: raise CvpProductionBlocked(['parent repair lacks fresh source-repair authority'])
+        packet=app['review_packet']; normalized=normalize_package(package)
+        for item in packet['items']:
+            old,new=item['before'],item['after']; cid=new['claim_id']
+            if cid in used or cid not in completed_ids or cid in selected_ids or cid not in rows:
+                raise CvpProductionBlocked([f'{cid}: parent repair must be unique and independently completed, never selected'])
+            used.add(cid); prior=rows[cid]
+            if old['revision']!=prior['claim_revision'] or semantic_record_sha(old)!=prior['claim_content_sha256']:
+                raise CvpProductionBlocked([f'{cid}: repair predecessor differs from accepted membership'])
+            for collection,oid in [('claims',cid),('evidence_steps',item['new_evidence_step']['evidence_step_id']),('source_fragments',item['new_fragment']['fragment_id'])]:
+                live=records.get((collection,oid)); expected=normalized[collection][oid]
+                if not live or live.get('retired') or live['revision']!=expected['revision'] or live['content_sha256']!=semantic_record_sha(expected) or live['payload']!=expected:
+                    raise CvpProductionBlocked([f'{collection}/{oid}: reviewed parent repair current drift'])
+            source=records[('source_documents',item['new_fragment']['source_id'])]['payload']
+            path,file_sha,projection=load_context_source(source)
+            text=projection.spoken_rows[int(item['new_fragment']['paragraph_key'][1:])-1]['text']
+            if str(path)!=packet['source_path'] or file_sha!=packet['source_file_sha256'] or text!=item['source_paragraph']:
+                raise CvpProductionBlocked([f'{cid}: repaired source physical drift'])
+            checked[('claims',cid)]={'revision':old['revision'],'content_sha256':semantic_record_sha(old),'payload':old,'retired':False}
+    verify_parent_current_pins(manifest,checked)
+    return sorted(used)
+
+
 def prepare(args: argparse.Namespace) -> dict[str, Any]:
     load_dotenv(PROJECT_ROOT / ".env")
     if subprocess.check_output(["git", "status", "--porcelain"], cwd=PROJECT_ROOT, text=True).strip():
@@ -73,6 +112,11 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
             all_ids.add(step["evidence_step_id"])
             all_ids.update(row["fragment_id"] for row in step["fragments"])
     all_ids.update(row["source_id"] for row in manifest["sources"])
+    repair_paths=getattr(args,'completed_source_repair',None) or []
+    repairs=[json.loads(path.read_text(encoding='utf-8')) for path in repair_paths]
+    for repair in repairs:
+        for item in repair.get('source_repair_application',{}).get('review_packet',{}).get('items',[]):
+            all_ids.add(item['new_evidence_step']['evidence_step_id']); all_ids.add(item['new_fragment']['fragment_id'])
     store = PostgresKnowledgeStore()
     records = {}
     with store.connect() as connection:
@@ -81,7 +125,24 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
             "SELECT collection,object_id,revision,content_sha256,payload,retired_at FROM wang_knowledge.objects WHERE object_id=ANY(%s)", (sorted(all_ids),),
         ).fetchall():
             records[(collection, oid)] = dict(revision=revision, content_sha256=content_sha, payload=payload, retired=retired_at is not None)
-    verify_parent_current_pins(manifest, records)
+    completed_ids=set()
+    if repairs:
+        proof_path=getattr(args,'parent_completed_proofs',None)
+        if not proof_path: raise CvpProductionBlocked(['source repair requires physical completed-group audit proofs'])
+        from backend.pipeline.viewpoint_cvp_campaign_runner import binding, read, validate_audit
+        group_rows={g['group_key']:g for g in manifest['groups']}
+        for row in read(proof_path)['groups']:
+            if row['group_key'] not in group_rows or any(binding(b['path'])!=b for b in row['bindings']):
+                raise CvpProductionBlocked(['completed parent proof physical drift'])
+            if binding(row['audit_path']) not in row['bindings']:
+                raise CvpProductionBlocked(['completed parent audit lacks physical binding'])
+            audited=read(row['audit_path']); claim_path=row.get('claim_audit_path',row['audit_path'])
+            if binding(claim_path) not in row['bindings']:
+                raise CvpProductionBlocked(['completed parent Claim audit lacks physical binding'])
+            claims=group_rows[row['group_key']]['claim_ids']
+            validate_audit({'meta':audited['meta'],'layers':{'3':read(claim_path)['layers']['3'],'4':audited['layers']['4']}},claims,row['viewpoint_ids'])
+            completed_ids.update(claims)
+    repaired_ids=completed_repair_parent_snapshot(manifest,records,repairs,completed_ids,wanted)
     claims = [records[("claims", cid)]["payload"] for cid in selected_ids]
     source_ids = {row["source_id"] for row in manifest["claim_packets"] if row["claim_id"] in wanted}
     sources = [records[("source_documents", sid)]["payload"] for sid in sorted(source_ids)]
@@ -111,6 +172,9 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
              "qualified_claim_ids": selected_ids, "qualified_group_key": canary["group_key"],
              "deferred_claim_ids": sorted({row["claim_id"] for row in manifest["claim_packets"]} - wanted),
              "parent_current_revision_content_pins_verified": True,
+             "completed_parent_source_repairs": repaired_ids,
+             "completed_source_repair_bindings": [{'path':str(p.resolve()),'file_sha256':hashlib.sha256(p.read_bytes()).hexdigest()} for p in repair_paths],
+             "accepted_predecessor_pins_used_only_for_completed_membership": bool(repaired_ids),
              "historical_bridge_sha256": source_lineage["artifact_sha256"],
              "source_eligibility_sha256": eligibility.artifact_sha256,
              "scope_audit_disposition_sha256": disposition["artifact_sha256"],
@@ -171,6 +235,8 @@ def main() -> None:
     for name in ("accepted-grouping-sha", "scope-authorized-by", "created-at", "backup-sha256"):
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--group-key", help="one intact accepted group explicitly authorized for sequential continuation")
+    parser.add_argument('--completed-source-repair',type=Path,action='append',help='fresh dual-reviewed repair of already independently completed parent Claims')
+    parser.add_argument('--parent-completed-proofs',type=Path,help='SHA-bound independent completed-group audits; never a manual Claim pass list')
     print(json.dumps(prepare(parser.parse_args()), ensure_ascii=False))
 
 
