@@ -284,6 +284,13 @@ def execute(args):
             if not audit_path.exists():
                 command([PYTHON, "scripts/audit-library.py", "--scope", "all", "--layers", "1,2,3,4", "--claim-ids", ",".join(groups[row["group_key"]]["claim_ids"]), "--viewpoint-ids", ",".join(target_ids), "--workers", "2", "--model", "gemini-3.8-flash", "--out", audit_root, "--no-status-file"])
             audit = read(audit_path)
+            from backend.pipeline.viewpoint_audit_source_adjudication import disputes, validate_population
+            if disputes(audit):
+                validate_population(audit, groups[row['group_key']]['claim_ids'], target_ids)
+                command([PYTHON, '-m', 'backend.pipeline.viewpoint_audit_source_adjudication',
+                         '--audit', audit_path, '--output-root', root / 'audit-source-adjudication'])
+                raise ValueError('independent audit dispute investigated against original source; '
+                                 'see audit-source-adjudication/handoff.json; no next group started')
             validate_audit(audit, groups[row["group_key"]]["claim_ids"], target_ids)
             mechanical = {"meta": audit["meta"], "layers": {key: audit["layers"][key] for key in ("1", "2")}}
             disposition = scope_audit_disposition(audit=mechanical,
