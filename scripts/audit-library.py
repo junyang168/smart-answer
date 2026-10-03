@@ -1836,6 +1836,7 @@ def audit_viewpoints(
     workers: int = 8,
     progress: "Progress | None" = None,
     only: set[str] | None = None,
+    reconsiderations: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """抽樣問：判為同一個觀點的那幾條主張，真值條件是不是真的一致。
 
@@ -1919,6 +1920,12 @@ def audit_viewpoints(
                 f"{source_block}"
             )
         prompt = _viewpoint_prompt(viewpoint_id, revision, blocks)
+        prior = (reconsiderations or {}).get(viewpoint_id)
+        if prior:
+            if prior.get('revision_id') != viewpoint.get('current_revision_id'):
+                return {'viewpoint_id': viewpoint_id, 'verdict': 'blocked', 'issue': 'other',
+                        'reason': '定向復核的原審計觀點版本已漂移'}
+            prompt += _reconsideration_prompt(prior)
         verdict = model.judge(prompt, VIEWPOINT_SCHEMA)
         return {
             "viewpoint_id": viewpoint_id,
@@ -1945,6 +1952,36 @@ def audit_viewpoints(
         "blocked": len(blocked),
         "results": results,
     }
+
+
+def _reconsideration_prompt(prior: dict[str, Any]) -> str:
+    return '\n\n【一次定向原文復核，不是要求通過】\n' + json.dumps(prior, ensure_ascii=False) + '''
+上面是先前審計異議，不是權威結論。重新讀本次提供的完整原文和實際連結，明確回應原異議。
+區分：把整條合取 Claim 當成單一 CVP 的 equivalent_full，與把其中一個合取項
+定位為 equivalent_component；後者並不因 Claim 還含另一個合取項就自動違規。
+同樣區分：原文明確界定指代對象，與借其他 Claim 追加未綁定的實質限定。
+只有在本條自己的原文中能確定完整指涉及真值條件相同，才可判 same。
+仍缺條件、定位不穩或原異議成立時，仍判 disputed；不得改連結、改寫教授原話或以多數票判通過。
+reason 必須說明原異議成立或不成立的原文依據。這是唯一一次復核，仍有異議就轉人工。'''
+
+
+def load_reconsiderations(path: Path, selected: set[str]) -> tuple[dict[str, Any], dict[str, Any]]:
+    raw = path.read_bytes()
+    audit = json.loads(raw)
+    report = audit['layers']['4']
+    rows = report['results']
+    if (audit['meta']['model'] != 'gemini-3.8-flash' or not report.get('complete') or
+            report.get('judged') != len(rows) or len({r['viewpoint_id'] for r in rows}) != len(rows) or
+            not {r['viewpoint_id'] for r in rows} <= selected or
+            any(report.get(k, 0) for k in ('model_errors', 'blocked'))):
+        raise ValueError('incomplete or foreign independent audit reconsideration')
+    found = {r['viewpoint_id']: r for r in rows if r.get('verdict') == 'disputed'}
+    if not found or report.get('disputed') != len(found):
+        raise ValueError('no exact disputed population to reconsider')
+    # No recursive reconsideration or cycling to hunt for a passing verdict.
+    if audit['meta'].get('reconsidered_audit'):
+        raise ValueError('independent reconsideration already attempted')
+    return found, {'path': str(path.resolve()), 'file_sha256': hashlib.sha256(raw).hexdigest()}
 
 
 def _viewpoint_prompt(viewpoint_id: str, revision: dict[str, Any], blocks: list[str]) -> str:
@@ -2331,6 +2368,8 @@ def main(argv: list[str] | None = None) -> int:
         "--viewpoint-ids", default="", help="只查這幾個觀點（逗號分隔）"
     )
     parser.add_argument("--seed", type=int, default=241, help="抽樣種子，同種子可重放")
+    parser.add_argument('--reconsider-audit', type=Path,
+                        help='一次定向原文復核；保留原審計，不以仲裁模型意見代替獨立判斷')
     parser.add_argument("--model", default=DEFAULT_MODEL, help="第 3、4 層用的獨立模型")
     parser.add_argument(
         "--scope",
@@ -2354,6 +2393,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     wanted = {int(x) for x in args.layers.split(",") if x.strip()}
+    reconsiderations, reconsidered_binding = None, None
+    if args.reconsider_audit:
+        if 4 not in wanted or args.viewpoints != 'all' or args.model != 'gemini-3.8-flash':
+            raise ValueError('reconsideration requires complete unchanged independent model audit')
+        reconsiderations, reconsidered_binding = load_reconsiderations(
+            args.reconsider_audit, {x.strip() for x in args.viewpoint_ids.split(',') if x.strip()})
+        if args.out is None or (args.out / 'audit.json').exists():
+            raise ValueError('reconsideration requires a fresh explicit output directory')
     settings = load_settings()
     database_url = settings.get("KNOWLEDGE_DATABASE_URL")
     if not database_url:
@@ -2453,6 +2500,7 @@ def main(argv: list[str] | None = None) -> int:
             args.workers,
             progress,
             {x.strip() for x in args.viewpoint_ids.split(",") if x.strip()} or None,
+            reconsiderations,
         )
 
     meta = {
@@ -2471,6 +2519,10 @@ def main(argv: list[str] | None = None) -> int:
         "claims": len(store.collection("claims")),
         "viewpoints": len(store.collection("canonical_viewpoints")),
     }
+    if reconsidered_binding:
+        if hashlib.sha256(args.reconsider_audit.read_bytes()).hexdigest() != reconsidered_binding['file_sha256']:
+            raise ValueError('original independent audit changed during reconsideration')
+        meta['reconsidered_audit'] = reconsidered_binding
     queue = build_human_queue(layers)
     report = render_report(layers, meta, len(queue["items"]))
 

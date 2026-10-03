@@ -16,6 +16,33 @@ AUDIT = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(AUDIT)
 
 
+def test_reconsideration_is_not_a_forced_pass():
+    prompt = AUDIT._reconsideration_prompt({'reason': '原合取異議', 'verdict': 'disputed'})
+    for text in ['原合取異議', '不是要求通過', 'equivalent_full', 'equivalent_component',
+                 '仍判 disputed', '不得改連結', '唯一一次復核', '不成立的原文依據']:
+        assert text in prompt
+
+
+@pytest.mark.parametrize('mutation', ['none', 'recursive', 'incomplete', 'foreign', 'duplicate', 'wrong_model'])
+def test_reconsideration_input_binding_and_one_round(tmp_path, mutation):
+    original = {'meta': {'model': 'gemini-3.8-flash'}, 'layers': {'4': {
+        'complete': True, 'judged': 1, 'disputed': 1,
+        'results': [{'viewpoint_id': 'V', 'revision_id': 'R', 'verdict': 'disputed'}]}}}
+    if mutation == 'recursive': original['meta']['reconsidered_audit'] = {'path': 'old'}
+    elif mutation == 'incomplete': original['layers']['4']['complete'] = False
+    elif mutation == 'foreign': original['layers']['4']['results'][0]['viewpoint_id'] = 'foreign'
+    elif mutation == 'duplicate': original['layers']['4']['results'] *= 2
+    elif mutation == 'wrong_model': original['meta']['model'] = 'other'
+    path = tmp_path/'original.json'; path.write_text(json.dumps(original))
+    if mutation != 'none':
+        with pytest.raises(ValueError): AUDIT.load_reconsiderations(path, {'V'})
+    else:
+        found, bound = AUDIT.load_reconsiderations(path, {'V'})
+        import hashlib
+        assert found['V']['revision_id'] == 'R'
+        assert bound['file_sha256'] == hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def test_component_context_contract_preserves_identity_and_negative_guards():
     prompt = AUDIT._viewpoint_prompt("CV-test", {"core_proposition": "神所揀選的僕人"}, [
         "被歸入的成分：僕人\n主張全文：宣告確認耶穌具有王與僕人的身份。\n"

@@ -284,13 +284,32 @@ def execute(args):
             if not audit_path.exists():
                 command([PYTHON, "scripts/audit-library.py", "--scope", "all", "--layers", "1,2,3,4", "--claim-ids", ",".join(groups[row["group_key"]]["claim_ids"]), "--viewpoint-ids", ",".join(target_ids), "--workers", "2", "--model", "gemini-3.8-flash", "--out", audit_root, "--no-status-file"])
             audit = read(audit_path)
+            resolution_bindings = []
             from backend.pipeline.viewpoint_audit_source_adjudication import disputes, validate_population
             if disputes(audit):
                 validate_population(audit, groups[row['group_key']]['claim_ids'], target_ids)
                 command([PYTHON, '-m', 'backend.pipeline.viewpoint_audit_source_adjudication',
                          '--audit', audit_path, '--output-root', root / 'audit-source-adjudication'])
-                raise ValueError('independent audit dispute investigated against original source; '
-                                 'see audit-source-adjudication/handoff.json; no next group started')
+                handoff_path = root / 'audit-source-adjudication/handoff.json'
+                handoff = read(handoff_path)
+                if not handoff['actions'] or any(a['verdict'] != 'audit_objection_rejected' for a in handoff['actions']):
+                    raise ValueError('original-source adjudication requires content repair or owner judgment; '
+                                     'no next group started')
+                recheck_path = root / 'independent-source-recheck/audit.json'
+                if not recheck_path.exists():
+                    command([PYTHON, 'scripts/audit-library.py', '--scope', 'all', '--layers', '1,2,3,4',
+                             '--claim-ids', ','.join(groups[row['group_key']]['claim_ids']),
+                             '--viewpoint-ids', ','.join(target_ids), '--workers', '2',
+                             '--model', 'gemini-3.8-flash', '--reconsider-audit', audit_path,
+                             '--out', recheck_path.parent, '--no-status-file'])
+                audit_path = recheck_path
+                audit = read(audit_path)
+                resolution_bindings = [
+                    binding(root / 'independent-audit/audit.json'), binding(handoff_path),
+                    binding(root / 'audit-source-adjudication/packet.json'),
+                    binding(root / 'audit-source-adjudication/raw-gpt.json'),
+                    binding(root / 'audit-source-adjudication/raw-opus.json')]
+                _write_immutable(root / 'audit-resolution-bindings.json', {'bindings': resolution_bindings})
             validate_audit(audit, groups[row["group_key"]]["claim_ids"], target_ids)
             mechanical = {"meta": audit["meta"], "layers": {key: audit["layers"][key] for key in ("1", "2")}}
             disposition = scope_audit_disposition(audit=mechanical,
@@ -299,7 +318,7 @@ def execute(args):
             _write_immutable(root / "post-apply-audit-disposition.json", disposition)
             if disposition["status"] != "passed":
                 raise ValueError("post-apply mechanical audit has in-scope/global Registry findings")
-            _write_immutable(completion, {"group_key": row["group_key"], "viewpoint_ids": target_ids, "audit_path": str(audit_path), "bindings": [binding(audit_path), binding(plans[0]), binding(root / "production/run/scope-run.json")], "argument_routes_completed": False})
+            _write_immutable(completion, {"group_key": row["group_key"], "viewpoint_ids": target_ids, "audit_path": str(audit_path), "bindings": [binding(audit_path), binding(plans[0]), binding(root / "production/run/scope-run.json"), *resolution_bindings], "argument_routes_completed": False})
             done.append(row["group_key"])
             save_state(args.output_root / "progress.json", state | {"status": "group_complete", "completed_new_groups": len(done), "remaining_groups": pending_count-len(done)})
         except Exception as exc:
