@@ -15,3 +15,11 @@ def test_required_json_consumers_remain_strict(tmp_path):
     with pytest.raises(ValueError): m.verify_binding(m.binding(path))
     path.write_text('{"actual": "audit"}')
     assert m.verify_binding(m.binding(path))=={'actual':'audit'}
+
+
+def test_distinct_repair_roots_with_same_handoff_name_do_not_collide(tmp_path):
+    root=tmp_path/'campaign'
+    a=tmp_path/'repair-v1'/'claim-repair-proof-resume'
+    b=tmp_path/'repair-v2'/'claim-repair-proof-resume'
+    assert m.continuation_root(root,a)!=m.continuation_root(root,b)
+    assert m.continuation_root(root,a)==m.continuation_root(root,a)

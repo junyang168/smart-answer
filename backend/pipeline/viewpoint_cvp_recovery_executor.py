@@ -20,6 +20,7 @@ from backend.pipeline.viewpoint_cvp_campaign_runner import (
     PROJECT_ROOT, PYTHON, binding, read, validate_audit, validate_schedule,
 )
 from backend.pipeline.viewpoint_resolution_runtime import write_immutable
+from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.pipeline.viewpoint_scoped_audit_disposition import scope_audit_disposition
 from backend.api.canonical_repository.viewpoint_production_safety import accepted_grouping_audit_scope
 
@@ -289,6 +290,12 @@ def continuation_inputs(root, output, extra_completion=None, *, additional_sourc
     return argv
 
 
+def continuation_root(root, attempt):
+    # Different immutable repair roots may have identically named handoffs.
+    # Their absolute identity, not a truncated basename, owns the new root.
+    return root.parent / (root.name + '-recovery-' + sha256_json({'attempt':str(attempt.resolve())})[:12])
+
+
 def resume_after_repair(root, attempt, recovery_root, executable, *, additional_proof_bindings=(), additional_source_repair_paths=(), saved_audit_path=None):
     cfg, schedule, manifest, groups = load_campaign(root)
     state = read(root / "progress.json")
@@ -321,7 +328,7 @@ def resume_after_repair(root, attempt, recovery_root, executable, *, additional_
                 verify_binding(b)
             extra = extra | {"bindings": extra["bindings"] + list(additional_proof_bindings)}
             write_immutable(attempt / 'verified-group/completion-with-content-repair.json', extra)
-    output = root.parent / (root.name + "-recovery-" + attempt.name[:12])
+    output = continuation_root(root,attempt)
     if output.exists():
         raise ValueError("continuation root already exists; never overwrite/retry")
     argv = continuation_inputs(root, output, extra, additional_source_repair_paths=additional_source_repair_paths) if additional_source_repair_paths else continuation_inputs(root, output, extra)
