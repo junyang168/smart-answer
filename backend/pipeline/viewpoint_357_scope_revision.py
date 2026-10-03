@@ -185,8 +185,9 @@ def package_for(states, proposal, report, root, *, preview=False):
         decision.update(revision=1, identity_decision_id='VID-'+digest[:20],
             identity_candidate_id=candidate['identity_candidate_id'], decision='match_existing',
             resolved_viewpoint_id=TARGET, claim_link_decisions=[{'claim_id': CLAIM, 'link_type': repair['link_type']}],
-            input_sha256=sha256_json(p), review_artifact_sha256=sha256_json(report),
-            semantic_call_artifact_sha256s=sorted(set(report['raw_artifact_shas'])),
+            input_sha256=digest, review_artifact_sha256=sha256_json(report),
+            semantic_call_artifact_sha256s=accepted_review_pair(report),
+            policy_version='wkp357_scope_revision_complete_postimage_v2',
             reviewer_model_ids=['claude-opus-5-5', 'gpt-6.1-sol'], reviewer_kind='system',
             approval_basis='dual_model_consensus', review_status='system_approved',
             created_at=stable_decided_at(root), reason='Exact successor CVP/member-link postimage passed independent review; '+p['reason'])
@@ -196,6 +197,15 @@ def package_for(states, proposal, report, root, *, preview=False):
             row['review_provenance']['basis_identity_decision_ids'] = [decision['identity_decision_id']]
         package.update(viewpoint_identity_candidates=[candidate], viewpoint_identity_decisions=[decision])
     return package, manifest
+
+
+def accepted_review_pair(report):
+    # Decision provenance is exactly the agreeing final proposal/review pair,
+    # not the rejected initial round. The report retains every raw response.
+    pair = report.get('accepted_call_artifact_shas', [])
+    if len(pair) != 2 or len(set(pair)) != 2 or not set(pair).issubset(report['raw_artifact_shas']):
+        raise ValueError('identity authority requires the accepted proposal/review pair')
+    return sorted(pair)
 
 
 def semantic_postimage(package):
@@ -247,6 +257,8 @@ def run(root, apply, backup):
               'effective_proposal': effective, 'final_review': review, 'approved': True,
               'approval_basis': 'dual_model_consensus', 'human_content_approval': False,
               'reviewed_postimage_sha256': sha256_json(postimage),
+              'accepted_call_artifact_shas': sorted(read_artifact(root / f'raw-{label}.json')['artifact_sha256']
+                  for label in ('gpt-correction' if round_number else 'gpt-proposal', f'opus-review-{round_number}')),
               'raw_artifact_shas': [read_artifact(p)['artifact_sha256'] for p in sorted(root.glob('raw-*.json'))]}
     write_immutable(root / 'review-report.json', report)
     with exclusive_cvp_run_lock({'global_lock_path': str(root.parent / 'registry-cvp.lock')}):

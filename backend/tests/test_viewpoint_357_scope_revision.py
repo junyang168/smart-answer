@@ -5,6 +5,12 @@ import pytest
 from backend.pipeline import viewpoint_357_scope_revision as m
 
 
+def approved_report():
+    return {'approved': True, 'approval_basis': 'dual_model_consensus',
+            'raw_artifact_shas': ['initial-proposal', 'initial-review', 'final-proposal', 'final-review'],
+            'accepted_call_artifact_shas': ['final-proposal', 'final-review']}
+
+
 def proposal():
     return {'core_proposition': '路12:20中的ψυχή应理解为魂，不应译成灵魂。',
             'scope': {'scripture_scope': ['路加福音 12:20'], 'audience_scope': [], 'historical_scope': []},
@@ -34,7 +40,7 @@ def states():
 def test_successor_preserves_history_and_never_fabricates_human_approval(tmp_path):
     original = states()
     old = deepcopy(original)
-    package, manifest = m.package_for(original, proposal(), {'approved': True, 'approval_basis': 'dual_model_consensus', 'raw_artifact_shas': ['raw-sha']}, tmp_path)
+    package, manifest = m.package_for(original, proposal(), approved_report(), tmp_path)
     assert original == old
     assert set(package) == {'schema_version', 'package_id', 'canonical_viewpoints', 'viewpoint_revisions', 'viewpoint_claim_links', 'viewpoint_identity_candidates', 'viewpoint_identity_decisions'}
     revision = package['viewpoint_revisions'][0]
@@ -105,7 +111,7 @@ def test_link_repair_cannot_invent_hide_or_duplicate_evidence(change):
 def test_review_receives_actual_link_postimage_identical_to_write(tmp_path):
     live, p = states(), proposal()
     preview, _ = m.package_for(live, p, {}, tmp_path, preview=True)
-    final, _ = m.package_for(live, p, {'approved': True, 'raw_artifact_shas': ['raw']}, tmp_path)
+    final, _ = m.package_for(live, p, approved_report(), tmp_path)
     assert m.semantic_postimage(preview) == m.semantic_postimage(final)
     expected = m.semantic_postimage(final)['member_link']
     assert expected['evidence_bindings'] == [{'evidence_step_id': 'e1', 'source_fragment_id': 'luke'}]
@@ -125,7 +131,7 @@ def test_single_focal_dependent_synopsis_is_reviewed_and_succeeds_without_lost_h
         'focal_viewpoints': [{'viewpoint_revision_id': m.OLD, 'structure_role': 'central_claim'}]}
     old = deepcopy(live)
     preview, _ = m.package_for(live, proposal(), {}, tmp_path, preview=True)
-    final, _ = m.package_for(live, proposal(), {'approved': True, 'raw_artifact_shas': ['raw']}, tmp_path)
+    final, _ = m.package_for(live, proposal(), approved_report(), tmp_path)
     assert m.semantic_postimage(preview) == m.semantic_postimage(final)
     structure = final['viewpoint_structure_revisions'][0]
     assert structure['central_synthesis'] == proposal()['core_proposition']
@@ -134,7 +140,8 @@ def test_single_focal_dependent_synopsis_is_reviewed_and_succeeds_without_lost_h
     assert live == old
 
 
-def test_runner_reviews_compiled_member_postimage_not_old_link(tmp_path, monkeypatch):
+@pytest.mark.parametrize('needs_correction', [False, True])
+def test_runner_reviews_compiled_member_postimage_not_old_link(tmp_path, monkeypatch, needs_correction):
     live = states()
     operations = [SimpleNamespace(collection=c) for c in ('canonical_viewpoints', 'viewpoint_revisions',
         'viewpoint_claim_links', 'viewpoint_identity_candidates', 'viewpoint_identity_decisions')]
@@ -149,17 +156,45 @@ def test_runner_reviews_compiled_member_postimage_not_old_link(tmp_path, monkeyp
     def review(adapter, request, root, label):
         calls.append(label)
         m.write_immutable(root / f'raw-{label}.json', {'artifact_sha256': m.sha256_json(label)})
-        if label == 'gpt-proposal':
+        if label in {'gpt-proposal', 'gpt-correction'}:
             return proposal(), 1, 0
         after = request['proposed_postimage']['member_link']
         assert after['validated_against_viewpoint_revision_id'] != m.OLD
         assert after['evidence_bindings'] == live['viewpoint_claim_links', m.LINK]['evidence_bindings'][:1]
         assert request['effective_proposal']['member_link_repair']['excluded_binding_reason']
+        if needs_correction and label == 'opus-review-0':
+            return {'verdicts': [{'claim_id': m.CLAIM, 'approved': False, 'reason': 'correct once', 'problems': ['scope']}]}, 1, 0
         return {'verdicts': [{'claim_id': m.CLAIM, 'approved': True, 'reason': 'reviewed exact postimage', 'problems': []}]}, 1, 0
     monkeypatch.setattr(m, 'review_call', review)
     assert m.run(tmp_path, False, None)['status'] == 'dry_run_pass'
-    assert calls == ['gpt-proposal', 'opus-review-0']
+    assert calls == (['gpt-proposal', 'opus-review-0', 'gpt-correction', 'opus-review-1']
+                     if needs_correction else ['gpt-proposal', 'opus-review-0'])
     report = m.read_artifact(tmp_path / 'review-report.json')
     package = m.read_artifact(tmp_path / 'effective-package.json')
     assert report['reviewed_postimage_sha256'] == m.sha256_json(m.semantic_postimage(package))
     assert report['human_content_approval'] is False
+    assert report['accepted_call_artifact_shas'] == sorted(m.sha256_json(label) for label in calls[-2:])
+    assert len(report['raw_artifact_shas']) == len(calls)
+
+
+def test_corrected_identity_provenance_keeps_only_accepted_pair_and_preserves_history(tmp_path):
+    from backend.api.canonical_repository.knowledge_models import ViewpointIdentityDecisionRecord
+    live = states()
+    live['viewpoint_identity_decisions', 'old-decision'].update(
+        reviewer_id='old-reviewer', policy_version='old-policy', created_at='2026-10-02T00:00:00Z')
+    report = approved_report()
+    package, _ = m.package_for(live, proposal(), report, tmp_path)
+    decision = ViewpointIdentityDecisionRecord.model_validate(package['viewpoint_identity_decisions'][0])
+    assert decision.semantic_call_artifact_sha256s == ['final-proposal', 'final-review']
+    assert decision.policy_version == 'wkp357_scope_revision_complete_postimage_v2'
+    assert decision.input_sha256 == package['viewpoint_identity_candidates'][0]['generation_fingerprint']
+    assert report['raw_artifact_shas'] == ['initial-proposal', 'initial-review', 'final-proposal', 'final-review']
+    assert live['viewpoint_identity_decisions', 'old-decision']['policy_version'] == 'old-policy'
+
+
+@pytest.mark.parametrize('pair', [[], ['final-proposal'], ['final-proposal']*2,
+                                 ['final-proposal', 'foreign'], ['initial-proposal', 'final-proposal', 'final-review']])
+def test_identity_rejects_missing_duplicate_foreign_or_extra_call_provenance(pair):
+    report = approved_report(); report['accepted_call_artifact_shas'] = pair
+    with pytest.raises(ValueError, match='accepted proposal/review pair'):
+        m.accepted_review_pair(report)
