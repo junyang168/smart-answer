@@ -331,8 +331,8 @@ def resume_after_repair(root, attempt, recovery_root, executable, *, additional_
     if binding(backup["path"]) != backup:
         raise ValueError("fresh backup SHA drift")
     run_logged(["pg_restore", "--list", backup["path"]], attempt, "backup-restore-list")
-    from backend.pipeline.viewpoint_cvp_recovery_supervisor import process_table, remaining_producers
-    if [p for p in remaining_producers(process_table(), root.parent) if p not in {os.getpid(), os.getppid()}]:
+    from backend.pipeline.viewpoint_cvp_recovery_supervisor import process_table, remaining_producers, current_job_process_ids
+    if [p for p in remaining_producers(process_table(), root.parent) if p not in current_job_process_ids()]:
         raise ValueError("producer active; do not start another")
     # macOS ships screen 4.00.03: it has no -Logfile option. Supply a fixed
     # config so logging begins before the first production command.

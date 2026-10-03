@@ -11,6 +11,7 @@ import argparse
 import fcntl
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import time
@@ -27,6 +28,31 @@ def process_table():
     result = subprocess.check_output(["ps", "-axo", "pid=,command="], text=True)
     return {int(parts[0]): parts[1] for line in result.splitlines()
             if len(parts := line.strip().split(maxsplit=1)) == 2}
+
+
+def current_job_process_ids(table=None, pid=None):
+    """Only this process and its actual screen/login wrapper ancestors.
+
+    macOS screen launches login, which launches Python. Both wrappers carry
+    the producer argv but neither is another writer. Unrelated wrappers, even
+    with identical argv, must remain visible to the producer guard.
+    """
+    if table is None:
+        raw = subprocess.check_output(['ps', '-axo', 'pid=,ppid=,command='], text=True)
+        table = {int(p[0]): (int(p[1]), p[2]) for line in raw.splitlines()
+                 if len(p := line.strip().split(maxsplit=2)) == 3}
+    current = os.getpid() if pid is None else pid
+    result = {current}
+    while current in table:
+        parent = table[current][0]
+        if parent in result or parent not in table:
+            break
+        command = table[parent][1]
+        if not command.startswith(('SCREEN ', 'login ')):
+            break
+        result.add(parent)
+        current = parent
+    return result
 
 
 def campaign_running(table, pid, root):

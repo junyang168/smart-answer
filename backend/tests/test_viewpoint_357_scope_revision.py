@@ -249,3 +249,16 @@ def test_saved_apply_readback_checks_store_assigned_revision_without_any_write(t
         result = m.verify_saved_apply(tmp_path, store)
         assert result['read_only_recovery'] and result['claim_source_mutations'] == 0
         assert result['status'] == 'applied_readback_verified'
+
+
+def test_process_guard_excludes_only_own_screen_login_chain_not_other_writer():
+    from backend.pipeline.viewpoint_cvp_recovery_supervisor import current_job_process_ids, remaining_producers
+    cmd = 'python -m backend.pipeline.viewpoint_357_scope_revision --output-root /repair/root'
+    table = {10: (9, cmd), 9: (8, 'login '+cmd), 8: (1, 'SCREEN '+cmd), 1: (0, 'launchd'),
+             20: (19, cmd), 19: (18, 'login '+cmd), 18: (1, 'SCREEN '+cmd)}
+    ours = current_job_process_ids(table, 10)
+    assert ours == {8, 9, 10}
+    assert set(remaining_producers({p: r[1] for p, r in table.items()}, '/repair')) - ours == {18, 19, 20}
+    # A Python writing parent is not a launcher wrapper and cannot be hidden.
+    table[9] = (8, cmd)
+    assert current_job_process_ids(table, 10) == {10}

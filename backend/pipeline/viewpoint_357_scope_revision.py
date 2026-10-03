@@ -393,10 +393,10 @@ def main():
                 if not (args.apply or args.verify_applied) or result['status'] != 'applied_readback_verified' or not args.recovery_root or not args.codex_executable:
                     raise ValueError('reviewed/readback content repair and recovery inputs required')
                 from backend.pipeline.viewpoint_cvp_recovery_executor import resume_after_repair, binding
-                from backend.pipeline.viewpoint_cvp_recovery_supervisor import remaining_producers, process_table
+                from backend.pipeline.viewpoint_cvp_recovery_supervisor import remaining_producers, process_table, current_job_process_ids
                 # This process and its detached screen parent are the current
                 # repair job, not a competing producer. All others still block.
-                if any(p not in {os.getpid(), os.getppid()} for p in remaining_producers(process_table(), root.parent)):
+                if any(p not in current_job_process_ids() for p in remaining_producers(process_table(), root.parent)):
                     raise ValueError('another producer active; no audit/restart race')
                 handoff = root / 'content-repair-handoff'
                 handoff.mkdir()
