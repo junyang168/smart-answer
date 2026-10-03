@@ -100,6 +100,46 @@ def _span(statement: str, text: str) -> dict[str, Any]:
     return {"start_char": start, "end_char": start + len(text), "exact_text": text}
 
 
+def test_run_batch_canonicalizes_packet_without_reordering_accepted_group(tmp_path, monkeypatch):
+    import backend.pipeline.viewpoint_batch_resolution_runner as runner
+
+    claims = [_claim("C2", "第二條"), _claim("C1", "第一條")]
+    before = [item.model_dump(mode="json") for item in claims]
+    captured = []
+
+    class StopBeforeModel(Exception):
+        pass
+
+    def capture_packet(path, packet):
+        captured.append(packet)
+        raise StopBeforeModel
+
+    monkeypatch.setattr(runner, "_write_immutable", capture_packet)
+    with pytest.raises(StopBeforeModel):
+        runner.run_batch(batch_id="B1", scope_label="Matthew", claims=claims,
+                         registry_context=[], pending_candidates=[], output_dir=tmp_path,
+                         proposer=None, reviewer=None)
+    assert [row["claim_id"] for row in captured[0]["claims"]] == ["C1", "C2"]
+    assert captured[0] == build_batch_packet(batch_id="B1", scope_label="Matthew",
+                                            claims=list(reversed(claims)), registry_context=[])
+    assert [item.model_dump(mode="json") for item in claims] == before
+
+
+def test_run_batch_keeps_duplicate_rejection_before_models_or_artifacts(tmp_path, monkeypatch):
+    import backend.pipeline.viewpoint_batch_resolution_runner as runner
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("duplicate Claims must fail before artifacts or model calls")
+
+    monkeypatch.setattr(runner, "_write_immutable", forbidden)
+    monkeypatch.setattr(runner, "_call", forbidden)
+    claim = _claim("C1", "第一條")
+    with pytest.raises(ValueError, match="id-sorted and unique"):
+        runner.run_batch(batch_id="B1", scope_label="Matthew", claims=[claim, claim],
+                         registry_context=[], pending_candidates=[], output_dir=tmp_path,
+                         proposer=None, reviewer=None)
+
+
 def _component(
     statement: str,
     text: str,

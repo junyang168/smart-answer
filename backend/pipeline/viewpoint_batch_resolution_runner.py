@@ -460,6 +460,11 @@ def run_batch(
     consolidator: Any = None,
     dependents_loader: Any = None,
 ) -> dict[str, Any]:
+    # Accepted grouping preserves its source/argument order. The model packet
+    # has a separate canonical ID-order contract; normalize only this local
+    # copy, never the accepted group, batch identity or campaign schedule.
+    # Sorting must not deduplicate: build_batch_packet still rejects duplicates.
+    claims = sorted(claims, key=lambda item: item.claim_id)
     packet = build_batch_packet(
         batch_id=batch_id,
         scope_label=scope_label,
