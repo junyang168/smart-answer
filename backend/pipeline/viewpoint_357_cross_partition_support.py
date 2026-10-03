@@ -388,11 +388,15 @@ def bind_joint_identity_proposal(states, packet):
     original = states['viewpoint_claim_links', links[0]['viewpoint_claim_link_id']]
     template = states['viewpoint_identity_decisions', original['decision_id']]
     candidate = deepcopy(states['viewpoint_identity_candidates', template['identity_candidate_id']])
+    fragments=[deepcopy(states['source_fragments',fid]) for fid in sorted({b['source_fragment_id'] for p in links for b in p.get('evidence_bindings',[])})]
+    source_ids={f['source_id'] for f in fragments}
     basis = {'viewpoint_id':composite['viewpoint_id'], 'link_ids':composite['joint_link_ids'],
-             'members':deepcopy(links),
+             'member_refs':[{'link_id':p['viewpoint_claim_link_id'],'record_table':'proposed_links'} for p in links],
+             'member_semantic_sha256s':{p['viewpoint_claim_link_id']:sha256_json({k:v for k,v in p.items() if k!='decision_id'}) for p in links},
              'claims':[deepcopy(states['claims',cid]) for cid in composite['joint_claim_ids']],
              'viewpoint_revision':deepcopy(states['viewpoint_revisions',links[0]['validated_against_viewpoint_revision_id']]),
-             'source_bindings':[{k:s[k] for k in ('source_id','path','file_sha256')} for s in packet['sources']]}
+             'evidence_fragments':fragments,
+             'source_bindings':[{k:s[k] for k in ('source_id','path','file_sha256','body_sha256')} for s in packet['sources'] if s['source_id'] in source_ids]}
     candidate.update(revision=1,candidate_claim_ids=composite['joint_claim_ids'],candidate_viewpoint_ids=[composite['viewpoint_id']],
                      proposed_action='match_existing',generation_fingerprint=sha256_json(basis),seed_relation_ids=[])
     identity={'claims':candidate['candidate_claim_ids'],'viewpoints':candidate['candidate_viewpoint_ids'],
@@ -404,6 +408,10 @@ def bind_joint_identity_proposal(states, packet):
     composite.update(joint_candidate=candidate,joint_decision_id=decision_id,joint_source_basis=basis,
         joint_decision={'identity_decision_id':decision_id,'identity_candidate_id':candidate['identity_candidate_id'],
             'decision':'match_existing','resolved_viewpoint_id':composite['viewpoint_id'],
+            'validated_against_viewpoint_revision_id':links[0]['validated_against_viewpoint_revision_id'],
+            'source_basis_sha256':sha256_json(basis),
+            'source_fragment_ids':[f['fragment_id'] for f in fragments],
+            'source_ambiguity_disclosure':deepcopy(packet.get('owner_source_ambiguity',{})),
             'claim_link_decisions':[{'claim_id':cid,'link_type':'supports'} for cid in composite['joint_claim_ids']],
             'superseded_link_decisions':[{'link_id':p['viewpoint_claim_link_id'],
                 'decision_id':states['viewpoint_claim_links',p['viewpoint_claim_link_id']]['decision_id']} for p in links],
@@ -412,8 +420,27 @@ def bind_joint_identity_proposal(states, packet):
         link['decision_id']=decision_id
     for plan in packet['proposed_decisions']:
         if plan['link_id'] in composite['joint_link_ids']:
-            plan.update(decision_id=decision_id,identity_candidate_id=candidate['identity_candidate_id'],
+            plan.update(identity_decision_id=decision_id,decision_id=decision_id,identity_candidate_id=candidate['identity_candidate_id'],
                         joint_claim_ids=composite['joint_claim_ids'],joint_link_ids=composite['joint_link_ids'])
+    validate_joint_identity_proposal(packet)
+
+
+def validate_joint_identity_proposal(packet):
+    """Reject inconsistent duplicate identities before spending model capacity."""
+    composite=packet['composite_identity']; joint=composite['joint_decision']
+    candidate=composite['joint_candidate']; basis=composite['joint_source_basis']
+    if joint['identity_decision_id']!=composite['joint_decision_id'] or joint['identity_candidate_id']!=candidate['identity_candidate_id'] or joint['source_basis_sha256']!=sha256_json(basis):
+        raise ValueError('joint identity record drift')
+    links={p['viewpoint_claim_link_id']:p for p in packet['proposed_links']}
+    plans={p['link_id']:p for p in packet['proposed_decisions']}
+    for lid in composite['joint_link_ids']:
+        p=links[lid]; plan=plans[lid]
+        if (p['decision_id']!=joint['identity_decision_id'] or plan['identity_decision_id']!=p['decision_id']
+            or plan['decision_id']!=p['decision_id'] or plan['identity_candidate_id']!=candidate['identity_candidate_id']
+            or basis['member_semantic_sha256s'][lid]!=sha256_json({k:v for k,v in p.items() if k!='decision_id'})):
+            raise ValueError('reviewed joint identity drift')
+    if {s['source_id'] for s in basis['source_bindings']}!={f['source_id'] for f in basis['evidence_fragments']}:
+        raise ValueError('joint source binding drift')
 
 
 def validate_future_candidate(contract, claim, exegesis_revision, theological_revision, membership):
@@ -455,6 +482,7 @@ def approved_package(states, packet, report, root):
     plans = {p['link_id']:p for p in packet['proposed_decisions']}
     composite=packet.get('composite_identity')
     if composite:
+        validate_joint_identity_proposal(packet)
         joint_links=[p for p in packet['proposed_links'] if p['viewpoint_claim_link_id'] in composite['joint_link_ids']]
         if (len(joint_links)!=2 or {p['claim_id'] for p in joint_links}!=set(composite['joint_claim_ids'])
             or any(p['viewpoint_id']!=composite['viewpoint_id'] or p['link_type']!='supports' for p in joint_links)
@@ -493,7 +521,11 @@ def approved_package(states, packet, report, root):
         if joint:
             decision.update(identity_decision_id=joint_id,
                 claim_link_decisions=[{'claim_id':cid,'link_type':'supports'} for cid in composite['joint_claim_ids']],
-                reason='Owner directed keeping one composite viewpoint. Exact joint source-grounded proposition independently reviewed; partial Claims support jointly, not individual full equivalence.')
+                reason='Owner directed keeping one composite viewpoint. Exact joint source-grounded proposition independently reviewed; partial Claims support jointly, not individual full equivalence. '+
+                    'Pinned revision '+composite['joint_decision']['validated_against_viewpoint_revision_id']+
+                    '; joint source basis SHA '+composite['joint_decision']['source_basis_sha256']+
+                    '; exact fragments '+','.join(composite['joint_decision']['source_fragment_ids'])+
+                    '; professor promote/maintain wording difference is preserved, not resolved into a new distinction.')
             link['decision_id']=joint_id
         link.update(review_status='system_approved', effective_state=plan['intended_effective_state_after_review'])
         package['viewpoint_claim_links'].append(link)

@@ -234,6 +234,16 @@ def test_composite_identity_has_one_joint_decision_not_fake_full_members(tmp_pat
         states['viewpoint_claim_links',lid]={'decision_id':'old'}
     packet['sources']=[]
     bind_joint_identity_proposal(states,packet)
+    from backend.pipeline.viewpoint_357_cross_partition_support import validate_joint_identity_proposal
+    for field in ('identity_decision_id','decision_id'):
+        altered=deepcopy(packet)
+        altered['proposed_decisions'][0][field]='stale-independent-id'
+        with pytest.raises(ValueError,match='joint identity drift'):
+            validate_joint_identity_proposal(altered)
+    altered=deepcopy(packet)
+    altered['proposed_links'][0]['link_type']='equivalent_full'
+    with pytest.raises(ValueError,match='joint identity drift'):
+        validate_joint_identity_proposal(altered)
     reviewed_ids=[p['decision_id'] for p in packet['proposed_links']]
     assert len(set(reviewed_ids))==1
     reviews=[{'verdicts':[{'claim_id':cid,'approved':True,'problems':[]} for cid in claims]} for _ in range(2)]
