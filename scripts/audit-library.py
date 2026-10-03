@@ -1174,6 +1174,10 @@ def _audit_component_locators(store: Store) -> list[dict[str, Any]]:
         locator = payload.get("component_locator") or {}
         component = str(locator.get("statement_component") or "").strip()
         claim = claims.get(str(payload.get("claim_id") or ""))
+        # Whole-Claim equivalence intentionally has no component locator.
+        # Missing Claims and every actual component still require validation.
+        if payload.get("link_type") == "equivalent_full" and claim is not None and not locator:
+            continue
         if claim is None or not component:
             findings.append({
                 "object_id": row["object_id"],
@@ -1856,7 +1860,10 @@ def audit_viewpoints(
         payload = row["payload"]
         if payload.get("effective_state") not in (None, "active"):
             continue
-        if payload.get("link_type") not in MEMBER_LINK_TYPES:
+        # Explicit production closure must also audit non-equivalent relations.
+        # Keep the default membership population unchanged, and never relabel
+        # supports as equivalence merely to include a support-only viewpoint.
+        if only is None and payload.get("link_type") not in MEMBER_LINK_TYPES:
             continue
         links_by_viewpoint[str(payload.get("viewpoint_id") or "")].append(payload)
 
@@ -1869,12 +1876,17 @@ def audit_viewpoints(
         if links and viewpoint_id in viewpoints
     ]
     if only:
-        candidates = [v for v in candidates if v in only]
+        candidates = sorted(only)
     chosen = (
         candidates if sample_size is None else rng.sample(candidates, min(sample_size, len(candidates)))
     )
 
     def judge(viewpoint_id: str) -> dict[str, Any]:
+        if viewpoint_id not in viewpoints or not links_by_viewpoint.get(viewpoint_id):
+            return {
+                "viewpoint_id": viewpoint_id, "verdict": "blocked", "issue": "other",
+                "reason": "明確要求的觀點不存在或沒有有效連結，不得略過或聲稱已審核",
+            }
         viewpoint = viewpoints[viewpoint_id]
         revision = revisions.get(str(viewpoint.get("current_revision_id") or ""))
         if revision is None:
@@ -1950,12 +1962,14 @@ def _viewpoint_prompt(viewpoint_id: str, revision: dict[str, Any], blocks: list[
 
 你的任務是按每條連結的類型判斷它是否成立。對等價連結，要檢查會不會在同樣的情況下為真、同樣的情況下為假；其餘連結不得冒充等價成員。主張的未定位部分不作等價判定，但可讀原文核實支持背景。
 
-不要判斷這個觀點在神學上對不對。只判斷「把這幾條放在一起，算不算同一個觀點」。
+對多條 `supports` 共同支持的複合觀點，不要求每一條局部來源各自等價於整個合取命題；須核實全部來源共同支持完整主張，而且完整主張確實出自教授，不是編輯只憑主題相近拼成的。若合在一起仍缺任何條件或一部分只有系統推論，仍判異議。
+
+不要判斷這個觀點在神學上對不對。只判斷等價身份或所標明的非等價關係是否符合來源。
 
 判 `disputed` 的情形：
 - `scope_mismatch`——某條主張的適用範圍（對象、人群、時態、條件）比觀點窄或寬，兩者不會同真同假；
 - `different_proposition`——某條主張講的根本是另一件事，只是用詞相近；
-- `over_merge`——觀點的表述把兩個可以分開的命題用「和」「以及」併在一起，而有些主張只支持其中一半；
+- `over_merge`——聲稱等價的成員實際只符合合取命題的一半，或共同支持來源仍無法證實教授講過完整合取命題；局部 supports 不冒充整體等價，但也不能藉此容許無來源的合併；
 - `other`——其他你說得出理由的問題。
 
 所有連結均符合各自標明的關係就判 `same`（這是既有結果欄位，對非等價連結只表示關係檢查通過，不表示它是成員），`issue` 填 `none`。
