@@ -181,12 +181,12 @@ def test_purpose_locator_restores_original_connective_without_other_semantic_edi
     assert {k:v for k,v in after.items() if k not in {'revision','component_locator'}}=={k:v for k,v in link.items() if k not in {'revision','component_locator'}}
 
 
-@pytest.mark.parametrize('bad',[None,'raw_sha','response','model','request','accepted'])
+@pytest.mark.parametrize('bad',[None,'raw_sha','response','model','request','accepted','backend'])
 def test_apply_binds_actual_independent_raw_reviews(tmp_path,bad):
     import json
     packet={'exact_packet':'source-bound'}; reviews=[{'verdicts':[]},{'verdicts':[]}]
     hashes=[]
-    for label,backend,model,review in zip(['gpt-review','opus-review'],['codex','claude'],['gpt-6.1-sol','claude-opus-5-5'],reviews):
+    for label,backend,model,review in zip(['gpt-review','opus-review'],['codex_subscription','claude_subscription'],['gpt-6.1-sol','claude-opus-5-5'],reviews):
         raw={'backend':backend,'model_id':model,'response':review,'response_sha256':sha256_json(review),
              'request_payload_sha256':sha256_json(packet)}
         raw['artifact_sha256']=sha256_json(raw); hashes.append(raw['artifact_sha256'])
@@ -195,6 +195,9 @@ def test_apply_binds_actual_independent_raw_reviews(tmp_path,bad):
             if bad=='response': raw['response']={'verdicts':['invented']}
             if bad=='model': raw['model_id']='different'
             if bad=='request': raw['request_payload_sha256']='different'
+            if bad=='backend':
+                raw['backend']='claude_api'
+                raw['artifact_sha256']=sha256_json({k:v for k,v in raw.items() if k!='artifact_sha256'})
         (tmp_path/('raw-'+label+'.json')).write_text(json.dumps(raw))
     report={'reviews':reviews,'accepted_call_artifact_shas':hashes}
     if bad=='accepted': report['accepted_call_artifact_shas']=['a','b']

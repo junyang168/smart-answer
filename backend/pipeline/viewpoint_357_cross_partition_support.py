@@ -539,7 +539,7 @@ def approved_package(states, packet, report, root):
 def verify_review_artifacts(packet, report, root):
     """Bind approval to the actual retained responses; no label-only approvals."""
     expected = []
-    for label, backend, model, review in zip(['gpt-review','opus-review'],['codex','claude'],
+    for label, backend, model, review in zip(['gpt-review','opus-review'],['codex_subscription','claude_subscription'],
                                             ['gpt-6.1-sol','claude-opus-5-5'],report['reviews']):
         raw = read_artifact(root/('raw-'+label+'.json'))
         body = {k:v for k,v in raw.items() if k!='artifact_sha256'}
