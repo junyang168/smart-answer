@@ -217,26 +217,39 @@ def test_major_qualifier_preserves_positive_scope_without_inserting_negation():
 
 
 def test_composite_identity_has_one_joint_decision_not_fake_full_members(tmp_path):
-    from backend.pipeline.viewpoint_357_cross_partition_support import OLD_LINK,COMPOSITE_VIEWPOINT,COMPOSITE_LINKS
+    from backend.pipeline.viewpoint_357_cross_partition_support import OLD_LINK,COMPOSITE_VIEWPOINT,COMPOSITE_LINKS,bind_joint_identity_proposal
     claims=['C1','C2']; lids=sorted(COMPOSITE_LINKS)
     links=[{'viewpoint_claim_link_id':lid,'claim_id':cid,'viewpoint_id':COMPOSITE_VIEWPOINT,'decision_id':'new-'+cid,
-            'revision':2,'link_type':'supports'} for lid,cid in zip(lids,claims)]
+            'revision':2,'link_type':'supports','validated_against_viewpoint_revision_id':'R1'} for lid,cid in zip(lids,claims)]
     plans=[{'link_id':p['viewpoint_claim_link_id'],'action':'revalidate_with_type_change',
             'intended_effective_state_after_review':'active'} for p in links]
     packet={'targets':[{'claim':{'claim_id':cid}} for cid in claims],'proposed_links':links,'proposed_decisions':plans,
             'composite_identity':{'viewpoint_id':COMPOSITE_VIEWPOINT,'joint_link_ids':lids,'joint_claim_ids':claims,
                                   'no_split':True,'core_and_signature_unchanged':True}}
-    reviews=[{'verdicts':[{'claim_id':cid,'approved':True,'problems':[]} for cid in claims]} for _ in range(2)]
-    report={'approved':True,'packet_sha256':sha256_json(packet),'accepted_call_artifact_shas':['a','b'],'reviews':reviews}
     states={('viewpoint_claim_links',OLD_LINK):{'decision_id':'old'},
             ('viewpoint_identity_decisions','old'):{'identity_candidate_id':'old-candidate'},
-            ('viewpoint_identity_candidates','old-candidate'):{}}
+            ('viewpoint_identity_candidates','old-candidate'):{},('viewpoint_revisions','R1'):{'viewpoint_revision_id':'R1'}}
+    for cid,lid in zip(claims,lids):
+        states['claims',cid]={'claim_id':cid,'revision':1}
+        states['viewpoint_claim_links',lid]={'decision_id':'old'}
+    packet['sources']=[]
+    bind_joint_identity_proposal(states,packet)
+    reviewed_ids=[p['decision_id'] for p in packet['proposed_links']]
+    assert len(set(reviewed_ids))==1
+    reviews=[{'verdicts':[{'claim_id':cid,'approved':True,'problems':[]} for cid in claims]} for _ in range(2)]
+    report={'approved':True,'packet_sha256':sha256_json(packet),'accepted_call_artifact_shas':['a','b'],'reviews':reviews}
     package=approved_package(states,packet,report,tmp_path)
     assert len(package['viewpoint_claim_links'])==2
     assert len(package['viewpoint_identity_candidates'])==len(package['viewpoint_identity_decisions'])==1
     decision=package['viewpoint_identity_decisions'][0]
+    assert decision['identity_decision_id']==reviewed_ids[0]
+    assert package['viewpoint_identity_candidates'][0]==packet['composite_identity']['joint_candidate']
     assert all(p['decision_id']==decision['identity_decision_id'] for p in package['viewpoint_claim_links'])
     assert {d['claim_id'] for d in decision['claim_link_decisions']}==set(claims)
     assert all(d['link_type']=='supports' for d in decision['claim_link_decisions'])
     assert package['viewpoint_identity_candidates'][0]['candidate_claim_ids']==claims
     assert not {'canonical_viewpoints','viewpoint_revisions'} & set(package)
+    packet['proposed_decisions'][0]['decision_id']='unreviewed-replacement'
+    report['packet_sha256']=sha256_json(packet)
+    with pytest.raises(ValueError,match='joint identity drift'):
+        approved_package(states,packet,report,tmp_path)

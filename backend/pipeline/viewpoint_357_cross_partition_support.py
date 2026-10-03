@@ -363,6 +363,7 @@ def build(states, amendment):
                   scope_resolution={'negative_link':'Whole Claim is theological, but this exact negative component is witnessed only as the Matthew3:15 question/answer. Preserve local equivalent_component with exact locator: no invented general-to-local reasoning and no orphan CVP. One full Claim partition remains salvation; component identity is not a second partition owner or new grouping assignment. Review this distinction rather than infer local component scope from the whole Claim routing label.',
                                     'adjacent_denial':'Retire qualifies: denial of a competing meaning is not a condition on the affirmative definition. Preserve original Claim, opposed position, and all other memberships; do not fabricate a new negative CVP.'})
     packet = whole_group_context(states, packet)
+    bind_joint_identity_proposal(states, packet)
     contract = {'schema_version': 'wkp357_pending_theological_connection.v1', 'status': 'pending_theological_identity',
                 'claim_id': CLAIM, 'claim_revision': claim['revision'], 'claim_semantic_sha256': semantic_record_sha(claim),
                 'classification_amendment_sha256': amendment['artifact_sha256'], 'primary_partition': 'salvation',
@@ -375,6 +376,44 @@ def build(states, amendment):
                 'requires_exact_proposal_review_and_independent_audit': True,
                 'database_mutations': 0, 'apply_authorization': False}
     return packet, contract
+
+
+def bind_joint_identity_proposal(states, packet):
+    """Materialize the joint identity BEFORE review; apply uses these same IDs."""
+    composite = packet['composite_identity']
+    links = sorted([p for p in packet['proposed_links'] if p['viewpoint_claim_link_id'] in composite['joint_link_ids']],
+                   key=lambda p:p['viewpoint_claim_link_id'])
+    if len(links)!=2 or {p['claim_id'] for p in links}!=set(composite['joint_claim_ids']):
+        raise ValueError('incomplete joint proposal')
+    original = states['viewpoint_claim_links', links[0]['viewpoint_claim_link_id']]
+    template = states['viewpoint_identity_decisions', original['decision_id']]
+    candidate = deepcopy(states['viewpoint_identity_candidates', template['identity_candidate_id']])
+    basis = {'viewpoint_id':composite['viewpoint_id'], 'link_ids':composite['joint_link_ids'],
+             'members':deepcopy(links),
+             'claims':[deepcopy(states['claims',cid]) for cid in composite['joint_claim_ids']],
+             'viewpoint_revision':deepcopy(states['viewpoint_revisions',links[0]['validated_against_viewpoint_revision_id']]),
+             'source_bindings':[{k:s[k] for k in ('source_id','path','file_sha256')} for s in packet['sources']]}
+    candidate.update(revision=1,candidate_claim_ids=composite['joint_claim_ids'],candidate_viewpoint_ids=[composite['viewpoint_id']],
+                     proposed_action='match_existing',generation_fingerprint=sha256_json(basis),seed_relation_ids=[])
+    identity={'claims':candidate['candidate_claim_ids'],'viewpoints':candidate['candidate_viewpoint_ids'],
+              'relations':[],'action':'match_existing','blockers':candidate.get('blocker_codes',[]),
+              'coverage_snapshot_id':candidate.get('coverage_snapshot_id'),'generation_fingerprint':candidate['generation_fingerprint']}
+    if candidate.get('scope_manifest_sha256'): identity['scope_manifest_sha256']=candidate['scope_manifest_sha256']
+    candidate['identity_candidate_id']='VIC-'+sha256_json(identity)[:20]
+    decision_id='VID-'+sha256_json({'candidate':candidate,'basis':basis})[:20]
+    composite.update(joint_candidate=candidate,joint_decision_id=decision_id,joint_source_basis=basis,
+        joint_decision={'identity_decision_id':decision_id,'identity_candidate_id':candidate['identity_candidate_id'],
+            'decision':'match_existing','resolved_viewpoint_id':composite['viewpoint_id'],
+            'claim_link_decisions':[{'claim_id':cid,'link_type':'supports'} for cid in composite['joint_claim_ids']],
+            'superseded_link_decisions':[{'link_id':p['viewpoint_claim_link_id'],
+                'decision_id':states['viewpoint_claim_links',p['viewpoint_claim_link_id']]['decision_id']} for p in links],
+            'review_status':'candidate','not_approved_before_dual_review':True})
+    for link in links:
+        link['decision_id']=decision_id
+    for plan in packet['proposed_decisions']:
+        if plan['link_id'] in composite['joint_link_ids']:
+            plan.update(decision_id=decision_id,identity_candidate_id=candidate['identity_candidate_id'],
+                        joint_claim_ids=composite['joint_claim_ids'],joint_link_ids=composite['joint_link_ids'])
 
 
 def validate_future_candidate(contract, claim, exegesis_revision, theological_revision, membership):
@@ -421,7 +460,7 @@ def approved_package(states, packet, report, root):
             or any(p['viewpoint_id']!=composite['viewpoint_id'] or p['link_type']!='supports' for p in joint_links)
             or not composite['no_split'] or not composite['core_and_signature_unchanged']):
             raise ValueError('incomplete or altered composite identity basis')
-    joint_id='VID-'+sha256_json({'joint':composite,'report':sha256_json(report)})[:20] if composite else None
+    joint_id=composite['joint_decision_id'] if composite else None
     joint_created=False
     for proposed in packet['proposed_links']:
         link = deepcopy(proposed); plan = plans[link['viewpoint_claim_link_id']]
@@ -436,9 +475,11 @@ def approved_package(states, packet, report, root):
         if candidate.get('scope_manifest_sha256'): identity['scope_manifest_sha256'] = candidate['scope_manifest_sha256']
         joint=bool(composite and link['viewpoint_claim_link_id'] in composite['joint_link_ids'])
         if joint:
-            candidate.update(candidate_claim_ids=composite['joint_claim_ids'],generation_fingerprint=sha256_json(composite))
-            identity.update(claims=candidate['candidate_claim_ids'],generation_fingerprint=candidate['generation_fingerprint'])
-        candidate['identity_candidate_id'] = 'VIC-'+sha256_json(identity)[:20]
+            candidate=deepcopy(composite['joint_candidate'])
+            if link['decision_id']!=joint_id or plan['decision_id']!=joint_id or plan['identity_candidate_id']!=candidate['identity_candidate_id']:
+                raise ValueError('reviewed joint identity drift')
+        else:
+            candidate['identity_candidate_id'] = 'VIC-'+sha256_json(identity)[:20]
         decision = deepcopy(template_decision)
         decision.update(revision=1, identity_decision_id=link['decision_id'], identity_candidate_id=candidate['identity_candidate_id'],
                         decision='reject_match' if plan['action']=='retire' else 'match_existing', resolved_viewpoint_id=link['viewpoint_id'],
