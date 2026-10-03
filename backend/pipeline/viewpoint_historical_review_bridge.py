@@ -42,6 +42,88 @@ def _read_binding(binding: Mapping[str, str]) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def verify_legacy_adjudicated_graph(claim_id, final, current_claim, versions,
+                                  current_evidence, current_fragments):
+    """Exact replayed post-image, not a waiver of an unresolved old finding."""
+    normalized, _ = _normalize_records(final)
+    reviewed = normalized.get('claims', {}).get(claim_id)
+    if (reviewed is None or _meaning(reviewed) != _meaning(current_claim)
+            or current_claim.get('review_status') != 'ai_consensus_reviewed'):
+        raise CvpProductionBlocked([f'{claim_id}: legacy adjudicated Claim drift'])
+    chain = sorted(versions, key=lambda row: row['revision'])
+    for row in chain:
+        if (row.get('status') != 'applied' or record_content_sha(row['payload']) != row['content_sha256']
+                or row['payload'].get('revision') != row['revision']
+                or _meaning(row['payload']) != _meaning(reviewed)):
+            raise CvpProductionBlocked([f'{claim_id}: legacy applied history drift'])
+    if not chain or chain[-1]['payload'] != dict(current_claim):
+        raise CvpProductionBlocked([f'{claim_id}: legacy history is not current'])
+    if chain[0].get('source_sha256') != sha256_json(final):
+        raise CvpProductionBlocked([f'{claim_id}: initial ChangeSet does not bind replayed final'])
+    for row in chain[1:]:
+        if row.get('source_kind') != 'legacy_adjudicated_auto_applied_review_reconciliation_v1':
+            raise CvpProductionBlocked([f'{claim_id}: unexpected legacy post-review revision'])
+    for eid in reviewed['evidence_step_ids']:
+        old, live = normalized['evidence_steps'][eid], current_evidence.get(eid)
+        if live is None or _meaning(old) != _meaning(live) or claim_id not in live['produced_claim_ids']:
+            raise CvpProductionBlocked([f'{claim_id}: legacy adjudicated evidence drift'])
+        for fid in evidence_fragment_ids(EvidenceStepRecord.model_validate(live)):
+            if fid not in current_fragments or _fragment_meaning(normalized['source_fragments'][fid]) != _fragment_meaning(current_fragments[fid]):
+                raise CvpProductionBlocked([f'{claim_id}: legacy adjudicated fragment drift'])
+    return chain[-1]
+
+
+def _legacy_adjudicated_bridge(*, claim_id, current_claim, versions, current_evidence,
+                              current_fragments, review_binding, review_input_binding,
+                              legacy_reviewed_candidate_binding):
+    from backend.pipeline.legacy_candidate_reconciliation import inspect_legacy_bundle
+    from backend.pipeline.legacy_auto_applied_review_reconciliation import verify_historical_replay
+    final = _read_binding(legacy_reviewed_candidate_binding)
+    path = Path(legacy_reviewed_candidate_binding['path'])
+    bundle = inspect_legacy_bundle(path)
+    replay = verify_historical_replay(path)
+    if (bundle.get('reason') is not None or not replay
+            or bundle.get('review_sha256') != review_binding['file_sha256']
+            or bundle.get('package_sha256') != review_input_binding['file_sha256']
+            or not bundle.get('adjudication_structurally_validated')):
+        raise CvpProductionBlocked([f'{claim_id}: legacy adjudication is not source-bound replay authority'])
+    row = bundle['review_rows'].get(claim_id, {})
+    result = bundle['adjudication_results'].get(claim_id, {})
+    if (row.get('decision') != 'changes_suggested' or row.get('spot_check_selected')
+            or row.get('human_review_reason') or result.get('status') != 'auto_applied'
+            or result.get('human_review_reason') or result.get('openai', {}).get('decision') != 'accept'):
+        raise CvpProductionBlocked([f'{claim_id}: legacy finding lacks resolved independent adjudication'])
+    removed = result['openai'].get('patch', {}).get('excluded_claim_relation_ids', [])
+    if (not removed or set(removed) != set(final.get('consensus_application', {}).get('removed_claim_relation_ids', []))
+            or any(p.get('claim_relation_id') in removed for p in final.get('claim_relations', []))):
+        raise CvpProductionBlocked([f'{claim_id}: legacy excluded relation post-image mismatch'])
+    # The replay proves the original deletion; also prove it has not silently
+    # reappeared in the live graph. This is a read-only query, never a repair.
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    with PostgresKnowledgeStore().connect() as connection:
+        connection.execute('SET TRANSACTION READ ONLY')
+        if connection.execute("SELECT object_id FROM wang_knowledge.objects WHERE collection='claim_relations' AND object_id = ANY(%s) AND retired_at IS NULL", (removed,)).fetchall():
+            raise CvpProductionBlocked([f'{claim_id}: excluded legacy relation remains active'])
+    baseline = verify_legacy_adjudicated_graph(claim_id, final, current_claim, versions,
+                                             current_evidence, current_fragments)
+    body = {'schema_version':'wang_historical_claim_review_bridge_v1', 'status':'verified',
+        'claim_id':claim_id, 'pinned_claim_revision':current_claim['revision'],
+        'claim_revision_sha256':record_content_sha(current_claim),
+        'review_binding':dict(review_binding), 'review_input_binding':dict(review_input_binding),
+        'legacy_reviewed_candidate_binding':dict(legacy_reviewed_candidate_binding),
+        'review_model_id':bundle['reviewer_id'], 'review_provider':'anthropic',
+        'reviewer_fingerprint_sha256':row['reviewer_fingerprint'],
+        'reviewed_applied_revision':baseline['revision'], 'reviewed_applied_change_set_id':baseline['change_set_id'],
+        'coordinate_repairs':[], 'authority_kind':'exact_legacy_replay_and_applied_final_not_initial_review_pass',
+        'independent_review_decision':'changes_suggested', 'adjudication_status':'auto_applied',
+        'adjudication_binding':{'path':bundle['adjudication_path'],'file_sha256':bundle['adjudication_sha256']},
+        'historical_replay':replay,
+        'evidence_dependency_sha256':sha256_json({eid:record_content_sha(p) for eid,p in sorted(current_evidence.items())}),
+        'fragment_dependency_sha256':sha256_json({fid:record_content_sha(p) for fid,p in sorted(current_fragments.items())}),
+        'master_data_mutations':0,'model_calls_executed':0,'approval_status':'not_human_approved'}
+    return body | {'artifact_sha256':sha256_json(body)}
+
+
 def _sealed_adjudicated_bridge(*, claim_id, current_claim, item, resolution, versions,
                               current_evidence, current_fragments, review_binding,
                               review_input_binding, sealed_lineage_binding):
@@ -114,6 +196,7 @@ def verify_historical_review_bridge(
     human_closure_binding: Mapping[str, str] | None = None,
     sealed_lineage_binding: Mapping[str, str] | None = None,
     random_spot_check_policy_binding: Mapping[str, str] | None = None,
+    legacy_reviewed_candidate_binding: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Verify one read-only DB version chain; never ignore arbitrary drift."""
     review = _read_binding(review_binding)
@@ -124,6 +207,15 @@ def verify_historical_review_bridge(
     if review.get("reviewed_claims") != projection["candidate_claims"]:
         raise CvpProductionBlocked([f"{claim_id}: historical review does not cover its input projection"])
     reviewer = review.get("reviewer") or {}
+    rows = [row for row in review.get('claim_reviews', []) if row.get('claim_id') == claim_id]
+    if (legacy_reviewed_candidate_binding is not None and len(rows) == 1
+            and rows[0].get('decision') == 'changes_suggested'):
+        if human_closure_binding is not None:
+            raise CvpProductionBlocked([f'{claim_id}: legacy adjudication cannot override a human hold'])
+        return _legacy_adjudicated_bridge(claim_id=claim_id, current_claim=current_claim, versions=versions,
+            current_evidence=current_evidence, current_fragments=current_fragments,
+            review_binding=review_binding, review_input_binding=review_input_binding,
+            legacy_reviewed_candidate_binding=legacy_reviewed_candidate_binding)
     sealed_model = None
     sealed_final = None
     if reviewer.get("provider") == "anthropic_batched":
@@ -379,6 +471,7 @@ def main() -> None:
                 human_closure_binding=selected.get("human_closure_binding"),
                 sealed_lineage_binding=selected.get("sealed_lineage_binding"),
                 random_spot_check_policy_binding=selected.get("random_spot_check_policy_binding"),
+                legacy_reviewed_candidate_binding=selected.get('legacy_reviewed_candidate_binding'),
             ))
     body = {"schema_version": "wang_historical_claim_review_bridges_v1", "status": "verified",
             "selection_file_sha256": hashlib.sha256(args.selection.read_bytes()).hexdigest(),

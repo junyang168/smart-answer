@@ -124,6 +124,8 @@ def build_selection(group, inventory, root, random_spot_check_policy=None):
         review = read(review_path)
         input_path = Path(review["source"]["package_path"])
         row = {"claim_id": cid, "review_binding": binding(review_path), "review_input_binding": binding(input_path)}
+        if variant['contract'] == 'requires_historical_proof_adapter':
+            row['legacy_reviewed_candidate_binding'] = binding(candidate)
         if random_spot_check_policy is not None:
             row["random_spot_check_policy_binding"] = binding(random_spot_check_policy)
         if variant["contract"] == "sealed_valid":
