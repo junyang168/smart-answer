@@ -29,6 +29,7 @@ FIRST_LINK = 'VCL-3c7053f2c9c443e38b79'
 QUALIFIES_LINK = 'VCL-36e9fc3812d574144d5f'
 NEGATIVE_LINK = 'VCL-a6bfc37011c50b2c61be'
 ADJACENT_DENIAL_LINK = 'VCL-0cb2c47000de7df6364e'
+PURPOSE_LINK = 'VCL-d6f273ad93fd0d88cb00'
 CAMPAIGN = BASE/'matthew-full-20261002-v7-recovery-5cace1dfce87-recovery-7dce4372f79f-recovery-40104d43ce05-recovery-0e53c144d586-recovery-001343224f1e-recovery-a826fedccf5c'
 
 
@@ -149,6 +150,30 @@ def occurrence_ref(claim, bindings):
     return 'OCC-'+sha256_json(seed)[:20]
 
 
+def repair_purpose_locator(link, claim):
+    """Preserve the purpose connective as an exact original span, never prose editing."""
+    if (link['viewpoint_claim_link_id'], link['claim_id'], link['revision'],
+        link['pinned_claim_revision'], link['link_type'], link['effective_state']) != (
+        PURPOSE_LINK, 'DK-61d92ac2a5fb-P03-CL003', 1, claim['revision'], 'equivalent_component', 'active'
+    ) or claim['claim_id'] != link['claim_id']:
+        raise ValueError('purpose link identity/revision drift')
+    text = claim['statement']
+    expected = '耶穌接受約翰的洗，不是因為祂需要悔改，而是為了盡諸般的義並與人類站在一起。'
+    if text != expected or link['component_locator']['claim_sha256'] != semantic_record_sha(claim):
+        raise ValueError('purpose Claim text/SHA drift')
+    old = link['component_locator']['canonical_spans']
+    pieces = ['耶穌接受約翰的洗', '與人類站在一起。']
+    old_expected = [{'start_char':text.index(part),'end_char':text.index(part)+len(part),'exact_text':part} for part in pieces]
+    if old != old_expected or link['component_locator']['statement_component'] != ''.join(pieces):
+        raise ValueError('purpose old locator drift')
+    pieces.insert(1, '為了')
+    after = deepcopy(link)
+    after.update(revision=2, component_locator={'claim_sha256':semantic_record_sha(claim),
+        'statement_component':''.join(pieces), 'canonical_spans':[
+            {'start_char':text.index(part),'end_char':text.index(part)+len(part),'exact_text':part} for part in pieces]})
+    return after
+
+
 def mark_proposed(link, action, amendment_sha):
     """Candidate metadata is never an active/approved Registry record."""
     seed = {'link': link, 'action': action, 'amendment': amendment_sha}
@@ -252,14 +277,15 @@ def build(states, amendment):
     if adjacent_denial['revision'] != 1 or adjacent_denial['link_type'] != 'qualifies' or adjacent_denial['effective_state'] != 'active':
         raise ValueError('adjacent denial revision drift')
     adjacent_denial.update(revision=2, effective_state='retired')
+    purpose = repair_purpose_locator(states['viewpoint_claim_links', PURPOSE_LINK], states['claims','DK-61d92ac2a5fb-P03-CL003'])
     decision_plans = [mark_proposed(link, action, amendment['artifact_sha256']) for link, action in
-                      [(first_after,'revalidate'),(retired,'retire'),(qualifies,'retire'),(support,'supports'),(negative,'supports'),(adjacent_denial,'retire')]]
+                      [(first_after,'revalidate'),(retired,'retire'),(qualifies,'retire'),(support,'supports'),(negative,'supports'),(adjacent_denial,'retire'),(purpose,'revalidate')]]
     target_members = [p for (c, _), p in states.items() if c == 'viewpoint_claim_links' and p.get('viewpoint_id') == EXEGESIS and p.get('effective_state') == 'active']
     packet.update(schema_version='wkp357_cross_partition_support_review.v1', classification_amendment=amendment,
                   target_exegesis_revision=target_revision, target_exegesis_links=target_members,
                   target_exegesis_claims=[states['claims', cid] for cid in sorted({p['claim_id'] for p in target_members})],
                   adjacent_negative_revision=states['viewpoint_revisions', negative_head['current_revision_id']],
-                  proposed_links=[first_after, retired, qualifies, support, negative, adjacent_denial], proposed_decisions=decision_plans,
+                  proposed_links=[first_after, retired, qualifies, support, negative, adjacent_denial, purpose], proposed_decisions=decision_plans,
                   excluded_support_evidence={'E001':'否定错误解释由独立的否定命题连接保留，不作为约翰施洗的支持依据。'},
                   occurrence_seed_contract='viewpoint_batch_changeset: claim_id, claim_revision_sha256, sorted selected evidence pairs',
                   authorization='Owner: 继续 after complete-g010 correction plan; inspect all g010 links and dependencies, resolve both final findings and adjacent denial. No Claim/Evidence/source/CVP prose edits. Candidate proposal only, no production continuation.',
@@ -351,7 +377,7 @@ REVIEW_PROMPT = '''核对完整来源和所有实际拟修订连接，每个targ
 读取目标释经CVP、来源原文、现有所有相邻连接和关系。原文是否确实把该神学前提用于解释约翰施洗？支持须保留具体行动限定，不得仅凭主题相似。检查仍保留的相邻qualifies等关系是否也需修订；若有问题必须指出，不为续跑默许。
 本轮一并撤销错误相邻qualifies，补上原Claim自身E003/E006的具体施洗证据，否定词义连接保留原文顿号而非拼成“审判灭罪”。请核对补充的否定CVP正文/signature，以及每项proposed_decisions撤销或重新验证依据。
 所有拟修订记录当前都是candidate，非retired记录invalidated，不伪装已批准/active。intended_effective_state_after_review仅在真实双模型审核、确定性校验、备份、ChangeSet、回读后才可生效。occurrence是整组选中证据的canonical batch seed，不是一条Evidence必有一个OCC。
-Claim、Evidence、来源、CVP正文不改；只改明确列出的六条连接。否定成分不再等价，而是神学前提supports原文明确讲到的太3:13-15局部否定应用；不可仅为过审核随意降级，请检查该原文论证是否真的成立。相邻VCL-0cb2c47000de7df6364e撤销：否定另一解释不是限定肯定定义，不制造尚未做的神学CVP。
+Claim、Evidence、来源、CVP正文不改；只改明确列出的七条连接。VCL-d6f273ad93fd0d88cb00必须补上原Claim的「為了」逐字span，保留目的关系；不改Claim、类型、证据和其他记录。否定成分不再等价，而是神学前提supports原文明确讲到的太3:13-15局部否定应用；不可仅为过审核随意降级，请检查该原文论证是否真的成立。相邻VCL-0cb2c47000de7df6364e撤销：否定另一解释不是限定肯定定义，不制造尚未做的神学CVP。
 必须检查group_closure内全部11个CVP的现有成员、当前正文/signature、相邻连接和依赖。每个targets Claim各一verdict；checked_link_ids与checked_dependency_ids必须完整且不重复列出实际检查的required IDs。发现任何未修的真实连接、范围或结构问题放入closure_problems，不能默许下一组。唯一partition是Claim的分类，不代表支持关系不能跨区。未来神学身份仅pending，不能当作已生成或已审核。review不授权写库；approved只有无任何problems才true。'''
 
 
@@ -421,7 +447,7 @@ def main():
                             raise ValueError('source changed during correction review')
                     package = approved_package(live, packet, report, root)
                     plan = store.plan_package(package, source_kind='wkp357_cross_partition_support_correction')
-                    if len(plan.operations) != 18 or any(op.collection not in package for op in plan.operations):
+                    if len(plan.operations) != 21 or any(op.collection not in package for op in plan.operations):
                         raise ValueError('unexpected correction operation scope')
                     write_immutable(root/'effective-package.json', package)
                     write_immutable(root/'dry-run-plan.json', json.loads(json.dumps(plan.as_dict())))

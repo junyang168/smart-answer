@@ -8,6 +8,7 @@ from backend.pipeline.viewpoint_357_cross_partition_support import (
     mark_proposed, exact_evidence,
     approved_package,
     validate_closure_review,
+    repair_purpose_locator, PURPOSE_LINK,
 )
 
 
@@ -149,3 +150,29 @@ def test_whole_group_requires_actual_complete_nonduplicate_review_coverage(bad):
         assert validate_closure_review(review,packet)
         review['closure_problems']=['unresolved neighbouring connection']
         assert not validate_closure_review(review,packet)
+
+
+@pytest.mark.parametrize('bad',[None,'claim_text','claim_sha','old_locator','revision','claim_id'])
+def test_purpose_locator_restores_original_connective_without_other_semantic_edits(bad):
+    claim={'claim_id':'DK-61d92ac2a5fb-P03-CL003','revision':3,
+           'statement':'耶穌接受約翰的洗，不是因為祂需要悔改，而是為了盡諸般的義並與人類站在一起。'}
+    link={'viewpoint_claim_link_id':PURPOSE_LINK,'claim_id':claim['claim_id'],'revision':1,
+          'pinned_claim_revision':3,'link_type':'equivalent_component','effective_state':'active',
+          'evidence_bindings':[{'evidence_step_id':'E004','source_fragment_id':'F004'}],
+          'component_locator':{'claim_sha256':semantic_record_sha(claim),
+            'statement_component':'耶穌接受約翰的洗與人類站在一起。',
+            'canonical_spans':[{'start_char':0,'end_char':8,'exact_text':'耶穌接受約翰的洗'},
+                               {'start_char':29,'end_char':37,'exact_text':'與人類站在一起。'}]}}
+    if bad=='claim_text': claim['statement']+='新增'
+    if bad=='claim_sha': link['component_locator']['claim_sha256']='wrong'
+    if bad=='old_locator': link['component_locator']['canonical_spans'][0]['end_char']=7
+    if bad=='revision': link['revision']=2
+    if bad=='claim_id': claim['claim_id']='another'
+    if bad:
+        with pytest.raises(ValueError): repair_purpose_locator(link,claim)
+        return
+    before=deepcopy((link,claim)); after=repair_purpose_locator(link,claim)
+    assert (link,claim)==before
+    assert after['component_locator']['statement_component']=='耶穌接受約翰的洗為了與人類站在一起。'
+    assert after['component_locator']['canonical_spans'][1]=={'start_char':21,'end_char':23,'exact_text':'為了'}
+    assert {k:v for k,v in after.items() if k not in {'revision','component_locator'}}=={k:v for k,v in link.items() if k not in {'revision','component_locator'}}
