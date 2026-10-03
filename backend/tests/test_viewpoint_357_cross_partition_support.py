@@ -254,6 +254,7 @@ def test_composite_identity_has_one_joint_decision_not_fake_full_members(tmp_pat
     decision=package['viewpoint_identity_decisions'][0]
     assert decision['identity_decision_id']==reviewed_ids[0]
     assert package['viewpoint_identity_candidates'][0]==packet['composite_identity']['joint_candidate']
+    assert decision['input_sha256']==package['viewpoint_identity_candidates'][0]['generation_fingerprint']
     assert all(p['decision_id']==decision['identity_decision_id'] for p in package['viewpoint_claim_links'])
     assert {d['claim_id'] for d in decision['claim_link_decisions']}==set(claims)
     assert all(d['link_type']=='supports' for d in decision['claim_link_decisions'])

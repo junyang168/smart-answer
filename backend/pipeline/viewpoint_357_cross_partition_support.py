@@ -513,7 +513,7 @@ def approved_package(states, packet, report, root):
                         decision='reject_match' if plan['action']=='retire' else 'match_existing', resolved_viewpoint_id=link['viewpoint_id'],
                         claim_link_decisions=[{'claim_id':link['claim_id'], 'link_type':link['link_type']}],
                         reason='Owner-authorized correction: '+plan['action']+'; exact postimage independently reviewed; historical decision preserved.',
-                        input_sha256=sha256_json(packet), review_artifact_sha256=sha256_json(report),
+                        input_sha256=candidate['generation_fingerprint'], review_artifact_sha256=sha256_json(report),
                         semantic_call_artifact_sha256s=sorted(report['accepted_call_artifact_shas']),
                         policy_version='wkp357_cross_partition_support_revision_v2', reviewer_id='g010_source_bound_correction',
                         reviewer_model_ids=['claude-opus-5-5','gpt-6.1-sol'], reviewer_kind='system',
@@ -622,10 +622,13 @@ def main():
     parser.add_argument('--amendment', type=Path, required=True)
     parser.add_argument('--review', action='store_true')
     parser.add_argument('--prior-review-root', type=Path)
+    parser.add_argument('--reuse-approved-review-root', type=Path)
     parser.add_argument('--apply-and-audit',action='store_true')
     args = parser.parse_args()
-    if args.apply_and_audit and not args.review:
+    if args.apply_and_audit and not (args.review or args.reuse_approved_review_root):
         raise ValueError('apply requires actual formal review in this run')
+    if args.reuse_approved_review_root and (args.review or args.prior_review_root):
+        raise ValueError('review reuse cannot invoke new models or replace prior findings')
     root = args.output_root.resolve()
     if PROJECT.name != 'wkp-357-worktree-per-session' or root.parent != BASE or root.exists():
         raise ValueError('fresh independent #357 root required')
@@ -640,6 +643,25 @@ def main():
         manifest = json.loads(Path(amendment['bindings']['partition_manifest']['path']).read_text())
         states = snapshot(PostgresKnowledgeStore())
         packet, contract = build(states, amendment)
+        reused_report=None
+        if args.reuse_approved_review_root:
+            prior=args.reuse_approved_review_root.resolve()
+            if prior.parent!=BASE or (prior/'apply-intent.json').exists() or (prior/'apply-receipt.json').exists():
+                raise ValueError('review reuse requires unapplied independent root')
+            old_packet=read_artifact(prior/'packet.json')
+            rebuilt=deepcopy(old_packet)
+            for k in ('prior_review_findings','prior_review_packet_sha256','prior_review_file_bindings','correction_round'):
+                rebuilt.pop(k,None)
+            if rebuilt!=packet:
+                raise ValueError('current source-bound proposal differs from approved packet')
+            old_before=read_artifact(prior/'before.json')
+            if fingerprint(states,old_before['collections'])!=old_before['pre_fingerprint_sha256']:
+                raise ValueError('Registry drift since approved review')
+            reused_report=read_artifact(prior/'review-report.json')
+            if not reused_report['approved'] or reused_report['packet_sha256']!=sha256_json(old_packet):
+                raise ValueError('review reuse requires exact actual dual approval')
+            verify_review_artifacts(old_packet,reused_report,prior)
+            packet=old_packet
         if args.prior_review_root:
             prior = args.prior_review_root.resolve()
             if prior.parent != BASE:
@@ -657,8 +679,15 @@ def main():
         write_immutable(root/'packet.json', packet); write_immutable(root/'pending-connection.json', contract)
         result = {'status': 'prepared_not_applied', 'database_mutations': 0, 'production_resumed': False}
         write_derived(root/'progress.json', result)
-        if args.review:
-            for label, backend, model in [('gpt-review', 'codex', 'gpt-6.1-sol'), ('opus-review', 'claude', 'claude-opus-5-5')]:
+        if reused_report:
+            for name in ('gpt-review.json','opus-review.json','raw-gpt-review.json','raw-opus-review.json'):
+                write_immutable(root/name,read_artifact(prior/name))
+            write_immutable(root/'review-reuse.json',{'root':str(prior),'packet_sha256':sha256_json(packet),
+                'review_report_sha256':sha256_json(reused_report),'new_model_calls':0,
+                'physical_file_bindings':[{'path':str(prior/n),'sha256':file_sha256(prior/n)} for n in
+                    ('packet.json','review-report.json','raw-gpt-review.json','raw-opus-review.json')]})
+        if args.review or reused_report:
+            for label, backend, model in ([] if reused_report else [('gpt-review', 'codex', 'gpt-6.1-sol'), ('opus-review', 'claude', 'claude-opus-5-5')]):
                 write_derived(root/'progress.json', result | {'status': label})
                 adapter = StructuredJsonReviewerAdapter(client=subscription_client(backend, model, 'high'), prompt=REVIEW_PROMPT, response_model=WholeGroupReview, schema_name='cross_partition_whole_group_review', compact_payload=True)
                 raw, _, _ = review_call(adapter, packet, root, label)
