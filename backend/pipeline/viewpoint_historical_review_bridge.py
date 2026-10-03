@@ -125,6 +125,7 @@ def verify_historical_review_bridge(
         raise CvpProductionBlocked([f"{claim_id}: historical review does not cover its input projection"])
     reviewer = review.get("reviewer") or {}
     sealed_model = None
+    sealed_final = None
     if reviewer.get("provider") == "anthropic_batched":
         if sealed_lineage_binding is None:
             raise CvpProductionBlocked([f"{claim_id}: batched review requires authenticated sealed lineage"])
@@ -144,6 +145,7 @@ def verify_historical_review_bridge(
         if resolution.get("target_review_status") != "ai_consensus_reviewed" or resolution.get("adjudication_status") != "not_required" or resolution.get("independent_review_decision") != "pass":
             raise CvpProductionBlocked([f"{claim_id}: sealed review does not resolve this passing Claim"])
         sealed_model = resolution.get("reviewer_id")
+        sealed_final = item
     identity = {key: value for key, value in reviewer.items() if key not in {"fingerprint_sha256", "generated_at", "artifact_sha256", "provider"}}
     if sealed_model is None and sha256_json(identity) != reviewer.get("fingerprint_sha256"):
         raise CvpProductionBlocked([f"{claim_id}: historical reviewer fingerprint mismatch"])
@@ -268,8 +270,12 @@ def verify_historical_review_bridge(
     # just the original Claim's forward index. Their fragments were already
     # in this independently reviewed source package; no new wording is admitted.
     for evidence_id in current_claim["evidence_step_ids"]:
-        if evidence_id not in current_evidence or evidence_id not in normalized["evidence_steps"] or _meaning(current_evidence[evidence_id]) != _meaning(normalized["evidence_steps"][evidence_id]):
+        if evidence_id not in current_evidence or evidence_id not in normalized["evidence_steps"]:
             raise CvpProductionBlocked([f"{claim_id}: reviewed EvidenceStep changed after review"])
+        if _meaning(current_evidence[evidence_id]) != _meaning(normalized["evidence_steps"][evidence_id]):
+            proof=verify_sealed_reverse_index(evidence_id,normalized['evidence_steps'][evidence_id],
+                current_evidence[evidence_id],sealed_final)
+            evidence_index_repairs.append(proof)
         for fragment_id in evidence_fragment_ids(EvidenceStepRecord.model_validate(current_evidence[evidence_id])):
             old = normalized["source_fragments"].get(fragment_id)
             current = current_fragments.get(fragment_id)
@@ -300,6 +306,34 @@ def verify_historical_review_bridge(
         body["random_spot_check_waived_by_owner_policy"] = True
         body["human_content_approval"] = False
     return body | {"artifact_sha256": sha256_json(body)}
+
+
+def verify_sealed_reverse_index(eid, reviewed, current, authenticated_item):
+    """Reuse an authenticated final graph's additive reverse index, not new meaning.
+
+    The caller has authenticated the full sealed review generation and its
+    passing resolution. No arbitrary history or hand-authored index is accepted.
+    """
+    if authenticated_item is None:
+        raise CvpProductionBlocked([f'{eid}: no authenticated final candidate for reverse index'])
+    final,_=_normalize_records(authenticated_item['payload'])
+    expected=final.get('evidence_steps',{}).get(eid)
+    if expected is None or _meaning(expected)!=_meaning(current):
+        raise CvpProductionBlocked([f'{eid}: current EvidenceStep differs from sealed final graph'])
+    left,right=deepcopy(_meaning(reviewed)),deepcopy(_meaning(current))
+    old_ids=left.pop('produced_claim_ids',[]); new_ids=right.pop('produced_claim_ids',[])
+    if left!=right:
+        raise CvpProductionBlocked([f'{eid}: EvidenceStep content changed, not just reverse index'])
+    added=set(new_ids)-set(old_ids)
+    if not added or len(new_ids)!=len(set(new_ids)) or [cid for cid in new_ids if cid in set(old_ids)]!=old_ids:
+        raise CvpProductionBlocked([f'{eid}: reverse index deletion/reordering/duplication'])
+    for cid in added:
+        claim=final.get('claims',{}).get(cid)
+        if not claim or eid not in claim.get('evidence_step_ids',[]):
+            raise CvpProductionBlocked([f'{eid}: reverse index addition lacks sealed reciprocal Claim'])
+    return {'evidence_step_id':eid,'authority_kind':'sealed_final_additive_reverse_index',
+            'final_candidate_sha256':authenticated_item['application']['artifact_sha256'],
+            'added_claim_ids':sorted(added),'evidence_content_unchanged':True}
 
 
 def main() -> None:
