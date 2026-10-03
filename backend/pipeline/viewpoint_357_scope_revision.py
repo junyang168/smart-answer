@@ -15,7 +15,9 @@ from typing import Literal
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict
 
-from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+from backend.api.canonical_repository.postgres_store import (
+    PostgresKnowledgeStore, ChangeOperation, stored_operation_payload, record_content_sha,
+)
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json, semantic_record_sha
 from backend.api.canonical_repository.viewpoint_resolution import (
     StructuredJsonReviewerAdapter, ViewpointPropositionSignature, ViewpointScope,
@@ -296,9 +298,10 @@ def run(root, apply, backup):
         write_immutable(root / 'apply-receipt.json', receipt)
         expected = deepcopy(live)
         for op in plan.operations:
-            if store.get_record_state(op.collection, op.object_id)['payload'] != op.payload:
+            stored = stored_operation_payload(op)
+            if store.get_record_state(op.collection, op.object_id)['payload'] != stored:
                 raise ValueError('readback differs from exact normalized plan')
-            expected[(op.collection, op.object_id)] = op.payload
+            expected[(op.collection, op.object_id)] = stored
         post = snapshot(store)
         if set(post) != set(expected) or fingerprint(post, before['collections']) != fingerprint(expected, before['collections']):
             raise ValueError('unexpected non-target mutation')
@@ -310,6 +313,54 @@ def run(root, apply, backup):
         return result
 
 
+def verify_saved_apply(root, store):
+    """Read-only recovery of an applied plan; never propose or apply again."""
+    plan = read_artifact(root / 'dry-run-plan.json')
+    receipt = read_artifact(root / 'apply-receipt.json')
+    report = read_artifact(root / 'review-report.json')
+    package = read_artifact(root / 'effective-package.json')
+    packet = read_artifact(root / 'packet.json')
+    before = read_artifact(root / 'before.json')
+    if receipt.get('status') != 'applied' or receipt['change_set_id'] != plan['change_set_id'] or store.get_change_set_status(plan['fingerprint_sha256']) != 'applied':
+        raise ValueError('saved plan has no applied ChangeSet')
+    if sha256_json(semantic_postimage(package)) != report['reviewed_postimage_sha256']:
+        raise ValueError('saved applied postimage differs from content review')
+    post = snapshot(store)
+    reconstructed_before = deepcopy(post)
+    with store.connect() as conn, conn.cursor() as cur:
+        cur.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+        for row in plan['operations']:
+            op = ChangeOperation(**row)
+            expected = stored_operation_payload(op)
+            if post.get((op.collection, op.object_id)) != expected or record_content_sha(expected) != op.after_sha256:
+                raise ValueError('readback differs from exact stored plan')
+            cur.execute('SELECT change_set_id FROM wang_knowledge.object_versions WHERE collection=%s AND object_id=%s AND revision=%s AND content_sha256=%s',
+                        (op.collection, op.object_id, op.after_revision, op.after_sha256))
+            version = cur.fetchone()
+            if not version or version[0] != plan['change_set_id']:
+                raise ValueError('readback version is not bound to this ChangeSet')
+            if op.operation == 'create':
+                del reconstructed_before[(op.collection, op.object_id)]
+            elif op.operation == 'update':
+                cur.execute('SELECT payload FROM wang_knowledge.object_versions WHERE collection=%s AND object_id=%s AND revision=%s AND content_sha256=%s',
+                            (op.collection, op.object_id, op.before_revision, op.before_sha256))
+                prior = cur.fetchone()
+                if not prior or record_content_sha(prior[0]) != op.before_sha256:
+                    raise ValueError('missing exact historical before version')
+                reconstructed_before[(op.collection, op.object_id)] = prior[0]
+            else:
+                raise ValueError('scope repair only creates/updates')
+    if sorted({c for c, _ in reconstructed_before}) != before['collections'] or fingerprint(reconstructed_before, before['collections']) != before['pre_fingerprint_sha256']:
+        raise ValueError('unexpected non-target mutation since approved snapshot')
+    if file_sha256(Path(packet['source_path'])) != packet['source_file_sha256']:
+        raise ValueError('source changed after apply')
+    result = {'status': 'applied_readback_verified', 'change_set_id': plan['change_set_id'],
+              **read_artifact(root / 'successor-manifest.json'), 'claim_source_mutations': 0,
+              'read_only_recovery': True, 'independent_audit': 'pending'}
+    write_immutable(root / 'verified-result.json', result)
+    return result
+
+
 def main():
     if PROJECT.name != 'wkp-357-worktree-per-session':
         raise ValueError('only #357 worktree allowed')
@@ -317,6 +368,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--output-root', type=Path, required=True)
     ap.add_argument('--apply', action='store_true')
+    ap.add_argument('--verify-applied', action='store_true', help='Readback only; never reapply an existing ChangeSet')
     ap.add_argument('--backup', type=Path)
     ap.add_argument('--resume-campaign-root', type=Path)
     ap.add_argument('--recovery-root', type=Path)
@@ -329,12 +381,16 @@ def main():
     with (root / 'job.lock').open('a') as lock:
         import fcntl
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        if (root / 'apply-receipt.json').exists():
+        if (root / 'apply-receipt.json').exists() and not args.verify_applied:
             raise ValueError('already applied; verify/audit without reapplying')
         try:
-            result = run(root, args.apply, args.backup)
+            if args.verify_applied:
+                with exclusive_cvp_run_lock({'global_lock_path': str(root.parent / 'registry-cvp.lock')}):
+                    result = verify_saved_apply(root, PostgresKnowledgeStore())
+            else:
+                result = run(root, args.apply, args.backup)
             if args.resume_campaign_root:
-                if not args.apply or result['status'] != 'applied_readback_verified' or not args.recovery_root or not args.codex_executable:
+                if not (args.apply or args.verify_applied) or result['status'] != 'applied_readback_verified' or not args.recovery_root or not args.codex_executable:
                     raise ValueError('reviewed/readback content repair and recovery inputs required')
                 from backend.pipeline.viewpoint_cvp_recovery_executor import resume_after_repair, binding
                 from backend.pipeline.viewpoint_cvp_recovery_supervisor import remaining_producers, process_table

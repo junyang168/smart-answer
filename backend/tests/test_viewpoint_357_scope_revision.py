@@ -201,3 +201,51 @@ def test_identity_rejects_missing_duplicate_foreign_or_extra_call_provenance(pai
     report = approved_report(); report['accepted_call_artifact_shas'] = pair
     with pytest.raises(ValueError, match='accepted proposal/review pair'):
         m.accepted_review_pair(report)
+
+
+@pytest.mark.parametrize('fault', [None, 'content', 'unrelated', 'history', 'source', 'unapplied'])
+def test_saved_apply_readback_checks_store_assigned_revision_without_any_write(tmp_path, monkeypatch, fault):
+    from contextlib import contextmanager
+    before = {('claims', 'claim'): {'revision': 1, 'statement': 'unchanged'},
+              ('canonical_viewpoints', 'v'): {'revision': 1, 'current_revision_id': 'old'}}
+    after = deepcopy(before); after['canonical_viewpoints', 'v'] = {'revision': 2, 'current_revision_id': 'new'}
+    after['viewpoint_revisions', 'new'] = {'revision': 1, 'core_proposition': 'reviewed'}
+    update = m.ChangeOperation('update', 'canonical_viewpoints', 'v', m.record_content_sha(before['canonical_viewpoints', 'v']),
+        m.record_content_sha(after['canonical_viewpoints', 'v']), 1, 2, {'revision': 1, 'current_revision_id': 'new'})
+    create = m.ChangeOperation('create', 'viewpoint_revisions', 'new', None,
+        m.record_content_sha(after['viewpoint_revisions', 'new']), None, 1, after['viewpoint_revisions', 'new'])
+    from dataclasses import asdict
+    docs = {'dry-run-plan.json': {'change_set_id': 'KCS-test', 'fingerprint_sha256': 'fp',
+                                'operations': [asdict(update), asdict(create)]},
+            'apply-receipt.json': {'status': 'applied', 'change_set_id': 'KCS-test'},
+            'review-report.json': {'reviewed_postimage_sha256': m.sha256_json('reviewed')},
+            'effective-package.json': {}, 'packet.json': {'source_path': '/source', 'source_file_sha256': 'sha'},
+            'before.json': {'collections': ['canonical_viewpoints', 'claims'],
+                            'pre_fingerprint_sha256': m.fingerprint(before, ['canonical_viewpoints', 'claims'])},
+            'successor-manifest.json': {}}
+    monkeypatch.setattr(m, 'read_artifact', lambda p: docs[p.name])
+    monkeypatch.setattr(m, 'semantic_postimage', lambda p: 'reviewed')
+    monkeypatch.setattr(m, 'file_sha256', lambda p: 'wrong' if fault == 'source' else 'sha')
+    if fault == 'content': after['canonical_viewpoints', 'v']['current_revision_id'] = 'unexpected'
+    if fault == 'unrelated': after['claims', 'claim']['statement'] = 'changed'
+    monkeypatch.setattr(m, 'snapshot', lambda s: deepcopy(after))
+    class Cursor:
+        def execute(self, sql, args=None):
+            self.sql = sql
+            assert sql.startswith(('SET TRANSACTION', 'SELECT'))
+        def fetchone(self):
+            if self.sql.startswith('SELECT payload'):
+                return None if fault == 'history' else (before['canonical_viewpoints', 'v'],)
+            return ('KCS-test',)
+    @contextmanager
+    def cursor(): yield Cursor()
+    @contextmanager
+    def connect(): yield SimpleNamespace(cursor=cursor)
+    # No apply_plan/plan_package or model client exists on this fake store.
+    store = SimpleNamespace(connect=connect, get_change_set_status=lambda fp: 'failed' if fault == 'unapplied' else 'applied')
+    if fault:
+        with pytest.raises(ValueError): m.verify_saved_apply(tmp_path, store)
+    else:
+        result = m.verify_saved_apply(tmp_path, store)
+        assert result['read_only_recovery'] and result['claim_source_mutations'] == 0
+        assert result['status'] == 'applied_readback_verified'
