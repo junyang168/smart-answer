@@ -59,7 +59,7 @@ def recorded_model_executions(
         if artifact.get("artifact_sha256") != sha256_json(body):
             raise ValueError(f"raw response artifact SHA mismatch: {path}")
         stages[stage] = {
-            "calls_recorded": int(artifact.get("calls_recorded") or 1),
+            "calls_recorded": int(artifact.get("calls_recorded", 1)),
             "wall_seconds_recorded": round(float(artifact["wall_seconds"]), 3),
             "backend": artifact.get("backend"),
             "model_id": artifact.get("model_id"),
@@ -148,6 +148,7 @@ def call_model(
             f"{int(max_request_bytes)}; refreeze a smaller semantic scope"
         )
     request_sha = sha256_json(payload)
+    from backend.pipeline.viewpoint_model_cache_handoff import reuse_response
     if cache.exists():
         artifact = read_artifact(cache)
         if artifact.get("request_payload_sha256") != request_sha:
@@ -174,9 +175,14 @@ def call_model(
         body = {key: value for key, value in artifact.items() if key != "artifact_sha256"}
         if artifact.get("artifact_sha256") != sha256_json(body):
             raise ValueError(f"cached response artifact SHA mismatch: {cache}")
+        if artifact.get("cache_handoff") is not None:
+            reused = reuse_response(adapter, payload, cache)
+            if reused is None or reused[0] != response or reused[1] != artifact["cache_handoff"]:
+                raise ValueError(f"cached handoff provenance drift: {cache}")
         return response, 0, 0.0
     started = time.monotonic()
-    raw = dict(adapter.generate(payload))
+    reused = reuse_response(adapter, payload, cache)
+    raw = dict(reused[0] if reused is not None else adapter.generate(payload))
     elapsed = round(time.monotonic() - started, 3)
     artifact = {
         "schema_version": "wang_canonical_viewpoint_batch_raw_response_v1",
@@ -189,6 +195,9 @@ def call_model(
         "response_sha256": sha256_json(raw),
         "response": raw,
     }
+    if reused is not None:
+        artifact.update({"calls_recorded": 0, "wall_seconds": 0.0,
+                         "cache_handoff": reused[1]})
     artifact["artifact_sha256"] = sha256_json(artifact)
     write_immutable(cache, artifact)
-    return raw, 1, elapsed
+    return raw, 0 if reused is not None else 1, 0.0 if reused is not None else elapsed
