@@ -128,6 +128,7 @@ def run_main():
     parser.add_argument('--backup',type=Path)
     parser.add_argument('--resume-campaign-root',type=Path)
     parser.add_argument('--codex-executable',type=Path)
+    parser.add_argument('--resume-saved-audit',action='store_true')
     args=parser.parse_args(); root=args.output_root.resolve()
     if PROJECT.name != 'wkp-357-worktree-per-session' or root.parent != Path('/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/staging/cvp-production-357'):
         raise ValueError('only #357 worktree and independent staging root allowed')
@@ -140,15 +141,21 @@ def run_main():
             if not args.codex_executable or not args.codex_executable.is_file():
                 raise ValueError('explicit subscription executable required')
             from backend.pipeline.viewpoint_cvp_recovery_executor import resume_after_repair, binding
-            handoff=root/'claim-repair-handoff'; handoff.mkdir()
+            handoff=root/('claim-repair-proof-resume' if args.resume_saved_audit else 'claim-repair-handoff'); handoff.mkdir()
             write_derived(root/'progress.json',result|{'status':'independent_reaudit_before_resume'})
             old_scope=root.parent/'g008-scope-revision-20261002-v6'
             proofs=[binding(root/n) for n in ('reviewed-package.json','dry-run-plan.json','apply-receipt.json','review-report.json','verified-result.json')]
             proofs.extend(binding(old_scope/n) for n in ('effective-package.json','dry-run-plan.json','apply-receipt.json','review-report.json','verified-result.json'))
             try:
+                saved=None
+                if args.resume_saved_audit:
+                    proof=read_artifact(root/'claim-repair-handoff/verified-group/completion-with-content-repair.json')
+                    from backend.pipeline.viewpoint_cvp_recovery_executor import verify_binding
+                    for b in proof['bindings']: verify_binding(b,parse_json=False)
+                    saved=Path(proof['audit_path'])
                 continuation=resume_after_repair(args.resume_campaign_root.resolve(),handoff,
                     root.parent/'immediate-recovery-20261002-v1',args.codex_executable,
-                    additional_proof_bindings=proofs,additional_source_repair_paths=[root/'reviewed-package.json'])
+                    additional_proof_bindings=proofs,additional_source_repair_paths=[root/'reviewed-package.json'],saved_audit_path=saved)
                 result=result|{'status':continuation['status'],'continuation':continuation}
                 write_derived(root/'progress.json',result)
             except Exception as exc:

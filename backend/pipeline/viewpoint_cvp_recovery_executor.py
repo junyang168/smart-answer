@@ -192,10 +192,10 @@ def apply_and_commit(proposal, baseline, attempt):
     return receipt
 
 
-def verify_binding(b):
+def verify_binding(b, *, parse_json=True):
     if binding(b["path"]) != b:
         raise ValueError("physical artifact SHA drift")
-    return read(b["path"])
+    return read(b["path"]) if parse_json else None
 
 
 def load_campaign(root):
@@ -257,7 +257,10 @@ def continuation_inputs(root, output, extra_completion=None, *, additional_sourc
         raise ValueError("duplicate completion proof")
     for seed in seeds:
         for b in seed["bindings"]:
-            verify_binding(b)
+            # A proof may bind an immutable explanatory Markdown record as
+            # well as its JSON evidence. Verify every byte; only the actual
+            # audit/plan consumers parse their required JSON below.
+            verify_binding(b, parse_json=False)
         audited = read(seed["audit_path"])
         ca = read(seed.get("claim_audit_path", seed["audit_path"]))
         validate_audit({"meta": audited["meta"], "layers": {"3": ca["layers"]["3"], "4": audited["layers"]["4"]}},
@@ -286,7 +289,7 @@ def continuation_inputs(root, output, extra_completion=None, *, additional_sourc
     return argv
 
 
-def resume_after_repair(root, attempt, recovery_root, executable, *, additional_proof_bindings=(), additional_source_repair_paths=()):
+def resume_after_repair(root, attempt, recovery_root, executable, *, additional_proof_bindings=(), additional_source_repair_paths=(), saved_audit_path=None):
     cfg, schedule, manifest, groups = load_campaign(root)
     state = read(root / "progress.json")
     group_root = root / f"g{state['sequence']:03d}"
@@ -302,11 +305,17 @@ def resume_after_repair(root, attempt, recovery_root, executable, *, additional_
         targets = sorted({o["payload"]["viewpoint_id"] for o in read(plans[0])["operations"]
                           if o["collection"] == "viewpoint_claim_links"})
         audit_dir = attempt / "independent-reaudit"
-        run_logged([PYTHON, "scripts/audit-library.py", "--scope", "all", "--layers", "1,2,3,4",
-                    "--claim-ids", ",".join(groups[state["group_key"]]["claim_ids"]),
-                    "--viewpoint-ids", ",".join(targets), "--workers", "2", "--model", "gemini-3.8-flash",
-                    "--out", audit_dir, "--no-status-file"], attempt, "independent-reaudit")
-        extra = verify_group_audit(root, cfg, schedule, manifest, groups, audit_dir / "audit.json", attempt / "verified-group")
+        if saved_audit_path is None:
+            run_logged([PYTHON, "scripts/audit-library.py", "--scope", "all", "--layers", "1,2,3,4",
+                        "--claim-ids", ",".join(groups[state["group_key"]]["claim_ids"]),
+                        "--viewpoint-ids", ",".join(targets), "--workers", "2", "--model", "gemini-3.8-flash",
+                        "--out", audit_dir, "--no-status-file"], attempt, "independent-reaudit")
+            saved_audit_path = audit_dir / "audit.json"
+        else:
+            # Caller first verifies its applied target/full-registry readback.
+            # Reuse a saved real audit, never fabricate a fresh model pass.
+            write_immutable(attempt / 'saved-audit-binding.json', binding(saved_audit_path))
+        extra = verify_group_audit(root, cfg, schedule, manifest, groups, saved_audit_path, attempt / "verified-group")
         if additional_proof_bindings:
             for b in additional_proof_bindings:
                 verify_binding(b)
