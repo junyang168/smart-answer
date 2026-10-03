@@ -232,7 +232,7 @@ def test_restart_requires_backup_dryrun_and_unique_real_process(tmp_path, monkey
     root.mkdir(); attempt.mkdir()
     (root / "progress.json").write_text('{"sequence":8,"group_key":"g"}')
     monkeypatch.setattr(m, "load_campaign", lambda *a: ({}, {}, {}, {}))
-    output = root.parent / (root.name + "-recovery-" + attempt.name[:12])
+    output = m.continuation_root(root, attempt)
     def inputs(*args):
         output.mkdir()
         return ["python", "-m", "backend.pipeline.viewpoint_cvp_campaign_runner", "--output-root", output]
