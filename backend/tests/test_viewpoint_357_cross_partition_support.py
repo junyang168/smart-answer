@@ -9,6 +9,7 @@ from backend.pipeline.viewpoint_357_cross_partition_support import (
     approved_package,
     validate_closure_review,
     repair_purpose_locator, PURPOSE_LINK,
+    verify_review_artifacts,
 )
 
 
@@ -95,12 +96,13 @@ def test_occurrence_uses_canonical_batch_seed_and_deduplicates_pairs():
 
 @pytest.mark.parametrize('action', ['supports','revalidate','retire'])
 def test_proposed_decision_never_claims_existing_approval(action):
-    link = {'decision_id':'VID-old', 'review_status':'system_approved', 'effective_state':'retired' if action=='retire' else 'active', 'viewpoint_claim_link_id':'VCL-one', 'viewpoint_id':'CV-one', 'claim_id':CLAIM, 'link_type':'supports'}
+    link = {'decision_id':'VID-old', 'revision':2, 'review_status':'system_approved', 'effective_state':'retired' if action=='retire' else 'active', 'viewpoint_claim_link_id':'VCL-one', 'viewpoint_id':'CV-one', 'claim_id':CLAIM, 'link_type':'supports'}
     plan = mark_proposed(link, action, 'amendment')
     assert link['decision_id'] != 'VID-old'
     assert link['review_status'] == 'candidate'
     assert link['effective_state'] == ('retired' if action=='retire' else 'invalidated')
     assert plan['intended_effective_state_after_review'] == ('retired' if action=='retire' else 'active')
+    assert plan['supersedes_decision_id']=='VID-old'
 
 
 @pytest.mark.parametrize('failure', [None, 'foreign', 'reciprocity', 'excerpt', 'physical'])
@@ -176,3 +178,25 @@ def test_purpose_locator_restores_original_connective_without_other_semantic_edi
     assert after['component_locator']['statement_component']=='耶穌接受約翰的洗為了與人類站在一起。'
     assert after['component_locator']['canonical_spans'][1]=={'start_char':21,'end_char':23,'exact_text':'為了'}
     assert {k:v for k,v in after.items() if k not in {'revision','component_locator'}}=={k:v for k,v in link.items() if k not in {'revision','component_locator'}}
+
+
+@pytest.mark.parametrize('bad',[None,'raw_sha','response','model','request','accepted'])
+def test_apply_binds_actual_independent_raw_reviews(tmp_path,bad):
+    import json
+    packet={'exact_packet':'source-bound'}; reviews=[{'verdicts':[]},{'verdicts':[]}]
+    hashes=[]
+    for label,backend,model,review in zip(['gpt-review','opus-review'],['codex','claude'],['gpt-6.1-sol','claude-opus-5-5'],reviews):
+        raw={'backend':backend,'model_id':model,'response':review,'response_sha256':sha256_json(review),
+             'request_payload_sha256':sha256_json(packet)}
+        raw['artifact_sha256']=sha256_json(raw); hashes.append(raw['artifact_sha256'])
+        if label=='opus-review':
+            if bad=='raw_sha': raw['artifact_sha256']='wrong'
+            if bad=='response': raw['response']={'verdicts':['invented']}
+            if bad=='model': raw['model_id']='different'
+            if bad=='request': raw['request_payload_sha256']='different'
+        (tmp_path/('raw-'+label+'.json')).write_text(json.dumps(raw))
+    report={'reviews':reviews,'accepted_call_artifact_shas':hashes}
+    if bad=='accepted': report['accepted_call_artifact_shas']=['a','b']
+    if bad:
+        with pytest.raises(ValueError): verify_review_artifacts(packet,report,tmp_path)
+    else: verify_review_artifacts(packet,report,tmp_path)
