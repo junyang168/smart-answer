@@ -188,7 +188,15 @@ export async function generateSundayServicePpt(date: string): Promise<Blob> {
   });
   if (!response.ok) {
     const message = await response.text();
-    throw new Error(message || `Request failed with status ${response.status}`);
+    // FastAPI answers {"detail": "..."}; show the message, not the JSON around it.
+    let detail = message;
+    try {
+      const parsed = JSON.parse(message);
+      if (typeof parsed?.detail === "string") detail = parsed.detail;
+    } catch {
+      // not JSON: show it as is
+    }
+    throw new Error(detail || `Request failed with status ${response.status}`);
   }
   return response.blob();
 }

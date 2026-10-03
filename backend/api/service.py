@@ -2447,12 +2447,48 @@ def _split_scripture_section(
     return sections
 
 
+def _assign_slide_readers(slide_entries: list[dict[str, object]], readers: list[str]) -> list[str]:
+    """One reader per slide when there are enough; otherwise a reader takes
+    consecutive slides of the same passage.
+
+    2026-10-04: 創 5:21–29 (9 verses) splits into two slides, so three passages
+    made four slides for three readers, and the PPT could not be generated
+    (OPS-33). A passage still needs at least one reader of its own; spare
+    readers go to the passages with the most slides per reader.
+    """
+
+    if len(readers) >= len(slide_entries):
+        return readers[: len(slide_entries)]
+    passages: list[list[int]] = []
+    for index, slide in enumerate(slide_entries):
+        if passages and slide_entries[passages[-1][0]].get("section") == slide.get("section"):
+            passages[-1].append(index)
+        else:
+            passages.append([index])
+    if len(readers) < len(passages):
+        raise ValueError(f"讀經同工人數不足：{len(passages)} 段經文至少需要 {len(passages)} 位讀經同工")
+    counts = [1] * len(passages)
+    for _ in range(len(readers) - len(passages)):
+        best = max(
+            (i for i in range(len(passages)) if counts[i] < len(passages[i])),
+            key=lambda i: len(passages[i]) / counts[i],
+        )
+        counts[best] += 1
+    slide_readers: list[str] = []
+    remaining = iter(readers)
+    for slides, count in zip(passages, counts):
+        base, extra = divmod(len(slides), count)
+        for chunk in range(count):
+            slide_readers.extend([next(remaining)] * (base + (1 if chunk < extra else 0)))
+    return slide_readers
+
+
 def _prepare_scripture_sections(
     sections: list[dict[str, object]],
     readers: list[str],
 ) -> tuple[list[dict[str, object]], list[dict[str, str]], list[str]]:
     slide_entries: list[dict[str, object]] = []
-    for section in sections:
+    for section_index, section in enumerate(sections):
         verses = section.get("verses") or []
         if not verses:
             continue
@@ -2490,33 +2526,29 @@ def _prepare_scripture_sections(
                     "lines": line_texts,
                     "label": label,
                     "reference": section.get("display", ""),
+                    "section": section_index,
                 }
             )
 
     if not slide_entries:
         return [], [], []
 
-    required = len(slide_entries)
-    assigned_readers: list[str] = []
-    seen: set[str] = set()
+    unique_readers: list[str] = []
     for candidate in readers:
         name = (candidate or "").strip()
         if not name:
             continue
-        if name in seen:
+        if name in unique_readers:
             raise ValueError(f"讀經同工不可重複：{name}")
-        assigned_readers.append(name)
-        seen.add(name)
-        if len(assigned_readers) == required:
-            break
+        unique_readers.append(name)
 
-    if len(assigned_readers) < required:
-        raise ValueError("讀經同工人數不足，無法分配每段經文")
+    slide_readers = _assign_slide_readers(slide_entries, unique_readers)
+    assigned_readers = list(dict.fromkeys(slide_readers))
 
     assigned_sections: list[dict[str, object]] = []
     summary: list[dict[str, str]] = []
     for index, slide in enumerate(slide_entries):
-        reader = assigned_readers[index]
+        reader = slide_readers[index]
         assigned_sections.append(
             {
                 "lines": slide["lines"],
