@@ -17,12 +17,59 @@ from backend.api.canonical_repository.viewpoint_production_safety import file_sh
 from backend.api.canonical_repository.viewpoint_resolution import StructuredJsonReviewerAdapter
 from backend.pipeline.viewpoint_authorized_source_repair_357 import snapshot, Review, review_call
 from backend.pipeline.viewpoint_357_g010_link_revision import BASE, PROJECT, prepare
-from backend.pipeline.viewpoint_resolution_runtime import subscription_client, write_immutable, write_derived
+from backend.pipeline.viewpoint_resolution_runtime import subscription_client, write_immutable, write_derived, read_artifact, stable_decided_at
+from backend.pipeline.viewpoint_authorized_source_repair_357 import fingerprint
+from backend.api.canonical_repository.viewpoint_production_safety import exclusive_cvp_run_lock
 
 CLAIM = 'DK-d7a3359c50c895c48b09-P08-CL001'
 OLD_LINK = 'VCL-84a15e86c11ea67ac44c'
 EXEGESIS = 'CV-fa68184befde30dfbb8e'
 FIRST_LINK = 'VCL-3c7053f2c9c443e38b79'
+QUALIFIES_LINK = 'VCL-36e9fc3812d574144d5f'
+NEGATIVE_LINK = 'VCL-a6bfc37011c50b2c61be'
+
+
+def exact_evidence(states, claim, packet_sources, step_ids):
+    """Expand actual Claim-owned steps, including previously unlinked evidence."""
+    sources = {s['source_id']: s for s in packet_sources}
+    rows = []
+    for eid in sorted(step_ids):
+        if eid not in claim['evidence_step_ids']:
+            raise ValueError('foreign evidence step')
+        step = states['evidence_steps', eid]
+        if claim['claim_id'] not in step['produced_claim_ids']:
+            raise ValueError('non-reciprocal Claim evidence')
+        for fid in sorted(step['source_fragment_ids']):
+            fragment = states['source_fragments', fid]
+            source = sources[fragment['source_id']]
+            if file_sha256(Path(source['path'])) != source['file_sha256']:
+                raise ValueError('physical source drift')
+            paragraph = source['complete_original'][int(fragment['paragraph_key'][1:])-1]
+            if not fragment['verbatim_excerpt'] or fragment['verbatim_excerpt'] not in paragraph:
+                raise ValueError('evidence excerpt is not verbatim in pinned paragraph')
+            rows.append({'step': deepcopy(step), 'fragment': deepcopy(fragment)})
+    return rows
+
+
+def occurrence_ref(claim, bindings):
+    """Same occurrence seed as viewpoint_batch_changeset (not one ref/step)."""
+    seed = {'claim_id': claim['claim_id'], 'claim_revision_sha256': semantic_record_sha(claim),
+            'evidence': sorted({(b['evidence_step_id'], b['source_fragment_id']) for b in bindings})}
+    return 'OCC-'+sha256_json(seed)[:20]
+
+
+def mark_proposed(link, action, amendment_sha):
+    """Candidate metadata is never an active/approved Registry record."""
+    seed = {'link': link, 'action': action, 'amendment': amendment_sha}
+    link['decision_id'] = 'VID-'+sha256_json(seed)[:20]
+    link['review_status'] = 'candidate'
+    if action != 'retire':
+        link['effective_state'] = 'invalidated'
+    return {'identity_decision_id': link['decision_id'], 'status': 'candidate_pending_exact_postimage_review',
+            'action': action, 'claim_id': link['claim_id'], 'viewpoint_id': link['viewpoint_id'],
+            'link_id': link['viewpoint_claim_link_id'], 'link_type': link['link_type'],
+            'intended_effective_state_after_review': 'retired' if action == 'retire' else 'active',
+            'prior_decision_preserved': True, 'approval_basis_after_review': 'dual_model_consensus'}
 
 
 def verify_amendment(amendment):
@@ -79,21 +126,48 @@ def build(states, amendment):
     first_after['evidence_bindings'] = sorted(
         [{'evidence_step_id': e['step']['evidence_step_id'], 'source_fragment_id': e['fragment']['fragment_id']}
          for e in first['available_evidence']], key=lambda b: (b['evidence_step_id'], b['source_fragment_id']))
+    first_after['occurrence_refs'] = [occurrence_ref(first['claim'], first_after['evidence_bindings'])]
     retired = deepcopy(target['link'])
     retired.update(revision=retired['revision'] + 1, effective_state='retired')
+    qualifies = deepcopy(states['viewpoint_claim_links', QUALIFIES_LINK])
+    if qualifies['revision'] != 1 or qualifies['claim_id'] != CLAIM or qualifies['effective_state'] != 'active':
+        raise ValueError('adjacent qualifies revision drift')
+    qualifies.update(revision=2, effective_state='retired')
+    support_steps = [CLAIM.replace('CL001', 'E'+suffix) for suffix in ['002','003','005','006']]
+    evidence = exact_evidence(states, claim, packet['sources'], support_steps)
+    target['available_evidence'] = exact_evidence(states, claim, packet['sources'], claim['evidence_step_ids'])
     support = deepcopy(target['link'])
     support.update(viewpoint_claim_link_id='VCL-'+sha256_json({'claim': CLAIM, 'viewpoint': EXEGESIS, 'role': 'supports', 'amendment': amendment['artifact_sha256']})[:20],
                    revision=1, viewpoint_id=EXEGESIS, validated_against_viewpoint_revision_id=target_revision['viewpoint_revision_id'],
-                   link_type='supports', component_locator=None, decision_id='pending_independent_review')
+                   link_type='supports', component_locator=None)
     support['evidence_bindings'] = sorted(
         [{'evidence_step_id': e['step']['evidence_step_id'], 'source_fragment_id': e['fragment']['fragment_id']}
-         for e in target['available_evidence']], key=lambda b: (b['evidence_step_id'], b['source_fragment_id']))
+         for e in evidence], key=lambda b: (b['evidence_step_id'], b['source_fragment_id']))
+    support['occurrence_refs'] = [occurrence_ref(claim, support['evidence_bindings'])]
+    negative = deepcopy(states['viewpoint_claim_links', NEGATIVE_LINK])
+    if negative['revision'] != 1 or negative['claim_id'] != CLAIM or negative['effective_state'] != 'active':
+        raise ValueError('negative component revision drift')
+    text = '「義」不是審判、滅罪'
+    if claim['statement'].count(text) != 1:
+        raise ValueError('negative component is not a unique exact substring')
+    start = claim['statement'].index(text)
+    negative.update(revision=2, component_locator={'claim_sha256':semantic_record_sha(claim),
+        'statement_component':text,'canonical_spans':[{'start_char':start,'end_char':start+len(text),'exact_text':text}]})
+    negative['occurrence_refs'] = [occurrence_ref(claim, negative['evidence_bindings'])]
+    negative_head = states['canonical_viewpoints', negative['viewpoint_id']]
+    if negative_head['current_revision_id'] != negative['validated_against_viewpoint_revision_id']:
+        raise ValueError('negative viewpoint drift')
+    decision_plans = [mark_proposed(link, action, amendment['artifact_sha256']) for link, action in
+                      [(first_after,'revalidate'),(retired,'retire'),(qualifies,'retire'),(support,'supports'),(negative,'revalidate')]]
     target_members = [p for (c, _), p in states.items() if c == 'viewpoint_claim_links' and p.get('viewpoint_id') == EXEGESIS and p.get('effective_state') == 'active']
     packet.update(schema_version='wkp357_cross_partition_support_review.v1', classification_amendment=amendment,
                   target_exegesis_revision=target_revision, target_exegesis_links=target_members,
                   target_exegesis_claims=[states['claims', cid] for cid in sorted({p['claim_id'] for p in target_members})],
-                  proposed_links=[first_after, retired, support],
-                  authorization='Owner: retire false equivalence, retain complete source-bound theological Claim as support for concrete exegesis; no Claim/Evidence/source edits. Proposal only; no production continuation.')
+                  adjacent_negative_revision=states['viewpoint_revisions', negative_head['current_revision_id']],
+                  proposed_links=[first_after, retired, qualifies, support, negative], proposed_decisions=decision_plans,
+                  excluded_support_evidence={'E001':'否定错误解释由独立的否定命题连接保留，不作为约翰施洗的支持依据。'},
+                  occurrence_seed_contract='viewpoint_batch_changeset: claim_id, claim_revision_sha256, sorted selected evidence pairs',
+                  authorization='Owner: 改干净; resolve all independent findings including adjacent qualifies and negative locator/proof. No Claim/Evidence/source/CVP prose edits. Candidate proposal only, no production continuation.')
     contract = {'schema_version': 'wkp357_pending_theological_connection.v1', 'status': 'pending_theological_identity',
                 'claim_id': CLAIM, 'claim_revision': claim['revision'], 'claim_semantic_sha256': semantic_record_sha(claim),
                 'classification_amendment_sha256': amendment['artifact_sha256'], 'primary_partition': 'salvation',
@@ -128,10 +202,56 @@ def validate_future_candidate(contract, claim, exegesis_revision, theological_re
             'status': 'candidate_requires_semantic_review_and_independent_audit', 'apply_authorization': False}
 
 
+def approved_package(states, packet, report, root):
+    """Seal only the exact reviewed semantics; actual approval is never copied."""
+    if not report['approved'] or report['packet_sha256'] != sha256_json(packet):
+        raise ValueError('unapproved or different correction packet')
+    if len(set(report['accepted_call_artifact_shas'])) != 2:
+        raise ValueError('two actual independent review calls required')
+    expected_claims = {t['claim']['claim_id'] for t in packet['targets']}
+    if len(report['reviews']) != 2 or any(
+        len(r['verdicts']) != len(expected_claims) or {v['claim_id'] for v in r['verdicts']} != expected_claims
+        or any(not v['approved'] or v['problems'] for v in r['verdicts']) for r in report['reviews']
+    ):
+        raise ValueError('unresolved content findings')
+    package = {'package_id':'G010-CROSS-PARTITION-'+sha256_json(report)[:20],
+               'viewpoint_claim_links':[], 'viewpoint_identity_candidates':[], 'viewpoint_identity_decisions':[]}
+    plans = {p['link_id']:p for p in packet['proposed_decisions']}
+    for proposed in packet['proposed_links']:
+        link = deepcopy(proposed); plan = plans[link['viewpoint_claim_link_id']]
+        original = states.get(('viewpoint_claim_links', link['viewpoint_claim_link_id']), states['viewpoint_claim_links', OLD_LINK])
+        template_decision = states['viewpoint_identity_decisions', original['decision_id']]
+        candidate = deepcopy(states['viewpoint_identity_candidates', template_decision['identity_candidate_id']])
+        candidate.update(revision=1, candidate_claim_ids=[link['claim_id']], candidate_viewpoint_ids=[link['viewpoint_id']],
+                         proposed_action='match_existing', generation_fingerprint=sha256_json(plan), seed_relation_ids=[])
+        identity = {'claims':candidate['candidate_claim_ids'], 'viewpoints':candidate['candidate_viewpoint_ids'],
+                    'relations':[], 'action':'match_existing', 'blockers':candidate.get('blocker_codes',[]),
+                    'coverage_snapshot_id':candidate.get('coverage_snapshot_id'), 'generation_fingerprint':candidate['generation_fingerprint']}
+        if candidate.get('scope_manifest_sha256'): identity['scope_manifest_sha256'] = candidate['scope_manifest_sha256']
+        candidate['identity_candidate_id'] = 'VIC-'+sha256_json(identity)[:20]
+        decision = deepcopy(template_decision)
+        decision.update(revision=1, identity_decision_id=link['decision_id'], identity_candidate_id=candidate['identity_candidate_id'],
+                        decision='reject_match' if plan['action']=='retire' else 'match_existing', resolved_viewpoint_id=link['viewpoint_id'],
+                        claim_link_decisions=[{'claim_id':link['claim_id'], 'link_type':link['link_type']}],
+                        reason='Owner-authorized correction: '+plan['action']+'; exact postimage independently reviewed; historical decision preserved.',
+                        input_sha256=sha256_json(packet), review_artifact_sha256=sha256_json(report),
+                        semantic_call_artifact_sha256s=sorted(report['accepted_call_artifact_shas']),
+                        policy_version='wkp357_cross_partition_support_revision_v2', reviewer_id='g010_source_bound_correction',
+                        reviewer_model_ids=['claude-opus-5-5','gpt-6.1-sol'], reviewer_kind='system',
+                        approval_basis='dual_model_consensus', review_status='system_approved', created_at=stable_decided_at(root))
+        link.update(review_status='system_approved', effective_state=plan['intended_effective_state_after_review'])
+        package['viewpoint_claim_links'].append(link)
+        package['viewpoint_identity_candidates'].append(candidate)
+        package['viewpoint_identity_decisions'].append(decision)
+    return package
+
+
 REVIEW_PROMPT = '''核对完整来源和所有实际拟修订连接，每个targets的Claim各一个verdict。
 第一条改为完整Claim等价，保留受洗/连合/代负罪债条件。第二条撤销与一般义定义的错误等价，另建完整神学Claim supports 具体“约翰施洗促进自己与神好关系”的释经CVP；不是一般义CVP的supports。
 读取目标释经CVP、来源原文、现有所有相邻连接和关系。原文是否确实把该神学前提用于解释约翰施洗？支持须保留具体行动限定，不得仅凭主题相似。检查仍保留的相邻qualifies等关系是否也需修订；若有问题必须指出，不为续跑默许。
-Claim、Evidence、来源、CVP正文和已有其他连接不改。未来神学身份仅pending，不能当作已生成或已审核。review不授权写库；approved只有无任何problems才true。'''
+本轮一并撤销错误相邻qualifies，补上原Claim自身E003/E006的具体施洗证据，否定词义连接保留原文顿号而非拼成“审判灭罪”。请核对补充的否定CVP正文/signature，以及每项proposed_decisions撤销或重新验证依据。
+所有拟修订记录当前都是candidate，非retired记录invalidated，不伪装已批准/active。intended_effective_state_after_review仅在真实双模型审核、确定性校验、备份、ChangeSet、回读后才可生效。occurrence是整组选中证据的canonical batch seed，不是一条Evidence必有一个OCC。
+Claim、Evidence、来源、CVP正文不改；只改明确列出的五条连接。未来神学身份仅pending，不能当作已生成或已审核。review不授权写库；approved只有无任何problems才true。'''
 
 
 def main():
@@ -139,6 +259,7 @@ def main():
     parser.add_argument('--output-root', type=Path, required=True)
     parser.add_argument('--amendment', type=Path, required=True)
     parser.add_argument('--review', action='store_true')
+    parser.add_argument('--prior-review-root', type=Path)
     args = parser.parse_args()
     root = args.output_root.resolve()
     if PROJECT.name != 'wkp-357-worktree-per-session' or root.parent != BASE or root.exists():
@@ -154,7 +275,19 @@ def main():
         manifest = json.loads(Path(amendment['bindings']['partition_manifest']['path']).read_text())
         states = snapshot(PostgresKnowledgeStore())
         packet, contract = build(states, amendment)
+        if args.prior_review_root:
+            prior = args.prior_review_root.resolve()
+            if prior.parent != BASE:
+                raise ValueError('prior review must be independent #357 root')
+            packet['prior_review_findings'] = {label:read_artifact(prior/(label+'.json')) for label in ['gpt-review','opus-review']}
+            packet['prior_review_packet_sha256'] = sha256_json(read_artifact(prior/'packet.json'))
+            packet['prior_review_file_bindings'] = [{'path':str(prior/name), 'file_sha256':file_sha256(prior/name)}
+                                                   for name in ['packet.json','gpt-review.json','opus-review.json']]
+            packet['correction_round'] = 1
         root.mkdir()
+        collections = sorted({c for c, _ in states})
+        before = {'collections':collections, 'pre_fingerprint_sha256':fingerprint(states,collections)}
+        write_immutable(root/'before.json', before)
         write_immutable(root/'classification-projection.json', role_projection(ledger, manifest, amendment))
         write_immutable(root/'packet.json', packet); write_immutable(root/'pending-connection.json', contract)
         result = {'status': 'prepared_not_applied', 'database_mutations': 0, 'production_resumed': False}
@@ -170,7 +303,27 @@ def main():
                     raise ValueError('review population mismatch')
                 write_immutable(root/(label+'.json'), review)
             reviews = [json.loads((root/(name+'.json')).read_text()) for name in ['gpt-review','opus-review']]
-            result['status'] = 'dual_review_pass_not_applied' if all(v['approved'] and not v['problems'] for r in reviews for v in r['verdicts']) else 'content_findings_no_apply'
+            approved = all(v['approved'] and not v['problems'] for r in reviews for v in r['verdicts'])
+            report = {'approved':approved, 'packet_sha256':sha256_json(packet), 'reviews':reviews,
+                      'accepted_call_artifact_shas':[read_artifact(root/('raw-'+label+'.json'))['artifact_sha256'] for label in ['gpt-review','opus-review']],
+                      'human_content_approval':False, 'database_mutations':0}
+            write_immutable(root/'review-report.json', report)
+            result['status'] = 'dual_review_pass_not_applied' if approved else 'content_findings_no_apply'
+            if approved:
+                with exclusive_cvp_run_lock({'global_lock_path':str(BASE/'registry-cvp.lock')}):
+                    store = PostgresKnowledgeStore(); live = snapshot(store)
+                    if fingerprint(live, collections) != before['pre_fingerprint_sha256']:
+                        raise ValueError('Registry changed during correction review')
+                    for source in packet['sources']:
+                        if file_sha256(Path(source['path'])) != source['file_sha256']:
+                            raise ValueError('source changed during correction review')
+                    package = approved_package(live, packet, report, root)
+                    plan = store.plan_package(package, source_kind='wkp357_cross_partition_support_correction')
+                    if len(plan.operations) != 15 or any(op.collection not in package for op in plan.operations):
+                        raise ValueError('unexpected correction operation scope')
+                    write_immutable(root/'effective-package.json', package)
+                    write_immutable(root/'dry-run-plan.json', json.loads(json.dumps(plan.as_dict())))
+                    result.update(status='reviewed_dry_run_pass_not_applied', planned_operations=len(plan.operations))
             write_derived(root/'progress.json', result)
         print(json.dumps(result))
 

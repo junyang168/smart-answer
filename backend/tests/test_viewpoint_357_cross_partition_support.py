@@ -4,7 +4,9 @@ import pytest
 
 from backend.api.canonical_repository.viewpoint_foundation import semantic_record_sha, sha256_json
 from backend.pipeline.viewpoint_357_cross_partition_support import (
-    CLAIM, EXEGESIS, role_projection, validate_future_candidate,
+    CLAIM, EXEGESIS, role_projection, validate_future_candidate, occurrence_ref,
+    mark_proposed, exact_evidence,
+    approved_package,
 )
 
 
@@ -79,3 +81,54 @@ def test_projection_rejects_duplicate_owner():
     manifest = {'artifact_sha256':'manifest', 'owners':{CLAIM:{'partition':'salvation'}}}
     amendment = {'bindings':{'role_ledger':{'artifact_sha256':'role'}, 'partition_manifest':{'artifact_sha256':'manifest'}}}
     with pytest.raises(ValueError, match='duplicate'): role_projection(ledger, manifest, amendment)
+
+
+def test_occurrence_uses_canonical_batch_seed_and_deduplicates_pairs():
+    _, claim, _, _, _ = fixture()
+    bindings = [{'evidence_step_id':'E3','source_fragment_id':'F3'}, {'evidence_step_id':'E6','source_fragment_id':'F6'}]
+    expected = 'OCC-'+sha256_json({'claim_id':claim['claim_id'], 'claim_revision_sha256':semantic_record_sha(claim), 'evidence':[('E3','F3'),('E6','F6')]})[:20]
+    assert occurrence_ref(claim, bindings+bindings) == expected
+    assert occurrence_ref(claim, bindings[:1]) != expected
+
+
+@pytest.mark.parametrize('action', ['supports','revalidate','retire'])
+def test_proposed_decision_never_claims_existing_approval(action):
+    link = {'decision_id':'VID-old', 'review_status':'system_approved', 'effective_state':'retired' if action=='retire' else 'active', 'viewpoint_claim_link_id':'VCL-one', 'viewpoint_id':'CV-one', 'claim_id':CLAIM, 'link_type':'supports'}
+    plan = mark_proposed(link, action, 'amendment')
+    assert link['decision_id'] != 'VID-old'
+    assert link['review_status'] == 'candidate'
+    assert link['effective_state'] == ('retired' if action=='retire' else 'invalidated')
+    assert plan['intended_effective_state_after_review'] == ('retired' if action=='retire' else 'active')
+
+
+@pytest.mark.parametrize('failure', [None, 'foreign', 'reciprocity', 'excerpt', 'physical'])
+def test_expand_previously_unlinked_evidence_with_physical_checks(tmp_path, failure):
+    from backend.api.canonical_repository.viewpoint_production_safety import file_sha256
+    source = tmp_path/'source.json'; source.write_text('source')
+    sources = [{'source_id':'SRC-one','path':str(source),'file_sha256':file_sha256(source),'complete_original':['神差遣約翰為人施洗。']}]
+    claim = {'claim_id':CLAIM,'evidence_step_ids':['E6']}
+    step = {'evidence_step_id':'E6','produced_claim_ids':[CLAIM],'source_fragment_ids':['F6']}
+    fragment = {'fragment_id':'F6','source_id':'SRC-one','paragraph_key':'S0001','verbatim_excerpt':'神差遣約翰為人施洗。'}
+    states = {('evidence_steps','E6'):step,('source_fragments','F6'):fragment}
+    if failure == 'foreign': claim['evidence_step_ids'] = []
+    if failure == 'reciprocity': step['produced_claim_ids'] = []
+    if failure == 'excerpt': fragment['verbatim_excerpt'] = '神没有讲过的话'
+    if failure == 'physical': source.write_text('changed')
+    if failure:
+        with pytest.raises(ValueError): exact_evidence(states,claim,sources,['E6'])
+    else:
+        before = deepcopy(states)
+        assert exact_evidence(states,claim,sources,['E6'])[0]['fragment'] == fragment
+        assert states == before
+
+
+@pytest.mark.parametrize('problem', ['unapproved','packet','one_call','findings'])
+def test_final_package_rejects_unapproved_or_incomplete_review(problem, tmp_path):
+    packet = {'targets':[{'claim':{'claim_id':CLAIM}}]}
+    report = {'approved':True,'packet_sha256':sha256_json(packet),'accepted_call_artifact_shas':['a','b'],
+              'reviews':[{'verdicts':[{'claim_id':CLAIM,'approved':True,'problems':[]}]}]*2}
+    if problem == 'unapproved': report['approved'] = False
+    if problem == 'packet': report['packet_sha256'] = 'wrong'
+    if problem == 'one_call': report['accepted_call_artifact_shas'] = ['a','a']
+    if problem == 'findings': report['reviews'][0]['verdicts'][0]['problems'] = ['unresolved']
+    with pytest.raises(ValueError): approved_package({},packet,report,tmp_path)
