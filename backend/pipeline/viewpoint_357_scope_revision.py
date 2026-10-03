@@ -275,7 +275,9 @@ def run(root, apply, backup):
         if len(plan.operations) != len(expected_collections) or {op.collection for op in plan.operations} != expected_collections:
             raise ValueError('unexpected revision ChangeSet')
         write_immutable(root / 'effective-package.json', package)
-        write_immutable(root / 'dry-run-plan.json', plan.as_dict())
+        # Dataclass tuples serialize as JSON arrays. Compare that same JSON
+        # representation on the dry-run/apply replay, not tuple versus list.
+        write_immutable(root / 'dry-run-plan.json', json.loads(json.dumps(plan.as_dict())))
         write_immutable(root / 'successor-manifest.json', manifest)
         if not apply:
             return {'status': 'dry_run_pass', 'master_data_mutations': 0}

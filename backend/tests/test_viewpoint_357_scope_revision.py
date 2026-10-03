@@ -145,7 +145,7 @@ def test_runner_reviews_compiled_member_postimage_not_old_link(tmp_path, monkeyp
     live = states()
     operations = [SimpleNamespace(collection=c) for c in ('canonical_viewpoints', 'viewpoint_revisions',
         'viewpoint_claim_links', 'viewpoint_identity_candidates', 'viewpoint_identity_decisions')]
-    fake_store = SimpleNamespace(plan_package=lambda *a, **k: SimpleNamespace(operations=operations, as_dict=lambda: {'operations': []}))
+    fake_store = SimpleNamespace(plan_package=lambda *a, **k: SimpleNamespace(operations=operations, as_dict=lambda: {'operations': ({'collection': 'test'},)}))
     monkeypatch.setattr(m, 'PostgresKnowledgeStore', lambda: fake_store)
     monkeypatch.setattr(m, 'snapshot', lambda *a: deepcopy(live))
     monkeypatch.setattr(m, 'prepare', lambda *a: {'claim_id': m.CLAIM, 'source_path': '/source'})
@@ -175,6 +175,9 @@ def test_runner_reviews_compiled_member_postimage_not_old_link(tmp_path, monkeyp
     assert report['human_content_approval'] is False
     assert report['accepted_call_artifact_shas'] == sorted(m.sha256_json(label) for label in calls[-2:])
     assert len(report['raw_artifact_shas']) == len(calls)
+    # A second planning pass (dry-run -> apply) must not report drift merely
+    # because dataclass tuples became arrays in the frozen JSON artifact.
+    assert m.run(tmp_path, False, None)['status'] == 'dry_run_pass'
 
 
 def test_corrected_identity_provenance_keeps_only_accepted_pair_and_preserves_history(tmp_path):
