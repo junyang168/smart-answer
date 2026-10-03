@@ -155,6 +155,26 @@ def occurrence_ref(claim, bindings):
     return 'OCC-'+sha256_json(seed)[:20]
 
 
+def occurrence_review_basis(states, links):
+    """Expose current canonical seeds without rewriting retained historical IDs."""
+    rows=[]
+    for link in links:
+        claim=states['claims',link['claim_id']]
+        seed={'claim_id':claim['claim_id'],'claim_revision_sha256':semantic_record_sha(claim),
+              'evidence':sorted({(b['evidence_step_id'],b['source_fragment_id']) for b in link['evidence_bindings']})}
+        expected='OCC-'+sha256_json(seed)[:20]
+        old=states.get(('viewpoint_claim_links',link['viewpoint_claim_link_id']))
+        refs=link['occurrence_refs']
+        preserved=bool(old and refs==old['occurrence_refs'])
+        if not preserved and refs!=[expected]:
+            raise ValueError('new occurrence does not match current canonical seed')
+        rows.append({'link_id':link['viewpoint_claim_link_id'],'current_seed':seed,
+                     'current_canonical_occurrence':expected,'proposed_occurrence_refs':deepcopy(refs),
+                     'retained_historical_refs':preserved,
+                     'historical_refs_are_not_asserted_as_current_seed':preserved})
+    return rows
+
+
 def repair_purpose_locator(link, claim):
     """Preserve the purpose connective as an exact original span, never prose editing."""
     if (link['viewpoint_claim_link_id'], link['claim_id'], link['revision'],
@@ -408,6 +428,12 @@ def build(states, amendment):
                   scope_resolution={'negative_link':'Whole Claim is theological, but this exact negative component is witnessed only as the Matthew3:15 question/answer. Preserve local equivalent_component with exact locator: no invented general-to-local reasoning and no orphan CVP. One full Claim partition remains salvation; component identity is not a second partition owner or new grouping assignment. Review this distinction rather than infer local component scope from the whole Claim routing label.',
                                     'adjacent_denial':'Retire qualifies: denial of a competing meaning is not a condition on the affirmative definition. Preserve original Claim, opposed position, and all other memberships; do not fabricate a new negative CVP.'})
     packet = whole_group_context(states, packet)
+    packet['occurrence_review_basis']=occurrence_review_basis(states,packet['proposed_links'])
+    packet['prior_findings_clarification']={
+        'occurrence':'New or evidence-consolidated bindings use the pinned current Claim semantic SHA and selected evidence seed. Unchanged/retired links retain original historical occurrence IDs, not a claim that their old ID was recomputed from the current seed. Compare occurrence_review_basis, not identical evidence IDs alone.',
+        'component_context':'A component locator selects an exact proposition from the full pinned Claim, not a standalone professor sentence. Judge subject and scope from that full Claim and physical source; subject omission alone is not semantic contradiction. Still report any actual missing qualifier or exclusivity error.',
+        'ae6b':'The full Claim names Matthew3:15 righteousness and the pinned source explicitly coordinates sinless state with good relationship/behaviour using 以及. Check whether the existing component conveys that contextual sense, not an exclusive universal definition.',
+        'c902':'The existing component already preserves 主要; full Claim and its own source identify 義. The 8457 repair restores its missing 主要 qualifier; it does not impose subject repetition on every other contextual component. Verify this distinction against the actual source rather than treating it as approval.'}
     bind_joint_identity_proposal(states, packet)
     validate_effective_semantic_edges(states,packet)
     contract = {'schema_version': 'wkp357_pending_theological_connection.v1', 'status': 'pending_theological_identity',
@@ -654,7 +680,7 @@ REVIEW_PROMPT = '''核对完整来源和所有实际拟修订连接，每个targ
 第一条改为完整Claim等价，保留受洗/连合/代负罪债条件。第二条撤销与一般义定义的错误等价，另建完整神学Claim supports 具体“约翰施洗促进自己与神好关系”的释经CVP；不是一般义CVP的supports。
 读取目标释经CVP、来源原文、现有所有相邻连接和关系。原文是否确实把该神学前提用于解释约翰施洗？支持须保留具体行动限定，不得仅凭主题相似。检查仍保留的相邻qualifies等关系是否也需修订；若有问题必须指出，不为续跑默许。
 本轮一并撤销错误相邻qualifies，补上原Claim自身E003/E006的具体施洗证据，否定词义连接保留原文顿号而非拼成“审判灭罪”。请核对补充的否定CVP正文/signature，以及每项proposed_decisions撤销或重新验证依据。
-所有拟修订记录当前都是candidate，非retired记录invalidated，不伪装已批准/active。intended_effective_state_after_review仅在真实双模型审核、确定性校验、备份、ChangeSet、回读后才可生效。occurrence是整组选中证据的canonical batch seed，不是一条Evidence必有一个OCC。
+所有拟修订记录当前都是candidate，非retired记录invalidated，不伪装已批准/active。intended_effective_state_after_review仅在真实双模型审核、确定性校验、备份、ChangeSet、回读后才可生效。occurrence是整组选中证据的canonical batch seed，不是一条Evidence必有一个OCC。阅读occurrence_review_basis的实际seed与历史保留标记；退役/未改绑定保留旧历史ID，不宣称该ID由当前Claim SHA重算。component必须连同完整Claim与原文理解，不强制所有片段重复主语；但真正缺限定仍须指出。prior_findings_clarification只是供本轮核查的理由，不是批准。逐项回应旧findings，不修改授权外连接，不为通过忽略实际问题。
 Claim、Evidence、来源、CVP正文不改；只改明确列出的十六条连接。用户明确授权合并同Claim/同CVP两条支持连接：VCL-d6f273ad93fd0d88cb00退役，VCL-837c6e2210c15aa8c23d保留为完整原Claim supports（component_locator=null），绑定两条旧连接全部原证据；完整Claim保留不需悔改的否定、為了尽义与站在一起的两个目的及並的连接，不拼接伪造教授句子，不虚称equivalent_full。相邻cab54同类窄连合也改supports。8457补「義」主要原span及肯定部分，不把否定变肯定。两条否定别种解释的qualifies撤销。CL006整句等价改equivalent_full；CL007仅明确连合，缺更广认同/救赎目的，以完整Claim supports而不是硬补等价。John supports补自己E019/E020并保留E021，不能用耶稣关系冒充约翰关系。
 用户已明确裁定CV-d036的关系本身和行为应保持同一个复合观点，教授总强调这个；不拆CVP，不改正文/signature。两条部分来源改为共同支持，使用一个联合身份candidate/decision绑定两Claim与当前CVP及精确来源，不虚称任一局部Claim等同整个合取命题。实际审核仍须检查联合完整主张确实出自教授，不凭人工指令发明来源；保持促进/维持原措辞差异披露。新decision实际双模型批准才能生效，不伪装用户审批全部连接。
 否定成分撤回前一轮错误supports方案：全Claim归神学不能推出它所有成分都非局部释经。这里的否定原文只在太3:15问答出现，其精确成分与现有局部否定CVP保留equivalent_component。一个Claim只有一个partition，成分的既有身份连接不是第二次分组，不产生第二个owner。不虚构一般到局部推理，不掏空CVP；审核必须判断该成分的原文范围，不因路由标签推翻实际语义。

@@ -299,3 +299,21 @@ def test_consolidated_support_preserves_complete_claim_and_all_evidence():
     packet['proposed_decisions'].append({'link_id':'DUP','intended_effective_state_after_review':'active'})
     with pytest.raises(ValueError,match='duplicate effective'):
         validate_effective_semantic_edges(states,packet)
+
+
+def test_occurrence_basis_distinguishes_preserved_history_from_new_seed():
+    from backend.pipeline.viewpoint_357_cross_partition_support import occurrence_review_basis,occurrence_ref
+    claim={'claim_id':'C','revision':3,'statement':'原文'}
+    old={'viewpoint_claim_link_id':'L','claim_id':'C','occurrence_refs':['OCC-historical'],
+         'evidence_bindings':[{'evidence_step_id':'E','source_fragment_id':'F'}]}
+    states={('claims','C'):claim,('viewpoint_claim_links','L'):old}
+    before=deepcopy(states)
+    row=occurrence_review_basis(states,[old])[0]
+    assert row['retained_historical_refs']
+    assert row['current_canonical_occurrence']!=row['proposed_occurrence_refs'][0]
+    new=deepcopy(old); new['occurrence_refs']=[occurrence_ref(claim,new['evidence_bindings'])]
+    assert not occurrence_review_basis(states,[new])[0]['retained_historical_refs']
+    new['occurrence_refs']=['OCC-guessed']
+    with pytest.raises(ValueError,match='canonical seed'):
+        occurrence_review_basis(states,[new])
+    assert states==before
