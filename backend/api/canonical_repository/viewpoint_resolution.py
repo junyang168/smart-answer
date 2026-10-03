@@ -2114,6 +2114,19 @@ class StructuredJsonReviewerAdapter:
                 "payload_serialization": "compact_json_v1",
             })
 
+    def compact_copy(self) -> "StructuredJsonReviewerAdapter":
+        """A separately identified serialization, without mutating initial review."""
+        if self._compact_payload:
+            return self
+        result = StructuredJsonReviewerAdapter(
+            client=self._client, prompt=self._prompt,
+            response_model=self._response_model, schema_name=self._schema_name,
+            compact_payload=True,
+        )
+        if hasattr(self, "max_request_bytes"):
+            result.max_request_bytes = self.max_request_bytes
+        return result
+
     def generate(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         request = structured_json_request(
             payload,

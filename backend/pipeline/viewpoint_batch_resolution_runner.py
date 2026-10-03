@@ -411,6 +411,10 @@ def run_final_cvp_review(
         "reconsideration": reconsideration_payload,
         "allows_further_correction": False,
     }
+    # Keep the initial review's cache/config intact; final review alone uses
+    # lossless compact JSON, with its own serialization config identity.
+    if isinstance(reviewer, StructuredJsonReviewerAdapter):
+        reviewer = reviewer.compact_copy()
     raw_review, calls, seconds = _call(
         reviewer, review_packet, output_dir / "raw-final-review.json"
     )
@@ -457,6 +461,7 @@ def run_batch(
     output_dir: Path,
     proposer: Any,
     reviewer: Any,
+    final_reviewer: Any = None,
     reconsiderer: Any = None,
     consolidator: Any = None,
     dependents_loader: Any = None,
@@ -721,7 +726,7 @@ def run_batch(
             initial_proposal_sha256=proposal_sha,
             initial_review=review,
             reconsideration=reconsideration,
-            reviewer=reviewer,
+            reviewer=final_reviewer if final_reviewer is not None else reviewer,
             output_dir=output_dir,
         )
 

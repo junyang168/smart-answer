@@ -13,6 +13,7 @@ from pathlib import Path
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 
 ROLES = {"raw-proposal.json", "raw-consolidation.json", "raw-review.json"}
+CORRECTION_ROLE = "raw-reconsideration.json"
 
 
 def bound_read(binding):
@@ -86,6 +87,9 @@ def eligibility_migrations(source_binding, target_binding):
 
 
 def old_request(payload, old_batch_id, migrations=()):
+    for key in ("proposal", "review"):
+        if key in payload and payload.get(key + "_sha256") != sha256_json(payload[key]):
+            raise ValueError("cache handoff current input hash drift: " + key)
     result = copy.deepcopy(payload)
     result["batch_id"] = old_batch_id
     claims = result.get("packet", result).get("claims", [])
@@ -105,6 +109,9 @@ def old_request(payload, old_batch_id, migrations=()):
     if "proposal" in result:
         result["proposal"]["batch_id"] = old_batch_id
         result["proposal_sha256"] = sha256_json(result["proposal"])
+    if "review" in result:
+        result["review"]["proposal_sha256"] = result["proposal_sha256"]
+        result["review_sha256"] = sha256_json(result["review"])
     if "packet_sha256" in result:
         result["packet_sha256"] = sha256_json({k: v for k, v in result.items() if k != "packet_sha256"})
     return result
@@ -112,12 +119,14 @@ def old_request(payload, old_batch_id, migrations=()):
 
 def reuse_response(adapter, payload, cache):
     handoff_path = cache.parent / "prior-model-cache.json"
-    if not handoff_path.exists() or cache.name not in ROLES:
+    if not handoff_path.exists() or cache.name not in ROLES | {CORRECTION_ROLE}:
         return None
     handoff = json.loads(handoff_path.read_text())
     if handoff.get("schema_version") != "wang_cvp_model_cache_handoff_v1" or handoff.get("artifact_sha256") != sha256_json({k: v for k, v in handoff.items() if k != "artifact_sha256"}):
         raise ValueError("invalid model cache handoff")
     bound_read(handoff["target_freeze"])
+    if cache.name == CORRECTION_ROLE and cache.name not in handoff["raw_bindings"]:
+        return None
     if payload.get("batch_id") != handoff["target_batch_id"]:
         raise ValueError("cache handoff target batch mismatch")
     raw_binding = handoff["raw_bindings"][cache.name]
@@ -143,6 +152,12 @@ def reuse_response(adapter, payload, cache):
             raise ValueError("source review proposal binding drift")
         response["proposal_sha256"] = payload["proposal_sha256"]
         changed.append("proposal_sha256")
+    if cache.name == CORRECTION_ROLE:
+        for key in ("proposal_sha256", "review_sha256"):
+            if response[key] != original_request[key]:
+                raise ValueError("source correction input binding drift: " + key)
+            response[key] = payload[key]
+            changed.append(key)
     return response, {"source_raw_binding": raw_binding,
         "source_artifact_sha256": raw["artifact_sha256"],
         "source_request_payload_sha256": raw["request_payload_sha256"],
@@ -152,7 +167,7 @@ def reuse_response(adapter, payload, cache):
         "new_model_calls": 0}
 
 
-def prepare_handoff(source_batch, target_batch, *, target_batch_id, target_freeze, source_eligibility=None, target_eligibility=None):
+def prepare_handoff(source_batch, target_batch, *, target_batch_id, target_freeze, source_eligibility=None, target_eligibility=None, include_correction=False):
     from backend.pipeline.viewpoint_resolution_runtime import write_immutable
     def binding(p):
         return {"path": str(p.resolve()), "file_sha256": hashlib.sha256(p.read_bytes()).hexdigest()}
@@ -160,7 +175,7 @@ def prepare_handoff(source_batch, target_batch, *, target_batch_id, target_freez
     body = {"schema_version": "wang_cvp_model_cache_handoff_v1",
         "source_batch_id": packet["batch_id"], "target_batch_id": target_batch_id,
         "target_freeze": binding(target_freeze),
-        "raw_bindings": {name: binding(source_batch / name) for name in sorted(ROLES)}}
+        "raw_bindings": {name: binding(source_batch / name) for name in sorted(ROLES | ({CORRECTION_ROLE} if include_correction else set()))}}
     if source_eligibility is not None or target_eligibility is not None:
         if source_eligibility is None or target_eligibility is None:
             raise ValueError("both eligibility proofs required")
@@ -173,7 +188,7 @@ def prepare_handoff(source_batch, target_batch, *, target_batch_id, target_freez
 def verify_prefix(scope, batch_id, output_dir, max_request_bytes):
     """Exercise fresh scoped inputs through all saved stages; never call a model.
 
-    Stop at the not-yet-called correction. These derived model envelopes are
+    Stop at correction, or final review if a saved correction is bound. These envelopes are
     normal SHA-bound caches the production runner will independently recheck.
     """
     from backend.pipeline.viewpoint_batch_resolution_runner import (
@@ -184,25 +199,38 @@ def verify_prefix(scope, batch_id, output_dir, max_request_bytes):
     reviewer = build_reviewer("claude-opus-5-5", "high")
     consolidator = build_consolidator("claude-opus-5-5", "high")
     correction = build_reconsiderer("gpt-6.1-sol", "high", provider="codex")
+    final_review = reviewer.compact_copy()
+    handoff = json.loads((output_dir / "prior-model-cache.json").read_text())
+    has_correction = CORRECTION_ROLE in handoff["raw_bindings"]
     class PrefixVerified(Exception):
         pass
     def forbidden(_):
         raise ValueError("cache prefix would repeat a model stage; no fallback")
     def stop(payload):
+        adapter = final_review if has_correction else correction
         write_immutable(output_dir / "cache-prefix-preflight.json", {
             "all_three_initial_stages_reused": True, "new_model_calls": 0,
-            "master_data_mutations": 0, "correction_request_bytes": correction.request_bytes(payload),
+            "saved_correction_reused": has_correction,
+            "master_data_mutations": 0,
+            "next_stage": "final_review" if has_correction else "correction",
+            "next_request_bytes": adapter.request_bytes(payload),
+            **({"final_review_request_bytes": adapter.request_bytes(payload)} if has_correction
+               else {"correction_request_bytes": adapter.request_bytes(payload)}),
             "max_request_bytes": max_request_bytes, "original_findings_preserved": True})
         raise PrefixVerified()
-    for adapter in (proposer, reviewer, consolidator, correction):
+    for adapter in (proposer, reviewer, consolidator, correction, final_review):
         adapter.max_request_bytes = max_request_bytes
         adapter.generate = forbidden
-    correction.generate = stop
+    if has_correction:
+        final_review.generate = stop
+    else:
+        correction.generate = stop
     try:
         run_batch(batch_id=batch_id, scope_label=scope["scope_label"],
             claims=[ReviewClaim.model_validate(c) for c in scope["claims"]],
             registry_context=scope["registry_context"], pending_candidates=[], output_dir=output_dir,
-            proposer=proposer, reviewer=reviewer, consolidator=consolidator, reconsiderer=correction)
+            proposer=proposer, reviewer=reviewer, final_reviewer=final_review,
+            consolidator=consolidator, reconsiderer=correction)
     except PrefixVerified:
         return
-    raise ValueError("expected unresolved initial findings at cache prefix boundary")
+    raise ValueError("expected mandatory model review at cache prefix boundary")

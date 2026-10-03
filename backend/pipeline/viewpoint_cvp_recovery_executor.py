@@ -296,7 +296,7 @@ def continuation_root(root, attempt):
     return root.parent / (root.name + '-recovery-' + sha256_json({'attempt':str(attempt.resolve())})[:12])
 
 
-def resume_after_repair(root, attempt, recovery_root, executable, *, additional_proof_bindings=(), additional_source_repair_paths=(), saved_audit_path=None, prior_model_batch=None):
+def resume_after_repair(root, attempt, recovery_root, executable, *, additional_proof_bindings=(), additional_source_repair_paths=(), saved_audit_path=None, prior_model_batch=None, reuse_correction=False):
     cfg, schedule, manifest, groups = load_campaign(root)
     state = read(root / "progress.json")
     group_root = root / f"g{state['sequence']:03d}"
@@ -363,7 +363,8 @@ def resume_after_repair(root, attempt, recovery_root, executable, *, additional_
         prepare_handoff(prior_model_batch, target_group / 'run/batches' / identity['batch_key_sha256'],
                         target_batch_id=identity['batch_id'], target_freeze=freeze_path,
                         source_eligibility=prior_model_batch.parents[2] / 'inputs/source-eligibility.json',
-                        target_eligibility=target_group / 'inputs/source-eligibility.json')
+                        target_eligibility=target_group / 'inputs/source-eligibility.json',
+                        include_correction=reuse_correction)
         policy = read(PROJECT_ROOT / 'backend/pipeline/policies/wang_cvp_resolution_policy_v3.json')
         verify_prefix(scope, identity['batch_id'], target_group / 'run/batches' / identity['batch_key_sha256'],
                       int(policy['max_request_bytes']))

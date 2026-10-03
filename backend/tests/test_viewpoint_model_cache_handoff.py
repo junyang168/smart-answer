@@ -23,20 +23,75 @@ def fixture(tmp_path, role):
         old = {'batch_id': 'old', 'candidates': ['不能合併']}
         old['packet_sha256'] = sha256_json(old)
         response = {'verdicts': [{'decision': 'new'}]}
-    elif role == 'raw-review.json':
+    elif role in ('raw-review.json', 'raw-reconsideration.json'):
         old = {'batch_id': 'old', 'packet': packet, 'proposal': proposal,
                'proposal_sha256': sha256_json(proposal), 'revision_dependents': {}}
         response = {'proposal_sha256': sha256_json(proposal), 'findings': ['必須修正'], 'decision': 'correct'}
+        if role == 'raw-reconsideration.json':
+            old['review'] = copy.deepcopy(response)
+            old['review_sha256'] = sha256_json(old['review'])
+            response = {'proposal_sha256': old['proposal_sha256'],
+                        'review_sha256': old['review_sha256'],
+                        'candidate_patches': [{'conditions': ['不可刪的限定']}],
+                        'finding_dispositions': [{'decision': 'accept'}]}
     write_immutable(src / 'batch-packet.json', packet)
-    for name in ('raw-proposal.json', 'raw-consolidation.json', 'raw-review.json'):
+    for name in ('raw-proposal.json', 'raw-consolidation.json', 'raw-review.json', 'raw-reconsideration.json'):
         body = {k: getattr(adapter, k) for k in ('model_id','backend','prompt_sha256','generation_config_sha256')}
         body.update(request_payload_sha256=sha256_json(old), response=response,
                     response_sha256=sha256_json(response), wall_seconds=9)
         write_immutable(src / name, body | {'artifact_sha256': sha256_json(body)})
     freeze = tmp_path / 'freeze.json';write_immutable(freeze, {'runner_commit': 'new'})
-    prepare_handoff(src, dst, target_batch_id='new', target_freeze=freeze)
+    prepare_handoff(src, dst, target_batch_id='new', target_freeze=freeze,
+                    include_correction=role == 'raw-reconsideration.json')
     new = old_request(old, 'new')
     return adapter, new, dst / role, src, response
+
+
+def test_saved_correction_exact_reuse_only_rebinds_input_hashes(tmp_path):
+    a, p, c, src, original = fixture(tmp_path, 'raw-reconsideration.json')
+    before = (src / c.name).read_bytes()
+    result, calls, seconds = call_model(a, p, c)
+    assert calls == seconds == 0
+    assert result['proposal_sha256'] == p['proposal_sha256']
+    assert result['review_sha256'] == p['review_sha256']
+    for key in ('candidate_patches', 'finding_dispositions'):
+        assert result[key] == original[key]
+    assert (src / c.name).read_bytes() == before
+    assert call_model(a, p, c)[1] == 0
+
+
+@pytest.mark.parametrize('drift', ['review', 'proposal', 'review_hash', 'proposal_hash', 'correction', 'input_binding', 'model', 'physical'])
+def test_saved_correction_drift_never_falls_back_to_model(tmp_path, drift):
+    a, p, c, src, _ = fixture(tmp_path, 'raw-reconsideration.json')
+    if drift == 'review':
+        p['review']['findings'] = ['different']
+    elif drift == 'proposal':
+        p['proposal']['statement'] = 'different'
+    elif drift.endswith('_hash'):
+        p[drift.removesuffix('_hash') + '_sha256'] = 'wrong'
+    elif drift == 'model':
+        a.model_id = 'other'
+    elif drift == 'physical':
+        (src / c.name).write_text('{}')
+    else:
+        raw = json.loads((src / c.name).read_text())
+        if drift == 'correction':
+            raw['response']['candidate_patches'] = []
+        else:
+            raw['response']['review_sha256'] = 'wrong'
+            raw['response_sha256'] = sha256_json(raw['response'])
+            raw['artifact_sha256'] = sha256_json({k:v for k,v in raw.items() if k != 'artifact_sha256'})
+        (src / c.name).write_text(json.dumps(raw))
+        # Re-pin physical file in the fixture: raw semantic/binding checks must
+        # still reject it, not just the outer physical SHA.
+        import hashlib
+        h = json.loads((c.parent / 'prior-model-cache.json').read_text())
+        h['raw_bindings'][c.name]['file_sha256'] = hashlib.sha256((src / c.name).read_bytes()).hexdigest()
+        h['artifact_sha256'] = sha256_json({k:v for k,v in h.items() if k != 'artifact_sha256'})
+        (c.parent / 'prior-model-cache.json').write_text(json.dumps(h))
+    with pytest.raises(ValueError):
+        call_model(a, p, c)
+    assert not c.exists()
 
 
 @pytest.mark.parametrize('role', ['raw-proposal.json','raw-consolidation.json','raw-review.json'])
