@@ -32,6 +32,8 @@ QUALIFIES_LINK = 'VCL-36e9fc3812d574144d5f'
 NEGATIVE_LINK = 'VCL-a6bfc37011c50b2c61be'
 ADJACENT_DENIAL_LINK = 'VCL-0cb2c47000de7df6364e'
 PURPOSE_LINK = 'VCL-d6f273ad93fd0d88cb00'
+COMPOSITE_VIEWPOINT = 'CV-d03679c0b155aea26660'
+COMPOSITE_LINKS = {'VCL-d432f73b8199bfec5a2b','VCL-e2f60e9be9e3224715e8'}
 CAMPAIGN = BASE/'matthew-full-20261002-v7-recovery-5cace1dfce87-recovery-7dce4372f79f-recovery-40104d43ce05-recovery-0e53c144d586-recovery-001343224f1e-recovery-a826fedccf5c'
 
 
@@ -176,6 +178,21 @@ def repair_purpose_locator(link, claim):
     return after
 
 
+def add_major_qualifier(link,claim):
+    """Restore major-meaning qualifier without turning the denied meaning positive."""
+    if (link['viewpoint_claim_link_id'],link['revision'],link['claim_id'],link['pinned_claim_revision']) != (
+        'VCL-8457e53525f0eb1f35c3',1,claim['claim_id'],claim['revision']):
+        raise ValueError('major qualifier identity drift')
+    text=claim['statement']
+    if text!='「義」主要不是指沒有罪，而是好關係以及促進好關係的行為。' or link['component_locator']['claim_sha256']!=semantic_record_sha(claim):
+        raise ValueError('major qualifier text/SHA drift')
+    parts=['「義」主要','是好關係以及促進好關係的行為。']
+    after=deepcopy(link)
+    after.update(revision=2,component_locator={'claim_sha256':semantic_record_sha(claim),'statement_component':''.join(parts),
+        'canonical_spans':[{'start_char':text.index(part),'end_char':text.index(part)+len(part),'exact_text':part} for part in parts]})
+    return after
+
+
 def mark_proposed(link, action, amendment_sha):
     """Candidate metadata is never an active/approved Registry record."""
     prior_decision = link['decision_id']
@@ -306,16 +323,37 @@ def build(states, amendment):
         [{'evidence_step_id':e['step']['evidence_step_id'],'source_fragment_id':e['fragment']['fragment_id']} for e in john_evidence],
         key=lambda b:(b['evidence_step_id'],b['source_fragment_id'])))
     john_support['occurrence_refs']=[occurrence_ref(john_claim,john_support['evidence_bindings'])]
+    purpose['link_type']='supports'
+    union_component=deepcopy(states['viewpoint_claim_links','VCL-cab54eff0119ad55a8b2'])
+    if union_component['revision']!=1 or union_component['link_type']!='equivalent_component':
+        raise ValueError('adjacent union identity drift')
+    union_component.update(revision=2,link_type='supports')
+    major=add_major_qualifier(states['viewpoint_claim_links','VCL-8457e53525f0eb1f35c3'],states['claims','DK-b4223cee7ee7-P02-CL002'])
+    composite_members=[]
+    for lid in sorted(COMPOSITE_LINKS):
+        link=deepcopy(states['viewpoint_claim_links',lid])
+        if link['revision']!=1 or link['viewpoint_id']!=COMPOSITE_VIEWPOINT or link['link_type']!='equivalent_component':
+            raise ValueError('composite source identity drift')
+        link.update(revision=2,link_type='supports')
+        composite_members.append(link)
     decision_plans = [mark_proposed(link, action, amendment['artifact_sha256']) for link, action in
                       [(first_after,'revalidate_with_type_change'),(retired,'retire'),(qualifies,'retire'),(support,'create'),
-                       (negative,'revalidate'),(adjacent_denial,'retire'),(purpose,'revalidate'),(repentance,'retire'),
-                       (union_full,'revalidate_with_type_change'),(union_support,'revalidate_with_type_change'),(john_support,'revalidate')]]
+                       (negative,'revalidate'),(adjacent_denial,'retire'),(purpose,'revalidate_with_type_change'),(repentance,'retire'),
+                       (union_full,'revalidate_with_type_change'),(union_support,'revalidate_with_type_change'),(john_support,'revalidate'),
+                       (union_component,'revalidate_with_type_change'),(major,'revalidate')]
+                      +[(link,'revalidate_with_type_change') for link in composite_members]]
     target_members = [p for (c, _), p in states.items() if c == 'viewpoint_claim_links' and p.get('viewpoint_id') == EXEGESIS and p.get('effective_state') == 'active']
     packet.update(schema_version='wkp357_cross_partition_support_review.v1', classification_amendment=amendment,
                   target_exegesis_revision=target_revision, target_exegesis_links=target_members,
                   target_exegesis_claims=[states['claims', cid] for cid in sorted({p['claim_id'] for p in target_members})],
                   adjacent_negative_revision=states['viewpoint_revisions', negative_head['current_revision_id']],
-                  proposed_links=[first_after, retired, qualifies, support, negative, adjacent_denial, purpose,repentance,union_full,union_support,john_support], proposed_decisions=decision_plans,
+                  proposed_links=[first_after, retired, qualifies, support, negative, adjacent_denial, purpose,repentance,union_full,union_support,john_support,union_component,major]+composite_members, proposed_decisions=decision_plans,
+                  composite_identity={'viewpoint_id':COMPOSITE_VIEWPOINT,'owner_direction':'应该是合在一起的，教授总是强调这个',
+                    'core_and_signature_unchanged':True,'no_split':True,'joint_link_ids':sorted(COMPOSITE_LINKS),
+                    'joint_claim_ids':sorted(link['claim_id'] for link in composite_members),
+                    'identity_basis':'Joint source-grounded proposition, not each partial Claim asserted equivalent to the complete conjunction. Preserve original relationship/behaviour formulations and disclose promote/maintain ambiguity. Actual dual review must verify the conjunction is professed, not invented.',
+                    'decision_requires_joint_candidate_and_both_support_members':True,
+                    'does_not_approve_other_content_or_all_links':True},
                   excluded_support_evidence={'E001':'否定错误解释由独立的否定命题连接保留，不作为约翰施洗的支持依据。'},
                   occurrence_seed_contract='viewpoint_batch_changeset: claim_id, claim_revision_sha256, sorted selected evidence pairs',
                   authorization='Owner: 继续 after complete-g010 correction plan; 好，这个要改 for purpose locator; latest complaint authorizes completing existing repair rather than idle promises. Resolve all g010 links/dependencies within existing connection scope. No Claim/Evidence/source/CVP prose edits. Explicit apply requires actual dual pass, backup, dry-run, exact readback and audit; no production continuation.',
@@ -376,6 +414,15 @@ def approved_package(states, packet, report, root):
     package = {'package_id':'G010-CROSS-PARTITION-'+sha256_json(report)[:20],
                'viewpoint_claim_links':[], 'viewpoint_identity_candidates':[], 'viewpoint_identity_decisions':[]}
     plans = {p['link_id']:p for p in packet['proposed_decisions']}
+    composite=packet.get('composite_identity')
+    if composite:
+        joint_links=[p for p in packet['proposed_links'] if p['viewpoint_claim_link_id'] in composite['joint_link_ids']]
+        if (len(joint_links)!=2 or {p['claim_id'] for p in joint_links}!=set(composite['joint_claim_ids'])
+            or any(p['viewpoint_id']!=composite['viewpoint_id'] or p['link_type']!='supports' for p in joint_links)
+            or not composite['no_split'] or not composite['core_and_signature_unchanged']):
+            raise ValueError('incomplete or altered composite identity basis')
+    joint_id='VID-'+sha256_json({'joint':composite,'report':sha256_json(report)})[:20] if composite else None
+    joint_created=False
     for proposed in packet['proposed_links']:
         link = deepcopy(proposed); plan = plans[link['viewpoint_claim_link_id']]
         original = states.get(('viewpoint_claim_links', link['viewpoint_claim_link_id']), states['viewpoint_claim_links', OLD_LINK])
@@ -387,6 +434,10 @@ def approved_package(states, packet, report, root):
                     'relations':[], 'action':'match_existing', 'blockers':candidate.get('blocker_codes',[]),
                     'coverage_snapshot_id':candidate.get('coverage_snapshot_id'), 'generation_fingerprint':candidate['generation_fingerprint']}
         if candidate.get('scope_manifest_sha256'): identity['scope_manifest_sha256'] = candidate['scope_manifest_sha256']
+        joint=bool(composite and link['viewpoint_claim_link_id'] in composite['joint_link_ids'])
+        if joint:
+            candidate.update(candidate_claim_ids=composite['joint_claim_ids'],generation_fingerprint=sha256_json(composite))
+            identity.update(claims=candidate['candidate_claim_ids'],generation_fingerprint=candidate['generation_fingerprint'])
         candidate['identity_candidate_id'] = 'VIC-'+sha256_json(identity)[:20]
         decision = deepcopy(template_decision)
         decision.update(revision=1, identity_decision_id=link['decision_id'], identity_candidate_id=candidate['identity_candidate_id'],
@@ -398,10 +449,17 @@ def approved_package(states, packet, report, root):
                         policy_version='wkp357_cross_partition_support_revision_v2', reviewer_id='g010_source_bound_correction',
                         reviewer_model_ids=['claude-opus-5-5','gpt-6.1-sol'], reviewer_kind='system',
                         approval_basis='dual_model_consensus', review_status='system_approved', created_at=stable_decided_at(root))
+        if joint:
+            decision.update(identity_decision_id=joint_id,
+                claim_link_decisions=[{'claim_id':cid,'link_type':'supports'} for cid in composite['joint_claim_ids']],
+                reason='Owner directed keeping one composite viewpoint. Exact joint source-grounded proposition independently reviewed; partial Claims support jointly, not individual full equivalence.')
+            link['decision_id']=joint_id
         link.update(review_status='system_approved', effective_state=plan['intended_effective_state_after_review'])
         package['viewpoint_claim_links'].append(link)
-        package['viewpoint_identity_candidates'].append(candidate)
-        package['viewpoint_identity_decisions'].append(decision)
+        if not joint or not joint_created:
+            package['viewpoint_identity_candidates'].append(candidate)
+            package['viewpoint_identity_decisions'].append(decision)
+        if joint: joint_created=True
     return package
 
 
@@ -478,7 +536,8 @@ REVIEW_PROMPT = '''核对完整来源和所有实际拟修订连接，每个targ
 读取目标释经CVP、来源原文、现有所有相邻连接和关系。原文是否确实把该神学前提用于解释约翰施洗？支持须保留具体行动限定，不得仅凭主题相似。检查仍保留的相邻qualifies等关系是否也需修订；若有问题必须指出，不为续跑默许。
 本轮一并撤销错误相邻qualifies，补上原Claim自身E003/E006的具体施洗证据，否定词义连接保留原文顿号而非拼成“审判灭罪”。请核对补充的否定CVP正文/signature，以及每项proposed_decisions撤销或重新验证依据。
 所有拟修订记录当前都是candidate，非retired记录invalidated，不伪装已批准/active。intended_effective_state_after_review仅在真实双模型审核、确定性校验、备份、ChangeSet、回读后才可生效。occurrence是整组选中证据的canonical batch seed，不是一条Evidence必有一个OCC。
-Claim、Evidence、来源、CVP正文不改；只改明确列出的十一条连接。VCL-d6f273ad93fd0d88cb00补上「為了」原span。两条否定别种解释的qualifies撤销。CL006整句等价改equivalent_full；CL007仅明确连合，缺更广认同/救赎目的，以完整Claim supports而不是硬补等价。John supports补自己E019/E020并保留E021，不能用耶稣关系冒充约翰关系。
+Claim、Evidence、来源、CVP正文不改；只改明确列出的十五条连接。VCL-d6f273ad93fd0d88cb00补上「為了」原span并改supports；相邻cab54同类窄连合也改supports。8457补「義」主要原span及肯定部分，不把否定变肯定。两条否定别种解释的qualifies撤销。CL006整句等价改equivalent_full；CL007仅明确连合，缺更广认同/救赎目的，以完整Claim supports而不是硬补等价。John supports补自己E019/E020并保留E021，不能用耶稣关系冒充约翰关系。
+用户已明确裁定CV-d036的关系本身和行为应保持同一个复合观点，教授总强调这个；不拆CVP，不改正文/signature。两条部分来源改为共同支持，使用一个联合身份candidate/decision绑定两Claim与当前CVP及精确来源，不虚称任一局部Claim等同整个合取命题。实际审核仍须检查联合完整主张确实出自教授，不凭人工指令发明来源；保持促进/维持原措辞差异披露。新decision实际双模型批准才能生效，不伪装用户审批全部连接。
 否定成分撤回前一轮错误supports方案：全Claim归神学不能推出它所有成分都非局部释经。这里的否定原文只在太3:15问答出现，其精确成分与现有局部否定CVP保留equivalent_component。一个Claim只有一个partition，成分的既有身份连接不是第二次分组，不产生第二个owner。不虚构一般到局部推理，不掏空CVP；审核必须判断该成分的原文范围，不因路由标签推翻实际语义。
 owner_source_ambiguity记录用户对促进/维持的明确方向：教授未讲清区别，保留原文差异并披露不明确，不替他制造区别。不借该说明断言新的严格等价。若除此之外有真实身份问题仍指出。分类投影消费/未来神学CVP属于后续执行衔接；本次只检查精确连接后像，不声称已闭合生产或允许重分组。新建create与既有类型变更revalidate_with_type_change区分；supersedes_decision_id明确旧实际决定，先前未写候选仅是历史提案。
 必须检查group_closure内全部11个CVP的现有成员、当前正文/signature、相邻连接和依赖。每个targets Claim各一verdict；checked_link_ids与checked_dependency_ids必须完整且不重复列出实际检查的required IDs。发现任何未修的真实连接、范围或结构问题放入closure_problems，不能默许下一组。唯一partition是Claim的分类，不代表支持关系不能跨区。未来神学身份仅pending，不能当作已生成或已审核。review不授权写库；approved只有无任何problems才true。'''
@@ -553,7 +612,7 @@ def main():
                             raise ValueError('source changed during correction review')
                     package = approved_package(live, packet, report, root)
                     plan = store.plan_package(package, source_kind='wkp357_cross_partition_support_correction')
-                    if len(plan.operations) != 33 or any(op.collection not in package for op in plan.operations):
+                    if len(plan.operations) != 43 or any(op.collection not in package for op in plan.operations):
                         raise ValueError('unexpected correction operation scope')
                     write_immutable(root/'effective-package.json', package)
                     write_immutable(root/'dry-run-plan.json', json.loads(json.dumps(plan.as_dict())))

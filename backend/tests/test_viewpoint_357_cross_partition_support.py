@@ -10,6 +10,7 @@ from backend.pipeline.viewpoint_357_cross_partition_support import (
     validate_closure_review,
     repair_purpose_locator, PURPOSE_LINK,
     verify_review_artifacts,
+    add_major_qualifier,
 )
 
 
@@ -200,3 +201,42 @@ def test_apply_binds_actual_independent_raw_reviews(tmp_path,bad):
     if bad:
         with pytest.raises(ValueError): verify_review_artifacts(packet,report,tmp_path)
     else: verify_review_artifacts(packet,report,tmp_path)
+
+
+def test_major_qualifier_preserves_positive_scope_without_inserting_negation():
+    claim={'claim_id':'DK-b4223cee7ee7-P02-CL002','revision':2,
+           'statement':'「義」主要不是指沒有罪，而是好關係以及促進好關係的行為。'}
+    link={'viewpoint_claim_link_id':'VCL-8457e53525f0eb1f35c3','revision':1,'claim_id':claim['claim_id'],
+          'pinned_claim_revision':2,'component_locator':{'claim_sha256':semantic_record_sha(claim)}}
+    before=deepcopy((link,claim)); after=add_major_qualifier(link,claim)
+    assert (link,claim)==before
+    locator=after['component_locator']; assert locator['statement_component']=='「義」主要是好關係以及促進好關係的行為。'
+    assert '不是' not in locator['statement_component']
+    assert [(s['start_char'],s['end_char']) for s in locator['canonical_spans']]==[(0,5),(13,28)]
+    for s in locator['canonical_spans']: assert claim['statement'][s['start_char']:s['end_char']]==s['exact_text']
+
+
+def test_composite_identity_has_one_joint_decision_not_fake_full_members(tmp_path):
+    from backend.pipeline.viewpoint_357_cross_partition_support import OLD_LINK,COMPOSITE_VIEWPOINT,COMPOSITE_LINKS
+    claims=['C1','C2']; lids=sorted(COMPOSITE_LINKS)
+    links=[{'viewpoint_claim_link_id':lid,'claim_id':cid,'viewpoint_id':COMPOSITE_VIEWPOINT,'decision_id':'new-'+cid,
+            'revision':2,'link_type':'supports'} for lid,cid in zip(lids,claims)]
+    plans=[{'link_id':p['viewpoint_claim_link_id'],'action':'revalidate_with_type_change',
+            'intended_effective_state_after_review':'active'} for p in links]
+    packet={'targets':[{'claim':{'claim_id':cid}} for cid in claims],'proposed_links':links,'proposed_decisions':plans,
+            'composite_identity':{'viewpoint_id':COMPOSITE_VIEWPOINT,'joint_link_ids':lids,'joint_claim_ids':claims,
+                                  'no_split':True,'core_and_signature_unchanged':True}}
+    reviews=[{'verdicts':[{'claim_id':cid,'approved':True,'problems':[]} for cid in claims]} for _ in range(2)]
+    report={'approved':True,'packet_sha256':sha256_json(packet),'accepted_call_artifact_shas':['a','b'],'reviews':reviews}
+    states={('viewpoint_claim_links',OLD_LINK):{'decision_id':'old'},
+            ('viewpoint_identity_decisions','old'):{'identity_candidate_id':'old-candidate'},
+            ('viewpoint_identity_candidates','old-candidate'):{}}
+    package=approved_package(states,packet,report,tmp_path)
+    assert len(package['viewpoint_claim_links'])==2
+    assert len(package['viewpoint_identity_candidates'])==len(package['viewpoint_identity_decisions'])==1
+    decision=package['viewpoint_identity_decisions'][0]
+    assert all(p['decision_id']==decision['identity_decision_id'] for p in package['viewpoint_claim_links'])
+    assert {d['claim_id'] for d in decision['claim_link_decisions']}==set(claims)
+    assert all(d['link_type']=='supports' for d in decision['claim_link_decisions'])
+    assert package['viewpoint_identity_candidates'][0]['candidate_claim_ids']==claims
+    assert not {'canonical_viewpoints','viewpoint_revisions'} & set(package)
