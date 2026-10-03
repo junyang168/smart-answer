@@ -7,6 +7,7 @@ from backend.pipeline.viewpoint_357_cross_partition_support import (
     CLAIM, EXEGESIS, role_projection, validate_future_candidate, occurrence_ref,
     mark_proposed, exact_evidence,
     approved_package,
+    validate_closure_review,
 )
 
 
@@ -132,3 +133,19 @@ def test_final_package_rejects_unapproved_or_incomplete_review(problem, tmp_path
     if problem == 'one_call': report['accepted_call_artifact_shas'] = ['a','a']
     if problem == 'findings': report['reviews'][0]['verdicts'][0]['problems'] = ['unresolved']
     with pytest.raises(ValueError): approved_package({},packet,report,tmp_path)
+
+
+@pytest.mark.parametrize('bad', [None, 'missing_link', 'duplicate_link', 'missing_dependency', 'extra_dependency'])
+def test_whole_group_requires_actual_complete_nonduplicate_review_coverage(bad):
+    packet = {'group_closure':{'required_link_ids':['L1','L2'],'required_dependency_ids':['D1']}}
+    review = {'checked_link_ids':['L2','L1'],'checked_dependency_ids':['D1'],'closure_problems':[]}
+    if bad=='missing_link': review['checked_link_ids']=['L1']
+    if bad=='duplicate_link': review['checked_link_ids']=['L1','L2','L2']
+    if bad=='missing_dependency': review['checked_dependency_ids']=[]
+    if bad=='extra_dependency': review['checked_dependency_ids']+=['D2']
+    if bad:
+        with pytest.raises(ValueError,match='coverage'): validate_closure_review(review,packet)
+    else:
+        assert validate_closure_review(review,packet)
+        review['closure_problems']=['unresolved neighbouring connection']
+        assert not validate_closure_review(review,packet)

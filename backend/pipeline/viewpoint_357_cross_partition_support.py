@@ -8,6 +8,7 @@ import argparse
 import fcntl
 import json
 from pathlib import Path
+from pydantic import ConfigDict
 
 from dotenv import load_dotenv
 
@@ -27,6 +28,96 @@ EXEGESIS = 'CV-fa68184befde30dfbb8e'
 FIRST_LINK = 'VCL-3c7053f2c9c443e38b79'
 QUALIFIES_LINK = 'VCL-36e9fc3812d574144d5f'
 NEGATIVE_LINK = 'VCL-a6bfc37011c50b2c61be'
+ADJACENT_DENIAL_LINK = 'VCL-0cb2c47000de7df6364e'
+CAMPAIGN = BASE/'matthew-full-20261002-v7-recovery-5cace1dfce87-recovery-7dce4372f79f-recovery-40104d43ce05-recovery-0e53c144d586-recovery-001343224f1e-recovery-a826fedccf5c'
+
+
+class WholeGroupReview(Review):
+    model_config = ConfigDict(extra='forbid')
+    checked_link_ids: list[str]
+    checked_dependency_ids: list[str]
+    closure_problems: list[str]
+
+
+def whole_group_context(states, packet):
+    """One bounded closure: every g010 member and incident dependency, no topic search."""
+    from backend.pipeline.viewpoint_evidence_source_context import load_context_source
+    plans = list((CAMPAIGN/'g010/production/run/batches').glob('*/cvp-change-plan.json'))
+    if len(plans) != 1:
+        raise ValueError('one original g010 plan required')
+    plan = read_artifact(plans[0])
+    if plan['change_set_id'] != 'KCS-7684227135299cf96b6c':
+        raise ValueError('wrong g010 applied identity')
+    viewpoints = {op['payload']['viewpoint_id'] for op in plan['operations'] if op['collection']=='viewpoint_claim_links'}
+    if len(viewpoints) != 11:
+        raise ValueError('g010 viewpoint population drift')
+    links = [deepcopy(p) for (c, _), p in states.items() if c=='viewpoint_claim_links'
+             and p.get('effective_state')=='active' and p['viewpoint_id'] in viewpoints]
+    claim_ids = {p['claim_id'] for p in links}
+    # Include all active neighbours of those Claims, not just links in g010.
+    links = sorted([deepcopy(p) for (c, _), p in states.items() if c=='viewpoint_claim_links'
+                    and p.get('effective_state')=='active' and (p['viewpoint_id'] in viewpoints or p['claim_id'] in claim_ids)],
+                   key=lambda p:p['viewpoint_claim_link_id'])
+    endpoints = viewpoints | {p['viewpoint_id'] for p in links}
+    revisions = [deepcopy(states['viewpoint_revisions', states['canonical_viewpoints', vid]['current_revision_id']]) for vid in sorted(endpoints)]
+    dependencies = []
+    for (collection, key), payload in sorted(states.items()):
+        if collection not in {'viewpoint_relations','viewpoint_structures','viewpoint_structure_revisions'}:
+            continue
+        if any(vid in json.dumps(payload) for vid in endpoints):
+            dependencies.append({'collection':collection,'id':key,'unchanged_postimage':deepcopy(payload)})
+    sources = {s['source_id']:s for s in packet['sources']}
+    all_steps = {eid for cid in claim_ids for eid in states['claims',cid]['evidence_step_ids']}
+    for eid in sorted(all_steps):
+        for fid in states['evidence_steps',eid]['source_fragment_ids']:
+            sid = states['source_fragments',fid]['source_id']
+            if sid not in sources:
+                path, sha, projection = load_context_source(states['source_documents',sid])
+                sources[sid] = {'source_id':sid,'path':str(path),'file_sha256':sha,'body_sha256':projection.body_sha256,
+                                'complete_original':[r['text'] for r in projection.spoken_rows]}
+    packet['sources'] = [sources[sid] for sid in sorted(sources)]
+    existing = {t['claim']['claim_id']:t for t in packet['targets']}
+    for cid in sorted(claim_ids):
+        claim = states['claims',cid]
+        evidence = exact_evidence(states,claim,packet['sources'],claim['evidence_step_ids'])
+        if cid in existing:
+            existing[cid]['available_evidence'] = evidence
+        else:
+            existing[cid] = {'claim':deepcopy(claim),'available_evidence':evidence,
+                             'adjacent_links':[p for p in links if p['claim_id']==cid]}
+    packet['targets'] = [existing[cid] for cid in sorted(existing)]
+    proposed = {p['viewpoint_claim_link_id']:p for p in packet['proposed_links']}
+    # Lossless table references avoid repeating identical full records. All
+    # semantic fields remain in current_links/proposed_links; this is not a
+    # content projection or truncation.
+    link_table = {p['viewpoint_claim_link_id']:p for p in links}
+    for target in packet['targets']:
+        if 'adjacent_links' in target:
+            for link in target['adjacent_links']:
+                if link_table.get(link['viewpoint_claim_link_id']) != link:
+                    raise ValueError('neighbour link table mismatch')
+            target['adjacent_link_ids'] = [p['viewpoint_claim_link_id'] for p in target.pop('adjacent_links')]
+        if 'link' in target:
+            if link_table.get(target['link']['viewpoint_claim_link_id']) != target['link']:
+                raise ValueError('original target link table mismatch')
+            target['original_link_id'] = target.pop('link')['viewpoint_claim_link_id']
+    packet['group_closure'] = {'original_plan_binding':{'path':str(plans[0]),'file_sha256':file_sha256(plans[0])},
+                             'viewpoint_ids':sorted(viewpoints),'current_revisions':revisions,
+                             'current_links':links,'proposed_effective_link_refs':[
+                                 {'link_id':key,'record_table':'proposed_links' if key in proposed else 'group_closure.current_links'}
+                                 for key in sorted(set(proposed)|set(link_table))],
+                             'dependencies':dependencies,'required_link_ids':sorted(set(proposed)|{p['viewpoint_claim_link_id'] for p in links}),
+                             'required_dependency_ids':sorted(d['id'] for d in dependencies),
+                             'coverage':'all 11 original g010 CVPs, all active members, all incident Claim neighbours and viewpoint dependencies'}
+    return packet
+
+
+def validate_closure_review(review, packet):
+    closure = packet['group_closure']
+    for field, expected in [('checked_link_ids',closure['required_link_ids']),('checked_dependency_ids',closure['required_dependency_ids'])]:
+        if len(review[field]) != len(set(review[field])) or set(review[field]) != set(expected):
+            raise ValueError('incomplete or duplicate whole-group review coverage: '+field)
+    return not review['closure_problems']
 
 
 def exact_evidence(states, claim, packet_sources, step_ids):
@@ -151,23 +242,30 @@ def build(states, amendment):
     if claim['statement'].count(text) != 1:
         raise ValueError('negative component is not a unique exact substring')
     start = claim['statement'].index(text)
-    negative.update(revision=2, component_locator={'claim_sha256':semantic_record_sha(claim),
+    negative.update(revision=2, link_type='supports', component_locator={'claim_sha256':semantic_record_sha(claim),
         'statement_component':text,'canonical_spans':[{'start_char':start,'end_char':start+len(text),'exact_text':text}]})
     negative['occurrence_refs'] = [occurrence_ref(claim, negative['evidence_bindings'])]
     negative_head = states['canonical_viewpoints', negative['viewpoint_id']]
     if negative_head['current_revision_id'] != negative['validated_against_viewpoint_revision_id']:
         raise ValueError('negative viewpoint drift')
+    adjacent_denial = deepcopy(states['viewpoint_claim_links', ADJACENT_DENIAL_LINK])
+    if adjacent_denial['revision'] != 1 or adjacent_denial['link_type'] != 'qualifies' or adjacent_denial['effective_state'] != 'active':
+        raise ValueError('adjacent denial revision drift')
+    adjacent_denial.update(revision=2, effective_state='retired')
     decision_plans = [mark_proposed(link, action, amendment['artifact_sha256']) for link, action in
-                      [(first_after,'revalidate'),(retired,'retire'),(qualifies,'retire'),(support,'supports'),(negative,'revalidate')]]
+                      [(first_after,'revalidate'),(retired,'retire'),(qualifies,'retire'),(support,'supports'),(negative,'supports'),(adjacent_denial,'retire')]]
     target_members = [p for (c, _), p in states.items() if c == 'viewpoint_claim_links' and p.get('viewpoint_id') == EXEGESIS and p.get('effective_state') == 'active']
     packet.update(schema_version='wkp357_cross_partition_support_review.v1', classification_amendment=amendment,
                   target_exegesis_revision=target_revision, target_exegesis_links=target_members,
                   target_exegesis_claims=[states['claims', cid] for cid in sorted({p['claim_id'] for p in target_members})],
                   adjacent_negative_revision=states['viewpoint_revisions', negative_head['current_revision_id']],
-                  proposed_links=[first_after, retired, qualifies, support, negative], proposed_decisions=decision_plans,
+                  proposed_links=[first_after, retired, qualifies, support, negative, adjacent_denial], proposed_decisions=decision_plans,
                   excluded_support_evidence={'E001':'否定错误解释由独立的否定命题连接保留，不作为约翰施洗的支持依据。'},
                   occurrence_seed_contract='viewpoint_batch_changeset: claim_id, claim_revision_sha256, sorted selected evidence pairs',
-                  authorization='Owner: 改干净; resolve all independent findings including adjacent qualifies and negative locator/proof. No Claim/Evidence/source/CVP prose edits. Candidate proposal only, no production continuation.')
+                  authorization='Owner: 继续 after complete-g010 correction plan; inspect all g010 links and dependencies, resolve both final findings and adjacent denial. No Claim/Evidence/source/CVP prose edits. Candidate proposal only, no production continuation.',
+                  scope_resolution={'negative_link':'General theological negative component supports its explicitly witnessed Matthew3:13-15 application; not equivalent identity. Unique partition ownership is not a ban on cross-partition support.',
+                                    'adjacent_denial':'Retire qualifies: denial of a competing meaning is not a condition on the affirmative definition. Preserve original Claim, opposed position, and all other memberships; do not fabricate a new negative CVP.'})
+    packet = whole_group_context(states, packet)
     contract = {'schema_version': 'wkp357_pending_theological_connection.v1', 'status': 'pending_theological_identity',
                 'claim_id': CLAIM, 'claim_revision': claim['revision'], 'claim_semantic_sha256': semantic_record_sha(claim),
                 'classification_amendment_sha256': amendment['artifact_sha256'], 'primary_partition': 'salvation',
@@ -214,6 +312,8 @@ def approved_package(states, packet, report, root):
         or any(not v['approved'] or v['problems'] for v in r['verdicts']) for r in report['reviews']
     ):
         raise ValueError('unresolved content findings')
+    if 'group_closure' in packet and any(not validate_closure_review(r,packet) for r in report['reviews']):
+        raise ValueError('unresolved whole-group findings')
     package = {'package_id':'G010-CROSS-PARTITION-'+sha256_json(report)[:20],
                'viewpoint_claim_links':[], 'viewpoint_identity_candidates':[], 'viewpoint_identity_decisions':[]}
     plans = {p['link_id']:p for p in packet['proposed_decisions']}
@@ -251,7 +351,8 @@ REVIEW_PROMPT = '''核对完整来源和所有实际拟修订连接，每个targ
 读取目标释经CVP、来源原文、现有所有相邻连接和关系。原文是否确实把该神学前提用于解释约翰施洗？支持须保留具体行动限定，不得仅凭主题相似。检查仍保留的相邻qualifies等关系是否也需修订；若有问题必须指出，不为续跑默许。
 本轮一并撤销错误相邻qualifies，补上原Claim自身E003/E006的具体施洗证据，否定词义连接保留原文顿号而非拼成“审判灭罪”。请核对补充的否定CVP正文/signature，以及每项proposed_decisions撤销或重新验证依据。
 所有拟修订记录当前都是candidate，非retired记录invalidated，不伪装已批准/active。intended_effective_state_after_review仅在真实双模型审核、确定性校验、备份、ChangeSet、回读后才可生效。occurrence是整组选中证据的canonical batch seed，不是一条Evidence必有一个OCC。
-Claim、Evidence、来源、CVP正文不改；只改明确列出的五条连接。未来神学身份仅pending，不能当作已生成或已审核。review不授权写库；approved只有无任何problems才true。'''
+Claim、Evidence、来源、CVP正文不改；只改明确列出的六条连接。否定成分不再等价，而是神学前提supports原文明确讲到的太3:13-15局部否定应用；不可仅为过审核随意降级，请检查该原文论证是否真的成立。相邻VCL-0cb2c47000de7df6364e撤销：否定另一解释不是限定肯定定义，不制造尚未做的神学CVP。
+必须检查group_closure内全部11个CVP的现有成员、当前正文/signature、相邻连接和依赖。每个targets Claim各一verdict；checked_link_ids与checked_dependency_ids必须完整且不重复列出实际检查的required IDs。发现任何未修的真实连接、范围或结构问题放入closure_problems，不能默许下一组。唯一partition是Claim的分类，不代表支持关系不能跨区。未来神学身份仅pending，不能当作已生成或已审核。review不授权写库；approved只有无任何problems才true。'''
 
 
 def main():
@@ -295,15 +396,16 @@ def main():
         if args.review:
             for label, backend, model in [('gpt-review', 'codex', 'gpt-6.1-sol'), ('opus-review', 'claude', 'claude-opus-5-5')]:
                 write_derived(root/'progress.json', result | {'status': label})
-                adapter = StructuredJsonReviewerAdapter(client=subscription_client(backend, model, 'high'), prompt=REVIEW_PROMPT, response_model=Review, schema_name='cross_partition_support_review', compact_payload=True)
+                adapter = StructuredJsonReviewerAdapter(client=subscription_client(backend, model, 'high'), prompt=REVIEW_PROMPT, response_model=WholeGroupReview, schema_name='cross_partition_whole_group_review', compact_payload=True)
                 raw, _, _ = review_call(adapter, packet, root, label)
-                review = Review.model_validate(raw).model_dump(mode='json')
+                review = WholeGroupReview.model_validate(raw).model_dump(mode='json')
+                validate_closure_review(review,packet)
                 expected = {t['claim']['claim_id'] for t in packet['targets']}
                 if len(review['verdicts']) != len(expected) or {v['claim_id'] for v in review['verdicts']} != expected:
                     raise ValueError('review population mismatch')
                 write_immutable(root/(label+'.json'), review)
             reviews = [json.loads((root/(name+'.json')).read_text()) for name in ['gpt-review','opus-review']]
-            approved = all(v['approved'] and not v['problems'] for r in reviews for v in r['verdicts'])
+            approved = all(v['approved'] and not v['problems'] for r in reviews for v in r['verdicts']) and all(validate_closure_review(r,packet) for r in reviews)
             report = {'approved':approved, 'packet_sha256':sha256_json(packet), 'reviews':reviews,
                       'accepted_call_artifact_shas':[read_artifact(root/('raw-'+label+'.json'))['artifact_sha256'] for label in ['gpt-review','opus-review']],
                       'human_content_approval':False, 'database_mutations':0}
@@ -319,7 +421,7 @@ def main():
                             raise ValueError('source changed during correction review')
                     package = approved_package(live, packet, report, root)
                     plan = store.plan_package(package, source_kind='wkp357_cross_partition_support_correction')
-                    if len(plan.operations) != 15 or any(op.collection not in package for op in plan.operations):
+                    if len(plan.operations) != 18 or any(op.collection not in package for op in plan.operations):
                         raise ValueError('unexpected correction operation scope')
                     write_immutable(root/'effective-package.json', package)
                     write_immutable(root/'dry-run-plan.json', json.loads(json.dumps(plan.as_dict())))
