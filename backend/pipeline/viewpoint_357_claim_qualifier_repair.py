@@ -13,7 +13,7 @@ from backend.api.canonical_repository.viewpoint_resolution import StructuredJson
 from backend.api.canonical_repository.viewpoint_production_safety import exclusive_cvp_run_lock, file_sha256
 from backend.pipeline.viewpoint_authorized_source_repair_357 import snapshot, fingerprint, Review, review_call
 from backend.pipeline.viewpoint_evidence_source_context import load_context_source
-from backend.pipeline.viewpoint_resolution_runtime import read_artifact, write_immutable, subscription_client, stable_decided_at
+from backend.pipeline.viewpoint_resolution_runtime import read_artifact, write_immutable, write_derived, subscription_client, stable_decided_at
 
 PROJECT = Path(__file__).resolve().parents[2]
 CLAIM = 'DK-f2169ae66018ae261759-P02-CL001'
@@ -126,13 +126,35 @@ def run_main():
     parser.add_argument('--apply',action='store_true')
     parser.add_argument('--verify-applied',action='store_true')
     parser.add_argument('--backup',type=Path)
+    parser.add_argument('--resume-campaign-root',type=Path)
+    parser.add_argument('--codex-executable',type=Path)
     args=parser.parse_args(); root=args.output_root.resolve()
     if PROJECT.name != 'wkp-357-worktree-per-session' or root.parent != Path('/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/staging/cvp-production-357'):
         raise ValueError('only #357 worktree and independent staging root allowed')
     root.mkdir(parents=True,exist_ok=True)
     load_dotenv(PROJECT/'.env'); store=PostgresKnowledgeStore()
     if args.verify_applied:
-        print(json.dumps(verify(store,root))); return
+        with exclusive_cvp_run_lock({'global_lock_path':str(root.parent/'registry-cvp.lock')}):
+            result=verify(store,root)
+        if args.resume_campaign_root:
+            if not args.codex_executable or not args.codex_executable.is_file():
+                raise ValueError('explicit subscription executable required')
+            from backend.pipeline.viewpoint_cvp_recovery_executor import resume_after_repair, binding
+            handoff=root/'claim-repair-handoff'; handoff.mkdir()
+            write_derived(root/'progress.json',result|{'status':'independent_reaudit_before_resume'})
+            old_scope=root.parent/'g008-scope-revision-20261002-v6'
+            proofs=[binding(root/n) for n in ('reviewed-package.json','dry-run-plan.json','apply-receipt.json','review-report.json','verified-result.json')]
+            proofs.extend(binding(old_scope/n) for n in ('effective-package.json','dry-run-plan.json','apply-receipt.json','review-report.json','verified-result.json'))
+            try:
+                continuation=resume_after_repair(args.resume_campaign_root.resolve(),handoff,
+                    root.parent/'immediate-recovery-20261002-v1',args.codex_executable,
+                    additional_proof_bindings=proofs,additional_source_repair_paths=[root/'reviewed-package.json'])
+                result=result|{'status':continuation['status'],'continuation':continuation}
+                write_derived(root/'progress.json',result)
+            except Exception as exc:
+                write_derived(root/'progress.json',result|{'status':'stopped','error':str(exc),'no_next_group_started':True})
+                raise
+        print(json.dumps(result)); return
     if (root/'apply-receipt.json').exists():
         raise ValueError('already applied; use read-only verify-applied')
     if args.review:
