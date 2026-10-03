@@ -171,7 +171,7 @@ def qualify(row, group, inventory, root, args):
     # full 129MB snapshot 154 times would exhaust the local machine's disk.
     backup = args.output_root / "backup.json"
     if not backup.exists():
-        label = f"before-cvp-357-{args.output_root.name}"
+        label = campaign_backup_label(args.output_root)
         result = subprocess.run(["scripts/backup-registry.sh", label], cwd=PROJECT_ROOT, check=True, capture_output=True, text=True)
         print(result.stdout, flush=True)
         match = re.search(r"backup-registry: wrote (.+\.dump) \(", result.stdout)
@@ -198,6 +198,12 @@ def qualify(row, group, inventory, root, args):
     if getattr(args,'completed_source_repair',None):
         prepare_command.extend(['--parent-completed-proofs',args.completed_proofs])
     command(prepare_command)
+
+
+def campaign_backup_label(root):
+    """Fit backup-registry's 61-character contract without truncated identity."""
+    import hashlib
+    return 'before-cvp-357-' + hashlib.sha256(str(root.resolve()).encode()).hexdigest()[:32]
 
 
 def execute(args):
