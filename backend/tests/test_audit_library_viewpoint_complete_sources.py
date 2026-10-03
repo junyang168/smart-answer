@@ -16,6 +16,19 @@ AUDIT = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(AUDIT)
 
 
+def test_component_context_contract_preserves_identity_and_negative_guards():
+    prompt = AUDIT._viewpoint_prompt("CV-test", {"core_proposition": "神所揀選的僕人"}, [
+        "被歸入的成分：僕人\n主張全文：宣告確認耶穌具有王與僕人的身份。\n"
+        "【原文】僕人指賽42:1中神所揀選的僕人。"
+    ])
+    for rule in ["不是必須獨立成句", "該條主張全文及本連結綁定的原文",
+                 "不得僅因短成分", "未定位部分只用於理解原句語境",
+                 "不得借其他主張或未綁定來源補限定", "缺少必要條件或範圍不同",
+                 "仍須判異議", "替換它", "同樣的情況下為假"]:
+        assert rule in prompt
+    assert "僕人指賽42:1" in prompt
+
+
 @pytest.mark.parametrize("verdict", ["same", "disputed"])
 @pytest.mark.parametrize("link_type", ["equivalent_component", "supports"])
 def test_viewpoint_review_receives_complete_bound_originals_and_keeps_verdict(

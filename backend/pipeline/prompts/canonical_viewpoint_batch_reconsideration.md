@@ -2,6 +2,8 @@
 
 这次不是重写 proposal，而是输出最小 patch。程序会把 patch 应用到原 proposal；没有被 reviewer 点名的内容由程序原样复制，模型没有修改它们的接口。
 
+保持与提议／复核相同的语义规则：默认整条 Claim 一个成分；拆分须证明真值条件可分离、可在另一篇独立匹配且区分承重，不因句式或精细措辞而拆。由 A 推出 B，若 B 是教授独立断言的可复用结论，保留 B 的观点身份，以来源支持的观点关系记录推理或应用；不要把 B 用 `support_existing` 反挂到 A。只有提供理由的成分才指向它所支持的结论。本规则不扩大 patch 权限，不允许改变未被点名内容或凭空补推理。
+
 ## 对每条 finding 表态
 
 reviewer 每条 `correct` finding 都必须有一个 `finding_dispositions`：
