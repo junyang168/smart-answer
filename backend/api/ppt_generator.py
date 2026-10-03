@@ -452,7 +452,9 @@ def _render_section(
 
         if style == "scripture":
             if "{reader}" in content:
-                value = "⇉讀經 by " + next_reader if section_number < section_total else ""
+                # The cue hands over to the next reader; none when the same reader reads on (OPS-33).
+                handover = section_number < section_total and next_reader and next_reader != reader
+                value = "⇉讀經 by " + next_reader if handover else ""
                 _replace_in_text_frame(text_frame, {"reader":   value})
                 content = _text_frame_content(text_frame)
             if reader is not None and "{" + f"{placeholder_key}Reader" + "}" in content:
