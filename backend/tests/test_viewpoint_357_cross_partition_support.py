@@ -267,3 +267,35 @@ def test_composite_identity_has_one_joint_decision_not_fake_full_members(tmp_pat
     report['packet_sha256']=sha256_json(packet)
     with pytest.raises(ValueError,match='joint identity drift'):
         approved_package(states,packet,report,tmp_path)
+
+
+def test_consolidated_support_preserves_complete_claim_and_all_evidence():
+    from backend.pipeline.viewpoint_357_cross_partition_support import PURPOSE_SURVIVOR,consolidate_purpose_support,validate_effective_semantic_edges
+    claim={'claim_id':'DK-61d92ac2a5fb-P03-CL003','revision':3,
+           'statement':'耶穌接受約翰的洗，不是因為祂需要悔改，而是為了盡諸般的義並與人類站在一起。'}
+    old={'viewpoint_claim_link_id':PURPOSE_LINK,'claim_id':claim['claim_id'],'revision':1,
+         'pinned_claim_revision':3,'link_type':'equivalent_component','effective_state':'active',
+         'viewpoint_id':'CV','validated_against_viewpoint_revision_id':'R',
+         'evidence_bindings':[{'evidence_step_id':'E4','source_fragment_id':'F4'},{'evidence_step_id':'E7','source_fragment_id':'F7'}],
+         'component_locator':{'claim_sha256':semantic_record_sha(claim),'statement_component':'耶穌接受約翰的洗與人類站在一起。',
+             'canonical_spans':[{'start_char':0,'end_char':8,'exact_text':claim['statement'][0:8]},
+                                {'start_char':29,'end_char':37,'exact_text':claim['statement'][29:37]}]}}
+    survivor=deepcopy(old); survivor.update(viewpoint_claim_link_id=PURPOSE_SURVIVOR,link_type='supports',
+        evidence_bindings=[old['evidence_bindings'][0]],component_locator={'claim_sha256':semantic_record_sha(claim),
+        'canonical_spans':[{'start_char':19,'end_char':28,'exact_text':claim['statement'][19:28]}]})
+    states={('claims',claim['claim_id']):claim,('viewpoint_claim_links',PURPOSE_LINK):old,
+            ('viewpoint_claim_links',PURPOSE_SURVIVOR):survivor}
+    before=deepcopy(states); retired,combined=consolidate_purpose_support(states)
+    assert states==before
+    assert retired['effective_state']=='retired'
+    assert combined['component_locator'] is None and combined['link_type']=='supports'
+    assert combined['evidence_bindings']==old['evidence_bindings']
+    packet={'proposed_links':[retired,combined],'proposed_decisions':[
+        {'link_id':PURPOSE_LINK,'intended_effective_state_after_review':'retired'},
+        {'link_id':PURPOSE_SURVIVOR,'intended_effective_state_after_review':'active'}]}
+    validate_effective_semantic_edges(states,packet)
+    duplicate=deepcopy(combined); duplicate['viewpoint_claim_link_id']='DUP'
+    packet['proposed_links'].append(duplicate)
+    packet['proposed_decisions'].append({'link_id':'DUP','intended_effective_state_after_review':'active'})
+    with pytest.raises(ValueError,match='duplicate effective'):
+        validate_effective_semantic_edges(states,packet)
