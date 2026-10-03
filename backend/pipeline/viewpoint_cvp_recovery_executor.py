@@ -350,7 +350,7 @@ def resume_after_repair(root, attempt, recovery_root, executable, *, additional_
         raise ValueError("fresh backup SHA drift")
     run_logged(["pg_restore", "--list", backup["path"]], attempt, "backup-restore-list")
     if prior_model_batch is not None:
-        from backend.pipeline.viewpoint_model_cache_handoff import prepare_handoff
+        from backend.pipeline.viewpoint_model_cache_handoff import prepare_handoff, verify_prefix
         from backend.api.canonical_repository.viewpoint_production_safety import build_batch_identity
         target_group = output / f"g{progress['sequence']:03d}" / 'production'
         freeze_path = target_group / 'inputs/freeze.json'
@@ -361,7 +361,12 @@ def resume_after_repair(root, attempt, recovery_root, executable, *, additional_
             freeze_sha256=freeze['artifact_sha256'], grouping_sha256=grouping['artifact_sha256'],
             claim_ids=groups[progress['group_key']]['claim_ids'], cvp_policy_sha256=freeze['cvp_policy_sha256'])
         prepare_handoff(prior_model_batch, target_group / 'run/batches' / identity['batch_key_sha256'],
-                        target_batch_id=identity['batch_id'], target_freeze=freeze_path)
+                        target_batch_id=identity['batch_id'], target_freeze=freeze_path,
+                        source_eligibility=prior_model_batch.parents[2] / 'inputs/source-eligibility.json',
+                        target_eligibility=target_group / 'inputs/source-eligibility.json')
+        policy = read(PROJECT_ROOT / 'backend/pipeline/policies/wang_cvp_resolution_policy_v3.json')
+        verify_prefix(scope, identity['batch_id'], target_group / 'run/batches' / identity['batch_key_sha256'],
+                      int(policy['max_request_bytes']))
     from backend.pipeline.viewpoint_cvp_recovery_supervisor import process_table, remaining_producers, current_job_process_ids
     if [p for p in remaining_producers(process_table(), root.parent) if p not in current_job_process_ids()]:
         raise ValueError("producer active; do not start another")
