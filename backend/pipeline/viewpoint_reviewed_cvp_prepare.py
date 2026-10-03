@@ -73,6 +73,34 @@ def completed_repair_parent_snapshot(manifest, records, packages, completed_ids,
         app=package.get('source_repair_application')
         if not app: raise CvpProductionBlocked(['parent repair lacks fresh source-repair authority'])
         packet=app['review_packet']; normalized=normalize_package(package)
+        if app.get('schema_version') == 'wang_claim_qualifier_repair_v2':
+            old,new=packet['before_claim'],package['claims'][0]; cid=new['claim_id']
+            if cid in used or cid not in completed_ids or cid in selected_ids or cid not in rows:
+                raise CvpProductionBlocked([f'{cid}: qualifier repair must be independently completed and never selected'])
+            prior=rows[cid]
+            if old['revision']!=prior['claim_revision'] or semantic_record_sha(old)!=prior['claim_content_sha256']:
+                raise CvpProductionBlocked([f'{cid}: qualifier predecessor differs from accepted membership'])
+            for collection,objects in normalized.items():
+                for oid,expected in objects.items():
+                    current=records.get((collection,oid))
+                    if not current or current.get('retired') or current['revision']!=expected['revision'] or current['payload']!=expected or current['content_sha256']!=semantic_record_sha(expected):
+                        raise CvpProductionBlocked([f'{collection}/{oid}: reviewed qualifier current drift'])
+            source_ids={row['fragment']['source_id'] for row in packet['bound_evidence']}
+            if len(source_ids)!=1:
+                raise CvpProductionBlocked([f'{cid}: qualifier source population mismatch'])
+            source=records[('source_documents',next(iter(source_ids)))]['payload']
+            path,file_sha,projection=load_context_source(source)
+            if str(path)!=packet['source_path'] or file_sha!=packet['source_file_sha256'] or projection.body_sha256!=packet['source_body_sha256'] or [r['text'] for r in projection.spoken_rows]!=packet['complete_original']:
+                raise CvpProductionBlocked([f'{cid}: qualifier source physical drift'])
+            for row in packet['bound_evidence']:
+                for collection,key in [('evidence_steps','step'),('source_fragments','fragment')]:
+                    payload=row[key]; oid=payload['evidence_step_id'] if key=='step' else payload['fragment_id']
+                    current=records.get((collection,oid))
+                    if not current or current.get('retired') or current['payload']!=payload:
+                        raise CvpProductionBlocked([f'{collection}/{oid}: preserved qualifier evidence drift'])
+            used.add(cid)
+            checked[('claims',cid)]={'revision':old['revision'],'content_sha256':semantic_record_sha(old),'payload':old,'retired':False}
+            continue
         for item in packet['items']:
             old,new=item['before'],item['after']; cid=new['claim_id']
             if cid in used or cid not in completed_ids or cid in selected_ids or cid not in rows:
@@ -115,6 +143,8 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
     repair_paths=getattr(args,'completed_source_repair',None) or []
     repairs=[json.loads(path.read_text(encoding='utf-8')) for path in repair_paths]
     for repair in repairs:
+        if repair.get('source_repair_application',{}).get('schema_version')=='wang_claim_qualifier_repair_v2':
+            for link in repair.get('viewpoint_claim_links',[]): all_ids.add(link['viewpoint_claim_link_id'])
         for item in repair.get('source_repair_application',{}).get('review_packet',{}).get('items',[]):
             all_ids.add(item['new_evidence_step']['evidence_step_id']); all_ids.add(item['new_fragment']['fragment_id'])
     store = PostgresKnowledgeStore()

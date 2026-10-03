@@ -243,7 +243,7 @@ def verify_group_audit(root, cfg, schedule, manifest, groups, audit_path, output
     return proof
 
 
-def continuation_inputs(root, output, extra_completion=None):
+def continuation_inputs(root, output, extra_completion=None, *, additional_source_repair_paths=()):
     cfg, schedule, manifest, groups = load_campaign(root)
     seeds = read(cfg["completed_proofs"]["path"])["groups"][:]
     for row in schedule["schedule"]:
@@ -279,12 +279,14 @@ def continuation_inputs(root, output, extra_completion=None):
         argv.extend(["--" + key.replace("_", "-"), cfg[key]])
     for b in cfg.get("completed_source_repairs", []):
         argv.extend(["--completed-source-repair", b["path"]])
+    for path in additional_source_repair_paths:
+        argv.extend(["--completed-source-repair", str(path)])
     if cfg.get("random_spot_check_policy"):
         argv.extend(["--random-spot-check-policy", cfg["random_spot_check_policy"]["path"]])
     return argv
 
 
-def resume_after_repair(root, attempt, recovery_root, executable, *, additional_proof_bindings=()):
+def resume_after_repair(root, attempt, recovery_root, executable, *, additional_proof_bindings=(), additional_source_repair_paths=()):
     cfg, schedule, manifest, groups = load_campaign(root)
     state = read(root / "progress.json")
     group_root = root / f"g{state['sequence']:03d}"
@@ -313,7 +315,7 @@ def resume_after_repair(root, attempt, recovery_root, executable, *, additional_
     output = root.parent / (root.name + "-recovery-" + attempt.name[:12])
     if output.exists():
         raise ValueError("continuation root already exists; never overwrite/retry")
-    argv = continuation_inputs(root, output, extra)
+    argv = continuation_inputs(root, output, extra, additional_source_repair_paths=additional_source_repair_paths) if additional_source_repair_paths else continuation_inputs(root, output, extra)
     # Normal qualification makes and verifies the fresh pg_dump backup; normal
     # dry-run proves zero model calls/writes before the unique production screen.
     env = os.environ.copy()
