@@ -59,6 +59,20 @@ def test_repeat_budget_survives_new_output_root(tmp_path):
     assert m.failure_event(roots[0])["fingerprint"] == m.failure_event(roots[1])["fingerprint"]
 
 
+def test_capacity_traceback_distinct_from_legacy_order_budget_and_stable(tmp_path):
+    roots = [tmp_path / name for name in ("order", "capacity", "capacity2")]
+    for root in roots:
+        root.mkdir()
+        state(root, error=f"Command {root}/g010 returned non-zero exit status 1.")
+    old = m.failure_event(roots[0])["fingerprint"]
+    (roots[0] / "screenlog").write_text("ValueError: batch packet claims must be id-sorted and unique\n")
+    assert m.failure_event(roots[0])["fingerprint"] == old
+    for root, size in zip(roots[1:], (528238, 530000)):
+        (root / "screenlog").write_text(f"ValueError: model request is {size} bytes, exceeding the frozen ceiling 500000; refreeze a smaller semantic scope\n")
+    assert m.failure_event(roots[1])["fingerprint"] != old
+    assert m.failure_event(roots[1])["fingerprint"] == m.failure_event(roots[2])["fingerprint"]
+
+
 def test_attempt_receipt_prevents_second_call(tmp_path, monkeypatch):
     _, root, recovery = roots(tmp_path, monkeypatch)
     state(root)

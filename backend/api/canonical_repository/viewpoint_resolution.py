@@ -2089,11 +2089,13 @@ class StructuredJsonReviewerAdapter:
         prompt: str,
         response_model: type[BaseModel],
         schema_name: str,
+        compact_payload: bool = False,
     ) -> None:
         self._client = client
         self._prompt = prompt
         self._response_model = response_model
         self._schema_name = schema_name
+        self._compact_payload = compact_payload
         self.model_id = str(getattr(client, "model", ""))
         if not self.model_id:
             raise ValueError("structured reviewer client must expose model")
@@ -2106,6 +2108,11 @@ class StructuredJsonReviewerAdapter:
                 "temperature": 0.0,
             }
         )
+        if compact_payload:
+            self.generation_config_sha256 = sha256_json({
+                "base_config_sha256": self.generation_config_sha256,
+                "payload_serialization": "compact_json_v1",
+            })
 
     def generate(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         request = structured_json_request(
@@ -2113,6 +2120,7 @@ class StructuredJsonReviewerAdapter:
             prompt=self._prompt,
             response_model=self._response_model,
             schema_name=self._schema_name,
+            compact_payload=self._compact_payload,
         )
         return self._client.generate_json(
             **request,
@@ -2126,6 +2134,7 @@ class StructuredJsonReviewerAdapter:
                     prompt=self._prompt,
                     response_model=self._response_model,
                     schema_name=self._schema_name,
+                    compact_payload=self._compact_payload,
                 )
             ).encode("utf-8")
         )
@@ -2137,12 +2146,16 @@ def structured_json_request(
     prompt: str,
     response_model: type[BaseModel],
     schema_name: str,
+    compact_payload: bool = False,
 ) -> dict[str, Any]:
     """The exact arguments passed to generate_json, before transport wrapping."""
 
     return {
         "system_prompt": prompt,
-        "user_prompt": json.dumps(payload, ensure_ascii=False, indent=2),
+        "user_prompt": (
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+            if compact_payload else json.dumps(payload, ensure_ascii=False, indent=2)
+        ),
         "json_schema": {
             "name": schema_name,
             "strict": True,

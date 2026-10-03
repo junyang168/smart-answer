@@ -182,6 +182,7 @@ def build_reconsiderer(
         ),
         response_model=CanonicalViewpointReconsiderationResponse,
         schema_name="wang_canonical_viewpoint_reconsideration_v3",
+        compact_payload=True,
     )
 
 

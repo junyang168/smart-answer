@@ -12,6 +12,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import time
@@ -85,6 +86,20 @@ def failure_event(root):
     error = state.get("error") or "campaign exited without complete progress"
     error = error.replace(str(root), "<campaign-root>")
     body = {"status": state.get("status", "missing_progress"), "error": error}
+    # The campaign wraps every child failure in the same CalledProcessError.
+    # Distinguish the proven pre-call capacity stop, without re-keying any
+    # existing repair budgets (including the previous packet-order defect).
+    log = root / "screenlog"
+    if "returned non-zero exit status" in error and log.exists():
+        matches = re.findall(
+            r"^ValueError: model request is \d+ bytes, exceeding the frozen ceiling "
+            r"(\d+); refreeze a smaller semantic scope\r?$",
+            log.read_text(), re.MULTILINE,
+        )
+        if matches:
+            body = {"status": body["status"],
+                    "error": "model_request_exceeds_frozen_ceiling",
+                    "ceiling_bytes": int(matches[-1])}
     fingerprint = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
     return {"fingerprint": fingerprint, "campaign_root": str(root), "progress": state,
             "progress_file_sha256": hashlib.sha256(progress.read_bytes()).hexdigest() if progress.exists() else None}
