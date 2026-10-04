@@ -84,7 +84,9 @@ def test_campaign_invokes_source_investigation_for_deferred_items(tmp_path,monke
         write_immutable(tmp_path/'deferred-source-check/handoff.json',{'status':'investigated_not_resolved'})
     monkeypatch.setattr(module,'command',command)
     assert module.investigate_deferred(tmp_path)['status']=='investigated_not_resolved'
-    assert len(calls)==1 and 'backend.pipeline.viewpoint_deferred_source_check' in calls[0]
+    assert len(calls)==2
+    assert 'backend.pipeline.viewpoint_evidence_hold_trace' in calls[0]
+    assert 'backend.pipeline.viewpoint_deferred_source_check' in calls[1]
 
 
 def test_campaign_does_not_investigate_non_deferred_failure(tmp_path,monkeypatch):

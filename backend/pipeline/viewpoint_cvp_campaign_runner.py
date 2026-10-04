@@ -102,6 +102,11 @@ def investigate_deferred(root):
     if len(dispositions) != 1 or not any(c["disposition"] == "deferred"
             for item in read(dispositions[0])["claims"] for c in item["components"]):
         return None
+    # Trace original applied inputs/reviews before a model or human escalation.
+    # Separate diagnostic output preserves existing frozen model-cache identity.
+    command([PYTHON, "-m", "backend.pipeline.viewpoint_evidence_hold_trace",
+        "--packet", dispositions[0].parent / "batch-packet.json",
+        "--disposition", dispositions[0], "--output-root", root / "evidence-hold-trace"])
     command([PYTHON, "-m", "backend.pipeline.viewpoint_deferred_source_check",
         "--packet", dispositions[0].parent / "batch-packet.json",
         "--disposition", dispositions[0], "--output-root", root / "deferred-source-check"])
