@@ -125,6 +125,16 @@ def discover_selection(group, inventory, random_spot_check_policy=None):
         if len(usable) != 1:
             raise ValueError(f"{cid}: need unique current review lineage, found {len(usable)}")
         variant = usable[0]
+        if variant['contract'] == 'review_input_discovery_requires_history_validation':
+            row = {'claim_id': cid}
+            for key in ('review_binding', 'review_input_binding'):
+                if binding(variant[key]['path']) != variant[key]:
+                    raise ValueError(f'{cid}: discovered review/input SHA drift')
+                row[key] = dict(variant[key])
+            if random_spot_check_policy is not None:
+                row['random_spot_check_policy_binding'] = binding(random_spot_check_policy)
+            selected.append(row)
+            continue
         candidate = Path(variant["path"])
         if binding(candidate)["file_sha256"] != variant["file_sha256"]:
             raise ValueError(f"{cid}: inventory candidate file SHA drift")
@@ -177,6 +187,16 @@ def lineage_preflight(schedule, groups, inventory, random_spot_check_policy=None
 
 
 def build_selection(group, inventory, root, random_spot_check_policy=None):
+    missing = {cid for cid in group['claim_ids'] if len([
+        v for v in inventory[cid]['variants'] if set(v['changed_substantive_fields'])
+        <= {'occurrences', 'evidence_step_ids'}]) != 1}
+    if missing:
+        from dotenv import load_dotenv
+        from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+        from backend.pipeline.viewpoint_lineage_inventory import discover_review_inputs
+        load_dotenv(PROJECT_ROOT / '.env')
+        inventory = discover_review_inputs(claim_ids=missing, inventory=inventory,
+                                          store=PostgresKnowledgeStore())
     selected, sealed = discover_selection(group, inventory, random_spot_check_policy)
     if sealed:
         path = root / "sealed-lineage.json"

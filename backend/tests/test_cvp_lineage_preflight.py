@@ -44,7 +44,10 @@ def test_all_pending_claims_reported_without_models_or_writes(tmp_path):
 
 
 @pytest.mark.parametrize('mutation', ['statement', 'ambiguous', 'sha', 'missing_input'])
-def test_preflight_and_live_entrance_reject_same_failure(tmp_path, mutation):
+def test_preflight_and_live_entrance_reject_same_failure(tmp_path, mutation, monkeypatch):
+    # No additional reviewed generation is available in this fixture.
+    monkeypatch.setattr('backend.pipeline.viewpoint_lineage_inventory.discover_review_inputs',
+                        lambda **kw: kw['inventory'])
     index = inventory(tmp_path)
     variant = index['good']['variants'][0]
     if mutation == 'statement':

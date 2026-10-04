@@ -2,6 +2,65 @@ import json
 
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.pipeline.viewpoint_lineage_inventory import build_lineage_inventory
+from backend.pipeline.viewpoint_lineage_inventory import discover_review_inputs
+
+
+def test_later_review_input_discovery_matches_current_not_old_candidate(tmp_path):
+    import hashlib
+    from copy import deepcopy
+    from backend.pipeline.viewpoint_cvp_campaign_runner import discover_selection
+    batch = tmp_path / 'batch'
+    (batch / 'reviews/review-generations').mkdir(parents=True)
+    candidate = batch / 'reviewed/old.reviewed-candidate.json'
+    current = {'claim_id': 'C1', 'statement': '新主張', 'claim_type': 'teaching', 'revision': 3}
+    package = batch / 'input.json'
+    package.write_text(json.dumps({'claims': [current]}))
+    review = {'source': {'package_path': str(package),
+        'package_sha256': hashlib.sha256(package.read_bytes()).hexdigest()},
+        'claim_reviews': [{'claim_id': 'C1', 'decision': 'pass'}]}
+    p = batch / 'reviews/new.independent-review.json'
+    p.write_text(json.dumps(review))
+    (batch / 'reviews/review-generations/copy.json').write_bytes(p.read_bytes())
+    class Store:
+        def list_records(self, collection):
+            assert collection == 'claims'
+            return [current]
+    index = {'C1': {'variants': [{'path': str(candidate),
+        'changed_substantive_fields': ['statement']}]}}
+    before = deepcopy(index)
+    found = discover_review_inputs(claim_ids={'C1'}, inventory=index, store=Store())
+    assert index == before and len(found['C1']['variants']) == 1
+    selection, sealed = discover_selection({'claim_ids': ['C1']}, found)
+    assert selection[0]['review_input_binding']['path'] == str(package)
+    assert not sealed and 'legacy_reviewed_candidate_binding' not in selection[0]
+    # A matching filename or pass is insufficient: changed physical input SHA
+    # and changed current content each leave the old unqualified generation.
+    package.write_text(json.dumps({'claims': [current]}, indent=2))
+    assert discover_review_inputs(claim_ids={'C1'}, inventory=index, store=Store()) == index
+    review['source']['package_sha256'] = hashlib.sha256(package.read_bytes()).hexdigest()
+    p.write_text(json.dumps(review))
+    current['statement'] = '第三代主張'
+    assert discover_review_inputs(claim_ids={'C1'}, inventory=index, store=Store()) == index
+
+
+def test_distinct_later_reviews_remain_ambiguous_not_selected_by_filename(tmp_path):
+    # Discovery must never silently choose the newest file when decisions differ.
+    import hashlib
+    from backend.pipeline.viewpoint_cvp_campaign_runner import discover_selection
+    import pytest
+    (tmp_path / 'reviews').mkdir()
+    live = {'claim_id': 'C1', 'statement': '主張', 'claim_type': 'teaching'}
+    package = tmp_path / 'input.json'; package.write_text(json.dumps({'claims': [live]}))
+    for i, decision in enumerate(['pass', 'changes_suggested']):
+        (tmp_path / f'reviews/{i}.json').write_text(json.dumps({
+            'source': {'package_path': str(package), 'package_sha256': hashlib.sha256(package.read_bytes()).hexdigest()},
+            'claim_reviews': [{'claim_id': 'C1', 'decision': decision}]}))
+    class Store:
+        def list_records(self, collection): return [live]
+    index = {'C1': {'variants': [{'path': str(tmp_path / 'reviewed/old.json'), 'changed_substantive_fields': ['statement']}]}}
+    found = discover_review_inputs(claim_ids={'C1'}, inventory=index, store=Store())
+    with pytest.raises(ValueError, match='found 2'):
+        discover_selection({'claim_ids': ['C1']}, found)
 
 
 def test_inventory_distinguishes_coordinate_changes_from_review_metadata(tmp_path):

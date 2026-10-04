@@ -20,6 +20,54 @@ from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.api.canonical_repository.viewpoint_production_safety import validate_content_addressed
 
 
+def discover_review_inputs(*, claim_ids, inventory, store):
+    """Find later reviewed input generations; never grant review approval.
+
+    Search only batches already named by the frozen inventory. Same physical
+    review copied into review-generations is one candidate, not two approvals.
+    Actual history, review decision, source and evidence are verified by the
+    unchanged historical bridge after discovery.
+    """
+    from copy import deepcopy
+    result = deepcopy(inventory)
+    live = {r['claim_id']: r for r in store.list_records('claims') if r['claim_id'] in claim_ids}
+    for cid in sorted(claim_ids):
+        if cid not in live:
+            raise ValueError(f'{cid}: current Claim missing during review discovery')
+        roots = {Path(v['path']).parent.parent / 'reviews' for v in inventory[cid]['variants']}
+        found = {}
+        for root in sorted(roots):
+            for path in sorted(root.rglob('*.json')):
+                review = json.loads(path.read_bytes())
+                if not any(r.get('claim_id') == cid for r in review.get('claim_reviews', [])):
+                    continue
+                package_path = Path(review.get('source', {}).get('package_path', ''))
+                if not package_path.is_absolute() or not package_path.is_file():
+                    continue
+                raw_bytes = package_path.read_bytes()
+                package_sha = hashlib.sha256(raw_bytes).hexdigest()
+                if package_sha != review['source'].get('package_sha256'):
+                    continue
+                normalized, _ = _normalize_records(json.loads(raw_bytes))
+                if cid not in normalized.get('claims', {}):
+                    continue
+                prior = _substantive_payload(ClaimRecord.model_validate(normalized['claims'][cid]).model_dump(mode='json'))
+                current = _substantive_payload(ClaimRecord.model_validate(live[cid]).model_dump(mode='json'))
+                differences = sorted(k for k in set(prior) | set(current) if prior.get(k) != current.get(k))
+                if not set(differences) <= {'occurrences', 'evidence_step_ids'}:
+                    continue
+                review_sha = hashlib.sha256(path.read_bytes()).hexdigest()
+                found.setdefault((review_sha, package_sha), {
+                    'contract': 'review_input_discovery_requires_history_validation',
+                    'changed_substantive_fields': differences,
+                    'review_binding': {'path': str(path.resolve()), 'file_sha256': review_sha},
+                    'review_input_binding': {'path': str(package_path.resolve()), 'file_sha256': package_sha},
+                })
+        if found:
+            result[cid]['variants'] = list(found.values())
+    return result
+
+
 def build_lineage_inventory(*, manifest: dict[str, Any], reviewed_root: Path, store: Any) -> dict[str, Any]:
     validate_content_addressed(manifest, "artifact_sha256")
     wanted = {row["claim_id"] for row in manifest["claim_packets"]}
