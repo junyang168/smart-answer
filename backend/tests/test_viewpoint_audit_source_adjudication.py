@@ -10,6 +10,30 @@ def packet():
         {'source_id': 's', 'paragraphs': [{'paragraph_key': 'S0001', 'text': '王就是這位彌賽亞。'}]}]}]}
 
 
+@pytest.mark.parametrize('case', ['registered_alias', 'canonical', 'foreign', 'title_only',
+                                  'ambiguous', 'retired', 'notes'])
+def test_own_source_identity_only_accepts_unique_active_registered_sermon_alias(case):
+    source = {'source_id': 's', 'transcript_id': 'lecture',
+              'title': 'other', 'source_type': 'sermon_transcript'}
+    records = [source]
+    own = {'lecture'}
+    if case == 'canonical': own = {'s'}
+    if case == 'foreign': own = {'another'}
+    if case == 'title_only': own = {'other'}
+    if case == 'ambiguous': records += [source | {'source_id': 's2'}]
+    if case == 'notes': source['source_type'] = 'notes_manuscript'
+    class Store:
+        def list_records(self, collection): return records
+        def get_record_state(self, collection, identity):
+            return {'retired': case == 'retired',
+                    'payload': next(r for r in records if r['source_id'] == identity)}
+    if case in ('registered_alias', 'canonical'):
+        module.validate_own_source_identity(source, own, Store())
+    else:
+        with pytest.raises(ValueError, match='foreign source'):
+            module.validate_own_source_identity(source, own, Store())
+
+
 @pytest.mark.parametrize('legacy_cache', [False, True])
 def test_source_review_compact_and_legacy_cache_both_reuse_without_new_calls(tmp_path, legacy_cache):
     import json

@@ -70,6 +70,25 @@ def validate_population(audit, claim_ids, viewpoint_ids):
             raise ValueError('incomplete audit population cannot enter adjudication')
 
 
+def validate_own_source_identity(source, own_sources, store):
+    sid = source['source_id']
+    if sid in own_sources:
+        return
+    # Legacy sermon occurrences use the registered transcript key, not the
+    # SourceDocument object ID. Titles/paths never establish source authority.
+    alias = source.get('transcript_id')
+    matches = []
+    for candidate in store.list_records('source_documents'):
+        if not alias or candidate.get('transcript_id') != alias:
+            continue
+        state = store.get_record_state('source_documents', candidate['source_id'])
+        if state and not state['retired']:
+            matches.append(state['payload']['source_id'])
+    if (source.get('source_type') != 'sermon_transcript' or
+            alias not in own_sources or matches != [sid]):
+        raise ValueError('foreign source')
+
+
 def build_packet(audit_path, store):
     audit = read_artifact(audit_path)
     links = store.list_records('viewpoint_claim_links')
@@ -125,10 +144,10 @@ def build_packet(audit_path, store):
                     raise ValueError('fragment not bound to own EvidenceStep')
                 fragment = active('source_fragments', b['source_fragment_id'])
                 sid = fragment['source_id']
-                if sid not in own_sources:
-                    raise ValueError('foreign source')
+                source = active('source_documents', sid)
+                validate_own_source_identity(source, own_sources, store)
                 if sid not in sources:
-                    path, file_sha, projection = load_context_source(active('source_documents', sid))
+                    path, file_sha, projection = load_context_source(source)
                     sources[sid] = {'source_id': sid, 'path': str(path), 'file_sha256': file_sha,
                                     'body_sha256': projection.body_sha256,
                                     'paragraphs': [{'paragraph_key': f'S{i+1:04d}', 'text': str(p.get('text') or '')}
