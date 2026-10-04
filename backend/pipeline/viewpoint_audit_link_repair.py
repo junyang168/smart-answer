@@ -155,18 +155,26 @@ def package_for(states, packet, reviews, root):
     return package
 
 
-def run(campaign, root, *, owner_retire=False):
+def run(campaign, root, *, owner_retire=False, owner_identity_g033=False):
     store = PostgresKnowledgeStore()
     global_lock={'global_lock_path':str(BASE/'registry-cvp.lock')}
+    if owner_retire and owner_identity_g033:
+        raise ValueError('owner scopes cannot be combined')
+    if owner_identity_g033:
+        from backend.pipeline import viewpoint_g033_identity_repair as identity_repair
+        identity_repair.propose(campaign,root,store)
+    def prepare_current():
+        return identity_repair.prepare(campaign,root,store) if owner_identity_g033 else prepare(campaign,store,owner_retire=owner_retire)
     with exclusive_cvp_run_lock(global_lock):
-        states, packet=prepare(campaign, store, owner_retire=owner_retire)
+        states, packet=prepare_current()
         collections=sorted({c for c,_ in states}); before=fingerprint(states,collections)
         write_immutable(root/'packet.json',packet); write_immutable(root/'before.json',{'collections':collections,'pre_fingerprint_sha256':before})
     write_derived(root/'progress.json',{'status':'reviewing','master_data_mutations':0})
     reviews={}
     ids={i['claim']['claim_id'] for i in packet['targets']}
     for label,provider,model in [('gpt','codex','gpt-6.1-sol'),('opus','claude','claude-opus-5-5')]:
-        adapter=StructuredJsonReviewerAdapter(client=subscription_client(provider,model,'high'),prompt=RETIRE_PROMPT if owner_retire else PROMPT,response_model=Review,schema_name='audit_link_repair_review_v1',compact_payload=True)
+        prompt=identity_repair.PROMPT if owner_identity_g033 else RETIRE_PROMPT if owner_retire else PROMPT
+        adapter=StructuredJsonReviewerAdapter(client=subscription_client(provider,model,'high'),prompt=prompt,response_model=Review,schema_name='audit_link_repair_review_v1',compact_payload=True)
         adapter.max_request_bytes=500000
         raw,_,_=review_call(adapter,packet,root,label)
         result=Review.model_validate(raw)
@@ -174,14 +182,20 @@ def run(campaign, root, *, owner_retire=False):
             raise ValueError('repair review population mismatch')
         reviews[label]=result.model_dump(mode='json')
         if any(not v.approved or v.problems for v in result.verdicts):
-            raise ValueError('bounded supports repair not approved; no semantic retry')
+            raise ValueError('owner identity repair not approved; no semantic retry' if owner_identity_g033 else 'bounded supports repair not approved; no semantic retry')
     write_immutable(root/'review-report.json',{'packet_sha256':sha256_json(packet),'reviews':reviews,'approved':True,'human_content_approval':False})
     with exclusive_cvp_run_lock(global_lock):
-        live,current=prepare(campaign,store,owner_retire=owner_retire)
+        live,current=prepare_current()
         if current!=packet or fingerprint(live,collections)!=before: raise ValueError('pre-write Registry/source drift')
-        package=package_for(live,packet,reviews,root)
+        package=identity_repair.package_for(live,packet,reviews,root) if owner_identity_g033 else package_for(live,packet,reviews,root)
         plan=store.plan_package(package,source_kind='wang_source_adjudicated_link_repair')
-        if len(plan.operations)!=(1 if owner_retire else 3)*len(ids) or any(o.collection not in package or (o.collection=='viewpoint_claim_links')!=(o.operation=='update') for o in plan.operations): raise ValueError('unexpected repair writes')
+        if owner_identity_g033:
+            expected_ops={'viewpoint_revisions':('create',1),'canonical_viewpoints':('update',1),
+                'viewpoint_claim_links':('update',2),'viewpoint_relations':('update',3),
+                'viewpoint_identity_candidates':('create',2),'viewpoint_identity_decisions':('create',2)}
+            if len(plan.operations)!=11 or any(sum(o.collection==c and o.operation==kind for o in plan.operations)!=count for c,(kind,count) in expected_ops.items()):
+                raise ValueError('unexpected owner identity repair writes')
+        elif len(plan.operations)!=(1 if owner_retire else 3)*len(ids) or any(o.collection not in package or (o.collection=='viewpoint_claim_links')!=(o.operation=='update') for o in plan.operations): raise ValueError('unexpected repair writes')
         if owner_retire:
             write_immutable(root/'claim-disposition.json',{'schema_version':'wang_owner_reviewed_claim_disposition_v1',
                 'rows':[i['disposition'] for i in packet['targets']], 'reviews_sha256':sha256_json(reviews),
@@ -197,7 +211,7 @@ def run(campaign, root, *, owner_retire=False):
     from backend.pipeline.viewpoint_cvp_recovery_executor import binding, resume_after_repair, load_campaign, run_logged, PYTHON
     write_immutable(root/'backup.json',binding(backup))
     with exclusive_cvp_run_lock(global_lock):
-        live,current=prepare(campaign,store,owner_retire=owner_retire)
+        live,current=prepare_current()
         if current!=packet or fingerprint(live,collections)!=before: raise ValueError('pre-apply drift')
         replay=store.plan_package(package,source_kind='wang_source_adjudicated_link_repair')
         if replay.as_dict()!=plan.as_dict(): raise ValueError('dry-run/apply drift')
@@ -212,7 +226,7 @@ def run(campaign, root, *, owner_retire=False):
         for item in packet['targets']:
             for source in item['sources']:
                 if file_sha256(Path(source['path']))!=source['file_sha256']: raise ValueError('physical source drift')
-        write_immutable(root/'verified-result.json',{'status':'applied_readback_verified','change_set_id':replay.change_set_id,'master_data_mutations':len(replay.operations),'claim_source_viewpoint_text_writes':0})
+        write_immutable(root/'verified-result.json',{'status':'applied_readback_verified','change_set_id':replay.change_set_id,'master_data_mutations':len(replay.operations),'claim_source_viewpoint_text_writes':1 if owner_identity_g033 else 0,'claim_evidence_source_writes':0})
     write_derived(root/'progress.json',{'status':'independent_audit_before_resume','master_data_mutations':len(replay.operations)})
     continuation=root/'continuation'; continuation.mkdir(exist_ok=False)
     # Audit once. A fresh disputed report goes to the standing own-source GPT
@@ -242,6 +256,7 @@ def run(campaign, root, *, owner_retire=False):
     executable=Path(os.environ['CODEX_EXECUTABLE'])
     proof_names=['packet.json','review-report.json','effective-package.json','dry-run-plan.json','apply-receipt.json','verified-result.json']
     if owner_retire: proof_names.append('claim-disposition.json')
+    if owner_identity_g033: proof_names.extend(['owner-authorization.json','proposal-input.json','proposal-before.json','raw-proposal.json'])
     result=resume_after_repair(campaign,continuation,BASE/'immediate-recovery-20261002-v1',executable,
         saved_audit_path=audit_path, owner_resolution_path=resolution_path,
         additional_proof_bindings=[binding(root/name) for name in proof_names])
@@ -267,7 +282,7 @@ def launch_repair(campaign, packet, report):
 
 
 def main():
-    ap=argparse.ArgumentParser(description=__doc__); ap.add_argument('--campaign-root',type=Path,required=True); ap.add_argument('--output-root',type=Path,required=True); ap.add_argument('--wait-parent-pid',type=int); ap.add_argument('--owner-retire-g015-link',action='store_true'); args=ap.parse_args()
+    ap=argparse.ArgumentParser(description=__doc__); ap.add_argument('--campaign-root',type=Path,required=True); ap.add_argument('--output-root',type=Path,required=True); ap.add_argument('--wait-parent-pid',type=int); ap.add_argument('--owner-retire-g015-link',action='store_true'); ap.add_argument('--owner-identity-g033',action='store_true'); args=ap.parse_args()
     campaign=args.campaign_root.resolve(); root=args.output_root.resolve()
     if PROJECT.name!='wkp-357-worktree-per-session' or campaign.parent!=BASE or root.parent!=BASE: raise ValueError('only #357 independent roots allowed')
     load_dotenv(PROJECT/'.env')
@@ -283,7 +298,7 @@ def main():
         if any(p not in current_job_process_ids() for p in remaining_producers(process_table(),BASE)): raise ValueError('another producer active')
         if subprocess.check_output(['git','status','--porcelain'],cwd=PROJECT,text=True).strip(): raise ValueError('committed clean code required')
         root.mkdir(exist_ok=False)
-        try: print(json.dumps(run(campaign,root,owner_retire=args.owner_retire_g015_link)),flush=True)
+        try: print(json.dumps(run(campaign,root,owner_retire=args.owner_retire_g015_link,owner_identity_g033=args.owner_identity_g033)),flush=True)
         except Exception as exc:
             write_derived(root/'failure.json',{'error':str(exc),'applied':(root/'apply-receipt.json').exists(),'no_next_group_started':True})
             write_derived(root/'progress.json',{'status':'stopped','error':str(exc),'applied':(root/'apply-receipt.json').exists()}); raise
