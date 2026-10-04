@@ -4,6 +4,26 @@ from types import SimpleNamespace
 
 import pytest
 
+
+def test_long_campaign_watcher_paths_include_atomic_suffix_and_full_identity(tmp_path):
+    from backend.pipeline import viewpoint_cvp_recovery_supervisor as m
+    root = tmp_path / ('r' * 244)
+    recovery = tmp_path / 'recovery'
+    recovery.mkdir()
+    paths = []
+    for suffix in ('.watch.lock', '.watch.json', '.watch-result.json'):
+        path = m.watcher_path(root, recovery, suffix)
+        assert len((path.name + '.partial').encode()) <= 255
+        assert path == m.watcher_path(root, recovery, suffix)
+        paths.append(path)
+        if suffix.endswith('.json'):
+            m.write_derived(path, {'root': str(root)})
+            assert path.is_file()
+    assert len(set(paths)) == 3
+    # Same basename under a different parent is NOT the same watcher identity.
+    assert m.watcher_path(tmp_path / 'other' / root.name, recovery, '.watch.json') != paths[1]
+    assert m.watcher_path(tmp_path / 'short', recovery, '.watch.json').name == 'short.watch.json'
+
 from backend.pipeline import viewpoint_cvp_recovery_supervisor as m
 
 

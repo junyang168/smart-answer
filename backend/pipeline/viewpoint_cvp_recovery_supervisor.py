@@ -184,15 +184,24 @@ def dispatch(event, recovery_root, executable, *, run=subprocess.run):
     return status
 
 
+def watcher_path(root, recovery_root, suffix):
+    # Atomic writes add .partial. Long immutable continuation names must not
+    # exceed the filesystem's 255-byte component limit (including that suffix).
+    name = root.name + suffix
+    if len((name + '.partial').encode()) > 255:
+        name = 'campaign-' + hashlib.sha256(str(root.resolve()).encode()).hexdigest() + suffix
+    return recovery_root / name
+
+
 def watch(root, pid, recovery_root, executable, *, table=process_table, sleep=time.sleep, interval=1):
     if PROJECT_ROOT.name != EXPECTED_WORKTREE or root.parent != recovery_root.parent:
         raise ValueError("recovery must stay in #357 worktree and sibling campaign staging roots")
     recovery_root.mkdir(parents=True, exist_ok=True)
     # One attachment per root; a replacement campaign may attach while this
     # maintenance session still holds the GLOBAL repair lock.
-    with (recovery_root / (root.name + ".watch.lock")).open("a") as watcher:
+    with watcher_path(root, recovery_root, ".watch.lock").open("a") as watcher:
         fcntl.flock(watcher, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        write_derived(recovery_root / (root.name + ".watch.json"), {"status": "watching", "pid": pid, "root": str(root)})
+        write_derived(watcher_path(root, recovery_root, ".watch.json"), {"status": "watching", "pid": pid, "root": str(root)})
         while campaign_running(table(), pid, root):
             sleep(interval)
         if remaining_producers(table(), root):
@@ -217,7 +226,7 @@ def main():
     args = parser.parse_args()
     root, recovery = args.campaign_root.resolve(), args.recovery_root.resolve()
     status = watch(root, args.campaign_pid, recovery, args.codex_executable)
-    write_derived(recovery / (root.name + ".watch-result.json"), {"status": status})
+    write_derived(watcher_path(root, recovery, ".watch-result.json"), {"status": status, "root": str(root)})
     print(status, flush=True)
 
 
