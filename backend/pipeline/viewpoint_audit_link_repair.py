@@ -155,14 +155,15 @@ def package_for(states, packet, reviews, root):
     return package
 
 
-def run(campaign, root, *, owner_retire=False, owner_identity_g033=False):
+def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storage_review_from=None):
     store = PostgresKnowledgeStore()
     global_lock={'global_lock_path':str(BASE/'registry-cvp.lock')}
     if owner_retire and owner_identity_g033:
         raise ValueError('owner scopes cannot be combined')
+    if storage_review_from and not owner_identity_g033: raise ValueError('storage correction requires exact g033 owner scope')
     if owner_identity_g033:
         from backend.pipeline import viewpoint_g033_identity_repair as identity_repair
-        identity_repair.propose(campaign,root,store)
+        identity_repair.propose(campaign,root,store,storage_review_from=storage_review_from)
     def prepare_current():
         return identity_repair.prepare(campaign,root,store) if owner_identity_g033 else prepare(campaign,store,owner_retire=owner_retire)
     with exclusive_cvp_run_lock(global_lock):
@@ -257,6 +258,7 @@ def run(campaign, root, *, owner_retire=False, owner_identity_g033=False):
     proof_names=['packet.json','review-report.json','effective-package.json','dry-run-plan.json','apply-receipt.json','verified-result.json']
     if owner_retire: proof_names.append('claim-disposition.json')
     if owner_identity_g033: proof_names.extend(['owner-authorization.json','proposal-input.json','proposal-before.json','raw-proposal.json'])
+    if storage_review_from: proof_names.append('mechanical-review-source.json')
     result=resume_after_repair(campaign,continuation,BASE/'immediate-recovery-20261002-v1',executable,
         saved_audit_path=audit_path, owner_resolution_path=resolution_path,
         additional_proof_bindings=[binding(root/name) for name in proof_names])
@@ -282,7 +284,9 @@ def launch_repair(campaign, packet, report):
 
 
 def main():
-    ap=argparse.ArgumentParser(description=__doc__); ap.add_argument('--campaign-root',type=Path,required=True); ap.add_argument('--output-root',type=Path,required=True); ap.add_argument('--wait-parent-pid',type=int); ap.add_argument('--owner-retire-g015-link',action='store_true'); ap.add_argument('--owner-identity-g033',action='store_true'); args=ap.parse_args()
+    ap=argparse.ArgumentParser(description=__doc__); ap.add_argument('--campaign-root',type=Path,required=True); ap.add_argument('--output-root',type=Path,required=True); ap.add_argument('--wait-parent-pid',type=int); ap.add_argument('--owner-retire-g015-link',action='store_true'); ap.add_argument('--owner-identity-g033',action='store_true')
+    ap.add_argument('--owner-g033-storage-review-from',type=Path)
+    args=ap.parse_args()
     campaign=args.campaign_root.resolve(); root=args.output_root.resolve()
     if PROJECT.name!='wkp-357-worktree-per-session' or campaign.parent!=BASE or root.parent!=BASE: raise ValueError('only #357 independent roots allowed')
     load_dotenv(PROJECT/'.env')
@@ -298,7 +302,7 @@ def main():
         if any(p not in current_job_process_ids() for p in remaining_producers(process_table(),BASE)): raise ValueError('another producer active')
         if subprocess.check_output(['git','status','--porcelain'],cwd=PROJECT,text=True).strip(): raise ValueError('committed clean code required')
         root.mkdir(exist_ok=False)
-        try: print(json.dumps(run(campaign,root,owner_retire=args.owner_retire_g015_link,owner_identity_g033=args.owner_identity_g033)),flush=True)
+        try: print(json.dumps(run(campaign,root,owner_retire=args.owner_retire_g015_link,owner_identity_g033=args.owner_identity_g033,storage_review_from=args.owner_g033_storage_review_from)),flush=True)
         except Exception as exc:
             write_derived(root/'failure.json',{'error':str(exc),'applied':(root/'apply-receipt.json').exists(),'no_next_group_started':True})
             write_derived(root/'progress.json',{'status':'stopped','error':str(exc),'applied':(root/'apply-receipt.json').exists()}); raise

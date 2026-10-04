@@ -1,5 +1,6 @@
 """Owner-authorized g033 identity correction, never a general content waiver."""
 from copy import deepcopy
+from pathlib import Path
 from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
@@ -114,8 +115,34 @@ def context(campaign, store):
         'adjudication_packet_sha256':packet['artifact_sha256'],'claim_evidence_source_writes':0}
     return states, body
 
-def propose(campaign, root, store):
+def propose(campaign, root, store, *, storage_review_from=None):
     from backend.pipeline.viewpoint_audit_link_repair import BASE
+    if storage_review_from is not None:
+        old_root = storage_review_from.resolve()
+        if old_root != BASE/'g033-owner-identity-repair-20261004-v1':
+            raise ValueError('only exact failed g033 review may be corrected')
+        reservation = old_root/'owner-storage-correction-start.json'
+        if reservation.exists(): raise ValueError('storage review correction already attempted')
+        with exclusive_cvp_run_lock({'global_lock_path':str(BASE/'registry-cvp.lock')}):
+            states, packet = prepare(campaign, old_root, store)
+            if packet != read_artifact(old_root/'packet.json') or (old_root/'apply-receipt.json').exists():
+                raise ValueError('failed review semantic postimage/apply drift')
+            from backend.pipeline.viewpoint_audit_link_repair import Review
+            adapter=StructuredJsonReviewerAdapter(client=subscription_client('codex','gpt-6.1-sol','high'),
+                prompt=PROMPT,response_model=Review,schema_name='audit_link_repair_review_v1',compact_payload=True)
+            adapter.max_request_bytes=500000
+            if not (old_root/'raw-gpt.json').is_file(): raise ValueError('prior review missing')
+            prior,calls,_=call_model(adapter,packet,old_root/'raw-gpt.json')
+            if calls or read_artifact(old_root/'raw-gpt.json')['artifact_sha256']!='8edeab4563996dbb1ce0e8ec534906186bab852086cc92d922c8496ab4be72bd':
+                raise ValueError('exact owner-authorized mechanical refusal drift')
+            storage_proof(packet)
+            write_immutable(reservation,{'authorization_quote':'继续。','output_root':str(root),'semantic_packet_sha256':sha256_json(packet),'max_corrected_gpt_calls':1})
+            for name in ('proposal-input.json','proposal-before.json','raw-proposal.json','owner-authorization.json','request-preflight.json'):
+                write_immutable(root/name,read_artifact(old_root/name))
+            write_immutable(root/'mechanical-review-source.json',{'authorization_quote':'继续。','previous_root':str(old_root),
+                'semantic_packet_sha256':sha256_json(packet),'previous_refusal':read_artifact(old_root/'raw-gpt.json'),
+                'proposal_reused_new_calls':0,'same_semantic_postimage':True,'single_correction_only':True})
+        return
     with exclusive_cvp_run_lock({'global_lock_path':str(BASE/'registry-cvp.lock')}):
         states, payload = context(campaign,store)
         cols = sorted({c for c,_ in states})
@@ -194,9 +221,41 @@ def prepare(campaign, root, store):
         for side in ('source','target'):
             if old[side+'_viewpoint_id']==VIEWPOINT: new['validated_'+side+'_viewpoint_revision_id']=rid
         after_relations.append(new)
-    return states, {'schema_version':POLICY,'policy':{'policy_id':POLICY,'authorization_quote':'同意','automatic_future_identity_repair':False},
+    packet = {'schema_version':POLICY,'policy':{'policy_id':POLICY,'authorization_quote':'同意','automatic_future_identity_repair':False},
         'targets':targets,'context':payload,'after_revision':after,'after_relations':after_relations,
         'proposal':proposal,'claim_evidence_source_writes':0}
+    if (root/'mechanical-review-source.json').is_file():
+        prior=read_artifact(root/'mechanical-review-source.json')
+        if sha256_json(packet)!=prior['semantic_packet_sha256']:
+            raise ValueError('storage correction changed semantic postimage')
+        packet['mechanical_storage_proof']=storage_proof(packet)
+    return states, packet
+
+def storage_proof(packet):
+    """Executable model evidence, not a waiver of independent content review."""
+    from backend.api.canonical_repository.knowledge_models import ViewpointRevisionRecord
+    from backend.api.canonical_repository.viewpoint_production_safety import file_sha256
+    from pydantic import ValidationError
+    old=packet['context']['before_revision']; new=packet['after_revision']
+    if new['revision']!=1 or new['revision_number']!=1 or new['viewpoint_revision_id']==old['viewpoint_revision_id'] or new['supersedes_revision_id']!=old['viewpoint_revision_id'] or new['viewpoint_id']!=old['viewpoint_id']:
+        raise ValueError('new immutable revision identity/store invariant failed')
+    ViewpointRevisionRecord.model_validate(new)
+    wrong=deepcopy(new); wrong['revision_number']=2
+    try: ViewpointRevisionRecord.model_validate(wrong)
+    except ValidationError as exc:
+        if 'revision_number must equal store revision' not in str(exc): raise
+    else: raise ValueError('invalid store counter was not rejected')
+    model_path=Path(__file__).parents[1]/'api/canonical_repository/knowledge_models.py'
+    writer_path=model_path.with_name('viewpoint_batch_changeset.py')
+    excerpt='\n'.join(writer_path.read_text().splitlines()[423:436])
+    if 'revision_number=1' not in excerpt or 'supersedes_revision_id' not in excerpt:
+        raise ValueError('mechanical source authority drift')
+    return {'schema_version':'wang_immutable_revision_storage_proof_v1',
+        'rule':'Each new ViewpointRevision is a new immutable stored object: revision=1 and revision_number=1. Semantic succession uses supersedes_revision_id, not an incrementing store counter.',
+        'new_revision_validated':True,'counter_2_rejected':True,'supersedes_chain_validated':True,
+        'model_file_sha256':file_sha256(model_path),'model_schema_sha256':sha256_json(ViewpointRevisionRecord.model_json_schema()),
+        'writer_file_sha256':file_sha256(writer_path),'writer_excerpt':excerpt,
+        'review_boundary':'Mechanical storage evidence only. Independently review all unchanged semantic postimages and full originals; no approval or verdict is overridden.'}
 
 def package_for(states, packet, reviews, root):
     from backend.pipeline.viewpoint_audit_link_repair import package_for as link_package

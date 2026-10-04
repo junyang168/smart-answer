@@ -61,3 +61,25 @@ def test_new_revision_preserves_old_identity_and_exact_semantic_postimage(tmp_pa
         assert {k:v for k,v in link.items() if k!='decision_id'}=={k:v for k,v in target['after_link'].items() if k!='decision_id'}
         assert decision['claim_link_decisions'][0]['link_type']==link['link_type']
         assert decision['approval_basis']=='dual_model_consensus'
+
+def storage_case():
+    from backend.api.canonical_repository.knowledge_models import ViewpointRevisionRecord
+    _,p=case()
+    new=ViewpointRevisionRecord(viewpoint_revision_id='NEW',viewpoint_id=VIEWPOINT,
+        revision=1,revision_number=1,core_proposition='Synthetic example.',
+        proposition_signature=p['proposition_signature'],scope={},provenance={'basis_identity_decision_ids':['SYNTHETIC'], 'review_artifact_sha256':'a'*64},
+        supersedes_revision_id=OLD_REVISION).model_dump(mode='json')
+    return {'context':{'before_revision':{'viewpoint_revision_id':OLD_REVISION,'viewpoint_id':VIEWPOINT}},'after_revision':new}
+
+def test_storage_counter_one_is_executable_not_waiver():
+    from backend.pipeline.viewpoint_g033_identity_repair import storage_proof
+    p=storage_case(); before=deepcopy(p); proof=storage_proof(p)
+    assert p==before
+    assert proof['new_revision_validated'] and proof['counter_2_rejected'] and proof['supersedes_chain_validated']
+    assert len(proof['model_file_sha256'])==64 and len(proof['writer_file_sha256'])==64
+
+@pytest.mark.parametrize('field,value',[('revision',2),('revision_number',2),('viewpoint_revision_id',OLD_REVISION),('supersedes_revision_id','foreign'),('viewpoint_id','foreign')])
+def test_storage_proof_refuses_drift(field,value):
+    from backend.pipeline.viewpoint_g033_identity_repair import storage_proof
+    p=storage_case(); p['after_revision'][field]=value
+    with pytest.raises(ValueError): storage_proof(p)
