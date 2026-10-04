@@ -20,6 +20,8 @@ from backend.pipeline.viewpoint_cvp_campaign_runner import (
     PROJECT_ROOT, PYTHON, binding, read, validate_audit, validate_schedule,
 )
 from backend.pipeline.viewpoint_resolution_runtime import write_immutable
+from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
+from backend.pipeline.codex_subscription_preflight import verify_runtime
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.pipeline.viewpoint_scoped_audit_disposition import scope_audit_disposition
 from backend.api.canonical_repository.viewpoint_production_safety import accepted_grouping_audit_scope
@@ -355,6 +357,23 @@ def resume_after_repair(root, attempt, recovery_root, executable, *, additional_
     if binding(backup["path"]) != backup:
         raise ValueError("fresh backup SHA drift")
     run_logged(["pg_restore", "--list", backup["path"]], attempt, "backup-restore-list")
+    # Verify the SAME explicit binary and selected model before backgrounding.
+    # Login and model catalogs alone are not an inference-access test. This
+    # diagnostic is cached for this binary/login identity, not repeated on
+    # every group/restart. It is separate from the zero-model corpus dry-run.
+    client = CodexSubscriptionClient(model="gpt-6.1-sol", reasoning_effort="high",
+                                     executable=str(executable), environment=env)
+    try:
+        runtime = verify_runtime(client, recovery_root / "codex-runtime-proofs")
+    except Exception as exc:
+        write_immutable(attempt / "codex-runtime-failure.json", {
+            "executable": str(executable), "model": client.model,
+            "error": f"{type(exc).__name__}: {exc}",
+            "raw_response": client.last_raw_response, "production_started": False})
+        raise
+    write_immutable(attempt / "codex-runtime-preflight.json", runtime)
+    executable = client.executable
+    env["CODEX_EXECUTABLE"] = executable
     if prior_model_batch is not None:
         from backend.pipeline.viewpoint_model_cache_handoff import prepare_handoff, verify_prefix
         from backend.api.canonical_repository.viewpoint_production_safety import build_batch_identity
@@ -404,6 +423,7 @@ def resume_after_repair(root, attempt, recovery_root, executable, *, additional_
                 "--codex-executable", executable], attempt, "attach-supervisor", env=env)
     receipt = {"status": "resumed", "campaign_root": str(output), "campaign_pid": pid,
                "progress": read(output / "progress.json"), "backup": backup,
+               "codex_runtime": runtime,
                "production_complete": False}
     write_immutable(attempt / "continuation-receipt.json", receipt)
     return receipt

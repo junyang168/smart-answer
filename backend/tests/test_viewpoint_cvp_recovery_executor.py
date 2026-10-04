@@ -248,6 +248,8 @@ def test_restart_requires_backup_dryrun_and_unique_real_process(tmp_path, monkey
             (output / "progress.json").write_text('{"status":"preflight_passed_no_model_calls"}')
             (output / "backup.json").write_text(json.dumps(m.binding(backup)))
     monkeypatch.setattr(m, "run_logged", run)
+    monkeypatch.setattr(m, "verify_runtime", lambda client, cache: {
+        "identity": {"model": client.model, "cli": {"path": client.executable}}, "new_model_calls": 0})
     tables = iter([{10: f"python -m backend.pipeline.viewpoint_cvp_campaign_runner --output-root {output}"}] if active else
                   [{}, {10: f"python -m backend.pipeline.viewpoint_cvp_campaign_runner --output-root {output}"}])
     monkeypatch.setattr(supervisor, "process_table", lambda: next(tables))
@@ -261,3 +263,35 @@ def test_restart_requires_backup_dryrun_and_unique_real_process(tmp_path, monkey
         assert [name for name, _ in calls] == ["campaign-preflight", "backup-restore-list", "start-campaign", "attach-supervisor"]
         assert "-Logfile" not in calls[2][1]  # screen 4.00.03 on this machine
         assert "logfile flush 1" in (attempt / "campaign.screenrc").read_text()
+        assert json.loads((attempt / "codex-runtime-preflight.json").read_text())["identity"]["model"] == "gpt-6.1-sol"
+
+
+def test_bad_runtime_stops_before_background_launch_and_retains_reason(tmp_path, monkeypatch):
+    root, attempt, recovery = [tmp_path / n for n in ('old', 'attempt', 'recovery')]
+    root.mkdir(); attempt.mkdir()
+    (root / 'progress.json').write_text('{"sequence":13,"group_key":"g"}')
+    monkeypatch.setattr(m, 'load_campaign', lambda *a: ({}, {}, {}, {}))
+    output = m.continuation_root(root, attempt)
+    def inputs(*a):
+        output.mkdir()
+        return ['python', '--output-root', output]
+    monkeypatch.setattr(m, 'continuation_inputs', inputs)
+    backup = tmp_path / 'backup.dump'
+    backup.write_bytes(b'backup')
+    calls = []
+    def run(argv, directory, name, **kw):
+        calls.append(name)
+        assert name not in {'start-campaign', 'attach-supervisor'}
+        if name == 'campaign-preflight':
+            (output / 'progress.json').write_text('{"status":"preflight_passed_no_model_calls"}')
+            (output / 'backup.json').write_text(json.dumps(m.binding(backup)))
+    monkeypatch.setattr(m, 'run_logged', run)
+    def reject(*a):
+        raise ValueError('stale executable; not an account entitlement claim')
+    monkeypatch.setattr(m, 'verify_runtime', reject)
+    with pytest.raises(ValueError, match='stale executable'):
+        m.resume_after_repair(root, attempt, recovery, 'old-codex')
+    assert calls == ['campaign-preflight', 'backup-restore-list']
+    failure = json.loads((attempt / 'codex-runtime-failure.json').read_text())
+    assert failure['production_started'] is False
+    assert not (attempt / 'continuation-receipt.json').exists()
