@@ -25,6 +25,12 @@ from backend.pipeline.viewpoint_resolution_runtime import read_artifact, write_i
 PROJECT = Path(__file__).resolve().parents[2]
 BASE = Path('/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/staging/cvp-production-357')
 POLICY = PROJECT/'backend/pipeline/policies/wang_audit_link_repair_v1.json'
+RETIRE_LINK = 'VCL-c585f66750fd00c8e99b'
+RETIRE_PROMPT = '''独立核查负责人明确授权的退役后像和处置记录：只撤销指定错误等价连接，保留Claim作为结构辨识观察背景，不建立supports或新观点。
+完整自身原文、Claim、旧目标、既有证据、相邻连接与依赖均提供。不能给Claim补结论；Claim/Evidence/来源/CVP正文、其他连接、依赖必须原样。
+after_link只允许revision+1及effective_state=retired，原身份判定仅作历史保留，不冒充当前有效成员。
+核查disposition的observation_only/no_registry_assertion是否适当，目标仍有独立有效等价成员且依赖不受错误连接退役影响。
+每条指定Claim一个verdict，全部符合才approved=true且problems=[]。不要评价教授神学对错。'''
 PROMPT = '''独立审核实际 before_link/after_link：只允许将误标的 equivalent 连接改成 supports。
 完整自身原文、原审计与GPT原文裁决、Claim、目标CVP、证据、相邻成员均提供。
 支持方向必须是该Claim作为目标观点的真实论据；不能仅因两者相关而批准。
@@ -63,7 +69,7 @@ def select_repairs(packet, report):
     return selected
 
 
-def prepare(campaign, store):
+def prepare(campaign, store, *, owner_retire=False):
     state = read_artifact(campaign/'progress.json')
     group = campaign/f"g{state['sequence']:03d}"
     audit = group/'independent-audit/audit.json'
@@ -90,6 +96,25 @@ def prepare(campaign, store):
             and (cv in json.dumps(p, ensure_ascii=False) or old['viewpoint_claim_link_id'] in json.dumps(p, ensure_ascii=False))]
     policy = read_artifact(POLICY)
     if policy['policy_id'] != 'wang-audit-link-repair-v1': raise ValueError('unknown repair policy')
+    if owner_retire:
+        if len(targets)!=1 or targets[0]['before_link']['viewpoint_claim_link_id']!=RETIRE_LINK:
+            raise ValueError('owner retirement authorizes only exact g015 connection')
+        item=targets[0]
+        if item['dependent_records']:
+            raise ValueError('retirement with dependent structures needs additional scope')
+        if not any(p['viewpoint_claim_link_id']!=RETIRE_LINK and p['link_type'] in {'equivalent_full','equivalent_component'} for p in item['adjacent_links']):
+            raise ValueError('cannot orphan viewpoint membership')
+        if any(p['claim_id']==item['claim']['claim_id'] and p['viewpoint_claim_link_id']!=RETIRE_LINK for p in item['adjacent_links']):
+            raise ValueError('Claim has another active connection; disposition ambiguous')
+        after=deepcopy(item['before_link'])
+        after.update(revision=after['revision']+1,effective_state='retired')
+        item['after_link']=after
+        item['disposition']={'claim_id':item['claim']['claim_id'], 'claim_revision':item['claim']['revision'],
+            'processing_status':'resolved','resolution_kind':'no_registry_assertion','resolution_reason_code':'observation_only',
+            'reason':'Retained structural-identification observation; neither equivalent nor argument for the target section-start conclusion.',
+            'retired_connection_id':RETIRE_LINK, 'claim_preserved':True}
+        policy={'policy_id':'wang-g015-owner-link-retirement-v1','authorized_by':'owner','authorization_quote':'好',
+            'allowed_link_id':RETIRE_LINK,'claim_source_viewpoint_text_writes':0,'automatic_future_retirement':False}
     return states, {'schema_version':'wang_audit_link_repair_packet_v1', 'targets':targets,
                    'adjudication_packet_sha256':packet['artifact_sha256'], 'adjudication_handoff':report,
                    'policy':policy, 'claim_source_viewpoint_text_writes':0}
@@ -97,6 +122,14 @@ def prepare(campaign, store):
 
 def package_for(states, packet, reviews, root):
     digest = sha256_json({'packet':packet, 'reviews':reviews})
+    if packet.get('policy',{}).get('policy_id')=='wang-g015-owner-link-retirement-v1':
+        if len(packet['targets'])!=1 or packet['targets'][0]['before_link']['viewpoint_claim_link_id']!=RETIRE_LINK:
+            raise ValueError('retirement package outside owner scope')
+        old=packet['targets'][0]['before_link']; new=packet['targets'][0]['after_link']
+        expected=deepcopy(old); expected.update(revision=old['revision']+1,effective_state='retired')
+        if new!=expected: raise ValueError('retirement changed fields outside revision/state')
+        return {'package_id':'AUDIT-LINK-RETIRE-'+digest[:20],
+                'viewpoint_claim_links':[deepcopy(i['after_link']) for i in packet['targets']]}
     package = {'package_id':'AUDIT-LINK-REPAIR-'+digest[:20], 'viewpoint_claim_links':[],
                'viewpoint_identity_candidates':[], 'viewpoint_identity_decisions':[]}
     for item in packet['targets']:
@@ -122,18 +155,18 @@ def package_for(states, packet, reviews, root):
     return package
 
 
-def run(campaign, root):
+def run(campaign, root, *, owner_retire=False):
     store = PostgresKnowledgeStore()
     global_lock={'global_lock_path':str(BASE/'registry-cvp.lock')}
     with exclusive_cvp_run_lock(global_lock):
-        states, packet=prepare(campaign, store)
+        states, packet=prepare(campaign, store, owner_retire=owner_retire)
         collections=sorted({c for c,_ in states}); before=fingerprint(states,collections)
         write_immutable(root/'packet.json',packet); write_immutable(root/'before.json',{'collections':collections,'pre_fingerprint_sha256':before})
     write_derived(root/'progress.json',{'status':'reviewing','master_data_mutations':0})
     reviews={}
     ids={i['claim']['claim_id'] for i in packet['targets']}
     for label,provider,model in [('gpt','codex','gpt-6.1-sol'),('opus','claude','claude-opus-5-5')]:
-        adapter=StructuredJsonReviewerAdapter(client=subscription_client(provider,model,'high'),prompt=PROMPT,response_model=Review,schema_name='audit_link_repair_review_v1',compact_payload=True)
+        adapter=StructuredJsonReviewerAdapter(client=subscription_client(provider,model,'high'),prompt=RETIRE_PROMPT if owner_retire else PROMPT,response_model=Review,schema_name='audit_link_repair_review_v1',compact_payload=True)
         adapter.max_request_bytes=500000
         raw,_,_=review_call(adapter,packet,root,label)
         result=Review.model_validate(raw)
@@ -144,11 +177,15 @@ def run(campaign, root):
             raise ValueError('bounded supports repair not approved; no semantic retry')
     write_immutable(root/'review-report.json',{'packet_sha256':sha256_json(packet),'reviews':reviews,'approved':True,'human_content_approval':False})
     with exclusive_cvp_run_lock(global_lock):
-        live,current=prepare(campaign,store)
+        live,current=prepare(campaign,store,owner_retire=owner_retire)
         if current!=packet or fingerprint(live,collections)!=before: raise ValueError('pre-write Registry/source drift')
         package=package_for(live,packet,reviews,root)
         plan=store.plan_package(package,source_kind='wang_source_adjudicated_link_repair')
-        if len(plan.operations)!=3*len(ids) or any(o.collection not in package or (o.collection=='viewpoint_claim_links')!=(o.operation=='update') for o in plan.operations): raise ValueError('unexpected repair writes')
+        if len(plan.operations)!=(1 if owner_retire else 3)*len(ids) or any(o.collection not in package or (o.collection=='viewpoint_claim_links')!=(o.operation=='update') for o in plan.operations): raise ValueError('unexpected repair writes')
+        if owner_retire:
+            write_immutable(root/'claim-disposition.json',{'schema_version':'wang_owner_reviewed_claim_disposition_v1',
+                'rows':[i['disposition'] for i in packet['targets']], 'reviews_sha256':sha256_json(reviews),
+                'packet_sha256':sha256_json(packet),'historical_scope_run_preserved':True})
         write_immutable(root/'effective-package.json',package); write_immutable(root/'dry-run-plan.json',json.loads(json.dumps(plan.as_dict())))
     write_derived(root/'progress.json',{'status':'backup_before_apply','master_data_mutations':0})
     out=subprocess.run(['scripts/backup-registry.sh','before-audit-link-'+sha256_json(str(root))[:24]],cwd=PROJECT,check=True,capture_output=True,text=True)
@@ -160,7 +197,7 @@ def run(campaign, root):
     from backend.pipeline.viewpoint_cvp_recovery_executor import binding, resume_after_repair, load_campaign, run_logged, PYTHON
     write_immutable(root/'backup.json',binding(backup))
     with exclusive_cvp_run_lock(global_lock):
-        live,current=prepare(campaign,store)
+        live,current=prepare(campaign,store,owner_retire=owner_retire)
         if current!=packet or fingerprint(live,collections)!=before: raise ValueError('pre-apply drift')
         replay=store.plan_package(package,source_kind='wang_source_adjudicated_link_repair')
         if replay.as_dict()!=plan.as_dict(): raise ValueError('dry-run/apply drift')
@@ -203,9 +240,11 @@ def run(campaign, root):
         resolution_path = continuation/'gpt-source-final-resolution.json'
         create_gpt_resolution(audit_path, adjudication_root, resolution_path, store)
     executable=Path(os.environ['CODEX_EXECUTABLE'])
+    proof_names=['packet.json','review-report.json','effective-package.json','dry-run-plan.json','apply-receipt.json','verified-result.json']
+    if owner_retire: proof_names.append('claim-disposition.json')
     result=resume_after_repair(campaign,continuation,BASE/'immediate-recovery-20261002-v1',executable,
         saved_audit_path=audit_path, owner_resolution_path=resolution_path,
-        additional_proof_bindings=[binding(root/name) for name in ('packet.json','review-report.json','effective-package.json','dry-run-plan.json','apply-receipt.json','verified-result.json')])
+        additional_proof_bindings=[binding(root/name) for name in proof_names])
     write_derived(root/'progress.json',{'status':result['status'],'continuation':result})
     return result
 
@@ -228,7 +267,7 @@ def launch_repair(campaign, packet, report):
 
 
 def main():
-    ap=argparse.ArgumentParser(description=__doc__); ap.add_argument('--campaign-root',type=Path,required=True); ap.add_argument('--output-root',type=Path,required=True); ap.add_argument('--wait-parent-pid',type=int); args=ap.parse_args()
+    ap=argparse.ArgumentParser(description=__doc__); ap.add_argument('--campaign-root',type=Path,required=True); ap.add_argument('--output-root',type=Path,required=True); ap.add_argument('--wait-parent-pid',type=int); ap.add_argument('--owner-retire-g015-link',action='store_true'); args=ap.parse_args()
     campaign=args.campaign_root.resolve(); root=args.output_root.resolve()
     if PROJECT.name!='wkp-357-worktree-per-session' or campaign.parent!=BASE or root.parent!=BASE: raise ValueError('only #357 independent roots allowed')
     load_dotenv(PROJECT/'.env')
@@ -244,7 +283,7 @@ def main():
         if any(p not in current_job_process_ids() for p in remaining_producers(process_table(),BASE)): raise ValueError('another producer active')
         if subprocess.check_output(['git','status','--porcelain'],cwd=PROJECT,text=True).strip(): raise ValueError('committed clean code required')
         root.mkdir(exist_ok=False)
-        try: print(json.dumps(run(campaign,root)),flush=True)
+        try: print(json.dumps(run(campaign,root,owner_retire=args.owner_retire_g015_link)),flush=True)
         except Exception as exc:
             write_derived(root/'failure.json',{'error':str(exc),'applied':(root/'apply-receipt.json').exists(),'no_next_group_started':True})
             write_derived(root/'progress.json',{'status':'stopped','error':str(exc),'applied':(root/'apply-receipt.json').exists()}); raise
