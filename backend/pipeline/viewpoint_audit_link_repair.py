@@ -155,20 +155,55 @@ def package_for(states, packet, reviews, root):
     return package
 
 
-def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storage_review_from=None):
+def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storage_review_from=None,
+        human_review_from=None, human_handoff=None, human_decisions=()):
     store = PostgresKnowledgeStore()
     global_lock={'global_lock_path':str(BASE/'registry-cvp.lock')}
     if owner_retire and owner_identity_g033:
         raise ValueError('owner scopes cannot be combined')
     if storage_review_from and not owner_identity_g033: raise ValueError('storage correction requires exact g033 owner scope')
+    if any((human_review_from,human_handoff,human_decisions)) and not all((human_review_from,human_handoff,human_decisions)):
+        raise ValueError('human resume requires saved review root, exact handoff and decisions')
+    authority = None
+    if human_review_from:
+        if storage_review_from: raise ValueError('human resume cannot start another model correction')
+        from backend.pipeline.viewpoint_human_review import execution_authority
+        with exclusive_cvp_run_lock(global_lock):
+            old_root = human_review_from.resolve()
+            if old_root.parent != BASE or old_root == root or any((old_root/n).exists() for n in ('apply-intent.json','apply-receipt.json')):
+                raise ValueError('human resume requires an unapplied frozen review root')
+            old_packet = read_artifact(old_root/'packet.json')
+            old_before = read_artifact(old_root/'before.json')
+            from backend.pipeline.viewpoint_human_review import repair_handoff
+            saved_reviews = {label: read_artifact(old_root/f'raw-{label}.json')['response'] for label in ('gpt','opus')}
+            # Reconstruct the complete disputed population from the exact saved
+            # responses. A custom handoff cannot omit an inconvenient finding.
+            repair_handoff(old_root,old_packet,saved_reviews,output=human_handoff)
+            live = snapshot(store)
+            authority = execution_authority(human_handoff, human_decisions, packet=old_packet,
+                registry_fingerprint_sha256=fingerprint(live,old_before['collections']))
+            from backend.pipeline.viewpoint_human_review import validate_handoff
+            if Path(validate_handoff(human_handoff)['packet_path']).resolve() != old_root/'packet.json':
+                raise ValueError('human handoff belongs to another review root')
+            reservation = BASE/'human-review-consumptions'/f"{authority['handoff_sha256']}.json"
+            if reservation.exists(): raise ValueError('human postimage already reserved; inspect receipts, do not replay')
+            for name in ('raw-gpt.json','raw-opus.json'):
+                if not (old_root/name).is_file(): raise ValueError('saved independent review missing; no model fallback')
+            write_immutable(reservation,{'authority':authority,'output_root':str(root),'model_calls_allowed':0})
+            for name in ('raw-gpt.json','raw-opus.json','proposal-input.json','proposal-before.json',
+                         'raw-proposal.json','owner-authorization.json','request-preflight.json','mechanical-review-source.json'):
+                if (old_root/name).is_file(): write_immutable(root/name,read_artifact(old_root/name))
+            write_immutable(root/'human-execution-authority.json',authority)
     if owner_identity_g033:
         from backend.pipeline import viewpoint_g033_identity_repair as identity_repair
-        identity_repair.propose(campaign,root,store,storage_review_from=storage_review_from)
+        if not human_review_from:
+            identity_repair.propose(campaign,root,store,storage_review_from=storage_review_from)
     def prepare_current():
         return identity_repair.prepare(campaign,root,store) if owner_identity_g033 else prepare(campaign,store,owner_retire=owner_retire)
     with exclusive_cvp_run_lock(global_lock):
         states, packet=prepare_current()
         collections=sorted({c for c,_ in states}); before=fingerprint(states,collections)
+        if human_review_from and packet != old_packet: raise ValueError('human resume semantic postimage drift')
         write_immutable(root/'packet.json',packet); write_immutable(root/'before.json',{'collections':collections,'pre_fingerprint_sha256':before})
     write_derived(root/'progress.json',{'status':'reviewing','master_data_mutations':0})
     reviews={}
@@ -177,18 +212,29 @@ def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storag
         prompt=identity_repair.PROMPT if owner_identity_g033 else RETIRE_PROMPT if owner_retire else PROMPT
         adapter=StructuredJsonReviewerAdapter(client=subscription_client(provider,model,'high'),prompt=prompt,response_model=Review,schema_name='audit_link_repair_review_v1',compact_payload=True)
         adapter.max_request_bytes=500000
-        raw,_,_=review_call(adapter,packet,root,label)
+        raw,calls,_=review_call(adapter,packet,root,label)
+        if human_review_from and calls: raise ValueError('human resume must not call models')
         result=Review.model_validate(raw)
         if len(result.verdicts)!=len(ids) or {v.claim_id for v in result.verdicts}!=ids:
             raise ValueError('repair review population mismatch')
         reviews[label]=result.model_dump(mode='json')
         if any(not v.approved or v.problems for v in result.verdicts):
-            raise ValueError('owner identity repair not approved; no semantic retry' if owner_identity_g033 else 'bounded supports repair not approved; no semantic retry')
-    write_immutable(root/'review-report.json',{'packet_sha256':sha256_json(packet),'reviews':reviews,'approved':True,'human_content_approval':False})
+            if authority is None:
+                from backend.pipeline.viewpoint_human_review import repair_handoff
+                repair_handoff(root, packet, reviews)
+                raise ValueError('owner identity repair not approved; no semantic retry' if owner_identity_g033 else 'bounded supports repair not approved; no semantic retry')
+    write_immutable(root/'review-report.json',{'packet_sha256':sha256_json(packet),'reviews':reviews,
+        'approved':all(v['approved'] and not v['problems'] for r in reviews.values() for v in r['verdicts']),
+        'human_content_approval':authority is not None,'human_execution_authority':authority})
     with exclusive_cvp_run_lock(global_lock):
         live,current=prepare_current()
         if current!=packet or fingerprint(live,collections)!=before: raise ValueError('pre-write Registry/source drift')
+        if authority is not None:
+            from backend.pipeline.viewpoint_human_review import execution_authority, mark_human_package
+            if execution_authority(human_handoff,human_decisions,packet=packet,registry_fingerprint_sha256=before)!=authority:
+                raise ValueError('human execution permission drift')
         package=identity_repair.package_for(live,packet,reviews,root) if owner_identity_g033 else package_for(live,packet,reviews,root)
+        if authority is not None: package=mark_human_package(package,authority)
         plan=store.plan_package(package,source_kind='wang_source_adjudicated_link_repair')
         if owner_identity_g033:
             expected_ops={'viewpoint_revisions':('create',1),'canonical_viewpoints':('update',1),
@@ -214,6 +260,8 @@ def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storag
     with exclusive_cvp_run_lock(global_lock):
         live,current=prepare_current()
         if current!=packet or fingerprint(live,collections)!=before: raise ValueError('pre-apply drift')
+        if authority is not None and execution_authority(human_handoff,human_decisions,packet=packet,registry_fingerprint_sha256=before)!=authority:
+            raise ValueError('pre-apply human permission drift')
         replay=store.plan_package(package,source_kind='wang_source_adjudicated_link_repair')
         if replay.as_dict()!=plan.as_dict(): raise ValueError('dry-run/apply drift')
         if binding(backup)!=read_artifact(root/'backup.json'): raise ValueError('backup drift')
@@ -259,6 +307,7 @@ def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storag
     if owner_retire: proof_names.append('claim-disposition.json')
     if owner_identity_g033: proof_names.extend(['owner-authorization.json','proposal-input.json','proposal-before.json','raw-proposal.json'])
     if storage_review_from: proof_names.append('mechanical-review-source.json')
+    if authority is not None: proof_names.append('human-execution-authority.json')
     result=resume_after_repair(campaign,continuation,BASE/'immediate-recovery-20261002-v1',executable,
         saved_audit_path=audit_path, owner_resolution_path=resolution_path,
         additional_proof_bindings=[binding(root/name) for name in proof_names])
@@ -286,6 +335,9 @@ def launch_repair(campaign, packet, report):
 def main():
     ap=argparse.ArgumentParser(description=__doc__); ap.add_argument('--campaign-root',type=Path,required=True); ap.add_argument('--output-root',type=Path,required=True); ap.add_argument('--wait-parent-pid',type=int); ap.add_argument('--owner-retire-g015-link',action='store_true'); ap.add_argument('--owner-identity-g033',action='store_true')
     ap.add_argument('--owner-g033-storage-review-from',type=Path)
+    ap.add_argument('--human-review-from',type=Path)
+    ap.add_argument('--human-handoff',type=Path)
+    ap.add_argument('--human-decision',type=Path,action='append',default=[])
     args=ap.parse_args()
     campaign=args.campaign_root.resolve(); root=args.output_root.resolve()
     if PROJECT.name!='wkp-357-worktree-per-session' or campaign.parent!=BASE or root.parent!=BASE: raise ValueError('only #357 independent roots allowed')
@@ -302,7 +354,8 @@ def main():
         if any(p not in current_job_process_ids() for p in remaining_producers(process_table(),BASE)): raise ValueError('another producer active')
         if subprocess.check_output(['git','status','--porcelain'],cwd=PROJECT,text=True).strip(): raise ValueError('committed clean code required')
         root.mkdir(exist_ok=False)
-        try: print(json.dumps(run(campaign,root,owner_retire=args.owner_retire_g015_link,owner_identity_g033=args.owner_identity_g033,storage_review_from=args.owner_g033_storage_review_from)),flush=True)
+        try: print(json.dumps(run(campaign,root,owner_retire=args.owner_retire_g015_link,owner_identity_g033=args.owner_identity_g033,storage_review_from=args.owner_g033_storage_review_from,
+            human_review_from=args.human_review_from,human_handoff=args.human_handoff,human_decisions=args.human_decision)),flush=True)
         except Exception as exc:
             write_derived(root/'failure.json',{'error':str(exc),'applied':(root/'apply-receipt.json').exists(),'no_next_group_started':True})
             write_derived(root/'progress.json',{'status':'stopped','error':str(exc),'applied':(root/'apply-receipt.json').exists()}); raise

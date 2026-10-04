@@ -1668,6 +1668,17 @@ def _execute_locked(
             }
             stop["artifact_sha256"] = sha256_json(stop)
             _write_immutable(batch_dir / "scope-stop.json", stop)
+            # D4's terminal human handoff preserves the failed reviews. It does
+            # not create a ChangeSet, retry a model, or turn findings into pass.
+            from backend.pipeline.viewpoint_human_review import create_handoff
+            create_handoff(
+                batch_dir / "human-review-handoff.json", stage="production_review",
+                packet_path=batch_dir / "batch-packet.json",
+                review_paths=[p for p in (batch_dir / "raw-review.json", batch_dir / "raw-final-review.json") if p.is_file()],
+                items=[{"item_id": "effective-proposal", "findings": report.get("escalations") or [stop["reason"]]}],
+                context_paths=[batch_dir / "scope-stop.json", batch_dir / "proposal.json",
+                               *[p for p in (batch_dir / "reconsideration.json", batch_dir / "final-review.json") if p.is_file()]],
+            )
             print(json.dumps(stop, ensure_ascii=False, indent=2))
             return 1
 

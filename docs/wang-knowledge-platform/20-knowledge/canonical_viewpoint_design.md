@@ -133,6 +133,9 @@ flowchart TD
     C -->|"仍不一致"| H["转人工"]
     FR -->|"全部通过"| W
     FR -->|"仍有问题"| H
+    H --> HR["人工裁决绑定精确待写状态<br/>不改写模型结论"]
+    HR -->|"明确接受完整状态，程序验证通过"| W
+    HR -->|"只有解释意见／暂缓／需新提议"| HS["保留裁决，停止写入"]
     W --> RB["回读校验"]
     RB --> B
 ```
@@ -173,6 +176,10 @@ flowchart TD
 2. **整批失败，不放行一半。** 一条验证不过，整批不写。宁可重跑，不可写进半套。
 3. **最多一轮改正。** 不设第二轮。CanonicalViewpoint 或 ArgumentRoute 若发生改正，同一独立 reviewer 角色必须再审核一次实际可能写库的 B；这次只准通过或转人工，不再产生 C。
 4. **写完要回读。** 从库里读回来逐条比对，不一致就是失败。
+
+**人工出口不是另一轮模型审核。** `viewpoint_human_review.py` 将终局生产分歧或单次受控修订的拒绝保存为不可变 handoff，绑定待写材料及原始审核；受控修订另绑定物理来源与写前 Registry 指纹，普通批次保留原有 freeze 的来源准入门槛。原模型结论原样保留。人工回答分为解释意见（`interpretation`）、接受精确待写状态（`accept_exact_postimage`）、授权新修订（`authorize_revision`）和暂缓（`defer`）。解释意见、授权新修订及暂缓均不批准现有状态；授权新修订也不批准尚未生成的新内容。解释裁决与执行许可分开保存，不能从一句「相容」推导出退役或改关系的权限。
+
+所有异议都被明确接受且精确材料与当前 Registry 指纹仍匹配时，受控修订执行器可消费 `human_exception_review` 许可，复用已绑定模型回答，不再调用模型重审同一裁决。新记录使用 `human_approved`／`human_editor`，详细决定放在现有 provenance 的 `review_artifact_sha256` 所指 artifact，不增加 Registry schema 字段，也不伪造 `dual_model_consensus`。写入前仍通过原有结构、依赖、备份和 dry-run 门槛；全局锁下跨 root 一次消费，已有 apply-intent／receipt 不重放。写后严格回读及独立审计完成之前，不能推进下一组。普通批次的 handoff 只提供裁决入口，不自行绕过 batch writer 的审核门槛。
 
 ## 4. 怎样判断两条主张是同一个观点
 
@@ -308,7 +315,7 @@ flowchart TD
 9. 结论相同不足以证明两条路线是同一条。
 10. 观点修订里不得内嵌成员、路线、关系或覆盖数组——它们是各自独立的记录。
 11. 同样的输入必须编译出同样的结果：语义修订、覆盖范围与编译器版本相同时，产出的内容哈希必须一致。
-12. correction 后写库的 effective proposal SHA 必须与终局复核绑定的 proposal SHA 相同；初审 A 的批准不得为 B 背书，终局复核任一维度非 `pass` 时不得产生 ChangeSet。
+12. correction 后写库的 effective proposal SHA 必须与终局复核绑定的 proposal SHA 相同；初审 A 的批准不得为 B 背书，终局复核任一维度非 `pass` 时不得按模型共识产生 ChangeSet。人工例外只按第 3 节的精确状态许可另行批准，不改写原终局结果，不豁免机械门槛。
 13. 每条被路线结论引用的观点，其 scope 内可 attesting 成员来源必须 exact-once 落在 `attestation` 或经独立 reviewer 确认的无路线 disposition；缺席与重复都失败。
 14. ArgumentRoute correction 后写库的 effective proposal SHA 必须与终局复核绑定的 proposal SHA 相同；终局复核有任一非 `pass`，该 effective proposal 不得产生 ChangeSet。
 15. source eligibility attestation 若依据 `withdrawn` 或 `auto_applied` 裁定，row 与顶层 artifact hash 必须覆盖 exact adjudication SHA、状态以及适用时的 overrides SHA；不含这些字段的 legacy hash 只兼容无需仲裁的旧 `pass` 行。
@@ -347,5 +354,5 @@ flowchart TD
 > **读者**:Solution architect、Developer。同工不需要读本文；同工要知道的在 [Solution Architecture](../00-overview/solution_architecture.md)。
 > **类型**:规范
 > **状态**:当前。取代 `canonical_viewpoint_design.md`。
-> **与代码对齐**:未核对。第 1、7 节的数字仍取自 2026-08-25 的 PostgreSQL 快照；partition 实施以 #395 的验证记录为准。
+> **与代码对齐**:第 3 节人工交接与受控修订续跑于 2026-10-04 核对到 `viewpoint_human_review.py`、`viewpoint_audit_link_repair.py`、`viewpoint_batch_resolution_runner.py` 及对应回归测试；其余未核对。第 1、7 节的数字仍取自 2026-08-25 的 PostgreSQL 快照；partition 实施以 #395 的验证记录为准。
 > **权威范围**:观点、论证路线、观点关系的语义、身份判定与消费边界。
