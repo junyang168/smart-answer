@@ -39,3 +39,19 @@ def test_drift_and_scope_refused(bad):
 def test_review_rejects_extra_write_instructions():
     with pytest.raises(ValueError):
         Review.model_validate({'verdicts':[],'apply':True})
+
+@pytest.mark.parametrize('receipt',['raw-proposal.json','raw-opus.json','review-packet.json','apply-intent.json','apply-receipt.json'])
+def test_runtime_resume_never_replays_inference_or_write(tmp_path,receipt):
+    import json
+    from backend.pipeline.viewpoint_g033_relation_review import validate_pre_model_resume
+    (tmp_path/'failure.json').write_text(json.dumps({'error':'Codex executable unavailable: old','registry_writes':0}))
+    (tmp_path/receipt).write_text('{}')
+    with pytest.raises(ValueError,match='receipts forbid'):
+        validate_pre_model_resume(tmp_path,tmp_path/'handoff.json',{})
+
+def test_content_failure_cannot_use_runtime_resume(tmp_path):
+    import json
+    from backend.pipeline.viewpoint_g033_relation_review import validate_pre_model_resume
+    (tmp_path/'failure.json').write_text(json.dumps({'error':'content disagreement','registry_writes':0}))
+    with pytest.raises(ValueError,match='only proven'):
+        validate_pre_model_resume(tmp_path,tmp_path/'handoff.json',{})

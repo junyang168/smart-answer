@@ -6,6 +6,7 @@ It cannot accept the old rejected postimage or invent an intermediate viewpoint.
 from copy import deepcopy
 import argparse
 import fcntl
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -86,7 +87,16 @@ def adapter(provider, model, prompt, response, schema):
     result.max_request_bytes = 500000
     return result
 
-def run(root, handoff_path):
+def validate_pre_model_resume(old_root, handoff_path, packet):
+    failure=read_artifact(old_root/'failure.json')
+    if not failure['error'].startswith('Codex executable unavailable: ') or failure['registry_writes'] != 0:
+        raise ValueError('only proven missing executable before inference may resume')
+    if any((old_root/name).exists() for name in ('raw-proposal.json','raw-opus.json','review-packet.json','apply-intent.json','apply-receipt.json')):
+        raise ValueError('saved model/write receipts forbid pre-model resume')
+    if read_artifact(old_root/'proposal-input.json') != packet or packet['old_handoff_binding'] != binding(handoff_path):
+        raise ValueError('pre-model continuation semantic input drift')
+
+def run(root, handoff_path, *, resume_pre_model_from=None):
     from backend.pipeline.viewpoint_audit_link_repair import BASE
     from backend.pipeline.viewpoint_g033_identity_repair import context
     from backend.pipeline.viewpoint_cvp_recovery_supervisor import remaining_producers, process_table, current_job_process_ids
@@ -105,8 +115,11 @@ def run(root, handoff_path):
             if fingerprint(states, before['collections']) != before['pre_fingerprint_sha256'] or source_context != old['context']:
                 raise ValueError('old handoff live/source drift')
             reservation = Path(handoff['packet_path']).parent/'owner-relation-reconsideration-start.json'
-            if reservation.exists():
+            if reservation.exists() and resume_pre_model_from is None:
                 raise ValueError('this authorized relation reconsideration was already reserved; inspect receipts, no replay')
+            prior=read_artifact(reservation) if resume_pre_model_from else None
+            if prior and (Path(prior['output_root']) != resume_pre_model_from or resume_pre_model_from.parent != BASE):
+                raise ValueError('foreign pre-model continuation')
             root.mkdir(exist_ok=False)
             decision = record_decision(handoff_path, {
                 'handoff_sha256': handoff['artifact_sha256'], 'decided_by': 'junyang',
@@ -114,10 +127,10 @@ def run(root, handoff_path):
                 'item_ids': [r['item_id'] for r in handoff['items']], 'action': 'authorize_revision',
                 'rationale': '用户同意依原文重新提议并审核两条盐与使命综述关系；不批准旧extends后像，不直接退役，不新增中间观点，原文不足则不强行建立。',
                 'accepted_packet_sha256': None}, root/'owner-revision-authorization.json')
-            write_immutable(reservation, {'handoff_sha256': handoff['artifact_sha256'],
+            reservation_body = {'handoff_sha256': handoff['artifact_sha256'],
                 'decision_binding': binding(root/'owner-revision-authorization.json'),
                 'output_root': str(root), 'max_proposal_calls':1, 'max_independent_review_calls':1,
-                'registry_writes_allowed':0, 'old_failed_receipts_and_budgets_preserved':True})
+                'registry_writes_allowed':0, 'old_failed_receipts_and_budgets_preserved':True}
             packet = {'schema_version': 'wang_g033_relation_reconsideration_v1',
                 'authorization': decision, 'old_handoff_binding': binding(handoff_path),
                 'context': source_context, 'target_revision': old['after_revision'],
@@ -129,8 +142,19 @@ def run(root, handoff_path):
             packet['target_revision'] = deepcopy(packet['target_revision'])
             packet['target_revision'].update(review_status='candidate', approved_at=None, approved_by=None)
             packet['target_revision'].pop('provenance', None)
+            if resume_pre_model_from:
+                validate_pre_model_resume(resume_pre_model_from,handoff_path,packet)
+                write_immutable(resume_pre_model_from/'runtime-continuation.json',
+                    {'output_root':str(root),'original_reservation':binding(reservation),
+                     'same_packet_sha256':sha256_json(packet),'old_model_calls':0,'old_registry_writes':0,
+                     'budget_reset':False,'single_continuation_only':True})
+            else:
+                write_immutable(reservation, reservation_body)
             write_immutable(root/'proposal-input.json', packet)
         proposer = adapter('codex', 'gpt-6.1-sol', PROPOSE, Proposal, 'g033_relation_reconsideration_v1')
+        from backend.pipeline.codex_subscription_preflight import verify_runtime
+        runtime=verify_runtime(proposer._client,BASE/'immediate-recovery-20261002-v1/codex-runtime-proofs')
+        write_immutable(root/'codex-runtime-preflight.json',runtime)
         write_immutable(root/'request-preflight.json', {'request_bytes': proposer.request_bytes(packet), 'limit':500000, 'registry_writes':0})
         raw, calls, _ = review_call(proposer, packet, root, 'proposal')
         proposal = validate_choices(source_context, raw)
@@ -159,10 +183,13 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output-root',type=Path,required=True)
     parser.add_argument('--handoff',type=Path,required=True)
+    parser.add_argument('--codex-executable',type=Path,required=True)
+    parser.add_argument('--resume-pre-model-from',type=Path)
     args=parser.parse_args()
     load_dotenv(Path(__file__).resolve().parents[2]/'.env')
+    os.environ['CODEX_EXECUTABLE']=str(args.codex_executable.resolve(strict=True))
     root=args.output_root.resolve()
-    try: result=run(root,args.handoff.resolve())
+    try: result=run(root,args.handoff.resolve(),resume_pre_model_from=args.resume_pre_model_from.resolve() if args.resume_pre_model_from else None)
     except Exception as exc:
         if root.is_dir():
             write_immutable(root/'failure.json', {'error':str(exc),'registry_writes':0,'automatic_retry':False})
