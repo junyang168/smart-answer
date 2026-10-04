@@ -60,18 +60,24 @@ def validate_schedule(schedule, manifest):
     return groups
 
 
-def validate_audit(audit, claim_ids, viewpoint_ids):
+def validate_audit(audit, claim_ids, viewpoint_ids, *, owner_resolution_path=None):
     if (audit.get("meta") or {}).get("model") != "gemini-3.8-flash":
         raise ValueError("unexpected independent audit model")
+    resolved = set()
+    if owner_resolution_path is not None:
+        from backend.pipeline.viewpoint_audit_owner_resolution import validate_resolution
+        resolved = validate_resolution(audit, owner_resolution_path)
     for layer, expected, id_key in (("3", set(claim_ids), "claim_id"), ("4", set(viewpoint_ids), "viewpoint_id")):
         report = audit["layers"][layer]
         results = report["results"]
         if (not report.get("complete") or report.get("judged") != len(expected)
                 or len(results) != len(expected) or {r[id_key] for r in results} != expected
-                or any(report.get(k, 0) for k in ("disputed", "model_errors", "blocked", "no_source_text"))):
+                or any(report.get(k, 0) for k in ("model_errors", "blocked", "no_source_text"))
+                or (report.get('disputed', 0) != len(resolved) if layer == '4' else report.get('disputed', 0))):
             raise ValueError(f"independent layer {layer} failed or incomplete")
         allowed = {"supported"} if layer == "3" else {"same"}
-        if any(r.get("verdict") not in allowed for r in results):
+        if any(r.get("verdict") not in allowed and not
+               (layer == '4' and r.get('verdict') == 'disputed' and r[id_key] in resolved) for r in results):
             raise ValueError(f"independent layer {layer} has unresolved verdict")
 
 
@@ -236,7 +242,8 @@ def execute(args):
         audited = read(row["audit_path"])
         claim_audit = read(row.get("claim_audit_path", row["audit_path"]))
         validate_audit({"meta": audited["meta"], "layers": {"3": claim_audit["layers"]["3"], "4": audited["layers"]["4"]}},
-                       groups[row["group_key"]]["claim_ids"], row["viewpoint_ids"])
+                       groups[row["group_key"]]["claim_ids"], row["viewpoint_ids"],
+                       owner_resolution_path=row.get('owner_resolution_path'))
     done = []
     pending_count=sum(row['state']=='pending' for row in schedule['schedule'])
     for row in schedule["schedule"]:
@@ -248,7 +255,8 @@ def execute(args):
             proof = read(completion)
             if proof["group_key"] != row["group_key"] or any(binding(b["path"]) != b for b in proof["bindings"]):
                 raise ValueError("completed campaign group proof drift")
-            validate_audit(read(proof["audit_path"]), groups[row["group_key"]]["claim_ids"], proof["viewpoint_ids"])
+            validate_audit(read(proof["audit_path"]), groups[row["group_key"]]["claim_ids"], proof["viewpoint_ids"],
+                           owner_resolution_path=proof.get('owner_resolution_path'))
             done.append(row["group_key"])
             continue
         state = {"status": "qualifying", "group_key": row["group_key"], "sequence": row["sequence"], "completed_new_groups": len(done), "remaining_groups": pending_count-len(done)}

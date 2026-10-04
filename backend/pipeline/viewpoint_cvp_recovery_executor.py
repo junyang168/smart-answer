@@ -211,7 +211,7 @@ def load_campaign(root):
     return cfg, schedule, manifest, groups
 
 
-def verify_group_audit(root, cfg, schedule, manifest, groups, audit_path, output):
+def verify_group_audit(root, cfg, schedule, manifest, groups, audit_path, output, *, owner_resolution_path=None):
     state = read(root / "progress.json")
     group_key = state["group_key"]
     group_root = root / f"g{state['sequence']:03d}"
@@ -229,7 +229,7 @@ def verify_group_audit(root, cfg, schedule, manifest, groups, audit_path, output
     if read(rb).get("readback_status") != "verified":
         raise ValueError("missing verified readback")
     audit = read(audit_path)
-    validate_audit(audit, groups[group_key]["claim_ids"], targets)
+    validate_audit(audit, groups[group_key]["claim_ids"], targets, owner_resolution_path=owner_resolution_path)
     disposition = scope_audit_disposition(
         audit={"meta": audit["meta"], "layers": {k: audit["layers"][k] for k in ("1", "2")}},
         manifest=accepted_grouping_audit_scope(manifest, "group:" + group_key),
@@ -240,6 +240,10 @@ def verify_group_audit(root, cfg, schedule, manifest, groups, audit_path, output
     proof = {"group_key": group_key, "viewpoint_ids": targets, "audit_path": str(audit_path),
              "bindings": [binding(audit_path), binding(plans[0]), binding(scope_run), binding(rb)],
              "argument_routes_completed": False}
+    if owner_resolution_path is not None:
+        resolution = read(owner_resolution_path)
+        proof['owner_resolution_path'] = str(owner_resolution_path)
+        proof['bindings'] += [binding(owner_resolution_path), *resolution['bindings']]
     write_immutable(output / "completion.json", proof)
     return proof
 
@@ -265,7 +269,8 @@ def continuation_inputs(root, output, extra_completion=None, *, additional_sourc
         audited = read(seed["audit_path"])
         ca = read(seed.get("claim_audit_path", seed["audit_path"]))
         validate_audit({"meta": audited["meta"], "layers": {"3": ca["layers"]["3"], "4": audited["layers"]["4"]}},
-                       groups[seed["group_key"]]["claim_ids"], seed["viewpoint_ids"])
+                       groups[seed["group_key"]]["claim_ids"], seed["viewpoint_ids"],
+                       owner_resolution_path=seed.get('owner_resolution_path'))
     derived = copy.deepcopy(schedule)
     for row in derived["schedule"]:
         row["state"] = "already_complete" if row["group_key"] in keys else "pending"
@@ -296,7 +301,7 @@ def continuation_root(root, attempt):
     return root.parent / (root.name + '-recovery-' + sha256_json({'attempt':str(attempt.resolve())})[:12])
 
 
-def resume_after_repair(root, attempt, recovery_root, executable, *, additional_proof_bindings=(), additional_source_repair_paths=(), saved_audit_path=None, prior_model_batch=None, reuse_correction=False):
+def resume_after_repair(root, attempt, recovery_root, executable, *, additional_proof_bindings=(), additional_source_repair_paths=(), saved_audit_path=None, prior_model_batch=None, reuse_correction=False, owner_resolution_path=None):
     cfg, schedule, manifest, groups = load_campaign(root)
     state = read(root / "progress.json")
     group_root = root / f"g{state['sequence']:03d}"
@@ -322,7 +327,8 @@ def resume_after_repair(root, attempt, recovery_root, executable, *, additional_
             # Caller first verifies its applied target/full-registry readback.
             # Reuse a saved real audit, never fabricate a fresh model pass.
             write_immutable(attempt / 'saved-audit-binding.json', binding(saved_audit_path))
-        extra = verify_group_audit(root, cfg, schedule, manifest, groups, saved_audit_path, attempt / "verified-group")
+        verify_options = {'owner_resolution_path': owner_resolution_path} if owner_resolution_path is not None else {}
+        extra = verify_group_audit(root, cfg, schedule, manifest, groups, saved_audit_path, attempt / "verified-group", **verify_options)
         if additional_proof_bindings:
             for b in additional_proof_bindings:
                 verify_binding(b)
