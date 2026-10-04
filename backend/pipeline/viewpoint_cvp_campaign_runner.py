@@ -63,21 +63,25 @@ def validate_schedule(schedule, manifest):
 def validate_audit(audit, claim_ids, viewpoint_ids, *, owner_resolution_path=None):
     if (audit.get("meta") or {}).get("model") != "gemini-3.8-flash":
         raise ValueError("unexpected independent audit model")
-    resolved = set()
+    resolved_by_layer = {'3': set(), '4': set()}
     if owner_resolution_path is not None:
-        from backend.pipeline.viewpoint_audit_owner_resolution import validate_resolution
-        resolved = validate_resolution(audit, owner_resolution_path)
+        from backend.pipeline.viewpoint_audit_owner_resolution import validate_resolution, validate_gpt_resolution, GPT_SCHEMA
+        if read(owner_resolution_path).get('schema_version') == GPT_SCHEMA:
+            resolved_by_layer = validate_gpt_resolution(audit, owner_resolution_path)
+        else:
+            resolved_by_layer['4'] = validate_resolution(audit, owner_resolution_path)
     for layer, expected, id_key in (("3", set(claim_ids), "claim_id"), ("4", set(viewpoint_ids), "viewpoint_id")):
         report = audit["layers"][layer]
+        resolved = resolved_by_layer[layer]
         results = report["results"]
         if (not report.get("complete") or report.get("judged") != len(expected)
                 or len(results) != len(expected) or {r[id_key] for r in results} != expected
                 or any(report.get(k, 0) for k in ("model_errors", "blocked", "no_source_text"))
-                or (report.get('disputed', 0) != len(resolved) if layer == '4' else report.get('disputed', 0))):
+                or report.get('disputed', 0) != len(resolved)):
             raise ValueError(f"independent layer {layer} failed or incomplete")
         allowed = {"supported"} if layer == "3" else {"same"}
         if any(r.get("verdict") not in allowed and not
-               (layer == '4' and r.get('verdict') == 'disputed' and r[id_key] in resolved) for r in results):
+               (r.get('verdict') == 'disputed' and r[id_key] in resolved) for r in results):
             raise ValueError(f"independent layer {layer} has unresolved verdict")
 
 
@@ -293,32 +297,26 @@ def execute(args):
                 command([PYTHON, "scripts/audit-library.py", "--scope", "all", "--layers", "1,2,3,4", "--claim-ids", ",".join(groups[row["group_key"]]["claim_ids"]), "--viewpoint-ids", ",".join(target_ids), "--workers", "2", "--model", "gemini-3.8-flash", "--out", audit_root, "--no-status-file"])
             audit = read(audit_path)
             resolution_bindings = []
+            source_resolution_path = None
             from backend.pipeline.viewpoint_audit_source_adjudication import disputes, validate_population
             if disputes(audit):
                 validate_population(audit, groups[row['group_key']]['claim_ids'], target_ids)
                 command([PYTHON, '-m', 'backend.pipeline.viewpoint_audit_source_adjudication',
-                         '--audit', audit_path, '--output-root', root / 'audit-source-adjudication'])
-                handoff_path = root / 'audit-source-adjudication/handoff.json'
+                         '--audit', audit_path, '--output-root', root / 'audit-source-adjudication', '--final-gpt'])
+                handoff_path = root / 'audit-source-adjudication/gpt-final-handoff.json'
                 handoff = read(handoff_path)
                 if not handoff['actions'] or any(a['verdict'] != 'audit_objection_rejected' for a in handoff['actions']):
                     raise ValueError('original-source adjudication requires content repair or owner judgment; '
                                      'no next group started')
-                recheck_path = root / 'independent-source-recheck/audit.json'
-                if not recheck_path.exists():
-                    command([PYTHON, 'scripts/audit-library.py', '--scope', 'all', '--layers', '1,2,3,4',
-                             '--claim-ids', ','.join(groups[row['group_key']]['claim_ids']),
-                             '--viewpoint-ids', ','.join(target_ids), '--workers', '2',
-                             '--model', 'gemini-3.8-flash', '--reconsider-audit', audit_path,
-                             '--out', recheck_path.parent, '--no-status-file'])
-                audit_path = recheck_path
-                audit = read(audit_path)
-                resolution_bindings = [
-                    binding(root / 'independent-audit/audit.json'), binding(handoff_path),
-                    binding(root / 'audit-source-adjudication/packet.json'),
-                    binding(root / 'audit-source-adjudication/raw-gpt.json'),
-                    binding(root / 'audit-source-adjudication/raw-opus.json')]
+                from backend.pipeline.viewpoint_audit_owner_resolution import create_gpt_resolution
+                from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+                source_resolution_path = root / 'gpt-source-final-resolution.json'
+                resolution = create_gpt_resolution(audit_path, root / 'audit-source-adjudication',
+                                                   source_resolution_path, PostgresKnowledgeStore())
+                resolution_bindings = [binding(source_resolution_path), *resolution['bindings']]
                 _write_immutable(root / 'audit-resolution-bindings.json', {'bindings': resolution_bindings})
-            validate_audit(audit, groups[row["group_key"]]["claim_ids"], target_ids)
+            validate_audit(audit, groups[row["group_key"]]["claim_ids"], target_ids,
+                           owner_resolution_path=source_resolution_path)
             mechanical = {"meta": audit["meta"], "layers": {key: audit["layers"][key] for key in ("1", "2")}}
             disposition = scope_audit_disposition(audit=mechanical,
                 manifest=accepted_grouping_audit_scope(manifest, "group:" + row["group_key"]),
@@ -326,7 +324,12 @@ def execute(args):
             _write_immutable(root / "post-apply-audit-disposition.json", disposition)
             if disposition["status"] != "passed":
                 raise ValueError("post-apply mechanical audit has in-scope/global Registry findings")
-            _write_immutable(completion, {"group_key": row["group_key"], "viewpoint_ids": target_ids, "audit_path": str(audit_path), "bindings": [binding(audit_path), binding(plans[0]), binding(root / "production/run/scope-run.json"), *resolution_bindings], "argument_routes_completed": False})
+            proof = {"group_key": row["group_key"], "viewpoint_ids": target_ids, "audit_path": str(audit_path), "bindings": [binding(audit_path), binding(plans[0]), binding(root / "production/run/scope-run.json"), *resolution_bindings], "argument_routes_completed": False}
+            if source_resolution_path is not None:
+                # Compatibility key consumed by all completion/seed/prepare paths;
+                # the artifact distinguishes standing GPT policy from owner case acceptance.
+                proof['owner_resolution_path'] = str(source_resolution_path)
+            _write_immutable(completion, proof)
             done.append(row["group_key"])
             save_state(args.output_root / "progress.json", state | {"status": "group_complete", "completed_new_groups": len(done), "remaining_groups": pending_count-len(done)})
         except Exception as exc:

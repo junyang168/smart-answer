@@ -166,18 +166,22 @@ def validate_findings(raw, packet):
     return {f.item_id: f.model_dump(mode='json') for f in findings}
 
 
-def run(audit_path, output, store, adapters=None):
+def run(audit_path, output, store, adapters=None, *, final_gpt=False):
     packet = build_packet(audit_path, store)
     write_immutable(output / 'packet.json', packet)
     if not packet['items']:
         raise ValueError('no semantic audit disputes')
+    providers = [('codex', 'gpt-6.1-sol')]
+    if not final_gpt:
+        providers.append(('claude', 'claude-opus-5-5'))
     if adapters is None:
         adapters = [StructuredJsonReviewerAdapter(client=subscription_client(provider, model, 'high'),
                     prompt=PROMPT, response_model=Findings, schema_name='wang_audit_source_findings_v1')
-                    for provider, model in (('codex', 'gpt-6.1-sol'), ('claude', 'claude-opus-5-5'))]
+                    for provider, model in providers]
     try:
         reviews = []
-        for label, adapter in zip(('gpt', 'opus'), adapters, strict=True):
+        labels = ('gpt',) if final_gpt else ('gpt', 'opus')
+        for label, adapter in zip(labels, adapters, strict=True):
             adapter.max_request_bytes = 500_000
             raw, _, _ = call_model(adapter, packet, output / f'raw-{label}.json')
             reviews.append(validate_findings(raw, packet))
@@ -185,18 +189,23 @@ def run(audit_path, output, store, adapters=None):
             raise ValueError('source or Registry changed during adjudication')
         actions = []
         for item in packet['items']:
-            left, right = [r[item['item_id']] for r in reviews]
+            left = reviews[0][item['item_id']]
+            right = reviews[-1][item['item_id']]
             verdict = left['verdict'] if left['verdict'] == right['verdict'] else 'unresolved'
             action = {'audit_objection_upheld': 'authorized_content_repair_required',
                       'audit_objection_rejected': 'independent_resolution_required',
                       'unresolved': 'owner_judgment_required'}[verdict]
-            actions.append({'item_id': item['item_id'], 'verdict': verdict,
-                            'next_action': action, 'gpt': left, 'opus': right})
+            row = {'item_id': item['item_id'], 'verdict': verdict,
+                   'next_action': action, 'gpt': left}
+            if not final_gpt:
+                row['opus'] = right
+            actions.append(row)
         report = {'schema_version': 'wang_audit_source_adjudication_handoff_v1',
                   'packet_sha256': packet['artifact_sha256'], 'actions': actions,
-                  'group_complete': False, 'master_data_mutations': 0, 'maximum_model_calls': 2}
+                  'group_complete': False, 'master_data_mutations': 0,
+                  'maximum_model_calls': 1 if final_gpt else 2}
         report['artifact_sha256'] = sha256_json(report)
-        write_immutable(output / 'handoff.json', report)
+        write_immutable(output / ('gpt-final-handoff.json' if final_gpt else 'handoff.json'), report)
         return report
     except Exception as exc:
         transport = getattr(getattr(adapter, '_client', None), 'last_raw_response', None)
@@ -210,9 +219,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--audit', type=Path, required=True)
     parser.add_argument('--output-root', type=Path, required=True)
+    parser.add_argument('--final-gpt', action='store_true')
     args = parser.parse_args()
     load_dotenv(Path(__file__).resolve().parents[2] / '.env')
-    run(args.audit, args.output_root, PostgresKnowledgeStore())
+    run(args.audit, args.output_root, PostgresKnowledgeStore(), final_gpt=args.final_gpt)
 
 
 if __name__ == '__main__':

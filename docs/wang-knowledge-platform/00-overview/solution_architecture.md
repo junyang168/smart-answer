@@ -92,7 +92,9 @@
 
 所以「独立」有三条，缺一不可：**自己的代码路径**（不 import 任何 `backend/` 模块，不复用流水线的读取器与模型）、**直接读原件**（不信 `anchor_state` 与存下来的哈希，打开磁盘上的逐字稿核对）、**不同的模型**（需要判断的部分，用没参与过原判定的那一家）。
 
-审计只读，发现问题产出报告与人工队列条目，不自动修改任何记录；有异议的进 [D4](#d4最小化人工提议--复核--仲裁--转人工) 第 4 步同一个出口。运行方式与输出格式见[文库独立审计](../90-ops/library-audit/README.md)。
+审计只读，发现问题产出报告与待处理条目，不自动修改任何记录。对于完整审计中的内容异议，先由 GPT 6.1 Sol 读取该条主张自己绑定的完整原文、实际观点和连接，逐项仲裁。负责人已授权：GPT 引用自己的逐字原文、明确回应并否决异议，且来源、版本与内容哈希校验通过时，以该裁决结案，不再交回 Gemini 复查，也不追加 Opus 仲裁或重复请人确认。
+
+原审计异议和 GPT 原始回答都保留；结案记录单独绑定两者与物理原文，不把 Gemini 改成通过，不改写主张或观点。GPT 认可异议或证据不足时，仍转 [D4](#d4最小化人工提议--复核--仲裁--转人工) 第 4 步处理；不完整审计、模型失败、来源变化和机械校验失败不能由语义裁决放行。这项授权仅适用于独立审计后的原文仲裁，不取代生成提议和独立内容复核。运行方式与输出格式见[文库独立审计](../90-ops/library-audit/README.md)。
 
 ## 3. 架构总览
 
@@ -269,5 +271,5 @@ flowchart TD
 > **读者**：教会同工与 Solution architect。同工要参与审阅，必须能读懂本文；全文不用系统内部术语，英文名词在[术语](#术语)一节定义。
 > **类型**：规范
 > **状态**：当前
-> **与代码对齐**：2026-09-13。D4 的当前 CVP 独立复核模型核对到 `backend/pipeline/policies/wang_cvp_resolution_policy_v2.json`；第 2 节「正确性」一行与其下那条约束核对到 `scripts/audit-library.py`，比率取自 2026-08-26 的审计运行。第 4 节 D1／D2 引用的数字取自 2026-08-25 的 Registry 快照与仓库；其余陈述未逐条核对。
+> **与代码对齐**：第 2 节原文仲裁结案规则于 2026-10-03 核对到 `backend/pipeline/policies/wang_audit_source_resolution_v1.json`、`viewpoint_audit_source_adjudication.py`、`viewpoint_audit_owner_resolution.py` 与 `viewpoint_cvp_campaign_runner.py`。其余保持 2026-09-13 的核对范围：D4 当前 CVP 独立复核模型核对到 `wang_cvp_resolution_policy_v2.json`；独立审计核对到 `scripts/audit-library.py`，比率取自 2026-08-26；D1／D2 数字取自 2026-08-25 Registry 快照；其余陈述未逐条核对。
 > **权威范围**：第 4 节的 architecture decisions 与第 2 节的质量属性。下游设计与本文冲突时，先改本文并记录决定，不在下游打补丁。
