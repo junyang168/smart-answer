@@ -42,6 +42,96 @@ def _read_binding(binding: Mapping[str, str]) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def verify_coordinate_review_migration(claim_id, before, after, review_binding,
+                                     review_input_binding, review, *, root=None):
+    """Consume an exact applied #397 status-only plan, never a source-kind waiver.
+
+    The surrounding bridge has independently validated the historical pass,
+    coordinate chain, live evidence and physical source. Here the complete
+    frozen plan fingerprint must equal the applied ChangeSet identity.
+    """
+    from backend.config.wang_platform_paths import wang_platform_paths
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStoreError
+    from backend.pipeline.legacy_candidate_reconciliation import _decode_plan
+    root = Path(root) if root is not None else wang_platform_paths().staging / 'candidate-reconciliation-397'
+    if (_meaning(before['payload']) != _meaning(after['payload'])
+            or before['payload'].get('review_status') != 'candidate'
+            or after['payload'].get('review_status') != 'ai_consensus_reviewed'
+            or after['revision'] != before['revision'] + 1):
+        raise CvpProductionBlocked([f'{claim_id}: migration is not candidate-to-reviewed status only'])
+    candidates = []
+    for path in sorted(root.rglob('migration-plans.json')):
+        document = json.loads(path.read_text(encoding='utf-8'))
+        for raw in document.get('plans', []):
+            if raw.get('change_set_id') == after['change_set_id']:
+                candidates.append((path, document, raw))
+    if len(candidates) != 1:
+        raise CvpProductionBlocked([f'{claim_id}: applied migration proof missing or ambiguous'])
+    path, document, raw = candidates[0]
+    try:
+        plan = _decode_plan(raw)  # validates all operations/events and KCS fingerprint
+        preflight_path = path.parent / 'preflight.json'
+        preflight = json.loads(preflight_path.read_text(encoding='utf-8'))
+        freeze = sha256_json(preflight['rows'])
+        if (plan.source_kind != after['source_kind']
+                or plan.source_sha256 != after['source_sha256']
+                or freeze != preflight.get('snapshot_sha256')
+                or freeze != document.get('freeze_sha256')
+                or freeze != after.get('metadata', {}).get('freeze_sha256')):
+            raise ValueError('applied plan/frozen population binding differs')
+        rows = [r for r in preflight['rows'] if r['claim_id'] == claim_id]
+        ops = [o for o in plan.operations if o.collection == 'claims' and o.object_id == claim_id]
+        events = [e for e in plan.review_events if e.collection == 'claims' and e.object_id == claim_id]
+        if len(rows) != 1 or len(ops) != 1 or len(events) != 1:
+            raise ValueError('migration selected population is not unique')
+        row, op, event = rows[0], ops[0], events[0]
+        artifact = event.artifact
+        if (row.get('reason') != 'coordinate_only_historical_review_graph_verified'
+                or row.get('historical_decision_reason') != 'pass_ready_for_legacy_migration'
+                or row.get('review_decision') != 'pass'
+                or row.get('adjudication_status') != 'not_required'
+                or row.get('spot_check_selected') or row.get('human_review_reason')
+                or row.get('target_review_status') != 'ai_consensus_reviewed'
+                or row.get('revision') != before['revision']
+                or row.get('content_sha256') != before['content_sha256']
+                or row.get('review_sha256') != review_binding['file_sha256']
+                or row.get('package_sha256') != review_input_binding['file_sha256']
+                or row.get('review_fingerprint') != review['reviewer']['fingerprint_sha256']
+                or artifact.get('review_artifact_sha256') != row['review_sha256']
+                or artifact.get('package_sha256') != row['package_sha256']
+                or artifact.get('freeze_sha256') != freeze
+                or sha256_json(document['claim_related_graph_guards'][claim_id]) != row['graph_guard_sha256']
+                or artifact.get('graph_guard_sha256') != row['graph_guard_sha256']):
+            raise ValueError('migration does not bind the resolved independent pass/graph')
+        for field in ('coordinate_chain_sha256', 'coordinate_proof_code_sha256',
+                      'reviewed_claim_content_sha256', 'reviewed_claim_substantive_sha256',
+                      'current_anchor_count', 'current_fragment_count'):
+            if not row.get(field) or artifact.get(field) != row[field]:
+                raise ValueError('migration coordinate proof differs')
+        expected = dict(before['payload'])
+        expected.update(review_status='ai_consensus_reviewed', reviewed_by=row['reviewer_id'],
+                        reviewed_at=row['adjudicated_at'], review_note=event.reason,
+                        revision=after['revision'])
+        if (op.operation != 'update' or op.before_revision != before['revision']
+                or op.after_revision != after['revision']
+                or op.before_sha256 != before['content_sha256']
+                or op.after_sha256 != after['content_sha256']
+                or dict(op.payload, revision=op.after_revision) != after['payload']
+                or expected != after['payload']
+                or event.object_revision != after['revision']
+                or event.decision != 'ai_consensus_reviewed'
+                or event.reviewer_kind != 'ai' or event.reviewer_id != row['reviewer_id']
+                or event.reviewer_id != review['reviewer']['review_model_id']):
+            raise ValueError('applied status/reviewer/postimage differs')
+    except (ValueError, KeyError, TypeError, PostgresKnowledgeStoreError) as exc:
+        raise CvpProductionBlocked([f'{claim_id}: invalid applied coordinate review migration: {exc}']) from exc
+    return {'change_set_id': after['change_set_id'], 'authority_kind': 'exact_applied_coordinate_review_migration',
+            'plan_binding': {'path': str(path), 'file_sha256': hashlib.sha256(path.read_bytes()).hexdigest()},
+            'preflight_binding': {'path': str(preflight_path), 'file_sha256': hashlib.sha256(preflight_path.read_bytes()).hexdigest()},
+            'before_sha256': before['content_sha256'], 'after_sha256': after['content_sha256'],
+            'human_holds_released': False}
+
+
 def verify_legacy_adjudicated_graph(claim_id, final, current_claim, versions,
                                   current_evidence, current_fragments):
     """Exact replayed post-image, not a waiver of an unresolved old finding."""
@@ -388,8 +478,13 @@ def verify_historical_review_bridge(
         raise CvpProductionBlocked([f"{claim_id}: historical chain is discontinuous or not current"])
     repairs = []
     evidence_index_repairs = []
+    review_migrations = []
     for before, after in zip(chain, chain[1:]):
         if _meaning(before["payload"]) == _meaning(after["payload"]) and after.get("source_kind") == "review_decision":
+            continue
+        if after.get('source_kind') == 'legacy_coordinate_only_review_reconciliation_v1':
+            review_migrations.append(verify_coordinate_review_migration(
+                claim_id, before, after, review_binding, review_input_binding, review))
             continue
         if after.get("source_kind") == "wkp364_claim_evidence_pair_adjudication":
             # Existing verifier binds the exact applied ChangeSet and guard,
@@ -487,6 +582,8 @@ def verify_historical_review_bridge(
         body["sealed_lineage_binding"] = dict(sealed_lineage_binding)
     if evidence_index_repairs:
         body["evidence_index_repairs"] = evidence_index_repairs
+    if review_migrations:
+        body['review_migrations'] = review_migrations
     if merge_proof is not None:
         body['legacy_merge_authority'] = merge_proof
         body['legacy_reviewed_candidate_binding'] = dict(merge_proof['legacy_reviewed_candidate_binding'])

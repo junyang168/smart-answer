@@ -101,6 +101,116 @@ def test_real_parser_and_coordinate_only_chain(tmp_path):
     assert proof["approval_status"] == "not_human_approved"
 
 
+def migration_inputs(tmp_path):
+    from dataclasses import asdict
+    from pathlib import Path
+    from backend.pipeline.legacy_candidate_reconciliation import plan_review_migration
+    args = inputs(tmp_path)
+    before = deepcopy(args['versions'][-1])
+    before['payload']['review_status'] = 'candidate'
+    before['content_sha256'] = record_content_sha(before['payload'])
+    review = json.loads(Path(args['review_binding']['path']).read_text())
+    guard = [{'collection': 'claims', 'object_id': 'C1', 'revision': 2,
+              'content_sha256': before['content_sha256']}]
+    row = dict(claim_id='C1', source_id='S1', reason='coordinate_only_historical_review_graph_verified',
+               historical_decision_reason='pass_ready_for_legacy_migration', revision=2,
+               content_sha256=before['content_sha256'], review_decision='pass',
+               adjudication_status='not_required', target_review_status='ai_consensus_reviewed',
+               reviewer_id='claude-sonnet-5', adjudicated_at='2026-09-08T00:00:00Z',
+               spot_check_selected=False, graph_guard_sha256=sha256_json(guard),
+               coordinate_chain_sha256='chain', coordinate_proof_code_sha256='code',
+               reviewed_claim_content_sha256='reviewed', reviewed_claim_substantive_sha256='meaning',
+               current_anchor_count=1, current_fragment_count=1, source_revision=1,
+               source_content_sha256='source', package_sha256=args['review_input_binding']['file_sha256'],
+               review_sha256=args['review_binding']['file_sha256'],
+               review_fingerprint=review['reviewer']['fingerprint_sha256'],
+               adjudication_sha256='adjudication', reviewed_candidate_sha256='candidate')
+    freeze = sha256_json([row])
+    plan = asdict(plan_review_migration([row], {'C1': before}, freeze_sha256=freeze,
+                 source_kind='legacy_coordinate_only_review_reconciliation_v1'))
+    payload = dict(plan['operations'][0]['payload'], revision=3)
+    after = dict(revision=3, payload=payload, content_sha256=record_content_sha(payload),
+                 change_set_id=plan['change_set_id'], source_kind=plan['source_kind'],
+                 source_sha256=plan['source_sha256'], status='applied', metadata={'freeze_sha256': freeze})
+    root = tmp_path / 'migration'
+    root.mkdir()
+    write_binding(root/'migration-plans.json', dict(plans=[plan], freeze_sha256=freeze,
+                  claim_related_graph_guards={'C1': guard}))
+    write_binding(root/'preflight.json', dict(rows=[row], snapshot_sha256=freeze))
+    return dict(claim_id='C1', before=before, after=after, review_binding=args['review_binding'],
+                review_input_binding=args['review_input_binding'], review=review, root=root)
+
+
+def test_exact_applied_coordinate_review_migration(tmp_path):
+    from backend.pipeline.viewpoint_historical_review_bridge import verify_coordinate_review_migration
+    proof = verify_coordinate_review_migration(**migration_inputs(tmp_path))
+    assert proof['authority_kind'] == 'exact_applied_coordinate_review_migration'
+    assert proof['human_holds_released'] is False
+
+
+def test_bridge_consumes_migration_after_coordinate_proof(tmp_path, monkeypatch):
+    import backend.pipeline.viewpoint_historical_review_bridge as bridge
+    args = inputs(tmp_path)
+    migration = migration_inputs(tmp_path)
+    args['versions'][0]['payload']['review_status'] = 'candidate'
+    args['versions'][0]['content_sha256'] = record_content_sha(args['versions'][0]['payload'])
+    # The coordinate plan itself was built before changing its review status.
+    plan_path = args['versions'][1]['metadata']['source_plan_path']
+    from pathlib import Path
+    plan = json.loads(Path(plan_path).read_text())
+    plan['changed_records'][0]['before_sha256'] = args['versions'][0]['content_sha256']
+    plan['changed_records'][0]['after_sha256'] = migration['before']['content_sha256']
+    plan.pop('artifact_sha256')
+    plan['artifact_sha256'] = sha256_json(plan)
+    b = write_binding(Path(plan_path), plan)
+    migration['before']['metadata']['source_plan_file_sha256'] = b['file_sha256']
+    args['versions'] = [args['versions'][0], migration['before'], migration['after']]
+    args['current_claim'] = migration['after']['payload']
+    original = bridge.verify_coordinate_review_migration
+    monkeypatch.setattr(bridge, 'verify_coordinate_review_migration',
+        lambda *a, **kw: original(*a, **kw, root=migration['root']))
+    proof = bridge.verify_historical_review_bridge(**args)
+    assert proof['coordinate_repairs'][0]['after_revision'] == 2
+    assert proof['review_migrations'][0]['change_set_id'] == migration['after']['change_set_id']
+    assert proof['model_calls_executed'] == proof['master_data_mutations'] == 0
+
+
+@pytest.mark.parametrize('mutation', ['content', 'reviewer', 'human_hold', 'review_sha',
+                                     'freeze', 'missing', 'ambiguous', 'plan', 'graph', 'source_sha'])
+def test_coordinate_migration_never_whitelists_status(tmp_path, mutation):
+    from backend.pipeline.viewpoint_historical_review_bridge import verify_coordinate_review_migration
+    args = migration_inputs(tmp_path)
+    root = args['root']
+    if mutation == 'content':
+        args['after']['payload']['statement'] = '不同内容'
+    elif mutation == 'reviewer':
+        args['after']['payload']['reviewed_by'] = 'unreviewed-model'
+    elif mutation == 'human_hold':
+        args['after']['payload']['review_status'] = 'human_review_required'
+    elif mutation == 'review_sha':
+        args['review_binding']['file_sha256'] = 'other'
+    elif mutation == 'freeze':
+        args['after']['metadata']['freeze_sha256'] = 'other'
+    elif mutation == 'source_sha':
+        args['after']['source_sha256'] = 'other'
+    elif mutation == 'missing':
+        (root/'migration-plans.json').unlink()
+    elif mutation == 'ambiguous':
+        copy = root/'copy'
+        copy.mkdir()
+        (copy/'migration-plans.json').write_bytes((root/'migration-plans.json').read_bytes())
+    else:
+        path = root/'migration-plans.json'
+        data = json.loads(path.read_text())
+        if mutation == 'plan':
+            data['plans'][0]['operations'][0]['payload']['statement'] = 'different'
+        else:
+            data['claim_related_graph_guards']['C1'] = []
+        path.write_text(json.dumps(data))
+    with pytest.raises(CvpProductionBlocked):
+        verify_coordinate_review_migration(**args)
+
+
 @pytest.mark.parametrize("mutation", ["statement", "quotation", "modality", "step", "gap", "unapplied", "wrong_repair", "history_sha", "wrong_review", "source_bytes"])
 def test_no_semantic_drift_can_hide_as_coordinate_repair(tmp_path, mutation):
     args = inputs(tmp_path)
