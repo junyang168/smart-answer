@@ -422,8 +422,12 @@ def run_final_cvp_review(
     raw_review, calls, seconds = _call(
         reviewer, review_packet, output_dir / "raw-final-review.json"
     )
-    canonical_review, normalization_changes = canonicalize_review(raw_review)
-    review = CanonicalViewpointReviewResponse.model_validate(canonical_review)
+    from backend.pipeline.viewpoint_review_format_repair import parse_review
+    review, normalization_changes, format_calls, format_seconds = parse_review(
+        raw_review, adapter=reviewer, request=review_packet,
+        cache=output_dir / 'raw-final-review-format-repair.json', call=_call)
+    calls += format_calls
+    seconds += format_seconds
     validation = validate_review(
         review=review,
         proposal=proposal,
@@ -587,8 +591,12 @@ def run_batch(
     raw_review, review_calls, review_seconds = _call(
         reviewer, review_packet, output_dir / "raw-review.json"
     )
-    canonical_review, review_normalization_changes = canonicalize_review(raw_review)
-    review = CanonicalViewpointReviewResponse.model_validate(canonical_review)
+    from backend.pipeline.viewpoint_review_format_repair import parse_review
+    review, review_normalization_changes, format_calls, format_seconds = parse_review(
+        raw_review, adapter=reviewer, request=review_packet,
+        cache=output_dir / 'raw-review-format-repair.json', call=_call)
+    review_calls += format_calls
+    review_seconds += format_seconds
     review_validation = validate_review(
         review=review,
         proposal=proposal,

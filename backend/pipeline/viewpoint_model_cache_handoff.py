@@ -14,6 +14,7 @@ from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 
 ROLES = {"raw-proposal.json", "raw-consolidation.json", "raw-review.json"}
 CORRECTION_ROLE = "raw-reconsideration.json"
+FORMAT_ROLE = "raw-review-format-repair.json"
 
 
 def bound_read(binding):
@@ -87,7 +88,7 @@ def eligibility_migrations(source_binding, target_binding):
 
 
 def old_request(payload, old_batch_id, migrations=()):
-    for key in ("proposal", "review"):
+    for key in ("proposal", "review", "invalid_review"):
         if key in payload and payload.get(key + "_sha256") != sha256_json(payload[key]):
             raise ValueError("cache handoff current input hash drift: " + key)
     result = copy.deepcopy(payload)
@@ -112,6 +113,9 @@ def old_request(payload, old_batch_id, migrations=()):
     if "review" in result:
         result["review"]["proposal_sha256"] = result["proposal_sha256"]
         result["review_sha256"] = sha256_json(result["review"])
+    if 'invalid_review' in result:
+        result['invalid_review']['proposal_sha256'] = result['proposal_sha256']
+        result['invalid_review_sha256'] = sha256_json(result['invalid_review'])
     if "packet_sha256" in result:
         result["packet_sha256"] = sha256_json({k: v for k, v in result.items() if k != "packet_sha256"})
     return result
@@ -119,13 +123,13 @@ def old_request(payload, old_batch_id, migrations=()):
 
 def reuse_response(adapter, payload, cache):
     handoff_path = cache.parent / "prior-model-cache.json"
-    if not handoff_path.exists() or cache.name not in ROLES | {CORRECTION_ROLE}:
+    if not handoff_path.exists() or cache.name not in ROLES | {CORRECTION_ROLE, FORMAT_ROLE}:
         return None
     handoff = json.loads(handoff_path.read_text())
     if handoff.get("schema_version") != "wang_cvp_model_cache_handoff_v1" or handoff.get("artifact_sha256") != sha256_json({k: v for k, v in handoff.items() if k != "artifact_sha256"}):
         raise ValueError("invalid model cache handoff")
     bound_read(handoff["target_freeze"])
-    if cache.name == CORRECTION_ROLE and cache.name not in handoff["raw_bindings"]:
+    if cache.name in {CORRECTION_ROLE, FORMAT_ROLE} and cache.name not in handoff["raw_bindings"]:
         return None
     if payload.get("batch_id") != handoff["target_batch_id"]:
         raise ValueError("cache handoff target batch mismatch")
@@ -158,7 +162,7 @@ def reuse_response(adapter, payload, cache):
             raise ValueError("source response batch identity drift")
         response["batch_id"] = handoff["target_batch_id"]
         changed.append("batch_id")
-    if cache.name == "raw-review.json":
+    if cache.name in {"raw-review.json", FORMAT_ROLE}:
         if response["proposal_sha256"] != original_request["proposal_sha256"]:
             raise ValueError("source review proposal binding drift")
         response["proposal_sha256"] = payload["proposal_sha256"]
@@ -187,6 +191,10 @@ def prepare_handoff(source_batch, target_batch, *, target_batch_id, target_freez
     if initial_prefix_only and (include_correction or (source_batch / "raw-review.json").exists()):
         raise ValueError("initial-only prefix cannot discard a saved review/correction")
     roles = ROLES - {"raw-review.json"} if initial_prefix_only else ROLES
+    if (source_batch / FORMAT_ROLE).exists():
+        if initial_prefix_only:
+            raise ValueError('initial-only prefix cannot discard saved format repair')
+        roles = roles | {FORMAT_ROLE}
     body = {"schema_version": "wang_cvp_model_cache_handoff_v1",
         "source_batch_id": packet["batch_id"], "target_batch_id": target_batch_id,
         "target_freeze": binding(target_freeze),
@@ -227,15 +235,17 @@ def verify_prefix(scope, batch_id, output_dir, max_request_bytes):
     def forbidden(_):
         raise ValueError("cache prefix would repeat a model stage; no fallback")
     def stop(payload):
-        adapter = reviewer if initial_only else final_review if has_correction else correction
+        format_repair = payload.get('review_mode') == 'schema_format_repair'
+        adapter = reviewer if initial_only or format_repair else final_review if has_correction else correction
         write_immutable(output_dir / "cache-prefix-preflight.json", {
             "all_three_initial_stages_reused": not initial_only, "new_model_calls": 0,
             "initial_proposal_and_consolidation_reused": True,
             "saved_correction_reused": has_correction,
             "master_data_mutations": 0,
-            "next_stage": "initial_review" if initial_only else "final_review" if has_correction else "correction",
+            "next_stage": 'review_schema_format_repair' if format_repair else "initial_review" if initial_only else "final_review" if has_correction else "correction",
             "next_request_bytes": adapter.request_bytes(payload),
-            **({"initial_review_request_bytes": adapter.request_bytes(payload)} if initial_only
+            **({"format_repair_request_bytes": adapter.request_bytes(payload)} if format_repair
+               else {"initial_review_request_bytes": adapter.request_bytes(payload)} if initial_only
                else {"final_review_request_bytes": adapter.request_bytes(payload)} if has_correction
                else {"correction_request_bytes": adapter.request_bytes(payload)}),
             "max_request_bytes": max_request_bytes, "original_findings_preserved": True})
@@ -243,6 +253,7 @@ def verify_prefix(scope, batch_id, output_dir, max_request_bytes):
     for adapter in (proposer, reviewer, consolidator, correction, final_review):
         adapter.max_request_bytes = max_request_bytes
         adapter.generate = forbidden
+    reviewer.generate = stop  # Only reached for a genuinely uncached review/format repair.
     if initial_only:
         reviewer.generate = stop
     elif has_correction:
