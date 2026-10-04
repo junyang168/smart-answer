@@ -300,7 +300,11 @@ def continuation_inputs(root, output, extra_completion=None, *, additional_sourc
 def continuation_root(root, attempt):
     # Different immutable repair roots may have identically named handoffs.
     # Their absolute identity, not a truncated basename, owns the new root.
-    return root.parent / (root.name + '-recovery-' + sha256_json({'attempt':str(attempt.resolve())})[:12])
+    name = root.name + '-recovery-' + sha256_json({'attempt':str(attempt.resolve())})[:12]
+    if len(name.encode('utf-8')) > 240:
+        # Keep immutable identity, not an ever-growing filesystem basename.
+        name = 'campaign-recovery-' + sha256_json({'root':str(root.resolve()), 'attempt':str(attempt.resolve())})
+    return root.parent / name
 
 
 def resume_after_repair(root, attempt, recovery_root, executable, *, additional_proof_bindings=(), additional_source_repair_paths=(), saved_audit_path=None, prior_model_batch=None, reuse_correction=False, owner_resolution_path=None):

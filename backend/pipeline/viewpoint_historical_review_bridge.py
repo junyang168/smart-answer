@@ -364,6 +364,17 @@ def verify_historical_review_bridge(
             raise CvpProductionBlocked([f"{claim_id}: version history is not an authenticated applied chain"])
     baselines = [row for row in ordered if _meaning(row["payload"]) == _meaning(reviewed)]
     merge_proof = None
+    if not baselines and sealed_final is not None:
+        # A passing recipient can gain evidence from an independently resolved
+        # duplicate donor before its first ingestion. Authenticate that exact
+        # historical application; do not pretend its initial pass covered it.
+        candidate_path = Path(sealed_final['path'])
+        candidate_binding = {'path': str(candidate_path),
+                             'file_sha256': hashlib.sha256(candidate_path.read_bytes()).hexdigest()}
+        normalized, merge_proof = authenticate_legacy_merge_target(
+            claim_id, candidate_binding, review_binding, review_input_binding, ordered)
+        reviewed = normalized['claims'][claim_id]
+        baselines = [row for row in ordered if _meaning(row['payload']) == _meaning(reviewed)]
     if not baselines and legacy_reviewed_candidate_binding is not None:
         normalized, merge_proof = authenticate_legacy_merge_target(
             claim_id, legacy_reviewed_candidate_binding, review_binding, review_input_binding, ordered)
@@ -478,7 +489,7 @@ def verify_historical_review_bridge(
         body["evidence_index_repairs"] = evidence_index_repairs
     if merge_proof is not None:
         body['legacy_merge_authority'] = merge_proof
-        body['legacy_reviewed_candidate_binding'] = dict(legacy_reviewed_candidate_binding)
+        body['legacy_reviewed_candidate_binding'] = dict(merge_proof['legacy_reviewed_candidate_binding'])
     if random_sample_waived:
         body["random_spot_check_policy_binding"] = dict(random_spot_check_policy_binding)
         body["random_spot_check_waived_by_owner_policy"] = True

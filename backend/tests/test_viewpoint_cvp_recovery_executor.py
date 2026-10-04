@@ -226,6 +226,17 @@ def test_continuation_keeps_original_members_capacity_order_and_pins(tmp_path, m
         m.continuation_inputs(root, tmp_path / "tampered", proof)
 
 
+def test_long_continuation_root_is_bounded_and_full_identity_bound(tmp_path):
+    root = tmp_path / ('a' * 244)
+    attempt = tmp_path / 'attempt'
+    result = m.continuation_root(root, attempt)
+    assert len(result.name.encode('utf-8')) <= 240
+    assert result == m.continuation_root(root, attempt)
+    assert result != m.continuation_root(tmp_path / 'other' / root.name, attempt)
+    assert result != m.continuation_root(root, tmp_path / 'other-attempt')
+    result.mkdir()
+
+
 @pytest.mark.parametrize("active", [False, True])
 def test_restart_requires_backup_dryrun_and_unique_real_process(tmp_path, monkeypatch, active):
     root, attempt, recovery = [tmp_path / n for n in ("old", "fingerprint", "recovery")]

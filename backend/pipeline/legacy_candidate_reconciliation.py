@@ -108,6 +108,33 @@ def scoped_applied_adjudication(adjudication, actionable, claim_ids):
             [r for r in actionable if r['claim_id'] in claim_ids])
 
 
+def authenticate_batched_review(review_path, review, package_path, package):
+    """Read-only exact aggregate reconstruction and physical source binding."""
+    from backend.pipeline.claim_layer_review_batch import merge_review_artifacts
+    stem = review_path.name.removesuffix('.independent-review.json')
+    directory = review_path.parent / (stem + '.independent-review-batches') / 'reviews'
+    paths = sorted(directory.glob('batch-*.independent-review.json'))
+    artifacts = [_read(p) for p in paths]
+    rebuilt = merge_review_artifacts(artifacts, source_package=package, source_package_path=package_path)
+    if rebuilt != review:
+        raise ValueError('batched review does not exactly reconstruct from sealed batches')
+    hashes, source_paths = {}, {}
+    for artifact in artifacts:
+        for sid, value in (artifact.get('source', {}).get('transcript_sha256') or {}).items():
+            if sid in hashes and hashes[sid] != value:
+                raise ValueError('batched source hashes conflict')
+            hashes[sid] = value
+    sources = package.get('source_documents') or []
+    if len(sources) != len({s['source_id'] for s in sources}) or set(hashes) != {s['source_id'] for s in sources}:
+        raise ValueError('batched source coverage mismatch')
+    for source in sources:
+        p = Path(str(source.get('source_path') or ''))
+        if not p.is_absolute() or not p.is_file() or _sha(p) != source.get('source_file_sha256'):
+            raise ValueError('batched physical source SHA drift')
+        source_paths[source['source_id']] = str(p)
+    return hashes, source_paths
+
+
 def inspect_legacy_bundle(path: Path, *, validation_claim_ids: set[str] | None = None) -> dict[str, Any]:
     """Return evidence for one bundle; failures never become positive evidence."""
 
@@ -159,7 +186,12 @@ def inspect_legacy_bundle(path: Path, *, validation_claim_ids: set[str] | None =
             if key not in {"fingerprint_sha256", "generated_at", "artifact_sha256", "provider"}
         }
         review_fingerprint = str(reviewer.get("fingerprint_sha256") or "")
-        if review_fingerprint != sha256_json(reviewer_identity):
+        batched_sources = None
+        if reviewer.get('provider') == 'anthropic_batched':
+            # Reconstruct the sealed aggregate from its actual per-batch
+            # artifacts; a provider string is never a fingerprint waiver.
+            batched_sources = authenticate_batched_review(review_path, review, package_path, package)
+        elif review_fingerprint != sha256_json(reviewer_identity):
             result["reason"] = "review_fingerprint_invalid"
             return result
         review_seal = reviewer.get("artifact_sha256")
@@ -189,6 +221,8 @@ def inspect_legacy_bundle(path: Path, *, validation_claim_ids: set[str] | None =
         result["review_transcript_paths"] = dict(
             (review.get("source") or {}).get("transcript_paths") or {}
         )
+        if batched_sources is not None:
+            result['review_transcript_sha256'], result['review_transcript_paths'] = batched_sources
         result["review_fingerprint"] = str(
             (review.get("reviewer") or {}).get("fingerprint_sha256") or ""
         )
@@ -241,8 +275,8 @@ def inspect_legacy_bundle(path: Path, *, validation_claim_ids: set[str] | None =
         if any(adjudication.get(key) != value for key, value in expected_outcome.items()):
             result["reason"] = "adjudication_outcome_invalid"
             return result
-        source_paths = (review.get("source") or {}).get("transcript_paths") or {}
-        reviewed_source_hashes = (review.get("source") or {}).get("transcript_sha256") or {}
+        source_paths = result['review_transcript_paths']
+        reviewed_source_hashes = result['review_transcript_sha256']
         transcript_segments = {}
         current_source_matches = True
         source_binding_modes: dict[str, str] = {}

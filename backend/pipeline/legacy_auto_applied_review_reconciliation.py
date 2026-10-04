@@ -134,17 +134,35 @@ def verify_historical_replay(reviewed_path: Path, *, validation_claim_ids: set[s
         if not isinstance(payload, dict):
             return None
         transcripts[transcript_id] = payload
-    replayed = _historical_applier()(package, overrides, transcripts)
+    review = json.loads(Path(bundle['review_path']).read_text(encoding='utf-8'))
+    sealed_batched = review.get('reviewer', {}).get('provider') == 'anthropic_batched'
+    if sealed_batched:
+        # This later sealed format is not the retired September-04 applier.
+        # Reconstruct its full operation graph and final review seal, then
+        # require exact equality below. No new model or database write.
+        from backend.pipeline import knowledge_consensus_applier as applier
+        replayed = applier.apply_consensus_overrides(package, overrides, transcripts)
+        applier.apply_final_ai_review_outcomes(replayed, review=review,
+            review_artifact_sha256=bundle['review_sha256'], adjudication=adjudication,
+            adjudication_artifact_sha256=bundle['adjudication_sha256'],
+            overrides_artifact_sha256=_sha(overrides_path))
+        replay_code_sha = _sha(Path(applier.__file__))
+    else:
+        replayed = _historical_applier()(package, overrides, transcripts)
+        replay_code_sha = HISTORICAL_CODE_SHA256
     reviewed = json.loads(reviewed_path.read_text(encoding="utf-8"))
     if replayed != reviewed:
         return None
     proof = {
         "historical_replay_sha256": sha256_json(replayed),
-        "historical_replay_code_sha256": HISTORICAL_CODE_SHA256,
+        "historical_replay_code_sha256": replay_code_sha,
         "overrides_sha256": _sha(overrides_path),
     }
-    if validation_claim_ids is not None:
+    if validation_claim_ids is not None and (not sealed_batched or any(
+            s.get('source_type') == 'notes_manuscript' for s in package.get('source_documents', []))):
         proof['historical_source_reader_code_sha256'] = HISTORICAL_SOURCE_CODE_SHA256
+    if sealed_batched:
+        proof['replay_contract'] = 'sealed_batched_exact_full_package_v1'
     return proof
 
 
