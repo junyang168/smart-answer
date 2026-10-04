@@ -307,7 +307,7 @@ def continuation_root(root, attempt):
     return root.parent / name
 
 
-def resume_after_repair(root, attempt, recovery_root, executable, *, additional_proof_bindings=(), additional_source_repair_paths=(), saved_audit_path=None, prior_model_batch=None, reuse_correction=False, owner_resolution_path=None):
+def resume_after_repair(root, attempt, recovery_root, executable, *, additional_proof_bindings=(), additional_source_repair_paths=(), saved_audit_path=None, prior_model_batch=None, reuse_correction=False, owner_resolution_path=None, initial_prefix_only=False, allow_lossless_compact_config_migration=False):
     cfg, schedule, manifest, groups = load_campaign(root)
     state = read(root / "progress.json")
     group_root = root / f"g{state['sequence']:03d}"
@@ -393,7 +393,9 @@ def resume_after_repair(root, attempt, recovery_root, executable, *, additional_
                         target_batch_id=identity['batch_id'], target_freeze=freeze_path,
                         source_eligibility=prior_model_batch.parents[2] / 'inputs/source-eligibility.json',
                         target_eligibility=target_group / 'inputs/source-eligibility.json',
-                        include_correction=reuse_correction)
+                        include_correction=reuse_correction,
+                        initial_prefix_only=initial_prefix_only,
+                        allow_lossless_compact_config_migration=allow_lossless_compact_config_migration)
         policy = read(PROJECT_ROOT / 'backend/pipeline/policies/wang_cvp_resolution_policy_v3.json')
         verify_prefix(scope, identity['batch_id'], target_group / 'run/batches' / identity['batch_key_sha256'],
                       int(policy['max_request_bytes']))

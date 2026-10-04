@@ -60,6 +60,45 @@ def test_saved_correction_exact_reuse_only_rebinds_input_hashes(tmp_path):
     assert call_model(a, p, c)[1] == 0
 
 
+@pytest.mark.parametrize('approved', [True, False])
+def test_format_only_cache_migration_requires_explicit_opt_in(tmp_path, approved):
+    a, p, c, src, original = fixture(tmp_path, 'raw-consolidation.json')
+    a._compact_payload = True
+    a.generation_config_sha256 = sha256_json({'base_config_sha256': 'g',
+        'payload_serialization': 'compact_json_v1'})
+    h = json.loads((c.parent/'prior-model-cache.json').read_text())
+    if approved:
+        h['allow_lossless_compact_config_migration'] = True
+    h['artifact_sha256'] = sha256_json({k:v for k,v in h.items() if k != 'artifact_sha256'})
+    (c.parent/'prior-model-cache.json').write_text(json.dumps(h))
+    if approved:
+        response, calls, _ = call_model(a, p, c)
+        assert response == original and calls == 0
+    else:
+        with pytest.raises(ValueError, match='generation config drift'):
+            call_model(a, p, c)
+
+
+def test_initial_prefix_rejects_discarding_saved_review(tmp_path):
+    a, p, c, src, _ = fixture(tmp_path, 'raw-proposal.json')
+    with pytest.raises(ValueError, match='cannot discard'):
+        prepare_handoff(src, tmp_path/'other', target_batch_id='new',
+            target_freeze=tmp_path/'freeze.json', initial_prefix_only=True)
+
+
+def test_initial_prefix_stops_at_genuinely_missing_review(tmp_path):
+    a, p, c, src, _ = fixture(tmp_path, 'raw-proposal.json')
+    (src/'raw-review.json').unlink()
+    dst = tmp_path/'prefix'
+    prepare_handoff(src, dst, target_batch_id='new', target_freeze=tmp_path/'freeze.json',
+        initial_prefix_only=True)
+    from backend.pipeline.viewpoint_model_cache_handoff import reuse_response
+    assert reuse_response(a, p, dst/'raw-review.json') is None
+    p['batch_id'] = 'foreign'
+    with pytest.raises(ValueError, match='target batch mismatch'):
+        reuse_response(a, p, dst/'raw-review.json')
+
+
 @pytest.mark.parametrize('drift', ['review', 'proposal', 'review_hash', 'proposal_hash', 'correction', 'input_binding', 'model', 'physical'])
 def test_saved_correction_drift_never_falls_back_to_model(tmp_path, drift):
     a, p, c, src, _ = fixture(tmp_path, 'raw-reconsideration.json')

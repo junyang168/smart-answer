@@ -122,24 +122,28 @@ from backend.pipeline.viewpoint_resolution_runtime import (
     write_immutable as _write_immutable,
 )
 
+def _compact_adapter(**kwargs: Any) -> StructuredJsonReviewerAdapter:
+    """One lossless wire-format contract for every CVP model role."""
+    return StructuredJsonReviewerAdapter(**kwargs, compact_payload=True)
+
+
 def build_proposer(
     model: str, reasoning_effort: str, *, provider: str = "claude"
 ) -> StructuredJsonReviewerAdapter:
-    return StructuredJsonReviewerAdapter(
+    return _compact_adapter(
         client=_subscription_client(provider, model, reasoning_effort),
         prompt=(PROMPT_DIR / "canonical_viewpoint_batch_proposal.md").read_text(
             encoding="utf-8"
         ),
         response_model=CanonicalViewpointProposalResponse,
         schema_name="wang_canonical_viewpoint_proposal_v1",
-        compact_payload=True,
     )
 
 
 def build_reviewer(
     model: str, reasoning_effort: str, *, provider: str = "claude"
 ) -> StructuredJsonReviewerAdapter:
-    return StructuredJsonReviewerAdapter(
+    return _compact_adapter(
         client=_subscription_client(provider, model, reasoning_effort),
         prompt=(PROMPT_DIR / "canonical_viewpoint_batch_review.md").read_text(
             encoding="utf-8"
@@ -152,7 +156,7 @@ def build_reviewer(
 def build_consolidator(
     model: str, reasoning_effort: str, *, provider: str = "claude"
 ) -> StructuredJsonReviewerAdapter:
-    return StructuredJsonReviewerAdapter(
+    return _compact_adapter(
         client=_subscription_client(provider, model, reasoning_effort),
         prompt=(PROMPT_DIR / "canonical_viewpoint_identity_consolidation.md").read_text(
             encoding="utf-8"
@@ -163,7 +167,7 @@ def build_consolidator(
 
 
 def build_grouper(model: str, reasoning_effort: str) -> StructuredJsonReviewerAdapter:
-    return StructuredJsonReviewerAdapter(
+    return _compact_adapter(
         client=_subscription_client("claude", model, reasoning_effort),
         prompt=(PROMPT_DIR / "canonical_viewpoint_claim_grouping.md").read_text(
             encoding="utf-8"
@@ -176,14 +180,13 @@ def build_grouper(model: str, reasoning_effort: str) -> StructuredJsonReviewerAd
 def build_reconsiderer(
     model: str, reasoning_effort: str, *, provider: str = "claude"
 ) -> StructuredJsonReviewerAdapter:
-    return StructuredJsonReviewerAdapter(
+    return _compact_adapter(
         client=_subscription_client(provider, model, reasoning_effort),
         prompt=(PROMPT_DIR / "canonical_viewpoint_batch_reconsideration.md").read_text(
             encoding="utf-8"
         ),
         response_model=CanonicalViewpointReconsiderationResponse,
         schema_name="wang_canonical_viewpoint_reconsideration_v3",
-        compact_payload=True,
     )
 
 

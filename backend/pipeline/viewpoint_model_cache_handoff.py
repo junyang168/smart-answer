@@ -129,12 +129,23 @@ def reuse_response(adapter, payload, cache):
         return None
     if payload.get("batch_id") != handoff["target_batch_id"]:
         raise ValueError("cache handoff target batch mismatch")
+    if (cache.name == "raw-review.json" and handoff.get("initial_prefix_only") is True
+            and cache.name not in handoff["raw_bindings"]):
+        return None  # First review has genuinely never run; not a drift fallback.
     raw_binding = handoff["raw_bindings"][cache.name]
     raw = bound_read(raw_binding)
     if raw.get("artifact_sha256") != sha256_json({k: v for k, v in raw.items() if k != "artifact_sha256"}) or raw.get("response_sha256") != sha256_json(raw["response"]):
         raise ValueError("old raw model cache SHA mismatch")
+    formatting_migration = False
     for key in ("model_id", "backend", "prompt_sha256", "generation_config_sha256"):
         if raw.get(key) != getattr(adapter, key):
+            if (key == "generation_config_sha256"
+                    and handoff.get("allow_lossless_compact_config_migration") is True
+                    and getattr(adapter, "_compact_payload", False)
+                    and sha256_json({"base_config_sha256": raw[key],
+                                     "payload_serialization": "compact_json_v1"}) == getattr(adapter, key)):
+                formatting_migration = True
+                continue
             raise ValueError("old model cache generation config drift: " + key)
     migrations = eligibility_migrations(**handoff["eligibility_bindings"]) if handoff.get("eligibility_bindings") else []
     original_request = old_request(payload, handoff["source_batch_id"], migrations)
@@ -163,19 +174,27 @@ def reuse_response(adapter, payload, cache):
         "source_request_payload_sha256": raw["request_payload_sha256"],
         "handoff_file_sha256": hashlib.sha256(handoff_path.read_bytes()).hexdigest(),
         "verified_eligibility_migrations": migrations,
+        "verified_lossless_compact_config_migration": formatting_migration,
         "changed_metadata_paths": changed, "semantic_content_changed": False,
         "new_model_calls": 0}
 
 
-def prepare_handoff(source_batch, target_batch, *, target_batch_id, target_freeze, source_eligibility=None, target_eligibility=None, include_correction=False):
+def prepare_handoff(source_batch, target_batch, *, target_batch_id, target_freeze, source_eligibility=None, target_eligibility=None, include_correction=False, initial_prefix_only=False, allow_lossless_compact_config_migration=False):
     from backend.pipeline.viewpoint_resolution_runtime import write_immutable
     def binding(p):
         return {"path": str(p.resolve()), "file_sha256": hashlib.sha256(p.read_bytes()).hexdigest()}
     packet = json.loads((source_batch / "batch-packet.json").read_text())
+    if initial_prefix_only and (include_correction or (source_batch / "raw-review.json").exists()):
+        raise ValueError("initial-only prefix cannot discard a saved review/correction")
+    roles = ROLES - {"raw-review.json"} if initial_prefix_only else ROLES
     body = {"schema_version": "wang_cvp_model_cache_handoff_v1",
         "source_batch_id": packet["batch_id"], "target_batch_id": target_batch_id,
         "target_freeze": binding(target_freeze),
-        "raw_bindings": {name: binding(source_batch / name) for name in sorted(ROLES | ({CORRECTION_ROLE} if include_correction else set()))}}
+        "raw_bindings": {name: binding(source_batch / name) for name in sorted(roles | ({CORRECTION_ROLE} if include_correction else set()))}}
+    if initial_prefix_only:
+        body["initial_prefix_only"] = True
+    if allow_lossless_compact_config_migration:
+        body["allow_lossless_compact_config_migration"] = True
     if source_eligibility is not None or target_eligibility is not None:
         if source_eligibility is None or target_eligibility is None:
             raise ValueError("both eligibility proofs required")
@@ -202,26 +221,31 @@ def verify_prefix(scope, batch_id, output_dir, max_request_bytes):
     final_review = reviewer.compact_copy()
     handoff = json.loads((output_dir / "prior-model-cache.json").read_text())
     has_correction = CORRECTION_ROLE in handoff["raw_bindings"]
+    initial_only = handoff.get("initial_prefix_only") is True
     class PrefixVerified(Exception):
         pass
     def forbidden(_):
         raise ValueError("cache prefix would repeat a model stage; no fallback")
     def stop(payload):
-        adapter = final_review if has_correction else correction
+        adapter = reviewer if initial_only else final_review if has_correction else correction
         write_immutable(output_dir / "cache-prefix-preflight.json", {
-            "all_three_initial_stages_reused": True, "new_model_calls": 0,
+            "all_three_initial_stages_reused": not initial_only, "new_model_calls": 0,
+            "initial_proposal_and_consolidation_reused": True,
             "saved_correction_reused": has_correction,
             "master_data_mutations": 0,
-            "next_stage": "final_review" if has_correction else "correction",
+            "next_stage": "initial_review" if initial_only else "final_review" if has_correction else "correction",
             "next_request_bytes": adapter.request_bytes(payload),
-            **({"final_review_request_bytes": adapter.request_bytes(payload)} if has_correction
+            **({"initial_review_request_bytes": adapter.request_bytes(payload)} if initial_only
+               else {"final_review_request_bytes": adapter.request_bytes(payload)} if has_correction
                else {"correction_request_bytes": adapter.request_bytes(payload)}),
             "max_request_bytes": max_request_bytes, "original_findings_preserved": True})
         raise PrefixVerified()
     for adapter in (proposer, reviewer, consolidator, correction, final_review):
         adapter.max_request_bytes = max_request_bytes
         adapter.generate = forbidden
-    if has_correction:
+    if initial_only:
+        reviewer.generate = stop
+    elif has_correction:
         final_review.generate = stop
     else:
         correction.generate = stop

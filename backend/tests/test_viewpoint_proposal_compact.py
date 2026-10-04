@@ -1,6 +1,7 @@
 import copy
 import json
 from types import SimpleNamespace
+from pathlib import Path
 
 import pytest
 
@@ -43,3 +44,21 @@ def test_initial_proposal_keeps_frozen_ceiling_and_zero_calls_on_overflow(monkey
         call_model(adapter, {'whole_original': 'X'*500001}, tmp_path/'raw-proposal.json')
     assert not requests
     assert not (tmp_path/'raw-proposal.json').exists()
+
+
+@pytest.mark.parametrize('role', ['proposer', 'reviewer', 'consolidator', 'grouper', 'reconsiderer'])
+def test_every_cvp_model_factory_uses_shared_lossless_format(monkeypatch, role):
+    requests = []
+    client = SimpleNamespace(model='unchanged', backend='subscription',
+        reasoning_effort='high', max_output_tokens=None,
+        generate_json=lambda **kw: requests.append(kw) or {})
+    monkeypatch.setattr(runner, '_subscription_client', lambda *args: client)
+    a = getattr(runner, 'build_' + role)('unchanged', 'high')
+    payload = {'text': '原文\n  空白必須保留', 'evidence': ['限定', 'ψυχή']}
+    a.generate(payload)
+    assert a._compact_payload
+    assert json.loads(requests[0]['user_prompt']) == payload
+    assert requests[0]['user_prompt'] == json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
+    a.max_request_bytes = 500000
+    with pytest.raises(ValueError, match='frozen ceiling'):
+        call_model(a, {'original': 'X'*500001}, Path('/unused/never-called.json'))
