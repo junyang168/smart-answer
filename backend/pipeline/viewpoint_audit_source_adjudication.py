@@ -166,6 +166,21 @@ def validate_findings(raw, packet):
     return {f.item_id: f.model_dump(mode='json') for f in findings}
 
 
+def source_review_adapter(client, cache):
+    """Compact new requests; retain authenticated legacy cache format only.
+
+    Selecting a serializer is not cache approval: call_model still verifies
+    every model, backend, prompt, request, response and artifact SHA pin.
+    Unknown cached configurations fail there, never fall back to a new call.
+    """
+    legacy = StructuredJsonReviewerAdapter(client=client, prompt=PROMPT,
+        response_model=Findings, schema_name='wang_audit_source_findings_v1')
+    compact = legacy.compact_copy()
+    if cache.exists() and read_artifact(cache).get('generation_config_sha256') == legacy.generation_config_sha256:
+        return legacy
+    return compact
+
+
 def run(audit_path, output, store, adapters=None, *, final_gpt=False):
     packet = build_packet(audit_path, store)
     write_immutable(output / 'packet.json', packet)
@@ -175,9 +190,9 @@ def run(audit_path, output, store, adapters=None, *, final_gpt=False):
     if not final_gpt:
         providers.append(('claude', 'claude-opus-5-5'))
     if adapters is None:
-        adapters = [StructuredJsonReviewerAdapter(client=subscription_client(provider, model, 'high'),
-                    prompt=PROMPT, response_model=Findings, schema_name='wang_audit_source_findings_v1')
-                    for provider, model in providers]
+        adapters = [source_review_adapter(subscription_client(provider, model, 'high'),
+                    output / f'raw-{label}.json')
+                    for label, (provider, model) in zip(('gpt', 'opus'), providers)]
     try:
         reviews = []
         labels = ('gpt',) if final_gpt else ('gpt', 'opus')

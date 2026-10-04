@@ -108,7 +108,7 @@ def investigate_deferred(root):
     return read(root / "deferred-source-check/handoff.json")
 
 
-def build_selection(group, inventory, root, random_spot_check_policy=None):
+def discover_selection(group, inventory, random_spot_check_policy=None):
     """Discover physical inputs; proof verification is performed by the adapter.
 
     A matching filename or inventory status never counts as review approval.
@@ -145,6 +145,39 @@ def build_selection(group, inventory, root, random_spot_check_policy=None):
             sealed.append({"claim_id": cid, **{k + "_path": str(p.resolve()) for k, p in paths.items()},
                            **{k + "_sha256": binding(p)["file_sha256"] for k, p in paths.items()}})
         selected.append(row)
+    return selected, sealed
+
+
+def lineage_preflight(schedule, groups, inventory, random_spot_check_policy=None):
+    """Check every pending Claim now, without models, writes or approval.
+
+    Uses the very same discovery path as production. Historical bridge replay
+    and current Registry qualification still run at each serialized entrance.
+    This report is diagnostic, never an eligibility attestation.
+    """
+    results = []
+    for row in schedule['schedule']:
+        if row['state'] == 'already_complete':
+            continue
+        for cid in sorted(groups[row['group_key']]['claim_ids']):
+            item = {'sequence': row['sequence'], 'group_key': row['group_key'], 'claim_id': cid}
+            try:
+                selected, sealed = discover_selection({'claim_ids': [cid]}, inventory,
+                                                      random_spot_check_policy)
+                item.update(status='discovered', selection=selected[0], sealed=sealed)
+            except (ValueError, KeyError, OSError, TypeError) as exc:
+                item.update(status='blocked', error=str(exc))
+            results.append(item)
+    body = {'schema_version': 'cvp-lineage-discovery-preflight.v1',
+            'eligibility_approved': False, 'registry_writes': 0, 'model_calls': 0,
+            'claims_checked': len(results),
+            'blocked_claims': sum(r['status'] == 'blocked' for r in results),
+            'results': results}
+    return body | {'artifact_sha256': sha256_json(body)}
+
+
+def build_selection(group, inventory, root, random_spot_check_policy=None):
+    selected, sealed = discover_selection(group, inventory, random_spot_check_policy)
     if sealed:
         path = root / "sealed-lineage.json"
         body = {"claims": sealed}
@@ -248,6 +281,9 @@ def execute(args):
         validate_audit({"meta": audited["meta"], "layers": {"3": claim_audit["layers"]["3"], "4": audited["layers"]["4"]}},
                        groups[row["group_key"]]["claim_ids"], row["viewpoint_ids"],
                        owner_resolution_path=row.get('owner_resolution_path'))
+    preflight = lineage_preflight(schedule, groups, inventory,
+                                 getattr(args, 'random_spot_check_policy', None))
+    _write_immutable(args.output_root / 'lineage-discovery-preflight.json', preflight)
     done = []
     pending_count=sum(row['state']=='pending' for row in schedule['schedule'])
     for row in schedule["schedule"]:

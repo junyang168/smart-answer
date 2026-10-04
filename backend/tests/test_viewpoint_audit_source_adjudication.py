@@ -10,6 +10,48 @@ def packet():
         {'source_id': 's', 'paragraphs': [{'paragraph_key': 'S0001', 'text': '王就是這位彌賽亞。'}]}]}]}
 
 
+@pytest.mark.parametrize('legacy_cache', [False, True])
+def test_source_review_compact_and_legacy_cache_both_reuse_without_new_calls(tmp_path, legacy_cache):
+    import json
+    from types import SimpleNamespace
+    from backend.api.canonical_repository.viewpoint_resolution import StructuredJsonReviewerAdapter
+    from backend.pipeline.viewpoint_resolution_runtime import call_model
+    calls = []
+    client = SimpleNamespace(model='gpt-6.1-sol', backend='codex_subscription',
+        reasoning_effort='high', max_output_tokens=None,
+        generate_json=lambda **kw: calls.append(kw) or answer())
+    cache = tmp_path / 'raw-gpt.json'
+    initial = module.source_review_adapter(client, cache)
+    assert initial._compact_payload
+    if legacy_cache:
+        initial = StructuredJsonReviewerAdapter(client=client, prompt=module.PROMPT,
+            response_model=module.Findings, schema_name='wang_audit_source_findings_v1')
+    payload = packet()
+    call_model(initial, payload, cache)
+    original = cache.read_bytes()
+    restored = module.source_review_adapter(client, cache)
+    assert restored._compact_payload is not legacy_cache
+    call_model(restored, payload, cache)
+    assert len(calls) == 1 and cache.read_bytes() == original
+    assert json.loads(calls[0]['user_prompt']) == payload
+    with pytest.raises(ValueError, match='another request payload'):
+        call_model(restored, payload | {'source_drift': True}, cache)
+    assert len(calls) == 1
+
+
+def test_source_review_frozen_ceiling_stops_without_transport(tmp_path):
+    from types import SimpleNamespace
+    from backend.pipeline.viewpoint_resolution_runtime import call_model
+    client = SimpleNamespace(model='gpt-6.1-sol', backend='codex_subscription',
+        reasoning_effort='high', max_output_tokens=None,
+        generate_json=lambda **kw: pytest.fail('overflow must not call model'))
+    a = module.source_review_adapter(client, tmp_path / 'raw.json')
+    a.max_request_bytes = 500000
+    with pytest.raises(ValueError, match='frozen ceiling'):
+        call_model(a, {'original': 'X' * 500001}, tmp_path / 'raw.json')
+    assert not (tmp_path / 'raw.json').exists()
+
+
 def answer(verdict='audit_objection_rejected'):
     return {'findings': [{'item_id': '4:v:c', 'verdict': verdict, 'source_id': 's',
                           'paragraph_key': 'S0001', 'exact_quote': '王就是這位彌賽亞。',
