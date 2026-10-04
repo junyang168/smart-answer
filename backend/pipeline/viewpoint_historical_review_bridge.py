@@ -187,6 +187,79 @@ def _sealed_adjudicated_bridge(*, claim_id, current_claim, item, resolution, ver
     return body|{'artifact_sha256':sha256_json(body)}
 
 
+def authenticate_legacy_merge_target(claim_id, binding, review_binding, input_binding, versions):
+    """Authenticate a passing recipient's exact historical merged generation.
+
+    Only its applied duplicate-merge patches are semantic authority. Other
+    suggestions in the same package, particularly human holds, stay unresolved.
+    The entire historical application is still replayed byte-for-byte.
+    """
+    from backend.pipeline.legacy_candidate_reconciliation import inspect_legacy_bundle
+    from backend.pipeline.legacy_auto_applied_review_reconciliation import verify_historical_replay
+    final = _read_binding(binding)
+    merges = final.get('consensus_application', {}).get('merged_claim_ids', {})
+    donors = {cid for cid, target in merges.items() if target == claim_id}
+    applied = set(final.get('consensus_application', {}).get('applied_claim_ids', []))
+    if not donors or claim_id in merges or not donors <= applied or claim_id in applied:
+        raise CvpProductionBlocked([f'{claim_id}: no one-hop historical merge authority'])
+    path = Path(binding['path'])
+    bundle = inspect_legacy_bundle(path, validation_claim_ids=donors)
+    replay = verify_historical_replay(path, validation_claim_ids=donors)
+    if (bundle.get('reason') or not replay
+            or not bundle.get('scoped_adjudication_structurally_validated')
+            or set(bundle.get('validated_adjudication_claim_ids', [])) != donors
+            or bundle.get('review_sha256') != review_binding['file_sha256']
+            or bundle.get('package_sha256') != input_binding['file_sha256']):
+        raise CvpProductionBlocked([f'{claim_id}: historical merge replay/source validation failed'])
+    for donor in donors:
+        row = bundle['review_rows'].get(donor, {})
+        result = bundle['adjudication_results'].get(donor, {})
+        if (row.get('decision') != 'changes_suggested' or row.get('human_review_reason')
+                or row.get('spot_check_selected') or result.get('status') != 'auto_applied'
+                or result.get('human_review_reason')
+                or result.get('openai', {}).get('patch', {}).get('superseded_by_claim_id') != claim_id):
+            raise CvpProductionBlocked([f'{claim_id}: merge donor lacks independent resolved duplicate finding'])
+    normalized, _ = _normalize_records(final)
+    reviewed = normalized.get('claims', {}).get(claim_id)
+    original = bundle['original_claims'].get(claim_id)
+    if not original or not reviewed or original.get('statement') != reviewed.get('statement'):
+        raise CvpProductionBlocked([f'{claim_id}: duplicate merge rewrote passing recipient statement'])
+    first = min(versions, key=lambda r: r['revision']) if versions else {}
+    if (reviewed is None or first.get('source_kind') != 'knowledge_package'
+            or first.get('source_sha256') != sha256_json(final)
+            or _meaning(first.get('payload', {})) != _meaning(reviewed)):
+        raise CvpProductionBlocked([f'{claim_id}: initial applied generation is not the replayed merge'])
+    return normalized, {
+        'authority_kind': 'passing_recipient_of_exact_replayed_duplicate_merge',
+        'legacy_reviewed_candidate_binding': dict(binding),
+        'adjudication_binding': {'path': bundle['adjudication_path'], 'file_sha256': bundle['adjudication_sha256']},
+        'merged_claim_ids': sorted(donors), 'historical_replay': replay,
+        'unrelated_human_findings_released': False,
+    }
+
+
+def verify_legacy_evidence_history(eid, reviewed, current, final_sha):
+    """Authenticate a separately applied reverse-index repair, not just IDs."""
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    from backend.pipeline.viewpoint_link_history_repair import verify_chain
+    with PostgresKnowledgeStore().connect() as connection:
+        connection.execute('SET TRANSACTION READ ONLY')
+        rows = connection.execute(
+            "SELECT v.revision,v.content_sha256,v.payload,v.change_set_id,c.source_kind,c.source_sha256,c.status,c.metadata "
+            "FROM wang_knowledge.object_versions v JOIN wang_knowledge.change_sets c USING(change_set_id) "
+            "WHERE v.collection='evidence_steps' AND v.object_id=%s ORDER BY v.revision", (eid,)).fetchall()
+    columns = ('revision','content_sha256','payload','change_set_id','source_kind','source_sha256','status','metadata')
+    history = [dict(zip(columns, row)) for row in rows]
+    if (not history or history[0]['source_kind'] != 'knowledge_package'
+            or history[0]['source_sha256'] != final_sha
+            or _meaning(history[0]['payload']) != _meaning(reviewed)):
+        raise CvpProductionBlocked([f'{eid}: evidence repair does not start at replayed final'])
+    try:
+        return verify_chain(history, collection='evidence_steps', object_id=eid, current=current)
+    except (ValueError, KeyError) as exc:
+        raise CvpProductionBlocked([f'{eid}: invalid applied evidence repair: {exc}']) from exc
+
+
 def verify_historical_review_bridge(
     *, claim_id: str, current_claim: Mapping[str, Any],
     review_binding: Mapping[str, str], review_input_binding: Mapping[str, str],
@@ -290,6 +363,12 @@ def verify_historical_review_bridge(
         if row.get("status") != "applied" or record_content_sha(row["payload"]) != row["content_sha256"] or row["payload"].get("revision") != row["revision"]:
             raise CvpProductionBlocked([f"{claim_id}: version history is not an authenticated applied chain"])
     baselines = [row for row in ordered if _meaning(row["payload"]) == _meaning(reviewed)]
+    merge_proof = None
+    if not baselines and legacy_reviewed_candidate_binding is not None:
+        normalized, merge_proof = authenticate_legacy_merge_target(
+            claim_id, legacy_reviewed_candidate_binding, review_binding, review_input_binding, ordered)
+        reviewed = normalized['claims'][claim_id]
+        baselines = [row for row in ordered if _meaning(row['payload']) == _meaning(reviewed)]
     if not baselines:
         raise CvpProductionBlocked([f"{claim_id}: no applied generation matches the independently reviewed Claim"])
     baseline = baselines[-1]
@@ -365,8 +444,12 @@ def verify_historical_review_bridge(
         if evidence_id not in current_evidence or evidence_id not in normalized["evidence_steps"]:
             raise CvpProductionBlocked([f"{claim_id}: reviewed EvidenceStep changed after review"])
         if _meaning(current_evidence[evidence_id]) != _meaning(normalized["evidence_steps"][evidence_id]):
-            proof=verify_sealed_reverse_index(evidence_id,normalized['evidence_steps'][evidence_id],
-                current_evidence[evidence_id],sealed_final)
+            if merge_proof is not None:
+                proof = verify_legacy_evidence_history(evidence_id, normalized['evidence_steps'][evidence_id],
+                    current_evidence[evidence_id], merge_proof['historical_replay']['historical_replay_sha256'])
+            else:
+                proof=verify_sealed_reverse_index(evidence_id,normalized['evidence_steps'][evidence_id],
+                    current_evidence[evidence_id],sealed_final)
             evidence_index_repairs.append(proof)
         for fragment_id in evidence_fragment_ids(EvidenceStepRecord.model_validate(current_evidence[evidence_id])):
             old = normalized["source_fragments"].get(fragment_id)
@@ -393,6 +476,9 @@ def verify_historical_review_bridge(
         body["sealed_lineage_binding"] = dict(sealed_lineage_binding)
     if evidence_index_repairs:
         body["evidence_index_repairs"] = evidence_index_repairs
+    if merge_proof is not None:
+        body['legacy_merge_authority'] = merge_proof
+        body['legacy_reviewed_candidate_binding'] = dict(legacy_reviewed_candidate_binding)
     if random_sample_waived:
         body["random_spot_check_policy_binding"] = dict(random_spot_check_policy_binding)
         body["random_spot_check_waived_by_owner_policy"] = True

@@ -93,7 +93,22 @@ def review_source_binding_mode(
     return None
 
 
-def inspect_legacy_bundle(path: Path) -> dict[str, Any]:
+def scoped_applied_adjudication(adjudication, actionable, claim_ids):
+    """Select only explicitly applied patches; never release a human hold."""
+    results = {r['claim_id']: r for r in adjudication['results']}
+    if not claim_ids or any(
+        cid not in results or results[cid].get('status') != 'auto_applied'
+        or results[cid].get('human_review_reason')
+        or results[cid].get('openai', {}).get('decision') != 'accept'
+        for cid in claim_ids
+    ):
+        raise ValueError('scoped replay requires resolved applied patches')
+    response = adjudication['openai_adjudication']
+    return (dict(response, adjudications=[r for r in response['adjudications'] if r['claim_id'] in claim_ids]),
+            [r for r in actionable if r['claim_id'] in claim_ids])
+
+
+def inspect_legacy_bundle(path: Path, *, validation_claim_ids: set[str] | None = None) -> dict[str, Any]:
     """Return evidence for one bundle; failures never become positive evidence."""
 
     reviewed = _read(path)
@@ -260,8 +275,14 @@ def inspect_legacy_bundle(path: Path) -> dict[str, Any]:
                 str(row["claim_id"]): row for row in survey["candidate_claims"]
             }
             actionable = actionable_reviews(review)
+            response = adjudication["openai_adjudication"]
+            if validation_claim_ids is not None:
+                # A scoped read-only consumer must explicitly name its applied
+                # patches. Unapplied human-held suggestions are not authority
+                # for those patches, nor does this validate the whole bundle.
+                response, actionable = scoped_applied_adjudication(adjudication, actionable, validation_claim_ids)
             validate_openai_adjudication(
-                adjudication["openai_adjudication"], reviews=actionable,
+                response, reviews=actionable,
                 claims_by_id=claim_snapshots,
                 transcript_segments=transcript_segments,
             )
@@ -271,7 +292,9 @@ def inspect_legacy_bundle(path: Path) -> dict[str, Any]:
                 for row in adjudication["openai_adjudication"]["adjudications"]
                 if row.get("decision") == "reject"
             }
-            if rejected_ids:
+            if validation_claim_ids is not None:
+                result['validated_adjudication_claim_ids'] = sorted(validation_claim_ids)
+            elif rejected_ids:
                 validate_claude_reconsideration(
                     reconsideration, rejected_claim_ids=rejected_ids,
                     claims_by_id=claim_snapshots,
@@ -279,7 +302,8 @@ def inspect_legacy_bundle(path: Path) -> dict[str, Any]:
             elif reconsideration is not None:
                 result["reason"] = "unexpected_claude_reconsideration"
                 return result
-        result["adjudication_structurally_validated"] = current_source_matches
+        result["adjudication_structurally_validated"] = current_source_matches and validation_claim_ids is None
+        result['scoped_adjudication_structurally_validated'] = current_source_matches and validation_claim_ids is not None
         result["review_source_binding_modes"] = source_binding_modes
         result["adjudication_path"] = str(adjudication_path)
         result["adjudication_sha256"] = _sha(adjudication_path)
