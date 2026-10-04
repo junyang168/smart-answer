@@ -120,8 +120,8 @@ def prepare(campaign, store, *, owner_retire=False):
                    'policy':policy, 'claim_source_viewpoint_text_writes':0}
 
 
-def package_for(states, packet, reviews, root):
-    digest = sha256_json({'packet':packet, 'reviews':reviews})
+def package_for(states, packet, reviews, root, *, identity_digest=None):
+    digest = identity_digest or sha256_json({'packet':packet, 'reviews':reviews})
     if packet.get('policy',{}).get('policy_id')=='wang-g015-owner-link-retirement-v1':
         if len(packet['targets'])!=1 or packet['targets'][0]['before_link']['viewpoint_claim_link_id']!=RETIRE_LINK:
             raise ValueError('retirement package outside owner scope')
@@ -156,12 +156,14 @@ def package_for(states, packet, reviews, root):
 
 
 def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storage_review_from=None,
-        human_review_from=None, human_handoff=None, human_decisions=()):
+        human_review_from=None, human_handoff=None, human_decisions=(), relation_review_from=None):
     store = PostgresKnowledgeStore()
     global_lock={'global_lock_path':str(BASE/'registry-cvp.lock')}
     if owner_retire and owner_identity_g033:
         raise ValueError('owner scopes cannot be combined')
     if storage_review_from and not owner_identity_g033: raise ValueError('storage correction requires exact g033 owner scope')
+    if relation_review_from and (not owner_identity_g033 or storage_review_from or human_review_from):
+        raise ValueError('relation revision requires separate exact g033 scope, not another correction/waiver')
     if any((human_review_from,human_handoff,human_decisions)) and not all((human_review_from,human_handoff,human_decisions)):
         raise ValueError('human resume requires saved review root, exact handoff and decisions')
     authority = None
@@ -196,7 +198,10 @@ def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storag
             write_immutable(root/'human-execution-authority.json',authority)
     if owner_identity_g033:
         from backend.pipeline import viewpoint_g033_identity_repair as identity_repair
-        if not human_review_from:
+        if relation_review_from:
+            from backend.pipeline import viewpoint_g033_relation_package as identity_repair
+            identity_repair.propose(campaign,root,store,relation_review_from=relation_review_from)
+        elif not human_review_from:
             identity_repair.propose(campaign,root,store,storage_review_from=storage_review_from)
     def prepare_current():
         return identity_repair.prepare(campaign,root,store) if owner_identity_g033 else prepare(campaign,store,owner_retire=owner_retire)
@@ -307,6 +312,7 @@ def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storag
     if owner_retire: proof_names.append('claim-disposition.json')
     if owner_identity_g033: proof_names.extend(['owner-authorization.json','proposal-input.json','proposal-before.json','raw-proposal.json'])
     if storage_review_from: proof_names.append('mechanical-review-source.json')
+    if relation_review_from: proof_names.extend(['relation-review-source.json','metadata-materialization-contract.json'])
     if authority is not None: proof_names.append('human-execution-authority.json')
     result=resume_after_repair(campaign,continuation,BASE/'immediate-recovery-20261002-v1',executable,
         saved_audit_path=audit_path, owner_resolution_path=resolution_path,
@@ -335,6 +341,8 @@ def launch_repair(campaign, packet, report):
 def main():
     ap=argparse.ArgumentParser(description=__doc__); ap.add_argument('--campaign-root',type=Path,required=True); ap.add_argument('--output-root',type=Path,required=True); ap.add_argument('--wait-parent-pid',type=int); ap.add_argument('--owner-retire-g015-link',action='store_true'); ap.add_argument('--owner-identity-g033',action='store_true')
     ap.add_argument('--owner-g033-storage-review-from',type=Path)
+    ap.add_argument('--owner-g033-relation-review-from',type=Path)
+    ap.add_argument('--codex-executable',type=Path)
     ap.add_argument('--human-review-from',type=Path)
     ap.add_argument('--human-handoff',type=Path)
     ap.add_argument('--human-decision',type=Path,action='append',default=[])
@@ -342,6 +350,9 @@ def main():
     campaign=args.campaign_root.resolve(); root=args.output_root.resolve()
     if PROJECT.name!='wkp-357-worktree-per-session' or campaign.parent!=BASE or root.parent!=BASE: raise ValueError('only #357 independent roots allowed')
     load_dotenv(PROJECT/'.env')
+    if args.codex_executable: os.environ['CODEX_EXECUTABLE']=str(args.codex_executable.resolve(strict=True))
+    if args.owner_g033_relation_review_from and not args.codex_executable:
+        raise ValueError('relation package requires the explicit canonical subscription executable')
     if args.wait_parent_pid:
         for _ in range(60):
             try: os.kill(args.wait_parent_pid,0)
@@ -355,7 +366,8 @@ def main():
         if subprocess.check_output(['git','status','--porcelain'],cwd=PROJECT,text=True).strip(): raise ValueError('committed clean code required')
         root.mkdir(exist_ok=False)
         try: print(json.dumps(run(campaign,root,owner_retire=args.owner_retire_g015_link,owner_identity_g033=args.owner_identity_g033,storage_review_from=args.owner_g033_storage_review_from,
-            human_review_from=args.human_review_from,human_handoff=args.human_handoff,human_decisions=args.human_decision)),flush=True)
+            human_review_from=args.human_review_from,human_handoff=args.human_handoff,human_decisions=args.human_decision,
+            relation_review_from=args.owner_g033_relation_review_from)),flush=True)
         except Exception as exc:
             write_derived(root/'failure.json',{'error':str(exc),'applied':(root/'apply-receipt.json').exists(),'no_next_group_started':True})
             write_derived(root/'progress.json',{'status':'stopped','error':str(exc),'applied':(root/'apply-receipt.json').exists()}); raise
