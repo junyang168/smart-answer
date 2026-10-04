@@ -73,7 +73,8 @@ def remaining_producers(table, root):
                 "-m backend.pipeline.viewpoint_batch_resolution_runner ",
                 "scripts/audit-library.py ",
                 "-m backend.pipeline.viewpoint_reviewed_cvp_prepare ",
-                "-m backend.pipeline.viewpoint_357_scope_revision "))]
+                "-m backend.pipeline.viewpoint_357_scope_revision ",
+                "-m backend.pipeline.viewpoint_audit_link_repair "))]
 
 
 def failure_event(root):

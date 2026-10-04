@@ -306,8 +306,11 @@ def execute(args):
                 handoff_path = root / 'audit-source-adjudication/gpt-final-handoff.json'
                 handoff = read(handoff_path)
                 if not handoff['actions'] or any(a['verdict'] != 'audit_objection_rejected' for a in handoff['actions']):
-                    raise ValueError('original-source adjudication requires content repair or owner judgment; '
-                                     'no next group started')
+                    from backend.pipeline.viewpoint_audit_link_repair import launch_repair
+                    repair_root = launch_repair(args.output_root, read(root/'audit-source-adjudication/packet.json'), handoff)
+                    save_state(args.output_root/'progress.json', state | {'status':'controlled_content_repair',
+                        'repair_root':str(repair_root), 'no_next_group_started':True})
+                    return 0  # Parent exits; the locked repair worker owns continuation.
                 from backend.pipeline.viewpoint_audit_owner_resolution import create_gpt_resolution
                 from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
                 source_resolution_path = root / 'gpt-source-final-resolution.json'

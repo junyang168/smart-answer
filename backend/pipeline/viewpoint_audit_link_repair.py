@@ -1,0 +1,253 @@
+"""One bounded, source-reviewed equivalent-to-supports repair after GPT upheld an audit.
+
+No Claim/source/CVP text edits, no retargeting, no repeated semantic retries.
+The immutable adjudication remains a disagreement, never a forged audit pass.
+"""
+import argparse
+from copy import deepcopy
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import time
+
+from dotenv import load_dotenv
+from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore, stored_operation_payload
+from backend.api.canonical_repository.viewpoint_foundation import sha256_json
+from backend.api.canonical_repository.viewpoint_production_safety import exclusive_cvp_run_lock, file_sha256
+from backend.api.canonical_repository.viewpoint_resolution import StructuredJsonReviewerAdapter
+from backend.pipeline.viewpoint_authorized_source_repair_357 import snapshot, fingerprint, Review, review_call
+from backend.pipeline.viewpoint_audit_source_adjudication import build_packet, run as adjudicate
+from backend.pipeline.viewpoint_resolution_runtime import read_artifact, write_immutable, write_derived, subscription_client, stable_decided_at
+
+PROJECT = Path(__file__).resolve().parents[2]
+BASE = Path('/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/staging/cvp-production-357')
+POLICY = PROJECT/'backend/pipeline/policies/wang_audit_link_repair_v1.json'
+PROMPT = '''独立审核实际 before_link/after_link：只允许将误标的 equivalent 连接改成 supports。
+完整自身原文、原审计与GPT原文裁决、Claim、目标CVP、证据、相邻成员均提供。
+支持方向必须是该Claim作为目标观点的真实论据；不能仅因两者相关而批准。
+Claim/证据/来源/CVP文字与目标、其他成员、依赖必须不变；本轮全部既有证据保留。
+after_link必须忠于自身Claim完整命题，不补入原文中另有但Claim没说的结论。
+如果支持关系也不成立、须改观点/Claim/证据/目标或出现其他范围问题，拒绝并说明，不能为了续跑批准。
+每个指定Claim恰好一个verdict，approved=true仅当全部条件成立且problems=[]。不评价教授神学对错。
+这是系统独立内容审核，不是人工内容批准，不执行操作。'''
+
+
+def select_repairs(packet, report):
+    actions = report.get('actions', [])
+    items = {i['item_id']: i for i in packet['items']}
+    if not actions or len(actions) != len(items) or {a['item_id'] for a in actions} != set(items):
+        raise ValueError('adjudication population mismatch')
+    selected = []
+    for action in actions:
+        item = items[action['item_id']]
+        if action['verdict'] != 'audit_objection_upheld' or not action['item_id'].startswith('4:'):
+            raise ValueError('not a bounded upheld viewpoint connection objection')
+        links = item['connections']
+        if len(links) != 1 or links[0]['link_type'] not in {'equivalent_full', 'equivalent_component'}:
+            raise ValueError('ambiguous/non-equivalent connection; needs owner scope')
+        old = links[0]
+        if old.get('effective_state', 'active') != 'active':
+            raise ValueError('inactive connection cannot be repaired')
+        if old['claim_id'] != item['claim']['claim_id'] or old['viewpoint_id'] != item['viewpoint']['viewpoint_id']:
+            raise ValueError('foreign connection')
+        new = deepcopy(old)
+        new.update(revision=old['revision']+1, link_type='supports', component_locator=None)
+        selected.append({'item_id': action['item_id'], 'claim': item['claim'],
+                         'before_link': old, 'after_link': new,
+                         'adjudication': action['gpt'], 'evidence': item['evidence'], 'sources': item['sources']})
+    if len({i['claim']['claim_id'] for i in selected}) != len(selected):
+        raise ValueError('duplicate repair Claim')
+    return selected
+
+
+def prepare(campaign, store):
+    state = read_artifact(campaign/'progress.json')
+    group = campaign/f"g{state['sequence']:03d}"
+    audit = group/'independent-audit/audit.json'
+    root = group/'audit-source-adjudication'
+    # Existing exact SHA-bound GPT response is reused; drift is never fallback.
+    packet = build_packet(audit, store)
+    if read_artifact(root/'packet.json') != packet:
+        raise ValueError('original adjudication packet drift')
+    report = adjudicate(audit, root, store, final_gpt=True)
+    targets = select_repairs(packet, report)
+    states = snapshot(store)
+    for item in targets:
+        old = item['before_link']; cv = old['viewpoint_id']
+        if states['viewpoint_claim_links', old['viewpoint_claim_link_id']] != old:
+            raise ValueError('live connection drift')
+        item['viewpoint_revision'] = states['viewpoint_revisions', old['validated_against_viewpoint_revision_id']]
+        item['adjacent_links'] = [p for (c, _), p in states.items() if c=='viewpoint_claim_links' and p.get('effective_state')=='active' and p.get('viewpoint_id')==cv]
+        item['adjacent_claims'] = [states['claims', cid] for cid in sorted({p['claim_id'] for p in item['adjacent_links']})]
+        if any(p['claim_id']==old['claim_id'] and p['link_type']=='supports' for p in item['adjacent_links']):
+            raise ValueError('existing supports edge; needs separately authorized merge')
+        # Existing dependencies are read-only review context, never rewritten.
+        item['dependent_records'] = [p for (c, _), p in states.items()
+            if c in {'viewpoint_structures', 'argument_routes', 'argument_route_attestations', 'viewpoint_relations'}
+            and (cv in json.dumps(p, ensure_ascii=False) or old['viewpoint_claim_link_id'] in json.dumps(p, ensure_ascii=False))]
+    policy = read_artifact(POLICY)
+    if policy['policy_id'] != 'wang-audit-link-repair-v1': raise ValueError('unknown repair policy')
+    return states, {'schema_version':'wang_audit_link_repair_packet_v1', 'targets':targets,
+                   'adjudication_packet_sha256':packet['artifact_sha256'], 'adjudication_handoff':report,
+                   'policy':policy, 'claim_source_viewpoint_text_writes':0}
+
+
+def package_for(states, packet, reviews, root):
+    digest = sha256_json({'packet':packet, 'reviews':reviews})
+    package = {'package_id':'AUDIT-LINK-REPAIR-'+digest[:20], 'viewpoint_claim_links':[],
+               'viewpoint_identity_candidates':[], 'viewpoint_identity_decisions':[]}
+    for item in packet['targets']:
+        old = item['before_link']; link = deepcopy(item['after_link'])
+        previous = states['viewpoint_identity_decisions', old['decision_id']]
+        candidate = deepcopy(states['viewpoint_identity_candidates', previous['identity_candidate_id']])
+        seed = sha256_json({'repair':digest, 'link':old['viewpoint_claim_link_id']})
+        candidate.update(revision=1, candidate_claim_ids=[old['claim_id']], candidate_viewpoint_ids=[old['viewpoint_id']], proposed_action='match_existing', generation_fingerprint=seed)
+        identity = {'claims':candidate['candidate_claim_ids'], 'viewpoints':candidate['candidate_viewpoint_ids'],
+                    'relations':candidate.get('seed_relation_ids',[]), 'action':candidate['proposed_action'],
+                    'blockers':candidate.get('blocker_codes',[]), 'coverage_snapshot_id':candidate.get('coverage_snapshot_id'), 'generation_fingerprint':seed}
+        if candidate.get('scope_manifest_sha256'): identity['scope_manifest_sha256']=candidate['scope_manifest_sha256']
+        candidate['identity_candidate_id']='VIC-'+sha256_json(identity)[:20]
+        decision = deepcopy(previous)
+        decision.update(revision=1, identity_decision_id='VID-'+seed[:20], identity_candidate_id=candidate['identity_candidate_id'],
+            input_sha256=seed, claim_link_decisions=[{'claim_id':old['claim_id'],'link_type':'supports'}],
+            review_artifact_sha256=sha256_json(reviews), semantic_call_artifact_sha256s=sorted(read_artifact(root/f'raw-{label}.json')['artifact_sha256'] for label in ('gpt','opus')),
+            reviewer_model_ids=sorted(['gpt-6.1-sol','claude-opus-5-5']), reviewer_kind='system', reviewer_id='audit_link_repair_dual_model_review', approval_basis='dual_model_consensus',
+            review_status='system_approved', created_at=stable_decided_at(root), policy_version='wang-audit-link-repair-v1',
+            reason='Full-own-source GPT upheld equivalent-link objection; exact supports postimage independently dual reviewed; source Claim and viewpoint unchanged.')
+        link['decision_id']=decision['identity_decision_id']
+        package['viewpoint_claim_links'].append(link); package['viewpoint_identity_candidates'].append(candidate); package['viewpoint_identity_decisions'].append(decision)
+    return package
+
+
+def run(campaign, root):
+    store = PostgresKnowledgeStore()
+    global_lock={'global_lock_path':str(BASE/'registry-cvp.lock')}
+    with exclusive_cvp_run_lock(global_lock):
+        states, packet=prepare(campaign, store)
+        collections=sorted({c for c,_ in states}); before=fingerprint(states,collections)
+        write_immutable(root/'packet.json',packet); write_immutable(root/'before.json',{'collections':collections,'pre_fingerprint_sha256':before})
+    write_derived(root/'progress.json',{'status':'reviewing','master_data_mutations':0})
+    reviews={}
+    ids={i['claim']['claim_id'] for i in packet['targets']}
+    for label,provider,model in [('gpt','codex','gpt-6.1-sol'),('opus','claude','claude-opus-5-5')]:
+        adapter=StructuredJsonReviewerAdapter(client=subscription_client(provider,model,'high'),prompt=PROMPT,response_model=Review,schema_name='audit_link_repair_review_v1',compact_payload=True)
+        adapter.max_request_bytes=500000
+        raw,_,_=review_call(adapter,packet,root,label)
+        result=Review.model_validate(raw)
+        if len(result.verdicts)!=len(ids) or {v.claim_id for v in result.verdicts}!=ids:
+            raise ValueError('repair review population mismatch')
+        reviews[label]=result.model_dump(mode='json')
+        if any(not v.approved or v.problems for v in result.verdicts):
+            raise ValueError('bounded supports repair not approved; no semantic retry')
+    write_immutable(root/'review-report.json',{'packet_sha256':sha256_json(packet),'reviews':reviews,'approved':True,'human_content_approval':False})
+    with exclusive_cvp_run_lock(global_lock):
+        live,current=prepare(campaign,store)
+        if current!=packet or fingerprint(live,collections)!=before: raise ValueError('pre-write Registry/source drift')
+        package=package_for(live,packet,reviews,root)
+        plan=store.plan_package(package,source_kind='wang_source_adjudicated_link_repair')
+        if len(plan.operations)!=3*len(ids) or any(o.collection not in package or (o.collection=='viewpoint_claim_links')!=(o.operation=='update') for o in plan.operations): raise ValueError('unexpected repair writes')
+        write_immutable(root/'effective-package.json',package); write_immutable(root/'dry-run-plan.json',json.loads(json.dumps(plan.as_dict())))
+    write_derived(root/'progress.json',{'status':'backup_before_apply','master_data_mutations':0})
+    out=subprocess.run(['scripts/backup-registry.sh','before-audit-link-'+sha256_json(str(root))[:24]],cwd=PROJECT,check=True,capture_output=True,text=True)
+    match=re.search(r'backup-registry: wrote (.+\.dump) \(',out.stdout)
+    if not match: raise ValueError('backup not reported')
+    backup=Path(match.group(1)).resolve()
+    listing=subprocess.run(['pg_restore','--list',str(backup)],check=True,capture_output=True,text=True)
+    if not listing.stdout.strip(): raise ValueError('empty restore catalog')
+    from backend.pipeline.viewpoint_cvp_recovery_executor import binding, resume_after_repair, load_campaign, run_logged, PYTHON
+    write_immutable(root/'backup.json',binding(backup))
+    with exclusive_cvp_run_lock(global_lock):
+        live,current=prepare(campaign,store)
+        if current!=packet or fingerprint(live,collections)!=before: raise ValueError('pre-apply drift')
+        replay=store.plan_package(package,source_kind='wang_source_adjudicated_link_repair')
+        if replay.as_dict()!=plan.as_dict(): raise ValueError('dry-run/apply drift')
+        if binding(backup)!=read_artifact(root/'backup.json'): raise ValueError('backup drift')
+        write_immutable(root/'apply-intent.json',{'policy':packet['policy'],'backup':binding(backup),'packet_sha256':sha256_json(packet)})
+        receipt=store.apply_plan(replay,metadata={'source_adjudicated_link_repair':str(root)},expected_registry_fingerprint_sha256=before,registry_collections=collections)
+        write_immutable(root/'apply-receipt.json',receipt)
+        expected=deepcopy(live)
+        for op in replay.operations: expected[op.collection,op.object_id]=stored_operation_payload(op)
+        post=snapshot(store)
+        if set(post)!=set(expected) or fingerprint(post,collections)!=fingerprint(expected,collections): raise ValueError('complete Registry readback mismatch')
+        for item in packet['targets']:
+            for source in item['sources']:
+                if file_sha256(Path(source['path']))!=source['file_sha256']: raise ValueError('physical source drift')
+        write_immutable(root/'verified-result.json',{'status':'applied_readback_verified','change_set_id':replay.change_set_id,'master_data_mutations':len(replay.operations),'claim_source_viewpoint_text_writes':0})
+    write_derived(root/'progress.json',{'status':'independent_audit_before_resume','master_data_mutations':len(replay.operations)})
+    continuation=root/'continuation'; continuation.mkdir(exist_ok=False)
+    # Audit once. A fresh disputed report goes to the standing own-source GPT
+    # final route, not back to Gemini until it happens to return pass.
+    cfg, schedule, manifest, groups = load_campaign(campaign)
+    state = read_artifact(campaign/'progress.json')
+    group = campaign/f"g{state['sequence']:03d}"
+    plans = list((group/'production/run/batches').glob('*/cvp-change-plan.json'))
+    if len(plans) != 1: raise ValueError('ambiguous original applied plan')
+    targets = sorted({o['payload']['viewpoint_id'] for o in read_artifact(plans[0])['operations'] if o['collection']=='viewpoint_claim_links'})
+    audit_root = continuation/'independent-reaudit'
+    run_logged([PYTHON, 'scripts/audit-library.py', '--scope', 'all', '--layers', '1,2,3,4',
+        '--claim-ids', ','.join(groups[state['group_key']]['claim_ids']), '--viewpoint-ids', ','.join(targets),
+        '--workers', '2', '--model', 'gemini-3.8-flash', '--out', audit_root, '--no-status-file'], continuation, 'independent-reaudit')
+    audit_path = audit_root/'audit.json'
+    from backend.pipeline.viewpoint_audit_source_adjudication import disputes, validate_population
+    resolution_path = None
+    if disputes(read_artifact(audit_path)):
+        validate_population(read_artifact(audit_path), groups[state['group_key']]['claim_ids'], targets)
+        adjudication_root = continuation/'audit-source-adjudication'
+        report = adjudicate(audit_path, adjudication_root, store, final_gpt=True)
+        if not report['actions'] or any(a['verdict']!='audit_objection_rejected' for a in report['actions']):
+            raise ValueError('post-repair own-source GPT upholds/unresolved objection; one repair exhausted, needs owner')
+        from backend.pipeline.viewpoint_audit_owner_resolution import create_gpt_resolution
+        resolution_path = continuation/'gpt-source-final-resolution.json'
+        create_gpt_resolution(audit_path, adjudication_root, resolution_path, store)
+    executable=Path(os.environ['CODEX_EXECUTABLE'])
+    result=resume_after_repair(campaign,continuation,BASE/'immediate-recovery-20261002-v1',executable,
+        saved_audit_path=audit_path, owner_resolution_path=resolution_path,
+        additional_proof_bindings=[binding(root/name) for name in ('packet.json','review-report.json','effective-package.json','dry-run-plan.json','apply-receipt.json','verified-result.json')])
+    write_derived(root/'progress.json',{'status':result['status'],'continuation':result})
+    return result
+
+
+def launch_repair(campaign, packet, report):
+    """One detached, locked execution per exact adjudication; no restart loop."""
+    select_repairs(packet, report)  # Out-of-scope decisions never launch a writer.
+    from backend.pipeline.viewpoint_cvp_campaign_runner import PYTHON
+    identity = sha256_json({'campaign':str(campaign.resolve()), 'handoff':report})
+    output = BASE/('audit-link-repair-'+identity[:24])
+    group = campaign/f"g{read_artifact(campaign/'progress.json')['sequence']:03d}"
+    started = group/'controlled-link-repair-start.json'
+    if output.exists() or started.exists(): raise ValueError('repair already attempted; no automatic retry')
+    # Reserve before launch so a crash cannot silently create a second attempt.
+    write_immutable(started, {'repair_root':str(output), 'handoff_sha256':report['artifact_sha256'], 'completed':False})
+    subprocess.run(['screen', '-dmS', 'wkp357-audit-link-repair', str(PYTHON), '-m',
+        'backend.pipeline.viewpoint_audit_link_repair', '--campaign-root', str(campaign),
+        '--output-root', str(output), '--wait-parent-pid', str(os.getpid())], cwd=PROJECT, check=True)
+    return output
+
+
+def main():
+    ap=argparse.ArgumentParser(description=__doc__); ap.add_argument('--campaign-root',type=Path,required=True); ap.add_argument('--output-root',type=Path,required=True); ap.add_argument('--wait-parent-pid',type=int); args=ap.parse_args()
+    campaign=args.campaign_root.resolve(); root=args.output_root.resolve()
+    if PROJECT.name!='wkp-357-worktree-per-session' or campaign.parent!=BASE or root.parent!=BASE: raise ValueError('only #357 independent roots allowed')
+    load_dotenv(PROJECT/'.env')
+    if args.wait_parent_pid:
+        for _ in range(60):
+            try: os.kill(args.wait_parent_pid,0)
+            except ProcessLookupError: break
+            time.sleep(1)
+        else: raise ValueError('parent campaign did not exit; no parallel repair')
+    with (BASE/'immediate-recovery-20261002-v1/recovery.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        from backend.pipeline.viewpoint_cvp_recovery_supervisor import remaining_producers, process_table, current_job_process_ids
+        if any(p not in current_job_process_ids() for p in remaining_producers(process_table(),BASE)): raise ValueError('another producer active')
+        if subprocess.check_output(['git','status','--porcelain'],cwd=PROJECT,text=True).strip(): raise ValueError('committed clean code required')
+        root.mkdir(exist_ok=False)
+        try: print(json.dumps(run(campaign,root)),flush=True)
+        except Exception as exc:
+            write_derived(root/'failure.json',{'error':str(exc),'applied':(root/'apply-receipt.json').exists(),'no_next_group_started':True})
+            write_derived(root/'progress.json',{'status':'stopped','error':str(exc),'applied':(root/'apply-receipt.json').exists()}); raise
+
+
+if __name__=='__main__': main()
