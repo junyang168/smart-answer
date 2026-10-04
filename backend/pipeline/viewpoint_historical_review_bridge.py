@@ -514,6 +514,9 @@ def verify_sealed_reverse_index(eid, reviewed, current, authenticated_item):
     if left!=right:
         raise CvpProductionBlocked([f'{eid}: EvidenceStep content changed, not just reverse index'])
     added=set(new_ids)-set(old_ids)
+    removed=set(old_ids)-set(new_ids)
+    if removed and not added:
+        return verify_sealed_anchor_exclusion(eid, reviewed, current, authenticated_item, removed)
     if not added or len(new_ids)!=len(set(new_ids)) or [cid for cid in new_ids if cid in set(old_ids)]!=old_ids:
         raise CvpProductionBlocked([f'{eid}: reverse index deletion/reordering/duplication'])
     for cid in added:
@@ -523,6 +526,56 @@ def verify_sealed_reverse_index(eid, reviewed, current, authenticated_item):
     return {'evidence_step_id':eid,'authority_kind':'sealed_final_additive_reverse_index',
             'final_candidate_sha256':authenticated_item['application']['artifact_sha256'],
             'added_claim_ids':sorted(added),'evidence_content_unchanged':True}
+
+
+def verify_sealed_anchor_exclusion(eid, reviewed, current, item, removed):
+    """Only exact replayed, independently accepted anchor exclusions qualify.
+
+    This is not a deletion waiver: the complete original application, applied
+    EvidenceStep lineage, each removed Claim's patch and reciprocal final graph
+    must all authenticate. The corpus is never modified by this reader.
+    """
+    from backend.pipeline.legacy_candidate_reconciliation import inspect_legacy_bundle
+    from backend.pipeline.legacy_auto_applied_review_reconciliation import verify_historical_replay
+    path = Path(item['path'])
+    bundle = inspect_legacy_bundle(path, validation_claim_ids=removed)
+    replay = verify_historical_replay(path, validation_claim_ids=removed)
+    if (bundle.get('reason') or not replay or
+            replay.get('replay_contract') != 'sealed_batched_exact_full_package_v1' or
+            not bundle.get('scoped_adjudication_structurally_validated') or
+            set(bundle.get('validated_adjudication_claim_ids', [])) != removed or
+            _read_binding({'path':str(path),'file_sha256':hashlib.sha256(path.read_bytes()).hexdigest()}) != item['payload']):
+        raise CvpProductionBlocked([f'{eid}: excluded anchor lacks exact historical replay'])
+    final,_ = _normalize_records(item['payload'])
+    survey = _normalize_claim_layer(_read_binding({'path':bundle['package_path'],
+                                                  'file_sha256':bundle['package_sha256']}))
+    original_claims = {c['claim_id']:c for c in survey['candidate_claims']}
+    for cid in removed:
+        row = bundle['review_rows'].get(cid, {})
+        result = bundle['adjudication_results'].get(cid, {})
+        original = original_claims.get(cid, {})
+        patch = result.get('openai', {}).get('patch', {})
+        indexes = patch.get('excluded_anchor_indexes', [])
+        anchors = original.get('anchors', [])
+        if (row.get('decision') != 'changes_suggested' or row.get('human_review_reason') or
+                row.get('spot_check_selected') or result.get('status') != 'auto_applied' or
+                result.get('human_review_reason') or result.get('openai', {}).get('decision') != 'accept' or
+                cid not in final.get('claims', {}) or eid in final['claims'][cid].get('evidence_step_ids', []) or
+                not any(isinstance(i,int) and 0 <= i < len(anchors) and
+                        anchors[i].get('evidence_id') == eid for i in indexes)):
+            raise CvpProductionBlocked([f'{eid}: removed Claim lacks accepted own anchor exclusion'])
+    left,right = deepcopy(_meaning(reviewed)),deepcopy(_meaning(current))
+    old = left.pop('produced_claim_ids', []); new = right.pop('produced_claim_ids', [])
+    if (left != right or len(old) != len(set(old)) or len(new) != len(set(new)) or
+            new != [cid for cid in old if cid not in removed]):
+        raise CvpProductionBlocked([f'{eid}: exclusion changed content/order or added references'])
+    history = verify_legacy_evidence_history(eid, final['evidence_steps'][eid], current,
+                                            replay['historical_replay_sha256'])
+    return {'evidence_step_id':eid,'authority_kind':'exact_replayed_applied_anchor_exclusion',
+            'removed_claim_ids':sorted(removed),'historical_replay':replay,'applied_history':history,
+            'review_binding':{'path':bundle['review_path'],'file_sha256':bundle['review_sha256']},
+            'adjudication_binding':{'path':bundle['adjudication_path'],'file_sha256':bundle['adjudication_sha256']},
+            'evidence_content_unchanged':True,'unrelated_human_findings_released':False}
 
 
 def main() -> None:

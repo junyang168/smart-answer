@@ -4,6 +4,50 @@ import json
 
 import pytest
 
+
+@pytest.mark.parametrize('mutation', [None, 'no_replay', 'hold', 'wrong_anchor',
+                                     'reciprocal', 'content', 'order', 'history'])
+def test_exact_sealed_anchor_exclusion_is_not_a_deletion_waiver(tmp_path, monkeypatch, mutation):
+    from backend.pipeline import viewpoint_historical_review_bridge as m
+    from backend.pipeline import legacy_candidate_reconciliation as legacy
+    from backend.pipeline import legacy_auto_applied_review_reconciliation as replay
+    p = tmp_path/'final.json'; p.write_text('{}')
+    old = {'produced_claim_ids':['C0','C1','C2'], 'statement':'unchanged'}
+    new = old | {'produced_claim_ids':['C1','C2']}
+    final = {'evidence_steps':{'E':deepcopy(new)}, 'claims':{'C0':{'evidence_step_ids':[]}}}
+    bundle = {'reason':None,'scoped_adjudication_structurally_validated':True,
+              'validated_adjudication_claim_ids':['C0'],
+              'review_rows':{'C0':{'decision':'changes_suggested'}},
+              'adjudication_results':{'C0':{'status':'auto_applied','openai':{
+                  'decision':'accept','patch':{'excluded_anchor_indexes':[0]}}}},
+              'package_path':str(p),'package_sha256':'sha','review_path':str(p),
+              'review_sha256':'sha','adjudication_path':str(p),'adjudication_sha256':'sha'}
+    if mutation == 'hold': bundle['adjudication_results']['C0']['human_review_reason']='held'
+    if mutation == 'wrong_anchor': bundle['adjudication_results']['C0']['openai']['patch']['excluded_anchor_indexes']=[1]
+    if mutation == 'reciprocal': final['claims']['C0']['evidence_step_ids']=['E']
+    if mutation == 'content': new['statement']='changed'; final['evidence_steps']['E']=deepcopy(new)
+    if mutation == 'order': new['produced_claim_ids']=['C2','C1']; final['evidence_steps']['E']=deepcopy(new)
+    monkeypatch.setattr(m,'_normalize_records',lambda payload:(final,{}))
+    monkeypatch.setattr(m,'_normalize_claim_layer',lambda payload:{'candidate_claims':[
+        {'claim_id':'C0','anchors':[{'evidence_id':'E'},{'evidence_id':'other'}]}]})
+    monkeypatch.setattr(m,'_read_binding',lambda b:{})
+    monkeypatch.setattr(legacy,'inspect_legacy_bundle',lambda *a,**k:bundle)
+    monkeypatch.setattr(replay,'verify_historical_replay',lambda *a,**k:
+        None if mutation=='no_replay' else {'replay_contract':'sealed_batched_exact_full_package_v1',
+                                          'historical_replay_sha256':'finalsha'})
+    def history(*args):
+        if mutation=='history': raise m.CvpProductionBlocked(['history drift'])
+        return {'verified':True}
+    monkeypatch.setattr(m,'verify_legacy_evidence_history',history)
+    item={'path':str(p),'payload':{},'application':{'artifact_sha256':'sealed'}}
+    if mutation:
+        with pytest.raises(m.CvpProductionBlocked): m.verify_sealed_reverse_index('E',old,new,item)
+    else:
+        proof=m.verify_sealed_reverse_index('E',old,new,item)
+        assert proof['removed_claim_ids']==['C0']
+        assert proof['authority_kind']=='exact_replayed_applied_anchor_exclusion'
+        assert proof['unrelated_human_findings_released'] is False
+
 from backend.api.canonical_repository.postgres_store import _normalize_records, record_content_sha
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.api.canonical_repository.viewpoint_production_safety import CvpProductionBlocked
