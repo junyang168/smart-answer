@@ -37,6 +37,27 @@ from backend.pipeline.viewpoint_resolution_runtime import PROMPT_DIR
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+def validate_completed_parent_audit(row, group_rows):
+    """Reconsume the exact completed-group decision at the source-repair gate."""
+    from backend.pipeline.viewpoint_cvp_campaign_runner import binding, read, validate_audit
+    if row['group_key'] not in group_rows or any(binding(b['path']) != b for b in row['bindings']):
+        raise CvpProductionBlocked(['completed parent proof physical drift'])
+    if binding(row['audit_path']) not in row['bindings']:
+        raise CvpProductionBlocked(['completed parent audit lacks physical binding'])
+    audited = read(row['audit_path'])
+    claim_path = row.get('claim_audit_path', row['audit_path'])
+    if binding(claim_path) not in row['bindings']:
+        raise CvpProductionBlocked(['completed parent Claim audit lacks physical binding'])
+    resolution_path = row.get('owner_resolution_path')
+    if resolution_path is not None and binding(resolution_path) not in row['bindings']:
+        raise CvpProductionBlocked(['completed parent resolution lacks physical binding'])
+    claims = group_rows[row['group_key']]['claim_ids']
+    validate_audit({'meta': audited['meta'], 'layers': {
+        '3': read(claim_path)['layers']['3'], '4': audited['layers']['4']}},
+        claims, row['viewpoint_ids'], owner_resolution_path=resolution_path)
+    return claims
+
+
 def verify_parent_current_pins(manifest: dict[str, Any], records: dict[tuple[str, str], dict[str, Any]]) -> None:
     pins: dict[tuple[str, str], tuple[int, str]] = {}
     def pin(collection, oid, revision, content_sha):
@@ -159,19 +180,10 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
     if repairs:
         proof_path=getattr(args,'parent_completed_proofs',None)
         if not proof_path: raise CvpProductionBlocked(['source repair requires physical completed-group audit proofs'])
-        from backend.pipeline.viewpoint_cvp_campaign_runner import binding, read, validate_audit
+        from backend.pipeline.viewpoint_cvp_campaign_runner import read
         group_rows={g['group_key']:g for g in manifest['groups']}
         for row in read(proof_path)['groups']:
-            if row['group_key'] not in group_rows or any(binding(b['path'])!=b for b in row['bindings']):
-                raise CvpProductionBlocked(['completed parent proof physical drift'])
-            if binding(row['audit_path']) not in row['bindings']:
-                raise CvpProductionBlocked(['completed parent audit lacks physical binding'])
-            audited=read(row['audit_path']); claim_path=row.get('claim_audit_path',row['audit_path'])
-            if binding(claim_path) not in row['bindings']:
-                raise CvpProductionBlocked(['completed parent Claim audit lacks physical binding'])
-            claims=group_rows[row['group_key']]['claim_ids']
-            validate_audit({'meta':audited['meta'],'layers':{'3':read(claim_path)['layers']['3'],'4':audited['layers']['4']}},claims,row['viewpoint_ids'])
-            completed_ids.update(claims)
+            completed_ids.update(validate_completed_parent_audit(row, group_rows))
     repaired_ids=completed_repair_parent_snapshot(manifest,records,repairs,completed_ids,wanted)
     claims = [records[("claims", cid)]["payload"] for cid in selected_ids]
     source_ids = {row["source_id"] for row in manifest["claim_packets"] if row["claim_id"] in wanted}

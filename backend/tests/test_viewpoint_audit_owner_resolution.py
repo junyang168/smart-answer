@@ -72,3 +72,21 @@ def test_no_owner_authorization_cannot_create_resolution(tmp_path):
     with pytest.raises(ValueError, match='explicit'):
         module.create_resolution(tmp_path/'audit', tmp_path, tmp_path/'out', object(),
                                  authorized_by='', authorization_quotes=[])
+
+
+def test_source_repair_preparer_reconsumes_completed_owner_resolution(tmp_path, monkeypatch):
+    from backend.pipeline.viewpoint_reviewed_cvp_prepare import validate_completed_parent_audit
+    audit, path, root = fixture(tmp_path, monkeypatch)
+    row = {'group_key': 'g', 'audit_path': str(tmp_path/'audit.json'),
+           'viewpoint_ids': ['v'], 'owner_resolution_path': str(path),
+           'bindings': [module.binding(tmp_path/'audit.json'), module.binding(path)]}
+    assert validate_completed_parent_audit(row, {'g': {'claim_ids': ['c']}}) == ['c']
+    assert audit['layers']['4']['results'][0]['verdict'] == 'disputed'
+    without = dict(row); without.pop('owner_resolution_path')
+    with pytest.raises(ValueError): validate_completed_parent_audit(without, {'g': {'claim_ids': ['c']}})
+    without_pin = dict(row, bindings=[module.binding(tmp_path/'audit.json')])
+    with pytest.raises(ValueError, match='physical binding'):
+        validate_completed_parent_audit(without_pin, {'g': {'claim_ids': ['c']}})
+    (root/'raw-opus.json').write_text('{}')
+    with pytest.raises(ValueError, match='physical'):
+        validate_completed_parent_audit(row, {'g': {'claim_ids': ['c']}})
