@@ -132,6 +132,7 @@ def build_proposer(
         ),
         response_model=CanonicalViewpointProposalResponse,
         schema_name="wang_canonical_viewpoint_proposal_v1",
+        compact_payload=True,
     )
 
 
