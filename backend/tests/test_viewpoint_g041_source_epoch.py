@@ -26,6 +26,16 @@ def test_audit_worker_never_restarts_existing_continuation(monkeypatch,tmp_path)
         worker.run()
 
 
+@pytest.mark.parametrize('failure',[{'error':'semantic refusal','registry_writes':0},
+    {'error':"module 'backend.pipeline.viewpoint_g041_transcript_repair' has no attribute 'write_derived'",'registry_writes':1}])
+def test_progress_resume_rejects_other_failures(monkeypatch,tmp_path,failure):
+    from backend.pipeline import viewpoint_g041_source_epoch_continuation as worker
+    monkeypatch.setattr(worker,'ROOT',tmp_path)
+    monkeypatch.setattr(worker.repair.old,'read_artifact',lambda p:failure)
+    with pytest.raises(ValueError,match='exact once-only zero-write'):
+        worker.run(saved_g040_progress_repair=True)
+
+
 def fixture(monkeypatch):
     source={'source_id':m.repair.old.SOURCE,'revision':2,'exact':'new-source'}
     fragment={'fragment_id':'F','revision':2,'source_id':m.repair.old.SOURCE}
