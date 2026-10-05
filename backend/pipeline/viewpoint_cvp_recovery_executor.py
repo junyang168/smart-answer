@@ -270,7 +270,7 @@ def verify_group_audit(root, cfg, schedule, manifest, groups, audit_path, output
     return proof
 
 
-def continuation_inputs(root, output, extra_completion=None, *, additional_source_repair_paths=()):
+def continuation_inputs(root, output, extra_completion=None, *, additional_source_repair_paths=(), source_epoch_recompletion_path=None):
     cfg, schedule, manifest, groups = load_campaign(root)
     seeds = read(cfg["completed_proofs"]["path"])["groups"][:]
     for row in schedule["schedule"]:
@@ -279,6 +279,9 @@ def continuation_inputs(root, output, extra_completion=None, *, additional_sourc
             seeds.append(read(completion))
     if extra_completion:
         seeds.append(extra_completion)
+    if source_epoch_recompletion_path is not None:
+        from backend.pipeline.viewpoint_g041_source_epoch import recompletion_seed
+        seeds=recompletion_seed(source_epoch_recompletion_path,seeds)
     keys = [s["group_key"] for s in seeds]
     if len(keys) != len(set(keys)):
         raise ValueError("duplicate completion proof")
@@ -336,7 +339,7 @@ def continuation_root(root, attempt):
     return root.parent / name
 
 
-def resume_after_repair(root, attempt, recovery_root, executable, *, additional_proof_bindings=(), additional_source_repair_paths=(), saved_audit_path=None, prior_model_batch=None, reuse_correction=False, owner_resolution_path=None, initial_prefix_only=False, allow_lossless_compact_config_migration=False, component_resolution_path=None, contextual_semantics=False):
+def resume_after_repair(root, attempt, recovery_root, executable, *, additional_proof_bindings=(), additional_source_repair_paths=(), saved_audit_path=None, prior_model_batch=None, reuse_correction=False, owner_resolution_path=None, initial_prefix_only=False, allow_lossless_compact_config_migration=False, component_resolution_path=None, contextual_semantics=False, source_epoch_recompletion_path=None):
     if contextual_semantics and prior_model_batch is not None:
         raise ValueError('new semantic policy cannot migrate old model-response approval')
     cfg, schedule, manifest, groups = load_campaign(root)
@@ -384,7 +387,13 @@ def resume_after_repair(root, attempt, recovery_root, executable, *, additional_
     output = continuation_root(root,attempt)
     if output.exists():
         raise ValueError("continuation root already exists; never overwrite/retry")
-    argv = continuation_inputs(root, output, extra, additional_source_repair_paths=additional_source_repair_paths) if additional_source_repair_paths else continuation_inputs(root, output, extra)
+    if source_epoch_recompletion_path is not None:
+        if prior_model_batch is not None or contextual_semantics or not additional_source_repair_paths:
+            raise ValueError('source epoch completion cannot combine model/policy migration')
+        argv=continuation_inputs(root,output,extra,additional_source_repair_paths=additional_source_repair_paths,
+            source_epoch_recompletion_path=source_epoch_recompletion_path)
+    else:
+        argv = continuation_inputs(root, output, extra, additional_source_repair_paths=additional_source_repair_paths) if additional_source_repair_paths else continuation_inputs(root, output, extra)
     if contextual_semantics:
         if cfg.get('cvp_policy'):
             raise ValueError('contextual migration already present; no repeated upgrade')

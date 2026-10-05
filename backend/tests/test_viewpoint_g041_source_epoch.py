@@ -2,8 +2,28 @@ from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
+from pathlib import Path
 
 from backend.pipeline import viewpoint_g041_source_epoch as m
+
+
+@pytest.mark.parametrize('sequence',[1,39,42,156])
+def test_recompletion_cannot_expand_affected_groups(sequence):
+    with pytest.raises(ValueError,match='only original affected'):
+        m.completion_from_saved_audit(sequence,Path('/foreign/audit.json'),
+            m.repair.APPLICATION_ROOT/'continuation/foreign')
+
+
+def test_recompletion_cannot_replace_another_seed():
+    with pytest.raises(ValueError,match='outside exact independent root'):
+        m.recompletion_seed(m.repair.APPLICATION_ROOT/'continuation/g041-verified/completion.json',[])
+
+
+def test_audit_worker_never_restarts_existing_continuation(monkeypatch,tmp_path):
+    from backend.pipeline import viewpoint_g041_source_epoch_continuation as worker
+    monkeypatch.setattr(worker,'ROOT',tmp_path)
+    with pytest.raises(ValueError,match='already attempted'):
+        worker.run()
 
 
 def fixture(monkeypatch):

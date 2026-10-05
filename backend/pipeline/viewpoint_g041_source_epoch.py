@@ -146,3 +146,87 @@ def bridge(*,claim_id,current_claim,current_evidence,current_fragments,source_re
         'old_review_not_relabelled':True,'master_data_mutations':0,'model_calls_executed':0,
         'approval_status':'not_human_approved'}
     return {**body,'artifact_sha256':repair.old.sha256_json(body)}
+
+
+def completion_from_saved_audit(sequence,audit_path,output,resolution_path=None):
+    """New-source completion beside, never over, the old group proof."""
+    from backend.pipeline.viewpoint_cvp_recovery_executor import load_campaign,binding as file_binding
+    from backend.pipeline.viewpoint_cvp_campaign_runner import validate_audit
+    from backend.pipeline.viewpoint_scoped_audit_disposition import scope_audit_disposition
+    from backend.api.canonical_repository.viewpoint_production_safety import accepted_grouping_audit_scope
+    if sequence not in {40,41} or output.parent != repair.APPLICATION_ROOT/'continuation':
+        raise ValueError('source epoch only original affected g040/g041 completions')
+    verified_applied(binding(),repair.old.PostgresKnowledgeStore())
+    cfg,schedule,manifest,groups=load_campaign(repair.CAMPAIGN)
+    group=repair.CAMPAIGN/f'g{sequence:03d}'
+    key=next(r['group_key'] for r in schedule['schedule'] if r['sequence']==sequence)
+    scope=group/'production/run/scope-run.json'
+    plans=list((group/'production/run/batches').glob('*/cvp-change-plan.json'))
+    if len(plans)!=1 or repair.old.read_artifact(scope)['disposition_status']!='complete':
+        raise ValueError('source epoch cannot promote incomplete old applied group')
+    readback=plans[0].parent/'cvp-readback-receipt.json'
+    if repair.old.read_artifact(readback).get('readback_status')!='verified':
+        raise ValueError('source epoch original CVP readback is missing')
+    targets=sorted({o['payload']['viewpoint_id'] for o in repair.old.read_artifact(plans[0])['operations']
+        if o['collection']=='viewpoint_claim_links'})
+    audit=repair.old.read_artifact(audit_path)
+    audit_base=repair.APPLICATION_ROOT/f'continuation/g{sequence:03d}-audit'
+    allowed={audit_base/'independent-reaudit/audit.json',audit_base/'content-blocked-fallback/assessment.json'}
+    from backend.pipeline.viewpoint_content_blocked_fallback import verify_saved_full_audit, KEY
+    # Supplementary reports retain the bound original provider audit. Validate
+    # every current complete model input rather than trusting an old verdict.
+    if Path(audit_path) not in allowed:
+        raise ValueError('source epoch audit outside fresh exact affected-group root')
+    audit_bindings=verify_saved_full_audit(audit_base/'independent-reaudit/audit.json')
+    validate_audit(audit,groups[key]['claim_ids'],targets,owner_resolution_path=resolution_path)
+    disposition=scope_audit_disposition(audit={'meta':audit['meta'],
+        'layers':{k:audit['layers'][k] for k in ('1','2')}},
+        manifest=accepted_grouping_audit_scope(manifest,'group:'+key),
+        audit_file_sha256=repair.old.file_sha256(audit_path),authorized_by=cfg['authorized_by'])
+    if disposition['status']!='passed':
+        raise ValueError('source epoch full-group mechanical disposition failed')
+    proof={'group_key':key,'viewpoint_ids':targets,'audit_path':str(audit_path),
+        'bindings':[file_binding(p) for p in [audit_path,plans[0],scope,readback,PACKAGE,
+            repair.APPLICATION_ROOT/'apply-receipt.json',repair.APPLICATION_ROOT/'verified-result.json',
+            repair.APPLICATION_ROOT/'backup.json',repair.APPLICATION_ROOT/'pg-restore-proof.json',
+            repair.ROOT/'packet.json',repair.ROOT/'raw-gpt.json',repair.ROOT/'raw-opus.json',
+            repair.ROOT/'review-report.json']],
+        'source_epoch_recompletion':True,'source_repair_binding':binding(),
+        'argument_routes_completed':False}
+    proof['bindings']+=audit_bindings
+    from backend.pipeline.viewpoint_g035_temporary_audit import validate as validate_exception
+    exception_bindings=validate_exception(audit)
+    if exception_bindings:
+        from backend.pipeline.viewpoint_content_blocked_fallback import KEY
+        proof.update(revisit_required=True,independent_audit_complete=False,
+            approval_basis='owner_conditional_content_blocked_subscription_assessment',
+            temporary_audit_exception_path=audit['meta'][KEY]['path'])
+        proof['bindings']+=exception_bindings
+    if resolution_path is not None:
+        proof['owner_resolution_path']=str(resolution_path)
+        proof['bindings']+=[file_binding(resolution_path),*repair.old.read_artifact(resolution_path)['bindings']]
+    if sequence==40:
+        proof['bindings'].append(file_binding(group/'completion.json'))
+        proof['replaces_original_completion_binding']=file_binding(group/'completion.json')
+    repair.old.write_immutable(output/'audit-disposition.json',disposition)
+    repair.old.write_immutable(output/'completion.json',proof)
+    return proof
+
+
+def recompletion_seed(path,seeds):
+    """Exactly g040, exact old seed, exact applied source epoch and new audit."""
+    expected=repair.APPLICATION_ROOT/'continuation/g040-verified/completion.json'
+    if Path(path)!=expected:
+        raise ValueError('source epoch completion replacement outside exact independent root')
+    proof=repair.old.read_artifact(expected)
+    cfg,schedule,manifest,groups=__import__('backend.pipeline.viewpoint_cvp_recovery_executor',fromlist=['load_campaign']).load_campaign(repair.CAMPAIGN)
+    key=next(r['group_key'] for r in schedule['schedule'] if r['sequence']==40)
+    matches=[s for s in seeds if s['group_key']==key]
+    old=repair.old.read_artifact(repair.CAMPAIGN/'g040/completion.json')
+    if len(matches)!=1 or matches[0]!=old or proof.get('source_repair_binding')!=binding() or proof.get('source_epoch_recompletion') is not True:
+        raise ValueError('source epoch must replace exactly the original g040 seed')
+    rebuilt=completion_from_saved_audit(40,Path(proof['audit_path']),expected.parent,
+        Path(proof['owner_resolution_path']) if proof.get('owner_resolution_path') else None)
+    if proof!=rebuilt:
+        raise ValueError('source epoch new completion reconstruction drift')
+    return [proof if s['group_key']==key else s for s in seeds]
