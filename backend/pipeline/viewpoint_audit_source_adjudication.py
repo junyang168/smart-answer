@@ -93,6 +93,18 @@ def validate_own_source_identity(source, own_sources, store):
         raise ValueError('foreign source')
 
 
+def occurrence_source_ids(claim):
+    """Legacy occurrences bind transcript_id, never title/lecture/path guesses.
+
+    These keys are only candidates: validate_own_source_identity still proves
+    exact registered active sermon identity when the fragment uses Source ID.
+    """
+    ids = {o.get('source_id') or o.get('transcript_id') for o in claim['occurrences']}
+    if not ids or any(not isinstance(s, str) or not s.strip() for s in ids):
+        raise ValueError('Claim occurrence has no exact source identity')
+    return ids
+
+
 def build_packet(audit_path, store):
     audit = read_artifact(audit_path)
     links = store.list_records('viewpoint_claim_links')
@@ -138,7 +150,7 @@ def build_packet(audit_path, store):
                 for span in (link.get('component_locator') or {}).get('canonical_spans', []):
                     if claim['statement'][span['start_char']:span['end_char']] != span['exact_text']:
                         raise ValueError('component span drift')
-            own_sources = {o['source_id'] for o in claim['occurrences']}
+            own_sources = occurrence_source_ids(claim)
             for b in bindings:
                 if b['evidence_step_id'] not in claim['evidence_step_ids']:
                     raise ValueError('foreign evidence')
