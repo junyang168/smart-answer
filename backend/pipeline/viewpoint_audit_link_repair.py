@@ -171,6 +171,10 @@ def prepare(campaign, store, *, owner_retire=False, saved_source_assessment_root
 
 
 def package_for(states, packet, reviews, root, *, identity_digest=None):
+    context_review=packet.get('policy',{}).get('policy_id')=='wang-g037-owner-context-review-v1'
+    if context_review:
+        from backend.pipeline.viewpoint_g037_context_review import validate_postimages
+        validate_postimages(packet)
     digest = identity_digest or sha256_json({'packet':packet, 'reviews':reviews})
     if packet.get('policy',{}).get('policy_id')=='wang-g015-owner-link-retirement-v1':
         if len(packet['targets'])!=1 or packet['targets'][0]['before_link']['viewpoint_claim_link_id']!=RETIRE_LINK:
@@ -195,23 +199,28 @@ def package_for(states, packet, reviews, root, *, identity_digest=None):
         candidate['identity_candidate_id']='VIC-'+sha256_json(identity)[:20]
         decision = deepcopy(previous)
         decision.update(revision=1, identity_decision_id='VID-'+seed[:20], identity_candidate_id=candidate['identity_candidate_id'],
-            input_sha256=seed, claim_link_decisions=[{'claim_id':old['claim_id'],'link_type':'supports'}],
+            input_sha256=seed, claim_link_decisions=[{'claim_id':old['claim_id'],'link_type':link['link_type']}],
             review_artifact_sha256=sha256_json(reviews), semantic_call_artifact_sha256s=sorted(read_artifact(root/f'raw-{label}.json')['artifact_sha256'] for label in ('gpt','opus')),
             reviewer_model_ids=sorted(['gpt-6.1-sol','claude-opus-5-5']), reviewer_kind='system', reviewer_id='audit_link_repair_dual_model_review', approval_basis='dual_model_consensus',
             review_status='system_approved', created_at=stable_decided_at(root), policy_version='wang-audit-link-repair-v1',
             reason='Full-own-source GPT upheld equivalent-link objection; exact supports postimage independently dual reviewed; source Claim and viewpoint unchanged.')
         link['decision_id']=decision['identity_decision_id']
+        if context_review:
+            decision.update(policy_version='wang-g037-owner-context-review-v1',
+                reason='Owner-authorized single contextual re-review; exact preserved equivalence or supports postimage independently dual reviewed; historical refusal retained; Claim and viewpoint unchanged.')
         package['viewpoint_claim_links'].append(link); package['viewpoint_identity_candidates'].append(candidate); package['viewpoint_identity_decisions'].append(decision)
     return package
 
 
 def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storage_review_from=None,
         human_review_from=None, human_handoff=None, human_decisions=(), relation_review_from=None,
-        saved_source_assessment_root=None):
+        saved_source_assessment_root=None, owner_g037_context_from=None):
     store = PostgresKnowledgeStore()
     global_lock={'global_lock_path':str(BASE/'registry-cvp.lock')}
     if owner_retire and owner_identity_g033:
         raise ValueError('owner scopes cannot be combined')
+    if owner_g037_context_from and any((owner_retire,owner_identity_g033,storage_review_from,human_review_from,human_handoff,human_decisions,relation_review_from,saved_source_assessment_root)):
+        raise ValueError('g037 context review cannot combine other authorities')
     if saved_source_assessment_root and any((owner_retire,owner_identity_g033,human_review_from)):
         raise ValueError('saved source assessment permits only existing narrow supports route')
     if storage_review_from and not owner_identity_g033: raise ValueError('storage correction requires exact g033 owner scope')
@@ -257,18 +266,37 @@ def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storag
         elif not human_review_from:
             identity_repair.propose(campaign,root,store,storage_review_from=storage_review_from)
     def prepare_current():
-        return identity_repair.prepare(campaign,root,store) if owner_identity_g033 else prepare(campaign,store,owner_retire=owner_retire,
+        states,packet=identity_repair.prepare(campaign,root,store) if owner_identity_g033 else prepare(campaign,store,owner_retire=owner_retire,
             saved_source_assessment_root=saved_source_assessment_root)
+        if owner_g037_context_from:
+            from backend.pipeline.viewpoint_g037_context_review import prepare as context_prepare
+            if read_artifact(campaign/'progress.json')['sequence']!=37:
+                raise ValueError('context review authorizes only g037')
+            packet=context_prepare(packet,states,owner_g037_context_from,BASE)
+        return states,packet
     with exclusive_cvp_run_lock(global_lock):
         states, packet=prepare_current()
         collections=sorted({c for c,_ in states}); before=fingerprint(states,collections)
         if human_review_from and packet != old_packet: raise ValueError('human resume semantic postimage drift')
         write_immutable(root/'packet.json',packet); write_immutable(root/'before.json',{'collections':collections,'pre_fingerprint_sha256':before})
+        if owner_g037_context_from:
+            from backend.pipeline.viewpoint_g037_context_review import reserve, PROMPT as context_prompt
+            # Verify both exact transports before reserving/calling either model.
+            preflight={}
+            for provider,model in [('codex','gpt-6.1-sol'),('claude','claude-opus-5-5')]:
+                adapter=link_review_adapter(subscription_client(provider,model,'high'),context_prompt)
+                proof=adapter.request_encoding_proof(packet)
+                if adapter.request_bytes(packet)>500000:
+                    raise ValueError('context review request exceeds frozen ceiling')
+                preflight[provider]=proof
+            write_immutable(root/'request-preflight.json',preflight)
+            reserve(root,owner_g037_context_from,BASE)
     write_derived(root/'progress.json',{'status':'reviewing','master_data_mutations':0})
     reviews={}
     ids={i['claim']['claim_id'] for i in packet['targets']}
     for label,provider,model in [('gpt','codex','gpt-6.1-sol'),('opus','claude','claude-opus-5-5')]:
         prompt=identity_repair.PROMPT if owner_identity_g033 else RETIRE_PROMPT if owner_retire else PROMPT
+        if owner_g037_context_from: prompt=context_prompt
         adapter=link_review_adapter(subscription_client(provider,model,'high'),prompt,
             legacy_serialization=bool(human_review_from or owner_identity_g033 or owner_retire))
         raw,calls,_=review_call(adapter,packet,root,label)
@@ -370,6 +398,7 @@ def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storag
     if storage_review_from: proof_names.append('mechanical-review-source.json')
     if relation_review_from: proof_names.extend(['relation-review-source.json','metadata-materialization-contract.json'])
     if authority is not None: proof_names.append('human-execution-authority.json')
+    if owner_g037_context_from: proof_names.extend(['owner-authorization.json','request-preflight.json'])
     result=resume_after_repair(campaign,continuation,BASE/'immediate-recovery-20261002-v1',executable,
         saved_audit_path=audit_path, owner_resolution_path=resolution_path,
         additional_proof_bindings=[binding(root/name) for name in proof_names])
@@ -400,6 +429,7 @@ def main():
     ap.add_argument('--owner-g033-relation-review-from',type=Path)
     ap.add_argument('--codex-executable',type=Path)
     ap.add_argument('--saved-source-assessment-root',type=Path)
+    ap.add_argument('--owner-g037-context-from',type=Path)
     ap.add_argument('--human-review-from',type=Path)
     ap.add_argument('--human-handoff',type=Path)
     ap.add_argument('--human-decision',type=Path,action='append',default=[])
@@ -425,7 +455,7 @@ def main():
         try: print(json.dumps(run(campaign,root,owner_retire=args.owner_retire_g015_link,owner_identity_g033=args.owner_identity_g033,storage_review_from=args.owner_g033_storage_review_from,
             human_review_from=args.human_review_from,human_handoff=args.human_handoff,human_decisions=args.human_decision,
             relation_review_from=args.owner_g033_relation_review_from,
-            saved_source_assessment_root=args.saved_source_assessment_root)),flush=True)
+            saved_source_assessment_root=args.saved_source_assessment_root,owner_g037_context_from=args.owner_g037_context_from)),flush=True)
         except Exception as exc:
             write_derived(root/'failure.json',{'error':str(exc),'applied':(root/'apply-receipt.json').exists(),'no_next_group_started':True})
             write_derived(root/'progress.json',{'status':'stopped','error':str(exc),'applied':(root/'apply-receipt.json').exists()}); raise
