@@ -23,7 +23,8 @@ SYSTEM = ('Read-only supplementary assessment of fidelity to the complete suppli
 def cached_provider_binding(model, prompt, schema):
     key=hashlib.sha256(f'{model}\n{prompt}'.encode()).hexdigest()
     path=CACHE/'providers'/(key+'.json')
-    if not path.exists(): return None
+    if not path.exists():
+        return None
     receipt=read_artifact(path); content_block(receipt)
     if receipt['prompt']!=prompt or receipt['schema']!=schema or receipt['model']!=model:
         raise ValueError('archived provider receipt input drift')
@@ -65,6 +66,17 @@ def seed_saved_g035(assessment_path):
 def content_block(receipt):
     if receipt.get('model') != 'gemini-3.8-flash':
         raise ValueError('fallback requires actual configured Gemini audit')
+    if receipt.get('archive_kind')=='legacy_exact_model_prompt_cache_v1':
+        cached=receipt['archive_binding']
+        key=hashlib.sha256(f"{receipt['model']}\n{receipt['prompt']}".encode()).hexdigest()
+        if (Path(cached['path']).name!=key+'.json' or binding(cached['path'])!=cached
+                or read_artifact(Path(cached['path']))!=receipt['recorded_verdict']):
+            raise ValueError('legacy exact model/request/cache SHA drift')
+        verdict=receipt['recorded_verdict']
+        if (set(verdict)!={'verdict','issue','reason'} or verdict['verdict']!='blocked' or verdict['issue']!='other'
+                or verdict['reason'] not in {f'審計模型的安全過濾器擋下了這一條（{r}），沒有判讀。' for r in ('PROHIBITED_CONTENT','SAFETY')}):
+            raise ValueError('legacy result is not exact transport content block')
+        return
     raw = receipt['provider_response']
     reason = (raw.get('promptFeedback') or {}).get('blockReason')
     if reason is None:
@@ -73,6 +85,42 @@ def content_block(receipt):
             reason = candidates[0].get('finishReason')
     if reason not in {'PROHIBITED_CONTENT', 'SAFETY'}:
         raise ValueError('not a provider content block; no fallback')
+
+def archived_block_binding(layer, identity, prompt, schema):
+    """Bind existing authentic model/request-addressed result; never fabricate raw HTTP."""
+    from dotenv import dotenv_values
+    project=Path(__file__).resolve().parents[2]
+    settings=dotenv_values(project/'.env')
+    key=hashlib.sha256(f'gemini-3.8-flash\n{prompt}'.encode()).hexdigest()
+    cache=Path(settings['DATA_BASE_DIR'])/'wang-knowledge-platform/staging/reports/library-audit/.judgements'/(key+'.json')
+    if not cache.is_file():raise ValueError('missing actual legacy model/request cache')
+    receipt={'model':'gemini-3.8-flash','archive_kind':'legacy_exact_model_prompt_cache_v1',
+        'archive_binding':binding(cache),'recorded_verdict':read_artifact(cache),'prompt':prompt,'schema':schema}
+    content_block(receipt)
+    path=CACHE/'providers'/(key+'.json');write_immutable(path,receipt)
+    return binding(path)
+
+def verify_saved_full_audit(audit_path):
+    """Rebuild every current prompt; consume only exact cached full-input results."""
+    from dotenv import dotenv_values
+    settings=dotenv_values(Path(__file__).resolve().parents[2]/'.env')
+    cache_root=Path(settings['DATA_BASE_DIR'])/'wang-knowledge-platform/staging/reports/library-audit/.judgements'
+    audit=read_artifact(audit_path);bindings=[binding(audit_path)]
+    if audit['meta']['model']!='gemini-3.8-flash':raise ValueError('foreign saved audit')
+    for layer,key in (('3','claim_id'),('4','viewpoint_id')):
+        report=audit['layers'][layer]
+        if not report['complete'] or any(report.get(k,0) for k in ('model_errors','no_source_text')):
+            raise ValueError('saved audit incomplete')
+        for row in report['results']:
+            if row.get('paragraphs_dropped_to_pass_filter',0):raise ValueError('saved audit shortened original')
+            prompt,schema,sources=capture(layer,row[key])
+            cache=cache_root/(hashlib.sha256(f'gemini-3.8-flash\n{prompt}'.encode()).hexdigest()+'.json')
+            if not cache.is_file():raise ValueError('saved assessment no longer binds current complete input')
+            response=read_artifact(cache)
+            if any(row.get(k)!=v for k,v in response.items() if k!='provider_content_block'):
+                raise ValueError('saved actual full-input judgment drift')
+            bindings.extend([binding(cache),*sources])
+    return list({b['path']:b for b in bindings}.values())
 
 def capture(layer, identity):
     import importlib.util
@@ -141,7 +189,7 @@ def validate(audit):
     if (manifest['policy_binding']!=binding(POLICY) or manifest.get('revisit_required') is not True
             or manifest.get('independent') is not False):
         raise ValueError('fallback policy/disclosure drift')
-    bindings=[marker,manifest['policy_binding'],manifest['original_audit_binding']]
+    bindings=[marker,manifest['policy_binding'],manifest['original_audit_binding'],manifest['original_report_binding']]
     for b in bindings:
         if binding(b['path'])!=b: raise ValueError('fallback original evidence drift')
     proofs=[]
@@ -152,6 +200,8 @@ def validate(audit):
             if binding(evidence['path'])!=evidence: raise ValueError('fallback physical source/raw drift')
             bindings.append(evidence)
         receipt=read_artifact(Path(p['provider_binding']['path'])); content_block(receipt)
+        if receipt.get('archive_binding'):
+            bindings.append(receipt['archive_binding'])
         for evidence in receipt.get('archive_bindings',[]):
             if binding(evidence['path'])!=evidence: raise ValueError('archived provider evidence drift')
             bindings.append(evidence)
@@ -176,6 +226,14 @@ def validate(audit):
                 or 'model: gpt-6.1-sol' not in raw['stderr'] or 'reasoning effort: high' not in raw['stderr']):
             raise ValueError('fallback actual backend/full input/response drift')
     original=read_artifact(Path(manifest['original_audit_binding']['path']))
+    report=read_artifact(Path(manifest['original_report_binding']['path']))
+    augmented=deepcopy(report)
+    for p in proofs:
+        key='claim_id' if p['layer']=='3' else 'viewpoint_id'
+        row=next(r for r in augmented['layers'][p['layer']]['results'] if r[key]==p['identity'])
+        if row['verdict']!='blocked':raise ValueError('archive receipt cannot alter a substantive judgment')
+        row['provider_content_block']=p['provider_binding']
+    if augmented!=original:raise ValueError('archive metadata changed original verdict/input')
     expected=derive(original,proofs); expected['meta'][KEY]=marker
     if set(audit['layers'])=={'3','4'}: expected['layers']={k:expected['layers'][k] for k in ('3','4')}
     if audit!=expected: raise ValueError('fallback altered other verdicts/counters/disclosure')
@@ -196,9 +254,14 @@ def apply(audit_path, output):
     proof_bindings=[]; proofs=[]
     for layer,key,row in blocked:
         provider=row.get('provider_content_block')
-        if not provider or binding(provider['path'])!=provider: raise ValueError('missing original content-block receipt')
-        receipt=read_artifact(Path(provider['path'])); content_block(receipt)
         prompt,schema,sources=capture(layer,row[key])
+        if not provider:
+            provider=archived_block_binding(layer,row[key],prompt,schema)
+            # Separate metadata view below binds the original report. Original
+            # verdict/cache is untouched; archive receipt is not claimed as HTTP raw.
+            row['provider_content_block']=provider
+        if binding(provider['path'])!=provider: raise ValueError('missing original content-block receipt')
+        receipt=read_artifact(Path(provider['path'])); content_block(receipt)
         if prompt!=receipt['prompt'] or schema!=receipt['schema']: raise ValueError('full current audit input drift')
         # Global exact-input reservation survives recovery-root changes.
         root=CACHE/sha256_json({'layer':layer,'identity':row[key],'provider':provider,
@@ -227,9 +290,14 @@ def apply(audit_path, output):
                 if client.last_raw_response is not None: write_immutable(root/'raw-gpt.json',client.last_raw_response)
                 write_immutable(root/'failure.json',{'error':str(exc),'no_retry':True}); raise
         proofs.append(p); proof_bindings.append(binding(proof_path))
+    original_path=audit_path
+    original=read_artifact(audit_path)
+    if original!=audit:
+        audit_path=output/'archived-receipt-assessment-input.json'
+        write_immutable(audit_path,audit)
     path=output/'fallback-manifest.json'
     write_immutable(path,{'policy_binding':binding(POLICY),'original_audit_binding':binding(audit_path),
-        'proof_bindings':proof_bindings,'revisit_required':True,'independent':False})
+        'original_report_binding':binding(original_path),'proof_bindings':proof_bindings,'revisit_required':True,'independent':False})
     result=derive(audit,proofs); result['meta'][KEY]=binding(path); validate(result)
     write_immutable(output/'assessment.json',result)
     return output/'assessment.json'

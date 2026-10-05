@@ -32,7 +32,7 @@ def verify_transition(live, before, packet, plan):
         raise ValueError('whole Registry reverse fingerprint drift')
     return reverse
 
-def run(campaign, repair, output, prior_adjudication):
+def run(campaign, repair, output, prior_adjudication, saved_audit=None):
     from backend.pipeline.viewpoint_authorized_source_repair_357 import snapshot,fingerprint,Review,review_call
     from backend.pipeline.viewpoint_audit_link_repair import BASE,PROJECT,PROMPT,package_for
     from backend.pipeline.viewpoint_cvp_recovery_executor import load_campaign,run_logged,PYTHON,binding,resume_after_repair
@@ -75,9 +75,14 @@ def run(campaign, repair, output, prior_adjudication):
             if len(plans)!=1:raise ValueError('original group plan ambiguous')
             targets=sorted({o['payload']['viewpoint_id'] for o in read_artifact(plans[0])['operations'] if o['collection']=='viewpoint_claim_links'})
             audit_root=output/'independent-reaudit'
-            run_logged([PYTHON,'scripts/audit-library.py','--scope','all','--layers','1,2,3,4','--claim-ids',','.join(groups[state['group_key']]['claim_ids']),
-                '--viewpoint-ids',','.join(targets),'--workers','2','--model','gemini-3.8-flash','--out',audit_root,'--no-status-file','--preserve-full-context'],output,'independent-reaudit')
-            audit_path=apply(audit_root/'audit.json',output/'content-blocked-fallback');resolution_path=None
+            if saved_audit is None:
+                run_logged([PYTHON,'scripts/audit-library.py','--scope','all','--layers','1,2,3,4','--claim-ids',','.join(groups[state['group_key']]['claim_ids']),
+                    '--viewpoint-ids',','.join(targets),'--workers','2','--model','gemini-3.8-flash','--out',audit_root,'--no-status-file','--preserve-full-context'],output,'independent-reaudit')
+                saved_audit=audit_root/'audit.json'
+            from backend.pipeline.viewpoint_content_blocked_fallback import verify_saved_full_audit
+            saved_bindings=verify_saved_full_audit(saved_audit)
+            write_immutable(output/'saved-full-audit-proof.json',{'bindings':saved_bindings,'no_gemini_replay':True})
+            audit_path=apply(saved_audit,output/'content-blocked-fallback');resolution_path=None
             if disputes(read_artifact(audit_path)):
                 resolution_path=output/'reused-source-resolution.json'
                 create(audit_path,prior_adjudication,resolution_path,store)
@@ -85,7 +90,8 @@ def run(campaign, repair, output, prior_adjudication):
             proof_files=['packet.json','raw-gpt.json','raw-opus.json','review-report.json','effective-package.json','dry-run-plan.json','backup.json','apply-intent.json','apply-receipt.json','verified-result.json']
             result=resume_after_repair(campaign,output/'continuation',BASE/'immediate-recovery-20261002-v1',Path(os.environ['CODEX_EXECUTABLE']),
                 saved_audit_path=audit_path,owner_resolution_path=resolution_path,
-                additional_proof_bindings=[binding(repair/n) for n in proof_files]+[binding(output/'preflight.json')])
+                additional_proof_bindings=[binding(repair/n) for n in proof_files]+saved_bindings+
+                    [binding(output/'preflight.json'),binding(output/'saved-full-audit-proof.json')])
             write_immutable(output/'result.json',result);return result
         except Exception as exc:
             write_immutable(output/'failure.json',{'error':str(exc),'repair_already_applied':True,'no_retry':True});raise
@@ -94,4 +100,5 @@ if __name__=='__main__':
     import argparse
     ap=argparse.ArgumentParser(description=__doc__)
     for key in ('campaign','repair','output','prior-adjudication'):ap.add_argument('--'+key,type=Path,required=True)
-    a=ap.parse_args();print(run(a.campaign,a.repair,a.output,a.prior_adjudication))
+    ap.add_argument('--saved-audit',type=Path)
+    a=ap.parse_args();print(run(a.campaign,a.repair,a.output,a.prior_adjudication,a.saved_audit))

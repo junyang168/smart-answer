@@ -122,3 +122,38 @@ def test_standalone_reader_import_and_full_context_no_trimming():
         def judge(self,prompt,schema):self.calls.append(prompt);return {'verdict':'blocked'}
     model=Blocked();answer,used=reader._judge_trimming_on_block(model,lambda ps:'|'.join(ps),['all','full','original'],{})
     assert answer['verdict']=='blocked' and used==3 and model.calls==['all|full|original']
+
+@pytest.mark.parametrize('change',['none','sha','prompt','model','shape','quota'])
+def test_legacy_exact_transport_cache_not_fake_provider_raw(tmp_path,change):
+    import hashlib
+    prompt='complete own source request';model='gemini-3.8-flash'
+    path=tmp_path/(hashlib.sha256(f'{model}\n{prompt}'.encode()).hexdigest()+'.json')
+    verdict={'verdict':'blocked','issue':'other','reason':'審計模型的安全過濾器擋下了這一條（PROHIBITED_CONTENT），沒有判讀。'}
+    write_immutable(path,verdict)
+    receipt={'model':model,'archive_kind':'legacy_exact_model_prompt_cache_v1',
+        'prompt':prompt,'schema':{},'archive_binding':m.binding(path),'recorded_verdict':verdict}
+    if change=='none':m.content_block(receipt);assert 'provider_response' not in receipt;return
+    if change=='sha':path.write_text('{}')
+    elif change=='prompt':receipt['prompt']='different full source'
+    elif change=='model':receipt['model']='other-model'
+    elif change=='shape':receipt['recorded_verdict']['verdict']='same'
+    else:receipt['recorded_verdict']['reason']='quota'
+    with pytest.raises(ValueError):m.content_block(receipt)
+
+@pytest.mark.parametrize('change',['none','cache','prompt','trimmed'])
+def test_saved_audit_full_current_request_cache_reconstruction(tmp_path,monkeypatch,change):
+    import hashlib
+    path,old,_,_=fixture(tmp_path,monkeypatch)
+    monkeypatch.setattr('dotenv.dotenv_values',lambda *args:{'DATA_BASE_DIR':str(tmp_path)})
+    cache=tmp_path/'wang-knowledge-platform/staging/reports/library-audit/.judgements'
+    prompts={}
+    for layer,key in (('3','claim_id'),('4','viewpoint_id')):
+        for row in old['layers'][layer]['results']:
+            prompt=f'full prompt {layer} {row[key]}';prompts[layer,row[key]]=prompt
+            p=cache/(hashlib.sha256(f'gemini-3.8-flash\n{prompt}'.encode()).hexdigest()+'.json')
+            write_immutable(p,{k:row[k] for k in ('verdict','reason') if k in row})
+            if change=='cache' and layer=='4':p.write_text('{"verdict":"same"}')
+    if change=='trimmed':old['layers']['3']['results'][0]['paragraphs_dropped_to_pass_filter']=1;path.write_text(json.dumps(old))
+    monkeypatch.setattr(m,'capture',lambda l,i:(prompts[l,i]+('changed' if change=='prompt' else ''),{},[]))
+    if change=='none':assert m.verify_saved_full_audit(path);return
+    with pytest.raises(ValueError):m.verify_saved_full_audit(path)
