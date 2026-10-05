@@ -5,6 +5,54 @@ from backend.pipeline.viewpoint_lineage_inventory import build_lineage_inventory
 from backend.pipeline.viewpoint_lineage_inventory import discover_review_inputs
 
 
+def test_applied_review_discovery_requires_exact_event_operation_and_unique_reason(tmp_path):
+    from copy import deepcopy
+    from backend.pipeline.viewpoint_lineage_inventory import applied_review_match
+    from backend.pipeline.ai_review_ledger import Verdict, review_reason
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    import hashlib
+    package = tmp_path/'input.json'; package.write_text('{}')
+    pb = {'path':str(package), 'file_sha256':hashlib.sha256(package.read_bytes()).hexdigest()}
+    variants = []
+    for index in range(2):
+        p = tmp_path/f'review{index}.json'
+        p.write_text(json.dumps({'source':{'package_sha256':pb['file_sha256']},
+           'claim_reviews':[{'claim_id':'C1','decision':'pass','rationale':f'reason{index}',
+             'issues':[],'routing_status':'ai_reviewed'}]}))
+        variants.append({'review_binding':{'path':str(p),'file_sha256':hashlib.sha256(p.read_bytes()).hexdigest()},
+                         'review_input_binding':pb})
+    before = {'claim_id':'C1','statement':'same','revision':2,'review_status':'candidate'}
+    rb = variants[0]['review_binding']
+    reason = review_reason(Verdict('C1','pass','ai_consensus_reviewed','reason0',rb['path'],rb['file_sha256']))
+    after = before | {'revision':3,'review_status':'ai_consensus_reviewed',
+                      'review_note':reason,'reviewed_by':'independent_ai_review'}
+    event = {'event_id':'R','change_set_id':'K','source_kind':'review_decision','status':'applied',
+       'reviewer_kind':'ai','reviewer_id':'independent_ai_review','decision':'ai_consensus_reviewed',
+       'reason':reason,'artifact':{'change_set_id':'K'},'metadata':{'review_event_id':'R'},
+       'before':before,'after':after,'before_sha':record_content_sha(before),
+       'after_sha':record_content_sha(after),'source_sha':record_content_sha(before),
+       'fingerprint':sha256_json({'review_event_id':'R','collection':'claims','object_id':'C1'}),
+       'operation':'update','operation_count':1}
+    assert applied_review_match('C1',variants,[event]) == variants[:1]
+    for key,value in [('status','failed'),('reviewer_kind','human'),('source_kind','other'),
+                      ('reason','prefix alone'),('metadata',{}),('artifact',{}),
+                      ('fingerprint','wrong'),('before_sha','wrong'),('after_sha','wrong'),
+                      ('source_sha','wrong'),('operation','create'),('operation_count',2)]:
+        broken = deepcopy(event); broken[key]=value
+        assert applied_review_match('C1',variants,[broken]) == variants
+    broken = deepcopy(event);broken['after']['statement']='changed'
+    broken['after_sha']=record_content_sha(broken['after'])
+    assert applied_review_match('C1',variants,[broken]) == variants
+    # Two distinct applied reasons stay ambiguous; neither date nor pass wins.
+    second = deepcopy(event); rb=variants[1]['review_binding']
+    second['reason']=review_reason(Verdict('C1','pass','ai_consensus_reviewed','reason1',rb['path'],rb['file_sha256']))
+    second['after']['review_note']=second['reason'];second['after_sha']=record_content_sha(second['after'])
+    assert applied_review_match('C1',variants,[event,second]) == variants
+    # Physical SHA drift cannot be repaired by an apparently matching note.
+    tmp_path.joinpath('review0.json').write_text('{}')
+    assert applied_review_match('C1',variants,[event]) == variants
+
+
 def test_later_review_input_discovery_matches_current_not_old_candidate(tmp_path):
     import hashlib
     from copy import deepcopy

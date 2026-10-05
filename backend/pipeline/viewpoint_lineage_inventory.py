@@ -14,10 +14,97 @@ from pathlib import Path
 from typing import Any
 
 from backend.api.canonical_repository.knowledge_models import ClaimRecord
-from backend.api.canonical_repository.postgres_store import _normalize_records, _substantive_payload
+from backend.api.canonical_repository.postgres_store import _normalize_records, _substantive_payload, record_content_sha
 from backend.api.canonical_repository.reviewed_candidate_contract import validate_reviewed_candidate_artifact
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.api.canonical_repository.viewpoint_production_safety import validate_content_addressed
+
+
+def applied_review_match(claim_id, variants, events):
+    """Discover the uniquely recorded legacy review; never grant eligibility.
+
+    Legacy events record a truncated artifact hash in their reason. Compare the
+    complete deterministic reason, applied before/after version, event and
+    operation ledger, not that prefix alone. The full historical bridge remains
+    mandatory after discovery and verifies the full physical review/input SHAs.
+    """
+    from backend.pipeline.ai_review_ledger import Verdict, review_reason
+    from copy import deepcopy
+    matched = set()
+    if any(e['reviewer_kind'] == 'human' for e in events):
+        return variants
+    for event in events:
+        before, after = event['before'], event['after']
+        left, right = deepcopy(before), deepcopy(after)
+        for payload in (left, right):
+            for key in ('revision', 'review_status', 'review_note', 'reviewed_by', 'reviewed_at'):
+                payload.pop(key, None)
+        if (event['status'] != 'applied' or event['source_kind'] != 'review_decision'
+                or event['reviewer_kind'] != 'ai' or event['decision'] != 'ai_consensus_reviewed'
+                or before.get('claim_id') != claim_id or after.get('claim_id') != claim_id
+                or after.get('revision') != before.get('revision', 0) + 1 or left != right
+                or after.get('review_status') != event['decision']
+                or after.get('review_note') != event['reason']
+                or after.get('reviewed_by') != event['reviewer_id']
+                or event['before_sha'] != record_content_sha(before)
+                or event['after_sha'] != record_content_sha(after)
+                or event['source_sha'] != event['before_sha']
+                or event['operation'] != 'update' or event['operation_count'] != 1
+                or event['metadata'] != {'review_event_id': event['event_id']}
+                or event['artifact'] != {'change_set_id': event['change_set_id']}
+                or event['fingerprint'] != sha256_json({'review_event_id': event['event_id'],
+                        'collection': 'claims', 'object_id': claim_id})):
+            continue
+        for index, variant in enumerate(variants):
+            rb, pb = variant['review_binding'], variant['review_input_binding']
+            raw = Path(rb['path']).read_bytes(); package = Path(pb['path']).read_bytes()
+            if hashlib.sha256(raw).hexdigest() != rb['file_sha256'] or hashlib.sha256(package).hexdigest() != pb['file_sha256']:
+                continue
+            review = json.loads(raw)
+            rows = [r for r in review.get('claim_reviews', []) if r.get('claim_id') == claim_id]
+            if len(rows) != 1 or review.get('source', {}).get('package_sha256') != pb['file_sha256']:
+                continue
+            row = rows[0]
+            if (row.get('decision') != 'pass' or row.get('issues') or row.get('human_review_reason')
+                    or row.get('spot_check_selected') or row.get('routing_status') != 'ai_reviewed'):
+                continue
+            expected = review_reason(Verdict(claim_id, 'pass', 'ai_consensus_reviewed',
+                                    row.get('rationale', ''), rb['path'], rb['file_sha256']))
+            if expected == event['reason']:
+                matched.add(index)
+    return [variants[next(iter(matched))]] if len(matched) == 1 else variants
+
+
+def discover_applied_review(claim_id, variants, store):
+    if len(variants) < 2 or not hasattr(store, 'connect'):
+        return variants
+    with store.connect() as conn, conn.cursor() as cursor:
+        cursor.execute('SET TRANSACTION READ ONLY')
+        cursor.execute("""SELECT re.review_event_id,re.reviewer_kind,re.reviewer_id,re.decision,
+              re.reason,re.artifact,cs.change_set_id,cs.status,cs.source_kind,cs.source_sha256,
+              cs.fingerprint_sha256,cs.metadata,b.payload,v.payload,co.before_sha256,
+              co.after_sha256,co.operation,
+              (SELECT count(*) FROM wang_knowledge.change_operations x
+               WHERE x.change_set_id=cs.change_set_id)
+            FROM wang_knowledge.review_events re
+            JOIN wang_knowledge.object_versions v ON v.collection=re.collection
+              AND v.object_id=re.object_id AND v.revision=re.object_revision
+            JOIN wang_knowledge.change_sets cs ON cs.change_set_id=v.change_set_id
+            JOIN wang_knowledge.change_operations co ON co.change_set_id=cs.change_set_id
+              AND co.collection=v.collection AND co.object_id=v.object_id
+              AND co.after_revision=v.revision AND co.after_sha256=v.content_sha256
+            JOIN wang_knowledge.object_versions b ON b.collection=co.collection
+              AND b.object_id=co.object_id AND b.revision=co.before_revision
+              AND b.content_sha256=co.before_sha256
+            WHERE re.collection='claims' AND re.object_id=%s""", (claim_id,))
+        keys = ('event_id','reviewer_kind','reviewer_id','decision','reason','artifact',
+                'change_set_id','status','source_kind','source_sha','fingerprint','metadata',
+                'before','after','before_sha','after_sha','operation','operation_count')
+        events = [dict(zip(keys, row)) for row in cursor.fetchall()]
+        cursor.execute("SELECT count(*) FROM wang_knowledge.review_events WHERE collection='claims' AND object_id=%s AND reviewer_kind='human'", (claim_id,))
+        if cursor.fetchone()[0]:
+            return variants
+    return applied_review_match(claim_id, variants, events)
 
 
 def discover_review_inputs(*, claim_ids, inventory, store):
@@ -64,7 +151,7 @@ def discover_review_inputs(*, claim_ids, inventory, store):
                     'review_input_binding': {'path': str(package_path.resolve()), 'file_sha256': package_sha},
                 })
         if found:
-            result[cid]['variants'] = list(found.values())
+            result[cid]['variants'] = discover_applied_review(cid, list(found.values()), store)
     return result
 
 

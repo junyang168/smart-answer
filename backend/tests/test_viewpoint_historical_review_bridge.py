@@ -5,6 +5,32 @@ import json
 import pytest
 
 
+@pytest.mark.parametrize('mutation', [None,'foreign','ambiguous','retired','type','generation','physical','record'])
+def test_adjudicated_registered_sermon_alias_is_exact_and_source_bound(tmp_path, mutation):
+    from backend.pipeline.viewpoint_historical_review_bridge import verify_fragment_own_source
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    source_file=tmp_path/'source.json';source_file.write_text('original')
+    source={'source_id':'SRC1','transcript_id':'legacy1','source_type':'sermon_transcript','source_sha256':'generation'}
+    state={'retired':False,'payload':source,'content_sha256':record_content_sha(source)}
+    fragment={'source_id':'SRC1','source_sha256':'generation'}
+    claim={'occurrences':[{'source_id':'legacy1'}]}
+    review={'source':{'transcript_paths':{'SRC1':str(source_file)},
+             'transcript_sha256':{'SRC1':hashlib.sha256(source_file.read_bytes()).hexdigest()}}}
+    if mutation=='foreign': claim['occurrences'][0]['source_id']='another'
+    if mutation=='retired': state['retired']=True
+    if mutation=='type': source['source_type']='notes_manuscript';state['content_sha256']=record_content_sha(source)
+    if mutation=='generation': fragment['source_sha256']='other'
+    if mutation=='physical': source_file.write_text('changed')
+    if mutation=='record': state['content_sha256']='wrong'
+    class Store:
+        def get_record_state(self,c,oid): return state if oid=='SRC1' else {'retired':False,'payload':{'source_id':'SRC2'}}
+        def list_records(self,c): return [source]+([source|{'source_id':'SRC2'}] if mutation=='ambiguous' else [])
+    if mutation:
+        with pytest.raises(ValueError): verify_fragment_own_source(fragment,claim,review,Store())
+    else:
+        assert verify_fragment_own_source(fragment,claim,review,Store()) is None
+
+
 @pytest.mark.parametrize('mutation', [None, 'no_replay', 'hold', 'wrong_anchor',
                                      'reciprocal', 'content', 'order', 'history'])
 def test_exact_sealed_anchor_exclusion_is_not_a_deletion_waiver(tmp_path, monkeypatch, mutation):

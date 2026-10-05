@@ -350,6 +350,36 @@ def verify_legacy_evidence_history(eid, reviewed, current, final_sha):
         raise CvpProductionBlocked([f'{eid}: invalid applied evidence repair: {exc}']) from exc
 
 
+def verify_fragment_own_source(fragment, current_claim, review, store=None):
+    """Recognize only an exact unique active registered sermon alias.
+
+    A transcript key on legacy occurrences and its SourceDocument ID are not
+    foreign sources. Neither titles, paths nor fuzzy similarity establish this.
+    Keep the physical review-source SHA and fragment generation constraints.
+    """
+    own = {o.get('source_id') for o in current_claim.get('occurrences', [])}
+    if not fragment:
+        raise ValueError('adjudicated evidence fragment missing')
+    sid = fragment.get('source_id')
+    if sid in own:
+        return
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    from backend.pipeline.viewpoint_audit_source_adjudication import validate_own_source_identity
+    store = store or PostgresKnowledgeStore()
+    state = store.get_record_state('source_documents', sid)
+    if not state or state['retired']:
+        raise ValueError('adjudicated source is missing or retired')
+    source = state['payload']
+    validate_own_source_identity(source, own, store)
+    if (source.get('source_id') != sid or source.get('source_sha256') != fragment.get('source_sha256')
+            or record_content_sha(source) != state['content_sha256']):
+        raise ValueError('adjudicated source generation drift')
+    path = Path(review.get('source', {}).get('transcript_paths', {}).get(sid, ''))
+    expected = review.get('source', {}).get('transcript_sha256', {}).get(sid)
+    if not expected or not path.is_absolute() or not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+        raise ValueError('adjudicated own-source physical SHA drift')
+
+
 def verify_historical_review_bridge(
     *, claim_id: str, current_claim: Mapping[str, Any],
     review_binding: Mapping[str, str], review_input_binding: Mapping[str, str],
@@ -506,10 +536,7 @@ def verify_historical_review_bridge(
                         raise ValueError("adjudicated evidence is not the exact reviewed, reciprocal step")
                     for fid in evidence_fragment_ids(EvidenceStepRecord.model_validate(live_step)):
                         fragment = current_fragments.get(fid)
-                        if not fragment or fragment.get("source_id") not in {
-                            o.get("source_id") for o in current_claim.get("occurrences", [])
-                        }:
-                            raise ValueError("adjudicated evidence crosses Claim source")
+                        verify_fragment_own_source(fragment, current_claim, review)
                 evidence_index_repairs.append(proof)
                 continue
             except (ValueError, KeyError, StopIteration) as exc:
