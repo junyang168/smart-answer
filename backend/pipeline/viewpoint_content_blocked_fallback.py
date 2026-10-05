@@ -113,7 +113,7 @@ def verify_saved_full_audit(audit_path):
             raise ValueError('saved audit incomplete')
         for row in report['results']:
             if row.get('paragraphs_dropped_to_pass_filter',0):raise ValueError('saved audit shortened original')
-            prompt,schema,sources=capture(layer,row[key])
+            prompt,schema,sources=capture_for_audit(audit,layer,row[key])
             cache=cache_root/(hashlib.sha256(f'gemini-3.8-flash\n{prompt}'.encode()).hexdigest()+'.json')
             if not cache.is_file():raise ValueError('saved assessment no longer binds current complete input')
             response=read_artifact(cache)
@@ -122,7 +122,18 @@ def verify_saved_full_audit(audit_path):
             bindings.extend([binding(cache),*sources])
     return list({b['path']:b for b in bindings}.values())
 
-def capture(layer, identity):
+def capture_for_audit(audit, layer, identity):
+    version = audit.get('meta', {}).get('semantic_contract_version')
+    if version is None:
+        return capture(layer, identity)
+    from backend.pipeline.viewpoint_semantic_contract import CONTRACT_PATH, CONTEXTUAL_SEMANTICS
+    if (version != CONTEXTUAL_SEMANTICS or
+            audit['meta'].get('semantic_contract_file_sha256') != hashlib.sha256(CONTRACT_PATH.read_bytes()).hexdigest()):
+        raise ValueError('saved audit semantic contract identity/physical SHA drift')
+    return capture(layer, identity, semantic_contract_version=version)
+
+
+def capture(layer, identity, *, semantic_contract_version='legacy_v1'):
     import importlib.util
     import sys
     project = Path(__file__).resolve().parents[2]
@@ -138,7 +149,8 @@ def capture(layer, identity):
             return {'verdict':'blocked', 'issue':'other', 'reason':'capture only'}
     model = Capture()
     fn = reader.audit_claims if layer == '3' else reader.audit_viewpoints
-    report = fn(store, sources, model, None, random.Random(0), workers=1, only={identity})
+    kwargs = {'semantic_contract_version':semantic_contract_version} if layer=='4' else {}
+    report = fn(store, sources, model, None, random.Random(0), workers=1, only={identity}, **kwargs)
     if len(report['results']) != 1 or not hasattr(model, 'prompt'):
         raise ValueError('missing unique current full-source audit input')
     return model.prompt, model.schema, [binding(f.path) for f in sources._files.values() if f]
@@ -260,7 +272,7 @@ def apply(audit_path, output):
     proof_bindings=[]; proofs=[]
     for layer,key,row in blocked:
         provider=row.get('provider_content_block')
-        prompt,schema,sources=capture(layer,row[key])
+        prompt,schema,sources=capture_for_audit(audit,layer,row[key])
         if not provider:
             provider=archived_block_binding(layer,row[key],prompt,schema)
             # Separate metadata view below binds the original report. Original
@@ -287,7 +299,7 @@ def apply(audit_path, output):
             try:
                 response=client.generate_json(SYSTEM,prompt,schema)
                 write_immutable(root/'raw-gpt.json',client.last_raw_response)
-                if capture(layer,row[key])!=(prompt,receipt['schema'],sources): raise ValueError('input changed during fallback')
+                if capture_for_audit(audit,layer,row[key])!=(prompt,receipt['schema'],sources): raise ValueError('input changed during fallback')
                 p={'layer':layer,'identity':row[key],'provider_binding':provider,'source_bindings':sources,
                     'raw_binding':binding(root/'raw-gpt.json'),'response':response,'prompt':prompt,'schema':schema,
                     'system_prompt':SYSTEM,'backend':client.backend,'model':client.model,'effort':client.reasoning_effort}

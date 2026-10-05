@@ -12,14 +12,14 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 
 
-CVP_POLICY_VERSION = "wang_cvp_resolution_policy_v2"
+CVP_POLICY_VERSION = "wang_cvp_resolution_policy_v3"
 SUPPORTED_CVP_POLICY_VERSIONS = frozenset(
-    {"wang_cvp_resolution_policy_v1", CVP_POLICY_VERSION}
+    {"wang_cvp_resolution_policy_v1", "wang_cvp_resolution_policy_v2", CVP_POLICY_VERSION}
 )
 DEFAULT_CVP_POLICY_PATH = (
     Path(__file__).resolve().parent
     / "policies"
-    / "wang_cvp_resolution_policy_v2.json"
+    / "wang_cvp_resolution_policy_v4.json"
 )
 
 
@@ -44,6 +44,11 @@ def load_cvp_policy(path: Path) -> dict[str, Any]:
         "max_request_bytes",
         "call_timeout_seconds",
     }
+    if policy["schema_version"] == CVP_POLICY_VERSION:
+        from backend.pipeline.viewpoint_semantic_contract import CONTEXTUAL_SEMANTICS
+        required.add("semantic_contract_version")
+        if policy.get("semantic_contract_version") != CONTEXTUAL_SEMANTICS:
+            raise ValueError("CVP v3 requires the contextual semantic contract")
     if set(policy) != required:
         raise ValueError(
             "CVP policy fields differ: "
@@ -76,10 +81,9 @@ def load_cvp_policy(path: Path) -> dict[str, Any]:
 def cvp_policy_prompt_sha256s(
     policy: Mapping[str, Any], *, prompt_dir: Path
 ) -> dict[str, str]:
-    return {
-        role: sha256_json((prompt_dir / str(filename)).read_text(encoding="utf-8"))
-        for role, filename in sorted(dict(policy["prompts"]).items())
-    }
+    from backend.pipeline.viewpoint_semantic_contract import policy_prompt
+    return {role: sha256_json(policy_prompt(policy, role, prompt_dir))
+            for role in sorted(policy["prompts"])}
 
 
 def cvp_policy_fingerprint(

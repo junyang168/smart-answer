@@ -1,0 +1,111 @@
+{
+  "schema_version": "wang_cvp_contextual_semantic_eval_v1",
+  "synthetic_examples": true,
+  "not_professor_quotes": true,
+  "cases": [
+    {
+      "id": "ellipsis_same",
+      "claim": "他们应当作见证。",
+      "viewpoint": "门徒应当作见证。",
+      "source": "我这里说的他们是门徒。他们应当作见证。",
+      "requested_relation": "equivalent_full",
+      "expected": "valid"
+    },
+    {
+      "id": "positive_negative_boundary",
+      "claim": "未形成行淫意志的欲望不是这里所说的犯罪。",
+      "viewpoint": "这里的内心犯罪要求形成行淫意志，单纯的欲望不等于这种犯罪。",
+      "source": "没有形成行淫意志的欲望不是这里说的犯罪。这里的犯罪是意志上决定去行淫，决定时已经犯罪。",
+      "requested_relation": "equivalent_full",
+      "expected": "valid"
+    },
+    {
+      "id": "negative_not_all_equivalent",
+      "claim": "欣赏美丽不是犯罪。",
+      "viewpoint": "所有尚未形成行淫意志的念头与欲望都不是这里的犯罪。",
+      "source": "我这里只讲欣赏美丽，不是在判断其他念头或欲望。欣赏美丽本身不是犯罪。",
+      "requested_relation": "equivalent_full",
+      "expected": "invalid"
+    },
+    {
+      "id": "necessity_not_sufficiency",
+      "claim": "这种犯罪包含意志决定。",
+      "viewpoint": "只要作出决定，即使未行动也已犯罪。",
+      "source": "这种犯罪包含意志决定。我尚未说明决定本身是否已构成犯罪。",
+      "requested_relation": "equivalent_full",
+      "expected": "invalid"
+    },
+    {
+      "id": "sufficiency_not_necessity",
+      "claim": "这样决定就已犯罪。",
+      "viewpoint": "没有这种决定就绝不构成这种犯罪。",
+      "source": "我只说明这样决定就已犯罪，未在这里判断其他情况。",
+      "requested_relation": "equivalent_full",
+      "expected": "invalid"
+    },
+    {
+      "id": "partial_reason_supports",
+      "claim": "这个词是阴性。",
+      "viewpoint": "这段的指代不宜直接等同于前面的男性人物。",
+      "source": "这个词是阴性，这是我不直接把指代等同于前面男性人物的理由之一。还要结合其他语法线索。",
+      "requested_relation": "supports",
+      "expected": "valid"
+    },
+    {
+      "id": "example_supports",
+      "claim": "他在困难中仍坚持。",
+      "viewpoint": "这类信心表现在困难中坚持。",
+      "source": "他在困难中仍坚持，这个例子显示这类信心如何在困难中表现。",
+      "requested_relation": "supports",
+      "expected": "valid"
+    },
+    {
+      "id": "same_topic_not_support",
+      "claim": "这个词出现在该段。",
+      "viewpoint": "这个词在该段必定指君王。",
+      "source": "这个词出现在该段，我没有说明它是否指君王，也没有给出这一判断的依据。",
+      "requested_relation": "supports",
+      "expected": "invalid"
+    },
+    {
+      "id": "modality_not_equivalent",
+      "claim": "这可能指君王。",
+      "viewpoint": "这必定指君王。",
+      "source": "这可能指君王，但我还不能断定。",
+      "requested_relation": "equivalent_full",
+      "expected": "invalid"
+    },
+    {
+      "id": "population_not_equivalent",
+      "claim": "这里指当时的门徒。",
+      "viewpoint": "这里指所有时代的所有人。",
+      "source": "这里我只谈当时的门徒，不谈所有时代的所有人。",
+      "requested_relation": "equivalent_full",
+      "expected": "invalid"
+    },
+    {
+      "id": "attribution_not_equivalent",
+      "claim": "有人认为这指君王。",
+      "viewpoint": "教授赞同这指君王。",
+      "source": "有人认为这指君王，我在这里转述他的说法，尚未表示赞同。",
+      "requested_relation": "equivalent_full",
+      "expected": "invalid"
+    },
+    {
+      "id": "context_cannot_replace_claim",
+      "claim": "教授建议考察这段经文。",
+      "viewpoint": "这段经文证明一个新段落开始。",
+      "source": "我建议考察这段经文。另一个问题是段落划分，我们稍后才讨论它。",
+      "requested_relation": "supports",
+      "expected": "invalid"
+    },
+    {
+      "id": "unclear_antecedent",
+      "claim": "这说明他们应当如此做。",
+      "viewpoint": "门徒应当作见证。",
+      "source": "这说明他们应当如此做。这里没有留下他们或如此做的明确指代。",
+      "requested_relation": "equivalent_full",
+      "expected": "unresolved"
+    }
+  ]
+}

@@ -72,6 +72,19 @@ APPROVED_STATUSES = {"approved", "system_approved", "human_approved"}
 #: 而那是審計自己問錯了。
 MEMBER_LINK_TYPES = {"equivalent_full", "equivalent_component"}
 
+CONTEXTUAL_SEMANTICS = "wang_cvp_contextual_semantics_v2"
+SEMANTIC_RULES_PATH = REPO_ROOT / "config" / "wang_cvp_contextual_semantics_v2.md"
+
+
+def contextual_semantic_rules(version: str) -> str:
+    # Independent text loader; deliberately no backend import/model/reader.
+    if version != CONTEXTUAL_SEMANTICS:
+        raise ValueError("unknown independent-audit semantic contract")
+    rules = SEMANTIC_RULES_PATH.read_text(encoding="utf-8")
+    if not rules.startswith("## 统一语义规则：" + version + "\n"):
+        raise ValueError("independent-audit semantic contract identity drift")
+    return rules
+
 #: 一條欄位路徑要有這個比例的值解析得開，才當它是指向物件的引用。低於這條線的
 #: 是撞號，不是引用——見 `audit_coverage` 裡的說明。
 REFERENCE_PATH_MIN_RATE = 0.9
@@ -1860,6 +1873,7 @@ def audit_viewpoints(
     progress: "Progress | None" = None,
     only: set[str] | None = None,
     reconsiderations: dict[str, dict[str, Any]] | None = None,
+    semantic_contract_version: str = CONTEXTUAL_SEMANTICS,
 ) -> dict[str, Any]:
     """抽樣問：判為同一個觀點的那幾條主張，真值條件是不是真的一致。
 
@@ -1942,7 +1956,7 @@ def audit_viewpoints(
                 f"    主張全文：{str(claim.get('statement') or '（庫裡找不到這條主張）').strip()}\n"
                 f"{source_block}"
             )
-        prompt = _viewpoint_prompt(viewpoint_id, revision, blocks)
+        prompt = _viewpoint_prompt(viewpoint_id, revision, blocks, semantic_contract_version=semantic_contract_version)
         prior = (reconsiderations or {}).get(viewpoint_id)
         if prior:
             if prior.get('revision_id') != viewpoint.get('current_revision_id'):
@@ -2007,7 +2021,34 @@ def load_reconsiderations(path: Path, selected: set[str]) -> tuple[dict[str, Any
     return found, {'path': str(path.resolve()), 'file_sha256': hashlib.sha256(raw).hexdigest()}
 
 
-def _viewpoint_prompt(viewpoint_id: str, revision: dict[str, Any], blocks: list[str]) -> str:
+def _viewpoint_prompt(viewpoint_id: str, revision: dict[str, Any], blocks: list[str], *,
+                      semantic_contract_version: str = CONTEXTUAL_SEMANTICS) -> str:
+    if semantic_contract_version == "legacy_v1":
+        return _legacy_viewpoint_prompt(viewpoint_id, revision, blocks)
+    rules = contextual_semantic_rules(semantic_contract_version)
+    signature = revision.get("proposition_signature") or {}
+    return rules + f'''\n\n## 独立审计任务\n
+逐条按实际连结类型审核来源忠实性，不评价教授神学对错。
+equivalent_full/component 才是等价成员；supports 不算成员。
+同义判断须解释原文依据；拒绝等价须指出承重差异与具体误读，不能只列不同词句。
+supports 须说明原文的具体论证作用及所支持部分，不要求每条证明整个合取观点；
+仍核对整个 CVP 的所有实质内容是否有来源，不得用局部支持掩盖无来源合并。
+缺信息或真实范围冲突须报告，不自动改连接、Claim、CVP 或原文。
+scope_mismatch 是实质范围／条件／模态差异；different_proposition 是另一主张；
+over_merge 是等价成员只表达实质独立的一部分，或完整合取观点无来源；其他问题用 other。
+所有连接均符合其各自关系时 verdict=same、issue=none；same 对 supports 仅表示关系成立，不表示等价。
+有问题时 verdict=disputed，reason 写具体原文依据、差异或缺失论证作用及误读，不受一到三句限制。
+claim_ids_in_question 只列本次有问题的 Claim ID；无问题为空。用原有 JSON schema 回答。
+
+观点 [{viewpoint_id}]
+核心命题：{str(revision.get('core_proposition') or '').strip()}
+命题签名：{json.dumps(signature, ensure_ascii=False)}
+适用范围：{json.dumps(revision.get('scope') or {}, ensure_ascii=False)}
+主张与观点的连结（逐条按实际类型审核）：
+{chr(10).join(blocks)}'''
+
+
+def _legacy_viewpoint_prompt(viewpoint_id: str, revision: dict[str, Any], blocks: list[str]) -> str:
     signature = revision.get("proposition_signature") or {}
     signature_line = " / ".join(
         str(signature.get(key) or "—")
@@ -2533,6 +2574,8 @@ def main(argv: list[str] | None = None) -> int:
         "model": args.model if model else "未使用",
         "seed": args.seed,
         "scope": args.scope,
+        "semantic_contract_version": CONTEXTUAL_SEMANTICS,
+        "semantic_contract_file_sha256": hashlib.sha256(SEMANTIC_RULES_PATH.read_bytes()).hexdigest(),
         "sources": len(sources.in_scope) if sources.in_scope is not None else len(sources.documents),
         "sources_out_of_scope": len(sources.out_of_scope),
         "duplicate_sources": duplicate_source_documents(sources),

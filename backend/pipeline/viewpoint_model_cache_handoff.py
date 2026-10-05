@@ -212,7 +212,7 @@ def prepare_handoff(source_batch, target_batch, *, target_batch_id, target_freez
     write_immutable(target_batch / "prior-model-cache.json", body | {"artifact_sha256": sha256_json(body)})
 
 
-def verify_prefix(scope, batch_id, output_dir, max_request_bytes):
+def verify_prefix(scope, batch_id, output_dir, max_request_bytes, *, cvp_policy=None):
     """Exercise fresh scoped inputs through all saved stages; never call a model.
 
     Stop at correction, or final review if a saved correction is bound. These envelopes are
@@ -222,10 +222,15 @@ def verify_prefix(scope, batch_id, output_dir, max_request_bytes):
         run_batch, build_proposer, build_reviewer, build_consolidator, build_reconsiderer)
     from backend.api.canonical_repository.viewpoint_resolution import ReviewClaim
     from backend.pipeline.viewpoint_resolution_runtime import write_immutable
-    proposer = build_proposer("gpt-6.1-sol", "high", provider="codex")
-    reviewer = build_reviewer("claude-opus-5-5", "high")
-    consolidator = build_consolidator("claude-opus-5-5", "high")
-    correction = build_reconsiderer("gpt-6.1-sol", "high", provider="codex")
+    from backend.pipeline.viewpoint_cvp_policy import load_cvp_policy
+    # This helper verifies frozen #357 prefix migrations. A changed default
+    # must not reinterpret old raw/model/schema/codec identities as new ones.
+    policy = cvp_policy if cvp_policy is not None else load_cvp_policy(
+        Path(__file__).parent / 'policies/wang_cvp_resolution_policy_v3.json')
+    proposer = build_proposer("gpt-6.1-sol", "high", provider="codex", cvp_policy=policy)
+    reviewer = build_reviewer("claude-opus-5-5", "high", cvp_policy=policy)
+    consolidator = build_consolidator("claude-opus-5-5", "high", cvp_policy=policy)
+    correction = build_reconsiderer("gpt-6.1-sol", "high", provider="codex", cvp_policy=policy)
     final_review = reviewer.compact_copy()
     handoff = json.loads((output_dir / "prior-model-cache.json").read_text())
     has_correction = CORRECTION_ROLE in handoff["raw_bindings"]

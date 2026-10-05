@@ -731,7 +731,7 @@ def test_runner_cli_defaults_match_the_fable_v2_policy(tmp_path, monkeypatch):
     assert captured["review_model"] == "claude-fable-5-1"
     assert captured["consolidation_model"] == "claude-fable-5-1"
     assert captured["group_model"] == "claude-fable-5-1"
-    assert captured["cvp_policy"].name == "wang_cvp_resolution_policy_v2.json"
+    assert captured["cvp_policy"].name == "wang_cvp_resolution_policy_v4.json"
     assert captured["route_policy"].name == "wang_route_resolution_policy_v2.json"
 
 

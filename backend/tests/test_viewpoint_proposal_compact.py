@@ -47,7 +47,7 @@ def test_initial_proposal_keeps_frozen_ceiling_and_zero_calls_on_overflow(monkey
 
 
 @pytest.mark.parametrize('role', ['proposer', 'reviewer', 'consolidator', 'grouper', 'reconsiderer'])
-def test_every_cvp_model_factory_uses_shared_lossless_format(monkeypatch, role):
+def test_every_cvp_model_factory_uses_shared_lossless_format(monkeypatch, role, tmp_path):
     requests = []
     client = SimpleNamespace(model='unchanged', backend='subscription',
         reasoning_effort='high', max_output_tokens=None,
@@ -61,4 +61,5 @@ def test_every_cvp_model_factory_uses_shared_lossless_format(monkeypatch, role):
     assert requests[0]['user_prompt'] == json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
     a.max_request_bytes = 500000
     with pytest.raises(ValueError, match='frozen ceiling'):
-        call_model(a, {'original': 'X'*500001}, Path('/unused/never-called.json'))
+        call_model(a, {'original': 'X'*500001}, tmp_path/'never-called.json')
+    assert len(requests)==1  # Only the small lossless request above; no overflow call.

@@ -45,6 +45,17 @@ component 必须在完整 Claim 和自己原文中理解，不要求截取片段
 context 只是诊断材料，不授予新增引用权威。结果只是提案，不是审计通过或写库批准。'''
 
 
+def contextual_adjudication_prompt():
+    from backend.pipeline.viewpoint_semantic_contract import semantic_prompt
+    return semantic_prompt('''只读原文仲裁。逐项判断独立审计异议是否成立；不生成修改、不授权写入。
+完整 Claim、实际 CVP、现行连接及其自己绑定的原文均提供，先理解自身语境，再按实际关系判断。
+每个 item 恰好返回一次 audit_objection_upheld / audit_objection_rejected / unresolved。
+前两者须给本 item 原文逐字引文、source_id 和 paragraph_key，明确回应原异议。
+reason 须说明语境对应或承重差异及误读；supports 须解释具体论证作用，不要求独自证明全部 CVP。
+证据不足保留 unresolved，不靠想象反例否决，也不为通过而补条件、改关系或扩范围。
+结果不是独立审计通过，不取代原有完成与写库门槛。''')
+
+
 def disputes(audit):
     from backend.pipeline.viewpoint_g035_temporary_audit import validate as validate_exception
     validate_exception(audit)
@@ -211,9 +222,16 @@ def source_review_adapter(client, cache):
     legacy = StructuredJsonReviewerAdapter(client=client, prompt=PROMPT,
         response_model=Findings, schema_name='wang_audit_source_findings_v1')
     compact = legacy.compact_copy()
-    if cache.exists() and read_artifact(cache).get('generation_config_sha256') == legacy.generation_config_sha256:
-        return legacy
-    return compact
+    if cache.exists():
+        saved = read_artifact(cache)
+        config = saved.get('generation_config_sha256')
+        if saved.get('prompt_sha256') == legacy.prompt_sha256 and config == legacy.generation_config_sha256:
+            return legacy
+        if saved.get('prompt_sha256') == compact.prompt_sha256 and config == compact.generation_config_sha256:
+            return compact
+    return StructuredJsonReviewerAdapter(client=client, prompt=contextual_adjudication_prompt(),
+        response_model=Findings, schema_name='wang_audit_source_findings_v1', compact_payload=True,
+        shared_text_payload=True, shared_record_payload=True)
 
 
 def run(audit_path, output, store, adapters=None, *, final_gpt=False):
@@ -221,6 +239,16 @@ def run(audit_path, output, store, adapters=None, *, final_gpt=False):
     write_immutable(output / 'packet.json', packet)
     if not packet['items']:
         raise ValueError('no semantic audit disputes')
+    if final_gpt and not (output / 'raw-gpt.json').exists():
+        from backend.pipeline.viewpoint_adjudication_history import assert_no_readjudication, campaign_history
+        # An unchanged target with a differently worded finding is not a fresh
+        # call budget. This never changes an old verdict or grants completion.
+        try:
+            assert_no_readjudication(packet, campaign_history(audit_path, output))
+        except ValueError as exc:
+            write_immutable(output / 'failure.json', {'error':str(exc),
+                'packet_sha256':packet['artifact_sha256'], 'new_model_calls':0})
+            raise
     providers = [('codex', 'gpt-6.1-sol')]
     if not final_gpt:
         providers.append(('claude', 'claude-opus-5-5'))

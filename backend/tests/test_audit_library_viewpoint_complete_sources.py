@@ -48,10 +48,8 @@ def test_component_context_contract_preserves_identity_and_negative_guards():
         "被歸入的成分：僕人\n主張全文：宣告確認耶穌具有王與僕人的身份。\n"
         "【原文】僕人指賽42:1中神所揀選的僕人。"
     ])
-    for rule in ["不是必須獨立成句", "該條主張全文及本連結綁定的原文",
-                 "不得僅因短成分", "未定位部分只用於理解原句語境",
-                 "不得借其他主張或未綁定來源補限定", "缺少必要條件或範圍不同",
-                 "仍須判異議", "替換它", "同樣的情況下為假"]:
+    for rule in ["完整 Claim", "自身语境", "定位工具", "未定位部分只是解释语境",
+                 "未绑定来源补证", "必要条件与充分条件", "保留未决", "不能取代 Claim"]:
         assert rule in prompt
     assert "僕人指賽42:1" in prompt
 
@@ -108,7 +106,7 @@ def test_viewpoint_review_receives_complete_bound_originals_and_keeps_verdict(
             for excluded in ["未綁定另一篇", "已刪除說法", "編輯評論"]:
                 assert excluded not in prompt
             assert f"連結類型 {link_type}" in prompt
-            assert "共同支持完整主張" in prompt
+            assert "整个 CVP 的所有实质内容是否有来源" in prompt
             return {"verdict": verdict, "issue": "other" if verdict == "disputed" else "none"}
 
     model = Model()

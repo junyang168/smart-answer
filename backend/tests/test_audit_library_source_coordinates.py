@@ -20,12 +20,17 @@ def test_independent_audit_default_model_is_gemini_38_flash() -> None:
 
 
 def test_viewpoint_audit_distinguishes_support_from_equivalent_membership() -> None:
-    prompt = AUDIT._viewpoint_prompt("CV-test", {}, ["連結類型 supports"])
+    prompt = AUDIT._viewpoint_prompt("CV-test", {}, ["連結類型 supports"], semantic_contract_version='legacy_v1')
     assert '只有 `equivalent_full` 和 `equivalent_component`' in prompt
     assert '`supports` 只宣稱提供論據或支持背景，不宣稱同一命題' in prompt
     assert '不得僅因真值條件不同就判錯' in prompt
     assert '不符合標明關係時用 `other` 報錯' in prompt
     assert '不表示它是成員' in prompt
+    current = AUDIT._viewpoint_prompt("CV-test", {}, ["連結類型 supports"])
+    assert 'equivalent_full/component 才是等价成员；supports 不算成员' in current
+    assert '不要求每条证明整个合取观点' in current
+    assert '仅同主题、相邻出现或相容不算支持' in current
+    assert 'same 对 supports 仅表示关系成立，不表示等价' in current
 
 
 def test_modern_audit_uses_body_coordinates_and_body_identity(tmp_path: Path) -> None:

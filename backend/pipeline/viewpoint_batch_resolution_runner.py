@@ -26,6 +26,8 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     CanonicalViewpointProposalResponse,
     CanonicalViewpointReconsiderationResponse,
     IdentityConsolidationResponse,
+    ContextualIdentityConsolidationResponse,
+    decode_consolidation,
     CanonicalViewpointReviewResponse,
     ClaimGroupingResponse,
     DEFAULT_BATCH_SIZE,
@@ -124,70 +126,72 @@ from backend.pipeline.viewpoint_resolution_runtime import (
 
 def _compact_adapter(**kwargs: Any) -> StructuredJsonReviewerAdapter:
     """One lossless wire-format contract for every CVP model role."""
-    return StructuredJsonReviewerAdapter(**kwargs, compact_payload=True, shared_text_payload=True)
+    from backend.pipeline.viewpoint_semantic_contract import CONTEXTUAL_SEMANTICS
+    contextual = kwargs['prompt'].startswith('## 统一语义规则：' + CONTEXTUAL_SEMANTICS + '\n')
+    # New contract identity only. Frozen legacy prompts keep their old codec.
+    return StructuredJsonReviewerAdapter(**kwargs, compact_payload=True, shared_text_payload=True,
+                                        shared_record_payload=contextual)
 
 
 def build_proposer(
-    model: str, reasoning_effort: str, *, provider: str = "claude"
+    model: str, reasoning_effort: str, *, provider: str = "claude", cvp_policy=None
 ) -> StructuredJsonReviewerAdapter:
     return _compact_adapter(
         client=_subscription_client(provider, model, reasoning_effort),
-        prompt=(PROMPT_DIR / "canonical_viewpoint_batch_proposal.md").read_text(
-            encoding="utf-8"
-        ),
+        prompt=_role_prompt(cvp_policy, "proposal"),
         response_model=CanonicalViewpointProposalResponse,
         schema_name="wang_canonical_viewpoint_proposal_v1",
     )
 
 
 def build_reviewer(
-    model: str, reasoning_effort: str, *, provider: str = "claude"
+    model: str, reasoning_effort: str, *, provider: str = "claude", cvp_policy=None
 ) -> StructuredJsonReviewerAdapter:
     return _compact_adapter(
         client=_subscription_client(provider, model, reasoning_effort),
-        prompt=(PROMPT_DIR / "canonical_viewpoint_batch_review.md").read_text(
-            encoding="utf-8"
-        ),
+        prompt=_role_prompt(cvp_policy, "review"),
         response_model=CanonicalViewpointReviewResponse,
         schema_name="wang_canonical_viewpoint_review_v1",
     )
 
 
 def build_consolidator(
-    model: str, reasoning_effort: str, *, provider: str = "claude"
+    model: str, reasoning_effort: str, *, provider: str = "claude", cvp_policy=None
 ) -> StructuredJsonReviewerAdapter:
+    policy = cvp_policy if cvp_policy is not None else load_cvp_policy(DEFAULT_CVP_POLICY_PATH)
+    from backend.pipeline.viewpoint_semantic_contract import CONTEXTUAL_SEMANTICS
+    contextual = policy.get('semantic_contract_version') == CONTEXTUAL_SEMANTICS
     return _compact_adapter(
         client=_subscription_client(provider, model, reasoning_effort),
-        prompt=(PROMPT_DIR / "canonical_viewpoint_identity_consolidation.md").read_text(
-            encoding="utf-8"
-        ),
-        response_model=IdentityConsolidationResponse,
-        schema_name="wang_canonical_viewpoint_identity_consolidation_v1",
+        prompt=_role_prompt(policy, "consolidation"),
+        response_model=ContextualIdentityConsolidationResponse if contextual else IdentityConsolidationResponse,
+        schema_name="wang_canonical_viewpoint_identity_consolidation_v2" if contextual else "wang_canonical_viewpoint_identity_consolidation_v1",
     )
 
 
-def build_grouper(model: str, reasoning_effort: str) -> StructuredJsonReviewerAdapter:
+def build_grouper(model: str, reasoning_effort: str, *, cvp_policy=None) -> StructuredJsonReviewerAdapter:
     return _compact_adapter(
         client=_subscription_client("claude", model, reasoning_effort),
-        prompt=(PROMPT_DIR / "canonical_viewpoint_claim_grouping.md").read_text(
-            encoding="utf-8"
-        ),
+        prompt=_role_prompt(cvp_policy, "grouping"),
         response_model=ClaimGroupingResponse,
         schema_name="wang_canonical_viewpoint_claim_grouping_v1",
     )
 
 
 def build_reconsiderer(
-    model: str, reasoning_effort: str, *, provider: str = "claude"
+    model: str, reasoning_effort: str, *, provider: str = "claude", cvp_policy=None
 ) -> StructuredJsonReviewerAdapter:
     return _compact_adapter(
         client=_subscription_client(provider, model, reasoning_effort),
-        prompt=(PROMPT_DIR / "canonical_viewpoint_batch_reconsideration.md").read_text(
-            encoding="utf-8"
-        ),
+        prompt=_role_prompt(cvp_policy, "correction"),
         response_model=CanonicalViewpointReconsiderationResponse,
         schema_name="wang_canonical_viewpoint_reconsideration_v3",
     )
+
+
+def _role_prompt(policy, role):
+    from backend.pipeline.viewpoint_semantic_contract import policy_prompt
+    return policy_prompt(policy if policy is not None else load_cvp_policy(DEFAULT_CVP_POLICY_PATH), role, PROMPT_DIR)
 
 
 def _plan_from_document(payload: dict[str, Any]) -> ChangeSetPlan:
@@ -523,7 +527,7 @@ def run_batch(
         raw_consolidation, consolidation_calls, consolidation_seconds = _call(
             consolidator, consolidation_packet, output_dir / "raw-consolidation.json"
         )
-        consolidation = IdentityConsolidationResponse.model_validate(raw_consolidation)
+        consolidation = decode_consolidation(raw_consolidation, [c.local_key for c in proposal.new_viewpoint_candidates])
         consolidation_report = validate_consolidation(
             consolidation=consolidation,
             proposal=proposal,
@@ -1296,7 +1300,7 @@ def _execute_locked(
             runner_commit=runner_commit,
         )
         grouping_role = cvp_policy["grouping"]
-        grouper = build_grouper(grouping_role["model"], grouping_role["effort"])
+        grouper = build_grouper(grouping_role["model"], grouping_role["effort"], cvp_policy=cvp_policy)
         grouper.max_request_bytes = int(cvp_policy["max_request_bytes"])
         grouping_payload = build_grouping_payload(
             scope_label, [item.model_dump(mode="json") for item in claims.values()]
@@ -1412,6 +1416,7 @@ def _execute_locked(
         proposal_role["model"],
         proposal_role["effort"],
         provider=proposal_role["provider"],
+        cvp_policy=cvp_policy,
     )
     proposer.max_request_bytes = int(cvp_policy["max_request_bytes"])
     review_role = cvp_policy["review"]
@@ -1419,6 +1424,7 @@ def _execute_locked(
         review_role["model"],
         review_role["effort"],
         provider=review_role["provider"],
+        cvp_policy=cvp_policy,
     )
     reviewer.max_request_bytes = int(cvp_policy["max_request_bytes"])
     correction_role = cvp_policy["correction"]
@@ -1426,6 +1432,7 @@ def _execute_locked(
         correction_role["model"],
         correction_role["effort"],
         provider=correction_role["provider"],
+        cvp_policy=cvp_policy,
     )
     reconsiderer.max_request_bytes = int(cvp_policy["max_request_bytes"])
 
@@ -1434,6 +1441,7 @@ def _execute_locked(
         consolidation_role["model"],
         consolidation_role["effort"],
         provider=consolidation_role["provider"],
+        cvp_policy=cvp_policy,
     )
     consolidator.max_request_bytes = int(cvp_policy["max_request_bytes"])
 

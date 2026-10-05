@@ -3705,6 +3705,47 @@ class IdentityConsolidationResponse(StrictBatchModel):
         return self
 
 
+class UnresolvedConsolidationItem(StrictBatchModel):
+    local_key: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+
+class ContextualIdentityConsolidationResponse(StrictBatchModel):
+    """Versioned uncertainty exit; never coerces unknown identity into new/merge."""
+
+    schema_version: Literal["wang_canonical_viewpoint_identity_consolidation_v2"] = (
+        "wang_canonical_viewpoint_identity_consolidation_v2"
+    )
+    verdicts: list[ConsolidationVerdict] = Field(default_factory=list)
+    unresolved_items: list[UnresolvedConsolidationItem] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def exact_once_keys(self) -> "ContextualIdentityConsolidationResponse":
+        keys = [item.local_key for item in [*self.verdicts, *self.unresolved_items]]
+        if len(keys) != len(set(keys)):
+            raise ValueError("consolidation candidates cannot have duplicate or contradictory dispositions")
+        if any(not item.reason.strip() for item in self.unresolved_items):
+            raise ValueError("unresolved consolidation requires a concrete reason")
+        return self
+
+
+def decode_consolidation(raw, candidate_keys):
+    if raw.get("schema_version") != "wang_canonical_viewpoint_identity_consolidation_v2":
+        return IdentityConsolidationResponse.model_validate(raw)
+    contextual = ContextualIdentityConsolidationResponse.model_validate(raw)
+    ruled = {item.local_key for item in [*contextual.verdicts, *contextual.unresolved_items]}
+    if ruled != set(candidate_keys):
+        raise BatchResolutionError(["contextual consolidation must cover candidates exactly once"])
+    if contextual.unresolved_items:
+        raise BatchResolutionError([
+            f"{item.local_key}: unresolved identity; {item.reason}"
+            for item in contextual.unresolved_items
+        ])
+    # Accepted rulings still pass all existing deterministic merge/target gates.
+    # The original v2 raw remains immutable; this is an internal decoded view.
+    return IdentityConsolidationResponse(verdicts=contextual.verdicts)
+
+
 def validate_consolidation(
     *,
     consolidation: IdentityConsolidationResponse,

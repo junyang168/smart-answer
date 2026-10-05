@@ -58,7 +58,7 @@ def test_source_review_compact_and_legacy_cache_both_reuse_without_new_calls(tmp
     call_model(restored, payload, cache)
     assert len(calls) == 1 and cache.read_bytes() == original
     assert json.loads(calls[0]['user_prompt']) == payload
-    with pytest.raises(ValueError, match='another request payload'):
+    with pytest.raises(ValueError, match='another request payload|immutable artifact differs'):
         call_model(restored, payload | {'source_drift': True}, cache)
     assert len(calls) == 1
 

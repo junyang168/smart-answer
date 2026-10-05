@@ -276,7 +276,7 @@ def test_versioned_route_policy_fingerprint_binds_prompt_content():
     assert policy["review"]["targets_per_batch"] == 12
 
 
-def test_default_cvp_policy_uses_fable_and_preserves_cross_vendor_review():
+def test_default_cvp_policy_uses_contextual_rules_and_preserves_cross_vendor_models():
     from backend.pipeline.viewpoint_cvp_policy import (
         DEFAULT_CVP_POLICY_PATH,
         load_cvp_policy,
@@ -284,7 +284,8 @@ def test_default_cvp_policy_uses_fable_and_preserves_cross_vendor_review():
 
     policy = load_cvp_policy(DEFAULT_CVP_POLICY_PATH)
 
-    assert policy["schema_version"] == "wang_cvp_resolution_policy_v2"
+    assert policy["schema_version"] == "wang_cvp_resolution_policy_v3"
+    assert policy["semantic_contract_version"] == "wang_cvp_contextual_semantics_v2"
     assert policy["proposal"]["provider"] == "codex"
     assert policy["proposal"]["model"] == "gpt-5.6-sol"
     assert policy["correction"]["provider"] == "codex"

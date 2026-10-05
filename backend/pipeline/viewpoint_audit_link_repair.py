@@ -73,13 +73,25 @@ def select_repairs(packet, report):
     return selected
 
 
-def link_review_adapter(client, prompt, *, legacy_serialization=False):
+def link_review_adapter(client, prompt, *, legacy_serialization=False, contextual_semantics=False):
     # New bounded supports reviews use the same proven lossless transport as
     # production. Explicit historical/human/other owner scopes retain their
     # exact cached configuration; never relabel old raw replies as new format.
+    if contextual_semantics:
+        from backend.pipeline.viewpoint_semantic_contract import semantic_prompt
+        if prompt != PROMPT or legacy_serialization:
+            raise ValueError('contextual supports adapter cannot relabel a historical owner scope')
+        prompt = semantic_prompt('''独立审核 before_link/after_link：仅等价连接改 supports 的精确后像。
+完整自身原文、Claim、实际 CVP、证据、原审计和原裁决均提供；不要求通过。
+说明具体哪句 Claim、以什么论证作用支持目标哪一部分；不要求单条复述或推出整个 CVP。
+不能仅同主题或相容，不能借其他 Claim 补结论，不能以部分依据冒充完整证明。
+Claim/Evidence/来源/CVP文字、端点、其他成员及依赖须保持不变，只检查已授权连接修订。
+每个指定 Claim 恰好一个 verdict；全部成立才 approved=true、problems=[]。
+拒绝须说明缺失的论证作用或实质范围差异；证据不足或需新范围诚实拒绝，不修改内容。''')
     adapter = StructuredJsonReviewerAdapter(client=client, prompt=prompt,
         response_model=Review, schema_name='audit_link_repair_review_v1',
-        compact_payload=True, shared_text_payload=not legacy_serialization)
+        compact_payload=True, shared_text_payload=not legacy_serialization,
+        shared_record_payload=contextual_semantics)
     adapter.max_request_bytes = 500000
     return adapter
 
@@ -351,7 +363,10 @@ def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storag
         if owner_g037_context_from: prompt=context_prompt
         if owner_g037_claim_statement: prompt=claim_repair.PROMPT
         adapter=link_review_adapter(subscription_client(provider,model,'high'),prompt,
-            legacy_serialization=bool(human_review_from or owner_identity_g033 or owner_retire))
+            legacy_serialization=bool(human_review_from or owner_identity_g033 or owner_retire),
+            contextual_semantics=bool(not (human_review_from or owner_identity_g033 or owner_retire or owner_g037_context_from or owner_g037_claim_statement or owner_g037_secondary_from)
+                and (not (root/f'raw-{label}.json').exists() or
+                     read_artifact(root/f'raw-{label}.json').get('prompt_sha256') != sha256_json({'prompt':PROMPT}))))
         if owner_g037_claim_statement: adapter=claim_repair.review_adapter(subscription_client(provider,model,'high'))
         raw,calls,_=review_call(adapter,packet,root,label)
         if human_review_from and calls: raise ValueError('human resume must not call models')

@@ -42,7 +42,7 @@ def setup(tmp_path, monkeypatch, verdict='audit_objection_rejected', layer='4'):
     monkeypatch.setattr(resolution, 'build_packet', lambda *args: deepcopy(packet))
     providers = []
     monkeypatch.setattr(adjudication, 'subscription_client', lambda *args: providers.append(args))
-    monkeypatch.setattr(adjudication, 'StructuredJsonReviewerAdapter', lambda **kwargs: adapter)
+    monkeypatch.setattr(adjudication, 'source_review_adapter', lambda client, cache: adapter)
     root = tmp_path / 'adjudication'
     out = tmp_path / 'resolution.json'
     return audit, audit_path, root, out, adapter, providers, packet, source
