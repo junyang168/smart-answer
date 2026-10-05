@@ -5905,7 +5905,8 @@ class PostgresKnowledgeStore:
             if operation.operation != "retire"
         }
         incoming_edges: list[tuple[str, str, str, str, str]] = []
-        incoming_signatures: dict[tuple[str, str, str, str], str] = {}
+        incoming_signatures: dict[tuple[str, str, str, str], list[str]] = {}
+        incoming_payloads: dict[tuple[str, str], dict[str, Any]] = {}
         endpoint_ids: set[str] = set()
         for operation in plan.operations:
             if operation.collection not in EDGE_COLLECTIONS or operation.operation == "retire":
@@ -5927,13 +5928,20 @@ class PostgresKnowledgeStore:
                     f"Edge {operation.collection}/{operation.object_id} points to itself"
                 )
             signature = (operation.collection, from_id, to_id, relation_type)
-            prior = incoming_signatures.setdefault(signature, operation.object_id)
-            if prior != operation.object_id:
+            prior_ids = incoming_signatures.setdefault(signature, [])
+            if any(prior != operation.object_id and not (
+                operation.collection == "viewpoint_claim_links"
+                and cls._disjoint_support_components(
+                    incoming_payloads[operation.collection, prior], payload
+                )
+            ) for prior in prior_ids):
                 raise ChangeSetConflict(
                     "Duplicate semantic edge in one ChangeSet: "
-                    f"{operation.collection}/{prior} and {operation.object_id} "
+                    f"{operation.collection}/{prior_ids[0]} and {operation.object_id} "
                     f"both name {from_id}->{to_id} ({relation_type})"
                 )
+            prior_ids.append(operation.object_id)
+            incoming_payloads[operation.collection, operation.object_id] = payload
             incoming_edges.append(
                 (operation.collection, operation.object_id, from_id, to_id, relation_type)
             )
@@ -6040,6 +6048,26 @@ class PostgresKnowledgeStore:
             other_owners = existing.get(
                 (collection, from_id, to_id, relation_type), set()
             ) - {edge_id}
+            if collection == "viewpoint_claim_links" and other_owners:
+                conflicting = set()
+                for owner in sorted(other_owners):
+                    planned = planned_edge_operations.get((collection, owner))
+                    if planned is not None:
+                        other_payload = stored_operation_payload(planned)
+                    else:
+                        cursor.execute(
+                            """SELECT payload FROM wang_knowledge.edges
+                               WHERE edge_collection = %s AND edge_id = %s
+                                 AND retired_at IS NULL FOR UPDATE""",
+                            (collection, owner),
+                        )
+                        rows = cursor.fetchall()
+                        other_payload = rows[0][0] if len(rows) == 1 else None
+                    if not cls._disjoint_support_components(
+                        incoming_payloads[collection, edge_id], other_payload
+                    ):
+                        conflicting.add(owner)
+                other_owners = conflicting
             if other_owners:
                 owner = sorted(other_owners)[0]
                 raise ChangeSetConflict(
@@ -6047,6 +6075,35 @@ class PostgresKnowledgeStore:
                     f"{collection}/{owner}, not {edge_id}, names "
                     f"{from_id}->{to_id} ({relation_type})"
                 )
+
+    @staticmethod
+    def _disjoint_support_components(left: Any, right: Any) -> bool:
+        """Distinct approved, same-version support components are not one edge.
+
+        This does not authorize either link: package/foundation validation still
+        verifies decision provenance, exact Claim text and evidence. Full-Claim,
+        overlapping, unapproved or differently pinned links remain duplicates.
+        """
+        from .knowledge_models import ViewpointClaimLinkRecord
+
+        try:
+            a = ViewpointClaimLinkRecord.model_validate(left)
+            b = ViewpointClaimLinkRecord.model_validate(right)
+        except (ValueError, TypeError):
+            return False
+        if any(x.link_type != "supports" or x.effective_state != "active"
+               or not x.component_locator or not x.evidence_bindings for x in (a, b)):
+            return False
+        if (a.viewpoint_id, a.claim_id, a.pinned_claim_revision,
+            a.validated_against_viewpoint_revision_id) != (
+            b.viewpoint_id, b.claim_id, b.pinned_claim_revision,
+            b.validated_against_viewpoint_revision_id):
+            return False
+        ac, bc = a.component_locator, b.component_locator
+        if ac.claim_sha256 != bc.claim_sha256 or not re.fullmatch(r"[0-9a-f]{64}", ac.claim_sha256):
+            return False
+        return all(x.end_char <= y.start_char or y.end_char <= x.start_char
+                   for x in ac.canonical_spans for y in bc.canonical_spans)
 
     @staticmethod
     def _assert_no_uncoordinated_semantic_references(

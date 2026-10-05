@@ -35,3 +35,24 @@ def test_scope_drift_rejected(field,value):
 def test_locator_drift_rejected():
     old=old_link();old['component_locator']['canonical_spans'][0]['end_char']=16
     with pytest.raises(ValueError,match='component drift'):postimage(old,[])
+
+@pytest.mark.parametrize('failure',['packet','receipt','applied','proof','missing_intent','rejected','calls','identity'])
+def test_store_conflict_handoff_rejects_unsafe_reuse(tmp_path,monkeypatch,failure):
+    from backend.pipeline import viewpoint_g034_theme_support_repair as module
+    old=tmp_path/'old';new=tmp_path/'new';old.mkdir()
+    monkeypatch.setattr(module,'STORE_CONFLICT_ROOT',old)
+    monkeypatch.setattr(module,'ROOT',new);monkeypatch.setattr(module,'RECOVERY_ROOT',new)
+    packet={'bound':'unchanged'}
+    module.write_immutable(old/'packet.json',packet if failure!='packet' else {})
+    module.write_immutable(old/'dry-run-plan.json',{'fingerprint_sha256':'old'})
+    if failure!='missing_intent':module.write_immutable(old/'apply-intent.json',{})
+    if failure=='receipt':module.write_immutable(old/'apply-receipt.json',{})
+    module.write_immutable(old/'apply-conflict-zero-write.json',{} if failure=='proof' else {
+        'registry_unchanged':True,'link_unchanged':True,'database_change_set_status':None,'registry_writes':0})
+    class Store:
+        def get_change_set_status(self,fingerprint):return 'applied' if failure=='applied' else None
+    monkeypatch.setattr(module,'adapter',lambda *args:None)
+    verdict={'evidence_step_id':LINK if failure!='identity' else 'foreign','approved':failure!='rejected','problems':[], 'reason':'approved'}
+    monkeypatch.setattr(module,'call_model',lambda *args:(verdict,1 if failure=='calls' else 0,0))
+    with pytest.raises(ValueError):module.migrate_store_conflict_cache(Store(),packet)
+    assert not (new/'mechanical-cache-handoff.json').exists()

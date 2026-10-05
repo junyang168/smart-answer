@@ -25,6 +25,8 @@ from backend.pipeline.viewpoint_resolution_runtime import read_artifact, write_i
 BASE=Path('/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/staging/cvp-production-357')
 PRAYER=BASE/'g034-owner-prayer-link-review-20261004-v1'
 ROOT=BASE/'g034-owner-theme-support-repair-20261004-v1'
+STORE_CONFLICT_ROOT=ROOT
+RECOVERY_ROOT=BASE/'g034-owner-theme-component-store-repair-20261004-v1'
 LINK='VCL-db5e440b8856ca2f4ad6'
 CLAIM='DK-791c4e404fda-P06-CL010'
 CV='CV-3657f53d08ed20c39b95'
@@ -118,7 +120,37 @@ def reviews(packet, *, cached_only=False):
     return result
 
 
-def run(*,apply=False):
+def migrate_store_conflict_cache(store, packet):
+    """Only an unchanged, never-applied failed transaction may reuse approvals."""
+    if ROOT != RECOVERY_ROOT: raise ValueError('wrong mechanical recovery root')
+    old_packet=read_artifact(STORE_CONFLICT_ROOT/'packet.json')
+    old_plan=read_artifact(STORE_CONFLICT_ROOT/'dry-run-plan.json')
+    if old_packet!=packet: raise ValueError('reviewed semantic packet drift')
+    if (STORE_CONFLICT_ROOT/'apply-receipt.json').exists(): raise ValueError('prior apply receipt exists')
+    if not (STORE_CONFLICT_ROOT/'apply-intent.json').exists(): raise ValueError('missing original terminal reservation')
+    if store.get_change_set_status(old_plan['fingerprint_sha256']) is not None:
+        raise ValueError('prior ChangeSet exists; no recovery replay')
+    proof=read_artifact(STORE_CONFLICT_ROOT/'apply-conflict-zero-write.json')
+    if proof!={'registry_unchanged':True,'link_unchanged':True,'database_change_set_status':None,'registry_writes':0}:
+        raise ValueError('not exact zero-write conflict proof')
+    bindings=[]
+    for label,provider,model in ROLES:
+        raw=STORE_CONFLICT_ROOT/f'raw-{label}.json'
+        response,calls,_=call_model(adapter(provider,model),packet,raw)
+        verdict=Verdict.model_validate(response)
+        if calls or not verdict.approved or verdict.problems or verdict.evidence_step_id!=LINK:
+            raise ValueError('invalid frozen dual approval')
+        bindings.append({'path':str(raw),'file_sha256':file_sha256(raw)})
+        write_immutable(ROOT/raw.name,read_artifact(raw))
+    write_immutable(ROOT/'mechanical-cache-handoff.json',{
+        'source_root':str(STORE_CONFLICT_ROOT),'semantic_packet_sha256':sha256_json(packet),
+        'source_raw_bindings':bindings,'new_model_calls':0,'prior_registry_writes':0,
+        'old_failure_preserved':True})
+
+
+def run(*,apply=False,recover_store_conflict=False):
+    global ROOT
+    if recover_store_conflict: ROOT=RECOVERY_ROOT
     from backend.pipeline.viewpoint_audit_link_repair import package_for
     project=Path(__file__).resolve().parents[2]
     if project.name!='wkp-357-worktree-per-session': raise ValueError('wrong worktree')
@@ -128,7 +160,9 @@ def run(*,apply=False):
         with exclusive_cvp_run_lock({'global_lock_path':str(BASE/'registry-cvp.lock')}):
             if any((ROOT/n).exists() for n in ('failure.json','apply-intent.json','apply-receipt.json')):
                 raise ValueError('terminal failure/application reservation; no retry')
-            states,packet=prepare(store);result=reviews(packet,cached_only=apply)
+            states,packet=prepare(store)
+            if recover_store_conflict: migrate_store_conflict_cache(store,packet)
+            result=reviews(packet,cached_only=apply or recover_store_conflict)
             collections=sorted({c for c,_ in states})
             if fingerprint(snapshot(store),collections)!=packet['registry_before_sha256']: raise ValueError('Registry drift during review')
             write_immutable(ROOT/'review-report.json',{'approved':True,'reviews':result,'packet_sha256':sha256_json(packet)})
@@ -166,4 +200,4 @@ def run(*,apply=False):
 
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--apply',action='store_true');args=p.parse_args();run(apply=args.apply)
+    p=argparse.ArgumentParser();p.add_argument('--apply',action='store_true');p.add_argument('--recover-store-conflict',action='store_true');args=p.parse_args();run(apply=args.apply,recover_store_conflict=args.recover_store_conflict)
