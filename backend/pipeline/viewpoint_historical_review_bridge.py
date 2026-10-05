@@ -277,6 +277,84 @@ def _sealed_adjudicated_bridge(*, claim_id, current_claim, item, resolution, ver
     return body|{'artifact_sha256':sha256_json(body)}
 
 
+def _sealed_withdrawn_bridge(**kwargs):
+    """Consume an authenticated withdrawal, never relabel a suggestion as pass.
+
+    The full sealed batch/reconsideration must replay to the first applied
+    package. The selected Claim and its related graph must be unchanged from
+    the original review input; no semantic/coordinate drift privilege is added.
+    """
+    from backend.pipeline.legacy_candidate_reconciliation import inspect_legacy_bundle
+    from backend.pipeline.legacy_auto_applied_review_reconciliation import verify_historical_replay
+    from backend.pipeline.legacy_withdrawn_review_reconciliation import _related_records
+
+    cid, item = kwargs['claim_id'], kwargs['item']
+    resolution, chain = kwargs['resolution'], sorted(kwargs['versions'], key=lambda r: r['revision'])
+    bundle = inspect_legacy_bundle(Path(item['path']))
+    replay = verify_historical_replay(Path(item['path']))
+    if (bundle.get('reason') or not bundle.get('adjudication_structurally_validated')
+            or not replay or replay.get('replay_contract') != 'sealed_batched_exact_full_package_v1'
+            or replay.get('historical_replay_sha256') != sha256_json(item['payload'])
+            or bundle.get('review_sha256') != kwargs['review_binding']['file_sha256']
+            or bundle.get('package_sha256') != kwargs['review_input_binding']['file_sha256']):
+        raise CvpProductionBlocked([f'{cid}: withdrawn review lacks exact sealed replay/source proof'])
+    row = bundle['review_rows'].get(cid, {})
+    result = bundle['adjudication_results'].get(cid, {})
+    if (resolution.get('target_review_status') != 'ai_consensus_reviewed'
+            or resolution.get('independent_review_decision') != 'changes_suggested'
+            or resolution.get('adjudication_status') != 'withdrawn'
+            or row.get('decision') != 'changes_suggested' or row.get('spot_check_selected')
+            or row.get('human_review_reason') or row.get('routing_status') == 'human_spot_check'
+            or result.get('status') != 'withdrawn' or result.get('human_review_reason')
+            or result.get('openai', {}).get('decision') != 'reject'
+            or result.get('claude_reconsideration', {}).get('decision') != 'withdraw'
+            or cid in item['application'].get('applied_claim_ids', [])):
+        raise CvpProductionBlocked([f'{cid}: finding was not independently withdrawn without a human hold'])
+    original, _ = _normalize_records(item['review_input_payload'])
+    final, _ = _normalize_records(item['payload'])
+    try:
+        unchanged = (_meaning(original['claims'][cid]) == _meaning(final['claims'][cid])
+                     and _related_records(original, cid) == _related_records(final, cid))
+    except (ValueError, KeyError):
+        unchanged = False
+    if (not unchanged or not chain or chain[0]['revision'] != 1
+            or chain[0].get('source_kind') != 'knowledge_package'
+            or chain[0].get('source_sha256') != replay['historical_replay_sha256']
+            or [r['revision'] for r in chain] != list(range(1, kwargs['current_claim']['revision'] + 1))
+            or any(_meaning(r['payload']) != _meaning(final['claims'][cid]) for r in chain)):
+        raise CvpProductionBlocked([f'{cid}: withdrawal changes graph or lacks exact initial applied package'])
+    # Aggregate reviews omit paths. Only the already reconstructed per-batch
+    # physical source bindings supply them; no path/title inference is allowed.
+    source_review = deepcopy(item['review_payload'])
+    source_review['source']['transcript_paths'] = bundle['review_transcript_paths']
+    sources = item['review_input_payload'].get('source_documents', [])
+    physical = {s['source_id']: s.get('source_file_sha256') for s in sources}
+    if (len(physical) != len(sources) or not all(physical.values())
+            or set(physical) != set(bundle['review_transcript_paths'])
+            or set(physical) != set(bundle['review_transcript_sha256'])):
+        raise CvpProductionBlocked([f'{cid}: withdrawn physical source coverage differs'])
+    # The batch review may hash the rendered JSON projection. inspect/replay
+    # already authenticated that projection AND the separate original-file pin.
+    # The own-source alias verifier requires the latter, not the rendered SHA.
+    source_review['source']['transcript_sha256'] = physical
+    try:
+        for fragment in kwargs['current_fragments'].values():
+            verify_fragment_own_source(fragment, kwargs['current_claim'], source_review)
+    except ValueError as exc:
+        raise CvpProductionBlocked([f'{cid}: withdrawn own-source proof failed: {exc}']) from exc
+    proof = _sealed_adjudicated_bridge(**kwargs)
+    proof.pop('artifact_sha256')
+    proof.update(authority_kind='exact_replayed_applied_withdrawal_not_initial_review_pass',
+                 historical_replay=replay, original_claim_and_related_graph_unchanged=True,
+                 reviewed_source_bindings={sid: {
+                     'path': bundle['review_transcript_paths'][sid], 'file_sha256': physical[sid],
+                     'review_projection_sha256': bundle['review_transcript_sha256'][sid],
+                     'binding_mode': bundle['review_source_binding_modes'][sid]} for sid in physical},
+                 adjudication_binding={'path': bundle['adjudication_path'],
+                                       'file_sha256': bundle['adjudication_sha256']})
+    return proof | {'artifact_sha256': sha256_json(proof)}
+
+
 def authenticate_legacy_merge_target(claim_id, binding, review_binding, input_binding, versions):
     """Authenticate a passing recipient's exact historical merged generation.
 
@@ -522,6 +600,14 @@ def verify_historical_review_bridge(
         if item is None or item["review_payload"] != review or item["review_input_payload"] != package:
             raise CvpProductionBlocked([f"{claim_id}: sealed lineage binds another review generation"])
         resolution = next((row for row in item["application"]["review_resolutions"] if row["claim_id"] == claim_id), {})
+        if resolution.get('adjudication_status') == 'withdrawn':
+            if human_closure_binding is not None:
+                raise CvpProductionBlocked([f'{claim_id}: withdrawal cannot override a human hold'])
+            return _sealed_withdrawn_bridge(claim_id=claim_id, current_claim=current_claim,
+                item=item, resolution=resolution, versions=versions,
+                current_evidence=current_evidence, current_fragments=current_fragments,
+                review_binding=review_binding, review_input_binding=review_input_binding,
+                sealed_lineage_binding=sealed_lineage_binding)
         if resolution.get('target_review_status')=='ai_consensus_reviewed' and resolution.get('adjudication_status')=='auto_applied' and resolution.get('independent_review_decision')=='changes_suggested':
             if human_closure_binding is not None:
                 raise CvpProductionBlocked([f'{claim_id}: automatic adjudication cannot override a human hold'])
