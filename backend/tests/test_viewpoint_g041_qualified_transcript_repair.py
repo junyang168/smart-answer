@@ -127,3 +127,27 @@ def test_prior_refusal_and_actual_transport_verified(monkeypatch,mutation):
     if mutation is None:assert len(m.predecessor({}))==7
     else:
         with pytest.raises(ValueError):m.predecessor({})
+
+
+@pytest.mark.parametrize('mutation',[None,'root','version','source','fragment','claim','evidence','link',
+    'candidate','decision','review','authority','extra_collection'])
+def test_store_contract_rebuilds_exact_body_and_fresh_identity(monkeypatch,mutation):
+    expected={'package_id':'exact','source_documents':[{'revision':2}],
+        'source_fragments':[{'revision':2}], 'claims':[{'statement':m.STATEMENT}],
+        'evidence_steps':[{'statement':m.EVIDENCE_AFTER}], 'viewpoint_claim_links':[{'pin':2}],
+        'viewpoint_identity_candidates':[{'fresh':True}], 'viewpoint_identity_decisions':[{'fresh':True}],
+        'source_repair_application':{'schema_version':m.VERSION,'review_root':str(m.ROOT),
+            'review_artifacts':['exact'], 'user_authorization':'continue'}}
+    monkeypatch.setattr(m,'reviewed_inputs',lambda root:({}, {}, {}, {}, {}, []))
+    monkeypatch.setattr(m,'package_for',lambda *args:deepcopy(expected))
+    observed=deepcopy(expected)
+    if mutation in {'root','version','review','authority'}:
+        observed['source_repair_application'][{'root':'review_root','version':'schema_version',
+            'review':'review_artifacts','authority':'user_authorization'}[mutation]]='drift'
+    elif mutation=='extra_collection':observed['canonical_viewpoints']=[{'unauthorized':True}]
+    elif mutation is not None:
+        observed[{'source':'source_documents','fragment':'source_fragments','claim':'claims','evidence':'evidence_steps',
+            'link':'viewpoint_claim_links','candidate':'viewpoint_identity_candidates','decision':'viewpoint_identity_decisions'}[mutation]]=[]
+    if mutation is None:m.validate_package(observed)
+    else:
+        with pytest.raises(ValueError):m.validate_package(observed)

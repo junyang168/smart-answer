@@ -130,6 +130,109 @@ def extend(states, package, packet, root):
     return package, packet
 
 
+def saved_before(root=ROOT):
+    proof = old.read_artifact(root/'before.json')
+    states = {(r['collection'],r['object_id']):r['payload'] for r in proof['before_records']}
+    if len(states) != len(proof['before_records']) or old.fingerprint(states,proof['collections']) != proof['pre_fingerprint_sha256']:
+        raise ValueError('immutable complete Registry before proof drift')
+    return states, proof
+
+
+def reviewed_inputs(root=ROOT):
+    states, proof = saved_before(root)
+    bindings = predecessor(states)
+    report, proposal = old.frozen_inputs()
+    draft, packet = old.materialize(states, report, proposal, root)
+    draft, packet = extend(states, draft, packet, root)
+    packet['prior_refusal_bindings'] = bindings
+    if old.read_artifact(root/'packet.json') != packet or old.read_artifact(root/'draft-package.json') != draft:
+        raise ValueError('reviewed exact source/Claim/link packet reconstruction drift')
+    reservation = old.read_artifact(PRIOR/'owner-qualified-transcript-start.json')
+    if (reservation != old.read_artifact(root/'owner-authorization.json')
+            or reservation.get('schema_version') != VERSION or reservation.get('output_root') != str(root)
+            or reservation.get('packet_sha256') != old.sha256_json(packet)
+            or reservation.get('fresh_reviews_per_provider') != 1 or reservation.get('human_content_approval') is not False
+            or reservation.get('prior_refusal_bindings') != bindings):
+        raise ValueError('single-use owner qualifier authorization drift')
+    reviews, raws = {}, []
+    for label,provider,model in [('gpt','codex','gpt-6.1-sol'),('opus','claude','claude-opus-5-5')]:
+        a = adapter(provider,model); raw = old.read_artifact(root/f'raw-{label}.json')
+        encoding = a.request_encoding_proof(packet)
+        sealed = {'schema_version':'wang_model_request_encoding_proof_v1',**encoding}
+        expected = {'model_id':model,'backend':a.backend,'prompt_sha256':a.prompt_sha256,
+            'generation_config_sha256':a.generation_config_sha256,'request_payload_sha256':old.sha256_json(packet),
+            'request_encoding_proof_sha256':old.sha256_json(encoding)}
+        if (any(raw.get(k) != v for k,v in expected.items())
+                or raw['artifact_sha256'] != old.sha256_json({k:v for k,v in raw.items() if k != 'artifact_sha256'})
+                or raw['response_sha256'] != old.sha256_json(raw['response'])
+                or old.read_artifact(root/f'raw-{label}.request-encoding.json') != {**sealed,'artifact_sha256':old.sha256_json(sealed)}
+                or a.request_bytes(packet) > 500000):
+            raise ValueError('fresh complete dual review actual model/transport/integrity drift')
+        reviews[label] = old.require_approval(raw['response'],packet); raws.append(raw)
+    if old.read_artifact(root/'review-report.json') != {'status':'dual_review_approved_not_applied',
+            'packet_sha256':old.sha256_json(packet),'reviews':reviews,'master_data_mutations':0}:
+        raise ValueError('fresh dual review report drift')
+    return states, proof, draft, packet, reviews, raws
+
+
+def package_for(states, draft, packet, reviews, raws, root=ROOT):
+    from backend.pipeline.viewpoint_audit_link_repair import package_for as identity_package
+    targets = [{'before_link':states['viewpoint_claim_links',link['viewpoint_claim_link_id']],
+        'after_link':link} for link in draft['viewpoint_claim_links']]
+    identities = identity_package(states,{'targets':targets},reviews,root,
+        identity_digest=old.sha256_json({'packet':packet,'reviews':reviews,'version':VERSION}))
+    package = deepcopy(draft)
+    for key in ('viewpoint_claim_links','viewpoint_identity_candidates','viewpoint_identity_decisions'):
+        package[key] = identities[key]
+    for d in package['viewpoint_identity_decisions']:
+        d.update(policy_version=VERSION, reviewer_id='owner_qualified_transcript_dual_model_review',
+            reason='Owner-corrected source epoch with first-marriage qualifier and passive Evidence; exact fresh dual-reviewed Claim/link postimage; prior rejection and old source versions retained.')
+    package['source_repair_application'] = {'schema_version':VERSION,'user_authorization':packet['owner_authorization'],
+        'approval_status':'not_human_approved','review_packet':packet,'review_artifacts':raws,
+        'review_root':str(root),'before_binding':{'path':str(root/'before.json'),'file_sha256':old.file_sha256(root/'before.json')},
+        'package_sha256':old.sha256_json(package)}
+    return package
+
+
+def validate_package(package):
+    app = package.get('source_repair_application') or {}
+    if app.get('schema_version') != VERSION or app.get('review_root') != str(ROOT):
+        raise ValueError('qualified source repair outside exact version/root')
+    states,_,draft,packet,reviews,raws = reviewed_inputs(ROOT)
+    if package != package_for(states,draft,packet,reviews,raws,ROOT):
+        raise ValueError('qualified source repair package/postimage/identity drift')
+
+
+def plan_reviewed(root=ROOT):
+    """Full store dry-run only. Never infer application from a passing plan."""
+    from backend.api.canonical_repository.viewpoint_production_safety import exclusive_cvp_run_lock
+    from backend.api.canonical_repository.postgres_store import stored_operation_payload
+    load_dotenv(old.PROJECT/'.env')
+    states,before,draft,packet,reviews,raws = reviewed_inputs(root)
+    package = package_for(states,draft,packet,reviews,raws,root)
+    store = old.PostgresKnowledgeStore()
+    with exclusive_cvp_run_lock({'global_lock_path':str(old.BASE/'registry-cvp.lock')}):
+        live = old.snapshot(store)
+        if old.fingerprint(live,before['collections']) != before['pre_fingerprint_sha256']:
+            raise ValueError('pre-plan live Registry drift')
+        plan = store.plan_package(package,source_kind=VERSION)
+        expected = {'source_documents':('update',1),'source_fragments':('update',596),
+            'evidence_steps':('update',3),'claims':('update',3),'viewpoint_claim_links':('update',3),
+            'viewpoint_identity_candidates':('create',3),'viewpoint_identity_decisions':('create',3)}
+        if len(plan.operations) != 612 or any(sum(o.collection==c and o.operation==kind for o in plan.operations)!=n for c,(kind,n) in expected.items()):
+            raise ValueError('qualified transcript unexpected operations; no write')
+        post = deepcopy(live)
+        for op in plan.operations:
+            post[op.collection,op.object_id] = stored_operation_payload(op)
+        old.write_immutable(root/'effective-package.json',package)
+        old.write_immutable(root/'dry-run-plan.json',json.loads(json.dumps(plan.as_dict())))
+        old.write_immutable(root/'dry-run-result.json',{'status':'exact_store_plan_passed_not_applied',
+            'operations':612,'pre_fingerprint_sha256':before['pre_fingerprint_sha256'],
+            'expected_post_fingerprint_sha256':old.fingerprint(post,before['collections']),
+            'registry_writes':0,'new_model_calls':0,'source_version_consumer_required':True})
+    print('Exact 612-operation store dry-run passed; no writes or new model calls')
+
+
 def run(root, review=False):
     if root != ROOT:
         raise ValueError('one exact independent qualifier root required')
@@ -183,6 +286,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output-root',type=Path,required=True)
     parser.add_argument('--review',action='store_true')
+    parser.add_argument('--plan-reviewed',action='store_true')
     args = parser.parse_args(); root = args.output_root.resolve()
     if root != ROOT:
         raise ValueError('exact independent qualified transcript root required')
@@ -190,7 +294,12 @@ def main():
     with (old.BASE/'immediate-recovery-20261002-v1/recovery.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         try:
-            run(root,args.review)
+            if args.plan_reviewed:
+                if args.review:
+                    raise ValueError('saved dual-review planning cannot call models')
+                plan_reviewed(root)
+            else:
+                run(root,args.review)
         except Exception as exc:
             old.write_immutable(root/'failure.json',{'error':str(exc),'master_data_mutations':0,'automatic_repeat':False})
             raise
