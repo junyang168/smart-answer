@@ -37,13 +37,15 @@ def create_gpt_resolution(audit_path, adjudication_root, output, store):
     source_bindings = {s['path']: {'path': s['path'], 'file_sha256': s['file_sha256']}
                        for item in packet['items'] for s in item['sources']}
     audit = read_artifact(audit_path)
+    from backend.pipeline.viewpoint_g035_temporary_audit import validate as validate_exception
+    exception_bindings = validate_exception(audit)
     body = {'schema_version': GPT_SCHEMA, 'approval_basis': 'owner_authorized_gpt_source_final',
             'policy_id': policy['policy_id'], 'audit_semantic_sha256': audit_semantic_sha(audit),
             'packet_sha256': packet['artifact_sha256'],
             'resolved_findings_by_layer': {k: [r for r in audit['layers'][k]['results']
                                                 if r['verdict'] == 'disputed'] for k in ('3', '4')},
             'master_data_mutations': 0, 'independent_audit_verdicts_unchanged': True,
-            'bindings': [binding(p) for p in paths] + list(source_bindings.values()),
+            'bindings': [binding(p) for p in paths] + list(source_bindings.values()) + exception_bindings,
             'packet_path': str(packet_path), 'raw_gpt_path': str(adjudication_root / 'raw-gpt.json'),
             'handoff_path': str(adjudication_root / 'gpt-final-handoff.json'),
             'policy_path': str(GPT_POLICY)}

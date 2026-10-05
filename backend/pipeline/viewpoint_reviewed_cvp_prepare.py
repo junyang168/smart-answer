@@ -45,6 +45,8 @@ def validate_completed_parent_audit(row, group_rows):
     if binding(row['audit_path']) not in row['bindings']:
         raise CvpProductionBlocked(['completed parent audit lacks physical binding'])
     audited = read(row['audit_path'])
+    from backend.pipeline.viewpoint_g035_temporary_audit import validate_completion_disclosure
+    validate_completion_disclosure(row, audited)
     claim_path = row.get('claim_audit_path', row['audit_path'])
     if binding(claim_path) not in row['bindings']:
         raise CvpProductionBlocked(['completed parent Claim audit lacks physical binding'])

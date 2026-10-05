@@ -46,6 +46,8 @@ context 只是诊断材料，不授予新增引用权威。结果只是提案，
 
 
 def disputes(audit):
+    from backend.pipeline.viewpoint_g035_temporary_audit import validate as validate_exception
+    validate_exception(audit)
     result = []
     for layer, key in (('3', 'claim_id'), ('4', 'viewpoint_id')):
         report = audit.get('layers', {}).get(layer, {})
@@ -61,6 +63,8 @@ def disputes(audit):
 
 
 def validate_population(audit, claim_ids, viewpoint_ids):
+    from backend.pipeline.viewpoint_g035_temporary_audit import validate as validate_exception
+    validate_exception(audit)
     for layer, key, ids in (('3', 'claim_id', claim_ids), ('4', 'viewpoint_id', viewpoint_ids)):
         report = audit['layers'][layer]
         rows = report['results']

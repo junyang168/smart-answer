@@ -61,6 +61,8 @@ def validate_schedule(schedule, manifest):
 
 
 def validate_audit(audit, claim_ids, viewpoint_ids, *, owner_resolution_path=None):
+    from backend.pipeline.viewpoint_g035_temporary_audit import validate as validate_exception
+    validate_exception(audit)
     if (audit.get("meta") or {}).get("model") != "gemini-3.8-flash":
         raise ValueError("unexpected independent audit model")
     resolved_by_layer = {'3': set(), '4': set()}
@@ -333,6 +335,8 @@ def execute(args):
         # A link-only repair does not invalidate the earlier unchanged Claim
         # audit. Keep both physical reports explicit, never synthesize a pass.
         audited = read(row["audit_path"])
+        from backend.pipeline.viewpoint_g035_temporary_audit import validate_completion_disclosure
+        validate_completion_disclosure(row, audited)
         claim_audit = read(row.get("claim_audit_path", row["audit_path"]))
         validate_audit({"meta": audited["meta"], "layers": {"3": claim_audit["layers"]["3"], "4": audited["layers"]["4"]}},
                        groups[row["group_key"]]["claim_ids"], row["viewpoint_ids"],

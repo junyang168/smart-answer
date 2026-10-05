@@ -246,6 +246,15 @@ def verify_group_audit(root, cfg, schedule, manifest, groups, audit_path, output
     proof = {"group_key": group_key, "viewpoint_ids": targets, "audit_path": str(audit_path),
              "bindings": [binding(audit_path), binding(plans[0]), binding(scope_run), binding(rb)],
              "argument_routes_completed": False}
+    from backend.pipeline.viewpoint_g035_temporary_audit import validate as validate_exception, KEY
+    exception_bindings = validate_exception(audit)
+    if exception_bindings:
+        if group_key != 'p020:p020:whole' or state['sequence'] != 35:
+            raise ValueError('temporary audit exception belongs only to g035')
+        proof.update(revisit_required=True, independent_audit_complete=False,
+                     approval_basis='owner_temporary_gpt_exception_with_source_adjudication',
+                     temporary_audit_exception_path=audit['meta'][KEY]['path'])
+        proof['bindings'] += exception_bindings
     if owner_resolution_path is not None:
         resolution = read(owner_resolution_path)
         proof['owner_resolution_path'] = str(owner_resolution_path)
@@ -276,6 +285,8 @@ def continuation_inputs(root, output, extra_completion=None, *, additional_sourc
             # audit/plan consumers parse their required JSON below.
             verify_binding(b, parse_json=False)
         audited = read(seed["audit_path"])
+        from backend.pipeline.viewpoint_g035_temporary_audit import validate_completion_disclosure
+        validate_completion_disclosure(seed, audited)
         ca = read(seed.get("claim_audit_path", seed["audit_path"]))
         validate_audit({"meta": audited["meta"], "layers": {"3": ca["layers"]["3"], "4": audited["layers"]["4"]}},
                        groups[seed["group_key"]]["claim_ids"], seed["viewpoint_ids"],
