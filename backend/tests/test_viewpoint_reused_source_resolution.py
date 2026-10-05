@@ -59,3 +59,16 @@ def test_changed_connection_or_upheld_not_reusable(tmp_path,monkeypatch):
     changed=seal({k:v for k,v in changed.items() if k!='artifact_sha256'})
     monkeypatch.setattr('backend.pipeline.viewpoint_audit_source_adjudication.build_packet',lambda *args:changed)
     with pytest.raises(ValueError,match='changed/upheld'):m.create(tmp_path/'audit.json',prior,tmp_path/'other/resolution.json',object())
+
+def test_exact_finding_projection_not_general_reason_waiver():
+    old={'item_id':'4:v:c','claim':{'revision':1},'connections':[{'revision':1}],
+         'audit_finding':{'claim_ids_in_question':['c','fixed'],'reason':'original two concerns'}}
+    new=deepcopy(old);new['audit_finding']={'claim_ids_in_question':['c'],'reason':'the same remaining concern'}
+    policy={'old_finding_sha256':sha256_json(old['audit_finding']),
+            'new_finding_sha256':sha256_json(new['audit_finding']),'removed_claim_id':'fixed'}
+    assert m.exact_item(old,new,policy)
+    changed=deepcopy(new);changed['claim']['revision']=2
+    assert not m.exact_item(old,changed,policy)
+    changed=deepcopy(new);changed['audit_finding']['reason']='another semantic objection'
+    assert not m.exact_item(old,changed,policy)
+    assert not m.exact_item(old,new,None)
