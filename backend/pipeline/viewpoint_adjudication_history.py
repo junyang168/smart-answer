@@ -8,7 +8,6 @@ approved by this guard either; they remain subject to ordinary new-scope gates.
 """
 import hashlib
 from pathlib import Path
-from types import SimpleNamespace
 
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.pipeline.viewpoint_resolution_runtime import read_artifact
@@ -34,7 +33,11 @@ def validated_history(root):
     audit = packet['audit_binding']
     if hashlib.sha256(Path(audit['path']).read_bytes()).hexdigest() != audit['file_sha256']:
         raise ValueError('saved adjudication history audit drift')
-    client = SimpleNamespace(model='gpt-6.1-sol', backend='codex_subscription', reasoning_effort='high')
+    # Construct the real profile without executing it. Omitting its default
+    # output ceiling changed the configuration SHA and misclassified saved
+    # compact responses as unknown contextual requests.
+    from backend.pipeline.viewpoint_resolution_runtime import subscription_client
+    client = subscription_client('codex', 'gpt-6.1-sol', 'high')
     adapter = source_review_adapter(client, root / 'raw-gpt.json')
     if (raw.get('model_id') != adapter.model_id or raw.get('backend') != adapter.backend
             or raw.get('prompt_sha256') != adapter.prompt_sha256

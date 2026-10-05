@@ -190,7 +190,9 @@ def history_fixture(tmp_path):
         'audit_finding':{'reason':'exact prior objection'},
         'sources':[{'source_id':'s','path':str(source),'file_sha256':binding(source)['file_sha256'],
                     'paragraphs':[{'paragraph_key':'S0001','text':'own original quote'}]}]}]})
-    client=SimpleNamespace(model='gpt-6.1-sol',backend='codex_subscription',reasoning_effort='high')
+    from backend.pipeline.viewpoint_resolution_runtime import subscription_client
+    client=subscription_client('codex','gpt-6.1-sol','high')
+    assert client.max_output_tokens == 64000
     adapter=StructuredJsonReviewerAdapter(client=client,prompt=a.PROMPT,response_model=a.Findings,
         schema_name='wang_audit_source_findings_v1',compact_payload=True)
     response={'findings':[{'item_id':'4:v:c','verdict':'audit_objection_rejected',
