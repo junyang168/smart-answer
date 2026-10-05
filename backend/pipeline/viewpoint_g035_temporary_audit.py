@@ -54,7 +54,7 @@ def derive(original, response, proof_binding):
             blocked[0].get('revision_id') != REVISION or
             'PROHIBITED_CONTENT' not in blocked[0].get('reason', '') or
             report.get('blocked') != 1 or report.get('judged') != len(rows)-1 or
-            report.get('complete') or any(report.get(k, 0) for k in ('model_errors','no_source_text')) or
+            report.get('complete') is not True or any(report.get(k, 0) for k in ('model_errors','no_source_text')) or
             len({r['viewpoint_id'] for r in rows}) != len(rows)):
         raise ValueError('not the exact single provider-blocked g035 population')
     if (set(response) != {'verdict','issue','reason','claim_ids_in_question'} or

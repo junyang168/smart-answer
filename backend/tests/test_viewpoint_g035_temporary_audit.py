@@ -11,7 +11,7 @@ def original():
     return {'meta':{'model':'gemini-3.8-flash'},'layers':{
         '1':{'findings':[]},'2':{'findings':[]},
         '3':{'complete':True,'judged':1,'results':[{'claim_id':m.CLAIM,'verdict':'supported'}]},
-        '4':{'complete':False,'judged':2,'blocked':1,'disputed':1,'model_errors':0,'no_source_text':0,
+        '4':{'complete':True,'judged':2,'blocked':1,'disputed':1,'model_errors':0,'no_source_text':0,
              'results':[{'viewpoint_id':m.TARGET,'revision_id':m.REVISION,'verdict':'blocked','issue':'other','reason':'PROHIBITED_CONTENT'},
                         {'viewpoint_id':'v2','verdict':'same'},
                         {'viewpoint_id':'v3','revision_id':'r3','verdict':'disputed','issue':'over_merge','claim_ids_in_question':[m.CLAIM]}]}}}
@@ -48,7 +48,7 @@ def test_exact_exception_keeps_every_other_verdict_and_revisit_flag(tmp_path,mon
     projected={'meta':result['meta'],'layers':{k:result['layers'][k] for k in ('3','4')}}
     assert m.validate(projected)
 
-@pytest.mark.parametrize('change',['other_target','revision','two_blocked','not_filter','model_error','source_missing','wrong_judged','already_complete','duplicate'])
+@pytest.mark.parametrize('change',['other_target','revision','two_blocked','not_filter','model_error','source_missing','wrong_judged','incomplete_sampling','duplicate'])
 def test_not_exact_provider_gap_stops(change):
     a=original(); r=a['layers']['4']; row=r['results'][0]
     if change=='other_target':row['viewpoint_id']='foreign'
@@ -58,7 +58,7 @@ def test_not_exact_provider_gap_stops(change):
     elif change=='model_error':r['model_errors']=1
     elif change=='source_missing':r['no_source_text']=1
     elif change=='wrong_judged':r['judged']=0
-    elif change=='already_complete':r['complete']=True
+    elif change=='incomplete_sampling':r['complete']=False
     else:r['results'][1]['viewpoint_id']=m.TARGET
     with pytest.raises(ValueError):m.derive(a,response(),{})
 
