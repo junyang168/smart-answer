@@ -26,7 +26,7 @@ BASE=Path('/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/staging
 PRAYER=BASE/'g034-owner-prayer-link-review-20261004-v1'
 ROOT=BASE/'g034-owner-theme-support-repair-20261004-v1'
 STORE_CONFLICT_ROOT=ROOT
-RECOVERY_ROOT=BASE/'g034-owner-theme-component-store-repair-20261004-v1'
+RECOVERY_ROOT=BASE/'g034-owner-theme-component-store-repair-20261004-v2'
 LINK='VCL-db5e440b8856ca2f4ad6'
 CLAIM='DK-791c4e404fda-P06-CL010'
 CV='CV-3657f53d08ed20c39b95'
@@ -179,7 +179,8 @@ def run(*,apply=False,recover_store_conflict=False):
                 write_derived(ROOT/'progress.json',{'status':'dual_review_dry_run_passed','group_complete':False,'registry_writes':0})
                 print('dual review and exact dry-run passed; zero writes');return
             if subprocess.check_output(['git','status','--porcelain'],text=True).strip(): raise ValueError('commit tested executor before apply')
-            out=subprocess.run(['scripts/backup-registry.sh','before-g034-owner-theme-support'],cwd=project,check=True,capture_output=True,text=True)
+            backup_label='before-g034-theme-'+sha256_json({'root':str(ROOT)})[:16]
+            out=subprocess.run(['scripts/backup-registry.sh',backup_label],cwd=project,check=True,capture_output=True,text=True)
             match=re.search(r'backup-registry: wrote (.+\.dump) \(',out.stdout)
             if not match: raise ValueError('backup not reported')
             backup=Path(match.group(1)).resolve();listed=subprocess.run(['pg_restore','--list',str(backup)],check=True,capture_output=True,text=True)
