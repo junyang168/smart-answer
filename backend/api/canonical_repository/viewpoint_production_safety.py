@@ -376,7 +376,8 @@ def _validate_scope_packet(scope_packet: Mapping[str, Any], store: Any) -> list[
 def _artifact_binding(path: Path) -> dict[str, str]:
     if not path.is_file():
         raise CvpProductionBlocked([f"required artifact missing: {path}"])
-    return {"path": str(path.resolve()), "sha256": file_sha256(path)}
+    from backend.pipeline.viewpoint_backup_archive import logical_binding_path
+    return {"path": str(logical_binding_path(path)), "sha256": file_sha256(path)}
 
 
 def _passed_status(payload: Mapping[str, Any]) -> bool:

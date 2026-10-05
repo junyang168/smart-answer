@@ -30,7 +30,8 @@ def read(path):
 
 
 def binding(path):
-    path = Path(path).resolve()
+    from backend.pipeline.viewpoint_backup_archive import logical_binding_path
+    path = logical_binding_path(path)
     return {"path": str(path), "file_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
 
 
