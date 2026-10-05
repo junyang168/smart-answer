@@ -203,7 +203,13 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
         raise CvpProductionBlocked(["commit implementation before production preparation"])
     runner_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=PROJECT_ROOT, text=True).strip()
     repository = SharedGroupingRepository(args.grouping_repository)
-    loaded = repository.load(args.accepted_grouping_sha)
+    from backend.pipeline.viewpoint_g041_source_epoch import PACKAGE, GROUPING_EPOCH_KEY, binding as epoch_binding
+    repair_paths=getattr(args,'completed_source_repair',None) or []
+    epoch_paths=[p for p in repair_paths if p == PACKAGE]
+    if len(epoch_paths)>1:
+        raise CvpProductionBlocked(['duplicate applied source epoch package'])
+    applied_epoch=epoch_binding() if epoch_paths else None
+    loaded = repository.load(args.accepted_grouping_sha, source_epoch_binding=applied_epoch)
     manifest = loaded["manifest"]
     stage = "group:" + args.group_key if getattr(args, "group_key", None) else "canary"
     canary = accepted_grouping_phase_group(manifest, stage)
@@ -293,6 +299,8 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
                                partition_claim_ids=selected_ids, partition_manifest_sha256=args.accepted_grouping_sha,
                                include_source_context=True)
     packet.update(scope_kind="accepted_grouping_canary", accepted_grouping_stage=stage)
+    if applied_epoch is not None:
+        packet[GROUPING_EPOCH_KEY] = applied_epoch
     packet.pop("packet_sha256")
     packet["packet_sha256"] = sha256_json(packet)
     files = {"source_universe_manifest": ("source-universe.json", universe), "coverage_snapshot": ("coverage.json", coverage.model_dump(mode="json")),

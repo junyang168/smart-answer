@@ -126,3 +126,31 @@ def test_postimages_keep_unstated_source_fields_absent(monkeypatch):
     actual=m.postimages({})['source_documents']['source']
     assert actual=={'source_id':'source','revision':2,'body':'new','preserved':'yes'}
     assert 'visual_source_assets' not in actual
+
+
+@pytest.mark.parametrize('mutation',[None,'manifest','path','old_sha','frozen_sha','revision','body','content','current_sha','missing_applied','physical_drift'])
+def test_grouping_transition_requires_exact_applied_predecessor(monkeypatch,mutation):
+    old={'revision':1,'source_id':m.repair.old.SOURCE}
+    versions={'published_path':'/published.json','old_file_sha256':'old','new_file_sha256':'new','old_body_sha256':'old-body','new_body_sha256':'new-body'}
+    source={'source_id':m.repair.old.SOURCE,'path':'/published.json','file_sha256':'old','frozen_file_sha256':'old',
+        'source_revision':1,'source_body_sha256':'old-body','source_content_sha256':m.repair.old.semantic_record_sha(old)}
+    manifest={'sources':[source]};original=deepcopy(manifest)
+    current={'source_sha256':'new-body','source_body_sha256':'new-body'}
+    report={'source_versions':versions,'frozen_scope':{'manifest_path':'/frozen.json'}}
+    def applied(binding,store):
+        if mutation=='missing_applied':raise ValueError('not applied')
+        return {},{('source_documents',m.repair.old.SOURCE):old},{('source_documents',m.repair.old.SOURCE):current}
+    monkeypatch.setattr(m,'verified_applied',applied)
+    monkeypatch.setattr(m.repair.old,'frozen_inputs',lambda:(report,{}))
+    def physical(report):
+        if mutation=='physical_drift':raise ValueError('physical drift')
+    monkeypatch.setattr(m.repair.old,'verify_source',physical)
+    if mutation=='manifest':manifest['foreign']=True
+    fields={'path':'path','old_sha':'file_sha256','frozen_sha':'frozen_file_sha256','revision':'source_revision',
+        'body':'source_body_sha256','content':'source_content_sha256'}
+    if mutation in fields:source[fields[mutation]]='drift';original=deepcopy(manifest)
+    if mutation=='current_sha':current['source_sha256']='drift'
+    monkeypatch.setattr(m.repair.old,'read_artifact',lambda p:original)
+    if mutation is None:assert m.grouping_physical_transition(manifest,{})=={'/published.json':('old','new')}
+    else:
+        with pytest.raises(ValueError):m.grouping_physical_transition(manifest,{})

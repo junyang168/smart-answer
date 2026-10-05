@@ -11,6 +11,39 @@ from backend.pipeline import viewpoint_g041_qualified_transcript_repair as repai
 from backend.api.canonical_repository.postgres_store import _normalize_records, merge_over_existing
 
 PACKAGE = repair.APPLICATION_ROOT/'effective-package.json'
+GROUPING_EPOCH_KEY = 'applied_grouping_source_epoch_binding'
+
+
+def grouping_physical_transition(manifest, source_repair_binding):
+    """One applied epoch, not a source-ID exemption or a new grouping approval.
+
+    The immutable accepted manifest remains byte-for-byte authoritative. Only
+    its one published-file predecessor pin may transition; linked assets and
+    every other source retain their original physical gates.
+    """
+    package, before, live = verified_applied(source_repair_binding, repair.old.PostgresKnowledgeStore())
+    report, _ = repair.old.frozen_inputs()
+    repair.old.verify_source(report)
+    frozen = repair.old.read_artifact(Path(report['frozen_scope']['manifest_path']))
+    if manifest != frozen:
+        raise ValueError('source epoch cannot rebind another accepted manifest')
+    rows = [s for s in manifest['sources'] if s['source_id'] == repair.old.SOURCE]
+    if len(rows) != 1:
+        raise ValueError('source epoch physical predecessor is not unique')
+    source = rows[0]
+    versions = report['source_versions']
+    predecessor = before['source_documents', repair.old.SOURCE]
+    current = live['source_documents', repair.old.SOURCE]
+    if (source['path'] != versions['published_path']
+            or source['file_sha256'] != versions['old_file_sha256']
+            or source['frozen_file_sha256'] != versions['old_file_sha256']
+            or source['source_revision'] != predecessor['revision']
+            or source['source_body_sha256'] != versions['old_body_sha256']
+            or source['source_content_sha256'] != repair.old.semantic_record_sha(predecessor)
+            or current['source_sha256'] != versions['new_body_sha256']
+            or current['source_body_sha256'] != versions['new_body_sha256']):
+        raise ValueError('source epoch exact physical predecessor/current pin drift')
+    return {source['path']: (source['file_sha256'], versions['new_file_sha256'])}
 
 
 def bound_package(binding):

@@ -81,16 +81,19 @@ class SharedGroupingRepository:
         except (OSError, ValueError, TypeError) as exc:
             raise CvpProductionBlocked(["unreadable shared grouping reference"]) from exc
 
-    def load(self, manifest_sha256: str) -> dict[str, Any]:
+    def load(self, manifest_sha256: str, *, source_epoch_binding=None) -> dict[str, Any]:
         entry = self._read_entry(manifest_sha256)
-        artifacts = validate_reviewed_grouping_bindings(entry.get("bindings"), manifest_sha256=manifest_sha256)
-        validate_accepted_grouping(**artifacts, bindings=entry["bindings"], expected_manifest_sha256=manifest_sha256)
+        artifacts = validate_reviewed_grouping_bindings(entry.get("bindings"), manifest_sha256=manifest_sha256,
+                                                       source_epoch_binding=source_epoch_binding)
+        validate_accepted_grouping(**artifacts, bindings=entry["bindings"], expected_manifest_sha256=manifest_sha256,
+                                   source_epoch_binding=source_epoch_binding)
         if entry.get("claim_count") != len(artifacts["manifest"]["claim_packets"]) or entry.get("group_count") != len(artifacts["manifest"]["groups"]):
             raise CvpProductionBlocked(["shared grouping denominator mismatch"])
         return {"reference": entry, **artifacts}
 
     def admit(self, manifest_sha256: str, *, scope_packet: Mapping[str, Any], freeze: Mapping[str, Any]) -> dict[str, Any]:
-        loaded = self.load(manifest_sha256)
+        from backend.pipeline.viewpoint_g041_source_epoch import GROUPING_EPOCH_KEY
+        loaded = self.load(manifest_sha256, source_epoch_binding=freeze.get(GROUPING_EPOCH_KEY))
         reference = loaded.pop("reference")
         return admit_reviewed_grouping(
             **loaded, bindings=reference["bindings"], expected_manifest_sha256=manifest_sha256,

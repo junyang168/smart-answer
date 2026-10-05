@@ -27,11 +27,13 @@ def validate_accepted_grouping(
     *, manifest: Mapping[str, Any], validation: Mapping[str, Any],
     acceptance: Mapping[str, Any], physical_review: Mapping[str, Any],
     expected_manifest_sha256: str, bindings: Mapping[str, Mapping[str, str]],
+    source_epoch_binding=None,
 ) -> None:
     """Validate repository input; this grants no production/source eligibility."""
     for artifact in (manifest, validation, acceptance, physical_review):
         validate_content_addressed(artifact, "artifact_sha256")
-    upstream = validate_reviewed_grouping_bindings(bindings, manifest_sha256=expected_manifest_sha256)
+    upstream = validate_reviewed_grouping_bindings(bindings, manifest_sha256=expected_manifest_sha256,
+                                                 source_epoch_binding=source_epoch_binding)
     for role, artifact in (("manifest", manifest), ("validation", validation), ("acceptance", acceptance), ("physical_review", physical_review)):
         if upstream[role] != artifact:
             raise CvpProductionBlocked([f"{role}: supplied artifact differs from its physical binding"])
@@ -86,10 +88,13 @@ def admit_reviewed_grouping(
     freeze: Mapping[str, Any], bindings: Mapping[str, Mapping[str, str]],
 ) -> dict[str, Any]:
     """Rebind accepted groups to a qualified current scope without regrouping."""
+    from backend.pipeline.viewpoint_g041_source_epoch import GROUPING_EPOCH_KEY
+    if scope_packet.get(GROUPING_EPOCH_KEY) != freeze.get(GROUPING_EPOCH_KEY):
+        raise CvpProductionBlocked(['scope applied source epoch differs from freeze'])
     validate_accepted_grouping(
         manifest=manifest, validation=validation, acceptance=acceptance,
         physical_review=physical_review, expected_manifest_sha256=expected_manifest_sha256,
-        bindings=bindings,
+        bindings=bindings, source_epoch_binding=freeze.get(GROUPING_EPOCH_KEY),
     )
     validate_content_addressed(scope_packet, "packet_sha256")
     frozen_claims = {row["claim_id"]: row for row in manifest["claim_packets"]}
@@ -163,6 +168,8 @@ def admit_reviewed_grouping(
         body.update(accepted_grouping_stage=stage, parent_claim_count=len(all_frozen_claims),
                     parent_group_count=len(manifest["groups"]),
                     deferred_claim_ids=sorted(set(all_frozen_claims) - set(current_claims)))
+    if GROUPING_EPOCH_KEY in freeze:
+        body[GROUPING_EPOCH_KEY] = freeze[GROUPING_EPOCH_KEY]
     result = body | {"artifact_sha256": sha256_json(body)}
     validate_grouping_envelope(result, freeze=freeze)
     return result

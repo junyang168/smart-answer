@@ -620,6 +620,12 @@ def build_cvp_freeze(
         if scope_packet["accepted_grouping_stage"] != "canary" and not str(scope_packet["accepted_grouping_stage"]).startswith("group:"):
             raise CvpProductionBlocked(["unsupported accepted grouping admission stage"])
         body["accepted_grouping_stage"] = scope_packet["accepted_grouping_stage"]
+    from backend.pipeline.viewpoint_g041_source_epoch import GROUPING_EPOCH_KEY, verified_applied
+    if GROUPING_EPOCH_KEY in scope_packet:
+        if 'accepted_grouping_stage' not in scope_packet:
+            raise CvpProductionBlocked(['applied source epoch requires accepted grouping scope'])
+        verified_applied(scope_packet[GROUPING_EPOCH_KEY], store)
+        body[GROUPING_EPOCH_KEY] = scope_packet[GROUPING_EPOCH_KEY]
     return body | {"artifact_sha256": sha256_json(body)}
 
 
@@ -673,6 +679,9 @@ def validate_cvp_freeze(
         findings.extend(_validate_scope_packet(packet, store))
         if packet.get("packet_sha256") != freeze.get("scope_packet_sha256"):
             findings.append("scope packet identity drift")
+        from backend.pipeline.viewpoint_g041_source_epoch import GROUPING_EPOCH_KEY
+        if packet.get(GROUPING_EPOCH_KEY) != freeze.get(GROUPING_EPOCH_KEY):
+            findings.append('scope packet applied source epoch identity drift')
     if findings:
         raise CvpProductionBlocked(sorted(set(findings)))
     return dict(freeze)
@@ -777,7 +786,7 @@ def build_batch_identity(
 
 
 def validate_reviewed_grouping_bindings(
-    bindings: Mapping[str, Any], *, manifest_sha256: str,
+    bindings: Mapping[str, Any], *, manifest_sha256: str, source_epoch_binding=None,
 ) -> dict[str, dict[str, Any]]:
     """Reopen the four upstream artifacts; a cached acceptance is not enough."""
     roles = {"manifest", "validation", "acceptance", "physical_review"}
@@ -811,11 +820,24 @@ def validate_reviewed_grouping_bindings(
     selected_sources = {row["source_id"] for row in manifest["claim_packets"]}
     if set(source_ids) != selected_sources or len(source_ids) != len(set(source_ids)):
         raise CvpProductionBlocked(["reviewed grouping physical source denominator differs"])
+    transitions = {}
+    if source_epoch_binding is not None:
+        try:
+            from backend.pipeline.viewpoint_g041_source_epoch import grouping_physical_transition
+            transitions = grouping_physical_transition(manifest, source_epoch_binding)
+        except (ValueError, KeyError, TypeError, OSError) as exc:
+            raise CvpProductionBlocked(['reviewed grouping applied source epoch proof invalid: ' + str(exc)]) from exc
     for source in source_rows:
         for binding in [source, *(source.get("linked_files") or [])]:
             try:
                 path = Path(binding["path"])
-                if not path.is_absolute() or file_sha256(path) != binding["file_sha256"]:
+                expected = binding['file_sha256']
+                # Never apply a published-source transition to a linked asset.
+                if binding is source and str(path) in transitions:
+                    old_sha, expected = transitions[str(path)]
+                    if binding['file_sha256'] != old_sha:
+                        raise CvpProductionBlocked(['reviewed grouping predecessor SHA drift'])
+                if not path.is_absolute() or file_sha256(path) != expected:
                     raise CvpProductionBlocked([f"{source['source_id']}: physical source/linked asset SHA drift"])
             except (KeyError, TypeError, OSError) as exc:
                 raise CvpProductionBlocked([f"{source['source_id']}: missing physical source/linked asset"]) from exc
@@ -843,9 +865,13 @@ def validate_grouping_envelope(
         findings.append("reviewed grouping admission kind may not be removed or changed")
     if envelope.get("admission_kind") == "independently_accepted_exegesis_grouping":
         try:
+            from backend.pipeline.viewpoint_g041_source_epoch import GROUPING_EPOCH_KEY
+            if envelope.get(GROUPING_EPOCH_KEY) != freeze.get(GROUPING_EPOCH_KEY):
+                raise CvpProductionBlocked(['grouping applied source epoch differs from freeze'])
             upstream = validate_reviewed_grouping_bindings(
                 envelope.get("upstream_bindings"),
                 manifest_sha256=str(envelope.get("upstream_manifest_sha256") or ""),
+                source_epoch_binding=freeze.get(GROUPING_EPOCH_KEY),
             )
             original_groups = [
                 {key: row[key] for key in ("group_key", "claim_ids", "rationale")}

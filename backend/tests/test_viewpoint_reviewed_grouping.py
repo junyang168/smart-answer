@@ -121,3 +121,38 @@ def test_runtime_reopens_physical_source_and_linked_asset(tmp_path, name):
     (tmp_path / name).write_text("changed", encoding="utf-8")
     with pytest.raises(CvpProductionBlocked, match="physical source/linked asset SHA drift"):
         validate_grouping_envelope(envelope, freeze=args["freeze"])
+
+
+@pytest.mark.parametrize('mutation',[None,'missing_freeze','missing_packet','missing_envelope','changed_source','linked_asset','upstream','missing_proof','old_pin'])
+def test_exact_applied_epoch_is_carried_through_admission_and_runtime(tmp_path,monkeypatch,mutation):
+    from backend.pipeline import viewpoint_g041_source_epoch as epoch
+    args=inputs(tmp_path);source=tmp_path/'source.md'
+    old=args['manifest']['sources'][0]['file_sha256']
+    source.write_text('owner reviewed corrected source',encoding='utf-8')
+    new=hashlib.sha256(source.read_bytes()).hexdigest()
+    proof={'path':'/exact/applied-package','file_sha256':'exact'}
+    def transition(manifest,binding):
+        assert manifest==args['manifest']
+        if binding!=proof or mutation=='missing_proof':raise ValueError('exact applied proof missing')
+        return {str(source):('wrong' if mutation=='old_pin' else old,new)}
+    monkeypatch.setattr(epoch,'grouping_physical_transition',transition)
+    args['scope_packet'][epoch.GROUPING_EPOCH_KEY]=proof
+    args['scope_packet'].pop('packet_sha256');args['scope_packet']['packet_sha256']=sha256_json(args['scope_packet'])
+    args['freeze']['scope_packet_sha256']=args['scope_packet']['packet_sha256']
+    args['freeze'][epoch.GROUPING_EPOCH_KEY]=proof
+    if mutation=='missing_freeze':args['freeze'].pop(epoch.GROUPING_EPOCH_KEY)
+    if mutation=='missing_packet':args['scope_packet'].pop(epoch.GROUPING_EPOCH_KEY)
+    if mutation in {'missing_freeze','missing_packet','missing_proof','old_pin'}:
+        with pytest.raises(CvpProductionBlocked):admit_reviewed_grouping(**args)
+        return
+    envelope=admit_reviewed_grouping(**args)
+    if mutation is None:
+        assert envelope[epoch.GROUPING_EPOCH_KEY]==proof
+        validate_grouping_envelope(envelope,freeze=args['freeze'])
+        return
+    if mutation=='missing_envelope':
+        envelope.pop(epoch.GROUPING_EPOCH_KEY);envelope.pop('artifact_sha256');envelope=seal(envelope)
+    elif mutation=='changed_source':source.write_text('unapproved',encoding='utf-8')
+    elif mutation=='linked_asset':(tmp_path/'diagram.svg').write_text('drift',encoding='utf-8')
+    else:(tmp_path/'acceptance.json').write_text('{}',encoding='utf-8')
+    with pytest.raises(CvpProductionBlocked):validate_grouping_envelope(envelope,freeze=args['freeze'])
