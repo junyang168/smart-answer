@@ -104,12 +104,16 @@ def bound_group_audit(group, packet):
     return selected
 
 
-def prepare(campaign, store, *, owner_retire=False, saved_source_assessment_root=None):
+def prepare(campaign, store, *, owner_retire=False, saved_source_assessment_root=None, owner_g037_secondary_from=None):
     state = read_artifact(campaign/'progress.json')
     group = campaign/f"g{state['sequence']:03d}"
     audit = group/'independent-audit/audit.json'
     root = group/'audit-source-adjudication'
-    if saved_source_assessment_root is None:
+    if owner_g037_secondary_from:
+        from backend.pipeline.viewpoint_g037_secondary_supports import saved_inputs
+        if state['sequence']!=37:raise ValueError('secondary authority only permits g037')
+        audit,root=saved_inputs(owner_g037_secondary_from,BASE,store)
+    elif saved_source_assessment_root is None:
         audit = bound_group_audit(group, read_artifact(root/'packet.json'))
     if saved_source_assessment_root is not None:
         audit = saved_source_assessment_root/'temporary-assessment/assessment.json'
@@ -128,7 +132,11 @@ def prepare(campaign, store, *, owner_retire=False, saved_source_assessment_root
     packet = build_packet(audit, store)
     if read_artifact(root/'packet.json') != packet:
         raise ValueError('original adjudication packet drift')
-    report = adjudicate(audit, root, store, final_gpt=True)
+    if owner_g037_secondary_from:
+        from backend.pipeline.viewpoint_g037_secondary_supports import consume_report
+        report=consume_report(audit,root,store)
+    else:
+        report = adjudicate(audit, root, store, final_gpt=True)
     targets = select_repairs(packet, report)
     states = snapshot(store)
     for item in targets:
@@ -165,9 +173,16 @@ def prepare(campaign, store, *, owner_retire=False, saved_source_assessment_root
             'retired_connection_id':RETIRE_LINK, 'claim_preserved':True}
         policy={'policy_id':'wang-g015-owner-link-retirement-v1','authorized_by':'owner','authorization_quote':'好',
             'allowed_link_id':RETIRE_LINK,'claim_source_viewpoint_text_writes':0,'automatic_future_retirement':False}
-    return states, {'schema_version':'wang_audit_link_repair_packet_v1', 'targets':targets,
+    result={'schema_version':'wang_audit_link_repair_packet_v1', 'targets':targets,
                    'adjudication_packet_sha256':packet['artifact_sha256'], 'adjudication_handoff':report,
                    'policy':policy, 'claim_source_viewpoint_text_writes':0}
+    if owner_g037_secondary_from:
+        from backend.pipeline.viewpoint_g037_secondary_supports import validate_target,VERSION
+        validate_target(result)
+        result['owner_authorization']={'policy_id':VERSION,'authorization_quote':'同意',
+            'human_content_approval':False,'future_repairs_authorized':False,
+            'source_root':str(owner_g037_secondary_from),'prior_claim_repair_replay':False}
+    return states,result
 
 
 def package_for(states, packet, reviews, root, *, identity_digest=None):
@@ -215,9 +230,11 @@ def package_for(states, packet, reviews, root, *, identity_digest=None):
 def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storage_review_from=None,
         human_review_from=None, human_handoff=None, human_decisions=(), relation_review_from=None,
         saved_source_assessment_root=None, owner_g037_context_from=None, owner_g037_claim_statement=False,
-        owner_g037_claim_condition=False):
+        owner_g037_claim_condition=False, owner_g037_secondary_from=None):
     store = PostgresKnowledgeStore()
     global_lock={'global_lock_path':str(BASE/'registry-cvp.lock')}
+    if owner_g037_secondary_from and any((owner_retire,owner_identity_g033,storage_review_from,human_review_from,human_handoff,human_decisions,relation_review_from,saved_source_assessment_root,owner_g037_context_from,owner_g037_claim_statement,owner_g037_claim_condition)):
+        raise ValueError('secondary connection authority cannot combine other scopes')
     if owner_retire and owner_identity_g033:
         raise ValueError('owner scopes cannot be combined')
     if owner_g037_claim_condition and owner_g037_claim_statement:
@@ -278,7 +295,7 @@ def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storag
             identity_repair.propose(campaign,root,store,storage_review_from=storage_review_from)
     def prepare_current():
         states,packet=identity_repair.prepare(campaign,root,store) if owner_identity_g033 else prepare(campaign,store,owner_retire=owner_retire,
-            saved_source_assessment_root=saved_source_assessment_root)
+            saved_source_assessment_root=saved_source_assessment_root,owner_g037_secondary_from=owner_g037_secondary_from)
         if owner_g037_context_from:
             from backend.pipeline.viewpoint_g037_context_review import prepare as context_prepare
             if read_artifact(campaign/'progress.json')['sequence']!=37:
@@ -294,6 +311,16 @@ def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storag
         collections=sorted({c for c,_ in states}); before=fingerprint(states,collections)
         if human_review_from and packet != old_packet: raise ValueError('human resume semantic postimage drift')
         write_immutable(root/'packet.json',packet); write_immutable(root/'before.json',{'collections':collections,'pre_fingerprint_sha256':before})
+        if owner_g037_secondary_from:
+            from backend.pipeline.viewpoint_g037_secondary_supports import reserve,proof_bindings
+            preflight={}
+            for provider,model in [('codex','gpt-6.1-sol'),('claude','claude-opus-5-5')]:
+                adapter=link_review_adapter(subscription_client(provider,model,'high'),PROMPT)
+                if adapter.request_bytes(packet)>500000:raise ValueError('secondary supports review exceeds frozen ceiling')
+                preflight[provider]=adapter.request_encoding_proof(packet)
+            write_immutable(root/'request-preflight.json',preflight)
+            write_immutable(root/'prior-applied-proof.json',{'bindings':proof_bindings(owner_g037_secondary_from),'registry_writes':0,'model_replays':0})
+            reserve(root,owner_g037_secondary_from)
         if owner_g037_context_from:
             from backend.pipeline.viewpoint_g037_context_review import reserve, PROMPT as context_prompt
             # Verify both exact transports before reserving/calling either model.
@@ -433,10 +460,20 @@ def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storag
     if authority is not None: proof_names.append('human-execution-authority.json')
     if owner_g037_context_from: proof_names.extend(['owner-authorization.json','request-preflight.json'])
     if owner_g037_claim_statement: proof_names.extend(['owner-authorization.json','request-preflight.json'])
+    previous_proofs=[]
+    source_repairs=[root/'effective-package.json'] if owner_g037_claim_statement else []
+    if owner_g037_secondary_from:
+        # After this new write the old audit input necessarily changes. Consume
+        # the pre-write validated physical bindings, not a fresh old-input audit.
+        previous_proofs=read_artifact(root/'prior-applied-proof.json')['bindings']
+        for b in previous_proofs:
+            if binding(b['path'])!=b:raise ValueError('prior applied proof changed')
+        source_repairs.append(owner_g037_secondary_from/'effective-package.json')
+        proof_names.extend(['owner-authorization.json','request-preflight.json','prior-applied-proof.json'])
     result=resume_after_repair(campaign,continuation,BASE/'immediate-recovery-20261002-v1',executable,
         saved_audit_path=audit_path, owner_resolution_path=resolution_path,
-        additional_source_repair_paths=[root/'effective-package.json'] if owner_g037_claim_statement else (),
-        additional_proof_bindings=[binding(root/name) for name in proof_names])
+        additional_source_repair_paths=source_repairs,
+        additional_proof_bindings=[binding(root/name) for name in proof_names]+previous_proofs)
     write_derived(root/'progress.json',{'status':result['status'],'continuation':result})
     return result
 
@@ -467,6 +504,7 @@ def main():
     ap.add_argument('--owner-g037-context-from',type=Path)
     ap.add_argument('--owner-g037-claim-statement',action='store_true')
     ap.add_argument('--owner-g037-claim-condition',action='store_true')
+    ap.add_argument('--owner-g037-secondary-from',type=Path)
     ap.add_argument('--human-review-from',type=Path)
     ap.add_argument('--human-handoff',type=Path)
     ap.add_argument('--human-decision',type=Path,action='append',default=[])
@@ -494,7 +532,7 @@ def main():
             relation_review_from=args.owner_g033_relation_review_from,
             saved_source_assessment_root=args.saved_source_assessment_root,owner_g037_context_from=args.owner_g037_context_from,
             owner_g037_claim_statement=args.owner_g037_claim_statement,
-            owner_g037_claim_condition=args.owner_g037_claim_condition)),flush=True)
+            owner_g037_claim_condition=args.owner_g037_claim_condition,owner_g037_secondary_from=args.owner_g037_secondary_from)),flush=True)
         except Exception as exc:
             write_derived(root/'failure.json',{'error':str(exc),'applied':(root/'apply-receipt.json').exists(),'no_next_group_started':True})
             write_derived(root/'progress.json',{'status':'stopped','error':str(exc),'applied':(root/'apply-receipt.json').exists()}); raise
