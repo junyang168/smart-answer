@@ -10,7 +10,7 @@ from pathlib import Path
 from backend.pipeline import viewpoint_g041_qualified_transcript_repair as repair
 from backend.api.canonical_repository.postgres_store import _normalize_records, merge_over_existing
 
-PACKAGE = repair.ROOT/'effective-package.json'
+PACKAGE = repair.APPLICATION_ROOT/'effective-package.json'
 
 
 def bound_package(binding):
@@ -78,9 +78,9 @@ def verified_applied(binding,store):
     package=bound_package(binding)
     before,proof=repair.saved_before()
     normalized=postimages(package)
-    plan=repair.old.read_artifact(repair.ROOT/'dry-run-plan.json')
-    receipt=repair.old.read_artifact(repair.ROOT/'apply-receipt.json')
-    verified=repair.old.read_artifact(repair.ROOT/'verified-result.json')
+    plan=repair.old.read_artifact(repair.APPLICATION_ROOT/'dry-run-plan.json')
+    receipt=repair.old.read_artifact(repair.APPLICATION_ROOT/'apply-receipt.json')
+    verified=repair.old.read_artifact(repair.APPLICATION_ROOT/'verified-result.json')
     if (verified.get('status')!='applied_readback_verified' or verified.get('master_data_mutations')!=612
             or verified.get('change_set_id')!=plan['change_set_id']
             or receipt.get('change_set_id')!=plan['change_set_id']):

@@ -23,6 +23,7 @@ from backend.api.canonical_repository.viewpoint_resolution import StructuredJson
 VERSION = 'wang_g041_owner_qualified_transcript_reconciliation_v2'
 PRIOR = old.BASE / 'g041-owner-transcript-reconciliation-runtime-20261005-v2'
 ROOT = old.BASE / 'g041-owner-qualified-transcript-reconciliation-20261005-v1'
+APPLICATION_ROOT = old.BASE / 'g041-qualified-source-apply-20261005-v2'
 CAMPAIGN = old.BASE / 'campaign-recovery-2fc29744d5b0204c7b1e472f1f0e0862a914c4ab2e1ee0c4742935aeb699914f-recovery-cfb58a2570d6-recovery-9b5039675be7-recovery-70522204e72b'
 PREFIX = 'DK-c082110ed14e364955d7-P01-'
 CLAIM = PREFIX + 'CL005'
@@ -235,22 +236,36 @@ def plan_reviewed(root=ROOT):
     print('Exact 612-operation store dry-run passed; no writes or new model calls')
 
 
-def apply_reviewed(root=ROOT):
+def canonical_plan(plan):
+    """Compare the complete stored JSON, including every operation/event."""
+    return json.loads(json.dumps(plan))
+
+
+def apply_reviewed(root=APPLICATION_ROOT):
     """Apply only saved unanimous reviews; every current record is read back."""
     from backend.api.canonical_repository.viewpoint_production_safety import exclusive_cvp_run_lock
     from backend.api.canonical_repository.postgres_store import stored_operation_payload,normalize_package
     from backend.pipeline.viewpoint_cvp_campaign_runner import binding
     from backend.pipeline.viewpoint_audit_link_repair import write_derived
     from backend.pipeline.viewpoint_reviewed_cvp_prepare import completed_repair_parent_snapshot
+    if root != APPLICATION_ROOT:
+        raise ValueError('mechanical apply continuation requires one new independent root')
     if subprocess.check_output(['git','status','--porcelain'],cwd=old.PROJECT,text=True).strip():
         raise ValueError('commit exact source epoch/store consumer before apply')
     if any((root/n).exists() for n in ('apply-intent.json','apply-receipt.json','verified-result.json')):
         raise ValueError('single apply already attempted; recover actual receipt, never replay')
+    reservation=ROOT/'proven-json-plan-repair-start.json'
+    if reservation.exists():
+        raise ValueError('same JSON-plan failure mechanical repair budget already reserved; no repeat')
     load_dotenv(old.PROJECT/'.env')
-    before,proof,draft,packet,reviews,raws=reviewed_inputs(root)
-    package=package_for(before,draft,packet,reviews,raws,root)
-    if package!=old.read_artifact(root/'effective-package.json'):
+    before,proof,draft,packet,reviews,raws=reviewed_inputs(ROOT)
+    package=package_for(before,draft,packet,reviews,raws,ROOT)
+    if package!=old.read_artifact(ROOT/'effective-package.json'):
         raise ValueError('exact saved reviewed package drift')
+    failure=old.read_artifact(ROOT/'failure.json')
+    if (failure.get('error')!='saved dry-run/current plan drift' or failure.get('master_data_mutations')!=0
+            or any((ROOT/n).exists() for n in ('backup.json','apply-intent.json','apply-receipt.json'))):
+        raise ValueError('JSON-only apply continuation requires proved zero-write predecessor')
     store=old.PostgresKnowledgeStore()
     lock={'global_lock_path':str(old.BASE/'registry-cvp.lock')}
     with exclusive_cvp_run_lock(lock):
@@ -258,8 +273,21 @@ def apply_reviewed(root=ROOT):
         if old.fingerprint(live,proof['collections'])!=proof['pre_fingerprint_sha256']:
             raise ValueError('pre-apply complete Registry drift')
         plan=store.plan_package(package,source_kind=VERSION)
-        if plan.as_dict()!=old.read_artifact(root/'dry-run-plan.json'):
+        if canonical_plan(plan.as_dict())!=old.read_artifact(ROOT/'dry-run-plan.json'):
             raise ValueError('saved dry-run/current plan drift')
+        old.write_immutable(reservation,{'schema_version':VERSION,'application_root':str(root),
+            'failure_fingerprint_sha256':old.sha256_json({'error':failure['error'],
+                'saved_plan_file_sha256':old.file_sha256(ROOT/'dry-run-plan.json')}),
+            'repair_budget':1,'new_model_calls':0,'original_failure':binding(ROOT/'failure.json'),
+            'exact_JSON_plan_sha256':old.sha256_json(canonical_plan(plan.as_dict()))})
+        old.write_immutable(root/'effective-package.json',package)
+        old.write_immutable(root/'dry-run-plan.json',canonical_plan(plan.as_dict()))
+        old.write_immutable(root/'mechanical-continuation.json',{'schema_version':VERSION,
+            'original_review_root':str(ROOT),'application_root':str(root),'new_model_calls':0,
+            'old_failures_reservations_budgets_preserved':True,'repair_budget_once':True,
+            'complete_operation_event_JSON_equality_verified':True,
+            'bindings':[binding(ROOT/n) for n in ('failure.json','effective-package.json','dry-run-plan.json',
+                'raw-gpt.json','raw-opus.json','packet.json','owner-authorization.json')]})
         post=deepcopy(live)
         for op in plan.operations:post[op.collection,op.object_id]=stored_operation_payload(op)
         states={(c,o):{'payload':p,'revision':p['revision'],'content_sha256':old.semantic_record_sha(p),'retired':False}
@@ -300,9 +328,9 @@ def apply_reviewed(root=ROOT):
             raise ValueError('source epoch final before/backup drift')
         validate_package(package)
         replay=store.plan_package(package,source_kind=VERSION)
-        if replay.as_dict()!=plan.as_dict():raise ValueError('source epoch final plan drift')
+        if canonical_plan(replay.as_dict())!=canonical_plan(plan.as_dict()):raise ValueError('source epoch final plan drift')
         old.write_immutable(root/'apply-intent.json',{'schema_version':VERSION,
-            'package_sha256':old.sha256_json(package),'plan_sha256':old.sha256_json(replay.as_dict()),
+            'package_sha256':old.sha256_json(package),'plan_sha256':old.sha256_json(canonical_plan(replay.as_dict())),
             'backup':binding(backup),'pre_fingerprint_sha256':proof['pre_fingerprint_sha256'],
             'new_model_calls':0,'single_apply_required':True})
         receipt=store.apply_plan(replay,metadata={'owner_qualified_transcript_repair':str(root),
@@ -326,7 +354,7 @@ def apply_reviewed(root=ROOT):
 
 
 def run(root, review=False):
-    if root != ROOT:
+    if root != (APPLICATION_ROOT if args.apply_reviewed else ROOT):
         raise ValueError('one exact independent qualifier root required')
     if subprocess.check_output(['git','status','--porcelain'],cwd=old.PROJECT,text=True).strip():
         raise ValueError('commit bounded implementation before source review')
@@ -398,7 +426,9 @@ def main():
             else:
                 run(root,args.review)
         except Exception as exc:
-            old.write_immutable(root/'failure.json',{'error':str(exc),'master_data_mutations':0,'automatic_repeat':False})
+            old.write_immutable(root/'failure.json',{'error':str(exc),
+                'master_data_mutations':612 if (root/'apply-receipt.json').exists() else None if (root/'apply-intent.json').exists() else 0,
+                'automatic_repeat':False})
             raise
 
 

@@ -151,3 +151,16 @@ def test_store_contract_rebuilds_exact_body_and_fresh_identity(monkeypatch,mutat
     if mutation is None:m.validate_package(observed)
     else:
         with pytest.raises(ValueError):m.validate_package(observed)
+
+
+def test_complete_dry_run_json_equality_preserves_all_operations_and_events():
+    in_memory={'operations':({'collection':'claims','payload':{'statement':'same','revision':2}},),
+        'ignored_keys':(),'review_events':({'model':'gpt-6.1-sol','approved':True},)}
+    stored={'operations':[{'collection':'claims','payload':{'statement':'same','revision':2}}],
+        'ignored_keys':[],'review_events':[{'model':'gpt-6.1-sol','approved':True}]}
+    assert in_memory!=stored and m.canonical_plan(in_memory)==stored
+    for field in ('statement','revision'):
+        altered=deepcopy(stored);altered['operations'][0]['payload'][field]='drift'
+        assert m.canonical_plan(in_memory)!=altered
+    altered=deepcopy(stored);altered['review_events'][0]['approved']=False
+    assert m.canonical_plan(in_memory)!=altered
