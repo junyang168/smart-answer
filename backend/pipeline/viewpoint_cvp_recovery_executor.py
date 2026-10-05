@@ -213,12 +213,16 @@ def load_campaign(root):
     return cfg, schedule, manifest, groups
 
 
-def verify_group_audit(root, cfg, schedule, manifest, groups, audit_path, output, *, owner_resolution_path=None):
+def verify_group_audit(root, cfg, schedule, manifest, groups, audit_path, output, *, owner_resolution_path=None, component_resolution_path=None):
     state = read(root / "progress.json")
     group_key = state["group_key"]
     group_root = root / f"g{state['sequence']:03d}"
     scope_run = group_root / "production/run/scope-run.json"
-    if read(scope_run)["disposition_status"] != "complete":
+    component_proof = None
+    if component_resolution_path is not None:
+        from backend.pipeline.viewpoint_g034_component_completion import verify_proof
+        component_proof = verify_proof(root,component_resolution_path,groups[group_key]['claim_ids'])
+    if read(scope_run)["disposition_status"] != "complete" and component_proof is None:
         raise ValueError("cannot promote a partially applied group")
     plans = list((group_root / "production/run/batches").glob("*/cvp-change-plan.json"))
     if len(plans) != 1:
@@ -246,6 +250,9 @@ def verify_group_audit(root, cfg, schedule, manifest, groups, audit_path, output
         resolution = read(owner_resolution_path)
         proof['owner_resolution_path'] = str(owner_resolution_path)
         proof['bindings'] += [binding(owner_resolution_path), *resolution['bindings']]
+    if component_proof is not None:
+        proof['component_resolution_path'] = str(component_resolution_path)
+        proof['bindings'] += [binding(component_resolution_path), *component_proof['bindings']]
     write_immutable(output / "completion.json", proof)
     return proof
 
@@ -307,7 +314,7 @@ def continuation_root(root, attempt):
     return root.parent / name
 
 
-def resume_after_repair(root, attempt, recovery_root, executable, *, additional_proof_bindings=(), additional_source_repair_paths=(), saved_audit_path=None, prior_model_batch=None, reuse_correction=False, owner_resolution_path=None, initial_prefix_only=False, allow_lossless_compact_config_migration=False):
+def resume_after_repair(root, attempt, recovery_root, executable, *, additional_proof_bindings=(), additional_source_repair_paths=(), saved_audit_path=None, prior_model_batch=None, reuse_correction=False, owner_resolution_path=None, initial_prefix_only=False, allow_lossless_compact_config_migration=False, component_resolution_path=None):
     cfg, schedule, manifest, groups = load_campaign(root)
     state = read(root / "progress.json")
     group_root = root / f"g{state['sequence']:03d}"
@@ -315,7 +322,10 @@ def resume_after_repair(root, attempt, recovery_root, executable, *, additional_
     if (group_root / "production/run/scope-run.json").exists():
         # Already-written records are never generated/applied twice. Re-audit
         # exactly the bound Claim and Viewpoint population in a fresh directory.
-        if read(group_root / "production/run/scope-run.json")["disposition_status"] != "complete":
+        if component_resolution_path is not None:
+            from backend.pipeline.viewpoint_g034_component_completion import verify_proof
+            verify_proof(root,component_resolution_path,groups[state['group_key']]['claim_ids'])
+        if read(group_root / "production/run/scope-run.json")["disposition_status"] != "complete" and component_resolution_path is None:
             raise ValueError("partial/deferred content needs owner disposition")
         plans = list((group_root / "production/run/batches").glob("*/cvp-change-plan.json"))
         if len(plans) != 1:
@@ -334,6 +344,8 @@ def resume_after_repair(root, attempt, recovery_root, executable, *, additional_
             # Reuse a saved real audit, never fabricate a fresh model pass.
             write_immutable(attempt / 'saved-audit-binding.json', binding(saved_audit_path))
         verify_options = {'owner_resolution_path': owner_resolution_path} if owner_resolution_path is not None else {}
+        if component_resolution_path is not None:
+            verify_options['component_resolution_path'] = component_resolution_path
         extra = verify_group_audit(root, cfg, schedule, manifest, groups, saved_audit_path, attempt / "verified-group", **verify_options)
         if additional_proof_bindings:
             for b in additional_proof_bindings:

@@ -94,6 +94,26 @@ def completed_repair_parent_snapshot(manifest, records, packages, completed_ids,
         app=package.get('source_repair_application')
         if not app: raise CvpProductionBlocked(['parent repair lacks fresh source-repair authority'])
         packet=app['review_packet']; normalized=normalize_package(package)
+        if app.get('schema_version') == 'wang_owner_evidence_annotation_v1':
+            # Exact labeled editorial annotation on an independently completed
+            # Claim. Restore only its historical Evidence pin for membership;
+            # current reviewed postimage and original physical source are checked.
+            from backend.pipeline.viewpoint_owner_evidence_annotation import verify_files
+            old,new=packet['before_evidence'],packet['after_evidence'];cid=packet['claim']['claim_id']
+            if cid in used or cid not in completed_ids or cid in selected_ids or cid not in rows:
+                raise CvpProductionBlocked([f'{cid}: annotation parent must be completed and never selected'])
+            prior=rows[cid]
+            if packet['claim']['revision']!=prior['claim_revision'] or semantic_record_sha(packet['claim'])!=prior['claim_content_sha256']:
+                raise CvpProductionBlocked([f'{cid}: annotation Claim predecessor drift'])
+            eid=new['evidence_step_id'];key=('evidence_steps',eid);live=records.get(key)
+            pins=[e for e in prior['evidence_steps'] if e['evidence_step_id']==eid]
+            if len(pins)!=1 or old['revision']!=pins[0]['revision'] or semantic_record_sha(old)!=pins[0]['content_sha256']:
+                raise CvpProductionBlocked([f'{eid}: annotation predecessor pin drift'])
+            if not live or live.get('retired') or live['payload']!=new or live['revision']!=new['revision'] or live['content_sha256']!=semantic_record_sha(new):
+                raise CvpProductionBlocked([f'{eid}: reviewed annotation current drift'])
+            verify_files(packet)
+            used.add(cid);checked[key]={'revision':old['revision'],'content_sha256':semantic_record_sha(old),'payload':old,'retired':False}
+            continue
         if app.get('schema_version') == 'wang_claim_qualifier_repair_v2':
             old,new=packet['before_claim'],package['claims'][0]; cid=new['claim_id']
             if cid in used or cid not in completed_ids or cid in selected_ids or cid not in rows:

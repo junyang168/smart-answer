@@ -51,3 +51,34 @@ def test_without_repair_normal_parent_drift_still_blocks(monkeypatch):
     manifest,records,_=inputs(monkeypatch)
     with pytest.raises(CvpProductionBlocked,match='current pin drift'):
         runner.completed_repair_parent_snapshot(manifest,records,[],{'C1'},{'C2'})
+
+def annotation_inputs(monkeypatch):
+    from backend.tests.test_viewpoint_owner_evidence_annotation import package as annotation_package
+    from backend.pipeline import viewpoint_owner_evidence_annotation as annotation
+    pkg=annotation_package();app=pkg['source_repair_application'];p=app['review_packet']
+    p['claim']['revision']=3;p['physical_bindings']=[]
+    for raw in app['review_artifacts']:
+        raw['request_payload_sha256']=sha256_json(p)
+        raw['artifact_sha256']=sha256_json({k:v for k,v in raw.items() if k!='artifact_sha256'})
+    old,new=p['before_evidence'],p['after_evidence'];claim=p['claim']
+    manifest={'claim_packets':[{'claim_id':'C1','claim_revision':3,'claim_content_sha256':semantic_record_sha(claim),
+        'evidence_steps':[{'evidence_step_id':'E1','revision':old['revision'],'content_sha256':semantic_record_sha(old),'fragments':[]}]}],'sources':[]}
+    records={('claims','C1'):{'revision':3,'content_sha256':semantic_record_sha(claim),'payload':claim,'retired':False},
+        ('evidence_steps','E1'):{'revision':new['revision'],'content_sha256':semantic_record_sha(new),'payload':new,'retired':False}}
+    return manifest,records,pkg
+
+def test_completed_labeled_annotation_preserves_only_historical_evidence_pin(monkeypatch):
+    manifest,records,pkg=annotation_inputs(monkeypatch);before=deepcopy(records)
+    assert runner.completed_repair_parent_snapshot(manifest,records,[pkg],{'C1'},{'C2'})==['C1']
+    assert records==before
+
+@pytest.mark.parametrize('case',['selected','not_complete','old_pin','current','claim_pin','duplicate'])
+def test_annotation_parent_cannot_relax_current_or_selected_admission(monkeypatch,case):
+    m,r,p=annotation_inputs(monkeypatch);done={'C1'};selected={'C2'};packages=[p]
+    if case=='selected':selected={'C1'}
+    elif case=='not_complete':done=set()
+    elif case=='old_pin':m['claim_packets'][0]['evidence_steps'][0]['content_sha256']='bad'
+    elif case=='current':r['evidence_steps','E1']['payload']['statement']='changed'
+    elif case=='claim_pin':m['claim_packets'][0]['claim_content_sha256']='bad'
+    else:packages.append(p)
+    with pytest.raises(ValueError):runner.completed_repair_parent_snapshot(m,r,packages,done,selected)
