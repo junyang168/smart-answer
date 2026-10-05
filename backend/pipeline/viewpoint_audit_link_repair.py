@@ -214,14 +214,21 @@ def package_for(states, packet, reviews, root, *, identity_digest=None):
 
 def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storage_review_from=None,
         human_review_from=None, human_handoff=None, human_decisions=(), relation_review_from=None,
-        saved_source_assessment_root=None, owner_g037_context_from=None, owner_g037_claim_statement=False):
+        saved_source_assessment_root=None, owner_g037_context_from=None, owner_g037_claim_statement=False,
+        owner_g037_claim_condition=False):
     store = PostgresKnowledgeStore()
     global_lock={'global_lock_path':str(BASE/'registry-cvp.lock')}
     if owner_retire and owner_identity_g033:
         raise ValueError('owner scopes cannot be combined')
+    if owner_g037_claim_condition and owner_g037_claim_statement:
+        raise ValueError('distinct Claim revision authorities cannot combine')
+    if owner_g037_claim_condition:
+        owner_g037_claim_statement=True
     if owner_g037_claim_statement and any((owner_retire,owner_identity_g033,storage_review_from,human_review_from,human_handoff,human_decisions,relation_review_from,saved_source_assessment_root,owner_g037_context_from)):
         raise ValueError('g037 Claim revision cannot combine other authorities')
-    if owner_g037_claim_statement:
+    if owner_g037_claim_condition:
+        from backend.pipeline import viewpoint_g037_claim_condition_repair as claim_repair
+    elif owner_g037_claim_statement:
         from backend.pipeline import viewpoint_g037_claim_statement_repair as claim_repair
     if owner_g037_context_from and any((owner_retire,owner_identity_g033,storage_review_from,human_review_from,human_handoff,human_decisions,relation_review_from,saved_source_assessment_root)):
         raise ValueError('g037 context review cannot combine other authorities')
@@ -459,6 +466,7 @@ def main():
     ap.add_argument('--saved-source-assessment-root',type=Path)
     ap.add_argument('--owner-g037-context-from',type=Path)
     ap.add_argument('--owner-g037-claim-statement',action='store_true')
+    ap.add_argument('--owner-g037-claim-condition',action='store_true')
     ap.add_argument('--human-review-from',type=Path)
     ap.add_argument('--human-handoff',type=Path)
     ap.add_argument('--human-decision',type=Path,action='append',default=[])
@@ -485,7 +493,8 @@ def main():
             human_review_from=args.human_review_from,human_handoff=args.human_handoff,human_decisions=args.human_decision,
             relation_review_from=args.owner_g033_relation_review_from,
             saved_source_assessment_root=args.saved_source_assessment_root,owner_g037_context_from=args.owner_g037_context_from,
-            owner_g037_claim_statement=args.owner_g037_claim_statement)),flush=True)
+            owner_g037_claim_statement=args.owner_g037_claim_statement,
+            owner_g037_claim_condition=args.owner_g037_claim_condition)),flush=True)
         except Exception as exc:
             write_derived(root/'failure.json',{'error':str(exc),'applied':(root/'apply-receipt.json').exists(),'no_next_group_started':True})
             write_derived(root/'progress.json',{'status':'stopped','error':str(exc),'applied':(root/'apply-receipt.json').exists()}); raise

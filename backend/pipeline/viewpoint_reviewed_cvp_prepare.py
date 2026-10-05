@@ -96,7 +96,7 @@ def completed_repair_parent_snapshot(manifest, records, packages, completed_ids,
         app=package.get('source_repair_application')
         if not app: raise CvpProductionBlocked(['parent repair lacks fresh source-repair authority'])
         packet=app['review_packet']; normalized=normalize_package(package)
-        if app.get('schema_version') == 'wang_g037_claim_statement_repair_v1':
+        if app.get('schema_version') in {'wang_g037_claim_statement_repair_v1','wang_g037_claim_statement_repair_v2'}:
             old,new=packet['claim_revision']['before'],packet['claim_revision']['after'];cid=new['claim_id']
             if cid in used or cid not in completed_ids or cid in selected_ids or cid not in rows:
                 raise CvpProductionBlocked([f'{cid}: statement repair must be completed and never selected'])
@@ -211,7 +211,7 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
     repair_paths=getattr(args,'completed_source_repair',None) or []
     repairs=[json.loads(path.read_text(encoding='utf-8')) for path in repair_paths]
     for repair in repairs:
-        if repair.get('source_repair_application',{}).get('schema_version')=='wang_g037_claim_statement_repair_v1':
+        if repair.get('source_repair_application',{}).get('schema_version') in {'wang_g037_claim_statement_repair_v1','wang_g037_claim_statement_repair_v2'}:
             for objects in normalize_package(repair).values(): all_ids.update(objects)
             packet=repair['source_repair_application']['review_packet']
             for t in packet['targets']:
