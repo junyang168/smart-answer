@@ -73,6 +73,17 @@ def select_repairs(packet, report):
     return selected
 
 
+def link_review_adapter(client, prompt, *, legacy_serialization=False):
+    # New bounded supports reviews use the same proven lossless transport as
+    # production. Explicit historical/human/other owner scopes retain their
+    # exact cached configuration; never relabel old raw replies as new format.
+    adapter = StructuredJsonReviewerAdapter(client=client, prompt=prompt,
+        response_model=Review, schema_name='audit_link_repair_review_v1',
+        compact_payload=True, shared_text_payload=not legacy_serialization)
+    adapter.max_request_bytes = 500000
+    return adapter
+
+
 def bound_group_audit(group, packet):
     """Consume the exact audited input, including a proven blocked-content supplement."""
     original = group/'independent-audit/audit.json'
@@ -258,8 +269,8 @@ def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storag
     ids={i['claim']['claim_id'] for i in packet['targets']}
     for label,provider,model in [('gpt','codex','gpt-6.1-sol'),('opus','claude','claude-opus-5-5')]:
         prompt=identity_repair.PROMPT if owner_identity_g033 else RETIRE_PROMPT if owner_retire else PROMPT
-        adapter=StructuredJsonReviewerAdapter(client=subscription_client(provider,model,'high'),prompt=prompt,response_model=Review,schema_name='audit_link_repair_review_v1',compact_payload=True)
-        adapter.max_request_bytes=500000
+        adapter=link_review_adapter(subscription_client(provider,model,'high'),prompt,
+            legacy_serialization=bool(human_review_from or owner_identity_g033 or owner_retire))
         raw,calls,_=review_call(adapter,packet,root,label)
         if human_review_from and calls: raise ValueError('human resume must not call models')
         result=Review.model_validate(raw)

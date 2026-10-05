@@ -3,6 +3,35 @@ import pytest
 from backend.pipeline.viewpoint_audit_link_repair import select_repairs, launch_repair, package_for
 
 
+def test_supports_review_losslessly_deduplicates_and_binds_distinct_configuration():
+    from types import SimpleNamespace
+    from backend.pipeline.viewpoint_audit_link_repair import link_review_adapter,PROMPT
+    from backend.api.canonical_repository.viewpoint_foundation import sha256_json
+    client=SimpleNamespace(model='gpt-6.1-sol',backend='codex_subscription',reasoning_effort='high')
+    adapter=link_review_adapter(client,PROMPT)
+    legacy=link_review_adapter(client,PROMPT,legacy_serialization=True)
+    packet={'targets':[{'claim_id':str(i),'source':'逐字原文；限定与证据保持。'*500} for i in range(5)]}
+    before=deepcopy(packet)
+    proof=adapter.request_encoding_proof(packet)
+    assert proof['exact_roundtrip_verified'] is True
+    assert proof['semantic_payload_sha256']==proof['restored_payload_sha256']==sha256_json(packet)
+    assert proof['wire_request_bytes']==adapter.request_bytes(packet)<legacy.request_bytes(packet)
+    assert adapter.generation_config_sha256!=legacy.generation_config_sha256
+    assert adapter.prompt_sha256==legacy.prompt_sha256
+    assert adapter.max_request_bytes==legacy.max_request_bytes==500000
+    assert legacy.request_encoding_proof(packet) is None
+    assert packet==before
+
+
+def test_supports_review_refuses_reserved_reference_collision():
+    from types import SimpleNamespace
+    from backend.pipeline.viewpoint_audit_link_repair import link_review_adapter,PROMPT
+    client=SimpleNamespace(model='claude-opus-5-5',backend='claude_subscription',reasoning_effort='high')
+    adapter=link_review_adapter(client,PROMPT)
+    with pytest.raises(ValueError,match='reserved'):
+        adapter.request_encoding_proof({'targets':[{'__wkp_text_ref_v1__':0}]})
+
+
 @pytest.mark.parametrize('supplemental',[False,True])
 def test_bound_group_audit_uses_exact_original_or_verified_supplement(tmp_path,monkeypatch,supplemental):
     from backend.pipeline.viewpoint_audit_link_repair import bound_group_audit,file_sha256
