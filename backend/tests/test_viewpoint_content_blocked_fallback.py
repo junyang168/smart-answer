@@ -59,6 +59,20 @@ def test_non_content_failures_never_trigger(reason):
 def test_candidate_safety_is_actual_content_block():
     m.content_block({'model':'gemini-3.8-flash','provider_response':{'candidates':[{'finishReason':'SAFETY'}]}})
 
+
+def test_seed_layer_projection_preserves_exact_semantics(tmp_path,monkeypatch):
+    path,old,_,_=fixture(tmp_path,monkeypatch)
+    old['schema_version']='library-audit.v1'
+    path.write_text(json.dumps(old))
+    full=json.loads(m.apply(path,tmp_path/'out').read_text())
+    partial={'meta':full['meta'],'layers':{k:full['layers'][k] for k in ('3','4')}}
+    assert m.validate(partial)
+    changed=deepcopy(partial)
+    changed['layers']['3']['results'][0]['verdict']='disputed'
+    with pytest.raises(ValueError):m.validate(changed)
+    changed=deepcopy(partial);changed['schema_version']='foreign-schema'
+    with pytest.raises(ValueError):m.validate(changed)
+
 @pytest.mark.parametrize('change',['missing_receipt','source_error','model_error','incomplete','prompt_drift','other_provider'])
 def test_unsafe_input_stops_before_subscription(tmp_path,monkeypatch,change):
     path,a,calls,receipt=fixture(tmp_path,monkeypatch)

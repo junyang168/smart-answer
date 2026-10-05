@@ -235,7 +235,13 @@ def validate(audit):
         row['provider_content_block']=p['provider_binding']
     if augmented!=original:raise ValueError('archive metadata changed original verdict/input')
     expected=derive(original,proofs); expected['meta'][KEY]=marker
-    if set(audit['layers'])=={'3','4'}: expected['layers']={k:expected['layers'][k] for k in ('3','4')}
+    if set(audit['layers'])=={'3','4'}:
+        expected['layers']={k:expected['layers'][k] for k in ('3','4')}
+        # Seed validators pass precisely this semantic layer projection. The
+        # full physical report remains bound and validated above; do not treat
+        # its omitted top-level schema header as a changed verdict.
+        if set(audit)=={'meta','layers'}:
+            expected={'meta':expected['meta'],'layers':expected['layers']}
     if audit!=expected: raise ValueError('fallback altered other verdicts/counters/disclosure')
     return bindings
 
