@@ -354,7 +354,7 @@ def apply_reviewed(root=APPLICATION_ROOT):
 
 
 def run(root, review=False):
-    if root != (APPLICATION_ROOT if args.apply_reviewed else ROOT):
+    if root != ROOT:
         raise ValueError('one exact independent qualifier root required')
     if subprocess.check_output(['git','status','--porcelain'],cwd=old.PROJECT,text=True).strip():
         raise ValueError('commit bounded implementation before source review')
@@ -409,7 +409,7 @@ def main():
     parser.add_argument('--plan-reviewed',action='store_true')
     parser.add_argument('--apply-reviewed',action='store_true')
     args = parser.parse_args(); root = args.output_root.resolve()
-    if root != ROOT:
+    if root != (APPLICATION_ROOT if args.apply_reviewed else ROOT):
         raise ValueError('exact independent qualified transcript root required')
     root.mkdir(parents=True,exist_ok=True)
     with (old.BASE/'immediate-recovery-20261002-v1/recovery.lock').open('a') as lock:

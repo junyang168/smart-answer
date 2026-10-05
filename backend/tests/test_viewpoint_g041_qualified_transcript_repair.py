@@ -164,3 +164,24 @@ def test_complete_dry_run_json_equality_preserves_all_operations_and_events():
         assert m.canonical_plan(in_memory)!=altered
     altered=deepcopy(stored);altered['review_events'][0]['approved']=False
     assert m.canonical_plan(in_memory)!=altered
+
+
+@pytest.mark.parametrize('apply,wrong_root',[(False,False),(True,False),(False,True),(True,True)])
+def test_cli_keeps_review_and_zero_call_application_roots_separate(monkeypatch,tmp_path,apply,wrong_root):
+    import sys
+    root=tmp_path/'review'; application=tmp_path/'application'
+    monkeypatch.setattr(m,'ROOT',root);monkeypatch.setattr(m,'APPLICATION_ROOT',application)
+    monkeypatch.setattr(m.old,'BASE',tmp_path)
+    (tmp_path/'immediate-recovery-20261002-v1').mkdir()
+    correct=application if apply else root
+    chosen=(root if apply else application) if wrong_root else correct
+    calls=[]
+    monkeypatch.setattr(m,'run',lambda path,review=False:calls.append(('review',path)))
+    monkeypatch.setattr(m,'apply_reviewed',lambda path:calls.append(('apply',path)))
+    monkeypatch.setattr(sys,'argv',['qualified-repair','--output-root',str(chosen)]+(['--apply-reviewed'] if apply else []))
+    if wrong_root:
+        with pytest.raises(ValueError):m.main()
+        assert calls==[] and not chosen.exists()
+    else:
+        m.main()
+        assert calls==[('apply' if apply else 'review',correct)]
