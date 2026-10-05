@@ -4,6 +4,28 @@ import pytest
 
 from backend.pipeline.viewpoint_cvp_campaign_runner import validate_audit, validate_schedule
 
+@pytest.mark.parametrize('role,suffix',[('adjudication','ai-adjudication'),('adjudication','adjudication'),
+    ('overrides','consensus-overrides'),('overrides','overrides')])
+def test_sealed_artifact_filename_variants_require_exact_bytes(tmp_path,role,suffix):
+    from backend.pipeline.viewpoint_cvp_campaign_runner import discover_bound_sealed_artifact,binding
+    from backend.pipeline.viewpoint_resolution_runtime import write_immutable
+    p=tmp_path/('adjudications' if role=='adjudication' else 'overrides')/('source.'+suffix+'.json')
+    write_immutable(p,{'approved':'frozen'})
+    assert discover_bound_sealed_artifact(tmp_path,'source',role,binding(p)['file_sha256'])==p
+    with pytest.raises(ValueError):discover_bound_sealed_artifact(tmp_path,'source',role,'a'*64)
+
+@pytest.mark.parametrize('mode',['missing','ambiguous','other_generation','no_pin'])
+def test_sealed_filename_discovery_never_uses_unbound_or_ambiguous_generation(tmp_path,mode):
+    from backend.pipeline.viewpoint_cvp_campaign_runner import discover_bound_sealed_artifact,binding
+    from backend.pipeline.viewpoint_resolution_runtime import write_immutable
+    p=tmp_path/'adjudications/source.adjudication.json';q=p.with_name('source.ai-adjudication.json')
+    write_immutable(p,{'approved':'frozen'});sha=binding(p)['file_sha256']
+    if mode=='missing':p.unlink()
+    elif mode=='ambiguous':write_immutable(q,{'approved':'frozen'})
+    elif mode=='other_generation':write_immutable(q,{'approved':'other'})
+    else:sha=None
+    with pytest.raises(ValueError):discover_bound_sealed_artifact(tmp_path,'source','adjudication',sha)
+
 
 def fixture():
     manifest = {"artifact_sha256": "parent", "units": [{"unit_id": "u", "passage_key": "Matt.1.1"}],

@@ -113,6 +113,20 @@ def investigate_deferred(root):
     return read(root / "deferred-source-check/handoff.json")
 
 
+def discover_bound_sealed_artifact(batch, name, role, expected_sha):
+    """Two historical filename conventions; exact frozen bytes, no approval."""
+    suffixes={'adjudication':('ai-adjudication','adjudication'),
+              'overrides':('consensus-overrides','overrides')}
+    if role not in suffixes or not isinstance(expected_sha,str) or len(expected_sha)!=64:
+        raise ValueError('sealed artifact lacks exact frozen SHA')
+    paths=[batch/('adjudications' if role=='adjudication' else 'overrides')/(name+'.'+s+'.json') for s in suffixes[role]]
+    existing=[p for p in paths if p.is_file()]
+    matching=[p for p in existing if binding(p)['file_sha256']==expected_sha]
+    if len(matching)!=1 or any(binding(p)['file_sha256']!=expected_sha for p in existing):
+        raise ValueError(f'{role}: missing, ambiguous or drifted sealed artifact')
+    return matching[0]
+
+
 def discover_selection(group, inventory, random_spot_check_policy=None):
     """Discover physical inputs; proof verification is performed by the adapter.
 
@@ -154,9 +168,12 @@ def discover_selection(group, inventory, random_spot_check_policy=None):
         if random_spot_check_policy is not None:
             row["random_spot_check_policy_binding"] = binding(random_spot_check_policy)
         if variant["contract"] == "sealed_valid":
+            application=read(candidate)['consensus_application']
+            if binding(review_path)['file_sha256']!=application['review_artifact_sha256']:
+                raise ValueError(f'{cid}: sealed independent review SHA drift')
             paths = {"reviewed_candidate": candidate, "independent_review": review_path,
-                     "adjudication": batch / "adjudications" / (name + ".ai-adjudication.json"),
-                     "overrides": batch / "overrides" / (name + ".consensus-overrides.json")}
+                     **{role:discover_bound_sealed_artifact(batch,name,role,application.get(role+'_artifact_sha256'))
+                        for role in ('adjudication','overrides')}}
             sealed.append({"claim_id": cid, **{k + "_path": str(p.resolve()) for k, p in paths.items()},
                            **{k + "_sha256": binding(p)["file_sha256"] for k, p in paths.items()}})
         selected.append(row)
