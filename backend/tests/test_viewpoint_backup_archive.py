@@ -59,6 +59,13 @@ def test_other_ticket_and_nonbackup_paths_unchanged(archive):
     assert not foreign.is_symlink()
 
 
+@pytest.mark.parametrize('label',['before-1357','before-358-357','before-unrelated-deadbeef357cafe'])
+def test_ticket_scope_is_not_a_numeric_substring(archive,label):
+    p,dest=archive
+    q=p.parent.parent/f'registry-backup-2026-10-05-{label}'/m.NAME
+    assert not m.eligible(q)
+
+
 def test_inventory_keeps_latest_two_and_excludes_other_tasks(archive):
     p,dest=archive
     for i in range(3):

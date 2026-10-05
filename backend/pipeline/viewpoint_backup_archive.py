@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -39,7 +40,7 @@ def verify_volume():
 def eligible(path):
     p=Path(path).absolute()
     return (p.name==NAME and p.parent.parent==LOCAL and p.parent.name.startswith('registry-backup-')
-        and '357' in p.parent.name and '358' not in p.parent.name)
+        and re.search(r'(?:^|-)357(?:-|$)',p.parent.name) is not None and '358' not in p.parent.name)
 
 
 def logical_binding_path(path):
