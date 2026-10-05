@@ -569,8 +569,18 @@ def verify_historical_review_bridge(
     sealed_lineage_binding: Mapping[str, str] | None = None,
     random_spot_check_policy_binding: Mapping[str, str] | None = None,
     legacy_reviewed_candidate_binding: Mapping[str, str] | None = None,
+    source_repair_binding: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Verify one read-only DB version chain; never ignore arbitrary drift."""
+    if source_repair_binding is not None:
+        if any((human_closure_binding,sealed_lineage_binding,random_spot_check_policy_binding,legacy_reviewed_candidate_binding)):
+            raise CvpProductionBlocked(['fresh source epoch cannot combine historical override authority'])
+        from backend.pipeline.viewpoint_g041_source_epoch import bridge
+        proof=bridge(claim_id=claim_id,current_claim=dict(current_claim),current_evidence=dict(current_evidence),
+            current_fragments=dict(current_fragments),source_repair_binding=dict(source_repair_binding))
+        if proof['review_binding']!=dict(review_binding) or proof['review_input_binding']!=dict(review_input_binding):
+            raise CvpProductionBlocked(['fresh source epoch actual review packet binding drift'])
+        return proof
     review = _read_binding(review_binding)
     package = _read_binding(review_input_binding)
     if (review.get("source") or {}).get("package_sha256") != review_input_binding["file_sha256"]:
@@ -939,6 +949,7 @@ def main() -> None:
                 sealed_lineage_binding=selected.get("sealed_lineage_binding"),
                 random_spot_check_policy_binding=selected.get("random_spot_check_policy_binding"),
                 legacy_reviewed_candidate_binding=selected.get('legacy_reviewed_candidate_binding'),
+                source_repair_binding=selected.get('source_repair_binding'),
             ))
     body = {"schema_version": "wang_historical_claim_review_bridges_v1", "status": "verified",
             "selection_file_sha256": hashlib.sha256(args.selection.read_bytes()).hexdigest(),

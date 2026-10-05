@@ -11,6 +11,7 @@ from copy import deepcopy
 import fcntl
 import json
 from pathlib import Path
+import re
 import subprocess
 
 from dotenv import load_dotenv
@@ -22,6 +23,7 @@ from backend.api.canonical_repository.viewpoint_resolution import StructuredJson
 VERSION = 'wang_g041_owner_qualified_transcript_reconciliation_v2'
 PRIOR = old.BASE / 'g041-owner-transcript-reconciliation-runtime-20261005-v2'
 ROOT = old.BASE / 'g041-owner-qualified-transcript-reconciliation-20261005-v1'
+CAMPAIGN = old.BASE / 'campaign-recovery-2fc29744d5b0204c7b1e472f1f0e0862a914c4ab2e1ee0c4742935aeb699914f-recovery-cfb58a2570d6-recovery-9b5039675be7-recovery-70522204e72b'
 PREFIX = 'DK-c082110ed14e364955d7-P01-'
 CLAIM = PREFIX + 'CL005'
 EVIDENCE = PREFIX + 'E007'
@@ -233,6 +235,96 @@ def plan_reviewed(root=ROOT):
     print('Exact 612-operation store dry-run passed; no writes or new model calls')
 
 
+def apply_reviewed(root=ROOT):
+    """Apply only saved unanimous reviews; every current record is read back."""
+    from backend.api.canonical_repository.viewpoint_production_safety import exclusive_cvp_run_lock
+    from backend.api.canonical_repository.postgres_store import stored_operation_payload,normalize_package
+    from backend.pipeline.viewpoint_cvp_campaign_runner import binding
+    from backend.pipeline.viewpoint_audit_link_repair import write_derived
+    from backend.pipeline.viewpoint_reviewed_cvp_prepare import completed_repair_parent_snapshot
+    if subprocess.check_output(['git','status','--porcelain'],cwd=old.PROJECT,text=True).strip():
+        raise ValueError('commit exact source epoch/store consumer before apply')
+    if any((root/n).exists() for n in ('apply-intent.json','apply-receipt.json','verified-result.json')):
+        raise ValueError('single apply already attempted; recover actual receipt, never replay')
+    load_dotenv(old.PROJECT/'.env')
+    before,proof,draft,packet,reviews,raws=reviewed_inputs(root)
+    package=package_for(before,draft,packet,reviews,raws,root)
+    if package!=old.read_artifact(root/'effective-package.json'):
+        raise ValueError('exact saved reviewed package drift')
+    store=old.PostgresKnowledgeStore()
+    lock={'global_lock_path':str(old.BASE/'registry-cvp.lock')}
+    with exclusive_cvp_run_lock(lock):
+        live=old.snapshot(store)
+        if old.fingerprint(live,proof['collections'])!=proof['pre_fingerprint_sha256']:
+            raise ValueError('pre-apply complete Registry drift')
+        plan=store.plan_package(package,source_kind=VERSION)
+        if plan.as_dict()!=old.read_artifact(root/'dry-run-plan.json'):
+            raise ValueError('saved dry-run/current plan drift')
+        post=deepcopy(live)
+        for op in plan.operations:post[op.collection,op.object_id]=stored_operation_payload(op)
+        states={(c,o):{'payload':p,'revision':p['revision'],'content_sha256':old.semantic_record_sha(p),'retired':False}
+            for (c,o),p in post.items()}
+        report,_=old.frozen_inputs();manifest=old.read_artifact(Path(report['frozen_scope']['manifest_path']))
+        # This is structural prospective validation, not group completion.
+        cfg=old.read_artifact(CAMPAIGN/'campaign.json')
+        prior=[]
+        for bound in cfg.get('completed_source_repairs',[]):
+            if binding(bound['path'])!=bound:raise ValueError('previous source repair physical drift')
+            prior.append(old.read_artifact(Path(bound['path'])))
+        # Prospective storage compatibility only. The actual continuation must
+        # additionally authenticate all completed-group audit proofs.
+        repaired={c['claim_id'] for p in prior+[package] for c in p.get('claims',[])}
+        for p in prior:
+            rp=p['source_repair_application']['review_packet']
+            if 'claim' in rp:repaired.add(rp['claim']['claim_id'])
+        completed_repair_parent_snapshot(manifest,states,prior+[package],repaired,set())
+        old.write_immutable(root/'source-epoch-preflight.json',{'status':'structural_current_postimage_and_accepted_membership_verified',
+            'frozen_claims':973,'frozen_groups':156,'new_group_completion_asserted':False,
+            'future_claims_require_normal_lineage_or_exact_fresh_seven_claim_proof':True,
+            'expected_post_fingerprint_sha256':old.fingerprint(post,proof['collections']),
+            'registry_writes':0,'new_model_calls':0})
+    write_derived(root/'progress.json',{'status':'backup_before_apply','master_data_mutations':0})
+    out=subprocess.run(['scripts/backup-registry.sh','before-g041-source-'+old.sha256_json(str(root))[:24]],
+        cwd=old.PROJECT,check=True,capture_output=True,text=True)
+    match=re.search(r'backup-registry: wrote (.+\.dump) \(',out.stdout)
+    if not match:raise ValueError('source epoch backup not reported')
+    backup=Path(match.group(1)).resolve()
+    listing=subprocess.run(['pg_restore','--list',str(backup)],check=True,capture_output=True,text=True)
+    if not listing.stdout.strip():raise ValueError('source epoch empty backup restore catalog')
+    old.write_immutable(root/'backup.json',binding(backup))
+    old.write_immutable(root/'pg-restore-proof.json',{'backup':binding(backup),
+        'catalog_sha256':old.text_sha(listing.stdout),'catalog_nonempty':True,'exit_code':listing.returncode})
+    with exclusive_cvp_run_lock(lock):
+        live=old.snapshot(store)
+        if old.fingerprint(live,proof['collections'])!=proof['pre_fingerprint_sha256'] or binding(backup)!=old.read_artifact(root/'backup.json'):
+            raise ValueError('source epoch final before/backup drift')
+        validate_package(package)
+        replay=store.plan_package(package,source_kind=VERSION)
+        if replay.as_dict()!=plan.as_dict():raise ValueError('source epoch final plan drift')
+        old.write_immutable(root/'apply-intent.json',{'schema_version':VERSION,
+            'package_sha256':old.sha256_json(package),'plan_sha256':old.sha256_json(replay.as_dict()),
+            'backup':binding(backup),'pre_fingerprint_sha256':proof['pre_fingerprint_sha256'],
+            'new_model_calls':0,'single_apply_required':True})
+        receipt=store.apply_plan(replay,metadata={'owner_qualified_transcript_repair':str(root),
+            'source_repair_application':VERSION},expected_registry_fingerprint_sha256=proof['pre_fingerprint_sha256'],
+            registry_collections=proof['collections'])
+        old.write_immutable(root/'apply-receipt.json',receipt)
+        actual=old.snapshot(store)
+        if set(actual)!=set(post) or old.fingerprint(actual,proof['collections'])!=old.fingerprint(post,proof['collections']):
+            raise ValueError('source epoch complete Registry postimage readback mismatch')
+        old.verify_source(report)
+        old.write_immutable(root/'verified-result.json',{'status':'applied_readback_verified',
+            'change_set_id':replay.change_set_id,'master_data_mutations':len(replay.operations),
+            'pre_fingerprint_sha256':proof['pre_fingerprint_sha256'],
+            'post_fingerprint_sha256':old.fingerprint(actual,proof['collections']),
+            'physical_corrected_source_sha256':report['source_versions']['new_file_sha256'],
+            'claim_statement_changes':1,'cvp_body_changes':0,'all_original_records_retained':True})
+    write_derived(root/'progress.json',{'status':'full_group_independent_audit_required',
+        'master_data_mutations':len(plan.operations),'completed_groups':40,'completed_claims':222,
+        'new_group_completed':False})
+    print('Single 612-operation source repair applied and full Registry/physical source readback verified; independent group audits still required')
+
+
 def run(root, review=False):
     if root != ROOT:
         raise ValueError('one exact independent qualifier root required')
@@ -287,6 +379,7 @@ def main():
     parser.add_argument('--output-root',type=Path,required=True)
     parser.add_argument('--review',action='store_true')
     parser.add_argument('--plan-reviewed',action='store_true')
+    parser.add_argument('--apply-reviewed',action='store_true')
     args = parser.parse_args(); root = args.output_root.resolve()
     if root != ROOT:
         raise ValueError('exact independent qualified transcript root required')
@@ -294,7 +387,11 @@ def main():
     with (old.BASE/'immediate-recovery-20261002-v1/recovery.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         try:
-            if args.plan_reviewed:
+            if args.apply_reviewed:
+                if args.review or args.plan_reviewed:
+                    raise ValueError('single source application cannot run reviews/replace dry-run')
+                apply_reviewed(root)
+            elif args.plan_reviewed:
                 if args.review:
                     raise ValueError('saved dual-review planning cannot call models')
                 plan_reviewed(root)

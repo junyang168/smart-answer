@@ -213,7 +213,19 @@ def lineage_preflight(schedule, groups, inventory, random_spot_check_policy=None
     return body | {'artifact_sha256': sha256_json(body)}
 
 
-def build_selection(group, inventory, root, random_spot_check_policy=None):
+def build_selection(group, inventory, root, random_spot_check_policy=None, source_repair_paths=()):
+    fresh = []
+    for path in source_repair_paths:
+        package=read(path)
+        if package.get('source_repair_application',{}).get('schema_version') != 'wang_g041_owner_qualified_transcript_reconciliation_v2':
+            continue
+        from backend.pipeline.viewpoint_g041_source_epoch import verified_applied,reviewed_claim_ids,selection_row
+        from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+        verified_applied(binding(path),PostgresKnowledgeStore())
+        fresh.extend(selection_row(cid,package) for cid in sorted(set(group['claim_ids']) & reviewed_claim_ids(package)))
+    if len(fresh)!=len({r['claim_id'] for r in fresh}):
+        raise ValueError('duplicate fresh source epoch qualification')
+    group={**group,'claim_ids':sorted(set(group['claim_ids'])-{r['claim_id'] for r in fresh})}
     missing = {cid for cid in group['claim_ids'] if len([
         v for v in inventory[cid]['variants'] if set(v['changed_substantive_fields'])
         <= {'occurrences', 'evidence_step_ids'}]) != 1}
@@ -246,7 +258,7 @@ def build_selection(group, inventory, root, random_spot_check_policy=None):
         for row in selected:
             if row["claim_id"] in {s["claim_id"] for s in sealed}:
                 row["sealed_lineage_binding"] = binding(path)
-    _write_immutable(root / "review-selection.json", {"claims": selected})
+    _write_immutable(root / "review-selection.json", {"claims": sorted(selected+fresh,key=lambda r:r['claim_id'])})
 
 
 def campaign_policy(args):
@@ -291,7 +303,8 @@ def qualify(row, group, inventory, root, args):
     if (inputs / "freeze.json").exists():
         # Existing immutable phase is revalidated by the normal runner.
         return
-    build_selection(group, inventory, root, getattr(args, 'random_spot_check_policy', None))
+    build_selection(group, inventory, root, getattr(args, 'random_spot_check_policy', None),
+                    getattr(args,'completed_source_repair',None) or [])
     command([PYTHON, "-m", "backend.pipeline.viewpoint_historical_review_bridge", "--selection", root / "review-selection.json", "--output", root / "historical-bridges.json"])
     # One verified full snapshot before this serialized campaign, plus the
     # normal per-group compensatable ChangeSets/readback history. Repeating a

@@ -96,6 +96,13 @@ def completed_repair_parent_snapshot(manifest, records, packages, completed_ids,
         app=package.get('source_repair_application')
         if not app: raise CvpProductionBlocked(['parent repair lacks fresh source-repair authority'])
         packet=app['review_packet']; normalized=normalize_package(package)
+        if app.get('schema_version') == 'wang_g041_owner_qualified_transcript_reconciliation_v2':
+            from backend.pipeline.viewpoint_g041_source_epoch import membership_snapshot
+            checked, changed = membership_snapshot(manifest,checked,package,completed_ids,selected_ids)
+            if used.intersection(changed):
+                raise CvpProductionBlocked(['duplicate completed source epoch Claim authority'])
+            used.update(changed)
+            continue
         if app.get('schema_version') in {'wang_g037_claim_statement_repair_v1','wang_g037_claim_statement_repair_v2'}:
             old,new=packet['claim_revision']['before'],packet['claim_revision']['after'];cid=new['claim_id']
             if cid in used or cid not in completed_ids or cid in selected_ids or cid not in rows:
@@ -211,6 +218,11 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
     repair_paths=getattr(args,'completed_source_repair',None) or []
     repairs=[json.loads(path.read_text(encoding='utf-8')) for path in repair_paths]
     for repair in repairs:
+        if repair.get('source_repair_application',{}).get('schema_version') == 'wang_g041_owner_qualified_transcript_reconciliation_v2':
+            for objects in normalize_package(repair).values(): all_ids.update(objects)
+            packet=repair['source_repair_application']['review_packet']
+            for collection,key,id_key in [('claims','changed_paragraph_claims','claim_id'),('evidence_steps','changed_paragraph_evidence','evidence_step_id')]:
+                for obj in packet[key]: all_ids.add(obj[id_key])
         if repair.get('source_repair_application',{}).get('schema_version') in {'wang_g037_claim_statement_repair_v1','wang_g037_claim_statement_repair_v2'}:
             for objects in normalize_package(repair).values(): all_ids.update(objects)
             packet=repair['source_repair_application']['review_packet']

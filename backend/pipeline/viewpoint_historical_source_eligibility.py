@@ -100,6 +100,7 @@ def build_historical_source_eligibility(*, claim_manifest: dict[str, Any], bridg
                 random_spot_check_policy_binding=prior_proof.get("random_spot_check_policy_binding"),
                 sealed_lineage_binding=prior_proof.get("sealed_lineage_binding"),
                 legacy_reviewed_candidate_binding=prior_proof.get('legacy_reviewed_candidate_binding'),
+                source_repair_binding=prior_proof.get('source_repair_binding'),
             )
             if actual_proof != prior_proof:
                 raise CvpProductionBlocked([f"{cid}: historical bridge no longer matches current source lineage"])
