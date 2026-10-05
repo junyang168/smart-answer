@@ -59,6 +59,8 @@ from typing import Any, Iterable
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 #: 被視為「已批准」的 `review_status`。第 2 層只對這些物件要求依賴全部可解析：
 #: candidate 還在流程裡，引用暫時解不開不是缺陷。
@@ -1292,8 +1294,10 @@ class IndependentModel:
         api_key: str,
         timeout: int = 300,
         cache_dir: Path | None = None,
+        preserve_full_context: bool = False,
     ) -> None:
         self.model = model
+        self.preserve_full_context = preserve_full_context
         self.api_key = api_key
         self.timeout = timeout
         self.calls = 0
@@ -1478,6 +1482,9 @@ def _judge_trimming_on_block(
     """
 
     kept = len(paragraphs)
+    if getattr(model, 'preserve_full_context', False):
+        # #357 owner authorized provider substitution, not source truncation.
+        return model.judge(build(paragraphs), schema), kept
     while kept >= 0:
         verdict = model.judge(build(paragraphs[:kept]), schema)
         if verdict.get("verdict") != "blocked":
@@ -2387,6 +2394,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--reconsider-audit', type=Path,
                         help='一次定向原文復核；保留原審計，不以仲裁模型意見代替獨立判斷')
     parser.add_argument("--model", default=DEFAULT_MODEL, help="第 3、4 層用的獨立模型")
+    parser.add_argument('--preserve-full-context',action='store_true',help='Return the full-source content block; do not retry shortened inputs')
     parser.add_argument(
         "--scope",
         choices=("current-run", "all"),
@@ -2470,6 +2478,7 @@ def main(argv: list[str] | None = None) -> int:
         model = IndependentModel(
             args.model,
             api_key,
+            preserve_full_context=args.preserve_full_context,
             # 判讀結果按 prompt 存檔，跨次重用。全查一次一千多條，中途斷掉不必
             # 從頭付一次錢。
             cache_dir=data_base_dir

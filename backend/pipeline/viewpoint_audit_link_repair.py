@@ -315,7 +315,7 @@ def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storag
     audit_root = continuation/'independent-reaudit'
     run_logged([PYTHON, 'scripts/audit-library.py', '--scope', 'all', '--layers', '1,2,3,4',
         '--claim-ids', ','.join(groups[state['group_key']]['claim_ids']), '--viewpoint-ids', ','.join(targets),
-        '--workers', '2', '--model', 'gemini-3.8-flash', '--out', audit_root, '--no-status-file'], continuation, 'independent-reaudit')
+        '--workers', '2', '--model', 'gemini-3.8-flash', '--out', audit_root, '--no-status-file', '--preserve-full-context'], continuation, 'independent-reaudit')
     audit_path = audit_root/'audit.json'
     from backend.pipeline.viewpoint_content_blocked_fallback import apply as apply_content_blocked_fallback
     audit_path = apply_content_blocked_fallback(audit_path, continuation/'content-blocked-fallback')

@@ -84,6 +84,7 @@ def capture(layer, identity):
     settings = reader.load_settings(); store = reader.Store(settings['KNOWLEDGE_DATABASE_URL'])
     sources = reader.SourceIndex(store.collection('source_documents'), Path(settings['DATA_BASE_DIR']))
     class Capture:
+        preserve_full_context = True
         def judge(self, prompt, schema):
             self.prompt, self.schema = prompt, schema
             return {'verdict':'blocked', 'issue':'other', 'reason':'capture only'}

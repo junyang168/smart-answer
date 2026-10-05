@@ -190,6 +190,9 @@ def create_resolution(audit_path, adjudication_root, output, store, *, authorize
 
 def validate_resolution(audit, path):
     resolution = read_artifact(Path(path))
+    from backend.pipeline.viewpoint_reused_source_resolution import SCHEMA as reused_schema, verify as verify_reused
+    if resolution.get('schema_version') == reused_schema:
+        return verify_reused(audit,resolution)['4']
     if resolution.get('schema_version') == GPT_SCHEMA:
         return validate_gpt_resolution(audit, path)['4']
     verify_sha(resolution)

@@ -70,6 +70,9 @@ def validate_audit(audit, claim_ids, viewpoint_ids, *, owner_resolution_path=Non
         from backend.pipeline.viewpoint_audit_owner_resolution import validate_resolution, validate_gpt_resolution, GPT_SCHEMA
         if read(owner_resolution_path).get('schema_version') == GPT_SCHEMA:
             resolved_by_layer = validate_gpt_resolution(audit, owner_resolution_path)
+        elif read(owner_resolution_path).get('schema_version') == 'wang_exact_reused_gpt_source_resolution_v1':
+            from backend.pipeline.viewpoint_reused_source_resolution import verify
+            resolved_by_layer = verify(audit,read(owner_resolution_path))
         else:
             resolved_by_layer['4'] = validate_resolution(audit, owner_resolution_path)
     for layer, expected, id_key in (("3", set(claim_ids), "claim_id"), ("4", set(viewpoint_ids), "viewpoint_id")):
@@ -390,7 +393,7 @@ def execute(args):
             save_state(args.output_root / "progress.json", state | {"status": "independent_audit", "viewpoint_ids": target_ids})
             audit_path = audit_root / "audit.json"
             if not audit_path.exists():
-                command([PYTHON, "scripts/audit-library.py", "--scope", "all", "--layers", "1,2,3,4", "--claim-ids", ",".join(groups[row["group_key"]]["claim_ids"]), "--viewpoint-ids", ",".join(target_ids), "--workers", "2", "--model", "gemini-3.8-flash", "--out", audit_root, "--no-status-file"])
+                command([PYTHON, "scripts/audit-library.py", "--scope", "all", "--layers", "1,2,3,4", "--claim-ids", ",".join(groups[row["group_key"]]["claim_ids"]), "--viewpoint-ids", ",".join(target_ids), "--workers", "2", "--model", "gemini-3.8-flash", "--out", audit_root, "--no-status-file", "--preserve-full-context"])
             from backend.pipeline.viewpoint_content_blocked_fallback import apply as apply_content_blocked_fallback
             audit_path = apply_content_blocked_fallback(audit_path, root/'content-blocked-fallback')
             audit = read(audit_path)

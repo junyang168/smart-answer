@@ -106,3 +106,19 @@ def test_failed_reserved_call_not_retried_in_new_root(tmp_path,monkeypatch):
     with pytest.raises(RuntimeError):m.apply(path,tmp_path/'out')
     with pytest.raises(ValueError,match='already attempted'):m.apply(path,tmp_path/'other-root')
     assert calls==['failed']
+
+def test_standalone_reader_import_and_full_context_no_trimming():
+    import importlib.util
+    import subprocess
+    import sys
+    root=Path(__file__).resolve().parents[2]
+    help_result=subprocess.run([sys.executable,str(root/'scripts/audit-library.py'),'--help'],cwd='/tmp',capture_output=True,text=True)
+    assert help_result.returncode==0 and '--preserve-full-context' in help_result.stdout
+    spec=importlib.util.spec_from_file_location('full_context_test_reader',root/'scripts/audit-library.py')
+    reader=importlib.util.module_from_spec(spec);sys.modules[spec.name]=reader;spec.loader.exec_module(reader)
+    class Blocked:
+        preserve_full_context=True
+        def __init__(self):self.calls=[]
+        def judge(self,prompt,schema):self.calls.append(prompt);return {'verdict':'blocked'}
+    model=Blocked();answer,used=reader._judge_trimming_on_block(model,lambda ps:'|'.join(ps),['all','full','original'],{})
+    assert answer['verdict']=='blocked' and used==3 and model.calls==['all|full|original']

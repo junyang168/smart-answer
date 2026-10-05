@@ -349,7 +349,7 @@ def resume_after_repair(root, attempt, recovery_root, executable, *, additional_
             run_logged([PYTHON, "scripts/audit-library.py", "--scope", "all", "--layers", "1,2,3,4",
                         "--claim-ids", ",".join(groups[state["group_key"]]["claim_ids"]),
                         "--viewpoint-ids", ",".join(targets), "--workers", "2", "--model", "gemini-3.8-flash",
-                        "--out", audit_dir, "--no-status-file"], attempt, "independent-reaudit")
+                        "--out", audit_dir, "--no-status-file", "--preserve-full-context"], attempt, "independent-reaudit")
             saved_audit_path = audit_dir / "audit.json"
             from backend.pipeline.viewpoint_content_blocked_fallback import apply as apply_content_blocked_fallback
             saved_audit_path = apply_content_blocked_fallback(saved_audit_path, attempt/'content-blocked-fallback')
