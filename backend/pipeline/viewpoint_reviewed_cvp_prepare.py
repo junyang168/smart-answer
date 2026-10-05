@@ -96,6 +96,31 @@ def completed_repair_parent_snapshot(manifest, records, packages, completed_ids,
         app=package.get('source_repair_application')
         if not app: raise CvpProductionBlocked(['parent repair lacks fresh source-repair authority'])
         packet=app['review_packet']; normalized=normalize_package(package)
+        if app.get('schema_version') == 'wang_g037_claim_statement_repair_v1':
+            old,new=packet['claim_revision']['before'],packet['claim_revision']['after'];cid=new['claim_id']
+            if cid in used or cid not in completed_ids or cid in selected_ids or cid not in rows:
+                raise CvpProductionBlocked([f'{cid}: statement repair must be completed and never selected'])
+            prior=rows[cid]
+            if old['revision']!=prior['claim_revision'] or semantic_record_sha(old)!=prior['claim_content_sha256']:
+                raise CvpProductionBlocked([f'{cid}: statement predecessor membership drift'])
+            for collection,objects in normalized.items():
+                for oid,expected in objects.items():
+                    current=records.get((collection,oid))
+                    if not current or current.get('retired') or current['revision']!=expected['revision'] or current['payload']!=expected or current['content_sha256']!=semantic_record_sha(expected):
+                        raise CvpProductionBlocked([f'{collection}/{oid}: reviewed statement repair current drift'])
+            for t in packet['targets']:
+                for row in t['evidence']:
+                    for collection,key,id_key in [('evidence_steps','step','evidence_step_id'),('source_fragments','fragment','fragment_id')]:
+                        expected=row[key];current=records.get((collection,expected[id_key]))
+                        if not current or current.get('retired') or current['payload']!=expected:
+                            raise CvpProductionBlocked([f'{cid}: preserved statement evidence drift'])
+            for d in packet['preserved_claim_dependents']:
+                current=records.get((d['collection'],d['object_id']))
+                if not current or current.get('retired') or current['payload']!=d['payload']:
+                    raise CvpProductionBlocked([f'{cid}: preserved statement dependent drift'])
+            used.add(cid)
+            checked[('claims',cid)]={'revision':old['revision'],'content_sha256':semantic_record_sha(old),'payload':old,'retired':False}
+            continue
         if app.get('schema_version') == 'wang_owner_evidence_annotation_v1':
             # Exact labeled editorial annotation on an independently completed
             # Claim. Restore only its historical Evidence pin for membership;
@@ -186,6 +211,12 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
     repair_paths=getattr(args,'completed_source_repair',None) or []
     repairs=[json.loads(path.read_text(encoding='utf-8')) for path in repair_paths]
     for repair in repairs:
+        if repair.get('source_repair_application',{}).get('schema_version')=='wang_g037_claim_statement_repair_v1':
+            for objects in normalize_package(repair).values(): all_ids.update(objects)
+            packet=repair['source_repair_application']['review_packet']
+            for t in packet['targets']:
+                for r in t['evidence']:all_ids.update([r['step']['evidence_step_id'],r['fragment']['fragment_id']])
+            for d in packet['preserved_claim_dependents']:all_ids.add(d['object_id'])
         if repair.get('source_repair_application',{}).get('schema_version')=='wang_claim_qualifier_repair_v2':
             for link in repair.get('viewpoint_claim_links',[]): all_ids.add(link['viewpoint_claim_link_id'])
         for item in repair.get('source_repair_application',{}).get('review_packet',{}).get('items',[]):

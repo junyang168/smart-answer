@@ -214,11 +214,15 @@ def package_for(states, packet, reviews, root, *, identity_digest=None):
 
 def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storage_review_from=None,
         human_review_from=None, human_handoff=None, human_decisions=(), relation_review_from=None,
-        saved_source_assessment_root=None, owner_g037_context_from=None):
+        saved_source_assessment_root=None, owner_g037_context_from=None, owner_g037_claim_statement=False):
     store = PostgresKnowledgeStore()
     global_lock={'global_lock_path':str(BASE/'registry-cvp.lock')}
     if owner_retire and owner_identity_g033:
         raise ValueError('owner scopes cannot be combined')
+    if owner_g037_claim_statement and any((owner_retire,owner_identity_g033,storage_review_from,human_review_from,human_handoff,human_decisions,relation_review_from,saved_source_assessment_root,owner_g037_context_from)):
+        raise ValueError('g037 Claim revision cannot combine other authorities')
+    if owner_g037_claim_statement:
+        from backend.pipeline import viewpoint_g037_claim_statement_repair as claim_repair
     if owner_g037_context_from and any((owner_retire,owner_identity_g033,storage_review_from,human_review_from,human_handoff,human_decisions,relation_review_from,saved_source_assessment_root)):
         raise ValueError('g037 context review cannot combine other authorities')
     if saved_source_assessment_root and any((owner_retire,owner_identity_g033,human_review_from)):
@@ -273,6 +277,10 @@ def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storag
             if read_artifact(campaign/'progress.json')['sequence']!=37:
                 raise ValueError('context review authorizes only g037')
             packet=context_prepare(packet,states,owner_g037_context_from,BASE)
+        if owner_g037_claim_statement:
+            if read_artifact(campaign/'progress.json')['sequence']!=37:
+                raise ValueError('Claim statement authority authorizes only g037')
+            packet=claim_repair.prepare(packet,states,root,BASE)
         return states,packet
     with exclusive_cvp_run_lock(global_lock):
         states, packet=prepare_current()
@@ -291,14 +299,26 @@ def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storag
                 preflight[provider]=proof
             write_immutable(root/'request-preflight.json',preflight)
             reserve(root,owner_g037_context_from,BASE)
+        if owner_g037_claim_statement:
+            preflight={}
+            for provider,model in [('codex','gpt-6.1-sol'),('claude','claude-opus-5-5')]:
+                adapter=claim_repair.review_adapter(subscription_client(provider,model,'high'))
+                proof=adapter.request_encoding_proof(packet)
+                if adapter.request_bytes(packet)>500000:
+                    raise ValueError('Claim statement review request exceeds frozen ceiling')
+                preflight[provider]=proof
+            write_immutable(root/'request-preflight.json',preflight)
+            claim_repair.reserve(root,BASE)
     write_derived(root/'progress.json',{'status':'reviewing','master_data_mutations':0})
     reviews={}
     ids={i['claim']['claim_id'] for i in packet['targets']}
     for label,provider,model in [('gpt','codex','gpt-6.1-sol'),('opus','claude','claude-opus-5-5')]:
         prompt=identity_repair.PROMPT if owner_identity_g033 else RETIRE_PROMPT if owner_retire else PROMPT
         if owner_g037_context_from: prompt=context_prompt
+        if owner_g037_claim_statement: prompt=claim_repair.PROMPT
         adapter=link_review_adapter(subscription_client(provider,model,'high'),prompt,
             legacy_serialization=bool(human_review_from or owner_identity_g033 or owner_retire))
+        if owner_g037_claim_statement: adapter=claim_repair.review_adapter(subscription_client(provider,model,'high'))
         raw,calls,_=review_call(adapter,packet,root,label)
         if human_review_from and calls: raise ValueError('human resume must not call models')
         result=Review.model_validate(raw)
@@ -321,6 +341,7 @@ def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storag
             if execution_authority(human_handoff,human_decisions,packet=packet,registry_fingerprint_sha256=before)!=authority:
                 raise ValueError('human execution permission drift')
         package=identity_repair.package_for(live,packet,reviews,root) if owner_identity_g033 else package_for(live,packet,reviews,root)
+        if owner_g037_claim_statement: package=claim_repair.package_for(packet,reviews,root)
         if authority is not None: package=mark_human_package(package,authority)
         plan=store.plan_package(package,source_kind='wang_source_adjudicated_link_repair')
         if owner_identity_g033:
@@ -329,6 +350,11 @@ def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storag
                 'viewpoint_identity_candidates':('create',2),'viewpoint_identity_decisions':('create',2)}
             if len(plan.operations)!=11 or any(sum(o.collection==c and o.operation==kind for o in plan.operations)!=count for c,(kind,count) in expected_ops.items()):
                 raise ValueError('unexpected owner identity repair writes')
+        elif owner_g037_claim_statement:
+            expected_ops={'claims':('update',1),'viewpoint_claim_links':('update',6),
+                'viewpoint_identity_candidates':('create',6),'viewpoint_identity_decisions':('create',6)}
+            if len(plan.operations)!=19 or any(sum(o.collection==c and o.operation==kind for o in plan.operations)!=count for c,(kind,count) in expected_ops.items()):
+                raise ValueError('unexpected owner Claim statement repair writes')
         elif len(plan.operations)!=(1 if owner_retire else 3)*len(ids) or any(o.collection not in package or (o.collection=='viewpoint_claim_links')!=(o.operation=='update') for o in plan.operations): raise ValueError('unexpected repair writes')
         if owner_retire:
             write_immutable(root/'claim-disposition.json',{'schema_version':'wang_owner_reviewed_claim_disposition_v1',
@@ -362,7 +388,7 @@ def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storag
         for item in packet['targets']:
             for source in item['sources']:
                 if file_sha256(Path(source['path']))!=source['file_sha256']: raise ValueError('physical source drift')
-        write_immutable(root/'verified-result.json',{'status':'applied_readback_verified','change_set_id':replay.change_set_id,'master_data_mutations':len(replay.operations),'claim_source_viewpoint_text_writes':1 if owner_identity_g033 else 0,'claim_evidence_source_writes':0})
+        write_immutable(root/'verified-result.json',{'status':'applied_readback_verified','change_set_id':replay.change_set_id,'master_data_mutations':len(replay.operations),'claim_source_viewpoint_text_writes':1 if owner_identity_g033 or owner_g037_claim_statement else 0,'claim_evidence_source_writes':1 if owner_g037_claim_statement else 0})
     write_derived(root/'progress.json',{'status':'independent_audit_before_resume','master_data_mutations':len(replay.operations)})
     continuation=root/'continuation'; continuation.mkdir(exist_ok=False)
     # Audit once. A fresh disputed report goes to the standing own-source GPT
@@ -399,8 +425,10 @@ def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storag
     if relation_review_from: proof_names.extend(['relation-review-source.json','metadata-materialization-contract.json'])
     if authority is not None: proof_names.append('human-execution-authority.json')
     if owner_g037_context_from: proof_names.extend(['owner-authorization.json','request-preflight.json'])
+    if owner_g037_claim_statement: proof_names.extend(['owner-authorization.json','request-preflight.json'])
     result=resume_after_repair(campaign,continuation,BASE/'immediate-recovery-20261002-v1',executable,
         saved_audit_path=audit_path, owner_resolution_path=resolution_path,
+        additional_source_repair_paths=[root/'effective-package.json'] if owner_g037_claim_statement else (),
         additional_proof_bindings=[binding(root/name) for name in proof_names])
     write_derived(root/'progress.json',{'status':result['status'],'continuation':result})
     return result
@@ -430,6 +458,7 @@ def main():
     ap.add_argument('--codex-executable',type=Path)
     ap.add_argument('--saved-source-assessment-root',type=Path)
     ap.add_argument('--owner-g037-context-from',type=Path)
+    ap.add_argument('--owner-g037-claim-statement',action='store_true')
     ap.add_argument('--human-review-from',type=Path)
     ap.add_argument('--human-handoff',type=Path)
     ap.add_argument('--human-decision',type=Path,action='append',default=[])
@@ -455,7 +484,8 @@ def main():
         try: print(json.dumps(run(campaign,root,owner_retire=args.owner_retire_g015_link,owner_identity_g033=args.owner_identity_g033,storage_review_from=args.owner_g033_storage_review_from,
             human_review_from=args.human_review_from,human_handoff=args.human_handoff,human_decisions=args.human_decision,
             relation_review_from=args.owner_g033_relation_review_from,
-            saved_source_assessment_root=args.saved_source_assessment_root,owner_g037_context_from=args.owner_g037_context_from)),flush=True)
+            saved_source_assessment_root=args.saved_source_assessment_root,owner_g037_context_from=args.owner_g037_context_from,
+            owner_g037_claim_statement=args.owner_g037_claim_statement)),flush=True)
         except Exception as exc:
             write_derived(root/'failure.json',{'error':str(exc),'applied':(root/'apply-receipt.json').exists(),'no_next_group_started':True})
             write_derived(root/'progress.json',{'status':'stopped','error':str(exc),'applied':(root/'apply-receipt.json').exists()}); raise

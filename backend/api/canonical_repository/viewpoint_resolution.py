@@ -2091,6 +2091,7 @@ class StructuredJsonReviewerAdapter:
         schema_name: str,
         compact_payload: bool = False,
         shared_text_payload: bool = False,
+        shared_record_payload: bool = False,
     ) -> None:
         self._client = client
         self._prompt = prompt
@@ -2098,6 +2099,9 @@ class StructuredJsonReviewerAdapter:
         self._schema_name = schema_name
         self._compact_payload = compact_payload
         self._shared_text_payload = shared_text_payload
+        self._shared_record_payload = shared_record_payload
+        if shared_record_payload and not shared_text_payload:
+            raise ValueError('shared-record encoding requires shared text')
         if shared_text_payload and not compact_payload:
             raise ValueError('shared-text encoding requires compact JSON')
         self.model_id = str(getattr(client, "model", ""))
@@ -2122,6 +2126,11 @@ class StructuredJsonReviewerAdapter:
                 'base_config_sha256': self.generation_config_sha256,
                 'payload_serialization': 'wkp_shared_text_json_v1',
             })
+        if shared_record_payload:
+            self.generation_config_sha256 = sha256_json({
+                'base_config_sha256': self.generation_config_sha256,
+                'payload_serialization': 'wkp_shared_records_json_v1',
+            })
 
     def compact_copy(self) -> "StructuredJsonReviewerAdapter":
         """A separately identified serialization, without mutating initial review."""
@@ -2132,6 +2141,7 @@ class StructuredJsonReviewerAdapter:
             response_model=self._response_model, schema_name=self._schema_name,
             compact_payload=True,
             shared_text_payload=self._shared_text_payload,
+            shared_record_payload=self._shared_record_payload,
         )
         if hasattr(self, "max_request_bytes"):
             result.max_request_bytes = self.max_request_bytes
@@ -2145,6 +2155,7 @@ class StructuredJsonReviewerAdapter:
             schema_name=self._schema_name,
             compact_payload=self._compact_payload,
             shared_text_payload=self._shared_text_payload,
+            shared_record_payload=self._shared_record_payload,
         )
         return self._client.generate_json(
             **request,
@@ -2160,6 +2171,7 @@ class StructuredJsonReviewerAdapter:
                     schema_name=self._schema_name,
                     compact_payload=self._compact_payload,
                     shared_text_payload=self._shared_text_payload,
+                    shared_record_payload=self._shared_record_payload,
                 )
             ).encode("utf-8")
         )
@@ -2167,26 +2179,29 @@ class StructuredJsonReviewerAdapter:
     def request_encoding_proof(self, payload: Mapping[str, Any]) -> dict[str, Any] | None:
         if not self._shared_text_payload:
             return None
-        from .viewpoint_request_encoding import FORMAT, decode_shared_text
+        from .viewpoint_request_encoding import FORMAT, RECORD_FORMAT, decode_shared_text, decode_shared_records
         request = structured_json_request(payload, prompt=self._prompt,
             response_model=self._response_model, schema_name=self._schema_name,
-            compact_payload=self._compact_payload, shared_text_payload=True)
+            compact_payload=self._compact_payload, shared_text_payload=True,
+            shared_record_payload=self._shared_record_payload)
         wire = json.loads(request['user_prompt'])
         encoded = wire.get('format') == FORMAT and 'shared_text' in wire
-        restored = decode_shared_text(wire) if encoded else wire
+        records_encoded = wire.get('format') == RECORD_FORMAT and 'shared_records' in wire
+        restored = decode_shared_records(wire) if records_encoded else decode_shared_text(wire) if encoded else wire
         if canonical_json(restored) != canonical_json(payload):
             raise ValueError('actual outgoing request lost semantic content')
         original = structured_json_request(payload, prompt=self._prompt,
             response_model=self._response_model, schema_name=self._schema_name,
             compact_payload=self._compact_payload)
-        return {'serialization_contract': FORMAT,
-                'effective_serialization': FORMAT if encoded else 'compact_json_v1',
+        return {'serialization_contract': RECORD_FORMAT if self._shared_record_payload else FORMAT,
+                'effective_serialization': RECORD_FORMAT if records_encoded else FORMAT if encoded else 'compact_json_v1',
                 'semantic_payload_sha256': sha256_json(payload),
                 'restored_payload_sha256': sha256_json(restored),
                 'wire_request_sha256': sha256_json(request),
                 'wire_request_bytes': len(canonical_json(request).encode('utf-8')),
                 'original_request_bytes': len(canonical_json(original).encode('utf-8')),
                 'shared_text_count': len(wire['shared_text']) if encoded else 0,
+                **({'shared_record_count':len(wire['shared_records']) if records_encoded else 0} if self._shared_record_payload else {}),
                 'exact_roundtrip_verified': True,
                 'model_id': self.model_id, 'backend': self.backend,
                 'prompt_sha256': self.prompt_sha256,
@@ -2201,10 +2216,16 @@ def structured_json_request(
     schema_name: str,
     compact_payload: bool = False,
     shared_text_payload: bool = False,
+    shared_record_payload: bool = False,
 ) -> dict[str, Any]:
     """The exact arguments passed to generate_json, before transport wrapping."""
 
-    if shared_text_payload:
+    if shared_record_payload:
+        if not shared_text_payload or not compact_payload:
+            raise ValueError('shared-record encoding requires compact shared text')
+        from .viewpoint_request_encoding import encode_shared_records
+        user_prompt = encode_shared_records(payload)
+    elif shared_text_payload:
         from .viewpoint_request_encoding import encode_shared_text
         user_prompt = encode_shared_text(payload)
     else:
