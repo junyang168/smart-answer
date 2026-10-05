@@ -455,6 +455,7 @@ def validate_scoped_audit_admission(
     reference: Mapping[str, Any], audit_file_sha256: str,
     selected_claim_ids: Sequence[str],
     admission_stage: str | None = None,
+    source_epoch_binding=None,
 ) -> dict[str, dict[str, Any]]:
     """Verify owner-authorized isolation against the unfiltered original audit.
 
@@ -469,8 +470,10 @@ def validate_scoped_audit_admission(
     if reference.get("schema_version") != "wang_shared_grouping_reference_v1":
         raise CvpProductionBlocked(["scoped audit requires a shared accepted grouping reference"])
     manifest_sha = str(reference.get("manifest_sha256") or "")
-    upstream = validate_reviewed_grouping_bindings(reference.get("bindings"), manifest_sha256=manifest_sha)
-    validate_accepted_grouping(**upstream, bindings=reference["bindings"], expected_manifest_sha256=manifest_sha)
+    upstream = validate_reviewed_grouping_bindings(reference.get("bindings"), manifest_sha256=manifest_sha,
+                                                 source_epoch_binding=source_epoch_binding)
+    validate_accepted_grouping(**upstream, bindings=reference["bindings"], expected_manifest_sha256=manifest_sha,
+                               source_epoch_binding=source_epoch_binding)
     audit_scope = accepted_grouping_audit_scope(upstream["manifest"], admission_stage)
     expected_ids = [row["claim_id"] for row in audit_scope["claim_packets"]]
     if len(selected_claim_ids) != len(set(selected_claim_ids)) or set(selected_claim_ids) != set(expected_ids):
@@ -515,6 +518,7 @@ def _validate_prerequisites(
     scoped_audit = disposition.get("schema_version") == "wang_cvp_scoped_audit_disposition_v1"
     if scoped_audit:
         try:
+            from backend.pipeline.viewpoint_g041_source_epoch import GROUPING_EPOCH_KEY
             if audit is None or scope_packet is None or "reviewed_grouping_reference" not in payloads:
                 raise CvpProductionBlocked(["scoped audit lacks full audit, scope packet or shared grouping reference"])
             upstream = validate_scoped_audit_admission(
@@ -523,6 +527,7 @@ def _validate_prerequisites(
                 audit_file_sha256=bindings["independent_audit"]["sha256"],
                 selected_claim_ids=[row["claim_id"] for row in scope_packet["claims"]],
                 admission_stage=scope_packet.get("accepted_grouping_stage"),
+                source_epoch_binding=scope_packet.get(GROUPING_EPOCH_KEY),
             )
             manifest_ids = [row["claim_id"] for row in (payloads.get("claim_manifest") or {}).get("claims") or []]
             if set(manifest_ids) != {row["claim_id"] for row in scope_packet["claims"]} or len(manifest_ids) != len(set(manifest_ids)):

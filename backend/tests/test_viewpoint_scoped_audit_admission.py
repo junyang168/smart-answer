@@ -60,3 +60,52 @@ def test_drifted_svg_blocks_admission(tmp_path):
     (tmp_path / "diagram.svg").write_text("changed")
     with pytest.raises(CvpProductionBlocked, match="SHA drift"):
         validate_scoped_audit_admission(**args)
+
+
+@pytest.mark.parametrize('mutation',[None,'missing','unapplied','wrong_sha','asset','findings','denominator'])
+def test_scoped_audit_consumes_exact_applied_epoch_without_changing_audit(tmp_path,monkeypatch,mutation):
+    from backend.pipeline import viewpoint_g041_source_epoch as epoch
+    args=admission(tmp_path);source=tmp_path/'source.md'
+    old=hashlib.sha256(source.read_bytes()).hexdigest()
+    source.write_text('reviewed source epoch')
+    new=hashlib.sha256(source.read_bytes()).hexdigest();proof={'path':'/exact/applied','file_sha256':'exact'}
+    def transition(manifest,binding):
+        if binding!=proof or mutation=='unapplied':raise ValueError('applied proof missing')
+        return {str(source):(old,'wrong' if mutation=='wrong_sha' else new)}
+    monkeypatch.setattr(epoch,'grouping_physical_transition',transition)
+    if mutation!='missing':args['source_epoch_binding']=proof
+    if mutation=='asset':(tmp_path/'diagram.svg').write_text('changed')
+    if mutation=='findings':args['disposition']['isolated_findings'].pop()
+    if mutation=='denominator':args['selected_claim_ids']=[]
+    if mutation is None:
+        original=copy.deepcopy(args['disposition'])
+        result=validate_scoped_audit_admission(**args)
+        assert args['disposition']==original
+        assert result['manifest']['sources'][0]['file_sha256']==old
+    else:
+        with pytest.raises(CvpProductionBlocked):validate_scoped_audit_admission(**args)
+
+
+def test_freeze_prerequisite_adapter_forwards_scope_epoch(monkeypatch,tmp_path):
+    from backend.api.canonical_repository import viewpoint_production_safety as safety
+    from backend.pipeline.viewpoint_g041_source_epoch import GROUPING_EPOCH_KEY
+    args=admission(tmp_path);proof={'path':'/bound/package','file_sha256':'bound'}
+    seen=[]
+    def check(**kwargs):
+        seen.append(kwargs['source_epoch_binding'])
+        return {}
+    monkeypatch.setattr(safety,'validate_scoped_audit_admission',check)
+    payloads={k:{'status':'passed'} for k in ['source_universe_manifest','source_lineage_manifest','source_attestation','source_state_reconciliation','source_state_validation']}
+    for k in ['source_lineage_manifest','source_attestation']:
+        payloads[k]['artifact_sha256']=sha256_json(payloads[k])
+    payloads['claim_manifest']={'claims':[{'claim_id':'C1'}]}
+    payloads['claim_manifest']['manifest_sha256']=sha256_json(payloads['claim_manifest'])
+    payloads.update(independent_audit=args['audit'],audit_disposition=args['disposition'],reviewed_grouping_reference=args['reference'])
+    paths={}
+    for role,payload in payloads.items():
+        path=tmp_path/(role+'.json');path.write_text(json.dumps(payload));paths[role]=path
+    _,findings=safety._validate_prerequisites(paths,scope_packet={'claims':[{'claim_id':'C1'}],GROUPING_EPOCH_KEY:proof})
+    assert findings==[] and seen==[proof]
+    seen.clear()
+    safety._validate_prerequisites(paths,scope_packet={'claims':[{'claim_id':'C1'}]})
+    assert seen==[None]
