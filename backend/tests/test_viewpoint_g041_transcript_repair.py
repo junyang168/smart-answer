@@ -126,3 +126,60 @@ def test_model_transport_is_separate_new_subscription_identity(monkeypatch):
         assert a.model_id==model and a.max_request_bytes==500000
         assert a.backend==f'{provider}_subscription'
         assert a.request_encoding_proof({'same':['long content '*100]*4})
+
+
+@pytest.mark.parametrize('mutation',[None,'returned_raw','model_raw','wrong_error','wrong_packet','wrong_reservation','applied'])
+def test_mechanical_runtime_continuation_requires_zero_prior_inference(monkeypatch,mutation):
+    packet={'scoped':'packet'};digest=m.sha256_json(packet)
+    error='Codex executable unavailable: /Users/junyang/.vscode/extensions/openai.chatgpt-26.818.41705-darwin-arm64/bin/macos-aarch64/codex'
+    docs={m.FIRST_ROOT/'packet.json':packet,
+        m.FIRST_ROOT/'failure.json':{'error':error},
+        m.FIRST_ROOT/'failed-review-gpt.json':{'error':error,'raw_response':None,'packet_sha256':digest},
+        m.IMPACT/'owner-transcript-reconciliation-start.json':{'output_root':str(m.FIRST_ROOT),
+            'packet_sha256':digest,'proposal_sha256':m.PROPOSAL_SHA}}
+    exists=set()
+    if mutation=='returned_raw':docs[m.FIRST_ROOT/'failed-review-gpt.json']['raw_response']={'response':'x'}
+    if mutation=='model_raw':exists.add(m.FIRST_ROOT/'raw-gpt.json')
+    if mutation=='wrong_error':docs[m.FIRST_ROOT/'failure.json']['error']='quota'
+    if mutation=='wrong_packet':docs[m.FIRST_ROOT/'failed-review-gpt.json']['packet_sha256']='drift'
+    if mutation=='wrong_reservation':docs[m.IMPACT/'owner-transcript-reconciliation-start.json']['output_root']='other root'
+    if mutation=='applied':exists.add(m.FIRST_ROOT/'apply-receipt.json')
+    monkeypatch.setattr(m,'read_artifact',lambda p:deepcopy(docs[p]))
+    monkeypatch.setattr(m,'file_sha256',lambda p:'physical')
+    monkeypatch.setattr(m.Path,'exists',lambda p:p in exists)
+    if mutation is None:assert len(m.zero_call_predecessor())==5
+    else:
+        with pytest.raises(ValueError):m.zero_call_predecessor()
+
+
+@pytest.mark.parametrize('mutation',[None,'cli_sha','login','proof_identity','no_reuse','extra_diagnostic'])
+def test_canonical_runtime_cannot_select_stale_binary_or_new_diagnostic(monkeypatch,tmp_path,mutation):
+    from backend.pipeline import codex_subscription_client as c
+    from backend.pipeline import codex_subscription_preflight as preflight
+    executable=tmp_path/'codex';auth=tmp_path/'auth.json';proof_path=tmp_path/'saved-proof.json'
+    cli={'path':str(executable),'version':'codex-cli 0.159.2','file_sha256':'binary-sha','model':'gpt-6.1-sol'}
+    identity={'cli':cli,'model':'gpt-6.1-sol','backend':'codex_subscription','reasoning_effort':'high','login_state_sha256':'login-sha'}
+    proof={'identity':deepcopy(identity)}
+    if mutation=='proof_identity':proof['identity']['model']='other-model'
+    monkeypatch.setattr(m,'read_artifact',lambda p:({'codex_runtime':{'identity':identity,'proof_path':str(proof_path)}} if p==m.RUNTIME_RECEIPT else proof))
+    monkeypatch.setattr(m,'file_sha256',lambda p:('drift' if mutation=='cli_sha' else 'binary-sha') if p==executable else ('drift' if mutation=='login' else 'login-sha'))
+    class Client:
+        def __init__(self,model,reasoning_effort,executable):
+            self.model=model;self.reasoning_effort=reasoning_effort;self.backend='codex_subscription'
+            self.cli_identity=cli;self.environment={'CODEX_HOME':str(tmp_path)}
+        def _verify_chatgpt_login(self):pass
+    monkeypatch.setattr(c,'CodexSubscriptionClient',Client)
+    calls=[]
+    def reused(client,path):
+        calls.append(path)
+        return {'proof_path':str(proof_path),'reused':mutation!='no_reuse',
+            'new_model_calls':1 if mutation=='extra_diagnostic' else 0}
+    monkeypatch.setattr(preflight,'verify_runtime',reused)
+    monkeypatch.setenv('CODEX_EXECUTABLE','old nonexistent executable')
+    if mutation is None:
+        assert m.canonical_runtime()['reused']
+        assert m.os.environ['CODEX_EXECUTABLE']==str(executable)
+    else:
+        with pytest.raises(ValueError):m.canonical_runtime()
+        assert m.os.environ['CODEX_EXECUTABLE']=='old nonexistent executable'
+        if mutation in {'cli_sha','login','proof_identity'}:assert calls==[]

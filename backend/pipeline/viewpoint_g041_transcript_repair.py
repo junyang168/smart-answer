@@ -11,6 +11,7 @@ from copy import deepcopy
 import fcntl
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 
@@ -30,6 +31,8 @@ SOURCE = 'SRC-2017_NYSC_2-5be3c2739375'
 REPORT_SHA = 'a2c05af841d6ad4d76092a3a48da605915ffceb26119e3aa57247dee91484c5f'
 PROPOSAL_SHA = 'bc3f9aaccdecbd6e77fdc24799d90d7bf209e19855057f6a7a5740461bbfba0e'
 LINK = 'VCL-c9213899c86aa0654a06'
+FIRST_ROOT = BASE / 'g041-owner-transcript-reconciliation-20261005-v1'
+RUNTIME_RECEIPT = BASE / 'g040-sealed-withdrawn-lineage-repair-20261005-v1/continuation/continuation-receipt.json'
 PROJECT = Path(__file__).resolve().parents[2]
 PROMPT = '''独立审核负责人重新听录音后亲自更正的一份逐字稿所产生的精确来源版本迁移。负责人更正不是AI批准；旧异议、旧审核和旧版本必须保留。
 完整新旧自身原文都在包中。更正涉及听众1、听众2、教授答的归属，以及她/他的代词、离婚书用词和被动语态引号。只判断来源忠实，不评价教授神学对错，不用其他讲道替本篇补证。
@@ -203,6 +206,49 @@ def adapter(provider, model):
     return result
 
 
+def canonical_runtime():
+    """Reuse the exact producer runtime proof; never diagnose another identity."""
+    from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
+    from backend.pipeline.codex_subscription_preflight import verify_runtime
+    recorded = read_artifact(RUNTIME_RECEIPT)['codex_runtime']
+    identity = recorded['identity']; executable = Path(identity['cli']['path'])
+    proof_path = Path(recorded['proof_path']); proof = read_artifact(proof_path)
+    if proof['identity'] != identity or file_sha256(executable) != identity['cli']['file_sha256']:
+        raise ValueError('canonical producer runtime proof/physical identity drift')
+    client = CodexSubscriptionClient(model='gpt-6.1-sol',reasoning_effort='high',executable=str(executable))
+    client._verify_chatgpt_login()
+    auth = Path(client.environment.get('CODEX_HOME',str(Path.home()/'.codex')))/'auth.json'
+    actual = {'cli':client.cli_identity,'model':client.model,'backend':client.backend,
+        'reasoning_effort':client.reasoning_effort,'login_state_sha256':file_sha256(auth)}
+    if actual != identity:
+        raise ValueError('canonical runtime/login changed; no new diagnostic fallback')
+    reused = verify_runtime(client,proof_path.parent)
+    if reused['proof_path'] != str(proof_path) or not reused['reused'] or reused['new_model_calls'] != 0:
+        raise ValueError('canonical runtime must reuse prior successful proof')
+    os.environ['CODEX_EXECUTABLE'] = str(executable)
+    return reused
+
+
+def zero_call_predecessor():
+    """One mechanical continuation, retaining the spent reservation and failure."""
+    failure = read_artifact(FIRST_ROOT/'failure.json')
+    failed = read_artifact(FIRST_ROOT/'failed-review-gpt.json')
+    reservation = read_artifact(IMPACT/'owner-transcript-reconciliation-start.json')
+    packet = read_artifact(FIRST_ROOT/'packet.json')
+    if (failure.get('error') != 'Codex executable unavailable: /Users/junyang/.vscode/extensions/openai.chatgpt-26.818.41705-darwin-arm64/bin/macos-aarch64/codex'
+            or failed.get('error') != failure['error'] or failed.get('raw_response') is not None
+            or failed.get('packet_sha256') != sha256_json(packet)
+            or reservation.get('output_root') != str(FIRST_ROOT)
+            or reservation.get('packet_sha256') != sha256_json(packet)
+            or reservation.get('proposal_sha256') != PROPOSAL_SHA
+            or any((FIRST_ROOT/n).exists() for n in ('raw-gpt.json','raw-opus.json','apply-intent.json','apply-receipt.json','review-report.json'))):
+        raise ValueError('runtime continuation requires exact zero-inference predecessor')
+    return [{'path':str(FIRST_ROOT/n),'file_sha256':file_sha256(FIRST_ROOT/n)}
+        for n in ('failure.json','failed-review-gpt.json','packet.json','before.json')]+[
+        {'path':str(IMPACT/'owner-transcript-reconciliation-start.json'),
+         'file_sha256':file_sha256(IMPACT/'owner-transcript-reconciliation-start.json')}]
+
+
 def require_approval(response, packet):
     parsed = Review.model_validate(response)
     ids = {c['claim_id'] for c in packet['changed_paragraph_claims']}
@@ -211,10 +257,14 @@ def require_approval(response, packet):
     return parsed.model_dump(mode='json')
 
 
-def run(root, review=False):
+def run(root, review=False, mechanical_runtime_continuation=False):
     if subprocess.check_output(['git','status','--porcelain'],cwd=PROJECT,text=True).strip():
         raise ValueError('commit bounded implementation before source review')
     load_dotenv(PROJECT/'.env')
+    runtime = canonical_runtime()
+    predecessor_bindings = zero_call_predecessor() if mechanical_runtime_continuation else []
+    if mechanical_runtime_continuation and root != BASE/'g041-owner-transcript-reconciliation-runtime-20261005-v2':
+        raise ValueError('one distinct mechanical runtime continuation root required')
     report, proposal = frozen_inputs()
     states = snapshot(PostgresKnowledgeStore()); collections = sorted({c for c,_ in states})
     package, packet = materialize(states, report, proposal, root)
@@ -223,6 +273,7 @@ def run(root, review=False):
         'before_records':[{'collection':c,'object_id':o,'payload':p} for (c,o),p in sorted(states.items())]}
     write_immutable(root/'before.json',proof); write_immutable(root/'draft-package.json',package)
     write_immutable(root/'packet.json',packet)
+    write_immutable(root/'canonical-runtime.json',runtime)
     preflights = {}
     for label,provider,model in [('gpt','codex','gpt-6.1-sol'),('opus','claude','claude-opus-5-5')]:
         a = adapter(provider, model); size = a.request_bytes(packet)
@@ -233,11 +284,14 @@ def run(root, review=False):
         'requests':preflights,'registry_writes':0,'models_called':0})
     if not review:
         print(json.dumps({'status':'preflight_passed_no_models_no_writes','requests':{k:v['request_bytes'] for k,v in preflights.items()}}));return
-    reservation = IMPACT/'owner-transcript-reconciliation-start.json'
+    reservation = (FIRST_ROOT/'mechanical-runtime-continuation.json' if mechanical_runtime_continuation
+        else IMPACT/'owner-transcript-reconciliation-start.json')
     if reservation.exists():
         raise ValueError('source review already reserved; preserve raw artifacts, no repeat')
     authority = {'schema_version':VERSION,'output_root':str(root),'packet_sha256':sha256_json(packet),
-        'proposal_sha256':PROPOSAL_SHA,'human_content_approval':False,'fresh_reviews_per_provider':1}
+        'proposal_sha256':PROPOSAL_SHA,'human_content_approval':False,'fresh_reviews_per_provider':1,
+        'zero_call_predecessor_bindings':predecessor_bindings,'runtime_proof':runtime,
+        'old_failure_and_budget_preserved':True}
     write_immutable(reservation,authority);write_immutable(root/'owner-authorization.json',authority)
     reviews = {}
     for label,provider,model in [('gpt','codex','gpt-6.1-sol'),('opus','claude','claude-opus-5-5')]:
@@ -257,13 +311,14 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output-root',type=Path,required=True)
     parser.add_argument('--review',action='store_true')
+    parser.add_argument('--mechanical-runtime-continuation',action='store_true')
     args=parser.parse_args();root=args.output_root.resolve()
     if root.parent != BASE or not root.name.startswith('g041-owner-transcript-reconciliation-'):
         raise ValueError('independent owner source repair root required')
     root.mkdir(parents=True,exist_ok=True)
     with (BASE/'immediate-recovery-20261002-v1/recovery.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-        try:run(root,args.review)
+        try:run(root,args.review,args.mechanical_runtime_continuation)
         except Exception as exc:
             write_immutable(root/'failure.json',{'error':str(exc),'master_data_mutations':0,'automatic_repeat':False})
             raise
