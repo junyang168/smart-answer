@@ -363,7 +363,10 @@ def resume_after_repair(root, attempt, recovery_root, executable, *, additional_
         extra = verify_group_audit(root, cfg, schedule, manifest, groups, saved_audit_path, attempt / "verified-group", **verify_options)
         if additional_proof_bindings:
             for b in additional_proof_bindings:
-                verify_binding(b)
+                # These include physical source Markdown, not only JSON receipts.
+                # The caller validates semantics; every attachment still requires
+                # its exact physical SHA, as do completed seed bindings below.
+                verify_binding(b, parse_json=False)
             extra = extra | {"bindings": extra["bindings"] + list(additional_proof_bindings)}
             write_immutable(attempt / 'verified-group/completion-with-content-repair.json', extra)
     output = continuation_root(root,attempt)

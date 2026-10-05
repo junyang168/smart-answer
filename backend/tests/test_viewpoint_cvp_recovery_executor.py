@@ -10,6 +10,23 @@ from backend.pipeline import viewpoint_cvp_recovery_executor as m
 from backend.pipeline import viewpoint_cvp_recovery_supervisor as supervisor
 
 
+def test_physical_proof_binding_accepts_markdown_but_rejects_tampering(tmp_path):
+    source = tmp_path / 'source.md'
+    source.write_text('# Physical original\nNot a JSON receipt.\n')
+    proof = m.binding(source)
+    assert m.verify_binding(proof, parse_json=False) is None
+    source.write_text('# Changed original\n')
+    with pytest.raises(ValueError, match='physical artifact SHA drift'):
+        m.verify_binding(proof, parse_json=False)
+
+
+def test_structured_receipt_still_requires_json(tmp_path):
+    source = tmp_path / 'receipt.json'
+    source.write_text('not JSON')
+    with pytest.raises(json.JSONDecodeError):
+        m.verify_binding(m.binding(source))
+
+
 @pytest.fixture
 def repo(tmp_path, monkeypatch):
     root = tmp_path / "wkp-357-worktree-per-session"
