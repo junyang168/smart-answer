@@ -350,6 +350,67 @@ def verify_legacy_evidence_history(eid, reviewed, current, final_sha):
         raise CvpProductionBlocked([f'{eid}: invalid applied evidence repair: {exc}']) from exc
 
 
+def verify_applied_reverse_index(eid, reviewed, current, reviewed_claims):
+    """Consume already applied #364 reciprocal bookkeeping, not a new review.
+
+    The EvidenceStep's reviewed argument is unchanged. An independently applied
+    additive reverse pointer must have its exact guard and authoritative pinned
+    Claim version; that does not grant the added Claim identity eligibility.
+    """
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    from backend.pipeline.viewpoint_link_history_repair import verify_chain
+    with PostgresKnowledgeStore().connect() as conn:
+        conn.execute('SET TRANSACTION READ ONLY')
+        rows = conn.execute("SELECT v.revision,v.content_sha256,v.payload,v.change_set_id,c.source_kind,c.source_sha256,c.status,c.metadata FROM wang_knowledge.object_versions v JOIN wang_knowledge.change_sets c USING(change_set_id) WHERE v.collection='evidence_steps' AND v.object_id=%s ORDER BY v.revision", (eid,)).fetchall()
+        columns = ('revision','content_sha256','payload','change_set_id','source_kind','source_sha256','status','metadata')
+        history = [dict(zip(columns,row)) for row in rows]
+        baselines = [r for r in history if _meaning(r['payload']) == _meaning(reviewed)]
+        if not baselines:
+            raise CvpProductionBlocked([f'{eid}: no exact applied reviewed evidence generation'])
+        baseline = baselines[-1]
+        chain = [r for r in history if r['revision'] >= baseline['revision']]
+        try:
+            proofs = verify_chain(chain, collection='evidence_steps', object_id=eid, current=current)
+            return validate_applied_reverse_index(eid, reviewed, current, chain, proofs,
+                reviewed_claims, lambda cid,rev: conn.execute(
+                    "SELECT v.payload,v.content_sha256,c.status FROM wang_knowledge.object_versions v JOIN wang_knowledge.change_sets c USING(change_set_id) WHERE v.collection='claims' AND v.object_id=%s AND v.revision=%s", (cid,rev)).fetchone())
+        except (ValueError,KeyError) as exc:
+            raise CvpProductionBlocked([f'{eid}: invalid applied reverse index: {exc}']) from exc
+
+
+def validate_applied_reverse_index(eid, reviewed, current, chain, proofs, reviewed_claims, get_claim_version):
+    left,right=deepcopy(_meaning(reviewed)),deepcopy(_meaning(current))
+    old=left.pop('produced_claim_ids',[]);new=right.pop('produced_claim_ids',[])
+    if left != right or len(new)!=len(set(new)) or new[:len(old)]!=old or len(new)<=len(old):
+        raise ValueError('not strictly additive, unchanged reviewed evidence')
+    for before,after in zip(chain,chain[1:]):
+        old_ids=before['payload'].get('produced_claim_ids',[])
+        new_ids=after['payload'].get('produced_claim_ids',[])
+        if old_ids==new_ids:
+            continue
+        if (after['source_kind']!='wkp364_claim_evidence_pair_adjudication'
+                or new_ids[:len(old_ids)]!=old_ids or len(new_ids)!=len(set(new_ids))):
+            raise ValueError('reverse index transition deletes/reorders or lacks #364 authority')
+        auth=after['metadata']['claim_evidence_reciprocity_repair']['store_guard']['expected_pair_adjudication_authorization']
+        for cid in new_ids[len(old_ids):]:
+            actions=[a for a in auth['actions'] if a.get('claim_id')==cid and a.get('evidence_step_id')==eid]
+            if len(actions)!=1:
+                raise ValueError('ambiguous reverse-index action')
+            a=actions[0];version=get_claim_version(cid,a['claim_revision'])
+            if (a.get('mismatch_type')!='claim_only' or a.get('effective_decision')!='include'
+                    or a.get('decision_basis')!='project_existing_claim_binding_to_reverse_index'
+                    or a.get('evidence_content_sha256')!=before['content_sha256']
+                    or not version or version[2]!='applied'
+                    or record_content_sha(version[0])!=version[1]
+                    or version[1]!=a.get('claim_content_sha256')
+                    or eid not in version[0].get('evidence_step_ids',[])):
+                raise ValueError('reverse pointer lacks exact pre-existing applied forward binding')
+    return {'evidence_step_id':eid,'authority_kind':'exact_applied_reviewed_forward_binding_projection',
+            'reviewed_applied_revision':chain[0]['revision'],'evidence_transitions':proofs,
+            'added_claim_ids':new[len(old):],'evidence_content_unchanged':True,
+            'added_claim_eligibility_granted':False}
+
+
 def verify_fragment_own_source(fragment, current_claim, review, store=None):
     """Recognize only an exact unique active registered sermon alias.
 
@@ -378,6 +439,46 @@ def verify_fragment_own_source(fragment, current_claim, review, store=None):
     expected = review.get('source', {}).get('transcript_sha256', {}).get(sid)
     if not expected or not path.is_absolute() or not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
         raise ValueError('adjudicated own-source physical SHA drift')
+
+
+def verify_review_source_sha(review, source):
+    """Authenticate the actual reviewed file across additive coordinate metadata.
+
+    All original rows/fields (including editorial rows) must remain exact.
+    Only coordinate fields absent from the reviewed row may be added. This
+    consumes the surrounding authenticated #368 plan, not a source waiver.
+    """
+    path=Path(source['source_path']);expected=review.get('source',{}).get('transcript_sha256',{}).get(source['source_id'])
+    raw=path.read_bytes()
+    if hashlib.sha256(raw).hexdigest()!=source['source_file_sha256']:
+        raise ValueError('coordinate source physical SHA drift')
+    if expected==source['source_file_sha256']:
+        return {'source_file_sha256':expected,'contract':'exact_physical_source'}
+    declared=Path(review.get('source',{}).get('transcript_paths',{}).get(source['source_id'],''))
+    if (not expected or not declared.is_absolute() or not declared.is_file()
+            or hashlib.sha256(declared.read_bytes()).hexdigest()!=expected):
+        raise ValueError('reviewed source physical SHA drift')
+    old=json.loads(declared.read_bytes());new=json.loads(raw)
+    old_rows=old if isinstance(old,list) else old.get('script')
+    new_rows=new if isinstance(new,list) else new.get('script')
+    from backend.pipeline.source_projection import project_script
+    if (not isinstance(old_rows,list) or not isinstance(new_rows,list)
+            or len(old_rows)!=len(new_rows)
+            or project_script(new_rows).body_sha256!=source.get('source_body_sha256')):
+        raise ValueError('source rows/body generation drift')
+    allowed={'start_index','start_time','start_timeline','end_time'}
+    for before,after in zip(old_rows,new_rows):
+        if (not isinstance(before,dict) or not isinstance(after,dict)
+                or any(after.get(k)!=v or k not in after for k,v in before.items())
+                or not set(after).difference(before)<=allowed):
+            raise ValueError('reviewed source text/structure changed')
+        if 'start_index' in set(after).difference(before) and after['start_index']!=before.get('index'):
+            raise ValueError('added coordinate does not preserve original index')
+    return {'contract':'exact_reviewed_rows_additive_coordinate_metadata',
+            'reviewed_source':{'path':str(declared),'file_sha256':expected},
+            'current_source':{'path':str(path),'file_sha256':source['source_file_sha256']},
+            'source_body_sha256':source['source_body_sha256'],
+            'original_rows_and_fields_unchanged':True}
 
 
 def verify_historical_review_bridge(
@@ -565,9 +666,12 @@ def verify_historical_review_bridge(
         physical_source = Path(source["source_path"])
         if not physical_source.is_absolute() or hashlib.sha256(physical_source.read_bytes()).hexdigest() != source["source_file_sha256"]:
             raise CvpProductionBlocked([f"{claim_id}: repaired source physical SHA drift"])
-        if (review.get("source", {}).get("transcript_sha256") or {}).get(source["source_id"]) != source["source_file_sha256"]:
-            raise CvpProductionBlocked([f"{claim_id}: review and repair bind different source bytes"])
+        try:
+            source_proof = verify_review_source_sha(review, source)
+        except (ValueError,KeyError) as exc:
+            raise CvpProductionBlocked([f"{claim_id}: review and repair source binding failed: {exc}"]) from exc
         repairs.append({"change_set_id": after["change_set_id"], "plan_binding": plan_binding,
+                        "review_source_proof": source_proof,
                         "before_revision": before["revision"], "after_revision": after["revision"],
                         "before_sha256": before["content_sha256"], "after_sha256": after["content_sha256"]})
     # Include the separately adjudicated additions in dependency proof, not
@@ -580,6 +684,9 @@ def verify_historical_review_bridge(
             if merge_proof is not None:
                 proof = verify_legacy_evidence_history(evidence_id, normalized['evidence_steps'][evidence_id],
                     current_evidence[evidence_id], merge_proof['historical_replay']['historical_replay_sha256'])
+            elif sealed_final is None:
+                proof=verify_applied_reverse_index(evidence_id, normalized['evidence_steps'][evidence_id],
+                    current_evidence[evidence_id], normalized['claims'])
             else:
                 proof=verify_sealed_reverse_index(evidence_id,normalized['evidence_steps'][evidence_id],
                     current_evidence[evidence_id],sealed_final)

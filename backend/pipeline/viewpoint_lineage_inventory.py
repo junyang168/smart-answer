@@ -107,6 +107,20 @@ def discover_applied_review(claim_id, variants, store):
     return applied_review_match(claim_id, variants, events)
 
 
+def bound_review_input(review):
+    """Locate archived bytes by the review's full SHA, never by chronology."""
+    path = Path(review.get('source', {}).get('package_path', ''))
+    sha = review.get('source', {}).get('package_sha256')
+    if not path.is_absolute() or not sha:
+        return None
+    if path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == sha:
+        return path
+    # Existing generations of this exact input only; no unrelated batch scan.
+    found = [p for p in sorted((path.parent/'generations').glob(path.stem+'.*.json'))
+             if p.is_file() and hashlib.sha256(p.read_bytes()).hexdigest() == sha]
+    return found[0] if len(found) == 1 else None
+
+
 def discover_review_inputs(*, claim_ids, inventory, store):
     """Find later reviewed input generations; never grant review approval.
 
@@ -128,8 +142,8 @@ def discover_review_inputs(*, claim_ids, inventory, store):
                 review = json.loads(path.read_bytes())
                 if not any(r.get('claim_id') == cid for r in review.get('claim_reviews', [])):
                     continue
-                package_path = Path(review.get('source', {}).get('package_path', ''))
-                if not package_path.is_absolute() or not package_path.is_file():
+                package_path = bound_review_input(review)
+                if package_path is None:
                     continue
                 raw_bytes = package_path.read_bytes()
                 package_sha = hashlib.sha256(raw_bytes).hexdigest()

@@ -5,6 +5,63 @@ import json
 import pytest
 
 
+@pytest.mark.parametrize('mutation',[None,'text','heading','removed','extra','index','physical','body','order'])
+def test_reviewed_physical_rows_allow_only_additive_coordinate_metadata(tmp_path,mutation):
+    from backend.pipeline.viewpoint_historical_review_bridge import verify_review_source_sha
+    from backend.pipeline.source_projection import project_script
+    old=[{'text':'教授原文','index':1,'end_index':2},{'text':'編輯標題','type':'subtitle'}]
+    new=deepcopy(old);new[0].update(start_index=1,start_time=0,end_time=4,start_timeline='00:00:00')
+    a=tmp_path/'old.json';b=tmp_path/'current.json';a.write_text(json.dumps(old))
+    review={'source':{'transcript_paths':{'S':str(a)},'transcript_sha256':{'S':hashlib.sha256(a.read_bytes()).hexdigest()}}}
+    if mutation=='text':new[0]['text']='另一句'
+    if mutation=='heading':new[1]['text']='新標題'
+    if mutation=='removed':del new[0]['end_index']
+    if mutation=='extra':new[0]['interpretation']='新增內容'
+    if mutation=='index':new[0]['start_index']=3
+    if mutation=='order':new.reverse()
+    b.write_text(json.dumps({'script':new}))
+    source={'source_id':'S','source_path':str(b),'source_file_sha256':hashlib.sha256(b.read_bytes()).hexdigest(),
+            'source_body_sha256':project_script(new).body_sha256}
+    if mutation=='physical':a.write_text('[]')
+    if mutation=='body':source['source_body_sha256']='bad'
+    if mutation:
+        with pytest.raises(ValueError):verify_review_source_sha(review,source)
+    else:
+        proof=verify_review_source_sha(review,source)
+        assert proof['original_rows_and_fields_unchanged'] is True
+        assert proof['reviewed_source']['file_sha256']==review['source']['transcript_sha256']['S']
+
+
+@pytest.mark.parametrize('mutation',[None,'content','delete','reorder','kind','action','ambiguous','pin','forward','status'])
+def test_applied_additive_reverse_pointer_does_not_grant_claim_eligibility(mutation):
+    from backend.pipeline.viewpoint_historical_review_bridge import validate_applied_reverse_index
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    old={'statement':'原論證','produced_claim_ids':['C1']};new=old|{'produced_claim_ids':['C1','C2']}
+    claim={'claim_id':'C2','evidence_step_ids':['E']};sha=record_content_sha(claim)
+    action={'claim_id':'C2','evidence_step_id':'E','claim_revision':2,'claim_content_sha256':sha,
+            'evidence_content_sha256':'old','mismatch_type':'claim_only','effective_decision':'include',
+            'decision_basis':'project_existing_claim_binding_to_reverse_index'}
+    actions=[action]
+    after={'revision':3,'payload':new,'source_kind':'wkp364_claim_evidence_pair_adjudication',
+           'metadata':{'claim_evidence_reciprocity_repair':{'store_guard':{'expected_pair_adjudication_authorization':{'actions':actions}}}}}
+    if mutation=='content':new['statement']='變更'
+    if mutation=='delete':new['produced_claim_ids']=['C2']
+    if mutation=='reorder':new['produced_claim_ids']=['C2','C1']
+    if mutation=='kind':after['source_kind']='unknown'
+    if mutation=='action':action['decision_basis']='model_include'
+    if mutation=='ambiguous':actions.append(deepcopy(action))
+    if mutation=='pin':action['claim_content_sha256']='bad'
+    if mutation=='forward':claim['evidence_step_ids']=[];sha=record_content_sha(claim);action['claim_content_sha256']=sha
+    version=(claim,sha,'draft' if mutation=='status' else 'applied')
+    chain=[{'revision':2,'payload':old,'content_sha256':'old'},after]
+    if mutation:
+        with pytest.raises(ValueError):validate_applied_reverse_index('E',old,new,chain,{'verified':True},{},lambda *a:version)
+    else:
+        proof=validate_applied_reverse_index('E',old,new,chain,{'verified':True},{},lambda *a:version)
+        assert proof['added_claim_ids']==['C2']
+        assert proof['added_claim_eligibility_granted'] is False
+
+
 @pytest.mark.parametrize('mutation', [None,'foreign','ambiguous','retired','type','generation','physical','record'])
 def test_adjudicated_registered_sermon_alias_is_exact_and_source_bound(tmp_path, mutation):
     from backend.pipeline.viewpoint_historical_review_bridge import verify_fragment_own_source

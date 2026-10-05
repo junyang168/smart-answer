@@ -111,6 +111,21 @@ def test_distinct_later_reviews_remain_ambiguous_not_selected_by_filename(tmp_pa
         discover_selection({'claim_ids': ['C1']}, found)
 
 
+@__import__('pytest').mark.parametrize('mutation',[None,'missing','ambiguous','other_name','relative','tamper'])
+def test_archived_review_input_requires_unique_full_sha(tmp_path,mutation):
+    import hashlib
+    from backend.pipeline.viewpoint_lineage_inventory import bound_review_input
+    p=tmp_path/'batch.cross-section.json';p.write_text('new')
+    g=tmp_path/'generations';g.mkdir();a=g/'batch.cross-section.old.json';a.write_text('reviewed')
+    sha=hashlib.sha256(a.read_bytes()).hexdigest()
+    if mutation=='missing':a.unlink()
+    if mutation=='ambiguous':(g/'batch.cross-section.copy.json').write_text('reviewed')
+    if mutation=='other_name':a.rename(g/'other.old.json')
+    if mutation=='tamper':a.write_text('changed')
+    review={'source':{'package_path':'batch.json' if mutation=='relative' else str(p),'package_sha256':sha}}
+    assert bound_review_input(review)==(None if mutation else a)
+
+
 def test_inventory_distinguishes_coordinate_changes_from_review_metadata(tmp_path):
     prior = {"claim_id": "C1", "statement": "原主張", "claim_type": "teaching",
              "occurrences": [{"anchors": [{"paragraph_key": "S0001"}]}]}

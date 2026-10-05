@@ -212,6 +212,20 @@ def build_selection(group, inventory, root, random_spot_check_policy=None):
     missing = {cid for cid in group['claim_ids'] if len([
         v for v in inventory[cid]['variants'] if set(v['changed_substantive_fields'])
         <= {'occurrences', 'evidence_step_ids'}]) != 1}
+    for cid in set(group['claim_ids']) - missing:
+        usable = [v for v in inventory[cid]['variants'] if set(v['changed_substantive_fields'])
+                  <= {'occurrences', 'evidence_step_ids'}]
+        variant = usable[0]
+        if variant['contract'] != 'requires_historical_proof_adapter':
+            continue
+        candidate = Path(variant['path'])
+        if binding(candidate)['file_sha256'] != variant['file_sha256']:
+            raise ValueError(f'{cid}: inventory candidate file SHA drift')
+        name = candidate.name.removesuffix('.reviewed-candidate.json')
+        review = read(candidate.parent.parent/'reviews'/(name+'.independent-review.json'))
+        path = Path(review['source']['package_path'])
+        if not path.is_file() or binding(path)['file_sha256'] != review['source']['package_sha256']:
+            missing.add(cid)
     if missing:
         from dotenv import load_dotenv
         from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
