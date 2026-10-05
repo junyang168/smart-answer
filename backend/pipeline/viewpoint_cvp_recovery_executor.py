@@ -249,11 +249,12 @@ def verify_group_audit(root, cfg, schedule, manifest, groups, audit_path, output
     from backend.pipeline.viewpoint_g035_temporary_audit import validate as validate_exception, KEY
     exception_bindings = validate_exception(audit)
     if exception_bindings:
-        if group_key != 'p020:p020:whole' or state['sequence'] != 35:
+        from backend.pipeline.viewpoint_content_blocked_fallback import KEY as fallback_key
+        if KEY in audit['meta'] and (group_key != 'p020:p020:whole' or state['sequence'] != 35):
             raise ValueError('temporary audit exception belongs only to g035')
         proof.update(revisit_required=True, independent_audit_complete=False,
                      approval_basis='owner_temporary_gpt_exception_with_source_adjudication',
-                     temporary_audit_exception_path=audit['meta'][KEY]['path'])
+                     temporary_audit_exception_path=(audit['meta'].get(fallback_key) or audit['meta'][KEY])['path'])
         proof['bindings'] += exception_bindings
     if owner_resolution_path is not None:
         resolution = read(owner_resolution_path)
@@ -350,6 +351,8 @@ def resume_after_repair(root, attempt, recovery_root, executable, *, additional_
                         "--viewpoint-ids", ",".join(targets), "--workers", "2", "--model", "gemini-3.8-flash",
                         "--out", audit_dir, "--no-status-file"], attempt, "independent-reaudit")
             saved_audit_path = audit_dir / "audit.json"
+            from backend.pipeline.viewpoint_content_blocked_fallback import apply as apply_content_blocked_fallback
+            saved_audit_path = apply_content_blocked_fallback(saved_audit_path, attempt/'content-blocked-fallback')
         else:
             # Caller first verifies its applied target/full-registry readback.
             # Reuse a saved real audit, never fabricate a fresh model pass.

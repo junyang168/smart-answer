@@ -391,6 +391,8 @@ def execute(args):
             audit_path = audit_root / "audit.json"
             if not audit_path.exists():
                 command([PYTHON, "scripts/audit-library.py", "--scope", "all", "--layers", "1,2,3,4", "--claim-ids", ",".join(groups[row["group_key"]]["claim_ids"]), "--viewpoint-ids", ",".join(target_ids), "--workers", "2", "--model", "gemini-3.8-flash", "--out", audit_root, "--no-status-file"])
+            from backend.pipeline.viewpoint_content_blocked_fallback import apply as apply_content_blocked_fallback
+            audit_path = apply_content_blocked_fallback(audit_path, root/'content-blocked-fallback')
             audit = read(audit_path)
             resolution_bindings = []
             source_resolution_path = None
@@ -424,6 +426,13 @@ def execute(args):
             if disposition["status"] != "passed":
                 raise ValueError("post-apply mechanical audit has in-scope/global Registry findings")
             proof = {"group_key": row["group_key"], "viewpoint_ids": target_ids, "audit_path": str(audit_path), "bindings": [binding(audit_path), binding(plans[0]), binding(root / "production/run/scope-run.json"), *resolution_bindings], "argument_routes_completed": False}
+            from backend.pipeline.viewpoint_g035_temporary_audit import validate as validate_exception, KEY as legacy_key
+            from backend.pipeline.viewpoint_content_blocked_fallback import KEY as fallback_key
+            exception_bindings = validate_exception(audit)
+            if exception_bindings:
+                proof.update(revisit_required=True, independent_audit_complete=False,
+                    temporary_audit_exception_path=(audit['meta'].get(fallback_key) or audit['meta'][legacy_key])['path'])
+                proof['bindings'] += exception_bindings
             if source_resolution_path is not None:
                 # Compatibility key consumed by all completion/seed/prepare paths;
                 # the artifact distinguishes standing GPT policy from owner case acceptance.

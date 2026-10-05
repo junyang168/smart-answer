@@ -74,6 +74,9 @@ def derive(original, response, proof_binding):
 
 def validate(audit):
     """Replay exact exception; reject missing flag, changed original or evidence."""
+    from backend.pipeline.viewpoint_content_blocked_fallback import KEY as fallback_key, validate as validate_fallback
+    if fallback_key in audit.get('meta',{}):
+        return validate_fallback(audit)
     marker = audit.get('meta', {}).get(KEY)
     if marker is None:
         if (audit.get('meta', {}).get('assessment_basis') == 'owner_temporary_nonindependent_exception_pending_revisit' or
@@ -156,9 +159,11 @@ def create(original_path, authorization_path, diagnostic_root, output, source_pa
 
 def validate_completion_disclosure(row, audit):
     bindings = validate(audit)
-    if bindings and (row.get('group_key') != 'p020:p020:whole' or
+    from backend.pipeline.viewpoint_content_blocked_fallback import KEY as fallback_key
+    marker = audit.get('meta',{}).get(fallback_key) or audit.get('meta',{}).get(KEY)
+    if bindings and ((KEY in audit.get('meta',{}) and row.get('group_key') != 'p020:p020:whole') or
             row.get('revisit_required') is not True or row.get('independent_audit_complete') is not False or
-            row.get('temporary_audit_exception_path') != audit['meta'][KEY]['path'] or
+            row.get('temporary_audit_exception_path') != marker['path'] or
             any(b not in row.get('bindings',[]) for b in bindings)):
         raise ValueError('completion lost temporary exception/revisit disclosure')
 

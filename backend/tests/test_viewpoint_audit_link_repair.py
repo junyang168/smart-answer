@@ -40,6 +40,16 @@ def test_scope_refusals(mutation):
     if mutation=='missing': report['actions']=[]
     with pytest.raises(ValueError): select_repairs(packet,report)
 
+def test_mixed_rejected_items_preserved_only_upheld_connection_selected():
+    packet,report=case(); other=deepcopy(packet['items'][0]);other['item_id']='4:OTHER:C2'
+    packet['items'].append(other)
+    report['actions'].append({'item_id':other['item_id'],'verdict':'audit_objection_rejected','gpt':{'reason':'exact full-source rejection'}})
+    before=deepcopy((packet,report))
+    assert len(select_repairs(packet,report))==1
+    assert (packet,report)==before
+    report['actions'][1]['verdict']='unresolved'
+    with pytest.raises(ValueError):select_repairs(packet,report)
+
 
 def test_package_pins_reviewed_postimage_and_fresh_authority(tmp_path):
     import json

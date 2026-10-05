@@ -1319,7 +1319,13 @@ class IndependentModel:
             try:
                 with self._lock:
                     self.cached += 1
-                return json.loads(cached.read_text(encoding="utf-8"))
+                verdict = json.loads(cached.read_text(encoding="utf-8"))
+                if verdict.get('verdict')=='blocked' and 'provider_content_block' not in verdict:
+                    from backend.pipeline.viewpoint_content_blocked_fallback import cached_provider_binding
+                    receipt = cached_provider_binding(self.model,prompt,schema)
+                    if receipt is not None:
+                        verdict['provider_content_block']=receipt
+                return verdict
             except (json.JSONDecodeError, OSError):
                 pass
         body = json.dumps({
@@ -1344,6 +1350,9 @@ class IndependentModel:
                 with self._lock:
                     self.calls += 1
                 blocked = (parsed.get("promptFeedback") or {}).get("blockReason")
+                candidates = parsed.get('candidates') or []
+                if not blocked and len(candidates) == 1 and candidates[0].get('finishReason') == 'SAFETY':
+                    blocked = 'SAFETY'
                 if blocked:
                     # 安全過濾器擋下了 prompt。這是決定性的，重試三次只是把同一
                     # 個拒絕再要兩次。
@@ -1357,6 +1366,13 @@ class IndependentModel:
                         "issue": "other",
                         "reason": f"審計模型的安全過濾器擋下了這一條（{blocked}），沒有判讀。",
                     }
+                    if cached is not None:
+                        from backend.pipeline.viewpoint_resolution_runtime import write_immutable
+                        from backend.pipeline.viewpoint_g035_temporary_audit import binding
+                        receipt = cached.with_name(cached.stem + '.provider-block.json')
+                        write_immutable(receipt, {'model':self.model, 'provider_response':parsed,
+                                                 'prompt':prompt, 'schema':schema})
+                        verdict['provider_content_block'] = binding(receipt)
                     if cached is not None:
                         cached.write_text(
                             json.dumps(verdict, ensure_ascii=False), encoding="utf-8"

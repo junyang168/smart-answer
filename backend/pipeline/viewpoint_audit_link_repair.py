@@ -49,6 +49,8 @@ def select_repairs(packet, report):
     selected = []
     for action in actions:
         item = items[action['item_id']]
+        if action['verdict'] == 'audit_objection_rejected':
+            continue  # Preserved in the complete validated handoff, never re-audited to pass.
         if action['verdict'] != 'audit_objection_upheld' or not action['item_id'].startswith('4:'):
             raise ValueError('not a bounded upheld viewpoint connection objection')
         links = item['connections']
@@ -64,16 +66,31 @@ def select_repairs(packet, report):
         selected.append({'item_id': action['item_id'], 'claim': item['claim'],
                          'before_link': old, 'after_link': new,
                          'adjudication': action['gpt'], 'evidence': item['evidence'], 'sources': item['sources']})
+    if not selected:
+        raise ValueError('no upheld connection to repair')
     if len({i['claim']['claim_id'] for i in selected}) != len(selected):
         raise ValueError('duplicate repair Claim')
     return selected
 
 
-def prepare(campaign, store, *, owner_retire=False):
+def prepare(campaign, store, *, owner_retire=False, saved_source_assessment_root=None):
     state = read_artifact(campaign/'progress.json')
     group = campaign/f"g{state['sequence']:03d}"
     audit = group/'independent-audit/audit.json'
     root = group/'audit-source-adjudication'
+    if saved_source_assessment_root is not None:
+        audit = saved_source_assessment_root/'temporary-assessment/assessment.json'
+        root = saved_source_assessment_root/'source-adjudication'
+        from backend.pipeline.viewpoint_g035_temporary_audit import validate
+        if not validate(read_artifact(audit)):
+            raise ValueError('saved assessment lacks exact exception proof')
+        from backend.pipeline.viewpoint_cvp_recovery_executor import load_campaign
+        from backend.pipeline.viewpoint_audit_source_adjudication import validate_population
+        _,_,_,groups=load_campaign(campaign)
+        plans=list((group/'production/run/batches').glob('*/cvp-change-plan.json'))
+        if len(plans)!=1: raise ValueError('ambiguous saved group plan')
+        targets=sorted({o['payload']['viewpoint_id'] for o in read_artifact(plans[0])['operations'] if o['collection']=='viewpoint_claim_links'})
+        validate_population(read_artifact(audit),groups[state['group_key']]['claim_ids'],targets)
     # Existing exact SHA-bound GPT response is reused; drift is never fallback.
     packet = build_packet(audit, store)
     if read_artifact(root/'packet.json') != packet:
@@ -156,11 +173,14 @@ def package_for(states, packet, reviews, root, *, identity_digest=None):
 
 
 def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storage_review_from=None,
-        human_review_from=None, human_handoff=None, human_decisions=(), relation_review_from=None):
+        human_review_from=None, human_handoff=None, human_decisions=(), relation_review_from=None,
+        saved_source_assessment_root=None):
     store = PostgresKnowledgeStore()
     global_lock={'global_lock_path':str(BASE/'registry-cvp.lock')}
     if owner_retire and owner_identity_g033:
         raise ValueError('owner scopes cannot be combined')
+    if saved_source_assessment_root and any((owner_retire,owner_identity_g033,human_review_from)):
+        raise ValueError('saved source assessment permits only existing narrow supports route')
     if storage_review_from and not owner_identity_g033: raise ValueError('storage correction requires exact g033 owner scope')
     if relation_review_from and (not owner_identity_g033 or storage_review_from or human_review_from):
         raise ValueError('relation revision requires separate exact g033 scope, not another correction/waiver')
@@ -204,7 +224,8 @@ def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storag
         elif not human_review_from:
             identity_repair.propose(campaign,root,store,storage_review_from=storage_review_from)
     def prepare_current():
-        return identity_repair.prepare(campaign,root,store) if owner_identity_g033 else prepare(campaign,store,owner_retire=owner_retire)
+        return identity_repair.prepare(campaign,root,store) if owner_identity_g033 else prepare(campaign,store,owner_retire=owner_retire,
+            saved_source_assessment_root=saved_source_assessment_root)
     with exclusive_cvp_run_lock(global_lock):
         states, packet=prepare_current()
         collections=sorted({c for c,_ in states}); before=fingerprint(states,collections)
@@ -296,6 +317,8 @@ def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storag
         '--claim-ids', ','.join(groups[state['group_key']]['claim_ids']), '--viewpoint-ids', ','.join(targets),
         '--workers', '2', '--model', 'gemini-3.8-flash', '--out', audit_root, '--no-status-file'], continuation, 'independent-reaudit')
     audit_path = audit_root/'audit.json'
+    from backend.pipeline.viewpoint_content_blocked_fallback import apply as apply_content_blocked_fallback
+    audit_path = apply_content_blocked_fallback(audit_path, continuation/'content-blocked-fallback')
     from backend.pipeline.viewpoint_audit_source_adjudication import disputes, validate_population
     resolution_path = None
     if disputes(read_artifact(audit_path)):
@@ -343,6 +366,7 @@ def main():
     ap.add_argument('--owner-g033-storage-review-from',type=Path)
     ap.add_argument('--owner-g033-relation-review-from',type=Path)
     ap.add_argument('--codex-executable',type=Path)
+    ap.add_argument('--saved-source-assessment-root',type=Path)
     ap.add_argument('--human-review-from',type=Path)
     ap.add_argument('--human-handoff',type=Path)
     ap.add_argument('--human-decision',type=Path,action='append',default=[])
@@ -367,7 +391,8 @@ def main():
         root.mkdir(exist_ok=False)
         try: print(json.dumps(run(campaign,root,owner_retire=args.owner_retire_g015_link,owner_identity_g033=args.owner_identity_g033,storage_review_from=args.owner_g033_storage_review_from,
             human_review_from=args.human_review_from,human_handoff=args.human_handoff,human_decisions=args.human_decision,
-            relation_review_from=args.owner_g033_relation_review_from)),flush=True)
+            relation_review_from=args.owner_g033_relation_review_from,
+            saved_source_assessment_root=args.saved_source_assessment_root)),flush=True)
         except Exception as exc:
             write_derived(root/'failure.json',{'error':str(exc),'applied':(root/'apply-receipt.json').exists(),'no_next_group_started':True})
             write_derived(root/'progress.json',{'status':'stopped','error':str(exc),'applied':(root/'apply-receipt.json').exists()}); raise
