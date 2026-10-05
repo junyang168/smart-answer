@@ -249,13 +249,35 @@ def build_selection(group, inventory, root, random_spot_check_policy=None):
     _write_immutable(root / "review-selection.json", {"claims": selected})
 
 
+def campaign_policy(args):
+    # No implicit historical policy upgrade. New continuation roots select and
+    # physically pin the calibrated policy and shared rules explicitly.
+    legacy=PROJECT_ROOT/'backend/pipeline/policies/wang_cvp_resolution_policy_v3.json'
+    path=getattr(args,'cvp_policy',None)
+    if path is None:
+        if getattr(args,'cvp_policy_sha256',None) or getattr(args,'semantic_contract_sha256',None):
+            raise ValueError('semantic SHAs without explicit policy cannot select legacy')
+        return str(legacy.relative_to(PROJECT_ROOT)), {}
+    contextual=PROJECT_ROOT/'backend/pipeline/policies/wang_cvp_resolution_policy_v5.json'
+    if Path(path).resolve()!=contextual.resolve():
+        raise ValueError('explicit campaign policy must be the authorized contextual v5')
+    from backend.pipeline.viewpoint_semantic_contract import CONTRACT_PATH,CONTEXTUAL_SEMANTICS
+    policy=binding(contextual);rules=binding(CONTRACT_PATH)
+    if (policy['file_sha256']!=getattr(args,'cvp_policy_sha256',None)
+            or rules['file_sha256']!=getattr(args,'semantic_contract_sha256',None)
+            or read(contextual).get('semantic_contract_version')!=CONTEXTUAL_SEMANTICS):
+        raise ValueError('campaign semantic policy/rules physical SHA drift')
+    return str(contextual), {'cvp_policy':policy,'semantic_contract':rules}
+
+
 def runner_args(root, args):
+    policy,_=campaign_policy(args)
     inputs = root / "production/inputs"
     return [PYTHON, "-m", "backend.pipeline.viewpoint_batch_resolution_runner",
             "--packet", inputs / "scope-packet.json", "--freeze", inputs / "freeze.json",
             "--output-dir", root / "production/run", "--apply-authorization", inputs / "apply-authorization.json",
             "--accepted-grouping-sha", args.accepted_grouping_sha, "--grouping-repository", args.grouping_repository,
-            "--cvp-policy", "backend/pipeline/policies/wang_cvp_resolution_policy_v3.json",
+            "--cvp-policy", policy,
             "--route-policy", "backend/pipeline/policies/wang_route_resolution_policy_v1.json",
             "--proposal-provider", "codex", "--proposal-model", "gpt-6.1-sol", "--proposal-effort", "high",
             "--review-provider", "claude", "--review-model", "claude-opus-5-5", "--review-effort", "high",
@@ -264,6 +286,7 @@ def runner_args(root, args):
 
 
 def qualify(row, group, inventory, root, args):
+    policy,_=campaign_policy(args)
     inputs = root / "production/inputs"
     if (inputs / "freeze.json").exists():
         # Existing immutable phase is revalidated by the normal runner.
@@ -292,7 +315,7 @@ def qualify(row, group, inventory, root, args):
              "--accepted-grouping-sha", args.accepted_grouping_sha, "--historical-bridges", root / "historical-bridges.json",
              "--independent-audit", args.entrance_audit, "--output-root", root / "production",
              "--wang-repository", args.wang_repository,
-             "--cvp-policy", "backend/pipeline/policies/wang_cvp_resolution_policy_v3.json",
+             "--cvp-policy", policy,
              "--route-policy", "backend/pipeline/policies/wang_route_resolution_policy_v1.json",
              "--backup-dump", b["path"], "--backup-sha256", b["file_sha256"],
              "--global-lock", args.global_lock, "--scope-authorized-by", args.authorized_by,
@@ -327,6 +350,7 @@ def execute(args):
               "completed_source_repairs": [binding(p) for p in getattr(args,'completed_source_repair',None) or []],
               "random_spot_check_policy": binding(args.random_spot_check_policy) if getattr(args,'random_spot_check_policy',None) else None,
               "route_execution": False, "already_complete": schedule["completed_groups"]}
+    config.update(campaign_policy(args)[1])
     _write_immutable(args.output_root / "campaign.json", config)
     seed = read(args.completed_proofs)
     if {r["group_key"] for r in seed["groups"]} != set(schedule["completed_groups"]):
@@ -459,6 +483,9 @@ def main():
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument('--completed-source-repair',type=Path,action='append')
     parser.add_argument('--random-spot-check-policy',type=Path)
+    parser.add_argument('--cvp-policy',type=Path)
+    parser.add_argument('--cvp-policy-sha256')
+    parser.add_argument('--semantic-contract-sha256')
     args = parser.parse_args()
     args.output_root.mkdir(parents=True, exist_ok=True)
     with (args.output_root / "campaign.lock").open("a") as lock:

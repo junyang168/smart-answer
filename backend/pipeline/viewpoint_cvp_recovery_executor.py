@@ -207,6 +207,9 @@ def load_campaign(root):
         verify_binding(cfg[key])
     for b in cfg.get("completed_source_repairs", []) + ([cfg["random_spot_check_policy"]] if cfg.get("random_spot_check_policy") else []):
         verify_binding(b)
+    if cfg.get('cvp_policy'):
+        verify_binding(cfg['cvp_policy'])
+        verify_binding(cfg['semantic_contract'],parse_json=False)
     schedule = read(cfg["schedule"]["path"])
     manifest = read(schedule["upstream_manifest_path"])
     groups = validate_schedule(schedule, manifest)
@@ -313,6 +316,13 @@ def continuation_inputs(root, output, extra_completion=None, *, additional_sourc
         argv.extend(["--completed-source-repair", str(path)])
     if cfg.get("random_spot_check_policy"):
         argv.extend(["--random-spot-check-policy", cfg["random_spot_check_policy"]["path"]])
+    if cfg.get('cvp_policy'):
+        for key in ('cvp_policy','semantic_contract'):
+            if binding(cfg[key]['path'])!=cfg[key]:
+                raise ValueError('continued campaign semantic binding drift')
+        argv.extend(['--cvp-policy',cfg['cvp_policy']['path'],
+                     '--cvp-policy-sha256',cfg['cvp_policy']['file_sha256'],
+                     '--semantic-contract-sha256',cfg['semantic_contract']['file_sha256']])
     return argv
 
 
@@ -326,7 +336,9 @@ def continuation_root(root, attempt):
     return root.parent / name
 
 
-def resume_after_repair(root, attempt, recovery_root, executable, *, additional_proof_bindings=(), additional_source_repair_paths=(), saved_audit_path=None, prior_model_batch=None, reuse_correction=False, owner_resolution_path=None, initial_prefix_only=False, allow_lossless_compact_config_migration=False, component_resolution_path=None):
+def resume_after_repair(root, attempt, recovery_root, executable, *, additional_proof_bindings=(), additional_source_repair_paths=(), saved_audit_path=None, prior_model_batch=None, reuse_correction=False, owner_resolution_path=None, initial_prefix_only=False, allow_lossless_compact_config_migration=False, component_resolution_path=None, contextual_semantics=False):
+    if contextual_semantics and prior_model_batch is not None:
+        raise ValueError('new semantic policy cannot migrate old model-response approval')
     cfg, schedule, manifest, groups = load_campaign(root)
     state = read(root / "progress.json")
     group_root = root / f"g{state['sequence']:03d}"
@@ -373,6 +385,18 @@ def resume_after_repair(root, attempt, recovery_root, executable, *, additional_
     if output.exists():
         raise ValueError("continuation root already exists; never overwrite/retry")
     argv = continuation_inputs(root, output, extra, additional_source_repair_paths=additional_source_repair_paths) if additional_source_repair_paths else continuation_inputs(root, output, extra)
+    if contextual_semantics:
+        if cfg.get('cvp_policy'):
+            raise ValueError('contextual migration already present; no repeated upgrade')
+        from backend.pipeline.viewpoint_semantic_contract import CONTRACT_PATH
+        policy=binding(PROJECT_ROOT/'backend/pipeline/policies/wang_cvp_resolution_policy_v5.json')
+        rules=binding(CONTRACT_PATH)
+        argv.extend(['--cvp-policy',policy['path'],'--cvp-policy-sha256',policy['file_sha256'],
+                     '--semantic-contract-sha256',rules['file_sha256']])
+        write_immutable(attempt/'semantic-policy-migration.json',{
+            'old_campaign_root':str(root),'new_campaign_root':str(output),
+            'cvp_policy':policy,'semantic_contract':rules,'historical_caches_unchanged':True,
+            'completed_groups_replayed':False})
     # Normal qualification makes and verifies the fresh pg_dump backup; normal
     # dry-run proves zero model calls/writes before the unique production screen.
     env = os.environ.copy()
