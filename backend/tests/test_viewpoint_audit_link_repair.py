@@ -3,6 +3,32 @@ import pytest
 from backend.pipeline.viewpoint_audit_link_repair import select_repairs, launch_repair, package_for
 
 
+@pytest.mark.parametrize('supplemental',[False,True])
+def test_bound_group_audit_uses_exact_original_or_verified_supplement(tmp_path,monkeypatch,supplemental):
+    from backend.pipeline.viewpoint_audit_link_repair import bound_group_audit,file_sha256
+    relative='content-blocked-fallback/assessment.json' if supplemental else 'independent-audit/audit.json'
+    p=tmp_path/relative; p.parent.mkdir(); p.write_text('{}')
+    calls=[]
+    monkeypatch.setattr('backend.pipeline.viewpoint_content_blocked_fallback.validate',lambda a:calls.append(a) or ['proof'])
+    packet={'audit_binding':{'path':str(p),'file_sha256':file_sha256(p)}}
+    assert bound_group_audit(tmp_path,packet)==p
+    assert len(calls)==int(supplemental)
+
+
+@pytest.mark.parametrize('mutation',['foreign','sha','missing_proof','invalid_proof'])
+def test_bound_group_audit_rejects_foreign_tampered_or_unproven_input(tmp_path,monkeypatch,mutation):
+    from backend.pipeline.viewpoint_audit_link_repair import bound_group_audit,file_sha256
+    p=tmp_path/'content-blocked-fallback/assessment.json';p.parent.mkdir();p.write_text('{}')
+    packet={'audit_binding':{'path':str(p),'file_sha256':file_sha256(p)}}
+    def validate(a):
+        if mutation=='invalid_proof':raise ValueError('source drift')
+        return [] if mutation=='missing_proof' else ['proof']
+    monkeypatch.setattr('backend.pipeline.viewpoint_content_blocked_fallback.validate',validate)
+    if mutation=='foreign':packet['audit_binding']['path']=str(tmp_path/'other.json')
+    if mutation=='sha':packet['audit_binding']['file_sha256']='wrong'
+    with pytest.raises(ValueError):bound_group_audit(tmp_path,packet)
+
+
 def case():
     link = {'viewpoint_claim_link_id':'L', 'claim_id':'C', 'viewpoint_id':'V',
             'revision':1, 'link_type':'equivalent_component', 'component_locator':{'span':'all'},

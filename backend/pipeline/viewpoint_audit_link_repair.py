@@ -73,11 +73,33 @@ def select_repairs(packet, report):
     return selected
 
 
+def bound_group_audit(group, packet):
+    """Consume the exact audited input, including a proven blocked-content supplement."""
+    original = group/'independent-audit/audit.json'
+    supplemental = group/'content-blocked-fallback/assessment.json'
+    bound = packet.get('audit_binding', {})
+    if bound.get('path') == str(original):
+        selected = original
+    elif bound.get('path') == str(supplemental):
+        from backend.pipeline.viewpoint_content_blocked_fallback import validate
+        assessment = read_artifact(supplemental)
+        if not validate(assessment):
+            raise ValueError('supplemental audit lacks exact content-blocked proof')
+        selected = supplemental
+    else:
+        raise ValueError('adjudication audit outside exact group inputs')
+    if bound != {'path':str(selected), 'file_sha256':file_sha256(selected)}:
+        raise ValueError('adjudication audit physical binding drift')
+    return selected
+
+
 def prepare(campaign, store, *, owner_retire=False, saved_source_assessment_root=None):
     state = read_artifact(campaign/'progress.json')
     group = campaign/f"g{state['sequence']:03d}"
     audit = group/'independent-audit/audit.json'
     root = group/'audit-source-adjudication'
+    if saved_source_assessment_root is None:
+        audit = bound_group_audit(group, read_artifact(root/'packet.json'))
     if saved_source_assessment_root is not None:
         audit = saved_source_assessment_root/'temporary-assessment/assessment.json'
         root = saved_source_assessment_root/'source-adjudication'
