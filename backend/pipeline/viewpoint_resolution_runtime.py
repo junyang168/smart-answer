@@ -136,6 +136,12 @@ def subscription_client(
 def call_model(
     adapter: Any, payload: dict[str, Any], cache: Path
 ) -> tuple[dict[str, Any], int, float]:
+    encoding_proof = (adapter.request_encoding_proof(payload)
+        if callable(getattr(adapter, 'request_encoding_proof', None)) else None)
+    if encoding_proof is not None:
+        body = {'schema_version': 'wang_model_request_encoding_proof_v1', **encoding_proof}
+        write_immutable(cache.with_name(cache.stem + '.request-encoding.json'),
+                        body | {'artifact_sha256': sha256_json(body)})
     request_bytes = (
         adapter.request_bytes(payload)
         if callable(getattr(adapter, "request_bytes", None))
@@ -195,6 +201,8 @@ def call_model(
         "response_sha256": sha256_json(raw),
         "response": raw,
     }
+    if encoding_proof is not None:
+        artifact['request_encoding_proof_sha256'] = sha256_json(encoding_proof)
     if reused is not None:
         artifact.update({"calls_recorded": 0, "wall_seconds": 0.0,
                          "cache_handoff": reused[1]})

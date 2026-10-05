@@ -124,7 +124,7 @@ from backend.pipeline.viewpoint_resolution_runtime import (
 
 def _compact_adapter(**kwargs: Any) -> StructuredJsonReviewerAdapter:
     """One lossless wire-format contract for every CVP model role."""
-    return StructuredJsonReviewerAdapter(**kwargs, compact_payload=True)
+    return StructuredJsonReviewerAdapter(**kwargs, compact_payload=True, shared_text_payload=True)
 
 
 def build_proposer(
