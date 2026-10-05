@@ -2,11 +2,15 @@
 from copy import deepcopy
 import fcntl
 import json
+import argparse
+import subprocess
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+from backend.api.canonical_repository.postgres_store import stored_operation_payload
 from backend.api.canonical_repository.knowledge_models import ViewpointClaimLinkRecord
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.api.canonical_repository.viewpoint_production_safety import exclusive_cvp_run_lock, file_sha256
@@ -104,4 +108,70 @@ def run():
             print(json.dumps(result))
 
 
-if __name__ == '__main__': run()
+def apply_reviewed():
+    """Consume the two saved reviews once; create fresh identity provenance."""
+    from backend.pipeline.viewpoint_audit_link_repair import package_for
+    project = Path(__file__).resolve().parents[2]
+    if project.name != 'wkp-357-worktree-per-session': raise ValueError('wrong worktree')
+    load_dotenv(project/'.env'); store=PostgresKnowledgeStore()
+    with (BASE/'immediate-recovery-20261002-v1/recovery.lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        with exclusive_cvp_run_lock({'global_lock_path':str(BASE/'registry-cvp.lock')}):
+            if (ROOT/'apply-intent.json').exists() or (ROOT/'apply-receipt.json').exists():
+                raise ValueError('application already reserved; inspect receipt, never replay')
+            packet=read_artifact(ROOT/'packet.json'); states=snapshot(store)
+            collections=sorted({c for c,_ in states})
+            if fingerprint(states,collections)!=packet['registry_before_sha256']: raise ValueError('pre-apply Registry drift')
+            verify_applied(store,ANNOTATION)
+            if postimage(states['viewpoint_claim_links',LINK],states['claims',CLAIM],states['evidence_steps',EVIDENCE])!=packet['after_link']:
+                raise ValueError('reviewed connection drift')
+            reviews={}
+            for label,provider,model in [('gpt','codex','gpt-6.1-sol'),('opus','claude','claude-opus-5-5')]:
+                path=ROOT/f'raw-{label}.json'
+                if not path.is_file(): raise ValueError('saved review required; no model fallback')
+                adapter=StructuredJsonReviewerAdapter(client=subscription_client(provider,model,'high'),prompt=PROMPT,
+                    response_model=Verdict,schema_name='wang_g034_prayer_link_verdict_v1',compact_payload=True)
+                response,calls,_=call_model(adapter,packet,path)
+                verdict=Verdict.model_validate(response)
+                if calls or verdict.evidence_step_id!=EVIDENCE or not verdict.approved or verdict.problems: raise ValueError('not exact dual approval')
+                reviews[label]=response
+            package=package_for(states,{'targets':[{'before_link':packet['before_link'],'after_link':packet['after_link']}]},reviews,ROOT,
+                identity_digest=sha256_json({'g034_owner_prayer':packet,'reviews':reviews}))
+            decision=package['viewpoint_identity_decisions'][0]
+            decision.update(policy_version='wang-g034-owner-prayer-component-v1',
+                reason='Owner-authorized labeled Evidence annotation; exact deferred prayer supports component independently reviewed by GPT and Opus. Original Claim/CVP unchanged.')
+            plan=store.plan_package(package,source_kind='wang_g034_owner_prayer_component')
+            expected={('viewpoint_claim_links','update'):1,('viewpoint_identity_candidates','create'):1,('viewpoint_identity_decisions','create'):1}
+            if len(plan.operations)!=3 or any(sum(o.collection==c and o.operation==k for o in plan.operations)!=n for (c,k),n in expected.items()):
+                raise ValueError('not exact authorized three operations')
+            write_immutable(ROOT/'effective-package.json',package)
+            write_immutable(ROOT/'dry-run-plan.json',json.loads(json.dumps(plan.as_dict())))
+            if subprocess.check_output(['git','status','--porcelain'],text=True).strip(): raise ValueError('commit tested executor before apply')
+            out=subprocess.run(['scripts/backup-registry.sh','before-g034-owner-prayer-component'],cwd=project,check=True,capture_output=True,text=True)
+            match=re.search(r'backup-registry: wrote (.+\.dump) \(',out.stdout)
+            if not match: raise ValueError('backup not reported')
+            backup=Path(match.group(1)).resolve()
+            listed=subprocess.run(['pg_restore','--list',str(backup)],check=True,capture_output=True,text=True)
+            if not listed.stdout.strip(): raise ValueError('empty backup restore catalog')
+            backup_proof={'path':str(backup),'file_sha256':file_sha256(backup),'pg_restore_list_passed':True}
+            write_immutable(ROOT/'backup.json',backup_proof)
+            if fingerprint(snapshot(store),collections)!=packet['registry_before_sha256']: raise ValueError('Registry drift during backup')
+            for b in packet['physical_bindings']:
+                if file_sha256(Path(b['path']))!=b['file_sha256']: raise ValueError('physical source drift')
+            write_immutable(ROOT/'apply-intent.json',{'package_sha256':sha256_json(package),'packet_sha256':sha256_json(packet),'backup':backup_proof})
+            receipt=store.apply_plan(plan,metadata={'owner_prayer_component':str(ROOT)},
+                expected_registry_fingerprint_sha256=packet['registry_before_sha256'],registry_collections=collections)
+            write_immutable(ROOT/'apply-receipt.json',receipt)
+            expected_states=deepcopy(states)
+            for op in plan.operations: expected_states[op.collection,op.object_id]=stored_operation_payload(op)
+            if fingerprint(snapshot(store),collections)!=fingerprint(expected_states,collections): raise ValueError('full Registry readback mismatch')
+            result={'status':'prayer_link_applied_readback_verified','change_set_id':plan.change_set_id,
+                'operations':3,'claim_evidence_source_cvp_text_writes':0,'group_complete':False,
+                'next_action':'verify_effective_disposition_and_full_independent_audit'}
+            write_immutable(ROOT/'verified-result.json',result);write_derived(ROOT/'progress.json',result)
+            print(json.dumps(result))
+
+
+if __name__ == '__main__':
+    parser=argparse.ArgumentParser();parser.add_argument('--apply-reviewed',action='store_true');args=parser.parse_args()
+    apply_reviewed() if args.apply_reviewed else run()
