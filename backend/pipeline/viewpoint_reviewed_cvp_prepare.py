@@ -96,6 +96,13 @@ def completed_repair_parent_snapshot(manifest, records, packages, completed_ids,
         app=package.get('source_repair_application')
         if not app: raise CvpProductionBlocked(['parent repair lacks fresh source-repair authority'])
         packet=app['review_packet']; normalized=normalize_package(package)
+        if app.get('schema_version') == 'wang_s201129_owner_opus_source_reconciliation_v1':
+            from backend.pipeline.viewpoint_s201129_source_epoch import membership_snapshot
+            checked, changed = membership_snapshot(manifest,checked,package,completed_ids,selected_ids)
+            if used.intersection(changed):
+                raise CvpProductionBlocked(['duplicate pending source epoch Claim authority'])
+            used.update(changed)
+            continue
         if app.get('schema_version') == 'wang_g041_owner_qualified_transcript_reconciliation_v2':
             from backend.pipeline.viewpoint_g041_source_epoch import membership_snapshot
             checked, changed = membership_snapshot(manifest,checked,package,completed_ids,selected_ids)
@@ -203,12 +210,9 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
         raise CvpProductionBlocked(["commit implementation before production preparation"])
     runner_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=PROJECT_ROOT, text=True).strip()
     repository = SharedGroupingRepository(args.grouping_repository)
-    from backend.pipeline.viewpoint_g041_source_epoch import PACKAGE, GROUPING_EPOCH_KEY, binding as epoch_binding
+    from backend.pipeline.viewpoint_applied_source_epochs import GROUPING_EPOCH_KEY, compose
     repair_paths=getattr(args,'completed_source_repair',None) or []
-    epoch_paths=[p for p in repair_paths if p == PACKAGE]
-    if len(epoch_paths)>1:
-        raise CvpProductionBlocked(['duplicate applied source epoch package'])
-    applied_epoch=epoch_binding() if epoch_paths else None
+    applied_epoch=compose(repair_paths)
     loaded = repository.load(args.accepted_grouping_sha, source_epoch_binding=applied_epoch)
     manifest = loaded["manifest"]
     stage = "group:" + args.group_key if getattr(args, "group_key", None) else "canary"
@@ -224,6 +228,8 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
     repair_paths=getattr(args,'completed_source_repair',None) or []
     repairs=[json.loads(path.read_text(encoding='utf-8')) for path in repair_paths]
     for repair in repairs:
+        if repair.get('source_repair_application',{}).get('schema_version') == 'wang_s201129_owner_opus_source_reconciliation_v1':
+            for objects in normalize_package(repair).values(): all_ids.update(objects)
         if repair.get('source_repair_application',{}).get('schema_version') == 'wang_g041_owner_qualified_transcript_reconciliation_v2':
             for objects in normalize_package(repair).values(): all_ids.update(objects)
             packet=repair['source_repair_application']['review_packet']

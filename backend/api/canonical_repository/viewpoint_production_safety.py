@@ -625,7 +625,7 @@ def build_cvp_freeze(
         if scope_packet["accepted_grouping_stage"] != "canary" and not str(scope_packet["accepted_grouping_stage"]).startswith("group:"):
             raise CvpProductionBlocked(["unsupported accepted grouping admission stage"])
         body["accepted_grouping_stage"] = scope_packet["accepted_grouping_stage"]
-    from backend.pipeline.viewpoint_g041_source_epoch import GROUPING_EPOCH_KEY, verified_applied
+    from backend.pipeline.viewpoint_applied_source_epochs import GROUPING_EPOCH_KEY, verified_applied
     if GROUPING_EPOCH_KEY in scope_packet:
         if 'accepted_grouping_stage' not in scope_packet:
             raise CvpProductionBlocked(['applied source epoch requires accepted grouping scope'])
@@ -828,7 +828,7 @@ def validate_reviewed_grouping_bindings(
     transitions = {}
     if source_epoch_binding is not None:
         try:
-            from backend.pipeline.viewpoint_g041_source_epoch import grouping_physical_transition
+            from backend.pipeline.viewpoint_applied_source_epochs import grouping_physical_transition
             transitions = grouping_physical_transition(manifest, source_epoch_binding)
         except (ValueError, KeyError, TypeError, OSError) as exc:
             raise CvpProductionBlocked(['reviewed grouping applied source epoch proof invalid: ' + str(exc)]) from exc

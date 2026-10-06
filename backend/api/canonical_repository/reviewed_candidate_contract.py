@@ -49,6 +49,11 @@ def validate_store_package_authorization(package: Mapping[str, Any]) -> None:
     if package.get("source_repair_application") is not None:
         validate_source_repair_application(package)
         return
+    if (any(r.get('approval_basis') == 'owner_scoped_independent_terminal_review'
+            for r in package.get('viewpoint_identity_decisions', []))
+            or any(r.get('review_status') == 'independent_terminal_reviewed'
+                   for r in package.get('claims', []))):
+        raise ConsensusApplicationError('scoped Opus provenance requires exact source repair authority')
     if not package_requires_reviewed_candidate_contract(package):
         return
     if package.get("consensus_application") is None:
@@ -81,6 +86,10 @@ def validate_source_repair_application(package: Mapping[str, Any]) -> None:
     This contract cannot carry CVP text changes or unrelated Claim records.
     """
     app = package.get('source_repair_application') or {}
+    if app.get('schema_version') == 'wang_s201129_owner_opus_source_reconciliation_v1':
+        from backend.pipeline.viewpoint_s201129_source_repair import validate_package
+        validate_package(package)
+        return
     if app.get('schema_version') == 'wang_g041_owner_qualified_transcript_reconciliation_v2':
         from backend.pipeline.viewpoint_g041_qualified_transcript_repair import validate_package
         validate_package(package)

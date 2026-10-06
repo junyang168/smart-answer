@@ -52,7 +52,7 @@ RESOLUTION_RUN_VERSION = "wang_viewpoint_identity_resolution_run_v1"
 
 APPROVED_STATUSES = frozenset({"system_approved", "human_approved", "approved"})
 IDENTITY_ELIGIBLE_CLAIM_REVIEW_STATUSES = frozenset(
-    {"ai_consensus_reviewed", "human_approved", "approved"}
+    {"ai_consensus_reviewed", "human_approved", "approved", "independent_terminal_reviewed"}
 )
 IDENTITY_TERMINALLY_EXCLUDED_CLAIM_REVIEW_STATUSES = frozenset({"superseded"})
 VALID_ANCHOR_STATES = frozenset(

@@ -218,12 +218,14 @@ def build_selection(group, inventory, root, random_spot_check_policy=None, sourc
     fresh = []
     for path in source_repair_paths:
         package=read(path)
-        if package.get('source_repair_application',{}).get('schema_version') != 'wang_g041_owner_qualified_transcript_reconciliation_v2':
+        version = package.get('source_repair_application',{}).get('schema_version')
+        if version not in {'wang_g041_owner_qualified_transcript_reconciliation_v2', 'wang_s201129_owner_opus_source_reconciliation_v1'}:
             continue
-        from backend.pipeline.viewpoint_g041_source_epoch import verified_applied,reviewed_claim_ids,selection_row
+        from backend.pipeline.viewpoint_applied_source_epochs import implementation
+        epoch = implementation(binding(path))
         from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
-        verified_applied(binding(path),PostgresKnowledgeStore())
-        fresh.extend(selection_row(cid,package) for cid in sorted(set(group['claim_ids']) & reviewed_claim_ids(package)))
+        epoch.verified_applied(binding(path),PostgresKnowledgeStore())
+        fresh.extend(epoch.selection_row(cid,package) for cid in sorted(set(group['claim_ids']) & epoch.reviewed_claim_ids(package)))
     if len(fresh)!=len({r['claim_id'] for r in fresh}):
         raise ValueError('duplicate fresh source epoch qualification')
     group={**group,'claim_ids':sorted(set(group['claim_ids'])-{r['claim_id'] for r in fresh})}

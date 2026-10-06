@@ -575,7 +575,7 @@ def verify_historical_review_bridge(
     if source_repair_binding is not None:
         if any((human_closure_binding,sealed_lineage_binding,random_spot_check_policy_binding,legacy_reviewed_candidate_binding)):
             raise CvpProductionBlocked(['fresh source epoch cannot combine historical override authority'])
-        from backend.pipeline.viewpoint_g041_source_epoch import bridge
+        from backend.pipeline.viewpoint_applied_source_epochs import bridge
         proof=bridge(claim_id=claim_id,current_claim=dict(current_claim),current_evidence=dict(current_evidence),
             current_fragments=dict(current_fragments),source_repair_binding=dict(source_repair_binding))
         if proof['review_binding']!=dict(review_binding) or proof['review_input_binding']!=dict(review_input_binding):

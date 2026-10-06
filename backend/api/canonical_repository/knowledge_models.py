@@ -1426,7 +1426,7 @@ class ViewpointIdentityDecisionRecord(StrictViewpointRecord):
     )
     reviewer_kind: Literal["system", "human_editor"]
     reviewer_id: str
-    approval_basis: Literal["deterministic", "dual_model_consensus", "human_exception_review"]
+    approval_basis: Literal["deterministic", "dual_model_consensus", "human_exception_review", "owner_scoped_independent_terminal_review"]
     reason: str = Field(min_length=1)
     input_sha256: str
     review_artifact_sha256: Optional[str] = None
@@ -1471,6 +1471,15 @@ class ViewpointIdentityDecisionRecord(StrictViewpointRecord):
                 "semantic_call_artifact_sha256s must be sorted and unique"
             )
         if self.review_status == "system_approved":
+            if self.approval_basis == "owner_scoped_independent_terminal_review":
+                if (self.policy_version != "wang_s201129_owner_opus_source_reconciliation_v1"
+                        or self.reviewer_kind != "system"
+                        or self.reviewer_id != "s201129_owner_scoped_opus_terminal_review"
+                        or self.reviewer_model_ids != ["claude-opus-5-5"]
+                        or len(self.semantic_call_artifact_sha256s) != 1
+                        or not self.review_artifact_sha256):
+                    raise ValueError("scoped terminal review requires exact policy and single Opus provenance")
+                return self
             if self.approval_basis != "dual_model_consensus":
                 raise ValueError("system-approved identity requires dual-model consensus")
             if (

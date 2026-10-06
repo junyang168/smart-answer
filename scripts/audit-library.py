@@ -64,7 +64,7 @@ if str(REPO_ROOT) not in sys.path:
 
 #: 被視為「已批准」的 `review_status`。第 2 層只對這些物件要求依賴全部可解析：
 #: candidate 還在流程裡，引用暫時解不開不是缺陷。
-APPROVED_STATUSES = {"approved", "system_approved", "human_approved"}
+APPROVED_STATUSES = {"approved", "system_approved", "human_approved", "independent_terminal_reviewed"}
 
 #: 只有「等價」才算觀點的成員。`supports`／`extends`／`qualifies`／`applies` 是
 #: 關係，不是身份——見 CanonicalViewpoint 設計第 4 節。第 4 層問「這幾條是不是
