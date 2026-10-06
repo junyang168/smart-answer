@@ -110,6 +110,13 @@ def admit_reviewed_grouping(
         raise CvpProductionBlocked(["duplicate Claim packet"])
     if set(frozen_claims) != set(current_claims):
         raise CvpProductionBlocked(["reviewed grouping and production scope Claim sets differ"])
+    if freeze.get(GROUPING_EPOCH_KEY):
+        from backend.pipeline.viewpoint_applied_source_epochs import grouping_current_claim_packets
+        # Accepted groups/IDs/order remain unchanged. A new-source content
+        # comparison requires the actual review/apply/postimage proof, not
+        # merely a status label or the presence of a source-epoch field.
+        frozen_claims.update(grouping_current_claim_packets(
+            manifest, freeze[GROUPING_EPOCH_KEY], set(current_claims)))
     for claim_id, prior in frozen_claims.items():
         current = current_claims[claim_id]
         if any(prior.get(key) != current.get(key) for key in ("source_id", "statement")):

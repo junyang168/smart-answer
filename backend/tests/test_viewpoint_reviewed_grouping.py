@@ -88,6 +88,60 @@ def test_current_scope_drift_fails(tmp_path, mutation):
         admit_reviewed_grouping(**args)
 
 
+@pytest.mark.parametrize('mutation',[None,'statement','revision','quote','graph','source','scripture','evidence_statement'])
+def test_new_source_admission_checks_exact_reviewed_projection_not_stale_words(tmp_path,monkeypatch,mutation):
+    from backend.pipeline import viewpoint_reviewed_grouping as grouping
+    from backend.pipeline import viewpoint_applied_source_epochs as epochs
+    args=inputs(tmp_path)
+    old=copy.deepcopy(args['manifest'])
+    current=args['scope_packet']['claims'][0]
+    current.update(statement='已审核新主張',pinned_claim_revision=3)
+    current['evidence'][0]['verbatim_excerpt']='已校对原話'
+    expected=copy.deepcopy(old['claim_packets'][0])
+    expected.update(statement=current['statement'],claim_revision=3)
+    expected['evidence_steps'][0]['fragments'][0]['verbatim_excerpt']='已校对原話'
+    # Isolate the already-tested physical/database proof I/O; this branch
+    # receives only the independently authenticated expected projection.
+    monkeypatch.setattr(grouping,'validate_accepted_grouping',lambda **kw:None)
+    monkeypatch.setattr(grouping,'validate_grouping_envelope',lambda *a,**kw:None)
+    monkeypatch.setattr(epochs,'grouping_current_claim_packets',lambda manifest,bound,ids:{'C1':expected})
+    from backend.pipeline.viewpoint_g041_source_epoch import GROUPING_EPOCH_KEY
+    bound={'path':'exact-applied-proof','file_sha256':'a'*64}
+    args['freeze'][GROUPING_EPOCH_KEY]=bound
+    args['scope_packet'][GROUPING_EPOCH_KEY]=bound
+    if mutation=='statement':current['statement']='未审新内容'
+    elif mutation=='revision':current['pinned_claim_revision']=4
+    elif mutation=='quote':current['evidence'][0]['verbatim_excerpt']='未审引文'
+    elif mutation=='graph':current['evidence'][0]['source_fragment_id']='F-foreign'
+    elif mutation=='source':current['source_id']='foreign'
+    elif mutation=='scripture':current['scripture_refs']=['Matt.2.1']
+    elif mutation=='evidence_statement':current['evidence'][0]['evidence_statement']='未审解释'
+    args['scope_packet'].pop('packet_sha256')
+    args['scope_packet']['packet_sha256']=sha256_json(args['scope_packet'])
+    args['freeze']['scope_packet_sha256']=args['scope_packet']['packet_sha256']
+    if mutation:
+        with pytest.raises(CvpProductionBlocked):admit_reviewed_grouping(**args)
+    else:
+        result=admit_reviewed_grouping(**args)
+        assert result['grouping']['groups']==[{k:g[k] for k in ('group_key','claim_ids','rationale')} for g in old['groups']]
+        assert result['grouping_reexecuted'] is False
+    assert args['manifest']==old
+
+
+def test_new_source_admission_cannot_ignore_missing_proof(tmp_path,monkeypatch):
+    from backend.pipeline import viewpoint_reviewed_grouping as grouping
+    from backend.pipeline import viewpoint_applied_source_epochs as epochs
+    from backend.pipeline.viewpoint_g041_source_epoch import GROUPING_EPOCH_KEY
+    args=inputs(tmp_path)
+    monkeypatch.setattr(grouping,'validate_accepted_grouping',lambda **kw:None)
+    monkeypatch.setattr(epochs,'grouping_current_claim_packets',lambda *a:{})
+    args['scope_packet']['claims'][0]['statement']='无精确证明的新内容'
+    args['scope_packet'][GROUPING_EPOCH_KEY]=args['freeze'][GROUPING_EPOCH_KEY]={'path':'unavailable'}
+    args['scope_packet'].pop('packet_sha256')
+    args['scope_packet']['packet_sha256']=sha256_json(args['scope_packet'])
+    with pytest.raises(CvpProductionBlocked,match='projection drift'):admit_reviewed_grouping(**args)
+
+
 @pytest.mark.parametrize("role", ["manifest", "validation", "acceptance", "physical_review"])
 def test_runtime_reopens_upstream_files(tmp_path, role):
     args = inputs(tmp_path)

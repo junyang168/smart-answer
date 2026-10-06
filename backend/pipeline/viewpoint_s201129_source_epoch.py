@@ -167,6 +167,49 @@ def selection_row(cid, package):
             'source_repair_binding':binding()}
 
 
+def grouping_current_claim_packets(manifest, bound, claim_ids):
+    """Rebind content, never membership, to the exact applied source review."""
+    package, before, live = verified_applied(bound, repair.PostgresKnowledgeStore())
+    scope, _, _, _ = repair.reviewed_inputs()
+    if manifest != repair.read_artifact(Path(scope['manifest_path'])):
+        raise ValueError('S201129 grouping accepted manifest drift')
+    from backend.api.canonical_repository.knowledge_models import ClaimRecord, SourceFragmentRecord
+    from backend.api.canonical_repository.viewpoint_resolution import compile_review_claim
+    originals = {r['claim_id']: r for r in manifest['claim_packets']}
+    result = {}
+    for cid in set(claim_ids) & reviewed_claim_ids(package):
+        if cid not in originals:
+            raise ValueError('source repair cannot add a grouped Claim')
+        prior = originals[cid]
+        old = before['claims', cid]
+        if (prior['claim_revision'] != old['revision']
+                or prior['claim_content_sha256'] != repair.semantic_record_sha(old)):
+            raise ValueError('source repair grouping predecessor Claim pin drift')
+        claim = ClaimRecord.model_validate(live['claims', cid])
+        evidence = {eid: EvidenceStepRecord.model_validate(live['evidence_steps', eid])
+                    for eid in claim.evidence_step_ids}
+        fids = {fid for step in evidence.values() for fid in evidence_fragment_ids(step)}
+        fragments = {fid: SourceFragmentRecord.model_validate(live['source_fragments', fid]) for fid in fids}
+        source_shas = {f.source_id: live['source_documents', f.source_id]['source_file_sha256']
+                       for f in fragments.values()}
+        current, findings = compile_review_claim(claim=claim, evidence_index=evidence,
+            fragment_index=fragments, citation_index={}, coverage_source_sha256=source_shas,
+            attestation_sha=None)
+        if current is None or findings or current.source_id != prior['source_id']:
+            raise ValueError('source repair grouping source-local graph drift')
+        steps = {}
+        for row in current.evidence:
+            step = steps.setdefault(row.evidence_step_id, {'evidence_step_id':row.evidence_step_id,
+                'statement':row.evidence_statement, 'scripture_refs':row.scripture_refs, 'fragments':[]})
+            step['fragments'].append({'fragment_id':row.source_fragment_id,
+                                     'verbatim_excerpt':row.verbatim_excerpt})
+        result[cid] = {**prior, 'statement':current.statement,
+            'claim_revision':current.pinned_claim_revision,
+            'claim_content_sha256':current.claim_revision_sha256,
+            'scripture_refs':current.scripture_refs, 'evidence_steps':list(steps.values())}
+    return result
+
+
 def bridge(*, claim_id, current_claim, current_evidence, current_fragments, source_repair_binding, store=None):
     package, _, live = verified_applied(source_repair_binding,store or repair.PostgresKnowledgeStore())
     normalized = postimages(package)

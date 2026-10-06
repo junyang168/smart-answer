@@ -86,3 +86,17 @@ def grouping_physical_transition(manifest, bound):
 
 def bridge(**kwargs):
     return implementation(kwargs['source_repair_binding']).bridge(**kwargs)
+
+
+def grouping_current_claim_packets(manifest, bound, claim_ids):
+    """Only a fully proved transition may replace old content comparison pins."""
+    result = {}
+    for row in members(bound):
+        projector = getattr(implementation(row), 'grouping_current_claim_packets', None)
+        if projector is None:
+            continue  # No projection authority: the original strict check stays.
+        projected = projector(manifest, row, claim_ids)
+        if result.keys() & projected.keys() or set(projected) - set(claim_ids):
+            raise ValueError('conflicting or foreign source epoch grouping projection')
+        result.update(projected)
+    return result
