@@ -267,7 +267,7 @@ def test_sql_data_reuse_requires_fresh_engine_generation_but_verdicts_never_cros
         return module.current_registry_view(store).list_records('claims')
     with validation_runtime():
         with ValidationContext('first'):
-            assert check(store) is check(store)
+            assert check(store)==check(store)
         with ValidationContext('second'):
             assert check(store)[0]['text']=='original'
         assert store.reads==1 and checks==[1,1]
@@ -278,6 +278,17 @@ def test_sql_data_reuse_requires_fresh_engine_generation_but_verdicts_never_cros
             assert check(store)[0]['text']=='changed'
         assert store.reads==2 and checks==[1,1,2]
     assert all(c.closed for c in store.connections)
+
+
+def test_current_findings_preserve_mutable_list_api_without_mutating_cached_verdict():
+    from backend.pipeline.viewpoint_validation_context import current_check
+    calls=[]
+    @current_check
+    def check():calls.append(True);return []
+    with ValidationContext('findings'):
+        findings=check();findings.extend(['another independent finding'])
+        assert check()==[]
+    assert len(calls)==1
 
 
 @pytest.mark.parametrize('kind',['payload','retired','insert','delete','KCS','rewrite','restart','XID-wrap'])

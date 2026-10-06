@@ -465,5 +465,8 @@ def current_check(fn):
         key = fn, hashlib.sha256(encoded.encode()).hexdigest()
         if key not in ctx.current_results:
             ctx.current_results[key] = readonly(fn(*args, **kwargs))
-        return ctx.current_results[key]
+        result = ctx.current_results[key]
+        # Findings consumers append their own independent findings. Preserve
+        # that list API without exposing the retained immutable result.
+        return list(result) if isinstance(result, ReadOnlyList) else result
     return run
