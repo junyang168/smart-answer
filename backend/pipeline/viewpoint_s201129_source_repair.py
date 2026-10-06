@@ -48,6 +48,10 @@ PINS = {
     'owner-legacy-spot-check-disposition.txt': '1193f9a85915bac8c511ecfe8242dbd61776c355e8134d8e7b11833984fc979d',
 }
 
+# Process-local, one-entry cache of the immutable predecessor proof only.
+# Never cache the current SQL graph, source checks, or model approval checks.
+_saved_before_cache = None
+
 
 def binding(path):
     return {'path': str(path), 'file_sha256': file_sha256(path)}
@@ -155,14 +159,25 @@ def reviewed_inputs():
 
 
 def saved_before():
-    proof = read_artifact(APPLICATION_ROOT/'before.json')
-    states = {(r['collection'], r['object_id']):r['payload'] for r in proof['before_records']}
+    global _saved_before_cache
     scope, _, _, _ = reviewed_inputs()
+    path = APPLICATION_ROOT/'before.json'
+    physical_sha = file_sha256(path)
+    key = (str(path.resolve()), physical_sha, tuple(scope['registry_collections']),
+           scope['registry_fingerprint_sha256'])
+    if _saved_before_cache is not None and _saved_before_cache[0] == key:
+        # Callers may build proposed postimages; do not expose cached mutable data.
+        return deepcopy(_saved_before_cache[1])
+    proof = read_artifact(path)
+    if file_sha256(path) != physical_sha:
+        raise ValueError('before Registry proof changed while reading')
+    states = {(r['collection'], r['object_id']):r['payload'] for r in proof['before_records']}
     if (proof['collections'] != scope['registry_collections']
             or fingerprint(states, proof['collections']) != scope['registry_fingerprint_sha256']
             or proof['pre_fingerprint_sha256'] != scope['registry_fingerprint_sha256']):
         raise ValueError('full before Registry fingerprint drift')
-    return states, proof
+    _saved_before_cache = (key, (states, proof))
+    return deepcopy(_saved_before_cache[1])
 
 
 def package_for(states, scope, draft, logical, raw):

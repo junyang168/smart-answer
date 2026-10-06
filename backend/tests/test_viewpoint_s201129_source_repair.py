@@ -17,6 +17,58 @@ def isolate_synthetic_source_tests_from_live_child_receipts(monkeypatch, tmp_pat
     # must not make their parent validator read production data or call SQL.
     from backend.pipeline import viewpoint_s201129_link_support_apply as child
     monkeypatch.setattr(child, 'ROOT', tmp_path / 'no-live-child-application')
+    monkeypatch.setattr(repair, '_saved_before_cache', None)
+
+
+def before_cache_fixture(monkeypatch, tmp_path):
+    import json
+    monkeypatch.setattr(repair, 'APPLICATION_ROOT', tmp_path)
+    states = {('claims', 'C'): {'revision': 1, 'statement': 'original'}}
+    fp = repair.fingerprint(states, ['claims'])
+    scope = {'registry_collections': ['claims'], 'registry_fingerprint_sha256': fp}
+    proof = {'collections': ['claims'], 'pre_fingerprint_sha256': fp,
+             'before_records': [{'collection': 'claims', 'object_id': 'C', 'payload': states['claims', 'C']}]}
+    (tmp_path/'before.json').write_text(json.dumps(proof))
+    monkeypatch.setattr(repair, 'reviewed_inputs', lambda: (scope, None, None, None))
+    return scope, proof
+
+
+def test_before_cache_parses_and_recomputes_once_but_returns_isolated_data(monkeypatch, tmp_path):
+    before_cache_fixture(monkeypatch, tmp_path)
+    original = repair.read_artifact
+    calls = []
+    monkeypatch.setattr(repair, 'read_artifact', lambda p: (calls.append(p), original(p))[1])
+    first, proof = repair.saved_before()
+    first['claims', 'C']['statement'] = 'caller mutation'
+    proof['collections'].append('foreign')
+    second, second_proof = repair.saved_before()
+    assert len(calls) == 1
+    assert second['claims', 'C']['statement'] == 'original'
+    assert second_proof['collections'] == ['claims']
+
+
+@pytest.mark.parametrize('drift', ['content', 'expected_fingerprint', 'collections', 'deleted', 'during_read'])
+def test_before_cache_never_hides_proof_or_expected_pin_drift(monkeypatch, tmp_path, drift):
+    import json
+    scope, proof = before_cache_fixture(monkeypatch, tmp_path)
+    repair.saved_before()
+    path = tmp_path/'before.json'
+    if drift == 'content':
+        proof['before_records'][0]['payload']['statement'] = 'changed'
+        path.write_text(json.dumps(proof))
+    elif drift == 'expected_fingerprint': scope['registry_fingerprint_sha256'] = '0'*64
+    elif drift == 'collections': scope['registry_collections'] = ['claims', 'foreign']
+    elif drift == 'deleted': path.unlink()
+    else:
+        repair._saved_before_cache = None
+        original = repair.read_artifact
+        def changing_read(p):
+            result = original(p)
+            path.write_text(json.dumps({**proof, 'changed': True}))
+            return result
+        monkeypatch.setattr(repair, 'read_artifact', changing_read)
+    with pytest.raises((ValueError, FileNotFoundError)):
+        repair.saved_before()
 
 
 def decision():
