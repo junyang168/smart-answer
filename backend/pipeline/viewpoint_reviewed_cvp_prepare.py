@@ -240,6 +240,11 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
             for objects in normalize_package(repair).values(): all_ids.update(objects)
         if repair.get('source_repair_application',{}).get('schema_version') == 'wang_s201129_owner_opus_source_reconciliation_v1':
             for objects in normalize_package(repair).values(): all_ids.update(objects)
+            # The reviewed child creates new identity rows absent from the
+            # parent source package. Load them too; the existing exact child
+            # composition guard must check them, not confuse omission with drift.
+            from backend.pipeline.viewpoint_s201129_link_support_apply import applied_child_object_ids
+            all_ids.update(applied_child_object_ids())
         if repair.get('source_repair_application',{}).get('schema_version') == 'wang_g041_owner_qualified_transcript_reconciliation_v2':
             for objects in normalize_package(repair).values(): all_ids.update(objects)
             packet=repair['source_repair_application']['review_packet']

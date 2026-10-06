@@ -65,6 +65,44 @@ def test_absent_child_receipt_cannot_waive_parent_guard(monkeypatch,tmp_path):
     monkeypatch.setattr(repair,'ROOT',tmp_path)
     rows={('viewpoint_claim_links',repair.review.LINK):{'payload':{'unreviewed':'drift'}}}
     assert repair.restore_parent_records(rows) is rows
+    assert repair.applied_child_object_ids() == set()
+
+
+@pytest.mark.parametrize('mutation',[None,'extra','omit','foreign','payload','duplicate'])
+def test_partial_parent_readset_includes_all_exact_child_identities(monkeypatch,tmp_path,mutation):
+    monkeypatch.setattr(repair,'ROOT',tmp_path)
+    (tmp_path/'apply-receipt.json').touch()
+    ops=operations()
+    for i,op in enumerate(ops):
+        op.update(payload={'kind':str(i)},after_revision=3 if i==0 else 1)
+    expected={(o['collection'],o['object_id']):deepcopy(o['payload']) for o in ops}
+    monkeypatch.setattr(repair,'read_artifact',lambda p:{'operations':ops} if p.name=='dry-run-plan.json' else {'reviewed':True})
+    from backend.api.canonical_repository import postgres_store
+    monkeypatch.setattr(postgres_store,'normalize_package',lambda p:{
+        c:{oid:payload for (col,oid),payload in expected.items() if col==c}
+        for c,_ in expected})
+    if mutation=='extra':ops.append({'collection':'claims','operation':'update','object_id':'DK-foreign'})
+    elif mutation=='omit':ops.pop()
+    elif mutation=='foreign':ops[1]['object_id']='VIC-foreign'
+    elif mutation=='payload':ops[1]['payload']['kind']='unreviewed'
+    elif mutation=='duplicate':ops[2]=deepcopy(ops[1])
+    if mutation:
+        with pytest.raises(ValueError):repair.applied_child_object_ids()
+    else:
+        ids=repair.applied_child_object_ids()
+        assert ids == {repair.review.LINK,'VIC-test','VID-test'}
+        # A parent-only partial snapshot reproduces the real omission failure;
+        # adding the exact child read set fixes loading without weakening SHA,
+        # payload, revision, retirement or missing-row postimage checks.
+        records={(c,oid):{'payload':{**payload,'revision':3 if c=='viewpoint_claim_links' else 1},
+            'revision':3 if c=='viewpoint_claim_links' else 1,
+            'content_sha256':repair.source.semantic_record_sha({**payload,'revision':3 if c=='viewpoint_claim_links' else 1}),
+            'retired':False} for (c,oid),payload in expected.items()}
+        partial={k:v for k,v in records.items() if k[0]=='viewpoint_claim_links'}
+        with pytest.raises(ValueError,match='child exact postimage drift'):
+            repair.restore_exact_child_postimages(partial,{'operations':ops},{'revision':2})
+        assert repair.restore_exact_child_postimages(records,{'operations':ops},{'revision':2})[
+            'viewpoint_claim_links',repair.review.LINK]['payload']=={'revision':2}
 
 
 def test_apply_never_replays_an_existing_root(monkeypatch,tmp_path):

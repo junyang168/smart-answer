@@ -151,6 +151,21 @@ def validate_plan_package(plan,package):
     if seen!=set(expected):raise ValueError('reviewed package/plan population drift')
 
 
+def applied_child_object_ids():
+    """Include the exact child proof rows in a partial parent read set.
+
+    This is data loading, not admission: restore_parent_records still checks
+    the original review, all physical proofs, SQL KCS and every postimage.
+    Omitting either newly created identity must never mean ignoring its guard.
+    """
+    if not (ROOT/'apply-receipt.json').exists():
+        return set()
+    package=read_artifact(PACKAGE)
+    plan=read_artifact(ROOT/'dry-run-plan.json')
+    validate_plan_package(plan,package)
+    return {op['object_id'] for op in plan['operations']}
+
+
 def restore_parent_records(records):
     """Exact proof composition, not a waiver of the parent source postimage guard."""
     if not (ROOT/'apply-receipt.json').exists():return records
