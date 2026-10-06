@@ -54,6 +54,8 @@ def planned_postimages(normalized, stated, before, plan):
 
 
 def validate_postimage(package, records):
+    from backend.pipeline.viewpoint_s201129_link_support_apply import restore_parent_records
+    records = restore_parent_records(records)
     normalized = postimages(package)
     for collection, rows in normalized.items():
         for oid, expected in rows.items():

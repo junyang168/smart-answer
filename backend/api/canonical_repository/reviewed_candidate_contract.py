@@ -86,6 +86,10 @@ def validate_source_repair_application(package: Mapping[str, Any]) -> None:
     This contract cannot carry CVP text changes or unrelated Claim records.
     """
     app = package.get('source_repair_application') or {}
+    if app.get('schema_version') == 'wang_s201129_owner_cl005_supports_v1':
+        from backend.pipeline.viewpoint_s201129_link_support_apply import validate_package
+        validate_package(package)
+        return
     if app.get('schema_version') == 'wang_s201129_owner_opus_source_reconciliation_v1':
         from backend.pipeline.viewpoint_s201129_source_repair import validate_package
         validate_package(package)

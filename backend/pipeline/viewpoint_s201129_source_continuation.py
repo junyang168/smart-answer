@@ -20,9 +20,9 @@ ROOT = repair.APPLICATION_ROOT/'continuation'
 RECOMPLETIONS = ROOT/'recompleted-groups.json'
 
 
-def verified_audit(ident, claim_ids, viewpoint_ids):
+def verified_audit(ident, claim_ids, viewpoint_ids, *, root=None):
     """One fresh audit; real filter receipts only; upheld/new dispute stops."""
-    out = ROOT/ident
+    out = (root or ROOT)/ident
     if out.exists():
         raise ValueError('audit already attempted; inspect exact saved receipts, never rerun')
     out.mkdir()
@@ -47,10 +47,19 @@ def verified_audit(ident, claim_ids, viewpoint_ids):
     return audit, resolution
 
 
-def completion_from_saved_audit(sequence, audit_path, output, resolution_path=None):
+def completion_from_saved_audit(sequence, audit_path, output, resolution_path=None, *, root=None):
     from backend.pipeline.viewpoint_scoped_audit_disposition import scope_audit_disposition
     from backend.api.canonical_repository.viewpoint_production_safety import accepted_grouping_audit_scope
-    if sequence not in {40,41} or output != ROOT/f'g{sequence:03d}-verified':
+    active_root = root or ROOT
+    child_bindings = []
+    if active_root != ROOT:
+        from backend.pipeline.viewpoint_s201129_link_support_continuation import ROOT as CHILD_ROOT
+        from backend.pipeline import viewpoint_s201129_link_support_apply as child
+        if active_root != CHILD_ROOT:
+            raise ValueError('unknown source continuation root')
+        child_bindings = [binding(child.PACKAGE),binding(child.ROOT/'verified-result.json'),
+            *read_artifact(child.ROOT/'verified-result.json')['bindings']]
+    if sequence not in {40,41} or output != active_root/f'g{sequence:03d}-verified':
         raise ValueError('S201129 only the two already-completed affected groups')
     epoch.verified_applied(epoch.binding(),repair.PostgresKnowledgeStore())
     cfg, schedule, manifest, groups = load_campaign(repair.CAMPAIGN)
@@ -63,8 +72,8 @@ def completion_from_saved_audit(sequence, audit_path, output, resolution_path=No
     scope, _, _, _ = repair.reviewed_inputs()
     _, historic_source_bindings = repair.historical_seed_projection(old,scope)
     audit = read_artifact(audit_path)
-    original = ROOT/f'g{sequence:03d}-audit/independent-reaudit/audit.json'
-    if Path(audit_path) not in {original,ROOT/f'g{sequence:03d}-audit/content-blocked-fallback/assessment.json'}:
+    original = active_root/f'g{sequence:03d}-audit/independent-reaudit/audit.json'
+    if Path(audit_path) not in {original,active_root/f'g{sequence:03d}-audit/content-blocked-fallback/assessment.json'}:
         raise ValueError('affected audit outside exact new-source root')
     proofs = verify_saved_full_audit(original)
     validate_audit(audit,groups[key]['claim_ids'],old['viewpoint_ids'],owner_resolution_path=resolution_path)
@@ -81,7 +90,9 @@ def completion_from_saved_audit(sequence, audit_path, output, resolution_path=No
                  historical_changed_source_bindings=historic_source_bindings,
                  bindings=[b for b in old['bindings'] if b not in historic_source_bindings]+[binding(audit_path),*proofs,
                     *read_artifact(repair.APPLICATION_ROOT/'verified-result.json')['bindings'],
-                    binding(repair.APPLICATION_ROOT/'verified-result.json')])
+                    binding(repair.APPLICATION_ROOT/'verified-result.json'),*child_bindings])
+    if child_bindings:
+        fresh['child_connection_repair_binding'] = binding(child.PACKAGE)
     # Never inherit a prior source-epoch arbitration as approval of new input.
     fresh.pop('owner_resolution_path',None)
     fresh.pop('claim_audit_path',None)

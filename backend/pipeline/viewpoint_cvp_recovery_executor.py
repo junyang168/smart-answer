@@ -281,8 +281,11 @@ def continuation_inputs(root, output, extra_completion=None, *, additional_sourc
         seeds.append(extra_completion)
     if source_epoch_recompletion_path is not None:
         from backend.pipeline.viewpoint_s201129_source_continuation import RECOMPLETIONS
+        from backend.pipeline.viewpoint_s201129_link_support_continuation import RECOMPLETIONS as SUPPORT_RECOMPLETIONS
         if Path(source_epoch_recompletion_path) == RECOMPLETIONS:
             from backend.pipeline.viewpoint_s201129_source_continuation import recompletion_seed
+        elif Path(source_epoch_recompletion_path) == SUPPORT_RECOMPLETIONS:
+            from backend.pipeline.viewpoint_s201129_link_support_continuation import recompletion_seed
         else:
             from backend.pipeline.viewpoint_g041_source_epoch import recompletion_seed
         seeds=recompletion_seed(source_epoch_recompletion_path,seeds)

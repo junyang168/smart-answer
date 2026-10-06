@@ -1472,9 +1472,13 @@ class ViewpointIdentityDecisionRecord(StrictViewpointRecord):
             )
         if self.review_status == "system_approved":
             if self.approval_basis == "owner_scoped_independent_terminal_review":
-                if (self.policy_version != "wang_s201129_owner_opus_source_reconciliation_v1"
+                scoped_reviewers = {
+                    "wang_s201129_owner_opus_source_reconciliation_v1": "s201129_owner_scoped_opus_terminal_review",
+                    "wang_s201129_owner_cl005_supports_v1": "s201129_cl005_owner_scoped_opus_terminal_review",
+                }
+                if (self.policy_version not in scoped_reviewers
                         or self.reviewer_kind != "system"
-                        or self.reviewer_id != "s201129_owner_scoped_opus_terminal_review"
+                        or self.reviewer_id != scoped_reviewers.get(self.policy_version)
                         or self.reviewer_model_ids != ["claude-opus-5-5"]
                         or len(self.semantic_call_artifact_sha256s) != 1
                         or not self.review_artifact_sha256):
