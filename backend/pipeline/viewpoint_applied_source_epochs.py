@@ -13,6 +13,17 @@ def implementation(bound):
         return historical
     if path == local.repair.PACKAGE:
         return local
+    if path.is_file():
+        from backend.pipeline import source_reconciliation_epoch as generic
+        # Route only a recognized generic artifact. Its validator then proves
+        # the actual review/apply/completion, not merely this schema label.
+        import json
+        raw = json.loads(path.read_text(encoding='utf-8'))
+        if (raw.get('source_repair_application') or {}).get('schema_version') == 'wang_source_reconciliation_v1':
+            if generic.file_binding(path) != bound:
+                raise ValueError('generic epoch physical package drift')
+            generic.load(bound)
+            return generic
     # Preserve the legacy entry's own exact physical/path validator; an
     # unknown single binding is not accepted by this routing operation.
     return historical
@@ -30,18 +41,30 @@ def members(bound):
     for row in rows:
         if set(row) != {'path','file_sha256'}:
             raise ValueError('nested or unbound source epoch')
-        if Path(row['path']) not in {historical.PACKAGE, local.repair.PACKAGE}:
+        routed = implementation(row)
+        if Path(row['path']) not in {historical.PACKAGE, local.repair.PACKAGE} and routed is historical:
             raise ValueError('unrecognized composite source epoch package')
-        implementation(row)
     return rows
 
 
 def compose(paths):
     known = {historical.PACKAGE:historical,local.repair.PACKAGE:local}
-    selected = [Path(p) for p in paths if Path(p) in known]
+    selected = []
+    generic_rows = {}
+    for raw_path in paths:
+        path = Path(raw_path)
+        if path in known:
+            selected.append(path)
+        elif path.is_file():
+            from backend.pipeline.source_reconciliation_runner import binding
+            bound = binding(path)
+            routed = implementation(bound)
+            if routed is not historical:
+                selected.append(path)
+                generic_rows[path] = bound
     if len(selected) != len(set(selected)):
         raise ValueError('duplicate applied source epoch path')
-    rows = [known[p].binding() for p in sorted(selected)]
+    rows = [known[p].binding() if p in known else generic_rows[p] for p in sorted(selected)]
     if not rows:
         return None
     return rows[0] if len(rows) == 1 else {'schema_version':VERSION,'bindings':rows}

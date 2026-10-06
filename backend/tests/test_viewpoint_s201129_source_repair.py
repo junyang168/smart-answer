@@ -11,6 +11,14 @@ from backend.pipeline import viewpoint_s201129_source_epoch as epoch
 from backend.pipeline import viewpoint_applied_source_epochs as composed
 
 
+@pytest.fixture(autouse=True)
+def isolate_synthetic_source_tests_from_live_child_receipts(monkeypatch, tmp_path):
+    # These unit tests provide synthetic records. The later real child receipt
+    # must not make their parent validator read production data or call SQL.
+    from backend.pipeline import viewpoint_s201129_link_support_apply as child
+    monkeypatch.setattr(child, 'ROOT', tmp_path / 'no-live-child-application')
+
+
 def decision():
     return dict(identity_decision_id='VID-test', identity_candidate_id='VIC-test',
         decision='match_existing', resolved_viewpoint_id='CV-test',

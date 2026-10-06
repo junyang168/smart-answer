@@ -81,11 +81,16 @@ def validate_store_package_authorization(package: Mapping[str, Any]) -> None:
 def validate_source_repair_application(package: Mapping[str, Any]) -> None:
     """A bounded repair is not a complete extraction or its historical review.
 
-    Require two fresh independent, SHA-bound approvals of the exact proposed
-    records. The store still validates the complete live post-image graph.
-    This contract cannot carry CVP text changes or unrelated Claim records.
+    Dispatch only an exact versioned authority. Historical adapters retain
+    their original dual-review boundaries; the generic source reconciliation
+    contract uses one independent Opus terminal review and bounded CVR writes.
+    Every adapter must prove its own exact records, never borrow old approval.
     """
     app = package.get('source_repair_application') or {}
+    if app.get('schema_version') == 'wang_source_reconciliation_v1':
+        from backend.pipeline.source_reconciliation_runner import validate_package
+        validate_package(dict(package))
+        return
     if app.get('schema_version') == 'wang_s201129_owner_cl005_supports_v1':
         from backend.pipeline.viewpoint_s201129_link_support_apply import validate_package
         validate_package(package)

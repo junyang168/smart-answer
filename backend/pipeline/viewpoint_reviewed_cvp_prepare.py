@@ -95,7 +95,15 @@ def completed_repair_parent_snapshot(manifest, records, packages, completed_ids,
         validate_store_package_authorization(package)
         app=package.get('source_repair_application')
         if not app: raise CvpProductionBlocked(['parent repair lacks fresh source-repair authority'])
-        packet=app['review_packet']; normalized=normalize_package(package)
+        normalized=normalize_package(package)
+        if app.get('schema_version') == 'wang_source_reconciliation_v1':
+            from backend.pipeline.source_reconciliation_epoch import membership_snapshot
+            checked, changed = membership_snapshot(manifest,checked,package,completed_ids,selected_ids)
+            if used.intersection(changed):
+                raise CvpProductionBlocked(['duplicate generic source epoch Claim authority'])
+            used.update(changed)
+            continue
+        packet=app['review_packet']
         if app.get('schema_version') == 'wang_s201129_owner_opus_source_reconciliation_v1':
             from backend.pipeline.viewpoint_s201129_source_epoch import membership_snapshot
             checked, changed = membership_snapshot(manifest,checked,package,completed_ids,selected_ids)

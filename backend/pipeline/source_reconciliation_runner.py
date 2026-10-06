@@ -1,0 +1,503 @@
+"""Durable, bounded reconciliation orchestration with explicit production ports.
+
+The canonical directory is keyed by source epochs + owner authorization, not by
+timestamps, process IDs, or an operator-selected recovery root. Reservations
+survive crashes. A missing response is uncertain, never permission to retry.
+"""
+from __future__ import annotations
+
+import argparse
+from datetime import datetime, timezone
+from contextlib import contextmanager
+import fcntl
+import json
+import os
+from pathlib import Path
+from typing import Any, Protocol
+
+from backend.api.canonical_repository.viewpoint_foundation import canonical_json, sha256_json
+from backend.pipeline import source_reconciliation as contract
+
+STAGES = ("proposal", "initial_review", "correction", "final_review")
+
+
+class Stop(ValueError):
+    def __init__(self, reason: str, *, status: str = "needs_owner", waiting_for: str = "owner"):
+        super().__init__(reason)
+        self.status, self.waiting_for = status, waiting_for
+
+
+def seal(body: dict) -> dict:
+    return {**body, "artifact_sha256": sha256_json(body)}
+
+
+def read(path: Path) -> dict:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    stated = value.get("artifact_sha256")
+    if stated != sha256_json({k: v for k, v in value.items() if k != "artifact_sha256"}):
+        raise ValueError("artifact seal drift: " + str(path))
+    return value
+
+
+def write(path: Path, body: dict, *, immutable: bool = True) -> dict:
+    value = seal(body)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if immutable and path.exists():
+        if read(path) != value:
+            raise ValueError("immutable artifact differs: " + str(path))
+        return value
+    temporary = path.with_suffix(path.suffix + ".partial")
+    with temporary.open("w", encoding="utf-8") as stream:
+        stream.write(canonical_json(value) + "\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, path)
+    descriptor = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    return value
+
+
+def body(value: dict) -> dict:
+    return {k: v for k, v in value.items() if k != "artifact_sha256"}
+
+
+def task_id(manifest: contract.Manifest, physical_snapshots: dict | None = None) -> str:
+    # Changing Registry state/created_at/output directories cannot reset calls.
+    authorization = json.loads(contract.bound_bytes(manifest.authorization, physical_snapshots))
+    return "SR-" + sha256_json({"version": contract.VERSION, "source_id": manifest.source_id,
+        "before": manifest.before_source.file_sha256,
+        "after": sorted(b.file_sha256 for b in manifest.current_sources),
+        "authorization_id": authorization.get("authorization_id"),
+        "membership": manifest.accepted_membership.file_sha256})
+
+
+@contextmanager
+def exclusive(root: Path):
+    root.mkdir(parents=True, exist_ok=True)
+    with (root / "worker.lock").open("a+") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise Stop("another worker owns this update", status="busy", waiting_for="system") from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+class Ports(Protocol):
+    """Production implementation lives in source_reconciliation_runtime."""
+    def snapshot(self) -> dict[str, dict]: ...
+    def adapter(self, stage: str) -> Any: ...
+    def plan(self, package: dict) -> dict: ...
+    def backup(self, root: Path) -> dict: ...
+    def committed(self, plan: dict) -> bool: ...
+    def apply(self, package: dict, plan: dict, frozen: dict) -> dict: ...
+    def readback(self, plan: dict, expected: dict[str, dict], before: dict[str, dict]) -> dict[str, dict]: ...
+    def audit(self, root: Path, claim_ids: list[str], viewpoint_ids: list[str]) -> dict: ...
+    def audit_saved(self, root: Path, claim_ids: list[str], viewpoint_ids: list[str]) -> dict: ...
+    def validate_audit(self, result: dict, claim_ids: list[str], viewpoint_ids: list[str]) -> None: ...
+
+
+class Runner:
+    def __init__(self, workspace: Path, ports: Ports):
+        self.workspace, self.ports = workspace.resolve(), ports
+        self.root: Path | None = None
+
+    def state(self, status: str, *, waiting_for: str = "system", next_action: str, **extra) -> dict:
+        return write(self.root / "state.json", {"status": status, "waiting_for": waiting_for,
+            "next_action": next_action, "production_resumed": False, **extra}, immutable=False)
+
+    def prepare(self, manifest: contract.Manifest) -> dict:
+        self.root = self.workspace / task_id(manifest)
+        with exclusive(self.root):
+            if (self.root / "frozen.json").exists():
+                frozen = body(read(self.root / "frozen.json"))
+                if frozen["manifest"] != manifest.model_dump():
+                    raise Stop("same authorized source update has different input; budget not reset")
+                contract.guard_files(frozen)
+                return frozen
+            frozen = contract.freeze(manifest, self.ports.snapshot())
+            write(self.root / "frozen.json", frozen)
+            # Exact physical source versions survive later edits to the live
+            # transcript. This is a content-addressed archive, not a new source.
+            for b in [manifest.before_source, *manifest.current_sources]:
+                archive = self.workspace / "source-versions" / (b.file_sha256 + ".json")
+                raw = contract.bound_bytes(b, frozen["physical_snapshots"])
+                archive.parent.mkdir(parents=True, exist_ok=True)
+                if archive.exists():
+                    if archive.read_bytes() != raw:
+                        raise ValueError("immutable physical source archive drift")
+                else:
+                    # Exclusive creation prevents overwriting another task's archive.
+                    with archive.open("xb") as output:
+                        output.write(raw)
+                        output.flush()
+                        os.fsync(output.fileno())
+            self.state("prepared", next_action="run the bounded proposal/review workflow")
+            return frozen
+
+    def guard(self, frozen: dict, *, committed: bool = False) -> None:
+        contract.guard_files(frozen)
+        if not committed and contract.fingerprint(self.ports.snapshot()) != frozen["registry_sha256"]:
+            raise Stop("Registry changed since freeze; no model or write replay", status="proof_failure", waiting_for="system")
+
+    def call(self, stage: str, packet: dict) -> dict:
+        # The codec's first-occurrence dictionary must see the same key order
+        # before persistence and after recovery, not only the same JSON hash.
+        packet = json.loads(canonical_json(packet))
+        if stage not in STAGES:
+            raise ValueError("unknown model stage")
+        adapter = self.ports.adapter(stage)
+        expected = ("claude-opus-5-5", "claude_subscription") if "review" in stage else ("gpt-6.1-sol", "codex_subscription")
+        if (adapter.model_id, adapter.backend) != expected:
+            raise Stop("model/backend differs from frozen subscription policy", status="proof_failure", waiting_for="system")
+        proof = adapter.request_encoding_proof(packet)
+        size = adapter.request_bytes(packet)
+        if (size > 500000 or not proof or proof.get("exact_roundtrip_verified") is not True
+                or proof["semantic_payload_sha256"] != sha256_json(packet)
+                or proof["restored_payload_sha256"] != sha256_json(packet)):
+            raise Stop("actual request exceeds 500000 or lossless encoding failed", status="proof_failure", waiting_for="system")
+        request = {"model_id": adapter.model_id, "backend": adapter.backend,
+            "prompt_sha256": adapter.prompt_sha256, "generation_config_sha256": adapter.generation_config_sha256,
+            "request_payload_sha256": sha256_json(packet), "request_encoding_proof": proof,
+            "request_bytes": size, "stage": stage, "automatic_retry": False}
+        raw_path = self.root / (stage + ".raw.json")
+        reservation = self.root / (stage + ".reservation.json")
+        write(self.root / (stage + ".packet.json"), packet)
+        if raw_path.exists():
+            raw = read(raw_path)
+            if any(raw.get(k) != v for k, v in request.items()) or raw["response_sha256"] != sha256_json(raw["response"]):
+                raise Stop("cached model request/response identity drift", status="proof_failure", waiting_for="system")
+            if not reservation.exists() or body(read(reservation)) != request:
+                raise Stop("cached model reservation missing", status="proof_failure", waiting_for="system")
+            return raw
+        if reservation.exists():
+            raise Stop("reserved call has no verified reply; do not repeat", status="call_uncertain", waiting_for="system")
+        # Persist the reservation before any side effect. Errors do not reset it.
+        write(reservation, request)
+        self.state(stage, next_action="await the single subscription response")
+        try:
+            response = dict(adapter.generate(packet))
+        except Exception as exc:
+            write(self.root / (stage + ".failure.json"), {"error": str(exc), "automatic_retry": False,
+                "provider_raw": getattr(adapter._client, "last_raw_response", None)})
+            raise Stop("subscription call failed; original reservation retained", status="model_failed", waiting_for="owner") from exc
+        provider_raw = getattr(adapter._client, "last_raw_response", None)
+        executable = getattr(adapter._client, "executable", None)
+        runtime_identity = getattr(adapter._client, "cli_identity", None)
+        if executable:
+            import shutil
+            actual = Path(shutil.which(executable) or executable).resolve(strict=True)
+            runtime_identity = {"executable": str(actual), "file_sha256": contract.file_sha256(actual),
+                "model_id": adapter.model_id, "backend": adapter.backend, "reasoning_effort": adapter._client.reasoning_effort,
+                "cli_identity": runtime_identity}
+        return write(raw_path, {**request, "response": response, "response_sha256": sha256_json(response),
+            "provider_raw": provider_raw, "provider_raw_sha256": sha256_json(provider_raw), "runtime_identity": runtime_identity,
+            "completed_at": datetime.now(timezone.utc).isoformat()})
+
+    def reviewed(self, frozen: dict) -> tuple[contract.Proposal, dict]:
+        if frozen["inventory"]["unknown_keys"]:
+            raise Stop("unknown affected consumer requires a proven schema adapter; no model calls", status="proof_failure", waiting_for="system")
+        packet = build_proposal_packet(frozen)
+        self.guard(frozen)
+        raw = self.call("proposal", packet)
+        proposed = contract.Proposal.model_validate(raw["response"])
+        review_packet = contract.review_packet(frozen, proposed)
+        self.guard(frozen)
+        initial = self.call("initial_review", review_packet)
+        if contract.validate_review(review_packet, initial["response"]):
+            return proposed, initial
+        # Exactly one correction, never an extra GPT preapproval/review stage.
+        correction_packet = {**packet, "initial_proposal": proposed.model_dump(), "Opus_review": initial["response"],
+                             "correction_round": 1, "another_correction_allowed": False}
+        self.guard(frozen)
+        correction = self.call("correction", correction_packet)
+        proposed = contract.Proposal.model_validate(correction["response"])
+        review_packet = contract.review_packet(frozen, proposed)
+        self.guard(frozen)
+        final = self.call("final_review", review_packet)
+        if not contract.validate_review(review_packet, final["response"]):
+            write(self.root / "needs-owner.json", {"reason": "terminal Opus disagreement",
+                "review": final, "proposal": proposed.model_dump(), "correction_budget_exhausted": True,
+                "source_update_id": frozen["update_id"]})
+            raise Stop("terminal Opus review rejected/unresolved; no second correction")
+        return proposed, final
+
+    def run(self, manifest: contract.Manifest, *, apply: bool = False, audit: bool = False) -> dict:
+        self.prepare(manifest)
+        with exclusive(self.root):
+            try:
+                frozen = body(read(self.root / "frozen.json"))
+                before = contract.index(frozen["before_records"])
+                contract.guard_files(frozen)
+                if (self.root / "complete.json").exists():
+                    result = read(self.root / "complete.json")
+                    self.verify_completion(result, frozen)
+                    return result
+                if (self.root / "effective-package.json").exists():
+                    package = body(read(self.root / "effective-package.json"))
+                    validate_package(package)
+                else:
+                    proposed, raw = self.reviewed(frozen)
+                    package = contract.compile_package(frozen, proposed, raw)
+                    package["source_repair_application"] = {"schema_version": contract.VERSION,
+                        "run_root": str(self.root), "terminal_stage": raw["stage"],
+                        "frozen_sha256": read(self.root / "frozen.json")["artifact_sha256"],
+                        "review_sha256": raw["artifact_sha256"], "proposal_sha256": sha256_json(proposed.model_dump())}
+                    write(self.root / "effective-package.json", package)
+                intent = self.root / "apply-intent.json"
+                if (self.root / "plan.json").exists():
+                    plan = body(read(self.root / "plan.json"))
+                else:
+                    self.guard(frozen)
+                    plan = self.ports.plan(package)
+                    contract.assert_plan_postimages(package, plan, before)
+                    write(self.root / "plan.json", plan)
+                post = contract.assert_plan_postimages(package, plan, before)
+                committed = self.ports.committed(plan)
+                if committed and not intent.exists():
+                    raise Stop("database commit exists without this task's apply intent", status="proof_failure", waiting_for="system")
+                if not committed:
+                    if intent.exists():
+                        raise Stop("apply intent exists without proven commit; no blind replay", status="apply_uncertain", waiting_for="system")
+                    self.guard(frozen)
+                    if not apply:
+                        return self.state("reviewed_not_applied", waiting_for="operator", next_action="execute with --apply within existing bounded authorization; no new content approval required")
+                    backup = body(read(self.root / "backup.json")) if (self.root / "backup.json").exists() else self.ports.backup(self.root)
+                    contract.verify_file(backup["dump"])
+                    if backup.get("restore_catalog_nonempty") is not True:
+                        raise Stop("backup is not restore-list verified", status="proof_failure", waiting_for="system")
+                    write(self.root / "backup.json", backup)
+                    self.guard(frozen)
+                    if self.ports.plan(package) != plan:
+                        raise Stop("dry-run changed before commit", status="proof_failure", waiting_for="system")
+                    write(intent, {"plan_sha256": sha256_json(plan), "package_sha256": sha256_json(package),
+                                   "backup_sha256": read(self.root / "backup.json")["artifact_sha256"], "single_apply_required": True})
+                    self.state("applying", next_action="query actual ChangeSet before any recovery")
+                    receipt = self.ports.apply(package, plan, frozen)
+                    if receipt.get("status") != "applied":
+                        raise Stop("write did not prove a committed ChangeSet", status="apply_uncertain", waiting_for="system")
+                    write(self.root / "apply-receipt.json", receipt)
+                    if not self.ports.committed(plan):
+                        raise Stop("receipt not confirmed by database", status="proof_failure", waiting_for="system")
+                # Even after a crash between SQL commit and receipt, never apply again.
+                current = self.ports.readback(plan, post, before)
+                contract.guard_files(frozen)
+                write(self.root / "readback.json", {"change_set_id": plan["change_set_id"],
+                    "post_records": contract.rows(current), "post_fingerprint_sha256": contract.fingerprint(current),
+                    "source_files_verified": True})
+                if not audit:
+                    return self.state("committed_waiting_audit", next_action="perform complete affected independent audit")
+                jobs = audit_jobs(frozen, current)
+                outcomes = []
+                for job in jobs:
+                    job_root = self.root / "audits" / sha256_json(job)
+                    job_root.mkdir(parents=True, exist_ok=True)
+                    if (job_root / "result.json").exists():
+                        outcome = body(read(job_root / "result.json"))
+                    else:
+                        # Runtime may consume an already saved complete report, but
+                        # this reservation never permits an unknown model replay.
+                        fresh = not (job_root / "intent.json").exists()
+                        write(job_root / "intent.json", job)
+                        self.state("committed_waiting_audit", next_action="await independent audit", audit_job=job)
+                        outcome = self.ports.audit(job_root, job["claim_ids"], job["viewpoint_ids"]) if fresh else self.ports.audit_saved(job_root, job["claim_ids"], job["viewpoint_ids"])
+                        self.ports.validate_audit(outcome, job["claim_ids"], job["viewpoint_ids"])
+                        write(job_root / "result.json", outcome)
+                    self.ports.validate_audit(outcome, job["claim_ids"], job["viewpoint_ids"])
+                    outcomes.append({"job": job, "result": outcome,
+                                     "binding": binding(job_root / "result.json")})
+                contract.guard_files(frozen)
+                self.ports.readback(plan, post, before)
+                result = write(self.root / "complete.json", {"status": "audited_complete",
+                    "update_id": frozen["update_id"], "change_set_id": plan["change_set_id"],
+                    "source_epoch": [b.model_dump() for b in manifest.current_sources],
+                    "audits": outcomes, "affected_group_keys": [j["group_key"] for j in jobs if j["group_key"]],
+                    "bindings": [binding(self.root / n) for n in ("frozen.json", "effective-package.json", "plan.json", "apply-intent.json", "backup.json", "readback.json")],
+                    "campaign_membership_changed": False, "production_resumed": False,
+                    "revisit_required": any(j["revisit_required"] or o["result"].get("revisit_required", False) for j, o in zip(jobs, outcomes)),
+                    "independent_audit_complete": all(j["independent_audit_complete"] and o["result"].get("independent_audit_complete", False) for j, o in zip(jobs, outcomes))})
+                self.state("audited_complete", waiting_for="none", next_action="completion available; campaign restart is a separate explicit action")
+                return result
+            except Stop as exc:
+                self.state(exc.status, waiting_for=exc.waiting_for, next_action=str(exc))
+                raise
+            except Exception as exc:
+                self.state("proof_failure", waiting_for="system", next_action=str(exc))
+                raise
+
+    def verify_completion(self, result: dict, frozen: dict) -> None:
+        if result["update_id"] != frozen["update_id"] or result["status"] != "audited_complete":
+            raise Stop("completion belongs to another epoch", status="proof_failure", waiting_for="system")
+        for b in result["bindings"]:
+            contract.verify_file(b)
+        plan = body(read(self.root / "plan.json"))
+        if not self.ports.committed(plan):
+            raise Stop("completed ChangeSet not actually committed", status="proof_failure", waiting_for="system")
+        package = body(read(self.root / "effective-package.json"))
+        validate_package(package)
+        before = contract.index(frozen["before_records"])
+        post = contract.assert_plan_postimages(package, plan, before)
+        validate_completion_population(result, frozen, post)
+        self.ports.readback(plan, post, before)
+        for outcome in result["audits"]:
+            contract.verify_file(outcome["binding"])
+            job = outcome["job"]
+            self.ports.validate_audit(outcome["result"], job["claim_ids"], job["viewpoint_ids"])
+
+
+def binding(path: Path) -> dict:
+    return {"path": str(path.resolve()), "file_sha256": contract.file_sha256(path)}
+
+
+def build_proposal_packet(frozen: dict) -> dict:
+    selected = frozen["inventory"]["affected_keys"] + frozen["inventory"]["context_keys"]
+    states = contract.index(frozen["before_records"])
+    return {"schema_version": contract.VERSION, "update_id": frozen["update_id"],
+        "manifest": frozen["manifest"], "before_source": frozen["before"], "current_sources": frozen["after"],
+        "context_sources": frozen.get("context_sources", []), "sentence_inventory": frozen["sentence_inventory"],
+        "inventory": frozen["inventory"], "records": contract.rows({k: states[k] for k in selected})}
+
+
+def validate_completion_population(result: dict, frozen: dict, post: dict) -> None:
+    jobs = audit_jobs(frozen, post)
+    outcomes = result["audits"]
+    if ([o["job"] for o in outcomes] != jobs
+            or result["affected_group_keys"] != [j["group_key"] for j in jobs if j["group_key"]]
+            or result["source_epoch"] != frozen["manifest"]["current_sources"]
+            or result["production_resumed"] is not False or result["campaign_membership_changed"] is not False):
+        raise ValueError("completion affected audit denominator/source/membership drift")
+    required = {"frozen.json", "effective-package.json", "plan.json", "apply-intent.json", "backup.json", "readback.json"}
+    if {Path(b["path"]).name for b in result["bindings"]} != required or len(result["bindings"]) != len(required):
+        raise ValueError("completion proof denominator drift")
+    for outcome in outcomes:
+        if body(read(contract.verify_file(outcome["binding"]))) != outcome["result"]:
+            raise ValueError("completion audit result differs from its exact artifact")
+    revisit = any(j["revisit_required"] or o["result"].get("revisit_required", False) for j, o in zip(jobs, outcomes))
+    independent = all(j["independent_audit_complete"] and o["result"].get("independent_audit_complete", False) for j, o in zip(jobs, outcomes))
+    if result["revisit_required"] != revisit or result["independent_audit_complete"] != independent:
+        raise ValueError("completion cannot upgrade temporary audit exceptions")
+
+
+def audit_jobs(frozen: dict, current: dict[str, dict]) -> list[dict]:
+    changed = {split[1] for k in frozen["inventory"]["affected_keys"]
+               if (split := contract.split_key(k))[0] == "claims"}
+    jobs, covered = [], set()
+    affected_viewpoints = {contract.split_key(k)[1] for k in frozen["inventory"]["affected_keys"] if k.startswith("canonical_viewpoints/")}
+    for group in contract.Manifest.model_validate(frozen["manifest"]).groups:
+        if not changed.intersection(group.claim_ids) and not affected_viewpoints.intersection(group.viewpoint_ids):
+            continue
+        viewpoints = set(group.viewpoint_ids) | {p["viewpoint_id"] for k, p in current.items()
+            if k.startswith("viewpoint_claim_links/") and p["claim_id"] in group.claim_ids and p.get("effective_state", "active") == "active"}
+        jobs.append({"group_key": group.group_key, "claim_ids": sorted(group.claim_ids),
+                     "viewpoint_ids": sorted(viewpoints), "revisit_required": group.revisit_required,
+                     "independent_audit_complete": group.independent_audit_complete})
+        covered.update(group.claim_ids)
+    if changed - covered:
+        remaining = sorted(changed - covered)
+        viewpoints = sorted({p["viewpoint_id"] for k, p in current.items()
+                             if k.startswith("viewpoint_claim_links/") and p["claim_id"] in remaining})
+        jobs.append({"group_key": None, "claim_ids": remaining, "viewpoint_ids": viewpoints,
+                     "revisit_required": False, "independent_audit_complete": True})
+    if not jobs:
+        raise Stop("source update has no verifiable affected Claim audit population")
+    return jobs
+
+
+def validate_package(package: dict, *, historical: bool = False) -> None:
+    """Store-side reconstruction; supplied approval booleans are not authority."""
+    app = package.get("source_repair_application", {})
+    if app.get("schema_version") != contract.VERSION:
+        raise ValueError("unknown source reconciliation contract")
+    root = Path(app.get("run_root", ""))
+    if not root.is_absolute():
+        raise ValueError("reconciliation proof root must be absolute")
+    frozen_artifact = read(root / "frozen.json")
+    frozen = body(frozen_artifact)
+    if contract.freeze(contract.Manifest.model_validate(frozen["manifest"]), contract.index(frozen["before_records"]),
+                       physical_snapshots=frozen["physical_snapshots"]) != frozen:
+        raise ValueError("frozen source/inventory/authorization reconstruction drift")
+    if root.name != task_id(contract.Manifest.model_validate(frozen["manifest"]), frozen["physical_snapshots"]) or app.get("frozen_sha256") != frozen_artifact["artifact_sha256"]:
+        raise ValueError("reconciliation task/input identity drift")
+    contract.guard_files(frozen, historical=historical)
+    stage = app.get("terminal_stage")
+    if stage not in {"initial_review", "final_review"}:
+        raise ValueError("non-terminal stage cannot approve")
+    packet = body(read(root / (stage + ".packet.json")))
+    raw = read(root / (stage + ".raw.json"))
+    expected = validate_raw(root, stage, packet)
+    proposal = contract.Proposal.model_validate(packet["proposal"])
+    if packet != contract.review_packet(frozen, proposal) or not contract.validate_review(packet, raw["response"]):
+        raise ValueError("terminal complete postimage review invalid")
+    # Authenticate proposal and correction chain. A final reply cannot bypass initial review.
+    proposal_packet = body(read(root / "proposal.packet.json"))
+    if proposal_packet != build_proposal_packet(frozen):
+        raise ValueError("proposal omitted/changed frozen source or consumer context")
+    first = validate_raw(root, "proposal", proposal_packet)
+    if stage == "initial_review":
+        if first["response"] != proposal.model_dump():
+            raise ValueError("initial review is not of the actual proposal")
+    else:
+        initial_packet = body(read(root / "initial_review.packet.json"))
+        initial = validate_raw(root, "initial_review", initial_packet)
+        if initial_packet != contract.review_packet(frozen, contract.Proposal.model_validate(first["response"])) or contract.validate_review(initial_packet, initial["response"]):
+            raise ValueError("correction must follow one genuine initial disagreement")
+        correction_packet = body(read(root / "correction.packet.json"))
+        if correction_packet != {**proposal_packet, "initial_proposal": first["response"], "Opus_review": initial["response"], "correction_round": 1, "another_correction_allowed": False}:
+            raise ValueError("correction chain drift")
+        correction = validate_raw(root, "correction", correction_packet)
+        if correction["response"] != proposal.model_dump():
+            raise ValueError("terminal review is not of actual correction")
+    if expected["artifact_sha256"] != app.get("review_sha256") or sha256_json(proposal.model_dump()) != app.get("proposal_sha256"):
+        raise ValueError("final review/proposal provenance drift")
+    rebuilt = contract.compile_package(frozen, proposal, raw)
+    if {k: v for k, v in package.items() if k != "source_repair_application"} != rebuilt:
+        raise ValueError("package differs from exactly reviewed records/provenance")
+
+
+def validate_raw(root: Path, stage: str, packet: dict) -> dict:
+    from backend.pipeline.source_reconciliation_runtime import model_adapter
+    adapter = model_adapter(stage)  # Construction is local; never invokes login/models.
+    raw = read(root / (stage + ".raw.json"))
+    reservation = body(read(root / (stage + ".reservation.json")))
+    proof = adapter.request_encoding_proof(packet)
+    expected = {"model_id": adapter.model_id, "backend": adapter.backend,
+        "prompt_sha256": adapter.prompt_sha256, "generation_config_sha256": adapter.generation_config_sha256,
+        "request_payload_sha256": sha256_json(packet), "request_encoding_proof": proof,
+        "request_bytes": adapter.request_bytes(packet), "stage": stage, "automatic_retry": False}
+    if expected["request_bytes"] > 500000 or expected != reservation or any(raw.get(k) != v for k, v in expected.items()) or raw["response_sha256"] != sha256_json(raw["response"]):
+        raise ValueError("actual model/backend/prompt/schema/wire/raw binding drift")
+    if raw.get("provider_raw_sha256") != sha256_json(raw.get("provider_raw")):
+        raise ValueError("original subscription response drift")
+    if datetime.fromisoformat(raw["completed_at"]).utcoffset() is None:
+        raise ValueError("actual review completion time requires timezone")
+    identity = raw.get("runtime_identity")
+    if identity is not None and (identity["model_id"] != adapter.model_id or identity["backend"] != adapter.backend
+            or identity["reasoning_effort"] != "high" or not identity["file_sha256"]):
+        raise ValueError("actual executable/model/effort identity drift")
+    return raw
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--manifest", type=Path, required=True)
+    parser.add_argument("--prepare-only", action="store_true")
+    parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--audit", action="store_true")
+    args = parser.parse_args()
+    from dotenv import load_dotenv
+    from backend.pipeline.source_reconciliation_runtime import ProductionPorts, workspace, maintenance_lock
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+    manifest = contract.Manifest.model_validate_json(args.manifest.read_text(encoding="utf-8"))
+    runner = Runner(workspace(), ProductionPorts())
+    with maintenance_lock():
+        result = runner.prepare(manifest) if args.prepare_only else runner.run(manifest, apply=args.apply, audit=args.audit)
+    print(canonical_json({"task_root": str(runner.root), "status": result.get("status", "prepared"), "production_resumed": False}))
+
+
+if __name__ == "__main__":
+    main()

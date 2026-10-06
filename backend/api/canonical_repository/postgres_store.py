@@ -5289,6 +5289,16 @@ class PostgresKnowledgeStore:
         ] = None,
     ) -> dict[str, Any]:
         source_queue_context = _claim_evidence_source_queue_context
+        if plan.source_kind == "wang_source_reconciliation_v1":
+            from backend.pipeline.source_reconciliation_runtime import validate_apply_plan
+            frozen_registry_sha256 = validate_apply_plan(plan, metadata)
+            if (expected_registry_fingerprint_sha256 is not None
+                    and expected_registry_fingerprint_sha256 != frozen_registry_sha256):
+                raise ValueError("source reconciliation Registry guard differs from reviewed freeze")
+            # Every entry point, not only the CLI, guards the complete frozen
+            # read set inside the existing advisory-locked SQL transaction.
+            expected_registry_fingerprint_sha256 = frozen_registry_sha256
+            registry_collections = tuple(KNOWLEDGE_COLLECTIONS)
         if plan.source_kind in CLAIM_EVIDENCE_SOURCE_QUEUE_SOURCE_KINDS:
             if (
                 source_queue_context is None
