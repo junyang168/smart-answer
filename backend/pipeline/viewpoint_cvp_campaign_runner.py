@@ -167,7 +167,10 @@ def discover_selection(group, inventory, random_spot_check_policy=None):
         batch = candidate.parent.parent
         review_path = batch / "reviews" / (name + ".independent-review.json")
         review = read(review_path)
-        input_path = Path(review["source"]["package_path"])
+        from backend.pipeline.viewpoint_lineage_inventory import bound_review_input
+        input_path = bound_review_input(review)
+        if input_path is None:
+            raise ValueError(f'{cid}: missing or ambiguous SHA-bound historical review input')
         row = {"claim_id": cid, "review_binding": binding(review_path), "review_input_binding": binding(input_path)}
         if variant['contract'] == 'requires_historical_proof_adapter':
             row['legacy_reviewed_candidate_binding'] = binding(candidate)
@@ -243,8 +246,9 @@ def build_selection(group, inventory, root, random_spot_check_policy=None, sourc
             raise ValueError(f'{cid}: inventory candidate file SHA drift')
         name = candidate.name.removesuffix('.reviewed-candidate.json')
         review = read(candidate.parent.parent/'reviews'/(name+'.independent-review.json'))
-        path = Path(review['source']['package_path'])
-        if not path.is_file() or binding(path)['file_sha256'] != review['source']['package_sha256']:
+        from backend.pipeline.viewpoint_lineage_inventory import bound_review_input
+        path = bound_review_input(review)
+        if path is None:
             missing.add(cid)
     if missing:
         from dotenv import load_dotenv

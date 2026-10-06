@@ -4,6 +4,37 @@ import pytest
 
 from backend.pipeline.viewpoint_cvp_campaign_runner import validate_audit, validate_schedule
 
+@pytest.mark.parametrize('mutation', [None, 'missing', 'wrong_sha', 'ambiguous'])
+def test_legacy_merge_discovery_binds_original_archived_input(tmp_path, mutation):
+    import json
+    from backend.pipeline.viewpoint_cvp_campaign_runner import discover_selection, binding
+    candidate = tmp_path/'reviewed/source.reviewed-candidate.json'
+    candidate.parent.mkdir()
+    candidate.write_text('{}')
+    current = tmp_path/'cross-section/source.cross-section.json'
+    current.parent.mkdir()
+    current.write_text('{"generation":"later"}')
+    archived = current.parent/'generations/source.cross-section.old.json'
+    archived.parent.mkdir()
+    archived.write_text('{"generation":"reviewed"}')
+    pin = binding(archived)['file_sha256']
+    review_path = tmp_path/'reviews/source.independent-review.json'
+    review_path.parent.mkdir()
+    review_path.write_text(json.dumps({'source': {'package_path':str(current), 'package_sha256':pin}}))
+    if mutation == 'missing': archived.unlink()
+    elif mutation == 'wrong_sha': archived.write_text('{"generation":"unreviewed"}')
+    elif mutation == 'ambiguous': archived.with_name('source.cross-section.copy.json').write_bytes(archived.read_bytes())
+    inventory = {'C1': {'variants': [{'path':str(candidate), 'file_sha256':binding(candidate)['file_sha256'],
+                 'contract':'requires_historical_proof_adapter', 'changed_substantive_fields':['evidence_step_ids']}]}}
+    if mutation:
+        with pytest.raises(ValueError, match='SHA-bound historical review input'):
+            discover_selection({'claim_ids':['C1']}, inventory)
+    else:
+        selected, sealed = discover_selection({'claim_ids':['C1']}, inventory)
+        assert selected[0]['review_input_binding'] == binding(archived)
+        assert selected[0]['legacy_reviewed_candidate_binding'] == binding(candidate)
+        assert sealed == []  # Discovery alone never grants sealed approval.
+
 @pytest.mark.parametrize('role,suffix',[('adjudication','ai-adjudication'),('adjudication','adjudication'),
     ('overrides','consensus-overrides'),('overrides','overrides')])
 def test_sealed_artifact_filename_variants_require_exact_bytes(tmp_path,role,suffix):

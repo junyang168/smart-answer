@@ -165,6 +165,13 @@ def inspect_legacy_bundle(path: Path, *, validation_claim_ids: set[str] | None =
         named = str((review.get("source") or {}).get("package_path") or "")
         if named and Path(named).is_absolute():
             candidates.add(Path(named))
+        # A passing merge recipient still requires the complete original
+        # application replay. Locate the exact reviewed generation, not the
+        # later overwritten package at its historical logical path.
+        from backend.pipeline.viewpoint_lineage_inventory import bound_review_input
+        archived = bound_review_input(review)
+        if archived is not None:
+            candidates.add(archived)
         matching = sorted(p for p in candidates if p.is_file() and _sha(p) == stated_package_sha)
         if len(matching) != 1:
             result["reason"] = "review_package_missing_or_ambiguous"
