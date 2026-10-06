@@ -60,6 +60,8 @@ def completion_from_saved_audit(sequence, audit_path, output, resolution_path=No
     if len(matches) != 1:
         raise ValueError('exact previous completed group proof not unique')
     old = matches[0]
+    scope, _, _, _ = repair.reviewed_inputs()
+    _, historic_source_bindings = repair.historical_seed_projection(old,scope)
     audit = read_artifact(audit_path)
     original = ROOT/f'g{sequence:03d}-audit/independent-reaudit/audit.json'
     if Path(audit_path) not in {original,ROOT/f'g{sequence:03d}-audit/content-blocked-fallback/assessment.json'}:
@@ -76,7 +78,8 @@ def completion_from_saved_audit(sequence, audit_path, output, resolution_path=No
     fresh.update(audit_path=str(audit_path), claim_audit_path=str(audit_path),
                  source_epoch_recompletion=True,source_repair_binding=epoch.binding(),
                  replaces_original_completion_sha256=repair.sha256_json(old),
-                 bindings=old['bindings']+[binding(audit_path),*proofs,
+                 historical_changed_source_bindings=historic_source_bindings,
+                 bindings=[b for b in old['bindings'] if b not in historic_source_bindings]+[binding(audit_path),*proofs,
                     *read_artifact(repair.APPLICATION_ROOT/'verified-result.json')['bindings'],
                     binding(repair.APPLICATION_ROOT/'verified-result.json')])
     # Never inherit a prior source-epoch arbitration as approval of new input.

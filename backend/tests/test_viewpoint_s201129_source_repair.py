@@ -151,3 +151,24 @@ def test_source_audit_cannot_complete_pending_or_unaffected_group(sequence,tmp_p
     from backend.pipeline import viewpoint_s201129_source_continuation as worker
     with pytest.raises(ValueError,match='two already-completed'):
         worker.completion_from_saved_audit(sequence,tmp_path/'audit.json',tmp_path/'output')
+
+
+@pytest.mark.parametrize('mutation',[None,'wrong_old','wrong_current','other_group','foreign_path'])
+def test_historical_source_pin_projection_is_not_current_audit_approval(monkeypatch,mutation):
+    path=str(repair.BASE.parents[2]/'script_review/S 201129.json')
+    row={'path':path,'file_sha256':'old'}
+    seed={'group_key':'p023:wife_clause_passive_forced_remarriage','bindings':[row],
+          'audit_path':'/original/audit.json'}
+    scope={'registry_source_before':{'source_file_sha256':'old'},'source_files':{'review':'new','published':'pub'}}
+    monkeypatch.setattr(repair,'file_sha256',lambda p:'wrong' if mutation=='wrong_current' else 'new')
+    if mutation=='wrong_old':row['file_sha256']='foreign'
+    if mutation=='other_group':seed['group_key']='unaffected'
+    if mutation=='foreign_path':row['path']='/another/source'
+    original=deepcopy(seed)
+    if mutation in {'wrong_old','wrong_current','other_group'}:
+        with pytest.raises(ValueError):repair.historical_seed_projection(seed,scope)
+    else:
+        checked,changes=repair.historical_seed_projection(seed,scope)
+        assert seed==original and checked['audit_path']=='/original/audit.json'
+        if mutation=='foreign_path':assert changes==[] and checked==seed
+        else:assert changes==[row] and checked['bindings'][0]['file_sha256']=='new'

@@ -26,7 +26,7 @@ VERSION = 'wang_s201129_owner_opus_source_reconciliation_v1'
 PROJECT = Path(__file__).resolve().parents[2]
 BASE = Path('/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/staging/cvp-production-357')
 REVIEW_ROOT = BASE/'s201129-owner-preserve-human-hold-20261006-v1'
-APPLICATION_ROOT = BASE/'s201129-owner-opus-reviewed-source-apply-20261006-v1'
+APPLICATION_ROOT = BASE/'s201129-owner-opus-reviewed-source-apply-20261006-v2'
 PACKAGE = APPLICATION_ROOT/'effective-package.json'
 SOURCE = 'SRC-S_201129-3b3ae033645d'
 CAMPAIGN = BASE/'campaign-recovery-2fc29744d5b0204c7b1e472f1f0e0862a914c4ab2e1ee0c4742935aeb699914f-recovery-cfb58a2570d6-recovery-9b5039675be7-recovery-70522204e72b-recovery-dfe291992426-recovery-1e7557c492fc-recovery-2503db96ea62'
@@ -51,6 +51,35 @@ PINS = {
 
 def binding(path):
     return {'path': str(path), 'file_sha256': file_sha256(path)}
+
+
+def historical_seed_projection(seed, scope):
+    """Authenticate old membership without declaring old audits current.
+
+    Only the single explicitly reviewed old-to-new physical source transition
+    can be projected for prerequisite checking. Old proofs are never rewritten;
+    fresh complete affected-group audits are required before a new seed exists.
+    """
+    projected = deepcopy(seed)
+    changed = []
+    original = scope['registry_source_before']['source_file_sha256']
+    paths = {str(BASE.parents[2]/folder/'S 201129.json'):scope['source_files'][label]
+             for label,folder in [('review','script_review'),('published','script_published')]}
+    for index, row in enumerate(seed['bindings']):
+        if row['path'] not in paths:
+            continue
+        expected = paths[row['path']]
+        if row['file_sha256'] == expected:
+            continue
+        if row['file_sha256'] != original or file_sha256(Path(row['path'])) != expected:
+            raise ValueError('historical seed source transition outside exact reviewed epoch')
+        changed.append(deepcopy(row))
+        projected['bindings'][index] = {'path':row['path'],'file_sha256':expected}
+    if changed and seed['group_key'] not in {
+            'p023:wife_clause_passive_forced_remarriage',
+            'p023:marrying_man_passive_and_matt19_omission'}:
+        raise ValueError('source transition found another affected completed group; audit scope must be explicit')
+    return projected, changed
 
 
 def _module(name, path, pin):
@@ -288,7 +317,8 @@ def apply_reviewed():
         group_rows = {g['group_key']:g for g in manifest['groups']}
         completed = set()
         for seed in seeds:
-            completed.update(validate_completed_parent_audit(seed,group_rows))
+            projected, _ = historical_seed_projection(seed,scope)
+            completed.update(validate_completed_parent_audit(projected,group_rows))
         if len(seeds) != 41 or len(completed) != 228:
             raise ValueError('previous completed 41/228 denominator drift')
         completed_repair_parent_snapshot(manifest,records,[*priors,package],completed,set())
