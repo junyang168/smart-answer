@@ -168,9 +168,10 @@ def rows(states: dict[str, dict]) -> list[dict]:
             for k, p in sorted(states.items())]
 
 
-def fingerprint(states: dict[str, dict]) -> str:
-    # Same content fingerprint as the SQL writer (revision is metadata).
-    collections = sorted({split_key(k)[0] for k in states})
+def fingerprint(states: dict[str, dict], *, collections: list[str] | None = None) -> str:
+    # Bind even currently empty collections: inserting a record there after
+    # review must be detected by the advisory-locked SQL boundary too.
+    collections = sorted(set(KNOWLEDGE_COLLECTIONS) | {split_key(k)[0] for k in states}) if collections is None else sorted(collections)
     return sha256_json({c: sorted(sha256_json(p) for k, p in states.items()
                                  if split_key(k)[0] == c) for c in collections})
 

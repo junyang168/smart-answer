@@ -664,3 +664,28 @@ def test_epoch_membership_validates_full_proof_but_preserves_partial_caller_popu
     assert set(restored) == set(partial) and changed == ["CL-test"]
     assert restored["claims", "CL-test"]["payload"] == scenario[1]["claims/CL-test"]
     assert ports.applies == 1 and ports.calls == ["proposal", "initial_review"]
+
+
+def test_frozen_registry_fingerprint_matches_sql_including_empty_collections(scenario):
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    _, states, _ = scenario
+    class Cursor:
+        def execute(self, sql, parameters):
+            self.collection = parameters[0]
+        def fetchall(self):
+            return [(p,) for k, p in states.items() if c.split_key(k)[0] == self.collection]
+    PostgresKnowledgeStore._assert_registry_fingerprint(Cursor(), expected_sha256=c.fingerprint(states), collections=list(c.KNOWLEDGE_COLLECTIONS))
+    changed = deepcopy(states)
+    changed["product_dependencies/DEP-new"] = {"dependency_id": "DEP-new", "revision": 1}
+    assert c.fingerprint(changed) != c.fingerprint(states)
+
+
+def test_production_environment_failure_is_before_any_model_reservation(scenario, tmp_path):
+    runner, ports, manifest = setup_runner(tmp_path, scenario)
+    def preflight(stage):
+        raise ValueError("dirty worktree or missing SSD")
+    ports.before_model_call = preflight
+    with pytest.raises(ValueError, match="dirty worktree"):
+        runner.run(manifest)
+    assert ports.calls == [] and ports.applies == 0
+    assert not (runner.root / "proposal.reservation.json").exists()

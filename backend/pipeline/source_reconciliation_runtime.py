@@ -118,6 +118,12 @@ class ProductionPorts:
     def adapter(self, stage: str):
         return model_adapter(stage, live=True)
 
+    def before_model_call(self, stage: str) -> None:
+        # Cached responses do not run model/auth diagnostics. A new actual
+        # invocation needs the committed implementation and physical backup
+        # environment too, not only a check after the models have finished.
+        self._environment_guard()
+
     def plan(self, package: dict) -> dict:
         return json.loads(json.dumps(self.store.plan_package(package, source_kind=contract.VERSION).as_dict()))
 

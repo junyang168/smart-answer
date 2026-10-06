@@ -177,6 +177,9 @@ class Runner:
             return raw
         if reservation.exists():
             raise Stop("reserved call has no verified reply; do not repeat", status="call_uncertain", waiting_for="system")
+        preflight = getattr(self.ports, "before_model_call", None)
+        if preflight:
+            preflight(stage)
         # Persist the reservation before any side effect. Errors do not reset it.
         write(reservation, request)
         self.state(stage, next_action="await the single subscription response")
