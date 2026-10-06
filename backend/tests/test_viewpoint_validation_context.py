@@ -1,0 +1,214 @@
+from copy import deepcopy
+import json
+
+import pytest
+
+from backend.pipeline.viewpoint_validation_context import (
+    ValidationContext, validated_history, validation_phase, readonly,
+    finish_validation_phase, RecordSnapshot,
+    validation_runtime, read_current_objects,
+)
+from backend.pipeline.viewpoint_resolution_runtime import read_artifact, call_model
+from backend.api.canonical_repository.viewpoint_production_safety import file_sha256
+
+
+def proof(path, calls):
+    @validated_history
+    def validate(expected):
+        calls.append(expected)
+        assert file_sha256(path) == expected
+        return read_artifact(path)
+    return validate
+
+
+def test_one_parse_one_full_validator_shared_immutable_result(tmp_path):
+    p = tmp_path/'proof.json';p.write_text('{"row":{"revision":1},"ids":["C"]}')
+    calls = []; validate = proof(p, calls); pin = file_sha256(p)
+    with ValidationContext('test') as ctx:
+        a = validate(pin); b = validate(pin)
+        assert a is b
+        with pytest.raises(TypeError): a['row']['revision'] = 2
+        with pytest.raises(TypeError): a['ids'].append('foreign')
+        mutable = deepcopy(a); mutable['row']['revision'] = 2
+        assert b['row']['revision'] == 1
+    assert calls == [pin]
+    assert ctx.metrics['json_parses'] == 1
+    assert ctx.metrics['proof_runs'] == 1 and ctx.metrics['proof_reuses'] == 1
+
+
+@pytest.mark.parametrize('change', ['content', 'deleted', 'replacement', 'symlink', 'new_receipt'])
+def test_phase_boundary_rechecks_actual_bytes_and_negative_receipts(tmp_path, change):
+    p = tmp_path/'proof.json';p.write_text('{"revision":1}')
+    validate = proof(p, []);pin = file_sha256(p)
+    with pytest.raises((ValueError, FileNotFoundError)):
+        with ValidationContext('test'):
+            validate(pin)
+            if change == 'content':p.write_text('{"revision":2}')
+            elif change == 'deleted':p.unlink()
+            elif change == 'replacement':
+                q=tmp_path/'replace';q.write_text('{"revision":2}');q.replace(p)
+            elif change == 'symlink':
+                q=tmp_path/'target';q.write_text('{"revision":1}');p.unlink();p.symlink_to(q)
+            else:(tmp_path/'apply-receipt.json').write_text('{}')
+            validate(pin)  # reuse never exempts the closing boundary
+
+
+def test_changed_expected_pin_cannot_reuse_and_failures_are_not_cached(tmp_path):
+    p=tmp_path/'proof.json';p.write_text('{}');calls=[];validate=proof(p,calls)
+    with ValidationContext('test') as ctx:
+        validate(file_sha256(p))
+        for _ in range(2):
+            with pytest.raises(AssertionError):validate('wrong')
+        assert len(ctx.results) == 1
+    assert len(calls) == 3
+
+
+def test_record_simulation_copies_index_not_the_complete_registry():
+    records=readonly({('claims','C'):{'revision':1,'anchors':[{'quote':'exact'}]}})
+    assert isinstance(records, RecordSnapshot)
+    simulation=deepcopy(records)
+    assert simulation['claims','C'] is records['claims','C']
+    with pytest.raises(TypeError): simulation['claims','C']['anchors'][0]['quote']='drift'
+    simulation['claims','C']=deepcopy(simulation['claims','C'])
+    simulation['claims','C']['revision']=2
+    assert records['claims','C']['revision']==1
+
+
+def test_no_state_crosses_model_or_next_validation_phase(tmp_path):
+    p=tmp_path/'proof.json';p.write_text('{}');calls=[];validate=proof(p,calls);pin=file_sha256(p)
+    with ValidationContext('test') as ctx:
+        validate(pin);finish_validation_phase()
+        assert ctx.closed and not ctx.results and not ctx.documents
+        validate(pin)  # no memoization after boundary, like a fresh store gate
+    with ValidationContext('next'):validate(pin)
+    assert len(calls)==3
+
+
+def test_drift_blocks_before_adapter_execution(tmp_path):
+    p=tmp_path/'proof.json';p.write_text('{}');validate=proof(p,[])
+    class ForbiddenAdapter:
+        def request_encoding_proof(self, payload):
+            pytest.fail('model adapter reached before historical drift detection')
+    with pytest.raises(ValueError):
+        with ValidationContext('test'):
+            validate(file_sha256(p));p.write_text('{"changed":true}')
+            call_model(ForbiddenAdapter(), {}, tmp_path/'raw.json')
+    assert not (tmp_path/'raw.json').exists()
+
+
+def test_phase_returns_only_after_validation_and_discards_on_error(tmp_path):
+    p=tmp_path/'proof.json';p.write_text('{}');calls=[];validate=proof(p,calls);pin=file_sha256(p)
+    @validation_phase
+    def phase():
+        validate(pin);validate(pin);return 'complete'
+    assert phase()=='complete' and phase()=='complete'
+    assert len(calls)==2
+
+
+def test_live_checks_are_not_memoized(tmp_path):
+    p=tmp_path/'proof.json';p.write_text('{"revision":1}')
+    with ValidationContext('test'):
+        assert read_artifact(p)['revision']==1
+        p.write_text('{"revision":2}')
+        assert read_artifact(p)['revision']==2
+        assert file_sha256(p)==__import__('hashlib').sha256(p.read_bytes()).hexdigest()
+
+
+def test_shared_runtime_reauthenticates_bytes_without_reparsing_or_revalidating(tmp_path):
+    p=tmp_path/'proof.json';p.write_text('{"revision":1}');calls=[];validate=proof(p,calls);pin=file_sha256(p)
+    with validation_runtime():
+        with ValidationContext('prepare') as a: result=validate(pin)
+        with ValidationContext('dryrun') as b: assert validate(pin) is result
+        assert a.metrics['json_parses']==1 and b.metrics['json_parses']==0
+        assert calls==[pin]
+        p.write_text('{"revision":2}')
+        with pytest.raises(ValueError):
+            with ValidationContext('next'):validate(pin)
+
+
+def test_new_receipt_between_phases_cannot_borrow_prior_proof(tmp_path):
+    p=tmp_path/'proof.json';p.write_text('{}');validate=proof(p,[]);pin=file_sha256(p)
+    with validation_runtime():
+        with ValidationContext('first'):validate(pin)
+        (tmp_path/'raw-opus.json').write_text('{}')
+        with pytest.raises(ValueError):
+            with ValidationContext('next'):validate(pin)
+
+
+def test_full_dependency_closure_is_kept_for_nested_proofs(tmp_path):
+    p=tmp_path/'proof.json';p.write_text('{}');inner=proof(p,[]);pin=file_sha256(p)
+    @validated_history
+    def outer():return inner(pin)
+    with validation_runtime():
+        with ValidationContext('first'):outer()
+        p.write_text('{"changed":true}')
+        with pytest.raises(ValueError):
+            with ValidationContext('second'):outer()
+
+
+def test_exact_current_readset_is_fresh_and_preserves_actual_sql_metadata():
+    from contextlib import nullcontext
+    class Store:
+        revision=1
+        reads=0
+        def connect(self):return nullcontext(self)
+        def execute(self, query, params=None):
+            if query.startswith('SELECT'):
+                self.reads+=1
+                assert params==(['C'],)
+            return self
+        def fetchall(self):return [('claims','C',self.revision,'stored-sha',{'revision':1},'retired')]
+    store=Store()
+    with validation_runtime():
+        with ValidationContext('first'):a=read_current_objects(store,{('claims','C')})
+        store.revision=2
+        with ValidationContext('second'):b=read_current_objects(store,{('claims','C')})
+    assert store.reads==2 and a['claims','C']['revision']==1 and b['claims','C']['revision']==2
+    assert b['claims','C']['content_sha256']=='stored-sha' and b['claims','C']['retired']
+
+
+def test_exact_current_readset_rejects_missing_objects():
+    from contextlib import nullcontext
+    class Store:
+        def connect(self):return nullcontext(self)
+        def execute(self,*args):return self
+        def fetchall(self):return []
+    with pytest.raises(ValueError,match='readset incomplete'):
+        read_current_objects(Store(),{('claims','C')})
+
+
+@pytest.mark.parametrize('module', ['viewpoint_reviewed_cvp_prepare','viewpoint_batch_resolution_runner'])
+def test_campaign_same_runtime_dispatch_keeps_cli_args_and_does_not_spawn(monkeypatch,tmp_path,module):
+    from types import SimpleNamespace
+    from backend.pipeline import viewpoint_cvp_campaign_runner as campaign
+    p=tmp_path/'proof.json';p.write_text('{}');calls=[];validate=proof(p,calls);pin=file_sha256(p)
+    received=[]
+    @validation_phase
+    def main(argv):
+        received.append(argv);validate(pin);return 0
+    monkeypatch.setattr('importlib.import_module', lambda name:SimpleNamespace(main=main))
+    monkeypatch.setattr(campaign.subprocess,'run',lambda *a,**k:pytest.fail('CVP subprocess loses proof lifecycle'))
+    flag='--output-root' if module.endswith('_prepare') else '--output-dir'
+    argv=[campaign.PYTHON,'-m','backend.pipeline.'+module,flag,tmp_path/'out','--dry-run']
+    with validation_runtime():
+        campaign.command(argv);campaign.command(argv)
+    assert received==[[flag,str(tmp_path/'out'),'--dry-run']]*2 and calls==[pin]
+
+
+def test_unrecognized_command_still_uses_existing_subprocess(monkeypatch):
+    from backend.pipeline import viewpoint_cvp_campaign_runner as campaign
+    calls=[];monkeypatch.setattr(campaign.subprocess,'run',lambda argv,**kw:calls.append(argv))
+    argv=[campaign.PYTHON,'-m','other_module']
+    with validation_runtime():campaign.command(argv)
+    assert calls==[[str(a) for a in argv]]
+
+
+def test_phase_failure_does_not_leak_proofs_into_next_phase(tmp_path):
+    p=tmp_path/'proof.json';p.write_text('{}');calls=[];validate=proof(p,calls);pin=file_sha256(p)
+    with validation_runtime() as pool:
+        with pytest.raises(RuntimeError):
+            with ValidationContext('first'):
+                validate(pin);raise RuntimeError('fail closed')
+        assert not pool.results and not pool.documents
+        with ValidationContext('second'):validate(pin)
+    assert len(calls)==2

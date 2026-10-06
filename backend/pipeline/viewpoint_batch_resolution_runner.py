@@ -104,6 +104,7 @@ from backend.pipeline.viewpoint_cvp_policy import (
     load_cvp_policy,
 )
 from backend.pipeline.viewpoint_partition_validation import validate_partition_manifest
+from backend.pipeline.viewpoint_validation_context import validation_phase, finish_validation_phase
 from backend.pipeline.viewpoint_grouping_repository import SharedGroupingRepository
 from backend.pipeline.viewpoint_partition_manifest import (
     DEFAULT_PARTITION_POLICY,
@@ -921,7 +922,7 @@ def run_batch(
         "_revision_dependents": revision_dependents,
         "_effective_validation": effective_validation,
     }
-def main() -> int:
+def main(argv=None) -> int:
     load_dotenv(PROJECT_ROOT / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--packet", type=Path, required=True, help="scope packet from viewpoint_scope_packet_runner")
@@ -1037,7 +1038,7 @@ def main() -> int:
         action="append",
         help="resolve only these groups; the grouping plan itself still covers the whole scope",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     return execute(args)
 
 
@@ -1089,6 +1090,7 @@ def validate_shared_grouping_execution(
     repository.admit(args.accepted_grouping_sha, scope_packet=scope_packet, freeze=freeze)
 
 
+@validation_phase
 def execute(args: argparse.Namespace) -> int:
     if bool(getattr(args, "accepted_grouping_sha", None)) != bool(getattr(args, "grouping_repository", None)):
         raise CvpProductionBlocked(["--accepted-grouping-sha and --grouping-repository must be supplied together"])
@@ -1729,6 +1731,7 @@ def _execute_locked(
         # replacements and named the stranded originals; retiring them rides
         # the same ChangeSet, the same way the route worker retires the
         # attestations its own revisions strand.
+        finish_validation_phase()
         plan = store.plan_package(
             package,
             source_kind="cvp_batch_resolution",

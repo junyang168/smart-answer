@@ -33,6 +33,7 @@ from backend.pipeline.viewpoint_source_attestation_runner import _write_immutabl
 from backend.pipeline.viewpoint_cvp_policy import load_cvp_policy, cvp_policy_fingerprint, cvp_policy_prompt_sha256s
 from backend.pipeline.viewpoint_route_policy import load_route_policy, route_policy_fingerprint, route_policy_prompt_sha256s
 from backend.pipeline.viewpoint_resolution_runtime import PROMPT_DIR
+from backend.pipeline.viewpoint_validation_context import validation_phase
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -89,7 +90,8 @@ def completed_repair_parent_snapshot(manifest, records, packages, completed_ids,
     the accepted predecessor pins remain explicit historical membership proof.
     No repaired Claim can enter a new runtime scope through this adapter.
     """
-    checked=deepcopy(records); rows={c['claim_id']:c for c in manifest['claim_packets']}
+    # Membership projection replaces complete rows; it never edits live rows.
+    checked=dict(records); rows={c['claim_id']:c for c in manifest['claim_packets']}
     used=set()
     for package in packages:
         validate_store_package_authorization(package)
@@ -212,6 +214,7 @@ def completed_repair_parent_snapshot(manifest, records, packages, completed_ids,
     return sorted(used)
 
 
+@validation_phase
 def prepare(args: argparse.Namespace) -> dict[str, Any]:
     load_dotenv(PROJECT_ROOT / ".env")
     if subprocess.check_output(["git", "status", "--porcelain"], cwd=PROJECT_ROOT, text=True).strip():
@@ -364,7 +367,7 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
             "runner_commit": runner_commit, "freeze_sha256": freeze["artifact_sha256"], "model_calls_executed": 0, "master_data_mutations": 0}
 
 
-def main() -> None:
+def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("grouping-repository", "historical-bridges", "independent-audit", "output-root", "wang-repository", "cvp-policy", "route-policy", "backup-dump", "global-lock"):
         parser.add_argument("--" + name, type=Path, required=True)
@@ -373,7 +376,7 @@ def main() -> None:
     parser.add_argument("--group-key", help="one intact accepted group explicitly authorized for sequential continuation")
     parser.add_argument('--completed-source-repair',type=Path,action='append',help='fresh dual-reviewed repair of already independently completed parent Claims')
     parser.add_argument('--parent-completed-proofs',type=Path,help='SHA-bound independent completed-group audits; never a manual Claim pass list')
-    print(json.dumps(prepare(parser.parse_args()), ensure_ascii=False))
+    print(json.dumps(prepare(parser.parse_args(argv)), ensure_ascii=False))
 
 
 if __name__ == "__main__":

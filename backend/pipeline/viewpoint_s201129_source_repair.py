@@ -21,6 +21,7 @@ from backend.api.canonical_repository.viewpoint_foundation import sha256_json, s
 from backend.api.canonical_repository.viewpoint_production_safety import file_sha256, exclusive_cvp_run_lock
 from backend.pipeline.viewpoint_authorized_source_repair_357 import snapshot, fingerprint
 from backend.pipeline.viewpoint_resolution_runtime import read_artifact, write_immutable, stable_decided_at
+from backend.pipeline.viewpoint_validation_context import validated_history, historical_context
 
 VERSION = 'wang_s201129_owner_opus_source_reconciliation_v1'
 PROJECT = Path(__file__).resolve().parents[2]
@@ -104,6 +105,7 @@ def verify_sources(scope):
         raise ValueError('original 973/156 accepted manifest drift')
 
 
+@validated_history
 def reviewed_inputs():
     for name, pin in PINS.items():
         if file_sha256(REVIEW_ROOT/name) != pin:
@@ -158,10 +160,20 @@ def reviewed_inputs():
     return scope, draft, logical, raw
 
 
+@validated_history
 def saved_before():
     global _saved_before_cache
     scope, _, _, _ = reviewed_inputs()
     path = APPLICATION_ROOT/'before.json'
+    if historical_context() is not None:
+        proof = read_artifact(path)
+        states = {(r['collection'], r['object_id']):r['payload'] for r in proof['before_records']}
+        if (len(states) != len(proof['before_records'])
+                or proof['collections'] != scope['registry_collections']
+                or fingerprint(states, proof['collections']) != scope['registry_fingerprint_sha256']
+                or proof['pre_fingerprint_sha256'] != scope['registry_fingerprint_sha256']):
+            raise ValueError('full before Registry fingerprint drift')
+        return states, proof
     physical_sha = file_sha256(path)
     key = (str(path.resolve()), physical_sha, tuple(scope['registry_collections']),
            scope['registry_fingerprint_sha256'])
@@ -241,6 +253,7 @@ def package_for(states, scope, draft, logical, raw):
     return result
 
 
+@validated_history
 def validate_package(package):
     app = package.get('source_repair_application') or {}
     if app.get('schema_version') != VERSION or app.get('review_root') != str(REVIEW_ROOT):

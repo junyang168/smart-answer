@@ -326,6 +326,10 @@ def continuation_inputs(root, output, extra_completion=None, *, additional_sourc
         argv.extend(["--completed-source-repair", str(path)])
     if cfg.get("random_spot_check_policy"):
         argv.extend(["--random-spot-check-policy", cfg["random_spot_check_policy"]["path"]])
+    if cfg.get('validation_runtime') is not None:
+        if cfg['validation_runtime'] != 'bounded_authenticated_history_v1':
+            raise ValueError('unknown validation runtime; do not silently downgrade')
+        argv.append('--validation-runtime')
     if cfg.get('cvp_policy'):
         for key in ('cvp_policy','semantic_contract'):
             if binding(cfg[key]['path'])!=cfg[key]:

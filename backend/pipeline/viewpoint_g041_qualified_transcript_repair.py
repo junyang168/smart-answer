@@ -17,6 +17,7 @@ import subprocess
 from dotenv import load_dotenv
 
 from backend.pipeline import viewpoint_g041_transcript_repair as old
+from backend.pipeline.viewpoint_validation_context import validated_history
 from backend.pipeline.viewpoint_semantic_contract import semantic_prompt, CONTRACT_PATH
 from backend.api.canonical_repository.viewpoint_resolution import StructuredJsonReviewerAdapter
 
@@ -133,6 +134,7 @@ def extend(states, package, packet, root):
     return package, packet
 
 
+@validated_history
 def saved_before(root=ROOT):
     proof = old.read_artifact(root/'before.json')
     states = {(r['collection'],r['object_id']):r['payload'] for r in proof['before_records']}
@@ -141,6 +143,7 @@ def saved_before(root=ROOT):
     return states, proof
 
 
+@validated_history
 def reviewed_inputs(root=ROOT):
     states, proof = saved_before(root)
     bindings = predecessor(states)
@@ -197,6 +200,7 @@ def package_for(states, draft, packet, reviews, raws, root=ROOT):
     return package
 
 
+@validated_history
 def validate_package(package):
     app = package.get('source_repair_application') or {}
     if app.get('schema_version') != VERSION or app.get('review_root') != str(ROOT):

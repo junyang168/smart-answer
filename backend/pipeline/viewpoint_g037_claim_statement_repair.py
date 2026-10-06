@@ -6,6 +6,7 @@ from pathlib import Path
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json, semantic_record_sha
 from backend.api.canonical_repository.viewpoint_production_safety import file_sha256
 from backend.pipeline.viewpoint_resolution_runtime import read_artifact, write_immutable, stable_decided_at
+from backend.pipeline.viewpoint_validation_context import validated_history
 from backend.pipeline.viewpoint_g037_context_review import CLAIM, LINK, VIEWPOINT, OLD_ROOT_NAME, PACKET_SHA, QUOTE
 
 VERSION='wang_g037_claim_statement_repair_v1'
@@ -178,6 +179,7 @@ def package_for(packet,reviews,root):
     return package
 
 
+@validated_history
 def validate_package(package):
     from backend.pipeline.viewpoint_audit_link_repair import link_review_adapter
     from backend.pipeline.viewpoint_resolution_runtime import subscription_client

@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from backend.pipeline import viewpoint_s201129_link_support_review as review
 from backend.pipeline import viewpoint_s201129_source_repair as source
 from backend.pipeline.viewpoint_resolution_runtime import read_artifact, write_immutable, stable_decided_at
+from backend.pipeline.viewpoint_validation_context import validated_history
 from backend.api.canonical_repository.postgres_store import stored_operation_payload
 from backend.api.canonical_repository.viewpoint_production_safety import exclusive_cvp_run_lock
 
@@ -29,6 +30,7 @@ PINS = {
 }
 
 
+@validated_history
 def reviewed_inputs():
     for name, pin in PINS.items():
         if source.file_sha256(review.ROOT/name) != pin:
@@ -65,6 +67,7 @@ def reviewed_inputs():
     return packet,raw
 
 
+@validated_history
 def parent_snapshot():
     """Rebuild the real 401-operation postimage from immutable applied proofs."""
     package = read_artifact(source.PACKAGE)
@@ -123,6 +126,7 @@ def package_for(states,packet,raw):
         'bindings':[source.binding(review.ROOT/n) for n in PINS]}}
 
 
+@validated_history
 def validate_package(package):
     packet,raw=reviewed_inputs()
     if package != package_for(parent_snapshot(),packet,raw):

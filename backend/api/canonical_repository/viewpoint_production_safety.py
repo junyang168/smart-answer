@@ -77,6 +77,10 @@ class CvpProductionBlocked(ValueError):
 
 
 def file_sha256(path: Path) -> str:
+    from backend.pipeline.viewpoint_validation_context import historical_context
+    ctx = historical_context()
+    if ctx is not None:
+        return ctx.pin(path)
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):

@@ -93,6 +93,21 @@ def validate_audit(audit, claim_ids, viewpoint_ids, *, owner_resolution_path=Non
 
 def command(args):
     print("COMMAND", json.dumps([str(a) for a in args]), flush=True)
+    from backend.pipeline.viewpoint_validation_context import runtime_active, runtime_metrics
+    local_modules = {
+        'backend.pipeline.viewpoint_reviewed_cvp_prepare',
+        'backend.pipeline.viewpoint_batch_resolution_runner',
+    }
+    if runtime_active() and len(args) >= 3 and str(args[0]) == str(PYTHON) and args[1] == '-m' and args[2] in local_modules:
+        from importlib import import_module
+        result = import_module(args[2]).main([str(a) for a in args[3:]])
+        if result not in (None, 0):
+            raise subprocess.CalledProcessError(result, args)
+        output_arg = '--output-root' if args[2].endswith('_prepare') else '--output-dir'
+        output = Path(args[args.index(output_arg) + 1])
+        save_state(output/'validation-metrics.json', {'phases': runtime_metrics(),
+            'measurement_scope': 'mechanical validation only; not a model execution receipt'})
+        return
     subprocess.run([str(a) for a in args], cwd=PROJECT_ROOT, check=True)
 
 
@@ -371,6 +386,8 @@ def execute(args):
               "random_spot_check_policy": binding(args.random_spot_check_policy) if getattr(args,'random_spot_check_policy',None) else None,
               "route_execution": False, "already_complete": schedule["completed_groups"]}
     config.update(campaign_policy(args)[1])
+    if getattr(args, 'validation_runtime', False):
+        config['validation_runtime'] = 'bounded_authenticated_history_v1'
     _write_immutable(args.output_root / "campaign.json", config)
     seed = read(args.completed_proofs)
     if {r["group_key"] for r in seed["groups"]} != set(schedule["completed_groups"]):
@@ -506,10 +523,16 @@ def main():
     parser.add_argument('--cvp-policy',type=Path)
     parser.add_argument('--cvp-policy-sha256')
     parser.add_argument('--semantic-contract-sha256')
+    parser.add_argument('--validation-runtime', action='store_true',
+                        help='one runtime for authenticated historical proofs; live checks and write gates unchanged')
     args = parser.parse_args()
     args.output_root.mkdir(parents=True, exist_ok=True)
     with (args.output_root / "campaign.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if args.validation_runtime:
+            from backend.pipeline.viewpoint_validation_context import validation_runtime
+            with validation_runtime():
+                return execute(args)
         return execute(args)
 
 

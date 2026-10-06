@@ -9,6 +9,7 @@ from pathlib import Path
 
 from backend.pipeline import viewpoint_g041_qualified_transcript_repair as repair
 from backend.api.canonical_repository.postgres_store import _normalize_records, merge_over_existing
+from backend.pipeline.viewpoint_validation_context import read_current_objects
 
 PACKAGE = repair.APPLICATION_ROOT/'effective-package.json'
 GROUPING_EPOCH_KEY = 'applied_grouping_source_epoch_binding'
@@ -83,7 +84,7 @@ def membership_snapshot(manifest, records, package, completed_ids, selected_ids)
     repair.validate_package(package)
     normalized = validate_postimage(package,records)
     before,_ = repair.saved_before()
-    checked = deepcopy(records)
+    checked = dict(records)  # replace projected rows, do not clone untouched rows
     accepted = {c['claim_id']:c for c in manifest['claim_packets']}
     used=[]
     for collection, objects in normalized.items():
@@ -118,9 +119,12 @@ def verified_applied(binding,store):
             or verified.get('change_set_id')!=plan['change_set_id']
             or receipt.get('change_set_id')!=plan['change_set_id']):
         raise ValueError('source epoch lacks real single application/readback')
-    live=repair.old.snapshot(store)
-    states={(c,o):{'payload':p,'revision':p['revision'],
-        'content_sha256':repair.old.semantic_record_sha(p),'retired':False} for (c,o),p in live.items()}
+    required = {(c,o) for c,rows in normalized.items() for o in rows}
+    packet = package['source_repair_application']['review_packet']
+    required.update(('claims',r['claim_id']) for r in packet['changed_paragraph_claims'])
+    required.update(('evidence_steps',r['evidence_step_id']) for r in packet['changed_paragraph_evidence'])
+    states = read_current_objects(store, required)
+    live = {key: row['payload'] for key,row in states.items() if not row['retired']}
     validate_postimage(package,states)
     with store.connect() as conn:
         conn.execute('SET TRANSACTION READ ONLY')

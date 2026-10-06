@@ -5,6 +5,7 @@ from pathlib import Path
 from backend.pipeline import viewpoint_s201129_source_repair as repair
 from backend.api.canonical_repository.postgres_store import _normalize_records, merge_over_existing
 from backend.api.canonical_repository.knowledge_models import EvidenceStepRecord, evidence_fragment_ids
+from backend.pipeline.viewpoint_validation_context import read_current_objects
 
 
 def binding():
@@ -82,10 +83,17 @@ def verified_applied(bound, store):
     for row in verified['bindings']:
         if repair.binding(Path(row['path'])) != row:
             raise ValueError('S201129 applied proof physical drift')
-    live = repair.snapshot(store)
-    records = {(c,o):{'payload':p,'revision':p['revision'],
-                       'content_sha256':repair.semantic_record_sha(p),'retired':False}
-               for (c,o),p in live.items()}
+    expected = postimages(package)
+    required = {(c,o) for c,rows in expected.items() for o in rows}
+    from backend.pipeline.viewpoint_s201129_link_support_apply import applied_child_object_ids
+    child_ids = applied_child_object_ids()
+    # Plan carries exact collection identities; do not rely on ID prefixes.
+    if child_ids:
+        from backend.pipeline.viewpoint_s201129_link_support_apply import ROOT as child_root
+        child_plan = repair.read_artifact(child_root/'dry-run-plan.json')
+        required.update((o['collection'],o['object_id']) for o in child_plan['operations'])
+    records = read_current_objects(store, required)
+    live = {key: row['payload'] for key,row in records.items() if not row['retired']}
     validate_postimage(package,records)
     with store.connect() as conn:
         conn.execute('SET TRANSACTION READ ONLY')
@@ -136,7 +144,7 @@ def membership_snapshot(manifest, records, package, completed_ids, selected_ids)
     scope, _, _, _ = repair.reviewed_inputs()
     if manifest != repair.read_artifact(Path(scope['manifest_path'])):
         raise ValueError('S201129 accepted membership manifest drift')
-    checked = deepcopy(records)
+    checked = dict(records)  # replace projected rows, do not clone untouched rows
     accepted = {r['claim_id'] for r in manifest['claim_packets']}
     used = []
     for collection, rows in normalized.items():

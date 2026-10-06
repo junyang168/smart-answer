@@ -20,6 +20,10 @@ CALL_TIMEOUT_SECONDS = 1800.0
 
 
 def read_artifact(path: Path) -> dict[str, Any]:
+    from backend.pipeline.viewpoint_validation_context import historical_context
+    ctx = historical_context()
+    if ctx is not None:
+        return ctx.read(path)
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -136,6 +140,8 @@ def subscription_client(
 def call_model(
     adapter: Any, payload: dict[str, Any], cache: Path
 ) -> tuple[dict[str, Any], int, float]:
+    from backend.pipeline.viewpoint_validation_context import finish_validation_phase
+    finish_validation_phase()
     encoding_proof = (adapter.request_encoding_proof(payload)
         if callable(getattr(adapter, 'request_encoding_proof', None)) else None)
     if encoding_proof is not None:
