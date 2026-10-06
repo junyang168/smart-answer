@@ -5,7 +5,7 @@ from pathlib import Path
 from backend.pipeline import viewpoint_s201129_source_repair as repair
 from backend.api.canonical_repository.postgres_store import _normalize_records, merge_over_existing
 from backend.api.canonical_repository.knowledge_models import EvidenceStepRecord, evidence_fragment_ids
-from backend.pipeline.viewpoint_validation_context import read_current_objects
+from backend.pipeline.viewpoint_validation_context import read_current_objects, current_check
 
 
 def binding():
@@ -68,6 +68,7 @@ def validate_postimage(package, records):
     return normalized
 
 
+@current_check
 def verified_applied(bound, store):
     package = bound_package(bound)
     before, proof = repair.saved_before()
@@ -104,6 +105,7 @@ def verified_applied(bound, store):
     return package, before, live
 
 
+@current_check
 def grouping_physical_transition(manifest, bound):
     package, before, live = verified_applied(bound,repair.PostgresKnowledgeStore())
     scope, _, _, _ = repair.reviewed_inputs()

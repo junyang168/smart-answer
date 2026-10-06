@@ -213,3 +213,143 @@ def test_phase_failure_does_not_leak_proofs_into_next_phase(tmp_path):
         assert not pool.results and not pool.documents
         with ValidationContext('second'):validate(pin)
     assert len(calls)==2
+
+
+def test_default_and_explicit_arguments_share_the_same_history_identity(tmp_path):
+    p=tmp_path/'proof.json';p.write_text('{}');calls=[]
+    @validated_history
+    def validate(path=p):
+        calls.append(path)
+        return read_artifact(path)
+    with ValidationContext('defaults'):
+        assert validate() is validate(p) is validate(path=p)
+    assert calls==[p]
+
+
+class GenerationStore:
+    database_url='test-only-database-identity'
+    def __init__(self):
+        self.generation=1;self.reads=0;self.connections=[]
+        self.payload={'revision':1,'text':'original'}
+    def connect(self):
+        from copy import deepcopy
+        store=self
+        class Connection:
+            autocommit=False
+            closed=False
+            def __init__(self):
+                self.generation=store.generation;self.payload=deepcopy(store.payload);self.queries=[]
+            def __enter__(self):return self
+            def __exit__(self,*args):self.close()
+            def execute(self,query,params=None):
+                self.queries.append(query)
+                if query.startswith('SELECT object_id'):
+                    store.reads+=1
+                    self.rows=[('C',1,'unchanged-stored-sha',self.payload,None)]
+                return self
+            def fetchall(self):return self.rows
+            def rollback(self):pass
+            def close(self):self.closed=True
+        conn=Connection();self.connections.append(conn);return conn
+
+
+def generation_signature(conn):
+    return {'claims':('engine-epoch',conn.generation),'__change_sets__':('engine-epoch',1)}
+
+
+def test_sql_data_reuse_requires_fresh_engine_generation_but_verdicts_never_cross_phases(monkeypatch):
+    from backend.pipeline import viewpoint_validation_context as module
+    monkeypatch.setattr(module,'registry_signature',generation_signature)
+    store=GenerationStore();checks=[]
+    @module.current_check
+    def check(store):
+        checks.append(store.generation)
+        return module.current_registry_view(store).list_records('claims')
+    with validation_runtime():
+        with ValidationContext('first'):
+            assert check(store) is check(store)
+        with ValidationContext('second'):
+            assert check(store)[0]['text']=='original'
+        assert store.reads==1 and checks==[1,1]
+        # Application metadata lies: unchanged revision and stored SHA, actual
+        # PostgreSQL UPDATE generation changes and forces a payload reload.
+        store.generation=2;store.payload['text']='changed'
+        with ValidationContext('third'):
+            assert check(store)[0]['text']=='changed'
+        assert store.reads==2 and checks==[1,1,2]
+    assert all(c.closed for c in store.connections)
+
+
+@pytest.mark.parametrize('kind',['payload','retired','insert','delete','KCS','rewrite','restart','XID-wrap'])
+def test_boundary_generation_drift_blocks_even_writers_ignoring_advisory_lock(monkeypatch,kind):
+    from backend.pipeline import viewpoint_validation_context as module
+    monkeypatch.setattr(module,'registry_signature',generation_signature)
+    store=GenerationStore()
+    with validation_runtime() as pool:
+        with pytest.raises(ValueError,match='Registry changed'):
+            with ValidationContext(kind):
+                module.current_registry_view(store).list_records('claims')
+                store.generation+=1
+        assert not pool.registry_data and not pool.registry_cuts
+    assert all(c.closed for c in store.connections)
+
+
+def test_model_boundary_closes_sql_view_and_discards_current_verdicts(monkeypatch):
+    from backend.pipeline import viewpoint_validation_context as module
+    monkeypatch.setattr(module,'registry_signature',generation_signature)
+    store=GenerationStore()
+    with validation_runtime():
+        with ValidationContext('before-model') as ctx:
+            module.current_registry_view(store).list_records('claims')
+            ctx.current_results['verdict']=True
+            finish_validation_phase()
+            assert ctx.closed and not ctx.current_results
+            assert all(c.closed for c in store.connections)
+
+
+def test_sql_advisory_lock_is_acquired_before_mvcc_snapshot(monkeypatch):
+    from backend.pipeline import viewpoint_validation_context as module
+    monkeypatch.setattr(module,'registry_signature',generation_signature)
+    store=GenerationStore()
+    with ValidationContext('order'):module.current_registry_view(store)
+    q=store.connections[0].queries
+    assert 'pg_advisory_lock_shared' in q[0] and 'REPEATABLE READ READ ONLY' in q[1]
+
+
+def test_global_canonical_cut_value_is_unchanged_and_cached_data_is_immutable(monkeypatch):
+    from backend.pipeline import viewpoint_validation_context as module
+    from backend.api.canonical_repository.viewpoint_foundation import sha256_json
+    monkeypatch.setattr(module,'registry_signature',generation_signature)
+    store=GenerationStore()
+    with validation_runtime():
+        with ValidationContext('cut'):
+            view=module.current_registry_view(store)
+            assert view.canonical_cut('claims')==[sha256_json(store.payload)]
+            with pytest.raises(TypeError):view.list_records('claims')[0]['text']='tampered'
+        store.generation=2;store.payload['text']='new'
+        with ValidationContext('fresh-cut'):
+            assert module.current_registry_view(store).canonical_cut('claims')==[sha256_json(store.payload)]
+
+
+def test_current_file_pin_rechecked_without_freezing_runtime_output_directory(tmp_path):
+    p=tmp_path/'input.json';p.write_text('{}')
+    with ValidationContext('runtime'):
+        file_sha256(p)
+        (tmp_path/'result.json').write_text('{}')  # ordinary runtime output is not a historical negative receipt
+    with pytest.raises(ValueError,match='input drift'):
+        with ValidationContext('input'):
+            file_sha256(p);p.write_text('{"changed":true}')
+
+
+def test_engine_signature_reads_mvcc_generation_and_storage_epoch_not_self_reported_payload_sha():
+    from backend.pipeline.viewpoint_validation_context import registry_signature
+    class Connection:
+        def __init__(self):self.queries=[]
+        def execute(self,query):self.queries.append(query);return self
+        def __iter__(self):return iter([('claims','generation')])
+        def fetchone(self):
+            return ('restart','wrap','objects-node','KCS-node') if len(self.queries)==3 else ('KCS-generation',)
+    conn=Connection();result=registry_signature(conn)
+    assert result['claims']==(('restart','wrap','objects-node','KCS-node'),'generation')
+    assert all('xmin::text' in q and 'ctid::text' in q for q in conn.queries[:2])
+    assert 'payload' not in conn.queries[0] and 'pg_relation_filenode' in conn.queries[2]

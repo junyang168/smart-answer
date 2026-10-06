@@ -9,12 +9,13 @@ from pathlib import Path
 
 from backend.pipeline import viewpoint_g041_qualified_transcript_repair as repair
 from backend.api.canonical_repository.postgres_store import _normalize_records, merge_over_existing
-from backend.pipeline.viewpoint_validation_context import read_current_objects
+from backend.pipeline.viewpoint_validation_context import read_current_objects, current_check
 
 PACKAGE = repair.APPLICATION_ROOT/'effective-package.json'
 GROUPING_EPOCH_KEY = 'applied_grouping_source_epoch_binding'
 
 
+@current_check
 def grouping_physical_transition(manifest, source_repair_binding):
     """One applied epoch, not a source-ID exemption or a new grouping approval.
 
@@ -108,6 +109,7 @@ def membership_snapshot(manifest, records, package, completed_ids, selected_ids)
     return checked,used
 
 
+@current_check
 def verified_applied(binding,store):
     package=bound_package(binding)
     before,proof=repair.saved_before()

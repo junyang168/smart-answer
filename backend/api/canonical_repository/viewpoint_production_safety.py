@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import fcntl
+from backend.pipeline.viewpoint_validation_context import current_check
 
 from backend.api.canonical_repository.knowledge_models import (
     ClaimRecord,
@@ -77,8 +78,8 @@ class CvpProductionBlocked(ValueError):
 
 
 def file_sha256(path: Path) -> str:
-    from backend.pipeline.viewpoint_validation_context import historical_context
-    ctx = historical_context()
+    from backend.pipeline.viewpoint_validation_context import active_context
+    ctx = active_context()
     if ctx is not None:
         return ctx.pin(path)
     digest = hashlib.sha256()
@@ -101,6 +102,10 @@ def collection_fingerprint(store: Any, collections: Sequence[str]) -> str:
 
 
 def collection_cut(store: Any, collections: Sequence[str]) -> dict[str, list[str]]:
+    from backend.pipeline.viewpoint_validation_context import active_context, current_registry_view
+    if active_context() is not None and hasattr(store, 'database_url'):
+        view = current_registry_view(store)
+        return {c: view.canonical_cut(c) for c in collections}
     cuts: dict[str, list[str]] = {}
     for collection in collections:
         cuts[collection] = sorted(
@@ -166,6 +171,7 @@ def validate_registry_transition(intent: Mapping[str, Any], *, store: Any) -> st
     return sha256_json(observed)
 
 
+@current_check
 def _validate_scope_packet(scope_packet: Mapping[str, Any], store: Any) -> list[str]:
     findings: list[str] = []
     try:
@@ -794,6 +800,7 @@ def build_batch_identity(
     }
 
 
+@current_check
 def validate_reviewed_grouping_bindings(
     bindings: Mapping[str, Any], *, manifest_sha256: str, source_epoch_binding=None,
 ) -> dict[str, dict[str, Any]]:

@@ -15,6 +15,8 @@ import re
 import shutil
 import subprocess
 import sys
+import time
+from contextlib import nullcontext
 
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.pipeline.viewpoint_source_attestation_runner import _write_immutable
@@ -368,6 +370,31 @@ def campaign_backup_label(root):
     return 'before-cvp-357-' + hashlib.sha256(str(root.resolve()).encode()).hexdigest()[:32]
 
 
+def initialize_validation(args):
+    """Authenticate immutable history once; no model or Registry mutation.
+
+    Startup is explicitly timed separately from group entry. The runtime keeps
+    immutable data, never a reusable current-state or production pass receipt.
+    """
+    from backend.pipeline.viewpoint_validation_context import ValidationContext
+    from backend.api.canonical_repository.reviewed_candidate_contract import validate_store_package_authorization
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    from backend.api.canonical_repository.viewpoint_production_safety import collection_cut, CORPUS_COLLECTIONS, REGISTRY_COLLECTIONS
+    from backend.pipeline.viewpoint_applied_source_epochs import compose
+    from backend.pipeline.viewpoint_grouping_repository import SharedGroupingRepository
+    start = time.perf_counter()
+    paths = getattr(args, 'completed_source_repair', None) or []
+    with ValidationContext('campaign startup authentication'):
+        for path in paths:
+            validate_store_package_authorization(read(path))
+        SharedGroupingRepository(args.grouping_repository).load(
+            args.accepted_grouping_sha, source_epoch_binding=compose(paths))
+        collection_cut(PostgresKnowledgeStore(), (*CORPUS_COLLECTIONS, *REGISTRY_COLLECTIONS))
+    return {'startup_seconds': time.perf_counter()-start,
+            'scope': 'one-time history authentication and immutable SQL data loading',
+            'model_calls': 0, 'Registry_writes': 0}
+
+
 def execute(args):
     if binding(args.schedule)["file_sha256"] != args.schedule_sha256:
         raise ValueError("approved schedule file SHA mismatch")
@@ -408,6 +435,8 @@ def execute(args):
     preflight = lineage_preflight(schedule, groups, inventory,
                                  getattr(args, 'random_spot_check_policy', None))
     _write_immutable(args.output_root / 'lineage-discovery-preflight.json', preflight)
+    if getattr(args, 'validation_runtime', False):
+        _write_immutable(args.output_root / 'validation-startup.json', initialize_validation(args))
     done = []
     pending_count=sum(row['state']=='pending' for row in schedule['schedule'])
     for row in schedule["schedule"]:
@@ -428,8 +457,14 @@ def execute(args):
         try:
             if shutil.disk_usage(args.output_root).free < 2 * 1024**3:
                 raise ValueError("less than 2 GiB free disk; stop safely before another group")
-            qualify(row, groups[row["group_key"]], inventory, root, args)
-            command(runner_args(root, args) + ["--dry-run"])
+            from backend.pipeline.viewpoint_validation_context import ValidationContext
+            phase = ValidationContext('group entry') if getattr(args, 'validation_runtime', False) else nullcontext()
+            started = time.perf_counter()
+            with phase:
+                qualify(row, groups[row["group_key"]], inventory, root, args)
+                command(runner_args(root, args) + ["--dry-run"])
+            save_state(root/'entry-validation.json', {'wall_seconds': time.perf_counter()-started,
+                'model_calls': 0, 'Registry_writes': 0, 'scope': 'qualification plus dry-run, including boundary drift checks'})
             if args.dry_run:
                 save_state(args.output_root / "progress.json", state | {"status": "preflight_passed_no_model_calls"})
                 return 0

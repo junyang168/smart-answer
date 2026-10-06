@@ -3253,7 +3253,9 @@ class PostgresKnowledgeStore:
 
     def list_records(self, collection: str) -> list[dict[str, Any]]:
         """Read the active collection in stable object-id order."""
-
+        from backend.pipeline.viewpoint_validation_context import active_context, current_registry_view
+        if active_context() is not None:
+            return current_registry_view(self).list_records(collection)
         with self.connect() as conn, conn.cursor() as cursor:
             cursor.execute(
                 """SELECT payload FROM wang_knowledge.objects
