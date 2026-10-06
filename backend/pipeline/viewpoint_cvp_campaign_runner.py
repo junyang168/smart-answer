@@ -33,8 +33,9 @@ def read(path):
 
 def binding(path):
     from backend.pipeline.viewpoint_backup_archive import logical_binding_path
+    from backend.api.canonical_repository.viewpoint_production_safety import file_sha256
     path = logical_binding_path(path)
-    return {"path": str(path), "file_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+    return {"path": str(path), "file_sha256": file_sha256(path)}
 
 
 def validate_schedule(schedule, manifest):

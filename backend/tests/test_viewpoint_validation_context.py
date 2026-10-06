@@ -257,6 +257,18 @@ def generation_signature(conn):
     return {'claims':('engine-epoch',conn.generation),'__change_sets__':('engine-epoch',1)}
 
 
+@pytest.fixture(autouse=True)
+def mock_clock_only_for_test_generation_connections(monkeypatch):
+    from backend.pipeline import viewpoint_validation_context as module
+    original=module.database_clock
+    def clock(conn):
+        if hasattr(conn,'generation'):
+            assert conn.autocommit is True  # sampled before MVCC snapshot
+            return conn.generation,'restart'
+        return original(conn)
+    monkeypatch.setattr(module,'database_clock',clock)
+
+
 def test_sql_data_reuse_requires_fresh_engine_generation_but_verdicts_never_cross_phases(monkeypatch):
     from backend.pipeline import viewpoint_validation_context as module
     monkeypatch.setattr(module,'registry_signature',generation_signature)
@@ -318,13 +330,14 @@ def test_model_boundary_closes_sql_view_and_discards_current_verdicts(monkeypatc
             assert all(c.closed for c in store.connections)
 
 
-def test_sql_advisory_lock_is_acquired_before_mvcc_snapshot(monkeypatch):
+def test_single_writer_entry_uses_readonly_snapshot_without_global_read_lock(monkeypatch):
     from backend.pipeline import viewpoint_validation_context as module
     monkeypatch.setattr(module,'registry_signature',generation_signature)
     store=GenerationStore()
     with ValidationContext('order'):module.current_registry_view(store)
     q=store.connections[0].queries
-    assert 'pg_advisory_lock_shared' in q[0] and 'REPEATABLE READ READ ONLY' in q[1]
+    assert 'REPEATABLE READ READ ONLY' in q[0]
+    assert all('advisory' not in query for query in q)
 
 
 def test_global_canonical_cut_value_is_unchanged_and_cached_data_is_immutable(monkeypatch):
@@ -412,3 +425,38 @@ def test_scoped_graph_retains_orphan_and_duplicate_reverse_evidence_edges():
     full=claim_evidence_integrity_findings(claim_ids=['C'],claims=claims,evidence_steps=dict(index))
     assert partial==full and any('EvidenceStep-only' in finding for finding in partial)
     assert any('duplicate' in finding for finding in partial)
+
+
+def test_unchanged_wal_skips_full_library_cut_but_rechecks_clock_and_current_verdict(monkeypatch):
+    from backend.pipeline import viewpoint_validation_context as module
+    cuts=[];checks=[];store=GenerationStore()
+    def signature(conn):cuts.append(conn.generation);return generation_signature(conn)
+    monkeypatch.setattr(module,'registry_signature',signature)
+    @module.current_check
+    def check(store):checks.append(True);return module.current_registry_view(store).list_records('claims')
+    with validation_runtime():
+        with ValidationContext('first'):check(store)
+        with ValidationContext('second'):check(store)
+    assert len(cuts)==1 and len(checks)==2
+    assert len(store.connections)==4  # entry and exit clocks on fresh connections
+
+
+def test_changed_wal_with_unchanged_corpus_reauthenticates_without_discarding_data(monkeypatch):
+    from backend.pipeline import viewpoint_validation_context as module
+    store=GenerationStore();clock=[1];cuts=[]
+    monkeypatch.setattr(module,'database_clock',lambda conn:(clock[0],'restart'))
+    def signature(conn):cuts.append(True);return generation_signature(conn)
+    monkeypatch.setattr(module,'registry_signature',signature)
+    with validation_runtime():
+        with ValidationContext('first'):module.current_registry_view(store).list_records('claims')
+        clock[0]=2  # unrelated WAL activity, not an authority to reuse a pass
+        with ValidationContext('second'):module.current_registry_view(store).list_records('claims')
+    assert len(cuts)==2 and store.reads==1
+
+
+def test_unlogged_registry_cannot_use_fast_clock():
+    from backend.pipeline.viewpoint_validation_context import database_clock
+    class Connection:
+        def execute(self,query):return self
+        def fetchone(self):return ('lsn','restart',False)
+    with pytest.raises(ValueError,match='WAL logged'):database_clock(Connection())

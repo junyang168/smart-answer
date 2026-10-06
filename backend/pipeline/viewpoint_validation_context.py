@@ -33,6 +33,7 @@ class HistoricalProofPool:
         self.registry_data = {}
         self.registry_cuts = {}
         self.typed_data = {}
+        self.registry_generations = {}
 
     def clear(self):
         self.documents.clear()
@@ -40,6 +41,7 @@ class HistoricalProofPool:
         self.registry_data.clear()
         self.registry_cuts.clear()
         self.typed_data.clear()
+        self.registry_generations.clear()
 
 
 @contextmanager
@@ -344,16 +346,31 @@ def registry_signature(connection):
     return {k:(tuple(epoch),v) for k,v in result.items()}
 
 
+def database_clock(connection):
+    """Cluster WAL is monotonic: unchanged means no logged data mutation.
+
+    Read BEFORE starting the MVCC snapshot. A changed clock triggers the full
+    physical-row cut, never an assumption that a writer behaved correctly.
+    Restart is part of identity; canonical tables must actually be WAL logged.
+    """
+    row=connection.execute(
+        "SELECT pg_current_wal_insert_lsn()::text,pg_postmaster_start_time()::text,"
+        "bool_and(relpersistence='p') FROM pg_class "
+        "WHERE oid IN ('wang_knowledge.objects'::regclass,'wang_knowledge.change_sets'::regclass)"
+    ).fetchone()
+    if row[2] is not True:raise ValueError('canonical tables must be WAL logged')
+    return tuple(row[:2])
+
+
 class CurrentRegistryView:
     """One consistent read-only view, valid only until the next model/write.
 
-    Uses the store's existing writer advisory lock in shared mode. An actual
-    physical row-generation cut on a fresh connection at exit detects even writers
-    that ignored that lock. The runtime may retain immutable data, not current
+    Uses a read-only MVCC snapshot, not a multi-writer coordination protocol.
+    A fresh WAL clock and, when changed, physical row-generation cut at exit
+    detects data drift. The runtime may retain immutable data, not current
     verdicts, keyed by the freshly checked PostgreSQL generation.
     """
     def __init__(self, store):
-        from backend.api.canonical_repository.postgres_store import POSTGRES_APPLY_ADVISORY_LOCK_KEY
         self.store = store
         self.connection = store.connect()
         self.collections = {}
@@ -361,14 +378,16 @@ class CurrentRegistryView:
         self.closed = False
         self.pool = active_context().pool
         try:
-            # Acquire before the MVCC snapshot, so a preceding writer's commit
-            # is visible. Closing the connection releases this session lock.
+            # Single-writer campaign: no database-wide read lock. Sample the
+            # engine clock BEFORE the MVCC snapshot, never attach a newer
+            # clock to an older snapshot. Original apply locking is unchanged.
             self.connection.autocommit = True
-            self.connection.execute("SELECT pg_advisory_lock_shared(hashtextextended(%s,0))",
-                                    (POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
+            self.clock=database_clock(self.connection)
             self.connection.autocommit = False
             self.connection.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
-            self.signature = registry_signature(self.connection)
+            prior=self.pool.registry_generations.get(store.database_url)
+            self.signature = prior[1] if prior is not None and prior[0]==self.clock else registry_signature(self.connection)
+            self.pool.registry_generations[store.database_url]=self.clock,self.signature
         except BaseException:
             self.close()
             raise
@@ -423,15 +442,22 @@ class CurrentRegistryView:
 
     def verify_unchanged(self):
         with self.store.connect() as connection:
-            connection.execute('SET TRANSACTION READ ONLY')
-            if registry_signature(connection) != self.signature:
-                raise ValueError('Registry changed during mechanical validation')
+            connection.autocommit=True
+            clock=database_clock(connection)
+            if clock!=self.clock:
+                connection.autocommit=False
+                connection.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+                if registry_signature(connection) != self.signature:
+                    raise ValueError('Registry changed during mechanical validation')
+                # Keep the PRE-snapshot clock, so a later mutation never rides
+                # an older snapshot under a newer token.
+                self.pool.registry_generations[self.store.database_url]=clock,self.signature
 
     def close(self):
         if not self.closed:
             self.closed = True
-            self.connection.rollback()
-            self.connection.close()
+            try:self.connection.rollback()
+            finally:self.connection.close()
             self.records.clear()
             self.collections.clear()
 
