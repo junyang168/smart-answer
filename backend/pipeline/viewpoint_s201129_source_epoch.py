@@ -22,8 +22,35 @@ def bound_package(bound):
 def postimages(package):
     normalized, stated = _normalize_records(package)
     before, _ = repair.saved_before()
-    return {c:{o:merge_over_existing(p,before.get((c,o)),stated[c,o]) for o,p in rows.items()}
-            for c,rows in normalized.items()}
+    plan = repair.read_artifact(repair.APPLICATION_ROOT/'dry-run-plan.json')
+    return planned_postimages(normalized,stated,before,plan)
+
+
+def planned_postimages(normalized, stated, before, plan):
+    """An unchanged row keeps its stored revision; a draft is not an apply plan."""
+    operations = {(o['collection'],o['object_id']):o for o in plan['operations']}
+    if (len(operations) != len(plan['operations'])
+            or set(operations) - {(c,o) for c,rows in normalized.items() for o in rows}):
+        raise ValueError('source plan has duplicate or unreviewed objects')
+    result = {}
+    for collection, rows in normalized.items():
+        result[collection] = {}
+        for oid, payload in rows.items():
+            prior = before.get((collection,oid))
+            proposed = merge_over_existing(payload,prior,stated[collection,oid])
+            operation = operations.get((collection,oid))
+            if operation is None:
+                if (prior is None or {k:v for k,v in proposed.items() if k != 'revision'}
+                        != {k:v for k,v in prior.items() if k != 'revision'}):
+                    raise ValueError('source plan omitted an actual changed record: '+oid)
+                expected = deepcopy(prior)
+            else:
+                expected = {**operation['payload'],'revision':operation['after_revision']}
+                if ({k:v for k,v in expected.items() if k != 'revision'}
+                        != {k:v for k,v in proposed.items() if k != 'revision'}):
+                    raise ValueError('source plan changed reviewed content: '+oid)
+            result[collection][oid] = expected
+    return result
 
 
 def validate_postimage(package, records):

@@ -172,3 +172,26 @@ def test_historical_source_pin_projection_is_not_current_audit_approval(monkeypa
         assert seed==original and checked['audit_path']=='/original/audit.json'
         if mutation=='foreign_path':assert changes==[] and checked==seed
         else:assert changes==[row] and checked['bindings'][0]['file_sha256']=='new'
+
+
+@pytest.mark.parametrize('mutation',[None,'omitted_change','changed_operation','foreign_operation','duplicate_operation'])
+def test_actual_plan_not_draft_controls_unchanged_evidence_revision(monkeypatch,mutation):
+    monkeypatch.setattr(epoch,'merge_over_existing',lambda p,b,s:deepcopy(p))
+    before={('evidence_steps','E'):{'evidence_step_id':'E','revision':1,'statement':'same'}}
+    normal={'evidence_steps':{'E':{**before['evidence_steps','E'],'revision':2}}}
+    stated={('evidence_steps','E'):{'revision','statement','evidence_step_id'}}
+    plan={'operations':[]}
+    if mutation=='omitted_change':normal['evidence_steps']['E']['statement']='different'
+    if mutation in {'changed_operation','foreign_operation','duplicate_operation'}:
+        operation={'collection':'evidence_steps','object_id':'E','after_revision':2,
+                   'payload':{'evidence_step_id':'E','statement':'same'}}
+        if mutation=='changed_operation':operation['payload']['statement']='wrong'
+        if mutation=='foreign_operation':operation['object_id']='foreign'
+        plan['operations']=[operation]
+        if mutation=='duplicate_operation':plan['operations'].append(deepcopy(operation))
+    if mutation:
+        with pytest.raises(ValueError):epoch.planned_postimages(normal,stated,before,plan)
+    else:
+        result=epoch.planned_postimages(normal,stated,before,plan)
+        assert result['evidence_steps']['E']==before['evidence_steps','E']
+        assert normal['evidence_steps']['E']['revision']==2
