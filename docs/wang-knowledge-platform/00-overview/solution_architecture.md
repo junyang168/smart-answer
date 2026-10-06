@@ -150,6 +150,8 @@ flowchart TD
 
 后果分两半：**已发布文章的读者核对不受影响**（片段是副本，自带录音时间）；但**重新抽取做不了**，新的观点归并也做不了。那批文件需要与数据库同等的备份对待。
 
+**原文重新校对后，更新知识库是一个完整流程，不是改几条记录就结束。** 先保存新旧原文，找齐被影响的引用、主张、问题、关系和观点连接；只修改获准的内容，但完整检查相连的知识。由 GPT 提议、Opus 独立审核，最多一轮纠正；旧版本与拒绝保留。数据库单次写入、回读和受影响完整分组的独立审计都完成，才算这次更新完成。观点正文并不因某篇讲道修改就必然改变，也不自动启动文章或发布。Developer 的执行契约见[来源修订 → Claim → CVP 更新流程](../20-knowledge/source_reconciliation_workflow_v1.md)。
+
 ## 4. Key Architecture Decisions
 
 每条格式相同：**决策 → 其他解决方案 → 为什么不用 → 后果**，必要时附证据。
@@ -273,11 +275,13 @@ flowchart TD
 - [知识库详细设计](./knowledge_platform_design.md)——知识对象、双轴组织、问答设计、审核机制
 - [共享知识模型](./shared_knowledge_model_v1.md)——对象的意义与边界
 - [Canonical Viewpoint Registry 设计](../20-knowledge/canonical_viewpoint_design.md)——跨讲身份层的架构权威
+- [来源修订 → Claim → CVP 更新流程](../20-knowledge/source_reconciliation_workflow_v1.md)——来源校对后的完整影响验证、一次纠正与单次应用
 
 ## 关于本文档
 
 > **读者**：教会同工与 Solution architect。同工要参与审阅，必须能读懂本文；全文不用系统内部术语，英文名词在[术语](#术语)一节定义。
 > **类型**：规范
 > **状态**：当前
+> **来源更新代码对齐**：2026-10-06 核对到 `eacc753`、`c5bc74a`、`1bcb34f` 的通用来源更新入口及离线测试；未宣称新入口已真实模型／SQL 端到端运行。历史流程保持其原批准依据，不由新入口追认。
 > **与代码对齐**：第 2 节语境等价／部分支持、未决出口与重复仲裁保护于 2026-10-05 核对到 `config/wang_cvp_contextual_semantics_v2.md`、`viewpoint_semantic_contract.py`、新版本角色模板、`viewpoint_adjudication_history.py` 与离线回归测试；尚未作新规则真实模型校准或生产启用。原文仲裁结案规则保持 2026-10-03 对 `wang_audit_source_resolution_v1.json`、仲裁／结案／campaign 代码的核对。新标准 profile 为 `wang_cvp_resolution_policy_v4.json`，#357 指定订阅模型 profile 为 `wang_cvp_resolution_policy_v5.json`；旧 profile 及缓存保留。独立审计核对到 `scripts/audit-library.py`，比率仍取自 2026-08-26；D1／D2 数字取自 2026-08-25 Registry 快照；其余陈述未逐条核对。
 > **权威范围**：第 4 节的 architecture decisions 与第 2 节的质量属性。下游设计与本文冲突时，先改本文并记录决定，不在下游打补丁。

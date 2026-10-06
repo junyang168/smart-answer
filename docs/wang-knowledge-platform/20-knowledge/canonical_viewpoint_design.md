@@ -35,6 +35,7 @@
 | [8. 不变量](#8-不变量) | 机器可查的规则 |
 | [9. 谁读观点](#9-谁读观点) | 文章、问答怎样取用 |
 | [10. 明确不做](#10-明确不做) | |
+| [11. 来源改变后的观点更新](#11-来源改变后的观点更新) | 新版本批准与完整影响证明 |
 
 ## 1. 观点是什么
 
@@ -295,12 +296,14 @@ flowchart TD
 | --- | --- | --- |
 | 生成状态 | 这一轮跑完了没有 | `generated / validated / failed` |
 | 审核状态 | 谁认可了 | `candidate / ai_consensus / system_approved / human_approved / rejected` |
-| 批准依据 | 凭什么认可的 | `deterministic / dual_model_consensus / human_exception_review` |
+| 批准依据 | 凭什么认可的 | `deterministic / dual_model_consensus / owner_scoped_independent_terminal_review / human_exception_review` |
 | 身份状态 | 这个观点还是不是它自己 | `active / redirected / split / merged / retired` |
 | 可见性 | 谁能看到 | `internal / active_snapshot_eligible / public` |
 | 依赖状态 | 用了它的产品还有效吗 | `current / invalidated / withdrawn / rebuilt` |
 
-**`system_approved` 不等于同工看过。** 它表示两个模型一致且属于低风险，界面上不得显示成人工批准。批准依据这一栏就是用来防止这种混淆的。
+**`system_approved` 不等于同工看过。** 它表示系统按该版本契约批准；正常观点解析依靠两个模型一致且属于低风险，界面上不得显示成人工批准。批准依据这一栏就是用来防止这种混淆的。
+
+另有明确受控来源修订的 `owner_scoped_independent_terminal_review`：GPT 只提议／纠正，Opus 对精确完整后像独立终审；必须绑定该版本契约、真实 Opus 回答与单次应用证明，不假称双模型共识，也不把 owner 的执行授权称为内容批准。不能只凭状态或政策名称放行。
 
 当前实际状态(2026-08-25):32 条修订全部是 `system_approved` / `internal`——**没有一条对外**。
 
@@ -349,6 +352,16 @@ flowchart TD
 - 不把不同来源的证据步骤拼成一条虚构的完整论证；
 - 不把出现次数当作重要性。
 
+## 11. 来源改变后的观点更新
+
+按[来源修订 → Claim → CVP 更新流程](./source_reconciliation_workflow_v1.md)，先检查改变来源的全部 consumer，再检查目标 CVP 所有其他成员及其完整来源。编辑推论与教授直说分开；逐字引用成立仍须核对主体、归属、范围、模态、必要／充分条件及上下文。
+
+来源修改不必导致 CVP 核心命题改变。可保留核心命题而更新 Claim 版本、连接及证据绑定；partial supports 必须指出具体作用，不能要求 Claim 复述整个 CVP，也不能把它不支持的部分凑成等价。确有获准的核心意思变化，创建新 CVR 并保留旧 CVR／supersedes 链，不自动合并、拆分或退役身份。
+
+终审批准后的 fresh provenance 明确单一 Opus 实际依据；连接绑定最终 Claim SHA、当前 CVR 和精确 locator，不能沿用旧 decision 冒充新批准。原子应用后失效相关产品依赖，但本流程不生成路线／文章或发布。完整受影响组独立审计与准确 flags 是完成门槛，SQL 成功不是完成。
+
+通用来源版本证明只读还原冻结成员的历史 pins；未来执行仍须核验当前知识与新来源批准。旧硬编码修订包不自动升级为通用证明；缺少、歧义、冲突或 human hold 均停止。
+
 ## 待定
 
 **复杂论证体系可能需要扩展。** 当前模型是「观点 + 论证路线 + 观点关系」。多层嵌套的论证、几个观点联合才成立的结论、有条件才成立的结论，现有对象是否够用，尚未论证。本文不擅自扩展模型，记录为公开问题。
@@ -358,5 +371,6 @@ flowchart TD
 > **读者**:Solution architect、Developer。同工不需要读本文；同工要知道的在 [Solution Architecture](../00-overview/solution_architecture.md)。
 > **类型**:规范
 > **状态**:当前。取代 `canonical_viewpoint_design.md`。
+> **来源更新代码对齐**:第 11 节与受控终审依据于 2026-10-06 核对到 `eacc753`、`c5bc74a`、`1bcb34f` 及离线回归；新入口未作真实模型／SQL 端到端实跑，不追认旧包。其余数字与旧规则的原核对范围保持。
 > **与代码对齐**:第 4 节语境语义规则于 2026-10-05 核对到 `config/wang_cvp_contextual_semantics_v2.md`、`viewpoint_semantic_contract.py`、新版本角色模板及 `scripts/audit-library.py`；身份归并未决出口核对到 v2 response，重复仲裁保护核对到 `viewpoint_adjudication_history.py`。新规则目前只完成离线回归，尚非真实模型校准或生产通过。第 3 节人工交接与受控修订续跑保持 2026-10-04 对 `viewpoint_human_review.py`、`viewpoint_audit_link_repair.py`、`viewpoint_batch_resolution_runner.py` 及对应回归测试的核对；其余未核对。第 1、7 节的数字仍取自 2026-08-25 的 PostgreSQL 快照；partition 实施以 #395 的验证记录为准。
 > **权威范围**:观点、论证路线、观点关系的语义、身份判定与消费边界。
