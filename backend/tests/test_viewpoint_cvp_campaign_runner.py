@@ -146,3 +146,30 @@ def test_campaign_does_not_investigate_non_deferred_failure(tmp_path,monkeypatch
     from backend.pipeline import viewpoint_cvp_campaign_runner as module
     monkeypatch.setattr(module,'command',lambda args:pytest.fail('no source investigation without deferred item'))
     assert module.investigate_deferred(tmp_path) is None
+
+
+@pytest.mark.parametrize('drift',[None,'selection','population','status','artifact'])
+def test_existing_bridge_is_exchange_input_not_authority_to_skip_prepare(tmp_path,monkeypatch,drift):
+    from types import SimpleNamespace
+    from backend.pipeline import viewpoint_cvp_campaign_runner as module
+    from backend.pipeline.viewpoint_resolution_runtime import write_immutable
+    from backend.api.canonical_repository.viewpoint_foundation import sha256_json
+    write_immutable(tmp_path/'review-selection.json',{'claims':[{'claim_id':'C'}]})
+    body={'status':'verified','selection_file_sha256':module.binding(tmp_path/'review-selection.json')['file_sha256'],
+          'proofs':[{'claim_id':'C'}]}
+    if drift=='selection':body['selection_file_sha256']='wrong'
+    if drift=='population':body['proofs']=[{'claim_id':'foreign'}]
+    if drift=='status':body['status']='held'
+    write_immutable(tmp_path/'historical-bridges.json',body|{'artifact_sha256':'wrong' if drift=='artifact' else sha256_json(body)})
+    monkeypatch.setattr(module,'campaign_policy',lambda args:('policy',{}))
+    monkeypatch.setattr(module,'build_selection',lambda *args,**kwargs:None)
+    monkeypatch.setattr(module,'ensure_campaign_backup',lambda args:{'path':'dump','file_sha256':'backup'})
+    calls=[];monkeypatch.setattr(module,'command',lambda argv:calls.append(argv))
+    args=SimpleNamespace(grouping_repository=tmp_path,accepted_grouping_sha='sha',entrance_audit=tmp_path/'audit',
+        wang_repository=tmp_path,global_lock=tmp_path/'lock',authorized_by='user',completed_source_repair=[])
+    if drift:
+        with pytest.raises(ValueError):module.qualify({}, {'group_key':'g','claim_ids':['C']},{},tmp_path,args)
+        assert not calls
+    else:
+        module.qualify({}, {'group_key':'g','claim_ids':['C']},{},tmp_path,args)
+        assert len(calls)==1 and calls[0][2]=='backend.pipeline.viewpoint_reviewed_cvp_prepare'

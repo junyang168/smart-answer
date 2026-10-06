@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import time
+import os
 from contextlib import nullcontext
 
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
@@ -330,7 +331,39 @@ def qualify(row, group, inventory, root, args):
         return
     build_selection(group, inventory, root, getattr(args, 'random_spot_check_policy', None),
                     getattr(args,'completed_source_repair',None) or [])
-    command([PYTHON, "-m", "backend.pipeline.viewpoint_historical_review_bridge", "--selection", root / "review-selection.json", "--output", root / "historical-bridges.json"])
+    bridge=root/'historical-bridges.json'
+    if bridge.exists():
+        # A bridge is exchange input, never a cached current approval. The
+        # prepare/freeze validators independently reconstruct its lineage
+        # against current Claim/Evidence/source and hold status.
+        from backend.api.canonical_repository.viewpoint_production_safety import validate_content_addressed
+        cached=read(bridge)
+        validate_content_addressed(cached,'artifact_sha256')
+        if (cached.get('status')!='verified'
+                or cached.get('selection_file_sha256')!=binding(root/'review-selection.json')['file_sha256']
+                or sorted(p['claim_id'] for p in cached['proofs'])!=sorted(group['claim_ids'])):
+            raise ValueError('historical bridge exchange input identity drift')
+    else:
+        command([PYTHON, "-m", "backend.pipeline.viewpoint_historical_review_bridge", "--selection", root / "review-selection.json", "--output", bridge])
+    b=ensure_campaign_backup(args)
+    prepare_command=[PYTHON, "-m", "backend.pipeline.viewpoint_reviewed_cvp_prepare",
+             "--group-key", group["group_key"], "--grouping-repository", args.grouping_repository,
+             "--accepted-grouping-sha", args.accepted_grouping_sha, "--historical-bridges", root / "historical-bridges.json",
+             "--independent-audit", args.entrance_audit, "--output-root", root / "production",
+             "--wang-repository", args.wang_repository,
+             "--cvp-policy", policy,
+             "--route-policy", "backend/pipeline/policies/wang_route_resolution_policy_v1.json",
+             "--backup-dump", b["path"], "--backup-sha256", b["file_sha256"],
+             "--global-lock", args.global_lock, "--scope-authorized-by", args.authorized_by,
+             "--created-at", datetime.now(timezone.utc).isoformat()]
+    for path in getattr(args,'completed_source_repair',None) or []:
+        prepare_command.extend(['--completed-source-repair',path])
+    if getattr(args,'completed_source_repair',None):
+        prepare_command.extend(['--parent-completed-proofs',args.completed_proofs])
+    command(prepare_command)
+
+
+def ensure_campaign_backup(args):
     # One verified full snapshot before this serialized campaign, plus the
     # normal per-group compensatable ChangeSets/readback history. Repeating a
     # full 129MB snapshot 154 times would exhaust the local machine's disk.
@@ -348,21 +381,7 @@ def qualify(row, group, inventory, root, args):
     b = read(backup)
     if binding(b["path"]) != b:
         raise ValueError("campaign baseline backup SHA drift")
-    prepare_command=[PYTHON, "-m", "backend.pipeline.viewpoint_reviewed_cvp_prepare",
-             "--group-key", group["group_key"], "--grouping-repository", args.grouping_repository,
-             "--accepted-grouping-sha", args.accepted_grouping_sha, "--historical-bridges", root / "historical-bridges.json",
-             "--independent-audit", args.entrance_audit, "--output-root", root / "production",
-             "--wang-repository", args.wang_repository,
-             "--cvp-policy", policy,
-             "--route-policy", "backend/pipeline/policies/wang_route_resolution_policy_v1.json",
-             "--backup-dump", b["path"], "--backup-sha256", b["file_sha256"],
-             "--global-lock", args.global_lock, "--scope-authorized-by", args.authorized_by,
-             "--created-at", datetime.now(timezone.utc).isoformat()]
-    for path in getattr(args,'completed_source_repair',None) or []:
-        prepare_command.extend(['--completed-source-repair',path])
-    if getattr(args,'completed_source_repair',None):
-        prepare_command.extend(['--parent-completed-proofs',args.completed_proofs])
-    command(prepare_command)
+    return b
 
 
 def campaign_backup_label(root):
@@ -423,6 +442,10 @@ def execute(args):
     config.update(campaign_policy(args)[1])
     if getattr(args, 'validation_runtime', False):
         config['validation_runtime'] = 'bounded_authenticated_history_v1'
+    if getattr(args,'stop_after_sequence',None) is not None:
+        if not 1<=args.stop_after_sequence<=len(schedule['schedule']):
+            raise ValueError('invalid validation checkpoint sequence')
+        config['validation_checkpoint_sequence']=args.stop_after_sequence
     _write_immutable(args.output_root / "campaign.json", config)
     seed = read(args.completed_proofs)
     if {r["group_key"] for r in seed["groups"]} != set(schedule["completed_groups"]):
@@ -444,7 +467,8 @@ def execute(args):
                                  getattr(args, 'random_spot_check_policy', None))
     _write_immutable(args.output_root / 'lineage-discovery-preflight.json', preflight)
     if getattr(args, 'validation_runtime', False):
-        _write_immutable(args.output_root / 'validation-startup.json', initialize_validation(args))
+        ensure_campaign_backup(args)  # one campaign startup snapshot, not per-group entry work
+        _write_immutable(args.output_root / 'validation-startups' / f'{os.getpid()}-{time.time_ns()}.json', initialize_validation(args))
     done = []
     pending_count=sum(row['state']=='pending' for row in schedule['schedule'])
     for row in schedule["schedule"]:
@@ -547,6 +571,11 @@ def execute(args):
             _write_immutable(completion, proof)
             done.append(row["group_key"])
             save_state(args.output_root / "progress.json", state | {"status": "group_complete", "completed_new_groups": len(done), "remaining_groups": pending_count-len(done)})
+            if row['sequence']==getattr(args,'stop_after_sequence',None):
+                save_state(args.output_root/'progress.json',state|{'status':'owner_validation_checkpoint',
+                    'completed_new_groups':len(done),'remaining_groups':pending_count-len(done),
+                    'no_next_group_started':True,'checkpoint_group_completed':True})
+                return 0
         except Exception as exc:
             save_state(args.output_root / "progress.json", state | {"status": "blocked", "error": str(exc), "no_next_group_started": True})
             raise
@@ -568,6 +597,8 @@ def main():
     parser.add_argument('--semantic-contract-sha256')
     parser.add_argument('--validation-runtime', action='store_true',
                         help='one runtime for authenticated historical proofs; live checks and write gates unchanged')
+    parser.add_argument('--stop-after-sequence',type=int,
+                        help='stop only after this group has real write/readback/audit completion')
     args = parser.parse_args()
     args.output_root.mkdir(parents=True, exist_ok=True)
     with (args.output_root / "campaign.lock").open("a") as lock:
