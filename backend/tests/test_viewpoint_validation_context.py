@@ -189,6 +189,7 @@ def test_campaign_same_runtime_dispatch_keeps_cli_args_and_does_not_spawn(monkey
     monkeypatch.setattr('importlib.import_module', lambda name:SimpleNamespace(main=main))
     monkeypatch.setattr(campaign.subprocess,'run',lambda *a,**k:pytest.fail('CVP subprocess loses proof lifecycle'))
     flag='--output-root' if module.endswith('_prepare') else '--output-dir'
+    (tmp_path/'out').mkdir()  # runtime output is not a new historical receipt
     argv=[campaign.PYTHON,'-m','backend.pipeline.'+module,flag,tmp_path/'out','--dry-run']
     with validation_runtime():
         campaign.command(argv);campaign.command(argv)
