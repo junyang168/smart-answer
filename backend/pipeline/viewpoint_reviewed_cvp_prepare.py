@@ -236,6 +236,8 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
     repair_paths=getattr(args,'completed_source_repair',None) or []
     repairs=[json.loads(path.read_text(encoding='utf-8')) for path in repair_paths]
     for repair in repairs:
+        if repair.get('source_repair_application',{}).get('schema_version') == 'wang_source_reconciliation_v1':
+            for objects in normalize_package(repair).values(): all_ids.update(objects)
         if repair.get('source_repair_application',{}).get('schema_version') == 'wang_s201129_owner_opus_source_reconciliation_v1':
             for objects in normalize_package(repair).values(): all_ids.update(objects)
         if repair.get('source_repair_application',{}).get('schema_version') == 'wang_g041_owner_qualified_transcript_reconciliation_v2':

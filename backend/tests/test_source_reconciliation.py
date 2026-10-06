@@ -647,3 +647,20 @@ def test_store_projection_preserves_omitted_fields_not_new_schema_defaults(scena
     plan = {"operations": [dict(operation="update", collection="questions", object_id="Q-test", before_revision=1, after_revision=2, payload=payload)]}
     post = c.assert_plan_postimages(package, plan, before)
     assert post["questions/Q-test"]["answer_claim_ids"] == ["CL-test"]
+
+
+def test_epoch_membership_validates_full_proof_but_preserves_partial_caller_population(scenario, tmp_path, monkeypatch):
+    from backend.pipeline import source_reconciliation_epoch as epoch
+    runner, ports, manifest = setup_runner(tmp_path, scenario)
+    runner.run(manifest, apply=True, audit=True)
+    ports.store = object()
+    monkeypatch.setattr(epoch, "ProductionPorts", lambda store=None: ports)
+    monkeypatch.setattr(epoch, "_assert_database", lambda plan, store: None)
+    package = r.body(r.read(runner.root / "effective-package.json"))
+    partial = {("claims", "CL-test"): {"payload": ports.states["claims/CL-test"], "revision": 2,
+        "content_sha256": record_content_sha(ports.states["claims/CL-test"]), "retired": False}}
+    membership = json.loads(Path(manifest.accepted_membership.path).read_text())
+    restored, changed = epoch.membership_snapshot(membership, partial, package, set(), {"CL-test"})
+    assert set(restored) == set(partial) and changed == ["CL-test"]
+    assert restored["claims", "CL-test"]["payload"] == scenario[1]["claims/CL-test"]
+    assert ports.applies == 1 and ports.calls == ["proposal", "initial_review"]

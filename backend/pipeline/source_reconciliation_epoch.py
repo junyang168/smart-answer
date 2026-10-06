@@ -158,15 +158,23 @@ def membership_snapshot(manifest, records, package, completed_ids, selected_ids)
     frozen = body(read(root / "frozen.json"))
     if json.loads(c.bound_bytes(frozen["manifest"]["accepted_membership"], frozen["physical_snapshots"])) != manifest:
         raise ValueError("historical membership manifest differs from authorized accepted grouping")
-    current = {c.key(col, oid): row["payload"] for (col, oid), row in records.items() if not row.get("retired")}
-    restored = _predecessor_projection(package, current, ProductionPorts().store)
+    ports = ProductionPorts()
+    _, _, live = verified_applied(file_binding(root / "effective-package.json"), ports.store)
+    current = {c.key(col, oid): payload for (col, oid), payload in live.items()}
+    for (col, oid), row in records.items():
+        if (row.get("retired") or row["payload"] != current.get(c.key(col, oid))
+                or row["revision"] != row["payload"].get("revision")
+                or row["content_sha256"] != record_content_sha(row["payload"])):
+            raise ValueError("source epoch caller snapshot differs from actual current Registry")
+    restored = _predecessor_projection(package, current, ports.store)
     result = deepcopy(records)
     for k in current.keys() - restored.keys():
         if c.split_key(k)[0] in {"source_documents", "source_fragments", "evidence_steps", "claims"}:
-            del result[c.split_key(k)]
+            result.pop(c.split_key(k), None)
     changed = []
     for k, old in restored.items():
-        if k not in current or current[k] == old or c.split_key(k)[0] not in {"source_documents", "source_fragments", "evidence_steps", "claims"}:
+        if (c.split_key(k) not in result or k not in current or current[k] == old
+                or c.split_key(k)[0] not in {"source_documents", "source_fragments", "evidence_steps", "claims"}):
             continue
         col, oid = c.split_key(k)
         result[col, oid] = {"payload": old, "revision": old["revision"], "content_sha256": record_content_sha(old), "retired": False}
