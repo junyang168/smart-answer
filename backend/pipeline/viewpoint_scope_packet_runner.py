@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from dotenv import load_dotenv
+from backend.pipeline.viewpoint_validation_context import typed_records
 
 from backend.api.canonical_repository.knowledge_models import (
     ArgumentRouteRecord,
@@ -258,33 +259,15 @@ def build_scope_packet(
     exceptions = {row.claim_id: row for row in source_attestation.exceptions}
 
     store = PostgresKnowledgeStore(database_url)
-    claims = {
-        row.claim_id: row
-        for row in (
-            ClaimRecord.model_validate(raw) for raw in store.list_records("claims")
-        )
-    }
-    evidence_index = {
-        row.evidence_step_id: row
-        for row in (
-            EvidenceStepRecord.model_validate(raw)
-            for raw in store.list_records("evidence_steps")
-        )
-    }
-    fragment_index = {
-        row.fragment_id: row
-        for row in (
-            SourceFragmentRecord.model_validate(raw)
-            for raw in store.list_records("source_fragments")
-        )
-    }
+    claims = typed_records(store,'claims',ClaimRecord,'claim_id')
+    all_evidence = typed_records(store,'evidence_steps',EvidenceStepRecord,'evidence_step_id')
+    forward_ids={eid for cid in in_scope if cid in claims for eid in getattr(claims[cid],'evidence_step_ids',[])}
+    evidence_index=all_evidence.reciprocal_subset(set(in_scope),forward_ids)
+    fragment_index = typed_records(store,'source_fragments',SourceFragmentRecord,'fragment_id')
     citation_index = {
         item.citation_id: item for item in RepositoryStore(repository_root).list_citations()
     }
-    source_sha256 = {
-        fragment.source_id: str(fragment.source_sha256 or "")
-        for fragment in fragment_index.values()
-    }
+    source_sha256 = {sid:str(sha or '') for sid,sha in fragment_index.project_last('source_id','source_sha256').items()}
 
     # A Claim review moves every reviewed Claim's revision and fingerprint
     # without altering a word it says, and the manifest pins both. On

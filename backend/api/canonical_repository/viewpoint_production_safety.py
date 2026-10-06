@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import fcntl
-from backend.pipeline.viewpoint_validation_context import current_check
+from backend.pipeline.viewpoint_validation_context import current_check, typed_records
 
 from backend.api.canonical_repository.knowledge_models import (
     ClaimRecord,
@@ -188,26 +188,9 @@ def _validate_scope_packet(scope_packet: Mapping[str, Any], store: Any) -> list[
     if len(blocked_claim_ids) != len(set(blocked_claim_ids)):
         findings.append("scope packet contains duplicate blocked Claim IDs")
 
-    current_claims = {
-        row.claim_id: row
-        for row in (
-            ClaimRecord.model_validate(raw) for raw in store.list_records("claims")
-        )
-    }
-    current_evidence = {
-        row.evidence_step_id: row
-        for row in (
-            EvidenceStepRecord.model_validate(raw)
-            for raw in store.list_records("evidence_steps")
-        )
-    }
-    current_fragments = {
-        row.fragment_id: row
-        for row in (
-            SourceFragmentRecord.model_validate(raw)
-            for raw in store.list_records("source_fragments")
-        )
-    }
+    current_claims = typed_records(store,'claims',ClaimRecord,'claim_id')
+    current_evidence = typed_records(store,'evidence_steps',EvidenceStepRecord,'evidence_step_id')
+    current_fragments = typed_records(store,'source_fragments',SourceFragmentRecord,'fragment_id')
     source_records = store.list_records("source_documents")
     context_sources = {str(row.get("source_id") or ""): row for row in source_records}
     context_cache = {}

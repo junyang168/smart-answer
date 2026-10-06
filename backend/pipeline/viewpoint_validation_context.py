@@ -17,6 +17,8 @@ import inspect
 import json
 from pathlib import Path
 import time
+from collections.abc import Mapping
+from copy import deepcopy
 
 _current = ContextVar('cvp_validation_context', default=None)
 _pool = ContextVar('cvp_historical_proof_pool', default=None)
@@ -30,12 +32,14 @@ class HistoricalProofPool:
         self.phase_metrics = []
         self.registry_data = {}
         self.registry_cuts = {}
+        self.typed_data = {}
 
     def clear(self):
         self.documents.clear()
         self.results.clear()
         self.registry_data.clear()
         self.registry_cuts.clear()
+        self.typed_data.clear()
 
 
 @contextmanager
@@ -440,6 +444,47 @@ def current_registry_view(store):
     if identity not in ctx.registry_views:
         ctx.registry_views[identity] = CurrentRegistryView(store)
     return ctx.registry_views[identity]
+
+
+class TypedRecords(Mapping):
+    """Parsed data, not approval: callers receive isolated selected models.
+
+    All active rows are schema-validated when the authenticated generation is
+    loaded. Never expose the retained mutable Pydantic objects to consumers.
+    """
+    def __init__(self, rows, model, id_field):
+        parsed = [model.model_validate(row) for row in rows]
+        self.__rows = {getattr(row,id_field):row for row in parsed}
+        if len(parsed)!=len(self.__rows):raise ValueError('duplicate typed record identity')
+    def __len__(self):return len(self.__rows)
+    def __iter__(self):return iter(self.__rows)
+    def __getitem__(self,key):
+        row=self.__rows[key]
+        return row.model_copy(deep=True) if hasattr(row,'model_copy') else deepcopy(row)
+    def reciprocal_subset(self, selected_claims, forward_ids):
+        """Include BOTH forward and reverse edges, even malformed orphan edges."""
+        wanted=set(forward_ids)
+        wanted.update(k for k,row in self.__rows.items() if set(row.produced_claim_ids)&selected_claims)
+        return {k:self[k] for k in wanted if k in self.__rows}
+    def project_last(self, key_field, value_field):
+        # Preserve the old full-collection stable-order last-value projection.
+        return {getattr(row,key_field):deepcopy(getattr(row,value_field)) for row in self.__rows.values()}
+
+
+def typed_records(store, collection, model, id_field):
+    ctx=active_context()
+    if ctx is None or not hasattr(store,'database_url'):
+        return TypedRecords(store.list_records(collection),model,id_field)
+    view=current_registry_view(store)
+    ctx.pin(Path(inspect.getfile(model)))
+    key=store.database_url,collection,model,id_field
+    pin=view.signature.get(collection)
+    cached=ctx.pool.typed_data.get(key)
+    if cached is None or cached[0]!=pin:
+        data=TypedRecords(view.list_records(collection),model,id_field)
+        ctx.pool.typed_data[key]=pin,data
+    else:data=cached[1]
+    return data
 
 
 def current_check(fn):

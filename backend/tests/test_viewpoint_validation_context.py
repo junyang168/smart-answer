@@ -364,3 +364,51 @@ def test_engine_signature_reads_mvcc_generation_and_storage_epoch_not_self_repor
     assert result['claims']==(('restart','wrap','objects-node','KCS-node'),'generation')
     assert all('xmin::text' in q and 'ctid::text' in q for q in conn.queries[:2])
     assert 'payload' not in conn.queries[0] and 'pg_relation_filenode' in conn.queries[2]
+
+
+def test_typed_models_are_parsed_once_per_generation_but_selected_copies_are_isolated(monkeypatch):
+    from pydantic import BaseModel
+    from backend.pipeline import viewpoint_validation_context as module
+    monkeypatch.setattr(module,'registry_signature',generation_signature)
+    class Row(BaseModel):
+        revision:int
+        text:str
+    store=GenerationStore()
+    with validation_runtime():
+        with ValidationContext('first'):
+            a=module.typed_records(store,'claims',Row,'text')
+            a['original'].text='consumer-only change'
+            assert a['original'].text=='original'
+        with ValidationContext('second'):
+            assert module.typed_records(store,'claims',Row,'text') is a
+        store.generation=2;store.payload['text']='new'
+        with ValidationContext('third'):
+            b=module.typed_records(store,'claims',Row,'text')
+            assert b is not a and b['new'].text=='new'
+
+
+def test_typed_subset_still_validates_unselected_malformed_records():
+    from pydantic import BaseModel,ValidationError
+    from backend.pipeline.viewpoint_validation_context import TypedRecords
+    class Row(BaseModel):
+        oid:str
+        required:int
+    with pytest.raises(ValidationError):
+        TypedRecords([{'oid':'selected','required':1},{'oid':'unselected','required':'bad'}],Row,'oid')
+
+
+def test_scoped_graph_retains_orphan_and_duplicate_reverse_evidence_edges():
+    from backend.pipeline.viewpoint_validation_context import TypedRecords
+    from backend.api.canonical_repository.knowledge_models import EvidenceStepRecord,ClaimRecord
+    from backend.api.canonical_repository.viewpoint_resolution import claim_evidence_integrity_findings
+    rows=[{'evidence_step_id':'E1','produced_claim_ids':['C']},
+          {'evidence_step_id':'orphan','produced_claim_ids':['C','C']},
+          {'evidence_step_id':'unrelated','produced_claim_ids':['elsewhere']}]
+    index=TypedRecords(rows,EvidenceStepRecord,'evidence_step_id')
+    selected=index.reciprocal_subset({'C'},{'E1'})
+    assert set(selected)=={'E1','orphan'}
+    claims={'C':ClaimRecord(claim_id='C',statement='unchanged',claim_type='teaching',evidence_step_ids=['E1'])}
+    partial=claim_evidence_integrity_findings(claim_ids=['C'],claims=claims,evidence_steps=selected)
+    full=claim_evidence_integrity_findings(claim_ids=['C'],claims=claims,evidence_steps=dict(index))
+    assert partial==full and any('EvidenceStep-only' in finding for finding in partial)
+    assert any('duplicate' in finding for finding in partial)
