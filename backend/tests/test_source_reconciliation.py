@@ -653,6 +653,77 @@ def test_epoch_reuses_only_this_invocations_checked_index(monkeypatch, count):
         epoch.verified_applied({}, object())
 
 
+def test_parent_reconstruction_reuses_history_not_sql_or_current_boundary(scenario, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from backend.pipeline import owner_approved_link_correction as child
+    from backend.pipeline import immutable_proof_reuse
+    from backend.pipeline.viewpoint_validation_context import ValidationContext
+    runner, ports, manifest = setup_runner(tmp_path, scenario)
+    runner.run(manifest, apply=True, audit=True)
+    parent = runner.root
+    frozen = r.body(r.read(parent/"frozen.json"))
+    plan = r.body(r.read(parent/"plan.json"))
+    package = r.body(r.read(parent/"effective-package.json"))
+    old = c.index(frozen["before_records"])
+    post = c.assert_plan_postimages(package, plan, old)
+    expected = runtime.expected_invalidations(old, post, plan)
+    identity = "LR-"+c.sha256_json({"parent":r.binding(parent/"effective-package.json"),
+        "before_link":{"revision":1},"after_link":{"revision":2}})
+    root = parent/"authorized-link-corrections"/identity
+    adjudication = tmp_path/"audit/own-source-adjudication"
+    r.write(root/"packet.json", {"source_root":str(parent), "before_link":{"revision":1},
+        "after_link":{"revision":2}, "adjudication_root":str(adjudication),
+        "original_audit":{"path":str(adjudication.parent/"independent-audit/audit.json")},
+        "prior_bindings":[], "old_audit_source_proofs":[]})
+    r.write(root/"before.json", {"records":c.rows(expected)})
+    # Isolate parent history/current checks from the separately tested child
+    # target and historical audit validators; no real SQL/provider is called.
+    monkeypatch.setattr(child, "validate_target", lambda packet: None)
+    monkeypatch.setattr(immutable_proof_reuse, "verify_once", lambda *args: None)
+    reconstructed=[];actual=c.assert_plan_postimages
+    def counted(*args):
+        reconstructed.append(1)
+        return actual(*args)
+    monkeypatch.setattr(c,"assert_plan_postimages",counted)
+    sql=[];applied=[True]
+    def committed(p):
+        assert p==plan
+        sql.append(1)
+        return applied[0]
+    production=SimpleNamespace(committed=committed,store=object())
+    with ValidationContext("same parent stage"):
+        assert child.validate_parent(root,expected,production)==(frozen,old,post,plan)
+        assert child.validate_parent(root,expected,production)==(frozen,old,post,plan)
+        applied[0]=False
+        with pytest.raises(ValueError,match="not actually applied"):
+            child.validate_parent(root,expected,production)
+        applied[0]=True
+        drifted=deepcopy(expected);drifted["questions/Q-test"]["text"]="unreviewed"
+        with pytest.raises(ValueError,match="exact entire applied source boundary"):
+            child.validate_parent(root,drifted,production)
+        assert reconstructed==[1] and sql==[1]*4
+    # Standalone contexts do not retain approval beyond their closing boundary.
+    with ValidationContext("new parent stage"):
+        assert child.validate_parent(root,expected,production)==(frozen,old,post,plan)
+    assert reconstructed==[1,1] and sql==[1]*5
+    assert ports.applies==1 and ports.calls==["proposal","initial_review"]
+
+
+@pytest.mark.parametrize("name", ["frozen.json","effective-package.json","plan.json",
+    "proposal.raw.json","initial_review.packet.json","initial_review.raw.json","source"])
+def test_parent_frame_reuse_cannot_ignore_changed_physical_dependency(scenario,tmp_path,name):
+    from backend.pipeline import owner_approved_link_correction as child
+    from backend.pipeline.viewpoint_validation_context import ValidationContext
+    runner,ports,manifest=setup_runner(tmp_path,scenario)
+    runner.run(manifest,apply=True,audit=True)
+    target=Path(manifest.current_sources[0].path) if name=="source" else runner.root/name
+    with pytest.raises(ValueError,match="drift"):
+        with ValidationContext("changed parent input"):
+            child._parent_frame(runner.root)
+            target.write_bytes(target.read_bytes()+b" ")
+            child._parent_frame(runner.root)
+
+
 def test_initial_model_packet_cannot_drop_frozen_context(scenario, tmp_path):
     runner, _, manifest = setup_runner(tmp_path, scenario)
     runner.run(manifest)

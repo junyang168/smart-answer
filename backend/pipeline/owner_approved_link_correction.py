@@ -27,6 +27,7 @@ from backend.api.canonical_repository.viewpoint_production_safety import exclusi
 from backend.pipeline.viewpoint_authorized_source_repair_357 import Review
 from backend.pipeline.viewpoint_resolution_runtime import subscription_client, read_artifact
 from backend.pipeline.viewpoint_semantic_contract import semantic_prompt
+from backend.pipeline.viewpoint_validation_context import validated_history
 
 VERSION = "wang_owner_approved_link_correction_v1"
 REVIEWER = "owner_approved_link_opus_terminal_review"
@@ -340,6 +341,22 @@ def historical_audit_proofs(audit_path, before):
     return list({bound["path"]:bound for bound in bindings}.values())
 
 
+@validated_history(bound_files_only=True)
+def _parent_frame(parent):
+    """Immutable historical reconstruction only; no SQL/current approval."""
+    from backend.pipeline.viewpoint_validation_context import historical_context
+    ctx = historical_context()
+    if ctx:
+        ctx.pin(Path(c.__file__))
+        ctx.pin(Path(expected_invalidations.__code__.co_filename))
+    frozen = body(read(parent/"frozen.json")); c.guard_files(frozen)
+    package = body(read(parent/"effective-package.json")); validate_package(package)
+    plan = body(read(parent/"plan.json"))
+    old = c.index(frozen["before_records"])
+    post = c.assert_plan_postimages(package,plan,old)
+    return frozen,old,post,plan
+
+
 def validate_parent(root, before, ports):
     packet = body(read(root/"packet.json")); validate_target(packet)
     parent = Path(packet["source_root"])
@@ -349,12 +366,8 @@ def validate_parent(root, before, ports):
         raise ValueError("child task/root identity changed; budget cannot be reset")
     if packet["original_audit"]["path"] != str(Path(packet["adjudication_root"]).parent/"independent-audit/audit.json"):
         raise ValueError("child detached from the actual parent audit")
-    frozen = body(read(parent/"frozen.json")); c.guard_files(frozen)
-    package = body(read(parent/"effective-package.json")); validate_package(package)
-    parent_plan = body(read(parent/"plan.json"))
+    frozen,old,post,parent_plan = _parent_frame(parent)
     if not ports.committed(parent_plan): raise ValueError("parent source write not actually applied")
-    old = c.index(frozen["before_records"])
-    post = c.assert_plan_postimages(package,parent_plan,old)
     if before != expected_invalidations(old,post,parent_plan):
         raise ValueError("child before differs from exact entire applied source boundary")
     for bound in packet["prior_bindings"]: c.verify_file(bound)
