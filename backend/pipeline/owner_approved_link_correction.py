@@ -344,6 +344,16 @@ def validate_parent(root, before, ports):
     from backend.pipeline.viewpoint_audit_source_adjudication import build_packet, run as adjudicate, source_review_adapter
     adjudication = Path(packet["adjudication_root"])
     audit = Path(packet["original_audit"]["path"])
+    from backend.pipeline.immutable_proof_reuse import verify_once
+    bindings=packet['prior_bindings']+packet['old_audit_source_proofs']
+    bindings += [binding(root/n) for n in ('packet.json','before.json')]
+    bindings += [binding(Path(__file__)),binding(PROJECT/'scripts/audit-library.py')]
+    verify_once(str(root),bindings,ports.store,lambda:validate_historical_parent(packet,audit,adjudication,before))
+    return frozen,old,post,parent_plan
+
+
+def validate_historical_parent(packet,audit,adjudication,before):
+    from backend.pipeline.viewpoint_audit_source_adjudication import build_packet, run as adjudicate, source_review_adapter
     actual_proofs = {b["path"]:b for b in historical_audit_proofs(audit,before)}
     if actual_proofs != {b["path"]:b for b in packet["old_audit_source_proofs"]}:
         raise ValueError("prior actual full audit input/cache proof changed")
@@ -357,7 +367,6 @@ def validate_parent(root, before, ports):
     obj.generate = no_call
     handoff = adjudicate(audit,adjudication,history,adapters=[obj],final_gpt=True)
     if handoff != packet["handoff"]: raise ValueError("upheld adjudication changed")
-    return frozen,old,post,parent_plan
 
 
 def validate_child(root, store, current=None):

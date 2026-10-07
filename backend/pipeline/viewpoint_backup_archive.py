@@ -22,6 +22,41 @@ DEST=MOUNT/'WangKnowledgePlatform/registry-backups/357'
 UUID='8D2A5FB1-CC0A-4230-B338-188BF47B06F3'
 NAME='smart_answer_knowledge.dump'
 RECEIPT='ssd-archive-receipt.json'
+SCOPE='357-owner-backup-scope.json'
+
+
+def authorize_backup(path, proof):
+    """Explicit owner-scoped migration of an old unlabelled backup; never glob it."""
+    p=Path(path).absolute(); proof=Path(proof).absolute()
+    if p.name!=NAME or p.parent.parent!=LOCAL or '358' in p.parent.name:
+        raise ValueError('foreign backup')
+    allowed=(BASE, BASE.parent/'source-reconciliation')
+    if not any(proof.is_relative_to(root) for root in allowed) or '358' in str(proof):
+        raise ValueError('foreign backup proof')
+    value=json.loads(proof.read_text())
+    dump=value.get('dump',value)
+    if dump.get('path')!=str(p) or dump.get('file_sha256')!=digest(p):
+        raise ValueError('exact backup binding missing or changed')
+    if ('restore_list_exit_code' in value and value['restore_list_exit_code']!=0
+            or 'restore_catalog_nonempty' in value and not value['restore_catalog_nonempty']
+            or 'pg_restore_list_passed' in value and not value['pg_restore_list_passed']):
+        raise ValueError('backup restore proof missing')
+    catalog(p)  # Independently prove the current exact dump, including old receipt shapes.
+    value={'task':'#357','original_path':str(p),'backup_sha256':digest(p),
+           'proof_path':str(proof),'proof_sha256':digest(proof)}
+    write_immutable(p.parent/SCOPE,{**value,'artifact_sha256':sha256_json(value)})
+
+
+def explicit_scope(p):
+    scope=p.parent/SCOPE
+    if not scope.is_file():return False
+    value=json.loads(scope.read_text()); body={k:v for k,v in value.items() if k!='artifact_sha256'}
+    proof=Path(value.get('proof_path',''))
+    if (value.get('artifact_sha256')!=sha256_json(body) or value.get('task')!='#357'
+            or value.get('original_path')!=str(p) or not proof.is_file()
+            or digest(proof)!=value.get('proof_sha256') or digest(p)!=value.get('backup_sha256')):
+        raise ValueError('explicit backup scope drift')
+    return True
 
 
 def digest(path):
@@ -40,7 +75,39 @@ def verify_volume():
 def eligible(path):
     p=Path(path).absolute()
     return (p.name==NAME and p.parent.parent==LOCAL and p.parent.name.startswith('registry-backup-')
-        and re.search(r'(?:^|-)357(?:-|$)',p.parent.name) is not None and '358' not in p.parent.name)
+        and '358' not in p.parent.name
+        and (re.search(r'(?:^|-)357(?:-|$)',p.parent.name) is not None or explicit_scope(p)))
+
+
+def create_backup(label, database_url):
+    """#357 writes directly to the verified SSD, retaining its logical proof path."""
+    if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,60}',label) or not re.search(r'(?:^|-)357(?:-|$)',label) or '358' in label:
+        raise ValueError('exact #357 label required')
+    from datetime import datetime,timezone
+    verify_volume()
+    name='registry-backup-'+datetime.now(timezone.utc).strftime('%Y-%m-%d')+'-'+label
+    p=LOCAL/name/NAME; target=DEST/name/NAME
+    if p.parent.exists() or target.parent.exists():raise ValueError('backup already attempted; no overwrite')
+    if shutil.disk_usage(MOUNT).free<2*1024**3:raise ValueError('SSD backup reserve below 2GiB')
+    target.parent.mkdir(parents=True,mode=0o700); p.parent.mkdir(parents=True,mode=0o700)
+    temp=target.parent/(NAME+'.partial')
+    # Failed files are preserved, not retried or removed by this function.
+    subprocess.run(['pg_dump','--format=custom','--file='+str(temp),database_url],check=True,capture_output=True)
+    if not temp.stat().st_size:raise ValueError('empty backup')
+    cat=catalog(temp); sha=digest(temp); size=temp.stat().st_size
+    with temp.open('rb') as f:os.fsync(f.fileno())
+    verify_volume(); os.replace(temp,target)
+    body={'schema_version':'wang_registry_backup_ssd_archive_v1','task':'#357',
+        'original_path':str(p),'archive_path':str(target),'volume_uuid':UUID,
+        'file_sha256':sha,'size':size,'restore_catalog_sha256':cat,
+        'status':'copied_sha_and_restore_catalog_verified','registry_writes':0,'model_calls':0,
+        'direct_ssd':True}
+    receipt={**body,'artifact_sha256':sha256_json(body)}
+    write_immutable(target.parent/RECEIPT,receipt);write_immutable(p.parent/RECEIPT,receipt)
+    p.symlink_to(target)
+    if logical_binding_path(p)!=p:raise ValueError('backup logical path verification failed')
+    print(f'backup-registry: wrote {p} ({size} bytes, verified Jun SSD)',flush=True)
+    return receipt
 
 
 def logical_binding_path(path):
@@ -119,17 +186,30 @@ def inventory():
 
 
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('--apply',action='store_true');args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--apply',action='store_true')
+    parser.add_argument('--create-label');parser.add_argument('--migration-root',type=Path)
+    parser.add_argument('--backup-proof',type=Path,action='append',default=[]);args=parser.parse_args()
     if Path(__file__).resolve().parents[2].name!='wkp-357-worktree-per-session':
         raise ValueError('only #357 worktree may migrate these backups')
+    if args.create_label:
+        create_backup(args.create_label,os.environ['KNOWLEDGE_DATABASE_URL']);return
     with (BASE/'immediate-recovery-20261002-v1/recovery.lock').open('a') as lock, (BASE/'registry-cvp.lock').open('a') as registry:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB);fcntl.flock(registry,fcntl.LOCK_EX|fcntl.LOCK_NB)
-        verify_volume();paths,kept=inventory()
+        verify_volume()
+        if args.backup_proof:
+            if not args.apply or not args.migration_root:raise ValueError('explicit new owner migration root required')
+            for proof in args.backup_proof:
+                value=json.loads(proof.read_text())
+                authorize_backup(value.get('dump',value)['path'],proof)
+        paths,kept=inventory()
+        if args.migration_root:paths+=kept;kept=[]
         summary={'count':len(paths),'bytes':sum(p.stat().st_size for p in paths),
             'kept_local':[str(p) for p in kept],'archive_root':str(DEST),'volume_uuid':UUID}
         print(json.dumps(summary),flush=True)
         if not args.apply:return
-        root=BASE/'registry-backup-ssd-migration-20261005-v1'
+        root=args.migration_root or BASE/'registry-backup-ssd-migration-20261005-v1'
+        if root.parent!=BASE or not root.name.startswith('registry-backup-ssd-'):
+            raise ValueError('independent #357 migration root required')
         if root.exists():raise ValueError('migration already attempted; no silent restart')
         root.mkdir();write_immutable(root/'plan.json',{**summary,'paths':[str(p) for p in paths]})
         results=[]

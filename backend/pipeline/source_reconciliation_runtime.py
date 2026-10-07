@@ -138,7 +138,7 @@ class ProductionPorts:
 
     def backup(self, root: Path) -> dict:
         self._environment_guard()
-        completed = subprocess.run(["scripts/backup-registry.sh", "before-source-" + contract.sha256_json(str(root))[:32]],
+        completed = subprocess.run(["scripts/backup-registry.sh", "before-source-357-" + contract.sha256_json(str(root))[:32]],
             cwd=PROJECT, capture_output=True, text=True, check=True)
         match = re.search(r"backup-registry: wrote (.+\.dump) \(", completed.stdout)
         if not match:
@@ -253,8 +253,13 @@ class ProductionPorts:
             raise ValueError("audit population differs from affected full group")
         path = contract.verify_file(result["audit"])
         original = contract.verify_file(result["original_audit"])
-        if verify_saved_full_audit(original) != result["source_proofs"]:
-            raise ValueError("actual independent input/cache/source proof drift")
+        states = self.snapshot()
+        from backend.pipeline.immutable_proof_reuse import verify_once
+        def verify_saved():
+            if verify_saved_full_audit(original) != result["source_proofs"]:
+                raise ValueError("actual independent input/cache/source proof drift")
+        verify_once((str(original),contract.fingerprint(states)),
+            [result['original_audit']]+result['source_proofs'],self.store,verify_saved)
         for b in result["source_proofs"]:
             contract.verify_file(b)
         resolution = contract.verify_file(result["resolution"]) if result["resolution"] else None
@@ -267,7 +272,6 @@ class ProductionPorts:
         validate_audit(audit, claim_ids, viewpoint_ids, owner_resolution_path=resolution)
         # Isolate global Layer 1/2 findings using an actual current Claim scope.
         from backend.pipeline.viewpoint_scoped_audit_disposition import scope_audit_disposition
-        states = self.snapshot()
         packets = []
         for cid in claim_ids:
             claim = states[contract.key("claims", cid)]

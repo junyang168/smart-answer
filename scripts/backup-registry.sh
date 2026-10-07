@@ -27,6 +27,13 @@ DATA_BASE_DIR="${DATA_BASE_DIR:-$(env_value DATA_BASE_DIR)}"
 DB_URL="${KNOWLEDGE_DATABASE_URL:-$(env_value KNOWLEDGE_DATABASE_URL)}"
 [[ -n "$DB_URL" ]] || fail "KNOWLEDGE_DATABASE_URL is required (from .env)"
 
+# Only this owner's #357 worktree and explicit ticket label use Jun SSD.
+# Other cards, including #358, retain their original behavior.
+if [[ "${SOURCE_REPO##*/}" == "wkp-357-worktree-per-session" && "$LABEL" =~ (^|-)357(-|$) && "$LABEL" != *358* ]]; then
+    KNOWLEDGE_DATABASE_URL="$DB_URL" "$SOURCE_REPO/backend/.venv/bin/python" -m backend.pipeline.viewpoint_backup_archive --create-label "$LABEL"
+    exit 0
+fi
+
 STAMP="$(date -u +%Y-%m-%d)"
 TARGET_PARENT="$DATA_BASE_DIR/wang-knowledge-platform/staging/viewpoint-backfill"
 TARGET_DIR="$TARGET_PARENT/registry-backup-$STAMP-$LABEL"

@@ -40,6 +40,8 @@ def seal(body: dict) -> dict:
 
 def read(path: Path) -> dict:
     value = json.loads(path.read_text(encoding="utf-8"))
+    from backend.pipeline.immutable_proof_reuse import restore_snapshot
+    value=restore_snapshot(path,value)
     stated = value.get("artifact_sha256")
     if stated != sha256_json({k: v for k, v in value.items() if k != "artifact_sha256"}):
         raise ValueError("artifact seal drift: " + str(path))
@@ -54,8 +56,10 @@ def write(path: Path, body: dict, *, immutable: bool = True) -> dict:
             raise ValueError("immutable artifact differs: " + str(path))
         return value
     temporary = path.with_suffix(path.suffix + ".partial")
+    from backend.pipeline.immutable_proof_reuse import pack_snapshot
+    serialized=pack_snapshot(path,value) if immutable else value
     with temporary.open("w", encoding="utf-8") as stream:
-        stream.write(canonical_json(value) + "\n")
+        stream.write(canonical_json(serialized) + "\n")
         stream.flush()
         os.fsync(stream.fileno())
     os.replace(temporary, path)
