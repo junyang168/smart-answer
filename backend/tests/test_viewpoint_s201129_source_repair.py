@@ -11,6 +11,71 @@ from backend.pipeline import viewpoint_s201129_source_epoch as epoch
 from backend.pipeline import viewpoint_applied_source_epochs as composed
 
 
+@pytest.mark.parametrize('drift',[None,'missing','duplicate','foreign','revision','sha','payload','create_before','unbound','retire'])
+def test_generic_applied_preimages_read_only_exact_SQL_versions(tmp_path,monkeypatch,drift):
+    from backend.pipeline import viewpoint_resolution_runtime as runtime
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    old={'claim_id':'any-Claim','revision':3,'statement':'old','review_status':'human_review_required'}
+    digest=record_content_sha(old)
+    operations=[{'operation':'update','collection':'claims','object_id':'any-Claim',
+        'before_revision':3,'before_sha256':digest},
+        {'operation':'create','collection':'questions','object_id':'any-new-object',
+         'before_revision':None,'before_sha256':None}]
+    rows=[('claims','any-Claim',3,digest,deepcopy(old))];queries=[]
+    package={'any_original':'package'};bound={'path':str(tmp_path/'effective-package.json')}
+    monkeypatch.setattr(composed,'consume_applied_source_package',lambda b,s:package)
+    monkeypatch.setattr(runtime,'read_artifact',lambda p:{'operations':operations})
+    monkeypatch.setattr(repair,'saved_before',lambda:pytest.fail('whole predecessor fallback'))
+    if drift=='missing':rows=[]
+    elif drift=='duplicate':rows*=2
+    elif drift=='foreign':rows[0]=('claims','foreign',3,digest,old)
+    elif drift=='revision':rows[0]=('claims','any-Claim',2,digest,old)
+    elif drift=='sha':rows[0]=('claims','any-Claim',3,'a'*64,old)
+    elif drift=='payload':rows[0][4]['statement']='unreviewed'
+    elif drift=='create_before':operations[1]['before_revision']=1
+    elif drift=='unbound':operations[0]['before_sha256']=None
+    elif drift=='retire':operations[0]['operation']='retire'
+    class Cursor:
+        def __enter__(self):return self
+        def __exit__(self,*a):pass
+        def execute(self,q,params=None):queries.append((q,params))
+        def fetchall(self):return rows
+    class Conn(Cursor):
+        def cursor(self):return Cursor()
+    class Store:
+        def connect(self):return Conn()
+    if drift:
+        with pytest.raises(ValueError):composed.applied_source_preimages(bound,Store())
+    else:
+        actual,prior=composed.applied_source_preimages(bound,Store())
+        assert actual==package and prior=={('claims','any-Claim'):old,('questions','any-new-object'):None}
+        assert prior['claims','any-Claim']['review_status']=='human_review_required'
+        assert len(queries)==2 and queries[0][0]=='SET TRANSACTION READ ONLY'
+        assert queries[1][1]==('claims','any-Claim',3,digest)
+
+
+@pytest.mark.parametrize('drift',[None,'package','missing_context','duplicate_context','context_change'])
+def test_legacy_postimages_use_generic_SQL_and_original_unchanged_context(monkeypatch,drift):
+    from backend.api.canonical_repository.postgres_store import _normalize_records
+    old={'evidence_step_id':'E','revision':1,'statement':'same'}
+    package={'evidence_steps':[{**old,'revision':2}]}
+    logical={'before_evidence':[old]};plan={'operations':[]}
+    monkeypatch.setattr(composed,'applied_source_preimages',lambda *a:({'wrong':'package'} if drift=='package' else package,{}))
+    monkeypatch.setattr(epoch,'binding',lambda:{'path':'/arbitrary-package'})
+    monkeypatch.setattr(repair,'PostgresKnowledgeStore',lambda:None)
+    monkeypatch.setattr(repair,'reviewed_inputs',lambda:({},None,logical,None))
+    monkeypatch.setattr(repair,'read_artifact',lambda p:plan)
+    monkeypatch.setattr(repair,'saved_before',lambda:pytest.fail('whole predecessor parsed'))
+    if drift=='missing_context':logical['before_evidence']=[]
+    elif drift=='duplicate_context':logical['before_evidence']*=2
+    elif drift=='context_change':old['statement']='unreviewed'
+    if drift:
+        with pytest.raises(ValueError):epoch.postimages(package)
+    else:
+        assert epoch.postimages(package)['evidence_steps']['E']==old
+        assert package['evidence_steps'][0]['revision']==2
+
+
 @pytest.mark.parametrize('drift',[None,'package','operation','plan','intent','receipt','readback','missing_pin','raw','SQL','SQL_summary'])
 def test_generic_completed_application_consumption_has_no_source_ID_or_writer_rebuild(tmp_path,monkeypatch,drift):
     import json

@@ -83,6 +83,55 @@ def consume_applied_source_package(bound, store):
     return package
 
 
+def applied_source_preimages(bound, store):
+    """Read exact old SQL versions declared by an authenticated applied plan.
+
+    This is a scoped historical read, not current approval or a whole snapshot.
+    Missing versions, unknown operation shapes or a content mismatch stop; no
+    archived Registry reconstruction is a fallback. Unchanged context is NOT
+    inferred here and must come from the caller's original bound review input.
+    """
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    package = consume_applied_source_package(bound, store)
+    plan = read_artifact(Path(bound['path']).parent/'dry-run-plan.json')
+    wanted, result = [], {}
+    for op in plan['operations']:
+        key = op['collection'], op['object_id']
+        if op['operation'] == 'create':
+            if op['before_revision'] is not None or op['before_sha256'] is not None:
+                raise ValueError('created object has a declared predecessor')
+            result[key] = None
+        elif (op['operation'] == 'update' and type(op['before_revision']) is int
+                and op['before_revision'] > 0 and isinstance(op['before_sha256'], str)
+                and len(op['before_sha256']) == 64):
+            wanted.append((*key, op['before_revision'], op['before_sha256']))
+        else:
+            raise ValueError('unsupported or unpinned applied predecessor operation')
+    if wanted:
+        placeholders = ','.join(['(%s,%s,%s::integer,%s)']*len(wanted))
+        with store.connect() as conn, conn.cursor() as cursor:
+            cursor.execute('SET TRANSACTION READ ONLY')
+            cursor.execute('''SELECT ov.collection,ov.object_id,ov.revision,ov.content_sha256,ov.payload
+                FROM wang_knowledge.object_versions ov JOIN (VALUES '''+placeholders+''')
+                AS wanted(collection,object_id,revision,content_sha256)
+                ON ov.collection=wanted.collection AND ov.object_id=wanted.object_id
+                AND ov.revision=wanted.revision AND ov.content_sha256=wanted.content_sha256''',
+                tuple(value for pin in wanted for value in pin))
+            rows = cursor.fetchall()
+        expected = {pin[:2]: pin[2:] for pin in wanted}
+        if len(rows) != len(expected):
+            raise ValueError('applied predecessor SQL version population missing/duplicated')
+        for collection, oid, revision, digest, payload in rows:
+            key = collection, oid
+            if (key not in expected or key in result or (revision,digest) != expected[key]
+                    or not isinstance(payload, dict) or payload.get('revision') != revision
+                    or record_content_sha(payload) != digest):
+                raise ValueError('applied predecessor SQL identity/version/content drift')
+            result[key] = payload
+    return package, result
+
+
 def implementation(bound):
     path = Path(bound.get('path',''))
     if path == historical.PACKAGE:

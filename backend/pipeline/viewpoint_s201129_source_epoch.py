@@ -23,9 +23,27 @@ def bound_package(bound):
 
 
 def postimages(package):
+    from backend.pipeline.viewpoint_applied_source_epochs import applied_source_preimages
+    actual, before = applied_source_preimages(binding(), repair.PostgresKnowledgeStore())
+    if package != actual:
+        raise ValueError('completed source postimage package drift')
     normalized, stated = _normalize_records(package)
-    before, _ = repair.saved_before()
     plan = repair.read_artifact(repair.APPLICATION_ROOT/'dry-run-plan.json')
+    # Thin legacy review-format adapter only: the original small review packet
+    # contains these unchanged evidence rows. Never infer them from a newer
+    # current row or reopen the whole archived Registry on a missing context.
+    _, _, logical, _ = repair.reviewed_inputs()
+    unchanged = {('evidence_steps', row['evidence_step_id']):row
+                 for row in logical['before_evidence']}
+    if len(unchanged) != len(logical['before_evidence']):
+        raise ValueError('duplicate original unchanged review context')
+    for collection, rows in normalized.items():
+        for oid in rows:
+            key = collection, oid
+            if key not in before:
+                if key not in unchanged:
+                    raise ValueError('completed source lacks original unchanged context: '+oid)
+                before[key] = unchanged[key]
     return planned_postimages(normalized,stated,before,plan)
 
 
