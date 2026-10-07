@@ -23,7 +23,8 @@ from backend.pipeline.viewpoint_deferred_source_check import build_packet as sou
 PROJECT = Path(__file__).resolve().parents[2]
 BASE = Path('/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/staging/cvp-production-357')
 PARENT = BASE/'campaign-single-writer-20261007-v1-recovery-g051'
-ROOT = BASE/'g052-owner-new-cvp-repair-20261007-v1'
+FAILED_ROOT = BASE/'g052-owner-new-cvp-repair-20261007-v1'
+ROOT = BASE/'g052-owner-new-cvp-repair-20261007-v2'
 GROUP = PARENT/'g052'
 BATCH = GROUP/'production/run/batches/75e337ead6567ce77497686395e25b60f699720cf1771d4469a4a749593fcfc3'
 CLAIM = 'DK-0bdf88fe8565-P09-CL007'
@@ -80,7 +81,9 @@ def validate_plan(plan):
     if len(ops)!=5 or {o['collection'] for o in ops}!=expected or any(o['operation']!='create' or o['before_revision'] is not None or o['after_revision']!=1 for o in ops):
         raise ValueError('not exact five new authority records')
     link = next(o['payload'] for o in ops if o['collection']=='viewpoint_claim_links')
-    if link['claim_id']!=CLAIM or link['pinned_claim_revision']!=3 or link['link_type']!='equivalent_full' or link.get('component_locator') is not None:
+    if (link['claim_id']!=CLAIM or link['pinned_claim_revision']!=3 or link['link_type']!='equivalent_component'
+            or link.get('component_locator')!={'statement_component':'饒恕的條件關係並不表示人的行為能夠賺取神的恩典。','claim_sha256':PIN,
+                'canonical_spans':[{'start_char':0,'end_char':24,'exact_text':'饒恕的條件關係並不表示人的行為能夠賺取神的恩典。'}]}):
         raise ValueError('not exact whole Claim equivalent member')
     cv = next(o['payload'] for o in ops if o['collection']=='canonical_viewpoints')
     rev = next(o['payload'] for o in ops if o['collection']=='viewpoint_revisions')
@@ -220,7 +223,7 @@ def verify_proof(campaign_root,path,claim_ids,store=None):
     return proof
 
 
-def run():
+def run(*,recover_storage_shape=False):
     from backend.pipeline.viewpoint_s201129_source_continuation import canonical_runtime
     from backend.pipeline.viewpoint_cvp_recovery_supervisor import process_table,remaining_producers,current_job_process_ids
     from backend.pipeline.viewpoint_cvp_recovery_executor import run_logged,load_campaign,resume_after_repair,PYTHON
@@ -232,6 +235,10 @@ def run():
     with (BASE/'immediate-recovery-20261002-v1/recovery.lock').open('r+') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         if ROOT.exists(): raise ValueError('reserved owner repair root; no retry')
+        if not recover_storage_shape: raise ValueError('v2 only consumes exact zero-write storage-shape failure; explicit mechanical recovery flag required')
+        if read(FAILED_ROOT/'failure.json')!={'error':'not exact whole Claim equivalent member','applied':False,'group_complete':False,'no_retry':True} or (FAILED_ROOT/'apply-intent.json').exists() or (FAILED_ROOT/'apply-receipt.json').exists():
+            raise ValueError('not exact preserved zero-write mechanical failure')
+        if (FAILED_ROOT/'storage-shape-recovery-start.json').exists(): raise ValueError('same fingerprint repair already reserved')
         if PROJECT.name!='wkp-357-worktree-per-session' or subprocess.check_output(['git','status','--porcelain'],cwd=PROJECT,text=True).strip(): raise ValueError('wrong/dirty worktree')
         if [p for p in remaining_producers(process_table(),BASE) if p not in current_job_process_ids()]: raise ValueError('active production/maintenance')
         write_immutable(ROOT/'owner-authorization.json',{'quote':AUTH,'claim_id':CLAIM,'claim_sha256':PIN,'new_cvps':1,'new_links':1,'other_mutations':0,'future_permission':False,'old_budgets_preserved':True})
@@ -258,7 +265,21 @@ def run():
                 sources=[binding(Path(e['source_context']['source_path'])) for e in packet['claims'][0]['evidence']]
                 write_immutable(ROOT/'before.json',{'collections':cols,'pre_fingerprint_sha256':fingerprint(states,cols),'physical_sources':sources,'parent_bindings':bindings})
                 write_immutable(ROOT/'packet.json',packet)
-                package=reviewed_package(ROOT,packet,read(GROUP/'production/inputs/freeze.json'))
+                if packet!=read(FAILED_ROOT/'packet.json') or read(ROOT/'before.json')!=read(FAILED_ROOT/'before.json'):
+                    raise ValueError('original reviewed input or full Registry/source boundary changed')
+                cached=reviewed_package(FAILED_ROOT,packet,read(GROUP/'production/inputs/freeze.json'),cached_only=True)
+                old_plan=store.plan_package(cached,source_kind=VERSION)
+                if store.get_change_set_status(old_plan.fingerprint_sha256) is not None: raise ValueError('prior proposed ChangeSet already exists')
+                oldbindings=[binding(p) for p in sorted((FAILED_ROOT/'review').glob('*.json'))]
+                marker={'fingerprint':'g052-standard-compiler-whole-component-storage-shape-v1','authority':'standing proven mechanical implementation repair',
+                    'old_root':str(FAILED_ROOT),'new_root':str(ROOT),'semantic_packet_sha256':sha256_json(packet),
+                    'old_refusals_budgets_preserved':True,'new_model_calls':0,'prior_registry_writes':0,'bindings':oldbindings}
+                write_immutable(FAILED_ROOT/'storage-shape-recovery-start.json',marker)
+                for p in sorted((FAILED_ROOT/'review').glob('*.json')): write_immutable(ROOT/'review'/p.name,read(p))
+                write_immutable(ROOT/'decision-time.json',read(FAILED_ROOT/'decision-time.json'))
+                write_immutable(ROOT/'mechanical-cache-handoff.json',marker)
+                package=reviewed_package(ROOT,packet,read(GROUP/'production/inputs/freeze.json'),cached_only=True)
+                if package!=cached: raise ValueError('cached exact approved package drift')
                 if fingerprint(snapshot(store),cols)!=fingerprint(states,cols): raise ValueError('Registry drift during review')
                 plan=store.plan_package(package,source_kind=VERSION);doc=json.loads(json.dumps(plan.as_dict()));validate_plan(doc)
                 write_immutable(ROOT/'effective-package.json',package);write_immutable(ROOT/'dry-run-plan.json',doc)
@@ -303,4 +324,7 @@ def run():
             raise
 
 
-if __name__=='__main__': run()
+if __name__=='__main__':
+    import argparse
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--recover-storage-shape',action='store_true')
+    run(recover_storage_shape=parser.parse_args().recover_storage_shape)

@@ -1,6 +1,6 @@
 from copy import deepcopy
 import pytest
-from backend.pipeline.viewpoint_g052_new_cvp_repair import CLAIM, validate_scoped_proposal, validate_plan, verify_ledger
+from backend.pipeline.viewpoint_g052_new_cvp_repair import CLAIM, PIN, validate_scoped_proposal, validate_plan, verify_ledger
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 
 
@@ -26,7 +26,9 @@ def seal(p): return p|{'artifact_sha256':sha256_json(p)}
 def plan():
     items={'canonical_viewpoints':{'viewpoint_id':'CV-X','current_revision_id':'CVR-X'},
            'viewpoint_revisions':{'viewpoint_revision_id':'CVR-X','viewpoint_id':'CV-X'},
-           'viewpoint_claim_links':{'claim_id':CLAIM,'pinned_claim_revision':3,'link_type':'equivalent_full','component_locator':None,
+           'viewpoint_claim_links':{'claim_id':CLAIM,'pinned_claim_revision':3,'link_type':'equivalent_component',
+                'component_locator':{'statement_component':'饒恕的條件關係並不表示人的行為能夠賺取神的恩典。','claim_sha256':PIN,
+                    'canonical_spans':[{'start_char':0,'end_char':24,'exact_text':'饒恕的條件關係並不表示人的行為能夠賺取神的恩典。'}]},
                 'viewpoint_id':'CV-X','validated_against_viewpoint_revision_id':'CVR-X','decision_id':'VID-X'},
            'viewpoint_identity_decisions':{'identity_decision_id':'VID-X','identity_candidate_id':'VIC-X'},
            'viewpoint_identity_candidates':{'identity_candidate_id':'VIC-X'}}
@@ -58,7 +60,7 @@ def test_reject_proposal_drift(mutation):
     with pytest.raises(ValueError):validate_scoped_proposal(p)
 
 
-@pytest.mark.parametrize('mutation', ['extra','delete','update','before','revision','wrong_claim','partial_member','endpoint','decision'])
+@pytest.mark.parametrize('mutation', ['extra','delete','update','before','revision','wrong_claim','partial_member','endpoint','decision','locator','pin','wrong_full_storage_type'])
 def test_reject_plan_drift(mutation):
     p=plan();ops=p['operations'];link=ops[2]['payload']
     if mutation=='extra':ops.append(deepcopy(ops[0]))
@@ -69,7 +71,10 @@ def test_reject_plan_drift(mutation):
     elif mutation=='wrong_claim':link['claim_id']='OTHER'
     elif mutation=='partial_member':link['link_type']='supports'
     elif mutation=='endpoint':link['viewpoint_id']='OTHER'
-    else:link['decision_id']='OLD'
+    elif mutation=='decision':link['decision_id']='OLD'
+    elif mutation=='locator':link['component_locator']['canonical_spans'][0]['end_char']=23
+    elif mutation=='pin':link['component_locator']['claim_sha256']='0'*64
+    else:link.update(link_type='equivalent_full',component_locator=None)
     with pytest.raises(ValueError):validate_plan(p)
 
 
