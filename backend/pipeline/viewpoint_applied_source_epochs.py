@@ -7,6 +7,82 @@ GROUPING_EPOCH_KEY = historical.GROUPING_EPOCH_KEY
 VERSION = 'wang_exact_applied_source_epochs_v1'
 
 
+def has_applied_source_frame(path, package):
+    """Recognize the saved physical format, never a source-ID admission rule."""
+    app=package.get('source_repair_application') or {}
+    # Classify by the package's original declared format, NOT whether its
+    # receipts happen to be present/pass. Missing or damaged receipts must
+    # reach the generic hard stop, not an expensive legacy-writer fallback.
+    return bool(app.get('before_binding')) and 'bindings' in app
+
+
+def consume_applied_source_package(bound, store):
+    """Authenticate an original applied package, not rebuild its old writer.
+
+    The actual SQL KCS binds the ENTIRE package and exact operation/review-event
+    fingerprint. This grants no new semantic approval, current postimage waiver
+    or group completion. The original writer, source/hold/current and completed
+    group audit gates remain separate. No sermon IDs or source exceptions here.
+    Only saved applications with an explicit complete physical denominator may
+    use this adapter; missing older proof shapes stop, never fall back to a full
+    historical snapshot reconstruction.
+    """
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact as read
+    from backend.pipeline.source_reconciliation import verify_file
+    from backend.api.canonical_repository.postgres_store import (
+        ChangeOperation,PlannedReviewEvent,operation_fingerprint_rows,
+        review_event_fingerprint_rows,record_content_sha)
+    from backend.api.canonical_repository.viewpoint_foundation import sha256_json
+    path=verify_file(bound);root=path.parent;package=read(path)
+    app=package.get('source_repair_application') or {}
+    if path.name!='effective-package.json' or not app.get('schema_version'):
+        raise ValueError('completed source application package identity missing')
+    plan=read(root/'dry-run-plan.json');receipt=read(root/'apply-receipt.json')
+    verified=read(root/'verified-result.json')
+    pins=verified.get('bindings',[])
+    required={str(root/name) for name in ('before.json','effective-package.json',
+        'dry-run-plan.json','backup.json','pg-restore-proof.json','apply-intent.json','apply-receipt.json')}
+    if (len(pins)!=len({pin['path'] for pin in pins}) or not required<={pin['path'] for pin in pins}
+            or bound not in pins or app.get('before_binding') not in pins):
+        raise ValueError('applied source physical proof denominator missing/changed')
+    for pin in pins:verify_file(pin)
+    if any(pin not in pins for pin in app.get('bindings',[])):
+        raise ValueError('original reviewed source bindings omitted from application proof')
+    ops=[ChangeOperation(**row) for row in plan['operations']]
+    events=[PlannedReviewEvent(**row) for row in plan.get('review_events',[])]
+    if (len(ops)!=len({(op.collection,op.object_id) for op in ops})
+            or any(op.after_sha256!=record_content_sha(op.payload) for op in ops)):
+        raise ValueError('applied source operation population/payload SHA drift')
+    source_sha=sha256_json(package)
+    fp=sha256_json({'planner_schema':'wang_postgres_changeset_v2',
+        'source_kind':app['schema_version'],'source_sha256':source_sha,
+        'package_id':str(package.get('package_id') or ''),
+        'operations':operation_fingerprint_rows(ops),'review_events':review_event_fingerprint_rows(events)})
+    if (plan['source_kind']!=app['schema_version'] or plan['source_sha256']!=source_sha
+            or plan['fingerprint_sha256']!=fp or plan['change_set_id']!='KCS-'+fp[:20]
+            or plan['package_id']!=package['package_id'] or receipt.get('status')!='applied'
+            or receipt['change_set_id']!=plan['change_set_id']
+            or verified.get('status')!='applied_readback_verified'
+            or verified['change_set_id']!=plan['change_set_id']
+            or verified['master_data_mutations']!=len(ops)):
+        raise ValueError('original package/application/readback identity drift')
+    intent=read(root/'apply-intent.json')
+    if (intent.get('package_sha256')!=source_sha or intent.get('plan_sha256')!=sha256_json(plan)
+            or intent.get('single_apply_required') is not True
+            or intent.get('schema_version')!=app['schema_version']
+            or intent.get('pre_fingerprint_sha256')!=verified['pre_fingerprint_sha256']):
+        raise ValueError('original applied source intent/package drift')
+    with store.connect() as conn,conn.cursor() as cursor:
+        cursor.execute('SET TRANSACTION READ ONLY')
+        cursor.execute('SELECT source_kind,source_sha256,fingerprint_sha256,status,summary FROM wang_knowledge.change_sets WHERE change_set_id=%s',
+            (plan['change_set_id'],))
+        row=cursor.fetchone()
+        if (not row or tuple(row[:4])!=(app['schema_version'],source_sha,fp,'applied')
+                or row[4]!=receipt['summary']):
+            raise ValueError('original source has no matching actual applied SQL proof')
+    return package
+
+
 def implementation(bound):
     path = Path(bound.get('path',''))
     if path == historical.PACKAGE:

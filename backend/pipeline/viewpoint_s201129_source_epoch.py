@@ -15,9 +15,11 @@ def binding():
 def bound_package(bound):
     if bound != binding():
         raise ValueError('S201129 exact applied package physical drift')
-    package = repair.read_artifact(repair.PACKAGE)
-    repair.validate_package(package)
-    return package
+    # Legacy format/path identity only. The completed application's generic
+    # SQL/package/readback guard replaces re-entering this source's old writer.
+    # New writes still call repair.validate_package in the store contract.
+    from backend.pipeline.viewpoint_applied_source_epochs import consume_applied_source_package
+    return consume_applied_source_package(bound,repair.PostgresKnowledgeStore())
 
 
 def postimages(package):

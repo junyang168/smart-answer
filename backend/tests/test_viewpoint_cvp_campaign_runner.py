@@ -74,6 +74,34 @@ def test_exact_intact_schedule():
     assert set(validate_schedule(schedule, manifest)) == {"a", "b"}
 
 
+def test_startup_consumes_declared_completed_format_not_source_ID_or_old_writer(tmp_path,monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from backend.pipeline import viewpoint_cvp_campaign_runner as module
+    from backend.pipeline import viewpoint_applied_source_epochs as epochs
+    from backend.pipeline import viewpoint_grouping_repository as grouping
+    from backend.api.canonical_repository import reviewed_candidate_contract as contract
+    path=tmp_path/'unrelated-name/effective-package.json';path.parent.mkdir()
+    package={'package_id':'original','source_repair_application':{
+        'schema_version':'original_saved_format','before_binding':{'path':'unneeded-old-library','file_sha256':'a'*64},
+        'bindings':[]}}
+    path.write_text(json.dumps(package))
+    assert epochs.has_applied_source_frame(path,package)
+    # Its declared format still routes to a hard guard when a receipt is
+    # missing: do not invoke a historical whole-library fallback.
+    assert not (path.parent/'verified-result.json').exists()
+    calls=[]
+    def consume(bound,store):calls.append(bound);return package
+    monkeypatch.setattr(epochs,'consume_applied_source_package',consume)
+    monkeypatch.setattr(epochs,'compose',lambda paths:'original-composition')
+    monkeypatch.setattr(contract,'validate_store_package_authorization',lambda *a:pytest.fail('old source writer invoked'))
+    monkeypatch.setattr(grouping.SharedGroupingRepository,'load',lambda *a,**k:None)
+    args=SimpleNamespace(completed_source_repair=[path],grouping_repository=tmp_path,
+        accepted_grouping_sha='original')
+    assert module.initialize_validation(args)['model_calls']==0
+    assert calls==[module.binding(path)]
+
+
 @pytest.mark.parametrize('drift',[None,'pin','missing','duplicate_group','conflict','disclosure','audit'])
 def test_completed_seed_consumes_unique_bytes_but_all_original_group_gates(tmp_path,monkeypatch,drift):
     import json

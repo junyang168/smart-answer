@@ -11,6 +11,81 @@ from backend.pipeline import viewpoint_s201129_source_epoch as epoch
 from backend.pipeline import viewpoint_applied_source_epochs as composed
 
 
+@pytest.mark.parametrize('drift',[None,'package','operation','plan','intent','receipt','readback','missing_pin','raw','SQL','SQL_summary'])
+def test_generic_completed_application_consumption_has_no_source_ID_or_writer_rebuild(tmp_path,monkeypatch,drift):
+    import json
+    from backend.pipeline import source_reconciliation_runner as r
+    from backend.pipeline import source_reconciliation as c
+    from backend.api.canonical_repository.postgres_store import ChangeOperation,operation_fingerprint_rows,record_content_sha
+    version='historical_application_format_not_a_sermon_ID'
+    root=tmp_path/'arbitrary-approved-source';root.mkdir()
+    def put(name,value):
+        (root/name).write_text(json.dumps(value));return r.binding(root/name)
+    before=put('before.json',{'before_records':['MUST_NOT_PARSE']})
+    raw=put('review.json',{'original':'reviewed source-specific data, not special code'})
+    package={'package_id':'arbitrary-package','claims':[{'claim_id':'C','statement':'unchanged reviewed value','revision':2}],
+        'source_repair_application':{'schema_version':version,'before_binding':before,'bindings':[raw]}}
+    bound=put('effective-package.json',package);sha=c.sha256_json(package)
+    payload={'claim_id':'C','statement':'unchanged reviewed value'}
+    operation={'operation':'update','collection':'claims','object_id':'C','before_sha256':'a'*64,
+        'after_sha256':record_content_sha(payload),'before_revision':1,'after_revision':2,'payload':payload,'removed_fields':[]}
+    fp=c.sha256_json({'planner_schema':'wang_postgres_changeset_v2','source_kind':version,'source_sha256':sha,
+        'package_id':package['package_id'],'operations':operation_fingerprint_rows([ChangeOperation(**operation)]),'review_events':[]})
+    plan={'change_set_id':'KCS-'+fp[:20],'fingerprint_sha256':fp,'source_kind':version,'source_sha256':sha,
+        'package_id':package['package_id'],'operations':[operation],'review_events':[]}
+    plan_pin=put('dry-run-plan.json',plan)
+    receipt={'change_set_id':plan['change_set_id'],'status':'applied','summary':{'operations':1,'updated':1}}
+    receipt_pin=put('apply-receipt.json',receipt)
+    intent={'package_sha256':sha,'plan_sha256':c.sha256_json(plan),'schema_version':version,
+        'single_apply_required':True,'pre_fingerprint_sha256':'b'*64}
+    intent_pin=put('apply-intent.json',intent)
+    pins=[before,raw,bound,plan_pin,receipt_pin,intent_pin,
+        put('backup.json',{'original':'backup receipt'}),put('pg-restore-proof.json',{'original':'pg restore pass'})]
+    verified={'status':'applied_readback_verified','change_set_id':plan['change_set_id'],
+        'master_data_mutations':1,'pre_fingerprint_sha256':'b'*64,'bindings':pins}
+    put('verified-result.json',verified)
+    SQL=[version,sha,fp,'applied',deepcopy(receipt['summary'])];calls=[]
+    class Cursor:
+        def __enter__(self):return self
+        def __exit__(self,*a):pass
+        def execute(self,query,params=None):calls.append((query,params))
+        def fetchone(self):return tuple(SQL)
+    class Connection(Cursor):
+        def cursor(self):return Cursor()
+    class Store:
+        def connect(self):return Connection()
+    def replace(name,value):
+        # A coherent new physical pin still cannot hide a different SQL package
+        # or exact operation fingerprint. Test-only mutation of saved fixtures.
+        (root/name).write_text(json.dumps(value));pin=r.binding(root/name)
+        for old in pins:
+            if old['path']==pin['path']:old.update(pin)
+        (root/'verified-result.json').write_text(json.dumps(verified))
+    if drift=='package':package['claims'][0]['statement']='unreviewed';replace('effective-package.json',package);bound=r.binding(root/'effective-package.json')
+    elif drift=='operation':operation['payload']['statement']='unreviewed';replace('dry-run-plan.json',plan)
+    elif drift=='plan':plan['operations']=[];replace('dry-run-plan.json',plan)
+    elif drift=='intent':intent['single_apply_required']=False;replace('apply-intent.json',intent)
+    elif drift=='receipt':receipt['status']='planned';replace('apply-receipt.json',receipt)
+    elif drift=='readback':verified['master_data_mutations']=2;replace('verified-result.json',verified)
+    elif drift=='missing_pin':pins.remove(before);replace('verified-result.json',verified)
+    elif drift=='raw':(root/'review.json').write_text('{}')
+    elif drift=='SQL':SQL[3]='planned'
+    elif drift=='SQL_summary':SQL[4]['operations']=2
+    from backend.pipeline import viewpoint_resolution_runtime as resolution
+    original_read=resolution.read_artifact
+    def read(path):
+        if Path(path).name=='before.json':pytest.fail('completed consumer parsed whole old snapshot')
+        return original_read(path)
+    monkeypatch.setattr(resolution,'read_artifact',read)
+    monkeypatch.setattr(repair,'validate_package',lambda *a:pytest.fail('old source writer reconstruction'))
+    if drift:
+        with pytest.raises(ValueError):composed.consume_applied_source_package(bound,Store())
+    else:
+        assert composed.has_applied_source_frame(root/'effective-package.json',package)
+        assert composed.consume_applied_source_package(bound,Store())==package
+        assert calls[0][0]=='SET TRANSACTION READ ONLY' and len(calls)==2
+
+
 @pytest.fixture(autouse=True)
 def isolate_synthetic_source_tests_from_live_child_receipts(monkeypatch, tmp_path):
     # These unit tests provide synthetic records. The later real child receipt
