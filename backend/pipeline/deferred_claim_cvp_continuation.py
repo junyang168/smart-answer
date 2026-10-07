@@ -156,7 +156,9 @@ def build_proof(root,campaign,ids,ports):
     if sorted(frozen["manifest"]["deferred_repair"]["claim_ids"]) != sorted(context["repair_claim_ids"]):
         raise ValueError("normal CVP scope differs from actually repaired Claim identities")
     old = c.index(frozen["before_records"])
-    if rewind(claim_plan,reversed_normal,old) != old: raise ValueError("full Registry Claim-repair reverse mismatch")
+    from backend.pipeline.owner_approved_link_correction import source_projection
+    projected = source_projection(read(claim_root/"complete.json"),reversed_normal,ports.store)
+    if rewind(claim_plan,projected,old) != old: raise ValueError("full Registry Claim-repair reverse mismatch")
     original = Path(context["original_batch"])
     original_plan = json.loads((original/"cvp-change-plan.json").read_text())
     if ports.store.get_change_set_status(original_plan["fingerprint_sha256"]) != "applied": raise ValueError("original group not applied")

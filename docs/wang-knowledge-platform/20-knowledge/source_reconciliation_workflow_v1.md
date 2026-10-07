@@ -115,6 +115,10 @@ backend/.venv/bin/python -m backend.pipeline.source_reconciliation_runner --mani
 
 `--complete-group` 启用 `deferred_claim_cvp_continuation` 衔接：直接调用现有 `run_batch`、v6 覆盖审核及标准 compiler，不另建缺 CVP 提议器；只追加未覆盖成分，保留已有连接。独立 completion verifier 核对原批次、Claim 修订和正常 CVP 增量的真实 SQL／原始审核／完整 Registry 逆向边界；完整原组审计及后组备份、dry-run、实际 continuation receipt 通过后才恢复队列。其他旧连接的新异议不属于本 Claim 自动权限，必须明确停报。
 
+负责人明确批准精确修订后，后续动作由代码完成，不逐阶段等待新的「继续」。`owner_approved_link_correction` 将独立审核、备份、单次写入、全库回读、完整原组审计、原有 CVP 覆盖解析和安全续跑接成持久流程。当前契约仅允许获准的一条全文 locator 的 `equivalent_component` → `equivalent_full`，不授权未来其他连接或正文自动修改。全文连接按既有 schema 使用空 locator；旧全文定位、原审计和仲裁仍保留。
+
+子修订有独立持久调用／写入 intent 和 SQL store gate；新 Opus 拒绝、未知调用结果、新内容范围或证明冲突停止，不重复调用到通过。来源完成证明消费精确子修订后像并反向验证原来源事务，不放宽旧写入／当前版本边界；旧审计按已验证历史切面重建，不能用已修改的当前连接伪称原输入，也不将旧异议改成 pass。新完整原组审计真正通过后才完成来源证明并接回现有队列。离线验证和真实运行结果分别记录。
+
 实现分别在 `source_reconciliation.py`（契约／完整图验证）、`source_reconciliation_runner.py`（持久阶段）、`source_reconciliation_runtime.py`（订阅／SQL／备份／审计）及 `source_reconciliation_epoch.py`（完成证明消费）。
 测试为 `backend/tests/test_source_reconciliation.py`；既有来源修订与分组／store 回归仍须通过。
 v1 主来源只处理可重建 spoken-body 的 JSON 逐字稿，不支持视觉内容、缺失旧原文、未知 consumer、未证明历史链或有效 human hold 的自动放行。超过请求上限也停止，不降低门槛。

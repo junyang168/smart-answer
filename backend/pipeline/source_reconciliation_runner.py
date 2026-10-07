@@ -354,7 +354,14 @@ class Runner:
         before = contract.index(frozen["before_records"])
         post = contract.assert_plan_postimages(package, plan, before)
         validate_completion_population(result, frozen, post)
-        self.ports.readback(plan, post, before)
+        if result.get("authorized_link_corrections"):
+            from backend.pipeline.owner_approved_link_correction import source_projection
+            from backend.pipeline.source_reconciliation_runtime import expected_invalidations
+            projected = source_projection(result,self.ports.snapshot(),self.ports.store)
+            if projected != expected_invalidations(before,post,plan):
+                raise ValueError("composite source/approved child full Registry boundary drift")
+        else:
+            self.ports.readback(plan, post, before)
         for outcome in result["audits"]:
             contract.verify_file(outcome["binding"])
             job = outcome["job"]

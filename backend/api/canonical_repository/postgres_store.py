@@ -5291,6 +5291,14 @@ class PostgresKnowledgeStore:
         ] = None,
     ) -> dict[str, Any]:
         source_queue_context = _claim_evidence_source_queue_context
+        if plan.source_kind == "wang_owner_approved_link_correction_v1":
+            from backend.pipeline.owner_approved_link_correction import validate_apply_plan
+            frozen_registry_sha256 = validate_apply_plan(plan, metadata)
+            if (expected_registry_fingerprint_sha256 is not None
+                    and expected_registry_fingerprint_sha256 != frozen_registry_sha256):
+                raise ValueError("approved link Registry guard differs from exact reviewed predecessor")
+            expected_registry_fingerprint_sha256 = frozen_registry_sha256
+            registry_collections = tuple(KNOWLEDGE_COLLECTIONS)
         if plan.source_kind == "wang_source_reconciliation_v1":
             from backend.pipeline.source_reconciliation_runtime import validate_apply_plan
             frozen_registry_sha256 = validate_apply_plan(plan, metadata)

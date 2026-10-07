@@ -67,8 +67,10 @@ def verified_applied(bound, store):
     _assert_database(plan, store)
     ports = ProductionPorts(store)
     current = ports.snapshot()
-    _postimages(plan, current)
-    _retained_readset(frozen, plan, current)
+    from backend.pipeline.owner_approved_link_correction import source_projection
+    projected = source_projection(complete, current, store)
+    _postimages(plan, projected)
+    _retained_readset(frozen, plan, projected)
     for outcome in complete["audits"]:
         job = outcome["job"]
         ports.validate_audit(outcome["result"], job["claim_ids"], job["viewpoint_ids"])
@@ -87,8 +89,10 @@ def _predecessor_projection(package, states, store, *, seen=None):
     if bound["file_sha256"] in seen:
         raise ValueError("source epoch predecessor cycle")
     seen.add(bound["file_sha256"])
-    _, frozen, plan, _ = load(bound, historical=True)
+    _, frozen, plan, complete = load(bound, historical=True)
     _assert_database(plan, store)
+    from backend.pipeline.owner_approved_link_correction import source_projection
+    states = source_projection(complete, states, store)
     _postimages(plan, states)
     _retained_readset(frozen, plan, states)
     restored = deepcopy(states)
