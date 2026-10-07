@@ -125,6 +125,10 @@ def build_proof(store, campaign_root, claim_ids):
 
 
 def verify_proof(campaign_root,path,claim_ids,store=None):
+    value = read(Path(path))
+    if value.get('schema_version') == 'wang_deferred_claim_group_completion_v1':
+        from backend.pipeline.deferred_claim_cvp_continuation import verify_proof as verify_generic
+        return verify_generic(campaign_root,path,claim_ids,store)
     from backend.pipeline.viewpoint_g052_new_cvp_repair import ROOT as G052_ROOT, COMPLETION_ROOT as G052_COMPLETION, verify_proof as verify_g052
     if Path(path).resolve() in {G052_ROOT/'component-completion.json',G052_COMPLETION/'component-completion.json'}:
         return verify_g052(campaign_root,path,claim_ids,store)

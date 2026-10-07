@@ -86,6 +86,8 @@ def main():
     parser.add_argument("--authorization",type=Path,required=True)
     parser.add_argument("--prepare-only",action="store_true")
     parser.add_argument("--schema-rejection",type=Path,help="Exact original provider 400 receipt; not a model retry")
+    parser.add_argument("--resume-input",type=Path,help="Consume exact saved input/task and original stage budgets, never a new proposal")
+    parser.add_argument("--complete-group",action="store_true",help="Return to existing CVP resolution and complete full group before safe continuation")
     args = parser.parse_args()
     load_dotenv(PROJECT / ".env")
     if PROJECT.name != "wkp-357-worktree-per-session": raise ValueError("#357 worktree only; primary read-only")
@@ -93,7 +95,15 @@ def main():
         ports = ProductionPorts()
         output = args.output_root.resolve()
         try:
-            manifest,context = prepare(args.campaign_root.resolve(),output,args.authorization.resolve(),ports,args.schema_rejection)
+            if args.resume_input:
+                context = body(read(args.resume_input))
+                if (Path(context["campaign_root"]).resolve() != args.campaign_root.resolve()
+                        or context["standing_authorization"] != binding(args.authorization)):
+                    raise ValueError("saved Claim task/campaign/owner binding drift")
+                manifest = c.Manifest.model_validate(context["manifest"])
+                write(output / "saved-input-binding.json",binding(args.resume_input))
+            else:
+                manifest,context = prepare(args.campaign_root.resolve(),output,args.authorization.resolve(),ports,args.schema_rejection)
             runner = Runner(workspace(),ports)
             frozen = runner.prepare(manifest)
             write(output / "claim-task.json",{"root":str(runner.root),"update_id":frozen["update_id"]})
@@ -111,11 +121,15 @@ def main():
             os.environ["CODEX_EXECUTABLE"] = runtime["identity"]["cli"]["path"]
             write(output / "runtime-proof.json",runtime)
             result = runner.run(manifest,apply=True,audit=True)
+            continuation = None
+            if args.complete_group:
+                from backend.pipeline.deferred_claim_cvp_continuation import run as continue_group
+                continuation = continue_group(context,runner.root,ports)
             write(output / "result.json",{"status":"claim_repaired_affected_groups_audited",
                 "claim_completion":binding(runner.root / "complete.json"),"effective_package":binding(runner.root / "effective-package.json"),
                 "affected_group_keys":result["affected_group_keys"],"campaign_root":context["campaign_root"],
                 "next_stage":"normal_current_claim_cvp_resolution","production_resumed":False,"group_complete":False,
-                "Claim_revision_does_not_complete_deferred_CVP":True})
+                "Claim_revision_does_not_complete_deferred_CVP":True,"normal_CVP_continuation":continuation})
         except Exception as exc:
             write(output / "failure.json",{"error":str(exc),"automatic_retry":False,"group_complete":False,"production_resumed":False})
             raise

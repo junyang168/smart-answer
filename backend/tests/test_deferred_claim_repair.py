@@ -181,6 +181,25 @@ def test_quote_hashes_are_computed_before_opus_without_changing_words(case):
     assert effective == r.effective_proposal(frozen,raw)
 
 
+def test_normalization_only_declares_explicit_new_quote_not_missing_consumer(case):
+    states,_,bound = case
+    frozen = {"manifest":manifest_for(case).model_dump(),"before_records":c.rows(states),"after":[c.source_snapshot(bound)]}
+    raw = {"records":[{"collection":"source_fragments","object_id":"F2","payload":{"fragment_id":"F2","source_id":"S",
+        "paragraph_key":"S0001","verbatim_excerpt":"也支持乙"}}],"dispositions":[],"sentence_dispositions":[],"unadmitted_candidates":[]}
+    effective = d.normalize_proposal(frozen,raw)
+    assert [(x.record_key,x.action) for x in effective.dispositions] == [("source_fragments/F2","update")]
+    assert not any(x.record_key == "claims/C" for x in effective.dispositions)
+
+
+def test_false_redundant_bucket_cannot_promote_context_evidence(case):
+    states,_,bound = case
+    del states["claims/C"]["eligible_evidence_step_ids"]
+    claim = deepcopy(states["claims/C"]); claim["eligible_evidence_step_ids"] = []
+    frozen = {"manifest":manifest_for(case).model_dump(),"before_records":c.rows(states),"after":[c.source_snapshot(bound)]}
+    raw = {"records":[{"collection":"claims","object_id":"C","payload":claim}],"dispositions":[],"sentence_dispositions":[],"unadmitted_candidates":[]}
+    with pytest.raises(ValueError,match="qualification"): d.normalize_proposal(frozen,raw)
+
+
 def test_problem_budget_ignores_root_and_incidental_packet_context(case):
     _,repair,_ = case
     packet = d.artifact(repair.investigation_packet)

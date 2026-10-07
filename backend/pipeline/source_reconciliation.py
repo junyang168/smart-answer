@@ -706,7 +706,9 @@ def review_packet(frozen: dict, proposal: Proposal) -> dict:
             "deterministic_after_review_changes": ["fresh review fields", "fresh candidate/decision IDs", "dependent final Claim SHA"],
             "new_revision_objects_start_at_one": True, "correction_limit": 1,
             **({"deterministic_before_review": ["exact source/paragraph/quote SHA", "new quote source_version_bound",
-                "Claim schema defaults", "connected-overlap one-basis metadata", "proposed Claim locator SHA"]}
+                "Claim schema defaults", "connected-overlap one-basis metadata", "proposed Claim locator SHA",
+                "explicit new quote create disposition", "read-only CVP impact token becomes exact retain",
+                "verified redundant Evidence buckets retain old Claim storage shape"]}
                if frozen["manifest"].get("deferred_repair") else {}),
         },
     }

@@ -253,7 +253,7 @@ def build_selection(group, inventory, root, random_spot_check_policy=None, sourc
     for path in source_repair_paths:
         package=read(path)
         version = package.get('source_repair_application',{}).get('schema_version')
-        if version not in {'wang_g041_owner_qualified_transcript_reconciliation_v2', 'wang_s201129_owner_opus_source_reconciliation_v1', 'wang_owner_claim_statement_revision_v1'}:
+        if version not in {'wang_g041_owner_qualified_transcript_reconciliation_v2', 'wang_s201129_owner_opus_source_reconciliation_v1', 'wang_owner_claim_statement_revision_v1', 'wang_source_reconciliation_v1'}:
             continue
         from backend.pipeline.viewpoint_applied_source_epochs import implementation
         epoch = implementation(binding(path))

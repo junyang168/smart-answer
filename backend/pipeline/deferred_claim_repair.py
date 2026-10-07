@@ -270,6 +270,20 @@ def normalize_proposal(frozen,response):
     """Declared hash/default computation BEFORE independent Opus review."""
     proposed = c.Proposal.model_validate(decode_proposal(response))
     data = c.index(proposed.records)
+    before = c.index(frozen["before_records"])
+    permissions = {c.key(p["collection"],p["object_id"]) for p in frozen["manifest"]["permissions"]}
+    dispositions = [x.model_dump() for x in proposed.dispositions]
+    declared = {x["record_key"] for x in dispositions}
+    # A returned new quote explicitly proposes a create; declare that action
+    # for review. Never manufacture a disposition for a missing old consumer.
+    for k in sorted(data.keys()-before.keys()-declared):
+        if k.startswith("source_fragments/"):
+            dispositions.append({"record_key":k,"action":"update",
+                "reason":"Explicit proposed new source quote: mechanically declared create action, pending independent review; not approval."})
+    for x in dispositions:
+        if (x["action"] == "impact_only" and x["record_key"] not in data and x["record_key"] not in permissions
+                and x["record_key"].startswith(("canonical_viewpoints/","viewpoint_revisions/"))):
+            x["action"] = "retain"  # exact read-only identity, no invalidation/write
     source = frozen["after"][0]
     for k,p in data.items():
         if not k.startswith("source_fragments/"): continue
@@ -282,6 +296,16 @@ def normalize_proposal(frozen,response):
             verbatim_excerpt_sha256=hashlib.sha256(quote.encode()).hexdigest())
     for k,p in list(data.items()):
         if k.startswith("claims/"):
+            original = before[k]
+            buckets = {"eligible_evidence_step_ids":[],"context_evidence_step_ids":[],"withheld_evidence_step_ids":[]}
+            for eid in original.get("evidence_step_ids",[]):
+                gate = before[c.key("evidence_steps",eid)].get("support_eligibility")
+                name = "eligible_evidence_step_ids" if gate in {"eligible","eligible_candidate","eligible_with_label"} else "context_evidence_step_ids" if gate == "context_only" else "withheld_evidence_step_ids"
+                buckets[name].append(eid)
+            for name,expected in buckets.items():
+                if name not in original and name in p:
+                    if p[name] != expected: raise ValueError("derived Claim bucket changed actual Evidence qualification")
+                    del p[name]  # optional buckets never replace the real Evidence gate
             # New long quotes can contain an existing short context anchor.
             # Retain every old quote/role, but count connected overlaps once.
             for occurrence in p.get("occurrences",[]):
@@ -313,4 +337,4 @@ def normalize_proposal(frozen,response):
     for k,p in data.items():
         if k.startswith("viewpoint_claim_links/") and p.get("component_locator"):
             p["component_locator"]["claim_sha256"] = semantic_record_sha(current[c.key("claims",p["claim_id"])])
-    return c.Proposal.model_validate({**proposed.model_dump(),"records":c.rows(data)})
+    return c.Proposal.model_validate({**proposed.model_dump(),"records":c.rows(data),"dispositions":dispositions})
