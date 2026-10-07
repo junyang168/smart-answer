@@ -3,7 +3,7 @@
 > **读者**：Solution architect、Developer、维护执行者。
 > **类型**：流程。
 > **状态**：当前；新通用入口，不追认或替换历史修订审批。
-> **与代码对齐**：2026-10-07，核对通用执行器与 deferred Claim 入口的代码及离线回归；新增入口尚未完成真实模型／数据库端到端实跑。历史包只读重放不等于新入口生产批准。
+> **与代码对齐**：2026-10-07，核对通用执行器与 deferred Claim 入口的代码及离线回归；提议、Opus 审核、应用、回读和完整组审计已实际运行。完整组遇到未授权异议仍停止，不能将 Claim 已修订当成 campaign 完成；新 CVP 续接分支尚未完成真实实跑。具体生产结果另存独立运行记录。
 > **权威范围**：已授权来源版本变化及来源未变的 deferred Claim 修订，怎样传递到既有知识记录、观点连接和受影响分组；不授权新增 campaign 成员、路线、文章、发布或部署。
 
 ## 1. 更新原则
@@ -112,6 +112,8 @@ backend/.venv/bin/python -m backend.pipeline.source_reconciliation_runner --mani
 提议使用 GPT6.1Sol high 订阅，独立审核使用 Opus5.5 high 订阅；最多一次 GPT 纠正和一次 Opus 终审，不增加 GPT 前置批准。程序在审核前确定性计算引文哈希、重叠引用单一依据标记及拟 Claim locator SHA，完整拟后像交给 Opus；原始模型回答不覆盖。每个 Claim／来源版本／问题类别共用跨 root 的一次调用预算，已有 intent 无回答视为结果未知，不自动重试。
 
 审核后仍走本流程的备份、单次应用、全库回读与受影响完整组审计。`audited_complete` 只证明 Claim 修订完成；deferred 成分必须以当前 Claim 和新证据返回原有 CVP 覆盖解析，再经完整组审计和 completion 才能推进后一组。原 scope／ledger、旧审核和已应用 ChangeSet 均保留，不重放。
+
+`--complete-group` 启用 `deferred_claim_cvp_continuation` 衔接：直接调用现有 `run_batch`、v6 覆盖审核及标准 compiler，不另建缺 CVP 提议器；只追加未覆盖成分，保留已有连接。独立 completion verifier 核对原批次、Claim 修订和正常 CVP 增量的真实 SQL／原始审核／完整 Registry 逆向边界；完整原组审计及后组备份、dry-run、实际 continuation receipt 通过后才恢复队列。其他旧连接的新异议不属于本 Claim 自动权限，必须明确停报。
 
 实现分别在 `source_reconciliation.py`（契约／完整图验证）、`source_reconciliation_runner.py`（持久阶段）、`source_reconciliation_runtime.py`（订阅／SQL／备份／审计）及 `source_reconciliation_epoch.py`（完成证明消费）。
 测试为 `backend/tests/test_source_reconciliation.py`；既有来源修订与分组／store 回归仍须通过。
