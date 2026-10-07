@@ -484,6 +484,7 @@ def run_batch(
     reconsiderer: Any = None,
     consolidator: Any = None,
     dependents_loader: Any = None,
+    current_claim_links: Sequence[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     # Accepted grouping preserves its source/argument order. The model packet
     # has a separate canonical ID-order contract; normalize only this local
@@ -497,6 +498,14 @@ def run_batch(
         registry_context=registry_context,
         pending_candidates=pending_candidates,
     )
+    if current_claim_links is not None:
+        if getattr(reviewer,'_response_model',None) is not CoverageCanonicalViewpointReviewResponse:
+            raise ValueError('existing component retention requires the new coverage-contract profile')
+        ids={claim.claim_id for claim in claims}
+        packet['retained_existing_claim_links']=sorted([dict(l) for l in current_claim_links
+            if l.get('claim_id') in ids and l.get('effective_state')=='active'],key=lambda l:l['viewpoint_claim_link_id'])
+        packet['existing_component_write_boundary']='现有active连接原类型、目标CVR、定位spans和Evidence/fragment绑定必须逐项原样保留；正常独立审核仍需检查它们，不借旧审核当本次批准。已有覆盖不新建重复link；只补尚无覆盖的实质成分。若现有连接需实质修改则报告阻塞，不自动改旧关系/CVP。'
+        packet['packet_sha256']=sha256_json({k:v for k,v in packet.items() if k!='packet_sha256'})
     _write_immutable(output_dir / "batch-packet.json", packet)
 
     raw_proposal, proposal_calls, proposal_seconds = _call(
@@ -1634,6 +1643,8 @@ def _execute_locked(
                 dependents_loader=lambda targets: load_revision_dependents(
                     store=store, target_revision_ids=targets
                 ),
+                current_claim_links=(store.list_records('viewpoint_claim_links')
+                    if getattr(reviewer,'_response_model',None) is CoverageCanonicalViewpointReviewResponse else None),
             )
         except (BatchResolutionError, ValidationError) as exc:
             findings = (
@@ -1731,6 +1742,8 @@ def _execute_locked(
             proposer_model_id=str(effective_raw["model_id"]),
             reviewer_model_id=str(raw_review["model_id"]),
             decided_at=_stable_decided_at(batch_dir),
+            current_claim_links=(store.list_records('viewpoint_claim_links')
+                if report['_review'].schema_version=='wang_canonical_viewpoint_review_v2' else None),
         )
         _write_immutable(batch_dir / "cvp-change-package.json", package)
         # A viewpoint-wording supersede strands the attestations pinned to the

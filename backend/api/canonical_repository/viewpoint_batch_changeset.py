@@ -56,6 +56,31 @@ class CvpBatchChangeSetError(ValueError):
     pass
 
 
+def reuse_exact_current_links(proposed, current):
+    """Freshly reviewed identical links retain their durable identity/version.
+
+    This is not approval-cache reuse. The effective semantic proposal must
+    already have passed its fresh review; this only avoids duplicate writes.
+    Existing active components cannot silently disappear or be changed.
+    """
+    ignored={'viewpoint_claim_link_id','decision_id','revision','occurrence_refs'}
+    def meaning(row):
+        value=ViewpointClaimLinkRecord.model_validate(row).model_dump(mode='json')
+        return {k:v for k,v in value.items() if k not in ignored}
+    result=[];used=set()
+    for row in proposed:
+        matches=[old for old in current if meaning(old)==meaning(row)]
+        if len(matches)>1:raise CvpBatchChangeSetError('ambiguous existing exact component link')
+        if matches:
+            old=matches[0];lid=old['viewpoint_claim_link_id']
+            if lid in used:raise CvpBatchChangeSetError('duplicate proposed existing component')
+            used.add(lid);result.append(deepcopy(old))
+        else:result.append(row)
+    if used!={old['viewpoint_claim_link_id'] for old in current}:
+        raise CvpBatchChangeSetError('fresh batch changed/omitted an existing active component; new scope required')
+    return result
+
+
 def _revision_signature(
     revised: ProposedViewpointRevision,
 ) -> ViewpointPropositionSignature:
@@ -106,6 +131,7 @@ def compile_cvp_batch_package(
     proposer_model_id: str,
     reviewer_model_id: str,
     decided_at: str,
+    current_claim_links: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Create one deterministic, no-write CVP package from a passing review."""
 
@@ -545,6 +571,12 @@ def compile_cvp_batch_package(
                 review_status="system_approved",
             )
             links_out.append(link.model_dump(mode="json"))
+
+    if current_claim_links is not None:
+        if review.schema_version != 'wang_canonical_viewpoint_review_v2':
+            raise CvpBatchChangeSetError('exact link retention requires fresh coverage-contract review')
+        current=[dict(l) for l in current_claim_links if l.get('claim_id') in claim_index and l.get('effective_state')=='active']
+        links_out=reuse_exact_current_links(links_out,current)
 
     def _resolve(endpoint: tuple[str, str]) -> tuple[str, str]:
         ids = resolved_targets.get(endpoint)

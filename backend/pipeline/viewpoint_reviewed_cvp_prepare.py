@@ -98,6 +98,13 @@ def completed_repair_parent_snapshot(manifest, records, packages, completed_ids,
         app=package.get('source_repair_application')
         if not app: raise CvpProductionBlocked(['parent repair lacks fresh source-repair authority'])
         normalized=normalize_package(package)
+        if app.get('schema_version') == 'wang_owner_claim_statement_revision_v1':
+            from backend.pipeline.claim_statement_revision import membership_snapshot
+            checked, changed = membership_snapshot(manifest,checked,package,completed_ids,selected_ids)
+            if used.intersection(changed):
+                raise CvpProductionBlocked(['duplicate statement revision Claim authority'])
+            used.update(changed)
+            continue
         if app.get('schema_version') == 'wang_source_reconciliation_v1':
             from backend.pipeline.source_reconciliation_epoch import membership_snapshot
             checked, changed = membership_snapshot(manifest,checked,package,completed_ids,selected_ids)
@@ -239,6 +246,10 @@ def prepare(args: argparse.Namespace) -> dict[str, Any]:
     repair_paths=getattr(args,'completed_source_repair',None) or []
     repairs=[json.loads(path.read_text(encoding='utf-8')) for path in repair_paths]
     for repair in repairs:
+        if repair.get('source_repair_application',{}).get('schema_version') == 'wang_owner_claim_statement_revision_v1':
+            for objects in normalize_package(repair).values(): all_ids.update(objects)
+            for row in repair['source_repair_application']['review_packet']['context_records']:
+                all_ids.add(row['object_id'])
         if repair.get('source_repair_application',{}).get('schema_version') == 'wang_source_reconciliation_v1':
             for objects in normalize_package(repair).values(): all_ids.update(objects)
         if repair.get('source_repair_application',{}).get('schema_version') == 'wang_s201129_owner_opus_source_reconciliation_v1':

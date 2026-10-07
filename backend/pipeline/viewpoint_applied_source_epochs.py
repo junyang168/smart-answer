@@ -19,6 +19,12 @@ def implementation(bound):
         # the actual review/apply/completion, not merely this schema label.
         import json
         raw = json.loads(path.read_text(encoding='utf-8'))
+        if (raw.get('source_repair_application') or {}).get('schema_version') == 'wang_owner_claim_statement_revision_v1':
+            from backend.pipeline import claim_statement_revision as statement
+            if statement.binding(path) != bound:
+                raise ValueError('statement revision physical package drift')
+            statement.validate_package(raw)
+            return statement
         if (raw.get('source_repair_application') or {}).get('schema_version') == 'wang_source_reconciliation_v1':
             if generic.file_binding(path) != bound:
                 raise ValueError('generic epoch physical package drift')

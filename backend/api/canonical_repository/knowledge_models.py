@@ -1473,6 +1473,7 @@ class ViewpointIdentityDecisionRecord(StrictViewpointRecord):
         if self.review_status == "system_approved":
             if self.approval_basis == "owner_scoped_independent_terminal_review":
                 scoped_reviewers = {
+                    "wang_owner_claim_statement_revision_v1": "owner_claim_statement_opus_terminal_review",
                     "wang_source_reconciliation_v1": "source_reconciliation_opus_terminal_review",
                     "wang_s201129_owner_opus_source_reconciliation_v1": "s201129_owner_scoped_opus_terminal_review",
                     "wang_s201129_owner_cl005_supports_v1": "s201129_cl005_owner_scoped_opus_terminal_review",
