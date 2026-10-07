@@ -1,4 +1,5 @@
 from copy import deepcopy
+from pathlib import Path
 import pytest
 from backend.pipeline import owner_approved_link_correction as d
 from backend.pipeline import source_reconciliation as c
@@ -105,6 +106,155 @@ def test_legacy_complete_without_child_keeps_old_exact_shape():
 def test_multiple_child_proofs_cannot_reset_or_choose_favorable_result():
     with pytest.raises(ValueError,match="competing"):
         d.source_projection({"authorized_link_corrections":[{},{}]}, {}, None)
+
+
+def completed_projection_fixture(monkeypatch):
+    from backend.pipeline import source_reconciliation_epoch as epoch
+    before={'viewpoint_claim_links/L':{'revision':1},
+        'claims/C':{'revision':3,'statement':'unchanged','nested':{'text':'完整來源'}}}
+    plan={'change_set_id':'child','operations':[
+        {'operation':'update','collection':'viewpoint_claim_links','object_id':'L',
+         'before_revision':1,'after_revision':2,'before_sha256':'0'*64,'after_sha256':'1'*64,
+         'payload':{'revision':2}},
+        *({'operation':'create','collection':collection,'object_id':oid,
+           'before_revision':None,'after_revision':1,'before_sha256':None,
+           'after_sha256':'2'*64,'payload':{'revision':1}}
+          for collection,oid in [('viewpoint_identity_candidates','I'),('viewpoint_identity_decisions','D')])
+    ]}
+    for key,payload in before.items():
+        collection,oid=c.split_key(key)
+        payload[c.KNOWLEDGE_COLLECTIONS[collection][1]]=oid
+    for row in plan['operations']:
+        row['payload'][c.KNOWLEDGE_COLLECTIONS[row['collection']][1]]=row['object_id']
+    current=deepcopy(before)
+    for row in plan['operations']:
+        current[c.key(row['collection'],row['object_id'])]=deepcopy(row['payload'])
+    current['claims/unrelated_future']={'revision':1,'statement':'must remain exactly unchanged'}
+    checks=[]
+    monkeypatch.setattr(d,'consume_completed_child',lambda *a:({},
+        {'context_records':c.rows(before)},plan,{'change_set_id':'parent'}))
+    monkeypatch.setattr(epoch,'_assert_database',lambda p,s:checks.append(('parent SQL',p['change_set_id'])))
+    monkeypatch.setattr(d,'sql_applied',lambda p,s:checks.append(('child SQL',p['change_set_id'])) or True)
+    def forbidden(*a,**k):pytest.fail('completed child entered full historical reconstruction')
+    for name in ('child_proof','validate_child','validate_parent','historical_audit_proofs','rewind'):
+        monkeypatch.setattr(d,name,forbidden)
+    return before,current,checks
+
+
+def test_completed_projection_consumes_saved_result_preserves_entire_current_population(monkeypatch):
+    before,current,checks=completed_projection_fixture(monkeypatch)
+    original=deepcopy(current)
+    projected=d.source_projection({'authorized_link_corrections':[{'path':'saved'}]},current,object())
+    assert projected=={**before,'claims/unrelated_future':original['claims/unrelated_future']}
+    assert checks==[('parent SQL','parent'),('child SQL','child')]
+    projected['viewpoint_claim_links/L']['revision']=99
+    assert current==original
+
+
+@pytest.mark.parametrize('drift',['retained','written','missing','parent SQL','child SQL'])
+def test_completed_child_checks_actual_affected_state_and_sql_every_time(monkeypatch,drift):
+    from backend.pipeline import source_reconciliation_epoch as epoch
+    before,current,checks=completed_projection_fixture(monkeypatch)
+    complete={'authorized_link_corrections':[{'path':'saved'}]}
+    d.source_projection(complete,current,object())
+    if drift=='retained':current['claims/C']['revision']=4
+    if drift=='written':current['viewpoint_claim_links/L']['revision']=3
+    if drift=='missing':del current['viewpoint_identity_candidates/I']
+    if drift=='parent SQL':
+        def rejected(*a):raise ValueError('actual parent SQL drift')
+        monkeypatch.setattr(epoch,'_assert_database',rejected)
+    if drift=='child SQL':monkeypatch.setattr(d,'sql_applied',lambda *a:False)
+    with pytest.raises(ValueError):d.source_projection(complete,current,object())
+
+
+def completed_child_files(tmp_path,monkeypatch):
+    """Consumer framing fixture; real model/plan reconstruction tested separately."""
+    from backend.pipeline import source_reconciliation_epoch as epoch
+    parent=tmp_path/'parent';parent.mkdir()
+    write(parent/'effective-package.json',{'original_parent':'complete'})
+    *_,packet=fixture()
+    packet['source_root']=str(parent)
+    ident='LR-'+c.sha256_json({'parent':d.binding(parent/'effective-package.json'),
+        'before_link':packet['before_link'],'after_link':packet['after_link']})
+    root=parent/'authorized-link-corrections'/ident;root.mkdir(parents=True)
+    adjudication=parent/'audits'/'original'/'own-source-adjudication';adjudication.mkdir(parents=True)
+    packet['adjudication_root']=str(adjudication)
+    packet['handoff']={'verdict':'audit_objection_upheld','actual':'saved'}
+    for name in ('packet.json','raw-gpt.json','gpt-final-handoff.json'):
+        write(adjudication/name,packet['handoff'] if name=='gpt-final-handoff.json' else {'actual':name})
+    packet['handoff']=read(adjudication/'gpt-final-handoff.json')
+    packet['prior_bindings']=[d.binding(adjudication/name) for name in ('packet.json','raw-gpt.json','gpt-final-handoff.json')]
+    audit=adjudication.parent/'independent-audit'/'audit.json';audit.parent.mkdir()
+    write(audit,{'original':'audit'});packet['original_audit']=d.binding(audit)
+    packet['old_audit_source_proofs']=[d.binding(audit)]
+    package={'actual':'unchanged-approved-package'}
+    plan={'change_set_id':'child','operations':[]}
+    dump=tmp_path/'dump';dump.write_text('recoverable backup')
+    write(root/'backup.json',{'dump':d.binding(dump),'restore_catalog_nonempty':True,'restore_list_exit_code':0})
+    write(root/'apply-intent.json',{'plan_sha256':c.sha256_json(plan),'package_sha256':c.sha256_json(package),
+        'backup':d.binding(root/'backup.json')})
+    write(root/'apply-receipt.json',{'status':'applied','change_set_id':'child','summary':{
+        'operations':3,'created':2,'updated':1,'retired':0,'revived':0,'invalidated_dependencies':0}})
+    for name,value in {'packet.json':packet,'initial_review.packet.json':packet,
+            'initial_review.raw.json':{'original':'Opus'},'initial_review.reservation.json':{'original':'once'},
+            'before.json':{'records':'must NEVER be parsed'},'preflight.json':{'actual':'passed'},
+            'effective-package.json':package,'plan.json':plan}.items():write(root/name,value)
+    write(parent/'readback.json',{'post_fingerprint_sha256':'a'*64,'post_records':[]})
+    proof={'schema_version':d.VERSION,'status':'applied_readback_verified','master_data_mutations':3,
+        'source_root':str(parent),'source_update_id':'update','change_set_id':'child',
+        'before_sha256':'a'*64,'post_sha256':'b'*64,'bindings':[d.binding(root/n) for n in d.PROOF_FILES]}
+    write(root/'verified-result.json',proof)
+    bound=d.binding(root/'verified-result.json')
+    complete={'update_id':'update','authorized_link_corrections':[bound]}
+    monkeypatch.setattr(epoch,'load_completed',lambda _:({}, {'update_id':'update'}, {}, deepcopy(complete)))
+    monkeypatch.setattr(d,'review_raw',lambda *a:{'actual':'Opus'})
+    monkeypatch.setattr(d,'package_for',lambda *a:package)
+    monkeypatch.setattr(d,'assert_plan',lambda *a:None)
+    actual_read=d.read
+    def no_snapshot_read(path):
+        if Path(path).name in {'before.json','frozen.json','readback.json'}:
+            pytest.fail('completed child JSON-parsed a full historical snapshot')
+        return actual_read(path)
+    monkeypatch.setattr(d,'read',no_snapshot_read)
+    def forbidden(*a,**k):pytest.fail('completed child rebuilt already completed history')
+    for name in ('child_proof','validate_parent','validate_child','historical_audit_proofs'):
+        monkeypatch.setattr(d,name,forbidden)
+    return root,bound,complete,(proof,packet,plan,{})
+
+
+def test_completed_child_consumes_entire_saved_proof_and_packet_without_snapshot_rebuild(tmp_path,monkeypatch):
+    root,bound,complete,reference=completed_child_files(tmp_path,monkeypatch)
+    result=d.consume_completed_child(bound,complete)
+    assert tuple(body(v) for v in result)==reference
+
+
+@pytest.mark.parametrize('drift',['proof_status','proof_missing_pin','proof_source','parent','parent_postimage',
+    'raw_file','before_file','intent','backup','invalidated_dependencies'])
+def test_completed_child_refuses_incomplete_or_changed_original_proofs_without_fallback(tmp_path,monkeypatch,drift):
+    root,bound,complete,_=completed_child_files(tmp_path,monkeypatch)
+    proof=body(read(root/'verified-result.json'))
+    if drift.startswith('proof_'):
+        if drift=='proof_status':proof['status']='not complete'
+        if drift=='proof_missing_pin':proof['bindings'].pop()
+        if drift=='proof_source':proof['source_update_id']='different'
+        write(root/'verified-result.json',proof,immutable=False)
+        bound=d.binding(root/'verified-result.json');complete['authorized_link_corrections']=[bound]
+    elif drift=='parent':complete['authorized_link_corrections']=[]
+    elif drift=='parent_postimage':
+        write(root.parent.parent/'readback.json',{'post_fingerprint_sha256':'c'*64,'post_records':[]},immutable=False)
+    else:
+        name={'raw_file':'initial_review.raw.json','before_file':'before.json','intent':'apply-intent.json',
+              'backup':'backup.json','invalidated_dependencies':'apply-receipt.json'}[drift]
+        value=body(read(root/name))
+        if drift=='invalidated_dependencies':value['summary']['invalidated_dependencies']=1
+        else:value['changed']='not original'
+        write(root/name,value,immutable=False)
+        # Even a resealed completion cannot quietly discard unbound effects.
+        if drift=='invalidated_dependencies':
+            proof['bindings']=[d.binding(root/n) for n in d.PROOF_FILES]
+            write(root/'verified-result.json',proof,immutable=False)
+            bound=d.binding(root/'verified-result.json');complete['authorized_link_corrections']=[bound]
+    with pytest.raises(ValueError):d.consume_completed_child(bound,complete)
 
 
 def test_sql_gate_rejects_missing_root_before_any_write():

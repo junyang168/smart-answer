@@ -44,7 +44,7 @@ def load(bound, *, historical=False):
     return package, frozen, plan, complete
 
 
-def _frozen_seal(path):
+def _snapshot_header_value(path, field):
     # Executor JSON is key-sorted: the seal precedes before_records. Read its
     # small header, never decode/skip the giant records array on a miss.
     from backend.pipeline.viewpoint_compiled_readset import _Stream, CompileLimits
@@ -55,10 +55,15 @@ def _frozen_seal(path):
         stream.expect('{')
         while True:
             name=stream.value(); stream.expect(':')
-            if name=='artifact_sha256':return stream.value()
-            if name=='before_records':raise ValueError('completed frozen seal header missing')
+            if name==field:return stream.value()
+            if name in {'before_records','post_records','records'}:
+                raise ValueError('completed snapshot header missing: '+field)
             stream.skip();stream.expect(',')
     finally:stream.close()
+
+
+def _frozen_seal(path):
+    return _snapshot_header_value(path,'artifact_sha256')
 
 
 @validated_history(bound_files_only=True)

@@ -429,18 +429,101 @@ def validate_child(root, store, current=None):
     return rewind(plan,current,before)
 
 
+@validated_history(bound_files_only=True)
+def consume_completed_child(bound, complete):
+    """Authenticate the executor's already completed child, not replay history.
+
+    Its exact full readback and parent boundary were established before sealing
+    verified-result.json and the parent's complete.json. Consume those ORIGINAL
+    bindings plus the original complete review context, never decode before.json
+    or rebuild old audit prompts. This is NOT new-write/store authorization.
+    """
+    root=Path(c.verify_file(bound)).parent
+    if Path(bound['path'])!=root/'verified-result.json':
+        raise ValueError('child completion path mismatch')
+    proof=read(root/'verified-result.json'); packet=body(read(root/'packet.json'))
+    parent=Path(packet['source_root'])
+    if (proof.get('schema_version')!=VERSION or proof.get('status')!='applied_readback_verified'
+            or proof.get('master_data_mutations')!=3 or proof.get('source_root')!=str(parent)
+            or proof.get('source_update_id')!=complete['update_id']):
+        raise ValueError('child is not genuinely completed')
+    required={str(root/n) for n in PROOF_FILES}
+    if len(proof['bindings'])!=len(required) or {p['path'] for p in proof['bindings']}!=required:
+        raise ValueError('child completion proof denominator drift')
+    for pin in proof['bindings']:c.verify_file(pin)
+    from backend.pipeline.source_reconciliation_epoch import load_completed, _snapshot_header_value
+    _,frozen,parent_plan,parent_complete=load_completed(binding(parent/'effective-package.json'))
+    if (parent_complete!=complete or parent_complete.get('authorized_link_corrections')!=[bound]
+            or proof['source_update_id']!=frozen['update_id']):
+        raise ValueError('child detached from original completed parent')
+    ident='LR-'+c.sha256_json({'parent':binding(parent/'effective-package.json'),
+        'before_link':packet['before_link'],'after_link':packet['after_link']})
+    if root!=parent/'authorized-link-corrections'/ident:
+        raise ValueError('child task/root identity changed; budget cannot be reset')
+    if proof['before_sha256']!=_snapshot_header_value(parent/'readback.json','post_fingerprint_sha256'):
+        raise ValueError('child predecessor differs from completed parent full readback')
+    for key in ('before_sha256','post_sha256'):
+        value=proof[key]
+        if not isinstance(value,str) or len(value)!=64 or any(ch not in '0123456789abcdef' for ch in value):
+            raise ValueError('child complete whole Registry fingerprint missing')
+    validate_target(packet)
+    adjudication=Path(packet['adjudication_root'])
+    if packet['original_audit']['path']!=str(adjudication.parent/'independent-audit/audit.json'):
+        raise ValueError('child detached from actual parent audit')
+    expected={str(adjudication/n) for n in ('packet.json','raw-gpt.json','gpt-final-handoff.json')}
+    if len(packet['prior_bindings'])!=3 or {p['path'] for p in packet['prior_bindings']}!=expected:
+        raise ValueError('child original adjudication proof denominator drift')
+    for pin in packet['prior_bindings']+packet['old_audit_source_proofs']+[packet['original_audit']]:
+        c.verify_file(pin)
+    if read_artifact(adjudication/'gpt-final-handoff.json')!=packet['handoff']:
+        raise ValueError('original upheld adjudication changed')
+    if body(read(root/'initial_review.packet.json'))!=packet:
+        raise ValueError('child original complete review packet changed')
+    raw=review_raw(root,packet); package=body(read(root/'effective-package.json'))
+    if package!=package_for(packet,raw,root):raise ValueError('child actual review/package drift')
+    before=c.index(packet['context_records']); plan=body(read(root/'plan.json'))
+    assert_plan(plan,package,before)
+    if proof['change_set_id']!=plan['change_set_id']:raise ValueError('child completed plan drift')
+    intent=body(read(root/'apply-intent.json'))
+    if intent!={'plan_sha256':c.sha256_json(plan),'package_sha256':c.sha256_json(package),
+                'backup':binding(root/'backup.json')}:
+        raise ValueError('child durable reviewed write intent drift')
+    backup=body(read(root/'backup.json'));c.verify_file(backup['dump'])
+    if not backup['restore_catalog_nonempty'] or backup['restore_list_exit_code']!=0:
+        raise ValueError('child backup restore proof absent')
+    receipt=read(root/'apply-receipt.json')
+    if receipt.get('status')!='applied' or receipt.get('change_set_id')!=plan['change_set_id']:
+        raise ValueError('child receipt mismatch')
+    # No implicit loss of dependent-product invalidations. A future child with
+    # effects outside its saved readset needs explicit bounded effect bindings.
+    summary=receipt['summary']
+    if any(summary.get(k)!=v for k,v in {'operations':3,'created':2,'updated':1,
+            'retired':0,'revived':0,'invalidated_dependencies':0}.items()):
+        raise ValueError('child completion has unbound derived effects; no full-history fallback')
+    return proof,packet,plan,parent_plan
+
+
 def source_projection(complete, current, store):
     children = complete.get("authorized_link_corrections",[])
     if not children: return current
     if len(children) != 1: raise ValueError("competing/multiple child corrections need a new proven contract")
-    proof = read(c.verify_file(children[0])); root = Path(children[0]["path"]).parent
-    for bound in proof["bindings"]: c.verify_file(bound)
-    if (body(proof) != child_proof(root) or proof["source_update_id"] != complete["update_id"]
-            or root.parent.parent != Path(proof["source_root"])):
-        raise ValueError("child is not genuinely completed")
-    projected = validate_child(root,store,current)
-    if proof["before_sha256"] != c.fingerprint(c.index(read(root/"before.json")["records"])):
-        raise ValueError("child predecessor proof changed")
+    proof,packet,plan,parent_plan=consume_completed_child(children[0],complete)
+    from backend.pipeline.source_reconciliation_epoch import _assert_database
+    _assert_database(parent_plan,store)
+    if not sql_applied(plan,store):raise ValueError('child applied receipt not proven in SQL')
+    written={c.key(o['collection'],o['object_id']) for o in plan['operations']}
+    before=c.index(packet['context_records'])
+    for key,value in before.items():
+        if key not in written and current.get(key)!=value:
+            raise ValueError('child retained context/current version drift: '+key)
+    # Only the three authenticated operations are reversed in memory. Do not
+    # mutate the input or freeze/unwind unrelated future campaign inserts.
+    projected=dict(current)
+    for row in plan['operations']:
+        op=ChangeOperation(**row);key=c.key(op.collection,op.object_id)
+        if current.get(key)!=stored_operation_payload(op):raise ValueError('child current postimage drift')
+        if op.operation=='create':del projected[key]
+        else:projected[key]=deepcopy(before[key])
     return projected
 
 
