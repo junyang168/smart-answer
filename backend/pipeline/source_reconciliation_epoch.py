@@ -12,11 +12,12 @@ from backend.pipeline import source_reconciliation as c
 from backend.pipeline.source_reconciliation_runner import body, read, binding as file_binding, validate_package, validate_completion_population
 from backend.pipeline.source_reconciliation_runtime import ProductionPorts
 from backend.api.canonical_repository.postgres_store import record_content_sha
-from backend.pipeline.viewpoint_validation_context import validated_history
+from backend.pipeline.viewpoint_validation_context import validated_history, require_explicit_history_maintenance
 
 
 @validated_history(bound_files_only=True)
 def load(bound, *, historical=False):
+    require_explicit_history_maintenance('source epoch full frozen-package reconstruction')
     path = c.verify_file(bound)
     package = body(read(path))
     validate_package(package, historical=historical)
@@ -85,6 +86,7 @@ def binding(path):
 
 def _predecessor_projection(package, states, store, *, seen=None):
     """Restore only exact proven postimages in a local copy, never the database."""
+    require_explicit_history_maintenance('recursive source epoch predecessor reconstruction')
     seen = set() if seen is None else seen
     root = Path(package["source_repair_application"]["run_root"])
     bound = file_binding(root / "effective-package.json")

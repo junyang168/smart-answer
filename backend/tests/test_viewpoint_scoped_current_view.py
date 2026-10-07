@@ -131,3 +131,46 @@ def test_foreign_collection_same_id_is_not_returned_instead_of_requested_record(
     with pytest.raises(ValueError,match='incomplete'):
         with m.ValidationContext('exact collection'):
             m.read_current_objects(store,{('claims','C')})
+
+
+@pytest.mark.parametrize('scale', [1,10,100])
+def test_typed_selected_claims_load_current_sql_not_whole_library_or_history(scale, monkeypatch):
+    from pydantic import BaseModel
+    class Claim(BaseModel):
+        claim_id: str
+        revision: int
+        statement: str
+        review_status: str | None = None
+    store=Store();store.unrelated_records=234787*scale
+    store.rows['claims','C']=row(2, xmin='20', hold='human_judgment_required')
+    monkeypatch.setattr(m,'typed_records',lambda *_:pytest.fail('no whole-collection fallback'))
+    with m.validation_runtime(limits=m.ROUTINE_VALIDATION_LIMITS):
+        with m.ValidationContext('selected Claim') as ctx:
+            claims=m.typed_current_records(store,'claims',['C'],Claim,'claim_id')
+            assert claims['C'].revision==2 and claims['C'].review_status=='human_judgment_required'
+            claims['C'].statement='unreviewed local edit'
+            assert claims['C'].statement=='original'
+        assert ctx.metrics['sql_payload_rows']==ctx.metrics['sql_version_rows']==1
+
+
+@pytest.mark.parametrize('problem', ['missing','retired','identity'])
+def test_selected_typed_claim_does_not_restore_missing_retired_or_foreign_from_history(problem):
+    from pydantic import BaseModel
+    class Claim(BaseModel):
+        claim_id: str
+        revision: int
+        statement: str
+    store=Store()
+    if problem=='missing':store.rows.clear()
+    elif problem=='retired':store.rows['claims','C']=row(retired='retired')
+    else:
+        value=list(row());value[-1]['claim_id']='OTHER';value[3]=record_content_sha(value[-1])
+        store.rows['claims','C']=tuple(value)
+    with pytest.raises(ValueError, match='incomplete|retired/misidentified'):
+        with m.ValidationContext('current Claim'):
+            m.typed_current_records(store,'claims',['C'],Claim,'claim_id')
+
+
+def test_selected_typed_claim_requires_owning_sql_phase():
+    with pytest.raises(ValueError, match='owning SQL validation phase'):
+        m.typed_current_records(Store(),'claims',['C'],object,'claim_id')

@@ -194,6 +194,8 @@ def rewind(plan,states,before):
 
 
 def build_proof(root,campaign,ids,ports):
+    from backend.pipeline.viewpoint_validation_context import require_explicit_history_maintenance
+    require_explicit_history_maintenance('deferred completion full proof reconstruction')
     context = body(read(root/"context.json")); packet = body(read(root/"packet.json"))
     if context["campaign_root"] != str(campaign) or sorted(context["claim_ids"]) != sorted(ids):
         raise ValueError("deferred completion original group/member binding drift")
@@ -256,6 +258,8 @@ def build_proof(root,campaign,ids,ports):
 
 
 def verify_proof(campaign_root,path,claim_ids,store=None):
+    from backend.pipeline.viewpoint_validation_context import require_explicit_history_maintenance
+    require_explicit_history_maintenance('legacy completion consumption rebuilds full proof; compiled consumer required')
     root = Path(path).parent
     proof = read(Path(path)); rebuilt = build_proof(root,Path(campaign_root),claim_ids,ProductionPorts(store))
     if body(proof) != rebuilt: raise ValueError("generic deferred completion proof drift")

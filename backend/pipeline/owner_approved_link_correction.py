@@ -293,6 +293,8 @@ def historical_audit_proofs(audit_path, before):
     only the proven active predecessor rows. Retired evidence is still read by
     that reader's independent psql path. This never performs a new judgement.
     """
+    from backend.pipeline.viewpoint_validation_context import require_explicit_history_maintenance
+    require_explicit_history_maintenance('historical independent audit input reconstruction')
     import hashlib
     import importlib.util
     import random

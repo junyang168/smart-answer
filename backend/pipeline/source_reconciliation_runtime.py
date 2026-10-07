@@ -129,6 +129,8 @@ class ProductionPorts:
         self.store = store or PostgresKnowledgeStore()
 
     def snapshot(self) -> dict:
+        from backend.pipeline.viewpoint_validation_context import require_explicit_history_maintenance
+        require_explicit_history_maintenance('whole Registry payload snapshot')
         with self.store.connect() as conn, conn.cursor() as cursor:
             cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
             cursor.execute("SELECT collection,object_id,payload FROM wang_knowledge.objects WHERE retired_at IS NULL")

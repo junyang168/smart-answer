@@ -407,17 +407,14 @@ def campaign_backup_label(root):
 def initialize_validation(args):
     """Authenticate immutable history once; no model or Registry mutation.
 
-    Startup is explicitly timed separately from group entry. The runtime keeps
-    immutable data, never a reusable current-state or production pass receipt.
+    No whole-collection prewarm here: it was redundant with group entry and
+    loaded unrelated payloads. Actual qualification/write/current guards remain
+    responsible for their required readsets; this is NOT a release receipt.
     """
     from backend.pipeline.viewpoint_validation_context import ValidationContext
     from backend.api.canonical_repository.reviewed_candidate_contract import validate_store_package_authorization
-    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
-    from backend.api.canonical_repository.viewpoint_production_safety import collection_cut, CORPUS_COLLECTIONS, REGISTRY_COLLECTIONS
     from backend.pipeline.viewpoint_applied_source_epochs import compose
     from backend.pipeline.viewpoint_grouping_repository import SharedGroupingRepository
-    from backend.pipeline.viewpoint_validation_context import typed_records
-    from backend.api.canonical_repository.knowledge_models import ClaimRecord, EvidenceStepRecord, SourceFragmentRecord
     start = time.perf_counter()
     paths = getattr(args, 'completed_source_repair', None) or []
     with ValidationContext('campaign startup authentication'):
@@ -425,14 +422,8 @@ def initialize_validation(args):
             validate_store_package_authorization(read(path))
         SharedGroupingRepository(args.grouping_repository).load(
             args.accepted_grouping_sha, source_epoch_binding=compose(paths))
-        store=PostgresKnowledgeStore()
-        collection_cut(store, (*CORPUS_COLLECTIONS, *REGISTRY_COLLECTIONS))
-        for collection,model,key in [('claims',ClaimRecord,'claim_id'),
-                ('evidence_steps',EvidenceStepRecord,'evidence_step_id'),
-                ('source_fragments',SourceFragmentRecord,'fragment_id')]:
-            typed_records(store,collection,model,key)
     return {'startup_seconds': time.perf_counter()-start,
-            'scope': 'one-time history authentication and immutable SQL data loading',
+            'scope': 'history/grouping authentication; no whole-collection SQL prewarm',
             'model_calls': 0, 'Registry_writes': 0}
 
 

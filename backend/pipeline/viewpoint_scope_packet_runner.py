@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from dotenv import load_dotenv
-from backend.pipeline.viewpoint_validation_context import typed_records
+from backend.pipeline.viewpoint_validation_context import typed_records, typed_current_records, active_context
 
 from backend.api.canonical_repository.knowledge_models import (
     ArgumentRouteRecord,
@@ -259,7 +259,9 @@ def build_scope_packet(
     exceptions = {row.claim_id: row for row in source_attestation.exceptions}
 
     store = PostgresKnowledgeStore(database_url)
-    claims = typed_records(store,'claims',ClaimRecord,'claim_id')
+    claims = (typed_current_records(store,'claims',in_scope,ClaimRecord,'claim_id')
+              if active_context() is not None and hasattr(store,'database_url')
+              else typed_records(store,'claims',ClaimRecord,'claim_id'))
     all_evidence = typed_records(store,'evidence_steps',EvidenceStepRecord,'evidence_step_id')
     forward_ids={eid for cid in in_scope if cid in claims for eid in getattr(claims[cid],'evidence_step_ids',[])}
     evidence_index=all_evidence.reciprocal_subset(set(in_scope),forward_ids)

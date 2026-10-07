@@ -332,6 +332,22 @@ def active_context():
     return ctx if ctx is not None and not ctx.closed else None
 
 
+def require_explicit_history_maintenance(operation):
+    """Reject known whole-library algorithms BEFORE their first read/rebuild.
+
+    A time/byte limit cannot undo a SELECT-all payload transfer or a recursive
+    reconstruction already in flight. Bounded normal runtimes must use a
+    compiled consumer instead; a miss is not permission for legacy fallback.
+    Unbounded legacy maintenance remains subject to its explicit external job
+    budget. This veto grants no semantic, current-SQL or integrity approval.
+    """
+    ctx = active_context()
+    pool = _pool.get()
+    if (ctx is not None and ctx.limits is not None) or (pool is not None and pool.limits is not None):
+        raise ValidationBudgetExceeded(ctx.label if ctx else 'owned validation runtime',
+                                       'unbounded_algorithm', 1, 0, operation)
+
+
 def optional_file_exists(path):
     ctx = active_context()
     return ctx.optional_file_exists(path) if ctx else os.path.lexists(path)
@@ -751,7 +767,34 @@ class TypedRecords(Mapping):
         return {getattr(row,key_field):deepcopy(getattr(row,value_field)) for row in self.__rows.values()}
 
 
+def typed_current_records(store, collection, ids, model, id_field):
+    """Schema-validate exactly the declared CURRENT identities in owning phase.
+
+    No historical or full-collection fallback. Missing/retired/misidentified
+    records stop; holds are retained for the caller's existing eligibility
+    checks. Reciprocal graph discovery is a separate required readset, not
+    inferred complete merely because the forward identities were read.
+    """
+    ctx = active_context()
+    if ctx is None or not hasattr(store, 'database_url'):
+        raise ValueError('exact typed current records require an owning SQL validation phase')
+    if (not isinstance(collection, str) or not collection or not isinstance(ids, (list, tuple))
+            or not ids or any(not isinstance(oid, str) or not oid for oid in ids)
+            or len(set(ids)) != len(ids)):
+        raise ValueError('explicit nonempty unique current identities required')
+    ctx.pin(Path(inspect.getfile(model)))
+    observed = read_current_objects(store, {(collection, oid) for oid in ids})
+    rows = []
+    for oid in ids:
+        row = observed[collection, oid]
+        if row['retired'] or row['payload'].get(id_field) != oid:
+            raise ValueError('retired/misidentified current record: '+collection+'/'+oid)
+        rows.append(row['payload'])
+    return TypedRecords(rows, model, id_field)
+
+
 def typed_records(store, collection, model, id_field):
+    require_explicit_history_maintenance('whole-collection typed preload: '+collection)
     ctx=active_context()
     if ctx is None or not hasattr(store,'database_url'):
         return TypedRecords(store.list_records(collection),model,id_field)
