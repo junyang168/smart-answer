@@ -172,3 +172,20 @@ def test_exact_saved_review_validation_never_calls_or_accepts_drift(scenario,mon
         saved,_=c.reviewed_inputs(root);assert saved==packet
     else:
         with pytest.raises(ValueError):c.reviewed_inputs(root)
+
+
+def test_physical_original_projection_survives_exact_json_roundtrip(tmp_path,monkeypatch):
+    import hashlib
+    path=tmp_path/'source.json';path.write_text('{"script":[{"text":"甲。"}]}')
+    claim={'claim_id':'CL','evidence_step_ids':['E'],'occurrences':[{'source_id':'SRC'}]}
+    states={('evidence_steps','E'):{'evidence_step_id':'E','produced_claim_ids':['CL'],'source_fragment_ids':['FR']},
+        ('source_fragments','FR'):{'fragment_id':'FR','source_id':'SRC','paragraph_key':'S0001','verbatim_excerpt':'甲。',
+            'source_sha256':'body','verbatim_excerpt_sha256':hashlib.sha256('甲。'.encode()).hexdigest(),
+            'paragraph_text_sha256':hashlib.sha256('甲。'.encode()).hexdigest()},
+        ('source_documents','SRC'):{'source_id':'SRC','source_body_sha256':'body'}}
+    monkeypatch.setattr(c,'load_context_source',lambda source:(path,c.file_sha256(path),
+        SimpleNamespace(body_sha256='body',spoken_rows=({'text':'甲。'},))))
+    context=c.source_context(states,claim)
+    assert context==json.loads(json.dumps(context))
+    states['source_fragments','FR']['verbatim_excerpt']='乙。'
+    with pytest.raises(ValueError):c.source_context(states,claim)

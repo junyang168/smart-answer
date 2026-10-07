@@ -109,7 +109,7 @@ def source_context(states, claim):
             if fragment['source_id'] not in sources:
                 path, physical, projection = load_context_source(source)
                 sources[fragment['source_id']] = {'source': source, 'binding': binding(path),
-                    'body_sha256': projection.body_sha256, 'complete_original': projection.spoken_rows}
+                    'body_sha256': projection.body_sha256, 'complete_original': list(projection.spoken_rows)}
             rows = sources[fragment['source_id']]['complete_original']
             key = fragment['paragraph_key']
             index = int(key[1:])-1
