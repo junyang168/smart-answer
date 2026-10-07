@@ -232,6 +232,8 @@ def verify_group_audit(root, cfg, schedule, manifest, groups, audit_path, output
         raise ValueError("expected one intact group plan")
     targets = sorted({o["payload"]["viewpoint_id"] for o in read(plans[0])["operations"]
                       if o["collection"] == "viewpoint_claim_links"})
+    if component_proof is not None:
+        targets = sorted(set(targets) | set(component_proof.get('viewpoint_ids', [])))
     if not targets:
         raise ValueError("empty viewpoint population cannot prove completion")
     rb = plans[0].parent / "cvp-readback-receipt.json"
