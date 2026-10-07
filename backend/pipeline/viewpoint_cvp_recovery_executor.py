@@ -442,8 +442,8 @@ def resume_after_repair(root, attempt, recovery_root, executable, *, additional_
             'old_campaign_root':str(root),'new_campaign_root':str(output),
             'cvp_policy':policy,'semantic_contract':rules,'historical_caches_unchanged':True,
             'completed_groups_replayed':False})
-    # Normal qualification makes and verifies the fresh pg_dump backup; normal
-    # dry-run proves zero model calls/writes before the unique production screen.
+    # The unique producer qualifies and dry-runs, then waits before any call or
+    # write. The launcher releases that SAME process, never a second cold start.
     return start_prepared_campaign(root, output, attempt, recovery_root, executable, argv, groups,
         prior_model_batch=prior_model_batch, reuse_correction=reuse_correction,
         initial_prefix_only=initial_prefix_only,
@@ -459,6 +459,8 @@ def start_prepared_campaign(root, output, attempt, recovery_root, executable, ar
     A saved verified completion can use continuation_inputs without regenerating
     its model/audit/proof chain. This entry still performs actual startup package
     authentication, seed admission, fresh backup, dry-run and process checks.
+    The authenticated producer waits at its zero-call boundary and continues
+    in the SAME owned runtime after the launcher releases its remaining gates.
     """
     if str(argv[argv.index('--output-root') + 1]) != str(output):
         raise ValueError('prepared campaign output identity drift')
@@ -467,19 +469,11 @@ def start_prepared_campaign(root, output, attempt, recovery_root, executable, ar
     write_immutable(attempt/'scalability-acceptance-binding.json',performance)
     env = os.environ.copy()
     env["CODEX_EXECUTABLE"] = str(executable)
-    run_logged([*argv, "--dry-run"], attempt, "campaign-preflight", env=env)
-    progress = read(output / "progress.json")
-    if progress["status"] == "complete":
-        receipt = {"status": "complete", "campaign_root": str(output), "progress": progress,
-                   "production_complete": True, "production_restarted": False}
-        write_immutable(attempt / "continuation-receipt.json", receipt)
-        return receipt
-    if progress["status"] != "preflight_passed_no_model_calls":
-        raise ValueError("dry-run did not verify the next group")
-    backup = read(output / "backup.json")
-    if binding(backup["path"]) != backup:
-        raise ValueError("fresh backup SHA drift")
-    run_logged(["pg_restore", "--list", backup["path"]], attempt, "backup-restore-list")
+    from backend.pipeline import viewpoint_startup_handoff as startup
+    startup.validate_command(output, argv)
+    from backend.pipeline.viewpoint_cvp_recovery_supervisor import process_table, remaining_producers, current_job_process_ids
+    if [p for p in remaining_producers(process_table(), root.parent) if p not in current_job_process_ids()]:
+        raise ValueError("producer active; do not start another")
     # Verify the SAME explicit binary and selected model before backgrounding.
     # Login and model catalogs alone are not an inference-access test. This
     # diagnostic is cached for this binary/login identity, not repeated on
@@ -497,7 +491,54 @@ def start_prepared_campaign(root, output, attempt, recovery_root, executable, ar
     write_immutable(attempt / "codex-runtime-preflight.json", runtime)
     executable = client.executable
     env["CODEX_EXECUTABLE"] = executable
-    if prior_model_batch is not None:
+    request = startup.create(attempt,output,argv,performance)
+    startup_argv = [*argv,'--startup-handoff',request]
+    logfile = str(output / "screenlog")
+    if any(c in logfile for c in ('\n', '\r', '"', '\\')):
+        raise ValueError("noncanonical screen logfile")
+    screenrc = attempt / "campaign.screenrc"
+    with screenrc.open("x") as stream:
+        stream.write(f'logfile "{logfile}"\nlogfile flush 1\ndeflog on\n')
+    try:
+        run_logged(["screen", "-c", screenrc, "-dmS", "wkp357-cvp-matthew", *startup_argv],
+                   attempt, "start-campaign", env=env)
+        def matches(command):
+            import shlex
+            tokens = shlex.split(command)
+            return (not command.startswith(("SCREEN","login")) and
+                    "-m" in tokens and tokens[tokens.index("-m")+1] == 'backend.pipeline.viewpoint_cvp_campaign_runner'
+                    and '--output-root' in tokens and tokens[tokens.index('--output-root')+1] == str(output)
+                    and '--startup-handoff' in tokens and tokens[tokens.index('--startup-handoff')+1] == str(request))
+        pid = None
+        for _ in range(5):
+            matches_ids = [p for p,command in process_table().items() if matches(command)]
+            if len(matches_ids) == 1:
+                pid = matches_ids[0]
+                break
+            time.sleep(1)
+        if pid is None:
+            raise ValueError("could not verify unique startup PID; never claim production resumed")
+        alive = lambda p: matches(process_table().get(p,''))
+        ready = startup.wait_ready(request,pid,alive)
+        progress = ready['progress']
+        if ready['status'] == "complete":
+            receipt = {"status":"complete","campaign_root":str(output),"progress":progress,
+                       "startup_ready":binding(attempt/'startup-ready.json'),
+                       "owned_runtime_startups":1,"production_complete":True,"production_restarted":False}
+            write_immutable(attempt/'continuation-receipt.json',receipt)
+            return receipt
+        backup = read(output / "backup.json")
+        if ready['backup'] != backup or binding(backup["path"]) != backup:
+            raise ValueError("fresh backup SHA drift")
+        run_logged(["pg_restore", "--list", backup["path"]], attempt, "backup-restore-list")
+        if not (attempt/'backup-restore-list.stdout').stat().st_size:
+            raise ValueError('fresh backup restore catalog empty')
+    except Exception as exc:
+        startup.abort(request,f'{type(exc).__name__}: {exc}')
+        raise
+    def prepare_prefix():
+        if prior_model_batch is None:
+            return
         from backend.pipeline.viewpoint_model_cache_handoff import prepare_handoff, verify_prefix
         from backend.api.canonical_repository.viewpoint_production_safety import build_batch_identity
         target_group = output / f"g{progress['sequence']:03d}" / 'production'
@@ -518,30 +559,16 @@ def start_prepared_campaign(root, output, attempt, recovery_root, executable, ar
         policy = read(PROJECT_ROOT / 'backend/pipeline/policies/wang_cvp_resolution_policy_v3.json')
         verify_prefix(scope, identity['batch_id'], target_group / 'run/batches' / identity['batch_key_sha256'],
                       int(policy['max_request_bytes']))
-    from backend.pipeline.viewpoint_cvp_recovery_supervisor import process_table, remaining_producers, current_job_process_ids
-    if [p for p in remaining_producers(process_table(), root.parent) if p not in current_job_process_ids()]:
-        raise ValueError("producer active; do not start another")
-    # macOS ships screen 4.00.03: it has no -Logfile option. Supply a fixed
-    # config so logging begins before the first production command.
-    logfile = str(output / "screenlog")
-    if any(c in logfile for c in ('\n', '\r', '"', '\\')):
-        raise ValueError("noncanonical screen logfile")
-    screenrc = attempt / "campaign.screenrc"
-    with screenrc.open("x") as stream:
-        stream.write(f'logfile "{logfile}"\nlogfile flush 1\ndeflog on\n')
-    run_logged(["screen", "-c", screenrc, "-dmS", "wkp357-cvp-matthew", *argv],
-               attempt, "start-campaign", env=env)
-    pid = None
-    for _ in range(5):
-        table = process_table()
-        matches = [p for p, c in table.items() if "-m backend.pipeline.viewpoint_cvp_campaign_runner " in c
-                   and f"--output-root {output}" in c and not c.startswith(("SCREEN", "login"))]
-        if len(matches) == 1:
-            pid = matches[0]
-            break
-        time.sleep(1)
-    if pid is None:
-        raise ValueError("could not verify new campaign PID; never claim started")
+    try:
+        prepare_prefix()
+        if not alive(pid):
+            raise ValueError('authenticated startup exited; no second producer')
+        startup.release(request,pid,binding(attempt/'codex-runtime-preflight.json'),
+                        binding(attempt/'backup-restore-list.json'))
+        startup.wait_consumed(request,pid,alive)
+    except Exception as exc:
+        startup.abort(request,f'{type(exc).__name__}: {exc}')
+        raise
     run_logged(["screen", "-dmS", "wkp357-cvp-recovery", PYTHON, "-m",
                 "backend.pipeline.viewpoint_cvp_recovery_supervisor", "--campaign-root", output,
                 "--campaign-pid", pid, "--recovery-root", recovery_root,
@@ -549,6 +576,9 @@ def start_prepared_campaign(root, output, attempt, recovery_root, executable, ar
     receipt = {"status": "resumed", "campaign_root": str(output), "campaign_pid": pid,
                "progress": read(output / "progress.json"), "backup": backup,
                "codex_runtime": runtime,
+               "startup_ready":binding(attempt/'startup-ready.json'),
+               "startup_release_consumed":binding(attempt/'startup-release-consumed.json'),
+               "owned_runtime_startups":1,
                "production_complete": False}
     write_immutable(attempt / "continuation-receipt.json", receipt)
     return receipt

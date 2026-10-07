@@ -74,6 +74,70 @@ def test_exact_intact_schedule():
     assert set(validate_schedule(schedule, manifest)) == {"a", "b"}
 
 
+@pytest.mark.parametrize('stop_before_apply',[False,True])
+def test_startup_gate_reuses_actual_owned_runtime_and_precedes_apply(tmp_path,monkeypatch,stop_before_apply):
+    import json
+    import os
+    from types import SimpleNamespace
+    from backend.pipeline import viewpoint_cvp_campaign_runner as module
+    from backend.pipeline import viewpoint_validation_context as contexts
+    schedule,manifest=fixture()
+    schedule.update(completed_groups=[],upstream_manifest_path=str(tmp_path/'manifest.json'))
+    for name,value in [('schedule',schedule),('manifest',manifest),('inventory',{'claims':[]}),
+                       ('seed',{'groups':[]}),('audit',{})]:
+        (tmp_path/(name+'.json')).write_text(json.dumps(value))
+    output=tmp_path/'output';output.mkdir()
+    args=SimpleNamespace(schedule=tmp_path/'schedule.json',
+        schedule_sha256=module.binding(tmp_path/'schedule.json')['file_sha256'],
+        accepted_grouping_sha='parent',lineage_inventory=tmp_path/'inventory.json',
+        completed_proofs=tmp_path/'seed.json',entrance_audit=tmp_path/'audit.json',
+        grouping_repository=tmp_path/'grouping',wang_repository=tmp_path/'wang',
+        global_lock=tmp_path/'lock',authorized_by='offline-test',output_root=output,
+        validation_runtime=True,dry_run=False)
+    observed=[]
+    monkeypatch.setenv('CODEX_EXECUTABLE','pytest-only-no-provider')
+    def observe(stage):observed.append((stage,os.getpid(),contexts._pool.get()))
+    monkeypatch.setattr(module,'campaign_policy',lambda _:({},{}))
+    monkeypatch.setattr(module,'lineage_preflight',lambda *a:{})
+    monkeypatch.setattr(module,'pause_at_safe_boundary',lambda *a,**k:False)
+    monkeypatch.setattr(module.shutil,'disk_usage',lambda _:SimpleNamespace(free=10*1024**3))
+    dump=tmp_path/'dump';dump.write_bytes(b'offline dump')
+    def backup(_):
+        (output/'backup.json').write_text(json.dumps(module.binding(dump)))
+    monkeypatch.setattr(module,'ensure_campaign_backup',backup)
+    monkeypatch.setattr(module,'initialize_validation',lambda _:observe('initialize') or {})
+    def qualify(row,group,inventory,root,args):
+        observe('qualify')
+        inputs=root/'production/inputs';inputs.mkdir(parents=True)
+        (inputs/'scope.json').write_text('{}')
+    monkeypatch.setattr(module,'qualify',qualify)
+    monkeypatch.setattr(module,'runner_args',lambda *a:['offline-only'])
+    def command(argv):
+        if '--dry-run' in argv:observe('dry-run')
+        elif '--apply' in argv:
+            observe('apply-boundary')
+            raise ValueError('offline test stops BEFORE any real apply or provider')
+        else:pytest.fail('no provider/audit subprocess')
+    monkeypatch.setattr(module,'command',command)
+    class Gate:
+        released=False
+        def ready(self,state,pins,backup):
+            assert state['status']=='preflight_passed_no_model_calls' and pins and backup
+            observe('ready')
+        def wait_release(self,*a):
+            observe('release')
+            if stop_before_apply:raise ValueError('owner stop')
+            self.released=True
+    args._startup_gate=Gate()
+    with contexts.validation_runtime() as pool:
+        with pytest.raises(ValueError,match='owner stop' if stop_before_apply else 'offline test stops'):
+            module.execute(args)
+        assert all(pid==os.getpid() and owned is pool for _,pid,owned in observed)
+    stages=[stage for stage,_,_ in observed]
+    assert stages==['initialize','qualify','dry-run','ready','release']+([] if stop_before_apply else ['apply-boundary'])
+    assert len(list((output/'validation-startups').iterdir()))==1
+
+
 @pytest.mark.parametrize("mutation", ["duplicate", "count", "passage", "sha", "order", "claim_overlap", "capacity"])
 def test_bad_schedule_stops(mutation):
     schedule, manifest = fixture()

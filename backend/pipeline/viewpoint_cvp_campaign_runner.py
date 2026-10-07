@@ -524,6 +524,19 @@ def execute(args):
             if args.dry_run:
                 save_state(args.output_root / "progress.json", state | {"status": "preflight_passed_no_model_calls"})
                 return 0
+            gate = getattr(args, '_startup_gate', None)
+            if gate is not None and not gate.released:
+                waiting = state | {'status':'preflight_passed_no_model_calls'}
+                save_state(args.output_root/'progress.json',waiting)
+                pins = [binding(args.output_root/'campaign.json'), binding(args.output_root/'backup.json'),
+                        binding(root/'entry-validation.json')]
+                pins += [binding(p) for p in sorted(inputs_path for inputs_path
+                         in (root/'production/inputs').iterdir() if inputs_path.is_file())]
+                gate.ready(waiting,pins,read(args.output_root/'backup.json'))
+                from backend.pipeline.viewpoint_campaign_control import stop_requested
+                gate.wait_release(lambda:stop_requested(args.output_root),os.environ['CODEX_EXECUTABLE'])
+                # Same runtime, next phase. No current verdict is carried over:
+                # the normal apply runner freshly verifies source/SQL/holds.
             save_state(args.output_root / "progress.json", state | {"status": "generating_reviewing"})
             command(runner_args(root, args) + ["--apply"])
             run = read(root / "production/run/scope-run.json")
@@ -609,6 +622,9 @@ def execute(args):
             save_state(args.output_root / "progress.json", state | {"status": "blocked", "error": str(exc), "no_next_group_started": True})
             raise
     save_state(args.output_root / "progress.json", {"status": "complete", "completed_new_groups": len(done), "remaining_groups": 0, "argument_routes_completed": False})
+    if getattr(args, '_startup_gate', None) is not None and not args._startup_gate.released:
+        args._startup_gate.ready(read(args.output_root/'progress.json'),
+                                 [binding(args.output_root/'campaign.json')])
     return 0
 
 
@@ -626,6 +642,8 @@ def main():
     parser.add_argument('--semantic-contract-sha256')
     parser.add_argument('--validation-runtime', action='store_true',
                         help='one runtime for authenticated historical proofs; live checks and write gates unchanged')
+    parser.add_argument('--startup-handoff',type=Path,
+                        help='pause in THIS zero-call preflight process for bound launcher gates; no second cold start')
     parser.add_argument('--stop-after-sequence',type=int,
                         help='stop only after this group has real write/readback/audit completion')
     args = parser.parse_args()
@@ -634,6 +652,9 @@ def main():
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         from backend.pipeline.viewpoint_campaign_control import graceful_campaign_stop
         with graceful_campaign_stop(args.output_root):
+            if args.startup_handoff is not None:
+                from backend.pipeline.viewpoint_startup_handoff import ProducerGate
+                args._startup_gate = ProducerGate(args.startup_handoff,args.output_root,sys.argv[1:])
             if args.validation_runtime:
                 from backend.pipeline.viewpoint_validation_context import validation_runtime, ROUTINE_VALIDATION_LIMITS
                 with validation_runtime(limits=ROUTINE_VALIDATION_LIMITS):

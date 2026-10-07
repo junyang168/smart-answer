@@ -130,3 +130,27 @@ def test_saved_runtime_proof_tamper_rejected_not_model_retry(tmp_path, monkeypat
     with pytest.raises(m.CodexSubscriptionError, match='mismatch'):
         verify_runtime(client, tmp_path / 'proofs')
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize('drift',[None,'login','binary','proof','missing'])
+def test_release_runtime_consumption_never_generates_diagnostic(tmp_path,monkeypatch,drift):
+    import json
+    from backend.pipeline.codex_subscription_preflight import consume_saved_runtime
+    home=tmp_path/'home';home.mkdir();(home/'auth.json').write_text('offline test login')
+    client=m.CodexSubscriptionClient(model='gpt-6.1-sol',reasoning_effort='high',environment={'CODEX_HOME':str(home)})
+    client.cli_identity={'path':'/pytest-only-codex','file_sha256':'binary1'}
+    monkeypatch.setattr(client,'_verify_chatgpt_login',lambda:None)
+    monkeypatch.setattr(client,'generate_json',lambda *a,**k:{'ok':True})
+    result=verify_runtime(client,tmp_path/'proofs')
+    monkeypatch.setattr(client,'generate_json',lambda *a,**k:pytest.fail('no diagnostic fallback'))
+    if drift=='login':(home/'auth.json').write_text('changed login')
+    elif drift=='binary':client.cli_identity['file_sha256']='changed binary'
+    elif drift=='missing':m.Path(result['proof_path']).unlink()
+    elif drift=='proof':
+        path=m.Path(result['proof_path']);value=json.loads(path.read_text())
+        value['result']['model']='other';path.write_text(json.dumps(value))
+    if drift:
+        with pytest.raises((m.CodexSubscriptionError,FileNotFoundError)):
+            consume_saved_runtime(client,result)
+    else:
+        assert consume_saved_runtime(client,result)['new_model_calls']==0

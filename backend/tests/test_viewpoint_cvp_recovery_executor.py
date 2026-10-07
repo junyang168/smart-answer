@@ -10,6 +10,16 @@ from backend.pipeline import viewpoint_cvp_recovery_executor as m
 from backend.pipeline import viewpoint_cvp_recovery_supervisor as supervisor
 
 
+@pytest.fixture(autouse=True)
+def prohibit_real_model_diagnostics(monkeypatch):
+    from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
+    monkeypatch.setattr(CodexSubscriptionClient, 'generate_json',
+        lambda *a, **k: pytest.fail('unit tests must never call a real model'))
+    monkeypatch.setattr(m, 'verify_runtime', lambda client, cache: {
+        'identity': {'model': client.model, 'cli': {'path': client.executable}},
+        'new_model_calls': 0, 'test_double': True})
+
+
 def test_physical_proof_binding_accepts_markdown_but_rejects_tampering(tmp_path):
     source = tmp_path / 'source.md'
     source.write_text('# Physical original\nNot a JSON receipt.\n')
@@ -269,17 +279,19 @@ def mocked_performance_acceptance(monkeypatch):
     # The REAL measured-acceptance schema/negative gates are tested separately;
     # no actual production acceptance artifact is created by this fixture.
     from backend.pipeline import viewpoint_scalability_acceptance as performance
-    monkeypatch.setattr(performance,'require_scalability_acceptance',lambda _:{'status':'measured_pass','test_double':True})
+    monkeypatch.setattr(performance,'require_scalability_acceptance',lambda _:{'path':'/pytest-only-acceptance.json','status':'measured_pass','test_double':True})
 
 
 def test_prepared_seed_handoff_cannot_skip_dryrun_or_change_output(tmp_path, monkeypatch, mocked_performance_acceptance):
     output = tmp_path / 'new'
-    args = ['runner', '--output-root', str(output)]
+    args = ['python', '-m', 'backend.pipeline.viewpoint_cvp_campaign_runner',
+            '--output-root', str(output), '--validation-runtime']
     calls = []
     def fail_preflight(argv, attempt, name, **kwargs):
         calls.append((argv, name))
         raise ValueError('actual preflight failed')
     monkeypatch.setattr(m, 'run_logged', fail_preflight)
+    monkeypatch.setattr(supervisor, 'process_table', lambda: {})
     (tmp_path/'attempt').mkdir()
     with pytest.raises(ValueError, match='output identity drift'):
         m.start_prepared_campaign(tmp_path/'old', tmp_path/'foreign', tmp_path/'attempt',
@@ -288,7 +300,9 @@ def test_prepared_seed_handoff_cannot_skip_dryrun_or_change_output(tmp_path, mon
     with pytest.raises(ValueError, match='actual preflight failed'):
         m.start_prepared_campaign(tmp_path/'old', output, tmp_path/'attempt',
                                   tmp_path/'recovery', 'codex', args, {})
-    assert calls == [(args + ['--dry-run'], 'campaign-preflight')]
+    assert len(calls) == 1 and calls[0][1] == 'start-campaign'
+    assert '--startup-handoff' in calls[0][0] and '--dry-run' not in calls[0][0]
+    assert (tmp_path/'attempt/startup-abort.json').exists()
 
 
 def test_repaired_owner_checkpoint_never_preflights_or_starts_next_group(tmp_path,monkeypatch):
@@ -378,33 +392,50 @@ def test_restart_requires_backup_dryrun_and_unique_real_process(tmp_path, monkey
     output = m.continuation_root(root, attempt)
     def inputs(*args):
         output.mkdir()
-        return ["python", "-m", "backend.pipeline.viewpoint_cvp_campaign_runner", "--output-root", output]
+        return ["python", "-m", "backend.pipeline.viewpoint_cvp_campaign_runner", "--output-root", output, '--validation-runtime']
     monkeypatch.setattr(m, "continuation_inputs", inputs)
     calls = []
     backup = tmp_path / "backup.dump"
     backup.write_bytes(b"test dump (mock pg_restore)")
     def run(argv, directory, name, **kw):
         calls.append((name, argv))
-        if name == "campaign-preflight":
-            assert "--dry-run" in argv
+        if name == "start-campaign":
+            assert "--dry-run" not in argv and '--startup-handoff' in argv
             assert kw["env"]["CODEX_EXECUTABLE"] == "chosen-codex"
             (output / "progress.json").write_text('{"status":"preflight_passed_no_model_calls"}')
             (output / "backup.json").write_text(json.dumps(m.binding(backup)))
+        if name == 'backup-restore-list':
+            (directory/'backup-restore-list.stdout').write_text('verified catalog')
+            (directory/'backup-restore-list.json').write_text(json.dumps({'exit_code':0,'argv':[str(a) for a in argv]}))
     monkeypatch.setattr(m, "run_logged", run)
     monkeypatch.setattr(m, "verify_runtime", lambda client, cache: {
         "identity": {"model": client.model, "cli": {"path": client.executable}}, "new_model_calls": 0})
-    tables = iter([{10: f"python -m backend.pipeline.viewpoint_cvp_campaign_runner --output-root {output}"}] if active else
-                  [{}, {10: f"python -m backend.pipeline.viewpoint_cvp_campaign_runner --output-root {output}"}])
-    monkeypatch.setattr(supervisor, "process_table", lambda: next(tables))
+    command = (f'python -m backend.pipeline.viewpoint_cvp_campaign_runner --output-root {output}'
+               f' --validation-runtime --startup-handoff {attempt}/startup-request.json')
+    monkeypatch.setattr(supervisor, "process_table", lambda: {10:command} if active or calls else {})
+    from backend.pipeline import viewpoint_startup_handoff as startup
+    releases=[]
+    def ready(request,pid,alive):
+        assert pid==10 and alive(pid)
+        startup.save(attempt/'startup-ready.json',{'test_double':True})
+        return {'status':'preflight_passed_no_model_calls',
+                'progress':{'sequence':9,'group_key':'next'},'backup':m.binding(backup)}
+    monkeypatch.setattr(startup,'wait_ready',ready)
+    monkeypatch.setattr(startup,'release',lambda *a:releases.append(a))
+    def consumed(request,pid,alive):
+        assert alive(pid)
+        startup.save(attempt/'startup-release-consumed.json',{'test_double':True})
+    monkeypatch.setattr(startup,'wait_consumed',consumed)
     if active:
         with pytest.raises(ValueError, match="producer active"):
             m.resume_after_repair(root, attempt, recovery, "chosen-codex")
-        assert [name for name, _ in calls] == ["campaign-preflight", "backup-restore-list"]
+        assert calls == [] and releases == []
     else:
         result = m.resume_after_repair(root, attempt, recovery, "chosen-codex")
         assert result["campaign_pid"] == 10 and not result["production_complete"]
-        assert [name for name, _ in calls] == ["campaign-preflight", "backup-restore-list", "start-campaign", "attach-supervisor"]
-        assert "-Logfile" not in calls[2][1]  # screen 4.00.03 on this machine
+        assert [name for name, _ in calls] == ["start-campaign", "backup-restore-list", "attach-supervisor"]
+        assert len(releases)==1 and result['owned_runtime_startups']==1
+        assert "-Logfile" not in calls[0][1]  # screen 4.00.03 on this machine
         assert "logfile flush 1" in (attempt / "campaign.screenrc").read_text()
         assert json.loads((attempt / "codex-runtime-preflight.json").read_text())["identity"]["model"] == "gpt-6.1-sol"
 
@@ -417,7 +448,8 @@ def test_bad_runtime_stops_before_background_launch_and_retains_reason(tmp_path,
     output = m.continuation_root(root, attempt)
     def inputs(*a):
         output.mkdir()
-        return ['python', '--output-root', output]
+        return ['python', '-m', 'backend.pipeline.viewpoint_cvp_campaign_runner',
+                '--output-root', output, '--validation-runtime']
     monkeypatch.setattr(m, 'continuation_inputs', inputs)
     backup = tmp_path / 'backup.dump'
     backup.write_bytes(b'backup')
@@ -429,12 +461,13 @@ def test_bad_runtime_stops_before_background_launch_and_retains_reason(tmp_path,
             (output / 'progress.json').write_text('{"status":"preflight_passed_no_model_calls"}')
             (output / 'backup.json').write_text(json.dumps(m.binding(backup)))
     monkeypatch.setattr(m, 'run_logged', run)
+    monkeypatch.setattr(supervisor, 'process_table', lambda: {})
     def reject(*a):
         raise ValueError('stale executable; not an account entitlement claim')
     monkeypatch.setattr(m, 'verify_runtime', reject)
     with pytest.raises(ValueError, match='stale executable'):
         m.resume_after_repair(root, attempt, recovery, 'old-codex')
-    assert calls == ['campaign-preflight', 'backup-restore-list']
+    assert calls == []
     failure = json.loads((attempt / 'codex-runtime-failure.json').read_text())
     assert failure['production_started'] is False
     assert not (attempt / 'continuation-receipt.json').exists()
