@@ -24,9 +24,13 @@ import pydantic
 from backend.pipeline import source_reconciliation as c
 from backend.pipeline.source_reconciliation_runner import body, read, seal
 from backend.pipeline.viewpoint_resolution_runtime import write_immutable
-from backend.pipeline.viewpoint_validation_context import ValidationContext, ROUTINE_VALIDATION_LIMITS, active_context
+from backend.pipeline.viewpoint_validation_context import (
+    ValidationContext, ValidationLimits, ROUTINE_VALIDATION_LIMITS, active_context,
+    require_explicit_history_maintenance,
+)
 
 SCHEMA = 'wang_compiled_historical_readset_projection_v1'
+PREDECESSOR_SCHEMA = 'wang_flat_predecessor_projection_v1'
 MAX_PROJECTION_BYTES = 8*1024**2
 _PROJECT = Path(__file__).resolve().parents[2]
 CODE = (Path(__file__), Path(c.__file__), Path(__file__).with_name('source_reconciliation_runner.py'),
@@ -319,3 +323,125 @@ def consume_projection(bound, keys, *, completion_binding, snapshot_binding, fie
         raise ValueError('compiled positive/negative readset population drift')
     return {'rows':rows,'absent_keys':absent,'sections':value['sections'],
             'approval_status':'projection_only_not_admission'}
+
+
+def _projected_state(spec, keys):
+    if not isinstance(spec,dict) or set(spec) != {'projection','completion','snapshot','field'}:
+        raise ValueError('exact historical projection declaration required')
+    value = consume_projection(spec['projection'],keys,
+        completion_binding=spec['completion'],snapshot_binding=spec['snapshot'],field=spec['field'])
+    return {k:value['rows'].get(k) for k in keys}
+
+
+def compile_predecessor_map(transitions, keys, output, *, limits=CompileLimits()):
+    """Explicitly flatten declared, projected transitions ONCE, never approval.
+
+    Each transition supplies exact before/after projection bindings. All rows
+    and negative identities have the same denominator; adjacent states must be
+    byte-for-byte equal after JSON decoding. The output has only the oldest and
+    latest D rows, not an H-long history list. Its chain digest is provenance,
+    not proof that any transition had a valid review or SQL application.
+
+    A future admission consumer MUST establish those separate authorities and
+    full non-target integrity before using this map. Routine callers cannot
+    compile on a miss or silently fall back to recursive epoch reconstruction.
+    """
+    require_explicit_history_maintenance('compile flat historical predecessor map')
+    keys, output = _keys(keys), Path(output)
+    if not output.is_absolute() or output.exists():
+        raise ValueError('new absolute predecessor projection path required')
+    if not isinstance(transitions,list) or not transitions:
+        raise ValueError('nonempty explicit chronological transition chain required')
+    started=time.perf_counter(); read_bytes=0; previous=None; oldest=None
+    seen=set(); seen_states=set(); pins=[]
+    code_pins=[{'path':str(p.resolve()),'file_sha256':c.file_sha256(p)} for p in CODE]
+    with ValidationContext('explicit predecessor compilation',
+                           limits=ValidationLimits(limits.bytes,limits.seconds)) as ctx:
+        for transition in transitions:
+            if not isinstance(transition,dict) or set(transition) != {'before','after'}:
+                raise ValueError('exact before/after transition declaration required')
+            identity=c.sha256_json(transition)
+            if identity in seen:raise ValueError('duplicate historical transition/cycle')
+            seen.add(identity)
+            for spec in transition.values():
+                if not isinstance(spec,dict) or 'projection' not in spec:
+                    raise ValueError('historical projection binding missing')
+                pin=spec['projection']; size=Path(pin['path']).stat().st_size
+                read_bytes += size
+                if read_bytes > limits.bytes or size > limits.value_bytes:
+                    raise ValueError('explicit predecessor compilation IO/value budget exceeded; no fallback')
+                pins.append(pin)
+            before=_projected_state(transition['before'],keys)
+            after=_projected_state(transition['after'],keys)
+            if previous is not None and previous != before:
+                raise ValueError('historical predecessor continuity gap/order drift')
+            if oldest is None:
+                oldest=before; seen_states.add(c.sha256_json(before))
+            if before != after:
+                digest=c.sha256_json(after)
+                if digest in seen_states:raise ValueError('historical state cycle')
+                seen_states.add(digest)
+            previous=after
+            if time.perf_counter()-started > limits.seconds:
+                raise ValueError('explicit predecessor compilation time budget exceeded; no fallback')
+        # Reauthenticate all small inputs before publishing. They are copied
+        # provenance after publication, not traversed by the routine consumer.
+        for pin in pins:c.verify_file(pin)
+    value=dict(schema_version=PREDECESSOR_SCHEMA,
+        approval_status='projection_only_not_admission',semantic_approval_granted=False,
+        readset_keys=keys,chain_sha256=c.sha256_json(transitions),
+        first_before=transitions[0]['before'],last_after=transitions[-1]['after'],
+        oldest=oldest,latest=previous,
+        compiler_bindings=code_pins,
+        compiler_runtime=runtime_identity(),model_calls=0,registry_writes=0)
+    if len(json.dumps(seal(value),ensure_ascii=False).encode('utf-8')) > MAX_PROJECTION_BYTES:
+        raise ValueError('flat predecessor projection exceeds routine size ceiling')
+    if time.perf_counter()-started > limits.seconds:
+        raise ValueError('explicit predecessor compilation time budget exceeded; no fallback')
+    for pin in code_pins:c.verify_file(pin)
+    write_immutable(output,seal(value),require_new=True)
+    return dict(projection={'path':str(output),'file_sha256':c.file_sha256(output)},
+        chain_sha256=value['chain_sha256'],transition_count=len(transitions),
+        selected_keys=len(keys),input_projection_bytes=read_bytes,
+        authenticated_file_io_bytes=ctx.metrics['file_io_bytes'],
+        wall_seconds=time.perf_counter()-started,model_calls=0,registry_writes=0,
+        production_resume_authorized=False)
+
+
+def consume_predecessor_map(bound, keys, states, *, chain_sha256, first_before, last_after):
+    """Restore only exact D historical identities; never open H old artifacts.
+
+    `states` is the explicitly authenticated latest scoped map, not a whole
+    Registry snapshot. None denotes a declared absence (including creation in
+    an earlier transition). No database mutation or semantic authority results.
+    """
+    keys=_keys(keys)
+    if not isinstance(states,dict) or set(states) != set(keys):
+        raise ValueError('exact latest historical readset required; no whole Registry fallback')
+    if active_context() is None:
+        with ValidationContext('flat predecessor consumption',limits=ROUTINE_VALIDATION_LIMITS):
+            return consume_predecessor_map(bound,keys,states,chain_sha256=chain_sha256,
+                first_before=first_before,last_after=last_after)
+    value=body(_small(bound))
+    if (value.get('schema_version') != PREDECESSOR_SCHEMA
+            or value.get('approval_status') != 'projection_only_not_admission'
+            or value.get('semantic_approval_granted') is not False
+            or value.get('model_calls') != 0 or value.get('registry_writes') != 0):
+        raise ValueError('historical projection cannot grant admission/approval')
+    if (value.get('readset_keys') != keys or value.get('chain_sha256') != chain_sha256
+            or value.get('first_before') != first_before or value.get('last_after') != last_after
+            or value.get('compiler_runtime') != runtime_identity()):
+        raise ValueError('flat predecessor identity/readset/chain/runtime drift')
+    pins=value.get('compiler_bindings',[])
+    if len(pins) != len(CODE) or {p.get('path') for p in pins} != {str(p.resolve()) for p in CODE}:
+        raise ValueError('flat predecessor compiler denominator drift')
+    for pin in pins:c.verify_file(pin)
+    for label in ('oldest','latest'):
+        rows=value.get(label)
+        if not isinstance(rows,dict) or set(rows) != set(keys):
+            raise ValueError('flat predecessor positive/negative population drift')
+        c.index([dict(collection=c.split_key(k)[0],object_id=c.split_key(k)[1],payload=v)
+                 for k,v in rows.items() if v is not None])
+    if value['latest'] != states:
+        raise ValueError('latest historical postimage/version/absence drift')
+    return {'rows':value['oldest'],'approval_status':'projection_only_not_admission'}
