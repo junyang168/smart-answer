@@ -1,4 +1,4 @@
-"""Performance release gate, independent of semantic/model approval.
+"""Saved-input equivalence/performance gate, not semantic/model approval.
 
 No benchmark is fabricated here. A measured, implementation-bound acceptance
 artifact must exist before a recovery can even attempt its old cold preflight.
@@ -11,7 +11,7 @@ from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.api.canonical_repository.viewpoint_production_safety import file_sha256
 
 PROJECT = Path(__file__).resolve().parents[2]
-SCHEMA = 'wang_cvp_scalability_acceptance_v1'
+SCHEMA = 'wang_cvp_saved_input_equivalence_v1'
 IMPLEMENTATION = (
     'backend/pipeline/viewpoint_scalability_acceptance.py',
     'backend/pipeline/viewpoint_validation_context.py',
@@ -52,7 +52,9 @@ IMPLEMENTATION = (
     'scripts/audit-library.py',
 )
 PHASES = ('startup', 'completion_consumption')
-SCALES = (1, 10, 100)
+# Owner removed the separate growth-matrix release step. Keep the real input,
+# both phases and cold/warm paths; never turn that into a waiver of correctness.
+SCALES = (1,)
 
 
 def positive_int(value):
@@ -115,21 +117,27 @@ def require_scalability_acceptance(path):
                 or len(result['affected_readset_sha256']) != 64
                 or any(c not in '0123456789abcdef' for c in result['affected_readset_sha256'])):
             raise ValueError('fixed affected set is not content-bound')
+        original = result.get('reference_result_sha256')
+        if (not isinstance(original, str) or len(original) != 64
+                or any(c not in '0123456789abcdef' for c in original)
+                or result.get('result_sha256') != original):
+            raise ValueError('optimized result differs from the complete saved reference result')
     if set(indexed) != required:
-        raise ValueError('scalability benchmark must cover both phases, cold/warm and 1x/10x/100x data/history')
+        raise ValueError('saved-input validation must cover both phases and cold/warm')
     for phase in PHASES:
+        base = indexed[phase,'cold',1,1]
         for mode in ('cold','warm'):
-            base = indexed[phase,mode,1,1]
             for n in SCALES:
                 for h in SCALES:
                     row = indexed[phase,mode,n,h]
                     if row['affected_readset_sha256'] != base['affected_readset_sha256']:
-                        raise ValueError('growth benchmark changed the affected set')
+                        raise ValueError('saved-input validation changed the affected set')
+                    if row['result_sha256'] != base['result_sha256']:
+                        raise ValueError('cold/warm complete result mismatch')
                     if (any(row[k] > base[k] for k in ('file_io_bytes','sql_payload_rows','proof_rebuilds'))
                             or row['peak_rss_bytes'] > base['peak_rss_bytes']+32*1024**2):
-                        raise ValueError('routine validation grew with unrelated records/history')
-    # Each expanded cold workload must actually be a new process, not a warm
-    # cache labelled cold. Startup and completion share ONE owned runtime.
+                        raise ValueError('warm validation increased authenticated work')
+    # Startup and completion share ONE owned runtime, not two cold launches.
     cold_pids = set()
     for n in SCALES:
         for h in SCALES:
@@ -140,4 +148,4 @@ def require_scalability_acceptance(path):
             if any(indexed[p,m,n,h]['process_id'] != pid for p in PHASES for m in ('cold','warm')):
                 raise ValueError('benchmark used double startup instead of one owned runtime')
     return {'path':str(path),'file_sha256':file_sha256(path),'schema_version':SCHEMA,
-            'status':'measured_pass','growth_points':len(results)}
+            'status':'measured_pass','measurement_points':len(results)}

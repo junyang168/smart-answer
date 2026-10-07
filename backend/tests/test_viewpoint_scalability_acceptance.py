@@ -25,7 +25,9 @@ def report(tmp_path, monkeypatch):
                         full_history_snapshot_parses=0,all_active_payload_reads=0,full_rebuild_fallbacks=0,
                         owned_runtime_startups=1 if mode=='cold' else 0,
                         file_io_bytes=1000,sql_payload_rows=10,proof_rebuilds=0,peak_rss_bytes=1024**2,
-                        wall_seconds=0.1,affected_readset_sha256=sha256_json(phase)))
+                        wall_seconds=0.1,affected_readset_sha256=sha256_json(phase),
+                        reference_result_sha256=sha256_json({'complete_result':phase}),
+                        result_sha256=sha256_json({'complete_result':phase})))
     bind=lambda p:dict(path=str(p),file_sha256=m.file_sha256(p))
     value=dict(schema_version=m.SCHEMA,status='measured_pass',production_execution_performed=False,
         implementation_bindings=[bind(tmp_path/name) for name in m.IMPLEMENTATION],
@@ -43,19 +45,22 @@ def report(tmp_path, monkeypatch):
 def test_gate_accepts_complete_synthetic_shape_only(report):
     value,save=report
     receipt=m.require_scalability_acceptance(save())
-    assert receipt['growth_points']==36 and receipt['status']=='measured_pass'
+    assert receipt['measurement_points']==4 and receipt['status']=='measured_pass'
 
 
 @pytest.mark.parametrize('mutation', [
     'warm_only','missing_scale','duplicate','time','io','rss','rows_growth','bytes_growth',
     'history_rebuild','all_sql','fallback','changed_target','missing_metric','double_start',
-    'warm_as_cold','missing_code','mutation','driver_drift','code_drift','measurement_drift','seal'])
+    'split_runtime','missing_code','mutation','driver_drift','code_drift','measurement_drift','seal',
+    'changed_result','missing_reference','cold_warm_result','extra_growth'])
 def test_gate_rejects_missing_stale_or_non_scalable_measurements(report,mutation):
     value,save=report
     if mutation=='warm_only':value['results']=[r for r in value['results'] if r['mode']=='warm']
     elif mutation=='missing_scale':value['results'].pop()
     elif mutation=='duplicate':value['results'][-1]=deepcopy(value['results'][0])
     elif mutation=='missing_code':value['implementation_bindings'].pop()
+    elif mutation=='extra_growth':
+        value['results'].append({**value['results'][0],'history_scale':10})
     else:
         row=value['results'][-1]
         changes={'time':('wall_seconds',5.01),'io':('file_io_bytes',64*1024**2+1),
@@ -67,8 +72,11 @@ def test_gate_rejects_missing_stale_or_non_scalable_measurements(report,mutation
         if mutation in changes:
             key,new=changes[mutation];row[key]=new
         elif mutation=='missing_metric':row.pop('sql_payload_rows')
-        elif mutation=='warm_as_cold':
-            for r in value['results']:r['process_id']=100
+        elif mutation=='split_runtime':row['process_id']=101
+        elif mutation=='changed_result':row['result_sha256']='0'*64
+        elif mutation=='missing_reference':row.pop('reference_result_sha256')
+        elif mutation=='cold_warm_result':
+            row['result_sha256']=row['reference_result_sha256']='0'*64
     path=save(value)
     if mutation=='driver_drift':
         from pathlib import Path
