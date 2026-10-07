@@ -24,6 +24,7 @@ IMPLEMENTATION = (
     'backend/pipeline/owner_approved_link_correction.py',
     'backend/pipeline/deferred_claim_cvp_continuation.py',
     'backend/pipeline/immutable_proof_reuse.py',
+    'backend/pipeline/viewpoint_compiled_readset.py',
     'backend/pipeline/viewpoint_applied_source_epochs.py',
     'backend/pipeline/viewpoint_grouping_repository.py',
     'backend/pipeline/viewpoint_group_audit_population.py',

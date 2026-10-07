@@ -134,6 +134,42 @@ class ProductionPorts:
             cursor.execute("SELECT collection,object_id,payload FROM wang_knowledge.objects WHERE retired_at IS NULL")
             return {contract.key(c, o): p for c, o, p in cursor.fetchall()}
 
+    def scoped_snapshot(self, keys: list[str], *, absent_keys: list[str] = ()) -> dict:
+        """Fresh exact readset observation, not a global integrity approval.
+
+        No default/all-table fallback and no process-local current verdict.
+        Retired rows and actual stored revision/content SHA are inspected in
+        the same read-only snapshot; missing/extra/held references remain for
+        the caller's full admission guard, never silently supplied from history.
+        """
+        from backend.api.canonical_repository.postgres_store import record_content_sha
+        if (not keys or len(set(keys)) != len(keys) or len(set(absent_keys)) != len(absent_keys)
+                or set(keys)&set(absent_keys)):
+            raise ValueError('explicit unique disjoint scoped readset required')
+        wanted = {contract.split_key(k) for k in keys}
+        absent = {contract.split_key(k) for k in absent_keys}
+        probes = sorted(wanted|absent)
+        with self.store.connect() as conn, conn.cursor() as cursor:
+            cursor.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+            cursor.execute(
+                'SELECT o.collection,o.object_id,o.revision,o.content_sha256,o.payload,o.retired_at '
+                'FROM wang_knowledge.objects o JOIN unnest(%s::text[],%s::text[]) '
+                'AS wanted(collection,object_id) ON o.collection=wanted.collection '
+                'AND o.object_id=wanted.object_id',
+                ([col for col,oid in probes],[oid for col,oid in probes]))
+            rows = cursor.fetchall()
+        result = {}
+        for col,oid,revision,sha,payload,retired in rows:
+            identity = col,oid
+            if identity in absent:raise ValueError('scoped negative readset identity already exists')
+            if identity not in wanted or identity in result:raise ValueError('scoped SQL identity population drift')
+            if retired is not None:raise ValueError('scoped current record is retired')
+            if revision != payload.get('revision') or sha != record_content_sha(payload):
+                raise ValueError('scoped actual SQL revision/content SHA drift')
+            result[identity] = payload
+        if result.keys() != wanted:raise ValueError('scoped current readset incomplete')
+        return {contract.key(col,oid):payload for (col,oid),payload in result.items()}
+
     def adapter(self, stage: str):
         return model_adapter(stage, live=True)
 
