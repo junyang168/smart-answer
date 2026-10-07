@@ -136,27 +136,54 @@ def _postimages(plan, states):
             raise ValueError("source epoch current postimage drift: " + op["object_id"])
 
 
-def _retained_readset(frozen, plan, states):
+def _retained_readset(frozen, plan, states, *, before=None):
     written = {c.key(o["collection"], o["object_id"]) for o in plan["operations"]}
-    before = c.index(frozen["before_records"])
+    before = c.index(frozen["before_records"]) if before is None else before
     for k in frozen["inventory"]["affected_keys"] + frozen["inventory"]["context_keys"]:
         if k not in written and c.split_key(k)[0] in c.WRITABLE and states.get(k) != before[k]:
             raise ValueError("source epoch retained review context/version drift: " + k)
     return before
 
 
-def verified_applied(bound, store):
+def verified_applied(bound, store, *, current_keys=()):
     package, frozen, plan, complete = load(bound)
     _assert_database(plan, store)
     ports = ProductionPorts(store)
-    current = ports.snapshot()
+    before=c.index(frozen['before_records'])
+    keys=set(before)|set(current_keys)
+    keys.update(c.key(o['collection'],o['object_id']) for o in plan['operations'])
+    # The child original complete review context is part of this readset;
+    # do not discover it by loading its historical whole-library snapshot.
+    for pin in complete.get('authorized_link_corrections',[]):
+        from backend.pipeline.owner_approved_link_correction import consume_completed_child
+        _,packet,child_plan,_=consume_completed_child(pin,complete)
+        keys.update(c.index(packet['context_records']))
+        keys.update(c.key(o['collection'],o['object_id']) for o in child_plan['operations'])
+    for outcome in complete['audits']:
+        keys.update(c.key('claims',cid) for cid in outcome['job']['claim_ids'])
+        keys.update(c.key('canonical_viewpoints',vid) for vid in outcome['job']['viewpoint_ids'])
+    current=ports.current_snapshot(keys)
+    # Expand the actual audit Claims' complete own Evidence/fragment/source
+    # denominator. Each round reads only newly declared IDs, not collections.
+    while True:
+        needed=set()
+        for key,p in current.items():
+            col=c.split_key(key)[0]
+            if col=='claims':needed.update(c.key('evidence_steps',eid) for eid in p.get('evidence_step_ids',[]))
+            elif col=='evidence_steps':
+                fids=set(p.get('source_fragment_ids',[]))|({p['source_fragment_id']} if p.get('source_fragment_id') else set())
+                needed.update(c.key('source_fragments',fid) for fid in fids)
+            elif col=='source_fragments':needed.add(c.key('source_documents',p['source_id']))
+        missing=needed-current.keys()
+        if not missing:break
+        current.update(ports.current_snapshot(missing))
     from backend.pipeline.owner_approved_link_correction import source_projection
     projected = source_projection(complete, current, store)
     _postimages(plan, projected)
-    before = _retained_readset(frozen, plan, projected)
+    before = _retained_readset(frozen, plan, projected,before=before)
     for outcome in complete["audits"]:
         job = outcome["job"]
-        ports.validate_audit(outcome["result"], job["claim_ids"], job["viewpoint_ids"])
+        ports.consume_completed_audit(outcome,complete,current)
     return package, {c.split_key(k): p for k, p in before.items()}, {c.split_key(k): p for k, p in current.items()}
 
 
@@ -200,6 +227,43 @@ def _predecessor_projection(package, states, store, *, seen=None):
     return restored
 
 
+def _completed_predecessor_projection(package, states, store):
+    """Reverse already completed operations on this exact caller readset only.
+
+    Normal consumers never materialize an entire predecessor Registry. Each
+    original package/SQL epoch is authenticated; only provided identities are
+    projected, and unrelated current records preserve their exact values.
+    Missing older archived inputs stop with no full-freeze reconstruction.
+    """
+    restored=deepcopy(states); seen=set(); expected_source=None; expected_after=None
+    while True:
+        root=Path(package['source_repair_application']['run_root'])
+        bound=file_binding(root/'effective-package.json')
+        if bound['file_sha256'] in seen:raise ValueError('source epoch predecessor cycle')
+        seen.add(bound['file_sha256'])
+        checked,frozen,plan,complete=load(bound)
+        if checked!=package:raise ValueError('completed predecessor package drift')
+        sid=frozen['manifest']['source_id']
+        if expected_source is not None and (sid!=expected_source or frozen['after'][0]['body_sha256']!=expected_after):
+            raise ValueError('source epoch chronology/body transition gap')
+        _assert_database(plan,store)
+        from backend.pipeline.owner_approved_link_correction import source_projection
+        restored=source_projection(complete,restored,store)
+        before=c.index(frozen['before_records'])
+        for op in plan['operations']:
+            key=c.key(op['collection'],op['object_id'])
+            if key not in restored:continue
+            expected={**op['payload'],'revision':op['after_revision']}
+            if restored[key]!=expected:raise ValueError('completed predecessor related postimage drift')
+            if key in before:restored[key]=deepcopy(before[key])
+            else:del restored[key]
+        parents=frozen['manifest'].get('prior_updates',[])
+        if len(parents)>1:raise ValueError('one source has one chronological predecessor')
+        if not parents:return restored
+        expected_source,expected_after=sid,frozen['before']['body_sha256']
+        package,_,_,_=load(parents[0])
+
+
 def grouping_physical_transition(manifest, bound):
     package, frozen, _, _ = load(bound)
     original = json.loads(c.bound_bytes(frozen["manifest"]["accepted_membership"], frozen["physical_snapshots"]))
@@ -207,7 +271,7 @@ def grouping_physical_transition(manifest, bound):
         raise ValueError("source epoch cannot rewrite a different accepted grouping")
     store = ProductionPorts().store
     _, _, live = verified_applied(bound, store)
-    restored = _predecessor_projection(package, {c.key(col, oid): p for (col, oid), p in live.items()}, store)
+    restored = _completed_predecessor_projection(package, {c.key(col, oid): p for (col, oid), p in live.items()}, store)
     sid = frozen["manifest"]["source_id"]
     old = restored[c.key("source_documents", sid)]
     new = live["source_documents", sid]
@@ -246,14 +310,15 @@ def membership_snapshot(manifest, records, package, completed_ids, selected_ids)
     if json.loads(c.bound_bytes(frozen["manifest"]["accepted_membership"], frozen["physical_snapshots"])) != manifest:
         raise ValueError("historical membership manifest differs from authorized accepted grouping")
     ports = ProductionPorts()
-    _, _, live = verified_applied(file_binding(root / "effective-package.json"), ports.store)
+    _, _, live = verified_applied(file_binding(root / "effective-package.json"), ports.store,
+        current_keys={c.key(col,oid) for col,oid in records})
     current = {c.key(col, oid): payload for (col, oid), payload in live.items()}
     for (col, oid), row in records.items():
         if (row.get("retired") or row["payload"] != current.get(c.key(col, oid))
                 or row["revision"] != row["payload"].get("revision")
                 or row["content_sha256"] != record_content_sha(row["payload"])):
             raise ValueError("source epoch caller snapshot differs from actual current Registry")
-    restored = _predecessor_projection(package, current, ports.store)
+    restored = _completed_predecessor_projection(package, current, ports.store)
     result = deepcopy(records)
     for k in current.keys() - restored.keys():
         if c.split_key(k)[0] in {"source_documents", "source_fragments", "evidence_steps", "claims"}:

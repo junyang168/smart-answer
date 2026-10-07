@@ -78,6 +78,13 @@ class FakePorts:
     def snapshot(self):
         return deepcopy(self.states)
 
+    def current_snapshot(self,keys):
+        return {k:deepcopy(self.states[k]) for k in keys}
+
+    def consume_completed_audit(self,outcome,complete,states):
+        assert outcome in complete['audits']
+        self.validate_audit(outcome['result'],outcome['job']['claim_ids'],outcome['job']['viewpoint_ids'])
+
     def adapter(self, stage):
         adapter = runtime.model_adapter(stage)
         def generate(packet):
@@ -670,19 +677,21 @@ def test_epoch_reuses_only_this_invocations_checked_index(monkeypatch, count):
     frozen = {"before_records": c.rows(before), "inventory": {
         "affected_keys": ["claims/C"], "context_keys": list(before)}}
     package = {"identity": "unchanged-package"}
-    audit = {"result": {"unchanged": True}, "job": {"claim_ids": ["C"], "viewpoint_ids": ["V"]}}
+    audit = {"result": {"unchanged": True}, "job": {"claim_ids": ["C"], "viewpoint_ids": []}}
     monkeypatch.setattr(epoch, "load", lambda bound: (package, frozen, plan, {"audits": [audit]}))
     checks = []
     monkeypatch.setattr(epoch, "_assert_database", lambda plan, store: checks.append("SQL"))
     monkeypatch.setattr(child, "source_projection", lambda complete, states, store: states)
     class Ports:
         def __init__(self, store): pass
-        def snapshot(self):
+        def current_snapshot(self,keys):
             checks.append("current")
-            return deepcopy(current)
+            return {k:deepcopy(current[k]) for k in keys}
         def validate_audit(self, result, claims, views):
-            assert (result, claims, views) == (audit["result"], ["C"], ["V"])
+            assert (result, claims, views) == (audit["result"], ["C"], [])
             checks.append("audit")
+        def consume_completed_audit(self,outcome,complete,states):
+            self.validate_audit(outcome['result'],outcome['job']['claim_ids'],outcome['job']['viewpoint_ids'])
     monkeypatch.setattr(epoch, "ProductionPorts", Ports)
     actual_index = c.index
     indexed = []
@@ -874,6 +883,74 @@ def test_epoch_membership_validates_full_proof_but_preserves_partial_caller_popu
     assert set(restored) == set(partial) and changed == ["CL-test"]
     assert restored["claims", "CL-test"]["payload"] == scenario[1]["claims/CL-test"]
     assert ports.applies == 1 and ports.calls == ["proposal", "initial_review"]
+
+
+def test_completed_predecessor_entire_caller_projection_without_whole_history(scenario,tmp_path,monkeypatch):
+    from backend.pipeline import source_reconciliation_epoch as epoch
+    runner,ports,manifest=setup_runner(tmp_path,scenario)
+    runner.run(manifest,apply=True,audit=True)
+    package=r.body(r.read(runner.root/'effective-package.json'))
+    current={**ports.states,'claims/unrelated_future':{'claim_id':'unrelated_future','revision':1,'statement':'preserve exactly'}}
+    original=deepcopy(current)
+    actual_read=epoch.read
+    def no_snapshot(path):
+        if Path(path).name in {'frozen.json','before.json','readback.json'}:
+            pytest.fail('completed predecessor parsed full historical snapshot')
+        return actual_read(path)
+    monkeypatch.setattr(epoch,'read',no_snapshot)
+    monkeypatch.setattr(epoch,'_assert_database',lambda *a:None)
+    monkeypatch.setattr(epoch,'_predecessor_projection',lambda *a,**k:pytest.fail('legacy reconstruction'))
+    expected={**scenario[1],'claims/unrelated_future':current['claims/unrelated_future']}
+    assert epoch._completed_predecessor_projection(package,current,object())==expected
+    assert current==original and ports.applies==1 and ports.calls==['proposal','initial_review']
+    current['claims/CL-test']['statement']='unapproved current state'
+    with pytest.raises(ValueError,match='postimage'):
+        epoch._completed_predecessor_projection(package,current,object())
+
+
+@pytest.mark.parametrize('drift',[None,'retired','revision','SHA','identity','missing'])
+def test_current_source_snapshot_reads_only_declared_real_rows_and_storage_metadata(monkeypatch,drift):
+    from backend.pipeline import viewpoint_validation_context as context
+    payload={'claim_id':'C','revision':2,'statement':'actual reviewed value'}
+    state={'payload':deepcopy(payload),'revision':2,'content_sha256':record_content_sha(payload),'retired':False}
+    if drift=='retired':state['retired']=True
+    if drift=='revision':state['revision']=3
+    if drift=='SHA':state['content_sha256']='0'*64
+    if drift=='identity':state['payload']['claim_id']='OTHER'
+    observed={('claims','C'):state} if drift!='missing' else {}
+    calls=[];store=object()
+    monkeypatch.setattr(context,'read_current_objects',lambda s,k:calls.append((s,k)) or observed)
+    ports=runtime.ProductionPorts(store)
+    if drift:
+        with pytest.raises(ValueError):ports.current_snapshot({'claims/C'})
+    else:
+        assert ports.current_snapshot({'claims/C'})=={'claims/C':payload}
+    assert calls==[(store,{('claims','C')})]
+
+
+@pytest.mark.parametrize('drift',[None,'detached','result','raw_or_source','duplicate'])
+def test_completed_audit_consumes_original_result_and_all_physical_bindings_not_old_prompts(tmp_path,monkeypatch,drift):
+    audit=put(tmp_path/'audit.json',{'original':'Gemini report'})
+    cache=put(tmp_path/'cache.json',{'original':'saved raw judgement'})
+    result={'claim_ids':['C'],'viewpoint_ids':['V'],'audit':audit,'original_audit':audit,
+        'source_proofs':[audit,cache],'resolution':None,'revisit_required':False,'independent_audit_complete':True}
+    bound=r.write(tmp_path/'result.json',result)
+    outcome={'job':{'claim_ids':['C'],'viewpoint_ids':['V']},'result':result,'binding':r.binding(tmp_path/'result.json')}
+    complete={'status':'audited_complete','audits':[deepcopy(outcome)]}
+    if drift=='detached':complete['audits']=[]
+    if drift=='result':result['claim_ids']=['OTHER']
+    if drift=='raw_or_source':put(tmp_path/'cache.json',{'changed':'not original'})
+    if drift=='duplicate':result['source_proofs'].append(cache)
+    ports=runtime.ProductionPorts(object());calls=[]
+    monkeypatch.setattr(ports,'snapshot',lambda *a:pytest.fail('completed audit SELECT-all'))
+    monkeypatch.setattr(ports,'validate_audit',lambda *a:pytest.fail('completed audit prompt reconstruction'))
+    monkeypatch.setattr(ports,'_validate_audit_population',lambda *a:calls.append(a))
+    if drift:
+        with pytest.raises(ValueError):ports.consume_completed_audit(outcome,complete,{})
+        assert calls==[]
+    else:
+        ports.consume_completed_audit(outcome,complete,{'related':'only'})
+        assert calls==[(result,['C'],['V'],{'related':'only'})]
 
 
 def test_frozen_registry_fingerprint_matches_sql_including_empty_collections(scenario):

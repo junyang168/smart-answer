@@ -128,6 +128,23 @@ class ProductionPorts:
     def __init__(self, store=None):
         self.store = store or PostgresKnowledgeStore()
 
+    def current_snapshot(self, keys):
+        """Fresh exact row identities, including storage metadata; no SELECT-all."""
+        from backend.pipeline.viewpoint_validation_context import read_current_objects
+        from backend.api.canonical_repository.postgres_store import record_content_sha
+        wanted={contract.split_key(k) for k in keys}
+        observed=read_current_objects(self.store,wanted)
+        if set(observed)!=wanted:raise ValueError('current source readset missing records')
+        result={}
+        for (collection,oid),row in observed.items():
+            payload=row['payload']
+            if (row['retired'] or row['revision']!=payload.get('revision')
+                    or row['content_sha256']!=record_content_sha(payload)
+                    or payload.get(contract.KNOWLEDGE_COLLECTIONS[collection][1])!=oid):
+                raise ValueError('current source readset retirement/version/SHA/identity drift')
+            result[contract.key(collection,oid)]=deepcopy(payload)
+        return result
+
     def snapshot(self) -> dict:
         from backend.pipeline.viewpoint_validation_context import require_explicit_history_maintenance
         require_explicit_history_maintenance('whole Registry payload snapshot')
@@ -315,6 +332,32 @@ class ProductionPorts:
             [result['original_audit']]+result['source_proofs'],self.store,verify_saved)
         for b in result["source_proofs"]:
             contract.verify_file(b)
+        self._validate_audit_population(result,claim_ids,viewpoint_ids,states)
+
+    def consume_completed_audit(self, outcome, complete, states):
+        """Consume an ORIGINAL already-verified audit, never rebuild its prompts.
+
+        Caller must authenticate the completed source epoch, not supply a new
+        report/pass flag. All saved physical raw/cache/source bindings remain.
+        This neither runs a fresh audit nor approves later changed content.
+        """
+        if complete.get('status')!='audited_complete' or outcome not in complete['audits']:
+            raise ValueError('audit detached from completed source epoch')
+        result=outcome['result']; job=outcome['job']
+        if body(read(contract.verify_file(outcome['binding'])))!=result:
+            raise ValueError('completed audit result binding changed')
+        pins=result['source_proofs'];names=[p['path'] for p in pins]
+        if len(names)!=len(set(names)) or result['original_audit'] not in pins:
+            raise ValueError('completed audit original input proof denominator drift')
+        for pin in pins:contract.verify_file(pin)
+        self._validate_audit_population(result,job['claim_ids'],job['viewpoint_ids'],states)
+
+    def _validate_audit_population(self,result,claim_ids,viewpoint_ids,states):
+        from backend.pipeline.viewpoint_cvp_campaign_runner import validate_audit
+        from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+        if result['claim_ids']!=claim_ids or result['viewpoint_ids']!=viewpoint_ids:
+            raise ValueError('audit population differs from affected full group')
+        path=contract.verify_file(result['audit']); original=contract.verify_file(result['original_audit'])
         resolution = contract.verify_file(result["resolution"]) if result["resolution"] else None
         audit = read_artifact(path)
         if not viewpoint_ids:
