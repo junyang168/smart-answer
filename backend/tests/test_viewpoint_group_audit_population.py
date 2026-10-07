@@ -8,8 +8,10 @@ from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 @pytest.fixture
 def proof(tmp_path):
     package={'viewpoint_claim_links':[
-        {'viewpoint_claim_link_id':'retained','viewpoint_id':'CV-old','effective_state':'active'},
-        {'viewpoint_claim_link_id':'new','viewpoint_id':'CV-new','effective_state':'active'}]}
+        {'viewpoint_claim_link_id':'retained','viewpoint_id':'CV-old','effective_state':'active',
+         'validated_against_viewpoint_revision_id':'CVR-old'},
+        {'viewpoint_claim_link_id':'new','viewpoint_id':'CV-new','effective_state':'active',
+         'validated_against_viewpoint_revision_id':'CVR-new'}]}
     plan={'source_sha256':sha256_json(package),'change_set_id':'KCS-test','fingerprint_sha256':'plan',
           'operations':[{'collection':'viewpoint_claim_links','operation':'create','payload':package['viewpoint_claim_links'][1]}]}
     receipt={'readback_status':'verified','cvp_changeset_id':'KCS-test','cvp_changeset_sha256':'plan',
@@ -30,7 +32,8 @@ def test_retained_member_is_in_the_actual_full_audit_denominator(proof):
     assert group_audit_targets(save(proof))==['CV-new','CV-old']
 
 
-@pytest.mark.parametrize('fault',['package','omitted_retained_readback','wrong_kcs','wrong_plan','unverified','receipt_sha','duplicate','foreign_written'])
+@pytest.mark.parametrize('fault',['package','omitted_retained_readback','wrong_kcs','wrong_plan','unverified',
+    'receipt_sha','duplicate','foreign_written','wrong_revision','missing_revision','duplicate_readback'])
 def test_no_unbound_or_partial_full_audit(proof,fault):
     root,package,plan,receipt=proof
     if fault=='package':package['viewpoint_claim_links'][0]['viewpoint_id']='foreign'
@@ -41,6 +44,10 @@ def test_no_unbound_or_partial_full_audit(proof,fault):
     elif fault=='receipt_sha':receipt['artifact_sha256']='bad'
     elif fault=='duplicate':
         package['viewpoint_claim_links'].append(deepcopy(package['viewpoint_claim_links'][0]));plan['source_sha256']=sha256_json(package)
+    elif fault=='wrong_revision':receipt['committed_viewpoint_revisions'][0]['viewpoint_revision_id']='CVR-unreviewed'
+    elif fault=='missing_revision':
+        package['viewpoint_claim_links'][0].pop('validated_against_viewpoint_revision_id');plan['source_sha256']=sha256_json(package)
+    elif fault=='duplicate_readback':receipt['committed_viewpoint_revisions'].append(deepcopy(receipt['committed_viewpoint_revisions'][0]))
     else:plan['operations'][0]['payload']={**plan['operations'][0]['payload'],'viewpoint_id':'foreign'}
     if fault!='receipt_sha':receipt['artifact_sha256']=sha256_json({k:v for k,v in receipt.items() if k!='artifact_sha256'})
     with pytest.raises(ValueError):group_audit_targets(save(proof))

@@ -141,7 +141,7 @@ def test_scoped_provenance_requires_exact_new_single_opus_contract():
         with pytest.raises(ValueError):ViewpointIdentityDecisionRecord.model_validate({**value,field:new})
 
 
-@pytest.mark.parametrize('fault',[None,'model','backend','prompt','config','request','response','raw_sha','refusal','budget','report','encoding','handoff','phase'])
+@pytest.mark.parametrize('fault',[None,'model','backend','prompt','config','request','response','raw_sha','refusal','budget','report','encoding','handoff','phase','logs'])
 def test_exact_saved_review_validation_never_calls_or_accepts_drift(scenario,monkeypatch,fault):
     from backend.pipeline.viewpoint_resolution_runtime import call_model, write_immutable
     states,auth,root=scenario;packet=c.prepare(states,auth,root)
@@ -174,12 +174,14 @@ def test_exact_saved_review_validation_never_calls_or_accepts_drift(scenario,mon
         (root/'raw-opus.json').write_text(json.dumps(raw))
     monkeypatch.setattr(c,'adapter',lambda client:actual)
     actual.generate=lambda _:pytest.fail('saved proof cannot invoke any model')
-    if fault=='phase':
+    if fault in {'phase', 'logs'}:
         from backend.pipeline.viewpoint_validation_context import ValidationContext,validation_runtime
         with validation_runtime():
             with ValidationContext('first') as ctx:
                 c.reviewed_inputs(root)
                 assert not ctx.closed
+            if fault == 'logs':
+                (root/'repair-record.txt').write_text('a diagnostic note does not change the approved request')
             with ValidationContext('second') as ctx:
                 c.reviewed_inputs(root)
                 assert not ctx.closed

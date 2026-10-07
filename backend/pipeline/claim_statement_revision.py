@@ -203,7 +203,7 @@ def adapter(client):
     return result
 
 
-@validated_history
+@validated_history(bound_files_only=True)
 def reviewed_inputs(root):
     root = Path(root)
     packet = read_artifact(root/'packet.json')
@@ -222,20 +222,16 @@ def reviewed_inputs(root):
     # discarding the live-generation owner while it is authenticating history.
     # Reproduce ALL raw/config/request/response/encoding checks without invoking
     # the generator or ending the phase; never permit a handoff/fallback here.
-    expected_raw={'model_id':reader.model_id,'backend':reader.backend,'prompt_sha256':reader.prompt_sha256,
-        'generation_config_sha256':reader.generation_config_sha256,'request_payload_sha256':sha256_json(packet)}
+    from backend.pipeline.viewpoint_resolution_runtime import read_saved_model_response
+    response = read_saved_model_response(reader, packet, root/'raw-opus.json')
     proof=reader.request_encoding_proof(packet)
     encoding=read_artifact(root/'raw-opus.request-encoding.json')
     encoded_body={'schema_version':'wang_model_request_encoding_proof_v1',**proof}
-    if (any(raw.get(k)!=v for k,v in expected_raw.items())
-            or raw.get('response_sha256')!=sha256_json(raw.get('response') or {})
-            or raw.get('artifact_sha256')!=sha256_json({k:v for k,v in raw.items() if k!='artifact_sha256'})
-            or raw.get('request_encoding_proof_sha256')!=sha256_json(proof)
+    if (raw.get('request_encoding_proof_sha256')!=sha256_json(proof)
             or encoding!={**encoded_body,'artifact_sha256':sha256_json(encoded_body)}
             or raw.get('cache_handoff') is not None or raw.get('calls_recorded',1)!=1
             or reader.request_bytes(packet)>500000):
         raise ValueError('statement raw/config/request/response/exact encoding proof drift')
-    response=raw['response']
     report = read_artifact(root/'review-report.json')
     expected = {'policy':VERSION,'packet_sha256':sha256_json(packet),'prompt_sha256':reader.prompt_sha256,
                 'config_sha256':reader.generation_config_sha256,'model':reader.model_id,'backend':reader.backend,
@@ -288,7 +284,7 @@ def package_for(packet,raw):
         'bindings':[binding(root/n) for n in ('packet.json','raw-opus.json','raw-opus.request-encoding.json','review-report.json','review-reservation.json','review-budget-proof.json')]}}
 
 
-@validated_history
+@validated_history(bound_files_only=True)
 def validate_package(package):
     app=package['source_repair_application']
     if app.get('schema_version')!=VERSION:raise ValueError('statement authority version mismatch')

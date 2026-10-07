@@ -122,6 +122,18 @@ def save_state(path, data):
     tmp.replace(path)
 
 
+def pause_at_safe_boundary(root, state, *, group_complete):
+    from backend.pipeline.viewpoint_campaign_control import stop_requested
+    if not stop_requested(root):
+        return False
+    save_state(root / 'progress.json', state | {
+        'status': 'paused_at_safe_boundary', 'stop_requested': True,
+        'current_group_completed': group_complete, 'no_next_group_started': True,
+        'no_inflight_model_or_write': True,
+    })
+    return True
+
+
 def investigate_deferred(root):
     dispositions = list((root / "production/run/batches").glob("*/batch-disposition-applied.json"))
     if len(dispositions) != 1 or not any(c["disposition"] == "deferred"
@@ -487,6 +499,8 @@ def execute(args):
             done.append(row["group_key"])
             continue
         state = {"status": "qualifying", "group_key": row["group_key"], "sequence": row["sequence"], "completed_new_groups": len(done), "remaining_groups": pending_count-len(done)}
+        if pause_at_safe_boundary(args.output_root, state, group_complete=False):
+            return 0
         save_state(args.output_root / "progress.json", state)
         try:
             if shutil.disk_usage(args.output_root).free < 2 * 1024**3:
@@ -499,6 +513,8 @@ def execute(args):
                 command(runner_args(root, args) + ["--dry-run"])
             save_state(root/'entry-validation.json', {'wall_seconds': time.perf_counter()-started,
                 'model_calls': 0, 'Registry_writes': 0, 'scope': 'qualification plus dry-run, including boundary drift checks'})
+            if pause_at_safe_boundary(args.output_root, state, group_complete=False):
+                return 0
             if args.dry_run:
                 save_state(args.output_root / "progress.json", state | {"status": "preflight_passed_no_model_calls"})
                 return 0
@@ -574,6 +590,10 @@ def execute(args):
             _write_immutable(completion, proof)
             done.append(row["group_key"])
             save_state(args.output_root / "progress.json", state | {"status": "group_complete", "completed_new_groups": len(done), "remaining_groups": pending_count-len(done)})
+            if pause_at_safe_boundary(args.output_root, state | {
+                    'completed_new_groups': len(done), 'remaining_groups': pending_count-len(done)},
+                    group_complete=True):
+                return 0
             if row['sequence']==getattr(args,'stop_after_sequence',None):
                 save_state(args.output_root/'progress.json',state|{'status':'owner_validation_checkpoint',
                     'completed_new_groups':len(done),'remaining_groups':pending_count-len(done),
@@ -606,11 +626,13 @@ def main():
     args.output_root.mkdir(parents=True, exist_ok=True)
     with (args.output_root / "campaign.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        if args.validation_runtime:
-            from backend.pipeline.viewpoint_validation_context import validation_runtime
-            with validation_runtime():
-                return execute(args)
-        return execute(args)
+        from backend.pipeline.viewpoint_campaign_control import graceful_campaign_stop
+        with graceful_campaign_stop(args.output_root):
+            if args.validation_runtime:
+                from backend.pipeline.viewpoint_validation_context import validation_runtime
+                with validation_runtime():
+                    return execute(args)
+            return execute(args)
 
 
 if __name__ == "__main__":

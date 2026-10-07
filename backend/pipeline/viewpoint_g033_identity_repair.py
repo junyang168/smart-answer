@@ -231,6 +231,33 @@ def prepare(campaign, root, store):
         packet['mechanical_storage_proof']=storage_proof(packet)
     return states, packet
 
+def revision_writer_excerpt(source):
+    """Find the unique revision constructor by syntax, never by line numbers."""
+    import ast
+    tree = ast.parse(source)
+    functions = [node for node in tree.body if isinstance(node, ast.FunctionDef)
+                 and node.name == 'compile_cvp_batch_package']
+    if len(functions) != 1:
+        raise ValueError('mechanical source authority function missing or ambiguous')
+    calls = []
+    for node in ast.walk(functions[0]):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'ViewpointRevisionRecord'):
+            continue
+        keywords = {k.arg: k.value for k in node.keywords}
+        if 'supersedes_revision_id' in keywords:
+            calls.append((node, keywords))
+    if len(calls) != 1:
+        raise ValueError('mechanical source authority constructor missing or ambiguous')
+    call, keywords = calls[0]
+    counter = keywords.get('revision_number')
+    parent = keywords['supersedes_revision_id']
+    if (not isinstance(counter, ast.Constant) or type(counter.value) is not int or counter.value != 1
+            or not isinstance(parent, ast.Name) or parent.id != 'target_key'):
+        raise ValueError('mechanical source authority store counter or supersedes chain drift')
+    return ast.get_source_segment(source, call)
+
+
 def storage_proof(packet):
     """Executable model evidence, not a waiver of independent content review."""
     from backend.api.canonical_repository.knowledge_models import ViewpointRevisionRecord
@@ -247,9 +274,7 @@ def storage_proof(packet):
     else: raise ValueError('invalid store counter was not rejected')
     model_path=Path(__file__).parents[1]/'api/canonical_repository/knowledge_models.py'
     writer_path=model_path.with_name('viewpoint_batch_changeset.py')
-    excerpt='\n'.join(writer_path.read_text().splitlines()[423:436])
-    if 'revision_number=1' not in excerpt or 'supersedes_revision_id' not in excerpt:
-        raise ValueError('mechanical source authority drift')
+    excerpt=revision_writer_excerpt(writer_path.read_text())
     return {'schema_version':'wang_immutable_revision_storage_proof_v1',
         'rule':'Each new ViewpointRevision is a new immutable stored object: revision=1 and revision_number=1. Semantic succession uses supersedes_revision_id, not an incrementing store counter.',
         'new_revision_validated':True,'counter_2_rejected':True,'supersedes_chain_validated':True,

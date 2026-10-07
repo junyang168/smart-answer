@@ -15,6 +15,7 @@ from functools import wraps
 import hashlib
 import inspect
 import json
+import os
 from pathlib import Path
 import time
 from collections.abc import Mapping
@@ -121,11 +122,13 @@ class ValidationContext:
         self.depth = 0
         self.closed = False
         self.files = {}
+        self.absent_files = set()
         self.pool = _pool.get() or HistoricalProofPool()
         self.shared_pool = _pool.get() is not None
         self.documents = self.pool.documents
         self.results = self.pool.results
         self.dependency_stack = []
+        self.receipt_policy_stack = []
         self.current_results = {}
         self.registry_views = {}
         self.directories = {}
@@ -156,7 +159,7 @@ class ValidationContext:
         path = Path(path).absolute()
         if path not in self.files:
             self.files[path] = (path.resolve(strict=True), physical_sha(path))
-        if history or self.depth:
+        if (history or self.depth) and (not self.receipt_policy_stack or any(self.receipt_policy_stack)):
             # Negative historical receipts, not mutable runtime output folders.
             self.directories.setdefault(path.parent, frozenset(p.name for p in path.parent.iterdir()))
         for dependencies in self.dependency_stack:
@@ -177,6 +180,22 @@ class ValidationContext:
             self.metrics['parsed_bytes'] += len(data)
         return self.documents[path][1]
 
+    def optional_file_exists(self, path):
+        """Track a named optional/negative input, not its entire log directory."""
+        path = Path(path).absolute()
+        exists = os.path.lexists(path)
+        if exists:
+            if path in self.absent_files:
+                raise ValueError('validation phase optional receipt appeared: ' + str(path))
+            self.pin(path)
+        else:
+            if path in self.files:
+                raise ValueError('validation phase optional receipt disappeared: ' + str(path))
+            self.absent_files.add(path)
+            for dependencies in self.dependency_stack:
+                dependencies.add(path)
+        return exists
+
     def finish(self):
         if self.closed:
             return
@@ -184,6 +203,9 @@ class ValidationContext:
             for path, (resolved, pin) in self.files.items():
                 if path.resolve(strict=True) != resolved or physical_sha(path) != pin:
                     raise ValueError('validation phase historical input drift: ' + str(path))
+            for path in self.absent_files:
+                if os.path.lexists(path):
+                    raise ValueError('validation phase optional receipt appeared: ' + str(path))
             for path, names in self.directories.items():
                 if frozenset(p.name for p in path.iterdir()) != names:
                     raise ValueError('validation phase historical receipt set drift: ' + str(path))
@@ -211,6 +233,11 @@ def historical_context():
 def active_context():
     ctx = _current.get()
     return ctx if ctx is not None and not ctx.closed else None
+
+
+def optional_file_exists(path):
+    ctx = active_context()
+    return ctx.optional_file_exists(path) if ctx else os.path.lexists(path)
 
 
 def runtime_active():
@@ -271,7 +298,17 @@ def validation_phase(fn):
     return run
 
 
-def validated_history(fn):
+def validated_history(fn=None, *, bound_files_only=False):
+    """Memoize a complete historical validator, never a current approval.
+
+    Legacy validators retain conservative directory-population guards. A
+    validator which uses only explicit, content-bound files (no discovery or
+    absence-based decisions) can opt into bound_files_only. This separates its
+    proof inputs from unrelated progress/log files, without ignoring a changed,
+    missing or replaced input. Nested legacy validators keep their own guards.
+    """
+    if fn is None:
+        return lambda wrapped: validated_history(wrapped, bound_files_only=bound_files_only)
     signature = inspect.signature(fn)
     @wraps(fn)
     def run(*args, **kwargs):
@@ -289,16 +326,25 @@ def validated_history(fn):
         key = (fn, hashlib.sha256(encoded.encode()).hexdigest())
         if key in ctx.results:
             result, files, directories = ctx.results[key]
-            for path, expected in files.items():
-                ctx.pin(path, history=True)
-                if ctx.files[path] != expected:
-                    raise ValueError('historical proof dependency drift: ' + str(path))
+            ctx.receipt_policy_stack.append(not bound_files_only)
+            try:
+                for path, expected in files.items():
+                    if expected is None:
+                        if ctx.optional_file_exists(path):
+                            raise ValueError('historical proof optional receipt appeared: ' + str(path))
+                    else:
+                        ctx.pin(path, history=True)
+                    if expected is not None and ctx.files[path] != expected:
+                        raise ValueError('historical proof dependency drift: ' + str(path))
+            finally:
+                ctx.receipt_policy_stack.pop()
             for path, names in directories.items():
                 if ctx.directories.get(path) != names:
                     raise ValueError('historical proof receipt population drift: ' + str(path))
             ctx.metrics['proof_reuses'] += 1
             return result
         ctx.depth += 1
+        ctx.receipt_policy_stack.append(not bound_files_only)
         dependencies = set()
         ctx.dependency_stack.append(dependencies)
         try:
@@ -306,11 +352,13 @@ def validated_history(fn):
             if source_file.is_file():
                 ctx.pin(source_file)
             result = readonly(fn(*args, **kwargs))
-            ctx.results[key] = (result, {p: ctx.files[p] for p in dependencies},
-                                {p.parent: ctx.directories[p.parent] for p in dependencies})
+            ctx.results[key] = (result, {p: ctx.files.get(p) for p in dependencies},
+                                {p.parent: ctx.directories[p.parent] for p in dependencies
+                                 if p.parent in ctx.directories})
             ctx.metrics['proof_runs'] += 1
             return result
         finally:
+            ctx.receipt_policy_stack.pop()
             ctx.dependency_stack.pop()
             ctx.depth -= 1
     return run

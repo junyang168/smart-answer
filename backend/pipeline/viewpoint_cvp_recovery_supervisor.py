@@ -77,10 +77,22 @@ def remaining_producers(table, root):
                 "-m backend.pipeline.viewpoint_audit_link_repair "))]
 
 
+def quiet_exit_status(state):
+    if (state.get('status') == 'paused_at_safe_boundary' and state.get('stop_requested') is True
+            and state.get('no_next_group_started') is True and state.get('no_inflight_model_or_write') is True):
+        return 'campaign_paused_no_recovery_call'
+    if (state.get('status') == 'owner_validation_checkpoint' and state.get('no_next_group_started') is True
+            and state.get('checkpoint_group_completed') is True):
+        return 'campaign_checkpoint_no_recovery_call'
+    if state.get('status') == 'complete':
+        return 'campaign_complete_no_recovery_call'
+    return None
+
+
 def failure_event(root):
     progress = root / "progress.json"
     state = json.loads(progress.read_text()) if progress.exists() else {}
-    if state.get("status") == "complete":
+    if quiet_exit_status(state) is not None:
         return None
     # Include stage and normalized error, but not root/sequence: a new root
     # must not reset the retry budget for the identical failure.
@@ -209,7 +221,9 @@ def watch(root, pid, recovery_root, executable, *, table=process_table, sleep=ti
             return "orphan_producer_needs_attention"
         event = failure_event(root)
         if event is None:
-            return "campaign_complete_no_recovery_call"
+            # A stop/checkpoint is not completion and never calls the recovery model.
+            state = json.loads((root / 'progress.json').read_text())
+            return quiet_exit_status(state) or 'campaign_terminal_state_changed_needs_attention'
         with (recovery_root / "recovery.lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             # Recheck under lock immediately before giving any editor authority.
