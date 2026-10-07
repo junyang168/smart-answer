@@ -105,13 +105,16 @@ def package_from_saved_or_new(root, packet, cfg, cached_only=False):
     from backend.api.canonical_repository.viewpoint_resolution import ReviewClaim
     from backend.api.canonical_repository.viewpoint_batch_changeset import compile_cvp_batch_package
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact,stable_decided_at
+    from backend.pipeline.owner_model_reissue import directory
+    models = adapters(cfg,cached_only)
+    review_dir = directory(root,models["proposer"])
     report = run_batch(batch_id=packet["batch_id"],scope_label=packet["scope_label"],
         claims=[ReviewClaim.model_validate(x) for x in packet["claims"]],registry_context=packet["registry_context"],
-        pending_candidates=[],output_dir=root/"review",current_claim_links=packet["existing_links"],
-        **adapters(cfg,cached_only))
+        pending_candidates=[],output_dir=review_dir,current_claim_links=packet["existing_links"],
+        **models)
     resolved_report(report,[x["claim_id"] for x in packet["claims"]])
-    proposal = read_artifact(root/"review"/("raw-reconsideration.json" if report["_final_review"] is not None else "raw-proposal.json"))
-    review = read_artifact(root/"review"/("raw-final-review.json" if report["_final_review"] is not None else "raw-review.json"))
+    proposal = read_artifact(review_dir/("raw-reconsideration.json" if report["_final_review"] is not None else "raw-proposal.json"))
+    review = read_artifact(review_dir/("raw-final-review.json" if report["_final_review"] is not None else "raw-review.json"))
     return compile_cvp_batch_package(proposal=report["_effective_proposal"],review=report["_review"],
         deterministic_validation_sha256=report["_effective_validation"]["artifact_sha256"],
         scope_manifest_sha256=packet["current_claim_manifest_sha256"],claims=[ReviewClaim.model_validate(x) for x in packet["claims"]],
@@ -171,6 +174,10 @@ def build_proof(root,campaign,ids,ports):
     if deferred != sorted(context["repair_claim_ids"]): raise ValueError("deferred population changed")
     paths = [root/n for n in ("context.json","packet.json","before.json","effective-package.json","plan.json","backup.json","apply-intent.json","apply-receipt.json","readback.json")]
     paths += [p for p in (root/"review").glob("*.json") if p.name not in {"batch-run.json","measurements.json","current-state.json"}]
+    from backend.pipeline.owner_model_reissue import directory, NAME
+    if (root/NAME).exists():
+        paths += [root/NAME,root/"runtime-proof.json"]
+        paths += [p for p in directory(root).glob("*.json") if p.name not in {"batch-run.json","measurements.json","current-state.json"}]
     paths += [original/n for n in ("cvp-change-plan.json","cvp-change-package.json","cvp-readback-receipt.json")]
     paths += [original.parent.parent/n for n in ("scope-run.json","scope-disposition-ledger.json")]
     paths += [claim_root/n for n in ("complete.json","effective-package.json","frozen.json","plan.json","apply-intent.json","readback.json","backup.json")]

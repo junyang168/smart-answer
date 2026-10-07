@@ -555,16 +555,17 @@ def execute(root, context, ports):
     return run(context,parent,ports)
 
 
-def initialize_normal_runtime(root, resolve=None):
+def initialize_normal_runtime(root, resolve=None, *, reissue_quote=None, reissue_intent=None, cfg=None):
     """Authenticate the canonical client before reserving any new call.
 
     Old intent-without-answer remains a hard hold even after fixing the client.
     An environment fix is not permission to reset an invocation budget.
     """
-    review=root/'review'
+    from backend.pipeline.owner_model_reissue import directory, authorize
+    review=directory(root)
     for intent in review.glob('*.call-intent.json'):
         raw=review/(intent.name.removesuffix('.call-intent.json')+'.json')
-        if not raw.exists():
+        if not raw.exists() and not reissue_quote:
             raise Stop('normal CVP invocation has no saved answer; outcome_unknown requires explicit owner direction')
     if resolve is None:
         from backend.pipeline.viewpoint_s201129_source_continuation import canonical_runtime
@@ -573,6 +574,13 @@ def initialize_normal_runtime(root, resolve=None):
     if not proof.get('reused') or proof.get('new_model_calls')!=0:
         raise ValueError('normal CVP runtime must reuse existing authenticated identity proof')
     write(root/'runtime-proof.json',proof)
+    if reissue_quote:
+        if cfg is None:raise ValueError('exact normal campaign config required')
+        from backend.pipeline.deferred_claim_cvp_continuation import adapters
+        review=authorize(root,adapters(cfg)['proposer'],reissue_quote,reissue_intent)
+        for intent in review.glob('*.call-intent.json'):
+            if not (review/(intent.name.removesuffix('.call-intent.json')+'.json')).exists():
+                raise Stop('authorized reissue outcome unknown; no second reissue')
     return proof
 
 
@@ -584,9 +592,15 @@ def main():
     parser.add_argument("--link-id",required=True)
     parser.add_argument("--approval-quote",required=True)
     parser.add_argument("--execute",action="store_true")
+    parser.add_argument("--proposal-reissue-approval",help="explicit owner authorization for one unchanged initial proposal reissue")
+    parser.add_argument("--proposal-reissue-intent",help="exact SHA of the retained unanswered invocation")
     parser.add_argument("--continue-saved",action="store_true",
         help="consume actual audited parent/child completion only; no child review/apply/audit replay")
     args = parser.parse_args(); load_dotenv(PROJECT/".env")
+    if (args.proposal_reissue_approval or args.proposal_reissue_intent) and (
+            not args.continue_saved or not args.execute
+            or not args.proposal_reissue_approval or not args.proposal_reissue_intent):
+        raise ValueError('once-reissue authorization requires both exact pins and saved-only execution')
     if PROJECT.name != "wkp-357-worktree-per-session": raise ValueError("#357 worktree only")
     with maintenance_lock():
         ports = ProductionPorts()
@@ -607,7 +621,10 @@ def main():
                     or packet['adjudication_root']!=str(args.adjudication_root.resolve())):
                 raise ValueError('saved authorization identity changed')
             ports._environment_guard(planned_snapshot_bytes=(parent/'frozen.json').stat().st_size)
-            initialize_normal_runtime(parent/'normal-cvp')
+            from backend.pipeline.viewpoint_cvp_recovery_executor import load_campaign
+            cfg=load_campaign(Path(context['campaign_root']))[0]
+            initialize_normal_runtime(parent/'normal-cvp',reissue_quote=args.proposal_reissue_approval,
+                reissue_intent=args.proposal_reissue_intent,cfg=cfg)
             from backend.pipeline.deferred_claim_cvp_continuation import run
             # run starts by proving actual SQL/source/child/audit completion;
             # the original child execute path is deliberately not called.
