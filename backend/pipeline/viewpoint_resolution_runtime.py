@@ -6,6 +6,8 @@ import json
 import os
 import tempfile
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -19,6 +21,30 @@ PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
 # 900s proved too tight for opus reviewing a 20-claim effective proposal at
 # high effort (#315: final review timed out with every earlier stage done).
 CALL_TIMEOUT_SECONDS = 1800.0
+_saved_validation = ContextVar('cvp_saved_artifact_validation', default=False)
+
+
+def validating_saved_artifacts():
+    return _saved_validation.get()
+
+
+@contextmanager
+def saved_artifact_validation():
+    """Explicit bounded offline reconstruction; no artifact/model side effects.
+
+    Immutable outputs must already exist and match exactly. Derived runtime
+    summaries are not approval evidence and are neither consumed nor rewritten.
+    The owning context authenticates every actual input again on exit.
+    """
+    from backend.pipeline.viewpoint_validation_context import historical_context
+    ctx = historical_context()
+    if ctx is None or ctx.limits is None or validating_saved_artifacts():
+        raise ValueError('saved reconstruction requires its own bounded historical context')
+    token = _saved_validation.set(True)
+    try:
+        yield
+    finally:
+        _saved_validation.reset(token)
 
 
 def read_artifact(path: Path) -> dict[str, Any]:
@@ -36,6 +62,10 @@ def write_immutable(path: Path, payload: dict[str, Any], *, require_new: bool = 
     A crash can leave an unreferenced temporary file, never a partial final file.
     """
     path = Path(path)
+    if validating_saved_artifacts():
+        if require_new or read_artifact(path) != payload:
+            raise ValueError(f'saved immutable reconstruction differs: {path}')
+        return
     path.parent.mkdir(parents=True, exist_ok=True)
     data = (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
     with tempfile.NamedTemporaryFile(dir=path.parent, prefix="." + path.name + ".", delete=False) as stream:
@@ -62,6 +92,8 @@ def write_immutable(path: Path, payload: dict[str, Any], *, require_new: bool = 
 
 
 def write_derived(path: Path, payload: dict[str, Any]) -> None:
+    if validating_saved_artifacts():
+        return
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".partial")
     temporary.write_text(
@@ -216,6 +248,8 @@ def call_model(
     from backend.pipeline.viewpoint_validation_context import finish_validation_phase, historical_context
     cache = Path(cache)
     saved = cache.exists()
+    if validating_saved_artifacts() and not saved:
+        raise ValueError(f'saved reconstruction has no response; no invocation/fallback: {cache}')
     if not saved:
         if historical_context() is not None:
             raise ValueError(f"read-only historical validation has no saved response; no model fallback: {cache}")

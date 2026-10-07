@@ -872,11 +872,13 @@ def run_batch(
     # which is how adding the reconsideration fields broke a completed batch.
     _write_derived(output_dir / "batch-run.json", report)
     superseded = []
-    if (output_dir / "exception.json").exists():
+    from backend.pipeline.viewpoint_resolution_runtime import validating_saved_artifacts
+    if not validating_saved_artifacts() and (output_dir / "exception.json").exists():
         superseded.append("exception.json")
     superseded.extend(
         str(path.relative_to(output_dir))
-        for path in sorted((output_dir / "exceptions").glob("*.json"))
+        for path in (sorted((output_dir / "exceptions").glob("*.json"))
+                     if not validating_saved_artifacts() else [])
     )
     correction_resolved = not review_validation["reconsideration_required"] or bool(
         reconsideration_report and reconsideration_report["outcome"] == "resolved"
@@ -909,9 +911,13 @@ def run_batch(
         "component_count": validation["component_count"],
     }
     log_path = output_dir / "measurements.json"
-    history = _read(log_path)["executions"] if log_path.exists() else []
+    from backend.pipeline.viewpoint_resolution_runtime import validating_saved_artifacts
+    # A transcript compiler must not read an ever-growing execution log or
+    # append an execution that never happened. These are not approval inputs.
+    saved_only = validating_saved_artifacts()
+    history = _read(log_path)["executions"] if not saved_only and log_path.exists() else []
     history.append(measurements)
-    log_path.write_text(
+    if not saved_only: log_path.write_text(
         json.dumps(
             {
                 "schema_version": "wang_canonical_viewpoint_batch_measurements_v1",
