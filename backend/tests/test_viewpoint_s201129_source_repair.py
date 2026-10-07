@@ -76,8 +76,9 @@ def test_legacy_postimages_use_generic_SQL_and_original_unchanged_context(monkey
         assert package['evidence_steps'][0]['revision']==2
 
 
-@pytest.mark.parametrize('drift',[None,'package','operation','plan','intent','receipt','readback','missing_pin','raw','SQL','SQL_summary'])
-def test_generic_completed_application_consumption_has_no_source_ID_or_writer_rebuild(tmp_path,monkeypatch,drift):
+@pytest.mark.parametrize('frame',['snapshot','compact_parent'])
+@pytest.mark.parametrize('drift',[None,'package','operation','plan','intent','receipt','readback','missing_pin','raw','SQL','SQL_summary','parent_file','parent_pin','parent_fp'])
+def test_generic_completed_application_consumption_has_no_source_ID_or_writer_rebuild(tmp_path,monkeypatch,drift,frame):
     import json
     from backend.pipeline import source_reconciliation_runner as r
     from backend.pipeline import source_reconciliation as c
@@ -86,10 +87,17 @@ def test_generic_completed_application_consumption_has_no_source_ID_or_writer_re
     root=tmp_path/'arbitrary-approved-source';root.mkdir()
     def put(name,value):
         (root/name).write_text(json.dumps(value));return r.binding(root/name)
-    before=put('before.json',{'before_records':['MUST_NOT_PARSE']})
+    parent=put('arbitrary-parent-package.json',{'unchanged':'parent package, not another writer invocation'})
+    before_name='before.json' if frame=='snapshot' else 'before-proof.json'
+    predecessor={'before_records':['MUST_NOT_PARSE']} if frame=='snapshot' else {
+        'parent':parent,'pre_fingerprint_sha256':'b'*64,'Registry_writes':0}
+    before=put(before_name,predecessor)
     raw=put('review.json',{'original':'reviewed source-specific data, not special code'})
     package={'package_id':'arbitrary-package','claims':[{'claim_id':'C','statement':'unchanged reviewed value','revision':2}],
         'source_repair_application':{'schema_version':version,'before_binding':before,'bindings':[raw]}}
+    if frame=='compact_parent':
+        del package['source_repair_application']['before_binding']
+        package['source_repair_application']['parent_source_application']=parent
     bound=put('effective-package.json',package);sha=c.sha256_json(package)
     payload={'claim_id':'C','statement':'unchanged reviewed value'}
     operation={'operation':'update','collection':'claims','object_id':'C','before_sha256':'a'*64,
@@ -103,6 +111,7 @@ def test_generic_completed_application_consumption_has_no_source_ID_or_writer_re
     receipt_pin=put('apply-receipt.json',receipt)
     intent={'package_sha256':sha,'plan_sha256':c.sha256_json(plan),'schema_version':version,
         'single_apply_required':True,'pre_fingerprint_sha256':'b'*64}
+    if frame=='compact_parent':del intent['pre_fingerprint_sha256']
     intent_pin=put('apply-intent.json',intent)
     pins=[before,raw,bound,plan_pin,receipt_pin,intent_pin,
         put('backup.json',{'original':'backup receipt'}),put('pg-restore-proof.json',{'original':'pg restore pass'})]
@@ -136,6 +145,11 @@ def test_generic_completed_application_consumption_has_no_source_ID_or_writer_re
     elif drift=='raw':(root/'review.json').write_text('{}')
     elif drift=='SQL':SQL[3]='planned'
     elif drift=='SQL_summary':SQL[4]['operations']=2
+    elif drift in {'parent_file','parent_pin','parent_fp'}:
+        if frame!='compact_parent':pytest.skip('compact parent format only')
+        if drift=='parent_file':(root/'arbitrary-parent-package.json').write_text('{}')
+        elif drift=='parent_pin':predecessor['parent']={**parent,'file_sha256':'f'*64};replace(before_name,predecessor)
+        else:predecessor['pre_fingerprint_sha256']='f'*64;replace(before_name,predecessor)
     from backend.pipeline import viewpoint_resolution_runtime as resolution
     original_read=resolution.read_artifact
     def read(path):
@@ -158,6 +172,68 @@ def isolate_synthetic_source_tests_from_live_child_receipts(monkeypatch, tmp_pat
     from backend.pipeline import viewpoint_s201129_link_support_apply as child
     monkeypatch.setattr(child, 'ROOT', tmp_path / 'no-live-child-application')
     monkeypatch.setattr(repair, '_saved_before_cache', None)
+
+
+@pytest.mark.parametrize('drift',[None,'missing_create','retired','payload','revision','sha','old_link','review_pre_fp'])
+def test_completed_child_restores_exact_scoped_records_without_old_writer(tmp_path,monkeypatch,drift):
+    from backend.pipeline import viewpoint_s201129_link_support_apply as child
+    monkeypatch.setattr(child,'ROOT',tmp_path)
+    monkeypatch.setattr(child,'PACKAGE',tmp_path/'effective-package.json')
+    monkeypatch.setattr(child.review,'LINK','arbitrary-link')
+    (tmp_path/'apply-receipt.json').write_text('{}')
+    old={'viewpoint_claim_link_id':'arbitrary-link','revision':2,'link_type':'equivalent_component'}
+    payloads=[('viewpoint_claim_links','arbitrary-link',{'viewpoint_claim_link_id':'arbitrary-link','link_type':'supports'},3,'update'),
+        ('viewpoint_identity_candidates','any-candidate',{'identity_candidate_id':'any-candidate'},1,'create'),
+        ('viewpoint_identity_decisions','any-decision',{'identity_decision_id':'any-decision'},1,'create')]
+    operations=[{'collection':c,'object_id':oid,'payload':p,'after_revision':rev,'operation':kind}
+                for c,oid,p,rev,kind in payloads]
+    current={(c,oid):{'payload':{**p,'revision':rev},'revision':rev,
+        'content_sha256':repair.semantic_record_sha(p),'retired':False}
+        for c,oid,p,rev,kind in payloads}
+    current['claims','unrelated']={'unchanged':'leave this row alone'}
+    # Hash helper omits revision exactly as the production store does.
+    for row in list(current.values())[:3]:row['content_sha256']=repair.semantic_record_sha(row['payload'])
+    plan={'operations':operations,'change_set_id':'KCS-any','source_sha256':'a'*64}
+    package={'original':'entire child package'}
+    files={'dry-run-plan.json':plan,'effective-package.json':package,
+        'before-proof.json':{'before_link':deepcopy(old),'pre_fingerprint_sha256':'c'*64},
+        'apply-receipt.json':{'status':'applied','change_set_id':'KCS-any'},
+        'verified-result.json':{'status':'applied_readback_verified','change_set_id':'KCS-any',
+            'master_data_mutations':3,'bindings':[]}}
+    calls=[]
+    monkeypatch.setattr(child,'read_artifact',lambda path:deepcopy(files[Path(path).name]))
+    monkeypatch.setattr(child,'reviewed_inputs',lambda:({'targets':[{'before_link':old}],
+        'current_Registry_fingerprint_sha256':'c'*64},{}))
+    monkeypatch.setattr(child,'validate_package',lambda *a:pytest.fail('old child writer'))
+    monkeypatch.setattr(child,'parent_snapshot',lambda *a:pytest.fail('parent whole Registry replay'))
+    monkeypatch.setattr(child,'validate_plan_package',lambda *a:None)
+    monkeypatch.setattr(repair,'binding',lambda path:{'path':str(path),'file_sha256':'b'*64})
+    monkeypatch.setattr(composed,'consume_applied_source_package',lambda *a:(calls.append(a[0]) or package))
+    class Conn:
+        def __enter__(self):return self
+        def __exit__(self,*a):pass
+        def execute(self,*a):return self
+        def fetchone(self):return child.VERSION,'a'*64,'applied'
+    class Store:
+        def connect(self):return Conn()
+    monkeypatch.setattr(repair,'PostgresKnowledgeStore',Store)
+    candidate=current['viewpoint_identity_candidates','any-candidate']
+    if drift=='missing_create':del current['viewpoint_identity_candidates','any-candidate']
+    elif drift=='retired':candidate['retired']=True
+    elif drift=='payload':candidate['payload']['extra']='unreviewed'
+    elif drift=='revision':candidate['revision']=2
+    elif drift=='sha':candidate['content_sha256']='bad'
+    elif drift=='old_link':files['before-proof.json']['before_link']['link_type']='unreviewed'
+    elif drift=='review_pre_fp':files['before-proof.json']['pre_fingerprint_sha256']='f'*64
+    original=deepcopy(current)
+    if drift:
+        with pytest.raises(ValueError):child.restore_parent_records(current)
+    else:
+        result=child.restore_parent_records(current)
+        assert set(result)=={('claims','unrelated'),('viewpoint_claim_links','arbitrary-link')}
+        assert result['viewpoint_claim_links','arbitrary-link']['payload']==old
+        assert result['claims','unrelated']==current['claims','unrelated']
+    assert current==original and len(calls)==1
 
 
 def before_cache_fixture(monkeypatch, tmp_path):

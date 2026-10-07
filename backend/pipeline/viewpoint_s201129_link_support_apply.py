@@ -164,7 +164,8 @@ def applied_child_object_ids():
     """
     if not (ROOT/'apply-receipt.json').exists():
         return set()
-    package=read_artifact(PACKAGE)
+    from backend.pipeline.viewpoint_applied_source_epochs import consume_applied_source_package
+    package=consume_applied_source_package(source.binding(PACKAGE),source.PostgresKnowledgeStore())
     plan=read_artifact(ROOT/'dry-run-plan.json')
     validate_plan_package(plan,package)
     return {op['object_id'] for op in plan['operations']}
@@ -174,7 +175,12 @@ def restore_parent_records(records):
     """Exact proof composition, not a waiver of the parent source postimage guard."""
     if not (ROOT/'apply-receipt.json').exists():return records
     packet,_=reviewed_inputs()
-    package=read_artifact(PACKAGE);validate_package(package)
+    from backend.pipeline.viewpoint_applied_source_epochs import consume_applied_source_package
+    package=consume_applied_source_package(source.binding(PACKAGE),source.PostgresKnowledgeStore())
+    before_proof=read_artifact(ROOT/'before-proof.json')
+    if (before_proof.get('before_link')!=packet['targets'][0]['before_link']
+            or before_proof.get('pre_fingerprint_sha256')!=packet['current_Registry_fingerprint_sha256']):
+        raise ValueError('original child reviewed predecessor drift')
     plan=read_artifact(ROOT/'dry-run-plan.json');validate_plan_package(plan,package)
     receipt=read_artifact(ROOT/'apply-receipt.json');verified=read_artifact(ROOT/'verified-result.json')
     if (receipt['status']!='applied' or receipt['change_set_id']!=plan['change_set_id']

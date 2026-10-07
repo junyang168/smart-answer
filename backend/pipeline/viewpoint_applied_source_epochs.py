@@ -13,7 +13,7 @@ def has_applied_source_frame(path, package):
     # Classify by the package's original declared format, NOT whether its
     # receipts happen to be present/pass. Missing or damaged receipts must
     # reach the generic hard stop, not an expensive legacy-writer fallback.
-    return bool(app.get('before_binding')) and 'bindings' in app
+    return bool(app.get('before_binding') or app.get('parent_source_application')) and 'bindings' in app
 
 
 def consume_applied_source_package(bound, store):
@@ -40,14 +40,27 @@ def consume_applied_source_package(bound, store):
     plan=read(root/'dry-run-plan.json');receipt=read(root/'apply-receipt.json')
     verified=read(root/'verified-result.json')
     pins=verified.get('bindings',[])
-    required={str(root/name) for name in ('before.json','effective-package.json',
+    before_name = 'before.json' if app.get('before_binding') else 'before-proof.json'
+    required={str(root/name) for name in (before_name,'effective-package.json',
         'dry-run-plan.json','backup.json','pg-restore-proof.json','apply-intent.json','apply-receipt.json')}
     if (len(pins)!=len({pin['path'] for pin in pins}) or not required<={pin['path'] for pin in pins}
-            or bound not in pins or app.get('before_binding') not in pins):
+            or bound not in pins or (app.get('before_binding') and app['before_binding'] not in pins)):
         raise ValueError('applied source physical proof denominator missing/changed')
     for pin in pins:verify_file(pin)
     if any(pin not in pins for pin in app.get('bindings',[])):
         raise ValueError('original reviewed source bindings omitted from application proof')
+    if not app.get('before_binding'):
+        # Original compact child format: its BEFORE frame binds a parent
+        # package and exact parent postimage fingerprint. This authenticates
+        # that saved reference, not a recursively reconstructed parent history.
+        # Parent current/source/hold authority is still the caller's own gate.
+        parent = app.get('parent_source_application')
+        predecessor = read(root/before_name)
+        if (not parent or predecessor.get('parent') != parent
+                or predecessor.get('Registry_writes') != 0
+                or predecessor.get('pre_fingerprint_sha256') != verified['pre_fingerprint_sha256']):
+            raise ValueError('original compact parent predecessor binding drift')
+        verify_file(parent)
     ops=[ChangeOperation(**row) for row in plan['operations']]
     events=[PlannedReviewEvent(**row) for row in plan.get('review_events',[])]
     if (len(ops)!=len({(op.collection,op.object_id) for op in ops})
@@ -70,7 +83,8 @@ def consume_applied_source_package(bound, store):
     if (intent.get('package_sha256')!=source_sha or intent.get('plan_sha256')!=sha256_json(plan)
             or intent.get('single_apply_required') is not True
             or intent.get('schema_version')!=app['schema_version']
-            or intent.get('pre_fingerprint_sha256')!=verified['pre_fingerprint_sha256']):
+            or (app.get('before_binding')
+                and intent.get('pre_fingerprint_sha256')!=verified['pre_fingerprint_sha256'])):
         raise ValueError('original applied source intent/package drift')
     with store.connect() as conn,conn.cursor() as cursor:
         cursor.execute('SET TRANSACTION READ ONLY')
