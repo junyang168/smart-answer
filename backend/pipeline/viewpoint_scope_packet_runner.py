@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from dotenv import load_dotenv
-from backend.pipeline.viewpoint_validation_context import typed_records, typed_current_records, active_context
+from backend.pipeline.viewpoint_validation_context import typed_records, active_context
 
 from backend.api.canonical_repository.knowledge_models import (
     ArgumentRouteRecord,
@@ -259,17 +259,21 @@ def build_scope_packet(
     exceptions = {row.claim_id: row for row in source_attestation.exceptions}
 
     store = PostgresKnowledgeStore(database_url)
-    claims = (typed_current_records(store,'claims',in_scope,ClaimRecord,'claim_id')
-              if active_context() is not None and hasattr(store,'database_url')
-              else typed_records(store,'claims',ClaimRecord,'claim_id'))
-    all_evidence = typed_records(store,'evidence_steps',EvidenceStepRecord,'evidence_step_id')
-    forward_ids={eid for cid in in_scope if cid in claims for eid in getattr(claims[cid],'evidence_step_ids',[])}
-    evidence_index=all_evidence.reciprocal_subset(set(in_scope),forward_ids)
-    fragment_index = typed_records(store,'source_fragments',SourceFragmentRecord,'fragment_id')
+    if active_context() is not None and hasattr(store,'database_url'):
+        from backend.pipeline.viewpoint_current_scope import read_current_scope
+        claims,evidence_index,fragment_index,selected_sources = read_current_scope(store,in_scope)
+        source_sha256 = {sid:str(row.get('source_sha256') or '') for sid,row in selected_sources.items()}
+    else:
+        claims = typed_records(store,'claims',ClaimRecord,'claim_id')
+        all_evidence = typed_records(store,'evidence_steps',EvidenceStepRecord,'evidence_step_id')
+        forward_ids={eid for cid in in_scope if cid in claims for eid in getattr(claims[cid],'evidence_step_ids',[])}
+        evidence_index=all_evidence.reciprocal_subset(set(in_scope),forward_ids)
+        fragment_index = typed_records(store,'source_fragments',SourceFragmentRecord,'fragment_id')
+        source_sha256 = {sid:str(sha or '') for sid,sha in fragment_index.project_last('source_id','source_sha256').items()}
+        selected_sources = {row['source_id']:row for row in store.list_records('source_documents')} if include_source_context else {}
     citation_index = {
         item.citation_id: item for item in RepositoryStore(repository_root).list_citations()
     }
-    source_sha256 = {sid:str(sha or '') for sid,sha in fragment_index.project_last('source_id','source_sha256').items()}
 
     # A Claim review moves every reviewed Claim's revision and fingerprint
     # without altering a word it says, and the manifest pins both. On
@@ -287,7 +291,7 @@ def build_scope_packet(
         ],
     )
     review_claims = []
-    context_sources = {row["source_id"]: row for row in store.list_records("source_documents")} if include_source_context else {}
+    context_sources = selected_sources if include_source_context else {}
     context_cache = {}
     blocked: list[dict[str, Any]] = []
     excluded: list[dict[str, Any]] = []

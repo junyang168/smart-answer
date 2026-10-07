@@ -17,6 +17,7 @@ IMPLEMENTATION = (
     'backend/pipeline/viewpoint_validation_context.py',
     'backend/pipeline/viewpoint_cvp_campaign_runner.py',
     'backend/pipeline/viewpoint_scope_packet_runner.py',
+    'backend/pipeline/viewpoint_current_scope.py',
     'backend/pipeline/viewpoint_cvp_recovery_executor.py',
     'backend/pipeline/viewpoint_startup_handoff.py',
     'backend/pipeline/codex_subscription_preflight.py',

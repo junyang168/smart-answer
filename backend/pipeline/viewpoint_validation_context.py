@@ -396,6 +396,25 @@ def read_current_objects(store, keys):
     return records
 
 
+def current_evidence_producers(store, claim_ids):
+    """Indexed reverse-edge population, including orphan and malformed edges.
+
+    Forward Evidence IDs alone are not a complete graph. Register the actual
+    reverse predicate population in the owning SQL snapshot AND freshly at
+    phase close, so a new unseen orphan cannot evade exact-ID version checks.
+    """
+    ctx = active_context()
+    if ctx is None or not hasattr(store, 'database_url'):
+        raise ValueError('reverse Evidence discovery requires an owning SQL phase')
+    ids = list(claim_ids)
+    if not ids or any(not isinstance(cid, str) or not cid for cid in ids) or len(set(ids)) != len(ids):
+        raise ValueError('explicit unique selected Claim IDs required')
+    identity = ('exact_readset', store.database_url)
+    if identity not in ctx.registry_views:
+        ctx.registry_views[identity] = ScopedCurrentRegistryView(store, ctx)
+    return ctx.registry_views[identity].evidence_producers(ids)
+
+
 def finish_validation_phase():
     """Mandatory before a model call or a write; no state crosses that boundary."""
     ctx = _current.get()
@@ -546,6 +565,7 @@ class ScopedCurrentRegistryView:
     def __init__(self, store, ctx):
         self.store, self.ctx = store, ctx
         self.records, self.versions = {}, {}
+        self.reverse_populations = {}
         self.closed = False
         self.connection = store.connect()
         try:
@@ -609,6 +629,35 @@ class ScopedCurrentRegistryView:
                 self.versions[key] = tuple(row[2:7])
         return {key:self.records[key] for key in wanted}
 
+    def observe_evidence_producers(self, connection, cid):
+        self.bound_query(connection)
+        # Both conditions use the existing whole-payload JSONB GIN. The scalar
+        # case is invalid schema, but must be surfaced rather than hidden by
+        # an array-only predicate and silently omitted from integrity checks.
+        rows = connection.execute(
+            'SELECT collection,object_id FROM wang_knowledge.objects '
+            'WHERE collection=%s AND retired_at IS NULL '
+            'AND (payload @> %s::jsonb OR payload @> %s::jsonb)',
+            ('evidence_steps', json.dumps({'produced_claim_ids':[cid]}),
+             json.dumps({'produced_claim_ids':cid}))
+        ).fetchall()
+        found = set()
+        for col, oid in rows:
+            if col != 'evidence_steps' or not isinstance(oid,str) or not oid or oid in found:
+                raise ValueError('reverse Evidence population identity drift')
+            found.add(oid)
+        self.ctx.metrics['sql_membership_rows'] = self.ctx.metrics.get('sql_membership_rows',0)+len(rows)
+        self.ctx.check_budget('indexed reverse Evidence population returned')
+        return frozenset(found)
+
+    def evidence_producers(self, ids):
+        result = set()
+        for cid in sorted(ids):
+            if cid not in self.reverse_populations:
+                self.reverse_populations[cid] = self.observe_evidence_producers(self.connection,cid)
+            result.update(self.reverse_populations[cid])
+        return result
+
     def verify_unchanged(self):
         # A NEW read-only transaction observes current versions, not the old
         # repeatable-read snapshot. Same stored SHA is not enough: xmin/ctid
@@ -622,6 +671,9 @@ class ScopedCurrentRegistryView:
             rows = self.observe(current, set(self.versions), payload=False) if self.versions else {}
             if {key:tuple(row[2:7]) for key,row in rows.items()} != self.versions:
                 raise ValueError('exact current readset changed during mechanical validation')
+            for cid, expected in self.reverse_populations.items():
+                if self.observe_evidence_producers(current,cid) != expected:
+                    raise ValueError('reverse Evidence population changed during mechanical validation')
 
     def close(self):
         if not self.closed:
@@ -630,6 +682,7 @@ class ScopedCurrentRegistryView:
             finally:self.connection.close()
             self.records.clear()
             self.versions.clear()
+            self.reverse_populations.clear()
 
 
 class CurrentRegistryView:
