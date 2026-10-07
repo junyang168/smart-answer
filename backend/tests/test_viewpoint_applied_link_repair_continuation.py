@@ -30,3 +30,29 @@ def test_reverse_rejects_any_unproved_registry_mutation(change):
     elif change=='duplicate':plan['operations'][1]=plan['operations'][0]
     else:plan['operations'][1]['operation']='update'
     with pytest.raises(ValueError):verify_transition(live,before,packet,plan)
+
+
+@pytest.mark.parametrize('identity',['legacy','shared_text','contextual','foreign','ambiguous'])
+def test_saved_supports_review_uses_exact_transport_without_generation(tmp_path,monkeypatch,identity):
+    from types import SimpleNamespace
+    from backend.pipeline import viewpoint_applied_link_repair_continuation as m
+    from backend.pipeline import viewpoint_audit_link_repair as repair
+    from backend.pipeline import viewpoint_resolution_runtime as runtime
+    adapters={(True,False):SimpleNamespace(prompt_sha256='legacy',generation_config_sha256='old'),
+              (False,False):SimpleNamespace(prompt_sha256='shared_text',generation_config_sha256='text'),
+              (False,True):SimpleNamespace(prompt_sha256='contextual',generation_config_sha256='records')}
+    wanted={'legacy':'old','shared_text':'text','contextual':'records','foreign':'foreign','ambiguous':'old'}
+    if identity=='ambiguous':adapters[False,False]=adapters[True,False]
+    monkeypatch.setattr(m,'read_artifact',lambda _:dict(prompt_sha256='legacy' if identity=='ambiguous' else identity,
+        generation_config_sha256=wanted[identity]))
+    monkeypatch.setattr(runtime,'subscription_client',lambda *a:object())
+    monkeypatch.setattr(repair,'link_review_adapter',lambda c,p,legacy_serialization,contextual_semantics:
+        adapters[legacy_serialization,contextual_semantics])
+    calls=[]
+    monkeypatch.setattr(runtime,'read_saved_model_response',lambda a,p,r:(calls.append(a) or {'saved':True}))
+    if identity in ('foreign','ambiguous'):
+        with pytest.raises(ValueError,match='missing or ambiguous'):m.read_supports_review(tmp_path,tmp_path,'opus','claude','M',{})
+        assert not calls
+    else:
+        assert m.read_supports_review(tmp_path,tmp_path,'opus','claude','M',{})=={'saved':True}
+        assert len(calls)==1

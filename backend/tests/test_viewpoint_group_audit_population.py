@@ -51,3 +51,18 @@ def test_no_unbound_or_partial_full_audit(proof,fault):
     else:plan['operations'][0]['payload']={**plan['operations'][0]['payload'],'viewpoint_id':'foreign'}
     if fault!='receipt_sha':receipt['artifact_sha256']=sha256_json({k:v for k,v in receipt.items() if k!='artifact_sha256'})
     with pytest.raises(ValueError):group_audit_targets(save(proof))
+def test_every_post_apply_route_uses_complete_reviewed_group_population():
+    """All execution routes must use the same retained-plus-written gate."""
+    import ast,inspect
+    from backend.pipeline import viewpoint_audit_link_repair,viewpoint_applied_link_repair_continuation
+    from backend.pipeline import viewpoint_cvp_campaign_runner,viewpoint_cvp_recovery_executor
+    for function in (viewpoint_audit_link_repair.run,viewpoint_applied_link_repair_continuation.run,
+                     viewpoint_cvp_campaign_runner.execute,viewpoint_cvp_recovery_executor.verify_group_audit):
+        syntax=ast.parse(inspect.getsource(function))
+        assignments=[n for n in ast.walk(syntax) if isinstance(n,ast.Assign)
+                     and any(isinstance(t,ast.Name) and t.id in ('targets','target_ids') for t in n.targets)]
+        assert any(isinstance(n.value,ast.Call) and isinstance(n.value.func,ast.Name)
+                   and n.value.func.id=='group_audit_targets' for n in assignments)
+        assert not any(isinstance(child,ast.Subscript) and isinstance(child.slice,ast.Constant)
+                       and child.slice.value=='operations'
+                       for n in assignments for child in ast.walk(n.value))

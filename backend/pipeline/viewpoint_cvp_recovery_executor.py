@@ -332,6 +332,11 @@ def continuation_inputs(root, output, extra_completion=None, *, additional_sourc
         if cfg['validation_runtime'] != 'bounded_authenticated_history_v1':
             raise ValueError('unknown validation runtime; do not silently downgrade')
         argv.append('--validation-runtime')
+    if cfg.get('validation_checkpoint_sequence') is not None:
+        checkpoint=cfg['validation_checkpoint_sequence']
+        if type(checkpoint) is not int or not 1<=checkpoint<=len(schedule['schedule']):
+            raise ValueError('invalid owner checkpoint sequence')
+        argv.extend(['--stop-after-sequence',str(checkpoint)])
     if cfg.get('cvp_policy'):
         for key in ('cvp_policy','semantic_contract'):
             if binding(cfg[key]['path'])!=cfg[key]:
@@ -397,6 +402,20 @@ def resume_after_repair(root, attempt, recovery_root, executable, *, additional_
                 verify_binding(b, parse_json=False)
             extra = extra | {"bindings": extra["bindings"] + list(additional_proof_bindings)}
             write_immutable(attempt / 'verified-group/completion-with-content-repair.json', extra)
+    # A repair can finish the last owner-authorized group. Consume its real
+    # completion, but do not preflight/start the next group just to report it.
+    checkpoint=cfg.get('validation_checkpoint_sequence')
+    if checkpoint is not None:
+        if type(checkpoint) is not int or not 1<=checkpoint<=len(schedule['schedule']):
+            raise ValueError('invalid owner checkpoint sequence')
+        if state['sequence']>=checkpoint:
+            if state['sequence']!=checkpoint or extra is None:
+                raise ValueError('owner checkpoint has no exact completed group proof')
+            receipt={'status':'owner_validation_checkpoint','campaign_root':str(root),
+                'completed_group_proof':extra,'checkpoint_group_completed':True,
+                'no_next_group_started':True,'production_restarted':False,'production_complete':False}
+            write_immutable(attempt/'continuation-receipt.json',receipt)
+            return receipt
     output = continuation_root(root,attempt)
     if output.exists():
         raise ValueError("continuation root already exists; never overwrite/retry")

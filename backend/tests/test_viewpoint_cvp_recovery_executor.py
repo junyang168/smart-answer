@@ -229,6 +229,7 @@ def test_continuation_keeps_original_members_capacity_order_and_pins(tmp_path, m
            "lineage_inventory": {"path": "inventory"}, "entrance_audit": {"path": "entrance"},
            "grouping_repository": "grouping", "wang_repository": "wang", "global_lock": "lock",
            "completed_source_repairs": [{"path": "source-repair"}], "random_spot_check_policy": {"path": "spot-policy"}}
+    cfg['validation_checkpoint_sequence']=1
     monkeypatch.setattr(m, "load_campaign", lambda *a: (cfg, schedule, manifest, m.validate_schedule(schedule, manifest)))
     audit = {"meta": {"model": "gemini-3.8-flash"}, "layers": {
         "3": {"complete": True, "judged": 1, "results": [{"claim_id": "cl1", "verdict": "supported"}]},
@@ -244,6 +245,7 @@ def test_continuation_keeps_original_members_capacity_order_and_pins(tmp_path, m
     for old, new in zip(schedule["schedule"], derived["schedule"]):
         assert {k: v for k, v in old.items() if k != "state"} == {k: v for k, v in new.items() if k != "state"}
     assert "--completed-source-repair" in argv and "--random-spot-check-policy" in argv
+    assert argv[argv.index('--stop-after-sequence')+1]=='1'
     # An edited physical audit cannot be used to seed completion.
     audit_path.write_text("{}")
     with pytest.raises(ValueError, match="SHA drift"):
@@ -259,6 +261,26 @@ def test_long_continuation_root_is_bounded_and_full_identity_bound(tmp_path):
     assert result != m.continuation_root(tmp_path / 'other' / root.name, attempt)
     assert result != m.continuation_root(root, tmp_path / 'other-attempt')
     result.mkdir()
+
+
+def test_repaired_owner_checkpoint_never_preflights_or_starts_next_group(tmp_path,monkeypatch):
+    from backend.pipeline import viewpoint_group_audit_population as population
+    root=tmp_path/'campaign';attempt=tmp_path/'attempt';root.mkdir();attempt.mkdir()
+    (root/'progress.json').write_text('{"sequence":1,"group_key":"g"}')
+    run=root/'g001/production/run';batch=run/'batches/B';batch.mkdir(parents=True)
+    (run/'scope-run.json').write_text('{"disposition_status":"complete"}')
+    (batch/'cvp-change-plan.json').write_text('{}')
+    (tmp_path/'audit.json').write_text('{}')
+    monkeypatch.setattr(m,'load_campaign',lambda *_:({'validation_checkpoint_sequence':1},{'schedule':[{}]}, {}, {}))
+    monkeypatch.setattr(population,'group_audit_targets',lambda _:['CV'])
+    proof={'group_key':'g','bindings':[],'viewpoint_ids':['CV']}
+    monkeypatch.setattr(m,'verify_group_audit',lambda *a,**k:proof)
+    monkeypatch.setattr(m,'continuation_inputs',lambda *a,**k:pytest.fail('no next-group seed/start'))
+    monkeypatch.setattr(m,'run_logged',lambda *a,**k:pytest.fail('no next-group preflight/provider/start'))
+    result=m.resume_after_repair(root,attempt,tmp_path/'recovery','unused',saved_audit_path=tmp_path/'audit.json')
+    assert result['status']=='owner_validation_checkpoint'
+    assert result['completed_group_proof']==proof and result['no_next_group_started']
+    assert not result['production_complete'] and not result['production_restarted']
 
 
 @pytest.mark.parametrize("active", [False, True])

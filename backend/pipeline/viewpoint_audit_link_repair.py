@@ -447,7 +447,8 @@ def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storag
     group = campaign/f"g{state['sequence']:03d}"
     plans = list((group/'production/run/batches').glob('*/cvp-change-plan.json'))
     if len(plans) != 1: raise ValueError('ambiguous original applied plan')
-    targets = sorted({o['payload']['viewpoint_id'] for o in read_artifact(plans[0])['operations'] if o['collection']=='viewpoint_claim_links'})
+    from backend.pipeline.viewpoint_group_audit_population import group_audit_targets
+    targets = group_audit_targets(plans[0])
     audit_root = continuation/'independent-reaudit'
     run_logged([PYTHON, 'scripts/audit-library.py', '--scope', 'all', '--layers', '1,2,3,4',
         '--claim-ids', ','.join(groups[state['group_key']]['claim_ids']), '--viewpoint-ids', ','.join(targets),

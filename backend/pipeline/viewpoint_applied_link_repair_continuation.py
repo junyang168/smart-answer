@@ -33,17 +33,17 @@ def verify_transition(live, before, packet, plan):
     return reverse
 
 def run(campaign, repair, output, prior_adjudication, saved_audit=None):
-    from backend.pipeline.viewpoint_authorized_source_repair_357 import snapshot,fingerprint,Review,review_call
-    from backend.pipeline.viewpoint_audit_link_repair import BASE,PROJECT,PROMPT,package_for
+    from backend.pipeline.viewpoint_authorized_source_repair_357 import snapshot,fingerprint,Review
+    from backend.pipeline.viewpoint_audit_link_repair import BASE,PROJECT,package_for
     from backend.pipeline.viewpoint_cvp_recovery_executor import load_campaign,run_logged,PYTHON,binding,resume_after_repair
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
-    from backend.api.canonical_repository.viewpoint_resolution import StructuredJsonReviewerAdapter
-    from backend.pipeline.viewpoint_resolution_runtime import subscription_client
     from backend.pipeline.viewpoint_content_blocked_fallback import apply
     from backend.pipeline.viewpoint_audit_source_adjudication import disputes
     from backend.pipeline.viewpoint_reused_source_resolution import create
     load_dotenv(PROJECT/'.env')
-    os.environ['CODEX_EXECUTABLE']='/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex'
+    from backend.pipeline.viewpoint_s201129_source_continuation import canonical_runtime
+    runtime=canonical_runtime()
+    os.environ['CODEX_EXECUTABLE']=runtime['identity']['cli']['path']
     with (BASE/'immediate-recovery-20261002-v1/recovery.lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         if output.exists():raise ValueError('existing continuation attempt; inspect receipts')
@@ -58,10 +58,8 @@ def run(campaign, repair, output, prior_adjudication, saved_audit=None):
             reverse=verify_transition(live,before,packet,plan);reviews={}
             for label,provider,model in [('gpt','codex','gpt-6.1-sol'),('opus','claude','claude-opus-5-5')]:
                 if not (repair/f'raw-{label}.json').exists():raise ValueError('saved review missing; no fallback')
-                adapter=StructuredJsonReviewerAdapter(client=subscription_client(provider,model,'high'),prompt=PROMPT,response_model=Review,schema_name='audit_link_repair_review_v1',compact_payload=True)
-                adapter.max_request_bytes=500000
-                response,calls,_=review_call(adapter,packet,repair,label)
-                if calls or any(not v.approved or v.problems for v in Review.model_validate(response).verdicts):raise ValueError('saved dual review not approved')
+                response=read_supports_review(campaign,repair,label,provider,model,packet)
+                if any(not v.approved or v.problems for v in Review.model_validate(response).verdicts):raise ValueError('saved dual review not approved')
                 reviews[label]=response
             if package_for(reverse,packet,reviews,repair)!=read_artifact(repair/'effective-package.json'):
                 raise ValueError('applied package does not match saved double review')
@@ -73,7 +71,8 @@ def run(campaign, repair, output, prior_adjudication, saved_audit=None):
             cfg,schedule,manifest,groups=load_campaign(campaign);state=read_artifact(campaign/'progress.json')
             plans=list((campaign/f"g{state['sequence']:03d}/production/run/batches").glob('*/cvp-change-plan.json'))
             if len(plans)!=1:raise ValueError('original group plan ambiguous')
-            targets=sorted({o['payload']['viewpoint_id'] for o in read_artifact(plans[0])['operations'] if o['collection']=='viewpoint_claim_links'})
+            from backend.pipeline.viewpoint_group_audit_population import group_audit_targets
+            targets=group_audit_targets(plans[0])
             audit_root=output/'independent-reaudit'
             if saved_audit is None:
                 run_logged([PYTHON,'scripts/audit-library.py','--scope','all','--layers','1,2,3,4','--claim-ids',','.join(groups[state['group_key']]['claim_ids']),
@@ -95,6 +94,20 @@ def run(campaign, repair, output, prior_adjudication, saved_audit=None):
             write_immutable(output/'result.json',result);return result
         except Exception as exc:
             write_immutable(output/'failure.json',{'error':str(exc),'repair_already_applied':True,'no_retry':True});raise
+
+
+def read_supports_review(campaign,repair,label,provider,model,packet):
+    """Exact saved transport identity, never a generation/cache fallback."""
+    from backend.pipeline.viewpoint_audit_link_repair import PROMPT,link_review_adapter
+    from backend.pipeline.viewpoint_resolution_runtime import subscription_client,read_saved_model_response
+    raw=read_artifact(repair/f'raw-{label}.json')
+    client=subscription_client(provider,model,'high')
+    candidates=[link_review_adapter(client,PROMPT,legacy_serialization=legacy,contextual_semantics=contextual)
+                for legacy,contextual in ((True,False),(False,False),(False,True))]
+    matches=[a for a in candidates if a.prompt_sha256==raw.get('prompt_sha256')
+             and a.generation_config_sha256==raw.get('generation_config_sha256')]
+    if len(matches)!=1:raise ValueError('saved supports transport identity missing or ambiguous')
+    return read_saved_model_response(matches[0],packet,repair/f'raw-{label}.json')
 
 if __name__=='__main__':
     import argparse
