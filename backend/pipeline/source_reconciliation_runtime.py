@@ -150,11 +150,13 @@ class ProductionPorts:
         return {"dump": binding(path), "restore_catalog_nonempty": True,
                 "catalog_sha256": hashlib.sha256(listing.stdout).hexdigest(), "restore_list_exit_code": listing.returncode}
 
-    def _environment_guard(self):
+    def _environment_guard(self, *, planned_snapshot_bytes=0):
         if subprocess.check_output(["git", "status", "--porcelain"], cwd=PROJECT, text=True).strip():
             raise ValueError("committed clean implementation required before production apply")
         if shutil.disk_usage(PROJECT).free < 2 * 1024**3:
             raise ValueError("less than 2GiB free disk; do not lower the threshold")
+        if shutil.disk_usage(PROJECT).free < 2*1024**3 + planned_snapshot_bytes*2:
+            raise ValueError('insufficient disk for planned snapshot plus verification reserve')
         # Preserve the owner's SSD requirement and UUID/archive validation.
         from backend.pipeline.viewpoint_backup_archive import verify_volume
         verify_volume()

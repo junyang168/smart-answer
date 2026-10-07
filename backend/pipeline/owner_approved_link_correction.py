@@ -563,11 +563,37 @@ def main():
     parser.add_argument("--link-id",required=True)
     parser.add_argument("--approval-quote",required=True)
     parser.add_argument("--execute",action="store_true")
+    parser.add_argument("--continue-saved",action="store_true",
+        help="consume actual audited parent/child completion only; no child review/apply/audit replay")
     args = parser.parse_args(); load_dotenv(PROJECT/".env")
     if PROJECT.name != "wkp-357-worktree-per-session": raise ValueError("#357 worktree only")
     with maintenance_lock():
         ports = ProductionPorts()
         if args.execute: ports._environment_guard()
+        if args.continue_saved:
+            if not args.execute:raise ValueError('continuation requires explicit execution')
+            parent=args.source_root.resolve()
+            complete=read(parent/'complete.json')
+            context=body(read(args.resume_input)); c.verify_file(context['standing_authorization'])
+            if c.Manifest.model_validate(context['manifest']).model_dump()!=body(read(parent/'frozen.json'))['manifest']:
+                raise ValueError('saved continuation source task changed')
+            children=complete.get('authorized_link_corrections',[])
+            if len(children)!=1:raise ValueError('exact saved child completion required')
+            proof=read(c.verify_file(children[0]));root=Path(children[0]['path']).parent
+            packet=body(read(root/'packet.json'))
+            if (packet['before_link']['viewpoint_claim_link_id']!=args.link_id
+                    or packet['authorization']['authorization_quote']!=args.approval_quote
+                    or packet['adjudication_root']!=str(args.adjudication_root.resolve())):
+                raise ValueError('saved authorization identity changed')
+            ports._environment_guard(planned_snapshot_bytes=(parent/'frozen.json').stat().st_size)
+            from backend.pipeline.deferred_claim_cvp_continuation import run
+            # run starts by proving actual SQL/source/child/audit completion;
+            # the original child execute path is deliberately not called.
+            print(json.dumps({'status':'saved_completion_continuation','root':str(parent)}),flush=True)
+            result=run(context,parent,ports)
+            write(parent/'normal-cvp/owner-storage-continuation-result.json',result)
+            print(json.dumps(result,ensure_ascii=False),flush=True)
+            return
         root = prepare(args.source_root.resolve(),args.adjudication_root.resolve(),args.link_id,args.approval_quote,ports)
         print(json.dumps({"root":str(root),"status":"preflight_passed"}),flush=True)
         if not args.execute: return

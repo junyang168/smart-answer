@@ -24,6 +24,8 @@ def test_unlabelled_backup_requires_exact_saved_restore_proof(archive):
     proof=base/'backup.json';proof.write_text(json.dumps({'dump':{'path':str(p),'file_sha256':a.digest(p)},'restore_list_exit_code':0,'restore_catalog_nonempty':True}))
     a.authorize_backup(p,proof);before=a.digest(p);a.migrate_one(p)
     assert p.is_symlink() and a.logical_binding_path(p)==p and a.digest(p)==before
+    from backend.pipeline.source_reconciliation_runner import binding
+    assert binding(p)=={'path':str(p),'file_sha256':before}
     proof.write_text('{}')
     with pytest.raises(ValueError,match='scope drift'):a.logical_binding_path(p)
 

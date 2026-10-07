@@ -373,7 +373,8 @@ class Runner:
 
 
 def binding(path: Path) -> dict:
-    return {"path": str(path.resolve()), "file_sha256": contract.file_sha256(path)}
+    from backend.pipeline.viewpoint_backup_archive import logical_binding_path
+    return {"path": str(logical_binding_path(path)), "file_sha256": contract.file_sha256(path)}
 
 
 def build_proposal_packet(frozen: dict) -> dict:
