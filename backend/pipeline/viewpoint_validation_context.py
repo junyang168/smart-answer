@@ -339,8 +339,15 @@ def validated_history(fn=None, *, bound_files_only=False):
             finally:
                 ctx.receipt_policy_stack.pop()
             for path, names in directories.items():
-                if ctx.directories.get(path) != names:
+                # The previous phase may have inherited this guard from a
+                # legacy validator. A bound-only caller does not populate it
+                # by pinning files in the new phase; absence from this context
+                # is not physical drift. Reauthenticate the actual directory,
+                # then retain the guard through the closing boundary.
+                if (frozenset(p.name for p in path.iterdir()) != names
+                        or (path in ctx.directories and ctx.directories[path] != names)):
                     raise ValueError('historical proof receipt population drift: ' + str(path))
+                ctx.directories[path] = names
             ctx.metrics['proof_reuses'] += 1
             return result
         ctx.depth += 1

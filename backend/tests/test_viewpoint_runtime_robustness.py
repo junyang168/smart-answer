@@ -197,6 +197,38 @@ def test_explicit_proof_cannot_disable_nested_legacy_negative_receipt_guard(tmp_
             with ValidationContext('second'): outer()
 
 
+@pytest.mark.parametrize('change', ['none', 'new_receipt', 'delete_receipt', 'late_receipt'])
+def test_bound_proof_reauthenticates_inherited_directory_in_new_phase(tmp_path, change):
+    """A prior legacy check can pin the same parent before a bound-only proof."""
+    p = tmp_path/'proof.json'; p.write_text('{}')
+    receipt = tmp_path/'existing-receipt.json'; receipt.write_text('{}')
+    @validated_history
+    def legacy(): return r.read_artifact(p)
+    calls = []
+    @validated_history(bound_files_only=True)
+    def bound():
+        calls.append(1)
+        return r.read_artifact(p)
+    with validation_runtime():
+        with ValidationContext('first'):
+            legacy()
+            result = bound()
+        if change == 'new_receipt': (tmp_path/'new-receipt.json').write_text('{}')
+        if change == 'delete_receipt': receipt.unlink()
+        if change in ('new_receipt', 'delete_receipt'):
+            with pytest.raises(ValueError, match='receipt population drift'):
+                with ValidationContext('second'): bound()
+        elif change == 'late_receipt':
+            with pytest.raises(ValueError, match='receipt set drift'):
+                with ValidationContext('second'):
+                    assert bound() is result
+                    (tmp_path/'late-receipt.json').write_text('{}')
+        else:
+            with ValidationContext('second'):
+                assert bound() is result
+    assert calls == [1]
+
+
 @pytest.mark.parametrize('when', ['during_phase', 'next_phase'])
 def test_bound_file_proof_still_authenticates_explicit_negative_inputs(tmp_path, when):
     from backend.pipeline.viewpoint_validation_context import optional_file_exists
