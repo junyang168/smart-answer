@@ -437,6 +437,13 @@ def audit_jobs(frozen: dict, current: dict[str, dict]) -> list[dict]:
 
 def validate_package(package: dict, *, historical: bool = False) -> None:
     """Store-side reconstruction; supplied approval booleans are not authority."""
+    # Startup reads the saved, sealed artifact; the store receives its body.
+    # Authenticate the envelope before comparing exactly the same package body.
+    if "artifact_sha256" in package:
+        payload = body(package)
+        if package["artifact_sha256"] != sha256_json(payload):
+            raise ValueError("source reconciliation package artifact seal drift")
+        package = payload
     app = package.get("source_repair_application", {})
     if app.get("schema_version") != contract.VERSION:
         raise ValueError("unknown source reconciliation contract")

@@ -440,6 +440,23 @@ def resume_after_repair(root, attempt, recovery_root, executable, *, additional_
             'completed_groups_replayed':False})
     # Normal qualification makes and verifies the fresh pg_dump backup; normal
     # dry-run proves zero model calls/writes before the unique production screen.
+    return start_prepared_campaign(root, output, attempt, recovery_root, executable, argv, groups,
+        prior_model_batch=prior_model_batch, reuse_correction=reuse_correction,
+        initial_prefix_only=initial_prefix_only,
+        allow_lossless_compact_config_migration=allow_lossless_compact_config_migration)
+
+
+def start_prepared_campaign(root, output, attempt, recovery_root, executable, argv, groups, *,
+        prior_model_batch=None, reuse_correction=False, initial_prefix_only=False,
+        allow_lossless_compact_config_migration=False):
+    """Start a freshly derived seed through the unchanged production safety gates.
+
+    A saved verified completion can use continuation_inputs without regenerating
+    its model/audit/proof chain. This entry still performs actual startup package
+    authentication, seed admission, fresh backup, dry-run and process checks.
+    """
+    if str(argv[argv.index('--output-root') + 1]) != str(output):
+        raise ValueError('prepared campaign output identity drift')
     env = os.environ.copy()
     env["CODEX_EXECUTABLE"] = str(executable)
     run_logged([*argv, "--dry-run"], attempt, "campaign-preflight", env=env)

@@ -258,6 +258,24 @@ def test_long_continuation_root_is_bounded_and_full_identity_bound(tmp_path):
     result = m.continuation_root(root, attempt)
     assert len(result.name.encode('utf-8')) <= 240
     assert result == m.continuation_root(root, attempt)
+
+
+def test_prepared_seed_handoff_cannot_skip_dryrun_or_change_output(tmp_path, monkeypatch):
+    output = tmp_path / 'new'
+    args = ['runner', '--output-root', str(output)]
+    calls = []
+    def fail_preflight(argv, attempt, name, **kwargs):
+        calls.append((argv, name))
+        raise ValueError('actual preflight failed')
+    monkeypatch.setattr(m, 'run_logged', fail_preflight)
+    with pytest.raises(ValueError, match='output identity drift'):
+        m.start_prepared_campaign(tmp_path/'old', tmp_path/'foreign', tmp_path/'attempt',
+                                  tmp_path/'recovery', 'codex', args, {})
+    assert calls == []
+    with pytest.raises(ValueError, match='actual preflight failed'):
+        m.start_prepared_campaign(tmp_path/'old', output, tmp_path/'attempt',
+                                  tmp_path/'recovery', 'codex', args, {})
+    assert calls == [(args + ['--dry-run'], 'campaign-preflight')]
     assert result != m.continuation_root(tmp_path / 'other' / root.name, attempt)
     assert result != m.continuation_root(root, tmp_path / 'other-attempt')
     result.mkdir()

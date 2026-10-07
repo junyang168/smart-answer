@@ -598,6 +598,21 @@ def test_initial_model_packet_cannot_drop_frozen_context(scenario, tmp_path):
         r.validate_package(r.body(r.read(runner.root / "effective-package.json")))
 
 
+def test_saved_sealed_package_has_the_same_authority_as_store_body(scenario, tmp_path):
+    from backend.api.canonical_repository.reviewed_candidate_contract import validate_store_package_authorization
+    runner, _, manifest = setup_runner(tmp_path, scenario)
+    runner.run(manifest)
+    artifact = r.read(runner.root / "effective-package.json")
+    validate_store_package_authorization(artifact)
+    validate_store_package_authorization(r.body(artifact))
+    tampered = deepcopy(artifact)
+    tampered["package_id"] = "unreviewed"
+    with pytest.raises(ValueError, match="artifact seal drift"):
+        validate_store_package_authorization(tampered)
+    with pytest.raises(ValueError, match="exactly reviewed records"):
+        validate_store_package_authorization(r.seal(r.body(tampered)))
+
+
 def test_original_provider_response_is_sha_bound(scenario, tmp_path):
     runner, _, manifest = setup_runner(tmp_path, scenario)
     runner.run(manifest)
