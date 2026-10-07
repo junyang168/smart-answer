@@ -91,3 +91,21 @@ def test_verified_history_reuses_only_physical_pins_and_sql_generation(tmp_path)
     file.write_text('{"drift":1}')
     with pytest.raises(ValueError):p.verify_once('x',[bound],store,lambda:calls.append(1))
     assert len(calls)==2
+
+
+def test_missing_normal_answer_never_retries_even_with_fixed_runtime(tmp_path):
+    from backend.pipeline.owner_approved_link_correction import initialize_normal_runtime
+    review=tmp_path/'review';review.mkdir();intent=review/'raw-proposal.call-intent.json'
+    intent.write_text('{"once":true}');original=intent.read_bytes()
+    calls=[]
+    with pytest.raises(ValueError,match='outcome_unknown'):
+        initialize_normal_runtime(tmp_path,lambda:calls.append(1))
+    assert not calls and intent.read_bytes()==original
+
+
+def test_normal_runtime_authenticated_without_diagnostic_before_new_intent(tmp_path):
+    from backend.pipeline.owner_approved_link_correction import initialize_normal_runtime
+    proof={'reused':True,'new_model_calls':0,'proof_path':'existing'}
+    assert initialize_normal_runtime(tmp_path,lambda:proof)==proof
+    assert (tmp_path/'runtime-proof.json').exists()
+    assert not (tmp_path/'review').exists()

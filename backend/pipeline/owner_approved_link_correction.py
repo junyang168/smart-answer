@@ -555,6 +555,27 @@ def execute(root, context, ports):
     return run(context,parent,ports)
 
 
+def initialize_normal_runtime(root, resolve=None):
+    """Authenticate the canonical client before reserving any new call.
+
+    Old intent-without-answer remains a hard hold even after fixing the client.
+    An environment fix is not permission to reset an invocation budget.
+    """
+    review=root/'review'
+    for intent in review.glob('*.call-intent.json'):
+        raw=review/(intent.name.removesuffix('.call-intent.json')+'.json')
+        if not raw.exists():
+            raise Stop('normal CVP invocation has no saved answer; outcome_unknown requires explicit owner direction')
+    if resolve is None:
+        from backend.pipeline.viewpoint_s201129_source_continuation import canonical_runtime
+        resolve=canonical_runtime
+    proof=resolve()
+    if not proof.get('reused') or proof.get('new_model_calls')!=0:
+        raise ValueError('normal CVP runtime must reuse existing authenticated identity proof')
+    write(root/'runtime-proof.json',proof)
+    return proof
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-root",type=Path,required=True)
@@ -586,6 +607,7 @@ def main():
                     or packet['adjudication_root']!=str(args.adjudication_root.resolve())):
                 raise ValueError('saved authorization identity changed')
             ports._environment_guard(planned_snapshot_bytes=(parent/'frozen.json').stat().st_size)
+            initialize_normal_runtime(parent/'normal-cvp')
             from backend.pipeline.deferred_claim_cvp_continuation import run
             # run starts by proving actual SQL/source/child/audit completion;
             # the original child execute path is deliberately not called.
