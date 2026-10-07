@@ -125,8 +125,8 @@ def build_proof(store, campaign_root, claim_ids):
 
 
 def verify_proof(campaign_root,path,claim_ids,store=None):
-    from backend.pipeline.viewpoint_g052_new_cvp_repair import ROOT as G052_ROOT, verify_proof as verify_g052
-    if Path(path).resolve()==G052_ROOT/'component-completion.json':
+    from backend.pipeline.viewpoint_g052_new_cvp_repair import ROOT as G052_ROOT, COMPLETION_ROOT as G052_COMPLETION, verify_proof as verify_g052
+    if Path(path).resolve() in {G052_ROOT/'component-completion.json',G052_COMPLETION/'component-completion.json'}:
         return verify_g052(campaign_root,path,claim_ids,store)
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     if Path(path).resolve()!=RECOVERY_ROOT/'component-completion.json': raise ValueError('wrong bounded completion proof path')

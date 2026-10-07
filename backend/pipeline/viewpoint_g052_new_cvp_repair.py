@@ -25,6 +25,7 @@ BASE = Path('/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/stagi
 PARENT = BASE/'campaign-single-writer-20261007-v1-recovery-g051'
 FAILED_ROOT = BASE/'g052-owner-new-cvp-repair-20261007-v1'
 ROOT = BASE/'g052-owner-new-cvp-repair-20261007-v2'
+COMPLETION_ROOT = BASE/'g052-applied-new-cvp-completion-20261007-v1'
 GROUP = PARENT/'g052'
 BATCH = GROUP/'production/run/batches/75e337ead6567ce77497686395e25b60f699720cf1771d4469a4a749593fcfc3'
 CLAIM = 'DK-0bdf88fe8565-P09-CL007'
@@ -40,6 +41,13 @@ CONSTRAINT = '''\n本次独立负责人授权仅为 DK-0bdf88fe8565-P09-CL007 �
 
 def binding(path):
     return {'path':str(path),'file_sha256':file_sha256(path)}
+
+
+def immutable_review_paths(root):
+    # The normal batch validator appends executions / recomputes summaries on
+    # cache verification. Those are not semantic approval/source authority.
+    derived={'batch-run.json','measurements.json','current-state.json'}
+    return [p for p in sorted((root/'review').glob('*.json')) if p.name not in derived]
 
 
 def verify_ledger(ledger, claim_ids):
@@ -209,7 +217,7 @@ def build_proof(store):
     if reviewed_package(ROOT,packet,freeze,cached_only=True)!=read(ROOT/'effective-package.json'): raise ValueError('fresh actual review/package mismatch')
     for b in before['physical_sources']:
         if file_sha256(Path(b['path']))!=b['file_sha256']: raise ValueError('physical source drift')
-    for path in sorted(ROOT.glob('review/*.json')): bindings.append(binding(path))
+    for path in immutable_review_paths(ROOT): bindings.append(binding(path))
     bindings += [binding(ROOT/n) for n in ('owner-authorization.json','packet.json','before.json','effective-package.json','dry-run-plan.json','backup.json','apply-intent.json','apply-receipt.json','verified-result.json')]+before['physical_sources']
     return {'schema_version':VERSION,'campaign_root':str(PARENT),'group_key':'p030:p030:whole','claim_ids':sorted(ids),
         'resolved_claim_id':CLAIM,'status':'complete','historical_scope_run_preserved':True,'viewpoint_ids':[target],
@@ -217,10 +225,48 @@ def build_proof(store):
 
 
 def verify_proof(campaign_root,path,claim_ids,store=None):
-    if Path(campaign_root).resolve()!=PARENT or Path(path).resolve()!=ROOT/'component-completion.json': raise ValueError('wrong bounded new-CVP completion path')
+    if Path(campaign_root).resolve()!=PARENT or Path(path).resolve() not in {ROOT/'component-completion.json',COMPLETION_ROOT/'component-completion.json'}: raise ValueError('wrong bounded new-CVP completion path')
     proof=build_proof(store or PostgresKnowledgeStore())
     if sorted(claim_ids)!=proof['claim_ids'] or read(Path(path))!=proof: raise ValueError('new-CVP completion proof drift')
     return proof
+
+
+def complete_saved_audit():
+    """One independent zero-call/zero-write proof handoff, never rerun repair."""
+    from backend.pipeline.viewpoint_s201129_source_continuation import canonical_runtime
+    from backend.pipeline.viewpoint_cvp_recovery_executor import resume_after_repair
+    from backend.pipeline.viewpoint_content_blocked_fallback import verify_saved_full_audit
+    from backend.pipeline.viewpoint_cvp_recovery_supervisor import process_table,remaining_producers,current_job_process_ids
+    load_dotenv(PROJECT/'.env')
+    with (BASE/'immediate-recovery-20261002-v1/recovery.lock').open('r+') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        if COMPLETION_ROOT.exists() or (ROOT/'completion-proof-repair-start.json').exists(): raise ValueError('completion repair already reserved')
+        if [p for p in remaining_producers(process_table(),BASE) if p not in current_job_process_ids()]: raise ValueError('active producer')
+        if subprocess.check_output(['git','status','--porcelain'],cwd=PROJECT,text=True).strip(): raise ValueError('dirty worktree')
+        if read(ROOT/'failure.json')!={'error':'new-CVP completion proof drift','applied':True,'group_complete':False,'no_retry':True}:
+            raise ValueError('not exact immutable/derived proof-boundary failure')
+        marker={'fingerprint':'g052-derived-measurements-in-immutable-bindings-v1','authority':'standing proven mechanical proof repair',
+            'old_failure_preserved':True,'output_root':str(COMPLETION_ROOT),'new_model_calls':0,'registry_writes':0,'budget_reset':False}
+        write_immutable(ROOT/'completion-proof-repair-start.json',marker);write_immutable(COMPLETION_ROOT/'start.json',marker)
+        try:
+            runtime=canonical_runtime();os.environ['CODEX_EXECUTABLE']=runtime['identity']['cli']['path']
+            write_immutable(COMPLETION_ROOT/'runtime-proof.json',runtime)
+            store=PostgresKnowledgeStore();proof=build_proof(store);old=read(ROOT/'component-completion.json')
+            if {k:v for k,v in old.items() if k!='bindings'}!={k:v for k,v in proof.items() if k!='bindings'}:
+                raise ValueError('not exclusively derived binding drift')
+            derived={str(ROOT/'review'/n) for n in ('batch-run.json','measurements.json','current-state.json')}
+            if [b for b in old['bindings'] if b['path'] not in derived]!=proof['bindings']:
+                raise ValueError('immutable content/source/model/applied proof changed')
+            write_immutable(COMPLETION_ROOT/'component-completion.json',proof)
+            audit=ROOT/'independent-audit/audit.json';resolution=ROOT/'final-resolution.json'
+            bindings=verify_saved_full_audit(audit)
+            write_immutable(COMPLETION_ROOT/'saved-full-audit-proof.json',{'bindings':bindings,'audit_replayed':False,'new_model_calls':0})
+            result=resume_after_repair(PARENT,COMPLETION_ROOT/'continuation',BASE/'immediate-recovery-20261002-v1',Path(os.environ['CODEX_EXECUTABLE']),
+                saved_audit_path=audit,owner_resolution_path=resolution,component_resolution_path=COMPLETION_ROOT/'component-completion.json',
+                additional_proof_bindings=[binding(COMPLETION_ROOT/'saved-full-audit-proof.json'),*bindings])
+            write_immutable(COMPLETION_ROOT/'result.json',result)
+        except Exception as exc:
+            write_immutable(COMPLETION_ROOT/'failure.json',{'error':str(exc),'new_model_calls':0,'registry_writes':0,'no_retry':True});raise
 
 
 def run(*,recover_storage_shape=False):
@@ -326,5 +372,8 @@ def run(*,recover_storage_shape=False):
 
 if __name__=='__main__':
     import argparse
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--recover-storage-shape',action='store_true')
-    run(recover_storage_shape=parser.parse_args().recover_storage_shape)
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--recover-storage-shape',action='store_true');parser.add_argument('--complete-saved-audit',action='store_true')
+    args=parser.parse_args()
+    if args.complete_saved_audit and args.recover_storage_shape: parser.error('select one exact execution entry')
+    if args.complete_saved_audit: complete_saved_audit()
+    else: run(recover_storage_shape=args.recover_storage_shape)

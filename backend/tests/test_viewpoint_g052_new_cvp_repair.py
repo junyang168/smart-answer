@@ -2,6 +2,15 @@ from copy import deepcopy
 import pytest
 from backend.pipeline.viewpoint_g052_new_cvp_repair import CLAIM, PIN, validate_scoped_proposal, validate_plan, verify_ledger
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
+from backend.pipeline.viewpoint_g052_new_cvp_repair import immutable_review_paths
+
+
+def test_derived_measurements_are_not_approval_bindings(tmp_path):
+    d=tmp_path/'review';d.mkdir()
+    immutable=['batch-packet.json','raw-proposal.json','raw-proposal.request-encoding.json','proposal.json','raw-review.json','review.json','reviewer-call-reservation.json']
+    derived=['batch-run.json','measurements.json','current-state.json']
+    for name in immutable+derived:(d/name).touch()
+    assert [p.name for p in immutable_review_paths(tmp_path)]==sorted(immutable)
 
 
 def proposal():
