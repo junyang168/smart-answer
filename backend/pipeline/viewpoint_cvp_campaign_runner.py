@@ -432,6 +432,47 @@ def initialize_validation(args):
             'model_calls': 0, 'Registry_writes': 0}
 
 
+def validate_completed_seed(seed, groups, completed_groups):
+    """One startup's exact completed inputs; no cross-startup approval cache.
+
+    Preserve every original group and semantic gate. Repeated references to
+    identical immutable bytes do not require rereading those bytes per group;
+    conflicting pins stop before IO. This is NOT a new completion proof.
+    """
+    rows=seed['groups']
+    if (len(rows)!=len({row['group_key'] for row in rows})
+            or {row['group_key'] for row in rows}!=set(completed_groups)):
+        raise ValueError('completed-group proofs differ from schedule')
+    pins={};references=0
+    for row in rows:
+        for pin in row['bindings']:
+            references+=1
+            if pin['path'] in pins and pins[pin['path']]!=pin:
+                raise ValueError('conflicting completed-group evidence SHA')
+            pins[pin['path']]=pin
+    for path,pin in pins.items():
+        if binding(path)!=pin:
+            raise ValueError('completed-group evidence SHA drift')
+    from backend.pipeline.viewpoint_g035_temporary_audit import validate_completion_disclosure
+    documents={}
+    def audit_at(path):
+        # Isolate the per-group validators from the parse cache: a validator
+        # must not mutate another group's original audit representation.
+        from copy import deepcopy
+        if path not in documents:documents[path]=read(path)
+        return deepcopy(documents[path])
+    for row in rows:
+        audited=audit_at(row['audit_path'])
+        validate_completion_disclosure(row,audited)
+        claim_audit=audit_at(row.get('claim_audit_path',row['audit_path']))
+        validate_audit({'meta':audited['meta'],'layers':{
+            '3':claim_audit['layers']['3'],'4':audited['layers']['4']}},
+            groups[row['group_key']]['claim_ids'],row['viewpoint_ids'],
+            owner_resolution_path=row.get('owner_resolution_path'))
+    return {'groups':len(rows),'binding_references':references,
+            'unique_physical_bindings':len(pins),'unique_audit_documents':len(documents)}
+
+
 def execute(args):
     if binding(args.schedule)["file_sha256"] != args.schedule_sha256:
         raise ValueError("approved schedule file SHA mismatch")
@@ -464,21 +505,7 @@ def execute(args):
         config['validation_checkpoint_sequence']=args.stop_after_sequence
     _write_immutable(args.output_root / "campaign.json", config)
     seed = read(args.completed_proofs)
-    if {r["group_key"] for r in seed["groups"]} != set(schedule["completed_groups"]):
-        raise ValueError("completed-group proofs differ from schedule")
-    for row in seed["groups"]:
-        for b in row["bindings"]:
-            if binding(b["path"]) != b:
-                raise ValueError("completed-group evidence SHA drift")
-        # A link-only repair does not invalidate the earlier unchanged Claim
-        # audit. Keep both physical reports explicit, never synthesize a pass.
-        audited = read(row["audit_path"])
-        from backend.pipeline.viewpoint_g035_temporary_audit import validate_completion_disclosure
-        validate_completion_disclosure(row, audited)
-        claim_audit = read(row.get("claim_audit_path", row["audit_path"]))
-        validate_audit({"meta": audited["meta"], "layers": {"3": claim_audit["layers"]["3"], "4": audited["layers"]["4"]}},
-                       groups[row["group_key"]]["claim_ids"], row["viewpoint_ids"],
-                       owner_resolution_path=row.get('owner_resolution_path'))
+    validate_completed_seed(seed,groups,schedule['completed_groups'])
     preflight = lineage_preflight(schedule, groups, inventory,
                                  getattr(args, 'random_spot_check_policy', None))
     _write_immutable(args.output_root / 'lineage-discovery-preflight.json', preflight)

@@ -74,6 +74,49 @@ def test_exact_intact_schedule():
     assert set(validate_schedule(schedule, manifest)) == {"a", "b"}
 
 
+@pytest.mark.parametrize('drift',[None,'pin','missing','duplicate_group','conflict','disclosure','audit'])
+def test_completed_seed_consumes_unique_bytes_but_all_original_group_gates(tmp_path,monkeypatch,drift):
+    import json
+    from backend.pipeline import viewpoint_cvp_campaign_runner as module
+    from backend.pipeline import viewpoint_g035_temporary_audit as disclosure
+    original=good_audit();path=str(tmp_path/'audit.json')
+    (tmp_path/'audit.json').write_text(json.dumps(original))
+    bound=module.binding(path)
+    rows=[{'group_key':g,'bindings':[deepcopy(bound)],'audit_path':path,
+           'viewpoint_ids':['v'],'revisit_required':False,'independent_audit_complete':True}
+          for g in ('a','b')]
+    seed={'groups':rows};groups={g:{'claim_ids':['c']} for g in ('a','b')}
+    if drift=='pin':rows[0]['bindings'][0]['file_sha256']='0'*64;rows[1]['bindings'][0]['file_sha256']='0'*64
+    elif drift=='missing':(tmp_path/'audit.json').unlink()
+    elif drift=='duplicate_group':rows.append(deepcopy(rows[0]))
+    elif drift=='conflict':rows[1]['bindings'][0]['file_sha256']='0'*64
+    reads=[];hashes=[];checks=[];actual_read=module.read;actual_binding=module.binding
+    monkeypatch.setattr(module,'read',lambda p:reads.append(p) or actual_read(p))
+    monkeypatch.setattr(module,'binding',lambda p:hashes.append(p) or actual_binding(p))
+    def check_flags(row,audit):
+        checks.append(('disclosure',row['group_key']))
+        if drift=='disclosure':raise ValueError('temporary flags differ')
+    def check_audit(audit,claims,views,**kwargs):
+        assert audit==original and claims==['c'] and views==['v']
+        checks.append(('audit',claims,views))
+        if drift=='audit':raise ValueError('incomplete audit')
+        audit['layers']['3']['results'][0]['verdict']='mutated isolated copy'
+    monkeypatch.setattr(disclosure,'validate_completion_disclosure',check_flags)
+    monkeypatch.setattr(module,'validate_audit',check_audit)
+    if drift:
+        with pytest.raises((ValueError,FileNotFoundError)):module.validate_completed_seed(seed,groups,['a','b'])
+        if drift in {'conflict','duplicate_group'}:assert hashes==reads==checks==[]
+    else:
+        assert module.validate_completed_seed(seed,groups,['a','b'])=={
+            'groups':2,'binding_references':2,'unique_physical_bindings':1,'unique_audit_documents':1}
+        assert hashes==reads==[path] and len(checks)==4
+        assert seed['groups']==rows and original==good_audit()
+        # A later startup must authenticate again, not reuse prior approval.
+        (tmp_path/'audit.json').write_text(json.dumps({'changed':True}))
+        with pytest.raises(ValueError,match='SHA drift'):
+            module.validate_completed_seed(seed,groups,['a','b'])
+
+
 @pytest.mark.parametrize('stop_before_apply',[False,True])
 def test_startup_gate_reuses_actual_owned_runtime_and_precedes_apply(tmp_path,monkeypatch,stop_before_apply):
     import json
