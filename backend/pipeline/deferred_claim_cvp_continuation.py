@@ -257,13 +257,82 @@ def build_proof(root,campaign,ids,ports):
         "new_model_calls":0,"registry_writes":0}
 
 
+def consume_completed_proof(campaign_root, path, claim_ids):
+    """Consume an executor's completed result, not its construction algorithm.
+
+    The saved seal binds the exact result and every original input, including
+    failed calls and large predecessor snapshots. Authenticate those bytes;
+    never parse the snapshots or rebuild already-reviewed model packages.
+    This is historical authentication only. The caller still checks live SQL.
+    """
+    path = Path(path); root = path.parent
+    proof = body(read(path))
+    ids = sorted(claim_ids)
+    if (path.name != 'component-completion.json' or len(ids) != len(set(ids))
+            or proof.get('schema_version') != VERSION or proof.get('status') != 'complete'
+            or proof.get('campaign_root') != str(campaign_root) or proof.get('claim_ids') != ids
+            or proof.get('historical_scope_run_preserved') is not True
+            or proof.get('new_model_calls') != 0 or proof.get('registry_writes') != 0):
+        raise ValueError('saved deferred completion identity/scope mismatch')
+    pins = proof['bindings']; names = [b['path'] for b in pins]
+    if len(names) != len(set(names)):
+        raise ValueError('saved deferred completion has duplicate bindings')
+    for pin in pins:
+        c.verify_file(pin)
+    context = body(read(root/'context.json'))
+    source = Path(context['claim_package']['path']).parent
+    original = Path(context['original_batch'])
+    required = {str(root/n) for n in ('context.json','packet.json','before.json',
+        'effective-package.json','plan.json','backup.json','apply-intent.json',
+        'apply-receipt.json','readback.json')}
+    required |= {str(source/n) for n in ('complete.json','effective-package.json',
+        'frozen.json','plan.json','apply-intent.json','readback.json','backup.json')}
+    required |= {str(original/n) for n in ('cvp-change-plan.json',
+        'cvp-change-package.json','cvp-readback-receipt.json')}
+    required |= {str(original.parent.parent/n) for n in ('scope-run.json','scope-disposition-ledger.json')}
+    # Preserve all actually emitted roles, failures and owner-once inputs.
+    from backend.pipeline.owner_model_reissue import directory, NAME
+    for folder in (root/'review', directory(root)):
+        required |= {str(p) for p in folder.glob('*.json')
+                     if p.name not in {'batch-run.json','measurements.json','current-state.json'}}
+    if (root/NAME).exists(): required |= {str(root/NAME),str(root/'runtime-proof.json')}
+    if (not required <= set(names) or context['campaign_root'] != str(campaign_root)
+            or sorted(context['claim_ids']) != ids or context['group_key'] != proof['group_key']
+            or sorted(context['repair_claim_ids']) != proof['resolved_claim_ids']
+            or context['claim_package'] not in pins):
+        raise ValueError('saved deferred completion lost an original input or member')
+    plan = body(read(root/'plan.json')); validate_delta(plan,context['repair_claim_ids'])
+    receipt = body(read(root/'apply-receipt.json')); readback = body(read(root/'readback.json'))
+    if (receipt.get('status') != 'applied' or receipt.get('change_set_id') != plan['change_set_id']
+            or readback.get('status') != 'verified'
+            or readback.get('post_fingerprint_sha256') != proof['current_registry_sha256']):
+        raise ValueError('saved deferred completion lacks exact applied/readback result')
+    views = sorted({o['payload']['viewpoint_id'] for o in plan['operations']
+                    if o['collection'] == 'viewpoint_claim_links'})
+    if proof['viewpoint_ids'] != views:
+        raise ValueError('saved deferred completion viewpoint population drift')
+    return proof, plan
+
+
 def verify_proof(campaign_root,path,claim_ids,store=None):
-    from backend.pipeline.viewpoint_validation_context import require_explicit_history_maintenance
-    require_explicit_history_maintenance('legacy completion consumption rebuilds full proof; compiled consumer required')
-    root = Path(path).parent
-    proof = read(Path(path)); rebuilt = build_proof(root,Path(campaign_root),claim_ids,ProductionPorts(store))
-    if body(proof) != rebuilt: raise ValueError("generic deferred completion proof drift")
-    return rebuilt
+    proof, plan = consume_completed_proof(campaign_root,path,claim_ids)
+    store = store or ProductionPorts().store
+    if not committed(plan,store):
+        raise ValueError('saved deferred completion is not actually committed; never replay')
+    from backend.pipeline.viewpoint_validation_context import read_current_objects
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    wanted = {(o['collection'],o['object_id']) for o in plan['operations']}
+    current = read_current_objects(store,wanted)
+    for raw in plan['operations']:
+        op = ChangeOperation(**raw); row = current[op.collection,op.object_id]
+        expected = stored_operation_payload(op)
+        if (row['retired'] or row['payload'] != expected or row['revision'] != op.after_revision
+                or row['content_sha256'] != record_content_sha(expected)):
+            raise ValueError('saved deferred completion current written postimage drift: '+op.object_id)
+    # Non-target integrity, source epochs and whole independent group audit
+    # retain their own gates. This returns the EXACT already-built result, not
+    # a newly inferred approval, current Registry fingerprint or group pass.
+    return proof
 
 
 def run(context,claim_root,ports, *, prewrite_conflict_log=None):

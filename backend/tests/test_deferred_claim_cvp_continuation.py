@@ -26,6 +26,99 @@ def test_normal_delta_retains_existing_components_only_creates_fresh_coverage():
     d.validate_delta({"operations":[op(),op("canonical_viewpoints","V"),op("viewpoint_revisions","VR"),op("viewpoint_identity_decisions","D")]},["C"])
 
 
+def saved_completion(tmp_path):
+    from backend.pipeline.source_reconciliation_runner import write, binding
+    from backend.api.canonical_repository.viewpoint_foundation import sha256_json
+    source=tmp_path/'source'; root=source/'normal-cvp'
+    original=tmp_path/'campaign/g001/production/run/batches/B'
+    names=('context.json','packet.json','before.json','effective-package.json',
+           'plan.json','backup.json','apply-intent.json','apply-receipt.json','readback.json')
+    for directory,files in ((root,names),(source,('complete.json','effective-package.json',
+            'frozen.json','plan.json','apply-intent.json','readback.json','backup.json')),
+            (original,('cvp-change-plan.json','cvp-change-package.json','cvp-readback-receipt.json')),
+            (original.parent.parent,('scope-run.json','scope-disposition-ledger.json')),
+            (root/'review',('raw-proposal.json','raw-consolidation.json','raw-review.json',
+                            'raw-proposal.call-intent.json','raw-proposal.call-failure.json'))):
+        for name in files:write(directory/name,{'saved':name})
+    item={**op(), 'before_sha256':None,'after_sha256':'1'*64,
+          'payload':{'claim_id':'C','viewpoint_id':'V','viewpoint_claim_link_id':'L'}}
+    plan={'operations':[item],'change_set_id':'KCS','source_sha256':'s','fingerprint_sha256':'f'}
+    write(root/'plan.json',plan,immutable=False)
+    write(root/'context.json',{'campaign_root':str(tmp_path/'campaign'),'claim_ids':['C'],
+        'group_key':'G','repair_claim_ids':['C'],'original_batch':str(original),
+        'claim_package':binding(source/'effective-package.json')},immutable=False)
+    write(root/'apply-receipt.json',{'status':'applied','change_set_id':'KCS'},immutable=False)
+    write(root/'readback.json',{'status':'verified','post_fingerprint_sha256':'P'},immutable=False)
+    pins=[binding(p) for directory in (root,source,original,original.parent.parent,root/'review')
+          for p in directory.glob('*.json')]
+    proof={'schema_version':d.VERSION,'campaign_root':str(tmp_path/'campaign'),
+        'group_key':'G','claim_ids':['C'],'resolved_claim_ids':['C'],'status':'complete',
+        'historical_scope_run_preserved':True,'viewpoint_ids':['V'],
+        'current_registry_sha256':'P','bindings':pins,'new_model_calls':0,'registry_writes':0}
+    path=root/'component-completion.json';write(path,proof)
+    return path,proof,plan
+
+
+def test_completed_consumer_returns_entire_saved_result_without_history_or_model_rebuild(tmp_path,monkeypatch):
+    from backend.api.canonical_repository.postgres_store import ChangeOperation,stored_operation_payload,record_content_sha
+    from backend.pipeline import viewpoint_validation_context as v
+    path,proof,plan=saved_completion(tmp_path)
+    def forbidden(*a,**k):pytest.fail('completed consumption entered historical/model reconstruction')
+    monkeypatch.setattr(d,'build_proof',forbidden)
+    monkeypatch.setattr(d,'package_from_saved_or_new',forbidden)
+    monkeypatch.setattr(d.epoch,'verified_applied',forbidden)
+    payload=stored_operation_payload(ChangeOperation(**plan['operations'][0]))
+    row={'payload':payload,'revision':1,'content_sha256':record_content_sha(payload),'retired':False}
+    calls=[]
+    monkeypatch.setattr(d,'committed',lambda p,s:calls.append(('commit',p)) or s.applied)
+    monkeypatch.setattr(v,'read_current_objects',lambda s,keys:calls.append(('current',keys)) or {('viewpoint_claim_links','L'):row})
+    store=SimpleNamespace(applied=True)
+    for _ in range(2):
+        assert d.verify_proof(proof['campaign_root'],path,['C'],store)==proof
+    assert [c[0] for c in calls]==['commit','current','commit','current']
+    store.applied=False
+    with pytest.raises(ValueError,match='actually committed'):d.verify_proof(proof['campaign_root'],path,['C'],store)
+    store.applied=True;row['payload']={**payload,'viewpoint_id':'OTHER'}
+    with pytest.raises(ValueError,match='postimage drift'):d.verify_proof(proof['campaign_root'],path,['C'],store)
+
+
+@pytest.mark.parametrize('problem',['retired','revision','sha','missing'])
+def test_completed_consumer_does_not_turn_single_user_into_current_write_approval(tmp_path,monkeypatch,problem):
+    from backend.api.canonical_repository.postgres_store import ChangeOperation,stored_operation_payload,record_content_sha
+    from backend.pipeline import viewpoint_validation_context as v
+    path,proof,plan=saved_completion(tmp_path)
+    payload=stored_operation_payload(ChangeOperation(**plan['operations'][0]))
+    row={'payload':payload,'revision':1,'content_sha256':record_content_sha(payload),'retired':False}
+    if problem=='retired':row['retired']=True
+    if problem=='revision':row['revision']=2
+    if problem=='sha':row['content_sha256']='foreign'
+    def current(store,keys):
+        if problem=='missing':raise ValueError('current proof readset incomplete')
+        return {('viewpoint_claim_links','L'):row}
+    monkeypatch.setattr(d,'committed',lambda p,s:True)
+    monkeypatch.setattr(v,'read_current_objects',current)
+    with pytest.raises(ValueError):d.verify_proof(proof['campaign_root'],path,['C'],object())
+
+
+@pytest.mark.parametrize('problem',['seal','member','campaign','bindings','missing_raw','raw_changed',
+                                   'rejected_receipt','readback','views','resolved'])
+def test_completed_consumer_keeps_identity_original_raw_failures_and_readback_gates(tmp_path,problem):
+    from backend.pipeline.source_reconciliation_runner import write
+    path,proof,plan=saved_completion(tmp_path)
+    if problem=='seal':path.write_text('{}')
+    elif problem=='member':proof['claim_ids']=['OTHER']
+    elif problem=='campaign':proof['campaign_root']='/foreign'
+    elif problem=='bindings':proof['bindings']=proof['bindings'][1:]
+    elif problem=='missing_raw':(path.parent/'review/raw-proposal.call-failure.json').unlink()
+    elif problem=='raw_changed':(path.parent/'review/raw-review.json').write_text('{}')
+    elif problem=='rejected_receipt':write(path.parent/'apply-receipt.json',{'status':'rejected'},immutable=False)
+    elif problem=='readback':proof['current_registry_sha256']='foreign'
+    elif problem=='views':proof['viewpoint_ids']=[]
+    elif problem=='resolved':proof['resolved_claim_ids']=[]
+    if problem not in {'seal','missing_raw','raw_changed','rejected_receipt'}:write(path,proof,immutable=False)
+    with pytest.raises(ValueError):d.consume_completed_proof(str(tmp_path/'campaign'),path,['C'])
+
+
 @pytest.mark.parametrize("problem",["rejected","escalated","deferred","foreign","core","route"])
 def test_repaired_claim_not_whole_group_complete_until_normal_cvp_review_resolved(problem):
     p = SimpleNamespace(claim_decisions=[SimpleNamespace(claim_id="C",components=[SimpleNamespace(disposition="new_viewpoint")])],

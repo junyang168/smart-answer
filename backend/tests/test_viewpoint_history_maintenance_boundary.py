@@ -10,7 +10,7 @@ def forbidden(*_args, **_kwargs):
     pytest.fail('legacy full-history body or database read was entered')
 
 
-@pytest.mark.parametrize('entry', ['snapshot', 'epoch_load', 'predecessor', 'build', 'verify', 'audit', 'typed'])
+@pytest.mark.parametrize('entry', ['snapshot', 'epoch_load', 'predecessor', 'build', 'audit', 'typed'])
 @pytest.mark.parametrize('owner', ['phase', 'runtime_outside_phase'])
 def test_known_unbounded_paths_are_vetoed_before_io_import_copy_or_database(monkeypatch, entry, owner):
     from backend.pipeline import source_reconciliation_epoch as e
@@ -26,7 +26,6 @@ def test_known_unbounded_paths_are_vetoed_before_io_import_copy_or_database(monk
         'epoch_load': lambda: e.load({'path': '/never-read', 'file_sha256': '0'*64}),
         'predecessor': lambda: e._predecessor_projection({}, {}, store),
         'build': lambda: d.build_proof(Path('/absent'), Path('/campaign'), [], None),
-        'verify': lambda: d.verify_proof('/campaign', '/absent/proof.json', [], store),
         'audit': lambda: l.historical_audit_proofs('/absent/audit.json', {}),
         'typed': lambda: v.typed_records(store, 'claims', object, 'claim_id'),
     }
@@ -74,4 +73,3 @@ def test_startup_does_not_prewarm_whole_sql_collections(monkeypatch):
     assert [row[0] for row in calls] == ['package', 'epochs', 'grouping']
     assert result['model_calls'] == result['Registry_writes'] == 0
     assert 'no whole-collection SQL prewarm' in result['scope']
-
