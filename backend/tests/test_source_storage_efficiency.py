@@ -72,6 +72,26 @@ def test_new_snapshots_share_exact_rows_old_files_unchanged(tmp_path,monkeypatch
     with pytest.raises(ValueError,match='SHA drift'):read(one)
 
 
+def test_shared_history_is_parsed_once_and_blob_drift_is_still_rejected(tmp_path,monkeypatch):
+    from backend.pipeline import immutable_proof_reuse as p
+    from backend.pipeline.source_reconciliation_runner import write,read
+    from backend.pipeline.viewpoint_validation_context import ValidationContext
+    monkeypatch.setattr(p,'MIN_SNAPSHOT_BYTES',1)
+    root=tmp_path/'source-reconciliation'
+    path=root/'task/frozen.json'
+    write(path,{'before_records':[{'value':'own full text'}]})
+    with ValidationContext('saved history') as ctx:
+        first=read(path)
+        assert read(path) is first
+        assert ctx.metrics['json_parses']==2  # artifact and its shared blob
+        with pytest.raises(TypeError):first['before_records'][0]['value']='changed'
+    blob=next((root/'immutable-snapshots').glob('*.rows.json'))
+    with pytest.raises(ValueError,match='input drift'):
+        with ValidationContext('changed history'):
+            read(path)
+            blob.write_bytes(b'[]')
+
+
 def test_verified_history_reuses_only_physical_pins_and_sql_generation(tmp_path):
     from backend.pipeline import immutable_proof_reuse as p
     from backend.pipeline.source_reconciliation_runner import binding

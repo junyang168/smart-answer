@@ -37,9 +37,17 @@ def restore_snapshot(path,value):
         if len(sha)!=64 or any(c not in '0123456789abcdef' for c in sha) or set(ref)!={'wkp_shared_records_v1','size'}:
             raise ValueError('invalid shared records reference')
         index=path.parts.index('source-reconciliation');base=Path(*path.parts[:index+1])/'immutable-snapshots'
-        raw=(base/(sha+'.rows.json')).read_bytes()
-        if len(raw)!=ref['size'] or hashlib.sha256(raw).hexdigest()!=sha:raise ValueError('shared records size/SHA drift')
-        rows=json.loads(raw)
+        blob=base/(sha+'.rows.json')
+        from backend.pipeline.viewpoint_validation_context import historical_context
+        ctx=historical_context()
+        if ctx:
+            if blob.stat().st_size!=ref['size'] or ctx.pin(blob)!=sha:
+                raise ValueError('shared records size/SHA drift')
+            rows=ctx.read(blob)
+        else:
+            raw=blob.read_bytes()
+            if len(raw)!=ref['size'] or hashlib.sha256(raw).hexdigest()!=sha:raise ValueError('shared records size/SHA drift')
+            rows=json.loads(raw)
         if not isinstance(rows,list):raise ValueError('shared records not rows')
         value[field]=rows
     return value

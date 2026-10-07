@@ -17,6 +17,7 @@ from typing import Any, Protocol
 
 from backend.api.canonical_repository.viewpoint_foundation import canonical_json, sha256_json
 from backend.pipeline import source_reconciliation as contract
+from backend.pipeline.viewpoint_validation_context import validated_history
 
 STAGES = ("proposal", "initial_review", "correction", "final_review")
 
@@ -38,8 +39,11 @@ def seal(body: dict) -> dict:
     return {**body, "artifact_sha256": sha256_json(body)}
 
 
+@validated_history(bound_files_only=True)
 def read(path: Path) -> dict:
-    value = json.loads(path.read_text(encoding="utf-8"))
+    from backend.pipeline.viewpoint_validation_context import historical_context
+    ctx = historical_context()
+    value = ctx.read(path) if ctx else json.loads(path.read_text(encoding="utf-8"))
     from backend.pipeline.immutable_proof_reuse import restore_snapshot
     value=restore_snapshot(path,value)
     stated = value.get("artifact_sha256")
@@ -435,8 +439,24 @@ def audit_jobs(frozen: dict, current: dict[str, dict]) -> list[dict]:
     return jobs
 
 
+@validated_history(bound_files_only=True)
 def validate_package(package: dict, *, historical: bool = False) -> None:
     """Store-side reconstruction; supplied approval booleans are not authority."""
+    from backend.pipeline.viewpoint_validation_context import historical_context
+    ctx = historical_context()
+    if ctx:
+        # A cached reconstruction must also depend on its compiler/model code,
+        # not only the saved rows and this dispatcher's source file.
+        project = Path(__file__).resolve().parents[2]
+        for relative in (
+            'backend/pipeline/source_reconciliation.py',
+            'backend/pipeline/source_reconciliation_runtime.py',
+            'backend/pipeline/deferred_claim_repair.py',
+            'backend/pipeline/source_projection.py',
+            'backend/api/canonical_repository/knowledge_models.py',
+            'backend/api/canonical_repository/postgres_store.py',
+        ):
+            ctx.pin(project / relative)
     # Startup reads the saved, sealed artifact; the store receives its body.
     # Authenticate the envelope before comparing exactly the same package body.
     if "artifact_sha256" in package:
@@ -496,6 +516,16 @@ def validate_package(package: dict, *, historical: bool = False) -> None:
 
 def validate_raw(root: Path, stage: str, packet: dict) -> dict:
     from backend.pipeline.source_reconciliation_runtime import model_adapter
+    from backend.pipeline.viewpoint_validation_context import historical_context
+    ctx = historical_context()
+    if ctx:
+        from backend.pipeline.source_reconciliation_runtime import PROMPTS
+        from backend.pipeline.viewpoint_semantic_contract import CONTRACT_PATH
+        ctx.pin(CONTRACT_PATH)
+        ctx.pin(PROMPTS / ('source_reconciliation_review.md'
+            if stage in {'initial_review', 'final_review'} else 'source_reconciliation_proposal.md'))
+        if packet.get('manifest', {}).get('deferred_repair'):
+            ctx.pin(PROMPTS / 'deferred_claim_evidence_repair_v1.md')
     adapter = model_adapter(stage, deferred=bool(packet.get("manifest", {}).get("deferred_repair")))
     raw = read(root / (stage + ".raw.json"))
     reservation = body(read(root / (stage + ".reservation.json")))

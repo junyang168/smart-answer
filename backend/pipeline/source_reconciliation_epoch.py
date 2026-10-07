@@ -12,8 +12,10 @@ from backend.pipeline import source_reconciliation as c
 from backend.pipeline.source_reconciliation_runner import body, read, binding as file_binding, validate_package, validate_completion_population
 from backend.pipeline.source_reconciliation_runtime import ProductionPorts
 from backend.api.canonical_repository.postgres_store import record_content_sha
+from backend.pipeline.viewpoint_validation_context import validated_history
 
 
+@validated_history(bound_files_only=True)
 def load(bound, *, historical=False):
     path = c.verify_file(bound)
     package = body(read(path))
