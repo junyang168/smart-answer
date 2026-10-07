@@ -540,8 +540,16 @@ def test_generic_epoch_composes_two_applied_updates_without_writes(scenario,tmp_
     second_package=r.body(r.read(second_runner.root/"effective-package.json"))
     calls=[]
     monkeypatch.setattr(epoch,"_assert_database",lambda plan,store:calls.append(plan["change_set_id"]))
+    indexed_from=[];actual_index=c.index
+    def counted_index(rows):
+        import sys
+        caller=sys._getframe(1).f_code.co_name
+        if caller in {"_retained_readset","_predecessor_projection"}: indexed_from.append(caller)
+        return actual_index(rows)
+    monkeypatch.setattr(c,"index",counted_index)
     projected=epoch._predecessor_projection(second_package,second_ports.states,object())
     assert projected==original and len(calls)==2
+    assert indexed_from==["_retained_readset"]*2
     assert ports.applies==second_ports.applies==1
     assert second_ports.calls==["proposal","initial_review"]
 
@@ -586,6 +594,63 @@ def test_unchanged_reviewed_context_is_not_an_eternal_approval(scenario):
     drifted["questions/Q-test"]["text"] = "unreviewed question"
     with pytest.raises(ValueError, match="retained review context"):
         epoch._retained_readset(frozen, {"operations": []}, drifted)
+
+
+@pytest.mark.parametrize("count", [1, 1000])
+def test_epoch_reuses_only_this_invocations_checked_index(monkeypatch, count):
+    from backend.pipeline import source_reconciliation_epoch as epoch
+    from backend.pipeline import owner_approved_link_correction as child
+    before = {f"source_documents/S{i}": {"source_id": f"S{i}", "revision": 1,
+        "source_type": "sermon_transcript", "transcript_id": f"sermon-{i}",
+        "nested": {"text": "完整原文"}} for i in range(count)}
+    before["claims/C"] = {"claim_id": "C", "revision": 1, "statement": "旧版"}
+    current = deepcopy(before)
+    current["claims/C"] = {"claim_id": "C", "revision": 2, "statement": "已审核版本"}
+    plan = {"operations": [{"collection": "claims", "object_id": "C",
+        "payload": {"claim_id": "C", "statement": "已审核版本"}, "after_revision": 2}]}
+    frozen = {"before_records": c.rows(before), "inventory": {
+        "affected_keys": ["claims/C"], "context_keys": list(before)}}
+    package = {"identity": "unchanged-package"}
+    audit = {"result": {"unchanged": True}, "job": {"claim_ids": ["C"], "viewpoint_ids": ["V"]}}
+    monkeypatch.setattr(epoch, "load", lambda bound: (package, frozen, plan, {"audits": [audit]}))
+    checks = []
+    monkeypatch.setattr(epoch, "_assert_database", lambda plan, store: checks.append("SQL"))
+    monkeypatch.setattr(child, "source_projection", lambda complete, states, store: states)
+    class Ports:
+        def __init__(self, store): pass
+        def snapshot(self):
+            checks.append("current")
+            return deepcopy(current)
+        def validate_audit(self, result, claims, views):
+            assert (result, claims, views) == (audit["result"], ["C"], ["V"])
+            checks.append("audit")
+    monkeypatch.setattr(epoch, "ProductionPorts", Ports)
+    actual_index = c.index
+    indexed = []
+    def counted_index(rows):
+        indexed.append(len(rows))
+        return actual_index(rows)
+    monkeypatch.setattr(c, "index", counted_index)
+    expected = (package, {c.split_key(k): p for k, p in before.items()},
+        {c.split_key(k): p for k, p in current.items()})
+    assert epoch.verified_applied({}, object()) == expected
+    assert indexed == [count + 1]
+    assert checks == ["SQL", "current", "audit"]
+    # Returned mutable projections cannot mutate the frozen input or live state.
+    result = epoch.verified_applied({}, object())
+    result[1]["source_documents", "S0"]["nested"]["text"] = "changed by caller"
+    assert frozen["before_records"] == c.rows(before)
+    assert current["source_documents/S0"]["nested"]["text"] == "完整原文"
+    assert indexed == [count + 1, count + 1]
+    assert checks == ["SQL", "current", "audit"] * 2
+    # A later invocation MUST recheck both written and retained current values.
+    current["claims/C"]["revision"] = 3
+    with pytest.raises(ValueError, match="postimage"):
+        epoch.verified_applied({}, object())
+    current["claims/C"]["revision"] = 2
+    current["source_documents/S0"]["revision"] = 2
+    with pytest.raises(ValueError, match="retained review context"):
+        epoch.verified_applied({}, object())
 
 
 def test_initial_model_packet_cannot_drop_frozen_context(scenario, tmp_path):

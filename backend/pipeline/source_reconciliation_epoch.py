@@ -63,6 +63,7 @@ def _retained_readset(frozen, plan, states):
     for k in frozen["inventory"]["affected_keys"] + frozen["inventory"]["context_keys"]:
         if k not in written and c.split_key(k)[0] in c.WRITABLE and states.get(k) != before[k]:
             raise ValueError("source epoch retained review context/version drift: " + k)
+    return before
 
 
 def verified_applied(bound, store):
@@ -73,11 +74,11 @@ def verified_applied(bound, store):
     from backend.pipeline.owner_approved_link_correction import source_projection
     projected = source_projection(complete, current, store)
     _postimages(plan, projected)
-    _retained_readset(frozen, plan, projected)
+    before = _retained_readset(frozen, plan, projected)
     for outcome in complete["audits"]:
         job = outcome["job"]
         ports.validate_audit(outcome["result"], job["claim_ids"], job["viewpoint_ids"])
-    return package, {c.split_key(k): p for k, p in c.index(frozen["before_records"]).items()}, {c.split_key(k): p for k, p in current.items()}
+    return package, {c.split_key(k): p for k, p in before.items()}, {c.split_key(k): p for k, p in current.items()}
 
 
 def binding(path):
@@ -98,9 +99,8 @@ def _predecessor_projection(package, states, store, *, seen=None):
     from backend.pipeline.owner_approved_link_correction import source_projection
     states = source_projection(complete, states, store)
     _postimages(plan, states)
-    _retained_readset(frozen, plan, states)
+    before = _retained_readset(frozen, plan, states)
     restored = deepcopy(states)
-    before = c.index(frozen["before_records"])
     for op in plan["operations"]:
         k = c.key(op["collection"], op["object_id"])
         if k in before:
