@@ -52,7 +52,10 @@ def resolved_report(report,ids):
         raise ValueError("normal CVP decision denominator changed")
     if any(x.disposition == "deferred" for d in p.claim_decisions for x in d.components):
         raise ValueError("repaired Claim still deferred; do not fabricate group completion")
-    if p.viewpoint_revisions or p.argument_route_candidates:
+    # The strict CVP response has no Route field; Route proposals have their
+    # own schema. Still reject any supplied Route-bearing object rather than
+    # assuming that absent field exists on the real CVP response.
+    if p.viewpoint_revisions or getattr(p,"argument_route_candidates",[]):
         raise ValueError("normal delta needs existing CVP body/route changes outside Claim repair")
 
 

@@ -40,6 +40,22 @@ def test_repaired_claim_not_whole_group_complete_until_normal_cvp_review_resolve
     with pytest.raises(ValueError): d.resolved_report(report,["C"])
 
 
+def test_real_strict_cvp_response_has_no_route_field_and_passes_resolved_gate():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import CanonicalViewpointProposalResponse
+    p=CanonicalViewpointProposalResponse.model_validate({
+        "schema_version":"wang_canonical_viewpoint_proposal_v1","batch_id":"B",
+        "claim_decisions":[{"claim_id":"C","components":[{
+            "spans":[{"start_char":0,"end_char":2,"exact_text":"原文"}],
+            "disposition":"member_existing","target_viewpoint_revision_id":"VR",
+            "evidence_step_ids":["E"],"source_fragment_ids":["F"],"reason":"same source"}]}],
+        "new_viewpoint_candidates":[],"viewpoint_revisions":[],
+        "viewpoint_relations":[],"structures":[]})
+    assert not hasattr(p,"argument_route_candidates")
+    d.resolved_report({"approval_outcome":"pass","escalations":[],"_effective_proposal":p},["C"])
+    with pytest.raises(ValueError):
+        CanonicalViewpointProposalResponse.model_validate({**p.model_dump(),"argument_route_candidates":[{}]})
+
+
 def test_reverse_boundary_requires_every_exact_normalized_postimage():
     # stored_operation_payload uses actual after_revision, not a draft version.
     item = {**op("claims","C","update"),"before_revision":1,"after_revision":2,"payload":{"claim_id":"C","statement":"corrected"},
