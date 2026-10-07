@@ -991,6 +991,39 @@ class CanonicalViewpointReviewResponse(StrictBatchModel):
         return "pass"
 
 
+class CoverageReviewedChange(ReviewedChange):
+    """Reviewer-owned sufficiency judgment, not an inference from ID presence."""
+
+    coverage_requirement: Literal[
+        "cvp_required", "evidence_insufficient", "attribution_unresolved",
+        "source_conflict", "human_hold", "observation_only",
+    ]
+    coverage_claim_sha256: str = Field(min_length=1)
+    coverage_evidence_step_ids: list[str]
+    coverage_reason: str = Field(min_length=1)
+    cvp_covered: bool
+
+    @model_validator(mode="after")
+    def validate_coverage(self) -> "CoverageReviewedChange":
+        if self.coverage_evidence_step_ids != sorted(set(self.coverage_evidence_step_ids)):
+            raise ValueError("coverage evidence IDs must be sorted and unique")
+        if self.coverage_requirement == "cvp_required":
+            if not self.coverage_evidence_step_ids:
+                raise ValueError("sufficient Claim coverage requires its own evidence")
+            if not self.cvp_covered and (
+                self.decision != "correct" or "missing_cvp_coverage" not in self.finding_codes
+            ):
+                raise ValueError("sufficient Claim without CVP requires a correct finding")
+        return self
+
+
+class CoverageCanonicalViewpointReviewResponse(CanonicalViewpointReviewResponse):
+    """New request/cache identity; historical v1 reviews are not upgraded."""
+
+    schema_version: Literal["wang_canonical_viewpoint_review_v2"] = "wang_canonical_viewpoint_review_v2"
+    change_reviews: list[CoverageReviewedChange] = Field(min_length=1)
+
+
 def split_batches(
     claim_ids: Sequence[str], *, batch_size: int = DEFAULT_BATCH_SIZE
 ) -> list[list[str]]:
@@ -1499,6 +1532,7 @@ def validate_review(
     review: CanonicalViewpointReviewResponse,
     proposal: CanonicalViewpointProposalResponse,
     proposal_sha256: str,
+    claims: Sequence[ReviewClaim] | None = None,
 ) -> dict[str, Any]:
     """Require the reviewer to have answered every proposed change."""
 
@@ -1519,6 +1553,29 @@ def validate_review(
         findings.append(f"{missing[0]}#{missing[1]}: no review decision")
     for extra in sorted(set(reviewed) - set(expected)):
         findings.append(f"{extra[0]}#{extra[1]}: review points at no proposed change")
+
+    if isinstance(review, CoverageCanonicalViewpointReviewResponse):
+        claim_index = {c.claim_id: c for c in claims or []}
+        if (len(claim_index) != len(claims or [])
+                or set(claim_index) != {d.claim_id for d in proposal.claim_decisions}):
+            findings.append("coverage review requires exact pinned Claim batch")
+        components = {(d.claim_id, i): component for d in proposal.claim_decisions
+                      for i, component in enumerate(d.components)}
+        for item in review.change_reviews:
+            component = components.get((item.claim_id, item.component_index))
+            claim = claim_index.get(item.claim_id)
+            if component is None or claim is None:
+                continue
+            covered = component.disposition not in {"deferred", "no_registry_assertion"}
+            if item.cvp_covered != covered:
+                findings.append(f"{item.claim_id}#{item.component_index}: coverage disagrees with proposed CVP target")
+            if item.coverage_claim_sha256 != claim.claim_revision_sha256:
+                findings.append(f"{item.claim_id}: coverage belongs to another Claim version")
+            own = {e.evidence_step_id for e in claim.evidence}
+            eligible = {e.evidence_step_id for e in claim.evidence if e.valid_for_identity_review}
+            evidence = set(item.coverage_evidence_step_ids)
+            if not evidence <= own or (item.coverage_requirement == "cvp_required" and not evidence <= eligible):
+                findings.append(f"{item.claim_id}: coverage cites foreign or ineligible evidence")
 
     proposed_revisions = {
         item.target_viewpoint_revision_id for item in proposal.viewpoint_revisions
@@ -1614,6 +1671,9 @@ def validate_review(
         or any(not item.synthesis_entailed_by_focal for item in review.structure_reviews)
         or any(not item.direction_correct for item in review.relation_reviews),
     }
+    if isinstance(review, CoverageCanonicalViewpointReviewResponse):
+        report.update(coverage_contract_version="wang_cvp_required_coverage_v1",
+                      coverage_reviewed_change_count=len(review.change_reviews))
     report["artifact_sha256"] = sha256_json(report)
     return report
 

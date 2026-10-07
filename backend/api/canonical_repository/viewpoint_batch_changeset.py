@@ -115,8 +115,11 @@ def compile_cvp_batch_package(
         review=review,
         proposal=review_target,
         proposal_sha256=review_target_sha256,
+        claims=claims,
     )
     if review_validation["outcome"] != "pass":
+        if review.schema_version == "wang_canonical_viewpoint_review_v2":
+            raise CvpBatchChangeSetError("coverage contract requires passing review of effective proposal")
         if reconsideration is None or reviewed_proposal is None:
             raise CvpBatchChangeSetError(
                 "CVP ChangeSet requires a passing review or one resolved correction"

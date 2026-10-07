@@ -23,7 +23,9 @@ def semantic_prompt(role_prompt: str, version: str = CONTEXTUAL_SEMANTICS) -> st
 
 
 def policy_prompt(policy, role, prompt_dir):
-    return semantic_prompt(
+    prompt = semantic_prompt(
         (prompt_dir / policy["prompts"][role]).read_text(encoding="utf-8"),
         policy.get("semantic_contract_version", LEGACY_SEMANTICS),
     )
+    from backend.pipeline.viewpoint_cvp_coverage_contract import enabled, PROMPT
+    return prompt + "\n\n" + PROMPT if enabled(policy) else prompt

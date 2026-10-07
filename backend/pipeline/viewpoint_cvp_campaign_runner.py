@@ -297,8 +297,10 @@ def campaign_policy(args):
             raise ValueError('semantic SHAs without explicit policy cannot select legacy')
         return str(legacy.relative_to(PROJECT_ROOT)), {}
     contextual=PROJECT_ROOT/'backend/pipeline/policies/wang_cvp_resolution_policy_v5.json'
-    if Path(path).resolve()!=contextual.resolve():
-        raise ValueError('explicit campaign policy must be the authorized contextual v5')
+    coverage=PROJECT_ROOT/'backend/pipeline/policies/wang_cvp_resolution_policy_v6.json'
+    if Path(path).resolve() not in {contextual.resolve(), coverage.resolve()}:
+        raise ValueError('explicit campaign policy must be the authorized contextual v5 or coverage v6')
+    contextual=Path(path).resolve()
     from backend.pipeline.viewpoint_semantic_contract import CONTRACT_PATH,CONTEXTUAL_SEMANTICS
     policy=binding(contextual);rules=binding(CONTRACT_PATH)
     if (policy['file_sha256']!=getattr(args,'cvp_policy_sha256',None)

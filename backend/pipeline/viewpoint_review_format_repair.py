@@ -14,8 +14,9 @@ from backend.pipeline.viewpoint_resolution_runtime import call_model, write_immu
 def parse_review(raw: dict[str, Any], *, adapter: Any, request: dict[str, Any],
                  cache: Path, call=call_model):
     canonical, changes = canonicalize_review(raw)
+    response_model = getattr(adapter, '_response_model', CanonicalViewpointReviewResponse)
     try:
-        return CanonicalViewpointReviewResponse.model_validate(canonical), changes, 0, 0.0
+        return response_model.model_validate(canonical), changes, 0, 0.0
     except ValidationError as error:
         errors = error.errors(include_url=False, include_context=False, include_input=False)
         for item in errors:
@@ -45,7 +46,7 @@ def parse_review(raw: dict[str, Any], *, adapter: Any, request: dict[str, Any],
         fixed, calls, seconds = call(adapter, repair_request, cache)
         fixed_canonical, fixed_changes = canonicalize_review(fixed)
         # Validate once; a second malformed answer never causes another call.
-        parsed = CanonicalViewpointReviewResponse.model_validate(fixed_canonical)
+        parsed = response_model.model_validate(fixed_canonical)
         comparable = deepcopy(fixed_canonical)
         for index in indices:
             if fixed_canonical['change_reviews'][index]['finding_codes'] != []:

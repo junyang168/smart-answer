@@ -29,6 +29,7 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     ContextualIdentityConsolidationResponse,
     decode_consolidation,
     CanonicalViewpointReviewResponse,
+    CoverageCanonicalViewpointReviewResponse,
     ClaimGroupingResponse,
     DEFAULT_BATCH_SIZE,
     anchor_proposal_spans,
@@ -148,11 +149,14 @@ def build_proposer(
 def build_reviewer(
     model: str, reasoning_effort: str, *, provider: str = "claude", cvp_policy=None
 ) -> StructuredJsonReviewerAdapter:
+    from backend.pipeline.viewpoint_cvp_coverage_contract import enabled
+    policy = cvp_policy if cvp_policy is not None else load_cvp_policy(DEFAULT_CVP_POLICY_PATH)
+    coverage = enabled(policy)
     return _compact_adapter(
         client=_subscription_client(provider, model, reasoning_effort),
-        prompt=_role_prompt(cvp_policy, "review"),
-        response_model=CanonicalViewpointReviewResponse,
-        schema_name="wang_canonical_viewpoint_review_v1",
+        prompt=_role_prompt(policy, "review"),
+        response_model=CoverageCanonicalViewpointReviewResponse if coverage else CanonicalViewpointReviewResponse,
+        schema_name="wang_canonical_viewpoint_review_v2" if coverage else "wang_canonical_viewpoint_review_v1",
     )
 
 
@@ -437,6 +441,8 @@ def run_final_cvp_review(
         review=review,
         proposal=proposal,
         proposal_sha256=proposal_sha256,
+        claims=([ReviewClaim.model_validate(c) for c in packet["claims"]]
+                if isinstance(review, CoverageCanonicalViewpointReviewResponse) else None),
     )
     review_payload = review.model_dump(mode="json")
     review_sha256 = sha256_json(review_payload)
@@ -606,6 +612,7 @@ def run_batch(
         review=review,
         proposal=proposal,
         proposal_sha256=proposal_sha,
+        claims=claims,
     )
     review_payload = review.model_dump(mode="json")
     _write_immutable(
