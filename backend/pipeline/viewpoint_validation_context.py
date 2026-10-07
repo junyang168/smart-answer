@@ -356,7 +356,10 @@ def read_current_objects(store, keys):
     wanted = set(keys)
     ctx = active_context()
     if ctx is not None and hasattr(store, 'database_url'):
-        return current_registry_view(store).read_keys(wanted)
+        identity = ('exact_readset', store.database_url)
+        if identity not in ctx.registry_views:
+            ctx.registry_views[identity] = ScopedCurrentRegistryView(store, ctx)
+        return ctx.registry_views[identity].read_keys(wanted)
     records = {}
     with store.connect() as connection:
         connection.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
@@ -514,6 +517,103 @@ def database_clock(connection):
     ).fetchone()
     if row[2] is not True:raise ValueError('canonical tables must be WAL logged')
     return tuple(row[:2])
+
+
+class ScopedCurrentRegistryView:
+    """One phase's exact-ID SQL snapshot, never a whole-Registry approval.
+
+    Global collection/fingerprint consumers retain CurrentRegistryView below.
+    Exact readset consumers do not need its O(N) row-generation scan. Their
+    own rows, including retirement and physical MVCC identity, are freshly
+    rechecked at the phase boundary. No current records survive that boundary.
+    """
+    def __init__(self, store, ctx):
+        self.store, self.ctx = store, ctx
+        self.records, self.versions = {}, {}
+        self.closed = False
+        self.connection = store.connect()
+        try:
+            self.connection.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+            self.bound_query(self.connection)
+            self.epoch = self.storage_epoch(self.connection)
+        except BaseException:
+            self.close()
+            raise
+
+    def bound_query(self, connection):
+        self.ctx.check_budget('exact current SQL boundary')
+        if self.ctx.limits is not None:
+            remaining = self.ctx.limits.wall_seconds-(time.perf_counter()-self.ctx.started)
+            milliseconds = max(1, int(remaining*1000))
+            connection.execute('SET LOCAL statement_timeout = '+str(milliseconds))
+
+    @staticmethod
+    def storage_epoch(connection):
+        return tuple(connection.execute(
+            "SELECT pg_postmaster_start_time()::text,"
+            "floor(pg_snapshot_xmax(pg_current_snapshot())::text::numeric/4294967296)::text,"
+            "pg_relation_filenode('wang_knowledge.objects'::regclass)"
+        ).fetchone())
+
+    def observe(self, connection, keys, *, payload):
+        self.bound_query(connection)
+        probes = sorted(keys)
+        fields = 'o.collection,o.object_id,o.revision,o.content_sha256,o.retired_at,o.xmin::text,o.ctid::text'
+        if payload:
+            fields += ',o.payload'
+        rows = connection.execute(
+            'SELECT '+fields+' FROM wang_knowledge.objects o '
+            'JOIN unnest(%s::text[],%s::text[]) AS wanted(collection,object_id) '
+            'ON o.collection=wanted.collection AND o.object_id=wanted.object_id',
+            ([col for col,oid in probes], [oid for col,oid in probes])
+        ).fetchall()
+        indexed = {}
+        for row in rows:
+            key = row[0], row[1]
+            if key not in keys or key in indexed:
+                raise ValueError('exact current SQL readset identity drift')
+            indexed[key] = row
+        self.ctx.check_budget('exact current SQL readset returned')
+        metric = 'sql_payload_rows' if payload else 'sql_version_rows'
+        self.ctx.metrics[metric] = self.ctx.metrics.get(metric, 0)+len(rows)
+        if indexed.keys() != keys:
+            raise ValueError('current proof readset incomplete')
+        return indexed
+
+    def read_keys(self, wanted):
+        from backend.api.canonical_repository.postgres_store import record_content_sha
+        missing = wanted-self.records.keys()
+        if missing:
+            for key,row in self.observe(self.connection, missing, payload=True).items():
+                _,_,revision,sha,retired,xmin,ctid,payload = row
+                if revision != payload.get('revision') or sha != record_content_sha(payload):
+                    raise ValueError('exact current SQL revision/content SHA drift')
+                self.records[key] = readonly({'payload':payload, 'revision':revision,
+                                             'content_sha256':sha, 'retired':retired is not None})
+                self.versions[key] = tuple(row[2:7])
+        return {key:self.records[key] for key in wanted}
+
+    def verify_unchanged(self):
+        # A NEW read-only transaction observes current versions, not the old
+        # repeatable-read snapshot. Same stored SHA is not enough: xmin/ctid
+        # catch payload-only updates and delete/reinsert; epoch catches rewrite,
+        # restart and XID wrap. Unrelated rows neither invalidate nor get read.
+        with self.store.connect() as current:
+            current.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+            self.bound_query(current)
+            if self.storage_epoch(current) != self.epoch:
+                raise ValueError('exact readset database storage epoch changed')
+            rows = self.observe(current, set(self.versions), payload=False) if self.versions else {}
+            if {key:tuple(row[2:7]) for key,row in rows.items()} != self.versions:
+                raise ValueError('exact current readset changed during mechanical validation')
+
+    def close(self):
+        if not self.closed:
+            self.closed = True
+            try:self.connection.rollback()
+            finally:self.connection.close()
+            self.records.clear()
+            self.versions.clear()
 
 
 class CurrentRegistryView:
