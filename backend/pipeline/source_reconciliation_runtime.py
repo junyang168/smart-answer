@@ -76,20 +76,33 @@ def model_adapter(stage: str, *, live: bool = False, deferred: bool = False):
 
 
 def expected_invalidations(before: dict, planned_post: dict, plan: dict) -> dict:
-    """Mirror the SQL writer's deterministic dependency effects, not waive them."""
+    """Mirror SQL effects with one reverse-index pass, preserving every cause.
+
+    This full-snapshot compatibility API still costs O(N) to copy the postimage.
+    Index construction is O(N+R); lookup costs only affected edges, not W*N.
+    The bounded executor must eventually obtain this reverse index from SQL,
+    rather than rebuilding it from the library on routine group transitions.
+    """
     result = deepcopy(planned_post)
+    consumers = {}
+    for k, p in before.items():
+        if not k.startswith("product_dependencies/") or p.get("status", "current") != "current":
+            continue
+        # A dependency can name the Claim both in claim_id and in its manifest,
+        # or repeat a manifest entry. It still invalidates once for each cause.
+        references = {(r.get("collection"), r.get("record_id"))
+                      for r in p.get("dependency_manifest", [])}
+        if p.get("claim_id") is not None:
+            references.add(("claims", p["claim_id"]))
+        for reference in references:
+            consumers.setdefault(reference, set()).add(k)
     causes = {}
     for op in plan["operations"]:
         changed_collection, changed_id = op["collection"], op["object_id"]
-        ids = []
-        for k, p in before.items():
-            if not k.startswith("product_dependencies/") or p.get("status", "current") != "current":
-                continue
-            references = p.get("dependency_manifest", [])
-            if (changed_collection == "claims" and p.get("claim_id") == changed_id) or any(
-                    r.get("collection") == changed_collection and r.get("record_id") == changed_id for r in references):
-                ids.append(contract.split_key(k)[1])
-                causes.setdefault(k, []).append(op)
+        keys = sorted(consumers.get((changed_collection, changed_id), ()))
+        ids = [contract.split_key(k)[1] for k in keys]
+        for k in keys:
+            causes.setdefault(k, []).append(op)
         if ids:
             event_id = f"IMPACT-{plan['change_set_id']}-{changed_collection}-{changed_id}"
             event = {"impact_event_id": event_id, "changed_record_type": changed_collection,

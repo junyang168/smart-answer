@@ -20,14 +20,53 @@ from pathlib import Path
 import time
 from collections.abc import Mapping
 from copy import deepcopy
+from dataclasses import dataclass
+import math
 
 _current = ContextVar('cvp_validation_context', default=None)
 _pool = ContextVar('cvp_historical_proof_pool', default=None)
 
 
+@dataclass(frozen=True)
+class ValidationLimits:
+    """Fail-closed resource guard, not evidence that an algorithm is scalable.
+
+    Explicit maintenance may use an unbounded context under its external job
+    budget. Routine phases may not silently downgrade or retry without limits.
+    File IO includes authentication, parsing and the closing reauthentication.
+    """
+    file_io_bytes: int
+    wall_seconds: float
+
+    def __post_init__(self):
+        if (type(self.file_io_bytes) is not int or self.file_io_bytes <= 0
+                or not isinstance(self.wall_seconds, (int, float))
+                or isinstance(self.wall_seconds, bool) or not math.isfinite(self.wall_seconds)
+                or self.wall_seconds <= 0):
+            raise ValueError('positive finite validation limits required')
+
+
+class ValidationBudgetExceeded(ValueError):
+    """Mechanical design/scale failure; never a semantic rejection or retry."""
+    def __init__(self, phase, metric, observed, limit, operation):
+        self.detail = dict(status='scalability_budget_exceeded', phase=phase,
+                           metric=metric, observed=observed, limit=limit,
+                           operation=operation, automatic_fallback=False,
+                           model_calls=0, registry_writes=0)
+        super().__init__(json.dumps(self.detail, ensure_ascii=False, sort_keys=True))
+
+
+# Safety ceiling for the existing authenticated-history runtime. This does not
+# certify its cold path: the known whole-history path MUST stop at this ceiling
+# until replaced by compiled bounded proofs. No production release from a warm
+# cache or from merely staying under these ceilings; growth acceptance is extra.
+ROUTINE_VALIDATION_LIMITS = ValidationLimits(64*1024**2, 5.0)
+
+
 class HistoricalProofPool:
     """Owned by one campaign runtime; never persisted or shared with a writer."""
-    def __init__(self):
+    def __init__(self, limits=None):
+        self.limits = limits
         self.documents = {}
         self.results = {}
         self.phase_metrics = []
@@ -46,10 +85,10 @@ class HistoricalProofPool:
 
 
 @contextmanager
-def validation_runtime():
+def validation_runtime(*, limits=None):
     if _pool.get() is not None:
         raise ValueError('one owner per validation runtime')
-    pool = HistoricalProofPool()
+    pool = HistoricalProofPool(limits)
     token = _pool.set(pool)
     try:
         yield pool
@@ -117,13 +156,18 @@ def physical_sha(path):
 
 
 class ValidationContext:
-    def __init__(self, label):
+    def __init__(self, label, *, limits=None):
         self.label = label
         self.depth = 0
         self.closed = False
         self.files = {}
         self.absent_files = set()
         self.pool = _pool.get() or HistoricalProofPool()
+        # A caller cannot loosen its owning runtime's hard guard. Standalone
+        # maintenance can choose its own explicit bounds without changing it.
+        self.limits = self.pool.limits if self.pool.limits is not None else limits
+        if limits is not None and self.pool.limits is not None and limits != self.pool.limits:
+            raise ValueError('cannot override owning validation runtime limits')
         self.shared_pool = _pool.get() is not None
         self.documents = self.pool.documents
         self.results = self.pool.results
@@ -133,7 +177,54 @@ class ValidationContext:
         self.registry_views = {}
         self.directories = {}
         self.started = time.perf_counter()
-        self.metrics = dict(json_parses=0, parsed_bytes=0, proof_runs=0, proof_reuses=0)
+        self.metrics = dict(json_parses=0, parsed_bytes=0, proof_runs=0, proof_reuses=0,
+                            file_io_bytes=0, hashed_bytes=0)
+
+    def check_budget(self, operation):
+        if self.limits is not None:
+            elapsed = time.perf_counter()-self.started
+            if elapsed > self.limits.wall_seconds:
+                raise ValidationBudgetExceeded(self.label, 'wall_seconds', elapsed,
+                                               self.limits.wall_seconds, operation)
+
+    def charge_io(self, size, operation):
+        self.check_budget(operation)
+        total = self.metrics['file_io_bytes']+size
+        if self.limits is not None and total > self.limits.file_io_bytes:
+            raise ValidationBudgetExceeded(self.label, 'file_io_bytes', total,
+                                           self.limits.file_io_bytes, operation)
+        self.metrics['file_io_bytes'] = total
+
+    def hash_file(self, path):
+        # Refuse an oversized historical snapshot BEFORE opening/reading it.
+        # Stream and charge actual chunks too, so concurrent growth cannot
+        # defeat a stat-only precheck. No timestamp is treated as a content SHA.
+        size = path.stat().st_size
+        self.check_budget('authenticate '+str(path))
+        if self.limits is not None and self.metrics['file_io_bytes']+size > self.limits.file_io_bytes:
+            raise ValidationBudgetExceeded(self.label, 'file_io_bytes', self.metrics['file_io_bytes']+size,
+                                           self.limits.file_io_bytes, 'authenticate '+str(path))
+        digest = hashlib.sha256()
+        with path.open('rb') as stream:
+            while chunk := stream.read(1024*1024):
+                self.charge_io(len(chunk), 'authenticate '+str(path))
+                self.metrics['hashed_bytes'] += len(chunk)
+                digest.update(chunk)
+        self.check_budget('authenticated '+str(path))
+        return digest.hexdigest()
+
+    def read_bytes(self, path):
+        size = path.stat().st_size
+        self.check_budget('read '+str(path))
+        if self.limits is not None and self.metrics['file_io_bytes']+size > self.limits.file_io_bytes:
+            raise ValidationBudgetExceeded(self.label, 'file_io_bytes', self.metrics['file_io_bytes']+size,
+                                           self.limits.file_io_bytes, 'read '+str(path))
+        chunks = []
+        with path.open('rb') as stream:
+            while chunk := stream.read(1024*1024):
+                self.charge_io(len(chunk), 'read '+str(path))
+                chunks.append(chunk)
+        return b''.join(chunks)
 
     def __enter__(self):
         current = _current.get()
@@ -149,6 +240,8 @@ class ValidationContext:
             else:
                 self.closed = True
                 self.pool.clear()
+                self.metrics['wall_seconds'] = round(time.perf_counter()-self.started, 6)
+                self.pool.phase_metrics.append({'phase': self.label, 'status': 'failed', **self.metrics})
         finally:
             for view in self.registry_views.values():
                 view.close()
@@ -156,9 +249,10 @@ class ValidationContext:
             _current.reset(self.token)
 
     def pin(self, path, *, history=False):
+        self.check_budget('pin historical input')
         path = Path(path).absolute()
         if path not in self.files:
-            self.files[path] = (path.resolve(strict=True), physical_sha(path))
+            self.files[path] = (path.resolve(strict=True), self.hash_file(path))
         if (history or self.depth) and (not self.receipt_policy_stack or any(self.receipt_policy_stack)):
             # Negative historical receipts, not mutable runtime output folders.
             self.directories.setdefault(path.parent, frozenset(p.name for p in path.parent.iterdir()))
@@ -172,10 +266,11 @@ class ValidationContext:
         if path in self.documents and self.documents[path][0] != self.files[path]:
             raise ValueError('historical document no longer matches its authenticated bytes: ' + str(path))
         if path not in self.documents:
-            data = path.read_bytes()
+            data = self.read_bytes(path)
             if hashlib.sha256(data).hexdigest() != pin:
                 raise ValueError('historical artifact changed while reading: ' + str(path))
             self.documents[path] = (self.files[path], readonly(json.loads(data)))
+            self.check_budget('parsed '+str(path))
             self.metrics['json_parses'] += 1
             self.metrics['parsed_bytes'] += len(data)
         return self.documents[path][1]
@@ -200,8 +295,9 @@ class ValidationContext:
         if self.closed:
             return
         try:
+            self.check_budget('closing validation boundary')
             for path, (resolved, pin) in self.files.items():
-                if path.resolve(strict=True) != resolved or physical_sha(path) != pin:
+                if path.resolve(strict=True) != resolved or self.hash_file(path) != pin:
                     raise ValueError('validation phase historical input drift: ' + str(path))
             for path in self.absent_files:
                 if os.path.lexists(path):
@@ -211,6 +307,7 @@ class ValidationContext:
                     raise ValueError('validation phase historical receipt set drift: ' + str(path))
             for view in self.registry_views.values():
                 view.verify_unchanged()
+            self.check_budget('closed validation boundary')
         except BaseException:
             self.pool.clear()
             raise
@@ -315,6 +412,7 @@ def validated_history(fn=None, *, bound_files_only=False):
         ctx = _current.get()
         if ctx is None or ctx.closed:
             return fn(*args, **kwargs)
+        ctx.check_budget('historical validator '+fn.__qualname__)
         # Package identity is content-bound, never object-id or filename-only.
         def encode(v):
             if isinstance(v, Path):
@@ -359,6 +457,7 @@ def validated_history(fn=None, *, bound_files_only=False):
             if source_file.is_file():
                 ctx.pin(source_file)
             result = readonly(fn(*args, **kwargs))
+            ctx.check_budget('historical validator finished '+fn.__qualname__)
             ctx.results[key] = (result, {p: ctx.files.get(p) for p in dependencies},
                                 {p.parent: ctx.directories[p.parent] for p in dependencies
                                  if p.parent in ctx.directories})

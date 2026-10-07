@@ -456,6 +456,12 @@ def execute(args):
     config.update(campaign_policy(args)[1])
     if getattr(args, 'validation_runtime', False):
         config['validation_runtime'] = 'bounded_authenticated_history_v1'
+        from backend.pipeline.viewpoint_validation_context import ROUTINE_VALIDATION_LIMITS
+        config['mechanical_validation_limits'] = {
+            'file_io_bytes': ROUTINE_VALIDATION_LIMITS.file_io_bytes,
+            'wall_seconds': ROUTINE_VALIDATION_LIMITS.wall_seconds,
+            'automatic_full_rebuild_fallback': False,
+            'scalability_release_accepted': False}
     if getattr(args,'stop_after_sequence',None) is not None:
         if not 1<=args.stop_after_sequence<=len(schedule['schedule']):
             raise ValueError('invalid validation checkpoint sequence')
@@ -629,8 +635,8 @@ def main():
         from backend.pipeline.viewpoint_campaign_control import graceful_campaign_stop
         with graceful_campaign_stop(args.output_root):
             if args.validation_runtime:
-                from backend.pipeline.viewpoint_validation_context import validation_runtime
-                with validation_runtime():
+                from backend.pipeline.viewpoint_validation_context import validation_runtime, ROUTINE_VALIDATION_LIMITS
+                with validation_runtime(limits=ROUTINE_VALIDATION_LIMITS):
                     return execute(args)
             return execute(args)
 

@@ -191,9 +191,20 @@ def rows(states: dict[str, dict]) -> list[dict]:
 def fingerprint(states: dict[str, dict], *, collections: list[str] | None = None) -> str:
     # Bind even currently empty collections: inserting a record there after
     # review must be detected by the advisory-locked SQL boundary too.
-    collections = sorted(set(KNOWLEDGE_COLLECTIONS) | {split_key(k)[0] for k in states}) if collections is None else sorted(collections)
-    return sha256_json({c: sorted(sha256_json(p) for k, p in states.items()
-                                 if split_key(k)[0] == c) for c in collections})
+    # One traversal, not one whole-library traversal per collection. Keep the
+    # exact old wire fingerprint, including empty collections, unknown included
+    # collections and duplicate payload hashes. Explicit cuts must not hash rows
+    # outside the cut. This remains a FULL-cut operation, not an incremental
+    # current-state proof: callers must not mistake this optimization for O(D).
+    implicit = collections is None
+    hashes = {c: [] for c in (KNOWLEDGE_COLLECTIONS if implicit else collections)}
+    for k, payload in states.items():
+        collection = split_key(k)[0]
+        if implicit:
+            hashes.setdefault(collection, [])
+        if collection in hashes:
+            hashes[collection].append(sha256_json(payload))
+    return sha256_json({c: sorted(hashes[c]) for c in sorted(hashes)})
 
 
 def verify_file(binding: FileBinding | dict) -> Path:

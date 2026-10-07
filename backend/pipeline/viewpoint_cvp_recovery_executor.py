@@ -357,7 +357,7 @@ def continuation_root(root, attempt):
     return root.parent / name
 
 
-def resume_after_repair(root, attempt, recovery_root, executable, *, additional_proof_bindings=(), additional_source_repair_paths=(), saved_audit_path=None, prior_model_batch=None, reuse_correction=False, owner_resolution_path=None, initial_prefix_only=False, allow_lossless_compact_config_migration=False, component_resolution_path=None, contextual_semantics=False, source_epoch_recompletion_path=None):
+def resume_after_repair(root, attempt, recovery_root, executable, *, additional_proof_bindings=(), additional_source_repair_paths=(), saved_audit_path=None, prior_model_batch=None, reuse_correction=False, owner_resolution_path=None, initial_prefix_only=False, allow_lossless_compact_config_migration=False, component_resolution_path=None, contextual_semantics=False, source_epoch_recompletion_path=None, scalability_acceptance_path=None):
     if contextual_semantics and prior_model_batch is not None:
         raise ValueError('new semantic policy cannot migrate old model-response approval')
     cfg, schedule, manifest, groups = load_campaign(root)
@@ -367,7 +367,11 @@ def resume_after_repair(root, attempt, recovery_root, executable, *, additional_
     if (group_root / "production/run/scope-run.json").exists():
         # Already-written records are never generated/applied twice. Re-audit
         # exactly the bound Claim and Viewpoint population in a fresh directory.
-        if component_resolution_path is not None:
+        # With a SAVED audit, verify_group_audit below authenticates the same
+        # component before consuming its audit/population. Do not reconstruct
+        # the entire component here and immediately reconstruct it again there.
+        # A NEW audit still needs this check before any provider call; keep it.
+        if component_resolution_path is not None and saved_audit_path is None:
             from backend.pipeline.viewpoint_g034_component_completion import verify_proof
             verify_proof(root,component_resolution_path,groups[state['group_key']]['claim_ids'])
         if read(group_root / "production/run/scope-run.json")["disposition_status"] != "complete" and component_resolution_path is None:
@@ -443,12 +447,13 @@ def resume_after_repair(root, attempt, recovery_root, executable, *, additional_
     return start_prepared_campaign(root, output, attempt, recovery_root, executable, argv, groups,
         prior_model_batch=prior_model_batch, reuse_correction=reuse_correction,
         initial_prefix_only=initial_prefix_only,
-        allow_lossless_compact_config_migration=allow_lossless_compact_config_migration)
+        allow_lossless_compact_config_migration=allow_lossless_compact_config_migration,
+        scalability_acceptance_path=scalability_acceptance_path)
 
 
 def start_prepared_campaign(root, output, attempt, recovery_root, executable, argv, groups, *,
         prior_model_batch=None, reuse_correction=False, initial_prefix_only=False,
-        allow_lossless_compact_config_migration=False):
+        allow_lossless_compact_config_migration=False, scalability_acceptance_path=None):
     """Start a freshly derived seed through the unchanged production safety gates.
 
     A saved verified completion can use continuation_inputs without regenerating
@@ -457,6 +462,9 @@ def start_prepared_campaign(root, output, attempt, recovery_root, executable, ar
     """
     if str(argv[argv.index('--output-root') + 1]) != str(output):
         raise ValueError('prepared campaign output identity drift')
+    from backend.pipeline.viewpoint_scalability_acceptance import require_scalability_acceptance
+    performance = require_scalability_acceptance(scalability_acceptance_path)
+    write_immutable(attempt/'scalability-acceptance-binding.json',performance)
     env = os.environ.copy()
     env["CODEX_EXECUTABLE"] = str(executable)
     run_logged([*argv, "--dry-run"], attempt, "campaign-preflight", env=env)

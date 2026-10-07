@@ -263,7 +263,16 @@ def test_long_continuation_root_is_bounded_and_full_identity_bound(tmp_path):
     result.mkdir()
 
 
-def test_prepared_seed_handoff_cannot_skip_dryrun_or_change_output(tmp_path, monkeypatch):
+@pytest.fixture
+def mocked_performance_acceptance(monkeypatch):
+    # These legacy orchestration tests isolate backup/runtime/process gates.
+    # The REAL measured-acceptance schema/negative gates are tested separately;
+    # no actual production acceptance artifact is created by this fixture.
+    from backend.pipeline import viewpoint_scalability_acceptance as performance
+    monkeypatch.setattr(performance,'require_scalability_acceptance',lambda _:{'status':'measured_pass','test_double':True})
+
+
+def test_prepared_seed_handoff_cannot_skip_dryrun_or_change_output(tmp_path, monkeypatch, mocked_performance_acceptance):
     output = tmp_path / 'new'
     args = ['runner', '--output-root', str(output)]
     calls = []
@@ -271,6 +280,7 @@ def test_prepared_seed_handoff_cannot_skip_dryrun_or_change_output(tmp_path, mon
         calls.append((argv, name))
         raise ValueError('actual preflight failed')
     monkeypatch.setattr(m, 'run_logged', fail_preflight)
+    (tmp_path/'attempt').mkdir()
     with pytest.raises(ValueError, match='output identity drift'):
         m.start_prepared_campaign(tmp_path/'old', tmp_path/'foreign', tmp_path/'attempt',
                                   tmp_path/'recovery', 'codex', args, {})
@@ -301,8 +311,66 @@ def test_repaired_owner_checkpoint_never_preflights_or_starts_next_group(tmp_pat
     assert not result['production_complete'] and not result['production_restarted']
 
 
+@pytest.mark.parametrize('rejected', [False, True])
+def test_saved_audit_component_is_verified_once_not_twice(tmp_path, monkeypatch, rejected):
+    from backend.pipeline import viewpoint_group_audit_population as population
+    from backend.pipeline import viewpoint_g034_component_completion as component
+    root=tmp_path/'campaign'; attempt=tmp_path/'attempt'
+    root.mkdir(); attempt.mkdir()
+    (root/'progress.json').write_text('{"sequence":1,"group_key":"g"}')
+    run=root/'g001/production/run'; batch=run/'batches/B'; batch.mkdir(parents=True)
+    (run/'scope-run.json').write_text('{"disposition_status":"incomplete"}')
+    (batch/'cvp-change-plan.json').write_text('{}')
+    (batch/'cvp-change-package.json').write_text('{}')
+    (batch/'cvp-readback-receipt.json').write_text('{"readback_status":"verified"}')
+    audit=tmp_path/'audit.json'; audit.write_text('{"meta":{},"layers":{"1":{},"2":{}}}')
+    proof_path=tmp_path/'component.json'; proof_path.write_text('{}')
+    monkeypatch.setattr(m,'load_campaign',lambda *_:({'validation_checkpoint_sequence':1,'authorized_by':'owner'},
+        {'schedule':[{}]}, {}, {'g':{'claim_ids':['C']}}))
+    monkeypatch.setattr(population,'group_audit_targets',lambda _:['CV'])
+    calls=[]
+    def verify(campaign, path, ids):
+        calls.append((campaign,path,ids))
+        if rejected: raise ValueError('component proof drift')
+        return {'viewpoint_ids':['CV-new'], 'bindings':[]}
+    monkeypatch.setattr(component,'verify_proof',verify)
+    audits=[]
+    monkeypatch.setattr(m,'validate_audit',lambda *a,**kw:audits.append(a))
+    monkeypatch.setattr(m,'scope_audit_disposition',lambda **kw:{'status':'passed'})
+    monkeypatch.setattr(m,'accepted_grouping_audit_scope',lambda *a:{})
+    from backend.pipeline import viewpoint_g035_temporary_audit as exception
+    monkeypatch.setattr(exception,'validate',lambda _:[])
+    monkeypatch.setattr(m,'run_logged',lambda *a,**kw:pytest.fail('no provider/startup'))
+    options=dict(saved_audit_path=audit,component_resolution_path=proof_path)
+    if rejected:
+        with pytest.raises(ValueError,match='component proof drift'):
+            m.resume_after_repair(root,attempt,tmp_path/'recovery','unused',**options)
+        assert not audits and not (attempt/'verified-group/completion.json').exists()
+    else:
+        result=m.resume_after_repair(root,attempt,tmp_path/'recovery','unused',**options)
+        assert result['status']=='owner_validation_checkpoint'
+        assert result['completed_group_proof']['viewpoint_ids']==['CV','CV-new']
+        assert len(audits)==1
+    assert calls==[(root,proof_path,['C'])]
+
+
+def test_new_audit_rejects_bad_component_before_provider(tmp_path, monkeypatch):
+    from backend.pipeline import viewpoint_g034_component_completion as component
+    root=tmp_path/'campaign'; attempt=tmp_path/'attempt'; root.mkdir(); attempt.mkdir()
+    (root/'progress.json').write_text('{"sequence":1,"group_key":"g"}')
+    run=root/'g001/production/run'; run.mkdir(parents=True)
+    (run/'scope-run.json').write_text('{"disposition_status":"incomplete"}')
+    monkeypatch.setattr(m,'load_campaign',lambda *_:({}, {}, {}, {'g':{'claim_ids':['C']}}))
+    def reject(*args):raise ValueError('component proof drift')
+    monkeypatch.setattr(component,'verify_proof',reject)
+    monkeypatch.setattr(m,'run_logged',lambda *a,**kw:pytest.fail('no provider/startup'))
+    with pytest.raises(ValueError,match='component proof drift'):
+        m.resume_after_repair(root,attempt,tmp_path/'recovery','unused',
+                              component_resolution_path=tmp_path/'component.json')
+
+
 @pytest.mark.parametrize("active", [False, True])
-def test_restart_requires_backup_dryrun_and_unique_real_process(tmp_path, monkeypatch, active):
+def test_restart_requires_backup_dryrun_and_unique_real_process(tmp_path, monkeypatch, active, mocked_performance_acceptance):
     root, attempt, recovery = [tmp_path / n for n in ("old", "fingerprint", "recovery")]
     root.mkdir(); attempt.mkdir()
     (root / "progress.json").write_text('{"sequence":8,"group_key":"g"}')
@@ -341,7 +409,7 @@ def test_restart_requires_backup_dryrun_and_unique_real_process(tmp_path, monkey
         assert json.loads((attempt / "codex-runtime-preflight.json").read_text())["identity"]["model"] == "gpt-6.1-sol"
 
 
-def test_bad_runtime_stops_before_background_launch_and_retains_reason(tmp_path, monkeypatch):
+def test_bad_runtime_stops_before_background_launch_and_retains_reason(tmp_path, monkeypatch, mocked_performance_acceptance):
     root, attempt, recovery = [tmp_path / n for n in ('old', 'attempt', 'recovery')]
     root.mkdir(); attempt.mkdir()
     (root / 'progress.json').write_text('{"sequence":13,"group_key":"g"}')
