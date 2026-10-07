@@ -66,7 +66,26 @@ BEGIN
     IF pg_trigger_depth() < 2 THEN
         RAISE EXCEPTION 'direct integrity metadata write refused';
     END IF;
-    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+    -- Another trigger is not permission to rewind the head or edit history.
+    -- A privileged caller can invalidate a baseline, never restore its old
+    -- sequence by a nested DELETE/UPDATE without changing guarded catalogs.
+    IF TG_TABLE_NAME = 'integrity_head' THEN
+        IF TG_OP <> 'UPDATE' OR NEW.singleton <> OLD.singleton
+           OR NEW.journal_id <> OLD.journal_id OR NEW.sequence <> OLD.sequence + 1 THEN
+            RAISE EXCEPTION 'integrity head must advance exactly once; identity/rewind refused';
+        END IF;
+    ELSIF TG_TABLE_NAME = 'integrity_changes' THEN
+        IF TG_OP <> 'INSERT' THEN
+            RAISE EXCEPTION 'integrity history is immutable';
+        END IF;
+        IF NEW.transaction_id <> pg_current_xact_id()::text
+           OR NOT EXISTS (SELECT 1 FROM wang_knowledge.integrity_head h
+                          WHERE h.journal_id = NEW.journal_id AND h.sequence = NEW.sequence) THEN
+            RAISE EXCEPTION 'integrity history must match current transaction/head';
+        END IF;
+    ELSE
+        RAISE EXCEPTION 'unexpected integrity guard table';
+    END IF;
     RETURN NEW;
 END;
 $wkp$;

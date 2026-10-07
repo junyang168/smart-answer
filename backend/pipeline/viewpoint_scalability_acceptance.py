@@ -39,6 +39,7 @@ IMPLEMENTATION = (
     'backend/api/canonical_repository/reviewed_candidate_contract.py',
     'backend/api/canonical_repository/postgres_store.py',
     'backend/api/canonical_repository/integrity_journal.py',
+    'backend/api/canonical_repository/integrity_baseline.py',
     'backend/api/canonical_repository/integrity_journal_install.sql',
     'scripts/audit-library.py',
 )

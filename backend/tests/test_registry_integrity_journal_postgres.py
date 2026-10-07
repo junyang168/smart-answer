@@ -208,3 +208,23 @@ def test_actual_fast_column_DDL_invalidates_baseline_without_row_trigger(databas
         observed=j.observe_generation(cursor)
         assert observed['sequence']==baseline['sequence']
         with pytest.raises(ValueError,match='generation changed'):j.assert_unchanged_generation(cursor,baseline)
+
+
+@pytest.mark.parametrize('mutation',[
+    'UPDATE wang_knowledge.integrity_head SET sequence=sequence-1',
+    'DELETE FROM wang_knowledge.integrity_head',
+    'DELETE FROM wang_knowledge.integrity_changes',
+    'UPDATE wang_knowledge.integrity_changes SET transaction_id=transaction_id',
+])
+def test_actual_nested_trigger_cannot_rewind_head_or_rewrite_old_history(database,mutation):
+    with psycopg.connect(database) as conn,conn.cursor() as cursor:
+        # Ensure even an empty-log DELETE cannot pass accidentally as a no-op.
+        insert(cursor,'C-'+uuid.uuid4().hex)
+        conn.execute('CREATE TABLE public.integrity_nested_fixture (value integer)')
+        conn.execute('CREATE FUNCTION public.integrity_nested_fixture() RETURNS trigger LANGUAGE plpgsql '
+                     'AS $$BEGIN '+mutation+'; RETURN NEW; END;$$')
+        conn.execute('CREATE TRIGGER nested_fixture AFTER INSERT ON public.integrity_nested_fixture '
+                     'FOR EACH ROW EXECUTE FUNCTION public.integrity_nested_fixture()')
+        with pytest.raises(psycopg.errors.RaiseException):
+            conn.execute('INSERT INTO public.integrity_nested_fixture VALUES (1)')
+        conn.rollback()
