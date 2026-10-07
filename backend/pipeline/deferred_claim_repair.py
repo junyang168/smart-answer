@@ -12,11 +12,69 @@ from backend.pipeline import source_reconciliation as c
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json, semantic_record_sha
 
 VERSION = "wang_deferred_claim_repair_v1"
+TRANSPORT = "wang_deferred_claim_json_records_v1"
 HOLDS = c.HUMAN_HOLDS | {"human_hold", "withheld_unreviewed"}
 CLAIM_FIELDS = {"occurrences", "evidence_step_ids", "eligible_evidence_step_ids", "context_evidence_step_ids", "withheld_evidence_step_ids"}
 CONTENT_FIELDS = {"statement", "attribution", "discourse_mode", "claim_type"}
 EVIDENCE_FIELDS = {"statement", "source_fragment_ids", "source_fragment_id"}
 LINK_FIELDS = {"pinned_claim_revision", "component_locator", "evidence_bindings"}
+
+
+class JsonRow(c.Contract):
+    collection: str
+    object_id: str
+    payload_json: str
+
+
+class JsonProposal(c.Contract):
+    """Lossless JSON text for schema-open Registry records; no Any in wire schema."""
+    records: list[JsonRow]
+    dispositions: list[c.Disposition]
+    unadmitted_candidates_json: list[str]
+    sentence_dispositions: list[c.SentenceDisposition]
+
+
+def decode_proposal(response):
+    if "unadmitted_candidates_json" not in response:
+        return response  # old read-only tests/fixtures, never a transport fallback
+    wire = JsonProposal.model_validate(response)
+    def unique(pairs):
+        result = {}
+        for k,v in pairs:
+            if k in result: raise ValueError("duplicate JSON payload field")
+            result[k] = v
+        return result
+    decode = lambda s: json.loads(s,object_pairs_hook=unique)
+    return {"records":[{"collection":r.collection,"object_id":r.object_id,"payload":decode(r.payload_json)} for r in wire.records],
+        "dispositions":[x.model_dump() for x in wire.dispositions],
+        "unadmitted_candidates":[decode(s) for s in wire.unadmitted_candidates_json],
+        "sentence_dispositions":[x.model_dump() for x in wire.sentence_dispositions]}
+
+
+def verify_schema_rejection(bound, states):
+    """Only explicit provider 400, no last message; never a timeout/no-answer inference."""
+    failure = artifact(bound)
+    root = Path(bound.path).parent
+    raw = failure.get("provider_raw") or {}
+    stderr = raw.get("stderr","")
+    errors = []
+    for line in stderr.splitlines():
+        if line.startswith("ERROR: "):
+            try: errors.append(json.loads(line[7:]))
+            except json.JSONDecodeError: raise ValueError("unstructured rejection cannot authorize a new call")
+    if (raw.get("last_message") is not None or raw.get("stdout") or not errors or
+            any(e.get("status") != 400 or e.get("error",{}).get("code") != "invalid_json_schema"
+                or e.get("error",{}).get("param") != "text.format.schema" for e in errors)
+            or (root / "proposal.raw.json").exists() or (root / "initial_review.reservation.json").exists()):
+        raise ValueError("not a proven pre-generation schema rejection")
+    old = c.index(__import__('backend.pipeline.source_reconciliation_runner',fromlist=['read']).read(root / "frozen.json")["before_records"])
+    if old != states: raise ValueError("Registry changed since the explicit schema rejection")
+    frozen = json.loads((root / "frozen.json").read_text())
+    if frozen["manifest"]["deferred_repair"].get("provider_schema_rejection") is not None:
+        raise ValueError("schema repair budget already used")
+    c.guard_files(frozen)
+    if not (root / "proposal.reservation.json").exists(): raise ValueError("original call intent missing")
+    return frozen
 
 
 def artifact(bound, snapshots=None):
@@ -141,6 +199,11 @@ def validate_authority(manifest,states,snapshots=None):
         raise ValueError("exact deferred mode/diagnosis is not bound to owner execution authority")
     if manifest.permissions != permissions(states,manifest.source_id,repair.claim_ids,repair.kind):
         raise ValueError("deferred permission set exceeds exact Claim/Evidence/link impact scope")
+    if repair.provider_schema_rejection:
+        old = verify_schema_rejection(repair.provider_schema_rejection,states)
+        old_repair = old["manifest"]["deferred_repair"]
+        if any(old_repair.get(k) != repair.model_dump().get(k) for k in ("kind","claim_ids","investigation_packet","handoff","raw_gpt","raw_opus")):
+            raise ValueError("schema correction changed the original deferred diagnosis/target")
     return verify_diagnosis(repair,states,manifest.source_id,snapshots)
 
 
@@ -205,7 +268,7 @@ def validate_postimages(frozen,post):
 
 def normalize_proposal(frozen,response):
     """Declared hash/default computation BEFORE independent Opus review."""
-    proposed = c.Proposal.model_validate(response)
+    proposed = c.Proposal.model_validate(decode_proposal(response))
     data = c.index(proposed.records)
     source = frozen["after"][0]
     for k,p in data.items():

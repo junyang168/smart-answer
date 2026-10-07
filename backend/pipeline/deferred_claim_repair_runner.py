@@ -12,7 +12,7 @@ from backend.pipeline.source_reconciliation_runtime import ProductionPorts, work
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 
 
-def prepare(campaign, output, owner, ports):
+def prepare(campaign, output, owner, ports, schema_rejection=None):
     from backend.pipeline.viewpoint_cvp_recovery_executor import load_campaign
     cfg,schedule,accepted,groups = load_campaign(campaign)
     progress = json.loads((campaign / "progress.json").read_text())
@@ -36,6 +36,7 @@ def prepare(campaign, output, owner, ports):
     investigation = group / "deferred-source-check"
     handoff = d.artifact(c.FileBinding.model_validate(binding(investigation / "handoff.json")))
     repair = c.DeferredRepair(kind=d.route(handoff["actions"]),claim_ids=deferred,
+        provider_schema_rejection=c.FileBinding.model_validate(binding(schema_rejection)) if schema_rejection else None,
         **{name:binding(investigation / filename) for name,filename in (
             ("investigation_packet","packet.json"),("handoff","handoff.json"),("raw_gpt","raw-gpt.json"),("raw_opus","raw-opus.json"))})
     states = ports.snapshot()
@@ -44,7 +45,7 @@ def prepare(campaign, output, owner, ports):
     if len(sources) != 1: raise ValueError("one Claim repair transaction must have one exact own source")
     sid = sources.pop()
     perms = d.permissions(states,sid,deferred,repair.kind)
-    write(output / "authorization.json",{"source_id":sid,"authorization_id":d.VERSION+":"+d.problem_identity(packet,repair.kind),
+    write(output / "authorization.json",{"source_id":sid,"authorization_id":d.TRANSPORT+":"+d.problem_identity(packet,repair.kind),
         "authorization_quote":auth["authorization_quote"],"human_content_approval":False,"standing_policy":d.VERSION,
         "standing_authorization":binding(owner),"deferred_repair":repair.model_dump(),"permissions":[p.model_dump() for p in perms]})
     source = binding(Path(states[c.key("source_documents",sid)]["source_path"]))
@@ -84,6 +85,7 @@ def main():
     parser.add_argument("--output-root",type=Path,required=True)
     parser.add_argument("--authorization",type=Path,required=True)
     parser.add_argument("--prepare-only",action="store_true")
+    parser.add_argument("--schema-rejection",type=Path,help="Exact original provider 400 receipt; not a model retry")
     args = parser.parse_args()
     load_dotenv(PROJECT / ".env")
     if PROJECT.name != "wkp-357-worktree-per-session": raise ValueError("#357 worktree only; primary read-only")
@@ -91,7 +93,7 @@ def main():
         ports = ProductionPorts()
         output = args.output_root.resolve()
         try:
-            manifest,context = prepare(args.campaign_root.resolve(),output,args.authorization.resolve(),ports)
+            manifest,context = prepare(args.campaign_root.resolve(),output,args.authorization.resolve(),ports,args.schema_rejection)
             runner = Runner(workspace(),ports)
             frozen = runner.prepare(manifest)
             write(output / "claim-task.json",{"root":str(runner.root),"update_id":frozen["update_id"]})

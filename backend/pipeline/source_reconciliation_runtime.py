@@ -57,15 +57,19 @@ def model_adapter(stage: str, *, live: bool = False, deferred: bool = False):
     prompt = semantic_prompt((PROMPTS / filename).read_text(encoding="utf-8"))
     if deferred:
         prompt += "\n" + (PROMPTS / "deferred_claim_evidence_repair_v1.md").read_text(encoding="utf-8")
+        if not review:
+            prompt += "\n输出采用无损 JSON records 协议：每条 records 的 payload_json 是完整拟后像 JSON 字符串，不删字段；unadmitted_candidates_json 同理。程序逐字段解析为原 Proposal 再机械验证和交给 Opus。"
     if stage == "correction":
         prompt += "\n本次是唯一一轮纠正。逐条回应初次 Opus 意见，不得扩大范围；未解决项明确 unresolved。"
     if stage == "final_review":
         prompt += "\n本次是终局审核实际纠正稿。只通过或保留拒绝，不再安排第二轮纠正。"
     client = subscription_client(provider, model, "high") if live else SimpleNamespace(
         model=model, backend=backend, reasoning_effort="high", max_output_tokens=64000)
+    if deferred and not review:
+        from backend.pipeline.deferred_claim_repair import JsonProposal
     adapter = StructuredJsonReviewerAdapter(client=client, prompt=prompt,
-        response_model=contract.Review if review else contract.Proposal,
-        schema_name="source_reconciliation_review_v1" if review else "source_reconciliation_proposal_v1",
+        response_model=contract.Review if review else JsonProposal if deferred else contract.Proposal,
+        schema_name="source_reconciliation_review_v1" if review else "deferred_claim_json_records_v1" if deferred else "source_reconciliation_proposal_v1",
         compact_payload=True, shared_text_payload=True, shared_record_payload=True)
     adapter.max_request_bytes = 500000
     return adapter

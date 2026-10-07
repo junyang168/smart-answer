@@ -188,3 +188,41 @@ def test_problem_budget_ignores_root_and_incidental_packet_context(case):
     assert d.problem_identity(packet,"evidence_binding") == d.problem_identity(changed,"evidence_binding")
     changed["items"][0]["claim_revision_sha256"] = "1"*64
     assert d.problem_identity(packet,"evidence_binding") != d.problem_identity(changed,"evidence_binding")
+
+
+def test_proposal_wire_has_no_open_objects_and_roundtrips_all_legacy_fields():
+    from backend.api.canonical_repository.viewpoint_resolution import _strict_json_schema
+    schema = _strict_json_schema(d.JsonProposal.model_json_schema())
+    def check(s):
+        if isinstance(s,dict):
+            if s.get("type") == "object":
+                assert isinstance(s.get("properties"),dict) and s["additionalProperties"] is False
+            for v in s.values(): check(v)
+        if isinstance(s,list):
+            for v in s: check(v)
+    check(schema)
+    payload = {"statement":"他說：『不是。』","occurrences":[{"legacy":True,"anchors":[]}],"unknown_legacy":None}
+    wire = {"records":[{"collection":"claims","object_id":"C","payload_json":json.dumps(payload,ensure_ascii=False)}],
+        "dispositions":[],"sentence_dispositions":[],"unadmitted_candidates_json":[]}
+    assert d.decode_proposal(wire)["records"][0]["payload"] == payload
+    wire["records"][0]["payload_json"] = '{"statement":"甲","statement":"乙"}'
+    with pytest.raises(ValueError,match="duplicate"): d.decode_proposal(wire)
+
+
+@pytest.mark.parametrize("change",["last_message","stdout","timeout","raw","second_budget","state"])
+def test_only_explicit_schema_400_can_authorize_mechanical_handoff(case,tmp_path,change):
+    states,repair,_ = case
+    root = tmp_path / "failed"; root.mkdir()
+    r.write(root / "frozen.json",{"before_records":c.rows(states),"manifest":manifest_for(case).model_dump()})
+    r.write(root / "proposal.reservation.json",{"intent":True})
+    raw = {"last_message":None,"stdout":"","stderr":'ERROR: '+json.dumps({"status":400,"error":{"code":"invalid_json_schema","param":"text.format.schema"}})}
+    if change == "last_message": raw["last_message"] = "{}"
+    if change == "stdout": raw["stdout"] = "assistant result"
+    if change == "timeout": raw["stderr"] = "timeout"
+    if change == "raw": r.write(root / "proposal.raw.json",{"response":{}})
+    if change == "state": states["claims/C"]["statement"] += "changed"
+    if change == "second_budget":
+        f = r.read(root / "frozen.json"); f["manifest"]["deferred_repair"]["provider_schema_rejection"] = {"path":"x","file_sha256":"0"*64}
+        (root / "frozen.json").unlink(); r.write(root / "frozen.json",r.body(f))
+    bound = put(root / "proposal.failure.json",{"provider_raw":raw})
+    with pytest.raises(ValueError): d.verify_schema_rejection(bound,states)

@@ -91,6 +91,7 @@ class DeferredRepair(Contract):
     handoff: FileBinding
     raw_gpt: FileBinding
     raw_opus: FileBinding
+    provider_schema_rejection: FileBinding | None = None
 
 
 class Manifest(Contract):
@@ -434,6 +435,8 @@ def freeze(manifest: Manifest, states: dict[str, dict], *, physical_snapshots: d
     if manifest.deferred_repair:
         archive_bindings += [manifest.deferred_repair.investigation_packet, manifest.deferred_repair.handoff,
                              manifest.deferred_repair.raw_gpt, manifest.deferred_repair.raw_opus]
+        if manifest.deferred_repair.provider_schema_rejection:
+            archive_bindings.append(manifest.deferred_repair.provider_schema_rejection)
     identity["physical_snapshots"] = {b.path + ":" + b.file_sha256: bound_bytes(b, physical_snapshots).hex() for b in archive_bindings}
     return {**identity, "changed_paragraph_keys": changed, "update_id": "SR-" + sha256_json(identity),
             "before_records": rows(states)}
@@ -449,6 +452,8 @@ def guard_files(frozen: dict, *, historical: bool = False) -> None:
         for b in (manifest.deferred_repair.investigation_packet, manifest.deferred_repair.handoff,
                   manifest.deferred_repair.raw_gpt, manifest.deferred_repair.raw_opus):
             bound_bytes(b, frozen["physical_snapshots"] if historical else None)
+        if manifest.deferred_repair.provider_schema_rejection:
+            bound_bytes(manifest.deferred_repair.provider_schema_rejection, frozen["physical_snapshots"] if historical else None)
 
 
 def _semantic(row: dict) -> dict:
