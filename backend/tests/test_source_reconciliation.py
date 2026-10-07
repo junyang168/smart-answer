@@ -586,6 +586,65 @@ def test_completed_epoch_cannot_omit_audit_or_upgrade_flags(scenario, tmp_path, 
     assert ports.applies == 1 and ports.calls == ["proposal", "initial_review"]
 
 
+@pytest.mark.parametrize('corrected',[False,True])
+def test_completed_epoch_uses_original_complete_review_readset_not_whole_freeze(scenario,tmp_path,monkeypatch,corrected):
+    from backend.pipeline import source_reconciliation_epoch as epoch
+    runner,ports,manifest=setup_runner(tmp_path,scenario)
+    ports.refuse_initial=corrected
+    runner.run(manifest,apply=True,audit=True)
+    whole=r.body(r.read(runner.root/'frozen.json'))
+    expected_package=r.body(r.read(runner.root/'effective-package.json'))
+    original_plan=r.body(r.read(runner.root/'plan.json'))
+    original_completion=r.read(runner.root/'complete.json')
+    selected=set(whole['inventory']['affected_keys'])|set(whole['inventory']['context_keys'])
+    expected={k:p for k,p in c.index(whole['before_records']).items() if k in selected}
+    actual_read=epoch.read
+    def bounded_read(path):
+        if Path(path).name=='frozen.json':pytest.fail('completed epoch parsed full frozen snapshot')
+        return actual_read(path)
+    monkeypatch.setattr(epoch,'read',bounded_read)
+    monkeypatch.setattr(epoch,'validate_package',lambda *a,**k:pytest.fail('completed epoch entered strict full-freeze reconstruction'))
+    monkeypatch.setattr(c,'freeze',lambda *a,**k:pytest.fail('completed epoch rebuilt original graph'))
+    package,frame,plan,complete=epoch.load(r.binding(runner.root/'effective-package.json'))
+    assert package==expected_package and plan==original_plan and complete==original_completion
+    assert frame['completed_readset_projection'] is True
+    assert c.index(frame['before_records'])==expected
+    assert frame['manifest']==whole['manifest'] and frame['inventory']==whole['inventory']
+    assert frame['before']==whole['before'] and frame['after']==whole['after']
+    assert ports.applies==ports.audits==1
+    assert ports.calls==(['proposal','initial_review','correction','final_review'] if corrected else ['proposal','initial_review'])
+
+
+@pytest.mark.parametrize('file',['proposal.raw.json','initial_review.raw.json','proposal.packet.json',
+                               'initial_review.reservation.json','frozen.json'])
+def test_completed_epoch_does_not_replace_actual_raw_or_original_freeze_with_status(scenario,tmp_path,file):
+    from backend.pipeline import source_reconciliation_epoch as epoch
+    runner,ports,manifest=setup_runner(tmp_path,scenario)
+    runner.run(manifest,apply=True,audit=True)
+    path=runner.root/file
+    value=r.body(r.read(path))
+    if file.endswith('.raw.json'):
+        value['request_payload_sha256']='0'*64
+    else:
+        value['unexpected']='not the original saved input'
+    r.write(path,value,immutable=False)
+    with pytest.raises(ValueError):epoch.load(r.binding(runner.root/'effective-package.json'))
+    assert ports.applies==1 and ports.calls==['proposal','initial_review']
+
+
+def test_frozen_identity_is_preserved_when_completed_readset_omits_unrelated_rows(scenario):
+    frozen,p=add_viewpoint(scenario)
+    raw=review_raw(frozen,p)
+    expected=c.compile_package(frozen,p,raw)
+    # The exact original freeze seal, not a new digest of a smaller frame.
+    selected=set(frozen['inventory']['affected_keys'])|set(frozen['inventory']['context_keys'])
+    frame={**frozen,'before_records':[row for row in frozen['before_records']
+        if c.key(row['collection'],row['object_id']) in selected]}
+    assert c.compile_package(frame,p,raw,frozen_sha256=c.sha256_json(frozen))==expected
+    for bad in ['','not-a-sha','g'*64]:
+        with pytest.raises(ValueError):c.compile_package(frame,p,raw,frozen_sha256=bad)
+
+
 def test_unchanged_reviewed_context_is_not_an_eternal_approval(scenario):
     from backend.pipeline import source_reconciliation_epoch as epoch
     manifest, before, _ = scenario

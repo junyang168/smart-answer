@@ -23,7 +23,7 @@ def test_known_unbounded_paths_are_vetoed_before_io_import_copy_or_database(monk
     monkeypatch.setattr(l, 'read_artifact', forbidden)
     entries = {
         'snapshot': lambda: ProductionPorts(store).snapshot(),
-        'epoch_load': lambda: e.load({'path': '/never-read', 'file_sha256': '0'*64}),
+        'epoch_load': lambda: e.load({'path': '/never-read', 'file_sha256': '0'*64},historical=True),
         'predecessor': lambda: e._predecessor_projection({}, {}, store),
         'build': lambda: d.build_proof(Path('/absent'), Path('/campaign'), [], None),
         'audit': lambda: l.historical_audit_proofs('/absent/audit.json', {}),
@@ -73,3 +73,25 @@ def test_startup_does_not_prewarm_whole_sql_collections(monkeypatch):
     assert [row[0] for row in calls] == ['package', 'epochs', 'grouping']
     assert result['model_calls'] == result['Registry_writes'] == 0
     assert 'no whole-collection SQL prewarm' in result['scope']
+
+
+def test_startup_consumes_completed_source_instead_of_store_write_authorization(monkeypatch):
+    from backend.pipeline import viewpoint_cvp_campaign_runner as runner
+    from backend.pipeline import viewpoint_grouping_repository as grouping
+    from backend.pipeline import viewpoint_applied_source_epochs as epochs
+    from backend.pipeline import source_reconciliation_epoch as epoch
+    from backend.api.canonical_repository import reviewed_candidate_contract as contract
+    package={'source_repair_application':{'schema_version':'wang_source_reconciliation_v1'}}
+    calls=[]
+    monkeypatch.setattr(runner,'read',lambda _:package)
+    monkeypatch.setattr(runner,'binding',lambda p:{'path':p,'file_sha256':'0'*64})
+    monkeypatch.setattr(contract,'validate_store_package_authorization',forbidden)
+    monkeypatch.setattr(epoch,'load_completed',lambda pin:calls.append(('completed',pin)))
+    monkeypatch.setattr(epochs,'compose',lambda paths:'epoch')
+    monkeypatch.setattr(grouping,'SharedGroupingRepository',lambda _:SimpleNamespace(
+        load=lambda *a,**k:calls.append(('grouping',a,k))))
+    args=SimpleNamespace(completed_source_repair=['/completed/effective-package.json'],
+        grouping_repository='/groups',accepted_grouping_sha='SHA')
+    result=runner.initialize_validation(args)
+    assert [row[0] for row in calls]==['completed','grouping']
+    assert result['model_calls']==result['Registry_writes']==0

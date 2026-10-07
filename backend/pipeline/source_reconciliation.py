@@ -736,12 +736,19 @@ def validate_review(packet: dict, response: dict) -> bool:
     return all(v.approved and not v.problems for v in review.verdicts)
 
 
-def compile_package(frozen: dict, proposal: Proposal, raw: dict) -> dict:
+def compile_package(frozen: dict, proposal: Proposal, raw: dict, *, frozen_sha256: str | None = None) -> dict:
     """Only declared deterministic provenance changes after actual Opus approval."""
     packet = review_packet(frozen, proposal)
     if not validate_review(packet, raw["response"]):
         raise ValueError("partial/rejected review cannot authorize a package")
     before = index(frozen["before_records"])
+    # A completed consumer may supply the authenticated original full-freeze
+    # seal while reading only the exact original reviewer readset. IDs must not
+    # change merely because unrelated predecessor rows were not materialized.
+    if frozen_sha256 is not None and (not isinstance(frozen_sha256,str)
+            or len(frozen_sha256)!=64 or any(ch not in '0123456789abcdef' for ch in frozen_sha256)):
+        raise ValueError('exact original frozen SHA required')
+    frozen_identity = frozen_sha256 or sha256_json(frozen)
     data = index(proposal.records)
     digest = raw["artifact_sha256"]
     reviewed_at = raw["completed_at"]
@@ -768,7 +775,7 @@ def compile_package(frozen: dict, proposal: Proposal, raw: dict) -> dict:
         seed = sha256_json({"version": VERSION, "update": frozen["update_id"], "review": digest, "link": k})
         candidate.update(revision=1, candidate_claim_ids=[link["claim_id"]], candidate_viewpoint_ids=[link["viewpoint_id"]],
                          proposed_action="match_existing", generation_fingerprint=seed, coverage_snapshot_id=None,
-                         scope_manifest_sha256=sha256_json(frozen), blocker_codes=[], seed_relation_ids=[])
+            scope_manifest_sha256=frozen_identity, blocker_codes=[], seed_relation_ids=[])
         identity = {"claims": candidate["candidate_claim_ids"], "viewpoints": candidate["candidate_viewpoint_ids"],
                     "relations": candidate.get("seed_relation_ids", []), "action": candidate["proposed_action"],
                     "blockers": candidate.get("blocker_codes", []), "coverage_snapshot_id": candidate.get("coverage_snapshot_id"),
@@ -811,7 +818,7 @@ def compile_package(frozen: dict, proposal: Proposal, raw: dict) -> dict:
                 raise ValueError("CVP text revision has no complete active member evidence")
             seed = sha256_json({"version": VERSION, "update": frozen["update_id"], "review": digest, "revision": k})
             candidate.update(revision=1, candidate_claim_ids=member_ids, candidate_viewpoint_ids=[vid], proposed_action="match_existing",
-                generation_fingerprint=seed, coverage_snapshot_id=None, scope_manifest_sha256=sha256_json(frozen), blocker_codes=[], seed_relation_ids=[])
+                generation_fingerprint=seed, coverage_snapshot_id=None, scope_manifest_sha256=frozen_identity, blocker_codes=[], seed_relation_ids=[])
             identity = {"claims": member_ids, "viewpoints": [vid], "relations": candidate.get("seed_relation_ids", []),
                 "action": "match_existing", "blockers": candidate.get("blocker_codes", []),
                 "coverage_snapshot_id": candidate.get("coverage_snapshot_id"), "generation_fingerprint": seed}

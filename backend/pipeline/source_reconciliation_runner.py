@@ -478,6 +478,18 @@ def validate_package(package: dict, *, historical: bool = False) -> None:
     if root.name != task_id(contract.Manifest.model_validate(frozen["manifest"]), frozen["physical_snapshots"]) or app.get("frozen_sha256") != frozen_artifact["artifact_sha256"]:
         raise ValueError("reconciliation task/input identity drift")
     contract.guard_files(frozen, historical=historical)
+    validate_reviewed_records(package, frozen)
+
+
+def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str | None = None) -> None:
+    """Exact saved proposal/review/package checks on their declared readset.
+
+    Not a store authorization entry: validate_package above still reconstructs
+    the full freeze and authorization before calling this shared portion.
+    Completed epoch consumers can use the SAME checks without rebuilding an
+    unrelated whole-library predecessor snapshot.
+    """
+    app = package['source_repair_application']; root = Path(app['run_root'])
     stage = app.get("terminal_stage")
     if stage not in {"initial_review", "final_review"}:
         raise ValueError("non-terminal stage cannot approve")
@@ -509,7 +521,7 @@ def validate_package(package: dict, *, historical: bool = False) -> None:
             raise ValueError("terminal review is not of actual correction")
     if expected["artifact_sha256"] != app.get("review_sha256") or sha256_json(proposal.model_dump()) != app.get("proposal_sha256"):
         raise ValueError("final review/proposal provenance drift")
-    rebuilt = contract.compile_package(frozen, proposal, raw)
+    rebuilt = contract.compile_package(frozen, proposal, raw, frozen_sha256=frozen_sha256)
     if {k: v for k, v in package.items() if k != "source_repair_application"} != rebuilt:
         raise ValueError("package differs from exactly reviewed records/provenance")
 

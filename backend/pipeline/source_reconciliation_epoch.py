@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 
 from backend.pipeline import source_reconciliation as c
-from backend.pipeline.source_reconciliation_runner import body, read, binding as file_binding, validate_package, validate_completion_population
+from backend.pipeline.source_reconciliation_runner import body, read, binding as file_binding, validate_package, validate_completion_population, validate_reviewed_records
 from backend.pipeline.source_reconciliation_runtime import ProductionPorts
 from backend.api.canonical_repository.postgres_store import record_content_sha
 from backend.pipeline.viewpoint_validation_context import validated_history, require_explicit_history_maintenance
@@ -17,6 +17,8 @@ from backend.pipeline.viewpoint_validation_context import validated_history, req
 
 @validated_history(bound_files_only=True)
 def load(bound, *, historical=False):
+    if not historical:
+        return load_completed(bound)
     require_explicit_history_maintenance('source epoch full frozen-package reconstruction')
     path = c.verify_file(bound)
     package = body(read(path))
@@ -40,6 +42,78 @@ def load(bound, *, historical=False):
             if b:
                 c.verify_file(b)
     return package, frozen, plan, complete
+
+
+def _frozen_seal(path):
+    # Executor JSON is key-sorted: the seal precedes before_records. Read its
+    # small header, never decode/skip the giant records array on a miss.
+    from backend.pipeline.viewpoint_compiled_readset import _Stream, CompileLimits
+    import time
+    metrics={'input_bytes':0,'decoded_values':0}
+    stream=_Stream(path,CompileLimits(bytes=8*1024**2,seconds=2),metrics,time.perf_counter())
+    try:
+        stream.expect('{')
+        while True:
+            name=stream.value(); stream.expect(':')
+            if name=='artifact_sha256':return stream.value()
+            if name=='before_records':raise ValueError('completed frozen seal header missing')
+            stream.skip();stream.expect(',')
+    finally:stream.close()
+
+
+@validated_history(bound_files_only=True)
+def load_completed(bound):
+    """Consume a completed source epoch using its ORIGINAL scoped packet.
+
+    No new snapshot/certificate/cache protocol. The executor already saved the
+    complete affected/context rows and source metadata in proposal.packet.json.
+    Its complete binding authenticates the old full freeze without parsing it.
+    Store writes retain validate_package's full authorization reconstruction.
+    Current postimages, retained versions, SQL and audit gates stay separate.
+    """
+    path=c.verify_file(bound); package=body(read(path))
+    app=package.get('source_repair_application',{}); root=Path(app.get('run_root',''))
+    if (app.get('schema_version')!=c.VERSION or not root.is_absolute()
+            or path!=root/'effective-package.json'):
+        raise ValueError('completed epoch package identity mismatch')
+    complete=read(root/'complete.json');plan=body(read(root/'plan.json'))
+    if (complete.get('status')!='audited_complete'
+            or complete.get('change_set_id')!=plan['change_set_id']
+            or complete.get('campaign_membership_changed') is not False):
+        raise ValueError('source epoch has no exact applied-and-audited completion')
+    required={str(root/n) for n in ('frozen.json','effective-package.json','plan.json',
+                                   'apply-intent.json','backup.json','readback.json')}
+    pins=complete['bindings']
+    if len(pins)!=len(required) or {b['path'] for b in pins}!=required or bound not in pins:
+        raise ValueError('completion proof denominator drift')
+    for pin in pins:c.verify_file(pin)
+    if app.get('frozen_sha256')!=_frozen_seal(root/'frozen.json'):
+        raise ValueError('completed epoch original frozen seal mismatch')
+    packet=body(read(root/'proposal.packet.json'))
+    frozen={'update_id':packet['update_id'],'manifest':packet['manifest'],
+        'inventory':packet['inventory'],'before':packet['before_source'],
+        'after':packet['current_sources'],'context_sources':packet.get('context_sources',[]),
+        'sentence_inventory':packet['sentence_inventory'],'before_records':packet['records'],
+        'physical_snapshots':None,'completed_readset_projection':True}
+    if 'deferred_diagnosis' in packet:frozen['deferred_diagnosis']=packet['deferred_diagnosis']
+    selected=set(frozen['inventory']['affected_keys'])|set(frozen['inventory']['context_keys'])
+    before=c.index(frozen['before_records'])
+    from backend.pipeline.source_reconciliation_runner import task_id
+    manifest=c.Manifest.model_validate(frozen['manifest'])
+    if (set(before)!=selected or complete['update_id']!=frozen['update_id']
+            or root.name!=task_id(manifest)):
+        raise ValueError('completion scoped packet/member identity mismatch')
+    # All original raw/config/wire/one-correction and exact package comparisons
+    # are shared with the strict store validator, not replaced by a pass flag.
+    validate_reviewed_records(package,frozen,frozen_sha256=app['frozen_sha256'])
+    c.guard_files(frozen)
+    post=c.assert_plan_postimages(package,plan,before)
+    validate_completion_population(complete,frozen,post)
+    for outcome in complete['audits']:
+        c.verify_file(outcome['binding'])
+        for pin in [outcome['result'].get(k) for k in ('audit','original_audit','resolution')]:
+            if pin:c.verify_file(pin)
+    return package,frozen,plan,complete
 
 
 def _assert_database(plan, store):
@@ -145,7 +219,7 @@ def grouping_physical_transition(manifest, bound):
 
 def reviewed_claim_ids(package):
     root = Path(package["source_repair_application"]["run_root"])
-    frozen = body(read(root / "frozen.json"))
+    _, frozen, _, _ = load(file_binding(root / 'effective-package.json'))
     # Includes unchanged Claim text explicitly independently reviewed against
     # the new source; no inherited approval, no new write just for status.
     return {c.split_key(k)[1] for k in frozen["inventory"]["affected_keys"] if k.startswith("claims/")}
@@ -163,7 +237,7 @@ def selection_row(cid, package):
 
 def membership_snapshot(manifest, records, package, completed_ids, selected_ids):
     root = Path(package["source_repair_application"]["run_root"])
-    frozen = body(read(root / "frozen.json"))
+    _, frozen, _, _ = load(file_binding(root / 'effective-package.json'))
     if json.loads(c.bound_bytes(frozen["manifest"]["accepted_membership"], frozen["physical_snapshots"])) != manifest:
         raise ValueError("historical membership manifest differs from authorized accepted grouping")
     ports = ProductionPorts()

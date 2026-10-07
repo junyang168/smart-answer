@@ -419,7 +419,12 @@ def initialize_validation(args):
     paths = getattr(args, 'completed_source_repair', None) or []
     with ValidationContext('campaign startup authentication'):
         for path in paths:
-            validate_store_package_authorization(read(path))
+            package=read(path)
+            if (package.get('source_repair_application') or {}).get('schema_version')=='wang_source_reconciliation_v1':
+                from backend.pipeline.source_reconciliation_epoch import load_completed
+                load_completed(binding(path))
+            else:
+                validate_store_package_authorization(package)
         SharedGroupingRepository(args.grouping_repository).load(
             args.accepted_grouping_sha, source_epoch_binding=compose(paths))
     return {'startup_seconds': time.perf_counter()-start,
