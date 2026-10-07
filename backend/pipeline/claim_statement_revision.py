@@ -10,7 +10,7 @@ from pathlib import Path
 
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json, semantic_record_sha
 from backend.api.canonical_repository.viewpoint_production_safety import file_sha256
-from backend.pipeline.viewpoint_resolution_runtime import read_artifact, stable_decided_at, subscription_client, call_model
+from backend.pipeline.viewpoint_resolution_runtime import read_artifact, stable_decided_at, subscription_client
 from backend.pipeline.viewpoint_validation_context import validated_history, current_check, read_current_objects
 from backend.pipeline.viewpoint_authorized_source_repair_357 import fingerprint, Review
 from backend.pipeline.viewpoint_evidence_source_context import load_context_source
@@ -216,16 +216,33 @@ def reviewed_inputs(root):
     if marker!={**reservation,'root':str(root)} or grant['authorization_id']!=packet['authorization']['authorization_id']:
         raise ValueError('cross-root statement review budget proof drift')
     reader = adapter(subscription_client('claude','claude-opus-5-5','high'))
-    reader.generate = lambda _: (_ for _ in ()).throw(ValueError('saved statement review cannot be replayed'))
-    response,calls,_ = call_model(reader,packet,root/'raw-opus.json')
     raw = read_artifact(root/'raw-opus.json')
+    # This is a read-only historical proof, not a model-call boundary. Calling
+    # call_model even in cache-only mode closes its caller's validation phase,
+    # discarding the live-generation owner while it is authenticating history.
+    # Reproduce ALL raw/config/request/response/encoding checks without invoking
+    # the generator or ending the phase; never permit a handoff/fallback here.
+    expected_raw={'model_id':reader.model_id,'backend':reader.backend,'prompt_sha256':reader.prompt_sha256,
+        'generation_config_sha256':reader.generation_config_sha256,'request_payload_sha256':sha256_json(packet)}
+    proof=reader.request_encoding_proof(packet)
+    encoding=read_artifact(root/'raw-opus.request-encoding.json')
+    encoded_body={'schema_version':'wang_model_request_encoding_proof_v1',**proof}
+    if (any(raw.get(k)!=v for k,v in expected_raw.items())
+            or raw.get('response_sha256')!=sha256_json(raw.get('response') or {})
+            or raw.get('artifact_sha256')!=sha256_json({k:v for k,v in raw.items() if k!='artifact_sha256'})
+            or raw.get('request_encoding_proof_sha256')!=sha256_json(proof)
+            or encoding!={**encoded_body,'artifact_sha256':sha256_json(encoded_body)}
+            or raw.get('cache_handoff') is not None or raw.get('calls_recorded',1)!=1
+            or reader.request_bytes(packet)>500000):
+        raise ValueError('statement raw/config/request/response/exact encoding proof drift')
+    response=raw['response']
     report = read_artifact(root/'review-report.json')
     expected = {'policy':VERSION,'packet_sha256':sha256_json(packet),'prompt_sha256':reader.prompt_sha256,
                 'config_sha256':reader.generation_config_sha256,'model':reader.model_id,'backend':reader.backend,
                 'request_bytes':reader.request_bytes(packet),'authorization_id':packet['authorization']['authorization_id'],
                 'GPT_new_calls':0,'calls_allowed':1}
     verdicts = Review.model_validate(response).verdicts
-    if (reservation != expected or calls or raw['model_id']!='claude-opus-5-5' or raw['backend']!='claude_subscription'
+    if (reservation != expected or raw['model_id']!='claude-opus-5-5' or raw['backend']!='claude_subscription'
             or len(verdicts)!=1 or verdicts[0].claim_id!=packet['before_claim']['claim_id'] or not verdicts[0].approved or verdicts[0].problems
             or report != {'status':'Opus_approved_not_applied','packet_sha256':sha256_json(packet),'review':response,
                           'raw_binding':binding(root/'raw-opus.json'),'calls_executed':1}):

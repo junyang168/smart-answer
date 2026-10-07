@@ -141,7 +141,7 @@ def test_scoped_provenance_requires_exact_new_single_opus_contract():
         with pytest.raises(ValueError):ViewpointIdentityDecisionRecord.model_validate({**value,field:new})
 
 
-@pytest.mark.parametrize('fault',[None,'model','backend','prompt','config','request','response','raw_sha','refusal','budget','report'])
+@pytest.mark.parametrize('fault',[None,'model','backend','prompt','config','request','response','raw_sha','refusal','budget','report','encoding','handoff','phase'])
 def test_exact_saved_review_validation_never_calls_or_accepts_drift(scenario,monkeypatch,fault):
     from backend.pipeline.viewpoint_resolution_runtime import call_model, write_immutable
     states,auth,root=scenario;packet=c.prepare(states,auth,root)
@@ -167,7 +167,23 @@ def test_exact_saved_review_validation_never_calls_or_accepts_drift(scenario,mon
         raw[field]='drift';(root/'raw-opus.json').write_text(json.dumps(raw))
     elif fault=='budget':marker.write_text('{}')
     elif fault=='report':report['review']['verdicts'][0]['reason']='漂移';(root/'review-report.json').write_text(json.dumps(report))
+    elif fault=='encoding':(root/'raw-opus.request-encoding.json').write_text('{}')
+    elif fault=='handoff':
+        raw=json.loads((root/'raw-opus.json').read_text());raw['cache_handoff']={'unverified':True}
+        raw['artifact_sha256']=c.sha256_json({k:v for k,v in raw.items() if k!='artifact_sha256'})
+        (root/'raw-opus.json').write_text(json.dumps(raw))
     monkeypatch.setattr(c,'adapter',lambda client:actual)
+    actual.generate=lambda _:pytest.fail('saved proof cannot invoke any model')
+    if fault=='phase':
+        from backend.pipeline.viewpoint_validation_context import ValidationContext,validation_runtime
+        with validation_runtime():
+            with ValidationContext('first') as ctx:
+                c.reviewed_inputs(root)
+                assert not ctx.closed
+            with ValidationContext('second') as ctx:
+                c.reviewed_inputs(root)
+                assert not ctx.closed
+        return
     if fault is None:
         saved,_=c.reviewed_inputs(root);assert saved==packet
     else:
