@@ -18,6 +18,48 @@ from backend.api.canonical_repository.postgres_store import ChangeOperation,stor
 VERSION = "wang_deferred_claim_group_completion_v1"
 
 
+def registry_collections(states):
+    # Must be exactly the same cut as c.fingerprint, including empty tables.
+    return sorted(set(c.KNOWLEDGE_COLLECTIONS) | {c.split_key(k)[0] for k in states})
+
+
+def validate_prewrite_conflict(log, before, current, plan, intent, package, source_root):
+    """A recorded pre-write SQL guard failure is not an uncertain commit."""
+    log=Path(log); text=log.read_text()
+    process=read(log.parent/"process.json"); result=read(log.parent/"exit-result.json")
+    argv=process["argv"]
+    if (result["exit_code"] != 1 or "--continue-saved" not in argv
+            or "--source-root" not in argv
+            or argv[argv.index("--source-root")+1] != str(source_root)
+            or current != before or not plan["operations"]
+            or any(o["operation"] != "create" or c.key(o["collection"],o["object_id"]) in current for o in plan["operations"])
+            or intent["plan_sha256"] != sha256_json(plan)
+            or intent["package_sha256"] != sha256_json(package)):
+        raise ValueError("prewrite conflict lacks exact unchanged Registry/plan/invocation proof")
+    old_cut=sorted({c.split_key(k)[0] for k in before})
+    observed=c.fingerprint(before,collections=old_cut)
+    expected=c.fingerprint(before)
+    exact=("backend.api.canonical_repository.postgres_store.ChangeSetConflict: "
+           f"CanonicalViewpoint Registry cut is stale: expected {expected}, found {observed}")
+    if (observed == expected or "self._assert_registry_fingerprint(" not in text
+            or text.rstrip().splitlines()[-1] != exact):
+        raise ValueError("not the proven empty-collection prewrite guard conflict")
+    return {"failure_log":binding(log),"failed_process":binding(log.parent/"process.json"),
+        "failed_exit":binding(log.parent/"exit-result.json"),"plan_sha256":sha256_json(plan),
+        "full_registry_sha256":expected,"old_nonempty_cut_sha256":observed,
+        "omitted_empty_collections":sorted(set(registry_collections(before))-set(old_cut)),
+        "old_intent_preserved":True,"automatic_retry":False}
+
+
+def apply_normal(root, package, before, ports):
+    from backend.api.canonical_repository.viewpoint_production_safety import exclusive_cvp_run_lock
+    from backend.pipeline.source_reconciliation_runtime import workspace
+    with exclusive_cvp_run_lock({"global_lock_path":str(workspace().parent/"cvp-production-357/registry-cvp.lock")}):
+        return ports.store.apply_plan(ports.store.plan_package(package,source_kind="cvp_batch_resolution"),
+            metadata={"generic_deferred_claim_normal_cvp":str(root)},
+            expected_registry_fingerprint_sha256=c.fingerprint(before),registry_collections=registry_collections(before))
+
+
 def committed(plan,store):
     with store.connect() as conn,conn.cursor() as cursor:
         cursor.execute("SET TRANSACTION READ ONLY")
@@ -181,6 +223,10 @@ def build_proof(root,campaign,ids,ports):
     if (root/NAME).exists():
         paths += [root/NAME,root/"runtime-proof.json"]
         paths += [p for p in directory(root).glob("*.json") if p.name not in {"batch-run.json","measurements.json","current-state.json"}]
+    retry=root/"empty-collection-prewrite-recovery-start.json"
+    if retry.exists():
+        saved=read(retry); paths += [retry]
+        paths += [c.verify_file(saved[k]) for k in ("failure_log","failed_process","failed_exit")]
     paths += [original/n for n in ("cvp-change-plan.json","cvp-change-package.json","cvp-readback-receipt.json")]
     paths += [original.parent.parent/n for n in ("scope-run.json","scope-disposition-ledger.json")]
     paths += [claim_root/n for n in ("complete.json","effective-package.json","frozen.json","plan.json","apply-intent.json","readback.json","backup.json")]
@@ -199,7 +245,7 @@ def verify_proof(campaign_root,path,claim_ids,store=None):
     return rebuilt
 
 
-def run(context,claim_root,ports):
+def run(context,claim_root,ports, *, prewrite_conflict_log=None):
     from backend.pipeline.viewpoint_cvp_recovery_executor import load_campaign,resume_after_repair
     from backend.pipeline.viewpoint_scope_packet_runner import registry_context
     campaign = Path(context["campaign_root"]); cfg,_,_,_ = load_campaign(campaign)
@@ -228,10 +274,32 @@ def run(context,claim_root,ports):
         if ports.snapshot() != before or json.loads(json.dumps(ports.store.plan_package(package,source_kind="cvp_batch_resolution").as_dict())) != plan:
             raise ValueError("normal CVP dry-run/base changed before apply")
         write(root/"apply-intent.json",{"plan_sha256":sha256_json(plan),"package_sha256":sha256_json(package),"backup":binding(root/"backup.json")})
-        receipt = ports.store.apply_plan(ports.store.plan_package(package,source_kind="cvp_batch_resolution"),
-            metadata={"generic_deferred_claim_normal_cvp":str(root)},expected_registry_fingerprint_sha256=c.fingerprint(before),registry_collections=sorted({c.split_key(k)[0] for k in before}))
+        receipt = apply_normal(root,package,before,ports)
         write(root/"apply-receipt.json",receipt)
     plan = body(read(root/"plan.json"))
+    if not committed(plan,ports.store) and prewrite_conflict_log is not None:
+        ports._environment_guard()
+        package=body(read(root/"effective-package.json"))
+        if package_from_saved_or_new(root,packet,cfg,True) != package:
+            raise ValueError("saved approved package drift before prewrite recovery")
+        validate_delta(plan,context["repair_claim_ids"])
+        c.assert_plan_postimages(package,plan,before)
+        if (root/"apply-receipt.json").exists() or ports.store.get_change_set_status(plan["fingerprint_sha256"]) is not None:
+            raise ValueError("prewrite recovery cannot replay any recorded SQL ChangeSet")
+        if json.loads(json.dumps(ports.store.plan_package(package,source_kind="cvp_batch_resolution").as_dict())) != plan:
+            raise ValueError("saved exact plan drift")
+        intent=body(read(root/"apply-intent.json")); c.verify_file(intent["backup"])
+        backup=read(root/"backup.json"); dump=c.verify_file(backup["dump"])
+        import subprocess,hashlib
+        listing=subprocess.run(["pg_restore","--list",str(dump)],capture_output=True,check=True)
+        if (not backup["restore_catalog_nonempty"] or not listing.stdout.strip()
+                or hashlib.sha256(listing.stdout).hexdigest() != backup["catalog_sha256"]):
+            raise ValueError("saved backup SHA/catalog proof drift")
+        proof=validate_prewrite_conflict(prewrite_conflict_log,before,ports.snapshot(),plan,intent,package,claim_root)
+        from backend.pipeline.viewpoint_resolution_runtime import write_immutable
+        # One mechanical recovery reservation for this same uncommitted plan.
+        write_immutable(root/"empty-collection-prewrite-recovery-start.json",proof,require_new=True)
+        write(root/"apply-receipt.json",apply_normal(root,package,before,ports))
     if not committed(plan,ports.store): raise ValueError("normal CVP intent outcome unknown; do not replay")
     expected = deepcopy(before)
     for op in plan["operations"]: expected[c.key(op["collection"],op["object_id"])] = stored_operation_payload(ChangeOperation(**op))

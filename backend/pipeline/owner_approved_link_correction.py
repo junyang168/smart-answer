@@ -594,6 +594,8 @@ def main():
     parser.add_argument("--execute",action="store_true")
     parser.add_argument("--proposal-reissue-approval",help="explicit owner authorization for one unchanged initial proposal reissue")
     parser.add_argument("--proposal-reissue-intent",help="exact SHA of the retained unanswered invocation")
+    parser.add_argument("--recover-prewrite-registry-cut",type=Path,
+        help="authenticate a saved empty-collection SQL guard conflict; never retry an uncertain commit")
     parser.add_argument("--continue-saved",action="store_true",
         help="consume actual audited parent/child completion only; no child review/apply/audit replay")
     args = parser.parse_args(); load_dotenv(PROJECT/".env")
@@ -601,6 +603,8 @@ def main():
             not args.continue_saved or not args.execute
             or not args.proposal_reissue_approval or not args.proposal_reissue_intent):
         raise ValueError('once-reissue authorization requires both exact pins and saved-only execution')
+    if args.recover_prewrite_registry_cut and (not args.continue_saved or not args.execute):
+        raise ValueError('prewrite recovery requires saved-only execution')
     if PROJECT.name != "wkp-357-worktree-per-session": raise ValueError("#357 worktree only")
     with maintenance_lock():
         ports = ProductionPorts()
@@ -629,7 +633,7 @@ def main():
             # run starts by proving actual SQL/source/child/audit completion;
             # the original child execute path is deliberately not called.
             print(json.dumps({'status':'saved_completion_continuation','root':str(parent)}),flush=True)
-            result=run(context,parent,ports)
+            result=run(context,parent,ports,prewrite_conflict_log=args.recover_prewrite_registry_cut)
             write(parent/'normal-cvp/owner-storage-continuation-result.json',result)
             print(json.dumps(result,ensure_ascii=False),flush=True)
             return
