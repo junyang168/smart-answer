@@ -1627,9 +1627,9 @@ def _whole_sources_for_claim(
             seen_sources.add(source_id)
             title = str(sources.documents.get(source_id, {}).get("title") or source_id)
             body = "\n\n".join(
-                live_text(segment.get("text", "")).strip()
+                text
                 for segment in source_file.segments
-                if live_text(segment.get("text", "")).strip()
+                if (text := live_text(segment.get("text", "")).strip())
             )
             texts.append(f"《{title}》\n{body}")
         excerpt = str(payload.get("verbatim_excerpt") or "").strip()

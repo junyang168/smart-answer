@@ -4,6 +4,7 @@ import importlib.util
 import json
 import random
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,6 +15,47 @@ SPEC = importlib.util.spec_from_file_location(
 assert SPEC and SPEC.loader
 AUDIT = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(AUDIT)
+
+
+@pytest.mark.parametrize('values',[
+    [],[''],[' ', '\n\t'],[' 原文 '],['甲~~乙~~丙', '~~全部刪除~~'],
+    ['第一段\n第二行',' 同一句 ', ' 同一句 ', '最後限定。'],
+    [None,0,1,False,True],['<svg><text>圖</text></svg>', '【編輯】字面原文'],
+])
+def test_whole_original_text_is_identical_to_previous_expression_without_duplicate_normalization(values,monkeypatch):
+    # Independent old expression as oracle, including order, duplicates,
+    # whitespace and struck-through gaps. No model/provider or SQL invocation.
+    segments=[{'text':value} for value in values]
+    live_text=AUDIT.live_text
+    expected='\n\n'.join(live_text(s.get('text','')).strip() for s in segments
+                           if live_text(s.get('text','')).strip())
+    calls=[]
+    def counted(value):
+        calls.append(value);return live_text(value)
+    monkeypatch.setattr(AUDIT,'live_text',counted)
+    sources=SimpleNamespace(documents={'S':{'title':'來源'}},
+                            file_for=lambda sid:SimpleNamespace(segments=segments) if sid=='S' else None)
+    fragments={'F':{'source_id':'S','verbatim_excerpt':'完整錨點'}}
+    actual=AUDIT._whole_sources_for_claim(['F','F','missing'],fragments,sources)
+    assert actual==([f'《來源》\n{expected}'],['完整錨點'])
+    assert calls==values
+
+
+def test_thousand_source_identities_keep_all_source_text_and_do_not_cache_mutable_context(monkeypatch):
+    segments=[{'text':'第一句。'},{'text':' '},{'text':'最後必要限定。'}]
+    source=SimpleNamespace(segments=segments)
+    documents={f'S{i}':{'title':f'講道{i}'} for i in range(1000)}
+    sources=SimpleNamespace(documents=documents,file_for=lambda sid:source if sid in documents else None)
+    fragments={f'F{i}':{'source_id':f'S{i}','verbatim_excerpt':f'錨點{i}'} for i in range(1000)}
+    real=AUDIT.live_text;calls=[]
+    monkeypatch.setattr(AUDIT,'live_text',lambda text:(calls.append(text),real(text))[1])
+    texts,anchors=AUDIT._whole_sources_for_claim(list(fragments),fragments,sources)
+    assert texts==[f'《講道{i}》\n第一句。\n\n最後必要限定。' for i in range(1000)]
+    assert anchors==[f'錨點{i}' for i in range(1000)]
+    assert len(calls)==3000
+    # No new lifetime cache: a later invocation reads its actual current input.
+    segments[-1]['text']='改後限定。';documents['S0']['title']='改後來源'
+    assert AUDIT._whole_sources_for_claim(['F0'],fragments,sources)[0]==['《改後來源》\n第一句。\n\n改後限定。']
 
 
 def test_reconsideration_is_not_a_forced_pass():
