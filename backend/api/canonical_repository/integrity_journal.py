@@ -231,4 +231,4 @@ def verify_transaction_delta(cursor, before, after, expected_before, expected_af
     if touched!=set(expected_before) or states!=expected_after:
         raise ValueError('actual written population/final signature drift')
     return dict(status='exact_transaction_write_set_observed',rows=len(rows),written_keys=len(touched),
-                semantic_approval_granted=False)
+                transaction_id=tx,delta_sha256=sha256_json(rows),semantic_approval_granted=False)

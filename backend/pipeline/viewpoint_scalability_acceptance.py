@@ -40,6 +40,8 @@ IMPLEMENTATION = (
     'backend/api/canonical_repository/postgres_store.py',
     'backend/api/canonical_repository/integrity_journal.py',
     'backend/api/canonical_repository/integrity_baseline.py',
+    'backend/api/canonical_repository/integrity_transition.py',
+    'backend/api/canonical_repository/integrity_ledger_indexes.sql',
     'backend/api/canonical_repository/integrity_journal_install.sql',
     'scripts/audit-library.py',
 )

@@ -30,7 +30,8 @@ def test_exact_declared_transaction_is_bounded_and_not_semantic_approval():
     after={('claims','C'):sig(),('claims','D'):sig(2),('claims','E'):None}
     cursor=Cursor(rows)
     result=j.verify_transaction_delta(cursor,generation(10),generation(13),before,after)
-    assert result==dict(status='exact_transaction_write_set_observed',rows=3,written_keys=3,semantic_approval_granted=False)
+    assert result==dict(status='exact_transaction_write_set_observed',rows=3,written_keys=3,
+        transaction_id='100',delta_sha256=j.sha256_json(rows),semantic_approval_granted=False)
     assert len(cursor.calls)==1 and 'sequence>%s AND sequence<=%s' in cursor.calls[0][0]
     assert before[('claims','D')]==sig()
 

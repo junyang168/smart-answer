@@ -171,20 +171,9 @@ def compile_baseline(connection,expected_sha256,collections,output,*,limits=Base
     return dict(path=str(output),file_sha256=hashlib.sha256(raw).hexdigest())
 
 
-def consume_baseline(connection,binding,*,expected_sha256,collections):
-    """Small certificate plus fresh bounded catalog/head reads, not admission.
-
-    Does not query object payloads, journal history, archived snapshots or any
-    reviewer. A miss/change is a stop, NEVER an implicit rebaseline. The later
-    owning write transaction still needs its exact reviewed plan and fresh
-    original source/hold/current/SQL guards at its linearization boundary.
-    """
-    started=time.perf_counter()
-    def remaining():
-        value=5-(time.perf_counter()-started)
-        if value<=0:raise ValueError('bounded baseline consumption time ceiling exceeded; no fallback')
-        return value
-    _idle(connection);_sha(expected_sha256);collections=_collections(collections)
+def read_baseline(binding,*,expected_sha256,collections):
+    """Authenticate a bounded saved baseline; makes NO current SQL assertion."""
+    _sha(expected_sha256);collections=_collections(collections)
     if not isinstance(binding,dict) or set(binding)!={'path','file_sha256'}:
         raise ValueError('exact physical baseline binding required')
     _sha(binding['file_sha256']);path=Path(binding['path'])
@@ -211,6 +200,24 @@ def consume_baseline(connection,binding,*,expected_sha256,collections):
             or value['metrics']['sql_rows']<value['metrics']['active_payload_rows']
             or value['implementation_bindings']!=_pins()):
         raise ValueError('baseline seal/cut/implementation drift')
+    return value
+
+
+def consume_baseline(connection,binding,*,expected_sha256,collections):
+    """Small certificate plus fresh bounded catalog/head reads, not admission.
+
+    Does not query object payloads, journal history, archived snapshots or any
+    reviewer. A miss/change is a stop, NEVER an implicit rebaseline. The later
+    owning write transaction still needs its exact reviewed plan and fresh
+    original source/hold/current/SQL guards at its linearization boundary.
+    """
+    started=time.perf_counter()
+    def remaining():
+        value=5-(time.perf_counter()-started)
+        if value<=0:raise ValueError('bounded baseline consumption time ceiling exceeded; no fallback')
+        return value
+    _idle(connection)
+    value=read_baseline(binding,expected_sha256=expected_sha256,collections=collections)
     with connection.transaction():
         with connection.cursor() as cursor:
             _snapshot(cursor,remaining())
