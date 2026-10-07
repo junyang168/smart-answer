@@ -131,7 +131,7 @@ def test_cold_consumer_never_runs_historical_models_and_never_grants_sql(tmp_pat
 
 
 @pytest.mark.parametrize('drift',['declaration','package','source','code','raw','new_stage',
-    'missing_dependency','duplicate_dependency','missing_model','runtime','sql_approval','audit_approval','seal'])
+    'missing_dependency','duplicate_dependency','missing_model','runtime','sql_approval','audit_approval','seal','declared_binding'])
 def test_certificate_rejects_dependency_and_authority_drift(tmp_path,small_certificate,drift):
     value,declaration=deepcopy(small_certificate)
     if drift=='declaration': declaration['review_directory']=str(tmp_path/'foreign')
@@ -146,6 +146,10 @@ def test_certificate_rejects_dependency_and_authority_drift(tmp_path,small_certi
     if drift=='runtime':value['runtime_identity']={'python':'old'}
     if drift=='sql_approval':value['sql_admission_granted']=True
     if drift=='audit_approval':value['independent_audit_complete']=True
+    if drift=='declared_binding':
+        declaration['packet']['file_sha256']='0'*64
+        value['declaration']=deepcopy(declaration)
+        value['declaration_sha256']=sha256_json(declaration)
     pin=publish(tmp_path,value)
     if drift=='seal':
         path=Path(pin['path']);saved=json.loads(path.read_text());saved['artifact_sha256']='0'*64

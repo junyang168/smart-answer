@@ -179,6 +179,10 @@ def consume_saved_review(certificate_binding, *, declaration):
         required.add(str(Path(declaration['review_directory'])/'batch-packet.json'))
         if len(names) != len(set(names)) or not required <= set(names):
             raise ValueError('saved review dependency population incomplete')
+        by_path = {p['path']:p for p in pins}
+        if any(by_path.get(declaration[k]['path']) != declaration[k]
+               for k in ('packet','configuration','package','decision_time')):
+            raise ValueError('saved review declared physical binding differs from read dependency')
         for pin in pins: _bound(ctx, pin)
         for absent in value['absent_dependencies']:
             if absent in names or not Path(absent).is_absolute() or ctx.optional_file_exists(absent):
