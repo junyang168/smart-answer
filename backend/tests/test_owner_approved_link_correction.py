@@ -5,6 +5,27 @@ from backend.pipeline import source_reconciliation as c
 from backend.pipeline.source_reconciliation_runner import write,read,body,Runner,Stop
 
 
+def test_old_audit_frames_built_once_return_isolated_exact_rows(monkeypatch):
+    from types import SimpleNamespace
+    before={"claims/C":{"claim_id":"C","revision":1,"review_status":"old","nested":{"long":"原文","a":"保留"}}}
+    count=[];actual=d.jsonb_order
+    def instrument(value):count.append(1);return actual(value)
+    monkeypatch.setattr(d,"jsonb_order",instrument)
+    queries=[]
+    retired=[{"object_id":"R","payload":{"claim_id":"R"},"retired":True}]
+    sql=SimpleNamespace(_query=lambda q:queries.append(q) or deepcopy(retired))
+    store=d.HistoricalAuditStore(before,sql)
+    first=store.collection("claims");n=len(count)
+    first[0]["payload"]["nested"]["a"]="tampered"
+    second=store.collection("claims")
+    assert len(count)==n and second[0]["payload"]["nested"]["a"]=="保留"
+    assert before["claims/C"]["nested"]["a"]=="保留"
+    assert store.collection("claims",include_retired=True)[1]["object_id"]=="R"
+    store.collection("claims",include_retired=True)
+    assert len(queries)==1 and len(count)==n
+    with pytest.raises(ValueError):store.collection("foreign")
+
+
 def fixture():
     claim = {"claim_id":"C","revision":3,"statement":"完整判斷","review_status":"independent_terminal_reviewed"}
     old = {"viewpoint_claim_link_id":"L","claim_id":"C","pinned_claim_revision":3,"viewpoint_id":"V",

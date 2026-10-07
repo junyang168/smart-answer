@@ -257,6 +257,34 @@ def jsonb_order(value):
     return value
 
 
+class HistoricalAuditStore:
+    """Private frame of a proven predecessor, never a current-SQL cache.
+
+    Construct jsonb-order rows once per collection for this one old audit.
+    Return isolated copies, so the independent reader cannot mutate the frame.
+    Retired SQL reads remain independently fetched once in this invocation.
+    """
+    def __init__(self,before,sql):
+        self.before,self.sql=before,sql
+        self.active,self.retired={},{}
+
+    def collection(self,collection,*,include_retired=False):
+        if collection not in c.KNOWLEDGE_COLLECTIONS:
+            raise ValueError("unknown historical collection")
+        if collection not in self.active:
+            self.active[collection]=[{"object_id":c.split_key(k)[1],"payload":jsonb_order(p),
+                "revision":p["revision"],"review_status":p.get("review_status"),"retired":False}
+                for k,p in self.before.items() if k.startswith(collection+"/")]
+        rows=list(self.active[collection])
+        if include_retired:
+            if collection not in self.retired:
+                self.retired[collection]=self.sql._query("select json_build_object('object_id',object_id,'payload',payload,"
+                    "'revision',revision,'review_status',review_status,'retired',true)::text from wang_knowledge.objects "
+                    f"where collection='{collection}' and retired_at is not null order by object_id")
+            rows+=self.retired[collection]
+        return deepcopy(sorted(rows,key=lambda r:r["object_id"]))
+
+
 def historical_audit_proofs(audit_path, before):
     """Reconstruct the OLD independent input from its authenticated predecessor.
 
@@ -278,21 +306,8 @@ def historical_audit_proofs(audit_path, before):
     spec = importlib.util.spec_from_file_location("owner_link_historical_audit_reader",PROJECT/"scripts/audit-library.py")
     reader = importlib.util.module_from_spec(spec); sys.modules[spec.name] = reader; spec.loader.exec_module(reader)
     settings = reader.load_settings(); sql = reader.Store(settings["KNOWLEDGE_DATABASE_URL"])
-    class Store:
-        def __init__(self): self.retired = {}
-        def collection(self, collection, *, include_retired=False):
-            if collection not in c.KNOWLEDGE_COLLECTIONS: raise ValueError("unknown historical collection")
-            rows = [{"object_id":c.split_key(k)[1],"payload":jsonb_order(p),"revision":p["revision"],
-                     "review_status":p.get("review_status"),"retired":False}
-                    for k,p in before.items() if k.startswith(collection+"/")]
-            if include_retired:
-                if collection not in self.retired:
-                    self.retired[collection] = sql._query("select json_build_object('object_id',object_id,'payload',payload,"
-                        "'revision',revision,'review_status',review_status,'retired',true)::text from wang_knowledge.objects "
-                        f"where collection='{collection}' and retired_at is not null order by object_id")
-                rows += self.retired[collection]
-            return sorted(rows,key=lambda r:r["object_id"])
-    store = Store(); sources = reader.SourceIndex(store.collection("source_documents"),Path(settings["DATA_BASE_DIR"]))
+    store = HistoricalAuditStore(before,sql)
+    sources = reader.SourceIndex(store.collection("source_documents"),Path(settings["DATA_BASE_DIR"]))
     class Capture:
         preserve_full_context = True
         def judge(self,prompt,schema):

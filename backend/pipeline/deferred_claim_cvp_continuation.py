@@ -60,6 +60,19 @@ def apply_normal(root, package, before, ports):
             expected_registry_fingerprint_sha256=c.fingerprint(before),registry_collections=registry_collections(before))
 
 
+def recovery_reservation(path, expected):
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+    saved=read_artifact(path)
+    # The first emitted marker was immutable raw JSON. Preserve its bytes;
+    # accept only the complete freshly reconstructed exact proof, not a
+    # schema/status whitelist or omission of any evidence.
+    if "artifact_sha256" in saved:
+        saved=body(read(path))
+    if saved != expected:
+        raise ValueError("prewrite recovery reservation proof drift")
+    return saved
+
+
 def committed(plan,store):
     with store.connect() as conn,conn.cursor() as cursor:
         cursor.execute("SET TRANSACTION READ ONLY")
@@ -225,7 +238,11 @@ def build_proof(root,campaign,ids,ports):
         paths += [p for p in directory(root).glob("*.json") if p.name not in {"batch-run.json","measurements.json","current-state.json"}]
     retry=root/"empty-collection-prewrite-recovery-start.json"
     if retry.exists():
-        saved=read(retry); paths += [retry]
+        from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+        old=read_artifact(retry)
+        expected=validate_prewrite_conflict(old["failure_log"]["path"],before,before,plan,
+            body(read(root/"apply-intent.json")),package,claim_root)
+        saved=recovery_reservation(retry,expected); paths += [retry]
         paths += [c.verify_file(saved[k]) for k in ("failure_log","failed_process","failed_exit")]
     paths += [original/n for n in ("cvp-change-plan.json","cvp-change-package.json","cvp-readback-receipt.json")]
     paths += [original.parent.parent/n for n in ("scope-run.json","scope-disposition-ledger.json")]
@@ -298,7 +315,8 @@ def run(context,claim_root,ports, *, prewrite_conflict_log=None):
         proof=validate_prewrite_conflict(prewrite_conflict_log,before,ports.snapshot(),plan,intent,package,claim_root)
         from backend.pipeline.viewpoint_resolution_runtime import write_immutable
         # One mechanical recovery reservation for this same uncommitted plan.
-        write_immutable(root/"empty-collection-prewrite-recovery-start.json",proof,require_new=True)
+        from backend.pipeline.source_reconciliation_runner import seal
+        write_immutable(root/"empty-collection-prewrite-recovery-start.json",seal(proof),require_new=True)
         write(root/"apply-receipt.json",apply_normal(root,package,before,ports))
     if not committed(plan,ports.store): raise ValueError("normal CVP intent outcome unknown; do not replay")
     expected = deepcopy(before)

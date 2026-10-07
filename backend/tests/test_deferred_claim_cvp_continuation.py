@@ -78,6 +78,20 @@ def test_sql_cut_includes_empty_collections_and_detects_first_insertion():
     assert c.fingerprint(later,collections=cut)!=c.fingerprint(before)
 
 
+@pytest.mark.parametrize("sealed",[False,True])
+def test_legacy_raw_recovery_marker_requires_exact_complete_reconstruction(tmp_path,sealed):
+    from backend.pipeline.source_reconciliation_runner import write
+    from backend.pipeline.viewpoint_resolution_runtime import write_immutable
+    path=tmp_path/"reservation.json";expected={"failure_log":{"path":"L","file_sha256":"s"},"old_intent_preserved":True}
+    if sealed:write(path,expected)
+    else:write_immutable(path,expected)
+    original=path.read_bytes()
+    assert d.recovery_reservation(path,expected)==expected
+    assert path.read_bytes()==original
+    for changed in [{}, {**expected,"old_intent_preserved":False}, {**expected,"extra":"drift"}]:
+        with pytest.raises(ValueError):d.recovery_reservation(path,changed)
+
+
 @pytest.mark.parametrize("problem",[None,"current_changed","created_present","wrong_plan","wrong_package","uncertain_error","failed_exit","foreign_root","update"])
 def test_only_proven_empty_cut_failure_can_recover_before_first_write(tmp_path,problem):
     from backend.pipeline.source_reconciliation_runner import write
