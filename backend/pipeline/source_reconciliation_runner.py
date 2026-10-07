@@ -21,6 +21,13 @@ from backend.pipeline import source_reconciliation as contract
 STAGES = ("proposal", "initial_review", "correction", "final_review")
 
 
+def effective_proposal(frozen, response):
+    if frozen["manifest"].get("deferred_repair"):
+        from backend.pipeline.deferred_claim_repair import normalize_proposal
+        return normalize_proposal(frozen, response)
+    return contract.Proposal.model_validate(response)
+
+
 class Stop(ValueError):
     def __init__(self, reason: str, *, status: str = "needs_owner", waiting_for: str = "owner"):
         super().__init__(reason)
@@ -151,7 +158,8 @@ class Runner:
         packet = json.loads(canonical_json(packet))
         if stage not in STAGES:
             raise ValueError("unknown model stage")
-        adapter = self.ports.adapter(stage)
+        deferred = bool(packet.get("manifest", {}).get("deferred_repair"))
+        adapter = self.ports.deferred_adapter(stage) if deferred else self.ports.adapter(stage)
         expected = ("claude-opus-5-5", "claude_subscription") if "review" in stage else ("gpt-6.1-sol", "codex_subscription")
         if (adapter.model_id, adapter.backend) != expected:
             raise Stop("model/backend differs from frozen subscription policy", status="proof_failure", waiting_for="system")
@@ -208,7 +216,7 @@ class Runner:
         packet = build_proposal_packet(frozen)
         self.guard(frozen)
         raw = self.call("proposal", packet)
-        proposed = contract.Proposal.model_validate(raw["response"])
+        proposed = effective_proposal(frozen, raw["response"])
         review_packet = contract.review_packet(frozen, proposed)
         self.guard(frozen)
         initial = self.call("initial_review", review_packet)
@@ -219,7 +227,7 @@ class Runner:
                              "correction_round": 1, "another_correction_allowed": False}
         self.guard(frozen)
         correction = self.call("correction", correction_packet)
-        proposed = contract.Proposal.model_validate(correction["response"])
+        proposed = effective_proposal(frozen, correction["response"])
         review_packet = contract.review_packet(frozen, proposed)
         self.guard(frozen)
         final = self.call("final_review", review_packet)
@@ -363,7 +371,11 @@ def build_proposal_packet(frozen: dict) -> dict:
     return {"schema_version": contract.VERSION, "update_id": frozen["update_id"],
         "manifest": frozen["manifest"], "before_source": frozen["before"], "current_sources": frozen["after"],
         "context_sources": frozen.get("context_sources", []), "sentence_inventory": frozen["sentence_inventory"],
-        "inventory": frozen["inventory"], "records": contract.rows({k: states[k] for k in selected})}
+        "inventory": frozen["inventory"], "records": contract.rows({k: states[k] for k in selected}),
+        **({"deferred_diagnosis": frozen["deferred_diagnosis"],
+             "writable_record_shapes": {col: contract.KNOWLEDGE_COLLECTIONS[col][0].model_json_schema()
+                 for col in sorted({p["collection"] for p in frozen["manifest"]["permissions"]})}}
+            if "deferred_diagnosis" in frozen else {})}
 
 
 def validate_completion_population(result: dict, frozen: dict, post: dict) -> None:
@@ -442,18 +454,19 @@ def validate_package(package: dict, *, historical: bool = False) -> None:
         raise ValueError("proposal omitted/changed frozen source or consumer context")
     first = validate_raw(root, "proposal", proposal_packet)
     if stage == "initial_review":
-        if first["response"] != proposal.model_dump():
+        if effective_proposal(frozen, first["response"]) != proposal:
             raise ValueError("initial review is not of the actual proposal")
     else:
         initial_packet = body(read(root / "initial_review.packet.json"))
         initial = validate_raw(root, "initial_review", initial_packet)
-        if initial_packet != contract.review_packet(frozen, contract.Proposal.model_validate(first["response"])) or contract.validate_review(initial_packet, initial["response"]):
+        first_proposal = effective_proposal(frozen, first["response"]).model_dump()
+        if initial_packet != contract.review_packet(frozen, effective_proposal(frozen, first["response"])) or contract.validate_review(initial_packet, initial["response"]):
             raise ValueError("correction must follow one genuine initial disagreement")
         correction_packet = body(read(root / "correction.packet.json"))
-        if correction_packet != {**proposal_packet, "initial_proposal": first["response"], "Opus_review": initial["response"], "correction_round": 1, "another_correction_allowed": False}:
+        if correction_packet != {**proposal_packet, "initial_proposal": first_proposal, "Opus_review": initial["response"], "correction_round": 1, "another_correction_allowed": False}:
             raise ValueError("correction chain drift")
         correction = validate_raw(root, "correction", correction_packet)
-        if correction["response"] != proposal.model_dump():
+        if effective_proposal(frozen, correction["response"]) != proposal:
             raise ValueError("terminal review is not of actual correction")
     if expected["artifact_sha256"] != app.get("review_sha256") or sha256_json(proposal.model_dump()) != app.get("proposal_sha256"):
         raise ValueError("final review/proposal provenance drift")
@@ -464,7 +477,7 @@ def validate_package(package: dict, *, historical: bool = False) -> None:
 
 def validate_raw(root: Path, stage: str, packet: dict) -> dict:
     from backend.pipeline.source_reconciliation_runtime import model_adapter
-    adapter = model_adapter(stage)  # Construction is local; never invokes login/models.
+    adapter = model_adapter(stage, deferred=bool(packet.get("manifest", {}).get("deferred_repair")))
     raw = read(root / (stage + ".raw.json"))
     reservation = body(read(root / (stage + ".reservation.json")))
     proof = adapter.request_encoding_proof(packet)

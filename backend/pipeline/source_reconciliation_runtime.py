@@ -50,11 +50,13 @@ def maintenance_lock():
             fcntl.flock(lock, fcntl.LOCK_UN)
 
 
-def model_adapter(stage: str, *, live: bool = False):
+def model_adapter(stage: str, *, live: bool = False, deferred: bool = False):
     review = "review" in stage
     model, backend, provider = ("claude-opus-5-5", "claude_subscription", "claude") if review else ("gpt-6.1-sol", "codex_subscription", "codex")
     filename = "source_reconciliation_review.md" if review else "source_reconciliation_proposal.md"
     prompt = semantic_prompt((PROMPTS / filename).read_text(encoding="utf-8"))
+    if deferred:
+        prompt += "\n" + (PROMPTS / "deferred_claim_evidence_repair_v1.md").read_text(encoding="utf-8")
     if stage == "correction":
         prompt += "\n本次是唯一一轮纠正。逐条回应初次 Opus 意见，不得扩大范围；未解决项明确 unresolved。"
     if stage == "final_review":
@@ -117,6 +119,9 @@ class ProductionPorts:
 
     def adapter(self, stage: str):
         return model_adapter(stage, live=True)
+
+    def deferred_adapter(self, stage: str):
+        return model_adapter(stage, live=True, deferred=True)
 
     def before_model_call(self, stage: str) -> None:
         # Cached responses do not run model/auth diagnostics. A new actual

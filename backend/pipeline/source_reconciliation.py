@@ -12,7 +12,7 @@ from pathlib import Path
 import hashlib
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_serializer
 
 from backend.api.canonical_repository.knowledge_models import KNOWLEDGE_COLLECTIONS
 from backend.api.canonical_repository.postgres_store import normalize_package, record_content_sha, _normalize_records, merge_over_existing, preserve_human_review
@@ -83,6 +83,16 @@ class Group(Contract):
     independent_audit_complete: bool = True
 
 
+class DeferredRepair(Contract):
+    schema_version: Literal["wang_deferred_claim_repair_v1"] = "wang_deferred_claim_repair_v1"
+    kind: Literal["evidence_binding", "claim_statement"] = "evidence_binding"
+    claim_ids: list[str] = Field(min_length=1)
+    investigation_packet: FileBinding
+    handoff: FileBinding
+    raw_gpt: FileBinding
+    raw_opus: FileBinding
+
+
 class Manifest(Contract):
     schema_version: Literal["wang_source_reconciliation_v1"] = VERSION
     source_id: str
@@ -97,6 +107,15 @@ class Manifest(Contract):
     accepted_membership: FileBinding
     prior_updates: list[FileBinding] = Field(default_factory=list)
     created_at: str
+    deferred_repair: DeferredRepair | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize(self, handler):
+        result = handler(self)
+        # Preserve the byte-semantic shape of already frozen v1 manifests.
+        if self.deferred_repair is None:
+            result.pop("deferred_repair", None)
+        return result
 
 
 class Disposition(Contract):
@@ -286,6 +305,49 @@ def inventory(states: dict[str, dict], source_id: str) -> dict:
     }
 
 
+def claim_inventory(states: dict[str, dict], source_id: str, claim_ids: list[str]) -> dict:
+    """Exact reverse impact plus all CVP members, not whole-sermon re-extraction."""
+    forward, reverse = dependency_index(states)
+    roots = {key("claims", cid) for cid in claim_ids}
+    if len(roots) != len(claim_ids) or not roots <= states.keys():
+        raise ValueError("deferred Claim identities missing/duplicated")
+    doc = states[key("source_documents", source_id)]
+    aliases = {source_id, doc.get("transcript_id"), doc.get("canonical_source_id")} - {None, ""}
+    for k in roots:
+        if not states[k].get("occurrences") or any(not aliases.intersection(set(strings(o))) for o in states[k]["occurrences"]):
+            raise ValueError("deferred Claim has foreign/ambiguous occurrence source")
+    affected = roots | {key("evidence_steps", eid) for k in roots for eid in states[k].get("evidence_step_ids", [])}
+    if not affected <= states.keys():
+        raise ValueError("deferred Claim has missing Evidence")
+    queue = deque(sorted(affected))
+    while queue:
+        k = queue.popleft()
+        if split_key(k)[0] in {"canonical_viewpoints", "source_documents", "source_fragments"}:
+            continue
+        for consumer in reverse[k]:
+            if consumer not in affected:
+                affected.add(consumer)
+                if split_key(consumer)[0] in WRITABLE:
+                    queue.append(consumer)
+    viewpoints = {states[k]["viewpoint_id"] for k in affected if k.startswith("viewpoint_claim_links/")}
+    for vid in viewpoints:
+        cv = key("canonical_viewpoints", vid)
+        if cv not in states:
+            raise ValueError("dangling affected CVP")
+        affected.update({cv, key("viewpoint_revisions", states[cv]["current_revision_id"])})
+        affected.update(reverse[cv])
+    context = set(affected) | {key("source_documents", source_id)}
+    queue = deque(sorted(context))
+    while queue:
+        for target in forward[queue.popleft()]:
+            if target not in context:
+                context.add(target)
+                queue.append(target)
+    return {"affected_keys": sorted(affected), "context_keys": sorted(context - affected),
+            "unknown_keys": sorted(k for k in affected if split_key(k)[0] not in WRITABLE | IMPACT_ONLY),
+            "reverse_edges": {k: sorted(reverse[k]) for k in sorted(affected)}}
+
+
 def freeze(manifest: Manifest, states: dict[str, dict], *, physical_snapshots: dict | None = None) -> dict:
     import json
     authorization = json.loads(bound_bytes(manifest.authorization, physical_snapshots))
@@ -331,7 +393,12 @@ def freeze(manifest: Manifest, states: dict[str, dict], *, physical_snapshots: d
     changed = sorted(k for k in keys if before["paragraphs"].get(k) != after[0]["paragraphs"].get(k))
     if not set(changed) <= set(manifest.authorized_paragraph_keys):
         raise ValueError("source change exceeds authorized paragraphs; no automatic scope expansion")
-    inv = inventory(states, manifest.source_id)
+    if manifest.deferred_repair:
+        from backend.pipeline.deferred_claim_repair import validate_authority
+        diagnosis = validate_authority(manifest, states, snapshots=physical_snapshots)
+        inv = claim_inventory(states, manifest.source_id, manifest.deferred_repair.claim_ids)
+    else:
+        inv = inventory(states, manifest.source_id)
     identity = {"schema_version": VERSION, "manifest": manifest.model_dump(),
                 "before": before, "after": after, "registry_sha256": fingerprint(states), "inventory": inv}
     context_sources = []
@@ -359,9 +426,14 @@ def freeze(manifest: Manifest, states: dict[str, dict], *, physical_snapshots: d
         [(int(k[1:]), after[0]["paragraphs"][k]["text"]) for k in sorted(set(manifest.authorized_paragraph_keys)) if k in after[0]["paragraphs"]],
         source_id=manifest.source_id, source_sha256=after[0]["body_sha256"])
     identity["sentence_inventory"] = [s.model_dump(mode="json") for s in sentence_inventory]
+    if manifest.deferred_repair:
+        identity["deferred_diagnosis"] = diagnosis
     archive_bindings = [manifest.before_source, *manifest.current_sources, manifest.authorization,
                         manifest.accepted_membership, *manifest.prior_updates]
     archive_bindings += [FileBinding.model_validate(s["file"]) for s in context_sources]
+    if manifest.deferred_repair:
+        archive_bindings += [manifest.deferred_repair.investigation_packet, manifest.deferred_repair.handoff,
+                             manifest.deferred_repair.raw_gpt, manifest.deferred_repair.raw_opus]
     identity["physical_snapshots"] = {b.path + ":" + b.file_sha256: bound_bytes(b, physical_snapshots).hex() for b in archive_bindings}
     return {**identity, "changed_paragraph_keys": changed, "update_id": "SR-" + sha256_json(identity),
             "before_records": rows(states)}
@@ -373,6 +445,10 @@ def guard_files(frozen: dict, *, historical: bool = False) -> None:
         bound_bytes(b, frozen["physical_snapshots"] if historical else None)
     for source in frozen.get("context_sources", []):
         bound_bytes(source["file"], frozen["physical_snapshots"] if historical else None)
+    if manifest.deferred_repair:
+        for b in (manifest.deferred_repair.investigation_packet, manifest.deferred_repair.handoff,
+                  manifest.deferred_repair.raw_gpt, manifest.deferred_repair.raw_opus):
+            bound_bytes(b, frozen["physical_snapshots"] if historical else None)
 
 
 def _semantic(row: dict) -> dict:
@@ -447,6 +523,9 @@ def validate_proposal(frozen: dict, proposal: Proposal) -> dict[str, dict]:
     if {split_key(k)[1] for k in before if k.startswith("claims/")} != {split_key(k)[1] for k in post if k.startswith("claims/")}:
         raise ValueError("source update cannot silently change Claim membership")
     validate_graph(post, before, frozen)
+    if manifest.deferred_repair:
+        from backend.pipeline.deferred_claim_repair import validate_postimages
+        validate_postimages(frozen, post)
     sentence_ids = [d.sentence_id for d in proposal.sentence_dispositions]
     if len(sentence_ids) != len(set(sentence_ids)) or set(sentence_ids) != {s["sentence_id"] for s in frozen["sentence_inventory"]}:
         raise ValueError("authorized source sentence denominator incomplete or duplicated")
@@ -614,12 +693,16 @@ def review_packet(frozen: dict, proposal: Proposal) -> dict:
         "context_sources": frozen.get("context_sources", []),
         "sentence_inventory": frozen["sentence_inventory"],
         "inventory": frozen["inventory"], "before_records": rows({k: before[k] for k in selected}),
+        **({"deferred_diagnosis": frozen["deferred_diagnosis"]} if "deferred_diagnosis" in frozen else {}),
         "proposal": proposal.model_dump(), "proposal_sha256": sha256_json(proposal.model_dump()),
         "provenance_contract": {
             "old_approval_is_history_only": True, "reviewer": "claude-opus-5-5",
             "approval_basis": "owner_scoped_independent_terminal_review",
             "deterministic_after_review_changes": ["fresh review fields", "fresh candidate/decision IDs", "dependent final Claim SHA"],
             "new_revision_objects_start_at_one": True, "correction_limit": 1,
+            **({"deterministic_before_review": ["exact source/paragraph/quote SHA", "new quote source_version_bound",
+                "Claim schema defaults", "connected-overlap one-basis metadata", "proposed Claim locator SHA"]}
+               if frozen["manifest"].get("deferred_repair") else {}),
         },
     }
 

@@ -3,8 +3,8 @@
 > **读者**：Solution architect、Developer、维护执行者。
 > **类型**：流程。
 > **状态**：当前；新通用入口，不追认或替换历史修订审批。
-> **与代码对齐**：2026-10-06，核对到 `eacc753`、`c5bc74a`、`1bcb34f` 及对应离线回归。生产端口已实现，但新入口尚未做真实模型／数据库端到端实跑；历史包只读重放不等于新入口生产批准。
-> **权威范围**：一篇讲道的已授权来源版本变化，怎样传递到既有知识记录、观点连接和受影响分组；不授权新增 campaign 成员、路线、文章、发布或部署。
+> **与代码对齐**：2026-10-07，核对通用执行器与 deferred Claim 入口的代码及离线回归；新增入口尚未完成真实模型／数据库端到端实跑。历史包只读重放不等于新入口生产批准。
+> **权威范围**：已授权来源版本变化及来源未变的 deferred Claim 修订，怎样传递到既有知识记录、观点连接和受影响分组；不授权新增 campaign 成员、路线、文章、发布或部署。
 
 ## 1. 更新原则
 
@@ -102,6 +102,16 @@ backend/.venv/bin/python -m backend.pipeline.source_reconciliation_runner --mani
 不能把后台启动、CLI 0、审核批准、apply receipt 或部分审计说成完成。未完成 reserved audit 仅复用已完整物化的结果，不猜测性重新调用。
 
 ## 8. 实现与适用边界
+
+### 8.1. deferred Claim 自动修订入口
+
+`backend.pipeline.deferred_claim_repair_runner` 将已保存的来源调查作为诊断而非批准，进入同一个通用 Claim 事务。入口区分「自身原文已有支持但证据链缺绑定」与「Claim 措辞／归属需要修订」；证据已经充分但缺 CVP 的情形返回现有 CVP 解析，不另建生成流程。
+
+此入口不改物理来源、不增删 Claim 身份或原分组成员。冻结目标 Claim、全部 Evidence／anchors／反向 consumer、已有 CVP 连接、当前 CVR 和其他成员的完整自身来源；未知 consumer、真实 human hold、来源冲突停止。证据补绑定模式不改 Claim 文字、连接谓词或 locator 范围；措辞修订模式仍逐一审核全部受影响连接，不自动改 CVP 正文或合并、拆分、退役观点。
+
+提议使用 GPT6.1Sol high 订阅，独立审核使用 Opus5.5 high 订阅；最多一次 GPT 纠正和一次 Opus 终审，不增加 GPT 前置批准。程序在审核前确定性计算引文哈希、重叠引用单一依据标记及拟 Claim locator SHA，完整拟后像交给 Opus；原始模型回答不覆盖。每个 Claim／来源版本／问题类别共用跨 root 的一次调用预算，已有 intent 无回答视为结果未知，不自动重试。
+
+审核后仍走本流程的备份、单次应用、全库回读与受影响完整组审计。`audited_complete` 只证明 Claim 修订完成；deferred 成分必须以当前 Claim 和新证据返回原有 CVP 覆盖解析，再经完整组审计和 completion 才能推进后一组。原 scope／ledger、旧审核和已应用 ChangeSet 均保留，不重放。
 
 实现分别在 `source_reconciliation.py`（契约／完整图验证）、`source_reconciliation_runner.py`（持久阶段）、`source_reconciliation_runtime.py`（订阅／SQL／备份／审计）及 `source_reconciliation_epoch.py`（完成证明消费）。
 测试为 `backend/tests/test_source_reconciliation.py`；既有来源修订与分组／store 回归仍须通过。
