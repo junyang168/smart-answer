@@ -5293,7 +5293,7 @@ class PostgresKnowledgeStore:
         source_queue_context = _claim_evidence_source_queue_context
         if (any(op.collection == "viewpoint_identity_decisions"
                 and op.payload.get("policy_version") == "wang_owner_approved_link_correction_v1"
-                for op in plan.operations)
+                for op in getattr(plan, "operations", ()))
                 and plan.source_kind != "wang_owner_approved_link_correction_v1"):
             raise ValueError("approved link correction cannot bypass its exact SQL store authority")
         if plan.source_kind == "wang_owner_approved_link_correction_v1":
