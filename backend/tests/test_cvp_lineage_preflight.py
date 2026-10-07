@@ -12,10 +12,12 @@ def inventory(tmp_path):
     candidate = tmp_path / 'batch/candidates/c.reviewed-candidate.json'
     review = tmp_path / 'batch/reviews/c.independent-review.json'
     package = tmp_path / 'input.json'
-    for path, body in ((candidate, {}), (package, {'original': '完整原文'}),
-                       (review, {'source': {'package_path': str(package)}})):
+    for path, body in ((candidate, {}), (package, {'original': '完整原文'})):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(body))
+    review.parent.mkdir(parents=True, exist_ok=True)
+    review.write_text(json.dumps({'source': {'package_path': str(package),
+                                           'package_sha256': binding(package)['file_sha256']}}))
     return {'good': {'variants': [{'path': str(candidate),
         'file_sha256': binding(candidate)['file_sha256'],
         'changed_substantive_fields': ['evidence_step_ids'],

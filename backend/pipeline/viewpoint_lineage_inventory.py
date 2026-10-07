@@ -34,6 +34,9 @@ def applied_review_match(claim_id, variants, events):
     if any(e['reviewer_kind'] == 'human' for e in events):
         return variants
     for event in events:
+        if event['source_kind'] == 'legacy_coordinate_only_review_reconciliation_v1':
+            matched.update(_coordinate_migration_review_matches(claim_id, variants, event))
+            continue
         before, after = event['before'], event['after']
         left, right = deepcopy(before), deepcopy(after)
         for payload in (left, right):
@@ -73,6 +76,67 @@ def applied_review_match(claim_id, variants, events):
             if expected == event['reason']:
                 matched.add(index)
     return [variants[next(iter(matched))]] if len(matched) == 1 else variants
+
+
+def _coordinate_migration_review_matches(claim_id, variants, event):
+    """Discover identity only after the existing full applied #397 proof passes.
+
+    Neither the source-kind nor event's SHA pointers grant eligibility. The
+    frozen complete plan, graph, selected review and exact status-only postimage
+    are reconstructed by the same migration verifier used by the full bridge.
+    Current source/evidence/coordinate/human-hold gates still run afterwards.
+    """
+    from backend.pipeline.viewpoint_historical_review_bridge import verify_coordinate_review_migration
+    from backend.api.canonical_repository.viewpoint_production_safety import CvpProductionBlocked
+    if (event['status'] != 'applied' or event['reviewer_kind'] != 'ai'
+            or event['decision'] != 'ai_consensus_reviewed' or event['operation'] != 'update'
+            or event['source_sha'] is None):
+        return set()
+    before, after = event['before'], event['after']
+    if (before.get('claim_id') != claim_id or after.get('claim_id') != claim_id
+            or event['before_sha'] != record_content_sha(before)
+            or event['after_sha'] != record_content_sha(after)
+            or after.get('review_note') != event['reason']
+            or after.get('reviewed_by') != event['reviewer_id']):
+        return set()
+    left = {'payload': before, 'revision': before['revision'], 'content_sha256': event['before_sha']}
+    right = {'payload': after, 'revision': after['revision'], 'content_sha256': event['after_sha'],
+             'change_set_id': event['change_set_id'], 'source_kind': event['source_kind'],
+             'source_sha256': event['source_sha'], 'metadata': event['metadata']}
+    matched = set()
+    for index, variant in enumerate(variants):
+        rb, pb = variant['review_binding'], variant['review_input_binding']
+        artifact = event['artifact']
+        if (artifact.get('review_artifact_sha256') != rb['file_sha256']
+                or artifact.get('package_sha256') != pb['file_sha256']):
+            continue
+        raw = Path(rb['path']).read_bytes(); package = Path(pb['path']).read_bytes()
+        if hashlib.sha256(raw).hexdigest() != rb['file_sha256'] or hashlib.sha256(package).hexdigest() != pb['file_sha256']:
+            continue
+        review = json.loads(raw)
+        if (review.get('source', {}).get('package_sha256') != pb['file_sha256']
+                or review.get('reviewer', {}).get('fingerprint_sha256') != artifact.get('review_fingerprint')):
+            continue
+        try:
+            proof = verify_coordinate_review_migration(claim_id, left, right, rb, pb, review)
+            # The verifier reconstructs every frozen operation/event. Also bind
+            # its complete operation count/fingerprint and SQL event artifact.
+            from backend.pipeline.legacy_candidate_reconciliation import _decode_plan
+            document = json.loads(Path(proof['plan_binding']['path']).read_bytes())
+            plans = [p for p in document['plans'] if p.get('change_set_id') == event['change_set_id']]
+            if len(plans) != 1:
+                continue
+            plan = _decode_plan(plans[0])
+            rows = [e for e in plan.review_events if e.collection == 'claims' and e.object_id == claim_id]
+            if (plan.fingerprint_sha256 != event['fingerprint']
+                    or len(plan.operations) != event['operation_count'] or len(rows) != 1
+                    or rows[0].review_event_id != event['event_id']
+                    or rows[0].artifact != artifact or rows[0].reason != event['reason']):
+                continue
+        except (CvpProductionBlocked, ValueError, KeyError, TypeError):
+            continue
+        matched.add(index)
+    return matched
 
 
 def discover_applied_review(claim_id, variants, store):

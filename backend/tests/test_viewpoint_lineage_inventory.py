@@ -1,8 +1,68 @@
 import json
+import hashlib
+from copy import deepcopy
+from types import SimpleNamespace
+import pytest
 
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.pipeline.viewpoint_lineage_inventory import build_lineage_inventory
 from backend.pipeline.viewpoint_lineage_inventory import discover_review_inputs
+
+
+@pytest.mark.parametrize('mutation', [None, 'unapplied', 'human', 'content', 'before_sha',
+    'after_sha', 'review_sha', 'package_sha', 'review_fingerprint', 'plan_fingerprint',
+    'operation_count', 'event_id', 'artifact', 'plan_refusal', 'physical_review', 'physical_input'])
+def test_coordinate_migration_discovery_requires_full_existing_proof(tmp_path, monkeypatch, mutation):
+    from backend.pipeline.viewpoint_lineage_inventory import applied_review_match
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    from backend.api.canonical_repository.viewpoint_production_safety import CvpProductionBlocked
+    package = tmp_path/'input.json'; package.write_text('{}')
+    pb = {'path':str(package),'file_sha256':hashlib.sha256(package.read_bytes()).hexdigest()}
+    variants = []
+    for i in range(2):
+        p=tmp_path/f'review{i}.json'
+        p.write_text(json.dumps({'source':{'package_sha256':pb['file_sha256']},
+            'reviewer':{'fingerprint_sha256':f'fingerprint{i}'}}))
+        variants.append({'review_binding':{'path':str(p),'file_sha256':hashlib.sha256(p.read_bytes()).hexdigest()},
+                         'review_input_binding':pb})
+    before={'claim_id':'C1','statement':'same','revision':2,'review_status':'candidate'}
+    after=before|{'revision':3,'review_status':'ai_consensus_reviewed','reviewed_by':'opus','review_note':'frozen reason'}
+    artifact={'review_artifact_sha256':variants[1]['review_binding']['file_sha256'],
+              'package_sha256':pb['file_sha256'],'review_fingerprint':'fingerprint1'}
+    event={'event_id':'R','change_set_id':'K','source_kind':'legacy_coordinate_only_review_reconciliation_v1',
+           'status':'applied','reviewer_kind':'ai','reviewer_id':'opus','decision':'ai_consensus_reviewed',
+           'reason':'frozen reason','artifact':artifact,'metadata':{'freeze_sha256':'freeze'},
+           'before':before,'after':after,'before_sha':record_content_sha(before),'after_sha':record_content_sha(after),
+           'source_sha':'source','fingerprint':'plan','operation':'update','operation_count':4}
+    frozen_event=SimpleNamespace(collection='claims',object_id='C1',review_event_id='R',
+                                 artifact=deepcopy(artifact),reason='frozen reason')
+    plan=SimpleNamespace(fingerprint_sha256='plan',operations=[0]*4,review_events=[frozen_event])
+    path=tmp_path/'migration-plans.json'; path.write_text(json.dumps({'plans':[{'change_set_id':'K'}]}))
+    calls=[]
+    def verify(cid,left,right,rb,input_binding,review):
+        calls.append(cid)
+        assert cid=='C1' and rb==variants[1]['review_binding'] and input_binding==pb
+        assert left['content_sha256']==event['before_sha'] and right['source_sha256']=='source'
+        if mutation=='content' or mutation=='plan_refusal':
+            raise CvpProductionBlocked(['full frozen proof refuses'])
+        return {'plan_binding':{'path':str(path)}}
+    monkeypatch.setattr('backend.pipeline.viewpoint_historical_review_bridge.verify_coordinate_review_migration',verify)
+    monkeypatch.setattr('backend.pipeline.legacy_candidate_reconciliation._decode_plan',lambda raw:plan)
+    if mutation=='unapplied':event['status']='failed'
+    if mutation=='human':event['reviewer_kind']='human'
+    if mutation=='content':event['after']['statement']='changed';event['after_sha']=record_content_sha(event['after'])
+    if mutation in {'before_sha','after_sha'}:event[mutation]='wrong'
+    if mutation=='review_sha':event['artifact']['review_artifact_sha256']='wrong'
+    if mutation=='package_sha':event['artifact']['package_sha256']='wrong'
+    if mutation=='review_fingerprint':event['artifact']['review_fingerprint']='wrong'
+    if mutation=='plan_fingerprint':event['fingerprint']='wrong'
+    if mutation=='operation_count':event['operation_count']=3
+    if mutation=='event_id':event['event_id']='different'
+    if mutation=='artifact':event['artifact']['extra']='tampered'
+    if mutation=='physical_review':pathlib_path=tmp_path/'review1.json';pathlib_path.write_text('{}')
+    if mutation=='physical_input':package.write_text('changed')
+    assert applied_review_match('C1',variants,[event])==(variants[1:] if mutation is None else variants)
+    if mutation is None:assert calls==['C1']
 
 
 def test_applied_review_discovery_requires_exact_event_operation_and_unique_reason(tmp_path):
