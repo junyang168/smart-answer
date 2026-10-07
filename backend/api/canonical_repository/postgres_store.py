@@ -5291,6 +5291,11 @@ class PostgresKnowledgeStore:
         ] = None,
     ) -> dict[str, Any]:
         source_queue_context = _claim_evidence_source_queue_context
+        if (any(op.collection == "viewpoint_identity_decisions"
+                and op.payload.get("policy_version") == "wang_owner_approved_link_correction_v1"
+                for op in plan.operations)
+                and plan.source_kind != "wang_owner_approved_link_correction_v1"):
+            raise ValueError("approved link correction cannot bypass its exact SQL store authority")
         if plan.source_kind == "wang_owner_approved_link_correction_v1":
             from backend.pipeline.owner_approved_link_correction import validate_apply_plan
             frozen_registry_sha256 = validate_apply_plan(plan, metadata)

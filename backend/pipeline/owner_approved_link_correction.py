@@ -146,7 +146,24 @@ def package_for(packet, raw, root):
         reason="Owner authorized the exact full-Claim classification correction; a single fresh Opus independently reviewed its postimage. Original audit and upheld GPT finding retained.")
     link["decision_id"] = decision["identity_decision_id"]
     return {"package_id":"OWNER-LINK-"+seed[:24],"viewpoint_claim_links":[link],
-        "viewpoint_identity_candidates":[candidate],"viewpoint_identity_decisions":[decision]}
+        "viewpoint_identity_candidates":[candidate],"viewpoint_identity_decisions":[decision],
+        "source_repair_application":{"schema_version":VERSION,"run_root":str(root),
+            "packet_sha256":c.sha256_json(packet),"review_sha256":raw["artifact_sha256"],
+            "approval_status":"not_human_approved"}}
+
+
+def validate_reviewed_package(package):
+    """Planner/store entry, not a policy/status whitelist or supplied boolean."""
+    app = package.get("source_repair_application",{})
+    root = Path(app.get("run_root",""))
+    if app.get("schema_version") != VERSION or not root.is_absolute():
+        raise ValueError("exact approved-link package authority missing")
+    packet = body(read(root/"packet.json"))
+    before = c.index(read(root/"before.json")["records"])
+    validate_parent(root,before,ProductionPorts())
+    raw = review_raw(root,packet)
+    if package != package_for(packet,raw,root):
+        raise ValueError("store package differs from real scoped Opus answer/authorized records")
 
 
 def assert_plan(plan, package, before):
@@ -556,7 +573,12 @@ def main():
             write(root/"result.json",result)
             print(json.dumps(result,ensure_ascii=False),flush=True)
         except Exception as exc:
-            write(root/"failure.json",{"error":str(exc),"automatic_retry":False,"production_resumed":False})
+            failure = {"error":str(exc),"automatic_retry":False,"production_resumed":False}
+            if not (root/"failure.json").exists(): write(root/"failure.json",failure)
+            write(root/"failures"/(c.sha256_json(failure)+".json"),failure)
+            write(root/"state.json",{"status":getattr(exc,"status","proof_failure"),
+                "waiting_for":getattr(exc,"waiting_for","system"),"next_action":str(exc),
+                "production_resumed":False},immutable=False)
             raise
 
 

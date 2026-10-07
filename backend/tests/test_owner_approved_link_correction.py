@@ -169,3 +169,27 @@ def test_saved_gpt_transport_uses_exact_original_jsonb_record_order_too():
     assert store.get_record_state("claims","C")["payload"] == value
     assert list(store.get_record_state("claims","C")["payload"]) == ["k","nested","long_key"]
     assert list(store.list_records("claims")[0]["nested"]) == ["a","zz"]
+
+
+def test_planner_dispatch_requires_real_bound_package_authority(monkeypatch):
+    from backend.api.canonical_repository.reviewed_candidate_contract import validate_store_package_authorization
+    called = []
+    monkeypatch.setattr(d,"validate_reviewed_package",lambda p: called.append(p))
+    package = {"source_repair_application":{"schema_version":d.VERSION},"viewpoint_identity_decisions":[]}
+    validate_store_package_authorization(package)
+    assert called == [package]
+
+
+def test_planner_authority_rejects_supplied_approval_without_exact_root():
+    with pytest.raises(ValueError,match="authority"):
+        d.validate_reviewed_package({"source_repair_application":{"schema_version":d.VERSION,"approved":True}})
+
+
+def test_different_source_kind_cannot_bypass_sql_authority_before_database_access():
+    from types import SimpleNamespace
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    store = object.__new__(PostgresKnowledgeStore)
+    plan = SimpleNamespace(source_kind="other",operations=[SimpleNamespace(collection="viewpoint_identity_decisions",
+        payload={"policy_version":d.VERSION})])
+    with pytest.raises(ValueError,match="bypass"):
+        store.apply_plan(plan)
