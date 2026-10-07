@@ -145,6 +145,13 @@ def test_new_identity_approval_is_single_fresh_opus_not_old_or_human():
     assert decision["identity_decision_id"] != old["decision_id"]
     from backend.api.canonical_repository.knowledge_models import ViewpointIdentityDecisionRecord
     ViewpointIdentityDecisionRecord.model_validate(decision)
+    candidate = package["viewpoint_identity_candidates"][0]
+    identity = {"claims":candidate["candidate_claim_ids"],"viewpoints":candidate["candidate_viewpoint_ids"],
+        "relations":candidate.get("seed_relation_ids",[]),"action":candidate["proposed_action"],
+        "blockers":candidate.get("blocker_codes",[]),"coverage_snapshot_id":candidate.get("coverage_snapshot_id"),
+        "generation_fingerprint":candidate["generation_fingerprint"]}
+    assert candidate["identity_candidate_id"] == "VIC-"+c.sha256_json(identity)[:20]
+    assert decision["input_sha256"] == candidate["generation_fingerprint"]
 
 
 def test_historical_jsonb_wire_order_restores_signature_without_semantic_change():
@@ -154,3 +161,11 @@ def test_historical_jsonb_wire_order_restores_signature_without_semantic_change(
     assert list(actual["rows"][0]) == ["k","long_key"]
     assert actual == value and c.sha256_json(actual) == c.sha256_json(value)
     assert value["rows"][0] == {"long_key":1,"k":2}
+
+
+def test_saved_gpt_transport_uses_exact_original_jsonb_record_order_too():
+    value = {"long_key":1,"k":2,"nested":{"zz":3,"a":4}}
+    store = d.HistoricalStore({"claims/C":value})
+    assert store.get_record_state("claims","C")["payload"] == value
+    assert list(store.get_record_state("claims","C")["payload"]) == ["k","nested","long_key"]
+    assert list(store.list_records("claims")[0]["nested"]) == ["a","zz"]

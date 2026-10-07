@@ -129,9 +129,15 @@ def package_for(packet, raw, root):
     candidate.update(revision=1,identity_candidate_id="VIC-"+seed[:20],
         candidate_claim_ids=[old["claim_id"]],candidate_viewpoint_ids=[old["viewpoint_id"]],
         proposed_action="match_existing",generation_fingerprint=seed)
+    identity = {"claims":candidate["candidate_claim_ids"],"viewpoints":candidate["candidate_viewpoint_ids"],
+        "relations":candidate.get("seed_relation_ids",[]),"action":candidate["proposed_action"],
+        "blockers":candidate.get("blocker_codes",[]),"coverage_snapshot_id":candidate.get("coverage_snapshot_id"),
+        "generation_fingerprint":seed}
+    if candidate.get("scope_manifest_sha256"): identity["scope_manifest_sha256"] = candidate["scope_manifest_sha256"]
+    candidate["identity_candidate_id"] = "VIC-"+c.sha256_json(identity)[:20]
     decision = deepcopy(prior)
     decision.update(revision=1,identity_decision_id="VID-"+seed[:20],identity_candidate_id=candidate["identity_candidate_id"],
-        input_sha256=c.sha256_json(packet),decision="match_existing",resolved_viewpoint_id=old["viewpoint_id"],
+        input_sha256=seed,decision="match_existing",resolved_viewpoint_id=old["viewpoint_id"],
         claim_link_decisions=[{"claim_id":old["claim_id"],"link_type":"equivalent_full"}],
         proposition_unit_link_decisions=[],review_artifact_sha256=raw["artifact_sha256"],
         semantic_call_artifact_sha256s=[raw["artifact_sha256"]],reviewer_model_ids=["claude-opus-5-5"],
@@ -216,10 +222,10 @@ class HistoricalStore:
     """Only reconstruct an already-saved own-source packet; never write SQL."""
     def __init__(self, states): self.states = states
     def list_records(self, collection):
-        return [p for k,p in self.states.items() if k.startswith(collection+"/")]
+        return [jsonb_order(p) for k,p in sorted(self.states.items()) if k.startswith(collection+"/")]
     def get_record_state(self, collection, oid):
         p = self.states.get(c.key(collection,oid))
-        return None if p is None else {"retired":False,"payload":p}
+        return None if p is None else {"retired":False,"payload":jsonb_order(p)}
 
 
 def jsonb_order(value):
