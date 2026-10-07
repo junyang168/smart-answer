@@ -258,6 +258,9 @@ def test_long_continuation_root_is_bounded_and_full_identity_bound(tmp_path):
     result = m.continuation_root(root, attempt)
     assert len(result.name.encode('utf-8')) <= 240
     assert result == m.continuation_root(root, attempt)
+    assert result != m.continuation_root(tmp_path / 'other' / root.name, attempt)
+    assert result != m.continuation_root(root, tmp_path / 'other-attempt')
+    result.mkdir()
 
 
 def test_prepared_seed_handoff_cannot_skip_dryrun_or_change_output(tmp_path, monkeypatch):
@@ -276,9 +279,6 @@ def test_prepared_seed_handoff_cannot_skip_dryrun_or_change_output(tmp_path, mon
         m.start_prepared_campaign(tmp_path/'old', output, tmp_path/'attempt',
                                   tmp_path/'recovery', 'codex', args, {})
     assert calls == [(args + ['--dry-run'], 'campaign-preflight')]
-    assert result != m.continuation_root(tmp_path / 'other' / root.name, attempt)
-    assert result != m.continuation_root(root, tmp_path / 'other-attempt')
-    result.mkdir()
 
 
 def test_repaired_owner_checkpoint_never_preflights_or_starts_next_group(tmp_path,monkeypatch):
