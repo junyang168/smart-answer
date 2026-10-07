@@ -222,6 +222,18 @@ class HistoricalStore:
         return None if p is None else {"retired":False,"payload":p}
 
 
+def jsonb_order(value):
+    """Restore PostgreSQL jsonb object-key storage order, without content edits.
+
+    The independent legacy prompt emits signature/scope without sort_keys.
+    Frozen canonical JSON has a different order despite identical values.
+    """
+    if isinstance(value,dict):
+        return {key:jsonb_order(value[key]) for key in sorted(value,key=lambda k:(len(k.encode("utf-8")),k.encode("utf-8")))}
+    if isinstance(value,list): return [jsonb_order(item) for item in value]
+    return value
+
+
 def historical_audit_proofs(audit_path, before):
     """Reconstruct the OLD independent input from its authenticated predecessor.
 
@@ -247,7 +259,7 @@ def historical_audit_proofs(audit_path, before):
         def __init__(self): self.retired = {}
         def collection(self, collection, *, include_retired=False):
             if collection not in c.KNOWLEDGE_COLLECTIONS: raise ValueError("unknown historical collection")
-            rows = [{"object_id":c.split_key(k)[1],"payload":p,"revision":p["revision"],
+            rows = [{"object_id":c.split_key(k)[1],"payload":jsonb_order(p),"revision":p["revision"],
                      "review_status":p.get("review_status"),"retired":False}
                     for k,p in before.items() if k.startswith(collection+"/")]
             if include_retired:

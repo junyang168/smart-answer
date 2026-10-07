@@ -145,3 +145,12 @@ def test_new_identity_approval_is_single_fresh_opus_not_old_or_human():
     assert decision["identity_decision_id"] != old["decision_id"]
     from backend.api.canonical_repository.knowledge_models import ViewpointIdentityDecisionRecord
     ViewpointIdentityDecisionRecord.model_validate(decision)
+
+
+def test_historical_jsonb_wire_order_restores_signature_without_semantic_change():
+    value = {"zzzz":1,"中文":2,"aa":3,"a":4,"rows":[{"long_key":1,"k":2}]}
+    actual = d.jsonb_order(value)
+    assert list(actual) == ["a","aa","rows","zzzz","中文"]
+    assert list(actual["rows"][0]) == ["k","long_key"]
+    assert actual == value and c.sha256_json(actual) == c.sha256_json(value)
+    assert value["rows"][0] == {"long_key":1,"k":2}
