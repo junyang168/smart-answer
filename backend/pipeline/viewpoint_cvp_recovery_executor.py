@@ -230,8 +230,8 @@ def verify_group_audit(root, cfg, schedule, manifest, groups, audit_path, output
     plans = list((group_root / "production/run/batches").glob("*/cvp-change-plan.json"))
     if len(plans) != 1:
         raise ValueError("expected one intact group plan")
-    targets = sorted({o["payload"]["viewpoint_id"] for o in read(plans[0])["operations"]
-                      if o["collection"] == "viewpoint_claim_links"})
+    from backend.pipeline.viewpoint_group_audit_population import group_audit_targets
+    targets = group_audit_targets(plans[0])
     if component_proof is not None:
         targets = sorted(set(targets) | set(component_proof.get('viewpoint_ids', [])))
     if not targets:
@@ -249,7 +249,7 @@ def verify_group_audit(root, cfg, schedule, manifest, groups, audit_path, output
     if disposition["status"] != "passed":
         raise ValueError("mechanical audit has selected/global integrity findings")
     proof = {"group_key": group_key, "viewpoint_ids": targets, "audit_path": str(audit_path),
-             "bindings": [binding(audit_path), binding(plans[0]), binding(scope_run), binding(rb)],
+             "bindings": [binding(audit_path), binding(plans[0]), binding(plans[0].parent/'cvp-change-package.json'), binding(scope_run), binding(rb)],
              "argument_routes_completed": False}
     from backend.pipeline.viewpoint_g035_temporary_audit import validate as validate_exception, KEY
     exception_bindings = validate_exception(audit)
@@ -370,8 +370,8 @@ def resume_after_repair(root, attempt, recovery_root, executable, *, additional_
         plans = list((group_root / "production/run/batches").glob("*/cvp-change-plan.json"))
         if len(plans) != 1:
             raise ValueError("ambiguous intact group plan")
-        targets = sorted({o["payload"]["viewpoint_id"] for o in read(plans[0])["operations"]
-                          if o["collection"] == "viewpoint_claim_links"})
+        from backend.pipeline.viewpoint_group_audit_population import group_audit_targets
+        targets = group_audit_targets(plans[0])
         audit_dir = attempt / "independent-reaudit"
         if saved_audit_path is None:
             run_logged([PYTHON, "scripts/audit-library.py", "--scope", "all", "--layers", "1,2,3,4",

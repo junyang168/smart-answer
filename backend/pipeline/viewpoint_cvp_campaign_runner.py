@@ -516,7 +516,8 @@ def execute(args):
             if len(plans) != 1:
                 raise ValueError("expected exactly one intact group plan")
             plan = read(plans[0])
-            target_ids = sorted({o["payload"]["viewpoint_id"] for o in plan["operations"] if o["collection"] == "viewpoint_claim_links"})
+            from backend.pipeline.viewpoint_group_audit_population import group_audit_targets
+            target_ids = group_audit_targets(plans[0])
             if not target_ids:
                 raise ValueError("no viewpoint audit targets; needs explicit disposition review")
             audit_root = root / "independent-audit"
@@ -558,7 +559,7 @@ def execute(args):
             _write_immutable(root / "post-apply-audit-disposition.json", disposition)
             if disposition["status"] != "passed":
                 raise ValueError("post-apply mechanical audit has in-scope/global Registry findings")
-            proof = {"group_key": row["group_key"], "viewpoint_ids": target_ids, "audit_path": str(audit_path), "bindings": [binding(audit_path), binding(plans[0]), binding(root / "production/run/scope-run.json"), *resolution_bindings], "argument_routes_completed": False}
+            proof = {"group_key": row["group_key"], "viewpoint_ids": target_ids, "audit_path": str(audit_path), "bindings": [binding(audit_path), binding(plans[0]), binding(plans[0].parent/'cvp-change-package.json'), binding(plans[0].parent/'cvp-readback-receipt.json'), binding(root / "production/run/scope-run.json"), *resolution_bindings], "argument_routes_completed": False}
             from backend.pipeline.viewpoint_g035_temporary_audit import validate as validate_exception, KEY as legacy_key
             from backend.pipeline.viewpoint_content_blocked_fallback import KEY as fallback_key
             exception_bindings = validate_exception(audit)

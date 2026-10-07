@@ -161,9 +161,15 @@ def test_content_dispute_blocks_completion_even_after_code_tests_pass(tmp_path):
     batch.mkdir(parents=True)
     (root / "progress.json").write_text(json.dumps({"sequence": 8, "group_key": "group"}))
     (batch.parent.parent / "scope-run.json").write_text('{"disposition_status":"complete"}')
-    (batch / "cvp-change-plan.json").write_text(json.dumps({"operations": [
-        {"collection": "viewpoint_claim_links", "payload": {"viewpoint_id": "cv"}}]}))
-    (batch / "cvp-readback-receipt.json").write_text('{"readback_status":"verified"}')
+    from backend.api.canonical_repository.viewpoint_foundation import sha256_json
+    package={"viewpoint_claim_links":[{"viewpoint_claim_link_id":"link","viewpoint_id":"cv","effective_state":"active"}]}
+    (batch / "cvp-change-package.json").write_text(json.dumps(package))
+    (batch / "cvp-change-plan.json").write_text(json.dumps({"source_sha256":sha256_json(package),
+        "change_set_id":"KCS-test","fingerprint_sha256":"plan","operations": [
+        {"collection": "viewpoint_claim_links","operation":"create","payload": package['viewpoint_claim_links'][0]}]}))
+    receipt={"readback_status":"verified","cvp_changeset_id":"KCS-test","cvp_changeset_sha256":"plan",
+        "committed_viewpoint_revisions":[{"viewpoint_id":"cv","viewpoint_revision_id":"cvr"}]}
+    (batch / "cvp-readback-receipt.json").write_text(json.dumps({**receipt,"artifact_sha256":sha256_json(receipt)}))
     audit = {"meta": {"model": "gemini-3.8-flash"}, "layers": {
         "3": {"complete": True, "judged": 1, "results": [{"claim_id": "cl", "verdict": "supported"}]},
         "4": {"complete": True, "judged": 1, "disputed": 1,
