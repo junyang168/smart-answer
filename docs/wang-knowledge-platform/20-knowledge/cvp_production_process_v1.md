@@ -2,8 +2,8 @@
 
 > **讀者**：流程負責人、神學編輯、Solution architect、Developer。
 > **類型**：流程。
-> **狀態**：當前內容流程；第 13 節為待批准、尚未實作的 Claim 問題閉環設計。儲存、交易與恢復由 v2 共同 SQL 入口承擔，舊執行方案禁用。本文不啟動生產、不新增內容修改授權。
-> **與代碼對齊**：2026-10-08；內容角色／SQL 交易基線核對到 `6b9541e`，程式版本綁定及第 13 節現有缺口核對到 `4ce1a4c` 的共同入口。第 13 節新增設計尚未實作；執行仍受 owner 邊界限制，不因驗收一組而自動擴大後續範圍。
+> **狀態**：當前內容流程；第 13 節共同 Claim 問題接點、聯合後像審核及 SQL 分支已實作、離線／隔離驗證，尚未啟用正式內容修訂。儲存、交易與恢復由 v2 共同 SQL 入口承擔，舊執行方案禁用。本文不啟動生產、不新增內容修改授權。
+> **與代碼對齊**：2026-10-08；交易基線 `6b9541e`、程式版本綁定 `4ce1a4c`；第 13 節核對本次 `claim_issue_management`、共同 SQL／model hooks、migration 007 與反例測試。正式 policy、migration 啟用與實際內容修訂／全組审计仍須獨立驗收。
 > **權威範圍**：說明 Claims 到 CVP 的正常路徑、例外分流、人工出口與恢復接點。內容定義服從 [CanonicalViewpoint 设计](./canonical_viewpoint_design.md)，使命與限制服從 [Project Mission Statement](../00-overview/project_mission_statement.md) 和 [Solution Architecture](../00-overview/solution_architecture.md)。具體授權仍以相應 policy／精確人工決定為準，不能拿本文擴權。
 
 ## 目錄
@@ -275,7 +275,7 @@ owner 暫停／指定 checkpoint 優先於自動恢復。停止時明確交代�
 
 ## 13. Claim 與 CVP 管理的變更閉環
 
-本節是流程設計，不是執行授權，也不宣布下述自動化已完成。第 4–12 節仍描述實際已接通的能力。新增通用 Claim／Evidence 或 CVP 連接修訂權限須分域由 owner 確認有界 policy；確認一次後，由 code 完成各自權限內的後續步驟，不逐條、逐步再問「繼續」。一域的批准不擴大另一域的權限。
+本節是共同流程及有界實作契約，不是執行授權。新接點已接入共同 SQL flow；不宣稱真實內容修訂已完成。新增通用 Claim／Evidence 或 CVP 連接修訂權限須分域由 owner 確認有界 policy；確認一次後，由 code 完成各自權限內的後續步驟，不逐條、逐步再問「繼續」。一域的批准不擴大另一域的權限。
 
 ### 13.1 管理域、職責與現有缺口
 
@@ -290,7 +290,7 @@ owner 暫停／指定 checkpoint 優先於自動恢復。停止時明確交代�
 
 兩個 management 是業務責任與批准邊界，不是兩份資料庫、兩個微服務或兩套 transaction／呼叫預算。共用既有 SQL store、執行器及 changelog；各自產生有權限、已审核的變更方案，執行器只驗證和提交，不替任一管理域做語義判斷。
 
-現有 SQL runner 能對已提交批次的 deferred 成分做來源調查，並自動補足現有證據充分的 CVP 覆蓋。來源／Claim 的受控修訂與交易執行器也已存在，但證據漏綁和 Claim 表述問題仍常停在 handoff，沒有共同的分類、權限匹配、修訂與復驗接點。機械准入、Opus 審核和獨立審計發現的問題，亦未全部進同一生命週期。
+共同接點 `claim_issue_management` 登記精確問題、保留發現角色／報告、匹配權限，並沿用 source compiler 提出／審核完整 Claim、Evidence 及 CVP 影響後像。GPT 提議的 deferred、Opus 初審／終審的 typed 證據或歸屬問題、已保存 deferred 調查，以及一次原文仲裁確認的 Gemini Claim 異議，均有共同入口。直接連接異議仍由原 CVP 分支處理。未通過准入的機械來源／ID／hold 問題仍停止取證；不能把缺失證明冒充可自動修的內容異議。
 
 重構沿用 `cvp_sql_flow`、`cvp_sql_actions`、既有內容 compiler 和 SQL transaction。補齊問題分流與修訂 policy，不另建工作流引擎、第二份呼叫帳本、逐 case wrapper 或歷史 proof 鏈。普通工程錯誤交工程維護，不冒充 Claim 內容異議。
 
@@ -373,7 +373,9 @@ commit 後用新 SQL 連線回讀，確認精確修改及歷史；再以當前�
 
 Claim management 的修訂已提交／本源復驗完成，與 CVP management 的影響處置完成分開記錄：可以明確回報「Claim 已修復，CVP 影響待驗」，不能混成一個 pass。整個問題只有在兩域所需的處置已合法核驗、原成員完整、受影響獨立審計及異議全部合法結案時才能標 resolved。SQL applied 不等於 resolved，resolved 也不代替 group audited。組中其他未決尚在，下一組仍不得啟動；35／37 復審 flags 等歷史限制不洗掉。
 
-沿用 `pipeline_runs` 的 action／review 記錄引用材料、問題分類、權限與當前待做動作，不建立第二套狀態資料庫。問題的 detected／classified／reviewed／committed／verified／resolved 是擬議 action metadata，不改原 group 的 `prepared → reviewed → applied → audited` 契約。
+沿用 `pipeline_runs` 的 issue／action／review 記錄引用材料、問題分類、權限與當前待做動作，不建立第二套狀態資料庫。問題以當前 Claim／Evidence／fragment／來源及精確 spans 決定穩定 ID；finders、理由、root 或 policy 改名不能換預算。SQL issue metadata 記 `detected → action_reserved → owner_group_audited`，分類及審核內容在原 action 材料中；不另建六階段工作流。不改 group 的 `prepared → reviewed → applied → audited` 契約。
+
+`owner_group_audited` 只表示該原組已完成，不表示其他被失效的組或 35／37 revisit 義務已解除；其他組仍依 SQL pending 事實復驗。尚有 `pending_cvp_claim_ids` 時，共同 completion transaction 拒絕結案。修訂後同 Claim 再出現內容問題，保存新報告並停止，不自動開第二個修訂循環。
 
 恢復先查 SQL 已提交事實和原角色呼叫預算：已保存回答不再叫模型；已 commit 不再 apply；未完成審計只接尚未完成且有合法預算的項。無回答 intent 保持 unknown，程式錯誤與資源問題分別標工程／運行負責人。正常恢復不遞迴重建歷史 proof，不重新驗前面所有組。
 
@@ -383,7 +385,11 @@ Claim management 的修訂已提交／本源復驗完成，與 CVP management �
 
 人工包只顯示最小決定所需的原話、Claim 差異、兩模型理由、已提交與待修改狀態；人工回答後仍由共同 code 路徑執行，不手寫 Registry。原模型不同意原樣保存，不伪造 consensus。機械、资源和未知副作用的 hold 另列，不能承諾它們不會停止執行。
 
-實作順序：先統一各發現入口、根因分類及 management 路由，再分別接 Claim／Evidence 與 CVP 連接的有界 policy／compiler，再接兩域版本交接與完整組復驗，最後接共同 SQL 恢復與續跑。一次全局改共同接點，不替每個案例寫 runner；此順序不是允許以局部測試通過啟動生產。
+實作共用既有 SQL runner／transaction，不替案例寫 runner。正式啟用前須先核對 owner policy 和索引 migration 007；只有實作或局部測試通過不能啟動生產。新 profile 的初次實際模型／完整組修訂驗收與離線測試分開記錄。
+
+目前支援的明確 policy 欄位：Claim 的 statement／claim_type／attribution／discourse_mode／scripture_refs／occurrences，既有 eligible Evidence 的 statement／source_fragment_id(s)，及既有連接的 pinned_claim_revision／component_locator／evidence_bindings／link_type。可新增同自身正文的精確 fragment，不替換 Evidence 所有權 buckets，不升級 context-only 或 hold。CVP 正文／新 CVR／關係只接受另列的精確 permission；不自动取得身份、退役、端點改換或新 Claim 權限。
+
+聯合管理只新增分類／最小提案的 GPT 回答與完整後像的 Opus 回答；必要時唯一纠正／終審。Claim 正確時明確 retain，不製造純版本更新；尚未寫入的原 normal-CVP 包保留為歷史，不能冒充新版本批准。後續必要 coverage 是帶實際 management 批准的新階段；已提交的旧正常包與未受影響連接保留，不重 apply。
 
 驗收必須覆蓋：
 
@@ -410,6 +416,7 @@ Claim management 的修訂已提交／本源復驗完成，與 CVP management �
 
 | 流程 | 主要實作／政策 | 反例與行為測試 |
 | --- | --- | --- |
+| 共同 Claim／Evidence 問題及 CVP 影響 | [management 接點](../../../backend/pipeline/claim_issue_management.py)、[SQL actions](../../../backend/pipeline/cvp_sql_actions.py)、[有界角色契約](../../../backend/pipeline/prompts/claim_issue_management_v1.md) | [共同入口／隔離交易／保存材料預覽](../../../backend/tests/test_claim_issue_management.py) |
 | 串行組、停止與完成 | [campaign runner](../../../backend/pipeline/viewpoint_cvp_campaign_runner.py) | [campaign tests](../../../backend/tests/test_viewpoint_cvp_campaign_runner.py) |
 | 生成、整合、纠正與終審 | [batch runner](../../../backend/pipeline/viewpoint_batch_resolution_runner.py)、[v6 policy](../../../backend/pipeline/policies/wang_cvp_resolution_policy_v6.json) | [required coverage](../../../backend/tests/test_viewpoint_required_cvp_coverage.py) |
 | 歷史資格橋接 | [lineage tests](../../../backend/tests/test_viewpoint_lineage_inventory.py)、[merge bridge](../../../backend/tests/test_viewpoint_legacy_merge_target_bridge.py) | [coordinate proof](../../../backend/tests/test_legacy_coordinate_review_proof.py) |

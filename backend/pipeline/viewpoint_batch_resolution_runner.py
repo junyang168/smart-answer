@@ -498,6 +498,8 @@ def run_batch(
     consolidator: Any = None,
     dependents_loader: Any = None,
     current_claim_links: Sequence[dict[str, Any]] | None = None,
+    claim_issue_handler: Any = None,
+    management_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     # Accepted grouping preserves its source/argument order. The model packet
     # has a separate canonical ID-order contract; normalize only this local
@@ -511,6 +513,9 @@ def run_batch(
         registry_context=registry_context,
         pending_candidates=pending_candidates,
     )
+    if management_context is not None:
+        packet['claim_management_resolution']=management_context
+        packet['packet_sha256']=sha256_json({k:v for k,v in packet.items() if k!='packet_sha256'})
     if current_claim_links is not None:
         if getattr(reviewer,'_response_model',None) is not CoverageCanonicalViewpointReviewResponse:
             raise ValueError('existing component retention requires the new coverage-contract profile')
@@ -542,6 +547,13 @@ def run_batch(
         claims=claims,
         registry_revision_ids=registry_revision_ids,
     )
+    # New GPT-only deferrals can enter Claim management immediately. Saved
+    # later-stage answers/intents always take precedence on recovery.
+    if claim_issue_handler is not None and not any(
+            output_dir.glob('raw-review*')) and not any(output_dir.glob('raw-consolidation*')):
+        claim_issue_handler(proposal=proposal,review=None,origin='gpt_proposal',
+                            report_path=output_dir/'raw-proposal.json',
+                            correction_used=False,terminal_refusal=False)
 
     # Identity, asked on its own. The proposer decides it while also carving
     # components, assigning roles, writing relations and building a structure,
@@ -664,6 +676,10 @@ def run_batch(
     )
 
     review_sha = sha256_json(review_payload)
+    if claim_issue_handler is not None:
+        claim_issue_handler(proposal=proposal,review=review,origin='opus_initial',
+                            report_path=output_dir/review_artifact_name,
+                            correction_used=False,terminal_refusal=False)
     reconsideration_report: dict[str, Any] | None = None
     reconsideration: CanonicalViewpointReconsiderationResponse | None = None
     reconsideration_calls = 0
@@ -783,6 +799,10 @@ def run_batch(
             reviewer=final_reviewer if final_reviewer is not None else reviewer,
             output_dir=output_dir,
         )
+        if claim_issue_handler is not None:
+            claim_issue_handler(proposal=effective_proposal,review=final_review,origin='opus_final',
+                                report_path=output_dir/'raw-final-review.json',
+                                correction_used=True,terminal_refusal=final_review_validation['outcome']!='pass')
 
     approval_review = final_review or review
     approval_validation = final_review_validation or review_validation

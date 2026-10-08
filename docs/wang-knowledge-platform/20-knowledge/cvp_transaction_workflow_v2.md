@@ -111,7 +111,7 @@ commit 後的新連線回讀用於确认可見結果與交接審計。它若失�
 
 各種修訂仍有自己的內容權限與 validator。它們輸出相同的材料／批准／ChangeSet 契約後，共用交易與恢復步驟；統一執行器不等於統一或擴大內容授權。
 
-業務責任分為 Claim management（Claim 本身、Evidence 與 Claim–Evidence 綁定）和 CVP management（Claim–CVP 連接及 CVP）；Claim／Evidence 修訂須交後者評估相關觀點影響，不默認 CVP 必須改寫。兩域已批准的完整方案可以共用同一短 transaction；只有一域完成時，另一域未驗的依賴不可標為有效或整組完成。交接及 pending／失效處理的待實作設計見[管理域變更閉環](./cvp_production_process_v1.md#13-claim-與-cvp-管理的變更閉環)，不由本文提前授權內容修改。
+業務責任分為 Claim management（Claim 本身、Evidence 與 Claim–Evidence 綁定）和 CVP management（Claim–CVP 連接及 CVP）；Claim／Evidence 修訂须在共同後像包評估相關觀點及完整其他成員，不默認 CVP 必須改寫。兩域已批准的完整方案共用同一短 transaction；有 pending coverage／影響時，completion 拒絕結案。共同接點、policy 邊界及實作狀態見[管理域變更閉環](./cvp_production_process_v1.md#13-claim-與-cvp-管理的變更閉環)，不由本文提前授權內容修改。
 
 **舊 solution 不再使用。** 原 campaign／batch 執行、來源與父子續接、逐組 special-case 修復及舊 recovery/watch 的執行入口直接拒絕。沒有環境旗標、路徑判斷或失敗 fallback 可以重新啟用它們。舊 artifacts、模型回答、失敗、預算和歷史驗證的純讀取函式保留；讀取歸檔不等於執行舊流程。
 

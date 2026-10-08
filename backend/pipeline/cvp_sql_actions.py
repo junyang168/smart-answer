@@ -18,6 +18,16 @@ SOURCE_SCHEMA='wang_source_sql_reconciliation_v2'
 LINK_SCHEMA='wang_owner_sql_link_correction_v2'
 
 
+def initialize_subscription_runtime(ports):
+    # Restoring an applied SQL group can bypass normal proposal startup. All
+    # live bounded branches still use the same local canonical identity proof.
+    from backend.pipeline.source_reconciliation_runtime import ProductionPorts
+    if isinstance(ports,ProductionPorts):
+        import os
+        from backend.pipeline.viewpoint_s201129_source_continuation import canonical_runtime
+        os.environ['CODEX_EXECUTABLE']=canonical_runtime()['identity']['cli']['path']
+
+
 def resume_bound_action(store,run_id,action_id):
     """All special cases consume the same SQL checkpoint/once authority."""
     saved=store.get_cvp_group(run_id)
@@ -33,8 +43,12 @@ def resume_bound_action(store,run_id,action_id):
 
 def action_sources(materials):
     manifest=content.Manifest.model_validate(materials['manifest'])
-    return [b.model_dump() for b in (manifest.before_source,*manifest.current_sources,manifest.authorization,
+    result = [b.model_dump() for b in (manifest.before_source,*manifest.current_sources,manifest.authorization,
                                     manifest.accepted_membership,*manifest.prior_updates)] + [s['file'] for s in materials.get('context_sources',[])]
+    if manifest.claim_issue:
+        context=materials['claim_issue_context']
+        result += [manifest.claim_issue.model_dump(),context['policy'],*(i['report'] for i in context['issues'])]
+    return result
 
 
 def validate_source_package(package):
@@ -59,7 +73,7 @@ def validate_source_package(package):
 
 def prepare_source_action(store,run_id,manifest,*,root):
     manifest=content.Manifest.model_validate(manifest)
-    action_id='CVPA-'+sha256_json(manifest.model_dump(mode='json'))
+    action_id=source_action_id(manifest)
     store.bind_cvp_execution_root(run_id,identity=action_id,root=root)
     saved=store.get_cvp_group(run_id)
     if not saved:raise ValueError('source action requires admitted SQL group')
@@ -70,7 +84,13 @@ def prepare_source_action(store,run_id,manifest,*,root):
             raise ValueError('saved SQL source action materials differ')
         return previous
     started=time.perf_counter()
-    keys=[('source_documents',manifest.source_id)]
+    if manifest.claim_issue:
+        context=json.loads(content.bound_bytes(manifest.claim_issue))
+        # Source is unchanged. Starting reverse closure at its document would
+        # incorrectly load every unrelated Claim in the same sermon.
+        keys=[('claims',cid) for cid in context['claim_ids']]
+    else:
+        keys=[('source_documents',manifest.source_id)]
     keys.extend((p.collection,p.object_id) for p in manifest.permissions if not p.create)
     records=store.read_affected_context(keys)
     states={content.key(col,oid):row['payload'] for (col,oid),row in records.items() if not row.get('retired')}
@@ -84,6 +104,14 @@ def prepare_source_action(store,run_id,manifest,*,root):
     write(root/'scoped-materials.json',materials)
     return store.prepare_cvp_action(run_id,action_id=action_id,kind='source_claim_revision',
         authorization=manifest.authorization.model_dump(),materials=materials)
+
+
+def source_action_id(manifest):
+    if manifest.claim_issue:
+        from backend.pipeline.claim_issue_management import Issue
+        context=__import__('json').loads(content.bound_bytes(manifest.claim_issue))
+        return 'CVPA-'+sha256_json({'claim_issues':sorted(Issue.model_validate(i).issue_id for i in context['issues'])})
+    return 'CVPA-'+sha256_json(manifest.model_dump(mode='json'))
 
 
 class ScopedSourceModelStages(ModelStages):
@@ -111,14 +139,20 @@ class ScopedSourceModelStages(ModelStages):
 
 def execute_source_action(store,run_id,manifest,*,root,ports):
     manifest=content.Manifest.model_validate(manifest).model_dump(mode='json')
-    root=root/('CVPA-'+sha256_json(manifest))
+    root=root/source_action_id(content.Manifest.model_validate(manifest))
     action=prepare_source_action(store,run_id,manifest,root=root)
     materials=action['materials'];read_pins=decoded_pins(materials['sql_scope']['read_pins'])
     saved=store.get_cvp_group(run_id)
     resumed=resume_bound_action(store,run_id,action['action_id'])
     if resumed:return resumed
+    issue_context=materials.get('claim_issue_context')
+    if issue_context:
+        from backend.pipeline.claim_issue_management import Issue
+        store.bind_claim_issue_action([Issue.model_validate(i).issue_id for i in issue_context['issues']],
+                                     run_id=run_id,action_id=action['action_id'])
     # Resume a committed source action directly from SQL. Neither content
     # stages nor apply are replayed. Audit/coverage continue in the group flow.
+    initialize_subscription_runtime(ports)
     stages=ScopedSourceModelStages(root,ports,store,read_pins)
     proposal,raw=stages.reviewed(materials)
     package=content.compile_package(materials,proposal,raw,frozen_sha256=action['materials_sha256'])
@@ -127,20 +161,28 @@ def execute_source_action(store,run_id,manifest,*,root,ports):
         'materials_sha256':action['materials_sha256'],'terminal_stage':raw['stage'],
         'review_sha256':raw['artifact_sha256'],'proposal_sha256':sha256_json(proposal.model_dump())}
     validate_source_package(package)
-    backup=ports.backup(root)
+    from backend.pipeline.cvp_sql_flow import verified_group_backup
+    backup=verified_group_backup(root,package,ports) if issue_context else ports.backup(root)
     original=store.get_cvp_group(run_id).get('reviewed',{}).get('evidence',{})
     approval={'terminal_review':binding(root/(raw['stage']+'.raw.json'))}
     for stage in ('initial_review','final_review'):
         proof=root/(stage+'.raw.program-binding.json')
         if proof.exists():approval[stage+'_program_binding']=binding(proof)
+    views=set(original.get('viewpoint_ids',[]))
+    if issue_context:
+        views.update(p['viewpoint_id'] for p in content.index(materials['before_records']).values() if 'viewpoint_id' in p)
+    pending=content.Manifest.model_validate(materials['manifest']).deferred_repair.claim_ids if materials['manifest'].get('deferred_repair') else []
+    if issue_context:
+        # Uncommitted original model materials include the changed Claim. They
+        # are retained as history, never re-labelled approved for the new cut.
+        pending=list(saved['claim_ids']) if not original else sorted(set(original.get('pending_cvp_claim_ids',[]))|set(issue_context['claim_ids']))
     return commit_package(store,run_id,package=package,
         approval=approval,
         authorization=action['authorization'],backup=backup,sources=action_sources(materials),
         read_pins=read_pins,reason='approved bounded source/Claim revision',actor='owner-authorized-pipeline',
-        source_kind=SOURCE_SCHEMA,viewpoint_ids=original.get('viewpoint_ids',[]),
+        source_kind=SOURCE_SCHEMA,viewpoint_ids=sorted(views),
         disposition=original.get('disposition'),action=action,
-        pending_cvp_claim_ids=content.Manifest.model_validate(materials['manifest']).deferred_repair.claim_ids
-            if materials['manifest'].get('deferred_repair') else ())
+        pending_cvp_claim_ids=pending)
 
 
 def merge_dispositions(old,new):
@@ -195,9 +237,20 @@ def execute_coverage_action(store,run_id,definition,group,*,root,ports,investiga
     store.bind_cvp_execution_root(run_id,identity=action_id,root=root)
     previous=store.get_cvp_action(run_id,action_id)
     materials=previous['materials'] if previous else prepare_group(store,definition,{**group,'claim_ids':ids})
+    if not previous and old.get('action',{}).get('materials',{}).get('claim_issue_context'):
+        # A retained Claim is not a newly approved normal CVP proposal. Its
+        # joint management review is explicit input to this new coverage stage;
+        # never silently repeat/relabel the former deferred request.
+        materials['claim_management_resolution']={
+            'prior_reviewed_sha256':saved['reviewed_sha256'],
+            'management_action_id':old['action']['action_id'],
+            'approved_package_sha256':old['package']['sha256'],
+            'terminal_review':old['approval']['terminal_review'],
+            'issues':old['action']['materials']['claim_issue_context']['issues']}
     action=store.prepare_cvp_action(run_id,action_id=action_id,kind='required_cvp_coverage',
                                     authorization={**old['authorization'],**({'source_investigation':investigation} if investigation else {})},materials=materials)
     if saved['checkpoint']=='reviewed':return resume_reviewed_action(store,run_id)
+    initialize_subscription_runtime(ports)
     package,approval,disposition=reviewed_cvp_package(root/'model-stages',materials,store,require_resolved=True)
     plan=store.plan_package(package,transactional=True,source_kind='cvp_batch_resolution')
     if any(op.operation!='create' or op.collection not in NORMAL_COLLECTIONS for op in plan.operations):
@@ -205,8 +258,10 @@ def execute_coverage_action(store,run_id,definition,group,*,root,ports,investiga
     if any(link['claim_id'] not in ids for link in package.get('viewpoint_claim_links',[])):
         raise ValueError('required coverage added a foreign Claim')
     views=sorted(set(old['viewpoint_ids'])|{l['viewpoint_id'] for l in package.get('viewpoint_claim_links',[])})
+    from backend.pipeline.cvp_sql_flow import verified_group_backup
     return commit_package(store,run_id,package=package,approval=approval,authorization=old['authorization'],
-        backup=ports.backup(root),sources=materials['sources'],read_pins=decoded_pins(materials['read_pins']),
+        backup=verified_group_backup(root,package,ports),
+        sources=materials['sources'],read_pins=decoded_pins(materials['read_pins']),
         reason='required CVP coverage after bounded Claim revision',actor=definition['authorized_by'],
         viewpoint_ids=views,disposition=merge_dispositions(old.get('disposition'),disposition),action=action)
 

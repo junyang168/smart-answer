@@ -23,6 +23,9 @@ STAGES = ("proposal", "initial_review", "correction", "final_review")
 
 
 def effective_proposal(frozen, response):
+    if frozen["manifest"].get("claim_issue"):
+        from backend.pipeline.claim_issue_management import normalize_proposal
+        return normalize_proposal(frozen, response)
     if frozen["manifest"].get("deferred_repair"):
         from backend.pipeline.deferred_claim_repair import normalize_proposal
         return normalize_proposal(frozen, response)
@@ -167,7 +170,8 @@ class Runner:
         if stage not in STAGES:
             raise ValueError("unknown model stage")
         deferred = bool(packet.get("manifest", {}).get("deferred_repair"))
-        adapter = self.ports.deferred_adapter(stage) if deferred else self.ports.adapter(stage)
+        issue = bool(packet.get("manifest", {}).get("claim_issue"))
+        adapter = self.ports.claim_issue_adapter(stage) if issue else self.ports.deferred_adapter(stage) if deferred else self.ports.adapter(stage)
         from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
         raw_path = self.root / (stage + '.raw.json')
         adapter = response_adapter(adapter, read(raw_path) if raw_path.exists() else None)
@@ -390,7 +394,7 @@ def binding(path: Path) -> dict:
 def build_proposal_packet(frozen: dict) -> dict:
     selected = frozen["inventory"]["affected_keys"] + frozen["inventory"]["context_keys"]
     states = contract.index(frozen["before_records"])
-    return {"schema_version": contract.VERSION, "update_id": frozen["update_id"],
+    result = {"schema_version": contract.VERSION, "update_id": frozen["update_id"],
         "manifest": frozen["manifest"], "before_source": frozen["before"], "current_sources": frozen["after"],
         "context_sources": frozen.get("context_sources", []), "sentence_inventory": frozen["sentence_inventory"],
         "inventory": frozen["inventory"], "records": contract.rows({k: states[k] for k in selected}),
@@ -398,6 +402,11 @@ def build_proposal_packet(frozen: dict) -> dict:
              "writable_record_shapes": {col: contract.KNOWLEDGE_COLLECTIONS[col][0].model_json_schema()
                  for col in sorted({p["collection"] for p in frozen["manifest"]["permissions"]})}}
             if "deferred_diagnosis" in frozen else {})}
+    if "claim_issue_context" in frozen:
+        result["claim_issue_context"] = frozen["claim_issue_context"]
+        result["writable_record_shapes"] = {col: contract.KNOWLEDGE_COLLECTIONS[col][0].model_json_schema()
+            for col in sorted({p["collection"] for p in frozen["manifest"]["permissions"]})}
+    return result
 
 
 def validate_completion_population(result: dict, frozen: dict, post: dict) -> None:
@@ -502,7 +511,7 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
     packet = body(read(root / (stage + ".packet.json")))
     raw = read(root / (stage + ".raw.json"))
     expected = validate_raw(root, stage, packet)
-    proposal = contract.Proposal.model_validate(packet["proposal"])
+    proposal = effective_proposal(frozen, packet["proposal"]) if frozen["manifest"].get("claim_issue") else contract.Proposal.model_validate(packet["proposal"])
     if packet != contract.review_packet(frozen, proposal) or not contract.validate_review(packet, raw["response"]):
         raise ValueError("terminal complete postimage review invalid")
     # Authenticate proposal and correction chain. A final reply cannot bypass initial review.
@@ -544,7 +553,10 @@ def validate_raw(root: Path, stage: str, packet: dict) -> dict:
             if stage in {'initial_review', 'final_review'} else 'source_reconciliation_proposal.md'))
         if packet.get('manifest', {}).get('deferred_repair'):
             ctx.pin(PROMPTS / 'deferred_claim_evidence_repair_v1.md')
-    adapter = model_adapter(stage, deferred=bool(packet.get("manifest", {}).get("deferred_repair")))
+        if packet.get('manifest', {}).get('claim_issue'):
+            ctx.pin(PROMPTS / 'claim_issue_management_v1.md')
+    adapter = model_adapter(stage, deferred=bool(packet.get("manifest", {}).get("deferred_repair")),
+                            issue=bool(packet.get("manifest", {}).get("claim_issue")))
     raw = read(root / (stage + ".raw.json"))
     from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
     adapter = response_adapter(adapter, raw)

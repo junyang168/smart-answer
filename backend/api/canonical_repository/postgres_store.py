@@ -3356,6 +3356,62 @@ class PostgresKnowledgeStore:
                          (ident,action_id,canonical_json(record)))
         return action
 
+    def register_claim_issue(self, run_id, issue):
+        """One indexed problem reservation across finders/roots/campaigns.
+
+        Metadata lives in the existing run table; it never changes content or
+        resets a call. A later report can tighten, not relax, the original budget.
+        """
+        from backend.pipeline.claim_issue_management import Issue
+        value = Issue.model_validate(issue)
+        ident = 'CVPI-' + value.issue_id
+        origin = {'run_id':run_id, **value.model_dump(mode='json')}
+        with self.connect() as conn:
+            conn.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))', (POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
+            if not conn.execute("SELECT 1 FROM wang_knowledge.schema_migrations WHERE migration_id='007_claim_issue_lookup'").fetchone():
+                raise ChangeSetConflict('Claim issue indexed schema not activated; no unbounded fallback')
+            parent = conn.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s AND stage='cvp_group'", (run_id,)).fetchone()
+            if not parent or value.claim_id not in parent[0].get('claim_ids', []):
+                raise ChangeSetConflict('Claim issue must belong to the original admitted group')
+            row = conn.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE', (ident,)).fetchone()
+            if row:
+                result = row[0]
+                if origin not in result['reports']:
+                    result['reports'].append(origin)
+                result['correction_used'] |= value.correction_used
+                result['terminal_refusal'] |= value.terminal_refusal
+                conn.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now() WHERE run_id=%s', (canonical_json(result), ident))
+            else:
+                result = {'kind':'claim_issue', 'issue_id':value.issue_id, 'owner_run_id':run_id,
+                    'reports':[origin], 'state':'detected', 'correction_used':value.correction_used,
+                    'terminal_refusal':value.terminal_refusal}
+                conn.execute("INSERT INTO wang_knowledge.pipeline_runs(run_id,subject_kind,subject_id,stage,trigger,status,metadata) VALUES (%s,'batch',%s,'cvp_group','cli','running',%s::jsonb)",
+                             (ident, value.claim_id, canonical_json(result)))
+            return result
+
+    def get_claim_issue(self, issue_id):
+        with self.connect() as conn:
+            row = conn.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s AND metadata->>'kind'='claim_issue'", ('CVPI-'+issue_id,)).fetchone()
+        return row[0] if row else None
+
+    def bind_claim_issue_action(self, issue_ids, *, run_id, action_id):
+        with self.connect() as conn:
+            conn.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))', (POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
+            for issue_id in sorted(issue_ids):
+                ident = 'CVPI-'+issue_id
+                row = conn.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE', (ident,)).fetchone()
+                if not row or row[0]['owner_run_id'] != run_id:
+                    raise ChangeSetConflict('original issue owner must resume; no duplicate pipeline')
+                value = row[0]
+                if value['terminal_refusal'] or value['correction_used']:
+                    raise ChangeSetConflict('original issue correction/terminal budget cannot restart')
+                bound = {'run_id':run_id,'action_id':action_id}
+                if value.get('action') and value['action'] != bound:
+                    raise ChangeSetConflict('same Claim issue already has an action; no new budget')
+                value['action'] = bound
+                value['state'] = 'action_reserved'
+                conn.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now() WHERE run_id=%s', (canonical_json(value), ident))
+
     def get_cvp_action(self, run_id, action_id):
         ident='CVPA-'+sha256_json({'parent':run_id,'action':action_id})
         with self.connect() as conn:
@@ -3476,6 +3532,8 @@ class PostgresKnowledgeStore:
             if not row or row[0].get("checkpoint") not in {"applied","audited"}:
                 raise ChangeSetConflict("group has no committed CVP write")
             value = row[0]
+            if (value.get('reviewed',{}).get('evidence') or {}).get('pending_cvp_claim_ids'):
+                raise ChangeSetConflict('Claim management committed; CVP coverage/impact remains pending')
             for source in (value.get('reviewed',{}).get('evidence') or {}).get('sources',[]):
                 if file_sha256(Path(source['path'])) != source['file_sha256']:
                     raise ChangeSetConflict('physical own source changed since independent audit')
@@ -3523,6 +3581,27 @@ class PostgresKnowledgeStore:
             value.update(checkpoint="audited",completion=completion,**flags)
             value.pop('pending_audit_from_change_set_ids',None)
             cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,status='succeeded',finished_at=now(),heartbeat_at=now(),error_message=NULL WHERE run_id=%s",(canonical_json(value),run_id))
+            # Close discovery records in the SAME audited transaction. This is
+            # owner-group completion, not permission to skip other invalidated
+            # groups. Their existing SQL applied checkpoints remain pending.
+            cursor.execute("""SELECT run_id,metadata FROM wang_knowledge.pipeline_runs
+                              WHERE metadata->>'kind'='claim_issue' AND metadata->>'owner_run_id'=%s
+                              FOR UPDATE""",(run_id,))
+            for issue_run, issue in cursor.fetchall():
+                bound=issue.get('action')
+                if not bound:raise ChangeSetConflict('unresolved detected Claim issue blocks group completion')
+                action_id=bound['action_id']
+                active=(value.get('reviewed',{}).get('evidence') or {}).get('action',{})
+                committed=active.get('action_id')==action_id or cursor.execute("""SELECT EXISTS(
+                    SELECT 1 FROM wang_knowledge.pipeline_runs WHERE metadata->>'kind'='cvp_review_archive'
+                      AND metadata->>'parent_run_id'=%s AND metadata->>'action_id'=%s
+                      AND metadata->>'checkpoint' IN ('applied','audited'))""",(run_id,action_id)).fetchone()[0]
+                if not committed:raise ChangeSetConflict('Claim issue management action not committed')
+                issue.update(state='owner_group_audited',completion=completion,
+                             independent_audit_complete=flags['independent_audit_complete'],
+                             revisit_required=flags['revisit_required'])
+                cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,status='succeeded',finished_at=now() WHERE run_id=%s",
+                               (canonical_json(issue),issue_run))
 
     def review_cvp_group(self, run_id: str, *, plan: ChangeSetPlan, evidence: Mapping[str, Any]) -> str:
         required = {"package", "approval", "authorization", "backup", "sources", "read_pins"}

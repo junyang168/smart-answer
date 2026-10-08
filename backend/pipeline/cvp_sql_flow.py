@@ -262,10 +262,17 @@ def reviewed_cvp_package(root, materials, store, *, require_resolved=False):
     models = adapters({"cvp_policy":materials["policy"]})
     check_binding(materials["policy"]); check_binding(materials["semantic_contract"])
     for source in materials["sources"]:check_binding(source)
+    from backend.pipeline.claim_issue_management import IssuesDetected,review_findings
+    def claim_issue_handler(*,proposal,review,origin,report_path,correction_used,terminal_refusal):
+        findings=review_findings(proposal,review)
+        if findings:
+            raise IssuesDetected(findings,origin=origin,report=binding(report_path),
+                                 correction_used=correction_used,terminal_refusal=terminal_refusal)
     report = run_batch(batch_id=packet["batch_id"],scope_label=packet["scope_label"],
         claims=[ReviewClaim.model_validate(row) for row in packet["claims"]],registry_context=packet["registry_context"],
         pending_candidates=[],output_dir=root,current_claim_links=packet["existing_links"],
-        dependents_loader=store.load_revision_dependents,**models)
+        dependents_loader=store.load_revision_dependents,claim_issue_handler=claim_issue_handler,
+        management_context=materials.get('claim_management_resolution'),**models)
     if report['approval_outcome']!='pass' or report['escalations']:
         raise ValueError('normal CVP terminal review unresolved; no second correction')
     if require_resolved:resolved_report(report,[row["claim_id"] for row in packet["claims"]])
@@ -348,6 +355,7 @@ def commit_package(store, run_id, *, package, approval, authorization, backup, s
 
 
 def run_group(store, definition, group, row, *, root):
+    from backend.pipeline.claim_issue_management import IssuesDetected,handle_issues,audit_claim_findings,prior_management_action
     campaign = definition["campaign_sha256"]
     if row is None:
         materials = prepare_group(store,definition,group)
@@ -366,7 +374,18 @@ def run_group(store, definition, group, row, *, root):
         runtime = canonical_runtime()
         os.environ["CODEX_EXECUTABLE"] = runtime["identity"]["cli"]["path"]
         stage_event('generating_reviewing', sequence=group['sequence'], run_id=run_id)
-        package,approval,disposition = reviewed_cvp_package(model_root,materials,store)
+        try:
+            package,approval,disposition = reviewed_cvp_package(model_root,materials,store)
+        except IssuesDetected as detected:
+            from backend.pipeline.claim_issue_management import handle_issues
+            from backend.pipeline.source_reconciliation_runtime import ProductionPorts
+            policy=root/'claim-issue-policy-binding.json'
+            handle_issues(store,run_id,detected,root=root/run_id/'claim-issues',
+                          policy_binding=read_artifact(policy).get('policy') if policy.exists() else None,
+                          ports=ProductionPorts())
+            # Actual SQL action committed first. Never apply the old normal
+            # package or reinterpret its old approval as new-version approval.
+            return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)
         from backend.pipeline.source_reconciliation_runtime import ProductionPorts
         backup = verified_group_backup(root/run_id,package,ProductionPorts())
         views = sorted({link["viewpoint_id"] for link in package.get("viewpoint_claim_links",[]) if link.get("effective_state")=="active"})
@@ -383,7 +402,14 @@ def run_group(store, definition, group, row, *, root):
     if evidence.get('pending_cvp_claim_ids'):
         from backend.pipeline.cvp_sql_actions import execute_coverage_action
         from backend.pipeline.source_reconciliation_runtime import ProductionPorts
-        execute_coverage_action(store,run_id,definition,group,root=root/run_id/'required-coverage',ports=ProductionPorts())
+        try:
+            execute_coverage_action(store,run_id,definition,group,root=root/run_id/'required-coverage',ports=ProductionPorts())
+        except IssuesDetected as detected:
+            policy=root/'claim-issue-policy-binding.json'
+            handle_issues(store,run_id,detected,root=root/run_id/'claim-issues',
+                policy_binding=read_artifact(policy).get('policy') if policy.exists() else None,ports=ProductionPorts(),
+                prior_management_action=prior_management_action(evidence,detected.findings))
+            return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)
         saved=store.get_cvp_group(run_id);evidence=saved['reviewed']['evidence']
     disposition=evidence.get('disposition')
     if disposition and any(component["disposition"]=="deferred" for claim in disposition["claims"] for component in claim["components"]):
@@ -393,8 +419,21 @@ def run_group(store, definition, group, row, *, root):
         write_immutable(packet_path,materials['packet']);write_immutable(disposition_path,disposition)
         handoff=investigate(packet_path,disposition_path,root/run_id/'deferred-investigation',store)
         if any(not a['models_agree'] or a['next_action']!='reviewed_cvp_repair_required' for a in handoff['actions']):
-            raise ValueError('deferred disposition needs bounded direction: '+
-                             json.dumps([{'item_id':a['item_id'],'next_action':a['next_action']} for a in handoff['actions']]))
+            from backend.pipeline.claim_issue_management import handle_issues,IssuesDetected
+            from backend.pipeline.source_reconciliation_runtime import ProductionPorts
+            findings=[]
+            packet_claims={r['claim_id']:r for r in materials['packet']['claims']}
+            for a in handoff['actions']:
+                cid=a['item_id'].rsplit(':',1)[0]
+                claim=packet_claims[cid]
+                findings.append({'claim_id':cid,'spans':[(0,len(claim['statement']),claim['statement'])],
+                                 'reason':json.dumps(a,ensure_ascii=False)})
+            policy=root/'claim-issue-policy-binding.json'
+            handle_issues(store,run_id,IssuesDetected(findings,origin='deferred',
+                report=binding(root/run_id/'deferred-investigation'/'handoff.json')),
+                root=root/run_id/'claim-issues',policy_binding=read_artifact(policy).get('policy') if policy.exists() else None,
+                ports=ProductionPorts())
+            return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)
         from backend.pipeline.cvp_sql_actions import execute_coverage_action
         from backend.pipeline.source_reconciliation_runtime import ProductionPorts
         execute_coverage_action(store,run_id,definition,group,root=root/run_id/'required-coverage',ports=ProductionPorts(),
@@ -434,6 +473,18 @@ def run_group(store, definition, group, row, *, root):
         # findings never cause old unchanged targets to be sent again.
         for previous in prior:
             old,_=validated_history(previous)
+            prior_report=read_artifact(previous/'gpt-final-handoff.json')
+            matched={target_identity(i) for i in packet['items']}&{target_identity(i) for i in old['items']}
+            active_items=[i for i in old['items'] if target_identity(i) in matched]
+            prior_claims=audit_claim_findings({'items':active_items},prior_report)
+            if prior_claims:
+                policy=root/'claim-issue-policy-binding.json'
+                from backend.pipeline.source_reconciliation_runtime import ProductionPorts
+                handle_issues(store,run_id,IssuesDetected(prior_claims,origin='gemini_audit',
+                    report=binding(previous/'gpt-final-handoff.json')),root=root/run_id/'claim-issues',
+                    policy_binding=read_artifact(policy).get('policy') if policy.exists() else None,ports=ProductionPorts(),
+                    prior_management_action=prior_management_action(evidence,prior_claims))
+                return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)
             known={target_identity(i) for i in old['items']}
             ids={i['item_id'] for i in packet['items'] if target_identity(i) in known}
             if ids:
@@ -451,6 +502,15 @@ def run_group(store, definition, group, row, *, root):
                 from backend.pipeline.viewpoint_s201129_source_continuation import canonical_runtime
                 os.environ['CODEX_EXECUTABLE']=canonical_runtime()['identity']['cli']['path']
             report=adjudicate(audit_path,adjudication,store,final_gpt=True,history_roots=[],only_item_ids=fresh)
+            claim_findings=audit_claim_findings(subset,report)
+            if claim_findings:
+                policy=root/'claim-issue-policy-binding.json'
+                from backend.pipeline.source_reconciliation_runtime import ProductionPorts
+                handle_issues(store,run_id,IssuesDetected(claim_findings,origin='gemini_audit',
+                    report=binding(adjudication/'gpt-final-handoff.json')),root=root/run_id/'claim-issues',
+                    policy_binding=read_artifact(policy).get('policy') if policy.exists() else None,ports=ProductionPorts(),
+                    prior_management_action=prior_management_action(evidence,claim_findings))
+                return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)
             if any(a['verdict']!='audit_objection_rejected' for a in report['actions']):
                 from backend.pipeline.cvp_sql_actions import execute_supports_action
                 from backend.pipeline.source_reconciliation_runtime import ProductionPorts
@@ -479,6 +539,7 @@ def main(argv=None):
     parser.add_argument('--direction',type=Path)
     parser.add_argument('--adjudication-root',type=Path)
     parser.add_argument('--link-id')
+    parser.add_argument('--claim-issue-policy',type=Path,help='Explicit owner bounded Claim/Evidence/CVP policy; no inferred permission')
     args = parser.parse_args(argv)
     load_dotenv(PROJECT/".env")
     if args.database_url:os.environ['KNOWLEDGE_DATABASE_URL']=args.database_url
@@ -499,6 +560,10 @@ def main(argv=None):
     from backend.pipeline.source_reconciliation_runtime import maintenance_lock
     with maintenance_lock():
         execution_boundary(args.output_root,args.sql_campaign,definition,args.stop_after_group,persist=True)
+        if args.claim_issue_policy:
+            from backend.pipeline.claim_issue_management import read_policy
+            read_policy(binding(args.claim_issue_policy))
+            write_immutable(args.output_root/'claim-issue-policy-binding.json',{'policy':binding(args.claim_issue_policy)})
         if args.action!='group':
             if not args.run_id:raise ValueError('bounded action requires exact admitted SQL run ID')
             saved=store.get_cvp_group(args.run_id)

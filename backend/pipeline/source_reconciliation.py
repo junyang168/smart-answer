@@ -109,6 +109,8 @@ class Manifest(Contract):
     prior_updates: list[FileBinding] = Field(default_factory=list)
     created_at: str
     deferred_repair: DeferredRepair | None = None
+    # Shared Claim management intake, not a new source epoch or retry budget.
+    claim_issue: FileBinding | None = None
 
     @model_serializer(mode="wrap")
     def serialize(self, handler):
@@ -116,6 +118,8 @@ class Manifest(Contract):
         # Preserve the byte-semantic shape of already frozen v1 manifests.
         if self.deferred_repair is None:
             result.pop("deferred_repair", None)
+        if self.claim_issue is None:
+            result.pop("claim_issue", None)
         return result
 
 
@@ -226,11 +230,18 @@ def bound_bytes(binding: FileBinding | dict, snapshots: dict | None = None) -> b
     return raw
 
 
-def source_snapshot(binding: FileBinding | dict, snapshots: dict | None = None) -> dict:
+def source_snapshot(binding: FileBinding | dict, snapshots: dict | None = None, *, source: dict | None = None) -> dict:
     import json
     raw = bound_bytes(binding, snapshots)
-    document = json.loads(raw)
-    projection = project_script(document.get("script") if isinstance(document, dict) else document)
+    if source and source.get("source_type") == "notes_manuscript":
+        from backend.pipeline.knowledge_source import markdown_blocks
+        from backend.pipeline.source_projection import script_from_markdown_blocks
+        if source.get("visual_source_assets"):
+            raise ValueError("Claim issue visual source requires a separately scoped adapter")
+        projection = project_script(script_from_markdown_blocks(markdown_blocks(raw.decode("utf-8"))))
+    else:
+        document = json.loads(raw)
+        projection = project_script(document.get("script") if isinstance(document, dict) else document)
     if projection.visual_blocks:
         raise ValueError("visual source changes require a separately scoped visual adapter")
     return {
@@ -391,11 +402,11 @@ def freeze(manifest: Manifest, states: dict[str, dict], *, physical_snapshots: d
         if p.parent_id and (not p.create or (p.collection == "source_fragments" and p.parent_id != manifest.source_id)
                 or (p.collection == "viewpoint_revisions" and key("canonical_viewpoints", p.parent_id) not in states)):
             raise ValueError("creation parent is outside the exact existing source/viewpoint identity")
-    before = source_snapshot(manifest.before_source, physical_snapshots)
-    after = [source_snapshot(b, physical_snapshots) for b in manifest.current_sources]
+    old = states[key("source_documents", manifest.source_id)]
+    before = source_snapshot(manifest.before_source, physical_snapshots, source=old if manifest.claim_issue else None)
+    after = [source_snapshot(b, physical_snapshots, source=old if manifest.claim_issue else None) for b in manifest.current_sources]
     if any(a["paragraphs"] != after[0]["paragraphs"] for a in after):
         raise ValueError("current source copies have different spoken bodies")
-    old = states[key("source_documents", manifest.source_id)]
     if (old.get("locator_space") != LOCATOR_SPACE or old.get("source_body_sha256") != before["body_sha256"]
             or old.get("source_file_sha256") != before["file"]["file_sha256"]):
         raise ValueError("old physical body is not the registered spoken-body epoch")
@@ -405,7 +416,11 @@ def freeze(manifest: Manifest, states: dict[str, dict], *, physical_snapshots: d
     changed = sorted(k for k in keys if before["paragraphs"].get(k) != after[0]["paragraphs"].get(k))
     if not set(changed) <= set(manifest.authorized_paragraph_keys):
         raise ValueError("source change exceeds authorized paragraphs; no automatic scope expansion")
-    if manifest.deferred_repair:
+    if manifest.claim_issue:
+        from backend.pipeline.claim_issue_management import validate_authority
+        diagnosis = validate_authority(manifest, states, snapshots=physical_snapshots)
+        inv = claim_inventory(states, manifest.source_id, diagnosis["claim_ids"])
+    elif manifest.deferred_repair:
         from backend.pipeline.deferred_claim_repair import validate_authority
         diagnosis = validate_authority(manifest, states, snapshots=physical_snapshots)
         inv = claim_inventory(states, manifest.source_id, manifest.deferred_repair.claim_ids)
@@ -440,9 +455,15 @@ def freeze(manifest: Manifest, states: dict[str, dict], *, physical_snapshots: d
     identity["sentence_inventory"] = [s.model_dump(mode="json") for s in sentence_inventory]
     if manifest.deferred_repair:
         identity["deferred_diagnosis"] = diagnosis
+    if manifest.claim_issue:
+        identity["claim_issue_context"] = diagnosis
     archive_bindings = [manifest.before_source, *manifest.current_sources, manifest.authorization,
                         manifest.accepted_membership, *manifest.prior_updates]
     archive_bindings += [FileBinding.model_validate(s["file"]) for s in context_sources]
+    if manifest.claim_issue:
+        archive_bindings.append(manifest.claim_issue)
+        archive_bindings.append(FileBinding.model_validate(diagnosis["policy"]))
+        archive_bindings.extend(FileBinding.model_validate(r["report"]) for r in diagnosis["issues"])
     if manifest.deferred_repair:
         archive_bindings += [manifest.deferred_repair.investigation_packet, manifest.deferred_repair.handoff,
                              manifest.deferred_repair.raw_gpt, manifest.deferred_repair.raw_opus]
@@ -459,6 +480,10 @@ def guard_files(frozen: dict, *, historical: bool = False) -> None:
         bound_bytes(b, frozen["physical_snapshots"] if historical else None)
     for source in frozen.get("context_sources", []):
         bound_bytes(source["file"], frozen["physical_snapshots"] if historical else None)
+    if manifest.claim_issue:
+        context = frozen["claim_issue_context"]
+        for b in [manifest.claim_issue, context["policy"], *(r["report"] for r in context["issues"])]:
+            bound_bytes(b, frozen["physical_snapshots"] if historical else None)
     if manifest.deferred_repair:
         for b in (manifest.deferred_repair.investigation_packet, manifest.deferred_repair.handoff,
                   manifest.deferred_repair.raw_gpt, manifest.deferred_repair.raw_opus):
@@ -542,6 +567,9 @@ def validate_proposal(frozen: dict, proposal: Proposal) -> dict[str, dict]:
     if manifest.deferred_repair:
         from backend.pipeline.deferred_claim_repair import validate_postimages
         validate_postimages(frozen, post)
+    if manifest.claim_issue:
+        from backend.pipeline.claim_issue_management import validate_resolution
+        validate_resolution(frozen, proposal, post)
     sentence_ids = [d.sentence_id for d in proposal.sentence_dispositions]
     if len(sentence_ids) != len(set(sentence_ids)) or set(sentence_ids) != {s["sentence_id"] for s in frozen["sentence_inventory"]}:
         raise ValueError("authorized source sentence denominator incomplete or duplicated")
@@ -710,6 +738,7 @@ def review_packet(frozen: dict, proposal: Proposal) -> dict:
         "sentence_inventory": frozen["sentence_inventory"],
         "inventory": frozen["inventory"], "before_records": rows({k: before[k] for k in selected}),
         **({"deferred_diagnosis": frozen["deferred_diagnosis"]} if "deferred_diagnosis" in frozen else {}),
+        **({"claim_issue_context": frozen["claim_issue_context"]} if "claim_issue_context" in frozen else {}),
         "proposal": proposal.model_dump(), "proposal_sha256": sha256_json(proposal.model_dump()),
         "provenance_contract": {
             "old_approval_is_history_only": True, "reviewer": "claude-opus-5-5",
