@@ -8,6 +8,8 @@
 
 ## 1. 設計決定
 
+完整內容流程與 special cases 見 [Claims → CVP 現行完整流程](./cvp_production_process_v1.md)。本設計只重整儲存、交易驗證與恢復責任，不把尚未接通的內容修復或歷史特批暗中變成通用自動授權。
+
 PostgreSQL 是資料、已提交更改及執行進度的權威。一次獲准修改在一個短 transaction 內寫入、validation、記錄歷史；任一項失敗就 rollback，全部成功才 commit。恢復查已提交的 ChangeSet 和分組進度。
 
 運行前提沿用單一使用者、生成期間無外部修改、批次串行。同一組可能有多次已批准修訂，每次各自提交；不把等待模型或人工裁決的幾十分鐘包進一個 transaction。

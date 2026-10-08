@@ -10,6 +10,8 @@
 
 產出位置：`$DATA_BASE_DIR/wang-knowledge-platform/staging/reports/library-audit/<UTC 時間戳>/`
 
+**#357 CVP 生產的後續政策**：本文下方的抽樣命令、舊模型配置與直接人工 queue 描述不是 #357 現行完整組放行流程。#357 使用精確全組母體、指定 Gemini 兩 worker、完整語義異議的 GPT 終局及有標記的 content-blocked 例外；實際分流與人工出口見 [Claims → CVP 現行完整流程](../../20-knowledge/cvp_production_process_v1.md)。不要按一般 CLI 預設抽樣代替全組審計。
+
 ## 怎麼跑
 
 ```bash

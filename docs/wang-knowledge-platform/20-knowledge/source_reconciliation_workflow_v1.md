@@ -10,6 +10,8 @@
 
 ## 1. 更新原则
 
+本流程是 [Claims → CVP 現行完整流程](./cvp_production_process_v1.md) 的來源／Claim 修訂分支。何時調查、何時已有權限可修、何時需要新的人工決定，以及修完後怎樣接回正常 CVP 和完整組審計，以該總流程定位；本文細化更新契約。
+
 **增量写入，完整检查受影响的依赖。** 文件改了，不是只刷新 SHA，也不是重抽整库。
 遵守 [Project Mission Statement](../00-overview/project_mission_statement.md)、[Solution Architecture](../00-overview/solution_architecture.md)、[Claim 设计](./claim_design.md) 和 [CanonicalViewpoint 设计](./canonical_viewpoint_design.md)。
 
