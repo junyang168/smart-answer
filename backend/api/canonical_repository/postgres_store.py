@@ -3234,7 +3234,11 @@ class PostgresKnowledgeStore:
         with self.connect() as conn, conn.cursor() as cursor:
             cursor.execute("SELECT metadata,status,error_message FROM wang_knowledge.pipeline_runs WHERE run_id=%s AND stage='cvp_group'", (run_id,))
             row = cursor.fetchone()
-            return {**row[0], "status": row[1], "error": row[2]} if row else None
+            if row and row[0].get('run_id',run_id)!=run_id:
+                raise ChangeSetConflict('SQL group metadata conflicts with its actual primary key')
+            # Point reads and campaign-list reads have the same identity
+            # contract. Metadata need not duplicate the SQL primary key.
+            return {**row[0], "run_id":run_id, "status": row[1], "error": row[2]} if row else None
 
     def initialize_cvp_campaign(self, definition: Mapping[str, Any]) -> str:
         from .transaction_validation import CONTRACT

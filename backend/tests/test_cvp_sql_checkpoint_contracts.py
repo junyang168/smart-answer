@@ -11,6 +11,18 @@ from backend.tests.test_cvp_sql_transaction_postgres import task,apply
 from backend.tests.test_claim_evidence_reciprocity_postgres_integration import _temporary_postgres,postgres_store
 
 
+def test_point_read_handoff_returns_actual_sql_run_identity(postgres_store):
+    _,context=task(postgres_store)
+    with postgres_store.connect() as conn:
+        stored=conn.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s',(context.run_id,)).fetchone()[0]
+        assert 'run_id' not in stored
+    assert postgres_store.get_cvp_group(context.run_id)['run_id']==context.run_id
+    with postgres_store.connect() as conn:
+        conn.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=jsonb_set(metadata,'{run_id}','\"foreign\"') WHERE run_id=%s",(context.run_id,))
+    with pytest.raises(ChangeSetConflict,match='actual primary key'):
+        postgres_store.get_cvp_group(context.run_id)
+
+
 def test_latest_sql_group_does_not_embed_historical_action_bodies(postgres_store):
     store=postgres_store;plan,context=task(store);apply(store,plan,context)
     prior=deepcopy(store.get_cvp_group(context.run_id))
