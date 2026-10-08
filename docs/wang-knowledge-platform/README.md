@@ -60,6 +60,7 @@
 | [跨讲道主张比较与双模型归并流程 v1](./20-knowledge/cross_sermon_relation_workflow_v1.md) | 不同讲道的主张怎样比较成关系 |
 | [母题—子专题—篇章段落自动发现与双模型复核 v1](./20-knowledge/topic_structure_discovery_workflow_v1.md) | 主题层级怎样从主张与关系里长出来 |
 | [PostgreSQL 共享知识主库 v1](./20-knowledge/postgresql_authoring_store_v1.md) | 谁是编辑权威，ChangeSet 怎么写入 |
+| [CVP 交易與恢復設計 v2](./20-knowledge/cvp_transaction_workflow_v2.md) | 待實作的簡化設計：transaction 內驗證、SQL changelog、按已提交狀態恢復；先驗收第 57 組完整續跑入口 |
 | [文库 Functional Specification](./20-knowledge/exegesis_topic_repository_functional_spec.md) | 面向读者的文库：canonical unit、圣经/主题索引、来源可追溯 |
 | [文库 Technical Specification](./20-knowledge/repository-tech-spec/README.md) | 文库的实现架构、存储布局与标识符。原为一份 1,994 行文档，已拆成五个： |
 | &nbsp;&nbsp;└ [Data Models](./20-knowledge/repository-tech-spec/data-models.md) | 23 个存储记录类型，开头有速查表 |
