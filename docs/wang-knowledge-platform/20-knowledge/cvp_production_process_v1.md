@@ -20,7 +20,7 @@
 - [10. 工程與運行例外](#10-工程與運行例外)
 - [11. 人工真正要決定什麼](#11-人工真正要決定什麼)
 - [12. 中斷恢復與完成條件](#12-中斷恢復與完成條件)
-- [13. Claim 問題的統一閉環設計](#13-claim-問題的統一閉環設計)
+- [13. Claim 與 CVP 管理的變更閉環](#13-claim-與-cvp-管理的變更閉環)
 - [14. 程式與驗證依據](#14-程式與驗證依據)
 
 ## 1. 目標與責任
@@ -273,11 +273,22 @@ v1 的整庫前像、指紋、回讀及遞迴歷史證明已退出執行路徑�
 
 owner 暫停／指定 checkpoint 優先於自動恢復。停止時明確交代「誰需要做哪個決定」，不讓 owner 和程式互相等；普通進度可安靜，真失敗、實際修復、完成或必要操作須報告。
 
-## 13. Claim 問題的統一閉環設計
+## 13. Claim 與 CVP 管理的變更閉環
 
-本節是流程設計，不是執行授權，也不宣布下述自動化已完成。第 4–12 節仍描述實際已接通的能力。新增通用 Claim 修訂權限須由 owner 確認有界 policy；確認一次後，由 code 完成權限內的後續步驟，不逐條、逐步再問「繼續」。
+本節是流程設計，不是執行授權，也不宣布下述自動化已完成。第 4–12 節仍描述實際已接通的能力。新增通用 Claim／Evidence 或 CVP 連接修訂權限須分域由 owner 確認有界 policy；確認一次後，由 code 完成各自權限內的後續步驟，不逐條、逐步再問「繼續」。一域的批准不擴大另一域的權限。
 
-### 13.1 現有缺口與重構邊界
+### 13.1 管理域、職責與現有缺口
+
+變更按業務責任分為兩類，不按「在哪個 pipeline 發現」分。Claim 本身及 Claim Evidence 的變更由 **Claim management** 負責；Claim 與 CVP 的連接、觀點及其身份由 **CVP management** 負責。CVP 生產發現 Claim 抽取錯誤，應交 Claim management 修訂，不因此取得任意改 Claim 的權限。
+
+| 管理域 | 管理的變更 | 不直接決定的內容 |
+| --- | --- | --- |
+| Claim management：Claim change | Claim 表述、限定、模態、經文／對象、歸屬及其修訂審核與版本 | Claim 應掛哪個 CVP、是否等價／支持、CVP 核心或身份 |
+| Claim management：Claim Evidence change | Evidence 本身的表述／精確引文／定位、Claim–Evidence 綁定與支持資格；仍以獲准自身正文為依據 | 不以補證據為由自動改 Claim–CVP 連接，不解除真 hold、不改教授原文 |
+| CVP management：Claim–CVP link change | 目標 CVP、連接類型、成分 locator、與新 Claim／Evidence 版本相符的身份判定與審核 | 不為維持等價關係而回頭改 Claim 或 Evidence |
+| CVP management：CVP change | 因相關 Claim／Evidence 變更而確需修改的 CVP 表述、修訂、身份及其他觀點關係 | 不因一條 Claim 變更就默認整個 CVP 改寫、合併或退役；需自己的內容權限與审核 |
+
+兩個 management 是業務責任與批准邊界，不是兩份資料庫、兩個微服務或兩套 transaction／呼叫預算。共用既有 SQL store、執行器及 changelog；各自產生有權限、已审核的變更方案，執行器只驗證和提交，不替任一管理域做語義判斷。
 
 現有 SQL runner 能對已提交批次的 deferred 成分做來源調查，並自動補足現有證據充分的 CVP 覆蓋。來源／Claim 的受控修訂與交易執行器也已存在，但證據漏綁和 Claim 表述問題仍常停在 handoff，沒有共同的分類、權限匹配、修訂與復驗接點。機械准入、Opus 審核和獨立審計發現的問題，亦未全部進同一生命週期。
 
@@ -285,7 +296,7 @@ owner 暫停／指定 checkpoint 優先於自動恢復。停止時明確交代�
 
 ### 13.2 共同入口與證據材料
 
-以下入口發現 Claim 問題時都登記同一問題：准入／引文校驗、GPT 提議、Opus 初審或終審、deferred 處置、Gemini 完整組審計，以及已有精確人工指正。正常審核的 `pass + evidence_insufficient` 仍是待處理 Claim 問題，不能只因 decision 為 pass 而跳過。
+以下入口發現問題時都登記同一問題並路由到相應管理域：准入／引文校驗、GPT 提議、Opus 初審或終審、deferred 處置、Gemini 完整組審計，以及已有精確人工指正。正常審核的 `pass + evidence_insufficient` 仍是待處理 Claim 問題，不能只因 decision 為 pass 而跳過。發現入口負責報告，不擁有跨域修改權。
 
 問題綁定 Claim ID、當前 revision、成分精確 span、物理來源版本、具體爭議和已有判讀；同一問題從另一入口再次出現，只追加其報告引用，不取得新模型預算。ID、SHA 和版本均由程式綁定，模型不抄寫 SHA。
 
@@ -317,7 +328,9 @@ Opus 發現問題後，先交 GPT 讀完整自身來源、原異議及精確 Cla
 
 ### 13.4 一次修訂與獨立審核
 
-共同分支為：**發現並登記 → 本源核查／GPT 分類與最小提議 → 程式驗證 → Opus 獨立審核精確後像 → 必要時一次 GPT 纠正與 Opus 終審 → SQL 提交 → 完整影響復驗 → 結案續跑。**
+共同接點為：**發現並登記 → 本源核查／GPT 分類 → 交相應 management 提出最小變更 → 程式驗證與 Opus 獨立審核精確後像 → 必要時一次 GPT 纠正與 Opus 終審 → 共用 SQL 提交 → 完整影響復驗 → 結案續跑。**
+
+Claim／Evidence 修訂的批准只准改 Claim management 的內容；Claim–CVP 連接與 CVP 核心的批准由 CVP management 產生。兩域所需的完整上下文、精確写集與權限都在同一包時，可由同一次完整提議／獨立审核覆蓋，不因劃分職責多審一遍；但不能用只審了 Claim 的回答冒充已審 CVP 連接。
 
 GPT 提議不批准自己的內容；Opus 檢查完整新 Claim、證據、差異理由及所有受影響連接。若 reviewer 不同意，回 GPT 最多一輪，再審有效後像；終審仍拒絕就明示問題，不換 root 重試。獨立 Gemini 審計與第 9 節終局規則不被這個 production review 取代。
 
@@ -329,29 +342,48 @@ GPT 提議不批准自己的內容；Opus 檢查完整新 Claim、證據、差�
 
 修訂前用索引取得完整受影響集合：Claim、Evidence／fragment、所有引用該版本的連接與判定、相關 CVP 的其他成員、相關已完成組及產品依賴。正常流程不讀整庫快照。計劃中每個對象必須有明確的 retain／update／invalidate／needs_direction 處置；不默認「換 Claim SHA 就好了」。
 
-同一次獲准修訂的 Claim／Evidence 與已批准版本傳遞，在一個短 transaction 內驗證完整寫集、當前依賴、hold、後像與 changelog；失敗 rollback，成功 commit。某條下游連接的新意思還未獲准，不能因 Claim 寫入而自動改為 supports、等價或退役；記為未解決並阻止相關組結案。
+兩域已各自批准的 Claim／Evidence 修訂、連接與必要 CVP 變更，可以組成同一完整方案，在一個短 transaction 內驗證寫集、當前依賴、hold、後像與 changelog；失敗 rollback，成功 commit。管理責任分開，不要求把一致性寫入拆成多筆交易，也不把等待模型的時間放進 transaction。
+
+若只完成 Claim 修訂批准，必須由已有確定性失效規則在同一交易登記受影響下游資格待重新驗證；旧連接及其歷史不可冒充已批准的新版本連接。這個 pending／失效機制亦須通過共同 validator；尚未具備時停止提交，不留下看似有效的半套資料。不能因 Claim 寫入而自動改連接為 supports、等價或退役；相關組在 CVP management 完成處置前不得結案。
 
 保留 Claim ID、原組成員、容量與邏輯順序，修訂只增加既有記錄版本，舊內容與拒絕留在 SQL 歷史。不靜默新增、拆分、刪除 Claim 或改來源正文。引用、locator 和批准必須綁新版本並實際重新核對，不機械替換哈希。
 
 產品依賴可依原確定性規則失效，但不啟動 ArgumentRoute、文章、發布或部署。确需 CVP 核心、身份或其他未批准關係更改時，只交新增範圍，不能把 Claim 修復自動擴權成全庫重整理。
 
-### 13.6 復驗、完成與中斷恢復
+### 13.6 Claim 變更到 CVP management 的交接
+
+Claim change 和 Claim Evidence change 都須產出精確影響清單；Claim statement 沒變，不代表相關 CVP 一定不受影響。Evidence 被增加、移除、限定或改變支持資格時，原 Claim–CVP 關係的依據也可能變化。共享 Evidence 變更先找齊所有引用它的 Claims，再找這些 Claims 的全部 CVP 連接，不能只看當前遇到的一條 Claim。
+
+交接沿用已有 SQL action／材料引用，至少包含：Claim 與 Evidence 的前後版本、逐欄差異、正文依据及实际审核、所有受影響連接／CVPs／原組、確定保留項及待判項。它是本源修訂結果，不是 CVP 修改批准；不新增消息系統或第二份歷史。
+
+CVP management 依新 Claim／Evidence 及相關 CVP 全部必要成員，逐項選擇：
+
+| 影響評估 | CVP management 的動作 |
+| --- | --- |
+| 原關係仍成立，CVP 命題仍有充分依據 | 保留 CVP 核心；合法驗證後重新綁定必要版本／locator／判定，不創建無意義的新 CVR |
+| Claim 的意思或支持作用變了，原連接不再成立 | 在其權限內提議新的精確連接處置並獨立审核；不能只替換 Claim SHA |
+| CVP 核心的某項內容失去依据 | 查看所有其他成員後，再提議有權限的 CVP 修訂，或轉新增範圍；不自動改寫／退役 |
+| 無法判定或有真實矛盾／hold | 保留未決與已提交事實，不以「Claim 已修好」宣布 CVP 完成 |
+
+直接的 Claim–CVP 連接錯誤只進 CVP management；只有本源核查另證明 Claim／Evidence 本身有錯，才交回 Claim management。不能為讓一條連接過關而改 Claim，也不能為保留旧 Claim 而硬造 CVP 支持。
+
+### 13.7 復驗、完成與中斷恢復
 
 commit 後用新 SQL 連線回讀，確認精確修改及歷史；再以當前版本審計完整受影響的原組 Claims、所有保留／新增／相連 CVPs 和必要其他成員。已完成舊審計只對未變的精確輸入有效；新版本須新審計，不能搬用舊 pass。
 
-問題只有在修訂或明示不需修改的理由已合法核驗、原成員處置完整、受影響獨立審計及異議全部合法結案時才能標 resolved。SQL applied 不等於 resolved，resolved 也不代替 group audited。組中其他未決尚在，下一組仍不得啟動；35／37 復審 flags 等歷史限制不洗掉。
+Claim management 的修訂已提交／本源復驗完成，與 CVP management 的影響處置完成分開記錄：可以明確回報「Claim 已修復，CVP 影響待驗」，不能混成一個 pass。整個問題只有在兩域所需的處置已合法核驗、原成員完整、受影響獨立審計及異議全部合法結案時才能標 resolved。SQL applied 不等於 resolved，resolved 也不代替 group audited。組中其他未決尚在，下一組仍不得啟動；35／37 復審 flags 等歷史限制不洗掉。
 
 沿用 `pipeline_runs` 的 action／review 記錄引用材料、問題分類、權限與當前待做動作，不建立第二套狀態資料庫。問題的 detected／classified／reviewed／committed／verified／resolved 是擬議 action metadata，不改原 group 的 `prepared → reviewed → applied → audited` 契約。
 
 恢復先查 SQL 已提交事實和原角色呼叫預算：已保存回答不再叫模型；已 commit 不再 apply；未完成審計只接尚未完成且有合法預算的項。無回答 intent 保持 unknown，程式錯誤與資源問題分別標工程／運行負責人。正常恢復不遞迴重建歷史 proof，不重新驗前面所有組。
 
-### 13.7 人工出口、實作與驗收
+### 13.8 人工出口、實作與驗收
 
 目標是只把原文問題、未消解教導張力／歸屬問題及有界纠正後仍有實質分歧交內容負責人。缺權限時問「是否批准這個明確的修訂範圍」，不是每項 metadata 問題都請人同意。一次批准的通用 policy 只允許列明的欄位、來源不變條件及復驗程序；原文編輯、Claim 刪拆、CVP 身份／正文／退役仍不自動涵蓋。
 
 人工包只顯示最小決定所需的原話、Claim 差異、兩模型理由、已提交與待修改狀態；人工回答後仍由共同 code 路徑執行，不手寫 Registry。原模型不同意原樣保存，不伪造 consensus。機械、资源和未知副作用的 hold 另列，不能承諾它們不會停止執行。
 
-實作順序：先統一各發現入口和根因分類，再接有界 Claim 修訂 policy／compiler，再接版本影響與完整組復驗，最後接 SQL 恢復與續跑。一次全局改共同分支，不替每個案例寫 runner；此順序不是允許以局部測試通過啟動生產。
+實作順序：先統一各發現入口、根因分類及 management 路由，再分別接 Claim／Evidence 與 CVP 連接的有界 policy／compiler，再接兩域版本交接與完整組復驗，最後接共同 SQL 恢復與續跑。一次全局改共同接點，不替每個案例寫 runner；此順序不是允許以局部測試通過啟動生產。
 
 驗收必須覆蓋：
 
@@ -364,6 +396,9 @@ commit 後用新 SQL 連線回讀，確認精確修改及歷史；再以當前�
 7. 真 hold、來源歧義、教導矛盾：不循環審到 pass，不改教授的原文或立場。
 8. 最後一項 SQL validation 失敗／commit 回覆丟失／審計中斷：分別完整 rollback、只恢復不重寫、按原預算續接。
 9. 固定受影響集合增加無關歷史：機械處理不讀歷史整庫、不重建祖先鏈，沿用既有時間／bytes 護欄。
+10. 只改 Evidence、Claim statement 不變：仍產生精確 CVP 影響評估；共享 Evidence 的所有相關 Claims 被覆蓋。
+11. 直接改連接但 Claim／Evidence 正確：只走 CVP management，不順帶改本源主張。
+12. 兩域聯合方案或 Claim 已提交而 CVP 待驗：分別證明共同交易批准完整、下游不能冒充新版本有效，以及各域進度／總結案不混淆。
 
 先用當前已保存 Claim 問題材料作零模型、零正式寫入的分類／計劃預覽與隔離 SQL 反例；這不等於批准真實內容修訂。政策及實作確認後，真實有界修訂仍需指定模型、來源、backup、transaction、全層審計與 completion 的實際驗收。
 
