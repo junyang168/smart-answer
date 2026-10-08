@@ -25,9 +25,27 @@ def source_run(store,scenario):
     return store.prepare_cvp_group(campaign_sha256=campaign,group_key='g1',sequence=1,claim_ids=['CL-test'],materials={'fixture':'synthetic source action'})
 
 
-def test_source_claim_workflow_uses_actual_transaction_and_no_legacy_ports(postgres_store,scenario,tmp_path):
-    store=postgres_store;run=source_run(store,scenario);manifest,states,new=scenario
+def source_ports(manifest, states, new, tmp_path, *, wire_pins):
     ports=FakePorts(manifest,states,new,tmp_path)
+    if wire_pins:
+        original=ports.adapter
+        def adapter(stage):
+            result=original(stage)
+            generate=result.generate
+            def response(packet):
+                raw=generate(packet)
+                raw.pop('proposal_sha256',None)
+                return raw
+            result.generate=response
+            return result
+        ports.adapter=adapter
+    return ports
+
+
+@pytest.mark.parametrize('wire_pins',[False,True])
+def test_source_claim_workflow_uses_actual_transaction_and_no_legacy_ports(postgres_store,scenario,tmp_path,wire_pins):
+    store=postgres_store;run=source_run(store,scenario);manifest,states,new=scenario
+    ports=source_ports(manifest,states,new,tmp_path,wire_pins=wire_pins)
     def forbidden(*args,**kwargs):raise AssertionError('legacy snapshot/apply must not execute')
     ports.snapshot=ports.apply=ports.plan=ports.readback=forbidden
     result=execute_source_action(store,run,manifest.model_dump(),root=tmp_path/'source-action',ports=ports)
@@ -46,9 +64,10 @@ def test_source_claim_workflow_uses_actual_transaction_and_no_legacy_ports(postg
     assert len(store.get_change_history(result['change_set_id'])['operations'])==6
 
 
-def test_source_late_validation_failure_rollback_and_saved_answers_reused(postgres_store,scenario,tmp_path,monkeypatch):
+@pytest.mark.parametrize('wire_pins',[False,True])
+def test_source_late_validation_failure_rollback_and_saved_answers_reused(postgres_store,scenario,tmp_path,monkeypatch,wire_pins):
     store=postgres_store;run=source_run(store,scenario);manifest,states,new=scenario
-    ports=FakePorts(manifest,states,new,tmp_path)
+    ports=source_ports(manifest,states,new,tmp_path,wire_pins=wire_pins)
     before=deepcopy(store.get_record_state('claims','CL-test'))
     actual=store._assert_transaction_edges_and_reviews
     def failure(*args):raise ValueError('late source transaction guard')

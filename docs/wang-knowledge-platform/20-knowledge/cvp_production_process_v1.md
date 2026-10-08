@@ -3,7 +3,7 @@
 > **讀者**：流程負責人、神學編輯、Solution architect、Developer。
 > **類型**：流程。
 > **狀態**：當前內容流程；儲存、交易與恢復由 v2 共同 SQL 入口承擔，舊執行方案禁用。本文不啟動生產、不新增內容修改授權。
-> **與代碼對齊**：2026-10-08 核對到 `6b9541e` 的內容角色／政策與 `cvp_sql_flow.py`、`cvp_sql_actions.py`；新交易入口已啟用，執行仍受每次 owner 邊界限制，不因驗收一組而自動擴大後續範圍。
+> **與代碼對齊**：2026-10-08；內容角色／SQL 交易基線核對到 `6b9541e`，程式版本綁定核對本次工作樹的共同模型入口與回歸。執行仍受 owner 邊界限制，不因驗收一組而自動擴大後續範圍。
 > **權威範圍**：說明 Claims 到 CVP 的正常路徑、例外分流、人工出口與恢復接點。內容定義服從 [CanonicalViewpoint 设计](./canonical_viewpoint_design.md)，使命與限制服從 [Project Mission Statement](../00-overview/project_mission_statement.md) 和 [Solution Architecture](../00-overview/solution_architecture.md)。具體授權仍以相應 policy／精確人工決定為準，不能拿本文擴權。
 
 ## 目錄
@@ -122,7 +122,7 @@ flowchart TD
 | 純背景、例證或連接語而非可復用判斷 | 明示 `observation_only` 等合法處置，不把它計作新 CVP |
 | 證據不足、歸屬未決、來源衝突或 human hold | 保留具體待決原因，不強行造 CVP、不偷解除 hold |
 
-审核的覆蓋欄位綁定當前 Claim SHA、自身 Evidence IDs、理由及可解析目標。`cvp_covered=true` 只證明有目標，不證明連接語義正確。僅因 Registry 沒有舊 CVP 而 defer，不是合法理由。
+审核的覆蓋欄位綁定當前 Claim SHA、自身 Evidence IDs、理由及可解析目標。SHA 由程式從已驗證的精確輸入綁定，模型只返回 Claim ID、成分編號、完整判斷與依据，不再抄寫版本 SHA；初審、唯一纠正、終審與來源／Claim 修訂審核共用此規則。原 raw 不變，舊配置仍按原身份驗真，不因 SHA 回填錯字再問模型／人工。`cvp_covered=true` 只證明有目標，不證明連接語義正確。僅因 Registry 沒有舊 CVP 而 defer，不是合法理由。
 
 ### 5.2 提議、整合、初審與終審
 
@@ -218,6 +218,7 @@ v1 的整庫前像、指紋、回讀及遞迴歷史證明已退出執行路徑�
 | 自動 recovery patch | supervisor 只診斷；受控 executor 限定 audit-library 來源讀取及新反例，驗 patch 後執行固定測試 | 不執行模型任意 shell；一般主 agent 的修復權限不等於此 executor 可自行改全部程式 |
 | 請求過大 | 已實作 compact JSON、完全相同長字串的共享表及逐字往返校驗；合法舊 cache 有明示無損遷移路徑 | 不摘要來源、不拆原組、不加上限；仍過大則停止，不能換 root 重置预算 |
 | Opus `pass` 同時帶 finding code | 僅無 correction、符合已知矛盾形狀時交同 Opus 一次格式修正；所有 decision／reason／identity／其他欄位不變 | 真異議不能清掉；缺欄位、內容漂移、第二次非法回答停止 |
+| 模型回填版本 SHA 少字、多字或錯字 | 不使用回填值；共同程式從完整驗真的原 request 及回答，以精確 ID／成分產生內部版本綁定，保留原 raw 與獨立衍生證據 | 不模糊匹配，不改內容判讀；未知／重複 ID、輸入或來源身份衝突仍停止，不借此重發模型 |
 | 已保存合法模型回答 | 按原 request／model／backend／prompt／config／encoding／SHA 驗證並復用 | 改配置後不能把舊回答冒充新审核；只讀驗證不得偷偷 fallback 新呼叫 |
 | 已有 call intent 或舊 request-encoding 痕跡卻沒有回答 | `outcome_unknown`，保存原記錄；需精確一次重發方向時，只問這個未定請求 | 無 raw 不等於沒呼叫；不刪 intent、不跨 root 自動重發；新 unknown 再停 |
 | 明確 provider schema 400、證明生成前拒絕 | 僅既有專用 verifier 完整證明後，按該一次機械交接契約處理 | 不能把一般 timeout、本地錯誤或 stderr 猜測套成已知未執行 |
@@ -305,4 +306,5 @@ owner 暫停／指定 checkpoint 優先於自動恢復。停止時明確交代�
 | content-blocked 例外 | [fallback policy](../../../backend/pipeline/policies/wang_content_blocked_fallback_v1.json)、[executor](../../../backend/pipeline/viewpoint_content_blocked_fallback.py) | [fallback tests](../../../backend/tests/test_viewpoint_content_blocked_fallback.py) |
 | 人工決定與 provenance | [human review](../../../backend/pipeline/viewpoint_human_review.py) | [human decision tests](../../../backend/tests/test_viewpoint_human_review.py) |
 | 格式、cache、未知呼叫 | [format repair](../../../backend/pipeline/viewpoint_review_format_repair.py)、[model runtime](../../../backend/pipeline/viewpoint_resolution_runtime.py) | [format tests](../../../backend/tests/test_viewpoint_review_format_repair.py)、[runtime tests](../../../backend/tests/test_viewpoint_runtime_robustness.py)、[cache handoff](../../../backend/tests/test_viewpoint_model_cache_handoff.py) |
+| 程式版本綁定 | [response binding](../../../backend/api/canonical_repository/viewpoint_response_binding.py)、[wire adapter](../../../backend/api/canonical_repository/viewpoint_resolution.py) | [全輪次與保存回答驗證](../../../backend/tests/test_viewpoint_program_response_binding.py)、[來源修訂 SQL 回滾](../../../backend/tests/test_cvp_sql_actions_postgres.py) |
 | 機械 recovery | [supervisor](../../../backend/pipeline/viewpoint_cvp_recovery_supervisor.py)、[executor](../../../backend/pipeline/viewpoint_cvp_recovery_executor.py) | [executor tests](../../../backend/tests/test_viewpoint_cvp_recovery_executor.py) |

@@ -726,7 +726,8 @@ def review_packet(frozen: dict, proposal: Proposal) -> dict:
 
 
 def validate_review(packet: dict, response: dict) -> bool:
-    review = Review.model_validate(response)
+    from backend.api.canonical_repository.viewpoint_response_binding import bind_response
+    review = Review.model_validate(bind_response(Review,response,packet))
     required = {d["record_key"] for d in packet["proposal"]["dispositions"]}
     actual = [v.record_key for v in review.verdicts]
     if (review.proposal_sha256 != packet["proposal_sha256"] or len(actual) != len(set(actual)) or set(actual) != required):

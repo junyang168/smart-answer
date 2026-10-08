@@ -168,6 +168,9 @@ class Runner:
             raise ValueError("unknown model stage")
         deferred = bool(packet.get("manifest", {}).get("deferred_repair"))
         adapter = self.ports.deferred_adapter(stage) if deferred else self.ports.adapter(stage)
+        from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
+        raw_path = self.root / (stage + '.raw.json')
+        adapter = response_adapter(adapter, read(raw_path) if raw_path.exists() else None)
         expected = ("claude-opus-5-5", "claude_subscription") if "review" in stage else ("gpt-6.1-sol", "codex_subscription")
         if (adapter.model_id, adapter.backend) != expected:
             raise Stop("model/backend differs from frozen subscription policy", status="proof_failure", waiting_for="system")
@@ -190,6 +193,7 @@ class Runner:
                 raise Stop("cached model request/response identity drift", status="proof_failure", waiting_for="system")
             if not reservation.exists() or body(read(reservation)) != request:
                 raise Stop("cached model reservation missing", status="proof_failure", waiting_for="system")
+            bound_model_response(adapter, packet, raw['response'], raw_path)
             return raw
         if reservation.exists():
             raise Stop("reserved call has no verified reply; do not repeat", status="call_uncertain", waiting_for="system")
@@ -214,9 +218,11 @@ class Runner:
             runtime_identity = {"executable": str(actual), "file_sha256": contract.file_sha256(actual),
                 "model_id": adapter.model_id, "backend": adapter.backend, "reasoning_effort": adapter._client.reasoning_effort,
                 "cli_identity": runtime_identity}
-        return write(raw_path, {**request, "response": response, "response_sha256": sha256_json(response),
+        raw = write(raw_path, {**request, "response": response, "response_sha256": sha256_json(response),
             "provider_raw": provider_raw, "provider_raw_sha256": sha256_json(provider_raw), "runtime_identity": runtime_identity,
             "completed_at": datetime.now(timezone.utc).isoformat()})
+        bound_model_response(adapter, packet, response, raw_path)
+        return raw
 
     def reviewed(self, frozen: dict) -> tuple[contract.Proposal, dict]:
         if frozen["inventory"]["unknown_keys"]:
@@ -540,6 +546,8 @@ def validate_raw(root: Path, stage: str, packet: dict) -> dict:
             ctx.pin(PROMPTS / 'deferred_claim_evidence_repair_v1.md')
     adapter = model_adapter(stage, deferred=bool(packet.get("manifest", {}).get("deferred_repair")))
     raw = read(root / (stage + ".raw.json"))
+    from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
+    adapter = response_adapter(adapter, raw)
     reservation = body(read(root / (stage + ".reservation.json")))
     proof = adapter.request_encoding_proof(packet)
     expected = {"model_id": adapter.model_id, "backend": adapter.backend,
@@ -556,6 +564,7 @@ def validate_raw(root: Path, stage: str, packet: dict) -> dict:
     if identity is not None and (identity["model_id"] != adapter.model_id or identity["backend"] != adapter.backend
             or identity["reasoning_effort"] != "high" or not identity["file_sha256"]):
         raise ValueError("actual executable/model/effort identity drift")
+    bound_model_response(adapter, packet, raw['response'], root / (stage + '.raw.json'), persist=False)
     return raw
 
 

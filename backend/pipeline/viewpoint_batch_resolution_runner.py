@@ -15,7 +15,7 @@ import argparse
 import json
 import subprocess
 from pathlib import Path
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from dotenv import load_dotenv
@@ -390,6 +390,23 @@ def build_consolidation_packet(
     return packet
 
 
+def _response_normalization(raw_path: Path, response: Mapping[str, Any], changes: list[str]) -> dict[str, Any]:
+    result = {'raw_response_sha256': sha256_json(dict(response)), 'changed_paths': changes,
+              'reader_visible_text_changed': False, 'truth_conditions_changed': False}
+    proof_path = raw_path.with_name(raw_path.stem + '.program-binding.json')
+    if proof_path.exists():
+        proof = _read(proof_path)
+        artifact = _read(raw_path)
+        if (proof['artifact_sha256'] != sha256_json({k:v for k,v in proof.items() if k != 'artifact_sha256'})
+                or proof['raw_artifact_sha256'] != artifact['artifact_sha256']
+                or proof['raw_response_sha256'] != artifact['response_sha256']
+                or proof['bound_response_sha256'] != sha256_json(dict(response))):
+            raise ValueError('review normalization program binding drift')
+        result['raw_response_sha256'] = proof['raw_response_sha256']
+        result['program_binding_sha256'] = proof['artifact_sha256']
+    return result
+
+
 def run_final_cvp_review(
     *,
     batch_id: str,
@@ -459,12 +476,8 @@ def run_final_cvp_review(
             "review": review_payload,
             "validation_report": validation,
             "allows_further_correction": False,
-            "normalization": {
-                "raw_response_sha256": sha256_json(dict(raw_review)),
-                "changed_paths": normalization_changes,
-                "reader_visible_text_changed": False,
-                "truth_conditions_changed": False,
-            },
+            "normalization": _response_normalization(
+                output_dir / 'raw-final-review.json', raw_review, normalization_changes),
         },
     )
     return review, validation, calls, seconds
@@ -645,12 +658,8 @@ def run_batch(
             "review_sha256": sha256_json(review_payload),
             "review": review_payload,
             "validation_report": review_validation,
-            "normalization": {
-                "raw_response_sha256": sha256_json(dict(raw_review)),
-                "changed_paths": review_normalization_changes,
-                "reader_visible_text_changed": False,
-                "truth_conditions_changed": False,
-            },
+            "normalization": _response_normalization(
+                output_dir / 'raw-review.json', raw_review, review_normalization_changes),
         },
     )
 

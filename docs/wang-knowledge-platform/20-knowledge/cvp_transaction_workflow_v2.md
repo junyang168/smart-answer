@@ -3,7 +3,7 @@
 > **讀者**：Solution architect、Developer、流程負責人。
 > **類型**：規範。
 > **狀態**：當前；SQL 共同交易與恢復入口已實作、遷移並啟用。隔離驗證、歷史接納與實際組驗收分開記錄；執行仍遵守 owner 停止邊界。舊整庫快照／歷史鏈執行器禁用，不得回退。
-> **與代碼對齊**：2026-10-08 核對到 `6b9541e` 的 `006_cvp_transaction_runs.sql`、`transaction_validation.py`、`cvp_sql_flow.py`、`cvp_sql_actions.py` 及隔離 PostgreSQL 測試；正式啟用與組驗收須有獨立 receipt。
+> **與代碼對齊**：2026-10-08；交易基線核對到 `6b9541e`，程式版本綁定核對本次工作樹的 `viewpoint_response_binding.py`、共同模型入口及回歸。正式啟用與組驗收須有獨立 receipt。
 > **權威範圍**：CVP 及已授權來源／連接修訂的交易、changelog、執行狀態與恢復；不變更內容判定、授權範圍、模型分工或分組。受 [Solution Architecture](../00-overview/solution_architecture.md) 與 [CanonicalViewpoint 設計](./canonical_viewpoint_design.md) 約束。
 
 ## 1. 設計決定
@@ -15,6 +15,10 @@ PostgreSQL 是資料、已提交更改及執行進度的權威。一次獲准修
 運行前提沿用單一使用者、生成期間無外部修改、批次串行。同一組可能有多次已批准修訂，每次各自提交；不把等待模型或人工裁決的幾十分鐘包進一個 transaction。
 
 JSON 保存模型的精確輸入、原始回答、來源副本、批准與審計證據。正常生產不生成整庫 `before/frozen/readback`，也不以它們重建已提交歷史。既有 JSON、拒絕和失敗記錄保留為歸檔。
+
+版本綁定由程式管理，不讓模型抄寫 SHA。正常初審／終審、GPT 纠正與來源／Claim 修訂審核的 wire schema 不含 `proposal_sha256`、`review_sha256`、`coverage_claim_sha256` 這些回填欄位；模型只按精確對象 ID、Claim ID 與成分编号返回完整內容判讀。共同入口先驗證實際 request、模型／backend／prompt／config、encoding、intent 及 raw，才從該次輸入產生內部版本欄位。原始回答不改；衍生結果及其綁定證據分開保存，並納入 SQL 批准材料。
+
+這不是 SHA 模糊比對，也不是只凭 Claim ID 接受任何舊回答。已保存回答沿用實際舊配置驗真，再作同一程式綁定；不因抄錯字元重新詢問模型或人工。不改 decision／reason／correction／證據判讀，不把證據不足變成通過。真正的來源或業務記錄 SHA、SQL 版本／依賴／hold 檢查、未知呼叫 hold 與完整審計全部保留；已完成歷史不重編或重審。
 
 本版沿用一個 store 和一個 runner，不引入事件溯源平台、通用工作流引擎或新的證明／快取框架。讀取目前記錄用 `objects`，看歷史才按 ID／版本查 `object_versions`。
 
@@ -131,6 +135,7 @@ commit 後的新連線回讀用於确认可見結果與交接審計。它若失�
 | [SQL migration 006](../../../backend/api/canonical_repository/migrations/006_cvp_transaction_runs.sql) | 現有運行表增加 `cvp_group` 及精確 group／action／依賴索引；須另作正式遷移 |
 | [Postgres store](../../../backend/api/canonical_repository/postgres_store.py)／[交易驗證](../../../backend/api/canonical_repository/transaction_validation.py) | 原子業務與確定性失效、實際 RETURNING 全寫集、後像與歷史核對、同交易 checkpoint；已提交 ID 優先判斷，錯誤 WHERE／隱藏 trigger 不放行 |
 | [共同 runner](../../../backend/pipeline/cvp_sql_flow.py)／[修訂分支](../../../backend/pipeline/cvp_sql_actions.py) | 正常 CVP、來源／Claim、owner link、窄 supports 及必要 coverage 共用提交與恢復；source Claim 的真實審核事件同交易寫入 |
+| [程式版本綁定](../../../backend/api/canonical_repository/viewpoint_response_binding.py)／[共同模型邊界](../../../backend/pipeline/viewpoint_resolution_runtime.py) | wire schema 移除模型回填 SHA，真實輸入及原回答驗證後衍生內部欄位；[回歸](../../../backend/tests/test_viewpoint_program_response_binding.py)涵蓋完整唯一纠正／終審與零重呼叫恢復 |
 | [歷史接納](../../../backend/pipeline/cvp_sql_admission.py) | 明示有預算的移入預覽；stream 物理 SHA 並匹配已提交 SQL 歷史，不解析整庫快照或重跑模型 |
 | [獨立審計](../../../scripts/audit-library.py) | 自己的 scoped SQL 讀取器、完整原 group 與 CVP 成員；報告攜帶實際所審版本 pins，不能由 producer 的 pins 代替 |
 | [舊入口拒絕](../../../backend/pipeline/cvp_retired_runtime.py) | 不依目錄或環境開關，執行前 fail closed；純內容 compiler 和歸檔讀取不擴權 |

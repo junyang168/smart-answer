@@ -284,6 +284,9 @@ def reviewed_cvp_package(root, materials, store, *, require_resolved=False):
     disposition = build_batch_disposition(proposal=report["_effective_proposal"],batch_identity={"batch_id":packet["batch_id"]},
         effective_proposal_sha256=sha256_json(report["_effective_proposal"].model_dump(mode="json")),apply_status="planned")
     approval = {"proposal":binding(root/proposal_name),"review":binding(root/review_name)}
+    for stage in ('raw-review', 'raw-reconsideration', 'raw-final-review'):
+        proof = root/(stage+'.program-binding.json')
+        if proof.exists(): approval[stage+'_program_binding'] = binding(proof)
     if review_name == 'raw-review-pin-format-repair.json':
         for key, name in (
             ('original_review', 'raw-review.json'),

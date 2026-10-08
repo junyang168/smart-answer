@@ -2092,9 +2092,13 @@ class StructuredJsonReviewerAdapter:
         compact_payload: bool = False,
         shared_text_payload: bool = False,
         shared_record_payload: bool = False,
+        program_response_binding: bool = False,
     ) -> None:
         self._client = client
-        self._prompt = prompt
+        from .viewpoint_response_binding import PROMPT as BINDING_PROMPT, fields, VERSION
+        self._program_response_binding = program_response_binding and any(fields(response_model))
+        self._base_prompt = prompt
+        self._prompt = prompt + BINDING_PROMPT if self._program_response_binding else prompt
         self._response_model = response_model
         self._schema_name = schema_name
         self._compact_payload = compact_payload
@@ -2108,7 +2112,7 @@ class StructuredJsonReviewerAdapter:
         if not self.model_id:
             raise ValueError("structured reviewer client must expose model")
         self.backend = str(getattr(client, "backend", "openai_api"))
-        self.prompt_sha256 = sha256_json({"prompt": prompt})
+        self.prompt_sha256 = sha256_json({"prompt": self._prompt})
         self.generation_config_sha256 = sha256_json(
             {
                 "reasoning_effort": getattr(client, "reasoning_effort", None),
@@ -2131,17 +2135,45 @@ class StructuredJsonReviewerAdapter:
                 'base_config_sha256': self.generation_config_sha256,
                 'payload_serialization': 'wkp_shared_records_json_v1',
             })
+        if self._program_response_binding:
+            self.generation_config_sha256 = sha256_json({
+                'base_config_sha256': self.generation_config_sha256,
+                'response_metadata_binding': VERSION,
+            })
+
+    def program_bound_copy(self):
+        from copy import copy
+        from .viewpoint_response_binding import fields, PROMPT, VERSION
+        if self._program_response_binding or not any(fields(self._response_model)):
+            return self
+        # Preserve injected transports/subclass behavior; change only the wire
+        # protocol identity, without mutating the adapter used for old receipts.
+        result = copy(self)
+        result._program_response_binding = True
+        result._prompt = self._base_prompt + PROMPT
+        result.prompt_sha256 = sha256_json({'prompt': result._prompt})
+        result.generation_config_sha256 = sha256_json({
+            'base_config_sha256': self.generation_config_sha256,
+            'response_metadata_binding': VERSION,
+        })
+        return result
+
+    def _wire_response_schema(self):
+        if not self._program_response_binding: return None
+        from .viewpoint_response_binding import wire_schema
+        return wire_schema(self._response_model)
 
     def compact_copy(self) -> "StructuredJsonReviewerAdapter":
         """A separately identified serialization, without mutating initial review."""
         if self._compact_payload:
             return self
         result = StructuredJsonReviewerAdapter(
-            client=self._client, prompt=self._prompt,
+            client=self._client, prompt=self._base_prompt,
             response_model=self._response_model, schema_name=self._schema_name,
             compact_payload=True,
             shared_text_payload=self._shared_text_payload,
             shared_record_payload=self._shared_record_payload,
+            program_response_binding=self._program_response_binding,
         )
         if hasattr(self, "max_request_bytes"):
             result.max_request_bytes = self.max_request_bytes
@@ -2156,6 +2188,7 @@ class StructuredJsonReviewerAdapter:
             compact_payload=self._compact_payload,
             shared_text_payload=self._shared_text_payload,
             shared_record_payload=self._shared_record_payload,
+            response_schema=self._wire_response_schema(),
         )
         return self._client.generate_json(
             **request,
@@ -2172,6 +2205,7 @@ class StructuredJsonReviewerAdapter:
                     compact_payload=self._compact_payload,
                     shared_text_payload=self._shared_text_payload,
                     shared_record_payload=self._shared_record_payload,
+                    response_schema=self._wire_response_schema(),
                 )
             ).encode("utf-8")
         )
@@ -2183,7 +2217,8 @@ class StructuredJsonReviewerAdapter:
         request = structured_json_request(payload, prompt=self._prompt,
             response_model=self._response_model, schema_name=self._schema_name,
             compact_payload=self._compact_payload, shared_text_payload=True,
-            shared_record_payload=self._shared_record_payload)
+            shared_record_payload=self._shared_record_payload,
+            response_schema=self._wire_response_schema())
         wire = json.loads(request['user_prompt'])
         encoded = wire.get('format') == FORMAT and 'shared_text' in wire
         records_encoded = wire.get('format') == RECORD_FORMAT and 'shared_records' in wire
@@ -2192,7 +2227,8 @@ class StructuredJsonReviewerAdapter:
             raise ValueError('actual outgoing request lost semantic content')
         original = structured_json_request(payload, prompt=self._prompt,
             response_model=self._response_model, schema_name=self._schema_name,
-            compact_payload=self._compact_payload)
+            compact_payload=self._compact_payload,
+            response_schema=self._wire_response_schema())
         return {'serialization_contract': RECORD_FORMAT if self._shared_record_payload else FORMAT,
                 'effective_serialization': RECORD_FORMAT if records_encoded else FORMAT if encoded else 'compact_json_v1',
                 'semantic_payload_sha256': sha256_json(payload),
@@ -2217,6 +2253,7 @@ def structured_json_request(
     compact_payload: bool = False,
     shared_text_payload: bool = False,
     shared_record_payload: bool = False,
+    response_schema: dict | None = None,
 ) -> dict[str, Any]:
     """The exact arguments passed to generate_json, before transport wrapping."""
 
@@ -2237,7 +2274,7 @@ def structured_json_request(
         "json_schema": {
             "name": schema_name,
             "strict": True,
-            "schema": _strict_json_schema(response_model.model_json_schema()),
+            "schema": _strict_json_schema(response_schema if response_schema is not None else response_model.model_json_schema()),
         },
         "temperature": 0.0,
     }

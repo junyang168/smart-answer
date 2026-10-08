@@ -203,9 +203,44 @@ def model_request_identity(adapter: Any, payload: dict[str, Any]) -> dict[str, s
             "request_payload_sha256": sha256_json(payload)}
 
 
+def response_adapter(adapter, saved=None):
+    """New calls use program pins; saved calls retain their actual wire identity."""
+    factory = getattr(adapter, 'program_bound_copy', None)
+    if not callable(factory): return adapter
+    bound = factory()
+    if saved is None: return bound
+    keys = ('model_id', 'backend', 'prompt_sha256', 'generation_config_sha256')
+    if all(saved.get(k) == getattr(bound, k) for k in keys): return bound
+    return adapter  # Exact legacy authentication still runs; never a fallback call.
+
+
+def bound_model_response(adapter, payload, raw, cache, *, persist=True):
+    from backend.api.canonical_repository.viewpoint_response_binding import fields, bind_response, VERSION
+    model = getattr(adapter, '_response_model', None)
+    if model is None or not any(fields(model)): return raw
+    from backend.pipeline.viewpoint_validation_context import historical_context
+    # Completed legacy reconstructions keep their exact old interpretation.
+    if (historical_context() is not None or validating_saved_artifacts()) and not getattr(adapter, '_program_response_binding', False):
+        return raw
+    result = bind_response(model, raw, payload)
+    artifact = read_artifact(cache)
+    proof = {'schema_version':VERSION, 'request_identity':model_request_identity(adapter,payload),
+        'raw_artifact_sha256':artifact['artifact_sha256'], 'raw_response_sha256':sha256_json(raw),
+        'bound_response_sha256':sha256_json(result), 'bound_response':result,
+        'model_raw_preserved':True, 'semantic_decisions_unchanged':True}
+    proof['artifact_sha256'] = sha256_json(proof)
+    path = cache.with_name(cache.stem+'.program-binding.json')
+    if path.exists():
+        if read_artifact(path) != proof: raise ValueError('program response binding proof drift')
+    elif persist and historical_context() is None and not validating_saved_artifacts():
+        write_immutable(path,proof)
+    return result
+
+
 def read_saved_model_response(adapter: Any, payload: dict[str, Any], cache: Path) -> dict[str, Any]:
     """Authenticate a saved response with no writes, phase closure or fallback."""
     artifact = read_artifact(cache)
+    adapter = response_adapter(adapter, artifact)
     expected = model_request_identity(adapter, payload)
     if artifact.get("request_payload_sha256") != expected["request_payload_sha256"]:
         raise ValueError(f"cached response belongs to another request payload: {cache}")
@@ -249,6 +284,7 @@ def call_model(
     from backend.pipeline.viewpoint_validation_context import finish_validation_phase, historical_context
     cache = Path(cache)
     saved = cache.exists()
+    adapter = response_adapter(adapter, read_artifact(cache) if saved else None)
     if validating_saved_artifacts() and not saved:
         raise ValueError(f'saved reconstruction has no response; no invocation/fallback: {cache}')
     if not saved:
@@ -272,7 +308,8 @@ def call_model(
         )
     from backend.pipeline.viewpoint_model_cache_handoff import reuse_response
     if saved:
-        return read_saved_model_response(adapter, payload, cache), 0, 0.0
+        raw = read_saved_model_response(adapter, payload, cache)
+        return bound_model_response(adapter,payload,raw,cache), 0, 0.0
     intent_path = cache.with_name(cache.stem + '.call-intent.json')
     encoding_path = cache.with_name(cache.stem + '.request-encoding.json')
     if intent_path.exists() or encoding_path.exists():
@@ -314,4 +351,4 @@ def call_model(
         artifact['invocation_sha256'] = intent['artifact_sha256']
     artifact["artifact_sha256"] = sha256_json(artifact)
     write_immutable(cache, artifact)
-    return raw, 0 if reused is not None else 1, 0.0 if reused is not None else elapsed
+    return bound_model_response(adapter,payload,raw,cache), 0 if reused is not None else 1, 0.0 if reused is not None else elapsed

@@ -129,8 +129,12 @@ def execute_source_action(store,run_id,manifest,*,root,ports):
     validate_source_package(package)
     backup=ports.backup(root)
     original=store.get_cvp_group(run_id).get('reviewed',{}).get('evidence',{})
+    approval={'terminal_review':binding(root/(raw['stage']+'.raw.json'))}
+    for stage in ('initial_review','final_review'):
+        proof=root/(stage+'.raw.program-binding.json')
+        if proof.exists():approval[stage+'_program_binding']=binding(proof)
     return commit_package(store,run_id,package=package,
-        approval={'terminal_review':binding(root/(raw['stage']+'.raw.json'))},
+        approval=approval,
         authorization=action['authorization'],backup=backup,sources=action_sources(materials),
         read_pins=read_pins,reason='approved bounded source/Claim revision',actor='owner-authorized-pipeline',
         source_kind=SOURCE_SCHEMA,viewpoint_ids=original.get('viewpoint_ids',[]),
