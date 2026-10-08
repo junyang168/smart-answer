@@ -59,12 +59,57 @@ def validate_transaction_audit(audit,claim_ids,viewpoint_ids):
 
 def binding(path):
     from backend.api.canonical_repository.viewpoint_production_safety import file_sha256
-    path = Path(path).resolve()
+    # Authorized SSD archives intentionally retain their original logical
+    # path. The archive reader verifies UUID, exact target, size and SHA first.
+    from backend.pipeline.viewpoint_backup_archive import logical_binding_path
+    path = logical_binding_path(path)
     return {"path":str(path),"file_sha256":file_sha256(path)}
 
 
 def check_binding(value):
     if binding(value["path"]) != value: raise ValueError("exact SQL material/source binding drift")
+
+
+def verified_group_backup(root, package, ports):
+    """Persist fresh backup before commit; recover only its exact SSD receipt.
+
+    A crash after pg_dump and before this small record must not create another
+    backup, overwrite an archive, or repeat an already reviewed model request.
+    """
+    from backend.pipeline.viewpoint_backup_archive import LOCAL, NAME, RECEIPT, catalog
+    path = root/'backup.json'
+    package_sha = sha256_json(package)
+    if path.exists():
+        saved = read_artifact(path)
+        if saved['package_sha256'] != package_sha:
+            raise ValueError('saved backup belongs to a different reviewed package')
+        backup = saved['backup']
+    else:
+        label = 'before-source-357-' + sha256_json(str(root))[:32]
+        attempted = list(LOCAL.glob('registry-backup-*-'+label))
+        if len(attempted)>1:
+            raise ValueError('ambiguous backup attempts for exact SQL execution root')
+        if attempted:
+            dump = attempted[0]/NAME
+            receipt = read_artifact(attempted[0]/RECEIPT)
+            if receipt.get('artifact_sha256') != sha256_json({k:v for k,v in receipt.items() if k!='artifact_sha256'}):
+                raise ValueError('saved direct SSD backup receipt seal differs')
+            dump_binding = binding(dump)
+            if not receipt.get('direct_ssd') or dump_binding != {'path':receipt['original_path'],'file_sha256':receipt['file_sha256']}:
+                raise ValueError('exact direct SSD backup identity differs')
+            backup = {'dump':dump_binding,'restore_catalog_nonempty':True,
+                      'catalog_sha256':catalog(dump),'restore_list_exit_code':0}
+            if backup['catalog_sha256'] != receipt['restore_catalog_sha256']:
+                raise ValueError('current backup restore catalog differs')
+        else:
+            backup = ports.backup(root)
+        write_immutable(path, {'package_sha256':package_sha,'backup':backup})
+    check_binding(backup['dump'])
+    if not backup.get('restore_catalog_nonempty') or backup.get('restore_list_exit_code') != 0:
+        raise ValueError('saved backup lacks successful restore catalog')
+    if catalog(Path(backup['dump']['path'])) != backup['catalog_sha256']:
+        raise ValueError('saved backup catalog drift')
+    return backup
 
 
 def plan_from_document(value):
@@ -312,7 +357,7 @@ def run_group(store, definition, group, row, *, root):
         stage_event('generating_reviewing', sequence=group['sequence'], run_id=run_id)
         package,approval,disposition = reviewed_cvp_package(model_root,materials,store)
         from backend.pipeline.source_reconciliation_runtime import ProductionPorts
-        backup = ProductionPorts().backup(root/run_id)
+        backup = verified_group_backup(root/run_id,package,ProductionPorts())
         views = sorted({link["viewpoint_id"] for link in package.get("viewpoint_claim_links",[]) if link.get("effective_state")=="active"})
         commit_package(store,run_id,package=package,approval=approval,authorization=definition["authorization"],backup=backup,
                        sources=materials["sources"],read_pins=decoded_pins(materials["read_pins"]),

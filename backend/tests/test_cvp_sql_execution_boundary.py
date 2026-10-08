@@ -52,3 +52,44 @@ def test_completed_boundary_returns_before_preparation(monkeypatch,tmp_path):
     monkeypatch.setattr(flow,'prepare_group',preparation)
     assert flow.main(['--sql-campaign','c','--output-root',str(tmp_path),'--dry-run','--stop-after-group','1'])==0
     preparation.assert_not_called()
+
+
+def test_verified_archive_logical_binding_not_confused_with_physical_path(monkeypatch,tmp_path):
+    from backend.pipeline import viewpoint_backup_archive as archive
+    physical=tmp_path/'physical.dump';physical.write_bytes(b'exact backup')
+    logical=tmp_path/'logical.dump';logical.symlink_to(physical)
+    checks=[]
+    def verified(path):
+        checks.append(path)
+        assert logical.resolve()==physical
+        return logical
+    monkeypatch.setattr(archive,'logical_binding_path',verified)
+    pin=flow.binding(logical)
+    assert pin['path']==str(logical)
+    flow.check_binding(pin)
+    physical.write_bytes(b'drift')
+    with pytest.raises(ValueError,match='binding drift'):flow.check_binding(pin)
+    assert len(checks)==3
+
+
+def test_completed_backup_recovered_from_exact_receipt_without_another_dump(monkeypatch,tmp_path):
+    from backend.pipeline import viewpoint_backup_archive as archive
+    from backend.api.canonical_repository.postgres_store import sha256_json
+    from backend.pipeline.viewpoint_resolution_runtime import write_immutable
+    root=tmp_path/'execution';root.mkdir()
+    label='before-source-357-'+sha256_json(str(root))[:32]
+    local=tmp_path/'archives';attempt=local/('registry-backup-2026-10-08-'+label);attempt.mkdir(parents=True)
+    dump=attempt/archive.NAME;dump.write_bytes(b'valid dump')
+    pin=flow.binding(dump)
+    body={'direct_ssd':True,'original_path':pin['path'],'file_sha256':pin['file_sha256'],
+          'restore_catalog_sha256':'catalog'}
+    write_immutable(attempt/archive.RECEIPT,{**body,'artifact_sha256':sha256_json(body)})
+    monkeypatch.setattr(archive,'LOCAL',local)
+    monkeypatch.setattr(archive,'catalog',lambda _: 'catalog')
+    ports=Mock();ports.backup.side_effect=AssertionError('must not repeat backup')
+    backup=flow.verified_group_backup(root,{'approved':'package'},ports)
+    assert backup['dump']==pin
+    assert flow.verified_group_backup(root,{'approved':'package'},ports)==backup
+    with pytest.raises(ValueError,match='different reviewed package'):
+        flow.verified_group_backup(root,{'changed':'package'},ports)
+    ports.backup.assert_not_called()
