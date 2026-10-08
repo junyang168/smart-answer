@@ -617,6 +617,18 @@ def run_batch(
         cache=output_dir / 'raw-review-format-repair.json', call=_call)
     review_calls += format_calls
     review_seconds += format_seconds
+    review_artifact_name = 'raw-review.json'
+    pin_authorization = output_dir/'owner-review-pin-format-authorization.json'
+    if pin_authorization.exists():
+        from backend.pipeline.viewpoint_review_format_repair import repair_coverage_pin
+        review, pin_changes, pin_calls, pin_seconds = repair_coverage_pin(
+            review,adapter=reviewer,request=review_packet,claims=claims,proposal=proposal,
+            raw_path=output_dir/'raw-review.json',packet_path=output_dir/'batch-packet.json',
+            authorization_path=pin_authorization,cache=output_dir/'raw-review-pin-format-repair.json',call=_call)
+        review_normalization_changes += pin_changes
+        review_calls += pin_calls
+        review_seconds += pin_seconds
+        review_artifact_name = 'raw-review-pin-format-repair.json'
     review_validation = validate_review(
         review=review,
         proposal=proposal,
@@ -813,7 +825,7 @@ def run_batch(
         raw_artifacts={
             "proposal": "raw-proposal.json",
             "consolidation": "raw-consolidation.json",
-            "review": "raw-review.json",
+            "review": review_artifact_name,
             "reconsideration": "raw-reconsideration.json",
             "final_review": "raw-final-review.json",
         },
@@ -936,6 +948,7 @@ def run_batch(
         # In-memory orchestration input only. The immutable proposal and
         # reconsideration envelopes above remain the auditable artifacts.
         "_effective_proposal": effective_proposal,
+        "_initial_review_artifact_name": review_artifact_name,
         "_original_proposal": proposal,
         "_review": approval_review,
         "_initial_review": review,

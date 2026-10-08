@@ -270,7 +270,7 @@ def reviewed_cvp_package(root, materials, store, *, require_resolved=False):
         raise ValueError('normal CVP terminal review unresolved; no second correction')
     if require_resolved:resolved_report(report,[row["claim_id"] for row in packet["claims"]])
     proposal_name = "raw-reconsideration.json" if report["_final_review"] is not None else "raw-proposal.json"
-    review_name = "raw-final-review.json" if report["_final_review"] is not None else "raw-review.json"
+    review_name = "raw-final-review.json" if report["_final_review"] is not None else report.get('_initial_review_artifact_name',"raw-review.json")
     proposal = read_artifact(root/proposal_name); review = read_artifact(root/review_name)
     package = compile_cvp_batch_package(proposal=report["_effective_proposal"],review=report["_review"],
         deterministic_validation_sha256=report["_effective_validation"]["artifact_sha256"],
@@ -283,7 +283,15 @@ def reviewed_cvp_package(root, materials, store, *, require_resolved=False):
     from backend.api.canonical_repository.viewpoint_batch_resolution import build_batch_disposition
     disposition = build_batch_disposition(proposal=report["_effective_proposal"],batch_identity={"batch_id":packet["batch_id"]},
         effective_proposal_sha256=sha256_json(report["_effective_proposal"].model_dump(mode="json")),apply_status="planned")
-    return package,{"proposal":binding(root/proposal_name),"review":binding(root/review_name)},disposition
+    approval = {"proposal":binding(root/proposal_name),"review":binding(root/review_name)}
+    if review_name == 'raw-review-pin-format-repair.json':
+        for key, name in (
+            ('original_review', 'raw-review.json'),
+            ('owner_pin_authorization', 'owner-review-pin-format-authorization.json'),
+            ('pin_format_validation', 'raw-review-pin-format-repair-validation.json'),
+        ):
+            approval[key] = binding(root/name)
+    return package,approval,disposition
 
 
 def commit_package(store, run_id, *, package, approval, authorization, backup, sources,
