@@ -102,6 +102,39 @@ def test_startup_consumes_declared_completed_format_not_source_ID_or_old_writer(
     assert calls==[module.binding(path)]
 
 
+@pytest.mark.parametrize('drift',[None,'missing_frame','reader_failure','unrecognized'])
+def test_completed_legacy_format_routes_to_exact_reader_never_new_writer(tmp_path,monkeypatch,drift):
+    import json
+    from types import SimpleNamespace
+    from backend.pipeline import viewpoint_cvp_campaign_runner as module
+    from backend.pipeline import viewpoint_applied_source_epochs as epochs
+    from backend.pipeline import viewpoint_grouping_repository as grouping
+    from backend.api.canonical_repository import reviewed_candidate_contract as contract
+    path=tmp_path/'arbitrary-legacy/effective-package.json';path.parent.mkdir()
+    package={'package_id':'original','source_repair_application':{'schema_version':'original_legacy_format',
+        'before_binding':{'path':'original-before','file_sha256':'a'*64}}}
+    if drift=='unrecognized':package['source_repair_application'].pop('before_binding')
+    path.write_text(json.dumps(package));calls=[]
+    def bound_package(bound):
+        calls.append(bound)
+        if drift=='reader_failure':raise ValueError('exact original review missing/changed')
+        return package
+    adapter=SimpleNamespace(COMPLETED_FRAME=None if drift=='missing_frame' else {'original':'pin'},bound_package=bound_package)
+    monkeypatch.setattr(epochs,'implementation',lambda b:adapter)
+    monkeypatch.setattr(epochs,'compose',lambda paths:'exact-composition')
+    monkeypatch.setattr(contract,'validate_store_package_authorization',lambda *a:pytest.fail('old writer fallback'))
+    monkeypatch.setattr(grouping.SharedGroupingRepository,'load',lambda *a,**k:None)
+    if drift=='unrecognized':
+        with pytest.raises(ValueError):epochs.consume_completed_source_frame(module.binding(path),None)
+        assert calls==[]
+    else:
+        args=SimpleNamespace(completed_source_repair=[path],grouping_repository=tmp_path,accepted_grouping_sha='exact')
+        if drift:
+            with pytest.raises(ValueError):module.initialize_validation(args)
+        else:assert module.initialize_validation(args)['Registry_writes']==0
+        assert calls==([] if drift=='missing_frame' else [module.binding(path)])
+
+
 @pytest.mark.parametrize('drift',[None,'pin','missing','duplicate_group','conflict','disclosure','audit'])
 def test_completed_seed_consumes_unique_bytes_but_all_original_group_gates(tmp_path,monkeypatch,drift):
     import json

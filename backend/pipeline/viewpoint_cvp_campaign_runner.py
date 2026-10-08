@@ -413,7 +413,7 @@ def initialize_validation(args):
     """
     from backend.pipeline.viewpoint_validation_context import ValidationContext
     from backend.api.canonical_repository.reviewed_candidate_contract import validate_store_package_authorization
-    from backend.pipeline.viewpoint_applied_source_epochs import compose,has_applied_source_frame,consume_applied_source_package
+    from backend.pipeline.viewpoint_applied_source_epochs import compose,has_applied_source_frame,consume_completed_source_frame
     from backend.pipeline.viewpoint_grouping_repository import SharedGroupingRepository
     start = time.perf_counter()
     paths = getattr(args, 'completed_source_repair', None) or []
@@ -425,7 +425,7 @@ def initialize_validation(args):
                 load_completed(binding(path))
             elif has_applied_source_frame(path,package):
                 from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
-                consume_applied_source_package(binding(path),PostgresKnowledgeStore())
+                consume_completed_source_frame(binding(path),PostgresKnowledgeStore())
             else:
                 validate_store_package_authorization(package)
         SharedGroupingRepository(args.grouping_repository).load(

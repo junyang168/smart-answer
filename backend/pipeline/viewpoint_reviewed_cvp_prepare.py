@@ -94,10 +94,8 @@ def completed_repair_parent_snapshot(manifest, records, packages, completed_ids,
     checked=dict(records); rows={c['claim_id']:c for c in manifest['claim_packets']}
     used=set()
     for package in packages:
-        validate_store_package_authorization(package)
         app=package.get('source_repair_application')
         if not app: raise CvpProductionBlocked(['parent repair lacks fresh source-repair authority'])
-        normalized=normalize_package(package)
         if app.get('schema_version') == 'wang_owner_claim_statement_revision_v1':
             from backend.pipeline.claim_statement_revision import membership_snapshot
             checked, changed = membership_snapshot(manifest,checked,package,completed_ids,selected_ids)
@@ -112,7 +110,6 @@ def completed_repair_parent_snapshot(manifest, records, packages, completed_ids,
                 raise CvpProductionBlocked(['duplicate generic source epoch Claim authority'])
             used.update(changed)
             continue
-        packet=app['review_packet']
         if app.get('schema_version') == 'wang_s201129_owner_opus_source_reconciliation_v1':
             from backend.pipeline.viewpoint_s201129_source_epoch import membership_snapshot
             checked, changed = membership_snapshot(manifest,checked,package,completed_ids,selected_ids)
@@ -127,6 +124,13 @@ def completed_repair_parent_snapshot(manifest, records, packages, completed_ids,
                 raise CvpProductionBlocked(['duplicate completed source epoch Claim authority'])
             used.update(changed)
             continue
+        # Completed epoch readers above authenticate their original applied
+        # package, actual reviews and current/source/hold proof themselves.
+        # New-write reconstruction is not their read-only membership gate.
+        # Other historical repair formats retain their original strict guard.
+        validate_store_package_authorization(package)
+        normalized=normalize_package(package)
+        packet=app['review_packet']
         if app.get('schema_version') in {'wang_g037_claim_statement_repair_v1','wang_g037_claim_statement_repair_v2'}:
             old,new=packet['claim_revision']['before'],packet['claim_revision']['after'];cid=new['claim_id']
             if cid in used or cid not in completed_ids or cid in selected_ids or cid not in rows:

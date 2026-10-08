@@ -13,7 +13,28 @@ def has_applied_source_frame(path, package):
     # Classify by the package's original declared format, NOT whether its
     # receipts happen to be present/pass. Missing or damaged receipts must
     # reach the generic hard stop, not an expensive legacy-writer fallback.
-    return bool(app.get('before_binding') or app.get('parent_source_application')) and 'bindings' in app
+    return bool(app.get('before_binding') or app.get('parent_source_application'))
+
+
+def consume_completed_source_frame(bound,store):
+    """Route an original completed physical format, never rebuild its writer.
+
+    Missing dependencies go to the selected reader's hard guard, not a slower
+    new-write authorization fallback. Legacy embedded reviews require their
+    adapter's exact original completed frame and actual reviewed-input checks.
+    """
+    from backend.pipeline.source_reconciliation import verify_file
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+    package=read_artifact(verify_file(bound))
+    app=package.get('source_repair_application') or {}
+    if not has_applied_source_frame(bound['path'],package):
+        raise ValueError('no declared completed source physical frame')
+    if 'bindings' in app:
+        return consume_applied_source_package(bound,store)
+    adapter=implementation(bound)
+    if not getattr(adapter,'COMPLETED_FRAME',None):
+        raise ValueError('original embedded review completion frame unavailable')
+    return adapter.bound_package(bound)
 
 
 def consume_applied_source_package(bound, store, *, completed_frame=None):

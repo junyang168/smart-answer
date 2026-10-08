@@ -9,6 +9,40 @@ from backend.api.canonical_repository.viewpoint_production_safety import CvpProd
 from backend.pipeline import viewpoint_reviewed_cvp_prepare as runner
 
 
+@pytest.mark.parametrize('schema,module_name',[
+    ('wang_owner_claim_statement_revision_v1','claim_statement_revision'),
+    ('wang_source_reconciliation_v1','source_reconciliation_epoch'),
+    ('wang_s201129_owner_opus_source_reconciliation_v1','viewpoint_s201129_source_epoch'),
+    ('wang_g041_owner_qualified_transcript_reconciliation_v2','viewpoint_g041_source_epoch')])
+@pytest.mark.parametrize('drift',[None,'reader_failure','duplicate','accepted_pin'])
+def test_shared_membership_consumes_complete_epoch_reader_without_new_write_reconstruction(monkeypatch,schema,module_name,drift):
+    from importlib import import_module
+    module=import_module('backend.pipeline.'+module_name)
+    old={'claim_id':'C','revision':1,'statement':'original accepted'}
+    current={**old,'revision':2,'statement':'actual independently reviewed change'}
+    row=lambda p:{'payload':p,'revision':p['revision'],'content_sha256':semantic_record_sha(p),'retired':False}
+    records={('claims','C'):row(current),('other','unchanged'):{'all':'original non-target metadata'}}
+    manifest={'claim_packets':[{'claim_id':'C','claim_revision':1,'claim_content_sha256':semantic_record_sha(old),'evidence_steps':[]}],'sources':[]}
+    package={'source_repair_application':{'schema_version':schema}};packages=[package];calls=[]
+    before=deepcopy((manifest,records,package))
+    def membership(m,r,p,done,selected):
+        calls.append((done,selected))
+        assert m==manifest and p==package and r['other','unchanged']==records['other','unchanged']
+        if drift=='reader_failure':raise ValueError('original applied/review/source/current proof invalid')
+        checked=dict(r);checked['claims','C']=row(old)
+        return checked,['C']
+    monkeypatch.setattr(module,'membership_snapshot',membership)
+    monkeypatch.setattr(runner,'validate_store_package_authorization',lambda *a:pytest.fail('new-write reconstruction'))
+    if drift=='duplicate':packages*=2
+    elif drift=='accepted_pin':manifest['claim_packets'][0]['claim_content_sha256']='different'
+    if drift:
+        with pytest.raises(ValueError):runner.completed_repair_parent_snapshot(manifest,records,packages,{'C'},{'next'})
+    else:
+        assert runner.completed_repair_parent_snapshot(manifest,records,packages,{'C'},{'next'})==['C']
+        assert (manifest,records,package)==before
+    assert len(calls)==(2 if drift=='duplicate' else 1)
+
+
 def inputs(monkeypatch):
     package=fixture_package(); app=package['source_repair_application']; packet=app['review_packet']
     package['source_fragments'][0].update(paragraph_key='S0001')
