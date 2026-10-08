@@ -30,9 +30,12 @@ def predecessor_inputs(bindings):
     entries = {}
     for bound in bindings:
         value = _small(bound)
-        if (set(value) != {'schema_version','source','completion','snapshot','aliases','projection'}
+        required={'schema_version','source','completion','snapshot','aliases','projection'}
+        if (set(value) not in (required,required|{'readback'})
                 or value['schema_version'] != SCHEMA):
             raise ValueError('completed predecessor declaration shape drift')
+        if 'readback' in value and set(value['readback'])!={'snapshot','projection'}:
+            raise ValueError('completed readback declaration shape drift')
         source = value['source']['path']
         aliases = value['aliases']
         if (source in entries or not aliases or value['snapshot'] not in aliases
@@ -139,7 +142,7 @@ def authenticate_snapshot(snapshot, source, plan, store, *, plan_path=None,
     if (anchor.get('kind') != 'completed_source_predecessor_compilation'
             or anchor.get('status') != 'complete'
             or anchor.get('source') != source or anchor.get('plan') != plan_pin
-            or anchor.get('bindings') != spec['aliases']
+            or anchor.get('bindings') != spec['aliases']+([spec['readback']['snapshot']] if 'readback' in spec else [])
             or anchor.get('semantic_approval_granted') is not False
             or anchor.get('model_calls') != 0 or anchor.get('Registry_writes') != 0):
         raise ValueError('compiled predecessor original source/plan/archive anchor drift')
@@ -153,6 +156,31 @@ def authenticate_snapshot(snapshot, source, plan, store, *, plan_path=None,
             or projection['sections']!=sections):
         raise ValueError('compiled predecessor differs from exact applied SQL before versions')
     entry['authenticated'] = True
+
+
+def authenticate_readback(snapshot,source,plan,post,store):
+    """Original complete readback cut; NEVER waive actual current readback."""
+    entry=_entry(source)
+    if entry is None or 'readback' not in entry['value']:
+        c.verify_file(snapshot);return
+    spec=entry['value'];copied=spec['readback']
+    if not entry['authenticated'] or copied['snapshot']!=snapshot:
+        raise ValueError('completed readback lacks authenticated source/predecessors')
+    anchor=_small(spec['completion']);headers=anchor.get('readback_headers')
+    if (not isinstance(headers,dict) or set(headers)!={'artifact_sha256','change_set_id','post_fingerprint_sha256','source_files_verified'}
+            or headers['change_set_id']!=plan['change_set_id'] or headers['source_files_verified'] is not True):
+        raise ValueError('completed original readback identity/source proof drift')
+    # Historical rows, including unchanged context, remain exact SQL versions.
+    # The separate epoch current/child/audit verifier still freshly reads live
+    # state; a historical readback must not be compared to a later child image.
+    from backend.pipeline.viewpoint_applied_source_epochs import read_pinned_versions
+    pins=[(*c.split_key(key),payload.get('revision'),c.record_content_sha(payload)) for key,payload in post.items()]
+    versions={c.key(*key):value for key,value in read_pinned_versions(pins,store).items()}
+    if versions!=post:raise ValueError('completed readback actual SQL versions differ')
+    projection=compiled.consume_projection(copied['projection'],sorted(post),
+        completion_binding=spec['completion'],snapshot_binding=snapshot,field='post_records',sections=sorted(headers))
+    if projection['rows']!=post or projection['absent_keys'] or projection['sections']!=headers:
+        raise ValueError('compiled original readback population/content/seal drift')
 
 
 def verify_archived_refusal(snapshot, source):
@@ -238,23 +266,35 @@ def compile_completed_epoch(source,output_root,store,*,limits=compiled.CompileLi
     if len(snapshots)!=1:raise ValueError('completed epoch frozen denominator missing/ambiguous')
     snapshot=snapshots[0];reviewed=c.index(frozen['before_records'])
     before=complete_readset(plan,store,reviewed)
+    readback_pins=[pin for pin in complete['bindings'] if pin['path']==str(original/'readback.json')]
+    if len(readback_pins)!=1:raise ValueError('completed readback denominator missing/ambiguous')
+    readback=readback_pins[0]
+    headers={field:epoch._snapshot_header_value(Path(readback['path']),field) for field in (
+        'artifact_sha256','change_set_id','post_fingerprint_sha256')}
+    headers['source_files_verified']=True
     sections={'artifact_sha256':package['source_repair_application']['frozen_sha256']}
     root.mkdir(parents=True)
     anchor=root/'original-applied-anchor.json'
     write(anchor,dict(kind='completed_source_predecessor_compilation',status='complete',
-        source=source,plan=binding(original/'plan.json'),bindings=[snapshot],
+        source=source,plan=binding(original/'plan.json'),bindings=[snapshot,readback],readback_headers=headers,
         original_completed_frame=binding(original/'complete.json'),semantic_approval_granted=False,
         model_calls=0,Registry_writes=0))
     receipt=compiled.compile_projection(binding(anchor),Path(snapshot['path']),sorted(before),
         root/'predecessors.json',field='before_records',sections=sorted(sections),limits=limits)
+    post=c.assert_plan_postimages(package,plan,reviewed)
+    post_receipt=compiled.compile_projection(binding(anchor),Path(readback['path']),sorted(post),
+        root/'readback.json',field='post_records',sections=sorted(headers),limits=limits)
     declaration=root/'completed-predecessor-input.json'
     write(declaration,dict(schema_version=SCHEMA,source=source,completion=binding(anchor),
-        snapshot=snapshot,aliases=[snapshot],projection=receipt['projection']))
+        snapshot=snapshot,aliases=[snapshot],projection=receipt['projection'],
+        readback={'snapshot':readback,'projection':post_receipt['projection']}))
     with predecessor_inputs([binding(declaration)]):
         authenticate_snapshot(snapshot,source,plan,store,plan_path=original/'plan.json',
                               reviewed_rows=reviewed,sections=sections)
+        authenticate_readback(readback,source,plan,post,store)
     write(root/'compilation-result.json',{**receipt,'declaration':binding(declaration),
         'whole_operation_population':len(plan['operations']),'complete_review_records':len(reviewed),
         'readset_population':len(before),'create_absences':sum(v is None for v in before.values()),
+        'readback_projection':post_receipt,'exact_SQL_readback_equality':True,
         'exact_SQL_predecessor_equality':True,'production_resume_authorized':False})
     return binding(declaration)

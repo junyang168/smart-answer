@@ -94,8 +94,9 @@ def load_completed(bound):
     from backend.pipeline.viewpoint_completed_predecessors import has_predecessor_input
     compact=has_predecessor_input(bound)
     frozen_pin=next(pin for pin in pins if pin['path']==str(root/'frozen.json'))
+    readback_pin=next(pin for pin in pins if pin['path']==str(root/'readback.json'))
     for pin in pins:
-        if not compact or pin!=frozen_pin:c.verify_file(pin)
+        if not compact or pin not in (frozen_pin,readback_pin):c.verify_file(pin)
     if not compact and app.get('frozen_sha256')!=_frozen_seal(root/'frozen.json'):
         raise ValueError('completed epoch original frozen seal mismatch')
     packet=body(read(root/'proposal.packet.json'))
@@ -124,12 +125,13 @@ def load_completed(bound):
             if pin:c.verify_file(pin)
     if compact:
         from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
-        from backend.pipeline.viewpoint_completed_predecessors import assert_applied_plan,authenticate_snapshot
+        from backend.pipeline.viewpoint_completed_predecessors import assert_applied_plan,authenticate_snapshot,authenticate_readback
         store=PostgresKnowledgeStore()
         if plan['source_kind']!=c.VERSION:raise ValueError('completed source SQL kind drift')
         assert_applied_plan(package,plan,store)
         authenticate_snapshot(frozen_pin,bound,plan,store,plan_path=root/'plan.json',
             reviewed_rows=before,sections={'artifact_sha256':app['frozen_sha256']})
+        authenticate_readback(readback_pin,bound,plan,post,store)
     return package,frozen,plan,complete
 
 

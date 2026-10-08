@@ -652,7 +652,7 @@ def test_frozen_identity_is_preserved_when_completed_readset_omits_unrelated_row
         with pytest.raises(ValueError):c.compile_package(frame,p,raw,frozen_sha256=bad)
 
 
-@pytest.mark.parametrize('drift',[None,'SQL_application','SQL_context','raw_review','source_file','logical_seal','missing_context','false_approval','missing_projection'])
+@pytest.mark.parametrize('drift',[None,'SQL_application','SQL_context','raw_review','source_file','logical_seal','missing_context','false_approval','missing_projection','readback_missing','readback_payload','readback_seal'])
 def test_explicit_compact_epoch_matches_all_original_outputs_without_whole_freeze(scenario,tmp_path,monkeypatch,drift):
     from backend.pipeline import source_reconciliation_epoch as epoch
     from backend.pipeline import viewpoint_completed_predecessors as compact
@@ -663,6 +663,7 @@ def test_explicit_compact_epoch_matches_all_original_outputs_without_whole_freez
     source=r.binding(runner.root/'effective-package.json')
     original=epoch.load_completed(source)
     before=c.index(original[1]['before_records']);plan=original[2]
+    post=c.assert_plan_postimages(original[0],plan,before)
     class Store:
         def connect(self):return self
         def cursor(self):return self
@@ -674,7 +675,8 @@ def test_explicit_compact_epoch_matches_all_original_outputs_without_whole_freez
     def old_versions(pins,store):
         result={}
         for col,oid,rev,sha in pins:
-            payload=before[c.key(col,oid)]
+            key=c.key(col,oid)
+            payload=before[key] if key in before and before[key]['revision']==rev else post[key]
             assert rev==payload['revision'] and sha==record_content_sha(payload)
             result[col,oid]=deepcopy(payload)
         return result
@@ -698,10 +700,21 @@ def test_explicit_compact_epoch_matches_all_original_outputs_without_whole_freez
         r.write(path,value,immutable=False);spec['projection']=r.binding(path)
         r.write(Path(declaration['path']),spec,immutable=False);declaration=r.binding(Path(declaration['path']))
     elif drift=='missing_projection':(tmp_path/'copied-readset/predecessors.json').unlink()
+    elif drift is not None and drift.startswith('readback_'):
+        spec=r.body(r.read(Path(declaration['path'])))
+        path=Path(spec['readback']['projection']['path'])
+        if drift=='readback_missing':path.unlink()
+        else:
+            value=r.body(r.read(path))
+            if drift=='readback_payload':value['rows'][0]['payload']['review_status']='human_review_required'
+            else:value['sections']['artifact_sha256']='0'*64
+            r.write(path,value,immutable=False);spec['readback']['projection']=r.binding(path)
+            r.write(Path(declaration['path']),spec,immutable=False);declaration=r.binding(Path(declaration['path']))
     actual_verify=c.verify_file
     def small_verify(pin):
         raw=pin.model_dump() if hasattr(pin,'model_dump') else pin
-        if raw['path']==str(runner.root/'frozen.json'):pytest.fail('routine opened whole archived freeze')
+        if raw['path'] in {str(runner.root/'frozen.json'),str(runner.root/'readback.json')}:
+            pytest.fail('routine opened whole archived before/after snapshot')
         return actual_verify(pin)
     monkeypatch.setattr(c,'verify_file',small_verify)
     monkeypatch.setattr(epoch,'_frozen_seal',lambda *a:pytest.fail('routine reopened archived header'))
