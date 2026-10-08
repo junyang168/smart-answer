@@ -84,14 +84,17 @@ def consume_applied_source_package(bound, store, *, completed_frame=None):
         if not required<=index.keys():
             raise ValueError('original completed application denominator missing')
         pins=[index[path] for path in sorted(required)]
-        verify_file(app['before_binding'])
     else:
         required={str(root/name) for name in (before_name,'effective-package.json',
             'dry-run-plan.json','backup.json','pg-restore-proof.json','apply-intent.json','apply-receipt.json')}
     if (len(pins)!=len({pin['path'] for pin in pins}) or not required<={pin['path'] for pin in pins}
             or bound not in pins or (completed_frame is None and app.get('before_binding') and app['before_binding'] not in pins)):
         raise ValueError('applied source physical proof denominator missing/changed')
-    for pin in pins:verify_file(pin)
+    # An explicitly compiled completed predecessor replaces ONLY this archived
+    # snapshot. Authenticate its exact SQL versions after the actual KCS guard;
+    # all other original physical dependencies remain ordinary inputs.
+    for pin in pins:
+        if pin != app.get('before_binding'):verify_file(pin)
     if any(pin not in pins for pin in app.get('bindings',[])):
         raise ValueError('original reviewed source bindings omitted from application proof')
     if not app.get('before_binding'):
@@ -139,6 +142,9 @@ def consume_applied_source_package(bound, store, *, completed_frame=None):
         if (not row or tuple(row[:4])!=(app['schema_version'],source_sha,fp,'applied')
                 or row[4]!=receipt['summary']):
             raise ValueError('original source has no matching actual applied SQL proof')
+    if app.get('before_binding'):
+        from backend.pipeline.viewpoint_completed_predecessors import authenticate_snapshot
+        authenticate_snapshot(app['before_binding'],bound,plan,store)
     return package
 
 

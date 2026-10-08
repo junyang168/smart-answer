@@ -493,6 +493,8 @@ def execute(args):
               "completed_source_repairs": [binding(p) for p in getattr(args,'completed_source_repair',None) or []],
               "random_spot_check_policy": binding(args.random_spot_check_policy) if getattr(args,'random_spot_check_policy',None) else None,
               "route_execution": False, "already_complete": schedule["completed_groups"]}
+    if getattr(args,'completed_source_predecessor',None):
+        config['completed_source_predecessors']=[binding(p) for p in args.completed_source_predecessor]
     config.update(campaign_policy(args)[1])
     if getattr(args, 'validation_runtime', False):
         config['validation_runtime'] = 'bounded_authenticated_history_v1'
@@ -662,6 +664,8 @@ def main():
         parser.add_argument("--" + key, required=True)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument('--completed-source-repair',type=Path,action='append')
+    parser.add_argument('--completed-source-predecessor',type=Path,action='append',
+                        help='explicit compiled SQL-checked archived predecessor; no automatic compilation')
     parser.add_argument('--random-spot-check-policy',type=Path)
     parser.add_argument('--cvp-policy',type=Path)
     parser.add_argument('--cvp-policy-sha256')
@@ -681,11 +685,13 @@ def main():
             if args.startup_handoff is not None:
                 from backend.pipeline.viewpoint_startup_handoff import ProducerGate
                 args._startup_gate = ProducerGate(args.startup_handoff,args.output_root,sys.argv[1:])
-            if args.validation_runtime:
-                from backend.pipeline.viewpoint_validation_context import validation_runtime, ROUTINE_VALIDATION_LIMITS
-                with validation_runtime(limits=ROUTINE_VALIDATION_LIMITS):
-                    return execute(args)
-            return execute(args)
+            from backend.pipeline.viewpoint_completed_predecessors import predecessor_inputs
+            with predecessor_inputs([binding(p) for p in args.completed_source_predecessor or []]):
+                if args.validation_runtime:
+                    from backend.pipeline.viewpoint_validation_context import validation_runtime, ROUTINE_VALIDATION_LIMITS
+                    with validation_runtime(limits=ROUTINE_VALIDATION_LIMITS):
+                        return execute(args)
+                return execute(args)
 
 
 if __name__ == "__main__":

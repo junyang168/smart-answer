@@ -38,7 +38,9 @@ CODE = (Path(__file__), Path(c.__file__), Path(__file__).with_name('source_recon
             'backend/api/canonical_repository/knowledge_models.py',
             'backend/api/canonical_repository/viewpoint_foundation.py',
             'backend/api/canonical_repository/viewpoint_production_safety.py',
-            'backend/pipeline/viewpoint_resolution_runtime.py')))
+            'backend/pipeline/viewpoint_resolution_runtime.py',
+            'backend/pipeline/viewpoint_completed_predecessors.py',
+            'backend/pipeline/viewpoint_applied_source_epochs.py')))
 
 
 def runtime_identity():

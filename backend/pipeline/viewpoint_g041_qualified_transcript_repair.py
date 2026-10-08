@@ -209,8 +209,10 @@ def completed_review_inputs(package):
             or reservation.get('fresh_reviews_per_provider')!=1
             or reservation.get('prior_refusal_bindings')!=packet['prior_refusal_bindings']):
         raise ValueError('completed original owner reservation drift')
-    from backend.pipeline.source_reconciliation import verify_file
-    for pin in packet['prior_refusal_bindings']:verify_file(pin)
+    from backend.pipeline.viewpoint_completed_predecessors import verify_archived_refusal
+    source={'path':str(APPLICATION_ROOT/'effective-package.json'),
+            'file_sha256':old.file_sha256(APPLICATION_ROOT/'effective-package.json')}
+    for pin in packet['prior_refusal_bindings']:verify_archived_refusal(pin,source)
     reviews,raws=saved_reviews(packet)
     if app['review_artifacts']!=raws:
         raise ValueError('completed SQL-bound raw model artifacts differ from original files')
