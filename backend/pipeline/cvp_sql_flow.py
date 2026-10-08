@@ -186,6 +186,27 @@ def next_group(store, campaign_sha):
     return definition,None,None
 
 
+def execution_boundary(root, campaign_sha, definition, stop_after, *, persist=False):
+    """An execution root cannot silently lose or expand its owner checkpoint."""
+    if stop_after is not None and not 1 <= stop_after <= len(definition['groups']):
+        raise ValueError('stop-after-group is outside the accepted original roster')
+    path = root / 'execution-boundary.json'
+    contract = {'schema_version':'cvp_sql_execution_boundary.v1',
+                'campaign_sha256':campaign_sha, 'stop_after_group':stop_after}
+    if path.exists() and read_artifact(path) != contract:
+        raise ValueError('immutable execution boundary differs; no automatic expansion')
+    if persist:
+        write_immutable(path, contract)
+
+
+def checkpoint_reached(group, stop_after):
+    return stop_after is not None and (group is None or group['sequence'] > stop_after)
+
+
+def stage_event(stage, **values):
+    print(json.dumps({'stage':stage, **values}), flush=True)
+
+
 def reviewed_cvp_package(root, materials, store, *, require_resolved=False):
     """Pure existing content compiler; no legacy apply/proof/resume entry."""
     from backend.pipeline.viewpoint_batch_resolution_runner import run_batch
@@ -274,6 +295,7 @@ def run_group(store, definition, group, row, *, root):
     campaign = definition["campaign_sha256"]
     if row is None:
         materials = prepare_group(store,definition,group)
+        stage_event('prepared', sequence=group['sequence'], **materials['metrics'])
         run_id = store.prepare_cvp_group(campaign_sha256=campaign,group_key=group["group_key"],sequence=group["sequence"],
                                          claim_ids=group["claim_ids"],materials=materials)
     else:
@@ -287,6 +309,7 @@ def run_group(store, definition, group, row, *, root):
         from backend.pipeline.viewpoint_s201129_source_continuation import canonical_runtime
         runtime = canonical_runtime()
         os.environ["CODEX_EXECUTABLE"] = runtime["identity"]["cli"]["path"]
+        stage_event('generating_reviewing', sequence=group['sequence'], run_id=run_id)
         package,approval,disposition = reviewed_cvp_package(model_root,materials,store)
         from backend.pipeline.source_reconciliation_runtime import ProductionPorts
         backup = ProductionPorts().backup(root/run_id)
@@ -299,6 +322,7 @@ def run_group(store, definition, group, row, *, root):
         resume_reviewed_action(store,run_id)
     saved = store.get_cvp_group(run_id)
     if saved["checkpoint"] != "applied": return
+    stage_event('applied', sequence=group['sequence'], run_id=run_id)
     evidence = saved.get('reviewed',{}).get('evidence') or saved.get('import_certificate',{})
     if evidence.get('pending_cvp_claim_ids'):
         from backend.pipeline.cvp_sql_actions import execute_coverage_action
@@ -325,6 +349,7 @@ def run_group(store, definition, group, row, *, root):
                  if col=='viewpoint_claim_links' and not r['retired'] and r['payload']['claim_id'] in group['claim_ids']})
     audit_dir = root/run_id/('audit-'+sha256_json(pin_rows(pins(current)))[:20]); audit_path = audit_dir/"audit.json"
     if not audit_path.exists():
+        stage_event('independent_audit', sequence=group['sequence'], run_id=run_id)
         audit_dir.mkdir(parents=True,exist_ok=True)
         intent=audit_dir/'audit-intent.json'
         if intent.exists():raise ValueError('independent audit intent lacks saved complete result; no automatic replay')
@@ -381,6 +406,7 @@ def run_group(store, definition, group, row, *, root):
         compose(audit_path,prior,resolution,store)
     store.complete_cvp_group(run_id,audit=audit,audit_binding=binding(audit_path),read_pins=pins(current),
                              owner_resolution_path=resolution)
+    stage_event('audited', sequence=group['sequence'], run_id=run_id)
 
 
 def main(argv=None):
@@ -390,6 +416,7 @@ def main(argv=None):
     parser.add_argument("--output-root",type=Path,required=True)
     parser.add_argument("--dry-run",action="store_true")
     parser.add_argument('--execute',action='store_true',help='Explicit new SQL execution; never implicitly resume a stopped campaign')
+    parser.add_argument('--stop-after-group',type=int,help='Complete this original group then stop before preparing the next')
     parser.add_argument('--action',choices=('group','source','owner-link'),default='group')
     parser.add_argument('--run-id')
     parser.add_argument('--manifest',type=Path)
@@ -401,6 +428,10 @@ def main(argv=None):
     if args.database_url:os.environ['KNOWLEDGE_DATABASE_URL']=args.database_url
     store = PostgresKnowledgeStore(args.database_url)
     definition,group,row = next_group(store,args.sql_campaign)
+    execution_boundary(args.output_root,args.sql_campaign,definition,args.stop_after_group)
+    if checkpoint_reached(group,args.stop_after_group):
+        stage_event('owner_checkpoint', stop_after_group=args.stop_after_group)
+        return 0
     if group is None:
         print(json.dumps({"status":"complete","groups":len(definition["groups"])})); return 0
     if args.dry_run:
@@ -411,10 +442,13 @@ def main(argv=None):
         raise RuntimeError('production remains stopped; explicit new SQL --execute required, no legacy fallback')
     from backend.pipeline.source_reconciliation_runtime import maintenance_lock
     with maintenance_lock():
+        execution_boundary(args.output_root,args.sql_campaign,definition,args.stop_after_group,persist=True)
         if args.action!='group':
             if not args.run_id:raise ValueError('bounded action requires exact admitted SQL run ID')
             saved=store.get_cvp_group(args.run_id)
             if not saved or saved['campaign_sha256']!=args.sql_campaign:raise ValueError('bounded action campaign drift')
+            if args.stop_after_group is not None and saved['sequence'] > args.stop_after_group:
+                raise ValueError('action exceeds owner execution boundary')
             action_root=args.output_root/args.run_id/'actions'
             from backend.pipeline.cvp_sql_actions import execute_source_action,execute_owner_link_action
             from backend.pipeline.source_reconciliation_runtime import ProductionPorts
@@ -428,12 +462,23 @@ def main(argv=None):
                     authorization=binding(args.direction),root=action_root/'owner-link',ports=ReviewPorts())
             definition,group,row=next_group(store,args.sql_campaign)
         while group is not None:
-            try:run_group(store,definition,group,row,root=args.output_root)
+            if checkpoint_reached(group,args.stop_after_group):
+                stage_event('owner_checkpoint', stop_after_group=args.stop_after_group)
+                break
+            try:
+                run_group(store,definition,group,row,root=args.output_root)
+                finished = next((r for r in store.cvp_campaign_progress(args.sql_campaign)
+                                 if r['group_key']==group['group_key']),None)
+                if not finished or finished['checkpoint']!='audited':
+                    raise ValueError('group returned without actual SQL audited checkpoint')
             except Exception as exc:
                 current = store.cvp_campaign_progress(args.sql_campaign)
                 active = next((r for r in current if r["group_key"]==group["group_key"]),None)
                 if active:store.fail_cvp_group(active["run_id"],str(exc))
                 raise
+            if group['sequence']==args.stop_after_group:
+                stage_event('owner_checkpoint', stop_after_group=args.stop_after_group)
+                break
             definition,group,row = next_group(store,args.sql_campaign)
     return 0
 

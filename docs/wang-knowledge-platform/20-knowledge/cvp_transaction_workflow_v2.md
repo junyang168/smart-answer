@@ -138,3 +138,5 @@ commit 後的新連線回讀用於确认可見結果與交接審計。它若失�
 | [真實保存資料驗收](../../../backend/tests/test_cvp_sql_real_saved_acceptance.py)／[規模驗證](../../../backend/tests/test_cvp_sql_scalability.py) | 前者只讀正式資料、寫隔離資料庫，精確復用原審計輸入；後者固定受影響集合增加無關資料，不能冒充 1,000 篇實測 |
 
 新 runner 須指定已接納的 SQL campaign；缺少時停止，不從旧 root 自動導入。`--dry-run` 僅當前組只讀準備，正式執行須明示 `--execute`。schema migration、歷史接納和 production execution 是三個不同操作；本次實作與隔離測試不代表它們已在正式資料庫執行。
+
+單組／有界驗收必須指定 `--stop-after-group N`：只有 SQL 已保存第 N 組 `audited` 才正常退出，不準備下一組。執行 root 的不可變 `execution-boundary.json` 固定 campaign 與停止組號；恢復不能省略或擴大此邊界。已有第 N 組完成時直接回報 owner checkpoint，不把它說成全量完成。準備、生成審核、已提交、完整獨立審計與完成階段各輸出即時事件，提交不等於組完成。
