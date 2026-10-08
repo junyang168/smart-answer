@@ -158,11 +158,25 @@ def current_claim_authority(store, cid, row):
                                  WHERE collection='claims' AND object_id=%s AND object_revision=%s
                                    AND decision=%s ORDER BY review_event_id""",
                               (cid,row["revision"],claim.get("review_status"))).fetchall()
+    if not events:
+        return coordinate_predecessor_authority(store, cid, row)
     if len(events) != 1 or events[0][1] not in {"ai","human","system"} or not events[0][3]:
         raise ValueError("current Claim has missing/ambiguous exact SQL review: " + cid)
     return {"claim_id":cid,"revision":row["revision"],"content_sha256":row["content_sha256"],
             "review_event_id":events[0][0],"reviewer_kind":events[0][1],"decision":events[0][2],
             "review_artifact_sha256":sha256_json(events[0][3])}
+
+
+def coordinate_predecessor_authority(store, cid, row):
+    """Carry one actual SQL review over an exact applied locator-only step.
+
+    No new review event, status mutation, history-chain replay or legacy runner.
+    The immediate predecessor must have its own unique review. The original
+    bounded plan, actual SQL operation and physical body must all agree, and
+    the original deterministic locator compiler must reproduce the full row.
+    """
+    from backend.pipeline.cvp_sql_claim_authority import coordinate_authority
+    return coordinate_authority(store, cid, row)
 
 
 def prepare_group(store, definition, group):
