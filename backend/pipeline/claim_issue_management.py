@@ -385,10 +385,18 @@ def validate_resolution(frozen, proposal, post):
                     and e.get('support_eligibility') in {'eligible','eligible_candidate','eligible_with_label'}
                     and e.get('review_status') not in HOLDS]
             fragments=bound_fragments(usable,lambda fid:post[c.key('source_fragments',fid)])
-            for cite in a.citations:
-                if not any(f.get('source_id')==cite.source_id and f.get('paragraph_key')==cite.paragraph_key
-                           and cite.exact_quote in f.get('verbatim_excerpt','') for f in fragments):
-                    raise ValueError('Evidence diagnosis must be represented by actual eligible bound Evidence')
+            bound_citations=[any(f.get('source_id')==cite.source_id and f.get('paragraph_key')==cite.paragraph_key
+                                and cite.exact_quote in f.get('verbatim_excerpt','') for f in fragments)
+                             for cite in a.citations]
+            # A statement diagnosis may cite additional own-body context to
+            # explain why the OLD wording was too strong. Those citations are
+            # not new Evidence: all were authenticated above, and the actual
+            # after-state must still have bound supporting citations plus the
+            # independent complete-postimage review. A binding repair, in
+            # contrast, must materialize every claimed new Evidence citation.
+            represented=all(bound_citations) if a.cause=='evidence_binding' else any(bound_citations)
+            if not represented:
+                raise ValueError('Evidence diagnosis must be represented by actual eligible bound Evidence')
             if a.cause=='evidence_binding' and post[k]==before[k] and all(
                     post[c.key('evidence_steps',eid)]==before[c.key('evidence_steps',eid)]
                     for eid in before[k]['evidence_step_ids']):

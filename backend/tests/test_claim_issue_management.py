@@ -130,6 +130,27 @@ def test_held_evidence_not_promoted_and_old_quotes_not_removed(issue_setup,tmp_p
     with pytest.raises(ValueError,match='eligible bound'):m.validate_resolution(frozen,proposal,post)
 
 
+@pytest.mark.parametrize('cause,only_context,accepted',[
+    ('claim_statement',False,True),('claim_statement',True,False),
+    ('evidence_binding',False,False)])
+def test_statement_diagnosis_context_is_not_automatically_evidence(issue_setup,tmp_path,cause,only_context,accepted):
+    _,frozen,issue=materials(issue_setup,tmp_path)
+    frozen['after'][0]['paragraphs']['S0002']={'text':'另一句说明旧词过强。'}
+    proposal=retain_proposal(frozen,issue,cause)
+    if only_context:proposal.claim_assessments[0].citations=[]
+    proposal.claim_assessments[0].citations.append(m.Citation(
+        source_id='SRC-test',paragraph_key='S0002',exact_quote='另一句说明旧词过强。'))
+    post=c.index(frozen['before_records'])
+    post['claims/CL-test']['statement']='甲属于假设。'
+    if cause=='evidence_binding':post['claims/CL-test']['statement']=c.index(frozen['before_records'])['claims/CL-test']['statement']
+    if accepted:
+        assert m.validate_resolution(frozen,proposal,post)==post
+        assert set(post)==set(c.index(frozen['before_records']))
+        assert post['evidence_steps/E-test']==c.index(frozen['before_records'])['evidence_steps/E-test']
+    else:
+        with pytest.raises(ValueError,match='eligible bound'):m.validate_resolution(frozen,proposal,post)
+
+
 def test_evidence_repair_adds_actual_own_quote_keeps_old_context_and_statement(issue_setup,tmp_path):
     _,states,report,policy_binding=issue_setup
     own=put(tmp_path/'complete-own-source.json',{'script':[{'text':'甲是假设。'},{'text':'甲不是断言。'}]})
