@@ -153,3 +153,10 @@ def test_membership_reuses_only_authentic_completed_application_predecessor(tmp_
     monkeypatch.setattr(consumer.repair,'binding',lambda path:{'path':str(path),'file_sha256':'changed'})
     with pytest.raises(ValueError,match='physical drift'):
         consumer.verify_completed_application_bindings([snapshot],source)
+
+
+def test_undeclared_scope_does_not_require_new_protocol_but_declared_scope_does(tmp_path,monkeypatch):
+    bound,_,_,_=scenario(tmp_path,monkeypatch)
+    assert m.has_predecessor_input({}) is False
+    with m.predecessor_inputs([bound]):
+        with pytest.raises(ValueError,match='exact source binding'):m.has_predecessor_input({})

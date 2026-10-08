@@ -53,6 +53,9 @@ def predecessor_inputs(bindings):
 
 def _entry(source):
     entries = _scope.get() or {}
+    if not entries:return None  # no opt-in: preserve the original reader
+    if not isinstance(source,dict) or not isinstance(source.get('path'),str):
+        raise ValueError('configured completed predecessor requires an exact source binding')
     entry = entries.get(source['path'])
     if entry is not None:
         c.verify_file(entry['binding'])
