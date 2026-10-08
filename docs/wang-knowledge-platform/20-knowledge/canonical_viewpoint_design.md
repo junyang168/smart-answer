@@ -6,7 +6,7 @@
 
 它是[知识库](../00-overview/solution_architecture.md#3-架构总览)三个 component 里管「观点」的那一个。单篇之内的判断由 [Claim](./claim_design.md) 承担。
 
-本文定義觀點身份與知識模型。實際生產的正常路徑、special cases、現行 #357 模型政策、人工出口和恢復接點，集中見 [Claims → CVP 現行完整流程](./cvp_production_process_v1.md)；交易／changelog 簡化另見尚未實作的 [CVP 交易與恢復設計 v2](./cvp_transaction_workflow_v2.md)。
+本文定義觀點身份與知識模型。實際生產的正常路徑、special cases、現行 #357 模型政策、人工出口和恢復接點，集中見 [Claims → CVP 現行完整流程](./cvp_production_process_v1.md)；已實作的 SQL 交易／changelog 與恢復入口另見 [CVP 交易與恢復設計 v2](./cvp_transaction_workflow_v2.md)。
 
 ## 术语
 

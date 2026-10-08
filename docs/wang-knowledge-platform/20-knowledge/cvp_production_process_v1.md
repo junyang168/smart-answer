@@ -3,7 +3,7 @@
 > **讀者**：流程負責人、神學編輯、Solution architect、Developer。
 > **類型**：流程。
 > **狀態**：當前內容流程；儲存、交易與恢復由 v2 共同 SQL 入口承擔，舊執行方案禁用。本文不啟動生產、不新增內容修改授權。
-> **與代碼對齊**：2026-10-07 核對到 `3223533` 的內容角色／政策與 `cvp_sql_flow.py`、`cvp_sql_actions.py`；新交易入口已作隔離測試及真實保存結果等價驗證，正式遷移和生產仍未啟用。
+> **與代碼對齊**：2026-10-08 核對到 `6b9541e` 的內容角色／政策與 `cvp_sql_flow.py`、`cvp_sql_actions.py`；新交易入口已啟用，執行仍受每次 owner 邊界限制，不因驗收一組而自動擴大後續範圍。
 > **權威範圍**：說明 Claims 到 CVP 的正常路徑、例外分流、人工出口與恢復接點。內容定義服從 [CanonicalViewpoint 设计](./canonical_viewpoint_design.md)，使命與限制服從 [Project Mission Statement](../00-overview/project_mission_statement.md) 和 [Solution Architecture](../00-overview/solution_architecture.md)。具體授權仍以相應 policy／精確人工決定為準，不能拿本文擴權。
 
 ## 目錄
