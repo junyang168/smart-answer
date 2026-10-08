@@ -360,9 +360,11 @@ def test_pending_reviewed_claim_restores_only_membership_and_no_mutation(monkeyp
     old={**claim,'revision':2,'statement':'old','review_status':'ai_consensus_reviewed'}
     records={('claims',claim['claim_id']):{'payload':deepcopy(claim),'revision':3,'content_sha256':repair.semantic_record_sha(claim),'retired':False}}
     package={'claims':[claim]};manifest={'claim_packets':[{'claim_id':claim['claim_id']}]}
-    monkeypatch.setattr(repair,'validate_package',lambda p:None)
+    monkeypatch.setattr(repair,'validate_package',lambda p:pytest.fail('old writer rebuild'))
+    monkeypatch.setattr(epoch,'bound_package',lambda b:package)
     monkeypatch.setattr(epoch,'postimages',lambda p:{'claims':{claim['claim_id']:claim}})
-    monkeypatch.setattr(repair,'saved_before',lambda:({('claims',claim['claim_id']):old},{}))
+    monkeypatch.setattr(repair,'saved_before',lambda:pytest.fail('full predecessor parsed'))
+    monkeypatch.setattr(epoch,'scoped_predecessors',lambda p:{('claims',claim['claim_id']):old})
     monkeypatch.setattr(repair,'reviewed_inputs',lambda:({'manifest_path':'/manifest'},None,None,None))
     monkeypatch.setattr(repair,'read_artifact',lambda p:manifest)
     original=deepcopy(records)
@@ -370,6 +372,87 @@ def test_pending_reviewed_claim_restores_only_membership_and_no_mutation(monkeyp
     assert checked['claims',claim['claim_id']]['payload']==old
     assert records==original and used==[claim['claim_id']]
     with pytest.raises(ValueError):epoch.selection_row('another-claim',package)
+
+
+@pytest.mark.parametrize('drift',[None,'changed','missing_pin','package','duplicate'])
+def test_membership_unreviewed_claim_uses_original_manifest_version_not_latest(monkeypatch,drift):
+    old={'claim_id':'arbitrary-pending','revision':2,'statement':'unchanged',
+         'review_status':'human_review_required','occurrences':[{'transcript_id':'S 201129'}]}
+    pin=('claims',old['claim_id'],2,repair.semantic_record_sha(old))
+    manifest={'claim_packets':[{'claim_id':old['claim_id'],'claim_revision':2,
+                                'claim_content_sha256':pin[3]}]}
+    package={'claims':[]};records={('claims',old['claim_id']):{'payload':deepcopy(old)}}
+    original=deepcopy(records);seen=[]
+    monkeypatch.setattr(epoch,'bound_package',lambda b:{} if drift=='package' else package)
+    monkeypatch.setattr(epoch,'validate_postimage',lambda *a:{})
+    monkeypatch.setattr(epoch,'scoped_predecessors',lambda p:{})
+    monkeypatch.setattr(repair,'reviewed_inputs',lambda:({'manifest_path':'/original-manifest'},None,None,None))
+    monkeypatch.setattr(repair,'read_artifact',lambda p:manifest)
+    monkeypatch.setattr(repair,'validate_package',lambda p:pytest.fail('old writer rebuild'))
+    monkeypatch.setattr(repair,'saved_before',lambda:pytest.fail('whole history fallback'))
+    monkeypatch.setattr(repair,'PostgresKnowledgeStore',lambda:None)
+    def read(pins,store):
+        seen.extend(pins);assert pins==[pin]
+        return {pin[:2]:deepcopy(old)}
+    monkeypatch.setattr(composed,'read_pinned_versions',read)
+    if drift=='changed':records['claims',old['claim_id']]['payload']['statement']='unreviewed change'
+    elif drift=='missing_pin':manifest['claim_packets']=[]
+    elif drift=='duplicate':manifest['claim_packets']*=2
+    if drift:
+        with pytest.raises(ValueError):epoch.membership_snapshot(manifest,records,package,set(),{old['claim_id']})
+    else:
+        actual,used=epoch.membership_snapshot(manifest,records,package,set(),{old['claim_id']})
+        assert actual==original and records==original and used==[] and seen==[pin]
+        assert actual['claims',old['claim_id']]['payload']['review_status']=='human_review_required'
+
+
+@pytest.mark.parametrize('drift',['duplicate','boolean_revision','zero_revision','missing_sha','missing_id'])
+def test_generic_manifest_version_reader_rejects_unbound_or_duplicate_pins_before_SQL(drift):
+    pin=['claims','any-id',1,'a'*64];wanted=[tuple(pin)]
+    if drift=='duplicate':wanted*=2
+    else:
+        index,value={'boolean_revision':(2,True),'zero_revision':(2,0),
+            'missing_sha':(3,None),'missing_id':(1,'')}[drift]
+        pin[index]=value;wanted=[tuple(pin)]
+    class Store:
+        def connect(self):pytest.fail('invalid pins must fail before SQL')
+    with pytest.raises(ValueError):composed.read_pinned_versions(wanted,Store())
+
+
+@pytest.mark.parametrize('drift',[None,'fingerprint','receipt','count','SQL','physical_pin'])
+def test_verified_applied_preserves_readback_scope_and_SQL_gates_without_full_before(monkeypatch,drift):
+    from backend.pipeline import viewpoint_s201129_link_support_apply as child
+    package={'original':'package'};before={('source_documents','arbitrary-source'):{'revision':1}}
+    plan={'change_set_id':'KCS-original','source_sha256':'a'*64,'operations':[{}]}
+    receipt={'change_set_id':'KCS-original'}
+    verified={'status':'applied_readback_verified','change_set_id':'KCS-original',
+        'master_data_mutations':1,'pre_fingerprint_sha256':'b'*64,'bindings':[]}
+    SQL=(repair.VERSION,'a'*64,'applied')
+    monkeypatch.setattr(epoch,'bound_package',lambda b:package)
+    monkeypatch.setattr(epoch,'scoped_predecessors',lambda p:before)
+    monkeypatch.setattr(epoch,'postimages',lambda p:{})
+    monkeypatch.setattr(epoch,'validate_postimage',lambda *a:{})
+    monkeypatch.setattr(epoch,'read_current_objects',lambda *a:{})
+    monkeypatch.setattr(repair,'reviewed_inputs',lambda:({'registry_fingerprint_sha256':'b'*64},None,None,None))
+    monkeypatch.setattr(repair,'read_artifact',lambda p:{'dry-run-plan.json':plan,
+        'apply-receipt.json':receipt,'verified-result.json':verified}[p.name])
+    monkeypatch.setattr(repair,'saved_before',lambda:pytest.fail('full predecessor parsed'))
+    monkeypatch.setattr(child,'applied_child_object_ids',lambda:set())
+    if drift=='fingerprint':verified['pre_fingerprint_sha256']='c'*64
+    elif drift=='receipt':receipt['change_set_id']='other'
+    elif drift=='count':verified['master_data_mutations']=0
+    elif drift=='SQL':SQL=(repair.VERSION,'a'*64,'planned')
+    elif drift=='physical_pin':verified['bindings']=[{'path':'/arbitrary-file','file_sha256':'c'*64}]
+    class Conn:
+        def __enter__(self):return self
+        def __exit__(self,*a):pass
+        def execute(self,*a):return self
+        def fetchone(self):return SQL
+    class Store:
+        def connect(self):return Conn()
+    if drift:
+        with pytest.raises((ValueError,FileNotFoundError)):epoch.verified_applied({},Store())
+    else:assert epoch.verified_applied({},Store())==(package,before,{})
 
 
 @pytest.mark.parametrize('wrong',[True,False])

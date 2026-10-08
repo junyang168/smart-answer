@@ -106,7 +106,6 @@ def applied_source_preimages(bound, store):
     inferred here and must come from the caller's original bound review input.
     """
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact
-    from backend.api.canonical_repository.postgres_store import record_content_sha
     package = consume_applied_source_package(bound, store)
     plan = read_artifact(Path(bound['path']).parent/'dry-run-plan.json')
     wanted, result = [], {}
@@ -122,6 +121,26 @@ def applied_source_preimages(bound, store):
             wanted.append((*key, op['before_revision'], op['before_sha256']))
         else:
             raise ValueError('unsupported or unpinned applied predecessor operation')
+    result.update(read_pinned_versions(wanted, store))
+    return package, result
+
+
+def read_pinned_versions(wanted, store):
+    """Read a caller-authenticated historical readset, never latest versions.
+
+    Pins must come from an authenticated plan or original accepted manifest.
+    This reader does not grant review/current/source authority to its caller.
+    """
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    expected = {}
+    for collection, oid, revision, digest in wanted:
+        key = collection, oid
+        if (key in expected or not isinstance(collection, str) or not collection
+                or not isinstance(oid, str) or not oid or type(revision) is not int
+                or revision <= 0 or not isinstance(digest, str) or len(digest) != 64):
+            raise ValueError('historical SQL pins missing/duplicated/invalid')
+        expected[key] = revision, digest
+    result = {}
     if wanted:
         placeholders = ','.join(['(%s,%s,%s::integer,%s)']*len(wanted))
         with store.connect() as conn, conn.cursor() as cursor:
@@ -133,7 +152,6 @@ def applied_source_preimages(bound, store):
                 AND ov.revision=wanted.revision AND ov.content_sha256=wanted.content_sha256''',
                 tuple(value for pin in wanted for value in pin))
             rows = cursor.fetchall()
-        expected = {pin[:2]: pin[2:] for pin in wanted}
         if len(rows) != len(expected):
             raise ValueError('applied predecessor SQL version population missing/duplicated')
         for collection, oid, revision, digest, payload in rows:
@@ -143,7 +161,7 @@ def applied_source_preimages(bound, store):
                     or record_content_sha(payload) != digest):
                 raise ValueError('applied predecessor SQL identity/version/content drift')
             result[key] = payload
-    return package, result
+    return result
 
 
 def implementation(bound):

@@ -22,13 +22,13 @@ def bound_package(bound):
     return consume_applied_source_package(bound,repair.PostgresKnowledgeStore())
 
 
-def postimages(package):
+def scoped_predecessors(package):
+    """Original operation versions plus unchanged original review context only."""
     from backend.pipeline.viewpoint_applied_source_epochs import applied_source_preimages
     actual, before = applied_source_preimages(binding(), repair.PostgresKnowledgeStore())
     if package != actual:
         raise ValueError('completed source postimage package drift')
-    normalized, stated = _normalize_records(package)
-    plan = repair.read_artifact(repair.APPLICATION_ROOT/'dry-run-plan.json')
+    normalized, _ = _normalize_records(package)
     # Thin legacy review-format adapter only: the original small review packet
     # contains these unchanged evidence rows. Never infer them from a newer
     # current row or reopen the whole archived Registry on a missing context.
@@ -44,6 +44,13 @@ def postimages(package):
                 if key not in unchanged:
                     raise ValueError('completed source lacks original unchanged context: '+oid)
                 before[key] = unchanged[key]
+    return before
+
+
+def postimages(package):
+    normalized, stated = _normalize_records(package)
+    before = scoped_predecessors(package)
+    plan = repair.read_artifact(repair.APPLICATION_ROOT/'dry-run-plan.json')
     return planned_postimages(normalized,stated,before,plan)
 
 
@@ -91,7 +98,8 @@ def validate_postimage(package, records):
 @current_check
 def verified_applied(bound, store):
     package = bound_package(bound)
-    before, proof = repair.saved_before()
+    before = scoped_predecessors(package)
+    scope, _, _, _ = repair.reviewed_inputs()
     plan = repair.read_artifact(repair.APPLICATION_ROOT/'dry-run-plan.json')
     receipt = repair.read_artifact(repair.APPLICATION_ROOT/'apply-receipt.json')
     verified = repair.read_artifact(repair.APPLICATION_ROOT/'verified-result.json')
@@ -99,7 +107,7 @@ def verified_applied(bound, store):
             or receipt['change_set_id'] != plan['change_set_id']
             or verified['change_set_id'] != plan['change_set_id']
             or verified['master_data_mutations'] != len(plan['operations'])
-            or verified['pre_fingerprint_sha256'] != proof['pre_fingerprint_sha256']):
+            or verified['pre_fingerprint_sha256'] != scope['registry_fingerprint_sha256']):
         raise ValueError('S201129 lacks actual single application and readback')
     for row in verified['bindings']:
         if repair.binding(Path(row['path'])) != row:
@@ -160,14 +168,18 @@ def membership_snapshot(manifest, records, package, completed_ids, selected_ids)
     pending Claims too. Neither changing the 973 IDs nor borrowing old approval
     is permitted. Normal selection independently consumes bridge() below.
     """
-    repair.validate_package(package)
+    if package != bound_package(binding()):
+        raise ValueError('S201129 membership applied package drift')
     normalized = validate_postimage(package,records)
-    before, _ = repair.saved_before()
+    before = scoped_predecessors(package)
     scope, _, _, _ = repair.reviewed_inputs()
     if manifest != repair.read_artifact(Path(scope['manifest_path'])):
         raise ValueError('S201129 accepted membership manifest drift')
     checked = dict(records)  # replace projected rows, do not clone untouched rows
     accepted = {r['claim_id'] for r in manifest['claim_packets']}
+    accepted_rows = {r['claim_id']:r for r in manifest['claim_packets']}
+    if len(accepted_rows) != len(manifest['claim_packets']):
+        raise ValueError('duplicate original accepted Claim membership')
     used = []
     for collection, rows in normalized.items():
         if collection not in {'claims','evidence_steps','source_fragments','source_documents'}:
@@ -180,12 +192,22 @@ def membership_snapshot(manifest, records, package, completed_ids, selected_ids)
                 'content_sha256':repair.semantic_record_sha(old),'retired':False}
             if collection == 'claims' and oid in accepted:
                 used.append(oid)
-    for cid in selected_ids - reviewed_claim_ids(package):
+    unreviewed = {cid for cid in selected_ids - reviewed_claim_ids(package)
+                  if records.get(('claims',cid)) and any(o.get('transcript_id') == 'S 201129'
+                     for o in records['claims',cid]['payload'].get('occurrences',[]))}
+    from backend.pipeline.viewpoint_applied_source_epochs import read_pinned_versions
+    pins = []
+    for cid in sorted(unreviewed):
+        if cid not in accepted_rows:
+            raise ValueError('unreviewed same-source Claim lacks accepted membership pin')
+        row = accepted_rows[cid]
+        pins.append(('claims',cid,row['claim_revision'],row['claim_content_sha256']))
+    originals = read_pinned_versions(pins,repair.PostgresKnowledgeStore())
+    for cid in unreviewed:
         current = records.get(('claims',cid))
-        old = before.get(('claims',cid))
-        if current and any(o.get('transcript_id') == 'S 201129' for o in current['payload'].get('occurrences',[])):
-            if current['payload'] != old:
-                raise ValueError('unreviewed same-source Claim changed')
+        old = originals['claims',cid]
+        if current['payload'] != old:
+            raise ValueError('unreviewed same-source Claim changed')
     return checked, used
 
 
