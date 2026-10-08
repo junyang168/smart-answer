@@ -3,7 +3,7 @@
 > **讀者**：Solution architect、Developer、流程負責人。
 > **類型**：規範。
 > **狀態**：當前；SQL 共同交易與恢復入口已實作並完成隔離驗證。正式資料庫尚未遷移、接納或啟用；生產維持停止。舊整庫快照／歷史鏈執行器禁用，不得回退。
-> **與代碼對齊**：2026-10-07 核對本次 `006_cvp_transaction_runs.sql`、`transaction_validation.py`、`cvp_sql_flow.py`、`cvp_sql_actions.py` 及隔離 PostgreSQL 測試；真實保存資料驗收與正式啟用分開記錄。
+> **與代碼對齊**：2026-10-07 核對到 `3223533` 的 `006_cvp_transaction_runs.sql`、`transaction_validation.py`、`cvp_sql_flow.py`、`cvp_sql_actions.py` 及隔離 PostgreSQL 測試；真實保存資料驗收與正式啟用分開記錄。
 > **權威範圍**：CVP 及已授權來源／連接修訂的交易、changelog、執行狀態與恢復；不變更內容判定、授權範圍、模型分工或分組。受 [Solution Architecture](../00-overview/solution_architecture.md) 與 [CanonicalViewpoint 設計](./canonical_viewpoint_design.md) 約束。
 
 ## 1. 設計決定
