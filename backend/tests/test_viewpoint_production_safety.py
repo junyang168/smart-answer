@@ -587,152 +587,27 @@ def test_full_plan_readback_checks_payload_and_resume_chain():
 
 
 def test_runner_dry_run_exits_before_any_model_client(tmp_path, monkeypatch):
-    from backend.pipeline import viewpoint_batch_resolution_runner as runner
-
-    store, packet_path, freeze = _fixture(tmp_path)
-    grouping_body = {
-        "schema_version": "wang_canonical_viewpoint_grouping_envelope_v2",
-        "scope_label": "matthew-test",
-        "freeze_sha256": freeze["artifact_sha256"],
-        "scope_packet_sha256": freeze["scope_packet_sha256"],
-        "cvp_policy_sha256": "cvp-policy",
-        "grouping": {
-            "scope_label": "matthew-test",
-            "groups": [{"group_key": "g", "claim_ids": ["C1"], "rationale": "r"}],
-        },
-    }
-    grouping = grouping_body | {"artifact_sha256": sha256_json(grouping_body)}
-    grouping_path = _write_json(tmp_path / "grouping.json", grouping)
-    freeze_path = _write_json(tmp_path / "freeze.json", freeze)
-    partition_policy = {"max_request_bytes": 500000}
-    partition_path = _write_json(
-        tmp_path / "partition.json",
-        {
-            "partition_policy": partition_policy,
-            "partition_policy_sha256": sha256_json(partition_policy),
-            "partitions": [{"partition_id": "p00001", "claims": [{"claim_id": "C1"}]}],
-        },
-    )
-    policy = {
-        "batch_size": 20,
-        "max_request_bytes": 500000,
-        "grouping": {"provider": "claude", "model": "claude-opus-5", "effort": "high"},
-        "proposal": {"provider": "codex", "model": "gpt-5.6-sol", "effort": "high"},
-        "review": {"provider": "claude", "model": "claude-opus-5", "effort": "high"},
-        "correction": {"provider": "codex", "model": "gpt-5.6-sol", "effort": "high"},
-        "consolidation": {"provider": "claude", "model": "claude-opus-5", "effort": "high"},
-    }
-    monkeypatch.setattr(runner, "load_cvp_policy", lambda path: policy)
-    monkeypatch.setattr(runner, "cvp_policy_prompt_sha256s", lambda *args, **kwargs: {})
-    monkeypatch.setattr(runner, "cvp_policy_fingerprint", lambda *args, **kwargs: "cvp-policy")
-    monkeypatch.setattr(runner, "load_route_policy", lambda path: {})
-    monkeypatch.setattr(runner, "route_policy_prompt_sha256s", lambda *args, **kwargs: {})
-    monkeypatch.setattr(runner, "route_policy_fingerprint", lambda *args, **kwargs: "route-policy")
-    monkeypatch.setattr(runner, "_repository_commit", lambda: "abc123")
-    monkeypatch.setattr(runner, "PostgresKnowledgeStore", lambda url: store)
-    monkeypatch.setattr(runner, "PROJECT_ROOT", tmp_path / "worktree")
-    monkeypatch.setattr(runner, "load_partition_policy", lambda path: partition_policy)
-    partition_checks = []
-    monkeypatch.setattr(
-        runner,
-        "validate_partition_manifest",
-        lambda *args, **kwargs: partition_checks.append(kwargs) or {"status": "valid"},
-    )
-    for name in (
-        "build_grouper",
-        "build_proposer",
-        "build_reviewer",
-        "build_reconsiderer",
-        "build_consolidator",
-    ):
-        monkeypatch.setattr(
-            runner,
-            name,
-            lambda *args, _name=name, **kwargs: (_ for _ in ()).throw(
-                AssertionError(f"{_name} must not be called during dry-run")
-            ),
-        )
-    args = Namespace(
-        cvp_policy=tmp_path / "policy.json",
-        route_policy=tmp_path / "route.json",
-        database_url=None,
-        freeze=freeze_path,
-        global_freeze=freeze_path,
-        partition_manifest=partition_path,
-        partition_id="p00001",
-        packet=packet_path,
-        output_dir=tmp_path / "output",
-        batch_size=None,
-        proposal_provider="codex",
-        proposal_model="gpt-5.6-sol",
-        proposal_effort="high",
-        review_provider="claude",
-        review_model="claude-opus-5",
-        review_effort="high",
-        consolidation_provider="claude",
-        consolidation_model="claude-opus-5",
-        consolidation_effort="high",
-        group_model="claude-opus-5",
-        group_effort="high",
-        no_reconsider=False,
-        no_consolidate=False,
-        apply=False,
-        apply_authorization=None,
-        grouping=grouping_path,
-        group=False,
-        group_key=None,
-        max_batches=None,
-        dry_run=True,
-    )
-
-    assert runner.execute(args) == 0
-    assert len(partition_checks) == 1
-    assert partition_checks[0]["partition_id"] == "p00001"
+    # The obsolete orchestration is no longer a supported solution.
+    # Current content validators and SQL action tests carry its safety rules.
+    from backend.pipeline import viewpoint_batch_resolution_runner as worker
+    with pytest.raises(RuntimeError,match='runtime is retired'):
+        worker.execute(None)
 
 
 def test_runner_rejects_missing_partition_before_store_or_models(monkeypatch):
-    from backend.pipeline import viewpoint_batch_resolution_runner as runner
-
-    monkeypatch.setattr(
-        runner, "PostgresKnowledgeStore",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("DB accessed")),
-    )
-    with pytest.raises(CvpProductionBlocked, match="--partition-manifest"):
-        runner.execute(Namespace(global_freeze=None, partition_manifest=None, partition_id=None))
+    # The obsolete orchestration is no longer a supported solution.
+    # Current content validators and SQL action tests carry its safety rules.
+    from backend.pipeline import viewpoint_batch_resolution_runner as worker
+    with pytest.raises(RuntimeError,match='runtime is retired'):
+        worker.execute(None)
 
 
 def test_runner_cli_defaults_match_the_fable_v2_policy(tmp_path, monkeypatch):
-    import sys
-
-    from backend.pipeline import viewpoint_batch_resolution_runner as runner
-
-    captured = {}
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "viewpoint_batch_resolution_runner",
-            "--packet",
-            str(tmp_path / "packet.json"),
-            "--output-dir",
-            str(tmp_path / "output"),
-            "--freeze",
-            str(tmp_path / "freeze.json"),
-            "--group",
-        ],
-    )
-    monkeypatch.setattr(
-        runner,
-        "execute",
-        lambda args: captured.update(vars(args)) or 0,
-    )
-
-    assert runner.main() == 0
-    assert captured["review_model"] == "claude-fable-5-1"
-    assert captured["consolidation_model"] == "claude-fable-5-1"
-    assert captured["group_model"] == "claude-fable-5-1"
-    assert captured["cvp_policy"].name == "wang_cvp_resolution_policy_v4.json"
-    assert captured["route_policy"].name == "wang_route_resolution_policy_v2.json"
+    # The obsolete orchestration is no longer a supported solution.
+    # Current content validators and SQL action tests carry its safety rules.
+    from backend.pipeline import viewpoint_batch_resolution_runner as worker
+    with pytest.raises(RuntimeError,match='runtime is retired'):
+        worker.main()
 
 
 def test_runner_resume_rejects_forged_applied_local_state(tmp_path):

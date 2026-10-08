@@ -2,8 +2,8 @@
 
 > **讀者**：流程負責人、神學編輯、Solution architect、Developer。
 > **類型**：流程。
-> **狀態**：當前實作流程；本文不啟動生產、不新增內容修改授權。交易改版另見 v2 設計。
-> **與代碼對齊**：2026-10-07 核對到 `4d165bd` 的 campaign、batch、修訂、審計、恢復入口及政策；關鍵反例測試已閱讀，本次文件整理未重新執行模型或生產。
+> **狀態**：當前內容流程；儲存、交易與恢復由 v2 共同 SQL 入口承擔，舊執行方案禁用。本文不啟動生產、不新增內容修改授權。
+> **與代碼對齊**：2026-10-07 核對現有內容角色／政策與 `cvp_sql_flow.py`、`cvp_sql_actions.py`；新交易入口已作隔離測試及真實保存結果等價驗證，正式遷移和生產仍未啟用。
 > **權威範圍**：說明 Claims 到 CVP 的正常路徑、例外分流、人工出口與恢復接點。內容定義服從 [CanonicalViewpoint 设计](./canonical_viewpoint_design.md)，使命與限制服從 [Project Mission Statement](../00-overview/project_mission_statement.md) 和 [Solution Architecture](../00-overview/solution_architecture.md)。具體授權仍以相應 policy／精確人工決定為準，不能拿本文擴權。
 
 ## 目錄
@@ -90,12 +90,12 @@ flowchart TD
 
 ## 4. 入口資格與歷史證明
 
-1. 讀原接受分組及完成紀錄，確認組身份、成員、順序和既有復審 flags；選第一個尚未合法結案的組。已有 completion 須驗證，不能僅看進度百分比。
+1. 讀 SQL 中原接受分組及已登記完成紀錄，確認組身份、成員、順序和既有復審 flags；選第一個尚未合法結案的組。歷史 completion 在明示接納時驗證；正常啟動不重新建立整條證明，也不能僅看進度百分比。
 2. 讀當前 Claim、自身 Evidence、fragment、SourceDocument 和必要 CVP 上下文，核對版本、物理來源 SHA、逐字位置、歸屬、審核身份及真實 hold。來源上下文不能自動升格成本 Claim 的證據。
 3. 核對模型／prompt／policy、实际訂閱可執行檔身份與已驗證 runtime proof；相同身份可復用診斷，不每組重跑診斷模型。
 4. 完成零模型、零 Registry 寫入的資格與 dry-run。這表示「可以執行」，不是組完成。
 
-入口讀到的舊審核可能需要以下**機械證明橋接**，不是重新叫模型審歷史：
+明示歷史接納可能需要以下**機械證明橋接**，不是正常入口遞迴重建或重新叫模型審歷史：
 
 | 現象 | 已有處理方式 | 絕不能用什麼代替 |
 | --- | --- | --- |
@@ -136,11 +136,11 @@ Opus 獨立審核成分、遺漏、觀點修訂及實際提出的關係／結構
 
 1. 程式將真正獲准的有效提案編譯成 package 和 ChangeSet；保存模型、prompt、材料、批准與來源身份，確定精確寫入範圍。
 2. 按現行入口要求完成 fresh backup、備份 SHA／SSD 身份、`pg_restore` 清單、dry-run、前置版本與授權檢查。備份不是審核批准。
-3. 保存 apply intent；受控 store 執行 `apply_plan`。**現有 store 已使用 PostgreSQL transaction**，並記錄 ChangeSet、操作、物件版本與審核歷史。
-4. 驗證實際回讀、預期後像、來源與 Registry 變更邊界；生成 receipt 和逐成分 disposition。真實 SQL 已提交，不能因後續 JSON proof 失敗而再次 apply。
+3. 保存 apply intent；共同 store 在短 PostgreSQL transaction 內執行 `apply_plan`，核對實際 RETURNING 全寫集、後像、依賴、審核／版本歷史和 SQL checkpoint。任何 validation 失敗全部 rollback，成功才 commit。
+4. commit 後用新連線驗實際後像與歷史，不建立整庫回讀 JSON。來源、完整必要依賴及非目標不變門檻由 v2 交易邊界承擔；真實 SQL 已提交，不能因後續 JSON proof 失敗而再次 apply。
 5. 處置完整才轉完整組審計；若仍有 deferred 成分，即使本組其他 CVP 已寫入，也不得標成完成或先啟動下一組。
 
-目前 v1 額外使用整庫前像、指紋、回讀及歷史證明；這是現況，不是必須永久保留的業務需求。它們與 transaction／changelog 的責任收斂見第 13 節。JSON 只記錄或固定輸入，模型審核不會因為讀了 JSON 就修改 SQL。
+v1 的整庫前像、指紋、回讀及遞迴歷史證明已退出執行路徑，不能用作 fallback。v2 交易／changelog 責任見第 13 節。JSON 只記錄或固定模型與來源材料，模型審核不會因為讀了 JSON 就修改 SQL。
 
 ## 7. 暫緩成分的來源調查
 
@@ -262,13 +262,13 @@ Opus 獨立審核成分、遺漏、觀點修訂及實際提出的關係／結構
 | apply 結果不明 | 先查 SQL ChangeSet／物件版本及精確計劃；未知時停，不依 receipt 缺失推定零寫入 |
 | 已 applied、proof 或 readback 文件失敗 | 核對實際已提交內容，只修復／接續驗證；不能 reapply |
 | 完整審計已保存 | 驗 input、版本、來源、raw／cache 及分母，復用已完成審計；不重跑模型來補機械交接錯誤 |
-| 組完成、continuation 失敗 | 消費真實 completion／seed 接續；不重建內容、不重寫該組 |
+| 組完成、交接失敗 | 查 SQL audited checkpoint 和原 flags，接續下一組；不重建 seed、內容或祖先證明，不重寫該組 |
 
 ### 12.2 組放行與運行狀態
 
 放行須同時滿足：原成員逐項有合法處置、实际批准與寫入／回讀一致、物理来源與當前版本成立、完整組审计及异议合法结案、機械检查通过，並保留所有復審 flags。CVP 完成不代表 ArgumentRoute 完成。
 
-下一組讀取前組已審寫入的 Registry。成功 continuation receipt 只證明交接；還要核對新 root 的真實 producer／supervisor／watch／progress，才稱 production running。process 啟動、CLI exit 0、已寫入或 log 沒新字，都不是整組完成證據。
+下一組讀取前組已審寫入的 Registry。v2 從 SQL checkpoint 續跑，不啟動舊 continuation／supervisor；歷史 receipt 只作交接證據，不作當前執行狀態。process 啟動、CLI exit 0、已寫入或 log 沒新字，都不是整組完成證據。
 
 owner 暫停／指定 checkpoint 優先於自動恢復。停止時明確交代「誰需要做哪個決定」，不讓 owner 和程式互相等；普通進度可安靜，真失敗、實際修復、完成或必要操作須報告。
 
@@ -278,19 +278,21 @@ owner 暫停／指定 checkpoint 優先於自動恢復。停止時明確交代�
 
 | 目前缺口 | 不能誤稱為 | 後續設計方向，不是本次新增授權 |
 | --- | --- | --- |
-| deferred 調查會輸出 handoff 並停止；通用修訂入口需另外選擇和核權 | 所有來源不足都已自動修復 | 依原因、有效 standing authority、once budget 決定可用執行器；其餘只送最小人工問題 |
+| deferred 調查的真實證據不足、來源歧義或新範圍 | 所有來源不足都已自動修復 | 現有綁定證據充分且已有 coverage 權限者自動補 CVP；需修改 Claim／證據者仍核精確修訂權限，其餘只送最小人工問題 |
 | 正常 v6 防漏，但已保存舊批次的遺漏不能重新標為 v6 通過 | 一條新 prompt 就修復了全部歷史 | 保留原批准，明示新增 coverage 的正常审核與單次修改身份 |
 | supports 是窄通用政策；其他 CVP 文字／身份／退役有一次性路徑 | owner 曾同意一例便允許未來全部修訂 | 需另定可驗證的通用範圍；先確保不消解真來源衝突或改教授立場 |
-| supervisor 的 patch 範圍遠小於整體工程維護權限 | 已有全自動任意 bug 修復器 | 維持可審 patch、反例、预算及安全交接，不讓模型自行擴權 |
-| v1 已有 SQL transaction／changelog，但正常恢復仍反覆讀取歷史 JSON 證明 | 沒有 database transaction，或 v2 已經上線 | 收斂為 SQL 當前記錄／歷史／checkpoint 與 transaction 內實際寫集驗證 |
+| 程式故障仍需工程診斷；舊 patch supervisor 禁用 | 已有全自動任意 bug 修復器 | 維持可審 patch、反例、预算及安全交接，不讓模型自行擴權或執行舊方案 |
+| v2 已隔離驗證，正式 schema／歷史接納仍未執行 | v2 已經上線 | 正式遷移與啟用分開核對；缺 SQL campaign 停止，不借旧 root 啟動 |
 
-[CVP 交易與恢復設計 v2](./cvp_transaction_workflow_v2.md) 是**待實作目標**：保留本文件的內容判斷和原始模型／來源證據，簡化儲存、validation 和恢復。模型與人工仍在 SQL transaction 外；commit 後的內容審計發現問題，須新修訂，不能 rollback 一個已結束的交易。
+[CVP 交易與恢復設計 v2](./cvp_transaction_workflow_v2.md) 已以共同 store／runner 實作：保留本文件的內容判斷和原始模型／來源證據，簡化儲存、validation 和恢復。模型與人工仍在 SQL transaction 外；commit 後的內容審計發現問題，須新修訂，不能 rollback 一個已結束的交易。
 
-先驗收真實第 57 組保存資料的完整恢復和第 58 組只讀入口，不以新增快取層代替端到端驗收。本次只補文件，不切換 v1／v2、不遷移資料、不恢復生產。
+先驗收真實第 57 組保存資料的完整恢復和第 58 組只讀入口，不以新增快取層代替端到端驗收。隔離驗收和正式啟用分開記錄；生產保持停止，舊執行方案不得使用。
 
 ## 14. 程式與驗證依據
 
 下表是維護本文的查核入口，非可隨手執行的恢復命令；測試涵蓋不等於當前生產已驗收。案例與歷史特批另見 [CVP 特殊案例索引](../90-ops/cvp_special_cases_20261007.md)。
+
+當前執行入口僅為 [共同 SQL flow](../../../backend/pipeline/cvp_sql_flow.py) 及其 [修訂分支](../../../backend/pipeline/cvp_sql_actions.py)。下表的舊 orchestrator 只保留純內容 compiler、驗證器和歸檔讀取；其原執行入口已拒絕，不能據表中鏈接恢復舊流程。
 
 | 流程 | 主要實作／政策 | 反例與行為測試 |
 | --- | --- | --- |

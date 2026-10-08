@@ -93,7 +93,8 @@ def validate_own_source_identity(source, own_sources, store):
     # SourceDocument object ID. Titles/paths never establish source authority.
     alias = source.get('transcript_id')
     matches = []
-    for candidate in store.list_records('source_documents'):
+    candidates=store.sources_by_transcript(alias) if hasattr(store,'sources_by_transcript') else store.list_records('source_documents')
+    for candidate in candidates:
         if not alias or candidate.get('transcript_id') != alias:
             continue
         state = store.get_record_state('source_documents', candidate['source_id'])
@@ -118,7 +119,9 @@ def occurrence_source_ids(claim):
 
 def build_packet(audit_path, store):
     audit = read_artifact(audit_path)
-    links = store.list_records('viewpoint_claim_links')
+    findings=disputes(audit)
+    ids={cid for layer,key,row in findings for cid in (row.get('claim_ids_in_question') if layer=='4' else [row['claim_id']]) or []}
+    links = store.claim_links(ids) if hasattr(store,'claim_links') else store.list_records('viewpoint_claim_links')
 
     def active(collection, identity):
         state = store.get_record_state(collection, identity)
@@ -127,7 +130,7 @@ def build_packet(audit_path, store):
         return state['payload']
 
     items = []
-    for layer, key, row in disputes(audit):
+    for layer, key, row in findings:
         viewpoint = active('canonical_viewpoints', row[key]) if layer == '4' else None
         if viewpoint and viewpoint['current_revision_id'] != row['revision_id']:
             raise ValueError('audited viewpoint revision drift')
@@ -234,8 +237,18 @@ def source_review_adapter(client, cache):
         shared_text_payload=True, shared_record_payload=True)
 
 
-def run(audit_path, output, store, adapters=None, *, final_gpt=False):
-    packet = build_packet(audit_path, store)
+def restricted_packet(packet, only_item_ids):
+    if only_item_ids is None:return packet
+    ids=set(only_item_ids)
+    if not ids or not ids<={i['item_id'] for i in packet['items']}:
+        raise ValueError('adjudication subset is empty or foreign')
+    body={k:v for k,v in packet.items() if k!='artifact_sha256'}
+    body['items']=[i for i in packet['items'] if i['item_id'] in ids]
+    return {**body,'artifact_sha256':sha256_json(body)}
+
+
+def run(audit_path, output, store, adapters=None, *, final_gpt=False, history_roots=None, only_item_ids=None):
+    packet = restricted_packet(build_packet(audit_path, store),only_item_ids)
     write_immutable(output / 'packet.json', packet)
     if not packet['items']:
         raise ValueError('no semantic audit disputes')
@@ -244,7 +257,7 @@ def run(audit_path, output, store, adapters=None, *, final_gpt=False):
         # An unchanged target with a differently worded finding is not a fresh
         # call budget. This never changes an old verdict or grants completion.
         try:
-            assert_no_readjudication(packet, campaign_history(audit_path, output))
+            assert_no_readjudication(packet, campaign_history(audit_path, output) if history_roots is None else history_roots)
         except ValueError as exc:
             write_immutable(output / 'failure.json', {'error':str(exc),
                 'packet_sha256':packet['artifact_sha256'], 'new_model_calls':0})
@@ -263,7 +276,7 @@ def run(audit_path, output, store, adapters=None, *, final_gpt=False):
             adapter.max_request_bytes = 500_000
             raw, _, _ = call_model(adapter, packet, output / f'raw-{label}.json')
             reviews.append(validate_findings(raw, packet))
-        if build_packet(audit_path, store) != packet:
+        if restricted_packet(build_packet(audit_path, store),only_item_ids) != packet:
             raise ValueError('source or Registry changed during adjudication')
         actions = []
         for item in packet['items']:

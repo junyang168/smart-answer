@@ -29,6 +29,9 @@ def test_known_unbounded_paths_are_vetoed_before_io_import_copy_or_database(monk
         'audit': lambda: l.historical_audit_proofs('/absent/audit.json', {}),
         'typed': lambda: v.typed_records(store, 'claims', object, 'claim_id'),
     }
+    if entry=='snapshot':
+        with pytest.raises(RuntimeError,match='runtime is retired'):entries[entry]()
+        return
     with pytest.raises(v.ValidationBudgetExceeded) as caught:
         with v.validation_runtime(limits=v.ROUTINE_VALIDATION_LIMITS):
             if owner == 'phase':
@@ -48,7 +51,8 @@ def test_explicit_legacy_maintenance_gate_grants_no_approval_and_does_not_change
         def fetchall(self): return rows
     from backend.pipeline.source_reconciliation_runtime import ProductionPorts
     with v.ValidationContext('explicit legacy maintenance'):
-        assert ProductionPorts(SimpleNamespace(connect=Connection)).snapshot() == {'claims/C': rows[0][2]}
+        with pytest.raises(RuntimeError,match='runtime is retired'):
+            ProductionPorts(SimpleNamespace(connect=Connection)).snapshot()
 
 
 def test_startup_does_not_prewarm_whole_sql_collections(monkeypatch):

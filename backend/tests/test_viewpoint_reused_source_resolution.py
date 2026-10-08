@@ -42,6 +42,27 @@ def test_exact_unchanged_rejected_subset_no_new_model_calls(tmp_path,monkeypatch
     from backend.pipeline.viewpoint_cvp_campaign_runner import validate_audit
     validate_audit(audit,['c'],['v'],owner_resolution_path=path)
 
+
+def test_composed_reuse_still_requires_actual_full_target_coverage(tmp_path,monkeypatch):
+    audit,path,prior,current=fixture(tmp_path,monkeypatch)
+    # Fixture-only profile. Production composition uses validated_history to
+    # authenticate the saved actual model/config, without executing it.
+    monkeypatch.setattr('backend.pipeline.viewpoint_adjudication_history.validated_history',
+                        lambda root:(read_artifact(root/'packet.json'),{}))
+    out=tmp_path/'composed/resolution.json'
+    result=m.compose(tmp_path/'audit.json',[prior],out,object())
+    assert m.verify_composed(audit,result)=={'3':set(),'4':{'v'}}
+    from backend.pipeline.viewpoint_cvp_campaign_runner import validate_audit
+    validate_audit(audit,['c'],['v'],owner_resolution_path=out)
+    changed=deepcopy(result);changed['parts']=[];changed=seal({k:v for k,v in changed.items() if k!='artifact_sha256'})
+    with pytest.raises(ValueError,match='omitted actual objection'):m.verify_composed(audit,changed)
+    part=read_artifact(result['parts'][0]['binding']['path'])
+    original=read_artifact(part['prior_packet_path'])
+    original['items'][0]['claim']['claim_id']='foreign'
+    Path=__import__('pathlib').Path
+    Path(part['prior_packet_path']).write_text(json.dumps(original))
+    with pytest.raises(ValueError):m.verify_composed(audit,result)
+
 @pytest.mark.parametrize('change',['original_raw','original_audit','source','current_finding','metadata','new_calls'])
 def test_no_proof_drift_or_forged_reuse(change,tmp_path,monkeypatch):
     audit,path,prior,_=fixture(tmp_path,monkeypatch);r=read_artifact(path)

@@ -130,17 +130,23 @@ def capture_for_audit(audit, layer, identity):
     if (version != CONTEXTUAL_SEMANTICS or
             audit['meta'].get('semantic_contract_file_sha256') != hashlib.sha256(CONTRACT_PATH.read_bytes()).hexdigest()):
         raise ValueError('saved audit semantic contract identity/physical SHA drift')
-    return capture(layer, identity, semantic_contract_version=version)
+    scope=audit.get('meta',{}).get('registry_read_scope')
+    return capture(layer, identity, semantic_contract_version=version, **({'sql_scope':scope} if scope else {}))
 
 
-def capture(layer, identity, *, semantic_contract_version='legacy_v1'):
+def capture(layer, identity, *, semantic_contract_version='legacy_v1',sql_scope=None):
     import importlib.util
     import sys
     project = Path(__file__).resolve().parents[2]
     spec = importlib.util.spec_from_file_location('fallback_audit_reader', project/'scripts/audit-library.py')
     reader = importlib.util.module_from_spec(spec); sys.modules[spec.name] = reader
     spec.loader.exec_module(reader)
-    settings = reader.load_settings(); store = reader.Store(settings['KNOWLEDGE_DATABASE_URL'])
+    settings = reader.load_settings()
+    if sql_scope is not None:
+        if sql_scope.get('kind')!='sql_transaction_group' or not sql_scope.get('complete_target_members'):
+            raise ValueError('fallback scope cannot fall back to whole Registry')
+        store=reader.SqlGroupStore(settings['KNOWLEDGE_DATABASE_URL'],set(sql_scope['claim_ids']),set(sql_scope['viewpoint_ids']))
+    else:store = reader.Store(settings['KNOWLEDGE_DATABASE_URL'])
     sources = reader.SourceIndex(store.collection('source_documents'), Path(settings['DATA_BASE_DIR']))
     class Capture:
         preserve_full_context = True
@@ -291,8 +297,9 @@ def apply(audit_path, output):
             if (root/'call-intent.json').exists(): raise ValueError('fallback already attempted; no automatic retry')
             schema=dict(schema,additionalProperties=False,required=list(schema['properties']))
             if len((SYSTEM+prompt+json.dumps(schema)).encode())>500000: raise ValueError('fallback request ceiling')
-            client=CodexSubscriptionClient(model='gpt-6.1-sol',reasoning_effort='high',timeout_seconds=900,
-                executable='/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex')
+            from backend.pipeline.viewpoint_s201129_source_continuation import canonical_runtime
+            executable=canonical_runtime()['identity']['cli']['path']
+            client=CodexSubscriptionClient(model='gpt-6.1-sol',reasoning_effort='high',timeout_seconds=900,executable=executable)
             client._verify_chatgpt_login()
             write_immutable(root/'call-intent.json',{'policy_binding':binding(POLICY),'provider_binding':provider,
                 'prompt_sha256':hashlib.sha256(prompt.encode()).hexdigest(),'maximum_calls':1,'no_retry':True})

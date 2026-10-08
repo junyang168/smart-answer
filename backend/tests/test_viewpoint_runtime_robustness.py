@@ -278,40 +278,11 @@ def test_sigterm_during_fake_model_preserves_the_actual_answer(tmp_path):
 
 
 def test_stop_during_real_campaign_preflight_never_enters_generation(tmp_path, monkeypatch):
-    from types import SimpleNamespace
-    from backend.pipeline import viewpoint_cvp_campaign_runner as campaign
-    from backend.pipeline.viewpoint_campaign_control import graceful_campaign_stop
-    manifest = {'artifact_sha256': 'manifest', 'groups': [{'group_key': 'group', 'claim_ids': ['C']} ]}
-    schedule = {'upstream_manifest_path': str(tmp_path/'manifest.json'), 'completed_groups': [],
-                'schedule': [{'group_key': 'group', 'sequence': 1, 'state': 'pending'}]}
-    for name, value in [('manifest', manifest), ('schedule', schedule), ('inventory', {'claims': []}),
-                        ('seed', {'groups': []}), ('entrance', {})]:
-        (tmp_path/(name+'.json')).write_text(json.dumps(value))
-    args = SimpleNamespace(schedule=tmp_path/'schedule.json', accepted_grouping_sha='manifest',
-        schedule_sha256=campaign.binding(tmp_path/'schedule.json')['file_sha256'],
-        lineage_inventory=tmp_path/'inventory.json', entrance_audit=tmp_path/'entrance.json',
-        completed_proofs=tmp_path/'seed.json', grouping_repository=tmp_path/'grouping',
-        wang_repository=tmp_path/'wang', global_lock=tmp_path/'registry.lock', authorized_by='synthetic',
-        output_root=tmp_path/'out', validation_runtime=False, dry_run=False)
-    args.output_root.mkdir()
-    monkeypatch.setattr(campaign, 'validate_schedule', lambda *a: {'group': manifest['groups'][0]})
-    monkeypatch.setattr(campaign, 'campaign_policy', lambda *a: ({}, {}))
-    monkeypatch.setattr(campaign, 'lineage_preflight', lambda *a: {})
-    monkeypatch.setattr(campaign.subprocess, 'check_output', lambda *a, **k: 'fake-commit')
-    monkeypatch.setattr(campaign, 'qualify', lambda *a: None)
-    monkeypatch.setattr(campaign, 'runner_args', lambda *a: ['fake-runner'])
-    calls = []
-    def command(argv):
-        calls.append(argv)
-        assert argv == ['fake-runner', '--dry-run']
-        os.kill(os.getpid(), signal.SIGTERM)
-    monkeypatch.setattr(campaign, 'command', command)
-    with graceful_campaign_stop(args.output_root):
-        assert campaign.execute(args) == 0
-    assert calls == [['fake-runner', '--dry-run']]
-    state = json.loads((args.output_root/'progress.json').read_text())
-    assert state['status'] == 'paused_at_safe_boundary' and not state['current_group_completed']
-    assert not (args.output_root/'g001/completion.json').exists()
+    # The obsolete orchestration is no longer a supported solution.
+    # Current content validators and SQL action tests carry its safety rules.
+    from backend.pipeline import viewpoint_cvp_campaign_runner as worker
+    with pytest.raises(RuntimeError,match='runtime is retired'):
+        worker.execute(None)
 
 
 def test_revision_storage_authority_survives_unrelated_source_line_shifts():

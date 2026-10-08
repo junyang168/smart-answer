@@ -2,8 +2,8 @@
 
 > **讀者**：Solution architect、Developer、流程負責人。
 > **類型**：規範。
-> **狀態**：當前目標設計；尚未實作、遷移或啟用。生產及定時接管維持暫停。
-> **與代碼對齊**：2026-10-07 核對到 `f5bc361`；下列「已有」能力來自現有 SQL schema 與 store，其餘是待實作設計，沒有新性能實測。
+> **狀態**：當前；SQL 共同交易與恢復入口已實作並完成隔離驗證。正式資料庫尚未遷移、接納或啟用；生產維持停止。舊整庫快照／歷史鏈執行器禁用，不得回退。
+> **與代碼對齊**：2026-10-07 核對本次 `006_cvp_transaction_runs.sql`、`transaction_validation.py`、`cvp_sql_flow.py`、`cvp_sql_actions.py` 及隔離 PostgreSQL 測試；真實保存資料驗收與正式啟用分開記錄。
 > **權威範圍**：CVP 及已授權來源／連接修訂的交易、changelog、執行狀態與恢復；不變更內容判定、授權範圍、模型分工或分組。受 [Solution Architecture](../00-overview/solution_architecture.md) 與 [CanonicalViewpoint 設計](./canonical_viewpoint_design.md) 約束。
 
 ## 1. 設計決定
@@ -31,6 +31,8 @@ JSON 保存模型的精確輸入、原始回答、來源副本、批准與審計
 | 運行紀錄 | `pipeline_runs` | 增加 `cvp_group` stage，以穩定 campaign 身份與原 group key 決定唯一 run ID；不按恢復目錄重新命名 |
 
 `pipeline_runs.status` 沿用 queued/running/succeeded/failed 等運行狀態。`metadata` 保存有版本的分組契約：原成員與順序、`checkpoint`、精確材料與审核引用、ChangeSet IDs、完整審計目標／結果、原復審 flags、停止原因和下一步。checkpoint 只用 `prepared → reviewed → applied → audited`；SQL 成功不等於整組完成。
+
+同一張運行表分別保存 campaign、group、精確 action 和已完成 review；用穩定 ID 按項查詢。group 只帶當前階段，不內嵌全部舊修訂材料或祖先鏈。SQL 登記每個角色／action 的原輸出位置，換目錄不能取得第二份呼叫預算。
 
 模型角色仍沿用既有持久 call intent、原回答及跨 root 一次預算。分組紀錄只指向這些證據，不另造第二個呼叫帳本。`progress.json` 和 completion JSON 如仍供工具顯示，只是可重建輸出，不能與 SQL 各自決定進度。
 
@@ -103,7 +105,9 @@ commit 後的新連線回讀用於确认可見結果與交接審計。它若失�
 | 同一入口兩次 cold preflight | 同一 runner 完成預檢後繼續，dry-run 是該入口的只讀模式 |
 | 用進程內快取與多種 compiled predecessor 解正常恢復 | 不再新增這類層；現有投影工具僅可供明確的歷史遷移使用 |
 
-各種修訂仍有自己的內容權限與 validator。它們輸出相同的材料／批准／ChangeSet 契約後，共用交易與恢復步驟；統一執行器不等於統一或擴大內容授權。既有 v1 保留至 v2 驗收通過，但一個 run 只走一個版本，不雙跑，也不在 v2 失敗時暗中 fallback 到全庫重建。
+各種修訂仍有自己的內容權限與 validator。它們輸出相同的材料／批准／ChangeSet 契約後，共用交易與恢復步驟；統一執行器不等於統一或擴大內容授權。
+
+**舊 solution 不再使用。** 原 campaign／batch 執行、來源與父子續接、逐組 special-case 修復及舊 recovery/watch 的執行入口直接拒絕。沒有環境旗標、路徑判斷或失敗 fallback 可以重新啟用它們。舊 artifacts、模型回答、失敗、預算和歷史驗證的純讀取函式保留；讀取歸檔不等於執行舊流程。
 
 ## 7. 先用第 57 組完成驗收
 
@@ -115,7 +119,7 @@ commit 後的新連線回讀用於确认可見結果與交接審計。它若失�
 4. **真實 rollback 測試**：隔離 PostgreSQL 中覆蓋末條 validation 失敗、歷史寫入失敗、錯誤 WHERE／多改一條、漏副作用、版本不符、真 hold、缺審核或來源、交易中斷及 commit 回覆丟失。失敗時對象／歷史／進度一起不生效，成功且回覆丟失時只接續、不重寫。
 5. **完整結果與耗時**：同一真實保存資料比對准入結果、後像、完整依賴及審計分母；測量冷啟動、同進程下一組與 commit 後恢復的時間、SQL rows、檔案 bytes 和峰值記憶體。正常機械階段沿用現有 64 MiB／5 s 護欄，不提高上限；備份、模型及內容審計另計。局部測試通過不能宣布本里程碑完成。
 
-原 completion 證據不足、實際 SQL 衝突或內容未解決時，接納預覽逐項報告，不能把所有舊資料直接標為成功。完成後才考慮安全續跑；設計、實作、歷史接納與正式恢復是分別可核對的交付，目前只交付本設計。
+原 completion 證據不足、實際 SQL 衝突或內容未解決時，接納預覽逐項報告，不能把所有舊資料直接標為成功。設計、實作、隔離接納驗收、正式遷移與恢復是分別可核對的交付；隔離驗證通過不啟動生產，也不授予新內容修改權限。
 
 ## 8. 實作範圍與代碼依據
 
@@ -124,9 +128,13 @@ commit 後的新連線回讀用於确认可見結果與交接審計。它若失�
 | 代碼依據 | 已核對到的能力或問題 |
 | --- | --- |
 | [SQL migration 001](../../../backend/api/canonical_repository/migrations/001_postgres_authoring_store.sql) | 目前資料、版本、ChangeSet、操作與審核表；具備 changelog 的基礎 |
-| [SQL migration 003](../../../backend/api/canonical_repository/migrations/003_pipeline_runs.sql)／[004](../../../backend/api/canonical_repository/migrations/004_pipeline_run_stages.sql) | 運行表已存在；stage 約束尚無 cvp_group，新增值和 metadata 契約須明示遷移 |
-| [Postgres store](../../../backend/api/canonical_repository/postgres_store.py) | `apply_plan` 已使用 connection transaction、交易鎖、before 版本／SHA、唯一 fingerprint 和同交易歷史；`_assert_change_set_write_ledger` 等僅部分路徑使用。全庫 fingerprint 在冪等查詢前，失效副作用另有 helper，均需收斂 |
-| [Campaign runner](../../../backend/pipeline/viewpoint_cvp_campaign_runner.py) | `validate_completed_seed`、檔案進度及多入口交接仍是目前恢復路徑；需接 SQL checkpoint |
-| [來源完成讀取](../../../backend/pipeline/source_reconciliation_epoch.py)、[連接修訂](../../../backend/pipeline/owner_approved_link_correction.py)、[CVP 續接](../../../backend/pipeline/deferred_claim_cvp_continuation.py) | 原歷史／父子重建邏輯；遷移後退出正常啟動和已完成階段的消费路徑 |
+| [SQL migration 006](../../../backend/api/canonical_repository/migrations/006_cvp_transaction_runs.sql) | 現有運行表增加 `cvp_group` 及精確 group／action／依賴索引；須另作正式遷移 |
+| [Postgres store](../../../backend/api/canonical_repository/postgres_store.py)／[交易驗證](../../../backend/api/canonical_repository/transaction_validation.py) | 原子業務與確定性失效、實際 RETURNING 全寫集、後像與歷史核對、同交易 checkpoint；已提交 ID 優先判斷，錯誤 WHERE／隱藏 trigger 不放行 |
+| [共同 runner](../../../backend/pipeline/cvp_sql_flow.py)／[修訂分支](../../../backend/pipeline/cvp_sql_actions.py) | 正常 CVP、來源／Claim、owner link、窄 supports 及必要 coverage 共用提交與恢復；source Claim 的真實審核事件同交易寫入 |
+| [歷史接納](../../../backend/pipeline/cvp_sql_admission.py) | 明示有預算的移入預覽；stream 物理 SHA 並匹配已提交 SQL 歷史，不解析整庫快照或重跑模型 |
+| [獨立審計](../../../scripts/audit-library.py) | 自己的 scoped SQL 讀取器、完整原 group 與 CVP 成員；報告攜帶實際所審版本 pins，不能由 producer 的 pins 代替 |
+| [舊入口拒絕](../../../backend/pipeline/cvp_retired_runtime.py) | 不依目錄或環境開關，執行前 fail closed；純內容 compiler 和歸檔讀取不擴權 |
+| [交易反例](../../../backend/tests/test_cvp_sql_transaction_postgres.py)／[修訂交易](../../../backend/tests/test_cvp_sql_actions_postgres.py)／[完成契約](../../../backend/tests/test_cvp_sql_checkpoint_contracts.py) | 真實隔離 SQL commit／rollback、lost reply、hold、原成員、後續修訂與禁用舊入口 |
+| [真實保存資料驗收](../../../backend/tests/test_cvp_sql_real_saved_acceptance.py)／[規模驗證](../../../backend/tests/test_cvp_sql_scalability.py) | 前者只讀正式資料、寫隔離資料庫，精確復用原審計輸入；後者固定受影響集合增加無關資料，不能冒充 1,000 篇實測 |
 
-本次文件沒有修改資料庫 schema、程式、內容、原 artifacts 或排程。v2 仍須實作及上述實際驗收，不能把設計的簡化當成已經取得的性能結果。
+新 runner 須指定已接納的 SQL campaign；缺少時停止，不從旧 root 自動導入。`--dry-run` 僅當前組只讀準備，正式執行須明示 `--execute`。schema migration、歷史接納和 production execution 是三個不同操作；本次實作與隔離測試不代表它們已在正式資料庫執行。

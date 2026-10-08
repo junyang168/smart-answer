@@ -37,6 +37,8 @@ def exact_conflict(old, old_findings, current, current_findings):
 
 
 def run(calibration, *, preflight_only=False):
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     from backend.pipeline.viewpoint_audit_owner_resolution import binding
     from backend.pipeline.viewpoint_audit_source_adjudication import build_packet, source_review_adapter, validate_findings

@@ -7,6 +7,8 @@ from backend.pipeline import viewpoint_content_blocked_fallback as m
 from backend.pipeline.viewpoint_resolution_runtime import write_immutable
 
 def fixture(tmp_path, monkeypatch, layer='4', response=None):
+    monkeypatch.setattr('backend.pipeline.viewpoint_s201129_source_continuation.canonical_runtime',
+                        lambda:{'identity':{'cli':{'path':'fixture-only-canonical-no-provider'}}})
     response=response or {'verdict':'same','issue':'none','reason':'own full source supports identity','claim_ids_in_question':[]}
     if layer=='3': response={'verdict':'supported','issue':'none','reason':'own evidence supports claim','quote':'source'}
     schema={'type':'object','properties':{k:{'type':'string'} for k in response},'required':['verdict','issue','reason']}

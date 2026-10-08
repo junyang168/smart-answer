@@ -10,6 +10,22 @@ def packet():
         {'source_id': 's', 'paragraphs': [{'paragraph_key': 'S0001', 'text': '王就是這位彌賽亞。'}]}]}]}
 
 
+def test_new_subset_never_resends_unchanged_known_target(tmp_path,monkeypatch):
+    from backend.api.canonical_repository.postgres_store import sha256_json
+    full=packet();known=deepcopy(full['items'][0]);known['item_id']='4:known:c'
+    full['items'].append(known)
+    full={k:v for k,v in full.items() if k!='artifact_sha256'}
+    full={**full,'artifact_sha256':sha256_json(full)}
+    monkeypatch.setattr(module,'build_packet',lambda *args:full)
+    adapter=Adapter(answer())
+    report=module.run(tmp_path/'audit.json',tmp_path/'out',object(),[adapter],final_gpt=True,
+                      history_roots=[],only_item_ids={'4:v:c'})
+    assert len(adapter.payloads)==1
+    assert [i['item_id'] for i in adapter.payloads[0]['items']]==['4:v:c']
+    assert len(report['actions'])==1
+    with pytest.raises(ValueError):module.restricted_packet(full,{'foreign'})
+
+
 @pytest.mark.parametrize('case', ['registered_alias', 'canonical', 'foreign', 'title_only',
                                   'ambiguous', 'retired', 'notes'])
 def test_own_source_identity_only_accepts_unique_active_registered_sermon_alias(case):

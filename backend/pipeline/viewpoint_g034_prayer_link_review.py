@@ -59,6 +59,8 @@ def postimage(old, claim, evidence):
 
 
 def run():
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     project = Path(__file__).resolve().parents[2]
     if project.name != 'wkp-357-worktree-per-session': raise ValueError('wrong worktree')
     load_dotenv(project/'.env'); store = PostgresKnowledgeStore()

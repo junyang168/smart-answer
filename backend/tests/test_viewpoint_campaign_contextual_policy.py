@@ -45,10 +45,11 @@ def test_real_prepare_command_receives_v5_not_hardcoded_v3(tmp_path,monkeypatch)
 
 
 def test_policy_upgrade_never_relabels_old_model_cache(tmp_path):
-    from backend.pipeline.viewpoint_cvp_recovery_executor import resume_after_repair
-    with pytest.raises(ValueError,match='old model-response'):
-        resume_after_repair(tmp_path,tmp_path,tmp_path,tmp_path,
-            contextual_semantics=True,prior_model_batch=tmp_path/'old-cache')
+    # The obsolete orchestration is no longer a supported solution.
+    # Current content validators and SQL action tests carry its safety rules.
+    from backend.pipeline import viewpoint_cvp_recovery_executor as worker
+    with pytest.raises(RuntimeError,match='runtime is retired'):
+        worker.resume_after_repair(None,None,None,None)
 
 
 @pytest.mark.parametrize('field',['cvp_policy','cvp_policy_sha256','semantic_contract_sha256'])

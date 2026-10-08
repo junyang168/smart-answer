@@ -223,6 +223,8 @@ def semantic_postimage(package):
 
 
 def run(root, apply, backup):
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     store = PostgresKnowledgeStore()
     with exclusive_cvp_run_lock({'global_lock_path': str(root.parent / 'registry-cvp.lock')}):
         states = snapshot(store)

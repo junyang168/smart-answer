@@ -140,6 +140,8 @@ def package_for(states, packet, proposal, report, root):
 
 
 def run(root, apply=False, campaign=None):
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     store = PostgresKnowledgeStore()
     with exclusive_cvp_run_lock({'global_lock_path': str(BASE/'registry-cvp.lock')}):
         states = snapshot(store); packet = prepare(states)

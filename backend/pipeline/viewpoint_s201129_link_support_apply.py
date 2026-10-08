@@ -216,6 +216,8 @@ def restore_exact_child_postimages(records,plan,old):
 
 
 def run():
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     if ROOT.exists():raise ValueError('support apply already attempted; inspect receipts, no replay')
     if subprocess.check_output(['git','status','--porcelain'],cwd=source.PROJECT,text=True).strip():
         raise ValueError('commit store and source proof consumers before applying')

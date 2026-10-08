@@ -151,6 +151,8 @@ def canonical_runtime():
 
 
 def run():
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     if ROOT.exists():
         raise ValueError('source continuation already attempted; inspect raw receipts, no replay')
     package, _, _ = epoch.verified_applied(epoch.binding(),repair.PostgresKnowledgeStore())

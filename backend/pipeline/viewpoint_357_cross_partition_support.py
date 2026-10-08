@@ -689,6 +689,8 @@ owner_source_ambiguity记录用户对促进/维持的明确方向：教授未讲
 
 
 def main():
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output-root', type=Path, required=True)
     parser.add_argument('--amendment', type=Path, required=True)

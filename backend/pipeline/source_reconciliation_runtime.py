@@ -146,6 +146,8 @@ class ProductionPorts:
         return result
 
     def snapshot(self) -> dict:
+        from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+        reject_legacy_execution()
         from backend.pipeline.viewpoint_validation_context import require_explicit_history_maintenance
         require_explicit_history_maintenance('whole Registry payload snapshot')
         with self.store.connect() as conn, conn.cursor() as cursor:
@@ -241,6 +243,8 @@ class ProductionPorts:
         return True
 
     def apply(self, package: dict, plan: dict, frozen: dict) -> dict:
+        from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+        reject_legacy_execution()
         self._environment_guard()
         validate_package(package)
         lock = {"global_lock_path": str(workspace().parent / "cvp-production-357/registry-cvp.lock")}

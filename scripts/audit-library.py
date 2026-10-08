@@ -174,6 +174,7 @@ class Store:
             ["psql", self.database_url, "-At", "-v", "ON_ERROR_STOP=1", "-c", sql],
             capture_output=True,
             text=True,
+            env={**os.environ,'PGOPTIONS':os.environ.get('PGOPTIONS','')+' -c default_transaction_read_only=on'},
         )
         if result.returncode != 0:
             raise SystemExit(f"psql failed: {result.stderr.strip()}")
@@ -259,6 +260,114 @@ class Store:
             "where cs.status='applied' and ov.object_id is null "
             ") q order by q.kind, q.collection, q.object_id"
         )
+
+
+class SqlGroupStore(Store):
+    """Independent current-graph reader for the SQL transaction flow.
+
+    Does not import backend models or trust its material projection. It reads
+    exact current SQL rows and every target CVP member, then reads original files
+    itself. Previous/superseded IDs resolve by SQL identity, not ancestor payloads.
+    """
+    @staticmethod
+    def literal(value):
+        return "'"+str(value).replace("'","''")+"'"
+
+    def id_array(self,ids):
+        return 'ARRAY['+','.join(self.literal(i) for i in sorted(ids))+']::text[]'
+
+    def __init__(self,database_url,claim_ids,viewpoint_ids):
+        super().__init__(database_url)
+        self.scoped_ids=set(claim_ids)|set(viewpoint_ids)
+        self.read_pins={}
+        self.external_ids=set();self.names=set();seen=set();bytes_read=0;started=time.monotonic()
+        roots=self._query("SELECT json_build_object('id',edge_id)::text FROM wang_knowledge.edges "
+            "WHERE edge_collection='viewpoint_claim_links' AND retired_at IS NULL AND (to_id=ANY("+
+            self.id_array(claim_ids)+") OR from_id=ANY("+self.id_array(viewpoint_ids)+"))")
+        self.scoped_ids.update(r['id'] for r in roots)
+        for cid in claim_ids:
+            self.scoped_ids.update(r['id'] for r in self._query(
+                "SELECT json_build_object('id',object_id)::text FROM wang_knowledge.objects "
+                "WHERE collection='evidence_steps' AND retired_at IS NULL AND payload->'produced_claim_ids' @> "+
+                self.literal(json.dumps([cid]))+'::jsonb'))
+        while self.scoped_ids-seen:
+            wanted=self.scoped_ids-seen;seen.update(wanted)
+            rows=self._query("SELECT json_build_object('c',collection,'id',object_id,'revision',revision,"
+                             "'sha',content_sha256,'retired',retired_at IS NOT NULL,'payload',payload)::text "
+                             "FROM wang_knowledge.objects WHERE object_id=ANY("+self.id_array(wanted)+")")
+            views=[]
+            for row in rows:
+                semantic={k:v for k,v in row['payload'].items() if k!='revision'}
+                digest=hashlib.sha256(json.dumps(semantic,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+                if digest!=row['sha']:raise ValueError('independent current SQL payload SHA drift')
+                self.read_pins[row['c'],row['id']]=[row['revision'],row['sha'],row['retired']]
+                self.names.add(row['c']);payload=row['payload'];bytes_read+=len(json.dumps(payload).encode())
+                # Source IDs include registered notes_manuscript keys with
+                # spaces/Unicode. They are identities, not UUID-shaped IDs;
+                # using the reference-report heuristic here omits real sources.
+                def source_ids(value):
+                    if isinstance(value,dict):
+                        for field,child in value.items():
+                            if field=='source_id' and isinstance(child,str):yield child
+                            elif isinstance(child,(dict,list)):yield from source_ids(child)
+                    elif isinstance(value,list):
+                        for child in value:yield from source_ids(child)
+                self.scoped_ids.update(source_ids(payload))
+                for field,oid in walk_references(payload,{row['id']}):
+                    if field.startswith(('provenance.','source_repair_application.','generation_provenance.')) or field.rsplit('.',1)[-1].startswith(('previous_','supersedes_')):
+                        self.external_ids.add(oid)
+                    else:self.scoped_ids.add(oid)
+                if row['c']=='canonical_viewpoints':views.append(row['id'])
+            if views:
+                self.scoped_ids.update(r['id'] for r in self._query(
+                    "SELECT json_build_object('id',edge_id)::text FROM wang_knowledge.edges "
+                    "WHERE edge_collection='viewpoint_claim_links' AND retired_at IS NULL AND from_id=ANY("+
+                    self.id_array(views)+")"))
+            if bytes_read>64*1024**2 or time.monotonic()-started>5:
+                raise ValueError('independent SQL group read exceeds budget; no whole-store fallback')
+        # A current record may name an old approval/predecessor by identity.
+        # Pin its exact SQL generation without traversing ancestor payloads.
+        # This is a version check, not a new content approval or historical audit.
+        for row in self._query("SELECT json_build_object('c',collection,'id',object_id,'revision',revision,"
+                               "'sha',content_sha256,'retired',retired_at IS NOT NULL)::text "
+                               "FROM wang_knowledge.objects WHERE object_id=ANY("+self.id_array(self.external_ids)+")"):
+            self.read_pins[row['c'],row['id']]=[row['revision'],row['sha'],row['retired']]
+        self.read_metrics={'payload_bytes':bytes_read,'object_ids':len(self.scoped_ids),'seconds':time.monotonic()-started,
+                           'historical_snapshot_reads':0}
+
+    def collection(self,name,*,include_retired=False):
+        key=f'{name}:{include_retired}'
+        if key not in self._cache:
+            self._cache[key]=self._query("SELECT json_build_object('object_id',object_id,'review_status',review_status,"
+                "'revision',revision,'content_sha256',content_sha256,'retired',retired_at IS NOT NULL,'payload',payload)::text "
+                "FROM wang_knowledge.objects WHERE collection="+self.literal(name)+
+                " AND object_id=ANY("+self.id_array(self.scoped_ids)+")"+
+                ('' if include_retired else ' AND retired_at IS NULL')+' ORDER BY object_id')
+            for row in self._cache[key]:
+                if self.read_pins.get((name,row['object_id'])) != [row['revision'],row['content_sha256'],row['retired']]:
+                    raise ValueError('current SQL changed during independent audit; no mixed version judgement')
+        return self._cache[key]
+
+    def collection_names(self):return sorted(self.names)
+
+    def retired_ids(self):
+        rows=self._query("SELECT json_build_object('c',collection,'i',object_id)::text FROM wang_knowledge.objects "
+                         "WHERE retired_at IS NOT NULL AND object_id=ANY("+self.id_array(self.scoped_ids|self.external_ids)+")")
+        return {(r['c'],r['i']) for r in rows}
+
+    def external_reference_ids(self):
+        return self._query("SELECT json_build_object('id',object_id,'collection',collection)::text FROM wang_knowledge.objects "
+                    "WHERE retired_at IS NULL AND object_id=ANY("+self.id_array(self.external_ids)+")")
+
+    def change_set_readback_findings(self):
+        return self._query("SELECT json_build_object('kind','operation_version_mismatch','change_set_id',co.change_set_id,"
+            "'collection',co.collection,'object_id',co.object_id,'revision',co.after_revision)::text "
+            "FROM wang_knowledge.objects o JOIN wang_knowledge.change_operations co "
+            "ON (co.collection,co.object_id,co.after_revision)=(o.collection,o.object_id,o.revision) "
+            "JOIN wang_knowledge.change_sets cs USING(change_set_id) LEFT JOIN wang_knowledge.object_versions v "
+            "ON (v.collection,v.object_id,v.revision,v.change_set_id,v.content_sha256)="
+            "(co.collection,co.object_id,co.after_revision,co.change_set_id,co.after_sha256) "
+            "WHERE cs.status='applied' AND v.object_id IS NULL AND o.object_id=ANY("+self.id_array(self.scoped_ids)+")")
 
 
 # ---------------------------------------------------------------------------
@@ -736,6 +845,8 @@ def audit_coverage(store: Store, sources: SourceIndex) -> dict[str, Any]:
                     own.add(value)
             own_ids_by_object[(name, row["object_id"])] = own
     retired_ids = {object_id for _, object_id in store.retired_ids()}
+    if isinstance(store,SqlGroupStore):
+        for identity in store.external_reference_ids():universe[identity['id']].add(identity['collection'])
 
     resolved_by_field: Counter[str] = Counter()
     unresolved_by_field: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -2242,6 +2353,8 @@ def render_report(
         f"{meta['claims']:,} 條主張 · {meta['viewpoints']} 個觀點",
         f"範圍        {meta['scope']}"
         + (
+            "（SQL 當前組：原 Claim、全部 retained/new CVP 成員及完整來源依賴；不是全庫審計）"
+            if meta.get('registry_read_scope',{}).get('kind')=='sql_transaction_group' else
             f"（run ledger 說這一輪 ingest 成功的來源；另有 {meta['sources_out_of_scope']} 份更早批次的沒查。"
             "第 2 層例外：依賴是全庫的，範圍縮不了）"
             if meta["scope"] == "current-run"
@@ -2446,6 +2559,8 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument("--out", type=Path, default=None, help="報告輸出目錄")
+    parser.add_argument('--sql-group-scope',action='store_true',
+        help='Read every requested Claim and target CVP member directly from indexed SQL; no historical payload traversal')
     parser.add_argument(
         "--status-file",
         type=Path,
@@ -2495,7 +2610,11 @@ def main(argv: list[str] | None = None) -> int:
         scope=args.scope,
         model=args.model,
     )
-    store = Store(database_url)
+    if args.sql_group_scope:
+        if args.scope!='all' or not args.claim_ids:
+            raise ValueError('SQL group audit requires explicit complete Claim/CVP population')
+        store=SqlGroupStore(database_url,{x for x in args.claim_ids.split(',') if x},{x for x in args.viewpoint_ids.split(',') if x})
+    else:store = Store(database_url)
     documents = store.collection("source_documents")
     in_scope: set[str] | None = None
     if args.scope == "current-run":
@@ -2591,6 +2710,11 @@ def main(argv: list[str] | None = None) -> int:
         if hashlib.sha256(args.reconsider_audit.read_bytes()).hexdigest() != reconsidered_binding['file_sha256']:
             raise ValueError('original independent audit changed during reconsideration')
         meta['reconsidered_audit'] = reconsidered_binding
+    if args.sql_group_scope:
+        meta['registry_read_scope']={'kind':'sql_transaction_group','claim_ids':[x for x in args.claim_ids.split(',') if x],
+                                     'viewpoint_ids':[x for x in args.viewpoint_ids.split(',') if x],'complete_target_members':True,
+                                     'read_pins':[{'collection':k[0],'object_id':k[1],'pin':v} for k,v in sorted(store.read_pins.items())],
+                                     'metrics':store.read_metrics}
     queue = build_human_queue(layers)
     report = render_report(layers, meta, len(queue["items"]))
 

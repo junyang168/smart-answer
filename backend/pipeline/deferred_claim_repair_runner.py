@@ -80,6 +80,8 @@ def prepare(campaign, output, owner, ports, schema_rejection=None):
 
 
 def main():
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--campaign-root",type=Path,required=True)
     parser.add_argument("--output-root",type=Path,required=True)

@@ -91,13 +91,11 @@ def test_gate_rejects_missing_stale_or_non_scalable_measurements(report,mutation
 
 
 def test_absent_acceptance_stops_before_old_preflight_backup_or_process(tmp_path, monkeypatch):
-    from backend.pipeline import viewpoint_cvp_recovery_executor as executor
-    monkeypatch.setattr(executor,'run_logged',lambda *a,**kw:pytest.fail('no preflight/model/backup/start allowed'))
-    output=tmp_path/'campaign'
-    with pytest.raises(ValueError,match='scalability acceptance missing'):
-        executor.start_prepared_campaign(tmp_path/'old',output,tmp_path/'attempt',tmp_path/'recovery',
-                                          'not-invoked',['runner','--output-root',str(output)],{})
-    assert not output.exists() and not (tmp_path/'attempt').exists()
+    # The obsolete orchestration is no longer a supported solution.
+    # Current content validators and SQL action tests carry its safety rules.
+    from backend.pipeline import viewpoint_cvp_recovery_executor as worker
+    with pytest.raises(RuntimeError,match='runtime is retired'):
+        worker.start_prepared_campaign(None,None,None,None,None,None,None)
 
 
 def test_relative_path_cannot_select_other_acceptance():

@@ -613,6 +613,8 @@ def prepare(parent, adjudication, link_id, quote, ports):
 
 
 def execute(root, context, ports):
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     packet = body(read(root/"packet.json")); before = c.index(read(root/"before.json")["records"])
     if not (root/"apply-intent.json").exists():
         if ports.snapshot() != before: raise ValueError("whole Registry changed before child review")
@@ -698,6 +700,8 @@ def initialize_normal_runtime(root, resolve=None, *, reissue_quote=None, reissue
 
 
 def main():
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-root",type=Path,required=True)
     parser.add_argument("--adjudication-root",type=Path,required=True)

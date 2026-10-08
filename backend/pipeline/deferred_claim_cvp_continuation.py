@@ -336,6 +336,8 @@ def verify_proof(campaign_root,path,claim_ids,store=None):
 
 
 def run(context,claim_root,ports, *, prewrite_conflict_log=None):
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     from backend.pipeline.viewpoint_cvp_recovery_executor import load_campaign,resume_after_repair
     from backend.pipeline.viewpoint_scope_packet_runner import registry_context
     campaign = Path(context["campaign_root"]); cfg,_,_,_ = load_campaign(campaign)

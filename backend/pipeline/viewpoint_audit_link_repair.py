@@ -243,6 +243,8 @@ def run(campaign, root, *, owner_retire=False, owner_identity_g033=False, storag
         human_review_from=None, human_handoff=None, human_decisions=(), relation_review_from=None,
         saved_source_assessment_root=None, owner_g037_context_from=None, owner_g037_claim_statement=False,
         owner_g037_claim_condition=False, owner_g037_secondary_from=None):
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     store = PostgresKnowledgeStore()
     global_lock={'global_lock_path':str(BASE/'registry-cvp.lock')}
     if owner_g037_secondary_from and any((owner_retire,owner_identity_g033,storage_review_from,human_review_from,human_handoff,human_decisions,relation_review_from,saved_source_assessment_root,owner_g037_context_from,owner_g037_claim_statement,owner_g037_claim_condition)):

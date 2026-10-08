@@ -560,6 +560,8 @@ def validate_raw(root: Path, stage: str, packet: dict) -> dict:
 
 
 def main() -> None:
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--prepare-only", action="store_true")

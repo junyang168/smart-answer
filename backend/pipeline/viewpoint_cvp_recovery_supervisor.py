@@ -207,6 +207,8 @@ def watcher_path(root, recovery_root, suffix):
 
 
 def watch(root, pid, recovery_root, executable, *, table=process_table, sleep=time.sleep, interval=1):
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     if PROJECT_ROOT.name != EXPECTED_WORKTREE or root.parent != recovery_root.parent:
         raise ValueError("recovery must stay in #357 worktree and sibling campaign staging roots")
     recovery_root.mkdir(parents=True, exist_ok=True)

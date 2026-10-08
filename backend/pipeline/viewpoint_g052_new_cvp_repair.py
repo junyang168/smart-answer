@@ -232,6 +232,8 @@ def verify_proof(campaign_root,path,claim_ids,store=None):
 
 
 def complete_saved_audit():
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     """One independent zero-call/zero-write proof handoff, never rerun repair."""
     from backend.pipeline.viewpoint_s201129_source_continuation import canonical_runtime
     from backend.pipeline.viewpoint_cvp_recovery_executor import resume_after_repair
@@ -270,6 +272,8 @@ def complete_saved_audit():
 
 
 def run(*,recover_storage_shape=False):
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     from backend.pipeline.viewpoint_s201129_source_continuation import canonical_runtime
     from backend.pipeline.viewpoint_cvp_recovery_supervisor import process_table,remaining_producers,current_job_process_ids
     from backend.pipeline.viewpoint_cvp_recovery_executor import run_logged,load_campaign,resume_after_repair,PYTHON

@@ -233,6 +233,11 @@ def test_startup_gate_reuses_actual_owned_runtime_and_precedes_apply(tmp_path,mo
             if stop_before_apply:raise ValueError('owner stop')
             self.released=True
     args._startup_gate=Gate()
+    from backend.pipeline.cvp_retired_runtime import legacy_runtime_is_retired
+    if legacy_runtime_is_retired():
+        with pytest.raises(RuntimeError,match='runtime is retired'):module.execute(args)
+        assert observed==[]
+        return
     with contexts.validation_runtime() as pool:
         with pytest.raises(ValueError,match='owner stop' if stop_before_apply else 'offline test stops'):
             module.execute(args)

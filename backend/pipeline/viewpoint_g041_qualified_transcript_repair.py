@@ -401,6 +401,8 @@ def apply_reviewed(root=APPLICATION_ROOT):
 
 
 def run(root, review=False):
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     if root != ROOT:
         raise ValueError('one exact independent qualifier root required')
     if subprocess.check_output(['git','status','--porcelain'],cwd=old.PROJECT,text=True).strip():

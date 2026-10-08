@@ -78,6 +78,9 @@ def validate_audit(audit, claim_ids, viewpoint_ids, *, owner_resolution_path=Non
         elif read(owner_resolution_path).get('schema_version') == 'wang_exact_reused_gpt_source_resolution_v1':
             from backend.pipeline.viewpoint_reused_source_resolution import verify
             resolved_by_layer = verify(audit,read(owner_resolution_path))
+        elif read(owner_resolution_path).get('schema_version') == 'wang_exact_composed_gpt_source_resolution_v2':
+            from backend.pipeline.viewpoint_reused_source_resolution import verify_composed
+            resolved_by_layer = verify_composed(audit,read(owner_resolution_path))
         else:
             resolved_by_layer['4'] = validate_resolution(audit, owner_resolution_path)
     for layer, expected, id_key in (("3", set(claim_ids), "claim_id"), ("4", set(viewpoint_ids), "viewpoint_id")):
@@ -435,7 +438,7 @@ def initialize_validation(args):
             'model_calls': 0, 'Registry_writes': 0}
 
 
-def validate_completed_seed(seed, groups, completed_groups):
+def validate_completed_seed(seed, groups, completed_groups, *, binding_verifier=None):
     """One startup's exact completed inputs; no cross-startup approval cache.
 
     Preserve every original group and semantic gate. Repeated references to
@@ -454,7 +457,7 @@ def validate_completed_seed(seed, groups, completed_groups):
                 raise ValueError('conflicting completed-group evidence SHA')
             pins[pin['path']]=pin
     for path,pin in pins.items():
-        if binding(path)!=pin:
+        if (binding_verifier or binding)(path)!=pin:
             raise ValueError('completed-group evidence SHA drift')
     from backend.pipeline.viewpoint_g035_temporary_audit import validate_completion_disclosure
     documents={}
@@ -477,6 +480,8 @@ def validate_completed_seed(seed, groups, completed_groups):
 
 
 def execute(args):
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     if binding(args.schedule)["file_sha256"] != args.schedule_sha256:
         raise ValueError("approved schedule file SHA mismatch")
     schedule = read(args.schedule)
@@ -657,41 +662,8 @@ def execute(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    for key in ("schedule", "lineage-inventory", "completed-proofs", "grouping-repository", "entrance-audit", "output-root", "wang-repository", "global-lock"):
-        parser.add_argument("--" + key, type=Path, required=True)
-    for key in ("schedule-sha256", "accepted-grouping-sha", "authorized-by"):
-        parser.add_argument("--" + key, required=True)
-    parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument('--completed-source-repair',type=Path,action='append')
-    parser.add_argument('--completed-source-predecessor',type=Path,action='append',
-                        help='explicit compiled SQL-checked archived predecessor; no automatic compilation')
-    parser.add_argument('--random-spot-check-policy',type=Path)
-    parser.add_argument('--cvp-policy',type=Path)
-    parser.add_argument('--cvp-policy-sha256')
-    parser.add_argument('--semantic-contract-sha256')
-    parser.add_argument('--validation-runtime', action='store_true',
-                        help='one runtime for authenticated historical proofs; live checks and write gates unchanged')
-    parser.add_argument('--startup-handoff',type=Path,
-                        help='pause in THIS zero-call preflight process for bound launcher gates; no second cold start')
-    parser.add_argument('--stop-after-sequence',type=int,
-                        help='stop only after this group has real write/readback/audit completion')
-    args = parser.parse_args()
-    args.output_root.mkdir(parents=True, exist_ok=True)
-    with (args.output_root / "campaign.lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        from backend.pipeline.viewpoint_campaign_control import graceful_campaign_stop
-        with graceful_campaign_stop(args.output_root):
-            if args.startup_handoff is not None:
-                from backend.pipeline.viewpoint_startup_handoff import ProducerGate
-                args._startup_gate = ProducerGate(args.startup_handoff,args.output_root,sys.argv[1:])
-            from backend.pipeline.viewpoint_completed_predecessors import predecessor_inputs
-            with predecessor_inputs([binding(p) for p in args.completed_source_predecessor or []]):
-                if args.validation_runtime:
-                    from backend.pipeline.viewpoint_validation_context import validation_runtime, ROUTINE_VALIDATION_LIMITS
-                    with validation_runtime(limits=ROUTINE_VALIDATION_LIMITS):
-                        return execute(args)
-                return execute(args)
+    from backend.pipeline.cvp_sql_flow import main as sql_main
+    return sql_main()
 
 
 if __name__ == "__main__":

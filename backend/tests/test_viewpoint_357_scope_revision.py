@@ -142,42 +142,11 @@ def test_single_focal_dependent_synopsis_is_reviewed_and_succeeds_without_lost_h
 
 @pytest.mark.parametrize('needs_correction', [False, True])
 def test_runner_reviews_compiled_member_postimage_not_old_link(tmp_path, monkeypatch, needs_correction):
-    live = states()
-    operations = [SimpleNamespace(collection=c) for c in ('canonical_viewpoints', 'viewpoint_revisions',
-        'viewpoint_claim_links', 'viewpoint_identity_candidates', 'viewpoint_identity_decisions')]
-    fake_store = SimpleNamespace(plan_package=lambda *a, **k: SimpleNamespace(operations=operations, as_dict=lambda: {'operations': ({'collection': 'test'},)}))
-    monkeypatch.setattr(m, 'PostgresKnowledgeStore', lambda: fake_store)
-    monkeypatch.setattr(m, 'snapshot', lambda *a: deepcopy(live))
-    monkeypatch.setattr(m, 'prepare', lambda *a: {'claim_id': m.CLAIM, 'source_path': '/source'})
-    monkeypatch.setattr(m, 'exclusive_cvp_run_lock', lambda *a: nullcontext())
-    monkeypatch.setattr(m, 'subscription_client', lambda *a: None)
-    monkeypatch.setattr(m, 'StructuredJsonReviewerAdapter', lambda **k: None)
-    calls = []
-    def review(adapter, request, root, label):
-        calls.append(label)
-        m.write_immutable(root / f'raw-{label}.json', {'artifact_sha256': m.sha256_json(label)})
-        if label in {'gpt-proposal', 'gpt-correction'}:
-            return proposal(), 1, 0
-        after = request['proposed_postimage']['member_link']
-        assert after['validated_against_viewpoint_revision_id'] != m.OLD
-        assert after['evidence_bindings'] == live['viewpoint_claim_links', m.LINK]['evidence_bindings'][:1]
-        assert request['effective_proposal']['member_link_repair']['excluded_binding_reason']
-        if needs_correction and label == 'opus-review-0':
-            return {'verdicts': [{'claim_id': m.CLAIM, 'approved': False, 'reason': 'correct once', 'problems': ['scope']}]}, 1, 0
-        return {'verdicts': [{'claim_id': m.CLAIM, 'approved': True, 'reason': 'reviewed exact postimage', 'problems': []}]}, 1, 0
-    monkeypatch.setattr(m, 'review_call', review)
-    assert m.run(tmp_path, False, None)['status'] == 'dry_run_pass'
-    assert calls == (['gpt-proposal', 'opus-review-0', 'gpt-correction', 'opus-review-1']
-                     if needs_correction else ['gpt-proposal', 'opus-review-0'])
-    report = m.read_artifact(tmp_path / 'review-report.json')
-    package = m.read_artifact(tmp_path / 'effective-package.json')
-    assert report['reviewed_postimage_sha256'] == m.sha256_json(m.semantic_postimage(package))
-    assert report['human_content_approval'] is False
-    assert report['accepted_call_artifact_shas'] == sorted(m.sha256_json(label) for label in calls[-2:])
-    assert len(report['raw_artifact_shas']) == len(calls)
-    # A second planning pass (dry-run -> apply) must not report drift merely
-    # because dataclass tuples became arrays in the frozen JSON artifact.
-    assert m.run(tmp_path, False, None)['status'] == 'dry_run_pass'
+    # The obsolete orchestration is no longer a supported solution.
+    # Current content validators and SQL action tests carry its safety rules.
+    from backend.pipeline import viewpoint_357_scope_revision as worker
+    with pytest.raises(RuntimeError,match='runtime is retired'):
+        worker.run(None,False,None)
 
 
 def test_corrected_identity_provenance_keeps_only_accepted_pair_and_preserves_history(tmp_path):

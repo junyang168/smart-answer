@@ -159,6 +159,12 @@ def test_owner_disposition_and_same_attempt_never_edit_or_restart(repo, tmp_path
     p = {"decision": "needs_owner", "reason": "true content dispute", "changes": []}
     attempt = attempt_dir(tmp_path, p)
     monkeypatch.setattr(m, "apply_and_commit", lambda *a: pytest.fail("no code edits"))
+    from backend.pipeline.cvp_retired_runtime import legacy_runtime_is_retired
+    if legacy_runtime_is_retired():
+        with pytest.raises(RuntimeError, match="runtime is retired"):
+            m.execute(p, {}, attempt, {"fingerprint": "once"}, tmp_path, "codex")
+        assert not (attempt / "executor-start.json").exists()
+        return
     result = m.execute(p, {}, attempt, {"fingerprint": "once"}, tmp_path, "codex")
     assert result["status"] == "needs_owner"
     with pytest.raises(ValueError, match="already attempted"):
@@ -293,6 +299,12 @@ def test_prepared_seed_handoff_cannot_skip_dryrun_or_change_output(tmp_path, mon
     monkeypatch.setattr(m, 'run_logged', fail_preflight)
     monkeypatch.setattr(supervisor, 'process_table', lambda: {})
     (tmp_path/'attempt').mkdir()
+    from backend.pipeline.cvp_retired_runtime import legacy_runtime_is_retired
+    if legacy_runtime_is_retired():
+        with pytest.raises(RuntimeError,match='runtime is retired'):
+            m.start_prepared_campaign(tmp_path/'old',output,tmp_path/'attempt',tmp_path/'recovery','codex',args,{})
+        assert calls==[]
+        return
     with pytest.raises(ValueError, match='output identity drift'):
         m.start_prepared_campaign(tmp_path/'old', tmp_path/'foreign', tmp_path/'attempt',
                                   tmp_path/'recovery', 'codex', args, {})
@@ -319,6 +331,11 @@ def test_repaired_owner_checkpoint_never_preflights_or_starts_next_group(tmp_pat
     monkeypatch.setattr(m,'verify_group_audit',lambda *a,**k:proof)
     monkeypatch.setattr(m,'continuation_inputs',lambda *a,**k:pytest.fail('no next-group seed/start'))
     monkeypatch.setattr(m,'run_logged',lambda *a,**k:pytest.fail('no next-group preflight/provider/start'))
+    from backend.pipeline.cvp_retired_runtime import legacy_runtime_is_retired
+    if legacy_runtime_is_retired():
+        with pytest.raises(RuntimeError,match='runtime is retired'):
+            m.resume_after_repair(root,attempt,tmp_path/'recovery','unused',saved_audit_path=tmp_path/'audit.json')
+        return
     result=m.resume_after_repair(root,attempt,tmp_path/'recovery','unused',saved_audit_path=tmp_path/'audit.json')
     assert result['status']=='owner_validation_checkpoint'
     assert result['completed_group_proof']==proof and result['no_next_group_started']
@@ -356,6 +373,12 @@ def test_saved_audit_component_is_verified_once_not_twice(tmp_path, monkeypatch,
     monkeypatch.setattr(exception,'validate',lambda _:[])
     monkeypatch.setattr(m,'run_logged',lambda *a,**kw:pytest.fail('no provider/startup'))
     options=dict(saved_audit_path=audit,component_resolution_path=proof_path)
+    from backend.pipeline.cvp_retired_runtime import legacy_runtime_is_retired
+    if legacy_runtime_is_retired():
+        with pytest.raises(RuntimeError,match='runtime is retired'):
+            m.resume_after_repair(root,attempt,tmp_path/'recovery','unused',**options)
+        assert calls==[] and audits==[]
+        return
     if rejected:
         with pytest.raises(ValueError,match='component proof drift'):
             m.resume_after_repair(root,attempt,tmp_path/'recovery','unused',**options)
@@ -378,6 +401,11 @@ def test_new_audit_rejects_bad_component_before_provider(tmp_path, monkeypatch):
     def reject(*args):raise ValueError('component proof drift')
     monkeypatch.setattr(component,'verify_proof',reject)
     monkeypatch.setattr(m,'run_logged',lambda *a,**kw:pytest.fail('no provider/startup'))
+    from backend.pipeline.cvp_retired_runtime import legacy_runtime_is_retired
+    if legacy_runtime_is_retired():
+        with pytest.raises(RuntimeError,match='runtime is retired'):
+            m.resume_after_repair(root,attempt,tmp_path/'recovery','unused',component_resolution_path=tmp_path/'component.json')
+        return
     with pytest.raises(ValueError,match='component proof drift'):
         m.resume_after_repair(root,attempt,tmp_path/'recovery','unused',
                               component_resolution_path=tmp_path/'component.json')
@@ -426,6 +454,12 @@ def test_restart_requires_backup_dryrun_and_unique_real_process(tmp_path, monkey
         assert alive(pid)
         startup.save(attempt/'startup-release-consumed.json',{'test_double':True})
     monkeypatch.setattr(startup,'wait_consumed',consumed)
+    from backend.pipeline.cvp_retired_runtime import legacy_runtime_is_retired
+    if legacy_runtime_is_retired():
+        with pytest.raises(RuntimeError,match='runtime is retired'):
+            m.resume_after_repair(root,attempt,recovery,'chosen-codex')
+        assert calls==[] and releases==[]
+        return
     if active:
         with pytest.raises(ValueError, match="producer active"):
             m.resume_after_repair(root, attempt, recovery, "chosen-codex")
@@ -465,6 +499,12 @@ def test_bad_runtime_stops_before_background_launch_and_retains_reason(tmp_path,
     def reject(*a):
         raise ValueError('stale executable; not an account entitlement claim')
     monkeypatch.setattr(m, 'verify_runtime', reject)
+    from backend.pipeline.cvp_retired_runtime import legacy_runtime_is_retired
+    if legacy_runtime_is_retired():
+        with pytest.raises(RuntimeError,match='runtime is retired'):
+            m.resume_after_repair(root,attempt,recovery,'old-codex')
+        assert calls==[]
+        return
     with pytest.raises(ValueError, match='stale executable'):
         m.resume_after_repair(root, attempt, recovery, 'old-codex')
     assert calls == []

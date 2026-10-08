@@ -67,6 +67,8 @@ def prepare(states):
     return package,{'schema_version':'wkp357_current_source_link_completion_v1','package_sha256':sha256_json(package),'items':items,'claim_writes':0,'cvp_text_writes':0}
 
 def main():
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     ap=argparse.ArgumentParser(description=__doc__); ap.add_argument('--output-root',type=Path,required=True)
     ap.add_argument('--review',action='store_true'); ap.add_argument('--apply',action='store_true'); ap.add_argument('--backup',type=Path)
     args=ap.parse_args(); root=args.output_root.resolve(); load_dotenv(Path(__file__).resolve().parents[2]/'.env'); store=PostgresKnowledgeStore()

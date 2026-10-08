@@ -86,6 +86,8 @@ def _policy_fingerprints(cvp_path: Path, route_path: Path) -> tuple[str, str]:
 
 
 def main() -> int:
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     load_dotenv(PROJECT_ROOT / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cvp-policy", type=Path, default=DEFAULT_CVP_POLICY_PATH)

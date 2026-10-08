@@ -258,6 +258,8 @@ def require_approval(response, packet):
 
 
 def run(root, review=False, mechanical_runtime_continuation=False):
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     if subprocess.check_output(['git','status','--porcelain'],cwd=PROJECT,text=True).strip():
         raise ValueError('commit bounded implementation before source review')
     load_dotenv(PROJECT/'.env')

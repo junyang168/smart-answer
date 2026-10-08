@@ -37,6 +37,8 @@ def recompletion_seed(path,seeds):
 
 
 def run():
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     if ROOT.exists():raise ValueError('composed audit already attempted; inspect receipts, no replay')
     package,_,_=epoch.verified_applied(epoch.binding(),source.PostgresKnowledgeStore())
     if list((source.CAMPAIGN/'g042').glob('production/run/batches/*/cvp-change-plan.json')):

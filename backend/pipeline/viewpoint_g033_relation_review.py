@@ -97,6 +97,8 @@ def validate_pre_model_resume(old_root, handoff_path, packet):
         raise ValueError('pre-model continuation semantic input drift')
 
 def run(root, handoff_path, *, resume_pre_model_from=None):
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     from backend.pipeline.viewpoint_audit_link_repair import BASE
     from backend.pipeline.viewpoint_g033_identity_repair import context
     from backend.pipeline.viewpoint_cvp_recovery_supervisor import remaining_producers, process_table, current_job_process_ids

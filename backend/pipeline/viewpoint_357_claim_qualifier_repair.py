@@ -120,6 +120,8 @@ def verify(store, root):
 
 
 def run_main():
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output-root',required=True,type=Path)
     parser.add_argument('--review',action='store_true')

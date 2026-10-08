@@ -178,59 +178,20 @@ def test_repair_hook_binds_actual_saved_raw_review(tmp_path, drift):
 
 @pytest.mark.parametrize("accept", [False, True])
 def test_existing_repair_executor_consumes_only_explicit_exact_action(tmp_path, monkeypatch, accept):
+    # The obsolete orchestration is no longer a supported solution.
+    # Current content validators and SQL action tests carry its safety rules.
     from backend.pipeline import viewpoint_audit_link_repair as worker
-    from backend.pipeline import viewpoint_human_review as human
-    old = tmp_path / "old"; new = tmp_path / "new"; old.mkdir(); new.mkdir()
-    packet = {"targets": [{"claim": {"claim_id": "C"}, "sources": []}]}
-    write_immutable(old / "packet.json", packet)
-    before = worker.fingerprint({}, [])
-    write_immutable(old / "before.json", {"collections": [], "pre_fingerprint_sha256": before})
-    reviews = {}
-    for label, model, backend, approved in (("gpt", "gpt-6.1-sol", "codex_subscription", True),
-                                           ("opus", "claude-opus-5-5", "claude_subscription", False)):
-        reviews[label] = {"verdicts": [{"claim_id": "C", "approved": approved,
-            "reason": "actual saved opinion", "problems": [] if approved else ["relation scope"]}]}
-        raw = {"schema_version": "wang_canonical_viewpoint_batch_raw_response_v1", "model_id": model, "backend": backend,
-            "request_payload_sha256": sha256_json(packet), "response": reviews[label], "response_sha256": sha256_json(reviews[label])}
-        write_immutable(old / f"raw-{label}.json", sealed(raw))
-    h = human.repair_handoff(old, packet, reviews)
-    value = {"handoff_sha256": h["artifact_sha256"], "decided_by": "owner", "authorization_quotes": ["explicit exact acceptance" if accept else "compatible"],
-        "item_ids": [i["item_id"] for i in h["items"]], "action": "accept_exact_postimage" if accept else "interpretation", "rationale": "specific decision"}
-    if accept: value["accepted_packet_sha256"] = h["packet_sha256"]
-    human.record_decision(old / "human-review-handoff.json", value, old / "decision.json")
-    monkeypatch.setattr(worker, "BASE", tmp_path)
-    monkeypatch.setattr(worker, "PostgresKnowledgeStore", lambda: object())
-    monkeypatch.setattr(worker, "snapshot", lambda store: {})
-    monkeypatch.setattr(worker, "prepare", lambda *a, **k: ({}, deepcopy(packet)))
-    monkeypatch.setattr(worker, "subscription_client", lambda *a: object())
-    class Adapter:
-        def __init__(self, **kwargs): pass
-    monkeypatch.setattr(worker, "StructuredJsonReviewerAdapter", Adapter)
-    calls = []
-    def saved_call(adapter, actual, root, label):
-        assert actual == packet and (root / f"raw-{label}.json").is_file()
-        calls.append(label); return reviews[label], 0, 0
-    monkeypatch.setattr(worker, "review_call", saved_call)
-    def assembly(states, actual, actual_reviews, root):
-        assert actual_reviews == reviews and actual_reviews["opus"]["verdicts"][0]["approved"] is False
-        raise RuntimeError("test stops before plan/backup/apply")
-    monkeypatch.setattr(worker, "package_for", assembly)
-    with pytest.raises((ValueError, RuntimeError), match="test stops" if accept else "exact execution action"):
-        worker.run(tmp_path / "campaign", new, human_review_from=old,
-                   human_handoff=old / "human-review-handoff.json", human_decisions=[old / "decision.json"])
-    assert calls == (["gpt", "opus"] if accept else [])
-    assert not (new / "apply-receipt.json").exists()
-    if accept:
-        report = json.loads((new / "review-report.json").read_text())
-        assert report["approved"] is False and report["human_content_approval"] is True
+    with pytest.raises(RuntimeError,match='runtime is retired'):
+        worker.run(None,None)
 
 
 @pytest.mark.parametrize("fields", [{"human_review_from": "old"}, {"human_handoff": "handoff"}, {"human_decisions": ["decision"]}])
 def test_incomplete_human_resume_arguments_refused(tmp_path, monkeypatch, fields):
+    # The obsolete orchestration is no longer a supported solution.
+    # Current content validators and SQL action tests carry its safety rules.
     from backend.pipeline import viewpoint_audit_link_repair as worker
-    monkeypatch.setattr(worker, "PostgresKnowledgeStore", lambda: object())
-    with pytest.raises(ValueError, match="requires saved review root"):
-        worker.run(tmp_path / "campaign", tmp_path / "new", **fields)
+    with pytest.raises(RuntimeError,match='runtime is retired'):
+        worker.run(None,None)
 
 
 @pytest.mark.parametrize("stage", ["quota", "schema", "source_drift", "audit"])

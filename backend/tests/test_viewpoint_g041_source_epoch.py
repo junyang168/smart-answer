@@ -20,20 +20,21 @@ def test_recompletion_cannot_replace_another_seed():
 
 
 def test_audit_worker_never_restarts_existing_continuation(monkeypatch,tmp_path):
+    # The obsolete orchestration is no longer a supported solution.
+    # Current content validators and SQL action tests carry its safety rules.
     from backend.pipeline import viewpoint_g041_source_epoch_continuation as worker
-    monkeypatch.setattr(worker,'ROOT',tmp_path)
-    with pytest.raises(ValueError,match='already attempted'):
+    with pytest.raises(RuntimeError,match='runtime is retired'):
         worker.run()
 
 
 @pytest.mark.parametrize('failure',[{'error':'semantic refusal','registry_writes':0},
     {'error':"module 'backend.pipeline.viewpoint_g041_transcript_repair' has no attribute 'write_derived'",'registry_writes':1}])
 def test_progress_resume_rejects_other_failures(monkeypatch,tmp_path,failure):
+    # The obsolete orchestration is no longer a supported solution.
+    # Current content validators and SQL action tests carry its safety rules.
     from backend.pipeline import viewpoint_g041_source_epoch_continuation as worker
-    monkeypatch.setattr(worker,'ROOT',tmp_path)
-    monkeypatch.setattr(worker.repair.old,'read_artifact',lambda p:failure)
-    with pytest.raises(ValueError,match='exact once-only zero-write'):
-        worker.run(saved_g040_progress_repair=True)
+    with pytest.raises(RuntimeError,match='runtime is retired'):
+        worker.run()
 
 
 def fixture(monkeypatch):

@@ -1478,6 +1478,7 @@ class ViewpointIdentityDecisionRecord(StrictViewpointRecord):
                     "wang_s201129_owner_opus_source_reconciliation_v1": "s201129_owner_scoped_opus_terminal_review",
                     "wang_s201129_owner_cl005_supports_v1": "s201129_cl005_owner_scoped_opus_terminal_review",
                     "wang_owner_approved_link_correction_v1": "owner_approved_link_opus_terminal_review",
+                    "wang_owner_sql_link_correction_v2": "owner_approved_link_opus_terminal_review",
                 }
                 if (self.policy_version not in scoped_reviewers
                         or self.reviewer_kind != "system"

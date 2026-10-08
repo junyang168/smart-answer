@@ -48,6 +48,7 @@ def saved_artifact_validation():
 
 
 def read_artifact(path: Path) -> dict[str, Any]:
+    path = Path(path)
     from backend.pipeline.viewpoint_validation_context import historical_context
     ctx = historical_context()
     if ctx is not None:

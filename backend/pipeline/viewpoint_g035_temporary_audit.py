@@ -168,6 +168,8 @@ def validate_completion_disclosure(row, audit):
         raise ValueError('completion lost temporary exception/revisit disclosure')
 
 def continue_g035(campaign, authorization, diagnostic, output):
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     """Locked single execution, no Registry writes or replay of g035 production."""
     import fcntl
     import os

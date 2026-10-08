@@ -8,6 +8,8 @@ ROOT=repair.APPLICATION_ROOT/'continuation'
 
 
 def run(*, saved_g040_progress_repair=False):
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     from backend.pipeline.viewpoint_audit_link_repair import write_derived
     from backend.pipeline.viewpoint_cvp_recovery_executor import load_campaign,run_logged,PYTHON,resume_after_repair,binding
     from backend.pipeline.viewpoint_content_blocked_fallback import apply,verify_saved_full_audit

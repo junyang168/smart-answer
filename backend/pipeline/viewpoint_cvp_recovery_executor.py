@@ -358,6 +358,8 @@ def continuation_root(root, attempt):
 
 
 def resume_after_repair(root, attempt, recovery_root, executable, *, additional_proof_bindings=(), additional_source_repair_paths=(), saved_audit_path=None, prior_model_batch=None, reuse_correction=False, owner_resolution_path=None, initial_prefix_only=False, allow_lossless_compact_config_migration=False, component_resolution_path=None, contextual_semantics=False, source_epoch_recompletion_path=None, scalability_acceptance_path=None):
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     if contextual_semantics and prior_model_batch is not None:
         raise ValueError('new semantic policy cannot migrate old model-response approval')
     cfg, schedule, manifest, groups = load_campaign(root)
@@ -462,6 +464,8 @@ def start_prepared_campaign(root, output, attempt, recovery_root, executable, ar
     The authenticated producer waits at its zero-call boundary and continues
     in the SAME owned runtime after the launcher releases its remaining gates.
     """
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     if str(argv[argv.index('--output-root') + 1]) != str(output):
         raise ValueError('prepared campaign output identity drift')
     from backend.pipeline.viewpoint_scalability_acceptance import require_scalability_acceptance
@@ -585,6 +589,8 @@ def start_prepared_campaign(root, output, attempt, recovery_root, executable, ar
 
 
 def execute(proposal, baseline, attempt, event, recovery_root, executable):
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     if (attempt / "executor-start.json").exists():
         raise ValueError("executor already attempted; no duplicate repair/verification")
     write_immutable(attempt / "executor-start.json", {"fingerprint": event["fingerprint"], "baseline": baseline})

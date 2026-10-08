@@ -149,6 +149,8 @@ def migrate_store_conflict_cache(store, packet):
 
 
 def run(*,apply=False,recover_store_conflict=False):
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     global ROOT
     if recover_store_conflict: ROOT=RECOVERY_ROOT
     from backend.pipeline.viewpoint_audit_link_repair import package_for

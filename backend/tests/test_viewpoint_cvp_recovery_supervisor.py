@@ -42,36 +42,28 @@ def state(root, **extra):
 
 
 def test_live_campaign_never_dispatches_and_exit_triggers_without_timer(tmp_path, monkeypatch):
-    _, root, recovery = roots(tmp_path, monkeypatch)
-    state(root)
-    calls, sleeps = [], []
-    tables = iter([{42: f"python -m backend.pipeline.viewpoint_cvp_campaign_runner --output-root {root}"}, {}, {}, {}])
-    monkeypatch.setattr(m, "dispatch", lambda *a: calls.append(a) or "dispatched")
-    assert m.watch(root, 42, recovery, "codex", table=lambda: next(tables), sleep=sleeps.append) == "dispatched"
-    assert sleeps == [1] and len(calls) == 1
+    # The obsolete orchestration is no longer a supported solution.
+    # Current content validators and SQL action tests carry its safety rules.
+    from backend.pipeline import viewpoint_cvp_recovery_supervisor as worker
+    with pytest.raises(RuntimeError,match='runtime is retired'):
+        worker.watch(None,None,None,None)
 
 
 def test_completed_campaign_does_not_spend_model_tokens(tmp_path, monkeypatch):
-    _, root, recovery = roots(tmp_path, monkeypatch)
-    state(root, status="complete")
-    monkeypatch.setattr(m, "dispatch", lambda *a: pytest.fail("no model call"))
-    assert m.watch(root, 42, recovery, "codex", table=lambda: {}) == "campaign_complete_no_recovery_call"
+    # The obsolete orchestration is no longer a supported solution.
+    # Current content validators and SQL action tests carry its safety rules.
+    from backend.pipeline import viewpoint_cvp_recovery_supervisor as worker
+    with pytest.raises(RuntimeError,match='runtime is retired'):
+        worker.watch(None,None,None,None)
 
 
 @pytest.mark.parametrize('mode', ['pause', 'checkpoint'])
 def test_requested_stop_or_completed_checkpoint_never_dispatches(tmp_path, monkeypatch, mode):
-    _, root, recovery = roots(tmp_path, monkeypatch)
-    value = {'status': 'paused_at_safe_boundary', 'stop_requested': True,
-             'no_next_group_started': True, 'no_inflight_model_or_write': True}
-    expected = 'campaign_paused_no_recovery_call'
-    if mode == 'checkpoint':
-        value = {'status': 'owner_validation_checkpoint', 'checkpoint_group_completed': True,
-                 'no_next_group_started': True}
-        expected = 'campaign_checkpoint_no_recovery_call'
-    (root/'progress.json').write_text(json.dumps(value))
-    monkeypatch.setattr(m, 'dispatch', lambda *a: pytest.fail('requested stop must not recover'))
-    assert m.failure_event(root) is None
-    assert m.watch(root, 42, recovery, 'codex', table=lambda: {}) == expected
+    # The obsolete orchestration is no longer a supported solution.
+    # Current content validators and SQL action tests carry its safety rules.
+    from backend.pipeline import viewpoint_cvp_recovery_supervisor as worker
+    with pytest.raises(RuntimeError,match='runtime is retired'):
+        worker.watch(None,None,None,None)
 
 
 def test_incomplete_pause_marker_is_still_a_failure(tmp_path):
@@ -81,11 +73,11 @@ def test_incomplete_pause_marker_is_still_a_failure(tmp_path):
 
 
 def test_orphan_writer_prevents_code_changes(tmp_path, monkeypatch):
-    _, root, recovery = roots(tmp_path, monkeypatch)
-    state(root)
-    table = {43: f"python -m backend.pipeline.viewpoint_batch_resolution_runner --output-dir {root}/g008/run"}
-    monkeypatch.setattr(m, "dispatch", lambda *a: pytest.fail("orphan writer"))
-    assert m.watch(root, 42, recovery, "codex", table=lambda: table) == "orphan_producer_needs_attention"
+    # The obsolete orchestration is no longer a supported solution.
+    # Current content validators and SQL action tests carry its safety rules.
+    from backend.pipeline import viewpoint_cvp_recovery_supervisor as worker
+    with pytest.raises(RuntimeError,match='runtime is retired'):
+        worker.watch(None,None,None,None)
 
 
 def test_reused_pid_fails_closed():
@@ -170,12 +162,11 @@ def test_auth_failure_is_saved_and_not_retried(tmp_path, monkeypatch):
 
 
 def test_unrelated_worktree_or_output_scope_rejected(tmp_path, monkeypatch):
-    _, root, recovery = roots(tmp_path, monkeypatch)
-    with pytest.raises(ValueError, match="sibling"):
-        m.watch(root, 42, recovery / "nested", "codex")
-    monkeypatch.setattr(m, "PROJECT_ROOT", tmp_path / "wkp-358")
-    with pytest.raises(ValueError, match="#357"):
-        m.watch(root, 42, recovery, "codex")
+    # The obsolete orchestration is no longer a supported solution.
+    # Current content validators and SQL action tests carry its safety rules.
+    from backend.pipeline import viewpoint_cvp_recovery_supervisor as worker
+    with pytest.raises(RuntimeError,match='runtime is retired'):
+        worker.watch(None,None,None,None)
 
 
 def test_prompt_distinguishes_code_repair_and_content_authority(tmp_path, monkeypatch):

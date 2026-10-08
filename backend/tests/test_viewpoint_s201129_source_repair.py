@@ -518,12 +518,11 @@ def test_store_rebuilds_entire_reviewed_package_not_partial_pass(monkeypatch,fie
 
 
 def test_no_application_or_audit_replay(monkeypatch,tmp_path):
+    # The obsolete orchestration is no longer a supported solution.
+    # Current content validators and SQL action tests carry its safety rules.
     from backend.pipeline import viewpoint_s201129_source_continuation as worker
-    monkeypatch.setattr(worker,'ROOT',tmp_path)
-    with pytest.raises(ValueError,match='already attempted'):worker.run()
-    out=tmp_path/'exact-audit';out.mkdir()
-    with pytest.raises(ValueError,match='already attempted'):worker.verified_audit('exact-audit',{'C'},{'V'})
-    with pytest.raises(ValueError,match='outside exact'):worker.recompletion_seed(Path('/foreign'),[])
+    with pytest.raises(RuntimeError,match='runtime is retired'):
+        worker.run()
 
 
 @pytest.mark.parametrize('sequence',[1,39,42,43,156])

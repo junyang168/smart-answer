@@ -945,6 +945,8 @@ def run_batch(
         "_effective_validation": effective_validation,
     }
 def main(argv=None) -> int:
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     load_dotenv(PROJECT_ROOT / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--packet", type=Path, required=True, help="scope packet from viewpoint_scope_packet_runner")
@@ -1114,6 +1116,8 @@ def validate_shared_grouping_execution(
 
 @validation_phase
 def execute(args: argparse.Namespace) -> int:
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     if bool(getattr(args, "accepted_grouping_sha", None)) != bool(getattr(args, "grouping_repository", None)):
         raise CvpProductionBlocked(["--accepted-grouping-sha and --grouping-repository must be supplied together"])
     accepted_mode = bool(getattr(args, "accepted_grouping_sha", None))

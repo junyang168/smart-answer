@@ -33,6 +33,8 @@ def verify_transition(live, before, packet, plan):
     return reverse
 
 def run(campaign, repair, output, prior_adjudication, saved_audit=None):
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     from backend.pipeline.viewpoint_authorized_source_repair_357 import snapshot,fingerprint,Review
     from backend.pipeline.viewpoint_audit_link_repair import BASE,PROJECT,package_for
     from backend.pipeline.viewpoint_cvp_recovery_executor import load_campaign,run_logged,PYTHON,binding,resume_after_repair

@@ -14,7 +14,7 @@ GPT_POLICY = Path(__file__).parent / 'policies/wang_audit_source_resolution_v1.j
 GPT_SCHEMA = 'wang_gpt_final_audit_source_resolution_v1'
 
 
-def create_gpt_resolution(audit_path, adjudication_root, output, store):
+def create_gpt_resolution(audit_path, adjudication_root, output, store, *, history_roots=None):
     """Consume a source-bound GPT adjudication under the owner's standing policy.
 
     Original audit/raws stay unchanged; this never marks Gemini as passing or
@@ -24,7 +24,7 @@ def create_gpt_resolution(audit_path, adjudication_root, output, store):
     if policy['policy_id'] != 'wang-audit-gpt-source-final-v1':
         raise ValueError('unknown source resolution policy')
     original_packet = build_packet(audit_path, store)
-    report = run(audit_path, adjudication_root, store, final_gpt=True)
+    report = run(audit_path, adjudication_root, store, final_gpt=True, history_roots=history_roots)
     packet_path = adjudication_root / 'packet.json'
     packet = read_artifact(packet_path)
     verify_sha(packet)

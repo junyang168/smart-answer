@@ -72,6 +72,8 @@ def verify_applied_chain(store):
 
 
 def run(*,preflight_only=False):
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     from backend.pipeline.viewpoint_adjudication_history import validated_history
     from backend.pipeline.viewpoint_audit_source_adjudication import build_packet,validate_population

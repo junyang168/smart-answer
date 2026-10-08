@@ -125,6 +125,8 @@ def prepare(store):
 
 
 def run():
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     if ROOT.exists() or (source.APPLICATION_ROOT/'owner-cl005-supports-start.json').exists():
         raise ValueError('review already reserved or attempted; inspect receipts, no retry')
     packet = prepare(source.PostgresKnowledgeStore())

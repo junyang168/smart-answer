@@ -410,6 +410,8 @@ def apply_reviewed():
 
 
 def main():
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     load_dotenv(PROJECT/'.env')
     parser = argparse.ArgumentParser(description=__doc__)
     modes = parser.add_mutually_exclusive_group(required=True)
