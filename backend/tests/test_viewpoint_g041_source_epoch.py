@@ -49,8 +49,10 @@ def fixture(monkeypatch):
         for (c,o),p in live.items()}
     package={'source_repair_application':{'review_packet':{'changed_paragraph_claims':[claim]}}}
     monkeypatch.setattr(m,'postimages',lambda p:deepcopy(normalized))
-    monkeypatch.setattr(m.repair,'validate_package',lambda p:None)
-    monkeypatch.setattr(m.repair,'saved_before',lambda:(deepcopy(before),{}))
+    monkeypatch.setattr(m.repair,'validate_package',lambda p:pytest.fail('old writer rebuild'))
+    monkeypatch.setattr(m.repair,'saved_before',lambda:pytest.fail('whole before parsed'))
+    monkeypatch.setattr(m,'bound_package',lambda b:package)
+    monkeypatch.setattr(m,'scoped_predecessors',lambda p:deepcopy(before))
     return package,normalized,before,live,records
 
 
@@ -73,9 +75,16 @@ def test_predecessor_restore_is_only_membership_not_new_claim_approval(monkeypat
     pending='pending';old={'claim_id':pending,'revision':1,'review_status':'ai_consensus_reviewed','statement':'unchanged'}
     b['claims',pending]=old
     records['claims',pending]={'payload':deepcopy(old),'revision':1,'content_sha256':m.repair.old.semantic_record_sha(old),'retired':False}
-    monkeypatch.setattr(m.repair,'saved_before',lambda:(deepcopy(b),{}))
     manifest={'claim_packets':[{'claim_id':m.repair.CLAIM,'source_id':m.repair.old.SOURCE},
-        {'claim_id':pending,'source_id':m.repair.old.SOURCE}]}
+        {'claim_id':pending,'source_id':m.repair.old.SOURCE,'claim_revision':1,
+         'claim_content_sha256':m.repair.old.semantic_record_sha(old)}]}
+    monkeypatch.setattr(m.repair.old,'frozen_inputs',lambda:({'frozen_scope':{'manifest_path':'/manifest'}},{}))
+    monkeypatch.setattr(m.repair.old,'read_artifact',lambda p:manifest)
+    from backend.pipeline import viewpoint_applied_source_epochs as common
+    def pinned(pins,store):
+        assert pins==[('claims',pending,1,m.repair.old.semantic_record_sha(old))]
+        return {('claims',cid):deepcopy(b['claims',cid]) for _,cid,_,_ in pins}
+    monkeypatch.setattr(common,'read_pinned_versions',pinned)
     completed={m.repair.CLAIM};selected={pending}
     if mutation=='not_completed':completed=set()
     elif mutation=='selected_changed':selected.add(m.repair.CLAIM)
@@ -122,7 +131,7 @@ def test_postimages_keep_unstated_source_fields_absent(monkeypatch):
     before={('source_documents','source'):{'source_id':'source','revision':1,'body':'old','preserved':'yes'}}
     normalized={'source_documents':{'source':{'source_id':'source','revision':2,'body':'new','visual_source_assets':[]}}}
     monkeypatch.setattr(m,'_normalize_records',lambda p:(normalized,{('source_documents','source'):frozenset({'source_id','revision','body'})}))
-    monkeypatch.setattr(m.repair,'saved_before',lambda:(before,{}))
+    monkeypatch.setattr(m,'scoped_predecessors',lambda p:before)
     actual=m.postimages({})['source_documents']['source']
     assert actual=={'source_id':'source','revision':2,'body':'new','preserved':'yes'}
     assert 'visual_source_assets' not in actual

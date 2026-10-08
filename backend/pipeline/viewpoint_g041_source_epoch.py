@@ -13,6 +13,8 @@ from backend.pipeline.viewpoint_validation_context import read_current_objects, 
 
 PACKAGE = repair.APPLICATION_ROOT/'effective-package.json'
 GROUPING_EPOCH_KEY = 'applied_grouping_source_epoch_binding'
+COMPLETED_FRAME = {'path':str(repair.APPLICATION_ROOT/'continuation/g041-verified/completion.json'),
+    'file_sha256':'9ffc2df60f32ebcb0a7fafb02a7aca4d19429a386af7c424e3838b1dc349a379'}
 
 
 @current_check
@@ -51,8 +53,10 @@ def grouping_physical_transition(manifest, source_repair_binding):
 def bound_package(binding):
     if binding != {'path':str(PACKAGE),'file_sha256':repair.old.file_sha256(PACKAGE)}:
         raise ValueError('corrected source epoch exact package physical drift')
-    package = repair.old.read_artifact(PACKAGE)
-    repair.validate_package(package)
+    from backend.pipeline.viewpoint_applied_source_epochs import consume_applied_source_package
+    package = consume_applied_source_package(binding,repair.old.PostgresKnowledgeStore(),
+                                             completed_frame=COMPLETED_FRAME)
+    repair.completed_review_inputs(package)
     return package
 
 
@@ -60,10 +64,27 @@ def binding():
     return {'path':str(PACKAGE),'file_sha256':repair.old.file_sha256(PACKAGE)}
 
 
+def scoped_predecessors(package):
+    from backend.pipeline.viewpoint_applied_source_epochs import applied_source_preimages
+    actual,before=applied_source_preimages(binding(),repair.old.PostgresKnowledgeStore(),
+                                          completed_frame=COMPLETED_FRAME)
+    if package!=actual:raise ValueError('completed source package drift')
+    packet=repair.completed_review_inputs(package)
+    for collection,field,id_field in [('claims','changed_paragraph_claims','claim_id'),
+                                     ('evidence_steps','changed_paragraph_evidence','evidence_step_id')]:
+        seen=set()
+        for row in packet[field]:
+            key=collection,row[id_field]
+            if key in seen or (key in before and before[key]!=row):
+                raise ValueError('original reviewed predecessor identity/content drift')
+            seen.add(key);before[key]=row
+    return before
+
+
 def postimages(package):
     """Use the store's omission-preserves-existing contract, not model defaults."""
     normalized,stated=_normalize_records(package)
-    before,_=repair.saved_before()
+    before=scoped_predecessors(package)
     return {c:{o:merge_over_existing(p,before.get((c,o)),stated[c,o]) for o,p in objects.items()}
         for c,objects in normalized.items()}
 
@@ -82,11 +103,15 @@ def validate_postimage(package, records):
 
 
 def membership_snapshot(manifest, records, package, completed_ids, selected_ids):
-    repair.validate_package(package)
+    if package!=bound_package(binding()):raise ValueError('completed membership package drift')
     normalized = validate_postimage(package,records)
-    before,_ = repair.saved_before()
+    before = scoped_predecessors(package)
+    report,_=repair.old.frozen_inputs()
+    if manifest!=repair.old.read_artifact(Path(report['frozen_scope']['manifest_path'])):
+        raise ValueError('completed source accepted membership manifest drift')
     checked = dict(records)  # replace projected rows, do not clone untouched rows
     accepted = {c['claim_id']:c for c in manifest['claim_packets']}
+    if len(accepted)!=len(manifest['claim_packets']):raise ValueError('duplicate accepted membership')
     used=[]
     for collection, objects in normalized.items():
         for oid in objects:
@@ -101,18 +126,21 @@ def membership_snapshot(manifest, records, package, completed_ids, selected_ids)
                 'content_sha256':repair.old.semantic_record_sha(old),'retired':False}
     # Every newly selected same-source Claim outside the reviewed seven retains
     # its frozen Claim wording/anchors; normal independent lineage still runs.
-    for cid in selected_ids:
-        if cid in accepted and accepted[cid]['source_id']==repair.old.SOURCE:
-            live=records.get(('claims',cid)); old=before.get(('claims',cid))
-            if not live or live['payload']!=old or old.get('review_status')!='ai_consensus_reviewed':
-                raise ValueError('pending source epoch Claim drift or human hold')
+    pending={cid for cid in selected_ids if cid in accepted and accepted[cid]['source_id']==repair.old.SOURCE}
+    from backend.pipeline.viewpoint_applied_source_epochs import read_pinned_versions
+    original_pending=read_pinned_versions([('claims',cid,accepted[cid]['claim_revision'],
+        accepted[cid]['claim_content_sha256']) for cid in sorted(pending)],repair.old.PostgresKnowledgeStore())
+    for cid in pending:
+        live=records.get(('claims',cid)); old=original_pending['claims',cid]
+        if not live or live['payload']!=old or old.get('review_status')!='ai_consensus_reviewed':
+            raise ValueError('pending source epoch Claim drift or human hold')
     return checked,used
 
 
 @current_check
 def verified_applied(binding,store):
     package=bound_package(binding)
-    before,proof=repair.saved_before()
+    before=scoped_predecessors(package)
     normalized=postimages(package)
     plan=repair.old.read_artifact(repair.APPLICATION_ROOT/'dry-run-plan.json')
     receipt=repair.old.read_artifact(repair.APPLICATION_ROOT/'apply-receipt.json')

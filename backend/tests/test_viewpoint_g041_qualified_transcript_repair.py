@@ -87,6 +87,108 @@ def test_separate_subscription_review_and_lossless_transport(monkeypatch):
         assert a.prompt_sha256!=m.old.adapter(provider,model).prompt_sha256
 
 
+@pytest.mark.parametrize('provider',['gpt','opus'])
+@pytest.mark.parametrize('drift',[None,'model','backend','prompt','config','request','raw_seal',
+    'response_sha','encoding_sha','encoding_file','ceiling','rejected','population','report'])
+def test_saved_complete_reviews_keep_actual_identity_integrity_and_approval(monkeypatch,tmp_path,provider,drift):
+    packet={'changed_paragraph_claims':[{'claim_id':f'C{n}'} for n in range(7)]}
+    docs={};reviews={};raws=[];encoding={'lossless':'original'}
+    adapters={}
+    for label,backend,model in [('gpt','codex','gpt-6.1-sol'),('opus','claude','claude-opus-5-5')]:
+        response={'verdicts':[{'claim_id':c['claim_id'],'approved':True,'reason':'exact original','problems':[]}
+            for c in packet['changed_paragraph_claims']]}
+        a=SimpleNamespace(backend=f'{backend}_subscription',prompt_sha256='prompt',generation_config_sha256='config',
+            request_encoding_proof=lambda p:encoding,request_bytes=lambda p:100)
+        adapters[backend]=a
+        raw={'model_id':model,'backend':a.backend,'prompt_sha256':'prompt','generation_config_sha256':'config',
+            'request_payload_sha256':m.old.sha256_json(packet),'request_encoding_proof_sha256':m.old.sha256_json(encoding),
+            'response_sha256':m.old.sha256_json(response),'response':response}
+        raw['artifact_sha256']=m.old.sha256_json(raw)
+        sealed={'schema_version':'wang_model_request_encoding_proof_v1',**encoding}
+        docs[f'raw-{label}.json']=raw
+        docs[f'raw-{label}.request-encoding.json']={**sealed,'artifact_sha256':m.old.sha256_json(sealed)}
+        reviews[label]=m.old.require_approval(response,packet);raws.append(deepcopy(raw))
+    docs['review-report.json']={'status':'dual_review_approved_not_applied',
+        'packet_sha256':m.old.sha256_json(packet),'reviews':reviews,'master_data_mutations':0}
+    raw=docs[f'raw-{provider}.json']
+    if drift in {'model','backend','prompt','config','request'}:
+        raw[{'model':'model_id','backend':'backend','prompt':'prompt_sha256','config':'generation_config_sha256',
+            'request':'request_payload_sha256'}[drift]]='different'
+        raw['artifact_sha256']=m.old.sha256_json({k:v for k,v in raw.items() if k!='artifact_sha256'})
+    elif drift=='raw_seal':raw['artifact_sha256']='different'
+    elif drift=='response_sha':raw['response_sha256']='different'
+    elif drift=='encoding_sha':raw['request_encoding_proof_sha256']='different'
+    elif drift=='encoding_file':docs[f'raw-{provider}.request-encoding.json']['artifact_sha256']='different'
+    elif drift=='ceiling':adapters['codex' if provider=='gpt' else 'claude'].request_bytes=lambda p:500001
+    elif drift in {'rejected','population'}:
+        if drift=='rejected':raw['response']['verdicts'][0].update(approved=False,problems=['real refusal'])
+        else:raw['response']['verdicts'].pop()
+        raw['response_sha256']=m.old.sha256_json(raw['response'])
+        raw['artifact_sha256']=m.old.sha256_json({k:v for k,v in raw.items() if k!='artifact_sha256'})
+    elif drift=='report':docs['review-report.json']['master_data_mutations']=1
+    monkeypatch.setattr(m,'adapter',lambda backend,model:adapters[backend])
+    monkeypatch.setattr(m.old,'read_artifact',lambda path:deepcopy(docs[path.name]))
+    monkeypatch.setattr(m,'saved_before',lambda *a:pytest.fail('old full Registry predecessor reader'))
+    monkeypatch.setattr(m,'reviewed_inputs',lambda *a:pytest.fail('old writer reconstruction'))
+    if drift is None:assert m.saved_reviews(packet,tmp_path)==(reviews,raws)
+    else:
+        with pytest.raises(ValueError):m.saved_reviews(packet,tmp_path)
+
+
+@pytest.mark.parametrize('drift',[None,'version','root','packet','draft','authority','reservation',
+    'reservation_packet','reservation_version','reservation_root','human_approval','repeat_reviews',
+    'refusal_bindings','refusal_file','raws','impact','scope','source'])
+def test_completed_embedded_review_preserves_exact_owner_scope_and_original_refusals(monkeypatch,drift):
+    draft={'entire':'original draft'};raws=[{'exact':'actual saved raw'}]
+    pins=[{'path':'original-refusal','file_sha256':'physical'}]
+    packet={'draft_package_sha256':m.old.sha256_json(draft),'owner_authorization':'bounded continue',
+        'prior_refusal_bindings':pins,
+        'impact_binding':{'path':str(m.old.IMPACT/'impact-report.json'),'file_sha256':m.old.REPORT_SHA},
+        'scope_proposal_binding':{'path':str(m.old.IMPACT/'reconciliation-scope-proposal.json'),'file_sha256':m.old.PROPOSAL_SHA}}
+    reservation={'packet_sha256':m.old.sha256_json(packet),'schema_version':m.VERSION,'output_root':str(m.ROOT),
+        'human_content_approval':False,'fresh_reviews_per_provider':1,'prior_refusal_bindings':pins}
+    docs={'packet.json':deepcopy(packet),'draft-package.json':draft,'owner-authorization.json':deepcopy(reservation),
+        'owner-qualified-transcript-start.json':deepcopy(reservation)}
+    app={'schema_version':m.VERSION,'review_root':str(m.ROOT),'review_packet':packet,
+        'user_authorization':'bounded continue','review_artifacts':raws}
+    if drift in {'version','root','packet','authority','raws'}:
+        app[{'version':'schema_version','root':'review_root','packet':'review_packet',
+            'authority':'user_authorization','raws':'review_artifacts'}[drift]]='different'
+    elif drift=='draft':draft['entire']='different'
+    elif drift=='reservation':docs['owner-authorization.json']['packet_sha256']='different'
+    elif drift in {'reservation_packet','reservation_version','reservation_root','human_approval','repeat_reviews','refusal_bindings'}:
+        key={'reservation_packet':'packet_sha256','reservation_version':'schema_version','reservation_root':'output_root',
+            'human_approval':'human_content_approval','repeat_reviews':'fresh_reviews_per_provider','refusal_bindings':'prior_refusal_bindings'}[drift]
+        for name in ('owner-authorization.json','owner-qualified-transcript-start.json'):
+            docs[name][key]={'human_approval':True,'repeat_reviews':2,'refusal_bindings':[]}.get(drift,'different')
+    elif drift in {'impact','scope'}:
+        key='impact_binding' if drift=='impact' else 'scope_proposal_binding'
+        docs['packet.json'][key]['file_sha256']='different'
+        app['review_packet']=docs['packet.json']
+        for name in ('owner-authorization.json','owner-qualified-transcript-start.json'):
+            docs[name]['packet_sha256']=m.old.sha256_json(docs['packet.json'])
+    calls=[]
+    def verify(pin):
+        if drift=='refusal_file':raise ValueError('original refusal physical SHA drift')
+        calls.append(pin)
+    from backend.pipeline import source_reconciliation as c
+    monkeypatch.setattr(c,'verify_file',verify)
+    monkeypatch.setattr(m.old,'read_artifact',lambda path:deepcopy(docs[path.name]))
+    monkeypatch.setattr(m,'saved_reviews',lambda p:({},raws))
+    monkeypatch.setattr(m.old,'frozen_inputs',lambda:({'exact':'scope'},{}))
+    def verify_source(report):
+        if drift=='source':raise ValueError('physical source changed')
+        assert report=={'exact':'scope'}
+    monkeypatch.setattr(m.old,'verify_source',verify_source)
+    monkeypatch.setattr(m,'saved_before',lambda *a:pytest.fail('historical full Registry reader'))
+    monkeypatch.setattr(m,'reviewed_inputs',lambda *a:pytest.fail('historical writer reconstruction'))
+    if drift is None:
+        assert m.completed_review_inputs({'source_repair_application':app})==packet
+        assert calls==pins
+    else:
+        with pytest.raises(ValueError):m.completed_review_inputs({'source_repair_application':app})
+
+
 @pytest.mark.parametrize('mutation',[None,'raw_hash','response','model','backend','prompt','config','request',
     'encoding','sealed_encoding','registry','new_opus','applied','population','new_refusal'])
 def test_prior_refusal_and_actual_transport_verified(monkeypatch,mutation):

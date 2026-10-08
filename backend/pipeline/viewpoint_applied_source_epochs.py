@@ -16,7 +16,7 @@ def has_applied_source_frame(path, package):
     return bool(app.get('before_binding') or app.get('parent_source_application')) and 'bindings' in app
 
 
-def consume_applied_source_package(bound, store):
+def consume_applied_source_package(bound, store, *, completed_frame=None):
     """Authenticate an original applied package, not rebuild its old writer.
 
     The actual SQL KCS binds the ENTIRE package and exact operation/review-event
@@ -41,10 +41,34 @@ def consume_applied_source_package(bound, store):
     verified=read(root/'verified-result.json')
     pins=verified.get('bindings',[])
     before_name = 'before.json' if app.get('before_binding') else 'before-proof.json'
-    required={str(root/name) for name in (before_name,'effective-package.json',
-        'dry-run-plan.json','backup.json','pg-restore-proof.json','apply-intent.json','apply-receipt.json')}
+    if completed_frame is not None:
+        # Older original readbacks did not carry a bindings array. Consume the
+        # exact, caller-pinned completed frame's APPLICATION dependencies only;
+        # this is not revalidation or approval of its historical group audit.
+        # Plan/intent remain fully cross-bound to the actual SQL fingerprint.
+        if pins or not app.get('before_binding') or not app.get('review_artifacts') or not app.get('review_packet'):
+            raise ValueError('completed embedded-review frame format mismatch')
+        frame=read(verify_file(completed_frame))
+        if frame.get('source_repair_binding')!=bound or frame.get('source_epoch_recompletion') is not True:
+            raise ValueError('completed frame belongs to another source application')
+        review_root=Path(app['review_root'])
+        required={str(root/name) for name in ('effective-package.json','apply-receipt.json',
+            'verified-result.json','backup.json','pg-restore-proof.json')}
+        required.update(str(review_root/name) for name in ('packet.json','raw-gpt.json','raw-opus.json','review-report.json'))
+        index={}
+        for pin in frame.get('bindings',[]):
+            if pin['path'] in index and index[pin['path']]!=pin:
+                raise ValueError('conflicting original completion physical bindings')
+            index[pin['path']]=pin
+        if not required<=index.keys():
+            raise ValueError('original completed application denominator missing')
+        pins=[index[path] for path in sorted(required)]
+        verify_file(app['before_binding'])
+    else:
+        required={str(root/name) for name in (before_name,'effective-package.json',
+            'dry-run-plan.json','backup.json','pg-restore-proof.json','apply-intent.json','apply-receipt.json')}
     if (len(pins)!=len({pin['path'] for pin in pins}) or not required<={pin['path'] for pin in pins}
-            or bound not in pins or (app.get('before_binding') and app['before_binding'] not in pins)):
+            or bound not in pins or (completed_frame is None and app.get('before_binding') and app['before_binding'] not in pins)):
         raise ValueError('applied source physical proof denominator missing/changed')
     for pin in pins:verify_file(pin)
     if any(pin not in pins for pin in app.get('bindings',[])):
@@ -97,7 +121,7 @@ def consume_applied_source_package(bound, store):
     return package
 
 
-def applied_source_preimages(bound, store):
+def applied_source_preimages(bound, store, *, completed_frame=None):
     """Read exact old SQL versions declared by an authenticated applied plan.
 
     This is a scoped historical read, not current approval or a whole snapshot.
@@ -106,7 +130,8 @@ def applied_source_preimages(bound, store):
     inferred here and must come from the caller's original bound review input.
     """
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact
-    package = consume_applied_source_package(bound, store)
+    package = (consume_applied_source_package(bound, store) if completed_frame is None
+               else consume_applied_source_package(bound, store, completed_frame=completed_frame))
     plan = read_artifact(Path(bound['path']).parent/'dry-run-plan.json')
     wanted, result = [], {}
     for op in plan['operations']:

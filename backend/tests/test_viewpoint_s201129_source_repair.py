@@ -76,8 +76,9 @@ def test_legacy_postimages_use_generic_SQL_and_original_unchanged_context(monkey
         assert package['evidence_steps'][0]['revision']==2
 
 
-@pytest.mark.parametrize('frame',['snapshot','compact_parent'])
-@pytest.mark.parametrize('drift',[None,'package','operation','plan','intent','receipt','readback','missing_pin','raw','SQL','SQL_summary','parent_file','parent_pin','parent_fp'])
+@pytest.mark.parametrize('frame',['snapshot','compact_parent','embedded_review'])
+@pytest.mark.parametrize('drift',[None,'package','operation','plan','intent','receipt','readback','missing_pin','raw','SQL','SQL_summary','parent_file','parent_pin','parent_fp',
+    'frame_binding','frame_source','frame_incomplete','frame_conflict'])
 def test_generic_completed_application_consumption_has_no_source_ID_or_writer_rebuild(tmp_path,monkeypatch,drift,frame):
     import json
     from backend.pipeline import source_reconciliation_runner as r
@@ -88,8 +89,8 @@ def test_generic_completed_application_consumption_has_no_source_ID_or_writer_re
     def put(name,value):
         (root/name).write_text(json.dumps(value));return r.binding(root/name)
     parent=put('arbitrary-parent-package.json',{'unchanged':'parent package, not another writer invocation'})
-    before_name='before.json' if frame=='snapshot' else 'before-proof.json'
-    predecessor={'before_records':['MUST_NOT_PARSE']} if frame=='snapshot' else {
+    before_name='before-proof.json' if frame=='compact_parent' else 'before.json'
+    predecessor={'before_records':['MUST_NOT_PARSE']} if frame!='compact_parent' else {
         'parent':parent,'pre_fingerprint_sha256':'b'*64,'Registry_writes':0}
     before=put(before_name,predecessor)
     raw=put('review.json',{'original':'reviewed source-specific data, not special code'})
@@ -98,6 +99,10 @@ def test_generic_completed_application_consumption_has_no_source_ID_or_writer_re
     if frame=='compact_parent':
         del package['source_repair_application']['before_binding']
         package['source_repair_application']['parent_source_application']=parent
+    elif frame=='embedded_review':
+        del package['source_repair_application']['bindings']
+        package['source_repair_application'].update(review_root=str(root),
+            review_packet={'original':'packet'},review_artifacts=[{'original':'review'}])
     bound=put('effective-package.json',package);sha=c.sha256_json(package)
     payload={'claim_id':'C','statement':'unchanged reviewed value'}
     operation={'operation':'update','collection':'claims','object_id':'C','before_sha256':'a'*64,
@@ -117,6 +122,10 @@ def test_generic_completed_application_consumption_has_no_source_ID_or_writer_re
         put('backup.json',{'original':'backup receipt'}),put('pg-restore-proof.json',{'original':'pg restore pass'})]
     verified={'status':'applied_readback_verified','change_set_id':plan['change_set_id'],
         'master_data_mutations':1,'pre_fingerprint_sha256':'b'*64,'bindings':pins}
+    completed_frame=None
+    if frame=='embedded_review':
+        pins.extend(put(name,{'original':name}) for name in ('packet.json','raw-gpt.json','raw-opus.json','review-report.json'))
+        del verified['bindings']
     put('verified-result.json',verified)
     SQL=[version,sha,fp,'applied',deepcopy(receipt['summary'])];calls=[]
     class Cursor:
@@ -141,8 +150,8 @@ def test_generic_completed_application_consumption_has_no_source_ID_or_writer_re
     elif drift=='intent':intent['single_apply_required']=False;replace('apply-intent.json',intent)
     elif drift=='receipt':receipt['status']='planned';replace('apply-receipt.json',receipt)
     elif drift=='readback':verified['master_data_mutations']=2;replace('verified-result.json',verified)
-    elif drift=='missing_pin':pins.remove(before);replace('verified-result.json',verified)
-    elif drift=='raw':(root/'review.json').write_text('{}')
+    elif drift=='missing_pin':pins.remove(bound if frame=='embedded_review' else before);replace('verified-result.json',verified)
+    elif drift=='raw':(root/('raw-gpt.json' if frame=='embedded_review' else 'review.json')).write_text('{}')
     elif drift=='SQL':SQL[3]='planned'
     elif drift=='SQL_summary':SQL[4]['operations']=2
     elif drift in {'parent_file','parent_pin','parent_fp'}:
@@ -157,11 +166,23 @@ def test_generic_completed_application_consumption_has_no_source_ID_or_writer_re
         return original_read(path)
     monkeypatch.setattr(resolution,'read_artifact',read)
     monkeypatch.setattr(repair,'validate_package',lambda *a:pytest.fail('old source writer reconstruction'))
+    if frame=='embedded_review':
+        pins.append(r.binding(root/'verified-result.json'))
+        saved_frame={'source_repair_binding':bound,'source_epoch_recompletion':True,'bindings':pins}
+        if drift=='frame_source':saved_frame['source_repair_binding']={**bound,'file_sha256':'f'*64}
+        elif drift=='frame_incomplete':saved_frame['source_epoch_recompletion']=False
+        elif drift=='frame_conflict':pins.append({**bound,'file_sha256':'f'*64})
+        completed_frame=put('original-completion.json',saved_frame)
+        if drift=='frame_binding':(root/'original-completion.json').write_text('{}')
+    elif drift and drift.startswith('frame_'):pytest.skip('original embedded review format only')
+    def consume():
+        return (composed.consume_applied_source_package(bound,Store()) if completed_frame is None
+            else composed.consume_applied_source_package(bound,Store(),completed_frame=completed_frame))
     if drift:
-        with pytest.raises(ValueError):composed.consume_applied_source_package(bound,Store())
+        with pytest.raises(ValueError):consume()
     else:
-        assert composed.has_applied_source_frame(root/'effective-package.json',package)
-        assert composed.consume_applied_source_package(bound,Store())==package
+        if frame!='embedded_review':assert composed.has_applied_source_frame(root/'effective-package.json',package)
+        assert consume()==package
         assert calls[0][0]=='SET TRANSACTION READ ONLY' and len(calls)==2
 
 

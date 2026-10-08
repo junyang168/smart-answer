@@ -160,6 +160,12 @@ def reviewed_inputs(root=ROOT):
             or reservation.get('fresh_reviews_per_provider') != 1 or reservation.get('human_content_approval') is not False
             or reservation.get('prior_refusal_bindings') != bindings):
         raise ValueError('single-use owner qualifier authorization drift')
+    reviews, raws = saved_reviews(packet,root)
+    return states, proof, draft, packet, reviews, raws
+
+
+def saved_reviews(packet,root=ROOT):
+    """Original actual dual calls/encoding/report, without a Registry builder."""
     reviews, raws = {}, []
     for label,provider,model in [('gpt','codex','gpt-6.1-sol'),('opus','claude','claude-opus-5-5')]:
         a = adapter(provider,model); raw = old.read_artifact(root/f'raw-{label}.json')
@@ -178,7 +184,42 @@ def reviewed_inputs(root=ROOT):
     if old.read_artifact(root/'review-report.json') != {'status':'dual_review_approved_not_applied',
             'packet_sha256':old.sha256_json(packet),'reviews':reviews,'master_data_mutations':0}:
         raise ValueError('fresh dual review report drift')
-    return states, proof, draft, packet, reviews, raws
+    return reviews, raws
+
+
+def completed_review_inputs(package):
+    """Read the embedded original review of an independently SQL-bound package.
+
+    The caller must first authenticate the actual applied full package. This
+    adapter provides no new-write approval or group-completion authority.
+    """
+    app=package.get('source_repair_application') or {}
+    if app.get('schema_version')!=VERSION or app.get('review_root')!=str(ROOT):
+        raise ValueError('completed review outside original declared format/root')
+    packet=old.read_artifact(ROOT/'packet.json')
+    draft=old.read_artifact(ROOT/'draft-package.json')
+    if (app['review_packet']!=packet or packet['draft_package_sha256']!=old.sha256_json(draft)
+            or app['user_authorization']!=packet['owner_authorization']):
+        raise ValueError('completed embedded review packet/draft drift')
+    reservation=old.read_artifact(ROOT/'owner-authorization.json')
+    if (reservation!=old.read_artifact(PRIOR/'owner-qualified-transcript-start.json')
+            or reservation.get('packet_sha256')!=old.sha256_json(packet)
+            or reservation.get('schema_version')!=VERSION or reservation.get('output_root')!=str(ROOT)
+            or reservation.get('human_content_approval') is not False
+            or reservation.get('fresh_reviews_per_provider')!=1
+            or reservation.get('prior_refusal_bindings')!=packet['prior_refusal_bindings']):
+        raise ValueError('completed original owner reservation drift')
+    from backend.pipeline.source_reconciliation import verify_file
+    for pin in packet['prior_refusal_bindings']:verify_file(pin)
+    reviews,raws=saved_reviews(packet)
+    if app['review_artifacts']!=raws:
+        raise ValueError('completed SQL-bound raw model artifacts differ from original files')
+    report,_=old.frozen_inputs()
+    if (packet['impact_binding']!={'path':str(old.IMPACT/'impact-report.json'),'file_sha256':old.REPORT_SHA}
+            or packet['scope_proposal_binding']!={'path':str(old.IMPACT/'reconciliation-scope-proposal.json'),'file_sha256':old.PROPOSAL_SHA}):
+        raise ValueError('completed review original source scope drift')
+    old.verify_source(report)
+    return packet
 
 
 def package_for(states, draft, packet, reviews, raws, root=ROOT):
