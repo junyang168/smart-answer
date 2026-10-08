@@ -81,7 +81,50 @@ def plan_readset(plan, store):
     return before
 
 
-def authenticate_snapshot(snapshot, source, plan, store):
+def has_predecessor_input(source):
+    return _entry(source) is not None
+
+
+def assert_applied_plan(package,plan,store):
+    """Bind the ENTIRE exact plan/package to actual SQL, never a pass flag."""
+    from backend.api.canonical_repository.postgres_store import (ChangeOperation,
+        PlannedReviewEvent,operation_fingerprint_rows,review_event_fingerprint_rows)
+    ops=[ChangeOperation(**row) for row in plan['operations']]
+    events=[PlannedReviewEvent(**row) for row in plan.get('review_events',[])]
+    source_sha=c.sha256_json(package)
+    fp=c.sha256_json({'planner_schema':'wang_postgres_changeset_v2',
+        'source_kind':plan['source_kind'],'source_sha256':source_sha,'package_id':package['package_id'],
+        'operations':operation_fingerprint_rows(ops),'review_events':review_event_fingerprint_rows(events)})
+    if (plan['source_sha256']!=source_sha or plan['fingerprint_sha256']!=fp
+            or plan['change_set_id']!='KCS-'+fp[:20] or plan['package_id']!=package['package_id']
+            or any(op.after_sha256!=c.record_content_sha(op.payload) for op in ops)):
+        raise ValueError('compiled source full package/operation fingerprint drift')
+    with store.connect() as conn,conn.cursor() as cursor:
+        cursor.execute('SET TRANSACTION READ ONLY')
+        cursor.execute('SELECT source_kind,source_sha256,fingerprint_sha256,status FROM wang_knowledge.change_sets WHERE change_set_id=%s',
+                       (plan['change_set_id'],))
+        if tuple(cursor.fetchone() or ())!=(plan['source_kind'],source_sha,fp,'applied'):
+            raise ValueError('compiled source has no exact actual SQL application')
+
+
+def complete_readset(plan,store,reviewed_rows=None):
+    before=plan_readset(plan,store)
+    if reviewed_rows is None:return before
+    from backend.pipeline.viewpoint_applied_source_epochs import read_pinned_versions
+    pins=[(*c.split_key(key),payload.get('revision'),c.record_content_sha(payload))
+          for key,payload in reviewed_rows.items()]
+    versions={c.key(*key):value for key,value in read_pinned_versions(pins,store).items()}
+    if versions!=reviewed_rows:
+        raise ValueError('compiled source retained review context SQL version/content drift')
+    for key,payload in reviewed_rows.items():
+        if key in before and before[key]!=payload:
+            raise ValueError('compiled source plan/review predecessor conflict')
+        before[key]=payload
+    return before
+
+
+def authenticate_snapshot(snapshot, source, plan, store, *, plan_path=None,
+                          reviewed_rows=None, sections=None):
     """Called ONLY after the full package/plan/receipt actual SQL check passes."""
     entry = _entry(source)
     if entry is None:
@@ -91,8 +134,8 @@ def authenticate_snapshot(snapshot, source, plan, store):
     if snapshot != spec['snapshot']:
         raise ValueError('completed predecessor snapshot differs from applied package')
     anchor = _small(spec['completion'])
-    plan_pin = {'path':str(Path(source['path']).parent/'dry-run-plan.json'),
-                'file_sha256':c.file_sha256(Path(source['path']).parent/'dry-run-plan.json')}
+    plan_path=Path(plan_path) if plan_path is not None else Path(source['path']).parent/'dry-run-plan.json'
+    plan_pin = {'path':str(plan_path),'file_sha256':c.file_sha256(plan_path)}
     if (anchor.get('kind') != 'completed_source_predecessor_compilation'
             or anchor.get('status') != 'complete'
             or anchor.get('source') != source or anchor.get('plan') != plan_pin
@@ -100,12 +143,14 @@ def authenticate_snapshot(snapshot, source, plan, store):
             or anchor.get('semantic_approval_granted') is not False
             or anchor.get('model_calls') != 0 or anchor.get('Registry_writes') != 0):
         raise ValueError('compiled predecessor original source/plan/archive anchor drift')
-    before = plan_readset(plan,store)
+    before = complete_readset(plan,store,reviewed_rows)
+    sections={} if sections is None else sections
     projection = compiled.consume_projection(spec['projection'],sorted(before),
         completion_binding=spec['completion'],snapshot_binding=snapshot,
-        field='before_records')
+        field='before_records',sections=sorted(sections))
     if (projection['rows'] != {key:value for key,value in before.items() if value is not None}
-            or set(projection['absent_keys']) != {key for key,value in before.items() if value is None}):
+            or set(projection['absent_keys']) != {key for key,value in before.items() if value is None}
+            or projection['sections']!=sections):
         raise ValueError('compiled predecessor differs from exact applied SQL before versions')
     entry['authenticated'] = True
 
@@ -175,4 +220,41 @@ def compile_source_predecessor(source, output_root, store, *, completed_frame=No
         'create_absences':sum(v is None for v in before.values()),
         'exact_SQL_predecessor_equality':True,'old_archive_aliases':aliases,
         'production_resume_authorized':False})
+    return binding(declaration)
+
+
+def compile_completed_epoch(source,output_root,store,*,limits=compiled.CompileLimits()):
+    """Same explicit compiler for the generic completed source freeze format."""
+    from backend.pipeline.viewpoint_validation_context import require_explicit_history_maintenance
+    from backend.pipeline import source_reconciliation_epoch as epoch
+    require_explicit_history_maintenance('explicit completed source freeze compilation')
+    root=Path(output_root)
+    if _scope.get() is not None or not root.is_absolute() or root.exists():
+        raise ValueError('new unscoped absolute completed epoch compiler root required')
+    package,frozen,plan,complete=epoch.load_completed(source)
+    assert_applied_plan(package,plan,store)
+    original=Path(source['path']).parent
+    snapshots=[pin for pin in complete['bindings'] if pin['path']==str(original/'frozen.json')]
+    if len(snapshots)!=1:raise ValueError('completed epoch frozen denominator missing/ambiguous')
+    snapshot=snapshots[0];reviewed=c.index(frozen['before_records'])
+    before=complete_readset(plan,store,reviewed)
+    sections={'artifact_sha256':package['source_repair_application']['frozen_sha256']}
+    root.mkdir(parents=True)
+    anchor=root/'original-applied-anchor.json'
+    write(anchor,dict(kind='completed_source_predecessor_compilation',status='complete',
+        source=source,plan=binding(original/'plan.json'),bindings=[snapshot],
+        original_completed_frame=binding(original/'complete.json'),semantic_approval_granted=False,
+        model_calls=0,Registry_writes=0))
+    receipt=compiled.compile_projection(binding(anchor),Path(snapshot['path']),sorted(before),
+        root/'predecessors.json',field='before_records',sections=sorted(sections),limits=limits)
+    declaration=root/'completed-predecessor-input.json'
+    write(declaration,dict(schema_version=SCHEMA,source=source,completion=binding(anchor),
+        snapshot=snapshot,aliases=[snapshot],projection=receipt['projection']))
+    with predecessor_inputs([binding(declaration)]):
+        authenticate_snapshot(snapshot,source,plan,store,plan_path=original/'plan.json',
+                              reviewed_rows=reviewed,sections=sections)
+    write(root/'compilation-result.json',{**receipt,'declaration':binding(declaration),
+        'whole_operation_population':len(plan['operations']),'complete_review_records':len(reviewed),
+        'readset_population':len(before),'create_absences':sum(v is None for v in before.values()),
+        'exact_SQL_predecessor_equality':True,'production_resume_authorized':False})
     return binding(declaration)

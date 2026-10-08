@@ -70,9 +70,9 @@ def _frozen_seal(path):
 def load_completed(bound):
     """Consume a completed source epoch using its ORIGINAL scoped packet.
 
-    No new snapshot/certificate/cache protocol. The executor already saved the
-    complete affected/context rows and source metadata in proposal.packet.json.
-    Its complete binding authenticates the old full freeze without parsing it.
+    The executor saved all affected/context rows in proposal.packet.json.
+    An explicitly compiled predecessor input can replace repeat traversal of
+    the original whole freeze; all original scoped reviews and audit gates stay.
     Store writes retain validate_package's full authorization reconstruction.
     Current postimages, retained versions, SQL and audit gates stay separate.
     """
@@ -91,8 +91,12 @@ def load_completed(bound):
     pins=complete['bindings']
     if len(pins)!=len(required) or {b['path'] for b in pins}!=required or bound not in pins:
         raise ValueError('completion proof denominator drift')
-    for pin in pins:c.verify_file(pin)
-    if app.get('frozen_sha256')!=_frozen_seal(root/'frozen.json'):
+    from backend.pipeline.viewpoint_completed_predecessors import has_predecessor_input
+    compact=has_predecessor_input(bound)
+    frozen_pin=next(pin for pin in pins if pin['path']==str(root/'frozen.json'))
+    for pin in pins:
+        if not compact or pin!=frozen_pin:c.verify_file(pin)
+    if not compact and app.get('frozen_sha256')!=_frozen_seal(root/'frozen.json'):
         raise ValueError('completed epoch original frozen seal mismatch')
     packet=body(read(root/'proposal.packet.json'))
     frozen={'update_id':packet['update_id'],'manifest':packet['manifest'],
@@ -118,6 +122,14 @@ def load_completed(bound):
         c.verify_file(outcome['binding'])
         for pin in [outcome['result'].get(k) for k in ('audit','original_audit','resolution')]:
             if pin:c.verify_file(pin)
+    if compact:
+        from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+        from backend.pipeline.viewpoint_completed_predecessors import assert_applied_plan,authenticate_snapshot
+        store=PostgresKnowledgeStore()
+        if plan['source_kind']!=c.VERSION:raise ValueError('completed source SQL kind drift')
+        assert_applied_plan(package,plan,store)
+        authenticate_snapshot(frozen_pin,bound,plan,store,plan_path=root/'plan.json',
+            reviewed_rows=before,sections={'artifact_sha256':app['frozen_sha256']})
     return package,frozen,plan,complete
 
 

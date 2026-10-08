@@ -652,6 +652,67 @@ def test_frozen_identity_is_preserved_when_completed_readset_omits_unrelated_row
         with pytest.raises(ValueError):c.compile_package(frame,p,raw,frozen_sha256=bad)
 
 
+@pytest.mark.parametrize('drift',[None,'SQL_application','SQL_context','raw_review','source_file','logical_seal','missing_context','false_approval','missing_projection'])
+def test_explicit_compact_epoch_matches_all_original_outputs_without_whole_freeze(scenario,tmp_path,monkeypatch,drift):
+    from backend.pipeline import source_reconciliation_epoch as epoch
+    from backend.pipeline import viewpoint_completed_predecessors as compact
+    from backend.pipeline import viewpoint_applied_source_epochs as applied
+    from backend.api.canonical_repository import postgres_store
+    runner,ports,manifest=setup_runner(tmp_path,scenario)
+    runner.run(manifest,apply=True,audit=True)
+    source=r.binding(runner.root/'effective-package.json')
+    original=epoch.load_completed(source)
+    before=c.index(original[1]['before_records']);plan=original[2]
+    class Store:
+        def connect(self):return self
+        def cursor(self):return self
+        def __enter__(self):return self
+        def __exit__(self,*a):pass
+        def execute(self,*a):pass
+        def fetchone(self):return (plan['source_kind'],plan['source_sha256'],plan['fingerprint_sha256'],'applied')
+    store=Store()
+    def old_versions(pins,store):
+        result={}
+        for col,oid,rev,sha in pins:
+            payload=before[c.key(col,oid)]
+            assert rev==payload['revision'] and sha==record_content_sha(payload)
+            result[col,oid]=deepcopy(payload)
+        return result
+    monkeypatch.setattr(applied,'read_pinned_versions',old_versions)
+    monkeypatch.setattr(postgres_store,'PostgresKnowledgeStore',lambda:store)
+    declaration=compact.compile_completed_epoch(source,tmp_path/'copied-readset',store)
+    if drift=='SQL_application':store.fetchone=lambda:('wrong',)*4
+    elif drift=='SQL_context':
+        def changed(pins,store):
+            result=old_versions(pins,store);next(iter(result.values()))['review_status']='human_review_required';return result
+        monkeypatch.setattr(applied,'read_pinned_versions',changed)
+    elif drift=='raw_review':
+        path=runner.root/'initial_review.raw.json';value=r.body(r.read(path));value['request_payload_sha256']='0'*64;r.write(path,value,immutable=False)
+    elif drift=='source_file':Path(manifest.current_sources[0].path).write_text('{}')
+    elif drift in {'logical_seal','missing_context','false_approval'}:
+        spec=r.body(r.read(Path(declaration['path'])))
+        path=Path(spec['projection']['path']);value=r.body(r.read(path))
+        if drift=='logical_seal':value['sections']['artifact_sha256']='0'*64
+        elif drift=='missing_context':value['rows'].pop()
+        else:value['semantic_approval_granted']=True
+        r.write(path,value,immutable=False);spec['projection']=r.binding(path)
+        r.write(Path(declaration['path']),spec,immutable=False);declaration=r.binding(Path(declaration['path']))
+    elif drift=='missing_projection':(tmp_path/'copied-readset/predecessors.json').unlink()
+    actual_verify=c.verify_file
+    def small_verify(pin):
+        raw=pin.model_dump() if hasattr(pin,'model_dump') else pin
+        if raw['path']==str(runner.root/'frozen.json'):pytest.fail('routine opened whole archived freeze')
+        return actual_verify(pin)
+    monkeypatch.setattr(c,'verify_file',small_verify)
+    monkeypatch.setattr(epoch,'_frozen_seal',lambda *a:pytest.fail('routine reopened archived header'))
+    monkeypatch.setattr(epoch,'validate_package',lambda *a,**k:pytest.fail('routine rebuilt writer'))
+    with compact.predecessor_inputs([declaration]):
+        if drift is None:assert epoch.load_completed(source)==original
+        else:
+            with pytest.raises((ValueError,FileNotFoundError)):epoch.load_completed(source)
+    assert ports.applies==ports.audits==1 and ports.calls==['proposal','initial_review']
+
+
 def test_unchanged_reviewed_context_is_not_an_eternal_approval(scenario):
     from backend.pipeline import source_reconciliation_epoch as epoch
     manifest, before, _ = scenario
