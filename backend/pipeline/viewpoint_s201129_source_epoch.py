@@ -95,6 +95,21 @@ def validate_postimage(package, records):
     return normalized
 
 
+def verify_completed_application_bindings(rows,bound):
+    """Reuse the same authenticated predecessor at the membership readback.
+
+    bound_package has already checked the actual entire applied SQL package.
+    No declared projection means the original physical checks, not a waiver.
+    """
+    from backend.pipeline.viewpoint_completed_predecessors import has_predecessor_input,verify_archived_refusal
+    compact=has_predecessor_input(bound)
+    for row in rows:
+        if compact:
+            verify_archived_refusal(row,bound)
+        elif repair.binding(Path(row['path'])) != row:
+            raise ValueError('S201129 applied proof physical drift')
+
+
 @current_check
 def verified_applied(bound, store):
     package = bound_package(bound)
@@ -109,9 +124,7 @@ def verified_applied(bound, store):
             or verified['master_data_mutations'] != len(plan['operations'])
             or verified['pre_fingerprint_sha256'] != scope['registry_fingerprint_sha256']):
         raise ValueError('S201129 lacks actual single application and readback')
-    for row in verified['bindings']:
-        if repair.binding(Path(row['path'])) != row:
-            raise ValueError('S201129 applied proof physical drift')
+    verify_completed_application_bindings(verified['bindings'],bound)
     expected = postimages(package)
     required = {(c,o) for c,rows in expected.items() for o in rows}
     from backend.pipeline.viewpoint_s201129_link_support_apply import applied_child_object_ids

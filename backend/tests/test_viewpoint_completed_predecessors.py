@@ -133,3 +133,23 @@ def test_bounded_routine_cannot_start_compiler(tmp_path,monkeypatch):
     with ValidationContext('routine',limits=ROUTINE_VALIDATION_LIMITS):
         with pytest.raises(ValueError):m.compile_source_predecessor(source,tmp_path/'forbidden',object())
     assert not (tmp_path/'forbidden').exists()
+
+
+def test_membership_reuses_only_authentic_completed_application_predecessor(tmp_path,monkeypatch):
+    from backend.pipeline import viewpoint_s201129_source_epoch as consumer
+    bound,source,snapshot,plan=scenario(tmp_path,monkeypatch)
+    original=m.c.verify_file
+    def no_whole(pin):
+        assert pin!=snapshot
+        return original(pin)
+    monkeypatch.setattr(m.c,'verify_file',no_whole)
+    with m.predecessor_inputs([bound]):
+        with pytest.raises(ValueError,match='lacks actual SQL'):
+            consumer.verify_completed_application_bindings([snapshot],source)
+        m.authenticate_snapshot(snapshot,source,plan,object())
+        consumer.verify_completed_application_bindings([snapshot,source],source)
+        changed={**source,'file_sha256':'0'*64}
+        with pytest.raises(ValueError):consumer.verify_completed_application_bindings([changed],source)
+    monkeypatch.setattr(consumer.repair,'binding',lambda path:{'path':str(path),'file_sha256':'changed'})
+    with pytest.raises(ValueError,match='physical drift'):
+        consumer.verify_completed_application_bindings([snapshot],source)
