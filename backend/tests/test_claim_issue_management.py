@@ -14,6 +14,16 @@ from backend.tests.test_cvp_sql_actions_postgres import source_run
 from backend.tests.test_claim_evidence_reciprocity_postgres_integration import _temporary_postgres, postgres_store
 
 
+def test_production_policy_keeps_separate_domains_and_no_human_content_approval():
+    from pathlib import Path
+    path=Path(__file__).resolve().parents[1]/'pipeline/policies/wang_claim_issue_management_v1.json'
+    policy=m.Policy.model_validate_json(path.read_text())
+    assert set(policy.claim_fields)==m.CLAIM_FIELDS
+    assert set(policy.evidence_fields)==m.EVIDENCE_FIELDS
+    assert set(policy.link_fields)==m.LINK_FIELDS
+    assert not policy.human_content_approval and policy.cvp_permissions==[]
+
+
 @pytest.fixture
 def issue_setup(scenario,tmp_path):
     manifest,states,_=scenario

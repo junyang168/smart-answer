@@ -533,6 +533,7 @@ def main(argv=None):
     parser.add_argument("--dry-run",action="store_true")
     parser.add_argument('--execute',action='store_true',help='Explicit new SQL execution; never implicitly resume a stopped campaign')
     parser.add_argument('--stop-after-group',type=int,help='Complete this original group then stop before preparing the next')
+    parser.add_argument('--pause-after-group',type=int,help='Narrow this invocation for acceptance; never changes the immutable execution boundary')
     parser.add_argument('--action',choices=('group','source','owner-link'),default='group')
     parser.add_argument('--run-id')
     parser.add_argument('--manifest',type=Path)
@@ -546,8 +547,12 @@ def main(argv=None):
     store = PostgresKnowledgeStore(args.database_url)
     definition,group,row = next_group(store,args.sql_campaign)
     execution_boundary(args.output_root,args.sql_campaign,definition,args.stop_after_group)
-    if checkpoint_reached(group,args.stop_after_group):
-        stage_event('owner_checkpoint', stop_after_group=args.stop_after_group)
+    if args.pause_after_group is not None and (not 1 <= args.pause_after_group <= len(definition['groups'])
+            or args.stop_after_group is None or args.pause_after_group > args.stop_after_group):
+        raise ValueError('acceptance pause must narrow an explicit original execution boundary')
+    invocation_limit = args.pause_after_group or args.stop_after_group
+    if checkpoint_reached(group,invocation_limit):
+        stage_event('owner_checkpoint', stop_after_group=args.stop_after_group, pause_after_group=args.pause_after_group)
         return 0
     if group is None:
         print(json.dumps({"status":"complete","groups":len(definition["groups"])})); return 0
@@ -568,7 +573,7 @@ def main(argv=None):
             if not args.run_id:raise ValueError('bounded action requires exact admitted SQL run ID')
             saved=store.get_cvp_group(args.run_id)
             if not saved or saved['campaign_sha256']!=args.sql_campaign:raise ValueError('bounded action campaign drift')
-            if args.stop_after_group is not None and saved['sequence'] > args.stop_after_group:
+            if invocation_limit is not None and saved['sequence'] > invocation_limit:
                 raise ValueError('action exceeds owner execution boundary')
             action_root=args.output_root/args.run_id/'actions'
             from backend.pipeline.cvp_sql_actions import execute_source_action,execute_owner_link_action
@@ -583,8 +588,8 @@ def main(argv=None):
                     authorization=binding(args.direction),root=action_root/'owner-link',ports=ReviewPorts())
             definition,group,row=next_group(store,args.sql_campaign)
         while group is not None:
-            if checkpoint_reached(group,args.stop_after_group):
-                stage_event('owner_checkpoint', stop_after_group=args.stop_after_group)
+            if checkpoint_reached(group,invocation_limit):
+                stage_event('owner_checkpoint', stop_after_group=args.stop_after_group, pause_after_group=args.pause_after_group)
                 break
             try:
                 run_group(store,definition,group,row,root=args.output_root)
@@ -597,8 +602,8 @@ def main(argv=None):
                 active = next((r for r in current if r["group_key"]==group["group_key"]),None)
                 if active:store.fail_cvp_group(active["run_id"],str(exc))
                 raise
-            if group['sequence']==args.stop_after_group:
-                stage_event('owner_checkpoint', stop_after_group=args.stop_after_group)
+            if group['sequence']==invocation_limit:
+                stage_event('owner_checkpoint', stop_after_group=args.stop_after_group, pause_after_group=args.pause_after_group)
                 break
             definition,group,row = next_group(store,args.sql_campaign)
     return 0

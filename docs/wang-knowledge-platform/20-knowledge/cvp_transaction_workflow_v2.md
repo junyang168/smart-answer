@@ -147,3 +147,5 @@ commit 後的新連線回讀用於确认可見結果與交接審計。它若失�
 新 runner 須指定已接納的 SQL campaign；缺少時停止，不從旧 root 自動導入。`--dry-run` 僅當前組只讀準備，正式執行須明示 `--execute`。schema migration、歷史接納和 production execution 是三個不同操作；隔離測試不能代替各操作的實際 receipt。
 
 單組／有界驗收必須指定 `--stop-after-group N`：只有 SQL 已保存第 N 組 `audited` 才正常退出，不準備下一組。執行 root 的不可變 `execution-boundary.json` 固定 campaign 與停止組號；恢復不能省略或擴大此邊界。已有第 N 組完成時直接回報 owner checkpoint，不把它說成全量完成。準備、生成審核、已提交、完整獨立審計與完成階段各輸出即時事件，提交不等於組完成。
+
+既有執行 root 已獲准更遠的停止組號時，臨時有界驗收可另加 `--pause-after-group N`，只縮小這次 invocation。它必須在原明示邊界之內，不改寫原不可變邊界，不換 action／輸出位置或呼叫預算；仍只在 SQL 已 `audited` 後退出，不準備下一組。後續執行權限仍取自原 owner 邊界及最新停止指示，不由此參數新增。

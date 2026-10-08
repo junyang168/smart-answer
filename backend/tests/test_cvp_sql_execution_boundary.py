@@ -54,6 +54,32 @@ def test_completed_boundary_returns_before_preparation(monkeypatch,tmp_path):
     preparation.assert_not_called()
 
 
+def test_acceptance_pause_preserves_original_boundary_and_never_prepares_next(monkeypatch,tmp_path):
+    definition={'groups':[{},{}], 'campaign_sha256':'campaign'}
+    group={'sequence':1,'group_key':'first'}
+    store=Mock()
+    store.cvp_campaign_progress.return_value=[{'group_key':'first','run_id':'run','checkpoint':'audited'}]
+    next_group=Mock(return_value=(definition,group,None))
+    monkeypatch.setattr(flow,'PostgresKnowledgeStore',lambda _:store)
+    monkeypatch.setattr(flow,'next_group',next_group)
+    monkeypatch.setattr(flow,'run_group',Mock())
+    from backend.pipeline import source_reconciliation_runtime
+    monkeypatch.setattr(source_reconciliation_runtime,'maintenance_lock',nullcontext)
+    assert flow.main(['--sql-campaign','campaign','--output-root',str(tmp_path),'--execute',
+                      '--stop-after-group','2','--pause-after-group','1'])==0
+    assert flow.read_artifact(tmp_path/'execution-boundary.json')['stop_after_group']==2
+    next_group.assert_called_once()
+
+
+@pytest.mark.parametrize('limit,pause',[(None,'1'),('1','2'),('2','0'),('2','3')])
+def test_acceptance_pause_cannot_expand_boundary(monkeypatch,tmp_path,limit,pause):
+    monkeypatch.setattr(flow,'PostgresKnowledgeStore',lambda _:None)
+    monkeypatch.setattr(flow,'next_group',lambda *_:({'groups':[{},{}]}, {'sequence':1},None))
+    args=['--sql-campaign','c','--output-root',str(tmp_path),'--dry-run','--pause-after-group',pause]
+    if limit:args+=['--stop-after-group',limit]
+    with pytest.raises(ValueError,match='must narrow'):flow.main(args)
+
+
 def test_verified_archive_logical_binding_not_confused_with_physical_path(monkeypatch,tmp_path):
     from backend.pipeline import viewpoint_backup_archive as archive
     physical=tmp_path/'physical.dump';physical.write_bytes(b'exact backup')
