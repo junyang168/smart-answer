@@ -2,8 +2,8 @@
 
 > **讀者**：流程負責人、神學編輯、Solution architect、Developer。
 > **類型**：流程。
-> **狀態**：當前內容流程；第 13 節共同 Claim 問題接點、聯合後像審核及 SQL 分支已實作、離線／隔離驗證，尚未啟用正式內容修訂。儲存、交易與恢復由 v2 共同 SQL 入口承擔，舊執行方案禁用。本文不啟動生產、不新增內容修改授權。
-> **與代碼對齊**：2026-10-08；交易基線 `6b9541e`、程式版本綁定 `4ce1a4c`；第 13 節核對本次 `claim_issue_management`、共同 SQL／model hooks、migration 007 與反例測試。正式 policy、migration 啟用與實際內容修訂／全組审计仍須獨立驗收。
+> **狀態**：當前內容流程；第 13 節共同 Claim 問題接點、聯合後像審核及 SQL 分支已啟用，來源不變的 Claim 修訂、CVP 覆蓋及完整組獨立審計已經實際驗收。儲存、交易與恢復由 v2 共同 SQL 入口承擔，舊執行方案禁用。本文不啟動生產、不新增內容修改授權。
+> **與代碼對齊**：2026-10-08；交易基線 `6b9541e`、程式版本綁定 `4ce1a4c`；第 13 節核對 `0a93a08`、`d55b999`、`cf72c39`、`1f995b2` 的共同接點、policy／migration、診斷正文與 Evidence 區分及 SQL 交接。正式啟用和實際組驗收另存獨立 receipt，不由文檔追認未授權內容。
 > **權威範圍**：說明 Claims 到 CVP 的正常路徑、例外分流、人工出口與恢復接點。內容定義服從 [CanonicalViewpoint 设计](./canonical_viewpoint_design.md)，使命與限制服從 [Project Mission Statement](../00-overview/project_mission_statement.md) 和 [Solution Architecture](../00-overview/solution_architecture.md)。具體授權仍以相應 policy／精確人工決定為準，不能拿本文擴權。
 
 ## 目錄
@@ -275,7 +275,7 @@ owner 暫停／指定 checkpoint 優先於自動恢復。停止時明確交代�
 
 ## 13. Claim 與 CVP 管理的變更閉環
 
-本節是共同流程及有界實作契約，不是執行授權。新接點已接入共同 SQL flow；不宣稱真實內容修訂已完成。新增通用 Claim／Evidence 或 CVP 連接修訂權限須分域由 owner 確認有界 policy；確認一次後，由 code 完成各自權限內的後續步驟，不逐條、逐步再問「繼續」。一域的批准不擴大另一域的權限。
+本節是共同流程及有界實作契約，不是執行授權。新接點已接入共同 SQL flow；正式使用须有已綁定 policy 和實際驗收。新增通用 Claim／Evidence 或 CVP 連接修訂權限須分域由 owner 確認有界 policy；確認一次後，由 code 完成各自權限內的後續步驟，不逐條、逐步再問「繼續」。一域的批准不擴大另一域的權限。
 
 ### 13.1 管理域、職責與現有缺口
 
