@@ -1554,7 +1554,7 @@ def test_request_ceiling_blocks_before_model_call(tmp_path: Path):
 
     adapter = _StubAdapter({"ok": True})
     adapter.max_request_bytes = 10
-    with pytest.raises(ValueError, match="exceeding the frozen ceiling"):
+    with pytest.raises(ValueError, match="exceeding the configured ceiling"):
         _call(adapter, {"input": "payload is too large"}, tmp_path / "raw.json")
     assert adapter.calls == 0
     assert not (tmp_path / "raw.json").exists()

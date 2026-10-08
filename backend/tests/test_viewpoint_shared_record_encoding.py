@@ -70,5 +70,5 @@ def test_unique_oversize_still_stops_without_call(tmp_path):
     from backend.pipeline.viewpoint_resolution_runtime import call_model
     calls=[]
     a=review_adapter(SimpleNamespace(model='gpt-6.1-sol',backend='codex_subscription',reasoning_effort='high',generate_json=lambda **kw:calls.append(kw)))
-    with pytest.raises(ValueError,match='frozen ceiling'):call_model(a,{'unique':'字'*200000},tmp_path/'raw.json')
+    with pytest.raises(ValueError,match='configured ceiling'):call_model(a,{'unique':'字'*200000},tmp_path/'raw.json')
     assert not calls

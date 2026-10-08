@@ -232,9 +232,11 @@ def source_review_adapter(client, cache):
             return legacy
         if saved.get('prompt_sha256') == compact.prompt_sha256 and config == compact.generation_config_sha256:
             return compact
-    return StructuredJsonReviewerAdapter(client=client, prompt=contextual_adjudication_prompt(),
+    contextual = StructuredJsonReviewerAdapter(client=client, prompt=contextual_adjudication_prompt(),
         response_model=Findings, schema_name='wang_audit_source_findings_v1', compact_payload=True,
         shared_text_payload=True, shared_record_payload=True)
+    from backend.pipeline.viewpoint_resolution_runtime import response_adapter
+    return response_adapter(contextual, read_artifact(cache) if cache.exists() else None)
 
 
 def restricted_packet(packet, only_item_ids):

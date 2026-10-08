@@ -86,7 +86,7 @@ def test_actual_wire_count_config_identity_and_immutable_proof(tmp_path):
 
 def test_still_stops_oversized_unique_text_before_any_model_call(tmp_path):
     a,calls=adapter(True)
-    with pytest.raises(ValueError,match='frozen ceiling 500000'):
+    with pytest.raises(ValueError,match='configured ceiling 500000'):
         call_model(a,{'unique':'原'*200000},tmp_path/'raw-proposal.json')
     assert not calls and not (tmp_path/'raw-proposal.json').exists()
 

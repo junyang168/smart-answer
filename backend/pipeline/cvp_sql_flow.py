@@ -466,7 +466,7 @@ def run_group(store, definition, group, row, *, root):
                                 'model':'gemini-3.8-flash','workers':2,'automatic_retry':False})
         subprocess.run([str(PROJECT/"backend/.venv/bin/python"),"scripts/audit-library.py","--scope","all","--layers","1,2,3,4",
                         "--claim-ids",",".join(group["claim_ids"]),"--viewpoint-ids",",".join(views),
-                        "--workers","2","--model","gemini-3.8-flash","--no-status-file","--preserve-full-context","--sql-group-scope","--out",str(audit_dir)],
+                        "--workers","2","--model","gemini-3.8-flash","--no-status-file","--preserve-full-context","--component-roles","--sql-group-scope","--out",str(audit_dir)],
                        cwd=PROJECT,check=True,env={**os.environ,'KNOWLEDGE_DATABASE_URL':store.database_url})
     from backend.pipeline.viewpoint_content_blocked_fallback import apply as content_fallback
     validate_transaction_audit(read_artifact(audit_path),group['claim_ids'],views)
@@ -479,6 +479,24 @@ def run_group(store, definition, group, row, *, root):
         packet=build_packet(audit_path,store);targets=[target_identity(i) for i in packet['items']]
         prior=store.adjudication_roots(targets)
         resolution=audit_dir/'gpt-source-final-resolution.json'
+        component_binding = root/'component-role-authorization-binding.json'
+        if component_binding.exists():
+            saved_binding = read_artifact(component_binding)['authorization']
+            if binding(Path(saved_binding['path'])) != saved_binding:
+                raise ValueError('owner component direction physical drift')
+            direction = read_artifact(Path(saved_binding['path']))
+            if direction.get('run_id') == run_id:
+                from backend.pipeline.viewpoint_component_role_resolution import create
+                exact = [p for p in prior if binding(p/'packet.json') == direction.get('packet_binding')]
+                if len(exact) != 1:
+                    raise ValueError('owner component direction lacks unique actual saved adjudication')
+                resolution = audit_dir/'owner-component-role-resolution.json'
+                create(audit_path, exact[0], Path(saved_binding['path']), resolution, store,
+                       campaign_sha256=saved['campaign_sha256'], run_id=run_id)
+                store.complete_cvp_group(run_id,audit=audit,audit_binding=binding(audit_path),read_pins=pins(current),
+                                         owner_resolution_path=resolution)
+                stage_event('audited', sequence=group['sequence'], run_id=run_id)
+                return
         from backend.pipeline.viewpoint_reused_source_resolution import compose,create as reuse_part
         from backend.pipeline.viewpoint_adjudication_history import validated_history
         from backend.pipeline.viewpoint_audit_source_adjudication import restricted_packet
@@ -556,6 +574,8 @@ def main(argv=None):
     parser.add_argument('--link-id')
     parser.add_argument('--claim-issue-policy',type=Path,help='Explicit owner bounded Claim/Evidence/CVP policy; no inferred permission')
     parser.add_argument('--request-limit-authorization',type=Path,help='Owner campaign request budget; does not change frozen model inputs or call budgets')
+    parser.add_argument('--component-role-authorization', type=Path,
+                        help='Exact owner acceptance of an existing structural duplicate finding; no new model/content permission')
     args = parser.parse_args(argv)
     load_dotenv(PROJECT/".env")
     if args.database_url:os.environ['KNOWLEDGE_DATABASE_URL']=args.database_url
@@ -581,6 +601,14 @@ def main(argv=None):
     from backend.pipeline.viewpoint_resolution_runtime import authorized_request_limit
     with maintenance_lock(), authorized_request_limit(args.output_root,args.sql_campaign,args.request_limit_authorization):
         execution_boundary(args.output_root,args.sql_campaign,definition,args.stop_after_group,persist=True)
+        if args.component_role_authorization:
+            from backend.pipeline.viewpoint_component_role_resolution import AUTH_SCHEMA
+            direction = read_artifact(args.component_role_authorization)
+            if (direction.get('schema_version') != AUTH_SCHEMA or direction.get('campaign_sha256') != args.sql_campaign
+                    or direction.get('authorized_by') != 'owner' or not direction.get('targets')):
+                raise ValueError('component direction identity/campaign missing')
+            write_immutable(args.output_root/'component-role-authorization-binding.json',
+                            {'authorization': binding(args.component_role_authorization)})
         if args.claim_issue_policy:
             from backend.pipeline.claim_issue_management import read_policy
             read_policy(binding(args.claim_issue_policy))

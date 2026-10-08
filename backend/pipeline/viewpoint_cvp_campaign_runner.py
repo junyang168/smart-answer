@@ -73,7 +73,10 @@ def validate_audit(audit, claim_ids, viewpoint_ids, *, owner_resolution_path=Non
     resolved_by_layer = {'3': set(), '4': set()}
     if owner_resolution_path is not None:
         from backend.pipeline.viewpoint_audit_owner_resolution import validate_resolution, validate_gpt_resolution, GPT_SCHEMA
-        if read(owner_resolution_path).get('schema_version') == GPT_SCHEMA:
+        if read(owner_resolution_path).get('schema_version') == 'wang_owner_component_role_resolution_v1':
+            from backend.pipeline.viewpoint_component_role_resolution import verify
+            resolved_by_layer = verify(audit, read(owner_resolution_path))
+        elif read(owner_resolution_path).get('schema_version') == GPT_SCHEMA:
             resolved_by_layer = validate_gpt_resolution(audit, owner_resolution_path)
         elif read(owner_resolution_path).get('schema_version') == 'wang_exact_reused_gpt_source_resolution_v1':
             from backend.pipeline.viewpoint_reused_source_resolution import verify

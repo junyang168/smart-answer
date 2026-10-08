@@ -1109,6 +1109,10 @@ def validate_foundation_change_set(
                     }
                 )
                 active_component_owners[component_identity].add(viewpoint_id)
+    from .viewpoint_component_roles import component_role_findings
+    findings.extend(component_role_findings(
+        links.values(), claims, evidence_steps, source_fragments, claim_sha=semantic_record_sha
+    ))
     for key, link_ids in active_link_keys.items():
         if len(link_ids) > 1:
             findings.append(

@@ -251,8 +251,11 @@ def response_adapter(adapter, saved=None):
     factory = getattr(adapter, 'program_bound_copy', None)
     if not callable(factory): return adapter
     bound = factory()
-    if saved is None: return bound
+    roles_factory = getattr(bound, 'component_roles_copy', None)
+    roles = roles_factory() if callable(roles_factory) else bound
+    if saved is None: return roles
     keys = ('model_id', 'backend', 'prompt_sha256', 'generation_config_sha256')
+    if all(saved.get(k) == getattr(roles, k) for k in keys): return roles
     if all(saved.get(k) == getattr(bound, k) for k in keys): return bound
     return adapter  # Exact legacy authentication still runs; never a fallback call.
 
@@ -327,12 +330,12 @@ def call_model(
     from backend.pipeline.viewpoint_validation_context import finish_validation_phase, historical_context
     cache = Path(cache)
     saved = cache.exists()
-    adapter = response_adapter(adapter, read_artifact(cache) if saved else None)
     if validating_saved_artifacts() and not saved:
         raise ValueError(f'saved reconstruction has no response; no invocation/fallback: {cache}')
+    if not saved and historical_context() is not None:
+        raise ValueError(f"read-only historical validation has no saved response; no model fallback: {cache}")
+    adapter = response_adapter(adapter, read_artifact(cache) if saved else None)
     if not saved:
-        if historical_context() is not None:
-            raise ValueError(f"read-only historical validation has no saved response; no model fallback: {cache}")
         # Verify the complete live/input cut before even entering the adapter.
         # Cache authentication above this boundary remains purely read-only.
         finish_validation_phase()

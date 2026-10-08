@@ -64,6 +64,6 @@ def test_compact_final_review_still_enforces_frozen_ceiling(tmp_path):
     initial, requests = adapter()
     final = initial.compact_copy()
     final.max_request_bytes = 500000
-    with pytest.raises(ValueError, match='frozen ceiling 500000'):
+    with pytest.raises(ValueError, match='configured ceiling 500000'):
         call_model(final, {'unchanged_content': 'X'*500001}, tmp_path/'raw-final-review.json')
     assert not requests and not (tmp_path/'raw-final-review.json').exists()

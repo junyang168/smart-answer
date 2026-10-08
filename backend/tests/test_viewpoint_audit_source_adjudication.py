@@ -87,7 +87,7 @@ def test_source_review_frozen_ceiling_stops_without_transport(tmp_path):
         generate_json=lambda **kw: pytest.fail('overflow must not call model'))
     a = module.source_review_adapter(client, tmp_path / 'raw.json')
     a.max_request_bytes = 500000
-    with pytest.raises(ValueError, match='frozen ceiling'):
+    with pytest.raises(ValueError, match='configured ceiling'):
         call_model(a, {'original': 'X' * 500001}, tmp_path / 'raw.json')
     assert not (tmp_path / 'raw.json').exists()
 

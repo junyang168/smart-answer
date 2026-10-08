@@ -16,6 +16,10 @@ PostgreSQL 是資料、已提交更改及執行進度的權威。一次獲准修
 
 JSON 保存模型的精確輸入、原始回答、來源副本、批准與審計證據。正常生產不生成整庫 `before/frozen/readback`，也不以它們重建已提交歷史。既有 JSON、拒絕和失敗記錄保留為歸檔。
 
+同 Claim／CVP 的結論與論據連接依 [CanonicalViewpoint 成分規則](./canonical_viewpoint_design.md#4-怎样判断两条主张是同一个观点) 驗證：交易內完整受影響圖檢查精確版本、成分不重疊、各自可用證據與批准，任一違反照常 rollback。獨立審計使用自己的校驗程式及相同版本短規則，唯一 Claim 數與連接數分開。新版 prompt 身份不覆蓋舊回答。
+
+已保存的舊審計／GPT 結構異議不因新版規則自動改為 pass。只有精確 owner `component-role-authorization` 可接受具體已保存的成分重複異議；共同 SQL 入口驗證原完整仲裁、全部來源及當前連接，其他異議仍必須是原 GPT 明確否決。此 disposition 零新模型、零 Registry 修改，保留原 upheld／disputed；完整審計與 SQL 當前 pins 通過後才登記 audited。它不授予未來任意內容異議放行或新的正文／端點修改。
+
 版本綁定由程式管理，不讓模型抄寫 SHA。正常初審／終審、GPT 纠正與來源／Claim 修訂審核的 wire schema 不含 `proposal_sha256`、`review_sha256`、`coverage_claim_sha256` 這些回填欄位；模型只按精確對象 ID、Claim ID 與成分编号返回完整內容判讀。共同入口先驗證實際 request、模型／backend／prompt／config、encoding、intent 及 raw，才從該次輸入產生內部版本欄位。原始回答不改；衍生結果及其綁定證據分開保存，並納入 SQL 批准材料。
 
 這不是 SHA 模糊比對，也不是只凭 Claim ID 接受任何舊回答。已保存回答沿用實際舊配置驗真，再作同一程式綁定；不因抄錯字元重新詢問模型或人工。不改 decision／reason／correction／證據判讀，不把證據不足變成通過。真正的來源或業務記錄 SHA、SQL 版本／依賴／hold 檢查、未知呼叫 hold 與完整審計全部保留；已完成歷史不重編或重審。

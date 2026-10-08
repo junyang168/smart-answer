@@ -2158,6 +2158,27 @@ class StructuredJsonReviewerAdapter:
         })
         return result
 
+    def component_roles_copy(self):
+        """New role semantics have their own identity; old cached prompts survive."""
+        from copy import copy
+        from backend.pipeline.viewpoint_semantic_contract import (
+            COMPONENT_ROLES, CONTEXTUAL_SEMANTICS, component_rules,
+        )
+        if getattr(self, '_component_roles_version', None) == COMPONENT_ROLES:
+            return self
+        if CONTEXTUAL_SEMANTICS not in self._base_prompt:
+            return self
+        result = copy(self)
+        result._component_roles_version = COMPONENT_ROLES
+        result._prompt = self._prompt + '\n\n' + component_rules()
+        result.prompt_sha256 = sha256_json({'prompt': result._prompt})
+        result.generation_config_sha256 = sha256_json({
+            'base_config_sha256': self.generation_config_sha256,
+            'component_roles': COMPONENT_ROLES,
+            'component_rules_sha256': sha256_json(component_rules()),
+        })
+        return result
+
     def _wire_response_schema(self):
         if not self._program_response_binding: return None
         from .viewpoint_response_binding import wire_schema

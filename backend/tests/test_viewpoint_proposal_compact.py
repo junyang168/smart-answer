@@ -40,7 +40,7 @@ def test_initial_proposal_compaction_is_lossless_and_separately_identified(monke
 
 def test_initial_proposal_keeps_frozen_ceiling_and_zero_calls_on_overflow(monkeypatch, tmp_path):
     adapter, requests = proposer(monkeypatch)
-    with pytest.raises(ValueError, match='frozen ceiling 500000'):
+    with pytest.raises(ValueError, match='configured ceiling 500000'):
         call_model(adapter, {'whole_original': 'X'*500001}, tmp_path/'raw-proposal.json')
     assert not requests
     assert not (tmp_path/'raw-proposal.json').exists()
@@ -60,6 +60,6 @@ def test_every_cvp_model_factory_uses_shared_lossless_format(monkeypatch, role, 
     assert json.loads(requests[0]['user_prompt']) == payload
     assert requests[0]['user_prompt'] == json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
     a.max_request_bytes = 500000
-    with pytest.raises(ValueError, match='frozen ceiling'):
+    with pytest.raises(ValueError, match='configured ceiling'):
         call_model(a, {'original': 'X'*500001}, tmp_path/'never-called.json')
     assert len(requests)==1  # Only the small lossless request above; no overflow call.
