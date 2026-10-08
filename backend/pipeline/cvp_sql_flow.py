@@ -555,6 +555,7 @@ def main(argv=None):
     parser.add_argument('--adjudication-root',type=Path)
     parser.add_argument('--link-id')
     parser.add_argument('--claim-issue-policy',type=Path,help='Explicit owner bounded Claim/Evidence/CVP policy; no inferred permission')
+    parser.add_argument('--request-limit-authorization',type=Path,help='Owner campaign request budget; does not change frozen model inputs or call budgets')
     args = parser.parse_args(argv)
     load_dotenv(PROJECT/".env")
     if args.database_url:os.environ['KNOWLEDGE_DATABASE_URL']=args.database_url
@@ -577,7 +578,8 @@ def main(argv=None):
     if not args.execute:
         raise RuntimeError('production remains stopped; explicit new SQL --execute required, no legacy fallback')
     from backend.pipeline.source_reconciliation_runtime import maintenance_lock
-    with maintenance_lock():
+    from backend.pipeline.viewpoint_resolution_runtime import authorized_request_limit
+    with maintenance_lock(), authorized_request_limit(args.output_root,args.sql_campaign,args.request_limit_authorization):
         execution_boundary(args.output_root,args.sql_campaign,definition,args.stop_after_group,persist=True)
         if args.claim_issue_policy:
             from backend.pipeline.claim_issue_management import read_policy

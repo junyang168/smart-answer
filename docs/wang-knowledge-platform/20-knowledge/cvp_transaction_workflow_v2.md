@@ -59,12 +59,14 @@ flowchart LR
 | 階段 | 執行內容與完成依據 |
 | --- | --- |
 | 讀取本組材料 | 從原成員出發，取 Claim、Evidence、fragment、完整自身來源、已有 CVP 及其必要成員／反向引用。材料保存精確 ID、版本、SHA、批准與 hold，不截斷真正依賴 |
-| 模型提議與審核 | 沿用指定 GPT／Opus 及正常唯一纠正輪次、500000 bytes 和覆蓋規則；驗證批准確實對應待寫狀態。模型不取得 SQL 寫入權限 |
+| 模型提議與審核 | 沿用指定 GPT／Opus 及正常唯一纠正輪次、明示請求預算和覆蓋規則；驗證批准確實對應待寫狀態。模型不取得 SQL 寫入權限 |
 | 短 transaction | 依第 4 節驗證並提交。backup、模型、來源檔案及完整材料的 SHA 驗證在進入 transaction 前完成，不長時間持 SQL 鎖等待外部服務 |
 | 完整組獨立審計 | commit 後先以新連線讀取實際寫入記錄，再走原完整組 Gemini 審計、standing GPT 終局與既有例外規則；審計分母包含保留及新建 CVPs |
 | 完成或停止 | 審計結案結果、所審精確版本和 flags 以短 transaction 登記。下一組只在前一組達到原放行條件後開始 |
 
 物理來源在材料建立、恢復使用及審計時按本組來源核驗；檔案不受 SQL rollback 保護。來源內容變更仍走原完整授權流程，不因資料庫有 transaction 就省略原文驗證。
+
+請求 bytes 上限是執行預算，不是模型供應商的硬限制。舊 policy 的數字及完整已保存模型身份保留；owner 可用 campaign-bound `--request-limit-authorization` 明確指定新上限，共同模型入口對該 execution root 的所有角色生效。程式保存不可變 binding 及新呼叫的實際 bytes／授權引用，不改原 prompt、schema、encoding、語義 request 或 raw。恢復須明示同一授權，漂移／跨 campaign／越 root 拒絕；無回答 intent、單輪预算及 SQL／來源／審核門檻不變。未明示的其他執行仍使用原上限，不自動提高或縮減原分組。
 
 ## 4. Transaction 的 validation
 

@@ -22,6 +22,49 @@ PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
 # high effort (#315: final review timed out with every earlier stage done).
 CALL_TIMEOUT_SECONDS = 1800.0
 _saved_validation = ContextVar('cvp_saved_artifact_validation', default=False)
+_authorized_limit = ContextVar('cvp_authorized_request_limit', default=None)
+
+
+@contextmanager
+def authorized_request_limit(root, campaign, authorization=None):
+    """Execution budget only: never changes a model request or its cache identity."""
+    from backend.pipeline.cvp_sql_flow import binding, check_binding
+    root = Path(root).resolve()
+    saved = root/'request-limit-binding.json'
+    if authorization is None:
+        if saved.exists():
+            raise ValueError('saved request limit requires explicit owner authorization')
+        yield
+        return
+    pin = binding(authorization)
+    document = read_artifact(authorization)
+    if (set(document) != {'schema_version','campaign_sha256','max_request_bytes','authorized_by','owner_direction'}
+            or document['schema_version'] != 'cvp_sql_request_limit_authorization.v1'
+            or document['campaign_sha256'] != campaign
+            or type(document['max_request_bytes']) is not int or document['max_request_bytes'] <= 0
+            or document['authorized_by'] != 'owner' or not document['owner_direction']):
+        raise ValueError('invalid owner request limit authorization')
+    budget = {'authorization':pin, 'campaign_sha256':campaign,
+              'max_request_bytes':document['max_request_bytes']}
+    write_immutable(saved, budget)
+    token = _authorized_limit.set((root, budget))
+    try:
+        check_binding(pin)
+        yield
+    finally:
+        _authorized_limit.reset(token)
+
+
+def effective_request_limit(adapter, cache):
+    scope = _authorized_limit.get()
+    if scope is None:
+        return getattr(adapter, 'max_request_bytes', None), None
+    root, budget = scope
+    if not Path(cache).resolve().is_relative_to(root):
+        raise ValueError('model request outside authorized SQL execution root')
+    from backend.pipeline.cvp_sql_flow import check_binding
+    check_binding(budget['authorization'])
+    return budget['max_request_bytes'], budget
 
 
 def validating_saved_artifacts():
@@ -300,11 +343,11 @@ def call_model(
         if callable(getattr(adapter, "request_bytes", None))
         else len(canonical_json(payload).encode("utf-8"))
     )
-    max_request_bytes = getattr(adapter, "max_request_bytes", None)
+    max_request_bytes, request_budget = effective_request_limit(adapter, cache)
     if max_request_bytes is not None and request_bytes > int(max_request_bytes):
         raise ValueError(
-            f"model request is {request_bytes} bytes, exceeding the frozen ceiling "
-            f"{int(max_request_bytes)}; refreeze a smaller semantic scope"
+            f"model request is {request_bytes} bytes, exceeding the configured ceiling "
+            f"{int(max_request_bytes)}; explicit budget direction required"
         )
     from backend.pipeline.viewpoint_model_cache_handoff import reuse_response
     if saved:
@@ -314,6 +357,11 @@ def call_model(
     encoding_path = cache.with_name(cache.stem + '.request-encoding.json')
     if intent_path.exists() or encoding_path.exists():
         raise ValueError(f"prior model invocation has no saved response; outcome unknown, no automatic retry: {cache}")
+    if request_budget is not None:
+        write_immutable(cache.with_name(cache.stem+'.request-budget.json'), {
+            'schema_version':'cvp_sql_model_request_budget.v1', **request_budget,
+            'request_identity':model_request_identity(adapter,payload),
+            'cache_path':str(cache.resolve()), 'actual_request_bytes':request_bytes})
     started = time.monotonic()
     reused = reuse_response(adapter, payload, cache)
     request_identity = model_request_identity(adapter, payload)
