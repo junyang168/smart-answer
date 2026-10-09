@@ -3474,7 +3474,18 @@ class PostgresKnowledgeStore:
             return conn.execute("""SELECT EXISTS(SELECT 1 FROM wang_knowledge.pipeline_runs
                 WHERE stage='cvp_group' AND metadata->>'kind'='cvp_review_archive'
                   AND metadata->>'parent_run_id'=%s AND metadata->>'action_id'=%s
-                  AND metadata->>'checkpoint' IN ('applied','audited'))""",(run_id,action_id)).fetchone()[0]
+                  AND metadata->>'checkpoint' IN ('applied','audited'))
+                OR EXISTS(SELECT 1 FROM wang_knowledge.pipeline_runs r
+                  JOIN wang_knowledge.change_sets cs
+                    ON cs.change_set_id=r.metadata->'reviewed'->'plan'->>'change_set_id'
+                  WHERE r.run_id=%s AND r.stage='cvp_group'
+                    AND r.metadata->>'checkpoint' IN ('applied','audited')
+                    AND r.metadata->'reviewed'->'evidence'->'action'->>'action_id'=%s
+                    AND cs.status='applied'
+                    AND cs.fingerprint_sha256=r.metadata->'reviewed'->'plan'->>'fingerprint_sha256'
+                    AND cs.source_sha256=r.metadata->'reviewed'->'plan'->>'source_sha256'
+                    AND (r.metadata->'change_set_ids') ? cs.change_set_id)""",
+                (run_id,action_id,run_id,action_id)).fetchone()[0]
 
     def adjudication_roots(self, target_ids):
         with self.connect() as conn:

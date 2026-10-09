@@ -52,6 +52,10 @@ def test_source_claim_workflow_uses_actual_transaction_and_no_legacy_ports(postg
     assert result['status']=='applied'
     assert ports.calls==['proposal','initial_review']
     assert store.get_cvp_group(run)['checkpoint']=='applied'
+    action_id=store.get_cvp_group(run)['reviewed']['evidence']['action']['action_id']
+    assert store.cvp_action_committed(run,action_id)
+    assert not store.cvp_action_committed(run,action_id+'-foreign')
+    assert not store.cvp_action_committed(run+'-foreign',action_id)
     assert store.get_record('claims','CL-test')['statement']=='甲是假设，不是断言。'
     history=store.get_change_history(result['change_set_id'])
     assert len(history['operations'])==6
@@ -76,6 +80,8 @@ def test_source_late_validation_failure_rollback_and_saved_answers_reused(postgr
         execute_source_action(store,run,manifest.model_dump(),root=tmp_path/'source-action',ports=ports)
     assert store.get_record_state('claims','CL-test')==before
     assert store.get_cvp_group(run)['checkpoint']=='reviewed'
+    action_id=store.get_cvp_group(run)['reviewed']['evidence']['action']['action_id']
+    assert not store.cvp_action_committed(run,action_id)
     monkeypatch.setattr(store,'_assert_transaction_edges_and_reviews',actual)
     execute_source_action(store,run,manifest.model_dump(),root=tmp_path/'source-action',ports=ports)
     assert ports.calls==['proposal','initial_review']
