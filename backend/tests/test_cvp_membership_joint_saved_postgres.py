@@ -35,13 +35,14 @@ def test_complete_saved_joint_package_real_sql_and_late_rollback(postgres_store,
     before=deepcopy((frozen,original,correction))
     # The candidate's EXACT prefix is merely a simulated engineering fixture;
     # real GPT/Opus must decide whether it expresses the whole current core.
-    candidate=next(p for p in material['candidates'] if p['claim']['claim_id']=='DK-da9666998a59c56d3a70-P01-CL002')
-    component=candidate['claim']['statement'].split('，')[0]
+    candidate=next(p for p in material['candidates'] if m.candidate_claim(material,p)['claim_id']=='DK-da9666998a59c56d3a70-P01-CL002')
+    claim=m.candidate_claim(material,candidate)
+    component=claim['statement'].split('，')[0]
     evidence=[{'evidence_step_id':e['evidence_step_id'],'source_fragment_id':e['source_fragment_id']}
               for e in candidate['projection']['evidence'] if e['valid_for_identity_review']
               and e['support_eligibility'] in {'eligible','eligible_with_label','eligible_candidate'}]
     proposal={'decision':'propose_members','members':[{'viewpoint_id':handoff['targets'][0]['viewpoint_id'],
-        'claim_id':candidate['claim']['claim_id'],'statement_component':component,
+        'claim_id':claim['claim_id'],'statement_component':component,
         'evidence_bindings':evidence,'reason':'SIMULATED ENGINEERING FIXTURE ONLY, NOT CONTENT APPROVAL'}],
         'reason':'SIMULATED ENGINEERING FIXTURE ONLY'}
     management=tmp_path/'membership'
@@ -54,7 +55,7 @@ def test_complete_saved_joint_package_real_sql_and_late_rollback(postgres_store,
     class Ports:
         def adapter(self,stage):
             a=m.model_adapter(stage);a._client.executable=None
-            a.generate=lambda packet:({'verdicts':[{'claim_id':candidate['claim']['claim_id'],
+            a.generate=lambda packet:({'verdicts':[{'claim_id':claim['claim_id'],
                 'approved':True,'problems':[],'reason':'SIMULATED ENGINEERING FIXTURE ONLY'}]}
                 if 'review' in stage else proposal)
             return a
@@ -110,6 +111,11 @@ def test_complete_saved_joint_package_real_sql_and_late_rollback(postgres_store,
         meta={k:v for k,v in production.get_cvp_group(run_id).items() if k not in {'status','error'}}
         conn.execute("INSERT INTO wang_knowledge.pipeline_runs(run_id,subject_kind,subject_id,stage,trigger,status,metadata) VALUES (%s,'batch','isolated','cvp_group','cli','running',%s::jsonb)",
                      (run_id,canonical_json(meta)))
+        prior={'kind':'group','campaign_sha256':meta['campaign_sha256'],'checkpoint':'audited',
+               'claim_ids':['ISOLATED-unmodified-outside-source-readset'],
+               'independent_audit_complete':True,
+               'import_certificate':{'viewpoint_ids':[handoff['targets'][0]['viewpoint_id']]}}
+        conn.execute("INSERT INTO wang_knowledge.pipeline_runs(run_id,subject_kind,subject_id,stage,trigger,status,metadata) VALUES ('CVPG-isolated-prior-member-denominator','batch','isolated','cvp_group','cli','succeeded',%s::jsonb)",(canonical_json(prior),))
     plan=store.plan_package(package,source_kind=SOURCE_SCHEMA,transactional=True)
     readset=pins(records)
     # The normal commit path includes all store-discovered exact dependencies.
@@ -129,9 +135,13 @@ def test_complete_saved_joint_package_real_sql_and_late_rollback(postgres_store,
         store.apply_plan(plan,transaction_context=context,metadata={'reason':'isolated test','actor':'pytest'})
     for key,row in records.items():assert store.get_record_state(*key)==row
     assert store.get_record_state('viewpoint_claim_links',member_package['viewpoint_claim_links'][0]['viewpoint_claim_link_id']) is None
+    assert store.get_cvp_group('CVPG-isolated-prior-member-denominator')['checkpoint']=='audited'
     monkeypatch.setattr(store,'_assert_transaction_edges_and_reviews',late)
     result=store.apply_plan(plan,transaction_context=context,metadata={'reason':'isolated test','actor':'pytest'})
     history=store.get_change_history(result['change_set_id'])
+    affected=store.get_cvp_group('CVPG-isolated-prior-member-denominator')
+    assert affected['checkpoint']=='applied' and not affected['independent_audit_complete']
+    assert affected['pending_audit_from_change_set_ids']==[result['change_set_id']]
     assert len(history['operations'])==len(plan.operations)
     assert len(plan.operations)==17  # Six updates + eight fresh provenance + three membership creates.
     for op in history['operations']:

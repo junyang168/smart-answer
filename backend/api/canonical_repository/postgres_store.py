@@ -3543,10 +3543,18 @@ class PostgresKnowledgeStore:
     @staticmethod
     def _affected_cvp_groups(cursor, plan, context, group):
         changed=[op for op in plan.operations if op.operation in {'update','retire','revive'}]
-        if not changed:return []
+        links=[op for op in plan.operations if op.collection=='viewpoint_claim_links']
+        if not changed and not links:return []
         claims={op.object_id for op in changed if op.collection=='claims'}
         views={op.object_id for op in changed if op.collection=='canonical_viewpoints'}
         views.update(op.payload['viewpoint_id'] for op in changed if op.collection=='viewpoint_revisions')
+        # Membership changes alter the full current-member audit denominator
+        # even when neither the CVP head nor an old member payload changed.
+        for op in links:
+            if (op.payload or {}).get('viewpoint_id'):views.add(op.payload['viewpoint_id'])
+            cursor.execute("SELECT payload->>'viewpoint_id' FROM wang_knowledge.objects WHERE collection='viewpoint_claim_links' AND object_id=%s",(op.object_id,))
+            previous=cursor.fetchone()
+            if previous and previous[0]:views.add(previous[0])
         if any(op.collection in {'source_documents','source_fragments','evidence_steps'} for op in changed):
             claims.update(oid for col,oid in context.read_pins if col=='claims')
         cursor.execute("""SELECT run_id,metadata FROM wang_knowledge.pipeline_runs

@@ -374,6 +374,10 @@ CVP management 依新 Claim／Evidence 及相關 CVP 全部必要成員，逐項
 
 成員管理以當前 CVP／CVR 決定穩定呼叫身份，跨 finder／group／root 不重置預算。已消費的原 Claim 糾正保留未決；只有精確的新成員獨立批准證明，才能形成明示的 domain resolution 和完整聯合終審包，不簡單把原 raw 改成 retain。新連接及 fresh VIC／VID 與原獲准修訂共用一次 SQL transaction；寫集、版本、hold、完整後像／歷史和受影響獨立審計仍逐項驗證。獨立批准、待聯合提交、已提交與 group audited 分開記錄；機械測試不冒充真實內容批准。
 
+完整自身正文須逐來源提供全部正文段落，不能把完整證據段落冒充全文；獨立 validator 以實際物理來源及 body SHA 重現全部段落。候選完整 Claim 已在 before records 時可用精確 ID 引用而不重複全文，引用須可無損還原。新成員建立、變更或退役即使不改 CVP head，也使該 CVP 的完整成員審計分母改變；共同交易必須登記相關已完成組待復驗，不能沿用舊完整審計。
+
+既有成員分支確因程式漏送完整自身正文而耗盡輪次時，工程修復契約須綁全部原材料／四階段 request、raw、來源、當前版本及 standing 工程方向。只有可證明的正文補齊及無損重複消除，才能進固定父 action 的 `complete-input-repair-once`：一次 GPT 提議、一次 Opus 獨立審核，零追加糾正。原未決及預算不刪、不改；完整正文原已送出、實質待寫候選遭拒、來源／版本漂移、未知呼叫或已消費補齊都不產生此預算。補齊後仍未決就停止，不換 root 或再次補齊；這不授權來源、Claim、核心或範圍更改，也不表示舊模型看過全文。
+
 教授在不同講道持續豐富同一觀點時，範圍更新屬常規 CVP management，不是每次另請 owner 批准的 exception。共同 `cvp_scope_management` 接點消費已綁定的 scope policy：對 typed `scope_mismatch` 且完整原文判讀未否決的異議，沿用同一次最小 GPT 提議、Opus 完整後像獨立审核及必要唯一纠正，不重問原仲裁。純 Claim 問題仍走 Claim management；over-merge、核心身份衝突不被改名為範圍問題。
 
 接點讀完整 current 成員／支持 Claims、自身原文、關係端點及歷史結構。提議必須逐 Claim 引用自己正文、分清經文適用限定與材料覆蓋。當一般命題只是誤把最早材料的經文列表存成適用限定時，可提議不按該列表限定；不是刪 Claim 的經文或證據。只有 Opus 判定仍是教授同一核心及真值條件，才可進交易。核心、完整 signature、歸屬、人群／歷史範圍、Claim／Evidence／來源、連接作用及關係語義不能順帶改。

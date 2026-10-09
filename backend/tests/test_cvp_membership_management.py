@@ -230,3 +230,41 @@ def test_no_protected_or_unattested_evidence_upgrade(member_material,eligibility
     member_material['candidates'][0]['projection']['evidence'][0].update(
         support_eligibility=eligibility,valid_for_identity_review=valid)
     with pytest.raises(ValueError,match='qualified'):m.new_links(member_material,member_answer())
+
+
+def test_lossless_claim_reference_keeps_complete_body_once(member_material):
+    old=deepcopy(member_material)
+    actual=m.candidate_claim(old,old['candidates'][0])
+    material=deepcopy(old);material['candidates'][0]['claim_id']=actual['claim_id']
+    material['candidates'][0].pop('claim');material['candidate_claim_encoding']='exact_current_before_record_reference_v1'
+    material['full_own_sources']=[{'source_id':'SRC-test','paragraph_texts':['entire own text']}]
+    assert m.candidate_claim(material,material['candidates'][0])==actual
+    assert m.expanded_legacy_material(material)==old
+    assert m.new_links(material,member_answer())==m.new_links(old,member_answer())
+    material['before_records']=[r for r in material['before_records'] if r['object_id']!='CL-new']
+    with pytest.raises(ValueError,match='omitted'):m.candidate_claim(material,material['candidates'][0])
+
+
+@pytest.mark.parametrize('change',['missing','truncated','duplicate','wrong_sha'])
+def test_whole_own_body_not_just_bound_paragraphs(member_material,monkeypatch,change):
+    from types import SimpleNamespace
+    from backend.pipeline import viewpoint_evidence_source_context as source
+    monkeypatch.setattr(source,'load_context_source',lambda _:('/exact/full/source','a'*64,
+        SimpleNamespace(body_sha256='b'*64,spoken_rows=[{'text':'first paragraph'},{'text':'second paragraph'}])))
+    material=deepcopy(member_material)
+    material['candidates'][0]['projection']['source_id']='SRC-test'
+    material['sources']=[{'path':'/exact/full/source','file_sha256':'a'*64}]
+    material['full_own_sources']=[{'source_id':'SRC-test','source_type':'sermon_transcript',
+        'source_file_sha256':'a'*64,'source_body_sha256':'b'*64,'paragraph_texts':['first paragraph','second paragraph']}]
+    m.validate_full_sources(material)
+    if change=='missing':material['full_own_sources']=[]
+    elif change=='truncated':material['full_own_sources'][0]['paragraph_texts'].pop()
+    elif change=='duplicate':material['full_own_sources'].append(deepcopy(material['full_own_sources'][0]))
+    else:material['full_own_sources'][0]['source_body_sha256']='wrong'
+    with pytest.raises(ValueError,match='omitted|outside'):m.validate_full_sources(material)
+
+
+def test_complete_semantic_refusal_cannot_become_another_input_repair(member_material):
+    material={**member_material,'full_own_sources':[{'complete':'own text'}]}
+    with pytest.raises(ValueError,match='semantic disagreement'):
+        m.complete_input_repair_material(None,None,None,material,None)

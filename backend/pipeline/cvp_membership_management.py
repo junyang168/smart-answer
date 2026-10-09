@@ -127,18 +127,128 @@ def prepare_material(store, frozen, handoff):
             continue  # Not qualified for membership; never upgrade Evidence here.
         loaded = load_context_source(doc)
         sources[sid] = {'path':str(loaded[0]),'file_sha256':loaded[1]}
-        candidates.append({'claim':payload, 'projection':attach_source_context(compiled,doc).model_dump(mode='json'),
+        candidates.append({'claim_id':claim.claim_id, 'projection':attach_source_context(compiled,doc).model_dump(mode='json'),
                            'authority':authority})
     if not candidates:
         raise ValueError('membership has no complete qualified current Claim/source candidate')
+    full_sources=[]
+    for sid in sorted(sources):
+        doc=states[c.key('source_documents',sid)]
+        _,physical,projection=load_context_source(doc)
+        full_sources.append({'source_id':sid,'source_type':doc['source_type'],
+            'source_file_sha256':physical,'source_body_sha256':projection.body_sha256,
+            'paragraph_texts':[row['text'] for row in projection.spoken_rows]})
     material={'schema_version':VERSION, 'policy':policy_binding(), 'handoff':handoff,
             'source_materials_sha256':sha256_json(frozen), 'run_id':frozen['sql_scope']['run_id'],
             'before_records':frozen['before_records'], 'read_pins':frozen['sql_scope']['read_pins'],
-            'candidates':candidates, 'excluded_candidates':excluded, 'sources':list(sources.values())}
+            'candidates':candidates, 'excluded_candidates':excluded, 'sources':list(sources.values()),
+            'full_own_sources':full_sources,
+            'candidate_claim_encoding':'exact_current_before_record_reference_v1'}
     from backend.api.canonical_repository.postgres_store import canonical_json
     if time.perf_counter()-started>5 or len(canonical_json(material).encode())>64*1024**2:
         raise ValueError('membership preparation exceeds shared mechanical budget; no whole-history fallback')
     return material
+
+
+def candidate_claim(material, candidate):
+    """No duplicate Claim body: the complete exact SQL record remains in before_records."""
+    states=c.index(material['before_records'])
+    cid=candidate.get('claim_id') or candidate['claim']['claim_id']
+    actual=states.get(c.key('claims',cid))
+    if actual is None or ('claim' in candidate and candidate['claim']!=actual):
+        raise ValueError('candidate reference omitted/changed complete current Claim')
+    return actual
+
+
+def validate_full_sources(material):
+    from backend.pipeline.viewpoint_evidence_source_context import load_context_source
+    states=c.index(material['before_records']);expected=[]
+    for source in sorted(material['full_own_sources'],key=lambda s:s['source_id']):
+        doc=states[c.key('source_documents',source['source_id'])]
+        path,digest,projection=load_context_source(doc)
+        if {'path':str(path),'file_sha256':digest} not in material['sources']:
+            raise ValueError('membership full own body is outside exact physical source binding')
+        expected.append({'source_id':source['source_id'],'source_type':doc['source_type'],
+            'source_file_sha256':digest,'source_body_sha256':projection.body_sha256,
+            'paragraph_texts':[row['text'] for row in projection.spoken_rows]})
+    ids=[s['source_id'] for s in material['full_own_sources']]
+    required={candidate['projection']['source_id'] for candidate in material['candidates']}
+    if len(ids)!=len(set(ids)) or set(ids)!=required or expected!=material['full_own_sources']:
+        raise ValueError('membership omitted/changed/duplicated complete own source body')
+
+
+def expanded_legacy_material(material):
+    result=deepcopy(material)
+    for key in ['full_own_sources','candidate_claim_encoding','complete_input_repair']:
+        result.pop(key,None)
+    for candidate in result['candidates']:
+        if 'claim_id' in candidate:
+            candidate['claim']=candidate_claim(material,candidate)
+            candidate.pop('claim_id')
+    return result
+
+
+def complete_input_repair_material(store,frozen,handoff,old,root):
+    """One exact engineering input correction, never repeat a semantic rejection.
+
+    Existing membership stages ALL completed on a provably incomplete own-body
+    packet. Preserve every raw and budget; add only the missing complete bodies
+    and lossless references to already-present full Claim records. Owner's
+    standing troubleshoot/fix/test/resume direction covers this engineering
+    defect, not content acceptance. The repaired domain gets ONE proposal and
+    ONE independent review, zero further correction/retry.
+    """
+    from backend.pipeline.source_reconciliation_runner import read,body
+    from backend.pipeline.cvp_sql_flow import binding
+    if old.get('full_own_sources'):
+        raise ValueError('complete source semantic disagreement is not an input-repair trigger')
+    first=saved_raw(root,'proposal',old)
+    initial=saved_raw(root,'initial_review',review_packet(old,first['response']))
+    correction_packet={**old,'initial_proposal':first['response'],'Opus_review':initial['response'],
+                       'correction_round':1,'another_correction_allowed':False}
+    correction=saved_raw(root,'correction',correction_packet)
+    final=saved_raw(root,'final_review',review_packet(old,correction['response']))
+    if correction['response']['decision']!='unresolved':
+        raise ValueError('input repair cannot retry a rejected writable membership candidate')
+    result=prepare_material(store,frozen,handoff)
+    if expanded_legacy_material(result)!=old:
+        raise ValueError('complete input repair changed something beyond body completeness/duplicate Claim references')
+    validate_full_sources(result)
+    result['complete_input_repair']={'schema_version':'cvp_membership_complete_own_body_once.v1',
+        'original_material':binding(root/'materials.json'),
+        'original_raws':{stage:binding(root/(stage+'.raw.json')) for stage in ['proposal','initial_review','correction','final_review']},
+        'original_material_sha256':sha256_json(old),'source_claims_cvp_core_fields_changed':0,
+        'authorization_quote':'bug不得停下来等工程批准；自主troubleshoot/fix/test/commit/safe resume',
+        'human_content_approval':False,'additional_proposal_limit':1,'additional_independent_review_limit':1,
+        'correction_limit':0,'automatic_retry':False,
+        'explanation':'Previous current-candidate packets carried full bound paragraphs but omitted complete own-body rows. '
+            'Those judgments remain genuine but cannot be represented as full-own-source judgments. '
+            'Only missing full source text is added; exact existing full Claim payloads remain by ID in before_records.'}
+    return result
+
+
+def validate_complete_input_repair(material):
+    from backend.pipeline.source_reconciliation_runner import read,body
+    from backend.pipeline.cvp_sql_flow import check_binding, binding
+    receipt=material['complete_input_repair'];check_binding(receipt['original_material'])
+    old=body(read(Path(receipt['original_material']['path'])));root=Path(receipt['original_material']['path']).parent
+    if (old.get('full_own_sources') or expanded_legacy_material(material)!=old
+            or receipt['original_material_sha256']!=sha256_json(old)
+            or receipt['human_content_approval'] is not False or receipt['automatic_retry'] is not False
+            or receipt['additional_proposal_limit']!=1 or receipt['additional_independent_review_limit']!=1
+            or receipt['correction_limit']!=0 or receipt['source_claims_cvp_core_fields_changed']!=0):
+        raise ValueError('complete-body repair cannot expand input/content/call budget')
+    if receipt['original_raws']!={stage:binding(root/(stage+'.raw.json'))
+        for stage in ['proposal','initial_review','correction','final_review']}:
+        raise ValueError('complete-body repair must retain all four exact original raw bindings')
+    for binding in receipt['original_raws'].values():check_binding(binding)
+    first=saved_raw(root,'proposal',old)
+    initial=saved_raw(root,'initial_review',review_packet(old,first['response']))
+    corrected=saved_raw(root,'correction',{**old,'initial_proposal':first['response'],'Opus_review':initial['response'],
+                        'correction_round':1,'another_correction_allowed':False})
+    saved_raw(root,'final_review',review_packet(old,corrected['response']))
+    if corrected['response']['decision']!='unresolved':raise ValueError('cannot retry a rejected substantive member')
+    validate_full_sources(material)
 
 
 def new_links(material, response):
@@ -152,11 +262,11 @@ def new_links(material, response):
     if len(proposal.members) != len(targets) or {m.viewpoint_id for m in proposal.members} != set(targets):
         raise ValueError('membership must cover exactly the orphaned target identities')
     states = c.index(material['before_records']); result = []
-    candidates = {p['claim']['claim_id']:p for p in material['candidates']}
+    candidates = {candidate_claim(material,p)['claim_id']:p for p in material['candidates']}
     for member in proposal.members:
         if member.claim_id not in candidates:
             raise ValueError('foreign/unqualified membership Claim')
-        candidate = candidates[member.claim_id]; claim = candidate['claim']; text = claim['statement']
+        candidate = candidates[member.claim_id]; claim = candidate_claim(material,candidate); text = claim['statement']
         if text.count(member.statement_component) != 1:
             raise ValueError('membership requires a unique exact nonempty statement component')
         if any(k.startswith('viewpoint_claim_links/') and p['claim_id']==member.claim_id
@@ -287,10 +397,13 @@ def validate_package(package):
     check_binding(material['policy'])
     if material['policy']!=policy_binding():raise ValueError('membership policy substitution')
     for source in material['sources']:check_binding(source)
+    validate_full_sources(material)
+    if material.get('complete_input_repair'):validate_complete_input_repair(material)
     first=saved_raw(root,'proposal',material); packet=review_packet(material,first['response'])
     initial=saved_raw(root,'initial_review',packet)
     proposal=first; terminal=initial
     if app['terminal_stage']=='final_review':
+        if material.get('complete_input_repair'):raise ValueError('complete-body repair has no extra correction')
         if approved(packet,initial):raise ValueError('membership correction without initial disagreement')
         correction_packet={**material,'initial_proposal':first['response'],'Opus_review':initial['response'],
                            'correction_round':1,'another_correction_allowed':False}
@@ -319,6 +432,19 @@ def execute(stages, frozen, handoff):
     store.prepare_cvp_action(run_id,action_id=action_id,kind='cvp_membership_revalidation',
                              authorization=material['policy'],materials=material)
     write(root/'materials.json',material)
+    if not material.get('full_own_sources'):
+        repair_root=root/'complete-input-repair-once'
+        repair_id=action_id+'-complete-own-body-once'
+        store.bind_cvp_execution_root(run_id,identity=repair_id,root=repair_root)
+        previous_repair=store.get_cvp_action(run_id,repair_id)
+        material=(previous_repair['materials'] if previous_repair else
+                  complete_input_repair_material(store,frozen,handoff,material,root))
+        validate_complete_input_repair(material)
+        store.prepare_cvp_action(run_id,action_id=repair_id,kind='cvp_membership_revalidation',
+                                 authorization=material['policy'],materials=material)
+        root=repair_root;action_id=repair_id
+        write(root/'materials.json',material)
+    validate_full_sources(material)
     def guard():
         c.guard_files(frozen)
         for source in material['sources']:check_binding(source)
@@ -331,6 +457,8 @@ def execute(stages, frozen, handoff):
     guard();proposal=runner.call('proposal',material)
     packet=review_packet(material,proposal['response']);guard();review=runner.call('initial_review',packet)
     if not approved(packet,review):
+        if material.get('complete_input_repair'):
+            raise Stop('complete-own-body membership assessment remains substantively unresolved; no further call/correction')
         correction_packet={**material,'initial_proposal':proposal['response'],'Opus_review':review['response'],
                            'correction_round':1,'another_correction_allowed':False}
         guard();proposal=runner.call('correction',correction_packet)
