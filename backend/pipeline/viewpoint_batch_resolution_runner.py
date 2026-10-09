@@ -649,6 +649,7 @@ def run_batch(
         direction = _read(output_dir / NAME)
         review_packet['owner_identity_direction'] = reviewer_direction(direction)
         review_packet['own_source_bodies'] = own_sources(packet, direction['claim_ids'])
+        reviewer = reviewer.shared_keys_copy()
     raw_review, review_calls, review_seconds = _call(
         reviewer, review_packet, output_dir / "raw-review.json"
     )
