@@ -3623,7 +3623,8 @@ class PostgresKnowledgeStore:
 
     def complete_cvp_group(self, run_id: str, *, audit: Mapping[str, Any],
                            audit_binding: Mapping[str, Any], read_pins: Mapping,
-                           owner_resolution_path: Optional[Path] = None) -> None:
+                           owner_resolution_path: Optional[Path] = None,
+                           retained_impacts_resolution_path: Optional[Path] = None) -> None:
         """Audit outside the write transaction; register completion separately."""
         from backend.pipeline.viewpoint_cvp_campaign_runner import validate_audit
         from backend.pipeline.viewpoint_g035_temporary_audit import validate_completion_disclosure
@@ -3640,8 +3641,17 @@ class PostgresKnowledgeStore:
             value = row[0]
             if (value.get('reviewed',{}).get('evidence') or {}).get('pending_cvp_claim_ids'):
                 raise ChangeSetConflict('Claim management committed; CVP coverage/impact remains pending')
-            if (value.get('reviewed',{}).get('evidence') or {}).get('pending_cvp_management_record_keys'):
+            pending_management=(value.get('reviewed',{}).get('evidence') or {}).get('pending_cvp_management_record_keys')
+            if pending_management and retained_impacts_resolution_path is None:
                 raise ChangeSetConflict('new coverage cannot clear pending existing CVP/link management')
+            retained_resolution=None
+            if retained_impacts_resolution_path is not None:
+                if not pending_management:raise ChangeSetConflict('foreign retained management completion proof')
+                from backend.pipeline.cvp_retained_impact_resolution import validate_for_completion
+                # The original reviewed evidence/pending list is immutable.
+                # Record a SEPARATE exact no-change resolution, never edit it.
+                retained_resolution=validate_for_completion({**value,'run_id':run_id},
+                    retained_impacts_resolution_path,audit_binding,cursor,semantic_resolution=owner_resolution_path)
             for source in (value.get('reviewed',{}).get('evidence') or {}).get('sources',[]):
                 if file_sha256(Path(source['path'])) != source['file_sha256']:
                     raise ChangeSetConflict('physical own source changed since independent audit')
@@ -3683,6 +3693,9 @@ class PostgresKnowledgeStore:
             if exception or not revisit:validate_completion_disclosure(disclosure,audit)
             completion = {"audit":dict(audit_binding),"owner_resolution_path":str(owner_resolution_path) if owner_resolution_path else None,
                           "read_pins":[{"collection":k[0],"object_id":k[1],"pin":list(v)} for k,v in sorted(independent_pins.items())]}
+            if retained_resolution is not None:
+                completion['retained_impacts_resolution']={'path':str(retained_impacts_resolution_path),
+                    'file_sha256':file_sha256(Path(retained_impacts_resolution_path))}
             if value["checkpoint"] == "audited":
                 if value.get("completion") != completion: raise ChangeSetConflict("group completion identity drift")
                 return
@@ -3723,6 +3736,8 @@ class PostgresKnowledgeStore:
             if not row:
                 raise ChangeSetConflict("CVP group not prepared")
             value = row[0]
+            from backend.pipeline.cvp_retained_impact_resolution import guard_operations
+            guard_operations({**value,'run_id':run_id},plan.operations)
             action=evidence.get('action')
             if action:
                 ident='CVPA-'+sha256_json({'parent':run_id,'action':action.get('action_id')})

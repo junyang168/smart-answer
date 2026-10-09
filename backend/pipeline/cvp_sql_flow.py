@@ -516,7 +516,7 @@ def run_group(store, definition, group, row, *, root):
                 prior_management_action=prior_management_action(evidence,detected.findings))
             return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)
         saved=store.get_cvp_group(run_id);evidence=saved['reviewed']['evidence']
-    if evidence.get('pending_cvp_management_record_keys'):
+    if evidence.get('pending_cvp_management_record_keys') and not evidence.get('approval',{}).get('retained_write_scope'):
         raise ValueError('new CVP coverage committed; existing CVP/link management remains pending, not group completion')
     disposition=evidence.get('disposition')
     if disposition and any(component["disposition"]=="deferred" for claim in disposition["claims"] for component in claim["components"]):
@@ -547,6 +547,13 @@ def run_group(store, definition, group, row, *, root):
                                 investigation_root=root/run_id/'deferred-investigation')
         saved=store.get_cvp_group(run_id);evidence=saved['reviewed']['evidence']
     current=store.read_cvp_context(group['claim_ids'],viewpoint_ids=evidence['viewpoint_ids'])
+    pending_keys=evidence.get('pending_cvp_management_record_keys',[])
+    for key in pending_keys:
+        col,oid=key.split('/',1)
+        if (col,oid) not in current:
+            state=store.get_record_state(col,oid)
+            if state is None:raise ValueError('pending management record missing from current SQL: '+key)
+            current[col,oid]=state
     views=sorted(set(evidence['viewpoint_ids'])|{r['payload']['viewpoint_id'] for (col,_),r in current.items()
                  if col=='viewpoint_claim_links' and not r['retired'] and r['payload']['claim_id'] in group['claim_ids']})
     audit_dir = root/run_id/('audit-'+sha256_json(pin_rows(pins(current)))[:20]); audit_path = audit_dir/"audit.json"
@@ -559,7 +566,8 @@ def run_group(store, definition, group, row, *, root):
                                 'model':'gemini-3.8-flash','workers':2,'automatic_retry':False})
         subprocess.run([str(PROJECT/"backend/.venv/bin/python"),"scripts/audit-library.py","--scope","all","--layers","1,2,3,4",
                         "--claim-ids",",".join(group["claim_ids"]),"--viewpoint-ids",",".join(views),
-                        "--workers","2","--model","gemini-3.8-flash","--no-status-file","--preserve-full-context","--component-roles","--sql-group-scope","--out",str(audit_dir)],
+                        "--workers","2","--model","gemini-3.8-flash","--no-status-file","--preserve-full-context","--component-roles","--sql-group-scope",
+                        *[a for k in pending_keys for a in ('--sql-record-key',k)],"--out",str(audit_dir)],
                        cwd=PROJECT,check=True,env={**os.environ,'KNOWLEDGE_DATABASE_URL':store.database_url})
     from backend.pipeline.viewpoint_content_blocked_fallback import apply as content_fallback
     validate_transaction_audit(read_artifact(audit_path),group['claim_ids'],views)
@@ -676,8 +684,13 @@ def run_group(store, definition, group, row, *, root):
                 return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)
             prior.append(adjudication)
         compose(audit_path,prior,resolution,store)
+    pending_resolution=None
+    if evidence.get('pending_cvp_management_record_keys'):
+        from backend.pipeline.cvp_retained_impact_resolution import build
+        pending_resolution=build(store,run_id,audit_path,audit_dir/'retained-impact-resolution.json',
+                                 semantic_resolution=resolution)
     store.complete_cvp_group(run_id,audit=audit,audit_binding=binding(audit_path),read_pins=pins(current),
-                             owner_resolution_path=resolution)
+                             owner_resolution_path=resolution,retained_impacts_resolution_path=pending_resolution)
     stage_event('audited', sequence=group['sequence'], run_id=run_id)
 
 

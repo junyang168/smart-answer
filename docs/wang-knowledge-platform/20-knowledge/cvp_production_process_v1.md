@@ -400,6 +400,8 @@ CVP management 依新 Claim／Evidence 及相關 CVP 全部必要成員，逐項
 
 共同 compiler 分別核驗本次實際寫集與既有保留项：每項新内容、結構與關係必須是真實終審 pass；保留項核對完整 SQL pins、Evidence／locator、原批准及精確人工決定。保留項不產生新的身份批准或 provenance，即使本次另有新成員挂到同一觀點。未解決的新内容、錯版、hold、缺原文或其他 pending impacts 仍拒絕；備份、交易、回讀、完整受影響獨立審計與組完成門檻保持。
 
+Claim-first 的既有 `pending` 清單是待驗範圍，不是必須修改清單。僅 Evidence 資格及已驗真審核 provenance 變更、Claim／原文／引文與綁定完全不變時，既有批准和精確人工保留可走零變更管理；必須先完成當前全部 Claims、保留／新增 CVPs 與完整成員的獨立審計。共同完成交易另綁 `wang_cvp_retained_impact_resolution_v1` 證明，逐項核對原清單、原 SQL pins、完整審計 pins、Claim 層 receipt、實際已提交 source 寫集與人工決定；原清單及模型未決不改、不清空。來源／語義／綁定變更、版本漂移、真 hold 或未解決審計異議不走此分支。人工明定不改的連接，在後續自動降類审核與 SQL review 寫集均禁止改動。
+
 ### 13.7 復驗、完成與中斷恢復
 
 commit 後用新 SQL 連線回讀，確認精確修改及歷史；再以當前版本審計完整受影響的原組 Claims、所有保留／新增／相連 CVPs 和必要其他成員。已完成舊審計只對未變的精確輸入有效；新版本須新審計，不能搬用舊 pass。

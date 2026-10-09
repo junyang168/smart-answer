@@ -283,9 +283,16 @@ class SqlGroupStore(Store):
     def id_array(self,ids):
         return 'ARRAY['+','.join(self.literal(i) for i in sorted(ids))+']::text[]'
 
-    def __init__(self,database_url,claim_ids,viewpoint_ids):
+    def __init__(self,database_url,claim_ids,viewpoint_ids,record_keys=()):
         super().__init__(database_url)
+        if len(record_keys)>128 or len(set(record_keys))!=len(record_keys):
+            raise ValueError('independent SQL pending record population duplicate/oversized')
+        extra={tuple(k.split('/',1)) for k in record_keys}
+        if any(len(k)!=2 or not k[1] or k[0] not in {'canonical_viewpoints','viewpoint_revisions',
+                'viewpoint_claim_links','viewpoint_relations'} for k in extra):
+            raise ValueError('independent SQL pending record is outside CVP management')
         self.scoped_ids=set(claim_ids)|set(viewpoint_ids)
+        self.scoped_ids.update(oid for _,oid in extra)
         self.read_pins={}
         self.external_ids=set();self.names=set();seen=set();bytes_read=0;started=time.monotonic()
         roots=self._query("SELECT json_build_object('id',edge_id)::text FROM wang_knowledge.edges "
@@ -307,6 +314,12 @@ class SqlGroupStore(Store):
                 semantic={k:v for k,v in row['payload'].items() if k!='revision'}
                 digest=hashlib.sha256(json.dumps(semantic,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
                 if digest!=row['sha']:raise ValueError('independent current SQL payload SHA drift')
+                if (row['c'],row['id']) in extra:
+                    payload=row['payload']
+                    affected=({payload.get('source_viewpoint_id'),payload.get('target_viewpoint_id')}
+                              if row['c']=='viewpoint_relations' else {payload.get('viewpoint_id')})
+                    if not affected<=set(viewpoint_ids):
+                        raise ValueError('pending record endpoints are outside the full declared CVP audit')
                 self.read_pins[row['c'],row['id']]=[row['revision'],row['sha'],row['retired']]
                 self.names.add(row['c']);payload=row['payload'];bytes_read+=len(json.dumps(payload).encode())
                 # Source IDs include registered notes_manuscript keys with
@@ -341,6 +354,10 @@ class SqlGroupStore(Store):
             self.read_pins[row['c'],row['id']]=[row['revision'],row['sha'],row['retired']]
         self.read_metrics={'payload_bytes':bytes_read,'object_ids':len(self.scoped_ids),'seconds':time.monotonic()-started,
                            'historical_snapshot_reads':0}
+        for col,oid in extra:
+            if self.read_pins.get((col,oid)) is None or self.read_pins[col,oid][2]:
+                raise ValueError('independent SQL pending current record missing/retired')
+        self.extra_record_keys=sorted(record_keys)
 
     def collection(self,name,*,include_retired=False):
         key=f'{name}:{include_retired}'
@@ -2640,6 +2657,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, default=None, help="報告輸出目錄")
     parser.add_argument('--sql-group-scope',action='store_true',
         help='Read every requested Claim and target CVP member directly from indexed SQL; no historical payload traversal')
+    parser.add_argument('--sql-record-key',action='append',default=[],
+        help='Exact pending CVP management collection/ID to read independently; no status or content approval')
     parser.add_argument(
         "--status-file",
         type=Path,
@@ -2689,10 +2708,12 @@ def main(argv: list[str] | None = None) -> int:
         scope=args.scope,
         model=args.model,
     )
+    if args.sql_record_key and not args.sql_group_scope:
+        raise ValueError('pending record keys require the explicit SQL group audit boundary')
     if args.sql_group_scope:
         if args.scope!='all' or not args.claim_ids:
             raise ValueError('SQL group audit requires explicit complete Claim/CVP population')
-        store=SqlGroupStore(database_url,{x for x in args.claim_ids.split(',') if x},{x for x in args.viewpoint_ids.split(',') if x})
+        store=SqlGroupStore(database_url,{x for x in args.claim_ids.split(',') if x},{x for x in args.viewpoint_ids.split(',') if x},args.sql_record_key)
     else:store = Store(database_url)
     documents = store.collection("source_documents")
     in_scope: set[str] | None = None
@@ -2797,6 +2818,7 @@ def main(argv: list[str] | None = None) -> int:
                                      'viewpoint_ids':[x for x in args.viewpoint_ids.split(',') if x],'complete_target_members':True,
                                      'read_pins':[{'collection':k[0],'object_id':k[1],'pin':v} for k,v in sorted(store.read_pins.items())],
                                      'metrics':store.read_metrics}
+        meta['registry_read_scope']['pending_management_record_keys']=store.extra_record_keys
     queue = build_human_queue(layers)
     report = render_report(layers, meta, len(queue["items"]))
 

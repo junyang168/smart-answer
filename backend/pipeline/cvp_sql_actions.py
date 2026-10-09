@@ -330,6 +330,10 @@ def execute_supports_action(store,run_id,adjudication_root,*,root,ports):
     packet,_=validated_history(adjudication_root)
     report=read_artifact(adjudication_root/'gpt-final-handoff.json')
     selected=select_repairs(packet,report)  # rejects l3/unresolved/non-equivalent/new scope
+    from backend.pipeline.cvp_retained_impact_resolution import protected_link_ids
+    protected=protected_link_ids(store.get_cvp_group(run_id))
+    if any(i['before_link']['viewpoint_claim_link_id'] in protected for i in selected):
+        raise ValueError('human NO-CHANGE disposition forbids another automatic demotion review')
     policy=read_artifact(POLICY)
     if (policy['allowed_after_type']!='supports' or not policy['require_dual_model_postimage_review']
             or policy['maximum_corrections_per_adjudication']!=1):raise ValueError('standing narrow policy drift')
