@@ -4,6 +4,7 @@
 > **類型**：流程。
 > **狀態**：當前內容流程；第 13 節共同 Claim 問題接點、聯合後像審核及 SQL 分支已啟用，來源不變的 Claim 修訂、CVP 覆蓋及完整組獨立審計已經實際驗收。儲存、交易與恢復由 v2 共同 SQL 入口承擔，舊執行方案禁用。本文不啟動生產、不新增內容修改授權。
 > **與代碼對齊**：2026-10-08；交易基線 `6b9541e`、程式版本綁定 `4ce1a4c`；第 13 節核對 `0a93a08`、`d55b999`、`cf72c39`、`1f995b2` 的共同接點、policy／migration、診斷正文與 Evidence 區分及 SQL 交接。正式啟用和實際組驗收另存獨立 receipt，不由文檔追認未授權內容。
+> **範圍管理代碼對齊**：2026-10-09 核對本次 `cvp_scope_management.py`、共享 SQL action、policy／prompt 和隔離 SQL rollback／恢復測試；真實模型／組驗收另記，不由離線測試宣稱完成。
 > **權威範圍**：說明 Claims 到 CVP 的正常路徑、例外分流、人工出口與恢復接點。內容定義服從 [CanonicalViewpoint 设计](./canonical_viewpoint_design.md)，使命與限制服從 [Project Mission Statement](../00-overview/project_mission_statement.md) 和 [Solution Architecture](../00-overview/solution_architecture.md)。具體授權仍以相應 policy／精確人工決定為準，不能拿本文擴權。
 
 ## 目錄
@@ -369,6 +370,12 @@ CVP management 依新 Claim／Evidence 及相關 CVP 全部必要成員，逐項
 
 直接的 Claim–CVP 連接錯誤只進 CVP management；只有本源核查另證明 Claim／Evidence 本身有錯，才交回 Claim management。不能為讓一條連接過關而改 Claim，也不能為保留旧 Claim 而硬造 CVP 支持。
 
+教授在不同講道持續豐富同一觀點時，範圍更新屬常規 CVP management，不是每次另請 owner 批准的 exception。共同 `cvp_scope_management` 接點消費已綁定的 scope policy：對 typed `scope_mismatch` 且完整原文判讀未否決的異議，沿用同一次最小 GPT 提議、Opus 完整後像獨立审核及必要唯一纠正，不重問原仲裁。純 Claim 問題仍走 Claim management；over-merge、核心身份衝突不被改名為範圍問題。
+
+接點讀完整 current 成員／支持 Claims、自身原文、關係端點及歷史結構。提議必須逐 Claim 引用自己正文、分清經文適用限定與材料覆蓋。當一般命題只是誤把最早材料的經文列表存成適用限定時，可提議不按該列表限定；不是刪 Claim 的經文或證據。只有 Opus 判定仍是教授同一核心及真值條件，才可進交易。核心、完整 signature、歸屬、人群／歷史範圍、Claim／Evidence／來源、連接作用及關係語義不能順帶改。
+
+新 CVR 保留 supersedes 鏈和舊 CVR；全部 current links、相關 relations 以同一批准更新版本引用，實際本輪 provenance 由程序產生。歷史結構仍引用其審過的版本，明示 impact-only，不生成新結構／路線／文章；產品資格依原交易失效規則處理。受影響已 audited 組按 SQL pending 事實復驗，不重跑舊提議或 ChangeSet，也不提前執行尚未到達的組。新 scope 問題若在同組這次修訂後仍出現，停止而不再自動開第二個修訂循環。
+
 ### 13.7 復驗、完成與中斷恢復
 
 commit 後用新 SQL 連線回讀，確認精確修改及歷史；再以當前版本審計完整受影響的原組 Claims、所有保留／新增／相連 CVPs 和必要其他成員。已完成舊審計只對未變的精確輸入有效；新版本須新審計，不能搬用舊 pass。
@@ -419,6 +426,7 @@ Claim management 的修訂已提交／本源復驗完成，與 CVP management �
 | 流程 | 主要實作／政策 | 反例與行為測試 |
 | --- | --- | --- |
 | 共同 Claim／Evidence 問題及 CVP 影響 | [management 接點](../../../backend/pipeline/claim_issue_management.py)、[SQL actions](../../../backend/pipeline/cvp_sql_actions.py)、[有界角色契約](../../../backend/pipeline/prompts/claim_issue_management_v1.md) | [共同入口／隔離交易／保存材料預覽](../../../backend/tests/test_claim_issue_management.py) |
+| 常規 CVP 經文範圍豐富 | [scope management](../../../backend/pipeline/cvp_scope_management.py)、[scope policy](../../../backend/pipeline/policies/wang_cvp_scope_management_v1.json)、[完整成員角色契約](../../../backend/pipeline/prompts/cvp_scope_management_v1.md) | [核心／限定／引用反例與 SQL rollback／單次恢復](../../../backend/tests/test_cvp_scope_management.py) |
 | 串行組、停止與完成 | [campaign runner](../../../backend/pipeline/viewpoint_cvp_campaign_runner.py) | [campaign tests](../../../backend/tests/test_viewpoint_cvp_campaign_runner.py) |
 | 生成、整合、纠正與終審 | [batch runner](../../../backend/pipeline/viewpoint_batch_resolution_runner.py)、[v6 policy](../../../backend/pipeline/policies/wang_cvp_resolution_policy_v6.json) | [required coverage](../../../backend/tests/test_viewpoint_required_cvp_coverage.py) |
 | 歷史資格橋接 | [lineage tests](../../../backend/tests/test_viewpoint_lineage_inventory.py)、[merge bridge](../../../backend/tests/test_viewpoint_legacy_merge_target_bridge.py) | [coordinate proof](../../../backend/tests/test_legacy_coordinate_review_proof.py) |

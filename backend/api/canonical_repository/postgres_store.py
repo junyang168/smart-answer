@@ -3341,7 +3341,7 @@ class PostgresKnowledgeStore:
         return root
 
     def prepare_cvp_action(self, run_id, *, action_id, kind, authorization, materials):
-        if kind not in {'source_claim_revision','owner_link_correction','audit_supports_correction','required_cvp_coverage'} or not authorization:
+        if kind not in {'source_claim_revision','cvp_scope_revision','owner_link_correction','audit_supports_correction','required_cvp_coverage'} or not authorization:
             raise ValueError('bounded action authority required')
         action={'action_id':action_id,'kind':kind,'authorization':authorization,
                 'materials_sha256':sha256_json(materials),'materials':materials}
@@ -3667,7 +3667,7 @@ class PostgresKnowledgeStore:
                     return digest
                 action = evidence.get('action')
                 if (value.get('checkpoint') not in {'applied','audited'} or not action
-                        or action.get('kind') not in {'source_claim_revision','owner_link_correction','audit_supports_correction','required_cvp_coverage'}
+                        or action.get('kind') not in {'source_claim_revision','cvp_scope_revision','owner_link_correction','audit_supports_correction','required_cvp_coverage'}
                         or not action.get('authorization') or not action.get('materials_sha256')
                         or plan.change_set_id in value.get('change_set_ids',[])
                         or not prepared or prepared[0]!=action):

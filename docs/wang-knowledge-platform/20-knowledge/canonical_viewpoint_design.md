@@ -120,6 +120,12 @@ erDiagram
 
 这是 [Solution Architecture D4](../00-overview/solution_architecture.md#d4最小化人工提议--复核--仲裁--转人工) 四步在这一层的落地。
 
+**观点会随新讲道持续丰富，范围修订是正常 CVP management，不是逐例 exception。** 新 Claim 可能为同一核心判断增加经文依据或另一种论证。程序读取该观点全部当前成员与支持材料，判断命题是否仍是教授同一意思，再提议最小新修订并独立复核。原 Claim、各篇论证及旧 CVR 保留，不把不同讲道拼成教授未说过的一条综合论证。
+
+观点修订的 `scope.scripture_scope` 表示命题的经文适用限定，不能充当「目前在哪些经文讲过」的覆盖列表；覆盖从来源、Claim 经文与连接另行取得。一般判断不因最初来自某段经文就永远只适用于该段。修订经文范围仍须确认教授没有真实的对象、条件或时期限定；不能仅凭不同经文都出现同一个词扩大身份。
+
+有界 scope policy 目前只允许同一核心、完整 proposition signature、归属及人群／历史限定不变时，修订经文范围并复核必要连接和关系的版本引用。每个相关 Claim 的自身正文、现有完整成员和关系作用交 GPT／Opus，至多一轮纠正；改核心、改变关系语义、解除 hold 或未消解教导张力不在该权内。提交与受影响组复验沿用[共同 SQL 流程](./cvp_transaction_workflow_v2.md)，不逐例增加执行器。
+
 ```mermaid
 flowchart TD
     SC["scope 内的全部主张"] --> G["智能分组<br/>claude-fable-5-1"]
@@ -380,3 +386,4 @@ flowchart TD
 > **来源更新代码对齐**:第 11 节与受控终审依据于 2026-10-06 核对到 `eacc753`、`c5bc74a`、`1bcb34f` 及离线回归；新入口未作真实模型／SQL 端到端实跑，不追认旧包。其余数字与旧规则的原核对范围保持。
 > **与代码对齐**:第 4 节语境语义规则于 2026-10-05 核对到 `config/wang_cvp_contextual_semantics_v2.md`、`viewpoint_semantic_contract.py`、新版本角色模板及 `scripts/audit-library.py`；身份归并未决出口核对到 v2 response，重复仲裁保护核对到 `viewpoint_adjudication_history.py`。新规则目前只完成离线回归，尚非真实模型校准或生产通过。第 3 节人工交接与受控修订续跑保持 2026-10-04 对 `viewpoint_human_review.py`、`viewpoint_audit_link_repair.py`、`viewpoint_batch_resolution_runner.py` 及对应回归测试的核对；其余未核对。第 1、7 节的数字仍取自 2026-08-25 的 PostgreSQL 快照；partition 实施以 #395 的验证记录为准。
 > **权威范围**:观点、论证路线、观点关系的语义、身份判定与消费边界。
+> **范围管理代码对齐**:第 3 节常规 scope enrichment 于 2026-10-09 核对本次 `cvp_scope_management.py`、共享 SQL action 与隔离交易测试；真实模型／组验收另存，不用离线结果追认新内容。

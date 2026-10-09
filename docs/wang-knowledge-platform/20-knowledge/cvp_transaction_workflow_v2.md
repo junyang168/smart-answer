@@ -5,6 +5,7 @@
 > **狀態**：當前；SQL 共同交易與恢復入口已實作、遷移並啟用。隔離驗證、歷史接納與實際組驗收分開記錄；執行仍遵守 owner 停止邊界。舊整庫快照／歷史鏈執行器禁用，不得回退。
 > **與代碼對齊**：2026-10-08；交易基線核對到 `6b9541e`，程式版本綁定核對本次工作樹的 `viewpoint_response_binding.py`、共同模型入口及回歸。正式啟用與組驗收須有獨立 receipt。
 > **權威範圍**：CVP 及已授權來源／連接修訂的交易、changelog、執行狀態與恢復；不變更內容判定、授權範圍、模型分工或分組。受 [Solution Architecture](../00-overview/solution_architecture.md) 與 [CanonicalViewpoint 設計](./canonical_viewpoint_design.md) 約束。
+> **範圍管理代碼對齊**：2026-10-09 核對本次 scope policy binding、共享 action、實際 SQL rollback／恢復與舊 input-repair 不重放反例；真實內容修訂與獨立組審計另驗收。
 
 ## 1. 設計決定
 
@@ -122,6 +123,10 @@ commit 後的新連線回讀用於确认可見結果與交接審計。它若失�
 | 用進程內快取與多種 compiled predecessor 解正常恢復 | 不再新增這類層；現有投影工具僅可供明確的歷史遷移使用 |
 
 各種修訂仍有自己的內容權限與 validator。它們輸出相同的材料／批准／ChangeSet 契約後，共用交易與恢復步驟；統一執行器不等於統一或擴大內容授權。
+
+常規 CVP scope enrichment 使用同一 action／transaction，另以 `--cvp-scope-policy` 綁定其域權限。來源與 Claim 不變時，不建立 source epoch、不讀整庫；由 CVP ID 索引讀完整當前成員及必要 consumer。穩定 action 身份由 CVP 和前 CVR 決定，改 finder／policy 名字／root 不重置同版預算。新 revision、head、全部 current links 和相關 relations 的批准後像一起提交；關係只換必要版本引用，不改語義。所有新版本 provenance 綁實際本輪 Opus，原拒絕及審計保留。
+
+正常組後完整獨立審計發現的 typed 範圍異議可以進這個有界管理分支；它不把原 GPT 未決改成否決。新提交的 CVR 產生新的精確審計輸入，已受影響組失效後只復驗，不重生成或重 apply。舊漏 CVR 的一次 input-repair 方向只對原 head／links 生效；合法新 CVR 不會觸發重放該舊呼叫。
 
 業務責任分為 Claim management（Claim 本身、Evidence 與 Claim–Evidence 綁定）和 CVP management（Claim–CVP 連接及 CVP）；Claim／Evidence 修訂须在共同後像包評估相關觀點及完整其他成員，不默認 CVP 必須改寫。兩域已批准的完整方案共用同一短 transaction；有 pending coverage／影響時，completion 拒絕結案。共同接點、policy 邊界及實作狀態見[管理域變更閉環](./cvp_production_process_v1.md#13-claim-與-cvp-管理的變更閉環)，不由本文提前授權內容修改。
 

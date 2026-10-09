@@ -50,7 +50,7 @@ def maintenance_lock():
             fcntl.flock(lock, fcntl.LOCK_UN)
 
 
-def model_adapter(stage: str, *, live: bool = False, deferred: bool = False, issue: bool = False):
+def model_adapter(stage: str, *, live: bool = False, deferred: bool = False, issue: bool = False, scope: bool = False):
     review = "review" in stage
     model, backend, provider = ("claude-opus-5-5", "claude_subscription", "claude") if review else ("gpt-6.1-sol", "codex_subscription", "codex")
     filename = "source_reconciliation_review.md" if review else "source_reconciliation_proposal.md"
@@ -61,6 +61,8 @@ def model_adapter(stage: str, *, live: bool = False, deferred: bool = False, iss
             prompt += "\n输出采用无损 JSON records 协议：每条 records 的 payload_json 是完整拟后像 JSON 字符串，不删字段；unadmitted_candidates_json 同理。程序逐字段解析为原 Proposal 再机械验证和交给 Opus。"
     if issue:
         prompt += "\n" + (PROMPTS / "claim_issue_management_v1.md").read_text(encoding="utf-8")
+    if scope:
+        prompt += '\n' + (PROMPTS / 'cvp_scope_management_v1.md').read_text(encoding='utf-8')
     if stage == "correction":
         prompt += "\n本次是唯一一轮纠正。逐条回应初次 Opus 意见，不得扩大范围；未解决项明确 unresolved。"
     if stage == "final_review":
@@ -69,11 +71,14 @@ def model_adapter(stage: str, *, live: bool = False, deferred: bool = False, iss
         model=model, backend=backend, reasoning_effort="high", max_output_tokens=64000)
     if deferred and not review:
         from backend.pipeline.deferred_claim_repair import JsonProposal
+    if scope and not review:
+        from backend.pipeline.cvp_scope_management import JsonScopeProposal
     if issue and not review:
         from backend.pipeline.claim_issue_management import JsonIssueProposal
     adapter = StructuredJsonReviewerAdapter(client=client, prompt=prompt,
-        response_model=contract.Review if review else JsonIssueProposal if issue else JsonProposal if deferred else contract.Proposal,
+        response_model=contract.Review if review else JsonScopeProposal if scope else JsonIssueProposal if issue else JsonProposal if deferred else contract.Proposal,
         schema_name=("claim_issue_review_v1" if review else "claim_issue_json_records_v1") if issue else
+            "cvp_scope_review_v1" if scope and review else "cvp_scope_json_records_v1" if scope else
             "source_reconciliation_review_v1" if review else "deferred_claim_json_records_v1" if deferred else "source_reconciliation_proposal_v1",
         compact_payload=True, shared_text_payload=True, shared_record_payload=True)
     adapter.max_request_bytes = 500000
@@ -204,6 +209,9 @@ class ProductionPorts:
 
     def claim_issue_adapter(self, stage: str):
         return model_adapter(stage, live=True, issue=True)
+
+    def scope_adapter(self, stage: str):
+        return model_adapter(stage, live=True, scope=True)
 
     def before_model_call(self, stage: str) -> None:
         # Cached responses do not run model/auth diagnostics. A new actual

@@ -487,9 +487,15 @@ def run_group(store, definition, group, row, *, root):
                 raise ValueError('adjudication input repair direction physical drift')
             direction = read_artifact(Path(auth['path']))
             if direction.get('run_id') == run_id:
+                # This consumed direction belongs only to its exact old head /
+                # links. A legitimately committed new CVR is not another input
+                # repair of the old audit, nor a reset of that old reservation.
+                old_packet=read_artifact(Path(direction['original_root'])/'packet.json')
+                from backend.pipeline.cvp_sql_adjudication_input_repair import applies_to_packet
                 from backend.pipeline.cvp_sql_adjudication_input_repair import execute
-                execute(store, run_id, Path(auth['path']))
-                prior = store.adjudication_roots(targets)
+                if applies_to_packet(old_packet,packet):
+                    execute(store, run_id, Path(auth['path']))
+                    prior = store.adjudication_roots(targets)
         from backend.pipeline.cvp_sql_adjudication_input_repair import effective_roots
         prior = effective_roots(prior)
         resolution=audit_dir/'gpt-source-final-resolution.json'
@@ -534,6 +540,9 @@ def run_group(store, definition, group, row, *, root):
             known={target_identity(i) for i in old['items']}
             ids={i['item_id'] for i in packet['items'] if target_identity(i) in known}
             if ids:
+                if handle_audit_scope(store,run_id,{'items':active_items},prior_report,
+                                      reports=[binding(previous/'packet.json'),binding(previous/'gpt-final-handoff.json')],root=root):
+                    return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)
                 unresolved=[a['item_id'] for a in prior_report['actions']
                             if a['item_id'] in ids and a['verdict']=='unresolved']
                 if unresolved:
@@ -562,6 +571,9 @@ def run_group(store, definition, group, row, *, root):
                     policy_binding=read_artifact(policy).get('policy') if policy.exists() else None,ports=ProductionPorts(),
                     prior_management_action=prior_management_action(evidence,claim_findings))
                 return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)
+            if handle_audit_scope(store,run_id,subset,report,
+                                  reports=[binding(adjudication/'packet.json'),binding(adjudication/'gpt-final-handoff.json')],root=root):
+                return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)
             if any(a['verdict']=='unresolved' for a in report['actions']):
                 raise ValueError('original-source adjudication unresolved; no automatic supports repair or second call')
             if any(a['verdict']!='audit_objection_rejected' for a in report['actions']):
@@ -576,6 +588,19 @@ def run_group(store, definition, group, row, *, root):
     store.complete_cvp_group(run_id,audit=audit,audit_binding=binding(audit_path),read_pins=pins(current),
                              owner_resolution_path=resolution)
     stage_event('audited', sequence=group['sequence'], run_id=run_id)
+
+
+def handle_audit_scope(store,run_id,packet,report,*,reports,root):
+    from backend.pipeline.cvp_scope_management import audit_targets,handle_scope
+    targets=audit_targets(packet,report)
+    if not targets:return False
+    policy=root/'cvp-scope-policy-binding.json'
+    if not policy.exists():return False
+    from backend.pipeline.source_reconciliation_runtime import ProductionPorts
+    for vid in targets:
+        handle_scope(store,run_id,vid,policy_binding=read_artifact(policy)['policy'],reports=reports,
+                     root=root/run_id/'cvp-management',ports=ProductionPorts())
+    return True
 
 
 def main(argv=None):
@@ -594,6 +619,7 @@ def main(argv=None):
     parser.add_argument('--adjudication-root',type=Path)
     parser.add_argument('--link-id')
     parser.add_argument('--claim-issue-policy',type=Path,help='Explicit owner bounded Claim/Evidence/CVP policy; no inferred permission')
+    parser.add_argument('--cvp-scope-policy',type=Path,help='Normal bounded CVP scope enrichment; no identity/core/Claim/source permission')
     parser.add_argument('--request-limit-authorization',type=Path,help='Owner campaign request budget; does not change frozen model inputs or call budgets')
     parser.add_argument('--component-role-authorization', type=Path,
                         help='Exact owner acceptance of an existing structural duplicate finding; no new model/content permission')
@@ -643,6 +669,10 @@ def main(argv=None):
             from backend.pipeline.claim_issue_management import read_policy
             read_policy(binding(args.claim_issue_policy))
             write_immutable(args.output_root/'claim-issue-policy-binding.json',{'policy':binding(args.claim_issue_policy)})
+        if args.cvp_scope_policy:
+            from backend.pipeline.cvp_scope_management import read_policy
+            read_policy(binding(args.cvp_scope_policy))
+            write_immutable(args.output_root/'cvp-scope-policy-binding.json',{'policy':binding(args.cvp_scope_policy)})
         if args.action!='group':
             if not args.run_id:raise ValueError('bounded action requires exact admitted SQL run ID')
             saved=store.get_cvp_group(args.run_id)

@@ -23,6 +23,9 @@ STAGES = ("proposal", "initial_review", "correction", "final_review")
 
 
 def effective_proposal(frozen, response):
+    if frozen['manifest'].get('viewpoint_scope_repair'):
+        from backend.pipeline.cvp_scope_management import effective_proposal as scoped
+        return scoped(response)
     if frozen["manifest"].get("claim_issue"):
         from backend.pipeline.claim_issue_management import normalize_proposal
         return normalize_proposal(frozen, response)
@@ -30,6 +33,30 @@ def effective_proposal(frozen, response):
         from backend.pipeline.deferred_claim_repair import normalize_proposal
         return normalize_proposal(frozen, response)
     return contract.Proposal.model_validate(response)
+
+
+def request_limit(adapter, path, *, saved=None):
+    """Shared campaign budget; historical answers keep their actual identity."""
+    from backend.pipeline.viewpoint_resolution_runtime import effective_request_limit, read_artifact
+    if saved is not None:
+        budget=saved.get('request_budget')
+        limit=getattr(adapter,'max_request_bytes',500000)
+    else:
+        limit,budget=effective_request_limit(adapter,path)
+    if budget is not None:
+        from backend.pipeline.cvp_sql_flow import check_binding
+        check_binding(budget['authorization'])
+        auth=read_artifact(Path(budget['authorization']['path']))
+        binding_path=next((p/'request-limit-binding.json' for p in Path(path).resolve().parents
+                           if (p/'request-limit-binding.json').exists()),None)
+        if (binding_path is None or read_artifact(binding_path)!=budget
+                or auth.get('schema_version')!='cvp_sql_request_limit_authorization.v1'
+                or auth.get('campaign_sha256')!=budget['campaign_sha256']
+                or auth.get('max_request_bytes')!=budget['max_request_bytes']
+                or auth.get('authorized_by')!='owner' or not auth.get('owner_direction')):
+            raise ValueError('source model campaign request budget drift')
+        limit=budget['max_request_bytes']
+    return limit or 500000,budget
 
 
 class Stop(ValueError):
@@ -171,7 +198,8 @@ class Runner:
             raise ValueError("unknown model stage")
         deferred = bool(packet.get("manifest", {}).get("deferred_repair"))
         issue = bool(packet.get("manifest", {}).get("claim_issue"))
-        adapter = self.ports.claim_issue_adapter(stage) if issue else self.ports.deferred_adapter(stage) if deferred else self.ports.adapter(stage)
+        scope = bool(packet.get('manifest', {}).get('viewpoint_scope_repair'))
+        adapter = self.ports.scope_adapter(stage) if scope else self.ports.claim_issue_adapter(stage) if issue else self.ports.deferred_adapter(stage) if deferred else self.ports.adapter(stage)
         from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
         raw_path = self.root / (stage + '.raw.json')
         adapter = response_adapter(adapter, read(raw_path) if raw_path.exists() else None)
@@ -180,14 +208,16 @@ class Runner:
             raise Stop("model/backend differs from frozen subscription policy", status="proof_failure", waiting_for="system")
         proof = adapter.request_encoding_proof(packet)
         size = adapter.request_bytes(packet)
-        if (size > 500000 or not proof or proof.get("exact_roundtrip_verified") is not True
+        limit,budget=request_limit(adapter,raw_path,saved=read(raw_path) if raw_path.exists() else None)
+        if (size > limit or not proof or proof.get("exact_roundtrip_verified") is not True
                 or proof["semantic_payload_sha256"] != sha256_json(packet)
                 or proof["restored_payload_sha256"] != sha256_json(packet)):
-            raise Stop("actual request exceeds 500000 or lossless encoding failed", status="proof_failure", waiting_for="system")
+            raise Stop(f"actual request exceeds {limit} or lossless encoding failed", status="proof_failure", waiting_for="system")
         request = {"model_id": adapter.model_id, "backend": adapter.backend,
             "prompt_sha256": adapter.prompt_sha256, "generation_config_sha256": adapter.generation_config_sha256,
             "request_payload_sha256": sha256_json(packet), "request_encoding_proof": proof,
             "request_bytes": size, "stage": stage, "automatic_retry": False}
+        if budget is not None:request['request_budget']=budget
         raw_path = self.root / (stage + ".raw.json")
         reservation = self.root / (stage + ".reservation.json")
         write(self.root / (stage + ".packet.json"), packet)
@@ -406,6 +436,10 @@ def build_proposal_packet(frozen: dict) -> dict:
         result["claim_issue_context"] = frozen["claim_issue_context"]
         result["writable_record_shapes"] = {col: contract.KNOWLEDGE_COLLECTIONS[col][0].model_json_schema()
             for col in sorted({p["collection"] for p in frozen["manifest"]["permissions"]})}
+    if 'viewpoint_scope_context' in frozen:
+        result['viewpoint_scope_context'] = frozen['viewpoint_scope_context']
+        result['writable_record_shapes'] = {col: contract.KNOWLEDGE_COLLECTIONS[col][0].model_json_schema()
+            for col in sorted({p['collection'] for p in frozen['manifest']['permissions']})}
     return result
 
 
@@ -511,7 +545,14 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
     packet = body(read(root / (stage + ".packet.json")))
     raw = read(root / (stage + ".raw.json"))
     expected = validate_raw(root, stage, packet)
-    proposal = effective_proposal(frozen, packet["proposal"]) if frozen["manifest"].get("claim_issue") else contract.Proposal.model_validate(packet["proposal"])
+    if frozen['manifest'].get('viewpoint_scope_repair'):
+        from backend.pipeline.viewpoint_validation_context import historical_context
+        ctx=historical_context()
+        if ctx:ctx.pin(Path(__file__).with_name('cvp_scope_management.py'))
+        from backend.pipeline.cvp_scope_management import Proposal
+        proposal=Proposal.model_validate(packet['proposal'])
+    else:
+        proposal = effective_proposal(frozen, packet["proposal"]) if frozen["manifest"].get("claim_issue") else contract.Proposal.model_validate(packet["proposal"])
     if packet != contract.review_packet(frozen, proposal) or not contract.validate_review(packet, raw["response"]):
         raise ValueError("terminal complete postimage review invalid")
     # Authenticate proposal and correction chain. A final reply cannot bypass initial review.
@@ -555,7 +596,10 @@ def validate_raw(root: Path, stage: str, packet: dict) -> dict:
             ctx.pin(PROMPTS / 'deferred_claim_evidence_repair_v1.md')
         if packet.get('manifest', {}).get('claim_issue'):
             ctx.pin(PROMPTS / 'claim_issue_management_v1.md')
-    adapter = model_adapter(stage, deferred=bool(packet.get("manifest", {}).get("deferred_repair")),
+        if packet.get('manifest', {}).get('viewpoint_scope_repair'):
+            ctx.pin(PROMPTS / 'cvp_scope_management_v1.md')
+    adapter = model_adapter(stage, scope=bool(packet.get('manifest', {}).get('viewpoint_scope_repair')),
+                            deferred=bool(packet.get("manifest", {}).get("deferred_repair")),
                             issue=bool(packet.get("manifest", {}).get("claim_issue")))
     raw = read(root / (stage + ".raw.json"))
     from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
@@ -566,7 +610,9 @@ def validate_raw(root: Path, stage: str, packet: dict) -> dict:
         "prompt_sha256": adapter.prompt_sha256, "generation_config_sha256": adapter.generation_config_sha256,
         "request_payload_sha256": sha256_json(packet), "request_encoding_proof": proof,
         "request_bytes": adapter.request_bytes(packet), "stage": stage, "automatic_retry": False}
-    if expected["request_bytes"] > 500000 or expected != reservation or any(raw.get(k) != v for k, v in expected.items()) or raw["response_sha256"] != sha256_json(raw["response"]):
+    limit,budget=request_limit(adapter,root/(stage+'.raw.json'),saved=raw)
+    if budget is not None:expected['request_budget']=budget
+    if expected["request_bytes"] > limit or expected != reservation or any(raw.get(k) != v for k, v in expected.items()) or raw["response_sha256"] != sha256_json(raw["response"]):
         raise ValueError("actual model/backend/prompt/schema/wire/raw binding drift")
     if raw.get("provider_raw_sha256") != sha256_json(raw.get("provider_raw")):
         raise ValueError("original subscription response drift")

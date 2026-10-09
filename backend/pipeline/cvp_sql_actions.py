@@ -45,7 +45,10 @@ def action_sources(materials):
     manifest=content.Manifest.model_validate(materials['manifest'])
     result = [b.model_dump() for b in (manifest.before_source,*manifest.current_sources,manifest.authorization,
                                     manifest.accepted_membership,*manifest.prior_updates)] + [s['file'] for s in materials.get('context_sources',[])]
-    if manifest.claim_issue:
+    if manifest.viewpoint_scope_repair:
+        context=materials['viewpoint_scope_context']
+        result += [manifest.viewpoint_scope_repair.model_dump(),context['policy'],*context['reports']]
+    elif manifest.claim_issue:
         context=materials['claim_issue_context']
         result += [manifest.claim_issue.model_dump(),context['policy'],*(i['report'] for i in context['issues'])]
     return result
@@ -84,7 +87,11 @@ def prepare_source_action(store,run_id,manifest,*,root):
             raise ValueError('saved SQL source action materials differ')
         return previous
     started=time.perf_counter()
-    if manifest.claim_issue:
+    if manifest.viewpoint_scope_repair:
+        from backend.pipeline.cvp_scope_management import direction
+        target=direction(manifest)
+        keys=[('canonical_viewpoints',target['viewpoint_id']),('viewpoint_revisions',target['before_revision_id'])]
+    elif manifest.claim_issue:
         context=json.loads(content.bound_bytes(manifest.claim_issue))
         # Source is unchanged. Starting reverse closure at its document would
         # incorrectly load every unrelated Claim in the same sermon.
@@ -102,11 +109,17 @@ def prepare_source_action(store,run_id,manifest,*,root):
     if len(canonical_json(materials).encode())>64*1024**2 or time.perf_counter()-started>5:
         raise ValueError('bounded source materials exceed mechanical guard; no whole-store fallback')
     write(root/'scoped-materials.json',materials)
-    return store.prepare_cvp_action(run_id,action_id=action_id,kind='source_claim_revision',
+    return store.prepare_cvp_action(run_id,action_id=action_id,
+        kind='cvp_scope_revision' if manifest.viewpoint_scope_repair else 'source_claim_revision',
         authorization=manifest.authorization.model_dump(),materials=materials)
 
 
 def source_action_id(manifest):
+    if manifest.viewpoint_scope_repair:
+        from backend.pipeline.cvp_scope_management import direction
+        value = direction(manifest)
+        return 'CVPA-'+sha256_json({'kind':'viewpoint_scope_revision','viewpoint_id':value['viewpoint_id'],
+                                  'before_revision_id':value['before_revision_id']})
     if manifest.claim_issue:
         from backend.pipeline.claim_issue_management import Issue
         context=__import__('json').loads(content.bound_bytes(manifest.claim_issue))
@@ -155,6 +168,8 @@ def execute_source_action(store,run_id,manifest,*,root,ports):
     initialize_subscription_runtime(ports)
     stages=ScopedSourceModelStages(root,ports,store,read_pins)
     proposal,raw=stages.reviewed(materials)
+    if manifest.get('viewpoint_scope_repair') and not proposal.records:
+        raise ValueError('scope assessment retained existing scope; unresolved original finding needs direction, no empty commit/retry loop')
     package=content.compile_package(materials,proposal,raw,frozen_sha256=action['materials_sha256'])
     package['source_repair_application']={'schema_version':SOURCE_SCHEMA,'run_root':str(Path(root).resolve()),
         'run_id':run_id,'materials':binding(root/'scoped-materials.json'),
@@ -162,14 +177,14 @@ def execute_source_action(store,run_id,manifest,*,root,ports):
         'review_sha256':raw['artifact_sha256'],'proposal_sha256':sha256_json(proposal.model_dump())}
     validate_source_package(package)
     from backend.pipeline.cvp_sql_flow import verified_group_backup
-    backup=verified_group_backup(root,package,ports) if issue_context else ports.backup(root)
+    backup=verified_group_backup(root,package,ports) if issue_context or manifest.get('viewpoint_scope_repair') else ports.backup(root)
     original=store.get_cvp_group(run_id).get('reviewed',{}).get('evidence',{})
     approval={'terminal_review':binding(root/(raw['stage']+'.raw.json'))}
     for stage in ('initial_review','final_review'):
         proof=root/(stage+'.raw.program-binding.json')
         if proof.exists():approval[stage+'_program_binding']=binding(proof)
     views=set(original.get('viewpoint_ids',[]))
-    if issue_context:
+    if issue_context or manifest.get('viewpoint_scope_repair'):
         views.update(p['viewpoint_id'] for p in content.index(materials['before_records']).values() if 'viewpoint_id' in p)
     pending=content.Manifest.model_validate(materials['manifest']).deferred_repair.claim_ids if materials['manifest'].get('deferred_repair') else []
     if issue_context:
@@ -179,7 +194,7 @@ def execute_source_action(store,run_id,manifest,*,root,ports):
     return commit_package(store,run_id,package=package,
         approval=approval,
         authorization=action['authorization'],backup=backup,sources=action_sources(materials),
-        read_pins=read_pins,reason='approved bounded source/Claim revision',actor='owner-authorized-pipeline',
+        read_pins=read_pins,reason='approved CVP management scope enrichment' if manifest.get('viewpoint_scope_repair') else 'approved bounded source/Claim revision',actor='owner-authorized-pipeline',
         source_kind=SOURCE_SCHEMA,viewpoint_ids=sorted(views),
         disposition=original.get('disposition'),action=action,
         pending_cvp_claim_ids=pending)

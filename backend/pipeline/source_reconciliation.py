@@ -35,6 +35,9 @@ IMPACT_ONLY = frozenset({
     "editorial_checks", "editorial_syntheses", "argument_routes", "argument_route_revisions",
     "argument_route_attestations", "viewpoint_identity_candidates", "viewpoint_identity_decisions",
     "viewpoint_resolution_ledgers", "viewpoint_quality_reports", "viewpoint_coverage_snapshots",
+    # A structure is a reviewed historical synthesis, not permission to
+    # regenerate it when one CVP changes. Its exact old CVR pins stay visible.
+    "viewpoint_structures", "viewpoint_structure_revisions",
 })
 PROVENANCE = frozenset({"review_status", "reviewed_by", "reviewed_at", "review_note",
                         "source_reconciliation_review_sha256"})
@@ -111,6 +114,8 @@ class Manifest(Contract):
     deferred_repair: DeferredRepair | None = None
     # Shared Claim management intake, not a new source epoch or retry budget.
     claim_issue: FileBinding | None = None
+    # Exact owner CVP scope permission; never inherited from Claim permission.
+    viewpoint_scope_repair: FileBinding | None = None
 
     @model_serializer(mode="wrap")
     def serialize(self, handler):
@@ -120,6 +125,8 @@ class Manifest(Contract):
             result.pop("deferred_repair", None)
         if self.claim_issue is None:
             result.pop("claim_issue", None)
+        if self.viewpoint_scope_repair is None:
+            result.pop("viewpoint_scope_repair", None)
         return result
 
 
@@ -403,8 +410,8 @@ def freeze(manifest: Manifest, states: dict[str, dict], *, physical_snapshots: d
                 or (p.collection == "viewpoint_revisions" and key("canonical_viewpoints", p.parent_id) not in states)):
             raise ValueError("creation parent is outside the exact existing source/viewpoint identity")
     old = states[key("source_documents", manifest.source_id)]
-    before = source_snapshot(manifest.before_source, physical_snapshots, source=old if manifest.claim_issue else None)
-    after = [source_snapshot(b, physical_snapshots, source=old if manifest.claim_issue else None) for b in manifest.current_sources]
+    before = source_snapshot(manifest.before_source, physical_snapshots, source=old if manifest.claim_issue or manifest.viewpoint_scope_repair else None)
+    after = [source_snapshot(b, physical_snapshots, source=old if manifest.claim_issue or manifest.viewpoint_scope_repair else None) for b in manifest.current_sources]
     if any(a["paragraphs"] != after[0]["paragraphs"] for a in after):
         raise ValueError("current source copies have different spoken bodies")
     if (old.get("locator_space") != LOCATOR_SPACE or old.get("source_body_sha256") != before["body_sha256"]
@@ -416,7 +423,13 @@ def freeze(manifest: Manifest, states: dict[str, dict], *, physical_snapshots: d
     changed = sorted(k for k in keys if before["paragraphs"].get(k) != after[0]["paragraphs"].get(k))
     if not set(changed) <= set(manifest.authorized_paragraph_keys):
         raise ValueError("source change exceeds authorized paragraphs; no automatic scope expansion")
-    if manifest.claim_issue:
+    if manifest.viewpoint_scope_repair:
+        from backend.pipeline.cvp_scope_management import validate_authority, scope_inventory
+        diagnosis = validate_authority(manifest, states, snapshots=physical_snapshots)
+        if changed or manifest.authorized_paragraph_keys:
+            raise ValueError('CVP scope repair cannot change source paragraphs')
+        inv = scope_inventory(states, diagnosis['viewpoint_id'])
+    elif manifest.claim_issue:
         from backend.pipeline.claim_issue_management import validate_authority
         diagnosis = validate_authority(manifest, states, snapshots=physical_snapshots)
         inv = claim_inventory(states, manifest.source_id, diagnosis["claim_ids"])
@@ -457,6 +470,8 @@ def freeze(manifest: Manifest, states: dict[str, dict], *, physical_snapshots: d
         identity["deferred_diagnosis"] = diagnosis
     if manifest.claim_issue:
         identity["claim_issue_context"] = diagnosis
+    if manifest.viewpoint_scope_repair:
+        identity['viewpoint_scope_context'] = diagnosis
     archive_bindings = [manifest.before_source, *manifest.current_sources, manifest.authorization,
                         manifest.accepted_membership, *manifest.prior_updates]
     archive_bindings += [FileBinding.model_validate(s["file"]) for s in context_sources]
@@ -464,6 +479,9 @@ def freeze(manifest: Manifest, states: dict[str, dict], *, physical_snapshots: d
         archive_bindings.append(manifest.claim_issue)
         archive_bindings.append(FileBinding.model_validate(diagnosis["policy"]))
         archive_bindings.extend(FileBinding.model_validate(r["report"]) for r in diagnosis["issues"])
+    if manifest.viewpoint_scope_repair:
+        archive_bindings += [manifest.viewpoint_scope_repair, FileBinding.model_validate(diagnosis['policy'])]
+        archive_bindings.extend(FileBinding.model_validate(b) for b in diagnosis['reports'])
     if manifest.deferred_repair:
         archive_bindings += [manifest.deferred_repair.investigation_packet, manifest.deferred_repair.handoff,
                              manifest.deferred_repair.raw_gpt, manifest.deferred_repair.raw_opus]
@@ -484,6 +502,10 @@ def guard_files(frozen: dict, *, historical: bool = False) -> None:
         context = frozen["claim_issue_context"]
         for b in [manifest.claim_issue, context["policy"], *(r["report"] for r in context["issues"])]:
             bound_bytes(b, frozen["physical_snapshots"] if historical else None)
+    if manifest.viewpoint_scope_repair:
+        context=frozen['viewpoint_scope_context']
+        for b in [manifest.viewpoint_scope_repair,context['policy'],*context['reports']]:
+            bound_bytes(b,frozen['physical_snapshots'] if historical else None)
     if manifest.deferred_repair:
         for b in (manifest.deferred_repair.investigation_packet, manifest.deferred_repair.handoff,
                   manifest.deferred_repair.raw_gpt, manifest.deferred_repair.raw_opus):
@@ -570,6 +592,9 @@ def validate_proposal(frozen: dict, proposal: Proposal) -> dict[str, dict]:
     if manifest.claim_issue:
         from backend.pipeline.claim_issue_management import validate_resolution
         validate_resolution(frozen, proposal, post)
+    if manifest.viewpoint_scope_repair:
+        from backend.pipeline.cvp_scope_management import validate_postimages
+        validate_postimages(frozen, proposal, post)
     sentence_ids = [d.sentence_id for d in proposal.sentence_dispositions]
     if len(sentence_ids) != len(set(sentence_ids)) or set(sentence_ids) != {s["sentence_id"] for s in frozen["sentence_inventory"]}:
         raise ValueError("authorized source sentence denominator incomplete or duplicated")
@@ -739,6 +764,7 @@ def review_packet(frozen: dict, proposal: Proposal) -> dict:
         "inventory": frozen["inventory"], "before_records": rows({k: before[k] for k in selected}),
         **({"deferred_diagnosis": frozen["deferred_diagnosis"]} if "deferred_diagnosis" in frozen else {}),
         **({"claim_issue_context": frozen["claim_issue_context"]} if "claim_issue_context" in frozen else {}),
+        **({'viewpoint_scope_context': frozen['viewpoint_scope_context']} if 'viewpoint_scope_context' in frozen else {}),
         "proposal": proposal.model_dump(), "proposal_sha256": sha256_json(proposal.model_dump()),
         "provenance_contract": {
             "old_approval_is_history_only": True, "reviewer": "claude-opus-5-5",
@@ -867,6 +893,13 @@ def compile_package(frozen: dict, proposal: Proposal, raw: dict, *, frozen_sha25
             ids = [decision["identity_decision_id"]]
         revision.update(provenance={"basis_identity_decision_ids": sorted(ids), "review_artifact_sha256": digest},
                         approved_by="claude-opus-5-5", approved_at=reviewed_at)
+    if frozen['manifest'].get('viewpoint_scope_repair'):
+        for k, relation in data.items():
+            if k.startswith('viewpoint_relations/'):
+                vids={relation['source_viewpoint_id'],relation['target_viewpoint_id']}
+                relation['review_provenance']={
+                    'basis_identity_decision_ids':sorted({d for vid in vids for d in identity_by_viewpoint[vid]}),
+                    'review_artifact_sha256':digest}
     body = {"package_id": frozen["update_id"]}
     for k, p in sorted(data.items()):
         body.setdefault(split_key(k)[0], []).append(p)

@@ -12,6 +12,16 @@ SCHEMA = 'cvp_sql_adjudication_input_repair_authorization.v1'
 PROOF = 'cvp_sql_adjudication_input_repair_proof.v1'
 
 
+def applies_to_packet(old, current):
+    from backend.pipeline.viewpoint_adjudication_history import target_identity
+    old_targets={target_identity(i) for i in old['items']}
+    current_targets={target_identity(i) for i in current['items']}
+    matched=old_targets & current_targets
+    if matched and matched != old_targets:
+        raise ValueError('partially changed input-repair target set; no automatic replay')
+    return bool(matched)
+
+
 def make_direction(store, campaign, run_id, original_root, quote):
     from backend.pipeline.viewpoint_adjudication_history import validated_history
     from backend.pipeline.viewpoint_audit_source_adjudication import build_packet

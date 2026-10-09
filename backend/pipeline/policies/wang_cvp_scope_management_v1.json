@@ -1,0 +1,10 @@
+{
+  "schema_version": "wang_cvp_scope_management_v1",
+  "authorization_id": "owner-cvp-management-scope-enrichment-v1",
+  "authorization_quote": "这种扩展现有 CVP 范围的操作并不是 exception 而应成为 CVP management 的一部分，因为教授不同讲道会不断丰富同一观点",
+  "human_content_approval": false,
+  "scope_fields": ["scripture_scope"],
+  "preserve_core_identity": true,
+  "preserve_claims_evidence_sources": true,
+  "correction_limit": 1
+}
