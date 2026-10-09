@@ -171,9 +171,11 @@ def coordinate_predecessor_authority(store, cid, row):
     """Carry one actual SQL review over an exact applied locator-only step.
 
     No new review event, status mutation, history-chain replay or legacy runner.
-    The immediate predecessor must have its own unique review. The original
-    bounded plan, actual SQL operation and physical body must all agree, and
-    the original deterministic locator compiler must reproduce the full row.
+    The immediate predecessor must have its own unique review, either a bound
+    SQL event or an exact passing imported-input/SQL-graph proof. Inherited
+    review notes grant no authority. The original bounded plan, actual SQL
+    operation and physical body must all agree, and the original deterministic
+    locator compiler must reproduce the full row. Never walk older versions.
     """
     from backend.pipeline.cvp_sql_claim_authority import coordinate_authority
     return coordinate_authority(store, cid, row)

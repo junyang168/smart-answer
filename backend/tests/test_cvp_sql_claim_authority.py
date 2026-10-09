@@ -132,3 +132,55 @@ def test_real_hold_never_uses_coordinate_history(authority_case):
     s,_,_=authority_case;s.row['payload']['review_status']='human_hold'
     with pytest.raises(ValueError,match='held'):current_claim_authority(s,'CL-test',s.row)
     assert not s.calls
+
+
+def test_sermon_json_locator_step_uses_actual_body_projection(authority_case,tmp_path):
+    s,path,source_path=authority_case
+    source=json.loads(path.read_text())['source']
+    script,_,_=markdown_source_document(source)
+    json_path=tmp_path/'sermon.json';json_path.write_text(json.dumps(script))
+    document=json.loads(path.read_text());document.pop('artifact_sha256')
+    document['source'].update(source_type='sermon_transcript',source_path=str(json_path),
+        source_file_sha256=hashlib.sha256(json_path.read_bytes()).hexdigest())
+    document['artifact_sha256']=sha256_json(document);path.write_text(json.dumps(document))
+    s.history['metadata']['source_plan_file_sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
+    result=current_claim_authority(s,'CL-test',s.row)
+    assert result['source']['path']==str(json_path)
+    assert result['model_calls']==result['master_data_mutations']==0
+
+
+def test_conflicting_predecessor_decision_is_not_hidden_by_pass_filter(authority_case):
+    s,_,_=authority_case
+    s.previous_events=[('REV-rejected','ai','rejected',{'change_set_id':'KCS-original'})]
+    with pytest.raises(ValueError,match='ambiguous predecessor review'):
+        current_claim_authority(s,'CL-test',s.row)
+
+
+@pytest.mark.parametrize('change',[None,'missing','changed','hold','retired','sha'])
+def test_imported_pass_requires_current_dependency_postimages(authority_case,monkeypatch,change):
+    from backend.pipeline import cvp_sql_imported_claim_review as imported
+    s,_,_=authority_case
+    s.previous_events=[];s.prior['source_kind']='knowledge_package'
+    step={'evidence_step_id':'E-test','revision':2,'statement':'Exact evidence.',
+        'review_status':'candidate','support_eligibility':'eligible'}
+    sha=record_content_sha(step)
+    s.prior['operations'].append({'collection':'evidence_steps','object_id':'E-test',
+        'operation':'update','after':step,'after_revision':2,'after_sha256':sha})
+    proof={'review_event_id':None,'reviewer_kind':'ai','decision':'ai_consensus_reviewed',
+        'review_artifact_sha256':'a'*64,'imported_dependency_pins':[
+            {'collection':'evidence_steps','object_id':'E-test','revision':2,'content_sha256':sha}]}
+    monkeypatch.setattr(imported,'imported_passing_review',lambda *a:deepcopy(proof))
+    live={'payload':deepcopy(step),'revision':2,'content_sha256':sha,'retired':False}
+    if change=='changed':live['payload']['statement']='Changed evidence.'
+    elif change=='hold':live['payload']['support_eligibility']='context_only'
+    elif change=='retired':live['retired']=True
+    elif change=='sha':live['content_sha256']='f'*64
+    s.get_record_state=lambda *key:None if change=='missing' else live
+    if change is not None:
+        with pytest.raises(ValueError,match='current reviewed dependency differs'):
+            current_claim_authority(s,'CL-test',s.row)
+    else:
+        result=current_claim_authority(s,'CL-test',s.row)
+        assert result['review_event_id'] is None
+        assert result['current_dependency_pins']==proof['imported_dependency_pins']
+        assert result['model_calls']==result['master_data_mutations']==0

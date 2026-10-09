@@ -103,6 +103,8 @@ commit 後的新連線回讀用於确认可見結果與交接審計。它若失�
 
 歷史審核記錄原模型、prompt、policy、來源和材料 SHA；交易記錄原驗證器版本。日後修改一般程式碼不自動推翻全部歷史，也不再因整個 module 的檔案 SHA 變化重編所有舊投影。只有明確判定原驗證規則有缺陷、證據損壞或依賴變更時，才針對受影響項進行有記錄的處理。
 
+舊 package 匯入可能保留另一語義版本的审核註記，卻漏登本版 SQL review event。註記或 `ai_consensus_reviewed` 不足以放行。精確 locator-only 更新的立即前版若屬已提交匯入，共同准入可核對該版的原獨立 pass、完整 SHA-bound 输入、实际模型身份／routing／hold、逐字来源，以及 SQL 已提交 Claim、Evidence、fragment 的完整語義後像。只有全部相同且审核唯一才消费；舊同 ID 不同內容、不完整／衝突审核、改過的證據或 merge／patch 後像均拒绝。講道 JSON 與母本 Markdown 各按真實正文投影驗證 locator compiler 的完整後像。這不新增 review event、不改舊註記、不推翻其他未決、不重放整包仲裁或遞迴歷史鏈；讀取只限立即前版及其確切輸入的有界 generations。
+
 ## 6. 從正常路徑移除什麼
 
 | 目前責任 | v2 接替方式 |
