@@ -480,6 +480,18 @@ def run_group(store, definition, group, row, *, root):
         from backend.pipeline.viewpoint_adjudication_history import target_identity
         packet=build_packet(audit_path,store,True);targets=[target_identity(i) for i in packet['items']]
         prior=store.adjudication_roots(targets)
+        input_repair_binding = root/'adjudication-input-repair-authorization-binding.json'
+        if input_repair_binding.exists():
+            auth = read_artifact(input_repair_binding)['authorization']
+            if binding(auth['path']) != auth:
+                raise ValueError('adjudication input repair direction physical drift')
+            direction = read_artifact(Path(auth['path']))
+            if direction.get('run_id') == run_id:
+                from backend.pipeline.cvp_sql_adjudication_input_repair import execute
+                execute(store, run_id, Path(auth['path']))
+                prior = store.adjudication_roots(targets)
+        from backend.pipeline.cvp_sql_adjudication_input_repair import effective_roots
+        prior = effective_roots(prior)
         resolution=audit_dir/'gpt-source-final-resolution.json'
         component_binding = root/'component-role-authorization-binding.json'
         if component_binding.exists():
@@ -585,6 +597,8 @@ def main(argv=None):
     parser.add_argument('--request-limit-authorization',type=Path,help='Owner campaign request budget; does not change frozen model inputs or call budgets')
     parser.add_argument('--component-role-authorization', type=Path,
                         help='Exact owner acceptance of an existing structural duplicate finding; no new model/content permission')
+    parser.add_argument('--adjudication-input-repair-authorization', type=Path,
+                        help='One owner-directed complete-CVR call for an exact saved unresolved incomplete input')
     args = parser.parse_args(argv)
     load_dotenv(PROJECT/".env")
     if args.database_url:os.environ['KNOWLEDGE_DATABASE_URL']=args.database_url
@@ -610,6 +624,13 @@ def main(argv=None):
     from backend.pipeline.viewpoint_resolution_runtime import authorized_request_limit
     with maintenance_lock(), authorized_request_limit(args.output_root,args.sql_campaign,args.request_limit_authorization):
         execution_boundary(args.output_root,args.sql_campaign,definition,args.stop_after_group,persist=True)
+        if args.adjudication_input_repair_authorization:
+            from backend.pipeline.cvp_sql_adjudication_input_repair import SCHEMA
+            direction = read_artifact(args.adjudication_input_repair_authorization)
+            if direction.get('schema_version') != SCHEMA or direction.get('campaign_sha256') != args.sql_campaign:
+                raise ValueError('adjudication input repair direction identity/campaign drift')
+            write_immutable(args.output_root/'adjudication-input-repair-authorization-binding.json',
+                            {'authorization': binding(args.adjudication_input_repair_authorization)})
         if args.component_role_authorization:
             from backend.pipeline.viewpoint_component_role_resolution import AUTH_SCHEMA
             direction = read_artifact(args.component_role_authorization)

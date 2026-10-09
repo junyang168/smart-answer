@@ -72,6 +72,8 @@ flowchart LR
 
 新的觀點異議原文仲裁包必須包含實際當前 `viewpoint_revision` 的完整命題、`proposition_signature`、`scope` 及批准來源；只有 CVP 身份與 `current_revision_id` 不足以判讀。組包時核對 audited revision、CVP 端點與批准狀態，缺失／錯版在模型呼叫前停止。舊 v1 回答按原精確包消費，不能補欄位後冒充它已看過完整 CVR。v2 補足材料不產生第二份仲裁預算；原未決回答及 reservation 保留，未獲新一次呼叫方向不得自動重問。
 
+已明確授權處理某次漏包並恢復執行時，共同 SQL 入口可登記一次 `adjudication-input-repair-authorization`：只向原未決 v1 請求補完整當前 CVR，其他來源／Claim／連接／異議逐字段相同。原 SQL reservation、原回答及失敗不刪；固定原輸出下的 `input-repair-once` 保存新材料和回答，SQL 附加同一 once 記錄。第二次、換 root、未知呼叫、內容漂移或原已作實質判定均拒絕。新結案綁兩份材料及 owner 方向，不把原未決改為否決，也不授權內容修訂或未來通用重試。
+
 請求 bytes 上限是執行預算，不是模型供應商的硬限制。舊 policy 的數字及完整已保存模型身份保留；owner 可用 campaign-bound `--request-limit-authorization` 明確指定新上限，共同模型入口對該 execution root 的所有角色生效。程式保存不可變 binding 及新呼叫的實際 bytes／授權引用，不改原 prompt、schema、encoding、語義 request 或 raw。恢復須明示同一授權，漂移／跨 campaign／越 root 拒絕；無回答 intent、單輪预算及 SQL／來源／審核門檻不變。未明示的其他執行仍使用原上限，不自動提高或縮減原分組。
 
 ## 4. Transaction 的 validation

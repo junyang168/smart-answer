@@ -3457,6 +3457,42 @@ class PostgresKnowledgeStore:
             value['semantic_adjudication_targets']=sorted(history)
             conn.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now() WHERE run_id=%s",(canonical_json(value),run_id))
 
+    def register_adjudication_input_repair(self, run_id, *, targets, original_root, original_packet,
+                                          root, packet_binding, authorization):
+        """Append one explicit complete-input call; retain first reservation unchanged."""
+        from backend.pipeline.cvp_sql_adjudication_input_repair import verify_proof
+        direction, proof = verify_proof(Path(root)/'owner-input-repair-proof.json')
+        if direction['run_id'] != run_id or direction['original_root'] != str(original_root):
+            raise ChangeSetConflict('input repair SQL direction identity drift')
+        from backend.pipeline.viewpoint_audit_owner_resolution import binding
+        from backend.pipeline.viewpoint_adjudication_history import target_identity
+        from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+        current = read_artifact(Path(root)/'packet.json')
+        if (set(targets) != {target_identity(i) for i in current['items']}
+                or len(targets) != len(set(targets)) or authorization != proof['authorization']
+                or packet_binding != binding(Path(root)/'packet.json')
+                or original_packet != direction['original_bindings'][0]):
+            raise ChangeSetConflict('input repair SQL packet/population/authorization drift')
+        record = {'root': str(root), 'packet': packet_binding, 'authorization': authorization}
+        with self.connect() as conn:
+            conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",(POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
+            row = conn.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s AND stage='cvp_group' FOR UPDATE",(run_id,)).fetchone()
+            if (not row or row[0]['campaign_sha256'] != direction['campaign_sha256']
+                    or row[0]['checkpoint'] not in {'applied', 'audited'}):
+                raise ChangeSetConflict('input repair lacks original SQL group/campaign')
+            value = row[0]; history = value.get('semantic_adjudications', {})
+            for key in targets:
+                prior = history.get(key)
+                if not prior or prior['root'] != str(original_root) or prior['packet'] != original_packet:
+                    raise ChangeSetConflict('input repair lacks exact original SQL reservation')
+                if prior.get('input_repair_once') and prior['input_repair_once'] != record:
+                    raise ChangeSetConflict('input repair once already reserved; no additional call')
+                if prior.get('additional_roots') not in (None, [], [str(root)]):
+                    raise ChangeSetConflict('input repair has another additional reservation')
+                prior['input_repair_once'] = record
+                prior['additional_roots'] = [str(root)]
+            conn.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now() WHERE run_id=%s",(canonical_json(value),run_id))
+
     @staticmethod
     def _affected_cvp_groups(cursor, plan, context, group):
         changed=[op for op in plan.operations if op.operation in {'update','retire','revive'}]

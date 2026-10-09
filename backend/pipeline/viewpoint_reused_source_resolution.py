@@ -33,6 +33,12 @@ def verify(audit, resolution, *, expected_item_ids=None):
         return read_artifact(Path(path))
     old,raw,handoff,current=(read(k) for k in ('prior_packet_path','prior_raw_path','prior_handoff_path','current_packet_path'))
     for a in (old,raw,handoff,current):verify_sha(a)
+    if resolution.get('input_repair_proof_path'):
+        proof = read('input_repair_proof_path')
+        from backend.pipeline.cvp_sql_adjudication_input_repair import verify_proof
+        verify_proof(Path(resolution['input_repair_proof_path']))
+        if any(pin not in resolution['bindings'] for pin in proof['bindings']):
+            raise ValueError('reused input repair lacks original request/owner direction bindings')
     policy=read_artifact(GPT_POLICY)
     if (bound.get(str(GPT_POLICY.resolve()))!=binding(GPT_POLICY) or raw['model_id']!=policy['model']
             or raw['backend']!=policy['backend'] or raw['request_payload_sha256']!=sha256_json(old)
@@ -105,6 +111,12 @@ def create(audit_path, prior_root, output, store, *, only_item_ids=None):
     body={'schema_version':SCHEMA,'audit_semantic_sha256':audit_semantic_sha(audit),'master_data_mutations':0,
           'new_model_calls':0,'bindings':[binding(p) for p in [*paths.values(),audit_path,GPT_POLICY,Path(old['audit_binding']['path'])]]+list(sources.values())+validate(audit),
           **{k:str(p.resolve()) for k,p in paths.items()}}
+    repair_proof = prior_root/'owner-input-repair-proof.json'
+    if repair_proof.exists():
+        from backend.pipeline.cvp_sql_adjudication_input_repair import verify_proof
+        _, proof = verify_proof(repair_proof)
+        body['input_repair_proof_path'] = str(repair_proof.resolve())
+        body['bindings'] += [binding(repair_proof), *proof['bindings']]
     old_items={i['item_id']:i for i in old['items']}
     if any(old_items.get(i['item_id'])!=i for i in packet['items']):
         projection=read_artifact(PROJECTION_POLICY)

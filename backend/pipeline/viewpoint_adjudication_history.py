@@ -58,6 +58,10 @@ def validated_history(root):
         for source in item['sources']:
             if hashlib.sha256(Path(source['path']).read_bytes()).hexdigest() != source['file_sha256']:
                 raise ValueError('saved adjudication history physical source drift')
+    proof = root/'owner-input-repair-proof.json'
+    if proof.exists():
+        from backend.pipeline.cvp_sql_adjudication_input_repair import verify_proof
+        verify_proof(proof)
     return packet, findings
 
 
