@@ -44,7 +44,8 @@ REVIEW_PROMPT = '''独立审核常规 CVP 成员重验的完整后像，不把�
 逐字核查所有目标完整 CVR/core/signature/scope、所有当前成员、候选完整自身正文与 evidence、原退役状态。
 new_links 展示每条新 equivalent_component 的精确 Claim/版本/成分/自身证据；同时完整核查新 VIC/VID 的 provenance_contract。
 只允许新增该同核心成员和本轮 fresh identity provenance；所有现有 supports、Claim/Evidence/source/CVP/core/signature/scope/关系必须不变。
-每个 member.claim_id 一个 verdict，任一不成立 approved=false 并说明实质差异；不能只同主题或局部支持。全部成立才批准，不为续跑批准。'''
+每个 member.claim_id 一个 verdict，任一不成立 approved=false 并说明实质差异；不能只同主题或局部支持。全部成立才批准，不为续跑批准。
+若 proposal.decision=unresolved，则按 unresolved_assessment.verdict_ids 为每个目标 viewpoint_id 返回一个 verdict（放在 claim_id 字段）；独立判断未决理由是否成立并逐字给依据。批准未决评估也不是写入批准。身份按完整自身语境的实际意思，不强求孤立短句数学等价；仍不能从原文替摘要补另一项独立结论。'''
 
 
 def model_adapter(stage):
@@ -185,8 +186,19 @@ def new_links(material, response):
 
 
 def review_packet(material, response):
+    proposal=MembershipProposal.model_validate(response)
+    if proposal.decision=='unresolved' and proposal.members:
+        raise ValueError('unresolved membership must not sneak writable members into review')
     return {'schema_version':PACKAGE_SCHEMA,'materials':material,'proposal':response,
-            'new_links':new_links(material,response), 'provenance_contract':{
+            'new_links':new_links(material,response) if proposal.decision=='propose_members' else [],
+            **({'unresolved_assessment':{
+                'verdict_ids':[t['viewpoint_id'] for t in material['handoff']['targets']],
+                'explanation':'Review the complete source/core assessment independently, using each target viewpoint_id '
+                    'as verdict claim_id. Approval of the unresolved assessment is NOT approval to write. '
+                    'Explain whether current own-text semantics supply a same-core member; do not enforce isolated mathematical equivalence. '
+                    'The normal one correction remains, not another initial proposal call.',
+                'write_authority':False}} if proposal.decision=='unresolved' else {}),
+            'provenance_contract':{
                 'fresh_candidate_and_decision_per_link':True,'pending_decision_is_display_only':True,
                 'reviewed_new_records':['viewpoint_claim_links','viewpoint_identity_candidates','viewpoint_identity_decisions'],
                 'existing_record_changes':0,'original_rejection_preserved':True}}
@@ -195,11 +207,13 @@ def review_packet(material, response):
 def approved(packet, raw):
     from backend.pipeline.viewpoint_authorized_source_repair_357 import Review
     verdicts = Review.model_validate(raw['response']).verdicts
-    required = [m['claim_id'] for m in packet['proposal']['members']]
+    required = (packet['unresolved_assessment']['verdict_ids'] if packet.get('unresolved_assessment')
+                else [m['claim_id'] for m in packet['proposal']['members']])
     actual = [v.claim_id for v in verdicts]
     if len(actual)!=len(set(actual)) or set(actual)!=set(required):
         raise ValueError('membership independent review omitted/duplicated a complete member')
-    return all(v.approved and not v.problems for v in verdicts)
+    return (packet['proposal']['decision']=='propose_members'
+            and all(v.approved and not v.problems for v in verdicts))
 
 
 def compile_package(material, proposal, review, root):

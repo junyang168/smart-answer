@@ -208,3 +208,25 @@ def test_missing_resolution_or_independent_rejection_cannot_clear_unresolved(ret
     monkeypatch.setattr(m,'validate_package',rejection)
     with pytest.raises(ValueError,match='refusal'):m.resolved_proposal(tmp_path,f,p,raw)
     with pytest.raises(ValueError,match='unresolved'):c.validate_proposal(f,p)
+
+
+def test_first_unresolved_is_independently_reviewed_not_premature_terminal(member_material):
+    response={'decision':'unresolved','members':[],'reason':'SYNTHETIC: possibly different modality'}
+    packet=m.review_packet(member_material,response)
+    assert packet['new_links']==[] and not packet['unresolved_assessment']['write_authority']
+    raw={'response':{'verdicts':[{'claim_id':'CV-test','approved':True,'problems':[],
+        'reason':'SYNTHETIC: agree no current member'}]}}
+    assert not m.approved(packet,raw)  # Genuine independent assessment never authorizes a write.
+    with pytest.raises(ValueError):m.approved(packet,{'response':{'verdicts':[]}})
+
+
+def test_unresolved_cannot_carry_hidden_members(member_material):
+    response=member_answer();response['decision']='unresolved'
+    with pytest.raises(ValueError,match='sneak'):m.review_packet(member_material,response)
+
+
+@pytest.mark.parametrize('eligibility,valid',[('context_only',True),('withheld',True),('eligible_candidate',False)])
+def test_no_protected_or_unattested_evidence_upgrade(member_material,eligibility,valid):
+    member_material['candidates'][0]['projection']['evidence'][0].update(
+        support_eligibility=eligibility,valid_for_identity_review=valid)
+    with pytest.raises(ValueError,match='qualified'):m.new_links(member_material,member_answer())
