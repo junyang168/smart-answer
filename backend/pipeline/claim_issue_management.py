@@ -17,8 +17,11 @@ from backend.api.canonical_repository.viewpoint_foundation import sha256_json, s
 VERSION = "wang_claim_issue_management_v1"
 CLAIM_FIELDS = frozenset({"statement", "claim_type", "attribution", "discourse_mode", "scripture_refs", "occurrences"})
 EVIDENCE_FIELDS = frozenset({"statement", "source_fragment_id", "source_fragment_ids"})
+ELIGIBILITY_FIELDS = frozenset({"support_eligibility", "valid_for_identity_review"})
 LINK_FIELDS = frozenset({"pinned_claim_revision", "component_locator", "evidence_bindings", "link_type"})
 HOLDS = c.HUMAN_HOLDS | {"human_hold", "withheld_unreviewed", "rejected"}
+# These are protected review states, not proof a human personally requested a
+# hold. Provenance must be inspected before attributing any restriction to owner.
 
 
 class Issue(c.Contract):
@@ -50,6 +53,8 @@ class Policy(c.Contract):
     human_content_approval: Literal[False] = False
     claim_fields: list[str]
     evidence_fields: list[str]
+    # Explicit versioned opt-in. Old policies/materials retain their exact scope.
+    evidence_eligibility_review: bool = False
     link_fields: list[str]
     # CVP body/identity/retirement is never implied by Claim permission.
     cvp_permissions: list[c.Permission] = Field(default_factory=list)
@@ -150,6 +155,25 @@ def audit_claim_findings(packet, report):
             for i in packet['items'] if i['item_id'] in upheld and i['item_id'].startswith('3:')]
 
 
+def eligibility_review_candidate(evidence, states, sid):
+    """A classification may be reviewed; this is NOT content approval."""
+    if (evidence.get('support_eligibility') != 'context_only'
+            or evidence.get('review_status') in HOLDS
+            or evidence.get('speaker') != 'professor' or evidence.get('stance') != 'asserted'
+            or not evidence.get('discourse_role')):
+        return False
+    fragments = bound_fragments([evidence], lambda fid: states.get(c.key('source_fragments', fid), {}))
+    return bool(fragments) and all(
+        f.get('source_id') == sid and f.get('review_status') not in HOLDS
+        and f.get('verbatim_excerpt') for f in fragments)
+
+
+def eligibility_profile(packet):
+    context = packet.get('claim_issue_context', {})
+    binding = context.get('policy')
+    return bool(binding and read_policy(binding).evidence_eligibility_review)
+
+
 def policy_permissions(policy, states, sid, claim_ids):
     if (not set(policy.claim_fields) <= CLAIM_FIELDS or not set(policy.evidence_fields) <= EVIDENCE_FIELDS
             or not set(policy.link_fields) <= LINK_FIELDS):
@@ -164,6 +188,9 @@ def policy_permissions(policy, states, sid, claim_ids):
         if fields and states[k].get("review_status") not in HOLDS:
             if col == "evidence_steps" and (states[k].get("valid_for_identity_review") is False
                     or states[k].get("support_eligibility") not in {"eligible", "eligible_candidate", "eligible_with_label"}):
+                if policy.evidence_eligibility_review and eligibility_review_candidate(states[k], states, sid):
+                    # Qualification only: do not rewrite speech/ownership to buy eligibility.
+                    result.append(c.Permission(collection=col, object_id=oid, fields=sorted(ELIGIBILITY_FIELDS)))
                 continue
             result.append(c.Permission(collection=col, object_id=oid, fields=sorted(set(fields))))
     if policy.evidence_fields:
@@ -351,6 +378,7 @@ def validate_resolution(frozen, proposal, post):
     before = c.index(frozen["before_records"])
     context = frozen["claim_issue_context"]
     issues = {Issue.model_validate(r).issue_id: Issue.model_validate(r) for r in context["issues"]}
+    policy = read_policy(context['policy'], frozen.get('physical_snapshots'))
     actual = [a.issue_id for a in proposal.claim_assessments]
     if len(actual) != len(set(actual)) or set(actual) != set(issues):
         raise ValueError("every exact Claim issue requires one assessment")
@@ -426,6 +454,28 @@ def validate_resolution(frozen, proposal, post):
         if old.get("review_status") in HOLDS or col == "source_documents":
             raise ValueError("Claim issue cannot clear hold or change original source")
         if col == "evidence_steps":
+            eligibility_changed = any(old.get(f) != post[k].get(f) for f in ELIGIBILITY_FIELDS)
+            if eligibility_changed:
+                if (not policy.evidence_eligibility_review
+                        or not eligibility_review_candidate(old, before, frozen['manifest']['source_id'])
+                        or post[k].get('support_eligibility') != 'eligible_with_label'
+                        or post[k].get('valid_for_identity_review') is False
+                        or {f:v for f,v in c._semantic(old).items() if f not in ELIGIBILITY_FIELDS}
+                           != {f:v for f,v in c._semantic(post[k]).items() if f not in ELIGIBILITY_FIELDS}):
+                    raise ValueError('Evidence eligibility review cannot clear hold, alter attribution/body or bypass policy')
+                eid = c.split_key(k)[1]
+                owners = [a for a in proposal.claim_assessments
+                          if eid in before[c.key('claims', issues[a.issue_id].claim_id)]['evidence_step_ids']]
+                fragments = bound_fragments([old], lambda fid: before[c.key('source_fragments', fid)])
+                if not owners or any(a.cause != 'evidence_binding' or not any(
+                        cite.source_id == fragment['source_id'] and cite.paragraph_key == fragment['paragraph_key']
+                        and cite.exact_quote in fragment['verbatim_excerpt']
+                        for cite in a.citations for fragment in fragments) for a in owners):
+                    raise ValueError('Evidence eligibility review requires exact own bound quote and binding assessment')
+                # All shared owners must have their own exact issue/assessment.
+                if set(old.get('produced_claim_ids', [])) - {issues[a.issue_id].claim_id for a in owners}:
+                    raise ValueError('Evidence eligibility review lacks shared Claim assessments')
+                continue
             old_ids=set(old.get('source_fragment_ids',[]))|({old['source_fragment_id']} if old.get('source_fragment_id') else set())
             new_ids=set(post[k].get('source_fragment_ids',[]))|({post[k]['source_fragment_id']} if post[k].get('source_fragment_id') else set())
             if (old.get("valid_for_identity_review") is False

@@ -50,7 +50,8 @@ def maintenance_lock():
             fcntl.flock(lock, fcntl.LOCK_UN)
 
 
-def model_adapter(stage: str, *, live: bool = False, deferred: bool = False, issue: bool = False, scope: bool = False):
+def model_adapter(stage: str, *, live: bool = False, deferred: bool = False, issue: bool = False, scope: bool = False,
+                  evidence_eligibility: bool = False):
     review = "review" in stage
     model, backend, provider = ("claude-opus-5-5", "claude_subscription", "claude") if review else ("gpt-6.1-sol", "codex_subscription", "codex")
     filename = "source_reconciliation_review.md" if review else "source_reconciliation_proposal.md"
@@ -61,6 +62,10 @@ def model_adapter(stage: str, *, live: bool = False, deferred: bool = False, iss
             prompt += "\n输出采用无损 JSON records 协议：每条 records 的 payload_json 是完整拟后像 JSON 字符串，不删字段；unadmitted_candidates_json 同理。程序逐字段解析为原 Proposal 再机械验证和交给 Opus。"
     if issue:
         prompt += "\n" + (PROMPTS / "claim_issue_management_v1.md").read_text(encoding="utf-8")
+    if evidence_eligibility:
+        if not issue:
+            raise ValueError('Evidence eligibility profile requires Claim management')
+        prompt += "\n" + (PROMPTS / "claim_evidence_eligibility_review_v2.md").read_text(encoding="utf-8")
     if scope:
         prompt += '\n' + (PROMPTS / 'cvp_scope_management_v1.md').read_text(encoding='utf-8')
     if stage == "correction":
@@ -207,8 +212,8 @@ class ProductionPorts:
     def deferred_adapter(self, stage: str):
         return model_adapter(stage, live=True, deferred=True)
 
-    def claim_issue_adapter(self, stage: str):
-        return model_adapter(stage, live=True, issue=True)
+    def claim_issue_adapter(self, stage: str, *, evidence_eligibility: bool = False):
+        return model_adapter(stage, live=True, issue=True, evidence_eligibility=evidence_eligibility)
 
     def scope_adapter(self, stage: str):
         return model_adapter(stage, live=True, scope=True)

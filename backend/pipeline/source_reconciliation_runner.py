@@ -205,7 +205,11 @@ class Runner:
         issue = bool(packet.get("manifest", {}).get("claim_issue"))
         scope = bool(packet.get('manifest', {}).get('viewpoint_scope_repair'))
         role = 'final_review' if stage == 'final_review_input_repair' else stage
-        adapter = self.ports.scope_adapter(role) if scope else self.ports.claim_issue_adapter(role) if issue else self.ports.deferred_adapter(role) if deferred else self.ports.adapter(role)
+        from backend.pipeline.claim_issue_management import eligibility_profile
+        if issue and eligibility_profile(packet):
+            adapter = self.ports.claim_issue_adapter(role, evidence_eligibility=True)
+        else:
+            adapter = self.ports.scope_adapter(role) if scope else self.ports.claim_issue_adapter(role) if issue else self.ports.deferred_adapter(role) if deferred else self.ports.adapter(role)
         from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
         raw_path = self.root / (stage + '.raw.json')
         adapter = response_adapter(adapter, read(raw_path) if raw_path.exists() else None)
@@ -620,6 +624,7 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
 
 def validate_raw(root: Path, stage: str, packet: dict) -> dict:
     from backend.pipeline.source_reconciliation_runtime import model_adapter
+    from backend.pipeline.claim_issue_management import eligibility_profile
     from backend.pipeline.viewpoint_validation_context import historical_context
     ctx = historical_context()
     if ctx:
@@ -632,11 +637,14 @@ def validate_raw(root: Path, stage: str, packet: dict) -> dict:
             ctx.pin(PROMPTS / 'deferred_claim_evidence_repair_v1.md')
         if packet.get('manifest', {}).get('claim_issue'):
             ctx.pin(PROMPTS / 'claim_issue_management_v1.md')
+            if eligibility_profile(packet):
+                ctx.pin(PROMPTS / 'claim_evidence_eligibility_review_v2.md')
         if packet.get('manifest', {}).get('viewpoint_scope_repair'):
             ctx.pin(PROMPTS / 'cvp_scope_management_v1.md')
     adapter = model_adapter('final_review' if stage=='final_review_input_repair' else stage, scope=bool(packet.get('manifest', {}).get('viewpoint_scope_repair')),
                             deferred=bool(packet.get("manifest", {}).get("deferred_repair")),
-                            issue=bool(packet.get("manifest", {}).get("claim_issue")))
+                            issue=bool(packet.get("manifest", {}).get("claim_issue")),
+                            evidence_eligibility=eligibility_profile(packet))
     raw = read(root / (stage + ".raw.json"))
     from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
     adapter = response_adapter(adapter, raw)

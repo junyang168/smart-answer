@@ -320,7 +320,7 @@ Opus 發現問題後，先交 GPT 讀完整自身來源、原異議及精確 Cla
 | 根因 | 最小處理 | 自動化邊界 |
 | --- | --- | --- |
 | 原有證據充分，初審誤解 | 不改 Claim，逐字說明原異議不成立 | 正常初審仍須原唯一纠正／終審契約；GPT 不能直接推翻 Opus 終審。完整獨立審計異議則按第 9.2 節 standing 終局政策 |
-| 原文明確支持，但 Evidence 漏綁或定位錯誤 | 提議精確 fragment／Evidence／anchor 修訂，Claim statement 不變 | 在批准的 evidence-binding policy 內；不解除真 hold，不提升 AI 小標題或舊 context-only 引文 |
+| 原文明確支持，但 Evidence 漏綁、定位或資格分類錯誤 | 提議精確 fragment／Evidence／anchor 或資格修訂，Claim statement 不變 | 綁定修訂依 evidence-binding policy；context-only 資格復核依明示的新版 policy，不能未經审核直接使用，不能提升 AI 小標題 |
 | Claim 抽取加強、丟限定、否定／模態／對象不符 | 提議忠於自身正文的最小 Claim 新版本 | 在批准的 statement-repair policy 內；逐項說明差異，不把改寫當作「只修 metadata」 |
 | Claim 正確，缺 CVP 或連接分類錯誤 | Claim 不改，走正常 coverage 或有權限的連接修訂 | 未批准的 CVP 正文／身份／退役不能由 Claim policy 順帶修改 |
 | 明確只是背景、例證或編輯歸納 | 提議對應的明示處置與歸屬，保留原條目與歷史 | 須精確獨立审核；不能因證據不足而隨意降為 observation-only 逃避审计 |
@@ -396,7 +396,11 @@ Claim management 的修訂已提交／本源復驗完成，與 CVP management �
 
 實作共用既有 SQL runner／transaction，不替案例寫 runner。正式啟用前須先核對 owner policy 和索引 migration 007；只有實作或局部測試通過不能啟動生產。新 profile 的初次實際模型／完整組修訂驗收與離線測試分開記錄。
 
-目前支援的明確 policy 欄位：Claim 的 statement／claim_type／attribution／discourse_mode／scripture_refs／occurrences，既有 eligible Evidence 的 statement／source_fragment_id(s)，及既有連接的 pinned_claim_revision／component_locator／evidence_bindings／link_type。可新增同自身正文的精確 fragment，不替換 Evidence 所有權 buckets，不升級 context-only 或 hold。CVP 正文／新 CVR／關係只接受另列的精確 permission；不自动取得身份、退役、端點改換或新 Claim 權限。
+目前支援的明確 policy 欄位：Claim 的 statement／claim_type／attribution／discourse_mode／scripture_refs／occurrences，既有 eligible Evidence 的 statement／source_fragment_id(s)，及既有連接的 pinned_claim_revision／component_locator／evidence_bindings／link_type。可新增同自身正文的精確 fragment，不替換 Evidence 所有權 buckets。CVP 正文／新 CVR／關係只接受另列的精確 permission；不自动取得身份、退役、端點改換或新 Claim 權限。
+
+`context_only` 是證據用途分類，不是永久禁止修訂或人工裁決的證明。明示 `evidence_eligibility_review` 的新版 policy 允許對教授 asserted、角色明示、已綁完整自身片段的既有證據提出 `eligible_with_label` 及必要 `valid_for_identity_review` 修訂。此分支只改資格，保留表述、說話者、角色、引文及綁定；教授轉述耶穌的解釋不得變成逐字經文。所有共享 Claim 都須有精確判讀，相關 CVP 仍完整影響审核。GPT 提議、Opus 獨立审核及原交易／審計門檻不變。
+
+受保護的审核狀態、withheld／rejected 不由資格分支順帶覆蓋；這不表示它們永久不可管理，更不能僅憑字段名宣稱 owner 曾要求 hold，須核查實際來源及裁決。舊 policy、prompt、回答與預算保持原契約；新版使用獨立 prompt 身份，不就地改既有 binding 或重問已消費的呼叫。
 
 聯合管理只新增分類／最小提案的 GPT 回答與完整後像的 Opus 回答；必要時唯一纠正／終審。Claim 正確時明確 retain，不製造純版本更新；尚未寫入的原 normal-CVP 包保留為歷史，不能冒充新版本批准。後續必要 coverage 是帶實際 management 批准的新階段；已提交的旧正常包與未受影響連接保留，不重 apply。
 
