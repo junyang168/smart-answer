@@ -371,7 +371,8 @@ def commit_package(store, run_id, *, package, approval, authorization, backup, s
     # CVP head shown to the model) must remain exact. New revision dependents
     # were included in the Opus packet by the indexed dependents loader.
     with store.connect() as conn:
-        context=store._existing_cvp_context(conn,normalize_package(package))
+        context=store._existing_cvp_context(conn,normalize_package(package),
+            [(op.collection,op.object_id) for op in plan.operations if op.operation=='retire'])
     for key,pin in pins(context).items():
         if key in complete_pins and complete_pins[key]!=pin:
             raise ValueError('model materials changed before SQL approval')
@@ -400,7 +401,13 @@ def commit_package(store, run_id, *, package, approval, authorization, backup, s
     if not history or history["status"] != "applied": raise ValueError("committed ChangeSet not visible")
     for operation in history['operations']:
         actual=store.get_record_state(operation['collection'],operation['object_id'])
-        if (actual is None or actual['payload']!=operation['after']
+        expected_payload=operation['after']
+        # Retirement advances storage/history revision while deliberately
+        # preserving the original object payload byte for byte. Do not treat
+        # that documented distinction as a missing commit or reapply it.
+        if operation['operation']=='retire':
+            expected_payload={**expected_payload,'revision':operation['before_revision']}
+        if (actual is None or actual['payload']!=expected_payload
                 or actual['revision']!=operation['after_revision']
                 or actual['content_sha256']!=operation['after_sha256']
                 or actual['retired']!=(operation['operation']=='retire')):
@@ -652,7 +659,7 @@ def main(argv=None):
     parser.add_argument('--pause-after-group',type=int,help='Narrow this invocation for acceptance; never changes the immutable execution boundary')
     parser.add_argument('--integrate-batch-candidates',action='store_true',
                         help='Explicit new-group identity integration; never upgrades saved legacy answers')
-    parser.add_argument('--action',choices=('group','source','owner-link','link-target','link-retarget'),default='group')
+    parser.add_argument('--action',choices=('group','source','owner-link','link-target','link-retarget','link-retire'),default='group')
     parser.add_argument('--candidate-viewpoint-id',action='append',default=[],
                         help='Exact existing target IDs for read-only link-target comparison; not content approval')
     parser.add_argument('--run-id')
@@ -803,6 +810,11 @@ def main(argv=None):
             if args.action=='source':
                 if not args.manifest:raise ValueError('source action lacks bounded Manifest/authorization')
                 execute_source_action(store,args.run_id,read_artifact(args.manifest),root=action_root/'source',ports=ProductionPorts())
+            elif args.action=='link-retire':
+                if not args.direction:raise ValueError('retirement requires exact human disposition')
+                from backend.pipeline.cvp_link_retirement import execute
+                execute(store,args.run_id,authorization=binding(args.direction),
+                        root=action_root/'link-retire',ports=ProductionPorts())
             elif args.action=='link-retarget':
                 if not args.direction:raise ValueError('retarget requires an exact owner direction')
                 from backend.pipeline.cvp_link_retarget import execute, production_ports
