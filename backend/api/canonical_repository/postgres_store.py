@@ -3341,7 +3341,7 @@ class PostgresKnowledgeStore:
         return root
 
     def prepare_cvp_action(self, run_id, *, action_id, kind, authorization, materials):
-        if kind not in {'source_claim_revision','cvp_scope_revision','owner_link_correction','audit_supports_correction','required_cvp_coverage'} or not authorization:
+        if kind not in {'source_claim_revision','cvp_scope_revision','owner_link_correction','owner_link_retarget','audit_supports_correction','required_cvp_coverage'} or not authorization:
             raise ValueError('bounded action authority required')
         action={'action_id':action_id,'kind':kind,'authorization':authorization,
                 'materials_sha256':sha256_json(materials),'materials':materials}
@@ -3667,7 +3667,7 @@ class PostgresKnowledgeStore:
                     return digest
                 action = evidence.get('action')
                 if (value.get('checkpoint') not in {'applied','audited'} or not action
-                        or action.get('kind') not in {'source_claim_revision','cvp_scope_revision','owner_link_correction','audit_supports_correction','required_cvp_coverage'}
+                        or action.get('kind') not in {'source_claim_revision','cvp_scope_revision','owner_link_correction','owner_link_retarget','audit_supports_correction','required_cvp_coverage'}
                         or not action.get('authorization') or not action.get('materials_sha256')
                         or plan.change_set_id in value.get('change_set_ids',[])
                         or not prepared or prepared[0]!=action):
@@ -4589,7 +4589,7 @@ class PostgresKnowledgeStore:
         Retiring afterwards is too late: nothing was ever planned.
         """
 
-        if (package.get('source_repair_application') or {}).get('schema_version') in {'wang_source_sql_reconciliation_v2','wang_owner_sql_link_correction_v2'} and not transactional:
+        if (package.get('source_repair_application') or {}).get('schema_version') in {'wang_source_sql_reconciliation_v2','wang_owner_sql_link_correction_v2','wang_cvp_sql_link_retarget_v1'} and not transactional:
             raise ValueError('SQL source action cannot use the retired whole-store planning path')
 
         try:
@@ -6052,7 +6052,7 @@ class PostgresKnowledgeStore:
             _ClaimEvidenceSourceQueueApplyContext
         ] = None,
     ) -> dict[str, Any]:
-        if plan.source_kind in {'wang_source_sql_reconciliation_v2','wang_owner_sql_link_correction_v2'} and transaction_context is None:
+        if plan.source_kind in {'wang_source_sql_reconciliation_v2','wang_owner_sql_link_correction_v2','wang_cvp_sql_link_retarget_v1'} and transaction_context is None:
             raise ValueError('SQL v2 actions cannot bypass the shared transaction boundary')
         if transaction_context is not None:
             from .transaction_validation import TransactionValidation

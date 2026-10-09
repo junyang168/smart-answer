@@ -158,8 +158,9 @@ def build_packet(store, *, link_id, candidate_viewpoint_ids):
         _approved(head); _approved(revision)
         if revision['viewpoint_id'] != vid:
             raise ValueError('foreign current CVR')
-        links = [p for (col, _), p in states.items() if col == 'viewpoint_claim_links'
-                 and p['viewpoint_id'] == vid and p.get('effective_state') == 'active']
+        links = sorted([p for (col, _), p in states.items() if col == 'viewpoint_claim_links'
+                 and p['viewpoint_id'] == vid and p.get('effective_state') == 'active'],
+                 key=lambda p:p['viewpoint_claim_link_id'])
         if not links:
             raise ValueError('existing target has no active members')
         members = []
@@ -172,7 +173,8 @@ def build_packet(store, *, link_id, candidate_viewpoint_ids):
                 raise ValueError('target selection stale member/target revision')
             members.append(member)
         comparisons.append({'viewpoint': head, 'current_revision': revision,
-                            'links': links, 'member_claims': members})
+                            'links': links, 'member_claims': sorted(
+                                {p['claim_id']:p for p in members}.values(),key=lambda p:p['claim_id'])})
     sources = []
     for (col, _), doc in sorted(states.items()):
         if col != 'source_documents':

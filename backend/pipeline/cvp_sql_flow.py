@@ -652,7 +652,7 @@ def main(argv=None):
     parser.add_argument('--pause-after-group',type=int,help='Narrow this invocation for acceptance; never changes the immutable execution boundary')
     parser.add_argument('--integrate-batch-candidates',action='store_true',
                         help='Explicit new-group identity integration; never upgrades saved legacy answers')
-    parser.add_argument('--action',choices=('group','source','owner-link','link-target'),default='group')
+    parser.add_argument('--action',choices=('group','source','owner-link','link-target','link-retarget'),default='group')
     parser.add_argument('--candidate-viewpoint-id',action='append',default=[],
                         help='Exact existing target IDs for read-only link-target comparison; not content approval')
     parser.add_argument('--run-id')
@@ -803,6 +803,11 @@ def main(argv=None):
             if args.action=='source':
                 if not args.manifest:raise ValueError('source action lacks bounded Manifest/authorization')
                 execute_source_action(store,args.run_id,read_artifact(args.manifest),root=action_root/'source',ports=ProductionPorts())
+            elif args.action=='link-retarget':
+                if not args.direction:raise ValueError('retarget requires an exact owner direction')
+                from backend.pipeline.cvp_link_retarget import execute, production_ports
+                execute(store,args.run_id,authorization=binding(args.direction),
+                        root=action_root/'link-retarget',ports=production_ports())
             else:
                 if not all((args.direction,args.adjudication_root,args.link_id)):raise ValueError('owner link direction incomplete')
                 from backend.pipeline.owner_approved_link_correction import ReviewPorts
