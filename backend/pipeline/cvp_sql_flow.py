@@ -667,12 +667,16 @@ def main(argv=None):
                         help='One owner-directed complete-CVR call for an exact saved unresolved incomplete input')
     parser.add_argument('--candidate-identity-authorization', type=Path,
                         help='Owner-directed same-batch identity revision; original unresolved answer is retained')
+    parser.add_argument('--source-review-input-repair-authorization', type=Path,
+                        help='Exact once-only engineering review input repair; no content or correction permission')
     args = parser.parse_args(argv)
     from backend.pipeline.cvp_batch_identity_integration import ENABLED, VERSION
     ENABLED.set(args.integrate_batch_candidates)
     integration_binding=args.output_root/'batch-identity-integration-binding.json'
     if integration_binding.exists() and not args.integrate_batch_candidates:
         raise ValueError('identity integration execution binding requires explicit recovery flag')
+    if (args.output_root/'source-review-input-repair-binding.json').exists() and not args.source_review_input_repair_authorization:
+        raise ValueError('source review input repair binding requires explicit recovery flag')
     load_dotenv(PROJECT/".env")
     if args.database_url:os.environ['KNOWLEDGE_DATABASE_URL']=args.database_url
     store = PostgresKnowledgeStore(args.database_url)
@@ -700,6 +704,23 @@ def main(argv=None):
             write_immutable(integration_binding, {'schema_version':VERSION,
                 'campaign_sha256':args.sql_campaign,'new_groups_only':True,'correction_budget':1})
         execution_boundary(args.output_root,args.sql_campaign,definition,args.stop_after_group,persist=True)
+        if args.source_review_input_repair_authorization:
+            from backend.pipeline.source_review_input_repair import SCHEMA, NAME
+            direction = read_artifact(args.source_review_input_repair_authorization)
+            target = Path(direction['action_root']).resolve()
+            saved = store.get_cvp_group(direction['run_id'])
+            if (direction.get('schema_version') != SCHEMA or direction.get('campaign_sha256') != args.sql_campaign
+                    or direction.get('authorized_by') != 'owner' or not direction.get('owner_direction')
+                    or direction.get('artifact_sha256') != sha256_json({k:v for k,v in direction.items() if k!='artifact_sha256'})
+                    or not saved or saved['campaign_sha256'] != args.sql_campaign
+                    or (invocation_limit is not None and saved['sequence'] > invocation_limit)
+                    or not target.is_relative_to((args.output_root/direction['run_id']/'claim-issues').resolve())
+                    or target.name != direction['action_id'] or direction.get('additional_review_limit') != 1
+                    or direction.get('content_change_authorized') is not False):
+                raise ValueError('source review input repair outside exact owner/action boundary')
+            write_immutable(target/NAME, direction)
+            write_immutable(args.output_root/'source-review-input-repair-binding.json',
+                            {'authorization': binding(args.source_review_input_repair_authorization)})
         if args.candidate_identity_authorization:
             from backend.pipeline.cvp_owner_candidate_identity import SCHEMA, NAME
             direction = read_artifact(args.candidate_identity_authorization)

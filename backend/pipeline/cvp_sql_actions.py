@@ -180,7 +180,7 @@ def execute_source_action(store,run_id,manifest,*,root,ports):
     backup=verified_group_backup(root,package,ports) if issue_context or manifest.get('viewpoint_scope_repair') else ports.backup(root)
     original=store.get_cvp_group(run_id).get('reviewed',{}).get('evidence',{})
     approval={'terminal_review':binding(root/(raw['stage']+'.raw.json'))}
-    for stage in ('initial_review','final_review'):
+    for stage in ('initial_review','final_review','final_review_input_repair'):
         proof=root/(stage+'.raw.program-binding.json')
         if proof.exists():approval[stage+'_program_binding']=binding(proof)
     views=set(original.get('viewpoint_ids',[]))

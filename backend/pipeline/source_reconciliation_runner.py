@@ -19,7 +19,7 @@ from backend.api.canonical_repository.viewpoint_foundation import canonical_json
 from backend.pipeline import source_reconciliation as contract
 from backend.pipeline.viewpoint_validation_context import validated_history
 
-STAGES = ("proposal", "initial_review", "correction", "final_review")
+STAGES = ("proposal", "initial_review", "correction", "final_review", "final_review_input_repair")
 
 
 def effective_proposal(frozen, response):
@@ -196,10 +196,16 @@ class Runner:
         packet = json.loads(canonical_json(packet))
         if stage not in STAGES:
             raise ValueError("unknown model stage")
+        if stage == 'final_review_input_repair':
+            from backend.pipeline.source_review_input_repair import NAME
+            direction = read(self.root/NAME)
+            if packet.get('input_repair', {}).get('authorization') != direction:
+                raise Stop('input repair call lacks exact immutable owner direction')
         deferred = bool(packet.get("manifest", {}).get("deferred_repair"))
         issue = bool(packet.get("manifest", {}).get("claim_issue"))
         scope = bool(packet.get('manifest', {}).get('viewpoint_scope_repair'))
-        adapter = self.ports.scope_adapter(stage) if scope else self.ports.claim_issue_adapter(stage) if issue else self.ports.deferred_adapter(stage) if deferred else self.ports.adapter(stage)
+        role = 'final_review' if stage == 'final_review_input_repair' else stage
+        adapter = self.ports.scope_adapter(role) if scope else self.ports.claim_issue_adapter(role) if issue else self.ports.deferred_adapter(role) if deferred else self.ports.adapter(role)
         from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
         raw_path = self.root / (stage + '.raw.json')
         adapter = response_adapter(adapter, read(raw_path) if raw_path.exists() else None)
@@ -258,6 +264,16 @@ class Runner:
         bound_model_response(adapter, packet, response, raw_path)
         return raw
 
+    def review_input(self, frozen, response, proposal, stage):
+        from backend.pipeline.source_review_input_repair import add_receipt, check_packet
+        base = contract.review_packet(frozen, proposal)
+        saved = self.root/(stage+'.packet.json')
+        if saved.exists():
+            packet = body(read(saved))
+            check_packet(frozen, response, packet, base)
+            return packet
+        return add_receipt(frozen, response, base) if frozen['manifest'].get('claim_issue') else base
+
     def reviewed(self, frozen: dict) -> tuple[contract.Proposal, dict]:
         if frozen["inventory"]["unknown_keys"]:
             raise Stop("unknown affected consumer requires a proven schema adapter; no model calls", status="proof_failure", waiting_for="system")
@@ -265,7 +281,7 @@ class Runner:
         self.guard(frozen)
         raw = self.call("proposal", packet)
         proposed = effective_proposal(frozen, raw["response"])
-        review_packet = contract.review_packet(frozen, proposed)
+        review_packet = self.review_input(frozen, raw['response'], proposed, 'initial_review')
         self.guard(frozen)
         initial = self.call("initial_review", review_packet)
         if contract.validate_review(review_packet, initial["response"]):
@@ -276,13 +292,21 @@ class Runner:
         self.guard(frozen)
         correction = self.call("correction", correction_packet)
         proposed = effective_proposal(frozen, correction["response"])
-        review_packet = contract.review_packet(frozen, proposed)
+        review_packet = self.review_input(frozen, correction['response'], proposed, 'final_review')
         self.guard(frozen)
         final = self.call("final_review", review_packet)
         if not contract.validate_review(review_packet, final["response"]):
             write(self.root / "needs-owner.json", {"reason": "terminal Opus disagreement",
                 "review": final, "proposal": proposed.model_dump(), "correction_budget_exhausted": True,
                 "source_update_id": frozen["update_id"]})
+            from backend.pipeline.source_review_input_repair import NAME, STAGE, repaired_packet
+            if (self.root/NAME).exists():
+                repaired = repaired_packet(self.root, frozen, proposed, review_packet, final, correction)
+                self.guard(frozen)
+                result = self.call(STAGE, repaired)
+                if not contract.validate_review(repaired, result['response']):
+                    raise Stop('input-repaired terminal Opus review rejected; no further call/correction')
+                return proposed, result
             raise Stop("terminal Opus review rejected/unresolved; no second correction")
         return proposed, final
 
@@ -540,7 +564,7 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
     """
     app = package['source_repair_application']; root = Path(app['run_root'])
     stage = app.get("terminal_stage")
-    if stage not in {"initial_review", "final_review"}:
+    if stage not in {"initial_review", "final_review", "final_review_input_repair"}:
         raise ValueError("non-terminal stage cannot approve")
     packet = body(read(root / (stage + ".packet.json")))
     raw = read(root / (stage + ".raw.json"))
@@ -553,7 +577,8 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
         proposal=Proposal.model_validate(packet['proposal'])
     else:
         proposal = effective_proposal(frozen, packet["proposal"]) if frozen["manifest"].get("claim_issue") else contract.Proposal.model_validate(packet["proposal"])
-    if packet != contract.review_packet(frozen, proposal) or not contract.validate_review(packet, raw["response"]):
+    base = contract.review_packet(frozen, proposal)
+    if not contract.validate_review(packet, raw["response"]):
         raise ValueError("terminal complete postimage review invalid")
     # Authenticate proposal and correction chain. A final reply cannot bypass initial review.
     proposal_packet = body(read(root / "proposal.packet.json"))
@@ -567,7 +592,9 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
         initial_packet = body(read(root / "initial_review.packet.json"))
         initial = validate_raw(root, "initial_review", initial_packet)
         first_proposal = effective_proposal(frozen, first["response"]).model_dump()
-        if initial_packet != contract.review_packet(frozen, effective_proposal(frozen, first["response"])) or contract.validate_review(initial_packet, initial["response"]):
+        from backend.pipeline.source_review_input_repair import check_packet
+        check_packet(frozen, first['response'], initial_packet, contract.review_packet(frozen, effective_proposal(frozen, first['response'])))
+        if contract.validate_review(initial_packet, initial["response"]):
             raise ValueError("correction must follow one genuine initial disagreement")
         correction_packet = body(read(root / "correction.packet.json"))
         if correction_packet != {**proposal_packet, "initial_proposal": first_proposal, "Opus_review": initial["response"], "correction_round": 1, "another_correction_allowed": False}:
@@ -575,6 +602,15 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
         correction = validate_raw(root, "correction", correction_packet)
         if effective_proposal(frozen, correction["response"]) != proposal:
             raise ValueError("terminal review is not of actual correction")
+    from backend.pipeline.source_review_input_repair import check_packet, repaired_packet
+    if stage == 'final_review_input_repair':
+        old_packet = body(read(root/'final_review.packet.json'))
+        old_raw = validate_raw(root, 'final_review', old_packet)
+        check_packet(frozen, correction['response'], old_packet, base)
+        if contract.validate_review(old_packet, old_raw['response']) or packet != repaired_packet(root, frozen, proposal, old_packet, old_raw, correction):
+            raise ValueError('input repair must preserve the exact rejected terminal review')
+    else:
+        check_packet(frozen, first['response'] if stage=='initial_review' else correction['response'], packet, base)
     if expected["artifact_sha256"] != app.get("review_sha256") or sha256_json(proposal.model_dump()) != app.get("proposal_sha256"):
         raise ValueError("final review/proposal provenance drift")
     rebuilt = contract.compile_package(frozen, proposal, raw, frozen_sha256=frozen_sha256)
@@ -591,14 +627,14 @@ def validate_raw(root: Path, stage: str, packet: dict) -> dict:
         from backend.pipeline.viewpoint_semantic_contract import CONTRACT_PATH
         ctx.pin(CONTRACT_PATH)
         ctx.pin(PROMPTS / ('source_reconciliation_review.md'
-            if stage in {'initial_review', 'final_review'} else 'source_reconciliation_proposal.md'))
+            if stage in {'initial_review', 'final_review', 'final_review_input_repair'} else 'source_reconciliation_proposal.md'))
         if packet.get('manifest', {}).get('deferred_repair'):
             ctx.pin(PROMPTS / 'deferred_claim_evidence_repair_v1.md')
         if packet.get('manifest', {}).get('claim_issue'):
             ctx.pin(PROMPTS / 'claim_issue_management_v1.md')
         if packet.get('manifest', {}).get('viewpoint_scope_repair'):
             ctx.pin(PROMPTS / 'cvp_scope_management_v1.md')
-    adapter = model_adapter(stage, scope=bool(packet.get('manifest', {}).get('viewpoint_scope_repair')),
+    adapter = model_adapter('final_review' if stage=='final_review_input_repair' else stage, scope=bool(packet.get('manifest', {}).get('viewpoint_scope_repair')),
                             deferred=bool(packet.get("manifest", {}).get("deferred_repair")),
                             issue=bool(packet.get("manifest", {}).get("claim_issue")))
     raw = read(root / (stage + ".raw.json"))
