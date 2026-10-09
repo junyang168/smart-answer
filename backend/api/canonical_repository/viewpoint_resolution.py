@@ -2105,6 +2105,7 @@ class StructuredJsonReviewerAdapter:
         self._shared_text_payload = shared_text_payload
         self._shared_record_payload = shared_record_payload
         self._shared_key_payload = False
+        self._shared_key_payload_v2 = False
         if shared_record_payload and not shared_text_payload:
             raise ValueError('shared-record encoding requires shared text')
         if shared_text_payload and not compact_payload:
@@ -2198,6 +2199,17 @@ class StructuredJsonReviewerAdapter:
             'payload_serialization':'wkp_shared_keys_json_v1'})
         return result
 
+    def shared_keys_v2_copy(self):
+        """Short key references are a new identity, never a v1 cache rewrite."""
+        from copy import copy
+        if self._shared_key_payload_v2:return self
+        result=copy(self.shared_keys_copy())
+        result._shared_key_payload_v2=True
+        result.generation_config_sha256=sha256_json({
+            'base_config_sha256':result.generation_config_sha256,
+            'payload_serialization':'wkp_shared_keys_json_v2'})
+        return result
+
     def compact_copy(self) -> "StructuredJsonReviewerAdapter":
         """A separately identified serialization, without mutating initial review."""
         if self._compact_payload:
@@ -2225,6 +2237,7 @@ class StructuredJsonReviewerAdapter:
             shared_record_payload=self._shared_record_payload,
             response_schema=self._wire_response_schema(),
             shared_key_payload=self._shared_key_payload,
+            shared_key_payload_v2=self._shared_key_payload_v2,
         )
         return self._client.generate_json(
             **request,
@@ -2243,6 +2256,7 @@ class StructuredJsonReviewerAdapter:
                     shared_record_payload=self._shared_record_payload,
                     response_schema=self._wire_response_schema(),
                     shared_key_payload=self._shared_key_payload,
+                    shared_key_payload_v2=self._shared_key_payload_v2,
                 )
             ).encode("utf-8")
         )
@@ -2250,26 +2264,28 @@ class StructuredJsonReviewerAdapter:
     def request_encoding_proof(self, payload: Mapping[str, Any]) -> dict[str, Any] | None:
         if not self._shared_text_payload:
             return None
-        from .viewpoint_request_encoding import FORMAT, RECORD_FORMAT, KEY_FORMAT, decode_shared_keys, decode_shared_text, decode_shared_records
+        from .viewpoint_request_encoding import FORMAT, RECORD_FORMAT, KEY_FORMAT, KEY_FORMAT_V2, decode_shared_keys, decode_shared_keys_v2, decode_shared_text, decode_shared_records
         request = structured_json_request(payload, prompt=self._prompt,
             response_model=self._response_model, schema_name=self._schema_name,
             compact_payload=self._compact_payload, shared_text_payload=True,
             shared_record_payload=self._shared_record_payload,
             shared_key_payload=self._shared_key_payload,
+            shared_key_payload_v2=self._shared_key_payload_v2,
             response_schema=self._wire_response_schema())
         wire = json.loads(request['user_prompt'])
         encoded = wire.get('format') == FORMAT and 'shared_text' in wire
         records_encoded = wire.get('format') == RECORD_FORMAT and 'shared_records' in wire
         keys_encoded = wire.get('format') == KEY_FORMAT
-        restored = decode_shared_keys(wire) if keys_encoded else decode_shared_records(wire) if records_encoded else decode_shared_text(wire) if encoded else wire
+        keys_v2_encoded = wire.get('format') == KEY_FORMAT_V2
+        restored = decode_shared_keys_v2(wire) if keys_v2_encoded else decode_shared_keys(wire) if keys_encoded else decode_shared_records(wire) if records_encoded else decode_shared_text(wire) if encoded else wire
         if canonical_json(restored) != canonical_json(payload):
             raise ValueError('actual outgoing request lost semantic content')
         original = structured_json_request(payload, prompt=self._prompt,
             response_model=self._response_model, schema_name=self._schema_name,
             compact_payload=self._compact_payload,
             response_schema=self._wire_response_schema())
-        return {'serialization_contract': KEY_FORMAT if self._shared_key_payload else RECORD_FORMAT if self._shared_record_payload else FORMAT,
-                'effective_serialization': KEY_FORMAT if keys_encoded else RECORD_FORMAT if records_encoded else FORMAT if encoded else 'compact_json_v1',
+        return {'serialization_contract': KEY_FORMAT_V2 if self._shared_key_payload_v2 else KEY_FORMAT if self._shared_key_payload else RECORD_FORMAT if self._shared_record_payload else FORMAT,
+                'effective_serialization': KEY_FORMAT_V2 if keys_v2_encoded else KEY_FORMAT if keys_encoded else RECORD_FORMAT if records_encoded else FORMAT if encoded else 'compact_json_v1',
                 'semantic_payload_sha256': sha256_json(payload),
                 'restored_payload_sha256': sha256_json(restored),
                 'wire_request_sha256': sha256_json(request),
@@ -2293,11 +2309,17 @@ def structured_json_request(
     shared_text_payload: bool = False,
     shared_record_payload: bool = False,
     shared_key_payload: bool = False,
+    shared_key_payload_v2: bool = False,
     response_schema: dict | None = None,
 ) -> dict[str, Any]:
     """The exact arguments passed to generate_json, before transport wrapping."""
 
-    if shared_key_payload:
+    if shared_key_payload_v2:
+        if not shared_key_payload or not shared_record_payload or not shared_text_payload or not compact_payload:
+            raise ValueError('shared-key v2 encoding requires compact shared keys')
+        from .viewpoint_request_encoding import encode_shared_keys_v2
+        user_prompt=encode_shared_keys_v2(payload)
+    elif shared_key_payload:
         if not shared_record_payload or not shared_text_payload or not compact_payload:
             raise ValueError('shared-key encoding requires compact shared records')
         from .viewpoint_request_encoding import encode_shared_keys

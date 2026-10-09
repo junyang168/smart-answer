@@ -257,6 +257,13 @@ def response_adapter(adapter, saved=None):
     keys = ('model_id', 'backend', 'prompt_sha256', 'generation_config_sha256')
     if all(saved.get(k) == getattr(roles, k) for k in keys): return roles
     if all(saved.get(k) == getattr(bound, k) for k in keys): return bound
+    for base in (roles,bound,adapter):
+        if not getattr(base,'_shared_record_payload',False):continue
+        for factory in ('shared_keys_copy','shared_keys_v2_copy'):
+            method=getattr(base,factory,None)
+            if callable(method):
+                candidate=method()
+                if all(saved.get(k)==getattr(candidate,k) for k in keys):return candidate
     return adapter  # Exact legacy authentication still runs; never a fallback call.
 
 
@@ -348,6 +355,11 @@ def call_model(
             smaller = key_factory()
             if smaller.request_bytes(payload) < adapter.request_bytes(payload):
                 adapter = smaller
+            v2_factory = getattr(adapter, 'shared_keys_v2_copy', None)
+            if callable(v2_factory) and adapter.request_bytes(payload) > int(limit):
+                smaller = v2_factory()
+                if smaller.request_bytes(payload) < adapter.request_bytes(payload):
+                    adapter = smaller
     elif saved:
         key_factory = getattr(adapter, 'shared_keys_copy', None)
         if callable(key_factory) and getattr(adapter, '_shared_record_payload', False):
@@ -356,6 +368,13 @@ def call_model(
             if all(artifact.get(k) == getattr(smaller, k) for k in
                    ('model_id', 'backend', 'prompt_sha256', 'generation_config_sha256')):
                 adapter = smaller
+            else:
+                v2_factory = getattr(smaller, 'shared_keys_v2_copy', None)
+                if callable(v2_factory):
+                    v2 = v2_factory()
+                    if all(artifact.get(k) == getattr(v2, k) for k in
+                           ('model_id', 'backend', 'prompt_sha256', 'generation_config_sha256')):
+                        adapter = v2
     if not saved:
         # Verify the complete live/input cut before even entering the adapter.
         # Cache authentication above this boundary remains purely read-only.

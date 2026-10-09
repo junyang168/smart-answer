@@ -530,6 +530,13 @@ def run_batch(
         packet['existing_component_write_boundary']='现有active连接原类型、目标CVR、定位spans和Evidence/fragment绑定必须逐项原样保留；正常独立审核仍需检查它们，不借旧审核当本次批准。已有覆盖不新建重复link；只补尚无覆盖的实质成分。若现有连接需实质修改则报告阻塞，不自动改旧关系/CVP。'
         packet['packet_sha256']=sha256_json({k:v for k,v in packet.items() if k!='packet_sha256'})
     _write_immutable(output_dir / "batch-packet.json", packet)
+    # JSONB preserves all values but not object key insertion order. Legacy
+    # lossless codecs bind their actual wire bytes as well as semantic SHA.
+    # Only after the complete immutable equality check, consume the saved
+    # exact packet order for cache authentication, never reinterpret its data.
+    if (output_dir / 'batch-packet.json').exists():
+        packet = _read(output_dir / 'batch-packet.json')
+        registry_context = packet['registry_context']
     from backend.pipeline.cvp_batch_identity_integration import ENABLED, VERSION
     integration_path=output_dir/'batch-identity-integration.json'
     if ENABLED.get() and not any(output_dir.glob('raw-proposal*')):

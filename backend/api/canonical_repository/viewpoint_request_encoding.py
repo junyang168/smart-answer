@@ -169,18 +169,22 @@ KEY_INSTRUCTIONS=('Lossless JSON key encoding. Each object key @wkpN means the e
 
 
 def decode_shared_keys(envelope):
+    return _decode_shared_keys(envelope,KEY_FORMAT,KEY_PREFIX,KEY_INSTRUCTIONS)
+
+
+def _decode_shared_keys(envelope,format_name,prefix,instructions):
     if (set(envelope)!={'format','instructions','semantic_payload_sha256','shared_keys','payload'}
-            or envelope['format']!=KEY_FORMAT or envelope['instructions']!=KEY_INSTRUCTIONS):
+            or envelope['format']!=format_name or envelope['instructions']!=instructions):
         raise ValueError('invalid shared-key envelope')
     keys=envelope['shared_keys']
-    if not isinstance(keys,list) or any(not isinstance(k,str) or k.startswith(KEY_PREFIX) for k in keys) or len(set(keys))!=len(keys):
+    if not isinstance(keys,list) or any(not isinstance(k,str) or k.startswith(prefix) for k in keys) or len(set(keys))!=len(keys):
         raise ValueError('invalid shared-key table')
     def walk(v):
         if isinstance(v,dict):
             result={}
             for key,value in v.items():
-                if key.startswith(KEY_PREFIX):
-                    suffix=key[len(KEY_PREFIX):]
+                if key.startswith(prefix):
+                    suffix=key[len(prefix):]
                     if not suffix.isdecimal() or str(int(suffix))!=suffix or not 0<=int(suffix)<len(keys):
                         raise ValueError('invalid shared-key reference')
                     key=keys[int(suffix)]
@@ -197,24 +201,42 @@ def decode_shared_keys(envelope):
 
 
 def encode_shared_keys(payload):
+    return _encode_shared_keys(payload,KEY_FORMAT,KEY_PREFIX,KEY_INSTRUCTIONS,12)
+
+
+def _encode_shared_keys(payload,format_name,prefix,instructions,min_length):
     inner=json.loads(encode_shared_records(payload));counts=Counter()
     def count(v):
         if isinstance(v,dict):
             for k,x in v.items():
-                if k.startswith(KEY_PREFIX):raise ValueError('reserved shared-key prefix')
+                if k.startswith(prefix):raise ValueError('reserved shared-key prefix')
                 counts[k]+=1;count(x)
         elif isinstance(v,list):
             for x in v:count(x)
     count(inner)
-    keys=sorted(k for k,n in counts.items() if n>1 and len(k.encode())>12)
-    indexes={k:KEY_PREFIX+str(i) for i,k in enumerate(keys)}
+    keys=sorted(k for k,n in counts.items() if n>1 and len(k.encode())>min_length)
+    indexes={k:prefix+str(i) for i,k in enumerate(keys)}
     def walk(v):
         if isinstance(v,dict):return {indexes.get(k,k):walk(x) for k,x in v.items()}
         if isinstance(v,list):return [walk(x) for x in v]
         return v
-    envelope={'format':KEY_FORMAT,'instructions':KEY_INSTRUCTIONS,'semantic_payload_sha256':sha256_json(payload),
+    envelope={'format':format_name,'instructions':instructions,'semantic_payload_sha256':sha256_json(payload),
               'shared_keys':keys,'payload':walk(inner)}
-    if canonical_json(decode_shared_keys(envelope))!=canonical_json(payload):raise ValueError('shared-key exact round-trip failed')
+    if canonical_json(_decode_shared_keys(envelope,format_name,prefix,instructions))!=canonical_json(payload):raise ValueError('shared-key exact round-trip failed')
     compact=lambda v:json.dumps(v,ensure_ascii=False,separators=(',',':'))
     encoded=compact(envelope);old=compact(inner)
     return encoded if len(encoded.encode())<len(old.encode()) else old
+
+
+KEY_FORMAT_V2='wkp_shared_keys_json_v2'
+KEY_PREFIX_V2='@'
+KEY_INSTRUCTIONS_V2=KEY_INSTRUCTIONS.replace('key @wkpN','key @N')
+
+
+def encode_shared_keys_v2(payload):
+    # Independently identified shorter references; v1 bytes and caches unchanged.
+    return _encode_shared_keys(payload,KEY_FORMAT_V2,KEY_PREFIX_V2,KEY_INSTRUCTIONS_V2,4)
+
+
+def decode_shared_keys_v2(envelope):
+    return _decode_shared_keys(envelope,KEY_FORMAT_V2,KEY_PREFIX_V2,KEY_INSTRUCTIONS_V2)
