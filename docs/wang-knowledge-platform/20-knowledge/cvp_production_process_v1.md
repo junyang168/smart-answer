@@ -404,6 +404,10 @@ Claim management 的修訂已提交／本源復驗完成，與 CVP management �
 
 聯合管理只新增分類／最小提案的 GPT 回答與完整後像的 Opus 回答；必要時唯一纠正／終審。Claim 正確時明確 retain，不製造純版本更新；尚未寫入的原 normal-CVP 包保留為歷史，不能冒充新版本批准。後續必要 coverage 是帶實際 management 批准的新階段；已提交的旧正常包與未受影響連接保留，不重 apply。
 
+共同入口的 `--claim-issue-rescope-authorization` 可消費明示的一次權限修訂：原 action 尚未提交，只有完整已保存的資格／連接未決提議，沒有初審、纠正、終審或未知呼叫時，精確綁原材料／packet／raw、原 SQL pins 和新 policy。原 issue／action／呼叫預算仍保留，SQL 只附加一項固定父 action 的 amendment reservation；換 root、第二份方向、已提交或已消費纠正不能取得新預算。
+
+修訂只許明列 Evidence 資格及另列的既有連接 locator／Evidence 綁定或錯誤 supports 的邏輯退役後像；不改 Claim、CVP 核心或端點。退役保存 SQL 前像歷史並撤回 active 作用，不刪教授主張。完整當前其他 Claims 可作只讀上下文，不新增組成員、不將退役的舊 Claim 冒充有效成員，也不以補包自動批准 CVP 身份。新提議仍須實際 Opus 完整後像审核、共同 transaction 和完整影響審計。
+
 驗收必須覆蓋：
 
 1. 現有證據充分／初審誤解：不改 Claim，正常审核輪次內結案，不重複仲裁。

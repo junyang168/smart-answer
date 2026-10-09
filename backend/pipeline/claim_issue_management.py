@@ -185,6 +185,9 @@ def policy_permissions(policy, states, sid, claim_ids):
         col, oid = c.split_key(k)
         fields = policy.claim_fields if col == "claims" and oid in claim_ids else (
             policy.evidence_fields if col == "evidence_steps" else policy.link_fields if col == "viewpoint_claim_links" else [])
+        if col=='evidence_steps' and policy.evidence_eligibility_review and eligibility_review_candidate(states[k],states,sid):
+            result.append(c.Permission(collection=col,object_id=oid,fields=sorted(ELIGIBILITY_FIELDS)))
+            continue
         if fields and states[k].get("review_status") not in HOLDS:
             if col == "evidence_steps" and (states[k].get("valid_for_identity_review") is False
                     or states[k].get("support_eligibility") not in {"eligible", "eligible_candidate", "eligible_with_label"}):
@@ -236,7 +239,13 @@ def validate_authority(manifest, states, snapshots=None):
     if (auth.get("claim_issue") != manifest.claim_issue.model_dump() or auth.get("policy") != context["policy"]
             or auth.get("authorization_id") != policy.authorization_id):
         raise ValueError("issue policy not bound to actual owner authority")
-    if manifest.permissions != policy_permissions(policy, states, manifest.source_id, ids):
+    expected=policy_permissions(policy, states, manifest.source_id, ids)
+    if context.get('scope_amendment'):
+        from backend.pipeline.claim_issue_rescope import permissions
+        direction=json.loads(c.bound_bytes(context['scope_amendment'],snapshots))
+        expected=[p for p in expected if p.collection!='evidence_steps' or p.object_id in direction['evidence_ids']]
+        expected += permissions(context,states,snapshots)
+    if manifest.permissions != expected:
         raise ValueError("Claim/CVP issue permission set exceeds separate domain authority")
     return context
 
@@ -484,6 +493,15 @@ def validate_resolution(frozen, proposal, post):
                 raise ValueError("Evidence repair cannot promote held evidence or discard quotes")
         if col == "viewpoint_claim_links":
             new = post[k]
+            if context.get('scope_amendment'):
+                from backend.pipeline.claim_issue_rescope import permissions
+                exact={p.key:p for p in permissions(context,before,frozen.get('physical_snapshots'))}
+                if k in exact and set(exact[k].fields)=={'effective_state'}:
+                    if (new.get('effective_state')!='retired' or
+                            {f:v for f,v in c._semantic(old).items() if f!='effective_state'} !=
+                            {f:v for f,v in c._semantic(new).items() if f!='effective_state'}):
+                        raise ValueError('exact link withdrawal must retain role/endpoints/body')
+                    continue
             if any(old.get(f) != new.get(f) for f in ("claim_id", "viewpoint_id", "effective_state")):
                 raise ValueError("Claim issue cannot retarget/retire a link")
     return post

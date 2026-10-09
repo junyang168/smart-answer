@@ -441,9 +441,16 @@ def run_group(store, definition, group, row, *, root):
             from backend.pipeline.claim_issue_management import handle_issues
             from backend.pipeline.source_reconciliation_runtime import ProductionPorts
             policy=root/'claim-issue-policy-binding.json'
-            handle_issues(store,run_id,detected,root=root/run_id/'claim-issues',
-                          policy_binding=read_artifact(policy).get('policy') if policy.exists() else None,
-                          ports=ProductionPorts())
+            from backend.pipeline.claim_issue_rescope import NAME, execute as amend
+            amendment=root/NAME
+            authorization=read_artifact(amendment)['authorization'] if amendment.exists() else None
+            direction=read_artifact(authorization['path']) if authorization else None
+            if direction and direction['run_id']==run_id:
+                amend(store,run_id,authorization=authorization,root=root/run_id/'claim-issues',ports=ProductionPorts())
+            else:
+                handle_issues(store,run_id,detected,root=root/run_id/'claim-issues',
+                              policy_binding=read_artifact(policy).get('policy') if policy.exists() else None,
+                              ports=ProductionPorts())
             # Actual SQL action committed first. Never apply the old normal
             # package or reinterpret its old approval as new-version approval.
             return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)
@@ -678,6 +685,8 @@ def main(argv=None):
                         help='Owner-directed same-batch identity revision; original unresolved answer is retained')
     parser.add_argument('--source-review-input-repair-authorization', type=Path,
                         help='Exact once-only engineering review input repair; no content or correction permission')
+    parser.add_argument('--claim-issue-rescope-authorization',type=Path,
+                        help='Exact once-only pre-review scope amendment; original issue calls remain reserved')
     args = parser.parse_args(argv)
     from backend.pipeline.cvp_batch_identity_integration import ENABLED, VERSION
     ENABLED.set(args.integrate_batch_candidates)
@@ -686,6 +695,9 @@ def main(argv=None):
         raise ValueError('identity integration execution binding requires explicit recovery flag')
     if (args.output_root/'source-review-input-repair-binding.json').exists() and not args.source_review_input_repair_authorization:
         raise ValueError('source review input repair binding requires explicit recovery flag')
+    from backend.pipeline.claim_issue_rescope import NAME as AMENDMENT_NAME
+    if (args.output_root/AMENDMENT_NAME).exists() and not args.claim_issue_rescope_authorization:
+        raise ValueError('Claim issue scope amendment binding requires explicit recovery flag')
     load_dotenv(PROJECT/".env")
     if args.database_url:os.environ['KNOWLEDGE_DATABASE_URL']=args.database_url
     store = PostgresKnowledgeStore(args.database_url)
@@ -744,6 +756,21 @@ def main(argv=None):
             write_immutable(integration_binding, {'schema_version':VERSION,
                 'campaign_sha256':args.sql_campaign,'new_groups_only':True,'correction_budget':1})
         execution_boundary(args.output_root,args.sql_campaign,definition,args.stop_after_group,persist=True)
+        if args.claim_issue_rescope_authorization:
+            from backend.pipeline.claim_issue_rescope import validate_live
+            authorization=binding(args.claim_issue_rescope_authorization)
+            direction=read_artifact(args.claim_issue_rescope_authorization)
+            if (direction['campaign_sha256']!=args.sql_campaign
+                    or not Path(direction['old_action_root']).resolve().is_relative_to((args.output_root/direction['run_id']/'claim-issues').resolve())):
+                raise ValueError('Claim issue amendment campaign/root mismatch')
+            target=store.get_cvp_group(direction['run_id'])
+            if not target or (invocation_limit is not None and target['sequence']>invocation_limit):
+                raise ValueError('Claim issue amendment outside execution boundary')
+            # Already committed amendment resumes through its own SQL facts;
+            # its original preimage is not a reason to replay it.
+            aid='CVPA-'+sha256_json({'kind':'claim_issue_scope_amendment_once','parent':direction['old_action_id']})
+            if not store.cvp_action_committed(direction['run_id'],aid):validate_live(store,direction)
+            write_immutable(args.output_root/AMENDMENT_NAME,{'authorization':authorization})
         if args.source_review_input_repair_authorization:
             from backend.pipeline.source_review_input_repair import SCHEMA, NAME
             direction = read_artifact(args.source_review_input_repair_authorization)

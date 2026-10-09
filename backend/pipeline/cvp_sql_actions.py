@@ -51,6 +51,7 @@ def action_sources(materials):
     elif manifest.claim_issue:
         context=materials['claim_issue_context']
         result += [manifest.claim_issue.model_dump(),context['policy'],*(i['report'] for i in context['issues'])]
+        if context.get('scope_amendment'):result.append(context['scope_amendment'])
     return result
 
 
@@ -96,6 +97,11 @@ def prepare_source_action(store,run_id,manifest,*,root):
         # Source is unchanged. Starting reverse closure at its document would
         # incorrectly load every unrelated Claim in the same sermon.
         keys=[('claims',cid) for cid in context['claim_ids']]
+        if context.get('scope_amendment'):
+            from backend.pipeline.claim_issue_rescope import validate_live
+            direction=json.loads(content.bound_bytes(context['scope_amendment']))
+            validate_live(store,direction)
+            keys += [('claims',cid) for cid in direction['context_claim_ids']]
     else:
         keys=[('source_documents',manifest.source_id)]
     keys.extend((p.collection,p.object_id) for p in manifest.permissions if not p.create)
@@ -123,6 +129,9 @@ def source_action_id(manifest):
     if manifest.claim_issue:
         from backend.pipeline.claim_issue_management import Issue
         context=__import__('json').loads(content.bound_bytes(manifest.claim_issue))
+        if context.get('scope_amendment'):
+            direction=json.loads(content.bound_bytes(context['scope_amendment']))
+            return 'CVPA-'+sha256_json({'kind':'claim_issue_scope_amendment_once','parent':direction['old_action_id']})
         return 'CVPA-'+sha256_json({'claim_issues':sorted(Issue.model_validate(i).issue_id for i in context['issues'])})
     return 'CVPA-'+sha256_json(manifest.model_dump(mode='json'))
 
@@ -161,8 +170,12 @@ def execute_source_action(store,run_id,manifest,*,root,ports):
     issue_context=materials.get('claim_issue_context')
     if issue_context:
         from backend.pipeline.claim_issue_management import Issue
-        store.bind_claim_issue_action([Issue.model_validate(i).issue_id for i in issue_context['issues']],
-                                     run_id=run_id,action_id=action['action_id'])
+        if issue_context.get('scope_amendment'):
+            store.bind_claim_issue_scope_amendment([Issue.model_validate(i).issue_id for i in issue_context['issues']],
+                run_id=run_id,action_id=action['action_id'],authorization=issue_context['scope_amendment'])
+        else:
+            store.bind_claim_issue_action([Issue.model_validate(i).issue_id for i in issue_context['issues']],
+                                         run_id=run_id,action_id=action['action_id'])
     # Resume a committed source action directly from SQL. Neither content
     # stages nor apply are replayed. Audit/coverage continue in the group flow.
     initialize_subscription_runtime(ports)

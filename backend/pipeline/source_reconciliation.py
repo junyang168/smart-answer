@@ -432,7 +432,23 @@ def freeze(manifest: Manifest, states: dict[str, dict], *, physical_snapshots: d
     elif manifest.claim_issue:
         from backend.pipeline.claim_issue_management import validate_authority
         diagnosis = validate_authority(manifest, states, snapshots=physical_snapshots)
-        inv = claim_inventory(states, manifest.source_id, diagnosis["claim_ids"])
+        ids=set(diagnosis['claim_ids'])
+        if diagnosis.get('scope_amendment'):
+            direction=json.loads(bound_bytes(diagnosis['scope_amendment'],physical_snapshots))
+            ids.update(states[key(p['collection'],p['object_id'])]['claim_id'] for p in direction['link_permissions'])
+        inv = claim_inventory(states, manifest.source_id, sorted(ids))
+        if diagnosis.get('scope_amendment'):
+            # Additional current source Claims are read-only context, never
+            # campaign members or automatic new CVP identity approvals.
+            forward,_=dependency_index(states)
+            context=set(inv['context_keys'])|set(inv['affected_keys'])
+            queue=deque(key('claims',cid) for cid in direction['context_claim_ids'])
+            while queue:
+                k=queue.popleft()
+                if k not in states:raise ValueError('amendment context Claim is missing/retired')
+                if k in context:continue
+                context.add(k);queue.extend(forward[k]-context)
+            inv['context_keys']=sorted(context-set(inv['affected_keys']))
     elif manifest.deferred_repair:
         from backend.pipeline.deferred_claim_repair import validate_authority
         diagnosis = validate_authority(manifest, states, snapshots=physical_snapshots)
@@ -479,6 +495,10 @@ def freeze(manifest: Manifest, states: dict[str, dict], *, physical_snapshots: d
         archive_bindings.append(manifest.claim_issue)
         archive_bindings.append(FileBinding.model_validate(diagnosis["policy"]))
         archive_bindings.extend(FileBinding.model_validate(r["report"]) for r in diagnosis["issues"])
+        if diagnosis.get('scope_amendment'):
+            archive_bindings.append(FileBinding.model_validate(diagnosis['scope_amendment']))
+            direction=json.loads(bound_bytes(diagnosis['scope_amendment'],physical_snapshots))
+            archive_bindings.extend(FileBinding.model_validate(direction[n]) for n in ('old_materials','old_packet','old_raw','new_policy'))
     if manifest.viewpoint_scope_repair:
         archive_bindings += [manifest.viewpoint_scope_repair, FileBinding.model_validate(diagnosis['policy'])]
         archive_bindings.extend(FileBinding.model_validate(b) for b in diagnosis['reports'])
@@ -502,6 +522,8 @@ def guard_files(frozen: dict, *, historical: bool = False) -> None:
         context = frozen["claim_issue_context"]
         for b in [manifest.claim_issue, context["policy"], *(r["report"] for r in context["issues"])]:
             bound_bytes(b, frozen["physical_snapshots"] if historical else None)
+        if context.get('scope_amendment'):
+            bound_bytes(context['scope_amendment'],frozen['physical_snapshots'] if historical else None)
     if manifest.viewpoint_scope_repair:
         context=frozen['viewpoint_scope_context']
         for b in [manifest.viewpoint_scope_repair,context['policy'],*context['reports']]:

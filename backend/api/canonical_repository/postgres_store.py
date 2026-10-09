@@ -3416,6 +3416,38 @@ class PostgresKnowledgeStore:
                 value['state'] = 'action_reserved'
                 conn.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now() WHERE run_id=%s', (canonical_json(value), ident))
 
+    def bind_claim_issue_scope_amendment(self, issue_ids, *, run_id, action_id, authorization):
+        """Append one owner-scoped amendment; retain original action/budgets."""
+        from backend.pipeline.claim_issue_rescope import validate_live
+        from backend.pipeline.source_reconciliation import bound_bytes
+        direction=json.loads(bound_bytes(authorization))
+        material,_=validate_live(self,direction)
+        from backend.pipeline.claim_issue_management import Issue
+        if set(issue_ids)!={Issue.model_validate(i).issue_id for i in material['claim_issue_context']['issues']} or len(issue_ids)!=len(set(issue_ids)):
+            raise ChangeSetConflict('scope amendment must preserve complete original issue denominator')
+        expected='CVPA-'+sha256_json({'kind':'claim_issue_scope_amendment_once','parent':direction['old_action_id']})
+        if action_id!=expected or run_id!=direction['run_id']:
+            raise ChangeSetConflict('scope amendment action identity drift')
+        with self.connect() as conn:
+            conn.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))',(POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
+            from backend.pipeline.cvp_sql_flow import decoded_pins
+            old=self.get_cvp_action(run_id,direction['old_action_id'])
+            with conn.cursor() as cursor:
+                self._assert_transaction_read_pins(cursor,decoded_pins(old['materials']['sql_scope']['read_pins']))
+            for issue_id in sorted(issue_ids):
+                ident='CVPI-'+issue_id
+                row=conn.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE',(ident,)).fetchone()
+                value=row[0] if row else None
+                if (not value or value['owner_run_id']!=run_id or value['correction_used'] or value['terminal_refusal']
+                        or value.get('action')!={'run_id':run_id,'action_id':direction['old_action_id']}):
+                    raise ChangeSetConflict('scope amendment cannot replace original issue reservation')
+                bound={'run_id':run_id,'action_id':action_id,'authorization':authorization}
+                if value.get('scope_amendment') and value['scope_amendment']!=bound:
+                    raise ChangeSetConflict('scope amendment already reserved; no second authority/budget')
+                value['scope_amendment']=bound
+                conn.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now() WHERE run_id=%s',
+                             (canonical_json(value),ident))
+
     def get_cvp_action(self, run_id, action_id):
         ident='CVPA-'+sha256_json({'parent':run_id,'action':action_id})
         with self.connect() as conn:
