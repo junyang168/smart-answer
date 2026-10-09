@@ -62,7 +62,7 @@ def test_common_prepared_recovery_enters_bound_amendment_without_old_normal_rebu
     r.write(tmp_path/a.NAME,{'authorization':direction})
     calls=[]
     class Store:
-        value={'materials':{},'checkpoint':'prepared'}
+        value={'run_id':'original-run','materials':{},'checkpoint':'prepared'}
         def get_cvp_group(self,run):return self.value
         def bind_cvp_execution_root(self,*args,**kwargs):pass
     store=Store()
