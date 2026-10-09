@@ -52,7 +52,17 @@ def verify_runtime(client, cache_root):
             raise CodexSubscriptionError("Saved runtime diagnostic identity/response mismatch; no fallback")
         return {"identity": identity, "proof_path": str(path), "reused": True,
                 "new_model_calls": 0, "corpus_writes": 0}
-    result = client.verify_model_access()
+    intent = cache_root / (key + '.call-intent.json')
+    if intent.exists():
+        raise CodexSubscriptionError('Prior runtime diagnostic has no saved success; no automatic retry')
+    write_immutable(intent, {'identity':identity, 'automatic_retry':False}, require_new=True)
+    try:
+        result = client.verify_model_access()
+    except BaseException as exc:
+        write_immutable(cache_root / (key + '.call-failure.json'),
+                        {'identity':identity, 'outcome':'unknown_or_rejected',
+                         'automatic_retry':False, 'error':str(exc)})
+        raise
     write_immutable(path, {"identity": identity, "result": result,
                          "diagnostic_response": {"ok": True}, "raw_response": client.last_raw_response})
     return {"identity": identity, "proof_path": str(path), "reused": False,

@@ -132,6 +132,53 @@ def test_saved_runtime_proof_tamper_rejected_not_model_retry(tmp_path, monkeypat
     assert len(calls) == 1
 
 
+def test_runtime_diagnostic_failure_has_persistent_once_guard(tmp_path,monkeypatch):
+    home=tmp_path/'home';home.mkdir();(home/'auth.json').write_text('login')
+    client=m.CodexSubscriptionClient(model='gpt-6.1-sol',environment={'CODEX_HOME':str(home)})
+    client.cli_identity={'path':'/current/codex','file_sha256':'new binary'}
+    monkeypatch.setattr(client,'_verify_chatgpt_login',lambda:None)
+    calls=[]
+    def fail(*a,**kw):
+        calls.append(True)
+        raise m.CodexSubscriptionError('quota or unknown')
+    monkeypatch.setattr(client,'generate_json',fail)
+    with pytest.raises(m.CodexSubscriptionError):verify_runtime(client,tmp_path/'proofs')
+    with pytest.raises(m.CodexSubscriptionError,match='no automatic retry'):
+        verify_runtime(client,tmp_path/'proofs')
+    assert len(calls)==1
+    assert len(list((tmp_path/'proofs').glob('*.call-failure.json')))==1
+
+
+@pytest.mark.parametrize('change',['binary','login','path'])
+def test_canonical_app_upgrade_only_not_account_or_executable_substitution(tmp_path,monkeypatch,change):
+    from backend.pipeline import viewpoint_s201129_source_continuation as mod
+    from backend.pipeline import codex_subscription_preflight as pre
+    old={'cli':{'path':'/same/codex','file_sha256':'old'},'model':'gpt-6.1-sol',
+         'backend':'codex_subscription','reasoning_effort':'high','login_state_sha256':'login'}
+    import copy
+    actual=copy.deepcopy(old)
+    if change=='binary':actual['cli']['file_sha256']='new'
+    elif change=='login':actual['login_state_sha256']='changed'
+    else:actual['cli']['path']='/foreign/codex'
+    monkeypatch.setattr(mod,'read_artifact',lambda path:{'identity':old,'proof_path':str(tmp_path/'old.json')})
+    monkeypatch.setattr(mod.repair,'file_sha256',lambda path:actual['login_state_sha256'])
+    class Client:
+        environment={};model='gpt-6.1-sol';backend='codex_subscription';reasoning_effort='high'
+        cli_identity=actual['cli']
+        def __init__(self,**kwargs):assert kwargs['executable']==old['cli']['path']
+        def _verify_chatgpt_login(self):pass
+    monkeypatch.setattr(m,'CodexSubscriptionClient',Client)
+    calls=[]
+    monkeypatch.setattr(pre,'verify_runtime',lambda client,path:calls.append(path) or {
+        'identity':actual,'proof_path':str(tmp_path/'new.json'),'reused':False,'new_model_calls':1})
+    if change=='binary':
+        assert mod.canonical_runtime()['new_model_calls']==1
+        assert len(calls)==1
+    else:
+        with pytest.raises(ValueError):mod.canonical_runtime()
+        assert calls==[]
+
+
 @pytest.mark.parametrize('drift',[None,'login','binary','proof','missing'])
 def test_release_runtime_consumption_never_generates_diagnostic(tmp_path,monkeypatch,drift):
     import json

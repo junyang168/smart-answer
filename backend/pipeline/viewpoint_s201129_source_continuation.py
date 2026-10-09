@@ -141,10 +141,12 @@ def canonical_runtime():
     auth = Path(client.environment.get('CODEX_HOME',str(Path.home()/'.codex')))/'auth.json'
     actual = {'cli':client.cli_identity,'model':client.model,'backend':client.backend,
         'reasoning_effort':client.reasoning_effort,'login_state_sha256':repair.file_sha256(auth)}
-    if actual != saved['identity']:
-        raise ValueError('canonical binary/model/effort/login identity changed; no diagnostic fallback')
+    if any(actual[k] != saved['identity'][k] for k in actual if k != 'cli'):
+        raise ValueError('canonical model/effort/backend/login identity changed; no diagnostic fallback')
+    if actual['cli']['path'] != saved['identity']['cli']['path']:
+        raise ValueError('canonical executable path changed; no implicit executable substitution')
     reused = verify_runtime(client,Path(saved['proof_path']).parent)
-    if reused['proof_path'] != saved['proof_path'] or not reused['reused'] or reused['new_model_calls'] != 0:
+    if actual == saved['identity'] and (reused['proof_path'] != saved['proof_path'] or not reused['reused'] or reused['new_model_calls'] != 0):
         raise ValueError('canonical diagnostic must reuse the prior success proof')
     os.environ['CODEX_EXECUTABLE'] = executable
     return reused
