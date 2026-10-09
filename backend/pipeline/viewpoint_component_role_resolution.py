@@ -95,13 +95,13 @@ def verify(audit, resolution):
 
 
 def create(audit_path, prior_root, authorization_path, output, store, *, campaign_sha256, run_id):
-    from backend.pipeline.viewpoint_audit_source_adjudication import build_packet
+    from backend.pipeline.viewpoint_audit_source_adjudication import build_packet_for_saved
     from backend.pipeline.viewpoint_audit_owner_resolution import binding, audit_semantic_sha
     auth = read_artifact(authorization_path)
     if auth.get('campaign_sha256') != campaign_sha256 or auth.get('run_id') != run_id:
         raise ValueError('component owner direction campaign/group mismatch')
     packet = read_artifact(prior_root / 'packet.json')
-    if build_packet(audit_path, store) != packet:
+    if build_packet_for_saved(audit_path, store, packet) != packet:
         raise ValueError('component current SQL/Claim/source/connection drift')
     paths = {'authorization_path': authorization_path, 'packet_path': prior_root / 'packet.json',
              'raw_path': prior_root / 'raw-gpt.json', 'handoff_path': prior_root / 'gpt-final-handoff.json'}
@@ -113,7 +113,7 @@ def create(audit_path, prior_root, authorization_path, output, store, *, campaig
             **{k: str(Path(v).resolve()) for k, v in paths.items()}}
     result = {**body, 'artifact_sha256': sha256_json(body)}
     verify(read_artifact(audit_path), result)
-    if build_packet(audit_path, store) != packet:
+    if build_packet_for_saved(audit_path, store, packet) != packet:
         raise ValueError('component current state changed during disposition')
     write_immutable(output, result)
     return result

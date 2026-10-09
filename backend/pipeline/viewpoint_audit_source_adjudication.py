@@ -117,7 +117,12 @@ def occurrence_source_ids(claim):
     return ids
 
 
-def build_packet(audit_path, store):
+def build_packet(audit_path, store, include_viewpoint_revision=False):
+    """Build a current packet; explicit v1 mode preserves frozen request identity.
+
+    New calls use v2 with the actual CVR, not merely its head pointer. Reading
+    a saved v1 answer never adds fields to the input it actually judged.
+    """
     audit = read_artifact(audit_path)
     findings=disputes(audit)
     ids={cid for layer,key,row in findings for cid in (row.get('claim_ids_in_question') if layer=='4' else [row['claim_id']]) or []}
@@ -134,6 +139,16 @@ def build_packet(audit_path, store):
         viewpoint = active('canonical_viewpoints', row[key]) if layer == '4' else None
         if viewpoint and viewpoint['current_revision_id'] != row['revision_id']:
             raise ValueError('audited viewpoint revision drift')
+        viewpoint_revision = None
+        if viewpoint and include_viewpoint_revision:
+            viewpoint_revision = active('viewpoint_revisions', row['revision_id'])
+            if (viewpoint_revision.get('viewpoint_revision_id') != row['revision_id']
+                    or viewpoint_revision.get('viewpoint_id') != viewpoint['viewpoint_id']
+                    or not str(viewpoint_revision.get('core_proposition') or '').strip()
+                    or not isinstance(viewpoint_revision.get('scope'), dict)
+                    or not isinstance(viewpoint_revision.get('proposition_signature'), dict)
+                    or viewpoint_revision.get('review_status') not in {'approved', 'system_approved', 'human_approved'}):
+                raise ValueError('adjudication lacks exact complete current viewpoint revision')
         ids = row.get('claim_ids_in_question') if layer == '4' else [row['claim_id']]
         if not ids or len(ids) != len(set(ids)):
             raise ValueError('audit must identify exact disputed Claims')
@@ -189,13 +204,24 @@ def build_packet(audit_path, store):
             items.append({'item_id': f'{layer}:{row[key]}:{cid}', 'audit_finding': row,
                           'claim': claim, 'viewpoint': viewpoint, 'connections': own_links,
                           'evidence': evidence, 'sources': list(sources.values())})
+            if include_viewpoint_revision:
+                items[-1]['viewpoint_revision'] = viewpoint_revision
     if len({i['item_id'] for i in items}) != len(items):
         raise ValueError('duplicate audit adjudication item')
-    body = {'schema_version': 'wang_audit_source_adjudication_packet_v1', 'items': items,
+    body = {'schema_version': ('wang_audit_source_adjudication_packet_v2' if include_viewpoint_revision
+                               else 'wang_audit_source_adjudication_packet_v1'), 'items': items,
             'audit_binding': {'path': str(audit_path.resolve()),
                               'file_sha256': hashlib.sha256(audit_path.read_bytes()).hexdigest()},
             'master_data_mutations': 0, 'context_grants_citation_authority': False}
     return body | {'artifact_sha256': sha256_json(body)}
+
+
+def build_packet_for_saved(audit_path, store, saved):
+    """Reconstruct only the original packet contract, never enrich a cached call."""
+    schema = saved.get('schema_version')
+    if schema not in {'wang_audit_source_adjudication_packet_v1', 'wang_audit_source_adjudication_packet_v2'}:
+        raise ValueError('unknown saved adjudication packet contract')
+    return build_packet(audit_path, store, schema == 'wang_audit_source_adjudication_packet_v2')
 
 
 def validate_findings(raw, packet):
@@ -250,7 +276,9 @@ def restricted_packet(packet, only_item_ids):
 
 
 def run(audit_path, output, store, adapters=None, *, final_gpt=False, history_roots=None, only_item_ids=None):
-    packet = restricted_packet(build_packet(audit_path, store),only_item_ids)
+    saved_packet = read_artifact(output / 'packet.json') if (output / 'packet.json').exists() else None
+    include_revision = saved_packet is None or saved_packet.get('schema_version') == 'wang_audit_source_adjudication_packet_v2'
+    packet = restricted_packet(build_packet(audit_path, store, include_revision),only_item_ids)
     write_immutable(output / 'packet.json', packet)
     if not packet['items']:
         raise ValueError('no semantic audit disputes')
@@ -278,7 +306,7 @@ def run(audit_path, output, store, adapters=None, *, final_gpt=False, history_ro
             adapter.max_request_bytes = 500_000
             raw, _, _ = call_model(adapter, packet, output / f'raw-{label}.json')
             reviews.append(validate_findings(raw, packet))
-        if restricted_packet(build_packet(audit_path, store),only_item_ids) != packet:
+        if restricted_packet(build_packet(audit_path, store, include_revision),only_item_ids) != packet:
             raise ValueError('source or Registry changed during adjudication')
         actions = []
         for item in packet['items']:

@@ -70,6 +70,8 @@ flowchart LR
 
 物理來源在材料建立、恢復使用及審計時按本組來源核驗；檔案不受 SQL rollback 保護。來源內容變更仍走原完整授權流程，不因資料庫有 transaction 就省略原文驗證。
 
+新的觀點異議原文仲裁包必須包含實際當前 `viewpoint_revision` 的完整命題、`proposition_signature`、`scope` 及批准來源；只有 CVP 身份與 `current_revision_id` 不足以判讀。組包時核對 audited revision、CVP 端點與批准狀態，缺失／錯版在模型呼叫前停止。舊 v1 回答按原精確包消費，不能補欄位後冒充它已看過完整 CVR。v2 補足材料不產生第二份仲裁預算；原未決回答及 reservation 保留，未獲新一次呼叫方向不得自動重問。
+
 請求 bytes 上限是執行預算，不是模型供應商的硬限制。舊 policy 的數字及完整已保存模型身份保留；owner 可用 campaign-bound `--request-limit-authorization` 明確指定新上限，共同模型入口對該 execution root 的所有角色生效。程式保存不可變 binding 及新呼叫的實際 bytes／授權引用，不改原 prompt、schema、encoding、語義 request 或 raw。恢復須明示同一授權，漂移／跨 campaign／越 root 拒絕；無回答 intent、單輪预算及 SQL／來源／審核門檻不變。未明示的其他執行仍使用原上限，不自動提高或縮減原分組。
 
 ## 4. Transaction 的 validation

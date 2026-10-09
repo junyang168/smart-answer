@@ -18,7 +18,9 @@ class AdjudicationAlreadyRecorded(ValueError):
 
 
 def target_identity(item):
-    return sha256_json({k: v for k, v in item.items() if k != 'audit_finding'})
+    # Adding the omitted CVR to diagnostic material cannot reset the original
+    # target's once budget. The head and links already pin its exact CVR ID.
+    return sha256_json({k: v for k, v in item.items() if k not in {'audit_finding', 'viewpoint_revision'}})
 
 
 def validated_history(root):

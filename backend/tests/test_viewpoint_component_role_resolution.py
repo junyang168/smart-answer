@@ -33,7 +33,8 @@ def fixture(tmp_path, monkeypatch, fault=None):
             'sources': [{'source_id': 'S', **binding(source), 'paragraphs': [
                 {'paragraph_key': 'S0001', 'text': source.read_text()}]}]}
     other = {**deepcopy(item), 'item_id': '4:V2:C2', 'audit_finding': rejected, 'claim': {'claim_id': 'C2'}}
-    packet = seal({'items': [item, other], 'audit_binding': binding(audit_path)})
+    packet = seal({'schema_version': 'wang_audit_source_adjudication_packet_v1',
+                   'items': [item, other], 'audit_binding': binding(audit_path)})
     prior = tmp_path/'prior'; write_immutable(prior/'packet.json', packet)
     answers = [{'item_id': row['item_id'], 'verdict': 'audit_objection_upheld' if i == 0 else 'audit_objection_rejected',
                 'source_id': 'S', 'paragraph_key': 'S0001', 'exact_quote': source.read_text(), 'reason': '回應異議'}

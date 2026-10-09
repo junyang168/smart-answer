@@ -151,3 +151,69 @@ def test_missing_population_cannot_be_routed():
     audit = {'layers': {'3': {'complete': True, 'judged': 1, 'results': [{'claim_id': 'other'}]}}}
     with pytest.raises(ValueError, match='population'):
         module.validate_population(audit, ['c'], ['v'])
+
+
+@pytest.mark.parametrize('fault', [None, 'missing', 'retired', 'foreign', 'wrong_id',
+                                  'missing_scope', 'missing_signature', 'empty_core', 'unapproved'])
+def test_complete_adjudication_packet_reads_actual_current_cvr_before_call(tmp_path, monkeypatch, fault):
+    from types import SimpleNamespace
+    from backend.pipeline.viewpoint_adjudication_history import target_identity
+    audit = tmp_path/'audit.json'; audit.write_text('{}')
+    row = {'viewpoint_id': 'v', 'revision_id': 'r', 'claim_ids_in_question': ['c']}
+    monkeypatch.setattr(module, 'disputes', lambda _: [('4', 'viewpoint_id', row)])
+    monkeypatch.setattr(module, 'read_artifact', lambda _: {})
+    source = tmp_path/'source.txt'; source.write_text('教授原話。')
+    monkeypatch.setattr(module, 'load_context_source', lambda _: (source, 'source-pin',
+        SimpleNamespace(body_sha256='body-pin', spoken_rows=[{'text': '教授原話。'}])))
+    revision = {'viewpoint_revision_id': 'r', 'viewpoint_id': 'v', 'core_proposition': '現行命題。',
+                'scope': {'scripture_scope': ['太17:1–2']}, 'proposition_signature': {'subject': '耶穌'},
+                'review_status': 'system_approved', 'provenance': {'review_artifact_sha256': 'review-pin'}}
+    records = {
+        ('canonical_viewpoints', 'v'): {'viewpoint_id': 'v', 'current_revision_id': 'r'},
+        ('viewpoint_revisions', 'r'): revision,
+        ('claims', 'c'): {'claim_id': 'c', 'revision': 1, 'statement': '主張。',
+                         'evidence_step_ids': ['e'], 'occurrences': [{'source_id': 's'}]},
+        ('evidence_steps', 'e'): {'source_fragment_ids': ['f']},
+        ('source_fragments', 'f'): {'source_id': 's', 'paragraph_key': 'S0001', 'verbatim_excerpt': '教授原話。'},
+        ('source_documents', 's'): {'source_id': 's'},
+    }
+    if fault == 'foreign': revision['viewpoint_id'] = 'other'
+    if fault == 'wrong_id': revision['viewpoint_revision_id'] = 'other'
+    if fault == 'missing_scope': revision.pop('scope')
+    if fault == 'missing_signature': revision.pop('proposition_signature')
+    if fault == 'empty_core': revision['core_proposition'] = ''
+    if fault == 'unapproved': revision['review_status'] = 'pending'
+    class Store:
+        reads = []
+        def claim_links(self, ids):
+            return [{'claim_id': 'c', 'viewpoint_id': 'v', 'effective_state': 'active',
+                     'pinned_claim_revision': 1, 'validated_against_viewpoint_revision_id': 'r',
+                     'evidence_bindings': [{'evidence_step_id': 'e', 'source_fragment_id': 'f'}]}]
+        def get_record_state(self, collection, identity):
+            self.reads.append((collection, identity))
+            if fault == 'missing' and collection == 'viewpoint_revisions': return None
+            return {'retired': fault == 'retired' and collection == 'viewpoint_revisions',
+                    'payload': deepcopy(records[collection, identity])}
+    store = Store()
+    if fault:
+        with pytest.raises(ValueError): module.build_packet(audit, store, True)
+        return
+    full = module.build_packet(audit, store, True)
+    assert full['schema_version'] == 'wang_audit_source_adjudication_packet_v2'
+    assert full['items'][0]['viewpoint_revision'] == revision
+    assert ('viewpoint_revisions', 'r') in store.reads
+    legacy = module.build_packet(audit, store)
+    assert 'viewpoint_revision' not in legacy['items'][0]
+    assert target_identity(full['items'][0]) == target_identity(legacy['items'][0])
+    assert module.build_packet_for_saved(audit, store, legacy) == legacy
+    assert module.build_packet_for_saved(audit, store, full) == full
+
+
+def test_adding_missing_cvr_does_not_grant_another_model_budget(tmp_path, monkeypatch):
+    from backend.pipeline import viewpoint_adjudication_history as history
+    legacy = packet(); legacy['items'][0]['viewpoint'] = {'current_revision_id': 'r'}
+    full = deepcopy(legacy); full['items'][0]['viewpoint_revision'] = {'viewpoint_revision_id': 'r', 'scope': {}}
+    monkeypatch.setattr(history, 'read_artifact', lambda _: legacy)
+    monkeypatch.setattr(history, 'validated_history', lambda _: (legacy, {
+        legacy['items'][0]['item_id']: {'verdict': 'unresolved'}}))
+    with pytest.raises(history.AdjudicationAlreadyRecorded): history.assert_no_readjudication(full, [tmp_path])

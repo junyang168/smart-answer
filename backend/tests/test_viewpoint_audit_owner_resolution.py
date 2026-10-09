@@ -34,6 +34,7 @@ def fixture(tmp_path, monkeypatch):
         'item_id': 'i', 'verdict': 'audit_objection_rejected', 'gpt': answer, 'opus': answer}]})
     write_immutable(root/'handoff.json', handoff)
     monkeypatch.setattr(module, 'build_packet', lambda *args: packet)
+    monkeypatch.setattr(module, 'build_packet_for_saved', lambda *args: packet)
     monkeypatch.setattr(module, 'run', lambda *args: handoff)
     path = tmp_path/'resolution.json'
     module.create_resolution(audit_path, root, path, object(), authorized_by='owner',

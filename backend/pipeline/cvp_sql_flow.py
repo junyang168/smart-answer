@@ -478,7 +478,7 @@ def run_group(store, definition, group, row, *, root):
     if audit["layers"]["3"].get("disputed") or audit["layers"]["4"].get("disputed"):
         from backend.pipeline.viewpoint_audit_source_adjudication import build_packet,run as adjudicate
         from backend.pipeline.viewpoint_adjudication_history import target_identity
-        packet=build_packet(audit_path,store);targets=[target_identity(i) for i in packet['items']]
+        packet=build_packet(audit_path,store,True);targets=[target_identity(i) for i in packet['items']]
         prior=store.adjudication_roots(targets)
         resolution=audit_dir/'gpt-source-final-resolution.json'
         component_binding = root/'component-role-authorization-binding.json'
@@ -522,6 +522,11 @@ def run_group(store, definition, group, row, *, root):
             known={target_identity(i) for i in old['items']}
             ids={i['item_id'] for i in packet['items'] if target_identity(i) in known}
             if ids:
+                unresolved=[a['item_id'] for a in prior_report['actions']
+                            if a['item_id'] in ids and a['verdict']=='unresolved']
+                if unresolved:
+                    raise ValueError('saved original-source adjudication unresolved; original once reservation retained: '
+                                     + ', '.join(unresolved))
                 reuse_part(audit_path,previous,audit_dir/('known-'+sha256_json(str(previous))[:20])/'resolution.json',
                            store,only_item_ids=ids)
                 covered.update(ids)
@@ -545,6 +550,8 @@ def run_group(store, definition, group, row, *, root):
                     policy_binding=read_artifact(policy).get('policy') if policy.exists() else None,ports=ProductionPorts(),
                     prior_management_action=prior_management_action(evidence,claim_findings))
                 return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)
+            if any(a['verdict']=='unresolved' for a in report['actions']):
+                raise ValueError('original-source adjudication unresolved; no automatic supports repair or second call')
             if any(a['verdict']!='audit_objection_rejected' for a in report['actions']):
                 from backend.pipeline.cvp_sql_actions import execute_supports_action
                 from backend.pipeline.source_reconciliation_runtime import ProductionPorts

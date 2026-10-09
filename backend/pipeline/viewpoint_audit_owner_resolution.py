@@ -8,7 +8,7 @@ import hashlib
 
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.pipeline.viewpoint_resolution_runtime import read_artifact, write_immutable
-from backend.pipeline.viewpoint_audit_source_adjudication import build_packet, validate_findings, run
+from backend.pipeline.viewpoint_audit_source_adjudication import build_packet, build_packet_for_saved, validate_findings, run
 
 GPT_POLICY = Path(__file__).parent / 'policies/wang_audit_source_resolution_v1.json'
 GPT_SCHEMA = 'wang_gpt_final_audit_source_resolution_v1'
@@ -23,12 +23,14 @@ def create_gpt_resolution(audit_path, adjudication_root, output, store, *, histo
     policy = read_artifact(GPT_POLICY)
     if policy['policy_id'] != 'wang-audit-gpt-source-final-v1':
         raise ValueError('unknown source resolution policy')
-    original_packet = build_packet(audit_path, store)
+    saved_path = adjudication_root / 'packet.json'
+    original_packet = (build_packet_for_saved(audit_path, store, read_artifact(saved_path))
+                       if saved_path.exists() else build_packet(audit_path, store, True))
     report = run(audit_path, adjudication_root, store, final_gpt=True, history_roots=history_roots)
     packet_path = adjudication_root / 'packet.json'
     packet = read_artifact(packet_path)
     verify_sha(packet)
-    if packet != original_packet or build_packet(audit_path, store) != packet:
+    if packet != original_packet or build_packet_for_saved(audit_path, store, packet) != packet:
         raise ValueError('source resolution packet/Registry drift')
     if not report['actions'] or any(a['verdict'] != 'audit_objection_rejected' for a in report['actions']):
         raise ValueError('GPT upheld/unresolved objections require repair or owner judgment')
@@ -137,7 +139,7 @@ def create_resolution(audit_path, adjudication_root, output, store, *, authorize
     packet = read_artifact(packet_path)
     verify_sha(packet)
     original_path = Path(packet['audit_binding']['path'])
-    if binding(original_path) != packet['audit_binding'] or build_packet(original_path, store) != packet:
+    if binding(original_path) != packet['audit_binding'] or build_packet_for_saved(original_path, store, packet) != packet:
         raise ValueError('source adjudication no longer matches current originals/Registry')
     handoff_path = adjudication_root / 'handoff.json'
     handoff = read_artifact(handoff_path)

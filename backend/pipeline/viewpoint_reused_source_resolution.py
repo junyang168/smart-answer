@@ -89,7 +89,10 @@ def create(audit_path, prior_root, output, store, *, only_item_ids=None):
     from backend.pipeline.viewpoint_audit_source_adjudication import build_packet
     from backend.pipeline.viewpoint_audit_owner_resolution import binding, audit_semantic_sha, GPT_POLICY
     from backend.pipeline.viewpoint_g035_temporary_audit import validate
-    audit=read_artifact(audit_path); packet=build_packet(audit_path,store)
+    audit=read_artifact(audit_path)
+    old=read_artifact(prior_root/'packet.json')
+    include_revision=old.get('schema_version')=='wang_audit_source_adjudication_packet_v2'
+    packet=build_packet(audit_path,store,include_revision)
     if only_item_ids is not None:
         body={k:v for k,v in packet.items() if k!='artifact_sha256'}
         body['items']=[i for i in packet['items'] if i['item_id'] in only_item_ids]
@@ -112,7 +115,7 @@ def create(audit_path, prior_root, output, store, *, only_item_ids=None):
         body['bindings'] += [binding(PROJECTION_POLICY)]+[binding(repair/n) for n in
             ('packet.json','raw-gpt.json','raw-opus.json','review-report.json','effective-package.json','dry-run-plan.json','backup.json','apply-receipt.json','verified-result.json')]
     resolution=body|{'artifact_sha256':sha256_json(body)};verify(audit,resolution,expected_item_ids=only_item_ids)
-    actual=build_packet(audit_path,store)
+    actual=build_packet(audit_path,store,include_revision)
     if only_item_ids is not None:
         actual={k:v for k,v in actual.items() if k!='artifact_sha256'}
         actual['items']=[i for i in actual['items'] if i['item_id'] in only_item_ids]
@@ -149,7 +152,7 @@ def compose(audit_path,prior_roots,output,store):
     from backend.pipeline.viewpoint_audit_owner_resolution import binding,audit_semantic_sha
     from backend.pipeline.viewpoint_audit_source_adjudication import build_packet
     from backend.pipeline.viewpoint_adjudication_history import target_identity
-    packet=build_packet(audit_path,store);parts=[]
+    packet=build_packet(audit_path,store,True);parts=[]
     for root in prior_roots:
         old=read_artifact(root/'packet.json');known={target_identity(i) for i in old['items']}
         ids={i['item_id'] for i in packet['items'] if target_identity(i) in known}
