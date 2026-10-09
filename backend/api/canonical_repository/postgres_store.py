@@ -3390,8 +3390,15 @@ class PostgresKnowledgeStore:
             if not conn.execute("SELECT 1 FROM wang_knowledge.schema_migrations WHERE migration_id='007_claim_issue_lookup'").fetchone():
                 raise ChangeSetConflict('Claim issue indexed schema not activated; no unbounded fallback')
             parent = conn.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s AND stage='cvp_group'", (run_id,)).fetchone()
-            if not parent or value.claim_id not in parent[0].get('claim_ids', []):
+            if not parent:
                 raise ChangeSetConflict('Claim issue must belong to the original admitted group')
+            if value.claim_id not in parent[0].get('claim_ids', []):
+                from backend.pipeline.claim_owner_revision import dependency_issue
+                claim=conn.execute('SELECT payload,revision,content_sha256,retired_at IS NOT NULL FROM wang_knowledge.objects WHERE collection=%s AND object_id=%s',
+                                   ('claims',value.claim_id)).fetchone()
+                if not claim:raise ChangeSetConflict('owner dependency Claim missing')
+                dependency_issue(value,{**parent[0],'run_id':run_id},
+                                 dict(zip(('payload','revision','content_sha256','retired'),claim)))
             row = conn.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE', (ident,)).fetchone()
             if row:
                 result = row[0]
@@ -3641,6 +3648,8 @@ class PostgresKnowledgeStore:
             value = row[0]
             if (value.get('reviewed',{}).get('evidence') or {}).get('pending_cvp_claim_ids'):
                 raise ChangeSetConflict('Claim management committed; CVP coverage/impact remains pending')
+            from backend.pipeline.claim_owner_revision import validate_dependency_completion
+            validate_dependency_completion({**value,'run_id':run_id},cursor=cursor)
             pending_management=(value.get('reviewed',{}).get('evidence') or {}).get('pending_cvp_management_record_keys')
             if pending_management and retained_impacts_resolution_path is None:
                 raise ChangeSetConflict('new coverage cannot clear pending existing CVP/link management')

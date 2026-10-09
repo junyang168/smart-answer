@@ -33,6 +33,17 @@ def guard_operations(value,operations):
         raise ValueError('explicit human NO-CHANGE decision forbids automatic retained link mutation')
 
 
+def managed_receipt(value,managed):
+    e=value['reviewed']['evidence'];a=e['approval']
+    result={'change_set_id':value['reviewed']['plan']['change_set_id'],
+            'material':a['pending_link_material'],'review':a['pending_link_review'],
+            'record_keys':sorted(managed)}
+    if a.get('prior_cvp_management'):
+        result.update(prior_management=a['prior_cvp_management'],owner_statement_review=a['terminal_review'],
+                      owner_claim_completion=a['owner_claim_completion'])
+    return result
+
+
 def qualification_only(operations,terminal_sha):
     if not operations or any(op['collection']!='evidence_steps' or op['operation']!='update' for op in operations):
         raise ValueError('retained impact closure requires qualification-only source transaction')
@@ -131,9 +142,7 @@ def build(store,run_id,audit_path,output,*,semantic_resolution=None):
         'model_verdicts_changed':False,'new_model_calls':0,
         'semantic_resolution':binding(semantic_resolution) if semantic_resolution else None}
     if managed:
-        body['reviewed_link_management']={'change_set_id':saved['reviewed']['plan']['change_set_id'],
-            'material':approval['pending_link_material'],'review':approval['pending_link_review'],
-            'record_keys':sorted(managed)}
+        body['reviewed_link_management']=managed_receipt(saved,managed)
     body['artifact_sha256']=sha256_json(body);write_immutable(output,body)
     return Path(output)
 
@@ -172,9 +181,7 @@ def validate_for_completion(value,path,audit_binding,cursor,*,semantic_resolutio
     from backend.pipeline.cvp_pending_link_management import resolved_pending_operations
     managed=resolved_pending_operations(value,cursor=cursor)
     if managed:
-        expected={'change_set_id':value['reviewed']['plan']['change_set_id'],
-            'material':evidence['approval']['pending_link_material'],'review':evidence['approval']['pending_link_review'],
-            'record_keys':sorted(managed)}
+        expected=managed_receipt(value,managed)
         if body.get('reviewed_link_management')!=expected:
             raise ValueError('pending link completion omitted/changed reviewed management proof')
         for key,op in managed.items():

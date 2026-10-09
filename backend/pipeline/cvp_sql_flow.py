@@ -504,6 +504,9 @@ def run_group(store, definition, group, row, *, root):
     if saved["checkpoint"] != "applied": return
     stage_event('applied', sequence=group['sequence'], run_id=run_id)
     evidence = saved.get('reviewed',{}).get('evidence') or saved.get('import_certificate',{})
+    if evidence.get('approval',{}).get('owner_claim_completion'):
+        from backend.pipeline.claim_owner_revision import finish_dependency_audit
+        finish_dependency_audit(store,run_id)
     if evidence.get('pending_cvp_claim_ids'):
         from backend.pipeline.cvp_sql_actions import execute_coverage_action
         from backend.pipeline.source_reconciliation_runtime import ProductionPorts
@@ -769,6 +772,8 @@ def main(argv=None):
                         help='Exact original generation raw leaf; indexed by actual committed decision artifact SHA')
     parser.add_argument('--retained-content-disposition',type=Path,
                         help='Exact human no-change decision for current retained links; never a model pass or write permission')
+    parser.add_argument('--owner-claim-revision',type=Path,
+                        help='Exact human identification of a Claim omission; normal GPT/Opus joint review still required')
     args = parser.parse_args(argv)
     from backend.pipeline.cvp_batch_identity_integration import ENABLED, VERSION
     ENABLED.set(args.integrate_batch_candidates)
@@ -786,6 +791,9 @@ def main(argv=None):
     from backend.pipeline.cvp_retained_review_separation import HUMAN_NAME
     if (args.output_root/HUMAN_NAME).exists() and not args.retained_content_disposition:
         raise ValueError('human retained disposition binding requires explicit recovery flag')
+    from backend.pipeline.claim_owner_revision import NAME as OWNER_CLAIM_NAME
+    if (args.output_root/OWNER_CLAIM_NAME).exists() and not args.owner_claim_revision:
+        raise ValueError('owner Claim revision binding requires explicit recovery flag')
     load_dotenv(PROJECT/".env")
     if args.database_url:os.environ['KNOWLEDGE_DATABASE_URL']=args.database_url
     store = PostgresKnowledgeStore(args.database_url)
@@ -851,6 +859,15 @@ def main(argv=None):
                 raise ValueError('human retention outside execution boundary')
             write_immutable(args.output_root/HUMAN_NAME,{
                 'human_disposition':binding(args.retained_content_disposition)})
+        if args.owner_claim_revision:
+            from backend.pipeline.claim_owner_revision import execute as owner_claim_revision
+            direction=read_artifact(args.owner_claim_revision)
+            target=store.get_cvp_group(direction['run_id'])
+            if (direction['campaign_sha256']!=args.sql_campaign or not target
+                    or target['campaign_sha256']!=args.sql_campaign
+                    or (invocation_limit is not None and target['sequence']>invocation_limit)):
+                raise ValueError('owner Claim completion outside current admitted execution boundary')
+            write_immutable(args.output_root/OWNER_CLAIM_NAME,{'direction':binding(args.owner_claim_revision)})
         if args.integrate_batch_candidates:
             write_immutable(integration_binding, {'schema_version':VERSION,
                 'campaign_sha256':args.sql_campaign,'new_groups_only':True,'correction_budget':1})
@@ -930,6 +947,12 @@ def main(argv=None):
             from backend.pipeline.cvp_scope_management import read_policy
             read_policy(binding(args.cvp_scope_policy))
             write_immutable(args.output_root/'cvp-scope-policy-binding.json',{'policy':binding(args.cvp_scope_policy)})
+        if args.owner_claim_revision:
+            from backend.pipeline.source_reconciliation_runtime import ProductionPorts
+            owner_direction=read_artifact(args.owner_claim_revision)
+            owner_claim_revision(store,owner_direction['run_id'],args.owner_claim_revision,
+                args.output_root/owner_direction['run_id']/'claim-issues',ProductionPorts())
+            definition,group,row=next_group(store,args.sql_campaign)
         if args.action!='group':
             if not args.run_id:raise ValueError('bounded action requires exact admitted SQL run ID')
             saved=store.get_cvp_group(args.run_id)

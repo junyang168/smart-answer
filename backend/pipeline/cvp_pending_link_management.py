@@ -225,12 +225,16 @@ def execute(store,run_id,*,root,ports):
 def resolved_pending_operations(value,store=None,cursor=None):
     """Exact changed subset for completion; never a generic pending-clear bit."""
     evidence=value['reviewed']['evidence'];approval=evidence['approval']
+    if approval.get('prior_cvp_management'):
+        from backend.pipeline.claim_owner_revision import managed_operations
+        return managed_operations(value,store=store,cursor=cursor)
     if not approval.get('pending_link_material'):return {}
     from backend.pipeline.cvp_sql_flow import check_binding
     check_binding(approval['pending_link_material']);check_binding(approval['pending_link_review'])
     material=body(read(Path(approval['pending_link_material']['path'])))
     package=evidence['package']['payload'];validate_package(package)
-    if evidence['action']['materials']!=material or material['run_id']!=value['run_id']:
+    action=evidence['action']
+    if (evidence['action']['materials']!=material and action.get('materials_sha256')!=sha256_json(material)) or material['run_id']!=value['run_id']:
         raise ValueError('pending link action/resolution foreign material')
     cid=value['reviewed']['plan']['change_set_id']
     if cid not in value['change_set_ids'] or value['reviewed']['plan']['source_kind']!=VERSION:

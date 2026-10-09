@@ -298,8 +298,12 @@ def manifest_for_issues(store, run_id, issues, policy_binding, root):
     if not issues or len({i.source_id for i in issues}) != 1:
         raise ValueError("issue repair uses one own source at a time, not a mixed-source extraction")
     saved = store.get_cvp_group(run_id)
-    if not saved or not {i.claim_id for i in issues} <= set(saved["claim_ids"]):
+    if not saved:
         raise ValueError("issue repair changed original group membership")
+    for i in issues:
+        if i.claim_id not in saved['claim_ids']:
+            from backend.pipeline.claim_owner_revision import dependency_issue
+            dependency_issue(i,saved,store.get_record_state('claims',i.claim_id))
     policy = read_policy(policy_binding)
     sid = issues[0].source_id
     records = store.read_affected_context([("claims", i.claim_id) for i in issues])

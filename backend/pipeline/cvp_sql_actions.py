@@ -121,6 +121,8 @@ def prepare_source_action(store,run_id,manifest,*,root):
     # The existing content compiler gets only the complete affected current
     # graph. Its before_records are scoped model evidence, not a Registry dump.
     materials=content.freeze(manifest,states)
+    from backend.pipeline.claim_owner_revision import attach_material
+    attach_material(store,saved,materials,root)
     materials['sql_scope']={'contract':'wang_cvp_sql_transaction_v2','run_id':run_id,
                            'read_pins':pin_rows(pins(records)),'consumer_roots':[list(k) for k in keys]}
     if len(canonical_json(materials).encode())>64*1024**2 or time.perf_counter()-started>5:
@@ -196,6 +198,8 @@ def execute_source_action(store,run_id,manifest,*,root,ports,claim_first=False):
     if manifest.get('viewpoint_scope_repair') and not proposal.records:
         raise ValueError('scope assessment retained existing scope; unresolved original finding needs direction, no empty commit/retry loop')
     package=content.compile_package(materials,proposal,raw,frozen_sha256=action['materials_sha256'],claim_first=claim_first)
+    from backend.pipeline.claim_owner_revision import validate_joint
+    joint_owner_claim=validate_joint(materials,proposal,package)
     if (root/'membership-resolution.json').exists():
         from backend.pipeline.cvp_membership_management import append_joint_package
         from backend.pipeline.source_reconciliation_runner import effective_proposal, validate_raw
@@ -210,7 +214,12 @@ def execute_source_action(store,run_id,manifest,*,root,ports,claim_first=False):
     from backend.pipeline.cvp_sql_flow import verified_group_backup
     backup=verified_group_backup(root,package,ports) if issue_context or manifest.get('viewpoint_scope_repair') else ports.backup(root)
     original=store.get_cvp_group(run_id).get('reviewed',{}).get('evidence',{})
-    approval={'terminal_review':binding(root/(raw['stage']+'.raw.json'))}
+    approval={**(original.get('approval',{}) if joint_owner_claim else {}),
+              'terminal_review':binding(root/(raw['stage']+'.raw.json'))}
+    if joint_owner_claim:
+        approval['owner_claim_completion']=materials['owner_claim_completion']
+        if materials.get('prior_cvp_management'):
+            approval['prior_cvp_management']=materials['prior_cvp_management']
     if (root/'membership-resolution.json').exists():
         approval['membership_management']=binding(root/'membership-resolution.json')
     for stage in ('initial_review','final_review','final_review_input_repair'):
@@ -224,13 +233,19 @@ def execute_source_action(store,run_id,manifest,*,root,ports,claim_first=False):
         # Uncommitted original model materials include the changed Claim. They
         # are retained as history, never re-labelled approved for the new cut.
         pending=list(saved['claim_ids']) if not original else sorted(set(original.get('pending_cvp_claim_ids',[]))|set(issue_context['claim_ids']))
+    if joint_owner_claim:
+        # Actual complete joint proposal/Opus reviewed every existing active
+        # connection against the new Claim. This is not create-only coverage.
+        # Other already-pending Claims are never cleared by this repair.
+        pending=sorted(set(original.get('pending_cvp_claim_ids',[]))-set(issue_context['claim_ids']))
     return commit_package(store,run_id,package=package,
         approval=approval,
         authorization=action['authorization'],backup=backup,sources=action_sources(materials),
         read_pins=read_pins,reason='approved CVP management scope enrichment' if manifest.get('viewpoint_scope_repair') else 'approved bounded source/Claim revision',actor='owner-authorized-pipeline',
         source_kind=SOURCE_SCHEMA,viewpoint_ids=sorted(views),
         disposition=original.get('disposition'),action=action,
-        pending_cvp_claim_ids=pending)
+        pending_cvp_claim_ids=pending,
+        pending_cvp_management_record_keys=original.get('pending_cvp_management_record_keys',[]) if joint_owner_claim else ())
 
 
 def merge_dispositions(old,new):

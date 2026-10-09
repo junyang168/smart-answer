@@ -701,6 +701,8 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
         check_packet(frozen, first['response'] if stage=='initial_review' else correction['response'], packet, base)
     if expected["artifact_sha256"] != app.get("review_sha256") or sha256_json(proposal.model_dump()) != app.get("proposal_sha256"):
         raise ValueError("final review/proposal provenance drift")
+    from backend.pipeline.claim_owner_revision import validate_joint
+    validate_joint(frozen,proposal,package)
     rebuilt = contract.compile_package(frozen, proposal, raw, frozen_sha256=frozen_sha256, claim_first=claim_first)
     if packet.get('membership_resolution'):
         from backend.pipeline.cvp_membership_management import append_joint_package
