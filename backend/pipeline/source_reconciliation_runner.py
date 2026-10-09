@@ -249,6 +249,8 @@ class Runner:
             adapter = self.ports.claim_issue_adapter(role, evidence_eligibility=True)
         else:
             adapter = self.ports.scope_adapter(role) if scope else self.ports.claim_issue_adapter(role) if issue else self.ports.deferred_adapter(role) if deferred else self.ports.adapter(role)
+        from backend.pipeline.claim_first_management import scoped_adapter
+        adapter = scoped_adapter(adapter, packet)
         from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
         raw_path = self.root / (stage + '.raw.json')
         adapter = stage_adapter(adapter, packet, raw_path, saved=read(raw_path) if raw_path.exists() else None)
@@ -337,6 +339,14 @@ class Runner:
         self.guard(frozen)
         correction = self.call("correction", correction_packet)
         proposed = effective_proposal(frozen, correction["response"])
+        if getattr(self, 'claim_first', False):
+            from backend.pipeline.claim_first_management import final_packet
+            proposed, review_packet = final_packet(self.root, frozen, proposed, correction)
+            self.guard(frozen)
+            final = self.call('final_review', review_packet)
+            if not contract.validate_review(review_packet, final['response']):
+                raise Stop('Claim-first final source postimage review rejected; no extra correction')
+            return proposed, final
         from backend.pipeline.cvp_membership_management import retirement_handoff
         handoff = retirement_handoff(frozen, proposed, correction)
         if handoff is not None:
@@ -634,7 +644,8 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
         proposal=Proposal.model_validate(packet['proposal'])
     else:
         proposal = effective_proposal(frozen, packet["proposal"]) if frozen["manifest"].get("claim_issue") else contract.Proposal.model_validate(packet["proposal"])
-    base = contract.review_packet(frozen, proposal)
+    claim_first = bool(packet.get('claim_first_management'))
+    base = contract.review_packet(frozen, proposal, claim_first=claim_first)
     if not contract.validate_review(packet, raw["response"]):
         raise ValueError("terminal complete postimage review invalid")
     # Authenticate proposal and correction chain. A final reply cannot bypass initial review.
@@ -661,7 +672,14 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
             raise ValueError("correction chain drift")
         correction = validate_raw(root, "correction", correction_packet)
         corrected = effective_proposal(frozen, correction['response'])
-        if packet.get('membership_resolution'):
+        if claim_first:
+            if stage != 'final_review':
+                raise ValueError('Claim-first cannot mint an additional terminal review')
+            from backend.pipeline.claim_first_management import final_packet
+            projected, expected_packet = final_packet(root, frozen, corrected, correction)
+            if proposal != projected or packet != expected_packet:
+                raise ValueError('Claim-first does not bind exact original correction and pending CVP postimages')
+        elif packet.get('membership_resolution'):
             if stage != 'final_review':
                 raise ValueError('membership cannot mint an extra terminal review budget')
             from backend.pipeline.cvp_membership_management import joint_review_packet
@@ -677,11 +695,11 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
         check_packet(frozen, correction['response'], old_packet, base)
         if contract.validate_review(old_packet, old_raw['response']) or packet != repaired_packet(root, frozen, proposal, old_packet, old_raw, correction):
             raise ValueError('input repair must preserve the exact rejected terminal review')
-    elif not packet.get('membership_resolution'):
+    elif not packet.get('membership_resolution') and not claim_first:
         check_packet(frozen, first['response'] if stage=='initial_review' else correction['response'], packet, base)
     if expected["artifact_sha256"] != app.get("review_sha256") or sha256_json(proposal.model_dump()) != app.get("proposal_sha256"):
         raise ValueError("final review/proposal provenance drift")
-    rebuilt = contract.compile_package(frozen, proposal, raw, frozen_sha256=frozen_sha256)
+    rebuilt = contract.compile_package(frozen, proposal, raw, frozen_sha256=frozen_sha256, claim_first=claim_first)
     if packet.get('membership_resolution'):
         from backend.pipeline.cvp_membership_management import append_joint_package
         rebuilt = append_joint_package(rebuilt,root,frozen,corrected,correction)
@@ -712,6 +730,8 @@ def validate_raw(root: Path, stage: str, packet: dict) -> dict:
                             deferred=bool(packet.get("manifest", {}).get("deferred_repair")),
                             issue=bool(packet.get("manifest", {}).get("claim_issue")),
                             evidence_eligibility=eligibility_profile(packet))
+    from backend.pipeline.claim_first_management import scoped_adapter
+    adapter = scoped_adapter(adapter, packet)
     raw = read(root / (stage + ".raw.json"))
     from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
     adapter = stage_adapter(adapter, packet, root / (stage + '.raw.json'), saved=raw)

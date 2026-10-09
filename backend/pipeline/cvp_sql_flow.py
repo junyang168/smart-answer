@@ -671,6 +671,8 @@ def main(argv=None):
     parser.add_argument('--integrate-batch-candidates',action='store_true',
                         help='Explicit new-group identity integration; never upgrades saved legacy answers')
     parser.add_argument('--action',choices=('group','source','owner-link','link-target','link-retarget','link-retire'),default='group')
+    parser.add_argument('--claim-first',action='store_true',
+                        help='Finish only the original bounded Claim/Evidence action; keep all CVPs pending and stop before CVP/group execution')
     parser.add_argument('--candidate-viewpoint-id',action='append',default=[],
                         help='Exact existing target IDs for read-only link-target comparison; not content approval')
     parser.add_argument('--run-id')
@@ -707,6 +709,8 @@ def main(argv=None):
     store = PostgresKnowledgeStore(args.database_url)
     definition,group,row = next_group(store,args.sql_campaign)
     execution_boundary(args.output_root,args.sql_campaign,definition,args.stop_after_group)
+    if args.claim_first and args.action!='source':
+        raise ValueError('Claim-first is an explicit original source action, never a group/CVP resume')
     if args.pause_after_group is not None and (not 1 <= args.pause_after_group <= len(definition['groups'])
             or args.stop_after_group is None or args.pause_after_group > args.stop_after_group):
         raise ValueError('acceptance pause must narrow an explicit original execution boundary')
@@ -840,7 +844,24 @@ def main(argv=None):
             from backend.pipeline.source_reconciliation_runtime import ProductionPorts
             if args.action=='source':
                 if not args.manifest:raise ValueError('source action lacks bounded Manifest/authorization')
-                execute_source_action(store,args.run_id,read_artifact(args.manifest),root=action_root/'source',ports=ProductionPorts())
+                manifest=read_artifact(args.manifest)
+                source_root=action_root/'source'
+                if args.claim_first:
+                    from backend.pipeline.cvp_sql_actions import source_action_id
+                    from backend.pipeline.source_reconciliation import Manifest
+                    aid=source_action_id(Manifest.model_validate(manifest))
+                    registered=saved.get('execution_roots',{}).get(aid)
+                    if not registered:raise ValueError('Claim-first requires original registered action; no new root/budget')
+                    bound=Path(registered).resolve()
+                    if not bound.is_relative_to(args.output_root.resolve()/args.run_id) or bound.name!=aid:
+                        raise ValueError('Claim-first original SQL action root drift')
+                    source_root=bound.parent
+                execute_source_action(store,args.run_id,manifest,root=source_root,ports=ProductionPorts(),claim_first=args.claim_first)
+                if args.claim_first:
+                    from backend.pipeline.claim_first_management import finish_claim_audit
+                    finish_claim_audit(store,args.run_id,bound)
+                    stage_event('claim_layer_audited_cvp_pending', run_id=args.run_id, group_complete=False)
+                    return 0
             elif args.action=='link-retire':
                 if not args.direction:raise ValueError('retirement requires exact human disposition')
                 from backend.pipeline.cvp_link_retirement import execute

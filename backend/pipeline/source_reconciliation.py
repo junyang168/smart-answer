@@ -540,7 +540,7 @@ def _semantic(row: dict) -> dict:
     return {k: v for k, v in row.items() if k not in PROVENANCE | {"revision"}}
 
 
-def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = False) -> dict[str, dict]:
+def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = False, claim_first: bool = False) -> dict[str, dict]:
     before = index(frozen["before_records"])
     manifest = Manifest.model_validate(frozen["manifest"])
     allowed = {p.key: p for p in manifest.permissions}
@@ -559,9 +559,17 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
     if len(dispositions) != len(proposal.dispositions) or set(dispositions) != required:
         raise ValueError("every affected consumer requires exactly one disposition")
     unresolved = {d.record_key for d in proposal.dispositions if d.action == 'unresolved'}
+    if claim_first:
+        from backend.pipeline.claim_first_management import SOURCE_COLUMNS, CVP_COLUMNS
+        pending = {k for k in required if split_key(k)[0] in CVP_COLUMNS}
+        if (not manifest.claim_issue or unresolved != pending
+                or any(split_key(k)[0] not in SOURCE_COLUMNS for k in proposed)):
+            raise ValueError('Claim-first must defer every CVP and write only source-owned records')
+        review_only = True
     if review_only and (not frozen.get('claim_issue_context', {}).get('scope_amendment')
-            or not any(row['pin'][2] is True for row in frozen.get('sql_scope', {}).get('read_pins', []))
+            or (not claim_first and not any(row['pin'][2] is True for row in frozen.get('sql_scope', {}).get('read_pins', [])))
             or any(split_key(k)[0] not in {'canonical_viewpoints', 'viewpoint_revisions'}
+                   and not (claim_first and split_key(k)[0] in CVP_COLUMNS)
                    or k not in before or k in proposed for k in unresolved)):
         raise ValueError('unresolved review requires bounded unchanged CVP context and SQL retirement proof')
     if frozen["inventory"]["unknown_keys"] or (unresolved and not review_only):
@@ -834,8 +842,8 @@ def validate_basis_groups(spans: list[tuple]) -> None:
             raise ValueError("overlapping anchors require one basis group and exactly one representative")
 
 
-def review_packet(frozen: dict, proposal: Proposal, *, review_only: bool = False) -> dict:
-    validate_proposal(frozen, proposal, review_only=review_only)
+def review_packet(frozen: dict, proposal: Proposal, *, review_only: bool = False, claim_first: bool = False) -> dict:
+    validate_proposal(frozen, proposal, review_only=review_only, claim_first=claim_first)
     selected = frozen["inventory"]["affected_keys"] + frozen["inventory"]["context_keys"]
     before = index(frozen["before_records"])
     result = {
@@ -860,7 +868,15 @@ def review_packet(frozen: dict, proposal: Proposal, *, review_only: bool = False
                if frozen["manifest"].get("deferred_repair") else {}),
         },
     }
-    if review_only:
+    if claim_first:
+        from backend.pipeline.claim_first_management import CVP_COLUMNS, VERSION as CLAIM_FIRST_VERSION
+        result['source_first_pending_cvp'] = {
+            'schema_version': CLAIM_FIRST_VERSION,
+            'pending_record_keys': sorted(d.record_key for d in proposal.dispositions
+                                         if split_key(d.record_key)[0] in CVP_COLUMNS),
+            'source_only_write': True, 'cvp_content_approved': False,
+            'group_completion_blocked': True}
+    elif review_only:
         result['unresolved_proposal_review'] = {
             'schema_version': 'source_unresolved_retirement_context_review.v1',
             'retired_current_sql_pins': [row for row in frozen['sql_scope']['read_pins'] if row['pin'][2] is True],
@@ -884,13 +900,19 @@ def validate_review(packet: dict, response: dict) -> bool:
         raise ValueError("review did not cover the exact complete consumer denominator")
     if any(v.approved and v.problems for v in review.verdicts):
         raise ValueError("pass with problems is not an approval")
+    if packet.get('source_first_pending_cvp'):
+        from backend.pipeline.claim_first_management import PENDING_PROBLEM
+        pending = set(packet['source_first_pending_cvp']['pending_record_keys'])
+        return all((not v.approved and v.problems == [PENDING_PROBLEM] and bool(v.reason))
+                   if v.record_key in pending else (v.approved and not v.problems)
+                   for v in review.verdicts)
     return (not packet.get('unresolved_proposal_review')
             and all(v.approved and not v.problems for v in review.verdicts))
 
 
-def compile_package(frozen: dict, proposal: Proposal, raw: dict, *, frozen_sha256: str | None = None) -> dict:
+def compile_package(frozen: dict, proposal: Proposal, raw: dict, *, frozen_sha256: str | None = None, claim_first: bool = False) -> dict:
     """Only declared deterministic provenance changes after actual Opus approval."""
-    packet = review_packet(frozen, proposal)
+    packet = review_packet(frozen, proposal, claim_first=claim_first)
     if not validate_review(packet, raw["response"]):
         raise ValueError("partial/rejected review cannot authorize a package")
     before = index(frozen["before_records"])

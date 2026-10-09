@@ -163,7 +163,7 @@ class ScopedSourceModelStages(ModelStages):
     def run(self,*args,**kwargs):raise RuntimeError('legacy source execution is retired')
 
 
-def execute_source_action(store,run_id,manifest,*,root,ports):
+def execute_source_action(store,run_id,manifest,*,root,ports,claim_first=False):
     manifest=content.Manifest.model_validate(manifest).model_dump(mode='json')
     root=root/source_action_id(content.Manifest.model_validate(manifest))
     action=prepare_source_action(store,run_id,manifest,root=root)
@@ -184,10 +184,11 @@ def execute_source_action(store,run_id,manifest,*,root,ports):
     # stages nor apply are replayed. Audit/coverage continue in the group flow.
     initialize_subscription_runtime(ports)
     stages=ScopedSourceModelStages(root,ports,store,read_pins)
+    stages.claim_first=claim_first
     proposal,raw=stages.reviewed(materials)
     if manifest.get('viewpoint_scope_repair') and not proposal.records:
         raise ValueError('scope assessment retained existing scope; unresolved original finding needs direction, no empty commit/retry loop')
-    package=content.compile_package(materials,proposal,raw,frozen_sha256=action['materials_sha256'])
+    package=content.compile_package(materials,proposal,raw,frozen_sha256=action['materials_sha256'],claim_first=claim_first)
     if (root/'membership-resolution.json').exists():
         from backend.pipeline.cvp_membership_management import append_joint_package
         from backend.pipeline.source_reconciliation_runner import effective_proposal, validate_raw

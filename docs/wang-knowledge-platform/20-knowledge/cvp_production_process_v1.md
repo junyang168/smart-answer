@@ -355,6 +355,10 @@ GPT 提議不批准自己的內容；Opus 檢查完整新 Claim、證據、差�
 
 ### 13.6 Claim 變更到 CVP management 的交接
 
+**先完成 Claim／Evidence 本源，再處理 CVP。** 已保存聯合提案中的本源修訂若可獨立成立，不得因另一 CVP 成員／身份問題而先執行 CVP 管理、阻擋本源終審與提交。共同入口 `--action source --claim-first` 只消費原註冊 action／root、精確舊提議與唯一纠正；從原纠正後像選取 Claim／Evidence／fragment 寫集，另把全部 CVP 影響明示為 pending，不把原未決改成 retain 或 pass。仍使用原尚未消費的完整 Opus 終審，逐項批准本源後像；CVP verdict 明示未審、非內容批准。無合法本源修訂、原終審已另有 intent／回答、未知呼叫、缺來源／版本／hold 或真正本源拒絕均不產生新預算。
+
+本源合法批准後共用短 SQL transaction、實際完整 RETURNING／後像／歷史／新連線回讀及直接 SSD backup。交易保留完整 `pending_cvp_claim_ids` 並失效相關舊完成資格，不能留下看似已審的新版本下游。以當前原組全部 Claims、完整自身正文作獨立 Gemini 第 1／2／3 層審計，逐項驗證實際模型回答及來源，保存 `claim_layer_audited_cvp_pending` 證明；不作第 4 層 CVP 身份判讀。這個入口隨即退出，不啟動 CVP 管理、不標 group audited、不啟動下一組。CVP 只在本源確已完成後依新當前材料另行管理；原 CVP 提案、拒絕和預算保持歷史，不能沿用舊前像重新整包提交。
+
 Claim change 和 Claim Evidence change 都須產出精確影響清單；Claim statement 沒變，不代表相關 CVP 一定不受影響。Evidence 被增加、移除、限定或改變支持資格時，原 Claim–CVP 關係的依據也可能變化。共享 Evidence 變更先找齊所有引用它的 Claims，再找這些 Claims 的全部 CVP 連接，不能只看當前遇到的一條 Claim。
 
 交接沿用已有 SQL action／材料引用，至少包含：Claim 與 Evidence 的前後版本、逐欄差異、正文依据及实际审核、所有受影響連接／CVPs／原組、確定保留項及待判項。它是本源修訂結果，不是 CVP 修改批准；不新增消息系統或第二份歷史。

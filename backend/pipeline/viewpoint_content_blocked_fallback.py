@@ -100,14 +100,17 @@ def archived_block_binding(layer, identity, prompt, schema):
     path=CACHE/'providers'/(key+'.json');write_immutable(path,receipt)
     return binding(path)
 
-def verify_saved_full_audit(audit_path):
+def verify_saved_full_audit(audit_path, *, layers=('3','4')):
     """Rebuild every current prompt; consume only exact cached full-input results."""
     from dotenv import dotenv_values
     settings=dotenv_values(Path(__file__).resolve().parents[2]/'.env')
     cache_root=Path(settings['DATA_BASE_DIR'])/'wang-knowledge-platform/staging/reports/library-audit/.judgements'
     audit=read_artifact(audit_path);bindings=[binding(audit_path)]
     if audit['meta']['model']!='gemini-3.8-flash':raise ValueError('foreign saved audit')
+    if layers not in {('3','4'), ('3',)}:
+        raise ValueError('unsupported exact audit domain')
     for layer,key in (('3','claim_id'),('4','viewpoint_id')):
+        if layer not in layers:continue
         report=audit['layers'][layer]
         if not report['complete'] or any(report.get(k,0) for k in ('model_errors','no_source_text')):
             raise ValueError('saved audit incomplete')
