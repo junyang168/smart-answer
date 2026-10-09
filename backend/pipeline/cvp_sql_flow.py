@@ -306,12 +306,24 @@ def reviewed_cvp_package(root, materials, store, *, require_resolved=False):
         if findings:
             raise IssuesDetected(findings,origin=origin,report=binding(report_path),
                                  correction_used=correction_used,terminal_refusal=terminal_refusal)
+    def retained_review_loader(**kwargs):
+        from backend.pipeline.cvp_retained_review_separation import build_boundary,policy_for
+        if policy_for(root) is None:return None
+        expected=decoded_pins(materials['read_pins'])
+        with store.connect() as conn, conn.cursor() as cursor:
+            store._assert_transaction_read_pins(cursor,expected)
+        result=build_boundary(root,store,source_loader=identity_source_loader,**kwargs)
+        if result is not None:
+            for row in result[1]['current_read_pins']:
+                if expected.get((row['collection'],row['object_id'])) != (row['revision'],row['content_sha256'],False):
+                    raise ValueError('retained approval outside immutable original SQL read set')
+        return result
     report = run_batch(batch_id=packet["batch_id"],scope_label=packet["scope_label"],
         claims=[ReviewClaim.model_validate(row) for row in packet["claims"]],registry_context=packet["registry_context"],
         pending_candidates=[],output_dir=root,current_claim_links=packet["existing_links"],
         dependents_loader=store.load_revision_dependents,claim_issue_handler=claim_issue_handler,
         management_context=materials.get('claim_management_resolution'),
-        identity_source_loader=identity_source_loader,**models)
+        identity_source_loader=identity_source_loader,retained_review_loader=retained_review_loader,**models)
     if report['approval_outcome']!='pass' or report['escalations']:
         raise ValueError('normal CVP terminal review unresolved; no second correction')
     if require_resolved:resolved_report(report,[row["claim_id"] for row in packet["claims"]])
@@ -325,12 +337,15 @@ def reviewed_cvp_package(root, materials, store, *, require_resolved=False):
         registry_context=packet["registry_context"],revision_dependents=report["_revision_dependents"],
         proposal_artifact_sha256=proposal["artifact_sha256"],review_artifact_sha256=review["artifact_sha256"],
         proposer_model_id=proposal["model_id"],reviewer_model_id=review["model_id"],decided_at=stable_decided_at(root),
-        current_claim_links=packet["existing_links"])
+        current_claim_links=packet["existing_links"],
+        retained_null_link_ids=(report.get('_retained_review_boundary') or {}).get('retained_null_locator_links',[]))
     write_immutable(root/"reviewed-package.json",package)
     from backend.api.canonical_repository.viewpoint_batch_resolution import build_batch_disposition
     disposition = build_batch_disposition(proposal=report["_effective_proposal"],batch_identity={"batch_id":packet["batch_id"]},
         effective_proposal_sha256=sha256_json(report["_effective_proposal"].model_dump(mode="json")),apply_status="planned")
     approval = {"proposal":binding(root/proposal_name),"review":binding(root/review_name)}
+    if report.get('_retained_review_boundary') is not None:
+        approval['retained_review_boundary'] = binding(root/'retained-review-boundary.json')
     if (root/'batch-identity-integration.json').exists():
         for name in ('batch-identity-integration.json','raw-proposal.json','raw-consolidation.json',
                      'raw-identity-reconsideration.json'):
@@ -699,6 +714,10 @@ def main(argv=None):
                         help='Exact once-only engineering review input repair; no content or correction permission')
     parser.add_argument('--claim-issue-rescope-authorization',type=Path,
                         help='Exact once-only pre-review scope amendment; original issue calls remain reserved')
+    parser.add_argument('--retained-link-review-policy',type=Path,
+                        help='Separate existing approved links from new proposed writes; no mutation/retry permission')
+    parser.add_argument('--retained-generation-artifact',type=Path,action='append',default=[],
+                        help='Exact original generation raw leaf; indexed by actual committed decision artifact SHA')
     args = parser.parse_args(argv)
     from backend.pipeline.cvp_batch_identity_integration import ENABLED, VERSION
     ENABLED.set(args.integrate_batch_candidates)
@@ -710,6 +729,9 @@ def main(argv=None):
     from backend.pipeline.claim_issue_rescope import NAME as AMENDMENT_NAME
     if (args.output_root/AMENDMENT_NAME).exists() and not args.claim_issue_rescope_authorization:
         raise ValueError('Claim issue scope amendment binding requires explicit recovery flag')
+    from backend.pipeline.cvp_retained_review_separation import NAME as RETAINED_NAME
+    if (args.output_root/RETAINED_NAME).exists() and not args.retained_link_review_policy:
+        raise ValueError('retained-link separation binding requires explicit recovery flag')
     load_dotenv(PROJECT/".env")
     if args.database_url:os.environ['KNOWLEDGE_DATABASE_URL']=args.database_url
     store = PostgresKnowledgeStore(args.database_url)
@@ -770,6 +792,12 @@ def main(argv=None):
             write_immutable(integration_binding, {'schema_version':VERSION,
                 'campaign_sha256':args.sql_campaign,'new_groups_only':True,'correction_budget':1})
         execution_boundary(args.output_root,args.sql_campaign,definition,args.stop_after_group,persist=True)
+        if args.retained_link_review_policy:
+            from backend.pipeline.cvp_retained_review_separation import validate_policy,generation_artifacts,VERSION as RETAINED_VERSION
+            validate_policy(read_artifact(args.retained_link_review_policy))
+            write_immutable(args.output_root/RETAINED_NAME,{'schema_version':RETAINED_VERSION,
+                'campaign_sha256':args.sql_campaign,'policy':binding(args.retained_link_review_policy),
+                'generation_artifacts':generation_artifacts(args.retained_generation_artifact)})
         if args.claim_issue_rescope_authorization:
             from backend.pipeline.claim_issue_rescope import validate_live
             authorization=binding(args.claim_issue_rescope_authorization)

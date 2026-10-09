@@ -378,6 +378,10 @@ CVP management 依新 Claim／Evidence 及相關 CVP 全部必要成員，逐項
 
 直接的 Claim–CVP 連接錯誤只進 CVP management；只有本源核查另證明 Claim／Evidence 本身有錯，才交回 Claim management。不能為讓一條連接過關而改 Claim，也不能為保留旧 Claim 而硬造 CVP 支持。
 
+**新增提案審核與已提交連接維護分開。** 已有連接可能是在完整教導語境中形成並獨立批准；本次較窄、按 Claim 切分的材料所產生的拒絕，不能自動推翻原判定，也不能成為修改舊連接以讓新組通過的理由。先核對原生成判定、當前版本、來源及完整自身正文，區分同一教導的指代／省略解釋與借入另一項獨立結論。原判定及其依據未變時，明示保留既有連接；新的提案仍獨立審核，不以保留項冒充新內容批准。
+
+`--retained-link-review-policy` 綁定此審核邊界；`--retained-generation-artifact` 只指定原生成 raw 的精確 leaf 檔案，依已提交判定中的 artifact SHA 索引，驗證完整物理檔及原回答，不搜索歷史鏈。尚未開始的新組在首次提議前保存独立 profile，首次審核即讀完整自身正文並區分保留與新增；已保存回答絕不升級為新 profile。已保存的原拒絕、唯一纠正及所有預算不改；只在原終審尚未呼叫時，將精確 SQL 原批准、原判定語境、完整自身正文及保留項的儲存表示提供給該原終審，零額外 GPT。程式投影只反映實際既有 type／target／locator／Evidence 綁定，保留原理由並展示差異，不改 Registry。完整語境仍不能確定或證明實質錯誤時，保存原終審及具體連接 ID，形成獨立人工內容判讀交接；不自動降為 supports、不重審到 pass，也不授予組完成資格。新／保留 CVP 的完整獨立審計及全部既有 pending impacts 仍不可跳過。
+
 原等價成員實際退役而當前只剩 supports 時，交常規 `cvp_membership_management`，不逐案等 owner 批准同核心成員重驗。共同接點核對精確退役 SQL pins、完整 current CVR／成員、候選 Claim 的原批准及完整自身正文；GPT 提議新成員成分，Opus 獨立審核完整後像，必要時最多一輪糾正。不能自動把 supports 當等價、復活退役 Claim／VIC，或改教授來源、Claim、Evidence、核心、signature、scope 和原組成員。
 
 成員管理以當前 CVP／CVR 決定穩定呼叫身份，跨 finder／group／root 不重置預算。已消費的原 Claim 糾正保留未決；只有精確的新成員獨立批准證明，才能形成明示的 domain resolution 和完整聯合終審包，不簡單把原 raw 改成 retain。新連接及 fresh VIC／VID 與原獲准修訂共用一次 SQL transaction；寫集、版本、hold、完整後像／歷史和受影響獨立審計仍逐項驗證。獨立批准、待聯合提交、已提交與 group audited 分開記錄；機械測試不冒充真實內容批准。

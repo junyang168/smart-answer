@@ -427,6 +427,9 @@ def run_final_cvp_review(
 
     proposal_payload = proposal.model_dump(mode="json")
     proposal_sha256 = sha256_json(proposal_payload)
+    if (packet.get('retained_review_boundary') is not None
+            and packet['retained_review_boundary']['effective_proposal_sha256'] != proposal_sha256):
+        raise ValueError('retained final review boundary differs from complete effective proposal')
     initial_review_payload = initial_review.model_dump(mode="json")
     reconsideration_payload = reconsideration.model_dump(mode="json")
     initial_review_sha256 = sha256_json(initial_review_payload)
@@ -505,6 +508,7 @@ def run_batch(
     claim_issue_handler: Any = None,
     management_context: dict[str, Any] | None = None,
     identity_source_loader: Any = None,
+    retained_review_loader: Any = None,
 ) -> dict[str, Any]:
     # Accepted grouping preserves its source/argument order. The model packet
     # has a separate canonical ID-order contract; normalize only this local
@@ -529,6 +533,21 @@ def run_batch(
             if l.get('claim_id') in ids and l.get('effective_state')=='active'],key=lambda l:l['viewpoint_claim_link_id'])
         packet['existing_component_write_boundary']='现有active连接原类型、目标CVR、定位spans和Evidence/fragment绑定必须逐项原样保留；正常独立审核仍需检查它们，不借旧审核当本次批准。已有覆盖不新建重复link；只补尚无覆盖的实质成分。若现有连接需实质修改则报告阻塞，不自动改旧关系/CVP。'
         packet['packet_sha256']=sha256_json({k:v for k,v in packet.items() if k!='packet_sha256'})
+    from backend.pipeline.cvp_retained_review_separation import policy_for,VERSION as RETAINED_VERSION
+    retained_profile_path=output_dir/'retained-review-input-profile.json'
+    if current_claim_links is not None and not any(output_dir.glob('raw-proposal*')):
+        retained_policy=policy_for(output_dir)
+        if retained_policy is not None:
+            _write_immutable(retained_profile_path,{'schema_version':RETAINED_VERSION,
+                'batch_id':batch_id,'packet_sha256':packet['packet_sha256'],
+                'policy':retained_policy['policy'],'old_answers_upgraded':False})
+    retained_initial_profile = _read(retained_profile_path) if retained_profile_path.exists() else None
+    if retained_initial_profile is not None:
+        retained_policy=policy_for(output_dir)
+        if (retained_policy is None or retained_initial_profile['policy']!=retained_policy['policy']
+                or retained_initial_profile['batch_id']!=batch_id
+                or retained_initial_profile['packet_sha256']!=packet['packet_sha256']):
+            raise ValueError('new retained-review profile requires exact original policy/packet')
     _write_immutable(output_dir / "batch-packet.json", packet)
     # JSONB preserves all values but not object key insertion order. Legacy
     # lossless codecs bind their actual wire bytes as well as semantic SHA.
@@ -716,6 +735,13 @@ def run_batch(
     }
     if integration_review_context is not None:
         review_packet['same_batch_identity_integration']=integration_review_context
+    if retained_initial_profile is not None:
+        if identity_source_loader is None:
+            raise ValueError('new retained-review profile missing complete own-source loader')
+        review_packet['retained_existing_review_scope']=retained_initial_profile
+        review_packet['own_source_bodies']=identity_source_loader(sorted({c.source_id for c in claims}))
+        from backend.pipeline.cvp_retained_review_separation import final_adapter
+        reviewer=final_adapter(reviewer,initial=True)
     if (output_dir / 'owner-identity-validation.json').exists():
         from backend.pipeline.cvp_owner_candidate_identity import NAME, own_sources, reviewer_direction
         direction = _read(output_dir / NAME)
@@ -872,7 +898,22 @@ def run_batch(
             },
         )
 
-    if reconsideration_report and reconsideration_report["outcome"] == "resolved":
+    retained_boundary = None
+    final_packet = packet
+    if (reconsideration_report and reconsideration_report['outcome'] != 'resolved'
+            and retained_review_loader is not None):
+        projected = retained_review_loader(original=proposal.model_dump(mode='json'),
+            revised=revised_proposal.model_dump(mode='json'), review=review.model_dump(mode='json'), packet=packet,
+            reconsideration=reconsideration.model_dump(mode='json'))
+        if projected is not None:
+            effective_proposal, retained_boundary = projected
+            effective_validation = validate_proposal(proposal=effective_proposal,batch_id=batch_id,claims=claims,
+                registry_revision_ids=[str(r['viewpoint_revision_id']) for r in registry_context if r.get('viewpoint_revision_id')])
+            final_packet = {**packet, 'retained_review_boundary':retained_boundary}
+            from backend.pipeline.cvp_retained_review_separation import final_adapter
+            final_reviewer = final_adapter(final_reviewer if final_reviewer is not None else reviewer)
+
+    if reconsideration_report and (reconsideration_report["outcome"] == "resolved" or retained_boundary is not None):
         assert reconsideration is not None
         (
             final_review,
@@ -881,7 +922,7 @@ def run_batch(
             final_review_seconds,
         ) = run_final_cvp_review(
             batch_id=batch_id,
-            packet=packet,
+            packet=final_packet,
             proposal=effective_proposal,
             revision_dependents=revision_dependents,
             initial_proposal_sha256=proposal_sha,
@@ -890,6 +931,9 @@ def run_batch(
             reviewer=final_reviewer if final_reviewer is not None else reviewer,
             output_dir=output_dir,
         )
+        if retained_boundary is not None:
+            from backend.pipeline.cvp_retained_review_separation import pending_maintenance
+            pending_maintenance(output_dir,retained_boundary,final_review.model_dump(mode='json'))
         if claim_issue_handler is not None:
             claim_issue_handler(proposal=effective_proposal,review=final_review,origin='opus_final',
                                 report_path=output_dir/'raw-final-review.json',
@@ -988,7 +1032,7 @@ def run_batch(
         ),
         "escalations": sorted(
             {
-                *(reconsideration_report["escalations"] if reconsideration_report else []),
+                *(reconsideration_report["escalations"] if reconsideration_report and retained_boundary is None else []),
                 *final_review_escalations,
             }
         ),
@@ -997,6 +1041,9 @@ def run_batch(
         "master_data_mutations": 0,
         "apply_allowed": False,
     }
+    if retained_boundary is not None:
+        report['retained_review_boundary_sha256'] = sha256_json(retained_boundary)
+        report['original_reconsideration_escalations'] = reconsideration_report['escalations']
     if (output_dir / 'owner-identity-validation.json').exists():
         report['_initial_proposal_artifact_name'] = 'raw-owner-identity-proposal.json'
     report["artifact_sha256"] = sha256_json(report)
@@ -1016,7 +1063,7 @@ def run_batch(
                      if not validating_saved_artifacts() else [])
     )
     correction_resolved = not review_validation["reconsideration_required"] or bool(
-        reconsideration_report and reconsideration_report["outcome"] == "resolved"
+        reconsideration_report and (reconsideration_report["outcome"] == "resolved" or retained_boundary is not None)
     )
     resolved = correction_resolved and approval_validation["outcome"] == "pass"
     _write_current_state(
@@ -1079,6 +1126,7 @@ def run_batch(
         "_reconsideration": reconsideration,
         "_revision_dependents": revision_dependents,
         "_effective_validation": effective_validation,
+        "_retained_review_boundary": retained_boundary,
     }
 def main(argv=None) -> int:
     from backend.pipeline.cvp_retired_runtime import reject_legacy_execution

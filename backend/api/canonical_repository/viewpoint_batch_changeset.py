@@ -56,7 +56,7 @@ class CvpBatchChangeSetError(ValueError):
     pass
 
 
-def reuse_exact_current_links(proposed, current):
+def reuse_exact_current_links(proposed, current, *, retained_null_link_ids=()):
     """Freshly reviewed identical links retain their durable identity/version.
 
     This is not approval-cache reuse. The effective semantic proposal must
@@ -68,8 +68,19 @@ def reuse_exact_current_links(proposed, current):
         value=ViewpointClaimLinkRecord.model_validate(row).model_dump(mode='json')
         return {k:v for k,v in value.items() if k not in ignored}
     result=[];used=set()
+    allowed_null=set(retained_null_link_ids)
+    if len(allowed_null)!=len(retained_null_link_ids) or not allowed_null <= {l['viewpoint_claim_link_id'] for l in current}:
+        raise CvpBatchChangeSetError('retained-null boundary contains duplicate/foreign existing IDs')
     for row in proposed:
         matches=[old for old in current if meaning(old)==meaning(row)]
+        if not matches:
+            # Explicit, independently reviewed retention boundary only. The
+            # program's proposed span is display/context, not permission to
+            # backfill an already-approved supports link's null SQL locator.
+            matches=[old for old in current if old['viewpoint_claim_link_id'] in allowed_null
+                and old['link_type']=='supports' and old.get('component_locator') is None
+                and {k:v for k,v in meaning(old).items() if k!='component_locator'}
+                    == {k:v for k,v in meaning(row).items() if k!='component_locator'}]
         if len(matches)>1:raise CvpBatchChangeSetError('ambiguous existing exact component link')
         if matches:
             old=matches[0];lid=old['viewpoint_claim_link_id']
@@ -132,6 +143,7 @@ def compile_cvp_batch_package(
     reviewer_model_id: str,
     decided_at: str,
     current_claim_links: Sequence[Mapping[str, Any]] | None = None,
+    retained_null_link_ids: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Create one deterministic, no-write CVP package from a passing review."""
 
@@ -576,7 +588,7 @@ def compile_cvp_batch_package(
         if review.schema_version != 'wang_canonical_viewpoint_review_v2':
             raise CvpBatchChangeSetError('exact link retention requires fresh coverage-contract review')
         current=[dict(l) for l in current_claim_links if l.get('claim_id') in claim_index and l.get('effective_state')=='active']
-        links_out=reuse_exact_current_links(links_out,current)
+        links_out=reuse_exact_current_links(links_out,current,retained_null_link_ids=retained_null_link_ids)
 
     def _resolve(endpoint: tuple[str, str]) -> tuple[str, str]:
         ids = resolved_targets.get(endpoint)
