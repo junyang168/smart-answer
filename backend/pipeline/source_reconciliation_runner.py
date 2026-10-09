@@ -66,6 +66,38 @@ def request_limit(adapter, path, *, saved=None):
     return limit or 500000,budget
 
 
+def stage_adapter(adapter, packet, path, *, saved=None):
+    """Select existing lossless wire only before reservation; authenticate saved wire exactly."""
+    from backend.pipeline.viewpoint_resolution_runtime import response_adapter
+    path = Path(path)
+    selected = response_adapter(adapter, saved)
+    if saved is not None:
+        # Program-bound and legacy stages both retain their actual codec/config.
+        candidates = [adapter, response_adapter(adapter)]
+        factory = getattr(adapter, 'program_bound_copy', None)
+        if callable(factory):
+            candidates.append(factory())
+        keys = ('model_id', 'backend', 'prompt_sha256', 'generation_config_sha256')
+        for candidate in candidates:
+            factory = getattr(candidate, 'shared_keys_copy', None)
+            if callable(factory) and getattr(candidate, '_shared_record_payload', False):
+                smaller = factory()
+                if all(saved.get(k) == getattr(smaller, k) for k in keys):
+                    return smaller
+        return selected  # Existing exact reservation/raw validation rejects drift.
+    blockers = [path.with_name(path.name.removesuffix('.raw.json') + suffix)
+                for suffix in ('.reservation.json', '.call-intent.json', '.request-encoding.json')]
+    if not any(p.exists() for p in blockers):
+        limit, _ = request_limit(selected, path)
+        factory = getattr(selected, 'shared_keys_copy', None)
+        if (callable(factory) and getattr(selected, '_shared_record_payload', False)
+                and selected.request_bytes(packet) > limit):
+            smaller = factory()
+            if smaller.request_bytes(packet) < selected.request_bytes(packet):
+                return smaller
+    return selected
+
+
 class Stop(ValueError):
     def __init__(self, reason: str, *, status: str = "needs_owner", waiting_for: str = "owner"):
         super().__init__(reason)
@@ -219,7 +251,7 @@ class Runner:
             adapter = self.ports.scope_adapter(role) if scope else self.ports.claim_issue_adapter(role) if issue else self.ports.deferred_adapter(role) if deferred else self.ports.adapter(role)
         from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
         raw_path = self.root / (stage + '.raw.json')
-        adapter = response_adapter(adapter, read(raw_path) if raw_path.exists() else None)
+        adapter = stage_adapter(adapter, packet, raw_path, saved=read(raw_path) if raw_path.exists() else None)
         expected = ("claude-opus-5-5", "claude_subscription") if "review" in stage else ("gpt-6.1-sol", "codex_subscription")
         if (adapter.model_id, adapter.backend) != expected:
             raise Stop("model/backend differs from frozen subscription policy", status="proof_failure", waiting_for="system")
@@ -659,7 +691,7 @@ def validate_raw(root: Path, stage: str, packet: dict) -> dict:
                             evidence_eligibility=eligibility_profile(packet))
     raw = read(root / (stage + ".raw.json"))
     from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
-    adapter = response_adapter(adapter, raw)
+    adapter = stage_adapter(adapter, packet, root / (stage + '.raw.json'), saved=raw)
     reservation = body(read(root / (stage + ".reservation.json")))
     proof = adapter.request_encoding_proof(packet)
     expected = {"model_id": adapter.model_id, "backend": adapter.backend,
