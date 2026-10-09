@@ -3340,8 +3340,23 @@ class PostgresKnowledgeStore:
             conn.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now() WHERE run_id=%s", (canonical_json(value),run_id))
         return root
 
+    def reserve_cvp_membership_identity(self, *, identity, parent_run_id, root, handoff_id):
+        """One current CVP/CVR management identity across finders/groups/roots."""
+        ident='CVPM-'+identity
+        metadata={'kind':'cvp_membership_identity','parent_run_id':parent_run_id,
+                  'root':str(Path(root).resolve()),'handoff_id':handoff_id,'identity':identity}
+        with self.connect() as conn:
+            conn.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))',(ident,))
+            existing=conn.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s',(ident,)).fetchone()
+            if existing:
+                if existing[0]!=metadata:
+                    raise ChangeSetConflict('same CVP/CVR membership cannot reset once budget across groups/roots/finders')
+                return
+            conn.execute("INSERT INTO wang_knowledge.pipeline_runs(run_id,subject_kind,subject_id,stage,trigger,status,metadata) VALUES (%s,'batch',%s,'cvp_group','cli','running',%s::jsonb)",
+                         (ident,identity,canonical_json(metadata)))
+
     def prepare_cvp_action(self, run_id, *, action_id, kind, authorization, materials):
-        if kind not in {'source_claim_revision','cvp_scope_revision','owner_link_correction','owner_link_retarget','owner_link_retirement','audit_supports_correction','required_cvp_coverage'} or not authorization:
+        if kind not in {'source_claim_revision','cvp_scope_revision','cvp_membership_revalidation','owner_link_correction','owner_link_retarget','owner_link_retirement','audit_supports_correction','required_cvp_coverage'} or not authorization:
             raise ValueError('bounded action authority required')
         action={'action_id':action_id,'kind':kind,'authorization':authorization,
                 'materials_sha256':sha256_json(materials),'materials':materials}

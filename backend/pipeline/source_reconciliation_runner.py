@@ -341,9 +341,15 @@ class Runner:
         handoff = retirement_handoff(frozen, proposed, correction)
         if handoff is not None:
             write(self.root / 'cvp-membership-handoff.json', handoff)
-            raise Stop('routine CVP membership revalidation pending; original correction retained',
-                       status='cvp_management_pending', waiting_for='system')
-        review_packet = self.review_input(frozen, correction['response'], proposed, 'final_review')
+            if not hasattr(self, 'store'):
+                raise Stop('routine CVP membership revalidation pending; original correction retained',
+                           status='cvp_management_pending', waiting_for='system')
+            from backend.pipeline.cvp_membership_management import execute, joint_review_packet
+            receipt = execute(self, frozen, handoff)
+            write(self.root/'membership-resolution.json',receipt)
+            proposed,review_packet = joint_review_packet(self.root,frozen,proposed,correction)
+        else:
+            review_packet = self.review_input(frozen, correction['response'], proposed, 'final_review')
         self.guard(frozen)
         final = self.call("final_review", review_packet)
         if not contract.validate_review(review_packet, final["response"]):
@@ -654,7 +660,15 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
         if correction_packet != expected_correction:
             raise ValueError("correction chain drift")
         correction = validate_raw(root, "correction", correction_packet)
-        if effective_proposal(frozen, correction["response"]) != proposal:
+        corrected = effective_proposal(frozen, correction['response'])
+        if packet.get('membership_resolution'):
+            if stage != 'final_review':
+                raise ValueError('membership cannot mint an extra terminal review budget')
+            from backend.pipeline.cvp_membership_management import joint_review_packet
+            resolved, joint = joint_review_packet(root,frozen,corrected,correction)
+            if proposal != resolved or packet != joint:
+                raise ValueError('terminal membership resolution does not bind original correction and full joint postimage')
+        elif corrected != proposal:
             raise ValueError("terminal review is not of actual correction")
     from backend.pipeline.source_review_input_repair import check_packet, repaired_packet
     if stage == 'final_review_input_repair':
@@ -663,11 +677,14 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
         check_packet(frozen, correction['response'], old_packet, base)
         if contract.validate_review(old_packet, old_raw['response']) or packet != repaired_packet(root, frozen, proposal, old_packet, old_raw, correction):
             raise ValueError('input repair must preserve the exact rejected terminal review')
-    else:
+    elif not packet.get('membership_resolution'):
         check_packet(frozen, first['response'] if stage=='initial_review' else correction['response'], packet, base)
     if expected["artifact_sha256"] != app.get("review_sha256") or sha256_json(proposal.model_dump()) != app.get("proposal_sha256"):
         raise ValueError("final review/proposal provenance drift")
     rebuilt = contract.compile_package(frozen, proposal, raw, frozen_sha256=frozen_sha256)
+    if packet.get('membership_resolution'):
+        from backend.pipeline.cvp_membership_management import append_joint_package
+        rebuilt = append_joint_package(rebuilt,root,frozen,corrected,correction)
     if {k: v for k, v in package.items() if k != "source_repair_application"} != rebuilt:
         raise ValueError("package differs from exactly reviewed records/provenance")
 

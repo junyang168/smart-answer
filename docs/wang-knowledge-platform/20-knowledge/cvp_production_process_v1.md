@@ -370,6 +370,10 @@ CVP management 依新 Claim／Evidence 及相關 CVP 全部必要成員，逐項
 
 直接的 Claim–CVP 連接錯誤只進 CVP management；只有本源核查另證明 Claim／Evidence 本身有錯，才交回 Claim management。不能為讓一條連接過關而改 Claim，也不能為保留旧 Claim 而硬造 CVP 支持。
 
+原等價成員實際退役而當前只剩 supports 時，交常規 `cvp_membership_management`，不逐案等 owner 批准同核心成員重驗。共同接點核對精確退役 SQL pins、完整 current CVR／成員、候選 Claim 的原批准及完整自身正文；GPT 提議新成員成分，Opus 獨立審核完整後像，必要時最多一輪糾正。不能自動把 supports 當等價、復活退役 Claim／VIC，或改教授來源、Claim、Evidence、核心、signature、scope 和原組成員。
+
+成員管理以當前 CVP／CVR 決定穩定呼叫身份，跨 finder／group／root 不重置預算。已消費的原 Claim 糾正保留未決；只有精確的新成員獨立批准證明，才能形成明示的 domain resolution 和完整聯合終審包，不簡單把原 raw 改成 retain。新連接及 fresh VIC／VID 與原獲准修訂共用一次 SQL transaction；寫集、版本、hold、完整後像／歷史和受影響獨立審計仍逐項驗證。獨立批准、待聯合提交、已提交與 group audited 分開記錄；機械測試不冒充真實內容批准。
+
 教授在不同講道持續豐富同一觀點時，範圍更新屬常規 CVP management，不是每次另請 owner 批准的 exception。共同 `cvp_scope_management` 接點消費已綁定的 scope policy：對 typed `scope_mismatch` 且完整原文判讀未否決的異議，沿用同一次最小 GPT 提議、Opus 完整後像獨立审核及必要唯一纠正，不重問原仲裁。純 Claim 問題仍走 Claim management；over-merge、核心身份衝突不被改名為範圍問題。
 
 接點讀完整 current 成員／支持 Claims、自身原文、關係端點及歷史結構。提議必須逐 Claim 引用自己正文、分清經文適用限定與材料覆蓋。當一般命題只是誤把最早材料的經文列表存成適用限定時，可提議不按該列表限定；不是刪 Claim 的經文或證據。只有 Opus 判定仍是教授同一核心及真值條件，才可進交易。核心、完整 signature、歸屬、人群／歷史範圍、Claim／Evidence／來源、連接作用及關係語義不能順帶改。

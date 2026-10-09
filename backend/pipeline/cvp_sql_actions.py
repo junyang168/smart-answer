@@ -188,6 +188,12 @@ def execute_source_action(store,run_id,manifest,*,root,ports):
     if manifest.get('viewpoint_scope_repair') and not proposal.records:
         raise ValueError('scope assessment retained existing scope; unresolved original finding needs direction, no empty commit/retry loop')
     package=content.compile_package(materials,proposal,raw,frozen_sha256=action['materials_sha256'])
+    if (root/'membership-resolution.json').exists():
+        from backend.pipeline.cvp_membership_management import append_joint_package
+        from backend.pipeline.source_reconciliation_runner import effective_proposal, validate_raw
+        correction_packet=body(read(root/'correction.packet.json'))
+        correction=validate_raw(root,'correction',correction_packet)
+        package=append_joint_package(package,root,materials,effective_proposal(materials,correction['response']),correction)
     package['source_repair_application']={'schema_version':SOURCE_SCHEMA,'run_root':str(Path(root).resolve()),
         'run_id':run_id,'materials':binding(root/'scoped-materials.json'),
         'materials_sha256':action['materials_sha256'],'terminal_stage':raw['stage'],
@@ -197,6 +203,8 @@ def execute_source_action(store,run_id,manifest,*,root,ports):
     backup=verified_group_backup(root,package,ports) if issue_context or manifest.get('viewpoint_scope_repair') else ports.backup(root)
     original=store.get_cvp_group(run_id).get('reviewed',{}).get('evidence',{})
     approval={'terminal_review':binding(root/(raw['stage']+'.raw.json'))}
+    if (root/'membership-resolution.json').exists():
+        approval['membership_management']=binding(root/'membership-resolution.json')
     for stage in ('initial_review','final_review','final_review_input_repair'):
         proof=root/(stage+'.raw.program-binding.json')
         if proof.exists():approval[stage+'_program_binding']=binding(proof)
