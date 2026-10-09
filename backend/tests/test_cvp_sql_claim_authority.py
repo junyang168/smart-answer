@@ -149,6 +149,115 @@ def test_sermon_json_locator_step_uses_actual_body_projection(authority_case,tmp
     assert result['model_calls']==result['master_data_mutations']==0
 
 
+def duplicate_case(authority_case, tmp_path):
+    s,path,_=authority_case
+    document=json.loads(path.read_text());source=document['source']
+    script,_,_=markdown_source_document(source)
+    json_path=tmp_path/'duplicate-sermon.json';json_path.write_text(json.dumps(script))
+    source.update(source_type='sermon_transcript',source_path=str(json_path),
+        source_file_sha256=hashlib.sha256(json_path.read_bytes()).hexdigest())
+    before=s.previous[2]
+    plan=build_source_contract_cleanup_plan(package_id='synthetic-duplicate',
+        source_kind='wkp368_source_duplicate_cleanup',current={('claims','CL-test'):
+            {'payload':before,'revision':2,'content_sha256':s.previous[1]}},
+        replacements={('claims','CL-test'):{**s.row['payload'],'revision':2}})
+    s.current=(plan.change_set_id,s.row['content_sha256'],s.row['payload'])
+    s.get_change_history=lambda cid:s.history if cid==s.current[0] else s.prior
+    s.history.update(source_kind=plan.source_kind,source_sha256=plan.source_sha256,
+                     fingerprint_sha256=plan.fingerprint_sha256)
+    document={'schema_version':'wang_source_duplicate_cleanup_plan_v1','plan':plan.as_dict(),
+        'groups':[{'alias_source_id':'ALIAS','canonical_source_id':'SRC-test','transcript_id':'SRC-test',
+                   'coordinate_ready':True,'coordinate_blockers':{'claims':[],'fragments':[],
+                                                               'human_settled_claim_ids':[]}}],
+        'frozen_sources':[{k:v for k,v in source.items() if k not in {'source_id','source_type'}}]}
+    def save():
+        document.pop('artifact_sha256',None);document['artifact_sha256']=sha256_json(document)
+        path.write_text(json.dumps(document));s.history['metadata']['source_plan_file_sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
+    save()
+    return s,document,save,json_path
+
+
+def test_duplicate_source_transaction_exact_locator_only_branch(authority_case,tmp_path):
+    s,_,_,_=duplicate_case(authority_case,tmp_path)
+    result=current_claim_authority(s,'CL-test',s.row)
+    assert result['review_event_id']=='REV-original'
+    assert result['reviewed_revision']==2 and result['revision']==3
+    assert result['model_calls']==result['master_data_mutations']==0
+
+
+@pytest.mark.parametrize('problem',['no_review','duplicate_group','missing_source','duplicate_source',
+    'not_ready','blocker','alias_reassignment','changed_source','wrong_transcript','changed_postimage'])
+def test_duplicate_transaction_cannot_expand_coordinate_authority(authority_case,tmp_path,problem):
+    s,doc,save,source_path=duplicate_case(authority_case,tmp_path)
+    if problem=='no_review':s.previous_events=[]
+    elif problem=='duplicate_group':doc['groups']*=2
+    elif problem=='missing_source':doc['frozen_sources']=[]
+    elif problem=='duplicate_source':doc['frozen_sources']*=2
+    elif problem=='not_ready':doc['groups'][0]['coordinate_ready']=False
+    elif problem=='blocker':doc['groups'][0]['coordinate_blockers']['claims']=['unresolved']
+    elif problem=='alias_reassignment':doc['groups'][0]['alias_source_id']='SRC-test'
+    elif problem=='wrong_transcript':doc['frozen_sources'][0]['transcript_id']='foreign'
+    elif problem=='changed_source':source_path.write_text('{"script":[]}')
+    elif problem=='changed_postimage':s.history['operations'][0]['after']['occurrences'][0]['anchors'][0]['paragraph_key']='S9999'
+    save()
+    with pytest.raises(ValueError):current_claim_authority(s,'CL-test',s.row)
+
+
+@pytest.mark.parametrize('problem',[None,'held','foreign','missing','retired','fragment_sha',
+    'fragment_postimage','fragment_source','ambiguous_index','quote_changed'])
+def test_duplicate_short_quote_requires_exact_own_committed_fragment(authority_case,tmp_path,problem):
+    from backend.pipeline.source_contract_cleanup import migrate_source_fragment
+    s,doc,save,source_path=duplicate_case(authority_case,tmp_path)
+    script=json.loads(source_path.read_text())
+    last=deepcopy(script['script'][-1])
+    script['script'].extend([{**last,'index':999,'text':'Additional body.'},
+                            {**last,'index':1000,'text':'Another exact evidence occurrence.'}])
+    source_path.write_text(json.dumps(script))
+    index,projection=build_projection(script['script'])
+    source=doc['frozen_sources'][0];source.update(source_file_sha256=hashlib.sha256(source_path.read_bytes()).hexdigest(),
+        source_body_sha256=projection.body_sha256)
+    before_fragment={'fragment_id':'F','source_id':'SRC-test','revision':1,
+        'paragraph_key':'S0004','source_segment_index':index.by_locator['S0002'].source_segment_index,
+        'verbatim_excerpt':'exact evidence'}
+    moved,res=migrate_source_fragment(before_fragment,index,source_sha256=projection.body_sha256,attested_locator='S0002')
+    assert moved and res.status=='resolved'
+    plan=build_source_contract_cleanup_plan(package_id='synthetic-duplicate-ambiguous',
+        source_kind='wkp368_source_duplicate_cleanup',
+        current={('claims','CL-test'):{'payload':s.previous[2],'revision':2,'content_sha256':s.previous[1]},
+                 ('source_fragments','F'):{'payload':before_fragment,'revision':1,
+                                          'content_sha256':record_content_sha(before_fragment)}},
+        replacements={('claims','CL-test'):{**s.row['payload'],'revision':2},('source_fragments','F'):moved})
+    after_fragment=dict(moved,revision=2)
+    step={'evidence_step_id':'E-test','support_eligibility':'eligible_candidate',
+          'produced_claim_ids':['CL-test'],'source_fragment_ids':['F']}
+    states={('evidence_steps','E-test'):{'payload':step,'revision':1,'content_sha256':record_content_sha(step),'retired':False},
+            ('source_fragments','F'):{'payload':after_fragment,'revision':2,
+                                    'content_sha256':record_content_sha(after_fragment),'retired':False}}
+    s.current=(plan.change_set_id,s.row['content_sha256'],s.row['payload'])
+    s.history.update(source_kind=plan.source_kind,source_sha256=plan.source_sha256,fingerprint_sha256=plan.fingerprint_sha256)
+    s.history['operations']=[{**{k:v for k,v in op.items() if k!='payload'},
+        'before':s.previous[2] if op['collection']=='claims' else before_fragment,
+        'after':s.row['payload'] if op['collection']=='claims' else after_fragment} for op in plan.as_dict()['operations']]
+    doc['plan']=plan.as_dict()
+    s.get_record_state=lambda col,oid:deepcopy(states.get((col,oid)))
+    if problem=='held':step['support_eligibility']='context_only'
+    elif problem=='foreign':step['produced_claim_ids']=['OTHER']
+    elif problem=='missing':states.pop(('source_fragments','F'))
+    elif problem=='retired':states['source_fragments','F']['retired']=True
+    elif problem=='fragment_sha':states['source_fragments','F']['content_sha256']='wrong'
+    elif problem=='fragment_postimage':after_fragment['paragraph_key']='S0004'
+    elif problem=='fragment_source':before_fragment['source_id']='ALIAS'
+    elif problem=='ambiguous_index':before_fragment['source_segment_index']='missing'
+    elif problem=='quote_changed':before_fragment['verbatim_excerpt']='changed quote'
+    if problem in {'held','foreign'}:states['evidence_steps','E-test']['content_sha256']=record_content_sha(step)
+    save()
+    if problem:
+        with pytest.raises(ValueError):current_claim_authority(s,'CL-test',s.row)
+    else:
+        result=current_claim_authority(s,'CL-test',s.row)
+        assert result['review_event_id']=='REV-original' and result['master_data_mutations']==0
+
+
 def test_conflicting_predecessor_decision_is_not_hidden_by_pass_filter(authority_case):
     s,_,_=authority_case
     s.previous_events=[('REV-rejected','ai','rejected',{'change_set_id':'KCS-original'})]
