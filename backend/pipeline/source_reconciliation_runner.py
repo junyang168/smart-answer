@@ -251,6 +251,8 @@ class Runner:
             adapter = self.ports.scope_adapter(role) if scope else self.ports.claim_issue_adapter(role) if issue else self.ports.deferred_adapter(role) if deferred else self.ports.adapter(role)
         from backend.pipeline.claim_first_management import scoped_adapter
         adapter = scoped_adapter(adapter, packet)
+        from backend.pipeline.cvp_pending_link_management import scoped_adapter as link_scoped_adapter
+        adapter = link_scoped_adapter(adapter,packet)
         from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
         raw_path = self.root / (stage + '.raw.json')
         adapter = stage_adapter(adapter, packet, raw_path, saved=read(raw_path) if raw_path.exists() else None)
@@ -732,6 +734,8 @@ def validate_raw(root: Path, stage: str, packet: dict) -> dict:
                             evidence_eligibility=eligibility_profile(packet))
     from backend.pipeline.claim_first_management import scoped_adapter
     adapter = scoped_adapter(adapter, packet)
+    from backend.pipeline.cvp_pending_link_management import scoped_adapter as link_scoped_adapter
+    adapter = link_scoped_adapter(adapter,packet)
     raw = read(root / (stage + ".raw.json"))
     from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
     adapter = stage_adapter(adapter, packet, root / (stage + '.raw.json'), saved=raw)

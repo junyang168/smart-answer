@@ -106,11 +106,18 @@ def build(store,run_id,audit_path,output,*,semantic_resolution=None):
     audit_pins={(p['collection'],p['object_id']):tuple(p['pin']) for p in
                 audit['meta']['registry_read_scope']['read_pins']}
     original_pins=decoded_pins(claim_receipt['read_pins'])
+    from backend.pipeline.cvp_pending_link_management import resolved_pending_operations
+    managed=resolved_pending_operations(saved,store=store)
     from backend.pipeline.cvp_link_target_selection import _approved
     rows=[]
     for key in sorted(pending):
         col,oid=key.split('/',1);state=store.get_record_state(col,oid)
         pin=original_pins.get((col,oid))
+        if key in managed:
+            op=managed[key]
+            if pin!=(op['before_revision'],op['before_sha256'],False):
+                raise ValueError('pending managed link did not start at original deferred generation')
+            pin=(op['after_revision'],op['after_sha256'],False)
         if (not state or state['retired'] or pin!=(state['revision'],state['content_sha256'],False)
                 or audit_pins.get((col,oid))!=pin or record_content_sha(state['payload'])!=state['content_sha256']):
             raise ValueError('pending current fact changed, missing audit or stale dependency: '+key)
@@ -123,6 +130,10 @@ def build(store,run_id,audit_path,output,*,semantic_resolution=None):
         'human_disposition':scope_body['human_disposition'],'registry_mutations':0,
         'model_verdicts_changed':False,'new_model_calls':0,
         'semantic_resolution':binding(semantic_resolution) if semantic_resolution else None}
+    if managed:
+        body['reviewed_link_management']={'change_set_id':saved['reviewed']['plan']['change_set_id'],
+            'material':approval['pending_link_material'],'review':approval['pending_link_review'],
+            'record_keys':sorted(managed)}
     body['artifact_sha256']=sha256_json(body);write_immutable(output,body)
     return Path(output)
 
@@ -158,6 +169,21 @@ def validate_for_completion(value,path,audit_binding,cursor,*,semantic_resolutio
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     pins=decoded_pins(body['read_pins'])
     original=decoded_pins(receipt['read_pins'])
+    from backend.pipeline.cvp_pending_link_management import resolved_pending_operations
+    managed=resolved_pending_operations(value,cursor=cursor)
+    if managed:
+        expected={'change_set_id':value['reviewed']['plan']['change_set_id'],
+            'material':evidence['approval']['pending_link_material'],'review':evidence['approval']['pending_link_review'],
+            'record_keys':sorted(managed)}
+        if body.get('reviewed_link_management')!=expected:
+            raise ValueError('pending link completion omitted/changed reviewed management proof')
+        for key,op in managed.items():
+            k=tuple(key.split('/',1))
+            if original.get(k)!=(op['before_revision'],op['before_sha256'],False):
+                raise ValueError('pending managed original version mismatch')
+            original[k]=(op['after_revision'],op['after_sha256'],False)
+    elif body.get('reviewed_link_management'):
+        raise ValueError('foreign pending management resolution')
     if (len(pins)!=len(body['read_pins']) or {c+'/'+i for c,i in pins}!=set(body['pending_record_keys'])
             or any(not p or p[2] or original.get(k)!=p for k,p in pins.items())):
         raise ValueError('retained management omitted pending record pins')

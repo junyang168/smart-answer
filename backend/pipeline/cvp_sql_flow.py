@@ -518,6 +518,12 @@ def run_group(store, definition, group, row, *, root):
         saved=store.get_cvp_group(run_id);evidence=saved['reviewed']['evidence']
     if evidence.get('pending_cvp_management_record_keys') and not evidence.get('approval',{}).get('retained_write_scope'):
         raise ValueError('new CVP coverage committed; existing CVP/link management remains pending, not group completion')
+    if (evidence.get('pending_cvp_management_record_keys') and evidence.get('approval',{}).get('retained_write_scope')
+            and not evidence['approval'].get('pending_link_material')):
+        from backend.pipeline.cvp_pending_link_management import execute as finish_pending_links
+        from backend.pipeline.source_reconciliation_runtime import ProductionPorts
+        if finish_pending_links(store,run_id,root=root/run_id/'pending-link-management',ports=ProductionPorts()):
+            return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)
     disposition=evidence.get('disposition')
     if disposition and any(component["disposition"]=="deferred" for claim in disposition["claims"] for component in claim["components"]):
         from backend.pipeline.viewpoint_deferred_source_check import run as investigate
@@ -574,7 +580,10 @@ def run_group(store, definition, group, row, *, root):
     audit_path = content_fallback(audit_path,root/run_id/"content-blocked-fallback")
     audit = read_artifact(audit_path)
     resolution=None
-    if audit["layers"]["3"].get("disputed") or audit["layers"]["4"].get("disputed"):
+    if audit['layers']['3'].get('disputed') or audit['layers']['4'].get('disputed'):
+        from backend.pipeline.cvp_human_retained_audit_resolution import create_if_complete
+        resolution=create_if_complete(audit_path,store,run_id,audit_dir/'human-retained-source-final-resolution.json')
+    if resolution is None and (audit["layers"]["3"].get("disputed") or audit["layers"]["4"].get("disputed")):
         from backend.pipeline.viewpoint_audit_source_adjudication import build_packet,run as adjudicate
         from backend.pipeline.viewpoint_adjudication_history import target_identity
         packet=build_packet(audit_path,store,True);targets=[target_identity(i) for i in packet['items']]

@@ -402,6 +402,10 @@ CVP management 依新 Claim／Evidence 及相關 CVP 全部必要成員，逐項
 
 Claim-first 的既有 `pending` 清單是待驗範圍，不是必須修改清單。僅 Evidence 資格及已驗真審核 provenance 變更、Claim／原文／引文與綁定完全不變時，既有批准和精確人工保留可走零變更管理；必須先完成當前全部 Claims、保留／新增 CVPs 與完整成員的獨立審計。共同完成交易另綁 `wang_cvp_retained_impact_resolution_v1` 證明，逐項核對原清單、原 SQL pins、完整審計 pins、Claim 層 receipt、實際已提交 source 寫集與人工決定；原清單及模型未決不改、不清空。來源／語義／綁定變更、版本漂移、真 hold 或未解決審計異議不走此分支。人工明定不改的連接，在後續自動降類审核與 SQL review 寫集均禁止改動。
 
+Claim-first 明示暫緩、但原精確 owner 權限已允許的連接後像，走 `wang_cvp_deferred_authorized_link_management_v1`，不再進 Claim 糾正。只有原 GPT 提案與原唯一糾正中後像完全一致、原初審對該項無內容拒絕、目前前像仍是原待驗 generation，才可接回該固定父 action 的未執行 CVP 寫入域。原部分初審沒有寫入權；程式直接復用保存的 GPT 候選，零新 GPT，對完整自身正文、全部當前目標成員及後像做一次真正獨立 Opus 審核，拒絕就停止、零追加糾正。只准既有精確 locator／Evidence 綁定與誤標 supports 的邏輯撤回；不改 Claim／來源／核心／身份／範圍／端點，不碰人工明定保留的連接。共同 SQL 單寫及 current／history 全回讀後，原待驗清單不刪，完成證明另消費實際已審管理 KCS 的原前像與新後像；其餘項仍須精確原樣保留及完整當前審計。
+
+完整獨立審計再次提出人工已明定保留的同一成員等價問題時，`wang_exact_human_retained_and_saved_source_audit_resolution_v1` 明示人工裁決，不把 Gemini disputed 或 GPT upheld 改為 rejected／pass。必須是原具名連接、Claim／head／CVR／批准的同一 generation，且該 CVP 的全部被質疑 Claims 都在人工範圍內；其他異議只接受精確保存的原文終局 rejected 或真正已审管理後的新完整審計，不授予通用豁免。
+
 ### 13.7 復驗、完成與中斷恢復
 
 commit 後用新 SQL 連線回讀，確認精確修改及歷史；再以當前版本審計完整受影響的原組 Claims、所有保留／新增／相連 CVPs 和必要其他成員。已完成舊審計只對未變的精確輸入有效；新版本須新審計，不能搬用舊 pass。

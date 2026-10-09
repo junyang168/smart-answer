@@ -4672,7 +4672,7 @@ class PostgresKnowledgeStore:
         Retiring afterwards is too late: nothing was ever planned.
         """
 
-        if (package.get('source_repair_application') or {}).get('schema_version') in {'wang_source_sql_reconciliation_v2','wang_owner_sql_link_correction_v2','wang_cvp_sql_link_retarget_v1','wang_cvp_owner_sql_link_retirement_v1'} and not transactional:
+        if (package.get('source_repair_application') or {}).get('schema_version') in {'wang_source_sql_reconciliation_v2','wang_owner_sql_link_correction_v2','wang_cvp_sql_link_retarget_v1','wang_cvp_owner_sql_link_retirement_v1','wang_cvp_deferred_authorized_link_management_v1'} and not transactional:
             raise ValueError('SQL source action cannot use the retired whole-store planning path')
         if (package.get('source_repair_application') or {}).get('schema_version') == 'wang_cvp_owner_sql_link_retirement_v1':
             from backend.pipeline.cvp_link_retirement import validate_package
@@ -6141,7 +6141,7 @@ class PostgresKnowledgeStore:
             _ClaimEvidenceSourceQueueApplyContext
         ] = None,
     ) -> dict[str, Any]:
-        if plan.source_kind in {'wang_source_sql_reconciliation_v2','wang_owner_sql_link_correction_v2','wang_cvp_sql_link_retarget_v1','wang_cvp_owner_sql_link_retirement_v1'} and transaction_context is None:
+        if plan.source_kind in {'wang_source_sql_reconciliation_v2','wang_owner_sql_link_correction_v2','wang_cvp_sql_link_retarget_v1','wang_cvp_owner_sql_link_retirement_v1','wang_cvp_deferred_authorized_link_management_v1'} and transaction_context is None:
             raise ValueError('SQL v2 actions cannot bypass the shared transaction boundary')
         if transaction_context is not None:
             from .transaction_validation import TransactionValidation
