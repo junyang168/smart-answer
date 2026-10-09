@@ -12,6 +12,7 @@ from backend.api.canonical_repository.postgres_store import record_content_sha, 
 
 VERSION = 'wang_cvp_retained_review_separation_v1'
 NAME = 'retained-review-separation-binding.json'
+HUMAN_NAME = 'retained-content-disposition-binding.json'
 PROMPT = '''本次新增提案审核与已提交连接维护分开。
 retained_review_boundary 中的现有连接是 SQL 已提交、原独立审核批准的当前事实，不是本次新增/修改的后像。
 原始拒绝与纠正保留；旧原文语境可消解指代、省略，不要求每条摘要复述CVP全部内容，不能把同一教导的语境解释误当另一独立断言。
@@ -250,6 +251,88 @@ def pending_maintenance(root, receipt, final_review):
         'retained_boundary':binding(Path(root)/'retained-review-boundary.json'),
         'items':items,'registry_mutations':0,'additional_calls_allowed':0,
         'group_completion_granted':False})
+
+
+def write_scope_authority(root, store, materials, report, *, human_binding=None):
+    """Consume an exact human NO-CHANGE decision, never manufacture model pass.
+
+    Physical final/raw, old approval and full-source receipts remain separate
+    from this human disposition. This admits new model-passed writes only;
+    group completion and every other pending impact still require resolution.
+    """
+    from backend.pipeline.cvp_sql_flow import binding,check_binding,decoded_pins
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact,write_immutable
+    from backend.api.canonical_repository.viewpoint_batch_changeset import (
+        RETAINED_WRITE_SCOPE_VERSION,retained_write_components)
+    from backend.api.canonical_repository.viewpoint_resolution import ReviewClaim
+    root=Path(root).resolve()
+    if human_binding is None:
+        marker=next((p/HUMAN_NAME for p in root.parents if (p/HUMAN_NAME).exists()),None)
+        if marker is None:return None
+        saved=read_artifact(marker)
+    else:
+        saved={'human_disposition':human_binding}
+    check_binding(saved['human_disposition'])
+    direction=read_artifact(saved['human_disposition']['path'])
+    run_id=direction['group_id']
+    # Scope to the exact current group; later groups do not inherit this content decision.
+    if run_id not in root.parts:return None
+    group=store.get_cvp_group(run_id)
+    if not group or group['campaign_sha256']!=direction['campaign_sha256']:
+        raise ValueError('human retention foreign SQL campaign/group')
+    wanted={'schema_version':'wang_cvp_human_retained_content_disposition_v1',
+        'human_exact_disposition':True,'decision':'retain_existing_contextual_equivalence_unchanged',
+        'registry_operations':[],'additional_model_calls_authorized':0,
+        'group_completion_granted':False,'other_pending_impacts_resolved':False}
+    if any(type(direction.get(k)) is not type(v) or direction.get(k)!=v for k,v in wanted.items()) or not direction.get('owner_reply'):
+        raise ValueError('human retain direction cannot grant writes/retries/completion')
+    receipt=report.get('_retained_review_boundary')
+    if receipt is None or report.get('_final_review') is None:
+        raise ValueError('human retention lacks actual complete-context final review')
+    final_path=root/'raw-final-review.json';raw=read_artifact(final_path)
+    if (binding(final_path)['file_sha256']!=direction['complete_context_final_raw_file_sha256']
+            or raw['artifact_sha256']!=direction['complete_context_final_raw_artifact_sha256']):
+        raise ValueError('human retention final raw drift')
+    handoff=read_artifact(root/'retained-connection-maintenance-handoff.json')
+    check_binding(handoff['complete_context_final_review']);check_binding(handoff['retained_boundary'])
+    if (handoff['complete_context_final_review']!=binding(final_path)
+            or handoff['retained_boundary']!=binding(root/'retained-review-boundary.json')):
+        raise ValueError('human retention conflicts with maintenance handoff')
+    human=direction['items'];lids=[i['link_id'] for i in human]
+    if len(set(lids))!=len(lids) or set(lids)!={i['link_id'] for i in handoff['items']}:
+        raise ValueError('human retention omits/adds an unresolved existing connection')
+    expected=decoded_pins(materials['read_pins'])
+    with store.connect() as conn,conn.cursor() as cursor:
+        store._assert_transaction_read_pins(cursor,expected)
+    links=materials['packet']['existing_links'];by_id={l['viewpoint_claim_link_id']:l for l in links}
+    pins=[]
+    for lid,link in sorted(by_id.items()):
+        state=store.get_record_state('viewpoint_claim_links',lid)
+        if (not state or state['retired'] or state['payload']!=link
+                or expected.get(('viewpoint_claim_links',lid))!=(state['revision'],state['content_sha256'],False)):
+            raise ValueError('human retention current SQL/readset drift')
+        pins.append({'collection':'viewpoint_claim_links','object_id':lid,
+                     'revision':state['revision'],'content_sha256':state['content_sha256']})
+    for item in human:
+        link=by_id.get(item['link_id'])
+        pin=next((p for p in pins if p['object_id']==item['link_id']),None)
+        if (not link or item['link_type']!='equivalent_component' or link['link_type']!=item['link_type']
+                or item['viewpoint_revision_id']!=link['validated_against_viewpoint_revision_id']
+                or item['storage_revision']!=pin['revision'] or item['content_sha256']!=pin['content_sha256']):
+            raise ValueError('human no-change disposition is stale or different postimage')
+    p=report['_effective_proposal'];r=report['_review']
+    authority={'schema_version':RETAINED_WRITE_SCOPE_VERSION,
+        'proposal_sha256':sha256_json(p.model_dump(mode='json')),
+        'review_sha256':sha256_json(r.model_dump(mode='json')),
+        'human_disposition':saved['human_disposition'],'human_retained_link_ids':sorted(lids),
+        'retained_link_pins':pins,'original_final_review':binding(final_path),
+        'retained_boundary':binding(root/'retained-review-boundary.json'),
+        'model_verdicts_changed':False,'all_pending_impacts_preserved':True}
+    retained_write_components(p,r,[ReviewClaim.model_validate(c)
+        for c in materials['packet']['claims']],links,authority,
+        retained_null_link_ids=receipt['retained_null_locator_links'])
+    write_immutable(root/'retained-write-scope-authority.json',authority)
+    return authority
 
 
 def final_adapter(adapter, *, initial=False):

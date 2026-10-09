@@ -324,9 +324,19 @@ def reviewed_cvp_package(root, materials, store, *, require_resolved=False):
         dependents_loader=store.load_revision_dependents,claim_issue_handler=claim_issue_handler,
         management_context=materials.get('claim_management_resolution'),
         identity_source_loader=identity_source_loader,retained_review_loader=retained_review_loader,**models)
-    if report['approval_outcome']!='pass' or report['escalations']:
+    from backend.pipeline.cvp_retained_review_separation import write_scope_authority
+    write_scope = write_scope_authority(root,store,materials,report)
+    if (report['approval_outcome']!='pass' or report['escalations']) and write_scope is None:
         raise ValueError('normal CVP terminal review unresolved; no second correction')
-    if require_resolved:resolved_report(report,[row["claim_id"] for row in packet["claims"]])
+    if require_resolved and write_scope is None:resolved_report(report,[row["claim_id"] for row in packet["claims"]])
+    if require_resolved and write_scope is not None:
+        # The original report/verdicts are NOT changed to pass. Split authority
+        # already validates every actual write; still enforce coverage boundary.
+        p=report['_effective_proposal']
+        if (sorted(d.claim_id for d in p.claim_decisions)!=sorted(row['claim_id'] for row in packet['claims'])
+                or any(c.disposition=='deferred' for d in p.claim_decisions for c in d.components)
+                or p.viewpoint_revisions or getattr(p,'argument_route_candidates',[])):
+            raise ValueError('split authority cannot waive unresolved coverage/CVP revision boundary')
     proposal_name = ("raw-reconsideration.json" if report["_final_review"] is not None
                      else report.get('_initial_proposal_artifact_name', 'raw-proposal.json'))
     review_name = "raw-final-review.json" if report["_final_review"] is not None else report.get('_initial_review_artifact_name',"raw-review.json")
@@ -338,12 +348,16 @@ def reviewed_cvp_package(root, materials, store, *, require_resolved=False):
         proposal_artifact_sha256=proposal["artifact_sha256"],review_artifact_sha256=review["artifact_sha256"],
         proposer_model_id=proposal["model_id"],reviewer_model_id=review["model_id"],decided_at=stable_decided_at(root),
         current_claim_links=packet["existing_links"],
+        retained_write_scope=write_scope,
         retained_null_link_ids=(report.get('_retained_review_boundary') or {}).get('retained_null_locator_links',[]))
     write_immutable(root/"reviewed-package.json",package)
     from backend.api.canonical_repository.viewpoint_batch_resolution import build_batch_disposition
     disposition = build_batch_disposition(proposal=report["_effective_proposal"],batch_identity={"batch_id":packet["batch_id"]},
         effective_proposal_sha256=sha256_json(report["_effective_proposal"].model_dump(mode="json")),apply_status="planned")
     approval = {"proposal":binding(root/proposal_name),"review":binding(root/review_name)}
+    if write_scope is not None:
+        approval['retained_write_scope']=binding(root/'retained-write-scope-authority.json')
+        approval['human_retained_content_disposition']=write_scope['human_disposition']
     if report.get('_retained_review_boundary') is not None:
         approval['retained_review_boundary'] = binding(root/'retained-review-boundary.json')
     if (root/'batch-identity-integration.json').exists():
@@ -718,6 +732,8 @@ def main(argv=None):
                         help='Separate existing approved links from new proposed writes; no mutation/retry permission')
     parser.add_argument('--retained-generation-artifact',type=Path,action='append',default=[],
                         help='Exact original generation raw leaf; indexed by actual committed decision artifact SHA')
+    parser.add_argument('--retained-content-disposition',type=Path,
+                        help='Exact human no-change decision for current retained links; never a model pass or write permission')
     args = parser.parse_args(argv)
     from backend.pipeline.cvp_batch_identity_integration import ENABLED, VERSION
     ENABLED.set(args.integrate_batch_candidates)
@@ -732,6 +748,9 @@ def main(argv=None):
     from backend.pipeline.cvp_retained_review_separation import NAME as RETAINED_NAME
     if (args.output_root/RETAINED_NAME).exists() and not args.retained_link_review_policy:
         raise ValueError('retained-link separation binding requires explicit recovery flag')
+    from backend.pipeline.cvp_retained_review_separation import HUMAN_NAME
+    if (args.output_root/HUMAN_NAME).exists() and not args.retained_content_disposition:
+        raise ValueError('human retained disposition binding requires explicit recovery flag')
     load_dotenv(PROJECT/".env")
     if args.database_url:os.environ['KNOWLEDGE_DATABASE_URL']=args.database_url
     store = PostgresKnowledgeStore(args.database_url)
@@ -788,6 +807,15 @@ def main(argv=None):
     from backend.pipeline.source_reconciliation_runtime import maintenance_lock
     from backend.pipeline.viewpoint_resolution_runtime import authorized_request_limit
     with maintenance_lock(), authorized_request_limit(args.output_root,args.sql_campaign,args.request_limit_authorization):
+        if args.retained_content_disposition:
+            direction=read_artifact(args.retained_content_disposition)
+            if direction['campaign_sha256']!=args.sql_campaign or not args.retained_link_review_policy:
+                raise ValueError('human retention requires exact campaign and retained policy')
+            target=store.get_cvp_group(direction['group_id'])
+            if not target or (invocation_limit is not None and target['sequence']>invocation_limit):
+                raise ValueError('human retention outside execution boundary')
+            write_immutable(args.output_root/HUMAN_NAME,{
+                'human_disposition':binding(args.retained_content_disposition)})
         if args.integrate_batch_candidates:
             write_immutable(integration_binding, {'schema_version':VERSION,
                 'campaign_sha256':args.sql_campaign,'new_groups_only':True,'correction_budget':1})

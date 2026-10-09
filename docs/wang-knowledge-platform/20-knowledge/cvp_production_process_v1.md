@@ -396,6 +396,10 @@ CVP management 依新 Claim／Evidence 及相關 CVP 全部必要成員，逐項
 
 新 CVR 保留 supersedes 鏈和舊 CVR；全部 current links、相關 relations 以同一批准更新版本引用，實際本輪 provenance 由程序產生。歷史結構仍引用其審過的版本，明示 impact-only，不生成新結構／路線／文章；產品資格依原交易失效規則處理。受影響已 audited 組按 SQL pending 事實復驗，不重跑舊提議或 ChangeSet，也不提前執行尚未到達的組。新 scope 問題若在同組這次修訂後仍出現，停止而不再自動開第二個修訂循環。
 
+已有連接經完整語境終審仍有異議、而 owner 明確裁定不改時，`--retained-content-disposition` 接回精確人工保留決定。方向綁原終審 raw、當前連接 revision／SHA、目標 CVR 和維護交接；只接受原樣保留，不授權新寫入、額外模型或完成豁免。原模型拒絕與理由保持，不能改為 pass 或宣稱一致。
+
+共同 compiler 分別核驗本次實際寫集與既有保留项：每項新内容、結構與關係必須是真實終審 pass；保留項核對完整 SQL pins、Evidence／locator、原批准及精確人工決定。保留項不產生新的身份批准或 provenance，即使本次另有新成員挂到同一觀點。未解決的新内容、錯版、hold、缺原文或其他 pending impacts 仍拒絕；備份、交易、回讀、完整受影響獨立審計與組完成門檻保持。
+
 ### 13.7 復驗、完成與中斷恢復
 
 commit 後用新 SQL 連線回讀，確認精確修改及歷史；再以當前版本審計完整受影響的原組 Claims、所有保留／新增／相連 CVPs 和必要其他成員。已完成舊審計只對未變的精確輸入有效；新版本須新審計，不能搬用舊 pass。
