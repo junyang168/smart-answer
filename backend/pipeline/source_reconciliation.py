@@ -540,7 +540,7 @@ def _semantic(row: dict) -> dict:
     return {k: v for k, v in row.items() if k not in PROVENANCE | {"revision"}}
 
 
-def validate_proposal(frozen: dict, proposal: Proposal) -> dict[str, dict]:
+def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = False) -> dict[str, dict]:
     before = index(frozen["before_records"])
     manifest = Manifest.model_validate(frozen["manifest"])
     allowed = {p.key: p for p in manifest.permissions}
@@ -558,10 +558,18 @@ def validate_proposal(frozen: dict, proposal: Proposal) -> dict[str, dict]:
     required = set(frozen["inventory"]["affected_keys"]) | set(proposed)
     if len(dispositions) != len(proposal.dispositions) or set(dispositions) != required:
         raise ValueError("every affected consumer requires exactly one disposition")
-    if frozen["inventory"]["unknown_keys"] or any(d.action == "unresolved" for d in proposal.dispositions):
+    unresolved = {d.record_key for d in proposal.dispositions if d.action == 'unresolved'}
+    if review_only and (not frozen.get('claim_issue_context', {}).get('scope_amendment')
+            or not any(row['pin'][2] is True for row in frozen.get('sql_scope', {}).get('read_pins', []))
+            or any(split_key(k)[0] not in {'canonical_viewpoints', 'viewpoint_revisions'}
+                   or k not in before or k in proposed for k in unresolved)):
+        raise ValueError('unresolved review requires bounded unchanged CVP context and SQL retirement proof')
+    if frozen["inventory"]["unknown_keys"] or (unresolved and not review_only):
         raise ValueError("unknown/unresolved consumer; owner scope or proof required")
     for k, d in dispositions.items():
         c, _ = split_key(k)
+        if review_only and k in unresolved:
+            continue  # Review a retained unresolved object, never authorize a write.
         if c in IMPACT_ONLY:
             if d.action != "impact_only" or k in proposed:
                 raise ValueError("historical/output consumers may only be invalidated, not regenerated")
@@ -613,7 +621,7 @@ def validate_proposal(frozen: dict, proposal: Proposal) -> dict[str, dict]:
         validate_postimages(frozen, post)
     if manifest.claim_issue:
         from backend.pipeline.claim_issue_management import validate_resolution
-        validate_resolution(frozen, proposal, post)
+        validate_resolution(frozen, proposal, post, review_only=review_only)
     if manifest.viewpoint_scope_repair:
         from backend.pipeline.cvp_scope_management import validate_postimages
         validate_postimages(frozen, proposal, post)
@@ -774,11 +782,11 @@ def validate_basis_groups(spans: list[tuple]) -> None:
             raise ValueError("overlapping anchors require one basis group and exactly one representative")
 
 
-def review_packet(frozen: dict, proposal: Proposal) -> dict:
-    validate_proposal(frozen, proposal)
+def review_packet(frozen: dict, proposal: Proposal, *, review_only: bool = False) -> dict:
+    validate_proposal(frozen, proposal, review_only=review_only)
     selected = frozen["inventory"]["affected_keys"] + frozen["inventory"]["context_keys"]
     before = index(frozen["before_records"])
-    return {
+    result = {
         "schema_version": VERSION, "update_id": frozen["update_id"],
         "manifest": frozen["manifest"], "before_source": frozen["before"], "current_sources": frozen["after"],
         "context_sources": frozen.get("context_sources", []),
@@ -800,6 +808,19 @@ def review_packet(frozen: dict, proposal: Proposal) -> dict:
                if frozen["manifest"].get("deferred_repair") else {}),
         },
     }
+    if review_only:
+        result['unresolved_proposal_review'] = {
+            'schema_version': 'source_unresolved_retirement_context_review.v1',
+            'retired_current_sql_pins': [row for row in frozen['sql_scope']['read_pins'] if row['pin'][2] is True],
+            'explanation': 'These exact SQL-pinned objects are retired, not missing active members. '
+                'Historical creation decisions do not establish current membership. Read-only current '
+                'Claims do not replace historical identities or approve a new identity mapping. '
+                'Review the unchanged unresolved proposal and complete afterstates independently; '
+                'unresolved items cannot be approved or committed. A genuine disagreement uses only '
+                'the existing single correction, then a strict complete final review.',
+            'write_authority': False,
+        }
+    return result
 
 
 def validate_review(packet: dict, response: dict) -> bool:
@@ -811,7 +832,8 @@ def validate_review(packet: dict, response: dict) -> bool:
         raise ValueError("review did not cover the exact complete consumer denominator")
     if any(v.approved and v.problems for v in review.verdicts):
         raise ValueError("pass with problems is not an approval")
-    return all(v.approved and not v.problems for v in review.verdicts)
+    return (not packet.get('unresolved_proposal_review')
+            and all(v.approved and not v.problems for v in review.verdicts))
 
 
 def compile_package(frozen: dict, proposal: Proposal, raw: dict, *, frozen_sha256: str | None = None) -> dict:

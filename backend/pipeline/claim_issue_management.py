@@ -382,7 +382,7 @@ def normalize_proposal(frozen, response):
     return Proposal.model_validate({**normalized.model_dump(), **fields})
 
 
-def validate_resolution(frozen, proposal, post):
+def validate_resolution(frozen, proposal, post, *, review_only=False):
     proposal = Proposal.model_validate(proposal.model_dump())
     before = c.index(frozen["before_records"])
     context = frozen["claim_issue_context"]
@@ -446,6 +446,10 @@ def validate_resolution(frozen, proposal, post):
     dispositions = {d.record_key: d.action for d in proposal.dispositions}
     for impact in proposal.cvp_impacts:
         citations(impact.citations)
+        if (review_only and impact.action == 'needs_direction'
+                and dispositions[impact.record_key] == 'unresolved'
+                and post[impact.record_key] == before[impact.record_key]):
+            continue
         expected = "retain" if impact.action == "retain" else "update"
         if impact.action == "needs_direction" or dispositions[impact.record_key] != expected:
             raise ValueError("CVP impact unresolved or differs from exact after-state")

@@ -35,6 +35,13 @@ def effective_proposal(frozen, response):
     return contract.Proposal.model_validate(response)
 
 
+def initial_review_base(frozen, proposal):
+    if not frozen.get('claim_issue_context', {}).get('scope_amendment'):
+        return contract.review_packet(frozen, proposal)
+    unresolved = any(d.action == 'unresolved' for d in proposal.dispositions)
+    return contract.review_packet(frozen, proposal, review_only=unresolved)
+
+
 def request_limit(adapter, path, *, saved=None):
     """Shared campaign budget; historical answers keep their actual identity."""
     from backend.pipeline.viewpoint_resolution_runtime import effective_request_limit, read_artifact
@@ -270,7 +277,7 @@ class Runner:
 
     def review_input(self, frozen, response, proposal, stage):
         from backend.pipeline.source_review_input_repair import add_receipt, check_packet
-        base = contract.review_packet(frozen, proposal)
+        base = initial_review_base(frozen, proposal) if stage == 'initial_review' else contract.review_packet(frozen, proposal)
         saved = self.root/(stage+'.packet.json')
         if saved.exists():
             packet = body(read(saved))
@@ -293,6 +300,8 @@ class Runner:
         # Exactly one correction, never an extra GPT preapproval/review stage.
         correction_packet = {**packet, "initial_proposal": proposed.model_dump(), "Opus_review": initial["response"],
                              "correction_round": 1, "another_correction_allowed": False}
+        if 'unresolved_proposal_review' in review_packet:
+            correction_packet['unresolved_proposal_review'] = review_packet['unresolved_proposal_review']
         self.guard(frozen)
         correction = self.call("correction", correction_packet)
         proposed = effective_proposal(frozen, correction["response"])
@@ -597,11 +606,14 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
         initial = validate_raw(root, "initial_review", initial_packet)
         first_proposal = effective_proposal(frozen, first["response"]).model_dump()
         from backend.pipeline.source_review_input_repair import check_packet
-        check_packet(frozen, first['response'], initial_packet, contract.review_packet(frozen, effective_proposal(frozen, first['response'])))
+        check_packet(frozen, first['response'], initial_packet, initial_review_base(frozen, effective_proposal(frozen, first['response'])))
         if contract.validate_review(initial_packet, initial["response"]):
             raise ValueError("correction must follow one genuine initial disagreement")
         correction_packet = body(read(root / "correction.packet.json"))
-        if correction_packet != {**proposal_packet, "initial_proposal": first_proposal, "Opus_review": initial["response"], "correction_round": 1, "another_correction_allowed": False}:
+        expected_correction = {**proposal_packet, "initial_proposal": first_proposal, "Opus_review": initial["response"], "correction_round": 1, "another_correction_allowed": False}
+        if 'unresolved_proposal_review' in initial_packet:
+            expected_correction['unresolved_proposal_review'] = initial_packet['unresolved_proposal_review']
+        if correction_packet != expected_correction:
             raise ValueError("correction chain drift")
         correction = validate_raw(root, "correction", correction_packet)
         if effective_proposal(frozen, correction["response"]) != proposal:
