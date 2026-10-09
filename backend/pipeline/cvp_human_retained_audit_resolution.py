@@ -11,6 +11,23 @@ from backend.pipeline.viewpoint_resolution_runtime import read_artifact,write_im
 VERSION='wang_exact_human_retained_and_saved_source_audit_resolution_v1'
 
 
+def partition_packet(audit,packet,value,store):
+    """Human-decided targets do not enter another model/rejection-reuse queue.
+
+    This is only routing. Full audit closure still requires create_if_complete,
+    which verifies every actual finding, including the excluded human targets.
+    """
+    from backend.pipeline.viewpoint_audit_source_adjudication import restricted_packet
+    human,_=human_items(audit,packet,value,store)
+    if not human:return packet,set()
+    remaining={i['item_id'] for i in packet['items']}-human
+    if not remaining:
+        body={k:v for k,v in packet.items() if k!='artifact_sha256'}
+        body['items']=[]
+        return {**body,'artifact_sha256':sha256_json(body)},human
+    return restricted_packet(packet,remaining),human
+
+
 def human_items(audit,packet,value,store):
     from backend.pipeline.cvp_retained_impact_resolution import protected_link_ids
     from backend.pipeline.cvp_sql_flow import check_binding

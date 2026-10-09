@@ -145,3 +145,22 @@ def test_actual_parent_cached_projection_complete_body_and_no_new_calls(monkeypa
             assert target.get_record_state(row['collection'],row['object_id'])['payload']==row['payload']
     assert target.apply_plan(plan,transaction_context=context,metadata={'actor':'pytest','reason':'synthetic isolated only'})['status']=='already_applied'
     assert len(target.get_cvp_group(run)['reviewed']['evidence']['pending_cvp_management_record_keys'])==24
+
+
+@pytest.mark.parametrize('verdict,link,blocked',[
+    ('audit_objection_rejected','target',False),
+    ('audit_objection_upheld','target',True),
+    ('unresolved','target',True),
+    ('audit_objection_upheld','other',False),
+])
+def test_actual_pending_link_repair_cannot_loop_new_semantic_objection(tmp_path,verdict,link,blocked):
+    from backend.pipeline.source_reconciliation_runner import write
+    from backend.pipeline.cvp_sql_flow import binding
+    p=tmp_path/'material.json';write(p,{'target_record_keys':['viewpoint_claim_links/target']})
+    value={'reviewed':{'evidence':{'approval':{'pending_link_material':binding(p)}}}}
+    packet={'items':[{'item_id':'4:V:C','connections':[{'viewpoint_claim_link_id':link}]}]}
+    report={'actions':[{'item_id':'4:V:C','verdict':verdict}]}
+    if blocked:
+        with pytest.raises(ValueError,match='no second automatic link repair'):
+            management.guard_repeated_semantic_repair(value,packet,report)
+    else:management.guard_repeated_semantic_repair(value,packet,report)

@@ -228,7 +228,7 @@ def resolved_pending_operations(value,store=None,cursor=None):
     if not approval.get('pending_link_material'):return {}
     from backend.pipeline.cvp_sql_flow import check_binding
     check_binding(approval['pending_link_material']);check_binding(approval['pending_link_review'])
-    material=body(read(approval['pending_link_material']['path']))
+    material=body(read(Path(approval['pending_link_material']['path'])))
     package=evidence['package']['payload'];validate_package(package)
     if evidence['action']['materials']!=material or material['run_id']!=value['run_id']:
         raise ValueError('pending link action/resolution foreign material')
@@ -257,3 +257,20 @@ def resolved_pending_operations(value,store=None,cursor=None):
     if any(op['after']!=expected[op['object_id']] or record_content_sha(op['after'])!=op['after_sha256'] for op in selected.values()):
         raise ValueError('pending link actual afterimage/history differs from independent review')
     return selected
+
+
+def guard_repeated_semantic_repair(value,packet,report):
+    """A newly reviewed/applied link rejected again is a content stop, not a loop."""
+    approval=value['reviewed']['evidence']['approval']
+    if not approval.get('pending_link_material'):return
+    from backend.pipeline.cvp_sql_flow import check_binding
+    check_binding(approval['pending_link_material'])
+    material=body(read(Path(approval['pending_link_material']['path'])))
+    targets={k.split('/',1)[1] for k in material['target_record_keys']}
+    actions={a['item_id']:a for a in report['actions']}
+    blocked=[i['item_id'] for i in packet['items']
+             if actions[i['item_id']]['verdict']!='audit_objection_rejected'
+             and targets & {p['viewpoint_claim_link_id'] for p in i.get('connections',[])}]
+    if blocked:
+        raise ValueError('current independently reviewed/applied link has a fresh upheld/unresolved content objection; '
+                         'no second automatic link repair: '+', '.join(blocked))

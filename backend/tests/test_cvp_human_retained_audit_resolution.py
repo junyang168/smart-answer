@@ -41,6 +41,18 @@ def test_explicit_human_retention_preserves_disputed_not_fabricated_pass(case):
     assert f['audit']==before and f['audit']['layers']['4']['results'][0]['verdict']=='disputed'
 
 
+@pytest.mark.parametrize('human',[set(),{'4:V:C'},{'4:V:C','4:OTHER:C'}])
+def test_partition_routes_only_named_human_targets_not_reuse_or_model(monkeypatch,human):
+    packet={'schema_version':'fixture','items':[{'item_id':'4:V:C'},{'item_id':'4:OTHER:C'}]}
+    packet['artifact_sha256']=sha256_json(packet);before=deepcopy(packet)
+    monkeypatch.setattr(resolution,'human_items',lambda *args:(human,None))
+    actual,accepted=resolution.partition_packet({},packet,{},None)
+    assert accepted==human
+    assert {i['item_id'] for i in actual['items']}=={'4:V:C','4:OTHER:C'}-human
+    assert actual['artifact_sha256']==sha256_json({k:v for k,v in actual.items() if k!='artifact_sha256'})
+    assert packet==before
+
+
 @pytest.mark.parametrize('fault',['extra-claim','extra-view','foreign-pair','new-type','pin','claim-pin','group','mutation','call','gpt-decision','gemini-decision','empty','layer3'])
 def test_human_decision_is_exact_membership_not_a_future_audit_waiver(case,fault):
     f=case;a=f['audit'];b=f['body']

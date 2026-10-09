@@ -586,7 +586,10 @@ def run_group(store, definition, group, row, *, root):
     if resolution is None and (audit["layers"]["3"].get("disputed") or audit["layers"]["4"].get("disputed")):
         from backend.pipeline.viewpoint_audit_source_adjudication import build_packet,run as adjudicate
         from backend.pipeline.viewpoint_adjudication_history import target_identity
-        packet=build_packet(audit_path,store,True);targets=[target_identity(i) for i in packet['items']]
+        packet=build_packet(audit_path,store,True)
+        from backend.pipeline.cvp_human_retained_audit_resolution import partition_packet
+        packet,human_retained_items=partition_packet(audit,packet,saved,store)
+        targets=[target_identity(i) for i in packet['items']]
         prior=store.adjudication_roots(targets)
         input_repair_binding = root/'adjudication-input-repair-authorization-binding.json'
         if input_repair_binding.exists():
@@ -670,6 +673,8 @@ def run_group(store, definition, group, row, *, root):
                 from backend.pipeline.viewpoint_s201129_source_continuation import canonical_runtime
                 os.environ['CODEX_EXECUTABLE']=canonical_runtime()['identity']['cli']['path']
             report=adjudicate(audit_path,adjudication,store,final_gpt=True,history_roots=[],only_item_ids=fresh)
+            from backend.pipeline.cvp_pending_link_management import guard_repeated_semantic_repair
+            guard_repeated_semantic_repair(saved,subset,report)
             claim_findings=audit_claim_findings(subset,report)
             if claim_findings:
                 policy=root/'claim-issue-policy-binding.json'
@@ -692,7 +697,15 @@ def run_group(store, definition, group, row, *, root):
                 # another complete audit. Unchanged judgement inputs reuse cache.
                 return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)
             prior.append(adjudication)
-        compose(audit_path,prior,resolution,store)
+        if human_retained_items:
+            # Excluding a human-owned target from adjudication is NOT a pass.
+            # Rejoin the full actual audit population only after every remaining
+            # finding has an exact authenticated source rejection.
+            resolution=create_if_complete(audit_path,store,run_id,audit_dir/'human-retained-source-final-resolution.json')
+            if resolution is None:
+                raise ValueError('human retained routing does not resolve remaining current audit findings')
+        else:
+            compose(audit_path,prior,resolution,store)
     pending_resolution=None
     if evidence.get('pending_cvp_management_record_keys'):
         from backend.pipeline.cvp_retained_impact_resolution import build
