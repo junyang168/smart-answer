@@ -88,6 +88,7 @@ def prepare_source_action(store,run_id,manifest,*,root):
             raise ValueError('saved SQL source action materials differ')
         return previous
     started=time.perf_counter()
+    amendment=None
     if manifest.viewpoint_scope_repair:
         from backend.pipeline.cvp_scope_management import direction
         target=direction(manifest)
@@ -98,14 +99,17 @@ def prepare_source_action(store,run_id,manifest,*,root):
         # incorrectly load every unrelated Claim in the same sermon.
         keys=[('claims',cid) for cid in context['claim_ids']]
         if context.get('scope_amendment'):
-            from backend.pipeline.claim_issue_rescope import validate_live
+            from backend.pipeline.claim_issue_rescope import validate_direction,amendment_records
             direction=json.loads(content.bound_bytes(context['scope_amendment']))
-            validate_live(store,direction)
-            keys += [('claims',cid) for cid in direction['context_claim_ids']]
+            # Indexed current pins/consumer checks below establish this
+            # material generation; the once reservation validates the SQL
+            # parent/action before any model call. No duplicate SQL coldstart.
+            original,_=validate_direction(direction)
+            amendment=amendment_records(store,direction,original)
     else:
         keys=[('source_documents',manifest.source_id)]
     keys.extend((p.collection,p.object_id) for p in manifest.permissions if not p.create)
-    records=store.read_affected_context(keys)
+    records=amendment if amendment is not None else store.read_affected_context(keys)
     states={content.key(col,oid):row['payload'] for (col,oid),row in records.items() if not row.get('retired')}
     # The existing content compiler gets only the complete affected current
     # graph. Its before_records are scoped model evidence, not a Registry dump.

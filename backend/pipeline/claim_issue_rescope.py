@@ -102,21 +102,60 @@ def permissions(context, states, snapshots=None):
 
 def amend_manifest(store, direction, authorization, root):
     old,_=validate_live(store,direction)
-    from backend.pipeline.claim_issue_management import manifest_for_issues
-    manifest=manifest_for_issues(store,direction['run_id'],old['claim_issue_context']['issues'],direction['new_policy'],root/'base-scope')
-    context=body(json.loads(c.bound_bytes(manifest.claim_issue)))
+    # The already verified original SQL closure is the authority, not a reason
+    # to expand the whole reverse graph again for unchanged source/Claims.
+    from backend.pipeline.claim_issue_management import read_policy,policy_permissions
+    manifest=c.Manifest.model_validate(old['manifest'])
+    states=c.index(old['before_records'])
+    context=body(old['claim_issue_context'])
+    context['policy']=direction['new_policy']
     context['scope_amendment']=authorization
     write(root/'issue-context.json',context)
     manifest.claim_issue=c.FileBinding.model_validate(binding(root/'issue-context.json'))
+    policy=read_policy(direction['new_policy'])
+    manifest.permissions=policy_permissions(policy,states,manifest.source_id,context['claim_ids'])
     manifest.permissions=[p for p in manifest.permissions if p.collection!='evidence_steps' or p.object_id in direction['evidence_ids']]
     manifest.permissions += [c.Permission.model_validate(p) for p in direction['link_permissions']]
-    auth=body(json.loads(c.bound_bytes(manifest.authorization)))
-    auth.update(claim_issue=manifest.claim_issue.model_dump(),scope_amendment=authorization,
-                permissions=[p.model_dump() for p in manifest.permissions])
+    auth={'source_id':manifest.source_id,'authorization_id':policy.authorization_id,
+          'authorization_quote':direction['authorization_quote'],'human_content_approval':False,
+          'policy':direction['new_policy'],'claim_issue':manifest.claim_issue.model_dump(),
+          'scope_amendment':authorization,'permissions':[p.model_dump() for p in manifest.permissions]}
     write(root/'scoped-authorization.json',auth)
     manifest.authorization=c.FileBinding.model_validate(binding(root/'scoped-authorization.json'))
     write(root/'manifest.json',manifest.model_dump(mode='json'))
     return manifest
+
+
+def amendment_records(store, direction, old):
+    """Fresh indexed original pins plus forward-only read-only context.
+
+    Current payloads are observed, not taken from a historic snapshot. An
+    unexpected direct consumer of a proposed write fails closed; no scan or
+    expanding historical/reverse closure is used as a fallback.
+    """
+    from backend.pipeline.cvp_sql_flow import decoded_pins
+    from backend.pipeline.viewpoint_validation_context import read_current_objects
+    wanted=decoded_pins(old['sql_scope']['read_pins'])
+    records=read_current_objects(store,wanted)
+    if set(records)!=set(wanted):raise ValueError('amendment original indexed readset incomplete')
+    with store.connect() as conn,conn.cursor() as cursor:
+        store._assert_transaction_read_pins(cursor,wanted)
+        write_ids=direction['evidence_ids']+[p['object_id'] for p in direction['link_permissions']]
+        consumers=store._reference_consumers(cursor,write_ids,sorted(c.KNOWLEDGE_COLLECTIONS))
+        if any((col,oid) not in records for col,oid,_ in consumers):
+            raise ValueError('amendment has a new consumer outside original complete SQL proof')
+    for key,payload in c.index(old['before_records']).items():
+        row=records[c.split_key(key)]
+        if row['retired'] or row['payload']!=payload:
+            raise ValueError('amendment current original payload/retirement drift')
+    extra=store.read_cvp_context(direction['context_claim_ids']) if direction['context_claim_ids'] else {}
+    for key,row in extra.items():
+        if key in records and records[key]!=row:
+            # Different helper metadata shapes do not replace payload/pins.
+            if any(records[key].get(f)!=row.get(f) for f in ('revision','content_sha256','payload','retired')):
+                raise ValueError('amendment additional context generation conflict')
+        else:records[key]=row
+    return records
 
 
 def execute(store, run_id, *, authorization, root, ports):

@@ -136,6 +136,11 @@ def test_amendment_single_sql_commit_saved_answers_rollback_and_original_budget_
         'link_permissions':[],'context_claim_ids':[],**{n:r.binding(oldroot/f) for n,f in
         [('old_materials','scoped-materials.json'),('old_packet','proposal.packet.json'),('old_raw','proposal.raw.json')]}})
     authorization=put(tmp_path/'direction.json',direction)
+    # No unseen consumer is silently dropped before commit.
+    with monkeypatch.context() as local:
+        local.setattr(store,'_reference_consumers',lambda *args:[('questions','unseen-consumer',{'answer_claim_ids':['E-test']})])
+        with pytest.raises(ValueError,match='new consumer'):
+            a.amendment_records(store,direction,old['materials'])
     ports=EligibilityPorts(issue)
     monkeypatch.setattr('backend.pipeline.cvp_sql_flow.verified_group_backup',lambda *args:{'dump':report,'restore_catalog_nonempty':True})
     original=store._assert_transaction_edges_and_reviews
@@ -156,6 +161,9 @@ def test_amendment_single_sql_commit_saved_answers_rollback_and_original_budget_
     assert r.read(oldroot/'proposal.raw.json')==raw
     assert a.execute(store,run,authorization=authorization,root=tmp_path/'issues',ports=ports)['status']=='already_applied'
     assert ports.calls==['proposal','initial_review']
+    from backend.api.canonical_repository.postgres_store import ChangeSetConflict
+    with pytest.raises(ChangeSetConflict,match='dependency drift'):
+        a.amendment_records(store,direction,old['materials'])
 
 
 @pytest.mark.skipif(os.environ.get('WKP_G094_ELIGIBILITY_READONLY')!='1',reason='explicit saved production packet read-only check')
@@ -170,9 +178,7 @@ def test_actual_g094_scope_complete_current_context_without_registry_writes(tmp_
     old,raw=a.validate_live(store,direction)
     before_group=store.get_cvp_group(direction['run_id'])
     manifest=a.amend_manifest(store,direction,r.binding(path),tmp_path/'scope')
-    keys=[c.split_key(k) for k in c.index(old['before_records'])]
-    keys += [('claims',cid) for cid in direction['context_claim_ids']]
-    records=store.read_affected_context(keys)
+    records=a.amendment_records(store,direction,old)
     states={c.key(col,oid):row['payload'] for (col,oid),row in records.items() if not row['retired']}
     frozen=c.freeze(manifest,states)
     packet=r.build_proposal_packet(frozen)
