@@ -56,6 +56,25 @@ def test_original_answer_stays_unresolved_and_scope_does_not_approve(amendment):
     assert not direction['human_content_approval']
 
 
+def test_common_prepared_recovery_enters_bound_amendment_without_old_normal_rebuild(tmp_path,monkeypatch):
+    from backend.pipeline import cvp_sql_flow as flow
+    direction=put(tmp_path/'direction.json',{'run_id':'original-run'})
+    r.write(tmp_path/a.NAME,{'authorization':direction})
+    calls=[]
+    class Store:
+        value={'materials':{},'checkpoint':'prepared'}
+        def get_cvp_group(self,run):return self.value
+        def bind_cvp_execution_root(self,*args,**kwargs):pass
+    store=Store()
+    def execute(s,run,**kwargs):
+        calls.append('amendment');s.value={**s.value,'checkpoint':'audited'}
+    monkeypatch.setattr(a,'execute',execute)
+    def forbidden(*args,**kwargs):raise AssertionError('old normal proposal must not rebuild or call')
+    monkeypatch.setattr(flow,'reviewed_cvp_package',forbidden)
+    flow.run_group(store,{'campaign_sha256':'test'},{'sequence':94},{'run_id':'original-run'},root=tmp_path)
+    assert calls==['amendment']
+
+
 @pytest.mark.parametrize('change',['owner','human_pass','limit','run','raw_sha','root','policy','duplicate_evidence','unknown_evidence'])
 def test_scope_cannot_drift_or_reset(amendment,change):
     direction,_,_,_=amendment

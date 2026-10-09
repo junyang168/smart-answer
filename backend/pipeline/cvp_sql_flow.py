@@ -429,6 +429,17 @@ def run_group(store, definition, group, row, *, root):
     store.bind_cvp_execution_root(run_id,identity='group',root=root/run_id)
     model_root = root/run_id/"normal-review"
     if saved["checkpoint"] == "prepared":
+        from backend.pipeline.claim_issue_rescope import NAME, execute as amend
+        amendment=root/NAME
+        authorization=read_artifact(amendment)['authorization'] if amendment.exists() else None
+        direction=read_artifact(authorization['path']) if authorization else None
+        if direction and direction['run_id']==run_id:
+            # The original saved issue/action already proves discovery. Do
+            # not rebuild/reinterpret the old normal prompt to discover it
+            # again, or reserve a second normal proposal call.
+            from backend.pipeline.source_reconciliation_runtime import ProductionPorts
+            amend(store,run_id,authorization=authorization,root=root/run_id/'claim-issues',ports=ProductionPorts())
+            return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)
         # The existing call-intent invariant handles interruption during any
         # model role; the SQL phase remains prepared until all answers pass.
         from backend.pipeline.viewpoint_s201129_source_continuation import canonical_runtime
@@ -441,16 +452,9 @@ def run_group(store, definition, group, row, *, root):
             from backend.pipeline.claim_issue_management import handle_issues
             from backend.pipeline.source_reconciliation_runtime import ProductionPorts
             policy=root/'claim-issue-policy-binding.json'
-            from backend.pipeline.claim_issue_rescope import NAME, execute as amend
-            amendment=root/NAME
-            authorization=read_artifact(amendment)['authorization'] if amendment.exists() else None
-            direction=read_artifact(authorization['path']) if authorization else None
-            if direction and direction['run_id']==run_id:
-                amend(store,run_id,authorization=authorization,root=root/run_id/'claim-issues',ports=ProductionPorts())
-            else:
-                handle_issues(store,run_id,detected,root=root/run_id/'claim-issues',
-                              policy_binding=read_artifact(policy).get('policy') if policy.exists() else None,
-                              ports=ProductionPorts())
+            handle_issues(store,run_id,detected,root=root/run_id/'claim-issues',
+                          policy_binding=read_artifact(policy).get('policy') if policy.exists() else None,
+                          ports=ProductionPorts())
             # Actual SQL action committed first. Never apply the old normal
             # package or reinterpret its old approval as new-version approval.
             return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)
