@@ -657,6 +657,56 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
     return post
 
 
+def retained_evidence_sequence_start(frozen, before, post, claim_key, evidence_key, fragment, text):
+    """An exact unique full Evidence sequence can disambiguate its short quote.
+
+    Only unchanged current SQL-pinned chains on an unchanged source qualify.
+    No first-occurrence choice, new Evidence, qualification change or inferred
+    gap/order is permitted. All quotes must already be bound to THIS Evidence.
+    """
+    if frozen['manifest']['before_source'] != frozen['manifest']['current_sources'][0]:
+        raise ValueError('retained Evidence sequence requires unchanged physical source')
+    evidence = post[evidence_key]
+    ids = evidence.get('source_fragment_ids') or ([evidence['source_fragment_id']]
+                                                if evidence.get('source_fragment_id') else [])
+    if (len(ids) < 2 or len(ids) != len(set(ids))
+            or evidence.get('source_fragment_id') not in {None, *ids}):
+        raise ValueError('retained Evidence sequence requires distinct ordered bound fragments')
+    keys = [key('source_fragments', fid) for fid in ids]
+    pins = {(row['collection'], row['object_id']): row['pin']
+            for row in frozen.get('sql_scope', {}).get('read_pins', [])}
+    for k in [claim_key, evidence_key, *keys]:
+        pin = pins.get(split_key(k))
+        if (not pin or pin[2] is not False or before.get(k) != post.get(k)
+                or pin[0] != before[k].get('revision') or pin[1] != record_content_sha(before[k])):
+            raise ValueError('retained Evidence sequence current SQL chain changed/missing/retired')
+    source_id = frozen['manifest']['source_id']
+    evidence_id = split_key(evidence_key)[1]
+    claim_id = split_key(claim_key)[1]
+    if (evidence_id not in post[claim_key].get('evidence_step_ids', [])
+            or claim_id not in evidence.get('produced_claim_ids', [])
+            or any(post[k].get('review_status') in HUMAN_HOLDS | {'human_hold', 'withheld_unreviewed', 'rejected'}
+                   for k in [claim_key, evidence_key, *keys])):
+        raise ValueError('retained Evidence sequence ownership/hold conflict')
+    quotes = []
+    for k in keys:
+        value = post[k]
+        quote = value.get('verbatim_excerpt')
+        if (not quote or value.get('source_id') != source_id
+                or value.get('paragraph_key') != fragment['paragraph_key']
+                or value.get('source_sha256') != frozen['after'][0]['body_sha256']
+                or value.get('paragraph_text_sha256') != hashlib.sha256(text.encode()).hexdigest()
+                or value.get('verbatim_excerpt_sha256') != hashlib.sha256(quote.encode()).hexdigest()
+                or value.get('anchor_state') != 'source_version_bound'):
+            raise ValueError('retained Evidence sequence exact own source/quote hash drift')
+        quotes.append(quote)
+    full = ''.join(quotes)
+    if text.count(full) != 1 or fragment['fragment_id'] not in ids:
+        raise ValueError('complete bound Evidence sequence absent/ambiguous')
+    position = ids.index(fragment['fragment_id'])
+    return text.index(full) + sum(len(q) for q in quotes[:position])
+
+
 def validate_graph(post: dict[str, dict], before: dict[str, dict], frozen: dict) -> None:
     """Mechanical checks over the entire affected graph, not just write rows."""
     source_id = frozen["manifest"]["source_id"]
@@ -706,9 +756,11 @@ def validate_graph(post: dict[str, dict], before: dict[str, dict], frozen: dict)
                                if post[key("source_fragments", fid)].get("source_id") == source_id
                                and post[key("source_fragments", fid)].get("paragraph_key") == anchor.get("paragraph_key")
                                and post[key("source_fragments", fid)].get("verbatim_excerpt") == quote]
-                    if not quote or text.count(quote) != 1 or len(matches) != 1:
+                    if not quote or text.count(quote) < 1 or len(matches) != 1:
                         raise ValueError("anchor -> Evidence -> exact own fragment chain missing/ambiguous")
-                    start = text.index(quote)
+                    start = (text.index(quote) if text.count(quote) == 1 else
+                             retained_evidence_sequence_start(frozen, before, post, k,
+                                                             key('evidence_steps', eid), matches[0], text))
                     spans.append((anchor["paragraph_key"], start, start + len(quote), anchor))
             validate_basis_groups(spans)
         if c == "viewpoint_claim_links":

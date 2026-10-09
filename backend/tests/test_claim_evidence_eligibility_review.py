@@ -69,6 +69,26 @@ def test_exact_label_change_can_enter_independent_review_without_changing_claim(
     assert m.eligibility_profile(r.body(r.build_proposal_packet(frozen)))
 
 
+@pytest.mark.parametrize('bound_target', [True, False])
+def test_qualification_only_own_body_diagnostics_do_not_become_new_evidence(issue_setup, tmp_path, bound_target):
+    _, states, report, policy = eligibility_setup(issue_setup, tmp_path)
+    own = put(tmp_path/'diagnostic-body.json', {'script': [{'text': '甲是假设。完整背景。'}]})
+    snapshot = c.source_snapshot(own)
+    states['source_documents/SRC-test'].update(source_path=own['path'], source_file_sha256=own['file_sha256'],
+        source_body_sha256=snapshot['body_sha256'], source_sha256=snapshot['body_sha256'])
+    states['source_fragments/FR-test']['source_sha256'] = snapshot['body_sha256']
+    _, frozen, issue = materials((None, states, report, policy), tmp_path)
+    proposal = eligibility_proposal(frozen, issue)
+    cite = m.Citation(source_id='SRC-test', paragraph_key='S0001', exact_quote='完整背景。')
+    proposal.claim_assessments[0].citations = ([proposal.claim_assessments[0].citations[0], cite]
+                                             if bound_target else [cite])
+    if bound_target:
+        post = c.validate_proposal(frozen, proposal)
+        assert post['source_fragments/FR-test'] == c.index(frozen['before_records'])['source_fragments/FR-test']
+    else:
+        with pytest.raises(ValueError, match='actual eligible bound Evidence'): c.validate_proposal(frozen, proposal)
+
+
 @pytest.mark.parametrize('field,value',[
     ('review_status','human_review_required'),('review_status','human_hold'),
     ('review_status','rejected'),('review_status','human_approved'),

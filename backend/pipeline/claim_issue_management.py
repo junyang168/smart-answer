@@ -431,7 +431,26 @@ def validate_resolution(frozen, proposal, post, *, review_only=False):
             # after-state must still have bound supporting citations plus the
             # independent complete-postimage review. A binding repair, in
             # contrast, must materialize every claimed new Evidence citation.
-            represented=all(bound_citations) if a.cause=='evidence_binding' else any(bound_citations)
+            qualification_only = [e for e in evidence
+                if post[c.key('evidence_steps', e['evidence_step_id'])] != before[c.key('evidence_steps', e['evidence_step_id'])]]
+            qualification_only = (qualification_only if policy.evidence_eligibility_review and post[k] == before[k]
+                and qualification_only and all(
+                    {f:v for f,v in c._semantic(e).items() if f not in ELIGIBILITY_FIELDS}
+                    == {f:v for f,v in c._semantic(before[c.key('evidence_steps', e['evidence_step_id'])]).items()
+                        if f not in ELIGIBILITY_FIELDS}
+                    for e in qualification_only)
+                and all(post[fk] == before.get(fk) for fk in post if fk.startswith('source_fragments/')) else [])
+            # Qualification-only review does not propose any new quote binding.
+            # Additional full-own-body diagnostic citations stay diagnostic;
+            # each requalified Evidence must still have an actual bound cite.
+            if a.cause == 'evidence_binding' and qualification_only:
+                represented = all(any(
+                    f.get('source_id') == cite.source_id and f.get('paragraph_key') == cite.paragraph_key
+                    and cite.exact_quote in f.get('verbatim_excerpt', '')
+                    for f in bound_fragments([e], lambda fid: post[c.key('source_fragments', fid)])
+                    for cite in a.citations) for e in qualification_only)
+            else:
+                represented=all(bound_citations) if a.cause=='evidence_binding' else any(bound_citations)
             if not represented:
                 raise ValueError('Evidence diagnosis must be represented by actual eligible bound Evidence')
             if a.cause=='evidence_binding' and post[k]==before[k] and all(
