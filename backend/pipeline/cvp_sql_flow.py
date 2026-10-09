@@ -292,7 +292,8 @@ def reviewed_cvp_package(root, materials, store, *, require_resolved=False):
     if report['approval_outcome']!='pass' or report['escalations']:
         raise ValueError('normal CVP terminal review unresolved; no second correction')
     if require_resolved:resolved_report(report,[row["claim_id"] for row in packet["claims"]])
-    proposal_name = "raw-reconsideration.json" if report["_final_review"] is not None else "raw-proposal.json"
+    proposal_name = ("raw-reconsideration.json" if report["_final_review"] is not None
+                     else report.get('_initial_proposal_artifact_name', 'raw-proposal.json'))
     review_name = "raw-final-review.json" if report["_final_review"] is not None else report.get('_initial_review_artifact_name',"raw-review.json")
     proposal = read_artifact(root/proposal_name); review = read_artifact(root/review_name)
     package = compile_cvp_batch_package(proposal=report["_effective_proposal"],review=report["_review"],
@@ -307,6 +308,10 @@ def reviewed_cvp_package(root, materials, store, *, require_resolved=False):
     disposition = build_batch_disposition(proposal=report["_effective_proposal"],batch_identity={"batch_id":packet["batch_id"]},
         effective_proposal_sha256=sha256_json(report["_effective_proposal"].model_dump(mode="json")),apply_status="planned")
     approval = {"proposal":binding(root/proposal_name),"review":binding(root/review_name)}
+    if report.get('_initial_proposal_artifact_name') == 'raw-owner-identity-proposal.json':
+        for name in ('owner-candidate-identity-authorization.json', 'owner-identity-validation.json',
+                     'raw-proposal.json', 'raw-consolidation.json', 'raw-owner-identity-proposal.json'):
+            approval[name] = binding(root/name)
     for stage in ('raw-review', 'raw-reconsideration', 'raw-final-review'):
         proof = root/(stage+'.program-binding.json')
         if proof.exists(): approval[stage+'_program_binding'] = binding(proof)
@@ -625,6 +630,8 @@ def main(argv=None):
                         help='Exact owner acceptance of an existing structural duplicate finding; no new model/content permission')
     parser.add_argument('--adjudication-input-repair-authorization', type=Path,
                         help='One owner-directed complete-CVR call for an exact saved unresolved incomplete input')
+    parser.add_argument('--candidate-identity-authorization', type=Path,
+                        help='Owner-directed same-batch identity revision; original unresolved answer is retained')
     args = parser.parse_args(argv)
     load_dotenv(PROJECT/".env")
     if args.database_url:os.environ['KNOWLEDGE_DATABASE_URL']=args.database_url
@@ -650,6 +657,20 @@ def main(argv=None):
     from backend.pipeline.viewpoint_resolution_runtime import authorized_request_limit
     with maintenance_lock(), authorized_request_limit(args.output_root,args.sql_campaign,args.request_limit_authorization):
         execution_boundary(args.output_root,args.sql_campaign,definition,args.stop_after_group,persist=True)
+        if args.candidate_identity_authorization:
+            from backend.pipeline.cvp_owner_candidate_identity import SCHEMA, NAME
+            direction = read_artifact(args.candidate_identity_authorization)
+            if (direction.get('schema_version') != SCHEMA or direction.get('campaign_sha256') != args.sql_campaign
+                    or direction.get('authorized_by') != 'owner'
+                    or direction.get('artifact_sha256') != sha256_json({k:v for k,v in direction.items() if k!='artifact_sha256'})):
+                raise ValueError('candidate identity direction campaign/owner mismatch')
+            saved = store.get_cvp_group(direction['run_id'])
+            direction_path = args.output_root/direction['run_id']/'normal-review'/NAME
+            if (not saved or saved['campaign_sha256'] != args.sql_campaign or
+                    (invocation_limit is not None and saved['sequence'] > invocation_limit)
+                    or (saved['change_set_ids'] and not direction_path.exists())):
+                raise ValueError('candidate identity direction is outside a pre-write owner boundary')
+            write_immutable(direction_path, direction)
         if args.adjudication_input_repair_authorization:
             from backend.pipeline.cvp_sql_adjudication_input_repair import SCHEMA
             direction = read_artifact(args.adjudication_input_repair_authorization)

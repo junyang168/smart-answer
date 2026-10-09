@@ -124,6 +124,8 @@ commit 後的新連線回讀用於确认可見結果與交接審計。它若失�
 
 各種修訂仍有自己的內容權限與 validator。它們輸出相同的材料／批准／ChangeSet 契約後，共用交易與恢復步驟；統一執行器不等於統一或擴大內容授權。
 
+同批新候選的身份未決經 owner 明確裁定為同一觀點時，`--candidate-identity-authorization` 將裁決接回共同流程。方向綁定原 packet、提議、未決回答及精確 Claim 版本，只允許兩個明示候選和必要引用重接。GPT 以兩條 Claim 的完整自身正文提出一次最小新方案；其他候選、成員、證據、成分範圍與既有 CVP 不變。新方案仍走全組 Opus 獨立審核及原唯一纠正、SQL transaction、回讀與完整獨立審計。原未決回答不改成 pass，owner 的身份裁決也不冒充對待寫文字的批准；固定新呼叫位置保留 once／unknown 門檻，不另建逐 case 執行器。
+
 常規 CVP scope enrichment 使用同一 action／transaction，另以 `--cvp-scope-policy` 綁定其域權限。來源與 Claim 不變時，不建立 source epoch、不讀整庫；由 CVP ID 索引讀完整當前成員及必要 consumer。穩定 action 身份由 CVP 和前 CVR 決定，改 finder／policy 名字／root 不重置同版預算。新 revision、head、全部 current links 和相關 relations 的批准後像一起提交；關係只換必要版本引用，不改語義。所有新版本 provenance 綁實際本輪 Opus，原拒絕及審計保留。
 
 正常組後完整獨立審計發現的 typed 範圍異議可以進這個有界管理分支；它不把原 GPT 未決改成否決。新提交的 CVR 產生新的精確審計輸入，已受影響組失效後只復驗，不重生成或重 apply。舊漏 CVR 的一次 input-repair 方向只對原 head／links 生效；合法新 CVR 不會觸發重放該舊呼叫。

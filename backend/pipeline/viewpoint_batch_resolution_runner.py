@@ -568,7 +568,18 @@ def run_batch(
         raw_consolidation, consolidation_calls, consolidation_seconds = _call(
             consolidator, consolidation_packet, output_dir / "raw-consolidation.json"
         )
-        consolidation = decode_consolidation(raw_consolidation, [c.local_key for c in proposal.new_viewpoint_candidates])
+        from backend.pipeline.cvp_owner_candidate_identity import NAME as OWNER_IDENTITY_NAME
+        if (output_dir / OWNER_IDENTITY_NAME).exists():
+            from backend.pipeline.cvp_owner_candidate_identity import revise, RAW
+            proposal, consolidation, owner_calls, owner_seconds = revise(
+                proposal=proposal, consolidation=raw_consolidation, packet=packet,
+                root=output_dir, proposer=proposer, call=_call)
+            proposal_calls += owner_calls
+            proposal_seconds += owner_seconds
+            validation = validate_proposal(proposal=proposal, batch_id=batch_id, claims=claims,
+                                           registry_revision_ids=registry_revision_ids)
+        else:
+            consolidation = decode_consolidation(raw_consolidation, [c.local_key for c in proposal.new_viewpoint_candidates])
         consolidation_report = validate_consolidation(
             consolidation=consolidation,
             proposal=proposal,
@@ -633,6 +644,11 @@ def run_batch(
         "proposal": proposal_payload,
         "revision_dependents": revision_dependents,
     }
+    if (output_dir / 'owner-identity-validation.json').exists():
+        from backend.pipeline.cvp_owner_candidate_identity import NAME, own_sources, reviewer_direction
+        direction = _read(output_dir / NAME)
+        review_packet['owner_identity_direction'] = reviewer_direction(direction)
+        review_packet['own_source_bodies'] = own_sources(packet, direction['claim_ids'])
     raw_review, review_calls, review_seconds = _call(
         reviewer, review_packet, output_dir / "raw-review.json"
     )
@@ -857,6 +873,7 @@ def run_batch(
             "review": review_artifact_name,
             "reconsideration": "raw-reconsideration.json",
             "final_review": "raw-final-review.json",
+            "owner_identity_proposal": "raw-owner-identity-proposal.json",
         },
     )
     report = {
@@ -905,6 +922,8 @@ def run_batch(
         "master_data_mutations": 0,
         "apply_allowed": False,
     }
+    if (output_dir / 'owner-identity-validation.json').exists():
+        report['_initial_proposal_artifact_name'] = 'raw-owner-identity-proposal.json'
     report["artifact_sha256"] = sha256_json(report)
     # Rewritten, not immutable. The batch's semantic artifacts — packet,
     # proposal, review, reconsideration — are the immutable record; this file
