@@ -652,7 +652,9 @@ def main(argv=None):
     parser.add_argument('--pause-after-group',type=int,help='Narrow this invocation for acceptance; never changes the immutable execution boundary')
     parser.add_argument('--integrate-batch-candidates',action='store_true',
                         help='Explicit new-group identity integration; never upgrades saved legacy answers')
-    parser.add_argument('--action',choices=('group','source','owner-link'),default='group')
+    parser.add_argument('--action',choices=('group','source','owner-link','link-target'),default='group')
+    parser.add_argument('--candidate-viewpoint-id',action='append',default=[],
+                        help='Exact existing target IDs for read-only link-target comparison; not content approval')
     parser.add_argument('--run-id')
     parser.add_argument('--manifest',type=Path)
     parser.add_argument('--direction',type=Path)
@@ -686,6 +688,37 @@ def main(argv=None):
             or args.stop_after_group is None or args.pause_after_group > args.stop_after_group):
         raise ValueError('acceptance pause must narrow an explicit original execution boundary')
     invocation_limit = args.pause_after_group or args.stop_after_group
+    if args.action == 'link-target':
+        if args.dry_run == args.execute or not args.link_id or not args.run_id:
+            raise ValueError('link-target requires dry-run or explicitly authorized review, run/link IDs')
+        saved = store.get_cvp_group(args.run_id)
+        if not saved or saved['campaign_sha256'] != args.sql_campaign:
+            raise ValueError('target selection requires an exact admitted campaign group')
+        from backend.pipeline.cvp_link_target_selection import build_packet, review_selection, production_ports, validate_group_scope
+        from backend.pipeline.source_reconciliation_runtime import maintenance_lock
+        with maintenance_lock():
+            packet = build_packet(store,link_id=args.link_id,candidate_viewpoint_ids=args.candidate_viewpoint_id)
+            validate_group_scope(saved,packet)
+            target = args.output_root/args.run_id/'target-selection'/sha256_json(packet)/'packet.json'
+            write_immutable(target,packet)
+            if args.execute:
+                if not args.direction:
+                    raise ValueError('target selection review needs exact direction; no inferred retry authority')
+                direction = read_artifact(args.direction)
+                wanted = {'schema_version':'cvp_link_target_selection_direction.v1',
+                          'campaign_sha256':args.sql_campaign,'run_id':args.run_id,
+                          'link_id':args.link_id,'packet_sha256':sha256_json(packet),
+                          'registry_writes':0,'human_content_approval':False}
+                if any(direction.get(k)!=v for k,v in wanted.items()) or not direction.get('authorization_quote'):
+                    raise ValueError('target selection direction differs from exact packet/read-only scope')
+                from backend.pipeline.viewpoint_resolution_runtime import authorized_request_limit
+                with authorized_request_limit(args.output_root,args.sql_campaign,args.request_limit_authorization):
+                    result = review_selection(store,packet,root=args.output_root/args.run_id/'target-selection',
+                                              ports=production_ports())
+                print(json.dumps(result)); return 0
+        print(json.dumps({'status':'target_comparison_no_models_no_registry_writes',
+                          'packet':binding(target),'candidate_viewpoint_ids':args.candidate_viewpoint_id,
+                          'semantic_approval':False})); return 0
     if checkpoint_reached(group,invocation_limit):
         stage_event('owner_checkpoint', stop_after_group=args.stop_after_group, pause_after_group=args.pause_after_group)
         return 0
