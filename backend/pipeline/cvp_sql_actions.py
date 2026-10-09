@@ -18,6 +18,13 @@ SOURCE_SCHEMA='wang_source_sql_reconciliation_v2'
 LINK_SCHEMA='wang_owner_sql_link_correction_v2'
 
 
+def read_source_manifest(path):
+    """Accept plain manifests or verify the existing immutable artifact envelope."""
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+    value=read_artifact(path)
+    return body(read(Path(path))) if 'artifact_sha256' in value else value
+
+
 def initialize_subscription_runtime(ports):
     # Restoring an applied SQL group can bypass normal proposal startup. All
     # live bounded branches still use the same local canonical identity proof.

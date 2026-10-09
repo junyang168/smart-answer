@@ -75,6 +75,22 @@ def test_existing_other_final_reservation_cannot_be_replaced(tmp_path):
         m.final_packet(tmp_path,{},None,None)
 
 
+@pytest.mark.parametrize('kind',['plain','sealed','drifted_seal'])
+def test_original_manifest_envelope_is_verified_before_business_validation(tmp_path,kind):
+    import json
+    from backend.pipeline.cvp_sql_actions import read_source_manifest
+    from backend.pipeline.source_reconciliation_runner import write
+    path=tmp_path/'manifest.json';value={'schema_version':'fixture','source_id':'unchanged'}
+    if kind=='plain':path.write_text(json.dumps(value))
+    else:
+        write(path,value)
+        if kind=='drifted_seal':
+            changed=json.loads(path.read_text());changed['source_id']='foreign';path.write_text(json.dumps(changed))
+    if kind=='drifted_seal':
+        with pytest.raises(ValueError,match='seal drift'):read_source_manifest(path)
+    else:assert read_source_manifest(path)==value
+
+
 def test_new_prompt_profile_preserves_old_adapter_identity():
     from backend.pipeline.source_reconciliation_runtime import model_adapter
     adapter=model_adapter('final_review',issue=True,evidence_eligibility=True)

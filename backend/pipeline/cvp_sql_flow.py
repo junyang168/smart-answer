@@ -844,7 +844,8 @@ def main(argv=None):
             from backend.pipeline.source_reconciliation_runtime import ProductionPorts
             if args.action=='source':
                 if not args.manifest:raise ValueError('source action lacks bounded Manifest/authorization')
-                manifest=read_artifact(args.manifest)
+                from backend.pipeline.cvp_sql_actions import read_source_manifest
+                manifest=read_source_manifest(args.manifest)
                 source_root=action_root/'source'
                 if args.claim_first:
                     from backend.pipeline.cvp_sql_actions import source_action_id
