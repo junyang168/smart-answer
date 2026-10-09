@@ -111,8 +111,9 @@ def coordinate_authority(store, cid, row):
     locator_evidence_pins = []
     migrated,findings = migrate_claim_occurrence_anchors(previous[2], index,
         source_id=source['source_id'],transcript_id=source['transcript_id'])
-    if duplicate and migrated is None and findings and all(
+    if migrated is None and findings and all(
             f['status'] in {'changed','coordinate_conflict','ambiguous_exact_text'} for f in findings):
+        # Both historical cleanup kinds used the same pure locator compiler.
         # Later locator resolvers reject a short quote present in two body
         # rows. Resolve ONLY through that anchor's own already-committed
         # Evidence/fragment graph, never the desired Claim postimage or a hint

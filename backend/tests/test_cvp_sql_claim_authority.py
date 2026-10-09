@@ -205,7 +205,8 @@ def test_duplicate_transaction_cannot_expand_coordinate_authority(authority_case
 
 @pytest.mark.parametrize('problem',[None,'held','foreign','missing','retired','fragment_sha',
     'fragment_postimage','fragment_source','ambiguous_index','quote_changed'])
-def test_duplicate_short_quote_requires_exact_own_committed_fragment(authority_case,tmp_path,problem):
+@pytest.mark.parametrize('kind',['wkp368_source_duplicate_cleanup','wkp368_source_contract_cleanup'])
+def test_duplicate_short_quote_requires_exact_own_committed_fragment(authority_case,tmp_path,problem,kind):
     from backend.pipeline.source_contract_cleanup import migrate_source_fragment
     s,doc,save,source_path=duplicate_case(authority_case,tmp_path)
     script=json.loads(source_path.read_text())
@@ -222,7 +223,7 @@ def test_duplicate_short_quote_requires_exact_own_committed_fragment(authority_c
     moved,res=migrate_source_fragment(before_fragment,index,source_sha256=projection.body_sha256,attested_locator='S0002')
     assert moved and res.status=='resolved'
     plan=build_source_contract_cleanup_plan(package_id='synthetic-duplicate-ambiguous',
-        source_kind='wkp368_source_duplicate_cleanup',
+        source_kind=kind,
         current={('claims','CL-test'):{'payload':s.previous[2],'revision':2,'content_sha256':s.previous[1]},
                  ('source_fragments','F'):{'payload':before_fragment,'revision':1,
                                           'content_sha256':record_content_sha(before_fragment)}},
@@ -239,6 +240,9 @@ def test_duplicate_short_quote_requires_exact_own_committed_fragment(authority_c
         'before':s.previous[2] if op['collection']=='claims' else before_fragment,
         'after':s.row['payload'] if op['collection']=='claims' else after_fragment} for op in plan.as_dict()['operations']]
     doc['plan']=plan.as_dict()
+    if kind=='wkp368_source_contract_cleanup':
+        doc['schema_version']='wang_source_contract_cleanup_source_plan_v1'
+        doc['source']={**source,'source_id':'SRC-test','source_type':'sermon_transcript'}
     s.get_record_state=lambda col,oid:deepcopy(states.get((col,oid)))
     if problem=='held':step['support_eligibility']='context_only'
     elif problem=='foreign':step['produced_claim_ids']=['OTHER']
