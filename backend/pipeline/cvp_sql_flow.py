@@ -354,7 +354,7 @@ def reviewed_cvp_package(root, materials, store, *, require_resolved=False):
 
 def commit_package(store, run_id, *, package, approval, authorization, backup, sources,
                    read_pins, reason, actor, source_kind="cvp_batch_resolution", viewpoint_ids=(), disposition=None, action=None,
-                   pending_cvp_claim_ids=()):
+                   pending_cvp_claim_ids=(), pending_cvp_management_record_keys=None):
     """The shared normal/source/link execution boundary after content approval."""
     for source in sources:check_binding(source)
     if not backup.get('restore_catalog_nonempty') or not backup.get('dump'):
@@ -384,6 +384,10 @@ def commit_package(store, run_id, *, package, approval, authorization, backup, s
                 "viewpoint_ids":list(viewpoint_ids),"disposition":disposition}
     evidence['execution']={'reason':reason,'actor':actor,'approval':approval,'authorization':authorization,'backup':backup}
     evidence['pending_cvp_claim_ids']=list(pending_cvp_claim_ids)
+    if pending_cvp_management_record_keys is None:
+        pending_cvp_management_record_keys=(store.get_cvp_group(run_id) or {}).get('reviewed',{}).get('evidence',{}).get('pending_cvp_management_record_keys',[])
+    if pending_cvp_management_record_keys:
+        evidence['pending_cvp_management_record_keys']=list(pending_cvp_management_record_keys)
     if action:evidence['action']=action
     reviewed = store.review_cvp_group(run_id,plan=plan,evidence=evidence)
     if source_kind == 'cvp_batch_resolution':
@@ -483,6 +487,8 @@ def run_group(store, definition, group, row, *, root):
                 prior_management_action=prior_management_action(evidence,detected.findings))
             return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)
         saved=store.get_cvp_group(run_id);evidence=saved['reviewed']['evidence']
+    if evidence.get('pending_cvp_management_record_keys'):
+        raise ValueError('new CVP coverage committed; existing CVP/link management remains pending, not group completion')
     disposition=evidence.get('disposition')
     if disposition and any(component["disposition"]=="deferred" for claim in disposition["claims"] for component in claim["components"]):
         from backend.pipeline.viewpoint_deferred_source_check import run as investigate

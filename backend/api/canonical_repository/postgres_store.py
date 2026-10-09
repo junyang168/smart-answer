@@ -3629,6 +3629,8 @@ class PostgresKnowledgeStore:
             value = row[0]
             if (value.get('reviewed',{}).get('evidence') or {}).get('pending_cvp_claim_ids'):
                 raise ChangeSetConflict('Claim management committed; CVP coverage/impact remains pending')
+            if (value.get('reviewed',{}).get('evidence') or {}).get('pending_cvp_management_record_keys'):
+                raise ChangeSetConflict('new coverage cannot clear pending existing CVP/link management')
             for source in (value.get('reviewed',{}).get('evidence') or {}).get('sources',[]):
                 if file_sha256(Path(source['path'])) != source['file_sha256']:
                     raise ChangeSetConflict('physical own source changed since independent audit')

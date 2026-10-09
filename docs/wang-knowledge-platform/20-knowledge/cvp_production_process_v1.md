@@ -359,6 +359,10 @@ GPT 提議不批准自己的內容；Opus 檢查完整新 Claim、證據、差�
 
 本源合法批准後共用短 SQL transaction、實際完整 RETURNING／後像／歷史／新連線回讀及直接 SSD backup。交易保留完整 `pending_cvp_claim_ids` 並失效相關舊完成資格，不能留下看似已審的新版本下游。以當前原組全部 Claims、完整自身正文作獨立 Gemini 第 1／2／3 層審計，逐項驗證實際模型回答及來源，保存 `claim_layer_audited_cvp_pending` 證明；不作第 4 層 CVP 身份判讀。這個入口隨即退出，不啟動 CVP 管理、不標 group audited、不啟動下一組。CVP 只在本源確已完成後依新當前材料另行管理；原 CVP 提案、拒絕和預算保持歷史，不能沿用舊前像重新整包提交。
 
+本源提交並完成本層復驗後，尚未提交的舊 CVP 提案不是必須修補的既定事實。共同 `required_cvp_coverage` 以 SQL 綁定的本源完成 receipt、實際 source-only 交易、當前原组 Claim／Evidence 及既有 Registry 重新提議：等價成立才復用，否則可提出由當前材料支持的新觀點，不強迫替舊核心找新等價成員。本源終審的 pending verdict 不是 CVP 批准；舊 raw、拒絕與预算原樣保留。此交接不重跑本源、不復活退役 Claim、不重置既有 coverage／成員判讀預算，也不將同一被拒候選換名重審。
+
+撤回未提交提案與撤回已提交資料分開。交易未 commit 時可 rollback，已 commit 的 Claim／Evidence 修復及旧 CVP／連接則保留；新 coverage 不自動刪改它們。共同後像繼續攜帶 `pending_cvp_management_record_keys`，已提交連接的必要處置仍須依自己的獲准管理與审核完成。新增 CVP 或新連接不能自動清空這份清單、代替受影響審計或標 group audited；完整既有 impacts 未解決時，SQL completion 拒絕結案。
+
 Claim change 和 Claim Evidence change 都須產出精確影響清單；Claim statement 沒變，不代表相關 CVP 一定不受影響。Evidence 被增加、移除、限定或改變支持資格時，原 Claim–CVP 關係的依據也可能變化。共享 Evidence 變更先找齊所有引用它的 Claims，再找這些 Claims 的全部 CVP 連接，不能只看當前遇到的一條 Claim。
 
 交接沿用已有 SQL action／材料引用，至少包含：Claim 與 Evidence 的前後版本、逐欄差異、正文依据及实际审核、所有受影響連接／CVPs／原組、確定保留項及待判項。它是本源修訂結果，不是 CVP 修改批准；不新增消息系統或第二份歷史。

@@ -285,7 +285,10 @@ def execute_coverage_action(store,run_id,definition,group,*,root,ports,investiga
     store.bind_cvp_execution_root(run_id,identity=action_id,root=root)
     previous=store.get_cvp_action(run_id,action_id)
     materials=previous['materials'] if previous else prepare_group(store,definition,{**group,'claim_ids':ids})
-    if not previous and old.get('action',{}).get('materials',{}).get('claim_issue_context'):
+    if not previous and saved.get('claim_layer_audit'):
+        from backend.pipeline.claim_first_management import coverage_context
+        materials['claim_management_resolution']=coverage_context(store,saved,group)
+    elif not previous and old.get('action',{}).get('materials',{}).get('claim_issue_context'):
         # A retained Claim is not a newly approved normal CVP proposal. Its
         # joint management review is explicit input to this new coverage stage;
         # never silently repeat/relabel the former deferred request.
@@ -297,6 +300,10 @@ def execute_coverage_action(store,run_id,definition,group,*,root,ports,investiga
             'issues':old['action']['materials']['claim_issue_context']['issues']}
     action=store.prepare_cvp_action(run_id,action_id=action_id,kind='required_cvp_coverage',
                                     authorization={**old['authorization'],**({'source_investigation':investigation} if investigation else {})},materials=materials)
+    if saved.get('claim_layer_audit'):
+        from backend.pipeline.claim_first_management import REPROPOSAL_VERSION
+        if materials.get('claim_management_resolution',{}).get('schema_version')!=REPROPOSAL_VERSION:
+            raise ValueError('saved coverage predates Claim-first handoff; no cache reinterpretation or new budget')
     if saved['checkpoint']=='reviewed':return resume_reviewed_action(store,run_id)
     initialize_subscription_runtime(ports)
     package,approval,disposition=reviewed_cvp_package(root/'model-stages',materials,store,require_resolved=True)
@@ -311,7 +318,8 @@ def execute_coverage_action(store,run_id,definition,group,*,root,ports,investiga
         backup=verified_group_backup(root,package,ports),
         sources=materials['sources'],read_pins=decoded_pins(materials['read_pins']),
         reason='required CVP coverage after bounded Claim revision',actor=definition['authorized_by'],
-        viewpoint_ids=views,disposition=merge_dispositions(old.get('disposition'),disposition),action=action)
+        viewpoint_ids=views,disposition=merge_dispositions(old.get('disposition'),disposition),action=action,
+        pending_cvp_management_record_keys=materials.get('claim_management_resolution',{}).get('pending_existing_cvp_record_keys',[]))
 
 
 def execute_supports_action(store,run_id,adjudication_root,*,root,ports):

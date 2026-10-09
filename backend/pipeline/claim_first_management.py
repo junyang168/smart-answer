@@ -13,6 +13,7 @@ VERSION = 'wang_claim_first_management_v1'
 SOURCE_COLUMNS = {'claims', 'evidence_steps', 'source_fragments'}
 CVP_COLUMNS = {'canonical_viewpoints', 'viewpoint_revisions', 'viewpoint_claim_links', 'viewpoint_relations'}
 PENDING_PROBLEM = 'pending_cvp_management'
+REPROPOSAL_VERSION = 'wang_post_claim_cvp_reproposal_v1'
 
 REVIEW_SCOPE = '''
 本次完整終審的寫入範圍是 Claim/Evidence/fragment，本源先完成，CVP 之後另行處理。
@@ -173,3 +174,98 @@ def finish_claim_audit(store, run_id, root):
         from backend.api.canonical_repository.postgres_store import canonical_json
         cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now() WHERE run_id=%s",(canonical_json(value),run_id))
     return receipt
+
+
+def coverage_context(store, saved, group):
+    """Authenticate the completed Claim layer, not a new CVP approval.
+
+    This consumes the SQL-pinned receipt once per coverage preparation. It
+    neither reruns audits/models nor resurrects the uncommitted joint proposal.
+    Existing SQL links stay visible to the normal reviewer and pending impacts
+    cannot be cleared merely by creating replacement coverage.
+    """
+    from pathlib import Path
+    from backend.pipeline.cvp_sql_flow import check_binding, decoded_pins
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+    from backend.pipeline.source_reconciliation_runner import body, read
+    marker = saved.get('claim_layer_audit')
+    if not marker:
+        return None
+    evidence = saved['reviewed']['evidence']
+    application = evidence['package']['payload'].get('source_repair_application', {})
+    root = Path(application.get('run_root', ''))
+    receipt_binding = marker.get('receipt', {})
+    if (saved['checkpoint'] != 'applied' or marker.get('status') != 'claim_layer_audited_cvp_pending'
+            or marker.get('cvp_management_complete') is not False
+            or receipt_binding.get('path') != str(root/'claim-first-audit/claim-layer-completion.json')
+            or application.get('run_id') != saved['run_id']
+            or saved['claim_ids'] != group['claim_ids']
+            or evidence.get('pending_cvp_claim_ids') != saved['claim_ids']):
+        raise ValueError('CVP reproposal requires exact completed original Claim layer')
+    check_binding(receipt_binding)
+    receipt = read_artifact(receipt_binding['path'])
+    if (receipt.get('schema_version') != VERSION or receipt.get('status') != marker['status']
+            or receipt.get('claim_ids') != saved['claim_ids']
+            or receipt.get('change_set_ids') != saved['change_set_ids']
+            or any(receipt.get(k) is not False for k in
+                   ('cvp_management_complete', 'group_complete', 'next_group_started'))):
+        raise ValueError('Claim completion receipt scope or status drift')
+    check_binding(receipt['audit'])
+    for proof in receipt['source_proofs']:
+        check_binding(proof)
+    from backend.pipeline.viewpoint_validation_context import read_current_objects
+    from backend.pipeline.cvp_sql_flow import pins
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    expected = decoded_pins(receipt['read_pins'])
+    current = read_current_objects(store, expected)
+    if pins(current) != expected or any(record_content_sha(r['payload']) != r['content_sha256']
+            or (not r['retired'] and r['payload'].get('revision') != r['revision'])
+            for r in current.values()):
+        raise ValueError('completed Claim audit current dependency drift')
+    plan = saved['reviewed']['plan']
+    history = store.get_change_history(plan['change_set_id'])
+    if (not history or history['status'] != 'applied' or not history['operations']
+            or any(op['collection'] not in SOURCE_COLUMNS for op in history['operations'])
+            or plan['change_set_id'] not in receipt['change_set_ids']):
+        raise ValueError('Claim-first transaction is not exclusively committed source work')
+    packet_path = root/'final_review.packet.json'
+    packet = body(read(packet_path))
+    if not packet.get('claim_first_management'):
+        raise ValueError('source terminal review did not defer CVP approval')
+    pending = packet.get('source_first_pending_cvp', {}).get('pending_record_keys', [])
+    if (not pending or len(pending) != len(set(pending))
+            or any(c.split_key(k)[0] not in CVP_COLUMNS for k in pending)):
+        raise ValueError('Claim-first handoff lost pending existing CVP impacts')
+    terminal = evidence['approval']['terminal_review']
+    program = evidence['approval'].get('final_review_program_binding')
+    if terminal.get('path') != str(root/'final_review.raw.json') or not program:
+        raise ValueError('Claim-first handoff lacks SQL-bound original final review')
+    check_binding(terminal); check_binding(program)
+    raw = read(root/'final_review.raw.json')
+    bound = read_artifact(program['path'])
+    verdicts = bound.get('bound_response',{}).get('verdicts',[])
+    observed = [v['record_key'] for v in verdicts
+                if not v['approved'] and v['problems']==[PENDING_PROBLEM]]
+    if (raw['artifact_sha256'] != application.get('review_sha256')
+            or bound.get('raw_artifact_sha256') != raw['artifact_sha256']
+            or bound.get('bound_response',{}).get('proposal_sha256') != application.get('proposal_sha256')
+            or packet.get('proposal_sha256') != application.get('proposal_sha256')
+            or sorted(observed) != sorted(pending)):
+        raise ValueError('source-only final review lost exact pending CVP verdict binding')
+    from backend.pipeline.cvp_sql_flow import binding
+    return {'schema_version': REPROPOSAL_VERSION,
+        'management_action_id': evidence['action']['action_id'],
+        'prior_reviewed_sha256': saved['reviewed_sha256'],
+        'claim_layer_completion': receipt_binding,
+        'source_terminal_review': evidence['approval']['terminal_review'],
+        'source_terminal_packet': binding(packet_path),
+        'pending_existing_cvp_record_keys': sorted(pending),
+        'source_only_approval': True, 'existing_cvp_content_approved': False,
+        'old_proposals_and_budgets_preserved': True,
+        'instructions': 'Propose CVP coverage from the current approved Claim/Evidence, not from the '
+            'uncommitted old joint CVP proposal. Reuse an existing identity only if actually equivalent; '
+            'otherwise propose a supported distinct viewpoint. Do not force a new equivalent member '
+            'for an old core, revive retired Claims, change Claim/Evidence/source, or repeat a rejected '
+            'membership candidate. Existing committed links remain visible and cannot be silently '
+            'discarded, retired, duplicated or labelled approved by the source-only review. '
+            'Their pending management is separate from new coverage and still prevents group completion.'}
