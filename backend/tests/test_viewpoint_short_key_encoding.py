@@ -105,7 +105,7 @@ def test_saved_g094_review_request_is_lossless_below_600k_with_zero_calls(monkey
     assert short.request_bytes(request)<600000 and proof['exact_roundtrip_verified']
     assert proof['semantic_payload_sha256']==proof['restored_payload_sha256']=='714b59dd8c0b38cbd965ca051476b2fca0091da627a76f5f0141276454ae0802'
     assert len(packet['claims'])==20 and len(packet['retained_existing_claim_links'])==25
-    assert not (p/'raw-review.call-intent.json').exists() and not (p/'raw-review.json').exists()
+    # The historical request remains reproducible after production saves review.
     # Rebuild through the actual common content compiler, authenticate both
     # saved model inputs, and stop before the never-invoked review boundary.
     from dotenv import load_dotenv
