@@ -337,6 +337,12 @@ class Runner:
         self.guard(frozen)
         correction = self.call("correction", correction_packet)
         proposed = effective_proposal(frozen, correction["response"])
+        from backend.pipeline.cvp_membership_management import retirement_handoff
+        handoff = retirement_handoff(frozen, proposed, correction)
+        if handoff is not None:
+            write(self.root / 'cvp-membership-handoff.json', handoff)
+            raise Stop('routine CVP membership revalidation pending; original correction retained',
+                       status='cvp_management_pending', waiting_for='system')
         review_packet = self.review_input(frozen, correction['response'], proposed, 'final_review')
         self.guard(frozen)
         final = self.call("final_review", review_packet)
