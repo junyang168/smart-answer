@@ -3689,6 +3689,62 @@ class PostgresKnowledgeStore:
             cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now(),error_message=NULL WHERE run_id=%s", (canonical_json(value),run_id))
         return digest
 
+    def retain_reviewed_cvp_relations(self, run_id, *, plan, reviewed_sha256):
+        """Derive a no-edge-write plan; archive the exact prior SQL approval.
+
+        No content review changes: every remaining operation, original package,
+        backup, source and model receipt is identical. Never repairs applied KCS.
+        """
+        from .cvp_relation_retention import derive
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s AND stage='cvp_group' FOR UPDATE", (run_id,))
+            row = cursor.fetchone()
+            if not row:
+                raise ChangeSetConflict("relation retention group missing")
+            value = row[0]
+            review = value.get('reviewed')
+            if (value.get('checkpoint') != 'reviewed' or not review
+                    or value.get('reviewed_sha256') != reviewed_sha256
+                    or sha256_json(review) != reviewed_sha256
+                    or canonical_json(review['plan']) != canonical_json(plan.as_dict())
+                    or plan.source_kind != 'cvp_batch_resolution'):
+                raise ChangeSetConflict("relation retention exact unapplied SQL review missing")
+            evidence = review['evidence']
+            if evidence.get('relation_retention'):
+                return reviewed_sha256
+            if (evidence['package'].get('sha256') != plan.source_sha256
+                    or sha256_json(evidence['package']['payload']) != plan.source_sha256):
+                raise ChangeSetConflict("relation retention original package seal drift")
+            if cursor.execute("SELECT 1 FROM wang_knowledge.change_sets WHERE change_set_id=%s OR fingerprint_sha256=%s",
+                              (plan.change_set_id,plan.fingerprint_sha256)).fetchone():
+                raise ChangeSetConflict("relation retention cannot change an existing ChangeSet")
+            old_pins = {(r['collection'],r['object_id']):tuple(r['pin']) if r['pin'] else None
+                        for r in evidence['read_pins']}
+            self._assert_transaction_read_pins(cursor, old_pins)
+            derived, new_pins, receipt = derive(cursor,plan,old_pins)
+            if not receipt:
+                return reviewed_sha256
+            self._assert_transaction_read_pins(cursor, new_pins)
+            archive = {'kind':'cvp_mechanical_relation_retention_archive',
+                       'parent_run_id':run_id,'reviewed_sha256':reviewed_sha256,
+                       'reviewed':review,'checkpoint':value['checkpoint'],
+                       'retention':receipt}
+            ident = 'CVPR-'+sha256_json({'parent':run_id,'reviewed_sha256':reviewed_sha256})
+            stored = cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s",(ident,)).fetchone()
+            if stored and stored[0] != archive:
+                raise ChangeSetConflict("relation retention archive identity conflict")
+            if not stored:
+                cursor.execute("INSERT INTO wang_knowledge.pipeline_runs(run_id,subject_kind,subject_id,stage,trigger,status,metadata) VALUES (%s,'batch',%s,'cvp_group','cli','succeeded',%s::jsonb)",
+                               (ident,run_id,canonical_json(archive)))
+            next_evidence = {**evidence,'relation_retention':receipt,
+                'read_pins':[{'collection':k[0],'object_id':k[1],'pin':list(v) if v else None}
+                             for k,v in sorted(new_pins.items())]}
+            next_review = {'plan':derived.as_dict(),'evidence':next_evidence}
+            digest = sha256_json(next_review)
+            value.update(reviewed=next_review,reviewed_sha256=digest)
+            cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now(),error_message=NULL WHERE run_id=%s",(canonical_json(value),run_id))
+            return digest
+
     @staticmethod
     def _lock_reviewed_cvp_group(cursor, plan, context):
         from .transaction_validation import CONTRACT

@@ -128,6 +128,11 @@ def resume_reviewed_action(store, run_id):
     check_binding(evidence['backup']['dump'])
     for proof in evidence['approval'].values():
         if isinstance(proof,dict) and {'path','file_sha256'} <= proof.keys(): check_binding(proof)
+    plan = plan_from_document(saved['reviewed']['plan'])
+    if plan.source_kind == 'cvp_batch_resolution':
+        store.retain_reviewed_cvp_relations(run_id,plan=plan,reviewed_sha256=saved['reviewed_sha256'])
+        saved = store.get_cvp_group(run_id)
+        evidence = saved['reviewed']['evidence']
     return store.apply_plan(plan_from_document(saved['reviewed']['plan']),
         transaction_context=TransactionValidation(run_id,saved['reviewed_sha256'],decoded_pins(evidence['read_pins'])),
         metadata=evidence['execution'])
@@ -380,6 +385,12 @@ def commit_package(store, run_id, *, package, approval, authorization, backup, s
     evidence['pending_cvp_claim_ids']=list(pending_cvp_claim_ids)
     if action:evidence['action']=action
     reviewed = store.review_cvp_group(run_id,plan=plan,evidence=evidence)
+    if source_kind == 'cvp_batch_resolution':
+        reviewed = store.retain_reviewed_cvp_relations(run_id,plan=plan,reviewed_sha256=reviewed)
+        saved = store.get_cvp_group(run_id)['reviewed']
+        plan = plan_from_document(saved['plan'])
+        evidence = saved['evidence']
+        complete_pins = decoded_pins(evidence['read_pins'])
     context = TransactionValidation(run_id,reviewed,complete_pins)
     result = store.apply_plan(plan,transaction_context=context,metadata=evidence['execution'])
     if result['change_set_id'] is None:return result
