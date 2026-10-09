@@ -628,7 +628,7 @@ def run_group(store, definition, group, row, *, root):
                                          owner_resolution_path=resolution)
                 stage_event('audited', sequence=group['sequence'], run_id=run_id)
                 return
-        from backend.pipeline.viewpoint_reused_source_resolution import compose,create as reuse_part
+        from backend.pipeline.viewpoint_reused_source_resolution import compose,create as reuse_part,subset_key
         from backend.pipeline.viewpoint_adjudication_history import validated_history
         from backend.pipeline.viewpoint_audit_source_adjudication import restricted_packet
         covered=set()
@@ -659,7 +659,7 @@ def run_group(store, definition, group, row, *, root):
                 if unresolved:
                     raise ValueError('saved original-source adjudication unresolved; original once reservation retained: '
                                      + ', '.join(unresolved))
-                reuse_part(audit_path,previous,audit_dir/('known-'+sha256_json(str(previous))[:20])/'resolution.json',
+                reuse_part(audit_path,previous,audit_dir/('known-'+subset_key(previous,ids))/'resolution.json',
                            store,only_item_ids=ids)
                 covered.update(ids)
         fresh={i['item_id'] for i in packet['items']}-covered

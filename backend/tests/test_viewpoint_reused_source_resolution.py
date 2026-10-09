@@ -43,6 +43,13 @@ def test_exact_unchanged_rejected_subset_no_new_model_calls(tmp_path,monkeypatch
     validate_audit(audit,['c'],['v'],owner_resolution_path=path)
 
 
+def test_subset_proof_identity_preserves_failed_immutable_broader_packet():
+    assert m.subset_key('original-root',{'rejected'})!=m.subset_key('original-root',{'rejected','human-upheld'})
+    assert m.subset_key('original-root',['a','b'])==m.subset_key('original-root',['b','a','b'])
+    assert m.subset_key('original-root',{'a'})!=m.subset_key('foreign-root',{'a'})
+    with pytest.raises(ValueError,match='empty'):m.subset_key('original-root',set())
+
+
 def test_composed_reuse_still_requires_actual_full_target_coverage(tmp_path,monkeypatch):
     audit,path,prior,current=fixture(tmp_path,monkeypatch)
     # Fixture-only profile. Production composition uses validated_history to

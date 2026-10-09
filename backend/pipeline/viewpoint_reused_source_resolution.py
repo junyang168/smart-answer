@@ -7,6 +7,11 @@ SCHEMA='wang_exact_reused_gpt_source_resolution_v1'
 COMPOSED_SCHEMA='wang_exact_composed_gpt_source_resolution_v2'
 PROJECTION_POLICY=Path(__file__).parent/'policies/wang_g035_rejected_finding_projection_v1.json'
 
+def subset_key(prior_root,item_ids):
+    """Derived proof identity, NOT a new adjudication root or model budget."""
+    if not item_ids:raise ValueError('empty reused semantic population')
+    return sha256_json({'prior':str(prior_root),'items':sorted(set(item_ids))})[:20]
+
 def exact_item(old,current,projection=None):
     if old==current:return True
     if not old or projection is None:return False
