@@ -335,6 +335,27 @@ def call_model(
     if not saved and historical_context() is not None:
         raise ValueError(f"read-only historical validation has no saved response; no model fallback: {cache}")
     adapter = response_adapter(adapter, read_artifact(cache) if saved else None)
+    # Only an uninvoked stage may choose a smaller lossless wire encoding.
+    # Saved answers and unknown intents retain their exact original identity.
+    intent_path = cache.with_name(cache.stem + '.call-intent.json')
+    encoding_path = cache.with_name(cache.stem + '.request-encoding.json')
+    if not saved and not intent_path.exists() and not encoding_path.exists():
+        limit, _ = effective_request_limit(adapter, cache)
+        key_factory = getattr(adapter, 'shared_keys_copy', None)
+        if (limit is not None and callable(key_factory)
+                and getattr(adapter, '_shared_record_payload', False)
+                and adapter.request_bytes(payload) > int(limit)):
+            smaller = key_factory()
+            if smaller.request_bytes(payload) < adapter.request_bytes(payload):
+                adapter = smaller
+    elif saved:
+        key_factory = getattr(adapter, 'shared_keys_copy', None)
+        if callable(key_factory) and getattr(adapter, '_shared_record_payload', False):
+            smaller = key_factory()
+            artifact = read_artifact(cache)
+            if all(artifact.get(k) == getattr(smaller, k) for k in
+                   ('model_id', 'backend', 'prompt_sha256', 'generation_config_sha256')):
+                adapter = smaller
     if not saved:
         # Verify the complete live/input cut before even entering the adapter.
         # Cache authentication above this boundary remains purely read-only.

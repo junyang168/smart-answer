@@ -126,6 +126,10 @@ commit 後的新連線回讀用於确认可見結果與交接審計。它若失�
 
 同批新候選的身份未決經 owner 明確裁定為同一觀點時，`--candidate-identity-authorization` 將裁決接回共同流程。方向綁定原 packet、提議、未決回答及精確 Claim 版本，只允許兩個明示候選和必要引用重接。GPT 以兩條 Claim 的完整自身正文提出一次最小新方案；其他候選、成員、證據、成分範圍與既有 CVP 不變。新方案仍走全組 Opus 獨立審核及原唯一纠正、SQL transaction、回讀與完整獨立審計。原未決回答不改成 pass，owner 的身份裁決也不冒充對待寫文字的批准；固定新呼叫位置保留 once／unknown 門檻，不另建逐 case 執行器。
 
+常規新組可用明示 `--integrate-batch-candidates` 啟用版本化同批新候選整合。原 GPT 提議仍保留全部 Claim；Opus 身份階段先讀既有完整段落上下文，對尚未提交候選明示同身份成員與保留 key、完整歸一化命題，再對保留候選匹配 Registry。程式只重接必要候選引用，保留 Claim 成分／證據／來源及原數量；不合併已提交 CVP。完整 Opus 審核另核對受整合成員的完整自身正文。段落上下文不得變成新 Evidence，也不因疑似同一次錄音而要求普通跨講整合先核對錄音身份。
+
+首次身份未決交 GPT 以完整自身正文作本組唯一纠正，再作完整 Opus 審核；仍未決或拒絕就停止，不再啟動正常 CVP 第二輪纠正。舊初審回答、未決及 once 預算全部保留。此入口以新 schema／prompt 身份及 execution binding 啟用；已有舊提議的組仍按原契約續接，新版不能重編已完成組或冒充舊回答看過新材料。模型請求超出既有上限時，可在尚無 intent 的階段選用更小的既有無損欄位字典編碼；保存回答按實際編碼身份消費，未知 intent 不重編、不重發，去重後仍超限就停止。
+
 常規 CVP scope enrichment 使用同一 action／transaction，另以 `--cvp-scope-policy` 綁定其域權限。來源與 Claim 不變時，不建立 source epoch、不讀整庫；由 CVP ID 索引讀完整當前成員及必要 consumer。穩定 action 身份由 CVP 和前 CVR 決定，改 finder／policy 名字／root 不重置同版預算。新 revision、head、全部 current links 和相關 relations 的批准後像一起提交；關係只換必要版本引用，不改語義。所有新版本 provenance 綁實際本輪 Opus，原拒絕及審計保留。
 
 正常組後完整獨立審計發現的 typed 範圍異議可以進這個有界管理分支；它不把原 GPT 未決改成否決。新提交的 CVR 產生新的精確審計輸入，已受影響組失效後只復驗，不重生成或重 apply。舊漏 CVR 的一次 input-repair 方向只對原 head／links 生效；合法新 CVR 不會觸發重放該舊呼叫。

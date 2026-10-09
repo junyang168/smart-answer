@@ -57,7 +57,7 @@ def test_adapter_transport_exact_once_new_config_and_old_unchanged(tmp_path):
     call_model(new,p,tmp_path/'raw.json')
     assert decode_shared_keys(json.loads(calls[0]['user_prompt']))==p
     assert call_model(new,p,tmp_path/'raw.json')[1]==0 and len(calls)==1
-    with pytest.raises(ValueError):call_model(old,p,tmp_path/'raw.json')
+    assert call_model(old,p,tmp_path/'raw.json')[1]==0 and len(calls)==1
 
 
 def test_shared_key_codec_does_not_bypass_size_or_unknown_hold(tmp_path):
@@ -71,3 +71,32 @@ def test_shared_key_codec_does_not_bypass_size_or_unknown_hold(tmp_path):
     (tmp_path/'unknown.call-intent.json').write_text('{}')
     with pytest.raises(ValueError,match='outcome unknown'):
         call_model(a,payload(),tmp_path/'unknown.json')
+
+
+def test_budget_fallback_is_lossless_and_saved_recovery_does_not_call(tmp_path):
+    from backend.pipeline.viewpoint_g037_claim_statement_repair import review_adapter
+    from backend.pipeline.viewpoint_resolution_runtime import call_model
+    calls=[]
+    client=SimpleNamespace(model='gpt-6.1-sol',backend='codex_subscription',reasoning_effort='high',
+        generate_json=lambda **kw:calls.append(kw) or {})
+    a=review_adapter(client);p=payload()
+    a.max_request_bytes=a.shared_keys_copy().request_bytes(p)
+    original_config=a.generation_config_sha256
+    assert a.request_bytes(p)>a.max_request_bytes
+    call_model(a,p,tmp_path/'raw.json')
+    assert decode_shared_keys(json.loads(calls[0]['user_prompt']))==p
+    assert a.generation_config_sha256==original_config and not a._shared_key_payload
+    assert call_model(a,p,tmp_path/'raw.json')[1]==0 and len(calls)==1
+
+
+def test_budget_fallback_never_changes_unknown_intent_identity(tmp_path):
+    from backend.pipeline.viewpoint_g037_claim_statement_repair import review_adapter
+    from backend.pipeline.viewpoint_resolution_runtime import call_model
+    client=SimpleNamespace(model='gpt-6.1-sol',backend='codex_subscription',reasoning_effort='high',
+        generate_json=lambda **kw:pytest.fail('must not resend unknown'))
+    a=review_adapter(client);p=payload();a.max_request_bytes=a.shared_keys_copy().request_bytes(p)
+    (tmp_path/'raw.call-intent.json').write_text('original unknown intent')
+    with pytest.raises(ValueError,match='configured ceiling'):
+        call_model(a,p,tmp_path/'raw.json')
+    assert (tmp_path/'raw.call-intent.json').read_text()=='original unknown intent'
+    assert not (tmp_path/'raw.request-encoding.json').exists()

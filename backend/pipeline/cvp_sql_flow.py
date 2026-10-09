@@ -279,6 +279,23 @@ def reviewed_cvp_package(root, materials, store, *, require_resolved=False):
     check_binding(materials["policy"]); check_binding(materials["semantic_contract"])
     for source in materials["sources"]:check_binding(source)
     from backend.pipeline.claim_issue_management import IssuesDetected,review_findings
+    def identity_source_loader(source_ids):
+        from backend.pipeline.viewpoint_evidence_source_context import load_context_source
+        result=[]
+        for sid in source_ids:
+            if sid not in {c['source_id'] for c in packet['claims']}:
+                raise ValueError('integration context crossed original Claim source identity')
+            source=store.get_record('source_documents',sid)
+            if not source:
+                raise ValueError('integration own source missing or retired')
+            path,physical_sha,projection=load_context_source(source)
+            if {'path':str(path),'file_sha256':physical_sha} not in materials['sources']:
+                raise ValueError('integration source is outside prepared physical source bindings')
+            result.append({'source_id':sid,'source_type':source['source_type'],
+                'source_path':str(path),'source_file_sha256':physical_sha,
+                'source_body_sha256':projection.body_sha256,
+                'paragraph_texts':[r['text'] for r in projection.spoken_rows]})
+        return result
     def claim_issue_handler(*,proposal,review,origin,report_path,correction_used,terminal_refusal):
         findings=review_findings(proposal,review)
         if findings:
@@ -288,7 +305,8 @@ def reviewed_cvp_package(root, materials, store, *, require_resolved=False):
         claims=[ReviewClaim.model_validate(row) for row in packet["claims"]],registry_context=packet["registry_context"],
         pending_candidates=[],output_dir=root,current_claim_links=packet["existing_links"],
         dependents_loader=store.load_revision_dependents,claim_issue_handler=claim_issue_handler,
-        management_context=materials.get('claim_management_resolution'),**models)
+        management_context=materials.get('claim_management_resolution'),
+        identity_source_loader=identity_source_loader,**models)
     if report['approval_outcome']!='pass' or report['escalations']:
         raise ValueError('normal CVP terminal review unresolved; no second correction')
     if require_resolved:resolved_report(report,[row["claim_id"] for row in packet["claims"]])
@@ -308,6 +326,10 @@ def reviewed_cvp_package(root, materials, store, *, require_resolved=False):
     disposition = build_batch_disposition(proposal=report["_effective_proposal"],batch_identity={"batch_id":packet["batch_id"]},
         effective_proposal_sha256=sha256_json(report["_effective_proposal"].model_dump(mode="json")),apply_status="planned")
     approval = {"proposal":binding(root/proposal_name),"review":binding(root/review_name)}
+    if (root/'batch-identity-integration.json').exists():
+        for name in ('batch-identity-integration.json','raw-proposal.json','raw-consolidation.json',
+                     'raw-identity-reconsideration.json'):
+            if (root/name).exists():approval[name]=binding(root/name)
     if report.get('_initial_proposal_artifact_name') == 'raw-owner-identity-proposal.json':
         for name in ('owner-candidate-identity-authorization.json', 'owner-identity-validation.json',
                      'raw-proposal.json', 'raw-consolidation.json', 'raw-owner-identity-proposal.json'):
@@ -617,6 +639,8 @@ def main(argv=None):
     parser.add_argument('--execute',action='store_true',help='Explicit new SQL execution; never implicitly resume a stopped campaign')
     parser.add_argument('--stop-after-group',type=int,help='Complete this original group then stop before preparing the next')
     parser.add_argument('--pause-after-group',type=int,help='Narrow this invocation for acceptance; never changes the immutable execution boundary')
+    parser.add_argument('--integrate-batch-candidates',action='store_true',
+                        help='Explicit new-group identity integration; never upgrades saved legacy answers')
     parser.add_argument('--action',choices=('group','source','owner-link'),default='group')
     parser.add_argument('--run-id')
     parser.add_argument('--manifest',type=Path)
@@ -633,6 +657,11 @@ def main(argv=None):
     parser.add_argument('--candidate-identity-authorization', type=Path,
                         help='Owner-directed same-batch identity revision; original unresolved answer is retained')
     args = parser.parse_args(argv)
+    from backend.pipeline.cvp_batch_identity_integration import ENABLED, VERSION
+    ENABLED.set(args.integrate_batch_candidates)
+    integration_binding=args.output_root/'batch-identity-integration-binding.json'
+    if integration_binding.exists() and not args.integrate_batch_candidates:
+        raise ValueError('identity integration execution binding requires explicit recovery flag')
     load_dotenv(PROJECT/".env")
     if args.database_url:os.environ['KNOWLEDGE_DATABASE_URL']=args.database_url
     store = PostgresKnowledgeStore(args.database_url)
@@ -656,6 +685,9 @@ def main(argv=None):
     from backend.pipeline.source_reconciliation_runtime import maintenance_lock
     from backend.pipeline.viewpoint_resolution_runtime import authorized_request_limit
     with maintenance_lock(), authorized_request_limit(args.output_root,args.sql_campaign,args.request_limit_authorization):
+        if args.integrate_batch_candidates:
+            write_immutable(integration_binding, {'schema_version':VERSION,
+                'campaign_sha256':args.sql_campaign,'new_groups_only':True,'correction_budget':1})
         execution_boundary(args.output_root,args.sql_campaign,definition,args.stop_after_group,persist=True)
         if args.candidate_identity_authorization:
             from backend.pipeline.cvp_owner_candidate_identity import SCHEMA, NAME

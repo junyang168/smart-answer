@@ -324,6 +324,7 @@ def build_consolidation_packet(
     proposal: CanonicalViewpointProposalResponse,
     claims: Sequence[ReviewClaim],
     registry_context: Sequence[dict[str, Any]],
+    include_source_context: bool = False,
 ) -> dict[str, Any]:
     """Candidates with the words they rest on, plus the Registry to check against.
 
@@ -346,6 +347,9 @@ def build_consolidation_packet(
                     "claim_id": claim.claim_id,
                     "source_id": claim.source_id,
                     "statement": claim.statement,
+                    **({'source_context': [item.source_context.model_dump(mode='json')
+                        for item in claim.evidence if item.evidence_step_id in steps
+                        and item.source_context is not None]} if include_source_context else {}),
                     "verbatim": sorted(
                         {
                             item.verbatim_excerpt
@@ -500,6 +504,7 @@ def run_batch(
     current_claim_links: Sequence[dict[str, Any]] | None = None,
     claim_issue_handler: Any = None,
     management_context: dict[str, Any] | None = None,
+    identity_source_loader: Any = None,
 ) -> dict[str, Any]:
     # Accepted grouping preserves its source/argument order. The model packet
     # has a separate canonical ID-order contract; normalize only this local
@@ -525,6 +530,14 @@ def run_batch(
         packet['existing_component_write_boundary']='现有active连接原类型、目标CVR、定位spans和Evidence/fragment绑定必须逐项原样保留；正常独立审核仍需检查它们，不借旧审核当本次批准。已有覆盖不新建重复link；只补尚无覆盖的实质成分。若现有连接需实质修改则报告阻塞，不自动改旧关系/CVP。'
         packet['packet_sha256']=sha256_json({k:v for k,v in packet.items() if k!='packet_sha256'})
     _write_immutable(output_dir / "batch-packet.json", packet)
+    from backend.pipeline.cvp_batch_identity_integration import ENABLED, VERSION
+    integration_path=output_dir/'batch-identity-integration.json'
+    if ENABLED.get() and not any(output_dir.glob('raw-proposal*')):
+        _write_immutable(integration_path, {'schema_version':VERSION,
+            'batch_id':batch_id,'packet_sha256':packet['packet_sha256'],
+            'legacy_answers_upgraded':False,'correction_budget':1})
+    if integration_path.exists() and not ENABLED.get():
+        raise ValueError('new identity integration requires its explicit execution flag on recovery')
 
     raw_proposal, proposal_calls, proposal_seconds = _call(
         proposer, packet, output_dir / "raw-proposal.json"
@@ -561,10 +574,20 @@ def run_batch(
     consolidation_calls = 0
     consolidation_seconds = 0.0
     consolidation: IdentityConsolidationResponse | None = None
-    if consolidator is not None and proposal.new_viewpoint_candidates and registry_context:
+    # Never recompile a saved legacy proposal under new semantic instructions.
+    # A marker is created before the first new proposal call, below on next run.
+    integrated=integration_path.exists()
+    identity_correction_used=False
+    integration_review_context=None
+    identity_review_source_ids=set()
+    if consolidator is not None and proposal.new_viewpoint_candidates and (registry_context or integrated):
         consolidation_packet = build_consolidation_packet(
-            proposal=proposal, claims=claims, registry_context=registry_context
+            proposal=proposal, claims=claims, registry_context=registry_context,
+            include_source_context=integrated,
         )
+        if integrated:
+            from backend.pipeline.cvp_batch_identity_integration import adapter as integration_adapter
+            consolidator=integration_adapter(consolidator)
         raw_consolidation, consolidation_calls, consolidation_seconds = _call(
             consolidator, consolidation_packet, output_dir / "raw-consolidation.json"
         )
@@ -578,6 +601,46 @@ def run_batch(
             proposal_seconds += owner_seconds
             validation = validate_proposal(proposal=proposal, batch_id=batch_id, claims=claims,
                                            registry_revision_ids=registry_revision_ids)
+        elif integrated:
+            from backend.pipeline.cvp_batch_identity_integration import parse_and_apply
+            parsed, integrated_proposal=parse_and_apply(raw_consolidation,proposal,registry_revision_ids)
+            if parsed.unresolved_items:
+                # The sole correction budget is shared with normal CVP review;
+                # a final full Opus rejection cannot start another GPT round.
+                if reconsiderer is None:raise ValueError('identity unresolved without the authorized sole correction')
+                if identity_source_loader is None:raise ValueError('identity correction lacks complete own-source loader')
+                keys={x.local_key for x in parsed.unresolved_items}
+                source_ids={c.source_id for c in claims if any(
+                    component.local_new_viewpoint_key in keys
+                    for d in proposal.claim_decisions if d.claim_id==c.claim_id for component in d.components)}
+                identity_review_source_ids.update(source_ids)
+                correction_packet={'original_identity_request':consolidation_packet,
+                    'original_identity_response':raw_consolidation,
+                    'own_source_bodies':identity_source_loader(sorted(source_ids)),
+                    'instruction':'核对各Claim自身完整上下文，返回相同integration schema；不是自动认可或强合，真实矛盾保留unresolved。此为本组唯一纠正，之后完整Opus终审，无第二纠正。'}
+                corrected, calls, seconds=_call(integration_adapter(proposer),correction_packet,
+                    output_dir/'raw-identity-reconsideration.json')
+                proposal_calls+=calls;proposal_seconds+=seconds
+                parsed,integrated_proposal=parse_and_apply(corrected,proposal,registry_revision_ids)
+                identity_correction_used=True
+                if parsed.unresolved_items:
+                    raise BatchResolutionError([f'{x.local_key}: unresolved identity after sole correction; {x.reason}'
+                                                for x in parsed.unresolved_items])
+            proposal=integrated_proposal
+            merged_keys={key for group in parsed.same_batch_groups for key in group.member_local_keys}
+            merged_source_ids={c.source_id for c in claims if any(
+                component.local_new_viewpoint_key in merged_keys
+                for d in CanonicalViewpointProposalResponse.model_validate(canonical_proposal).claim_decisions
+                if d.claim_id==c.claim_id for component in d.components)}
+            identity_review_source_ids.update(merged_source_ids)
+            if identity_review_source_ids and identity_source_loader is None:
+                raise ValueError('integrated identity review lacks complete own-source loader')
+            integration_review_context={'same_batch_groups':[x.model_dump(mode='json') for x in parsed.same_batch_groups],
+                'sole_correction_used':identity_correction_used,
+                'own_source_bodies':identity_source_loader(sorted(identity_review_source_ids)) if identity_review_source_ids else []}
+            consolidation=IdentityConsolidationResponse(verdicts=parsed.verdicts)
+            validation=validate_proposal(proposal=proposal,batch_id=batch_id,claims=claims,
+                                        registry_revision_ids=registry_revision_ids)
         else:
             consolidation = decode_consolidation(raw_consolidation, [c.local_key for c in proposal.new_viewpoint_candidates])
         consolidation_report = validate_consolidation(
@@ -644,6 +707,8 @@ def run_batch(
         "proposal": proposal_payload,
         "revision_dependents": revision_dependents,
     }
+    if integration_review_context is not None:
+        review_packet['same_batch_identity_integration']=integration_review_context
     if (output_dir / 'owner-identity-validation.json').exists():
         from backend.pipeline.cvp_owner_candidate_identity import NAME, own_sources, reviewer_direction
         direction = _read(output_dir / NAME)
@@ -696,7 +761,7 @@ def run_batch(
     if claim_issue_handler is not None:
         claim_issue_handler(proposal=proposal,review=review,origin='opus_initial',
                             report_path=output_dir/review_artifact_name,
-                            correction_used=False,terminal_refusal=False)
+                            correction_used=identity_correction_used,terminal_refusal=identity_correction_used)
     reconsideration_report: dict[str, Any] | None = None
     reconsideration: CanonicalViewpointReconsiderationResponse | None = None
     reconsideration_calls = 0
@@ -708,6 +773,8 @@ def run_batch(
     effective_proposal = proposal
     effective_validation = validation
     if review_validation["correction_required"] and reconsiderer is not None:
+        if identity_correction_used:
+            raise BatchResolutionError(['full Opus review refused after sole identity correction; no second correction'])
         # Identity consolidation's verdicts are an input to the correction, not
         # just a gate after it. A candidate ruled the same viewpoint as a
         # committed one has to end up connected to that exact revision when the
