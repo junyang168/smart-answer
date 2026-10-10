@@ -3477,11 +3477,26 @@ class PostgresKnowledgeStore:
         return row[0] if row else None
 
     def cvp_action_committed(self, run_id, action_id):
-        with self.connect() as conn:
-            return conn.execute("""SELECT EXISTS(SELECT 1 FROM wang_knowledge.pipeline_runs
-                WHERE stage='cvp_group' AND metadata->>'kind'='cvp_review_archive'
-                  AND metadata->>'parent_run_id'=%s AND metadata->>'action_id'=%s
-                  AND metadata->>'checkpoint' IN ('applied','audited'))
+        with self.connect() as conn, conn.cursor() as cursor:
+            return self._cvp_action_committed(cursor,run_id,action_id)
+
+    @staticmethod
+    def _cvp_action_committed(cursor,run_id,action_id):
+        """One indexed SQL commit authority for resume AND completion."""
+        return cursor.execute("""SELECT EXISTS(SELECT 1 FROM wang_knowledge.pipeline_runs a
+                LEFT JOIN wang_knowledge.change_sets cs
+                  ON cs.change_set_id=a.metadata->'reviewed'->'plan'->>'change_set_id'
+                JOIN wang_knowledge.pipeline_runs parent ON parent.run_id=%s
+                WHERE a.stage='cvp_group' AND a.metadata->>'kind'='cvp_review_archive'
+                  AND a.metadata->>'parent_run_id'=%s AND a.metadata->>'action_id'=%s
+                  AND a.metadata->>'checkpoint' IN ('applied','audited')
+                  AND ((cs.status='applied'
+                    AND cs.fingerprint_sha256=a.metadata->'reviewed'->'plan'->>'fingerprint_sha256'
+                    AND cs.source_sha256=a.metadata->'reviewed'->'plan'->>'source_sha256'
+                    AND (parent.metadata->'change_set_ids') ? cs.change_set_id)
+                    OR (a.metadata->'reviewed'->'plan'->'operations'='[]'::jsonb
+                      AND a.metadata->>'reviewed_sha256'=COALESCE(a.metadata->>'no_content_write_reviewed_sha256',
+                          parent.metadata->>'no_content_write_reviewed_sha256'))))
                 OR EXISTS(SELECT 1 FROM wang_knowledge.pipeline_runs r
                   JOIN wang_knowledge.change_sets cs
                     ON cs.change_set_id=r.metadata->'reviewed'->'plan'->>'change_set_id'
@@ -3491,8 +3506,54 @@ class PostgresKnowledgeStore:
                     AND cs.status='applied'
                     AND cs.fingerprint_sha256=r.metadata->'reviewed'->'plan'->>'fingerprint_sha256'
                     AND cs.source_sha256=r.metadata->'reviewed'->'plan'->>'source_sha256'
-                    AND (r.metadata->'change_set_ids') ? cs.change_set_id)""",
-                (run_id,action_id,run_id,action_id)).fetchone()[0]
+                    AND (r.metadata->'change_set_ids') ? cs.change_set_id)
+                OR EXISTS(SELECT 1 FROM wang_knowledge.pipeline_runs r
+                  WHERE r.run_id=%s AND r.stage='cvp_group'
+                    AND r.metadata->>'checkpoint' IN ('applied','audited')
+                    AND r.metadata->'reviewed'->'evidence'->'action'->>'action_id'=%s
+                    AND r.metadata->'reviewed'->'plan'->'operations'='[]'::jsonb
+                    AND r.metadata->>'reviewed_sha256'=r.metadata->>'no_content_write_reviewed_sha256')""",
+                (run_id,run_id,action_id,run_id,action_id,run_id,action_id)).fetchone()[0]
+
+    def _assert_claim_issue_committed(self,cursor,run_id,issue):
+        """An authorized amendment resolves its original issue, not a new one.
+
+        Keep both reservations/budgets. Accept the exact prepared amendment
+        only after its real KCS commit, including when a later action is current.
+        """
+        bound=issue.get('action')
+        if not bound or issue.get('owner_run_id')!=run_id or bound.get('run_id')!=run_id:
+            raise ChangeSetConflict('unresolved/foreign Claim issue blocks group completion')
+        action_id=bound['action_id'];amendment=issue.get('scope_amendment')
+        if amendment:
+            from backend.pipeline.claim_issue_rescope import SCHEMA
+            from backend.pipeline.cvp_sql_flow import check_binding
+            from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+            auth=amendment['authorization'];check_binding(auth);direction=read_artifact(auth['path'])
+            expected='CVPA-'+sha256_json({'kind':'claim_issue_scope_amendment_once','parent':action_id})
+            cursor.execute("SELECT metadata->>'campaign_sha256' FROM wang_knowledge.pipeline_runs WHERE run_id=%s",(run_id,))
+            campaign=cursor.fetchone()
+            if (amendment.get('run_id')!=run_id or amendment.get('action_id')!=expected
+                    or direction.get('schema_version')!=SCHEMA or direction.get('authorized_by')!='owner'
+                    or direction.get('human_content_approval') is not False
+                    or direction.get('additional_proposal_limit')!=1 or not direction.get('authorization_quote')
+                    or direction.get('run_id')!=run_id or direction.get('old_action_id')!=action_id
+                    or not campaign or direction.get('campaign_sha256')!=campaign[0]
+                    or direction.get('artifact_sha256')!=sha256_json({k:v for k,v in direction.items() if k!='artifact_sha256'})):
+                raise ChangeSetConflict('Claim issue completion amendment authority drift')
+            action_id=expected
+            ident='CVPA-'+sha256_json({'parent':run_id,'action':action_id})
+            cursor.execute("""SELECT metadata->'action'->>'kind',
+                metadata->'action'->'materials'->'claim_issue_context'
+                FROM wang_knowledge.pipeline_runs WHERE run_id=%s""",(ident,))
+            prepared=cursor.fetchone()
+            from backend.pipeline.claim_issue_management import Issue
+            if (not prepared or prepared[0]!='source_claim_revision'
+                    or prepared[1].get('scope_amendment')!=auth
+                    or issue['issue_id'] not in {Issue.model_validate(i).issue_id for i in prepared[1]['issues']}):
+                raise ChangeSetConflict('Claim issue completion lacks exact prepared amendment/issue')
+        if not self._cvp_action_committed(cursor,run_id,action_id):
+            raise ChangeSetConflict('Claim issue management action not committed')
 
     def adjudication_roots(self, target_ids):
         with self.connect() as conn:
@@ -3718,15 +3779,7 @@ class PostgresKnowledgeStore:
                               WHERE metadata->>'kind'='claim_issue' AND metadata->>'owner_run_id'=%s
                               FOR UPDATE""",(run_id,))
             for issue_run, issue in cursor.fetchall():
-                bound=issue.get('action')
-                if not bound:raise ChangeSetConflict('unresolved detected Claim issue blocks group completion')
-                action_id=bound['action_id']
-                active=(value.get('reviewed',{}).get('evidence') or {}).get('action',{})
-                committed=active.get('action_id')==action_id or cursor.execute("""SELECT EXISTS(
-                    SELECT 1 FROM wang_knowledge.pipeline_runs WHERE metadata->>'kind'='cvp_review_archive'
-                      AND metadata->>'parent_run_id'=%s AND metadata->>'action_id'=%s
-                      AND metadata->>'checkpoint' IN ('applied','audited'))""",(run_id,action_id)).fetchone()[0]
-                if not committed:raise ChangeSetConflict('Claim issue management action not committed')
+                self._assert_claim_issue_committed(cursor,run_id,issue)
                 issue.update(state='owner_group_audited',completion=completion,
                              independent_audit_complete=flags['independent_audit_complete'],
                              revisit_required=flags['revisit_required'])
@@ -3769,6 +3822,8 @@ class PostgresKnowledgeStore:
                     'action_id':value.get('reviewed',{}).get('evidence',{}).get('action',{}).get('action_id'),
                     'reviewed_sha256':value.get('reviewed_sha256'),'reviewed':value.get('reviewed'),
                     'checkpoint':value['checkpoint'],'completion':value.get('completion')}
+                if value.get('no_content_write_reviewed_sha256')==value.get('reviewed_sha256'):
+                    archive['no_content_write_reviewed_sha256']=value['no_content_write_reviewed_sha256']
                 ident='CVPR-'+sha256_json({'parent':run_id,'reviewed_sha256':value.get('reviewed_sha256')})
                 stored=cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s",(ident,)).fetchone()
                 if stored and stored[0]!=archive:raise ChangeSetConflict('prior SQL approval archive drift')

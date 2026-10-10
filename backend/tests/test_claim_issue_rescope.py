@@ -162,6 +162,75 @@ def test_amendment_single_sql_commit_saved_answers_rollback_and_original_budget_
     assert a.execute(store,run,authorization=authorization,root=tmp_path/'issues',ports=ports)['status']=='already_applied'
     assert ports.calls==['proposal','initial_review']
     from backend.api.canonical_repository.postgres_store import ChangeSetConflict
+    # Completion must consume the exact effective action, not require the
+    # uncommitted predecessor diagnosis to have written anything.
+    with store.connect() as conn,conn.cursor() as cursor:
+        store._assert_claim_issue_committed(cursor,run,row)
+        for fault in ('owner','original-run','amendment-run','amendment-id','authorization','issue'):
+            bad=deepcopy(row)
+            if fault=='owner':bad['owner_run_id']='foreign'
+            elif fault=='original-run':bad['action']['run_id']='foreign'
+            elif fault=='amendment-run':bad['scope_amendment']['run_id']='foreign'
+            elif fault=='amendment-id':bad['scope_amendment']['action_id']='foreign'
+            elif fault=='authorization':bad['scope_amendment']['authorization']['file_sha256']='0'*64
+            else:bad['issue_id']='foreign'
+            with pytest.raises((ValueError,ChangeSetConflict)):
+                store._assert_claim_issue_committed(cursor,run,bad)
+    # A later bounded approval archives the committed amendment. Both resume
+    # and completion still verify its KCS fingerprint/source/group membership.
+    from backend.api.canonical_repository.postgres_store import canonical_json
+    from backend.api.canonical_repository.transaction_validation import TransactionValidation
+    from dataclasses import replace
+    prior=store.get_cvp_group(run)
+    empty=replace(store.plan_package({'schema_version':'wang_shared_knowledge_v1.3','package_id':'fixture-next'}),operations=(),review_events=())
+    later=store.prepare_cvp_action(run,action_id='fixture-later',kind='required_cvp_coverage',
+        authorization={'fixture':True},materials={'fixture':'no new content'})
+    evidence=deepcopy(prior['reviewed']['evidence']);evidence['action']=later
+    evidence['pending_cvp_claim_ids']=[];evidence['read_pins']=[]
+    execution={'reason':'isolated no-write completion handoff','actor':'pytest'}
+    evidence['execution']=execution
+    digest=store.review_cvp_group(run,plan=empty,evidence=evidence)
+    store.apply_plan(empty,transaction_context=TransactionValidation(run,digest,{}),
+                     metadata=execution)
+    assert store.cvp_action_committed(run,later['action_id'])  # explicit no-content-write receipt
+    assert store.cvp_action_committed(run,row['scope_amendment']['action_id'])
+    with store.connect() as conn,conn.cursor() as cursor:
+        store._assert_claim_issue_committed(cursor,run,row)
+        # An archive flag alone cannot override actual commit identity.
+        for fault in ('status','fingerprint_sha256','source_sha256','group-membership'):
+            if fault=='group-membership':
+                cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=jsonb_set(metadata,'{change_set_ids}','[]'::jsonb) WHERE run_id=%s",(run,))
+            else:
+                cursor.execute(f'UPDATE wang_knowledge.change_sets SET {fault}=%s WHERE change_set_id=%s',
+                    ('planned' if fault=='status' else '0'*64,result['change_set_id']))
+            with pytest.raises(ChangeSetConflict,match='not committed'):
+                store._assert_claim_issue_committed(cursor,run,row)
+            conn.rollback()
+    records=store.read_cvp_context(['CL-test'])
+    from backend.pipeline.cvp_sql_flow import pins,pin_rows
+    current=pins(records)
+    audit={'meta':{'model':'gemini-3.8-flash','registry_read_scope':{'kind':'sql_transaction_group',
+        'claim_ids':['CL-test'],'viewpoint_ids':[],'complete_target_members':True,'read_pins':pin_rows(current)}},
+        'layers':{'1':{'counts':{'pass':1}},'2':{},
+                  '3':{'complete':True,'judged':1,'results':[{'claim_id':'CL-test','verdict':'supported'}]},
+                  '4':{'complete':True,'judged':0,'results':[]}}}
+    audit_binding=put(tmp_path/'completion-audit.json',audit)
+    extra={'kind':'claim_issue','issue_id':'uncommitted-last','owner_run_id':run,'state':'action_reserved',
+           'action':{'run_id':run,'action_id':'never-committed'}}
+    with store.connect() as conn:
+        conn.execute("INSERT INTO wang_knowledge.pipeline_runs(run_id,subject_kind,subject_id,stage,trigger,status,metadata) VALUES (%s,'batch',%s,'cvp_group','cli','running',%s::jsonb)",
+                     ('CVPI-uncommitted-last',run,canonical_json(extra)))
+    with pytest.raises(ChangeSetConflict,match='not committed'):
+        store.complete_cvp_group(run,audit=audit,audit_binding=audit_binding,read_pins=current)
+    assert store.get_cvp_group(run)['checkpoint']=='applied'
+    assert store.get_claim_issue(issue.issue_id)==row
+    with store.connect() as conn:
+        conn.execute('DELETE FROM wang_knowledge.pipeline_runs WHERE run_id=%s',('CVPI-uncommitted-last',))
+    store.complete_cvp_group(run,audit=audit,audit_binding=audit_binding,read_pins=current)
+    assert store.get_cvp_group(run)['checkpoint']=='audited'
+    done=store.get_claim_issue(issue.issue_id)
+    assert done['state']=='owner_group_audited' and done['action']==row['action'] and done['scope_amendment']==row['scope_amendment']
+    assert ports.calls==['proposal','initial_review']
     with pytest.raises(ChangeSetConflict,match='dependency drift'):
         a.amendment_records(store,direction,old['materials'])
 
