@@ -131,18 +131,17 @@ def saved_raw(root,stage,packet):
     return raw
 
 
-def compile_package(material,proposal,review,root):
-    packet=material['comparison'];old=packet['before_link'];link=postimage(packet,proposal['response'])
-    approved(review,old['claim_id'])
-    states=content.index(packet['context_records'])
+def fresh_identity_records(states, old, link, signature, proposal, review, *, seed, policy):
+    """Reuse exact reviewed identity provenance for a new or retargeted link.
+
+    This derives identifiers only; it does not approve the supplied postimage.
+    Each caller must independently validate its own content/write authority.
+    """
     prior=states[content.key('viewpoint_identity_decisions',old['decision_id'])]
     candidate=deepcopy(states[content.key('viewpoint_identity_candidates',prior['identity_candidate_id'])])
-    seed=sha256_json({'contract':SCHEMA,'material':sha256_json(material),
-                     'proposal':proposal['artifact_sha256'],'review':review['artifact_sha256']})
-    target=next(p for p in packet['candidates'] if p['viewpoint']['viewpoint_id']==link['viewpoint_id'])
     candidate.update(revision=1,candidate_claim_ids=[old['claim_id']],candidate_viewpoint_ids=[link['viewpoint_id']],
                      proposed_action='match_existing',seed_relation_ids=[],blocker_codes=[],
-                     generation_fingerprint=seed,proposed_proposition_signature=target['current_revision']['proposition_signature'])
+                     generation_fingerprint=seed,proposed_proposition_signature=signature)
     identity={'claims':candidate['candidate_claim_ids'],'viewpoints':candidate['candidate_viewpoint_ids'],
               'relations':[],'action':'match_existing','blockers':[],
               'coverage_snapshot_id':candidate.get('coverage_snapshot_id'),'generation_fingerprint':seed}
@@ -151,13 +150,25 @@ def compile_package(material,proposal,review,root):
     decision=deepcopy(prior)
     decision.update(revision=1,identity_decision_id='VID-'+seed[:20],identity_candidate_id=candidate['identity_candidate_id'],
                     input_sha256=seed,decision='match_existing',resolved_viewpoint_id=link['viewpoint_id'],
-                    claim_link_decisions=[{'claim_id':old['claim_id'],'link_type':'supports'}],proposition_unit_link_decisions=[],
+                    claim_link_decisions=[{'claim_id':old['claim_id'],'link_type':link['link_type']}],proposition_unit_link_decisions=[],
                     review_artifact_sha256=review['artifact_sha256'],
                     semantic_call_artifact_sha256s=sorted([proposal['artifact_sha256'],review['artifact_sha256']]),
                     reviewer_model_ids=['claude-opus-5-5','gpt-6.1-sol'],reviewer_kind='system',
-                    reviewer_id=SCHEMA,approval_basis='dual_model_consensus',review_status='system_approved',
-                    created_at=review['completed_at'],policy_version=SCHEMA,
+                    reviewer_id=policy,approval_basis='dual_model_consensus',review_status='system_approved',
+                    created_at=review['completed_at'],policy_version=policy,
                     reason=proposal['response']['selection']['reason'])
+    return candidate, decision
+
+
+def compile_package(material,proposal,review,root):
+    packet=material['comparison'];old=packet['before_link'];link=postimage(packet,proposal['response'])
+    approved(review,old['claim_id'])
+    states=content.index(packet['context_records'])
+    seed=sha256_json({'contract':SCHEMA,'material':sha256_json(material),
+                     'proposal':proposal['artifact_sha256'],'review':review['artifact_sha256']})
+    target=next(p for p in packet['candidates'] if p['viewpoint']['viewpoint_id']==link['viewpoint_id'])
+    candidate, decision = fresh_identity_records(states, old, link,
+        target['current_revision']['proposition_signature'], proposal, review, seed=seed, policy=SCHEMA)
     link['decision_id']=decision['identity_decision_id']
     return {'package_id':'CVP-RETARGET-'+seed[:24],'viewpoint_claim_links':[link],
             'viewpoint_identity_candidates':[candidate],'viewpoint_identity_decisions':[decision],

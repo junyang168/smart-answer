@@ -91,12 +91,14 @@ def stage_adapter(adapter, packet, path, *, saved=None):
                 for suffix in ('.reservation.json', '.call-intent.json', '.request-encoding.json')]
     if not any(p.exists() for p in blockers):
         limit, _ = request_limit(selected, path)
-        factory = getattr(selected, 'shared_keys_copy', None)
-        if (callable(factory) and getattr(selected, '_shared_record_payload', False)
-                and selected.request_bytes(packet) > limit):
-            smaller = factory()
-            if smaller.request_bytes(packet) < selected.request_bytes(packet):
-                return smaller
+        if getattr(selected, '_shared_record_payload', False):
+            for name in ('shared_keys_copy', 'shared_keys_v2_copy', 'shared_values_copy', 'shared_shapes_copy'):
+                if selected.request_bytes(packet) <= limit: break
+                factory = getattr(selected, name, None)
+                if callable(factory):
+                    smaller = factory()
+                    if smaller.request_bytes(packet) < selected.request_bytes(packet):
+                        selected = smaller
     return selected
 
 
