@@ -67,7 +67,7 @@ def test_actual_manifest_full_freeze_zero_writes(actual,monkeypatch):
     manifest=m.manifest_for_issues(store,run,issues,policy,root)
     for permission in manifest.permissions:
         if permission.collection=='claims' and permission.object_id==cid:
-            assert 'occurrences' not in permission.fields
+            assert 'occurrences' in permission.fields
     context=json.loads(read(manifest.claim_issue))
     keys=[('claims',i.claim_id) for i in issues]+[('source_documents',receipt['historical_source_pin']['object_id'])]
     records=store.read_affected_context(keys)
@@ -77,6 +77,43 @@ def test_actual_manifest_full_freeze_zero_writes(actual,monkeypatch):
     assert any(s['source_id']==receipt['historical_source_pin']['object_id'] for s in frozen['context_sources'])
     assert len(frozen['claim_issue_context']['claim_ids'])==2
     c.guard_files(frozen,historical=True)
+
+
+@pytest.mark.parametrize('fault', [None, 'historical', 'membership', 'identity', 'receipt'])
+def test_current_anchor_repair_preserves_historical_occurrence(actual, fault):
+    _,cid,sid,receipt,states=actual
+    old=states['claims/'+cid];new=deepcopy(old)
+    own=next(o for o in new['occurrences'] if o['source_id']==sid)
+    own['anchors'].append(deepcopy(own['anchors'][0]))
+    frozen={'manifest':{'source_id':sid},'before_records':c.rows(states),
+            'claim_issue_context':{'retained_occurrence_context':[deepcopy(receipt)]}}
+    if fault=='historical':new['occurrences'][0]['anchors'][0]['media_time']=99
+    if fault=='membership':new['occurrences'].reverse()
+    if fault=='identity':own['source_id']='foreign'
+    if fault=='receipt':frozen['claim_issue_context']['retained_occurrence_context'][0]['occurrences']=[]
+    if fault:
+        with pytest.raises(ValueError):h.validate_occurrence_delta(frozen,cid,old,new)
+    else:
+        h.validate_occurrence_delta(frozen,cid,old,new)
+        assert new['occurrences'][0]==old['occurrences'][0]
+
+
+def test_new_review_discloses_route_receipt_without_upgrading_old_cache(actual,tmp_path):
+    root=Path('/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/staging/cvp-production-357/campaign-sql-20261008-v1-from-g059/execution/CVPG-b0324087577d73360f4077b8d65438c7d777d27fda381f70913a8e1a367b0913/claim-issues')
+    action=next(root.glob('*/action/*/proposal.raw.json')).parent
+    frozen=runner.body(runner.read(action/'scoped-materials.json'))
+    raw=runner.read(action/'proposal.raw.json')
+    proposal=runner.effective_proposal(frozen,raw['response'])
+    obj=runner.Runner(tmp_path,None);obj.root=tmp_path
+    fresh=obj.review_input(frozen,raw['response'],proposal,'initial_review')
+    assert fresh['inventory']['unknown_keys']==[]
+    assert fresh['read_only_adapter_receipt']['content_write_authority'] is False
+    runner.write(tmp_path/'initial_review.packet.json',fresh)
+    assert obj.review_input(frozen,raw['response'],proposal,'initial_review')==fresh
+    obj.root=action
+    saved=runner.body(runner.read(action/'initial_review.packet.json'))
+    assert 'read_only_adapter_receipt' not in saved
+    assert obj.review_input(frozen,raw['response'],proposal,'initial_review')==saved
 
 
 @pytest.mark.parametrize('fault',[None,'pin','schema','hold','foreign','visibility','missing'])

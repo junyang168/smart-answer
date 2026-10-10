@@ -174,7 +174,7 @@ def eligibility_profile(packet):
     return bool(binding and read_policy(binding).evidence_eligibility_review)
 
 
-def policy_permissions(policy, states, sid, claim_ids, *, retained_occurrences=()):
+def policy_permissions(policy, states, sid, claim_ids, *, retained_occurrences=(), current_anchor_scope=False):
     if (not set(policy.claim_fields) <= CLAIM_FIELDS or not set(policy.evidence_fields) <= EVIDENCE_FIELDS
             or not set(policy.link_fields) <= LINK_FIELDS):
         raise ValueError("Claim issue policy has unsupported fields/hold/source expansion")
@@ -195,7 +195,7 @@ def policy_permissions(policy, states, sid, claim_ids, *, retained_occurrences=(
                     # Qualification only: do not rewrite speech/ownership to buy eligibility.
                     result.append(c.Permission(collection=col, object_id=oid, fields=sorted(ELIGIBILITY_FIELDS)))
                 continue
-            if col == 'claims' and any(r['claim_id'] == oid for r in retained_occurrences):
+            if col == 'claims' and not current_anchor_scope and any(r['claim_id'] == oid for r in retained_occurrences):
                 fields = set(fields) - {'occurrences'}
             result.append(c.Permission(collection=col, object_id=oid, fields=sorted(set(fields))))
     if policy.evidence_fields:
@@ -241,8 +241,11 @@ def validate_authority(manifest, states, snapshots=None):
     if (auth.get("claim_issue") != manifest.claim_issue.model_dump() or auth.get("policy") != context["policy"]
             or auth.get("authorization_id") != policy.authorization_id):
         raise ValueError("issue policy not bound to actual owner authority")
+    profile=context.get('current_occurrence_anchor_scope')
+    if profile not in (None, 'current_source_anchors_historical_exact_v1'):
+        raise ValueError('unknown retained occurrence anchor scope')
     expected=policy_permissions(policy, states, manifest.source_id, ids,
-        retained_occurrences=context.get('retained_occurrence_context', []))
+        retained_occurrences=context.get('retained_occurrence_context', []), current_anchor_scope=bool(profile))
     if context.get('scope_amendment'):
         from backend.pipeline.claim_issue_rescope import permissions
         direction=json.loads(c.bound_bytes(context['scope_amendment'],snapshots))
@@ -325,7 +328,8 @@ def manifest_for_issues(store, run_id, issues, policy_binding, root):
             row = store.get_record_state(pin['collection'], pin['object_id'])
             states[c.key(pin['collection'], pin['object_id'])] = row['payload']
             retained.append(receipt)
-    permissions = policy_permissions(policy, states, sid, ids, retained_occurrences=retained)
+    permissions = policy_permissions(policy, states, sid, ids, retained_occurrences=retained,
+                                     current_anchor_scope=True)
     definition = store.get_cvp_campaign(saved["campaign_sha256"])
     progress = {r["group_key"]:r for r in store.cvp_campaign_progress(saved["campaign_sha256"])}
     groups = [c.Group(group_key=g["group_key"], claim_ids=g["claim_ids"],
@@ -339,6 +343,7 @@ def manifest_for_issues(store, run_id, issues, policy_binding, root):
                "policy":policy_binding, "original_run_id":run_id}
     if retained:
         context['retained_occurrence_context'] = retained
+        context['current_occurrence_anchor_scope'] = 'current_source_anchors_historical_exact_v1'
     write(root/"issue-context.json", context)
     issue_binding = binding(root/"issue-context.json")
     write(root/"scoped-authorization.json", {"source_id":sid, "authorization_id":policy.authorization_id,

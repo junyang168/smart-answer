@@ -666,6 +666,9 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
         changed_fields = {f for f in set(old or {}) | set(new) if (old or {}).get(f) != new.get(f)}
         if changed_fields - set(permission.fields) - {"revision", id_field} - PROVENANCE:
             raise ValueError("field change outside permission: " + k)
+        if old and c == 'claims' and 'occurrences' in changed_fields:
+            from backend.pipeline.claim_retained_occurrence_context import validate_occurrence_delta
+            validate_occurrence_delta(frozen, object_id, old, new)
         if old and old.get("review_status") in HUMAN_HOLDS and new != old:
             from backend.pipeline.cvp_scope_management import approved_relation_reference_only
             if not approved_relation_reference_only(frozen,k,proposed):

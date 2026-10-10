@@ -1,11 +1,37 @@
 """Read-only historical occurrences after the fixed reviewed Evidence subset.
 
 This is not multi-source repair authority. The primary source remains the sole
-current Evidence source; historical occurrence records cannot be edited.
+current Evidence source; historical occurrence records cannot be edited. The
+ordinary policy may still repair anchors in the current source occurrence.
 """
 import json
 from backend.api.canonical_repository.postgres_store import record_content_sha
 from backend.pipeline import source_reconciliation as c
+
+
+def validate_occurrence_delta(frozen, claim_id, old, new):
+    """Protect exact historical occurrences, not the whole Claim field."""
+    receipts = [r for r in frozen.get('claim_issue_context', {}).get(
+        'retained_occurrence_context', []) if r['claim_id'] == claim_id]
+    if not receipts:
+        return
+    if len(receipts) != 1 or receipts[0]['occurrences'] != old['occurrences']:
+        raise ValueError('retained occurrence original generation drift')
+    sid = frozen['manifest']['source_id']
+    states = c.index(frozen['before_records'])
+    own = states[c.key('source_documents', sid)]
+    aliases = {sid, own.get('transcript_id'), own.get('canonical_source_id')} - {None, ''}
+    previous = old['occurrences']; current = new['occurrences']
+    if len(previous) != len(current):
+        raise ValueError('retained occurrence membership cannot change')
+    for before, after in zip(previous, current):
+        is_own = bool(aliases.intersection(c.strings(before)))
+        if not is_own:
+            if before != after:
+                raise ValueError('historical occurrence must remain exact')
+        elif ({k:v for k,v in before.items() if k != 'anchors'} !=
+              {k:v for k,v in after.items() if k != 'anchors'}):
+            raise ValueError('current occurrence identity must remain exact')
 
 
 def build(store, claim_id, source_id):

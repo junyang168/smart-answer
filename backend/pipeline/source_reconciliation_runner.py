@@ -328,8 +328,12 @@ class Runner:
         saved = self.root/(stage+'.packet.json')
         if saved.exists():
             packet = body(read(saved))
+            base = disclosed_review_base(frozen, base, saved=packet)
             check_packet(frozen, response, packet, base)
             return packet
+        # Saved review packets retain their exact old contract. New reviews
+        # receive the same verified read-only adapter proof as the proposer.
+        base = disclosed_review_base(frozen, base)
         return add_receipt(frozen, response, base) if frozen['manifest'].get('claim_issue') else base
 
     def reviewed(self, frozen: dict) -> tuple[contract.Proposal, dict]:
@@ -552,6 +556,16 @@ def build_proposal_packet(frozen: dict) -> dict:
     return result
 
 
+def disclosed_review_base(frozen, base, *, saved=None):
+    if saved is not None and 'read_only_adapter_receipt' not in saved:
+        return base  # Never upgrade a historical reviewer input.
+    disclosed = build_proposal_packet(frozen)
+    if 'read_only_adapter_receipt' in disclosed:
+        base = {**base, 'inventory': disclosed['inventory'],
+                'read_only_adapter_receipt': disclosed['read_only_adapter_receipt']}
+    return base
+
+
 def validate_completion_population(result: dict, frozen: dict, post: dict) -> None:
     jobs = audit_jobs(frozen, post)
     outcomes = result["audits"]
@@ -679,7 +693,9 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
         initial = validate_raw(root, "initial_review", initial_packet)
         first_proposal = effective_proposal(frozen, first["response"]).model_dump()
         from backend.pipeline.source_review_input_repair import check_packet
-        check_packet(frozen, first['response'], initial_packet, initial_review_base(frozen, effective_proposal(frozen, first['response'])))
+        initial_base = initial_review_base(frozen, effective_proposal(frozen, first['response']))
+        check_packet(frozen, first['response'], initial_packet,
+                     disclosed_review_base(frozen, initial_base, saved=initial_packet))
         if contract.validate_review(initial_packet, initial["response"]):
             raise ValueError("correction must follow one genuine initial disagreement")
         correction_packet = body(read(root / "correction.packet.json"))
@@ -710,11 +726,13 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
     if stage == 'final_review_input_repair':
         old_packet = body(read(root/'final_review.packet.json'))
         old_raw = validate_raw(root, 'final_review', old_packet)
-        check_packet(frozen, correction['response'], old_packet, base)
+        check_packet(frozen, correction['response'], old_packet,
+                     disclosed_review_base(frozen, base, saved=old_packet))
         if contract.validate_review(old_packet, old_raw['response']) or packet != repaired_packet(root, frozen, proposal, old_packet, old_raw, correction):
             raise ValueError('input repair must preserve the exact rejected terminal review')
     elif not packet.get('membership_resolution') and not claim_first:
-        check_packet(frozen, first['response'] if stage=='initial_review' else correction['response'], packet, base)
+        check_packet(frozen, first['response'] if stage=='initial_review' else correction['response'], packet,
+                     disclosed_review_base(frozen, base, saved=packet))
     if expected["artifact_sha256"] != app.get("review_sha256") or sha256_json(proposal.model_dump()) != app.get("proposal_sha256"):
         raise ValueError("final review/proposal provenance drift")
     from backend.pipeline.claim_owner_revision import validate_joint
