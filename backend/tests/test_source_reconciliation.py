@@ -243,7 +243,24 @@ def test_terminal_refusal_stops_no_partial_apply_or_second_correction(scenario, 
     with pytest.raises(r.Stop, match="terminal Opus"):
         runner.run(manifest, apply=True, audit=True)
     assert ports.calls == count and len(count) == 4 and ports.applies == 0
-    assert r.read(runner.root / "state.json")["waiting_for"] == "owner"
+    state = r.read(runner.root / "state.json")
+    assert state["waiting_for"] == "system"
+    assert state["status"] == "root_cause_required"
+    handoff = r.read(runner.root / "review-root-cause-handoff.json")
+    assert handoff['human_decision_required'] is False
+    assert handoff['automatic_retry'] is False
+    assert handoff['content_write_authority'] is False
+    assert handoff['correction_budget_exhausted'] is True
+    assert handoff['review']['response'] == r.read(runner.root/'final_review.raw.json')['response']
+    assert not (runner.root/'needs-owner.json').exists()
+
+
+def test_unclassified_stop_is_engineering_not_owner_approval():
+    stopped = r.Stop('schema or routine flow unavailable')
+    assert stopped.status == 'root_cause_required'
+    assert stopped.waiting_for == 'system'
+    explicit = r.Stop('actual resource unavailable', status='model_failed', waiting_for='owner')
+    assert explicit.status == 'model_failed' and explicit.waiting_for == 'owner'
 
 
 def test_reserved_uncertain_model_never_repeats_or_resets_by_timestamp(scenario, tmp_path):

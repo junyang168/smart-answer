@@ -110,7 +110,10 @@ def stage_adapter(adapter, packet, path, *, saved=None):
 
 
 class Stop(ValueError):
-    def __init__(self, reason: str, *, status: str = "needs_owner", waiting_for: str = "owner"):
+    def __init__(self, reason: str, *, status: str = "root_cause_required", waiting_for: str = "system"):
+        # Stopping production is not automatically a request for human content
+        # approval. Source/input/code/flow causes must be checked first; this
+        # classification never grants another call, retry or write authority.
         super().__init__(reason)
         self.status, self.waiting_for = status, waiting_for
 
@@ -380,8 +383,11 @@ class Runner:
         self.guard(frozen)
         final = self.call("final_review", review_packet)
         if not contract.validate_review(review_packet, final["response"]):
-            write(self.root / "needs-owner.json", {"reason": "terminal Opus disagreement",
+            write(self.root / "review-root-cause-handoff.json", {"reason": "terminal Opus disagreement",
                 "review": final, "proposal": proposed.model_dump(), "correction_budget_exhausted": True,
+                "waiting_for": "system", "human_decision_required": False,
+                "automatic_retry": False, "content_write_authority": False,
+                "required_action": "Check actual source/input/normalization/flow causes before any content handoff; preserve all original budgets.",
                 "source_update_id": frozen["update_id"]})
             from backend.pipeline.source_review_input_repair import NAME, STAGE, repaired_packet
             if (self.root/NAME).exists():

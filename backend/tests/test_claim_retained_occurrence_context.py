@@ -116,6 +116,31 @@ def test_new_review_discloses_route_receipt_without_upgrading_old_cache(actual,t
     assert obj.review_input(frozen,raw['response'],proposal,'initial_review')==saved
 
 
+def test_saved_unresolved_correction_cannot_gain_a_new_call_or_write(actual, monkeypatch):
+    root=Path('/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/staging/cvp-production-357/campaign-sql-20261008-v1-from-g059/execution/CVPG-b0324087577d73360f4077b8d65438c7d777d27fda381f70913a8e1a367b0913/claim-issues')
+    action=next(root.glob('*/action/*/correction.raw.json')).parent
+    frozen=runner.body(runner.read(action/'scoped-materials.json'))
+    files={p:hashlib.sha256(p.read_bytes()).hexdigest() for p in action.iterdir() if p.is_file()}
+    reads=[]
+    class SavedOnly(runner.Runner):
+        def __init__(self):self.root=action
+        def guard(self,frozen,**kw):c.guard_files(frozen)
+        def call(self,stage,packet):
+            assert stage in {'proposal','initial_review','correction'}, 'no new model stage authorized'
+            saved=runner.body(runner.read(action/(stage+'.packet.json')))
+            assert packet==saved
+            reads.append(stage)
+            return runner.validate_raw(action,stage,saved)
+    def no_write(*args,**kw):raise AssertionError('saved-only diagnosis cannot write')
+    monkeypatch.setattr(runner,'write',no_write)
+    with pytest.raises(ValueError,match='exactly one disposition'):
+        SavedOnly().reviewed(frozen)
+    assert reads==['proposal','initial_review','correction']
+    assert not (action/'final_review.reservation.json').exists()
+    assert not (action/'final_review.raw.json').exists()
+    assert files=={p:hashlib.sha256(p.read_bytes()).hexdigest() for p in action.iterdir() if p.is_file()}
+
+
 @pytest.mark.parametrize('fault',[None,'pin','schema','hold','foreign','visibility','missing'])
 def test_saved_internal_route_is_impact_only_not_generation(actual,fault):
     from backend.pipeline.source_reconciliation_runner import read,build_proposal_packet
