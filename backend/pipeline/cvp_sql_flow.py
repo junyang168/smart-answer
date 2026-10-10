@@ -817,6 +817,8 @@ def main(argv=None):
                         help='Exact once-only pre-review scope amendment; original issue calls remain reserved')
     parser.add_argument('--claim-complete-input-repair-authorization',type=Path,
                         help='Exact once-only proven Claim input repair; original calls remain immutable')
+    parser.add_argument('--normalization-engineering-recovery-authorization',type=Path,
+                        help='Fixed-parent flag-only program defect recovery; one independent review, no new proposal')
     parser.add_argument('--retained-link-review-policy',type=Path,
                         help='Separate existing approved links from new proposed writes; no mutation/retry permission')
     parser.add_argument('--retained-generation-artifact',type=Path,action='append',default=[],
@@ -848,6 +850,9 @@ def main(argv=None):
     from backend.pipeline.claim_complete_input_repair import NAME as INPUT_REPAIR_NAME, SCHEMA as INPUT_REPAIR_SCHEMA
     if (args.output_root/INPUT_REPAIR_NAME).exists() and not args.claim_complete_input_repair_authorization:
         raise ValueError('Claim complete input repair binding requires explicit recovery flag')
+    from backend.pipeline.source_normalization_recovery import BINDING as NORMALIZATION_BINDING
+    if (args.output_root/NORMALIZATION_BINDING).exists() and not args.normalization_engineering_recovery_authorization:
+        raise ValueError('normalization engineering recovery requires explicit original binding')
     from backend.pipeline.cvp_retained_review_separation import NAME as RETAINED_NAME
     if (args.output_root/RETAINED_NAME).exists() and not args.retained_link_review_policy:
         raise ValueError('retained-link separation binding requires explicit recovery flag')
@@ -987,6 +992,24 @@ def main(argv=None):
             aid='CVPA-'+sha256_json({'kind':'claim_issue_scope_amendment_once','parent':direction['old_action_id']})
             if not store.cvp_action_committed(direction['run_id'],aid):validate_live(store,direction)
             write_immutable(args.output_root/INPUT_REPAIR_NAME,{'authorization':authorization})
+        if args.normalization_engineering_recovery_authorization:
+            from backend.pipeline.source_normalization_recovery import SCHEMA, NAME, packet as recovery_packet
+            from backend.pipeline.source_reconciliation_runner import read, body
+            direction=read_artifact(args.normalization_engineering_recovery_authorization)
+            target=Path(direction['action_root']).resolve()
+            saved=store.get_cvp_group(direction['run_id'])
+            if (direction.get('schema_version')!=SCHEMA or direction.get('campaign_sha256')!=args.sql_campaign
+                    or not saved or saved['campaign_sha256']!=args.sql_campaign
+                    or (invocation_limit is not None and saved['sequence']>invocation_limit)
+                    or target.name!=direction['action_id']
+                    or not target.is_relative_to((args.output_root/direction['run_id']/'claim-issues').resolve())
+                    or saved.get('execution_roots',{}).get(direction['action_id'])!=str(target)):
+                raise ValueError('normalization recovery original SQL action/root/campaign drift')
+            write_immutable(target/NAME,direction)
+            if not store.cvp_action_committed(direction['run_id'],direction['action_id']):
+                recovery_packet(target,body(read(target/'scoped-materials.json')))
+            write_immutable(args.output_root/NORMALIZATION_BINDING,
+                {'authorization':binding(args.normalization_engineering_recovery_authorization)})
         if args.source_review_input_repair_authorization:
             from backend.pipeline.source_review_input_repair import SCHEMA, NAME
             direction = read_artifact(args.source_review_input_repair_authorization)

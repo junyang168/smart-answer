@@ -43,6 +43,16 @@ add counterexamples, test with `backend/.venv`, commit, verify the actual saved
 input without new calls/writes, and carry through a lawful recovery. Do not stop
 at a next-step record or ask the owner to approve those engineering steps.
 
+Model calls required because a proven code/input defect changed the material
+being reviewed are engineering recovery, not normal content correction rounds.
+Under the owner's standing engineering direction, bind the exact defect, fixed
+parent, original inputs/answers, program delta and affected stage before calling;
+reuse unaffected answers and independently review the corrected full postimage.
+Keep normal budgets and original verdicts immutable. Use a durable bounded
+recovery reservation in the common runner, never a new root or unlimited retry.
+An unknown call, quota, hold, source drift or genuine semantic disagreement does
+not acquire engineering-recovery permission merely because code was edited.
+
 Before pausing a CVP heartbeat or presenting an owner-action request, record:
 
 1. Fresh process/worker lock, SQL checkpoint and actual saved request/raw facts;

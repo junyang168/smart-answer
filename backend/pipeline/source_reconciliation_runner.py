@@ -19,7 +19,7 @@ from backend.api.canonical_repository.viewpoint_foundation import canonical_json
 from backend.pipeline import source_reconciliation as contract
 from backend.pipeline.viewpoint_validation_context import validated_history
 
-STAGES = ("proposal", "initial_review", "correction", "final_review", "final_review_input_repair")
+STAGES = ("proposal", "initial_review", "correction", "final_review", "final_review_input_repair", "normalization_recovery_review")
 
 
 def effective_proposal(frozen, response):
@@ -256,10 +256,14 @@ class Runner:
             direction = read(self.root/NAME)
             if packet.get('input_repair', {}).get('authorization') != direction:
                 raise Stop('input repair call lacks exact immutable owner direction')
+        if stage == 'normalization_recovery_review':
+            from backend.pipeline.source_normalization_recovery import NAME
+            if packet.get('normalization_engineering_recovery',{}).get('authorization') != read(self.root/NAME):
+                raise Stop('normalization recovery lacks immutable fixed-parent direction')
         deferred = bool(packet.get("manifest", {}).get("deferred_repair"))
         issue = bool(packet.get("manifest", {}).get("claim_issue"))
         scope = bool(packet.get('manifest', {}).get('viewpoint_scope_repair'))
-        role = 'final_review' if stage == 'final_review_input_repair' else stage
+        role = 'initial_review' if stage == 'normalization_recovery_review' else 'final_review' if stage == 'final_review_input_repair' else stage
         from backend.pipeline.claim_issue_management import eligibility_profile
         if issue and eligibility_profile(packet):
             adapter = self.ports.claim_issue_adapter(role, evidence_eligibility=True)
@@ -271,6 +275,8 @@ class Runner:
         adapter = link_scoped_adapter(adapter,packet)
         from backend.pipeline.claim_citation_purpose_review import scoped_adapter as citation_scoped_adapter
         adapter = citation_scoped_adapter(adapter,packet)
+        from backend.pipeline.source_normalization_recovery import scoped_adapter as recovery_scoped_adapter
+        adapter = recovery_scoped_adapter(adapter,packet)
         from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
         raw_path = self.root / (stage + '.raw.json')
         adapter = stage_adapter(adapter, packet, raw_path, saved=read(raw_path) if raw_path.exists() else None)
@@ -356,6 +362,14 @@ class Runner:
         if contract.validate_review(review_packet, initial["response"]):
             return proposed, initial
         if frozen.get('claim_issue_context',{}).get('complete_input_repair'):
+            from backend.pipeline.source_normalization_recovery import NAME, STAGE, packet as recovery_packet
+            if self.root is not None and (self.root/NAME).exists():
+                proposed, repaired = recovery_packet(self.root,frozen)
+                self.guard(frozen)
+                reviewed = self.call(STAGE,repaired)
+                if not contract.validate_review(repaired,reviewed['response']):
+                    raise Stop('normalization engineering recovery review rejected; no further recovery/correction')
+                return proposed,reviewed
             raise Stop('complete-input repair independent review rejected; no extra correction',
                        status='root_cause_required',waiting_for='system')
         # Exactly one correction, never an extra GPT preapproval/review stage.
@@ -643,6 +657,7 @@ def validate_package(package: dict, *, historical: bool = False) -> None:
             'backend/pipeline/source_reconciliation_runtime.py',
             'backend/pipeline/deferred_claim_repair.py',
             'backend/pipeline/claim_citation_purpose_review.py',
+            'backend/pipeline/source_normalization_recovery.py',
             'backend/pipeline/claim_issue_management.py',
             'backend/pipeline/source_projection.py',
             'backend/api/canonical_repository/knowledge_models.py',
@@ -683,12 +698,18 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
     """
     app = package['source_repair_application']; root = Path(app['run_root'])
     stage = app.get("terminal_stage")
-    if stage not in {"initial_review", "final_review", "final_review_input_repair"}:
+    if stage not in {"initial_review", "final_review", "final_review_input_repair", "normalization_recovery_review"}:
         raise ValueError("non-terminal stage cannot approve")
     packet = body(read(root / (stage + ".packet.json")))
     raw = read(root / (stage + ".raw.json"))
     expected = validate_raw(root, stage, packet)
-    if frozen['manifest'].get('viewpoint_scope_repair'):
+    engineering = stage == 'normalization_recovery_review'
+    if engineering:
+        from backend.pipeline.source_normalization_recovery import packet as recovery_packet
+        proposal, exact_packet = recovery_packet(root,frozen)
+        if packet != exact_packet:
+            raise ValueError('normalization recovery complete input drift')
+    elif frozen['manifest'].get('viewpoint_scope_repair'):
         from backend.pipeline.viewpoint_validation_context import historical_context
         ctx=historical_context()
         if ctx:ctx.pin(Path(__file__).with_name('cvp_scope_management.py'))
@@ -708,7 +729,7 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
     if stage == "initial_review":
         if effective_proposal(frozen, first["response"]) != proposal:
             raise ValueError("initial review is not of the actual proposal")
-    else:
+    elif not engineering:
         initial_packet = body(read(root / "initial_review.packet.json"))
         initial = validate_raw(root, "initial_review", initial_packet)
         first_proposal = effective_proposal(frozen, first["response"]).model_dump()
@@ -750,7 +771,7 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
                      disclosed_review_base(frozen, base, saved=old_packet))
         if contract.validate_review(old_packet, old_raw['response']) or packet != repaired_packet(root, frozen, proposal, old_packet, old_raw, correction):
             raise ValueError('input repair must preserve the exact rejected terminal review')
-    elif not packet.get('membership_resolution') and not claim_first:
+    elif not engineering and not packet.get('membership_resolution') and not claim_first:
         check_packet(frozen, first['response'] if stage=='initial_review' else correction['response'], packet,
                      disclosed_review_base(frozen, base, saved=packet))
     if expected["artifact_sha256"] != app.get("review_sha256") or sha256_json(proposal.model_dump()) != app.get("proposal_sha256"):
@@ -776,7 +797,8 @@ def validate_raw(root: Path, stage: str, packet: dict) -> dict:
         from backend.pipeline.viewpoint_semantic_contract import CONTRACT_PATH
         ctx.pin(CONTRACT_PATH)
         ctx.pin(PROMPTS / ('source_reconciliation_review.md'
-            if stage in {'initial_review', 'final_review', 'final_review_input_repair'} else 'source_reconciliation_proposal.md'))
+            if stage in {'initial_review', 'final_review', 'final_review_input_repair', 'normalization_recovery_review'} else 'source_reconciliation_proposal.md'))
+        if stage == 'normalization_recovery_review':ctx.pin(Path(__file__).with_name('source_normalization_recovery.py'))
         if packet.get('manifest', {}).get('deferred_repair'):
             ctx.pin(PROMPTS / 'deferred_claim_evidence_repair_v1.md')
         if packet.get('manifest', {}).get('claim_issue'):
@@ -785,7 +807,7 @@ def validate_raw(root: Path, stage: str, packet: dict) -> dict:
                 ctx.pin(PROMPTS / 'claim_evidence_eligibility_review_v2.md')
         if packet.get('manifest', {}).get('viewpoint_scope_repair'):
             ctx.pin(PROMPTS / 'cvp_scope_management_v1.md')
-    adapter = model_adapter('final_review' if stage=='final_review_input_repair' else stage, scope=bool(packet.get('manifest', {}).get('viewpoint_scope_repair')),
+    adapter = model_adapter('initial_review' if stage=='normalization_recovery_review' else 'final_review' if stage=='final_review_input_repair' else stage, scope=bool(packet.get('manifest', {}).get('viewpoint_scope_repair')),
                             deferred=bool(packet.get("manifest", {}).get("deferred_repair")),
                             issue=bool(packet.get("manifest", {}).get("claim_issue")),
                             evidence_eligibility=eligibility_profile(packet))
@@ -795,6 +817,8 @@ def validate_raw(root: Path, stage: str, packet: dict) -> dict:
     adapter = link_scoped_adapter(adapter,packet)
     from backend.pipeline.claim_citation_purpose_review import scoped_adapter as citation_scoped_adapter
     adapter = citation_scoped_adapter(adapter,packet)
+    from backend.pipeline.source_normalization_recovery import scoped_adapter as recovery_scoped_adapter
+    adapter = recovery_scoped_adapter(adapter,packet)
     raw = read(root / (stage + ".raw.json"))
     from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
     adapter = stage_adapter(adapter, packet, root / (stage + '.raw.json'), saved=raw)

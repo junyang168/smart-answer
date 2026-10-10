@@ -276,7 +276,10 @@ def execute_source_action(store,run_id,manifest,*,root,ports,claim_first=False):
             approval['prior_cvp_management']=materials['prior_cvp_management']
     if (root/'membership-resolution.json').exists():
         approval['membership_management']=binding(root/'membership-resolution.json')
-    for stage in ('initial_review','final_review','final_review_input_repair'):
+    if raw['stage']=='normalization_recovery_review':
+        from backend.pipeline.source_normalization_recovery import NAME
+        approval['normalization_engineering_recovery']=binding(root/NAME)
+    for stage in ('initial_review','final_review','final_review_input_repair','normalization_recovery_review'):
         proof=root/(stage+'.raw.program-binding.json')
         if proof.exists():approval[stage+'_program_binding']=binding(proof)
     views=set(original.get('viewpoint_ids',[]))
