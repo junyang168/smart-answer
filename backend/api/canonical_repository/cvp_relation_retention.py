@@ -11,7 +11,10 @@ from .postgres_store import (
 )
 
 POLICY = "cvp_exact_existing_relation_retention_v1"
-NON_SEMANTIC = {"viewpoint_relation_id", "revision", "reason", "review_provenance"}
+NON_SEMANTIC = {"viewpoint_relation_id", "revision", "reason", "review_provenance", "review_status"}
+# Different approval origins are not different relation meanings. Both must be
+# approved independently; retention never replaces the old status/provenance.
+APPROVED = {"system_approved", "approved", "human_approved"}
 
 
 def derive(cursor, plan, read_pins):
@@ -58,7 +61,8 @@ def derive(cursor, plan, read_pins):
             raise ChangeSetConflict("retained relation lacks exact committed current history")
         if (current.get("schema_version") != "wang_viewpoint_relation_v1"
                 or current.get("effective_state") != "active"
-                or current.get("review_status") not in {"system_approved", "approved", "human_approved"}
+                or current.get("review_status") not in APPROVED
+                or p.get("review_status") not in APPROVED
                 or not current.get("review_provenance")
                 or not p.get("review_provenance")
                 or {k:v for k,v in current.items() if k not in NON_SEMANTIC}

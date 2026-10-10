@@ -69,6 +69,30 @@ def test_pure_retention_keeps_all_other_operations_and_original_provenance(postg
     assert plan.as_dict()==before and facts==old
 
 
+@pytest.mark.parametrize('old_status',['human_approved','approved','system_approved'])
+@pytest.mark.parametrize('new_status',['human_approved','approved','system_approved'])
+def test_approved_labels_do_not_change_retained_semantics(postgres_store,old_status,new_status):
+    plan,_=task(postgres_store);plan,facts,pins=fixture(plan)
+    facts['viewpoint_relations','OLD']['review_status']=old_status
+    op=plan.operations[-1]
+    payload={**op.payload,'review_status':new_status}
+    plan=replace(plan,operations=plan.operations[:-1]+(replace(op,payload=payload,
+                 after_sha256=record_content_sha(payload)),))
+    before=deepcopy(facts);incoming=deepcopy(plan.as_dict())
+    derived,_,receipt=derive(Cursor(facts),plan,pins)
+    assert derived.operations==plan.operations[:-1] and receipt['relation_writes']==0
+    assert facts==before and plan.as_dict()==incoming
+
+
+@pytest.mark.parametrize('status',[None,'human_hold','rejected','unreviewed','withheld'])
+def test_unapproved_incoming_status_cannot_be_hidden_by_retention(postgres_store,status):
+    plan,_=task(postgres_store);plan,facts,pins=fixture(plan)
+    op=plan.operations[-1];payload={**op.payload,'review_status':status}
+    plan=replace(plan,operations=plan.operations[:-1]+(replace(op,payload=payload,
+                 after_sha256=record_content_sha(payload)),))
+    with pytest.raises(ChangeSetConflict):derive(Cursor(facts),plan,pins)
+
+
 @pytest.mark.parametrize('field,value',[
     ('review_status','human_hold'),('effective_state','inactive'),
     ('validated_source_viewpoint_revision_id','other'),('temporal_assertion',{'changed':True}),
@@ -90,7 +114,7 @@ def test_missing_conflicting_or_foreign_proof_refused(postgres_store,problem):
     with pytest.raises(ChangeSetConflict):derive(cursor,plan,pins)
 
 
-def setup_sql(store):
+def setup_sql(store,old_status='system_approved'):
     original,context=task(store)
     plan,facts,pins=fixture(original)
     plan=replace(plan,source_kind='cvp_batch_resolution')
@@ -101,7 +125,7 @@ def setup_sql(store):
     evidence['read_pins']=[{'collection':k[0],'object_id':k[1],'pin':list(v) if v else None} for k,v in sorted(pins.items())]
     review={'plan':plan.as_dict(),'evidence':evidence};digest=sha256_json(review)
     saved.update(reviewed=review,reviewed_sha256=digest);saved.pop('run_id')
-    old=facts['viewpoint_relations','OLD'];h=record_content_sha(old)
+    old=facts['viewpoint_relations','OLD'];old['review_status']=old_status;h=record_content_sha(old)
     with store.connect() as c:
         for (col,oid),p in facts.items():
             c.execute("INSERT INTO wang_knowledge.objects(collection,object_id,revision,review_status,visibility,content_sha256,payload) VALUES (%s,%s,1,%s,'internal',%s,%s::jsonb)",
@@ -114,8 +138,9 @@ def setup_sql(store):
     return plan,context.run_id,digest,facts
 
 
-def test_sql_archive_exact_once_and_late_rollback(postgres_store,monkeypatch):
-    store=postgres_store;plan,run,digest,facts=setup_sql(store)
+@pytest.mark.parametrize('old_status',['system_approved','human_approved'])
+def test_sql_archive_exact_once_and_late_rollback(postgres_store,monkeypatch,old_status):
+    store=postgres_store;plan,run,digest,facts=setup_sql(store,old_status)
     before=deepcopy(store.get_cvp_group(run)['reviewed'])
     next_digest=store.retain_reviewed_cvp_relations(run,plan=plan,reviewed_sha256=digest)
     from backend.pipeline.cvp_sql_flow import plan_from_document,decoded_pins
