@@ -337,6 +337,26 @@ def execute_coverage_action(store,run_id,definition,group,*,root,ports,investiga
         pending_cvp_management_record_keys=materials.get('claim_management_resolution',{}).get('pending_existing_cvp_record_keys',[]))
 
 
+def restore_exact_supports_packet_order(saved, current):
+    """Preserve the actual request order after exact indexed graph rebuild.
+
+    Only graph context arrays are unordered SQL sets. Source paragraphs,
+    evidence, spans, targets, findings and all content retain exact ordering.
+    """
+    from copy import deepcopy
+    projected=deepcopy(current)
+    if len(saved.get('targets',[]))!=len(projected.get('targets',[])):
+        raise ValueError('saved supports target population drift')
+    for old,new in zip(saved['targets'],projected['targets']):
+        for field in ('adjacent_links','adjacent_claims','dependent_records'):
+            if (field not in old or field not in new
+                    or sorted(map(canonical_json,old[field]))!=sorted(map(canonical_json,new[field]))):
+                raise ValueError('saved supports context field or record drift')
+            new[field]=old[field]
+    if projected!=saved:raise ValueError('saved supports content/input drift')
+    return saved
+
+
 def supports_identity_dependencies(store, records, selected):
     """Read exact forward candidate references omitted by consumer closure.
 
@@ -436,6 +456,9 @@ def execute_supports_action(store,run_id,adjudication_root,*,root,ports):
     repair={'schema_version':'wang_audit_link_repair_packet_v1','targets':selected,
             'adjudication_packet_sha256':packet['artifact_sha256'],'adjudication_handoff':report,
             'policy':policy,'claim_source_viewpoint_text_writes':0}
+    if (root/'packet.json').exists():
+        repair=restore_exact_supports_packet_order(read_artifact(root/'packet.json'),repair)
+        selected=repair['targets']
     write_immutable(root/'packet.json',repair)
     action=store.prepare_cvp_action(run_id,action_id=action_id,kind='audit_supports_correction',
         authorization=binding(POLICY),materials={'packet':repair,'read_pins':pin_rows(pins(records))})

@@ -2,7 +2,7 @@ from contextlib import nullcontext
 from copy import deepcopy
 import pytest
 from backend.api.canonical_repository.postgres_store import record_content_sha
-from backend.pipeline.cvp_sql_actions import supports_identity_dependencies
+from backend.pipeline.cvp_sql_actions import supports_identity_dependencies,restore_exact_supports_packet_order
 from backend.pipeline.cvp_sql_flow import exact_saved_upheld_items
 
 
@@ -77,3 +77,29 @@ def test_saved_upheld_changed_scope_cannot_resume(delta):
     elif delta=='missing':q['items']=[]
     else:r['actions'].append({'item_id':'foreign','verdict':'audit_objection_upheld'})
     with pytest.raises(ValueError):exact_saved_upheld_items(p,q,r,{'x'})
+
+
+def packet():
+    return {'targets':[{'adjacent_links':[{'id':'L1'},{'id':'L2'}],
+                       'adjacent_claims':[{'id':'C1'},{'id':'C2'}],
+                       'dependent_records':[{'id':'R1'},{'id':'R2'}],
+                       'sources':[{'paragraphs':['first','second']}],'after_link':{'role':'supports'}}]}
+
+
+def test_saved_wire_graph_order_preserved_only_after_full_record_equality():
+    old=packet();new=deepcopy(old)
+    for k in ('adjacent_links','adjacent_claims','dependent_records'):new['targets'][0][k].reverse()
+    assert restore_exact_supports_packet_order(old,new)==old
+    assert new!=old
+
+
+@pytest.mark.parametrize('delta',['value','extra','missing','paragraph_order','role','target'])
+def test_packet_order_recovery_never_changes_semantic_input(delta):
+    old=packet();new=deepcopy(old);i=new['targets'][0]
+    if delta=='value':i['adjacent_links'][0]['id']='changed'
+    elif delta=='extra':i['adjacent_links'].append({'id':'L1'})
+    elif delta=='missing':i.pop('adjacent_links')
+    elif delta=='paragraph_order':i['sources'][0]['paragraphs'].reverse()
+    elif delta=='role':i['after_link']['role']='equivalent_component'
+    else:new['targets']=[]
+    with pytest.raises(ValueError):restore_exact_supports_packet_order(old,new)
