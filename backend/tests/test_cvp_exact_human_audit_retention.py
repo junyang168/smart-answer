@@ -53,3 +53,66 @@ def test_partial_human_route_keeps_unrelated_item(monkeypatch):
     new,ids=h.partition({},packet,None,None)
     assert new['items']==[{'item_id':'4:V:OTHER'}] and len(packet['items'])==2
     assert ids=={'4:V:C'}
+
+
+def multi_direction():
+    d=direction();i=d['items'][0]
+    i['connections'].append({**i['connections'][0],'viewpoint_claim_link_id':'CONTEXT',
+        'decision_id':'OTHER','link_type':'equivalent_component'})
+    i['retained_link_ids']=['L'];d['exact_finding_only']=True
+    d['read_pins']=[{'collection':c,'object_id':o,'pin':[1,'a'*64,False]}
+        for c,o in sorted(h.required_keys(d['items']))]
+    return seal(d)
+
+
+def test_selected_link_keeps_full_other_connection_context():
+    d=multi_direction();before=deepcopy(d);h.validate_direction(d)
+    assert d==before and ('viewpoint_claim_links','CONTEXT') in h.required_keys(d['items'])
+
+
+@pytest.mark.parametrize('problem',['unselected','foreign','broad','missing_context_pin','duplicate','changed_finding_scope'])
+def test_selected_authority_counterexamples(problem):
+    d=multi_direction();i=d['items'][0]
+    if problem=='unselected':i.pop('retained_link_ids')
+    if problem=='foreign':i['retained_link_ids']=['FOREIGN']
+    if problem=='broad':i['retained_link_ids']=['L','CONTEXT']
+    if problem=='missing_context_pin':d['read_pins']=[p for p in d['read_pins'] if p['object_id']!='CONTEXT']
+    if problem=='duplicate':i['connections'].append(deepcopy(i['connections'][0]))
+    if problem=='changed_finding_scope':d.pop('exact_finding_only')
+    with pytest.raises(ValueError):h.validate_direction(seal(d))
+
+
+def test_selected_exact_finding_cannot_expand_to_new_concern():
+    d=multi_direction();item=deepcopy(d['items'][0]);item.pop('retained_link_ids')
+    item['audit_finding']={**item['audit_finding'],'reason':'new unrelated objection'}
+    with pytest.raises(ValueError,match='outside exact authorized finding'):
+        h.verify_item(item,d,{})
+
+
+def test_append_binding_preserves_original_and_requires_all_flags(tmp_path,monkeypatch):
+    from backend.pipeline import cvp_sql_flow
+    from backend.pipeline.viewpoint_resolution_runtime import write_immutable,read_artifact
+    monkeypatch.setattr(cvp_sql_flow,'check_binding',lambda b:None)
+    a=tmp_path/'a.json';b=tmp_path/'b.json'
+    write_immutable(a,direction());write_immutable(b,multi_direction())
+    ba={'path':str(a),'file_sha256':'a'*64};bb={'path':str(b),'file_sha256':'b'*64}
+    h.persist_bindings(tmp_path,[ba]);original=(tmp_path/h.NAME).read_bytes()
+    h.persist_bindings(tmp_path,[ba,bb]);h.persist_bindings(tmp_path,[ba,bb])
+    assert (tmp_path/h.NAME).read_bytes()==original
+    assert h.direction_bindings(tmp_path)==[ba,bb]
+    assert len(list((tmp_path/h.ADDITIONS).glob('*.json')))==1
+    for invalid in ([bb],[ba],[],[ba,bb,bb],[{**ba,'file_sha256':'changed'},bb]):
+        with pytest.raises(ValueError):h.check_explicit_bindings(tmp_path,invalid)
+
+
+def test_invalid_append_cannot_publish_new_binding(tmp_path,monkeypatch):
+    from backend.pipeline import cvp_sql_flow
+    from backend.pipeline.viewpoint_resolution_runtime import write_immutable
+    monkeypatch.setattr(cvp_sql_flow,'check_binding',lambda b:None)
+    a=tmp_path/'a.json';b=tmp_path/'b.json'
+    write_immutable(a,direction());d=multi_direction();d['additional_model_calls']=1
+    write_immutable(b,seal(d))
+    ba={'path':str(a),'file_sha256':'a'*64};bb={'path':str(b),'file_sha256':'b'*64}
+    h.persist_bindings(tmp_path,[ba])
+    with pytest.raises(ValueError):h.persist_bindings(tmp_path,[ba,bb])
+    assert h.direction_bindings(tmp_path)==[ba]

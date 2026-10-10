@@ -803,10 +803,9 @@ def main(argv=None):
     parser.add_argument('--owner-claim-revision',type=Path,
                         help='Exact human identification of a Claim omission; normal GPT/Opus joint review still required')
     args = parser.parse_args(argv)
-    from backend.pipeline.cvp_exact_human_audit_retention import NAME as AUDIT_RETAIN_NAME,validate_direction
+    from backend.pipeline.cvp_exact_human_audit_retention import validate_direction,check_explicit_bindings,persist_bindings
     audit_retention_binding={'directions':[binding(p) for p in args.audit_link_retention]}
-    if (args.output_root/AUDIT_RETAIN_NAME).exists() and read_artifact(args.output_root/AUDIT_RETAIN_NAME)!=audit_retention_binding:
-        raise ValueError('audit link retention requires exact explicit recovery directions')
+    check_explicit_bindings(args.output_root,audit_retention_binding['directions'])
     from backend.pipeline.cvp_batch_identity_integration import ENABLED, VERSION
     ENABLED.set(args.integrate_batch_candidates)
     integration_binding=args.output_root/'batch-identity-integration-binding.json'
@@ -911,7 +910,7 @@ def main(argv=None):
                         or not Path(d['audit']['path']).resolve().is_relative_to((args.output_root/d['run_id']).resolve())
                         or (invocation_limit is not None and v['sequence']>invocation_limit)):
                     raise ValueError('audit link retention campaign/root/boundary drift')
-            write_immutable(args.output_root/AUDIT_RETAIN_NAME,audit_retention_binding)
+            persist_bindings(args.output_root,audit_retention_binding['directions'])
         if args.retained_link_review_policy:
             from backend.pipeline.cvp_retained_review_separation import validate_policy,generation_artifacts,VERSION as RETAINED_VERSION
             validate_policy(read_artifact(args.retained_link_review_policy))

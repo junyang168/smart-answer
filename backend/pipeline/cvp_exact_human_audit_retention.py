@@ -10,6 +10,7 @@ from backend.pipeline.viewpoint_resolution_runtime import read_artifact, write_i
 DIRECTION = 'wang_exact_human_audit_link_retention_v1'
 RESOLUTION = 'wang_exact_human_audit_link_retention_resolution_v1'
 NAME = 'audit-link-retention-bindings.json'
+ADDITIONS = 'audit-link-retention-additions'
 APPROVED = {'approved', 'system_approved', 'human_approved', 'ai_consensus_reviewed'}
 
 
@@ -20,10 +21,11 @@ def target(item):
 def required_keys(items):
     result=set()
     for i in items:
-        l=i['connections'][0]
-        result|={('claims',i['claim']['claim_id']),('viewpoint_claim_links',l['viewpoint_claim_link_id']),
-            ('viewpoint_identity_decisions',l['decision_id']),('canonical_viewpoints',l['viewpoint_id']),
-            ('viewpoint_revisions',l['validated_against_viewpoint_revision_id'])}
+        result.add(('claims',i['claim']['claim_id']))
+        for l in i['connections']:
+            result|={('viewpoint_claim_links',l['viewpoint_claim_link_id']),
+                ('viewpoint_identity_decisions',l['decision_id']),('canonical_viewpoints',l['viewpoint_id']),
+                ('viewpoint_revisions',l['validated_against_viewpoint_revision_id'])}
         for e in i['evidence']:
             result|={('evidence_steps',e['step']['evidence_step_id']),('source_fragments',e['fragment']['fragment_id'])}
         result|={('source_documents',s['source_id']) for s in i['sources']}
@@ -39,8 +41,14 @@ def validate_direction(d):
             or not d.get('items') or len({i['item_id'] for i in d['items']}) != len(d['items'])):
         raise ValueError('exact human audit retention direction invalid')
     for i in d['items']:
-        if (not i['item_id'].startswith('4:') or len(i.get('connections',[])) != 1
-                or i['connections'][0]['link_type'] not in {'equivalent_full','equivalent_component','supports','qualifies'}):
+        links=i.get('connections',[])
+        selected=i.get('retained_link_ids')
+        ids=[l['viewpoint_claim_link_id'] for l in links]
+        if (not i['item_id'].startswith('4:') or not links or len(ids)!=len(set(ids))
+                or any(l['link_type'] not in {'equivalent_full','equivalent_component','supports','qualifies'} for l in links)
+                or (selected is None and len(links)!=1)
+                or (selected is not None and (len(selected)!=1 or selected[0] not in ids
+                    or d.get('exact_finding_only') is not True))):
             raise ValueError('human retention requires one exact existing link per item')
     if (len(d.get('read_pins',[])) != len(required_keys(d['items']))
             or {(p['collection'],p['object_id']) for p in d.get('read_pins',[])} != required_keys(d['items'])
@@ -48,11 +56,42 @@ def validate_direction(d):
         raise ValueError('human retention exact live dependency population missing')
 
 
+def build_direction(audit_path, store, owner_direction, selected_link_ids, run_id):
+    """Capture a human-selected no-change scope from actual audited SQL data."""
+    from backend.pipeline.viewpoint_audit_source_adjudication import build_packet
+    from backend.pipeline.viewpoint_audit_owner_resolution import binding
+    selected=set(selected_link_ids)
+    if not selected or len(selected)!=len(selected_link_ids):
+        raise ValueError('human retention selected link population invalid')
+    audit=read_artifact(audit_path);packet=build_packet(audit_path,store,True)
+    items=[];found=set()
+    for i in packet['items']:
+        ids=selected&{l['viewpoint_claim_link_id'] for l in i['connections']}
+        if ids:
+            if len(ids)!=1 or ids&found:
+                raise ValueError('human retention selected link ambiguous')
+            items.append({**i,'retained_link_ids':sorted(ids)});found|=ids
+    if found!=selected:raise ValueError('human retention selected link missing from actual audit')
+    keys=required_keys(items)
+    pins=[p for p in audit['meta']['registry_read_scope']['read_pins'] if (p['collection'],p['object_id']) in keys]
+    body={'schema_version':DIRECTION,'campaign_sha256':store.get_cvp_group(run_id)['campaign_sha256'],
+        'run_id':run_id,'authorized_by':'owner','owner_direction':owner_direction,
+        'decision':'reject_objection_retain_exact_current_link','master_data_mutations':0,
+        'additional_model_calls':0,'exact_finding_only':True,'audit':binding(audit_path),
+        'items':items,'read_pins':pins}
+    body['artifact_sha256']=sha256_json(body);validate_direction(body)
+    return body
+
+
 def verify_item(item, d, audit):
     validate_direction(d)
     old=next((i for i in d['items'] if i['item_id'] == item['item_id']),None)
-    if old is None or target(old) != target(item):
+    # Explicit selected links are authority metadata, not model packet fields.
+    original_target={k:v for k,v in target(old or {}).items() if k!='retained_link_ids'}
+    if old is None or original_target != target(item):
         raise ValueError('human retention current target drift')
+    if d.get('exact_finding_only') and old['audit_finding']!=item['audit_finding']:
+        raise ValueError('human retention outside exact authorized finding')
     from backend.pipeline.cvp_sql_flow import check_binding
     check_binding(d['audit'])
     original=read_artifact(d['audit']['path'])
@@ -77,12 +116,45 @@ def verify_item(item, d, audit):
     return item['item_id']
 
 
-def human_items(audit, packet, root, store):
+def direction_bindings(root):
     path=Path(root)/NAME
-    if not path.exists():return set(),[]
+    base=read_artifact(path)['directions'] if path.exists() else []
+    additions=Path(root)/ADDITIONS
+    extra=[read_artifact(p)['direction'] for p in sorted(additions.glob('*.json'))] if additions.exists() else []
+    result=base+extra
+    if len({b['path'] for b in result})!=len(result):
+        raise ValueError('duplicate human retention binding')
+    return result
+
+
+def check_explicit_bindings(root, explicit):
+    from backend.pipeline.cvp_sql_flow import check_binding
+    if len({b['path'] for b in explicit})!=len(explicit):
+        raise ValueError('duplicate explicit human retention direction')
+    for b in direction_bindings(root):
+        check_binding(b)
+        if b not in explicit:
+            raise ValueError('audit link retention requires every original exact recovery direction')
+
+
+def persist_bindings(root, explicit):
+    """Append owner directions without overwriting the original binding or raw."""
+    check_explicit_bindings(root,explicit)
+    path=Path(root)/NAME
+    if not path.exists():
+        write_immutable(path,{'directions':explicit})
+        return
+    old=direction_bindings(root)
+    for b in explicit:
+        if b not in old:
+            d=read_artifact(b['path']);validate_direction(d)
+            write_immutable(Path(root)/ADDITIONS/(sha256_json(b)+'.json'),{'direction':b})
+
+
+def human_items(audit, packet, root, store):
     from backend.pipeline.cvp_sql_flow import check_binding
     accepted=set();used=[]
-    for b in read_artifact(path)['directions']:
+    for b in direction_bindings(root):
         check_binding(b);d=read_artifact(b['path']);validate_direction(d)
         for item in packet['items']:
             if item['item_id'] not in {i['item_id'] for i in d['items']}:continue
