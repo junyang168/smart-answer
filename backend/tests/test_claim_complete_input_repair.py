@@ -195,3 +195,26 @@ def test_actual_complete_input_diagnostic_and_readonly_impact_gates(actual_direc
         if fault=='unbound_prefix':diagnostic.exact_quote='這不但是彼得自己的錯誤，也是當時猶太人普遍的錯誤。'
         else:assessment.citations=[diagnostic]
     with pytest.raises((ValueError,KeyError)):r.initial_review_base(frozen,proposal)
+
+
+def test_actual_basis_normalization_bug_and_exact_legacy_review_remain(actual_direction):
+    from backend.pipeline.deferred_claim_repair import decode_proposal,BASIS_PROFILE
+    root=Path(actual_direction['old_action_root']).parent.parent/'complete-input-repair-once/action'
+    path=next(root.glob('*/proposal.raw.json'))
+    frozen=r.body(r.read(path.parent/'scoped-materials.json'))
+    raw=r.validate_raw(path.parent,'proposal',r.body(r.read(path.parent/'proposal.packet.json')))
+    packet=r.body(r.read(path.parent/'initial_review.packet.json'))
+    review=r.validate_raw(path.parent,'initial_review',packet)
+    legacy=r.effective_proposal(frozen,raw['response'])
+    assert c.validate_review(packet,review['response']) is False
+    proposed=deepcopy(frozen);proposed['claim_issue_context']['basis_normalization_profile']=BASIS_PROFILE
+    corrected=r.effective_proposal(proposed,raw['response'])
+    key='claims/DK-07c73c44dc11-P04-CL007'
+    data=c.index(corrected.records);old=c.index(legacy.records)
+    base={k:v for k,v in raw['response'].items() if k not in {'claim_assessments','cvp_impacts'}}
+    original=c.index(c.Proposal.model_validate(decode_proposal(base)).records)
+    assert data[key]['occurrences'][0]['anchors']==original[key]['occurrences'][0]['anchors']
+    stripped=lambda x:{k:({**v,'occurrences':[{**o,'anchors':[{a:b for a,b in anchor.items() if a!='evidence_independence'} for anchor in o['anchors']]} for o in v['occurrences']]} if k==key else v) for k,v in x.items()}
+    assert stripped(data)==stripped(old)
+    r.initial_review_base(proposed,corrected)  # diagnostic only, no approval
+    assert r.effective_proposal(frozen,raw['response'])==legacy

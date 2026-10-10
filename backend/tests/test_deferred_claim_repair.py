@@ -181,6 +181,29 @@ def test_quote_hashes_are_computed_before_opus_without_changing_words(case):
     assert effective == r.effective_proposal(frozen,raw)
 
 
+@pytest.mark.parametrize('fault',[None,'missing','conflict','count','representative','paragraph'])
+def test_preserve_explicit_basis_with_nonoverlapping_context(fault):
+    def anchor(rep):return {'evidence_independence':{'basis_group_id':'model-basis',
+        'count_once_per_basis_group':True,'is_basis_representative':rep}}
+    spans=[('S0001',0,5,anchor(False)),('S0001',5,10,anchor(False)),
+           ('S0001',10,15,anchor(False)),('S0001',5,20,anchor(True))]
+    original=deepcopy(spans)
+    if fault=='missing':spans[1][3]['evidence_independence']={}
+    elif fault=='conflict':spans[2][3]['evidence_independence']['basis_group_id']='other'
+    elif fault=='count':spans[0][3]['evidence_independence']['count_once_per_basis_group']=False
+    elif fault=='representative':spans[0][3]['evidence_independence']['is_basis_representative']=True
+    elif fault=='paragraph':spans[0]=('S0002',0,5,spans[0][3])
+    if fault:
+        with pytest.raises(ValueError):d.preserve_declared_basis_group(spans,{1,2,3})
+    else:
+        assert d.preserve_declared_basis_group(spans,{1,2,3}) is True
+        assert spans==original
+
+
+def test_absent_basis_remains_computed_not_inferred():
+    assert d.preserve_declared_basis_group([('S0001',0,10,{}),('S0001',5,15,{})],{0,1}) is False
+
+
 def test_normalization_only_declares_explicit_new_quote_not_missing_consumer(case):
     states,_,bound = case
     frozen = {"manifest":manifest_for(case).model_dump(),"before_records":c.rows(states),"after":[c.source_snapshot(bound)]}

@@ -18,6 +18,24 @@ CLAIM_FIELDS = {"occurrences", "evidence_step_ids", "eligible_evidence_step_ids"
 CONTENT_FIELDS = {"statement", "attribution", "discourse_mode", "claim_type"}
 EVIDENCE_FIELDS = {"statement", "source_fragment_ids", "source_fragment_id"}
 LINK_FIELDS = {"pinned_claim_revision", "component_locator", "evidence_bindings"}
+BASIS_PROFILE = 'preserve_valid_declared_basis_groups_v2'
+
+
+def preserve_declared_basis_group(spans, group):
+    """Keep an explicit valid model grouping; never infer a semantic group."""
+    flags=[spans[i][3].get('evidence_independence',{}) for i in group]
+    if not any(flags):return False
+    ids={f.get('basis_group_id') for f in flags}
+    if len(ids)!=1 or None in ids or '' in ids:
+        raise ValueError('declared overlapping basis group is incomplete or conflicting')
+    basis=next(iter(ids))
+    members=[s for s in spans if s[3].get('evidence_independence',{}).get('basis_group_id')==basis]
+    if (len({s[0] for s in members})!=1
+            or any(s[3]['evidence_independence'].get('count_once_per_basis_group') is not True for s in members)
+            or sum(s[3]['evidence_independence'].get('is_basis_representative') is True for s in members)!=1):
+        raise ValueError('declared basis group requires same paragraph and one representative')
+    c.validate_basis_groups([spans[i] for i in group])
+    return True
 
 
 class JsonRow(c.Contract):
@@ -341,6 +359,9 @@ def normalize_proposal(frozen,response):
                             if pkey == para and low < h and l < high: group.add(j); queue.append(j)
                     remaining -= group
                     if len(group) < 2: continue
+                    if (context.get('basis_normalization_profile') == BASIS_PROFILE
+                            and preserve_declared_basis_group(spans, group)):
+                        continue
                     basis = "BASIS-"+sha256_json(sorted((spans[i][0],spans[i][1],spans[i][2],spans[i][3].get("evidence_id")) for i in group))[:20]
                     representative = min(group,key=lambda i: (-(spans[i][2]-spans[i][1]),i))
                     for i in group:
