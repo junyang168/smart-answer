@@ -55,6 +55,16 @@ def test_partial_human_route_keeps_unrelated_item(monkeypatch):
     assert ids=={'4:V:C'}
 
 
+def test_invalid_first_direction_is_not_persisted(tmp_path):
+    import json
+    from backend.pipeline.cvp_sql_flow import binding
+    d=direction();d['additional_model_calls']=1;seal(d)
+    p=tmp_path/'invalid.json';p.write_text(json.dumps(d))
+    out=tmp_path/'execution';out.mkdir()
+    with pytest.raises(ValueError):h.persist_bindings(out,[binding(p)])
+    assert not list(out.rglob('*.json'))
+
+
 def multi_direction():
     d=direction();i=d['items'][0]
     i['connections'].append({**i['connections'][0],'viewpoint_claim_link_id':'CONTEXT',

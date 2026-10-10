@@ -13,6 +13,8 @@ from backend.api.canonical_repository.postgres_store import record_content_sha, 
 VERSION = 'wang_cvp_retained_review_separation_v1'
 NAME = 'retained-review-separation-binding.json'
 HUMAN_NAME = 'retained-content-disposition-binding.json'
+HUMAN_ADDITIONS = 'retained-content-dispositions'
+HUMAN_SCOPES = 'retained-content-scopes'
 PROMPT = '''本次新增提案审核与已提交连接维护分开。
 retained_review_boundary 中的现有连接是 SQL 已提交、原独立审核批准的当前事实，不是本次新增/修改的后像。
 原始拒绝与纠正保留；旧原文语境可消解指代、省略，不要求每条摘要复述CVP全部内容，不能把同一教导的语境解释误当另一独立断言。
@@ -62,11 +64,107 @@ def persist_generation_binding(path, value):
             {k:v for k,v in value.items() if k!='generation_artifacts'}):
         raise ValueError('retained generation policy/campaign drift')
     leaves = value['generation_artifacts']
-    if any(leaf not in leaves for leaf in old['generation_artifacts']):
+    prior = list(old['generation_artifacts'])
+    for p in sorted((path.parent/'retained-generation-leaves').glob('*.json')):
+        leaf = read_artifact(p)
+        if leaf not in prior: prior.append(leaf)
+    if any(leaf not in leaves for leaf in prior):
         raise ValueError('original retained generation leaves omitted/changed')
     for leaf in leaves:
         if leaf not in old['generation_artifacts']:
             write_immutable(path.parent/'retained-generation-leaves'/(leaf['artifact_sha256']+'.json'),leaf)
+
+
+def human_bindings(root):
+    """Legacy receipt remains immutable; later groups have independent leaves."""
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+    root=Path(root)
+    result=([read_artifact(root/HUMAN_NAME)['human_disposition']]
+            if (root/HUMAN_NAME).exists() else [])
+    result += [read_artifact(p)['human_disposition']
+               for p in sorted((root/HUMAN_ADDITIONS).glob('*.json'))]
+    if len({b['path'] for b in result})!=len(result):
+        raise ValueError('duplicate retained content disposition binding')
+    return result
+
+
+def validate_human_direction(direction):
+    wanted={'schema_version':'wang_cvp_human_retained_content_disposition_v1',
+        'human_exact_disposition':True,'decision':'retain_existing_contextual_equivalence_unchanged',
+        'registry_operations':[],'additional_model_calls_authorized':0,
+        'group_completion_granted':False,'other_pending_impacts_resolved':False}
+    if (any(type(direction.get(k)) is not type(v) or direction.get(k)!=v for k,v in wanted.items())
+            or not direction.get('owner_reply') or not direction.get('group_id')
+            or not direction.get('campaign_sha256') or not direction.get('items')
+            or len({i['link_id'] for i in direction['items']})!=len(direction['items'])):
+        raise ValueError('human retain direction cannot grant writes/retries/completion')
+
+
+def persist_human_bindings(root, explicit, *, campaign, store, limit):
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact,write_immutable
+    from backend.pipeline.cvp_sql_flow import check_binding
+    old=human_bindings(root)
+    if len({b['path'] for b in explicit})!=len(explicit) or any(b not in explicit for b in old):
+        raise ValueError('every original exact retained content direction must remain explicit')
+    groups={}
+    # Validate the entire set before writing any receipt, including the first.
+    for b in explicit:
+        check_binding(b);d=read_artifact(b['path']);validate_human_direction(d)
+        g=store.get_cvp_group(d['group_id'])
+        if (d['campaign_sha256']!=campaign or not g or g['campaign_sha256']!=campaign
+                or (limit is not None and g['sequence']>limit)):
+            raise ValueError('human retention foreign campaign/group or outside execution boundary')
+        groups.setdefault(d['group_id'],[]).append(b)
+    merged={group:merge_human_directions(bs) for group,bs in groups.items() if len(bs)>1}
+    for b in explicit:
+        if b not in old:
+            write_immutable(Path(root)/HUMAN_ADDITIONS/(sha256_json(b)+'.json'),{'human_disposition':b})
+    for group,d in merged.items():
+        write_immutable(Path(root)/HUMAN_SCOPES/group/(sha256_json(d)+'.json'),d)
+
+
+def merge_human_directions(bindings):
+    """One-level exact disjoint decisions; never merge different review rounds."""
+    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+    values=[];seen=set()
+    identity=('schema_version','campaign_sha256','group_id','decision',
+              'complete_context_final_raw_file_sha256','complete_context_final_raw_artifact_sha256')
+    for b in sorted(bindings,key=lambda b:b['path']):
+        check_binding(b);d=read_artifact(b['path']);validate_human_direction(d)
+        if d.get('source_decision_bindings'):
+            raise ValueError('human disposition cannot recursively merge decision bundles')
+        if values and any(d.get(k)!=values[0].get(k) for k in identity):
+            raise ValueError('human decision bundle different campaign/group/final review')
+        ids={i['link_id'] for i in d['items']}
+        if ids&seen:raise ValueError('overlapping/conflicting human retained content decisions')
+        seen|=ids;values.append(d)
+    body={k:v for k,v in values[0].items() if k in (*identity,'human_exact_disposition',
+        'registry_operations','additional_model_calls_authorized','group_completion_granted','other_pending_impacts_resolved')}
+    body.update(owner_reply='\n'.join(d['owner_reply'] for d in values),
+        items=sorted([i for d in values for i in d['items']],key=lambda i:i['link_id']),
+        source_decision_bindings=sorted(bindings,key=lambda b:b['path']))
+    return body
+
+
+def human_binding_for(root):
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+    from backend.pipeline.cvp_sql_flow import check_binding,binding
+    root=Path(root).resolve()
+    parent=next((p for p in root.parents
+                 if (p/HUMAN_NAME).exists() or (p/HUMAN_ADDITIONS).exists()),None)
+    if parent is None:return None
+    matches=[]
+    for b in human_bindings(parent):
+        check_binding(b);d=read_artifact(b['path']);validate_human_direction(d)
+        if d['group_id'] in root.parts:matches.append(b)
+    if len(matches)>1:
+        body=merge_human_directions(matches)
+        group=body['group_id'];path=parent/HUMAN_SCOPES/group/(sha256_json(body)+'.json')
+        if not path.exists() or read_artifact(path)!=body:
+            raise ValueError('human partial decisions lack their exact complete scope receipt')
+        return binding(path)
+    return matches[0] if matches else None
 
 
 def generation_artifacts(paths):
@@ -303,25 +401,21 @@ def write_scope_authority(root, store, materials, report, *, human_binding=None)
     from backend.api.canonical_repository.viewpoint_resolution import ReviewClaim
     root=Path(root).resolve()
     if human_binding is None:
-        marker=next((p/HUMAN_NAME for p in root.parents if (p/HUMAN_NAME).exists()),None)
-        if marker is None:return None
-        saved=read_artifact(marker)
-    else:
-        saved={'human_disposition':human_binding}
+        human_binding=human_binding_for(root)
+        if human_binding is None:return None
+    saved={'human_disposition':human_binding}
     check_binding(saved['human_disposition'])
     direction=read_artifact(saved['human_disposition']['path'])
+    if direction.get('source_decision_bindings'):
+        if merge_human_directions(direction['source_decision_bindings'])!=direction:
+            raise ValueError('human disposition merged scope drift')
     run_id=direction['group_id']
     # Scope to the exact current group; later groups do not inherit this content decision.
     if run_id not in root.parts:return None
     group=store.get_cvp_group(run_id)
     if not group or group['campaign_sha256']!=direction['campaign_sha256']:
         raise ValueError('human retention foreign SQL campaign/group')
-    wanted={'schema_version':'wang_cvp_human_retained_content_disposition_v1',
-        'human_exact_disposition':True,'decision':'retain_existing_contextual_equivalence_unchanged',
-        'registry_operations':[],'additional_model_calls_authorized':0,
-        'group_completion_granted':False,'other_pending_impacts_resolved':False}
-    if any(type(direction.get(k)) is not type(v) or direction.get(k)!=v for k,v in wanted.items()) or not direction.get('owner_reply'):
-        raise ValueError('human retain direction cannot grant writes/retries/completion')
+    validate_human_direction(direction)
     receipt=report.get('_retained_review_boundary')
     if receipt is None or report.get('_final_review') is None:
         raise ValueError('human retention lacks actual complete-context final review')
@@ -364,6 +458,16 @@ def write_scope_authority(root, store, materials, report, *, human_binding=None)
         'retained_link_pins':pins,'original_final_review':binding(final_path),
         'retained_boundary':binding(root/'retained-review-boundary.json'),
         'model_verdicts_changed':False,'all_pending_impacts_preserved':True}
+    # Ordinary groups have no Claim-first receipt. Pin the actual reviewed
+    # Claim generations directly; never derive an old generation from a later audit.
+    if not (root/'retained-write-scope-authority.json').exists():
+        cids={by_id[lid]['claim_id'] for lid in lids}
+        authority['human_retained_claim_pins']=[{'collection':'claims','object_id':cid,
+            'pin':list(expected['claims',cid])} for cid in sorted(cids)]
+    else:
+        old=read_artifact(root/'retained-write-scope-authority.json')
+        if 'human_retained_claim_pins' in old:
+            authority['human_retained_claim_pins']=old['human_retained_claim_pins']
     retained_write_components(p,r,[ReviewClaim.model_validate(c)
         for c in materials['packet']['claims']],links,authority,
         retained_null_link_ids=receipt['retained_null_locator_links'])

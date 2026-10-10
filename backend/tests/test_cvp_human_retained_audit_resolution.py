@@ -42,6 +42,41 @@ def test_explicit_human_retention_preserves_disputed_not_fabricated_pass(case):
     assert f['audit']==before and f['audit']['layers']['4']['results'][0]['verdict']=='disputed'
 
 
+@pytest.mark.parametrize('fault',[None,'missing','duplicate','foreign','retired','claim-drift'])
+def test_normal_group_does_not_require_claim_first_receipt(case,fault):
+    f=case;b=f['body'];b.pop('claim_layer_completion')
+    path=f['tmp_path']/'scope.json';scope=json.loads(path.read_text())
+    rows=deepcopy([p for p in f['pins'] if p['collection']=='claims'])
+    if fault=='missing':rows=[]
+    elif fault=='duplicate':rows*=2
+    elif fault=='foreign':rows[0]['object_id']='FOREIGN'
+    elif fault=='retired':rows[0]['pin'][2]=True
+    elif fault=='claim-drift':rows[0]['pin'][0]+=1
+    scope['human_retained_claim_pins']=rows;path.write_text(json.dumps(scope))
+    b['human_scope_authority']=binding(path);seal(b)
+    if fault:
+        with pytest.raises(ValueError):resolution.verify_resolution(f['audit'],b)
+    else:assert resolution.verify_resolution(f['audit'],b)=={'3':set(),'4':{'V'}}
+
+
+def test_mixed_domains_rejoin_all_items_without_repeating_human_judgment(case,monkeypatch):
+    from backend.pipeline import cvp_exact_human_audit_retention as exact
+    f=case;a=f['audit'];b=f['body']
+    a['layers']['4']['results'].append({'viewpoint_id':'OTHER','verdict':'disputed','issue':'different_proposition','claim_ids_in_question':['C2']})
+    a['layers']['4']['disputed']=2
+    path=f['tmp_path']/'audit.json';path.write_text(json.dumps(a));b['audit']=binding(path)
+    b['audit_semantic_sha256']=audit_semantic_sha(a)
+    packet={'items':[{'item_id':'4:OTHER:C2'}]};packet['artifact_sha256']=sha256_json(packet)
+    b.update(exact_audit_packet=packet,exact_audit_human_items=[{'item_id':'4:OTHER:C2','direction':{}}])
+    checks=[]
+    monkeypatch.setattr(exact,'verify_human_entry',lambda audit,items,h:checks.append(h) or h['item_id'])
+    seal(b)
+    assert resolution.verify_resolution(a,b)=={'3':set(),'4':{'V','OTHER'}}
+    assert len(checks)==1
+    b['exact_audit_human_items']=[];seal(b)
+    with pytest.raises(ValueError):resolution.verify_resolution(a,b)
+
+
 @pytest.mark.parametrize('fault',[None,'new-pin','missing','retired','not-judged','foreign','proof'])
 def test_narrow_action_readset_requires_exact_saved_full_claim_audit(case,monkeypatch,fault):
     from backend.pipeline import claim_first_management,viewpoint_content_blocked_fallback

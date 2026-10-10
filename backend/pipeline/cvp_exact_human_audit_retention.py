@@ -156,6 +156,11 @@ def check_explicit_bindings(root, explicit):
 def persist_bindings(root, explicit):
     """Append owner directions without overwriting the original binding or raw."""
     check_explicit_bindings(root,explicit)
+    # First registration must be as strict as an append. Validate the complete
+    # input set before persisting even a single leaf.
+    from backend.pipeline.cvp_sql_flow import check_binding
+    for b in explicit:
+        check_binding(b);validate_direction(read_artifact(b['path']))
     path=Path(root)/NAME
     if not path.exists():
         write_immutable(path,{'directions':explicit})
@@ -266,15 +271,7 @@ def verify(audit, body):
         raise ValueError('human audit packet seal drift')
     items={i['item_id']:i for i in body['packet']['items']};covered=set()
     for h in body['human']:
-        check_binding(h['direction']);ident=verify_item(items[h['item_id']],read_artifact(h['direction']['path']),audit)
-        for proof in h.get('legacy_claim_context_authority',[]):
-            from backend.pipeline.cvp_retained_relation_only_claim import verify as verify_context
-            verify_context(proof)
-            claim=items[h['item_id']]['claim']
-            if (proof['claim_id']!=claim['claim_id'] or proof['claim_revision']!=claim['revision']
-                    or proof['claim_sha256']!=record_content_sha(claim)
-                    or proof['claim_id'] in audit['meta']['registry_read_scope']['claim_ids']):
-                raise ValueError('closed legacy Claim context receipt target drift')
+        ident=verify_human_entry(audit,items,h)
         if ident in covered:raise ValueError('duplicate human resolution')
         covered.add(ident)
     for part in body['parts']:
@@ -286,3 +283,18 @@ def verify(audit, body):
         for cid in ([row[key]] if layer=='3' else row.get('claim_ids_in_question',[]))}
     if covered != expected or set(items) != expected:raise ValueError('human audit resolution population incomplete')
     return {layer:{i.split(':')[1] for i in covered if i.startswith(layer+':')} for layer in ('3','4')}
+
+
+def verify_human_entry(audit,items,h):
+    from backend.pipeline.cvp_sql_flow import check_binding
+    check_binding(h['direction'])
+    ident=verify_item(items[h['item_id']],read_artifact(h['direction']['path']),audit)
+    for proof in h.get('legacy_claim_context_authority',[]):
+        from backend.pipeline.cvp_retained_relation_only_claim import verify as verify_context
+        verify_context(proof)
+        claim=items[h['item_id']]['claim']
+        if (proof['claim_id']!=claim['claim_id'] or proof['claim_revision']!=claim['revision']
+                or proof['claim_sha256']!=record_content_sha(claim)
+                or proof['claim_id'] in audit['meta']['registry_read_scope']['claim_ids']):
+            raise ValueError('closed legacy Claim context receipt target drift')
+    return ident

@@ -125,7 +125,7 @@ def retained_write_components(proposal, review, claims, current, scope, *, retai
     for item in review.change_reviews:
         if item.decision=='pass':continue
         lid=retained.get((item.claim_id,item.component_index))
-        if item.decision!='reject' or lid not in human:
+        if item.decision not in {'reject','defer'} or lid not in human:
             raise CvpBatchChangeSetError('new/uncertain component not authorized by exact human retain')
         rejected.append(lid)
     if set(rejected)!=set(human) or len(rejected)!=len(human):

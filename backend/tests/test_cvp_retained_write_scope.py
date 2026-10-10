@@ -59,7 +59,7 @@ def test_new_writes_pass_old_human_retention_has_no_fresh_identity_provenance(ba
     assert result['viewpoint_identity_decisions'][0]['claim_link_decisions']==[{'claim_id':'C2','link_type':'equivalent_component'}]
 
 
-@pytest.mark.parametrize('fault',['new-reject','new-defer','old-defer','missing-human','extra-human','duplicate-human',
+@pytest.mark.parametrize('fault',['new-reject','new-defer','missing-human','extra-human','duplicate-human',
     'proposal-sha','review-sha','fake-pass','missing-pin','foreign-pin','version','sha','target','type','span','evidence',
     'claim-version','link-hold','link-retired','novelty','missing-review'])
 def test_no_change_decision_never_waives_new_content_or_version_or_coverage(batch,fault):
@@ -95,6 +95,15 @@ def test_no_change_decision_never_waives_new_content_or_version_or_coverage(batc
         s['retained_link_pins'][0]['content_sha256']=record_content_sha(old[0])
     with pytest.raises(ValueError):
         compile_cvp_batch_package(proposal=p,review=r,claims=claims,current_claim_links=old,retained_write_scope=s,**kw)
+
+
+def test_exact_human_retention_resolves_old_uncertainty_without_changing_defer(batch):
+    p,r,claims,old,s,kw=batch
+    r.change_reviews[0].decision='defer'
+    s['review_sha256']=sha256_json(r.model_dump(mode='json'))
+    result=compile_cvp_batch_package(proposal=p,review=r,claims=claims,current_claim_links=old,retained_write_scope=s,**kw)
+    assert r.change_reviews[0].decision=='defer'
+    assert old[0] in result['viewpoint_claim_links']
 
 
 @pytest.mark.skipif(__import__('os').environ.get('WKP_CVP_RETAINED_WRITE_REAL_ACCEPTANCE')!='1',

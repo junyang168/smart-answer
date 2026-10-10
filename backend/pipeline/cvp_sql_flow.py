@@ -620,7 +620,7 @@ def run_group(store, definition, group, row, *, root):
         resolution=exact_human_complete(audit_path,root,store,run_id,audit_dir/'exact-human-link-resolution.json')
     if resolution is None and (audit['layers']['3'].get('disputed') or audit['layers']['4'].get('disputed')):
         from backend.pipeline.cvp_human_retained_audit_resolution import create_if_complete
-        resolution=create_if_complete(audit_path,store,run_id,audit_dir/'human-retained-source-final-resolution.json')
+        resolution=create_if_complete(audit_path,store,run_id,audit_dir/'human-retained-source-final-resolution.json',execution_root=root)
     if resolution is None and (audit["layers"]["3"].get("disputed") or audit["layers"]["4"].get("disputed")):
         from backend.pipeline.viewpoint_audit_source_adjudication import build_packet,run as adjudicate
         from backend.pipeline.viewpoint_adjudication_history import target_identity
@@ -743,14 +743,14 @@ def run_group(store, definition, group, row, *, root):
                 # another complete audit. Unchanged judgement inputs reuse cache.
                 return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)
             prior.append(adjudication)
-        if exact_human_items:
+        if exact_human_items and not human_retained_items:
             resolution=exact_human_complete(audit_path,root,store,run_id,audit_dir/'exact-human-link-resolution.json')
             if resolution is None:raise ValueError('exact human retention does not resolve remaining findings')
         elif human_retained_items:
             # Excluding a human-owned target from adjudication is NOT a pass.
             # Rejoin the full actual audit population only after every remaining
             # finding has an exact authenticated source rejection.
-            resolution=create_if_complete(audit_path,store,run_id,audit_dir/'human-retained-source-final-resolution.json')
+            resolution=create_if_complete(audit_path,store,run_id,audit_dir/'human-retained-source-final-resolution.json',execution_root=root)
             if resolution is None:
                 raise ValueError('human retained routing does not resolve remaining current audit findings')
         else:
@@ -823,7 +823,7 @@ def main(argv=None):
                         help='Separate existing approved links from new proposed writes; no mutation/retry permission')
     parser.add_argument('--retained-generation-artifact',type=Path,action='append',default=[],
                         help='Exact original generation raw leaf; indexed by actual committed decision artifact SHA')
-    parser.add_argument('--retained-content-disposition',type=Path,
+    parser.add_argument('--retained-content-disposition',type=Path,action='append',default=[],
                         help='Exact human no-change decision for current retained links; never a model pass or write permission')
     parser.add_argument('--audit-link-retention',type=Path,action='append',default=[],
                         help='Exact owner rejection of a named current audit link objection; zero writes or extra calls')
@@ -856,8 +856,8 @@ def main(argv=None):
     from backend.pipeline.cvp_retained_review_separation import NAME as RETAINED_NAME
     if (args.output_root/RETAINED_NAME).exists() and not args.retained_link_review_policy:
         raise ValueError('retained-link separation binding requires explicit recovery flag')
-    from backend.pipeline.cvp_retained_review_separation import HUMAN_NAME
-    if (args.output_root/HUMAN_NAME).exists() and not args.retained_content_disposition:
+    from backend.pipeline.cvp_retained_review_separation import human_bindings,persist_human_bindings
+    if human_bindings(args.output_root) and not args.retained_content_disposition:
         raise ValueError('human retained disposition binding requires explicit recovery flag')
     from backend.pipeline.claim_owner_revision import NAME as OWNER_CLAIM_NAME
     if (args.output_root/OWNER_CLAIM_NAME).exists() and not args.owner_claim_revision:
@@ -929,14 +929,10 @@ def main(argv=None):
         if args.manual_quota_resume_authorization:
             write_immutable(quota_binding,{'authorization':binding(args.manual_quota_resume_authorization)})
         if args.retained_content_disposition:
-            direction=read_artifact(args.retained_content_disposition)
-            if direction['campaign_sha256']!=args.sql_campaign or not args.retained_link_review_policy:
+            if not args.retained_link_review_policy:
                 raise ValueError('human retention requires exact campaign and retained policy')
-            target=store.get_cvp_group(direction['group_id'])
-            if not target or (invocation_limit is not None and target['sequence']>invocation_limit):
-                raise ValueError('human retention outside execution boundary')
-            write_immutable(args.output_root/HUMAN_NAME,{
-                'human_disposition':binding(args.retained_content_disposition)})
+            persist_human_bindings(args.output_root,[binding(p) for p in args.retained_content_disposition],
+                                   campaign=args.sql_campaign,store=store,limit=invocation_limit)
         if args.owner_claim_revision:
             from backend.pipeline.claim_owner_revision import execute as owner_claim_revision
             direction=read_artifact(args.owner_claim_revision)
