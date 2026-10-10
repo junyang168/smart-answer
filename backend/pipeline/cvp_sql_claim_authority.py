@@ -37,7 +37,11 @@ def coordinate_authority(store, cid, row):
     require(history and history['status'] == 'applied'
             and history['source_kind'] in {'wkp368_source_contract_cleanup','wkp368_source_duplicate_cleanup'},
             'not an applied locator cleanup')
-    prior = store.get_change_history(previous[0])
+    prior = None
+    if not events:
+        from backend.pipeline.cvp_sql_pair_review_authority import pair_history
+        prior = pair_history(store, previous[0], cid)
+    prior = prior or store.get_change_history(previous[0])
     require(prior and prior['status'] == 'applied', 'predecessor not committed')
     reviewed = [a for a in prior['operations'] if a['collection']=='claims' and a['object_id']==cid]
     review_ids = set(prior['metadata'].get('review_event_ids', []))
@@ -180,6 +184,9 @@ def coordinate_authority(store, cid, row):
     if events:
         review_authority = {'review_event_id':events[0][0],'reviewer_kind':events[0][1],
             'decision':events[0][2],'review_artifact_sha256':sha256_json(events[0][3])}
+    elif prior.get('source_kind') == 'wkp364_claim_evidence_pair_adjudication':
+        from backend.pipeline.cvp_sql_pair_review_authority import pair_review
+        review_authority = pair_review(store,cid,previous,prior,source,index,actual)
     else:
         from backend.pipeline.cvp_sql_imported_claim_review import imported_passing_review
         from backend.pipeline.source_contract_cleanup import migrate_source_fragment
