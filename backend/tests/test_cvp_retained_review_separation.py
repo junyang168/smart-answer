@@ -76,6 +76,55 @@ def test_exact_original_context_separated_zero_mutation_and_zero_new_correction(
     assert flow.build_boundary(root,store,**kw)[1]==receipt
 
 
+def test_explicit_retained_doubt_still_requires_exact_existing_connection(sample):
+    root,store,records,kw,_=sample
+    kw['review']['change_reviews'][0]['finding_codes']=[
+        'proposal_disposition_contradicts_reason','retained_link_equivalence_doubt']
+    before=deepcopy(records)
+    assert flow.build_boundary(root,store,**kw)[1]['original_findings'][0]['decision']=='reject'
+    assert records==before
+
+
+@pytest.mark.parametrize('codes', [['retained_link_equivalence_doubt'],
+    ['proposal_disposition_contradicts_reason'],
+    ['retained_link_equivalence_doubt','proposal_disposition_contradicts_reason','evidence_insufficient']])
+def test_retained_doubt_does_not_admit_other_findings(sample,codes):
+    _,_,_,kw,_=sample
+    kw['review']['change_reviews'][0]['finding_codes']=codes
+    with pytest.raises(ValueError):flow.match_retained(kw['original'],kw['review'],kw['packet']['retained_existing_claim_links'])
+
+
+def test_generation_leaf_append_preserves_original_binding(sample):
+    root,_,_,_,policy=sample
+    path=root/'binding.json'
+    original={'campaign_sha256':'campaign','policy':'policy','generation_artifacts':policy['generation_artifacts'][:1]}
+    flow.persist_generation_binding(path,original);before=path.read_bytes()
+    value={**original,'generation_artifacts':policy['generation_artifacts']}
+    flow.persist_generation_binding(path,value);flow.persist_generation_binding(path,value)
+    assert path.read_bytes()==before
+    assert len(list((root/'retained-generation-leaves').glob('*.json')))==1
+    with pytest.raises(ValueError):flow.persist_generation_binding(path,{**value,'campaign_sha256':'foreign'})
+    with pytest.raises(ValueError):flow.persist_generation_binding(path,{**value,'generation_artifacts':[]})
+
+
+def test_no_candidates_requires_no_fictitious_identity_call(sample):
+    root,store,_,kw,_=sample
+    (root/'raw-consolidation.json').unlink()
+    assert len(flow.build_boundary(root,store,**kw)[1]['original_responses'])==3
+
+
+@pytest.mark.parametrize('fault',['candidate','pending','intent','encoding','budget'])
+def test_missing_identity_response_not_skipped_when_required_or_unknown(sample,fault):
+    root,store,_,kw,_=sample
+    (root/'raw-consolidation.json').unlink()
+    if fault=='candidate':kw['original']['new_viewpoint_candidates']=[{'local_key':'new'}]
+    elif fault=='pending':kw['packet']['pending_candidates']=[{'id':'pending'}]
+    else:
+        suffix={'intent':'.call-intent.json','encoding':'.request-encoding.json','budget':'.request-budget.json'}[fault]
+        write_immutable(root/('raw-consolidation'+suffix),{'unknown':True})
+    with pytest.raises(ValueError,match='consolidation'):flow.build_boundary(root,store,**kw)
+
+
 @pytest.mark.parametrize('fault',['missing','retired','sha','head','cvr','hold','decision','review','fragment','claim-version','source','raw','ambiguous','new-finding','empty-finding'])
 def test_uncertain_or_foreign_proof_never_becomes_retained_pass(sample,fault):
     root,store,rows,kw,policy=sample

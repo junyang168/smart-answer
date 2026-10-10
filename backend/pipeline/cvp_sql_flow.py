@@ -959,9 +959,9 @@ def main(argv=None):
                     raise ValueError('audit link retention campaign/root/boundary drift')
             persist_bindings(args.output_root,audit_retention_binding['directions'])
         if args.retained_link_review_policy:
-            from backend.pipeline.cvp_retained_review_separation import validate_policy,generation_artifacts,VERSION as RETAINED_VERSION
+            from backend.pipeline.cvp_retained_review_separation import validate_policy,generation_artifacts,persist_generation_binding,VERSION as RETAINED_VERSION
             validate_policy(read_artifact(args.retained_link_review_policy))
-            write_immutable(args.output_root/RETAINED_NAME,{'schema_version':RETAINED_VERSION,
+            persist_generation_binding(args.output_root/RETAINED_NAME,{'schema_version':RETAINED_VERSION,
                 'campaign_sha256':args.sql_campaign,'policy':binding(args.retained_link_review_policy),
                 'generation_artifacts':generation_artifacts(args.retained_generation_artifact)})
         if args.claim_issue_rescope_authorization:

@@ -40,7 +40,33 @@ def policy_for(root):
     if path is None: return None
     binding = read_artifact(path); check_binding(binding['policy'])
     validate_policy(read_artifact(binding['policy']['path']))
-    return binding
+    extra_dir = path.parent / 'retained-generation-leaves'
+    leaves = list(binding.get('generation_artifacts', []))
+    for leaf_path in sorted(extra_dir.glob('*.json')):
+        leaf = read_artifact(leaf_path)
+        if generation_artifacts([leaf['binding']['path']])[0] != leaf:
+            raise ValueError('additional exact generation leaf drift')
+        if leaf not in leaves: leaves.append(leaf)
+    return {**binding, 'generation_artifacts':leaves}
+
+
+def persist_generation_binding(path, value):
+    """Append exact raw leaves without upgrading the original policy receipt."""
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact, write_immutable
+    path = Path(path)
+    if not path.exists():
+        write_immutable(path, value)
+        return
+    old = read_artifact(path)
+    if ({k:v for k,v in old.items() if k!='generation_artifacts'} !=
+            {k:v for k,v in value.items() if k!='generation_artifacts'}):
+        raise ValueError('retained generation policy/campaign drift')
+    leaves = value['generation_artifacts']
+    if any(leaf not in leaves for leaf in old['generation_artifacts']):
+        raise ValueError('original retained generation leaves omitted/changed')
+    for leaf in leaves:
+        if leaf not in old['generation_artifacts']:
+            write_immutable(path.parent/'retained-generation-leaves'/(leaf['artifact_sha256']+'.json'),leaf)
 
 
 def generation_artifacts(paths):
@@ -119,7 +145,9 @@ def match_retained(proposal, review, links):
     for item in review['change_reviews']:
         if item['decision'] == 'pass': continue
         codes = set(item.get('finding_codes', []))
-        if not codes or not codes <= allowed:
+        explicit_retained_doubt = codes == {'retained_link_equivalence_doubt',
+                                            'proposal_disposition_contradicts_reason'}
+        if not codes or (not codes <= allowed and not explicit_retained_doubt):
             raise ValueError('new/source/unknown finding cannot be resolved as retained coverage')
         cid, index = item['claim_id'], item['component_index']
         part = decisions[cid][index]
@@ -208,6 +236,14 @@ def build_boundary(root, store, *, original, revised, review, packet, source_loa
     bodies = source_loader(source_ids)
     if {s['source_id'] for s in bodies} != set(source_ids): raise ValueError('retained final missing complete own source')
     names = ('raw-proposal.json','raw-consolidation.json','raw-review.json','raw-reconsideration.json')
+    if not (root/'raw-consolidation.json').exists():
+        # The shared runner has no identity call when there are no new candidates.
+        # Never mistake an unanswered consolidation intent for that skipped role.
+        if (original.get('new_viewpoint_candidates') or packet.get('pending_candidates')
+                or any((root/('raw-consolidation'+suffix)).exists() for suffix in
+                    ('.call-intent.json','.request-encoding.json','.request-budget.json'))):
+            raise ValueError('missing/unknown required consolidation')
+        names = tuple(n for n in names if n!='raw-consolidation.json')
     if not all((root/name).is_file() for name in names):
         raise ValueError('retained boundary missing original closed model stages')
     originals = [binding(root/name) for name in names]
