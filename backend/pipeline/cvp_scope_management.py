@@ -154,6 +154,34 @@ def approved_relation_reference_only(frozen, record_key, proposed):
     return len(rows)==1 and rows[0]['pin']==[old['revision'],record_content_sha(old),False]
 
 
+def approved_relation_package_reference_only(package, record_key, current, incoming):
+    """Store-side version-reference exception after full package authentication.
+
+    Human semantic ruling is kept exact; fresh Opus approves only the new CVR
+    references. This is not an exemption for ordinary relation content changes.
+    """
+    from backend.pipeline.source_reconciliation_runner import read,body
+    app=package.get('source_repair_application') or {}
+    if app.get('schema_version')!='wang_source_sql_reconciliation_v2':return False
+    binding=app.get('materials')
+    if not binding:return False
+    frozen=body(read(Path(binding['path'])))
+    if sha256_json(frozen)!=app.get('materials_sha256'):return False
+    value=frozen.get('viewpoint_scope_context')
+    if not value or not frozen['manifest'].get('viewpoint_scope_repair'):return False
+    before=c.index(frozen['before_records']);old=before.get(record_key)
+    if not old or old!=current:return False
+    proposed={k:row for collection in ('canonical_viewpoints','viewpoint_revisions')
+              for row in package.get(collection,[]) for k in [c.key(collection,row[c.KNOWLEDGE_COLLECTIONS[collection][1]])]}
+    # The draft-specific validator requires null provenance. Strip ONLY new
+    # provenance for this check, then verify its actual terminal-review SHA.
+    draft=dict(incoming);proof=draft.get('review_provenance') or {}
+    if proof.get('review_artifact_sha256')!=app.get('review_sha256'):return False
+    draft['review_provenance']=None
+    proposed[record_key]=draft
+    return approved_relation_reference_only(frozen,record_key,proposed)
+
+
 def permissions(states, vid):
     head = states[c.key('canonical_viewpoints', vid)]
     rid = head['current_revision_id']

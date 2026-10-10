@@ -2888,6 +2888,12 @@ def build_change_set_plan(
                     f"claims/{object_id}: cannot change a superseded claim "
                     "whose review authority is unknown"
                 )
+            reference_only=False
+            if (collection=='viewpoint_relations' and current_payload
+                    and current_payload.get('review_status') in {'human_approved','approved'}
+                    and source_kind=='wang_source_sql_reconciliation_v2'):
+                from backend.pipeline.cvp_scope_management import approved_relation_package_reference_only
+                reference_only=approved_relation_package_reference_only(package,f'{collection}/{object_id}',current_payload,merged)
             if (
                 current_payload
                 and _is_human_settled(
@@ -2896,6 +2902,7 @@ def build_change_set_plan(
                 )
                 and _substantive_payload(merged)
                 != _substantive_payload(current_payload)
+                and not reference_only
             ):
                 raise PostgresKnowledgeStoreError(
                     f"{collection}/{object_id}: incoming package changes content "
@@ -2920,11 +2927,11 @@ def build_change_set_plan(
                         f"SourceDocument id {object_id!r} cannot change identity "
                         f"from {current_identity!r} to {incoming_identity!r}"
                     )
-            incoming = preserve_human_review(
-                merged,
-                current_payload,
-                existing_reviewer_kind=existing_reviewer_kind,
-            )
+            # Scope-reference-only changes have their own real Opus approval.
+            # Keep the original human semantic reason/history, but do not label
+            # the new version references as a new human ruling or copy its raw.
+            incoming = dict(merged) if reference_only else preserve_human_review(
+                merged,current_payload,existing_reviewer_kind=existing_reviewer_kind)
             removed_fields = fields_removed(current_payload, incoming)
             after_sha = record_content_sha(incoming)
             before_sha = str((current or {}).get("content_sha256") or "") or None
@@ -4604,6 +4611,25 @@ class PostgresKnowledgeStore:
         visit(value)
         return found
 
+    @staticmethod
+    def _origin_candidate_history_authority(cursor, object_id, row):
+        """One exact committed retirement generation; no ancestry traversal."""
+        cursor.execute('''SELECT v.payload,v.content_sha256,o.after_sha256,c.status,o.operation
+            FROM wang_knowledge.object_versions v JOIN wang_knowledge.change_sets c
+            ON c.change_set_id=v.change_set_id JOIN wang_knowledge.change_operations o
+            ON o.change_set_id=v.change_set_id AND o.collection=v.collection AND o.object_id=v.object_id
+            AND o.after_revision=v.revision WHERE v.collection='viewpoint_identity_candidates'
+            AND v.object_id=%s AND v.revision=%s''',(object_id,row['revision']))
+        history=cursor.fetchall();payload=row['payload']
+        if (len(history)!=1 or history[0][1:]!=(row['content_sha256'],row['content_sha256'],'applied','retire')
+                or history[0][0].get('revision')!=row['revision']
+                or {k:v for k,v in history[0][0].items() if k!='revision'}!={k:v for k,v in payload.items() if k!='revision'}
+                or payload.get('identity_candidate_id')!=object_id
+                or record_content_sha(payload)!=row['content_sha256']
+                or not row.get('retired')):
+            raise ChangeSetConflict('retired CVP origin lacks exact committed history')
+        return [row['revision'],row['content_sha256']]
+
     def _existing_cvp_context(self, conn, normalized, retiring_keys=()):
         """Indexed forward closure and complete affected CVP memberships.
 
@@ -4640,6 +4666,14 @@ class PostgresKnowledgeStore:
                     ids.update(row[0] for row in cursor.fetchall())
                 if bytes_read > 64*1024**2 or time.perf_counter()-started > 5:
                     raise ValueError("SQL dependency read budget exceeded; no whole-store fallback")
+            origins={p['payload'].get('created_from_candidate_id') for (col,_),p in result.items()
+                     if col=='canonical_viewpoints' and not p.get('retired')}
+            for cid in sorted(origins-{None,''}):
+                row=result.get(('viewpoint_identity_candidates',cid))
+                if row and row.get('retired'):
+                    row['historical_origin_authority']=self._origin_candidate_history_authority(cursor,cid,row)
+            if bytes_read > 64*1024**2 or time.perf_counter()-started > 5:
+                raise ValueError('SQL origin proof read budget exceeded')
         return result
 
     def read_cvp_context(self, claim_ids: Sequence[str], *, viewpoint_ids: Sequence[str] = ()):
@@ -6345,6 +6379,15 @@ class PostgresKnowledgeStore:
                     required = self._existing_cvp_context(conn,normalized,retiring)
                     if not set(required) <= set(transaction_context.read_pins):
                         raise ChangeSetConflict("transaction contains an unreviewed current dependency")
+                    for k,row in required.items():
+                        authority=row.get('historical_origin_authority')
+                        if authority is not None:
+                            locked=transaction_before[k]
+                            if ([locked['revision'],locked['content_sha256']]!=authority
+                                    or locked['payload']!=row['payload']
+                                    or not (locked.get('retired') or locked.get('retired_at') is not None)):
+                                raise ChangeSetConflict('locked historical origin proof drift')
+                            locked['historical_origin_authority']=authority
                     scope=sql_group['reviewed']['evidence'].get('action',{}).get('materials',{}).get('sql_scope')
                     if scope:
                         affected=self._affected_cvp_context(conn,[tuple(k) for k in scope['consumer_roots']])

@@ -1065,9 +1065,16 @@ def assert_plan_postimages(package: dict, plan: dict, before: dict[str, dict]) -
     normalized, stated = _normalize_records(package)
     # Mirror the store's explicit-field merge. New schema defaults must never
     # turn omitted historical fields into unreviewed null/empty writes.
-    expected = {key(c, o): preserve_human_review(
-        merge_over_existing(p, before.get(key(c, o)), stated[c, o]), before.get(key(c, o)))
-        for c, records in normalized.items() for o, p in records.items()}
+    expected={}
+    for collection,records in normalized.items():
+        for oid,payload in records.items():
+            k=key(collection,oid);old=before.get(k)
+            merged=merge_over_existing(payload,old,stated[collection,oid])
+            reference_only=False
+            if collection=='viewpoint_relations' and old and old.get('review_status') in {'human_approved','approved'}:
+                from backend.pipeline.cvp_scope_management import approved_relation_package_reference_only
+                reference_only=approved_relation_package_reference_only(package,k,old,merged)
+            expected[k]=merged if reference_only else preserve_human_review(merged,old)
     post = deepcopy(before)
     seen = set()
     for op in plan["operations"]:

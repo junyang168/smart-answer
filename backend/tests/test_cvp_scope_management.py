@@ -217,6 +217,34 @@ def test_human_relation_meaning_remains_exact_in_scope_version_review(scoped):
     assert post['viewpoint_relations/REL-test']['review_status']=='candidate'
 
 
+@pytest.mark.parametrize('problem',[None,'reason','type','endpoint','state','review','scope','pin','current','authority'])
+def test_store_scope_reference_exception_preserves_human_meaning(scoped,tmp_path,problem):
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    frozen=human_relation_reference(scoped[1]);states=c.index(frozen['before_records'])
+    states['viewpoint_relations/REL-test']=c.KNOWLEDGE_COLLECTIONS['viewpoint_relations'][0].model_validate(states['viewpoint_relations/REL-test']).model_dump(mode='json')
+    frozen['before_records']=c.rows(states)
+    frozen['sql_scope']['read_pins'][0]['pin'][1]=record_content_sha(states['viewpoint_relations/REL-test'])
+    p=proposal(frozen)
+    raw={'artifact_sha256':'e'*64,'completed_at':'2026-10-10T00:00:00+00:00',
+         'response':{'verdicts':[{'record_key':d.record_key,'approved':True,'reason':'完整审核','problems':[]} for d in p.dispositions]}}
+    package=c.compile_package(frozen,p,raw)
+    current=deepcopy(c.index(frozen['before_records'])['viewpoint_relations/REL-test'])
+    incoming=package['viewpoint_relations'][0]
+    if problem=='reason':incoming['reason']='changed'
+    if problem=='type':incoming['relation_type']='extends'
+    if problem=='endpoint':incoming['target_viewpoint_id']='foreign'
+    if problem=='state':incoming['effective_state']='retired'
+    if problem=='review':incoming['review_provenance']['review_artifact_sha256']='f'*64
+    if problem=='scope':frozen.pop('viewpoint_scope_context')
+    if problem=='pin':frozen['sql_scope']['read_pins']=[]
+    if problem=='current':current['reason']='changed'
+    material=put(tmp_path/'materials.json',{**frozen,'artifact_sha256':c.sha256_json(frozen)})
+    package['source_repair_application']={'schema_version':'wang_source_sql_reconciliation_v2',
+        'materials':material,'materials_sha256':c.sha256_json(frozen),'review_sha256':'e'*64}
+    if problem=='authority':package['source_repair_application']['materials_sha256']='f'*64
+    assert m.approved_relation_package_reference_only(package,'viewpoint_relations/REL-test',current,incoming)==(problem is None)
+
+
 @pytest.mark.parametrize('problem',['reason','type','endpoint','support','state','hold','superseded','missing_pin','pin_sha','retired','missing_scope','permission','old_revision','foreign_cvr','old_approval'])
 def test_human_relation_reference_exception_is_not_semantic_authority(scoped,problem):
     frozen=human_relation_reference(scoped[1]);p=proposal(frozen);before=c.index(frozen['before_records']);proposed=c.index(p.records)
@@ -321,16 +349,27 @@ def test_consumed_incomplete_input_direction_does_not_replay_new_revision():
 
 
 @pytest.mark.parametrize('late_failure',[False,True])
-def test_scope_action_shared_transaction_rollbacks_and_no_model_replay(scoped,tmp_path,postgres_store,monkeypatch,late_failure):
+@pytest.mark.parametrize('human_reference',[False,True])
+@pytest.mark.parametrize('retired_origin',[False,True])
+def test_scope_action_shared_transaction_rollbacks_and_no_model_replay(scoped,tmp_path,postgres_store,monkeypatch,late_failure,human_reference,retired_origin):
     from backend.pipeline.cvp_sql_actions import execute_source_action
     from backend.tests.test_cvp_sql_actions_postgres import source_run
     from backend.api.canonical_repository.postgres_store import record_content_sha
     manifest,frozen,_,_=scoped
     states=c.index(frozen['before_records'])
+    if human_reference:
+        states['viewpoint_relations/REL-test']['review_status']='human_approved'
+        states['viewpoint_relations/REL-test']=c.KNOWLEDGE_COLLECTIONS['viewpoint_relations'][0].model_validate(states['viewpoint_relations/REL-test']).model_dump(mode='json')
+    if retired_origin:
+        states['viewpoint_identity_decisions/VID-old'].update(review_status='system_approved',
+            claim_link_decisions=[{'claim_id':'CL-test','link_type':'equivalent_component'}])
     # The relation endpoint/current revision context stays in the full readset.
     policy=frozen['viewpoint_scope_context']['policy']
     reports=frozen['viewpoint_scope_context']['reports']
     run=source_run(postgres_store,(manifest,states,None))
+    if retired_origin:
+        postgres_store.retire_objects([('viewpoint_identity_candidates','VIC-old')],reason='historical provenance retirement',package_id='test-retire',apply=True)
+        assert postgres_store.get_record_state('viewpoint_identity_candidates','VIC-old')['retired']
     manifest=m.manifest_for_scope(postgres_store,run,'CV-test',policy,reports,tmp_path/'sql-scope')
     calls=[]
     class Ports:
@@ -367,5 +406,7 @@ def test_scope_action_shared_transaction_rollbacks_and_no_model_replay(scoped,tm
     assert relation['validated_target_viewpoint_revision_id']=='CVR-new'
     assert relation['reason']==states['viewpoint_relations/REL-test']['reason']
     assert relation['review_provenance']['review_artifact_sha256']!='a'*64
+    if human_reference:assert relation['review_status']=='system_approved'
+    if retired_origin:assert postgres_store.get_record_state('viewpoint_identity_candidates','VIC-old')['retired']
     assert execute_source_action(postgres_store,run,manifest.model_dump(),root=tmp_path/'sql-action',ports=Ports())['status']=='already_applied'
     assert calls==['proposal','initial_review']
