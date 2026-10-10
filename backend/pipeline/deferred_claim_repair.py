@@ -308,7 +308,20 @@ def normalize_proposal(frozen,response):
                     del p[name]  # optional buckets never replace the real Evidence gate
             # New long quotes can contain an existing short context anchor.
             # Retain every old quote/role, but count connected overlaps once.
+            historical_readonly = False
+            context = frozen.get('claim_issue_context', {})
+            if context.get('current_occurrence_anchor_scope') == 'current_source_anchors_historical_exact_v1':
+                from backend.pipeline.claim_retained_occurrence_context import validate, validate_occurrence_delta
+                receipts = [r for r in context.get('retained_occurrence_context', []) if r['claim_id'] == p['claim_id']]
+                if receipts:
+                    validate(receipts, before, frozen['manifest']['source_id'], [p['claim_id']], frozen.get('physical_snapshots'))
+                    validate_occurrence_delta(frozen, p['claim_id'], original, p)
+                    historical_readonly = True
+            own = before[c.key('source_documents', frozen['manifest']['source_id'])] if historical_readonly else {}
+            own_aliases = {frozen['manifest']['source_id'], own.get('transcript_id'), own.get('canonical_source_id')} - {None, ''}
             for occurrence in p.get("occurrences",[]):
+                if historical_readonly and not own_aliases.intersection(c.strings(occurrence)):
+                    continue  # Exact retained historical generation; never normalize against a different source.
                 spans = []
                 for anchor in occurrence.get("anchors",[]):
                     para = anchor.get("paragraph_key")

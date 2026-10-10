@@ -112,3 +112,33 @@ def test_complete_input_rejection_does_not_open_another_correction(monkeypatch,t
     frozen={'claim_issue_context':{'complete_input_repair':{'correction_limit':0}}}
     with pytest.raises(r.Stop,match='no extra correction'):Runner(tmp_path,None).reviewed(frozen)
     assert calls==['proposal','initial_review']
+
+
+@pytest.mark.parametrize('fault',[None,'historical_text','historical_identity','historical_order','receipt','legacy'])
+def test_actual_saved_proposal_historical_anchors_are_readonly_not_current_source(actual_direction,fault):
+    root=Path(actual_direction['old_action_root']).parent.parent/'complete-input-repair-once/action'
+    path=next(root.glob('*/proposal.raw.json'))
+    frozen=r.body(r.read(path.parent/'scoped-materials.json'))
+    raw=r.validate_raw(path.parent,'proposal',r.body(r.read(path.parent/'proposal.packet.json')))
+    response=deepcopy(raw['response'])
+    from backend.pipeline.deferred_claim_repair import decode_proposal
+    before=c.index(frozen['before_records'])
+    base={k:v for k,v in response.items() if k not in {'claim_assessments','cvp_impacts'}}
+    data=c.index(c.Proposal.model_validate(decode_proposal(base)).records)
+    claim=data['claims/DK-72483dc200ad-CL002']
+    if fault in {'historical_text','historical_identity','historical_order'}:
+        if fault=='historical_text':claim['occurrences'][0]['anchors'][0]['proposed_highlight']['text']='changed'
+        elif fault=='historical_identity':claim['occurrences'][0]['source_id']='foreign'
+        else:claim['occurrences'].reverse()
+        response={**response,'records':c.rows(data)}
+    elif fault=='receipt':frozen['claim_issue_context']['retained_occurrence_context'][0]['occurrences']=[]
+    elif fault=='legacy':frozen['claim_issue_context'].pop('current_occurrence_anchor_scope')
+    if fault:
+        with pytest.raises(ValueError):r.effective_proposal(frozen,response)
+    else:
+        normalized=r.effective_proposal(frozen,response)
+        actual=c.index(normalized.records)['claims/DK-72483dc200ad-CL002']
+        assert actual['occurrences'][0]==before['claims/DK-72483dc200ad-CL002']['occurrences'][0]
+        assert len(normalized.records)==7
+        # This is mechanical normalization, never content approval.
+        with pytest.raises(ValueError,match='Evidence diagnosis'):r.initial_review_base(frozen,normalized)
