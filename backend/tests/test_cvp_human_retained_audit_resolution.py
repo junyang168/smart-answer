@@ -1,5 +1,6 @@
 from copy import deepcopy
-import json
+import json,os
+from pathlib import Path
 import pytest
 from backend.pipeline import cvp_human_retained_audit_resolution as resolution
 from backend.pipeline.cvp_sql_flow import binding
@@ -41,6 +42,32 @@ def test_explicit_human_retention_preserves_disputed_not_fabricated_pass(case):
     assert f['audit']==before and f['audit']['layers']['4']['results'][0]['verdict']=='disputed'
 
 
+@pytest.mark.parametrize('fault',[None,'new-pin','missing','retired','not-judged','foreign','proof'])
+def test_narrow_action_readset_requires_exact_saved_full_claim_audit(case,monkeypatch,fault):
+    from backend.pipeline import claim_first_management,viewpoint_content_blocked_fallback
+    f=case;prior=deepcopy(f['audit']);receipt={'status':'claim_layer_audited_cvp_pending',
+        'read_pins':f['pins'][:-1],'claim_ids':['C'],'source_proofs':['verified']}
+    if fault=='missing':prior['meta']['registry_read_scope']['read_pins']=f['pins'][:-1]
+    elif fault=='retired':prior['meta']['registry_read_scope']['read_pins'][-1]['pin'][2]=True
+    elif fault=='not-judged':prior['layers']['3']['results']=[]
+    elif fault=='foreign':receipt['claim_ids']=[]
+    elif fault=='proof':receipt['source_proofs']=['foreign']
+    path=f['tmp_path']/'prior-audit.json';path.write_text(json.dumps(prior));receipt['audit']=binding(path)
+    checks=[]
+    monkeypatch.setattr(claim_first_management,'validate_claim_audit_report',lambda a,ids:checks.append(('full',a,ids)))
+    monkeypatch.setattr(viewpoint_content_blocked_fallback,'verify_saved_full_audit',lambda *a,**k:['verified'])
+    cp=f['tmp_path']/'narrow-receipt.json';cp.write_text(json.dumps(receipt));f['body']['claim_layer_completion']=binding(cp)
+    if fault=='new-pin':
+        f['audit']['meta']['registry_read_scope']['read_pins'][-1]['pin'][0]=3
+        (f['tmp_path']/'audit.json').write_text(json.dumps(f['audit']));f['body']['audit']=binding(f['tmp_path']/'audit.json')
+        f['body']['audit_semantic_sha256']=audit_semantic_sha(f['audit'])
+    seal(f['body'])
+    if fault:
+        with pytest.raises(ValueError):resolution.verify_resolution(f['audit'],f['body'])
+    else:assert resolution.verify_resolution(f['audit'],f['body'])=={'3':set(),'4':{'V'}}
+    assert checks
+
+
 @pytest.mark.parametrize('human',[set(),{'4:V:C'},{'4:V:C','4:OTHER:C'}])
 def test_partition_routes_only_named_human_targets_not_reuse_or_model(monkeypatch,human):
     packet={'schema_version':'fixture','items':[{'item_id':'4:V:C'},{'item_id':'4:OTHER:C'}]}
@@ -73,3 +100,15 @@ def test_human_decision_is_exact_membership_not_a_future_audit_waiver(case,fault
     elif fault=='layer3':a['layers']['3']['results'][0]['verdict']='disputed';a['layers']['3']['disputed']=1
     f['tmp_path'].joinpath('audit.json').write_text(json.dumps(a));b['audit']=binding(f['tmp_path']/'audit.json');b['audit_semantic_sha256']=audit_semantic_sha(a);seal(b)
     with pytest.raises(ValueError):resolution.verify_resolution(a,b)
+
+
+@pytest.mark.skipif(not os.environ.get('WKP_SAVED_HUMAN_AUDIT_ROOT'),reason='explicit actual saved resolution read-only')
+def test_actual_saved_human_resolution_missing_narrow_claim_pins():
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+    root=Path(os.environ['WKP_SAVED_HUMAN_AUDIT_ROOT'])
+    audit=read_artifact(root/'audit.json');before=deepcopy(audit)
+    result=resolution.verify_resolution(audit,read_artifact(root/'human-retained-source-final-resolution.json'))
+    assert result['3']==set() and len(result['4'])==3
+    assert audit==before and audit['layers']['4']['disputed']==3
+    print(json.dumps({'complete_saved_resolution':True,'resolved_cvp_findings':len(result['4']),
+        'original_disputed_unchanged':True,'new_model_calls':0,'registry_writes':0}))

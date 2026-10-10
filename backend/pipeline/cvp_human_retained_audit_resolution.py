@@ -11,6 +11,33 @@ from backend.pipeline.viewpoint_resolution_runtime import read_artifact,write_im
 VERSION='wang_exact_human_retained_and_saved_source_audit_resolution_v1'
 
 
+def claim_audit_pins(receipt,required):
+    """A source-action readset is not the complete audited Claim population.
+
+    Consume only the receipt's exact saved full Claim audit for members absent
+    from that narrower readset. Never infer a pin from the new audit/current SQL.
+    """
+    pins={(p['collection'],p['object_id']):tuple(p['pin']) for p in receipt['read_pins']}
+    missing={('claims',cid) for cid in required}-set(pins)
+    if not missing:return pins
+    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.claim_first_management import validate_claim_audit_report
+    from backend.pipeline.viewpoint_content_blocked_fallback import verify_saved_full_audit
+    check_binding(receipt['audit']);saved=read_artifact(receipt['audit']['path'])
+    validate_claim_audit_report(saved,receipt['claim_ids'])
+    if verify_saved_full_audit(Path(receipt['audit']['path']),layers=('3',))!=receipt['source_proofs']:
+        raise ValueError('human retained saved Claim audit raw/source proof drift')
+    audited={(p['collection'],p['object_id']):tuple(p['pin'])
+             for p in saved['meta']['registry_read_scope']['read_pins']}
+    judged={p['claim_id'] for p in saved['layers']['3']['results'] if p['verdict']=='supported'}
+    for key in missing:
+        if (key[1] not in receipt['claim_ids'] or key[1] not in judged
+                or key not in audited or audited[key][2] is not False):
+            raise ValueError('human retained Claim lacks exact saved audited generation')
+        pins[key]=audited[key]
+    return pins
+
+
 def partition_packet(audit,packet,value,store):
     """Human-decided targets do not enter another model/rejection-reuse queue.
 
@@ -132,8 +159,10 @@ def verify_resolution(audit,body):
     if not human or not human<=pairs:raise ValueError('human resolution includes unnamed/foreign membership')
     audited={(p['collection'],p['object_id']):tuple(p['pin']) for p in audit['meta']['registry_read_scope']['read_pins']}
     original={(p['collection'],p['object_id']):(p['revision'],p['content_sha256'],False) for p in boundary['current_read_pins']}
-    claim_pins={(p['collection'],p['object_id']):tuple(p['pin']) for p in claim_receipt['read_pins']}
     if claim_receipt.get('status')!='claim_layer_audited_cvp_pending':raise ValueError('human retained original Claim receipt foreign')
+    required={p['claim_id'] for lid,p in basis.items() if lid in links
+              and '4:'+p['original_decision']['resolved_viewpoint_id']+':'+p['claim_id'] in human}
+    claim_pins=claim_audit_pins(claim_receipt,required)
     for lid,p in basis.items():
         if lid not in links:continue
         pair='4:'+p['original_decision']['resolved_viewpoint_id']+':'+p['claim_id']
