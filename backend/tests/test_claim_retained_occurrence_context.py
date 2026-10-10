@@ -103,3 +103,59 @@ def test_saved_internal_route_is_impact_only_not_generation(actual,fault):
         assert packet['read_only_adapter_receipt']['content_write_authority'] is False
         assert frozen==old
         assert not any(p['collection']=='knowledge_routes' for p in frozen['manifest']['permissions'])
+
+
+@pytest.mark.parametrize('fault', [None, 'permission', 'pin', 'hold', 'proposed_pending',
+                                  'source_pending', 'source_uncertain', 'unknown', 'epoch', 'no_sql'])
+def test_saved_initial_draft_review_never_write_authority(actual, fault, tmp_path):
+    root=Path('/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/staging/cvp-production-357/campaign-sql-20261008-v1-from-g059/execution/CVPG-b0324087577d73360f4077b8d65438c7d777d27fda381f70913a8e1a367b0913/claim-issues')
+    action=next(root.glob('*/action/*/proposal.raw.json')).parent
+    frozen=deepcopy(runner.read(action/'scoped-materials.json'))
+    raw=runner.read(action/'proposal.raw.json')
+    proposal=runner.effective_proposal(frozen,raw['response'])
+    original=deepcopy(frozen); saved=deepcopy(raw)
+    pending=next(d for d in proposal.dispositions if d.action=='unresolved')
+    col,ident=c.split_key(pending.record_key)
+    row=next(r for r in frozen['before_records'] if r['collection']==col and r['object_id']==ident)
+    if fault=='permission':frozen['manifest']['permissions']=[]
+    if fault=='pin':next(r['pin'] for r in frozen['sql_scope']['read_pins'] if r['collection']==col and r['object_id']==ident)[0]+=1
+    if fault=='hold':row['payload']['review_status']='human_review_required'
+    if fault=='proposed_pending':proposal.records.append(c.Row(collection=col,object_id=ident,payload=deepcopy(row['payload'])))
+    if fault=='source_pending':next(d for d in proposal.dispositions if d.record_key.startswith('claims/')).action='unresolved'
+    if fault=='source_uncertain':proposal.claim_assessments[0].cause='source_unresolved'
+    if fault=='unknown':frozen['inventory']['unknown_keys'].append('foreign/X')
+    if fault=='epoch':frozen['after'][0]['body_sha256']='0'*64
+    if fault=='no_sql':frozen.pop('sql_scope')
+    if fault:
+        with pytest.raises((ValueError,KeyError)):
+            runner.initial_review_base(frozen,proposal)
+        return
+    packet=runner.initial_review_base(frozen,proposal)
+    receipt=packet['unresolved_proposal_review']
+    assert receipt['schema_version']=='claim_initial_draft_review.v1'
+    assert receipt['content_write_authority'] is False
+    assert receipt['mandatory_original_unique_correction'] is True
+    assert len(receipt['program_findings'])==3
+    assert frozen==original and raw==saved
+    # Even an all-approved draft review must use the original unique correction.
+    response={'proposal_sha256':packet['proposal_sha256'],
+              'verdicts':[{'record_key':d.record_key,'approved':True,'problems':[],
+                           'reason':'draft only'} for d in proposal.dispositions]}
+    assert c.validate_review(packet,response) is False
+    with pytest.raises(ValueError):c.review_packet(frozen,proposal)
+    with pytest.raises(ValueError):c.compile_package(frozen,proposal,{'response':response})
+    calls=[]
+    class Stages(runner.Runner):
+        def __init__(self):self.root=tmp_path
+        def guard(self,*args,**kw):pass  # Test-only; actual SQL guard is independently exercised.
+        def call(self,stage,packet):
+            calls.append(stage)
+            if stage=='initial_review':
+                return {'response':{'proposal_sha256':packet['proposal_sha256'],
+                    'verdicts':[{'record_key':d['record_key'],'approved':True,
+                                 'problems':[],'reason':'draft only'}
+                                for d in packet['proposal']['dispositions']]}}
+            assert stage in {'proposal','correction'}
+            return deepcopy(raw)  # Unchanged failing correction cannot open a final review.
+    with pytest.raises(ValueError):Stages().reviewed(frozen)
+    assert calls==['proposal','initial_review','correction']

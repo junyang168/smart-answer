@@ -39,6 +39,13 @@ def initial_review_base(frozen, proposal):
     if frozen.get('owner_claim_completion') and any(d.action=='unresolved' for d in proposal.dispositions):
         return contract.review_packet(frozen,proposal,review_only=True)
     if not frozen.get('claim_issue_context', {}).get('scope_amendment'):
+        if frozen['manifest'].get('claim_issue') and frozen.get('sql_scope'):
+            try:
+                return contract.review_packet(frozen, proposal)
+            except ValueError:
+                # The original initial review may evaluate a bounded draft,
+                # but cannot approve it for writing or bypass the unique correction.
+                return contract.review_packet(frozen, proposal, initial_claim_draft=True)
         return contract.review_packet(frozen, proposal)
     unresolved = any(d.action == 'unresolved' for d in proposal.dispositions)
     return contract.review_packet(frozen, proposal, review_only=unresolved)

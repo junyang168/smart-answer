@@ -576,7 +576,7 @@ def _semantic(row: dict) -> dict:
     return {k: v for k, v in row.items() if k not in PROVENANCE | {"revision"}}
 
 
-def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = False, claim_first: bool = False) -> dict[str, dict]:
+def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = False, claim_first: bool = False, initial_claim_draft: bool = False) -> dict[str, dict]:
     before = index(frozen["before_records"])
     manifest = Manifest.model_validate(frozen["manifest"])
     allowed = {p.key: p for p in manifest.permissions}
@@ -595,6 +595,26 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
     if len(dispositions) != len(proposal.dispositions) or set(dispositions) != required:
         raise ValueError("every affected consumer requires exactly one disposition")
     unresolved = {d.record_key for d in proposal.dispositions if d.action == 'unresolved'}
+    if initial_claim_draft:
+        # An initial draft is not a write authority. Permit only unchanged,
+        # current SQL-pinned CVP dependencies to remain pending for the original
+        # independent review and unique correction. Unknown/source/hold failures
+        # and all permission, identity and epoch gates still apply below.
+        if (not manifest.claim_issue or not frozen.get('claim_issue_context')
+                or not frozen.get('sql_scope') or claim_first or review_only):
+            raise ValueError('initial Claim draft requires exact SQL Claim management context')
+        pins = {(r['collection'], r['object_id']): r['pin'] for r in frozen['sql_scope']['read_pins']}
+        for k in unresolved:
+            col, ident = split_key(k)
+            old = before.get(k)
+            pin = pins.get((col, ident))
+            if (col not in {'viewpoint_claim_links', 'canonical_viewpoints', 'viewpoint_revisions'}
+                    or old is None or k in proposed or pin != [old.get('revision', 1),
+                        sha256_json({f:v for f,v in old.items() if f != 'revision'}), False]
+                    or old.get('review_status') in HUMAN_HOLDS):
+                raise ValueError('initial Claim draft pending dependency is foreign/stale/held/writable')
+        if any(a.cause == 'source_unresolved' for a in proposal.claim_assessments):
+            raise ValueError('source/attribution uncertainty needs content owner')
     if claim_first:
         from backend.pipeline.claim_first_management import SOURCE_COLUMNS, CVP_COLUMNS
         pending = {k for k in required if split_key(k)[0] in CVP_COLUMNS}
@@ -612,7 +632,7 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
                    and not (claim_first and split_key(k)[0] in CVP_COLUMNS)
                    or k not in before or k in proposed for k in unresolved)):
         raise ValueError('unresolved review requires bounded unchanged CVP context and SQL retirement proof')
-    if unresolved_consumers(frozen) or (unresolved and not review_only):
+    if unresolved_consumers(frozen) or (unresolved and not review_only and not initial_claim_draft):
         raise ValueError("unknown/unresolved consumer; owner scope or proof required")
     historical_scope=set()
     if frozen.get('viewpoint_scope_context'):
@@ -620,7 +640,7 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
         historical_scope=historical_impact_keys(frozen)
     for k, d in dispositions.items():
         c, _ = split_key(k)
-        if review_only and k in unresolved:
+        if (review_only or initial_claim_draft) and k in unresolved:
             continue  # Review a retained unresolved object, never authorize a write.
         if c in IMPACT_ONLY or (c == 'knowledge_routes' and k in frozen['inventory']['unknown_keys']):
             if d.action != "impact_only" or k in proposed:
@@ -672,6 +692,8 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
         raise ValueError("source migration cannot change the registered source identity")
     if {split_key(k)[1] for k in before if k.startswith("claims/")} != {split_key(k)[1] for k in post if k.startswith("claims/")}:
         raise ValueError("source update cannot silently change Claim membership")
+    if initial_claim_draft:
+        return post  # Review-only: graph/coverage findings are disclosed, never waived for final/write.
     validate_graph(post, before, frozen, pending_link_keys=pending_link_keys)
     if manifest.deferred_repair:
         from backend.pipeline.deferred_claim_repair import validate_postimages
@@ -895,8 +917,9 @@ def validate_basis_groups(spans: list[tuple]) -> None:
             raise ValueError("overlapping anchors require one basis group and exactly one representative")
 
 
-def review_packet(frozen: dict, proposal: Proposal, *, review_only: bool = False, claim_first: bool = False) -> dict:
-    validate_proposal(frozen, proposal, review_only=review_only, claim_first=claim_first)
+def review_packet(frozen: dict, proposal: Proposal, *, review_only: bool = False, claim_first: bool = False, initial_claim_draft: bool = False) -> dict:
+    validate_proposal(frozen, proposal, review_only=review_only, claim_first=claim_first,
+                      initial_claim_draft=initial_claim_draft)
     selected = frozen["inventory"]["affected_keys"] + frozen["inventory"]["context_keys"]
     before = index(frozen["before_records"])
     result = {
@@ -921,7 +944,36 @@ def review_packet(frozen: dict, proposal: Proposal, *, review_only: bool = False
                if frozen["manifest"].get("deferred_repair") else {}),
         },
     }
-    if claim_first:
+    if initial_claim_draft:
+        findings = []
+        try:
+            validate_proposal(frozen, proposal)
+        except ValueError as exc:
+            findings.append(str(exc))
+        post = validate_proposal(frozen, proposal, initial_claim_draft=True)
+        try:
+            validate_graph(post, before, frozen)
+        except ValueError as exc:
+            findings.append(str(exc))
+        if frozen['manifest'].get('claim_issue'):
+            from backend.pipeline.claim_issue_management import validate_resolution
+            try:
+                validate_resolution(frozen, proposal, post)
+            except ValueError as exc:
+                findings.append(str(exc))
+        result['unresolved_proposal_review'] = {
+            'schema_version': 'claim_initial_draft_review.v1',
+            'pending_record_keys': sorted(d.record_key for d in proposal.dispositions if d.action == 'unresolved'),
+            'program_findings': findings,
+            'content_write_authority': False,
+            'mandatory_original_unique_correction': True,
+            'explanation': 'This is the original initial draft, not an approved afterimage. '
+                'Review the complete proposal, own sources and all dependencies. Report every graph, '
+                'binding and coverage defect in this same independent review. Pending existing rows '
+                'are unchanged, not approved for revision. The proposer must use its original single '
+                'correction to resolve all findings within the existing permissions; no permission '
+                'is expanded and strict final validation and independent review remain mandatory.'}
+    elif claim_first:
         from backend.pipeline.claim_first_management import CVP_COLUMNS, VERSION as CLAIM_FIRST_VERSION
         result['source_first_pending_cvp'] = {
             'schema_version': CLAIM_FIRST_VERSION,
