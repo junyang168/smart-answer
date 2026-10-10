@@ -3247,6 +3247,52 @@ class PostgresKnowledgeStore:
             # contract. Metadata need not duplicate the SQL primary key.
             return {**row[0], "run_id":run_id, "status": row[1], "error": row[2]} if row else None
 
+    def get_cvp_retained_scope_bindings(self, run_id, *, cursor=None):
+        """Direct owned SQL review archives, not a recursive proof/history walk.
+
+        Replacing the active review for another legitimate action cannot erase
+        an already committed human no-change authority. Project only its binding
+        and exact commit identity; do not load old material packets.
+        """
+        if cursor is None:
+            with self.connect() as conn,conn.cursor() as cur:
+                return self.get_cvp_retained_scope_bindings(run_id,cursor=cur)
+        rows=cursor.execute("""SELECT a.run_id,a.metadata->>'reviewed_sha256',
+                a.metadata->'reviewed'->'evidence'->'approval'->'retained_write_scope'
+            FROM wang_knowledge.pipeline_runs a
+            JOIN wang_knowledge.pipeline_runs parent ON parent.run_id=%s
+            LEFT JOIN wang_knowledge.change_sets cs
+              ON cs.change_set_id=a.metadata->'reviewed'->'plan'->>'change_set_id'
+            WHERE a.stage='cvp_group' AND a.metadata->>'kind'='cvp_review_archive'
+              AND a.metadata->>'parent_run_id'=%s
+              AND a.metadata->>'checkpoint' IN ('applied','audited')
+              AND a.metadata->'reviewed'->'evidence'->'approval'->'retained_write_scope' IS NOT NULL
+              AND ((cs.status='applied'
+                AND cs.fingerprint_sha256=a.metadata->'reviewed'->'plan'->>'fingerprint_sha256'
+                AND cs.source_sha256=a.metadata->'reviewed'->'plan'->>'source_sha256'
+                AND (parent.metadata->'change_set_ids') ? cs.change_set_id
+                AND cs.metadata->>'run_id'=%s
+                AND cs.metadata->>'reviewed_sha256'=a.metadata->>'reviewed_sha256'
+                AND cs.metadata->'approval'->'retained_write_scope'=
+                    a.metadata->'reviewed'->'evidence'->'approval'->'retained_write_scope')
+                OR (a.metadata->'reviewed'->'plan'->'operations'='[]'::jsonb
+                  AND a.metadata->>'reviewed_sha256'=COALESCE(a.metadata->>'no_content_write_reviewed_sha256',
+                      parent.metadata->>'no_content_write_reviewed_sha256')))
+            ORDER BY a.run_id""",(run_id,run_id,run_id)).fetchall()
+        count=cursor.execute("""SELECT count(*) FROM wang_knowledge.pipeline_runs
+            WHERE stage='cvp_group' AND metadata->>'kind'='cvp_review_archive'
+              AND metadata->>'parent_run_id'=%s AND metadata->>'checkpoint' IN ('applied','audited')
+              AND metadata->'reviewed'->'evidence'->'approval'->'retained_write_scope' IS NOT NULL""",
+            (run_id,)).fetchone()[0]
+        if len(rows)!=count:
+            raise ChangeSetConflict('retained scope archived approval lacks exact committed authority')
+        result=[]
+        for ident,sha,b in rows:
+            if ident!='CVPR-'+sha256_json({'parent':run_id,'reviewed_sha256':sha}):
+                raise ChangeSetConflict('retained scope archived review identity drift')
+            if b not in result:result.append(b)
+        return result
+
     def initialize_cvp_campaign(self, definition: Mapping[str, Any]) -> str:
         from .transaction_validation import CONTRACT
         groups = definition.get("groups", [])
@@ -3823,7 +3869,7 @@ class PostgresKnowledgeStore:
                 raise ChangeSetConflict("CVP group not prepared")
             value = row[0]
             from backend.pipeline.cvp_retained_impact_resolution import guard_operations
-            guard_operations({**value,'run_id':run_id},plan.operations)
+            guard_operations({**value,'run_id':run_id},plan.operations,store=self,cursor=cursor)
             action=evidence.get('action')
             if action:
                 ident='CVPA-'+sha256_json({'parent':run_id,'action':action.get('action_id')})

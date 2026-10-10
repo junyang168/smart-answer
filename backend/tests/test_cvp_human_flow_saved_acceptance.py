@@ -30,6 +30,8 @@ def test_real_saved_human_no_change_full_shared_compiler(monkeypatch,postgres_st
     run='CVPG-dc7a68b9483efcd5e134b8162cf1753ad8943916b84379ea19863c57488ed446'
     root=campaign/'execution'/run/'normal-review'
     before=store.get_cvp_group(run);materials=before['materials']
+    if before['checkpoint']!='prepared':
+        pytest.skip('pre-commit current-readset acceptance is historical; do not replay completed generation')
     originals={str(p):p.read_bytes() for p in root.rglob('*.json')}
     captured={}
     def no_write(path,value,**kw):

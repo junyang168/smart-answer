@@ -6,6 +6,37 @@ import pytest
 from backend.pipeline import viewpoint_content_blocked_fallback as m
 from backend.pipeline.viewpoint_resolution_runtime import write_immutable
 
+
+@pytest.mark.parametrize('version',['legacy_v1','wang_cvp_contextual_semantics_v2','wang_cvp_component_roles_v1'])
+def test_saved_audit_capture_keeps_actual_semantic_role_profile(monkeypatch,version):
+    import hashlib
+    from backend.pipeline.viewpoint_semantic_contract import CONTRACT_PATH,COMPONENT_PATH
+    calls=[]
+    monkeypatch.setattr(m,'capture',lambda *a,**kw:calls.append((a,kw)) or 'actual')
+    if version=='legacy_v1':
+        assert m.capture_for_audit({'meta':{}},'4','V')=='actual'
+        assert calls==[(('4','V'),{})]
+    else:
+        audit={'meta':{'semantic_contract_version':version,
+            'semantic_contract_file_sha256':hashlib.sha256(CONTRACT_PATH.read_bytes()).hexdigest(),
+            'component_role_contract_file_sha256':hashlib.sha256(COMPONENT_PATH.read_bytes()).hexdigest()}}
+        assert m.capture_for_audit(audit,'4','V')=='actual'
+        assert calls[0][1]['semantic_contract_version']==version
+        audit['meta']['semantic_contract_file_sha256']='foreign'
+        with pytest.raises(ValueError):m.capture_for_audit(audit,'4','V')
+
+
+@pytest.mark.parametrize('fault',['missing','foreign','unknown'])
+def test_component_saved_audit_cannot_borrow_old_or_missing_contract(monkeypatch,fault):
+    import hashlib
+    from backend.pipeline.viewpoint_semantic_contract import CONTRACT_PATH
+    audit={'meta':{'semantic_contract_version':'wang_cvp_component_roles_v1',
+        'semantic_contract_file_sha256':hashlib.sha256(CONTRACT_PATH.read_bytes()).hexdigest()}}
+    if fault=='foreign':audit['meta']['component_role_contract_file_sha256']='foreign'
+    if fault=='unknown':audit['meta']['semantic_contract_version']='unknown'
+    monkeypatch.setattr(m,'capture',lambda *a,**k:pytest.fail('foreign profile must fail before reconstruction'))
+    with pytest.raises(ValueError):m.capture_for_audit(audit,'4','V')
+
 def fixture(tmp_path, monkeypatch, layer='4', response=None):
     monkeypatch.setattr('backend.pipeline.viewpoint_s201129_source_continuation.canonical_runtime',
                         lambda:{'identity':{'cli':{'path':'fixture-only-canonical-no-provider'}}})

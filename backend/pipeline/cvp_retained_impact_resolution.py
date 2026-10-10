@@ -12,9 +12,20 @@ from backend.pipeline.viewpoint_resolution_runtime import read_artifact,write_im
 VERSION='wang_cvp_retained_impact_resolution_v1'
 
 
-def protected_link_ids(value):
+def scope_authority(value,store=None,*,cursor=None):
+    scopes=[]
+    current=value.get('reviewed',{}).get('evidence',{}).get('approval',{}).get('retained_write_scope')
+    if current:scopes.append(current)
+    if store is not None and hasattr(store,'get_cvp_retained_scope_bindings'):
+        for b in store.get_cvp_retained_scope_bindings(value['run_id'],cursor=cursor):
+            if b not in scopes:scopes.append(b)
+    if len(scopes)>1:raise ValueError('ambiguous committed human retained scope authorities')
+    return scopes[0] if scopes else None
+
+
+def protected_link_ids(value,store=None,*,cursor=None):
     from backend.pipeline.cvp_sql_flow import check_binding
-    scope=value.get('reviewed',{}).get('evidence',{}).get('approval',{}).get('retained_write_scope')
+    scope=scope_authority(value,store,cursor=cursor)
     if not scope:return set()
     check_binding(scope);body=read_artifact(scope['path']);check_binding(body['human_disposition'])
     direction=read_artifact(body['human_disposition']['path'])
@@ -27,8 +38,8 @@ def protected_link_ids(value):
     return ids
 
 
-def guard_operations(value,operations):
-    protected=protected_link_ids(value)
+def guard_operations(value,operations,*,store=None,cursor=None):
+    protected=protected_link_ids(value,store,cursor=cursor)
     if any(o.collection=='viewpoint_claim_links' and o.object_id in protected for o in operations):
         raise ValueError('explicit human NO-CHANGE decision forbids automatic retained link mutation')
 

@@ -129,10 +129,13 @@ def capture_for_audit(audit, layer, identity):
     version = audit.get('meta', {}).get('semantic_contract_version')
     if version is None:
         return capture(layer, identity)
-    from backend.pipeline.viewpoint_semantic_contract import CONTRACT_PATH, CONTEXTUAL_SEMANTICS
-    if (version != CONTEXTUAL_SEMANTICS or
+    from backend.pipeline.viewpoint_semantic_contract import CONTRACT_PATH, CONTEXTUAL_SEMANTICS, COMPONENT_ROLES, COMPONENT_PATH
+    if (version not in {CONTEXTUAL_SEMANTICS,COMPONENT_ROLES} or
             audit['meta'].get('semantic_contract_file_sha256') != hashlib.sha256(CONTRACT_PATH.read_bytes()).hexdigest()):
         raise ValueError('saved audit semantic contract identity/physical SHA drift')
+    if (version==COMPONENT_ROLES and audit['meta'].get('component_role_contract_file_sha256')
+            !=hashlib.sha256(COMPONENT_PATH.read_bytes()).hexdigest()):
+        raise ValueError('saved audit component role contract identity/physical SHA drift')
     scope=audit.get('meta',{}).get('registry_read_scope')
     return capture(layer, identity, semantic_contract_version=version, **({'sql_scope':scope} if scope else {}))
 
@@ -148,7 +151,8 @@ def capture(layer, identity, *, semantic_contract_version='legacy_v1',sql_scope=
     if sql_scope is not None:
         if sql_scope.get('kind')!='sql_transaction_group' or not sql_scope.get('complete_target_members'):
             raise ValueError('fallback scope cannot fall back to whole Registry')
-        store=reader.SqlGroupStore(settings['KNOWLEDGE_DATABASE_URL'],set(sql_scope['claim_ids']),set(sql_scope['viewpoint_ids']))
+        store=reader.SqlGroupStore(settings['KNOWLEDGE_DATABASE_URL'],set(sql_scope['claim_ids']),
+            set(sql_scope['viewpoint_ids']),record_keys=sql_scope.get('pending_management_record_keys',[]))
     else:store = reader.Store(settings['KNOWLEDGE_DATABASE_URL'])
     sources = reader.SourceIndex(store.collection('source_documents'), Path(settings['DATA_BASE_DIR']))
     class Capture:

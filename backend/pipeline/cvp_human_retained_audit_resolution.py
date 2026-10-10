@@ -56,11 +56,11 @@ def partition_packet(audit,packet,value,store):
 
 
 def human_items(audit,packet,value,store):
-    from backend.pipeline.cvp_retained_impact_resolution import protected_link_ids
+    from backend.pipeline.cvp_retained_impact_resolution import protected_link_ids,scope_authority
     from backend.pipeline.cvp_sql_flow import check_binding
-    protected=protected_link_ids(value)
+    protected=protected_link_ids(value,store)
     if not protected:return set(),None
-    authority=value['reviewed']['evidence']['approval']['retained_write_scope'];check_binding(authority)
+    authority=scope_authority(value,store);check_binding(authority)
     scope=read_artifact(authority['path']);check_binding(scope['human_disposition'])
     direction=read_artifact(scope['human_disposition']['path'])
     from backend.pipeline.cvp_retained_review_separation import merge_human_directions

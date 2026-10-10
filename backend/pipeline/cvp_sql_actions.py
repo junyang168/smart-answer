@@ -482,7 +482,7 @@ def execute_supports_action(store,run_id,adjudication_root,*,root,ports):
     report=read_artifact(adjudication_root/'gpt-final-handoff.json')
     selected=select_repairs(packet,report)  # rejects l3/unresolved/non-equivalent/new scope
     from backend.pipeline.cvp_retained_impact_resolution import protected_link_ids
-    protected=protected_link_ids(store.get_cvp_group(run_id))
+    protected=protected_link_ids(store.get_cvp_group(run_id),store)
     if any(i['before_link']['viewpoint_claim_link_id'] in protected for i in selected):
         raise ValueError('human NO-CHANGE disposition forbids another automatic demotion review')
     policy=read_artifact(POLICY)
