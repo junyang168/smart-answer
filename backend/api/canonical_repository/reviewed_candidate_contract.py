@@ -87,6 +87,10 @@ def validate_source_repair_application(package: Mapping[str, Any]) -> None:
     Every adapter must prove its own exact records, never borrow old approval.
     """
     app = package.get('source_repair_application') or {}
+    if app.get('schema_version') == 'wang_cvp_sql_link_representation_v1':
+        from backend.pipeline.cvp_link_representation import validate_package
+        validate_package(dict(package))
+        return
     if app.get('schema_version') == 'wang_cvp_sql_link_replacement_v1':
         from backend.pipeline.cvp_link_replacement import validate_package
         validate_package(dict(package))

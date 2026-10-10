@@ -769,7 +769,7 @@ def main(argv=None):
     parser.add_argument('--pause-after-group',type=int,help='Narrow this invocation for acceptance; never changes the immutable execution boundary')
     parser.add_argument('--integrate-batch-candidates',action='store_true',
                         help='Explicit new-group identity integration; never upgrades saved legacy answers')
-    parser.add_argument('--action',choices=('group','source','owner-link','link-target','link-retarget','link-retire','link-replace'),default='group')
+    parser.add_argument('--action',choices=('group','source','owner-link','link-target','link-retarget','link-retire','link-replace','link-representation'),default='group')
     parser.add_argument('--claim-first',action='store_true',
                         help='Finish only the original bounded Claim/Evidence action; keep all CVPs pending and stop before CVP/group execution')
     parser.add_argument('--candidate-viewpoint-id',action='append',default=[],
@@ -1022,6 +1022,11 @@ def main(argv=None):
                     finish_claim_audit(store,args.run_id,bound)
                     stage_event('claim_layer_audited_cvp_pending', run_id=args.run_id, group_complete=False)
                     return 0
+            elif args.action=='link-representation':
+                if not args.direction:raise ValueError('representation requires an exact owner direction')
+                from backend.pipeline.cvp_link_representation import execute,production_ports
+                execute(store,args.run_id,authorization=binding(args.direction),
+                        root=action_root/'link-representation',ports=production_ports())
             elif args.action=='link-replace':
                 if not args.direction:raise ValueError('replacement requires an exact owner direction')
                 from backend.pipeline.cvp_link_replacement import execute, production_ports

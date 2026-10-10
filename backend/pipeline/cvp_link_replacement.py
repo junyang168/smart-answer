@@ -247,12 +247,12 @@ def effective_saved_review(root, m):
     return proposal, review
 
 
-def saved_raw(root, stage, packet):
+def saved_raw(root, stage, packet, *, adapter_factory=adapter):
     # Runner seals canonical key order before encoding. Reproduce that exact
     # request, including shape dictionaries; do not authenticate a new wire.
     packet = json.loads(canonical_json(packet))
     raw = read(root / (stage + '.raw.json'))
-    model = stage_adapter(adapter(stage), packet, root / (stage + '.raw.json'), saved=raw)
+    model = stage_adapter(adapter_factory(stage), packet, root / (stage + '.raw.json'), saved=raw)
     # Authenticate this contract's actual adapter, never relabel an old review.
     from backend.pipeline.source_reconciliation_runner import request_limit
     proof = model.request_encoding_proof(packet)
