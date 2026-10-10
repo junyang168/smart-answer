@@ -3754,7 +3754,10 @@ class PostgresKnowledgeStore:
             if not independent_pins:raise ChangeSetConflict('independent audit omitted actual SQL version pins')
             roots={'claims':{oid:{'claim_id':oid} for oid in value['claim_ids']},
                    'canonical_viewpoints':{oid:{'viewpoint_id':oid} for oid in views}}
-            required=self._existing_cvp_context(conn,roots)
+            # Match the independent reader's explicit historical-provenance
+            # boundary: pin a named old decision, do not traverse its candidate
+            # as though it were a current member after link replacement.
+            required=self._existing_cvp_context(conn,roots,historical_pins_only=True)
             if not set(required)<=set(independent_pins):
                 raise ChangeSetConflict('independent audit omitted complete current SQL dependencies: '+str(sorted(set(required)-set(independent_pins))))
             if any(k in read_pins and read_pins[k]!=pin for k,pin in independent_pins.items()):
@@ -4598,10 +4601,11 @@ class PostgresKnowledgeStore:
         }
 
     @staticmethod
-    def _record_reference_ids(value: Any, *, include_predecessor=False) -> set[str]:
+    def _record_reference_ids(value: Any, *, include_predecessor=False, exclude_provenance=False) -> set[str]:
         """Business references only; raw review/history is not a read graph."""
         excluded = {"review_provenance","audit_provenance","generation_provenance",
                     "source_repair_application","raw_response","provider_raw"}
+        if exclude_provenance:excluded.add('provenance')
         found: set[str] = set()
         def visit(node):
             if isinstance(node, Mapping):
@@ -4638,15 +4642,18 @@ class PostgresKnowledgeStore:
             raise ChangeSetConflict('retired CVP origin lacks exact committed history')
         return [row['revision'],row['content_sha256']]
 
-    def _existing_cvp_context(self, conn, normalized, retiring_keys=()):
+    def _existing_cvp_context(self, conn, normalized, retiring_keys=(), *, historical_pins_only=False):
         """Indexed forward closure and complete affected CVP memberships.
 
         Never load a whole collection or silently fall back to the old store
         picture. Retired rows remain visible to validators as retired.
         """
         ids = {oid for objects in normalized.values() for oid in objects}
+        historical_ids=set()
         for objects in normalized.values():
-            for payload in objects.values(): ids.update(self._record_reference_ids(payload,include_predecessor=True))
+            for payload in objects.values():
+                ids.update(self._record_reference_ids(payload,include_predecessor=True,exclude_provenance=historical_pins_only))
+                if historical_pins_only:historical_ids.update(self._record_reference_ids(payload.get('provenance',{})))
         ids.update(oid for _,oid in retiring_keys)
         result = {}; seen = set(); expanded_views = set(); bytes_read = 0
         import time
@@ -4663,7 +4670,11 @@ class PostgresKnowledgeStore:
                     bytes_read += len(canonical_json(payload).encode("utf-8"))
                     result[col,oid] = {"revision":revision,"content_sha256":content_sha,"payload":payload,
                                        "retired_at":retired,"retired":retired is not None}
-                    ids.update(self._record_reference_ids(payload))
+                    if not historical_pins_only:
+                        ids.update(self._record_reference_ids(payload))
+                    else:
+                        ids.update(self._record_reference_ids(payload,exclude_provenance=True))
+                        historical_ids.update(self._record_reference_ids(payload.get('provenance',{})))
                     if col == "canonical_viewpoints" and retired is None: views.add(oid)
                 new_views = sorted(views - expanded_views)
                 expanded_views.update(new_views)
@@ -4680,6 +4691,17 @@ class PostgresKnowledgeStore:
                 row=result.get(('viewpoint_identity_candidates',cid))
                 if row and row.get('retired'):
                     row['historical_origin_authority']=self._origin_candidate_history_authority(cursor,cid,row)
+            # Exact direct provenance pins only. Do not recurse into old
+            # decision/candidate payloads; active business paths above always
+            # take precedence and retain their full current dependency closure.
+            if historical_ids-seen:
+                cursor.execute('SELECT collection,object_id,revision,content_sha256,payload,retired_at FROM wang_knowledge.objects WHERE object_id=ANY(%s)',
+                    (sorted(historical_ids-seen),))
+                for col,oid,revision,content_sha,payload,retired in cursor.fetchall():
+                    if record_content_sha(payload)!=content_sha:raise ChangeSetConflict('historical dependency payload SHA drift')
+                    bytes_read+=len(canonical_json(payload).encode('utf-8'))
+                    result[col,oid]={'revision':revision,'content_sha256':content_sha,'payload':payload,
+                                    'retired_at':retired,'retired':retired is not None}
             if bytes_read > 64*1024**2 or time.perf_counter()-started > 5:
                 raise ValueError('SQL origin proof read budget exceeded')
         return result
