@@ -3409,7 +3409,7 @@ class PostgresKnowledgeStore:
                          (ident,identity,canonical_json(metadata)))
 
     def prepare_cvp_action(self, run_id, *, action_id, kind, authorization, materials):
-        if kind not in {'source_claim_revision','cvp_scope_revision','cvp_membership_revalidation','owner_link_correction','owner_link_retarget','owner_link_retirement','audit_supports_correction','required_cvp_coverage'} or not authorization:
+        if kind not in {'claim_retirement','source_claim_revision','cvp_scope_revision','cvp_membership_revalidation','owner_link_correction','owner_link_retarget','owner_link_retirement','audit_supports_correction','required_cvp_coverage'} or not authorization:
             raise ValueError('bounded action authority required')
         action={'action_id':action_id,'kind':kind,'authorization':authorization,
                 'materials_sha256':sha256_json(materials),'materials':materials}
@@ -3882,7 +3882,7 @@ class PostgresKnowledgeStore:
                     return digest
                 action = evidence.get('action')
                 if (value.get('checkpoint') not in {'applied','audited'} or not action
-                        or action.get('kind') not in {'source_claim_revision','cvp_scope_revision','owner_link_correction','owner_link_retarget','owner_link_retirement','audit_supports_correction','required_cvp_coverage'}
+                        or action.get('kind') not in {'claim_retirement','source_claim_revision','cvp_scope_revision','owner_link_correction','owner_link_retarget','owner_link_retirement','audit_supports_correction','required_cvp_coverage'}
                         or not action.get('authorization') or not action.get('materials_sha256')
                         or plan.change_set_id in value.get('change_set_ids',[])
                         or not prepared or prepared[0]!=action):
@@ -4865,6 +4865,14 @@ class PostgresKnowledgeStore:
             authorized_keys = validate_package(package)
             if retiring_keys and tuple(retiring_keys) != authorized_keys:
                 raise ValueError('extra retirement is not authorized')
+            retiring_keys = authorized_keys
+
+        if (package.get('source_repair_application') or {}).get('schema_version') == 'wang_claim_sql_retirement_v1':
+            if not transactional: raise ValueError('Claim retirement requires common SQL transaction')
+            from backend.pipeline.claim_retirement import validate_package
+            authorized_keys = validate_package(package)
+            if retiring_keys and tuple(retiring_keys) != authorized_keys:
+                raise ValueError('extra Claim retirement is not authorized')
             retiring_keys = authorized_keys
 
         try:
@@ -6719,7 +6727,12 @@ class PostgresKnowledgeStore:
                 self._assert_source_identity_uniqueness(cursor, plan)
                 self._assert_edge_integrity(cursor, plan)
                 self._assert_no_dangling_package_references(cursor, plan, scoped=transaction_context is not None)
-                self._assert_no_uncoordinated_semantic_references(cursor, plan, scoped=transaction_context is not None)
+                retirement_package = None
+                if plan.source_kind == 'wang_claim_sql_retirement_v1':
+                    if transaction_context is None: raise ChangeSetConflict('Claim retirement lacks transaction authority')
+                    retirement_package = sql_group['reviewed']['evidence']['package']['payload']
+                self._assert_no_uncoordinated_semantic_references(cursor, plan, scoped=transaction_context is not None,
+                                                                 retirement_package=retirement_package)
 
                 self._assert_current_viewpoint_revisions(
                     cursor, expected_current_viewpoint_revisions or {}
@@ -7296,7 +7309,7 @@ class PostgresKnowledgeStore:
 
     @staticmethod
     def _assert_no_uncoordinated_semantic_references(
-        cursor: Any, plan: ChangeSetPlan, *, scoped: bool = False
+        cursor: Any, plan: ChangeSetPlan, *, scoped: bool = False, retirement_package=None
     ) -> None:
         """Do not retire extraction identity under current CVR records.
 
@@ -7331,6 +7344,24 @@ class PostgresKnowledgeStore:
                 (sorted(SEMANTIC_REFERENCE_COLLECTIONS),),
             )
             rows = cursor.fetchall()
+        if retirement_package is not None:
+            from backend.pipeline.claim_retirement import historical_reference_rows, validate_package
+            if (plan.source_kind != 'wang_claim_sql_retirement_v1'
+                    or set(validate_package(retirement_package)) != {(o.collection,o.object_id) for o in plan.operations}
+                    or any(o.operation!='retire' for o in plan.operations)):
+                raise ChangeSetConflict('historical Claim references lack exact retire-only approval')
+            historical = {(r['collection'],r['object_id']):r['payload'] for r in historical_reference_rows(retirement_package)}
+            retired_claims={o.object_id for o in plan.operations if o.collection=='claims'}
+            checked=[]
+            for col,oid,payload in rows:
+                if (col,oid) in historical:
+                    if payload != historical[col,oid] or col!='viewpoint_identity_candidates':
+                        raise ChangeSetConflict('historical Claim candidate current payload drift')
+                    # Only the applied candidate's extraction list is history.
+                    # Unknown fields/other live semantic consumers stay strict.
+                    payload={**payload,'candidate_claim_ids':[i for i in payload['candidate_claim_ids'] if i not in retired_claims]}
+                checked.append((col,oid,payload))
+            rows=checked
         blockers = uncoordinated_semantic_reference_blockers(
             plan, rows
         )

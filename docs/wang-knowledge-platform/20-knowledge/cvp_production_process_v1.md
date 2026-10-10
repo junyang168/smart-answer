@@ -351,6 +351,10 @@ GPT 提議不批准自己的內容；Opus 檢查完整新 Claim、證據、差�
 
 保留 Claim ID、原組成員、容量與邏輯順序，修訂只增加既有記錄版本，舊內容與拒絕留在 SQL 歷史。不靜默新增、拆分、刪除 Claim 或改來源正文。引用、locator 和批准必須綁新版本並實際重新核對，不機械替換哈希。
 
+Claim 的邏輯退役屬 Claim management，不是刪除教授原話。對沒有獨立實質主張、且同篇已批准 Claim 已承載教學內容的抽取條目，共同 `--action claim-retire` 消費精確人工退役決定：在同一短 SQL transaction 退役具名 Claim、它的全部有效 CVP 連接及只服務此 Claim 的專屬 Evidence。原 payload、fragment、來源、原候選及審核決定均保留；Evidence 共用或還有其他有效引用時拒絕，不自動改所有權。程序核對全部直接引用、當前版本、hold 和每個受影響 CVP 的剩餘等價成員；真實業務引用未處置或失去最後等價成員時拒絕，不自動改核心／退役 CVP。
+
+已提交且批准的原身份候選只可保留精確 `candidate_claim_ids` 歷史引用，不能用此分支放行新候選、未知欄位或其他有效業務依賴。首版 `wang_claim_retirement_v1` 僅接受完整具名人工處置，不授予任意自動退役；原凍結 campaign 成員需要另有成員處置契約，不能縮減原分母或跳過審計。交易提交不是管理完成：新連線回讀、當前完整受影響審計及原組 completion 仍須實際通過。
+
 產品依賴可依原確定性規則失效，但不啟動 ArgumentRoute、文章、發布或部署。确需 CVP 核心、身份或其他未批准關係更改時，只交新增範圍，不能把 Claim 修復自動擴權成全庫重整理。
 
 ### 13.6 Claim 變更到 CVP management 的交接
