@@ -177,15 +177,22 @@ def human_items(audit, packet, root, store):
             if d['campaign_sha256'] != store.get_cvp_group(d['run_id'])['campaign_sha256']:
                 raise ValueError('human retention foreign campaign')
             verify_item(item,d,audit)
+            legacy_claim_context=[]
             with store.connect() as c:
                 for p in d['read_pins']:
                     row=c.execute('SELECT revision,content_sha256,payload,retired_at FROM wang_knowledge.objects WHERE collection=%s AND object_id=%s',
                         (p['collection'],p['object_id'])).fetchone()
+                    closed_context=False
+                    if row and p['collection']=='claims' and row[2].get('review_status')=='human_review_required':
+                        from backend.pipeline.cvp_retained_relation_only_claim import authority
+                        proof=authority(store,item,audit,{'revision':row[0],'content_sha256':row[1],
+                            'payload':row[2],'retired':row[3] is not None})
+                        legacy_claim_context.append(proof);closed_context=True
                     if (not row or (row[0],row[1],row[3] is not None) != tuple(p['pin'])
                             or record_content_sha(row[2]) != row[1]
-                            or row[2].get('review_status') in {'human_hold','human_review_required','withheld_unreviewed','rejected','superseded'}
+                            or (row[2].get('review_status') in {'human_hold','human_review_required','withheld_unreviewed','rejected','superseded'} and not closed_context)
                             or (p['collection'] in {'claims','viewpoint_claim_links','viewpoint_identity_decisions','canonical_viewpoints','viewpoint_revisions'}
-                                and row[2].get('review_status') not in APPROVED)):
+                                and row[2].get('review_status') not in APPROVED and not closed_context)):
                         raise ValueError('human retention current SQL/approval drift')
                     history=c.execute('''SELECT v.payload,v.content_sha256,o.after_sha256,c.status
                         FROM wang_knowledge.object_versions v JOIN wang_knowledge.change_sets c
@@ -209,7 +216,8 @@ def human_items(audit, packet, root, store):
                                 or decision[0].get('review_status')!='human_approved'):
                             raise ValueError('human postimage lacks actual committed exception review')
             if item['item_id'] in accepted:raise ValueError('overlapping human retention directions')
-            accepted.add(item['item_id']);used.append({'direction':b,'item_id':item['item_id']})
+            accepted.add(item['item_id']);used.append({'direction':b,'item_id':item['item_id'],
+                **({'legacy_claim_context_authority':legacy_claim_context} if legacy_claim_context else {})})
     return accepted,used
 
 
@@ -259,6 +267,14 @@ def verify(audit, body):
     items={i['item_id']:i for i in body['packet']['items']};covered=set()
     for h in body['human']:
         check_binding(h['direction']);ident=verify_item(items[h['item_id']],read_artifact(h['direction']['path']),audit)
+        for proof in h.get('legacy_claim_context_authority',[]):
+            from backend.pipeline.cvp_retained_relation_only_claim import verify as verify_context
+            verify_context(proof)
+            claim=items[h['item_id']]['claim']
+            if (proof['claim_id']!=claim['claim_id'] or proof['claim_revision']!=claim['revision']
+                    or proof['claim_sha256']!=record_content_sha(claim)
+                    or proof['claim_id'] in audit['meta']['registry_read_scope']['claim_ids']):
+                raise ValueError('closed legacy Claim context receipt target drift')
         if ident in covered:raise ValueError('duplicate human resolution')
         covered.add(ident)
     for part in body['parts']:
