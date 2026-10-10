@@ -77,3 +77,29 @@ def test_actual_manifest_full_freeze_zero_writes(actual,monkeypatch):
     assert any(s['source_id']==receipt['historical_source_pin']['object_id'] for s in frozen['context_sources'])
     assert len(frozen['claim_issue_context']['claim_ids'])==2
     c.guard_files(frozen,historical=True)
+
+
+@pytest.mark.parametrize('fault',[None,'pin','schema','hold','foreign','visibility','missing'])
+def test_saved_internal_route_is_impact_only_not_generation(actual,fault):
+    from backend.pipeline.source_reconciliation_runner import read,build_proposal_packet
+    root=Path('/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/staging/cvp-production-357/campaign-sql-20261008-v1-from-g059/execution/CVPG-b0324087577d73360f4077b8d65438c7d777d27fda381f70913a8e1a367b0913/claim-issues')
+    frozen=deepcopy(read(next(root.glob('*/action/*/scoped-materials.json'))))
+    key='knowledge_routes/ROUTE-78a6d9404481'
+    assert frozen['inventory']['unknown_keys']==[key]
+    old=deepcopy(frozen)
+    route=next(r['payload'] for r in frozen['before_records'] if r['collection']=='knowledge_routes' and r['object_id']=='ROUTE-78a6d9404481')
+    if fault=='pin':next(r['pin'] for r in frozen['sql_scope']['read_pins'] if r['collection']=='knowledge_routes')[0]+=1
+    if fault=='schema':route['route_type']='not-a-route'
+    if fault=='hold':route['review_status']='human_review_required'
+    if fault=='visibility':route['visibility']='public'
+    if fault=='missing':frozen['inventory']['affected_keys'].remove(key)
+    if fault=='foreign':frozen['inventory']['unknown_keys'].append('foreign/X')
+    if fault=='foreign':assert c.unresolved_consumers(frozen)==['foreign/X']
+    elif fault:
+        with pytest.raises(ValueError):c.unresolved_consumers(frozen)
+    else:
+        packet=build_proposal_packet(frozen)
+        assert packet['inventory']['unknown_keys']==[]
+        assert packet['read_only_adapter_receipt']['content_write_authority'] is False
+        assert frozen==old
+        assert not any(p['collection']=='knowledge_routes' for p in frozen['manifest']['permissions'])

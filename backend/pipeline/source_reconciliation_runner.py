@@ -326,7 +326,7 @@ class Runner:
         return add_receipt(frozen, response, base) if frozen['manifest'].get('claim_issue') else base
 
     def reviewed(self, frozen: dict) -> tuple[contract.Proposal, dict]:
-        if frozen["inventory"]["unknown_keys"]:
+        if contract.unresolved_consumers(frozen):
             raise Stop("unknown affected consumer requires a proven schema adapter; no model calls", status="proof_failure", waiting_for="system")
         packet = build_proposal_packet(frozen)
         self.guard(frozen)
@@ -533,6 +533,11 @@ def build_proposal_packet(frozen: dict) -> dict:
         result["claim_issue_context"] = frozen["claim_issue_context"]
         result["writable_record_shapes"] = {col: contract.KNOWLEDGE_COLLECTIONS[col][0].model_json_schema()
             for col in sorted({p["collection"] for p in frozen["manifest"]["permissions"]})}
+    if any(contract.split_key(k)[0]=='knowledge_routes' for k in frozen['inventory']['unknown_keys']):
+        result['inventory'] = {**frozen['inventory'], 'unknown_keys': contract.unresolved_consumers(frozen)}
+        result['read_only_adapter_receipt'] = {'schema': 'knowledge_route_impact_only_v1',
+            'keys': [k for k in frozen['inventory']['unknown_keys'] if contract.split_key(k)[0]=='knowledge_routes'],
+            'disposition': 'impact_only', 'content_write_authority': False}
     if 'viewpoint_scope_context' in frozen:
         result['viewpoint_scope_context'] = frozen['viewpoint_scope_context']
         result['writable_record_shapes'] = {col: contract.KNOWLEDGE_COLLECTIONS[col][0].model_json_schema()

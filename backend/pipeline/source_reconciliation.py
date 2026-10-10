@@ -335,6 +335,31 @@ def inventory(states: dict[str, dict], source_id: str) -> dict:
     }
 
 
+def unresolved_consumers(frozen):
+    """Consume saved pre-call unknown route classification without rewriting it.
+
+    KnowledgeRouteRecord is an existing internal output schema, not a new route
+    production permission. Exact SQL pins and payloads remain unchanged.
+    """
+    if not frozen['inventory']['unknown_keys']:
+        return []
+    before = index(frozen['before_records'])
+    pins = {(r['collection'], r['object_id']): r['pin'] for r in frozen.get('sql_scope', {}).get('read_pins', [])}
+    unknown = []
+    for k in frozen['inventory']['unknown_keys']:
+        col, oid = split_key(k)
+        if col != 'knowledge_routes':
+            unknown.append(k); continue
+        value = before[k]
+        KNOWLEDGE_COLLECTIONS[col][0].model_validate(value)
+        if (value.get('route_id') != oid or value.get('visibility') != 'internal'
+                or value.get('review_status') in {'human_hold', 'human_review_required', 'rejected', 'withheld_unreviewed'}
+                or pins.get((col, oid)) != [value['revision'], record_content_sha(value), False]
+                or k not in frozen['inventory']['affected_keys']):
+            raise ValueError('historical knowledge route schema/pin/hold drift')
+    return unknown
+
+
 def claim_inventory(states: dict[str, dict], source_id: str, claim_ids: list[str], *, retained_occurrences=()) -> dict:
     """Exact reverse impact plus all CVP members, not whole-sermon re-extraction."""
     forward, reverse = dependency_index(states)
@@ -587,7 +612,7 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
                    and not (claim_first and split_key(k)[0] in CVP_COLUMNS)
                    or k not in before or k in proposed for k in unresolved)):
         raise ValueError('unresolved review requires bounded unchanged CVP context and SQL retirement proof')
-    if frozen["inventory"]["unknown_keys"] or (unresolved and not review_only):
+    if unresolved_consumers(frozen) or (unresolved and not review_only):
         raise ValueError("unknown/unresolved consumer; owner scope or proof required")
     historical_scope=set()
     if frozen.get('viewpoint_scope_context'):
@@ -597,7 +622,7 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
         c, _ = split_key(k)
         if review_only and k in unresolved:
             continue  # Review a retained unresolved object, never authorize a write.
-        if c in IMPACT_ONLY:
+        if c in IMPACT_ONLY or (c == 'knowledge_routes' and k in frozen['inventory']['unknown_keys']):
             if d.action != "impact_only" or k in proposed:
                 raise ValueError("historical/output consumers may only be invalidated, not regenerated")
         elif k in historical_scope and d.action=='impact_only':
