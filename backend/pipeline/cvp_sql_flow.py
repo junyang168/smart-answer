@@ -195,7 +195,7 @@ def prepare_group(store, definition, group):
     from backend.pipeline.viewpoint_scope_packet_runner import registry_context
     started = time.perf_counter()
     records = store.read_cvp_context(group["claim_ids"])
-    authority = []; claims = []; sources = {}
+    authority = []; claims = []; sources = {}; unavailable = []
     for cid in group["claim_ids"]:
         row = records.get(("claims",cid))
         if not row: raise ValueError("original Claim absent from SQL")
@@ -210,6 +210,21 @@ def prepare_group(store, definition, group):
         claim = ClaimRecord.model_validate(row["payload"])
         evidence = {oid:EvidenceStepRecord.model_validate(value["payload"]) for (col,oid),value in records.items() if col=="evidence_steps" and not value.get("retired")}
         fragments = {oid:SourceFragmentRecord.model_validate(value["payload"]) for (col,oid),value in records.items() if col=="source_fragments" and not value.get("retired")}
+        missing_anchor_ids=set()
+        for eid in row['payload'].get('withheld_evidence_step_ids',[]):
+            step=evidence.get(eid)
+            if (step and step.support_eligibility=='withheld_missing_anchor' and step.anchor_quality=='missing'
+                    and not step.source_fragment_id and not step.source_fragment_ids):
+                if eid not in claim.evidence_step_ids or cid not in step.produced_claim_ids:
+                    raise ValueError('unbound withheld Evidence lacks exact own Claim binding')
+                state=records['evidence_steps',eid]
+                if state['content_sha256']!=record_content_sha(state['payload']):
+                    raise ValueError('unbound withheld Evidence current SHA drift')
+                missing_anchor_ids.add(eid)
+                unavailable.append({'claim_id':cid,'evidence_step_id':eid,
+                    'current_pin':[state['revision'],state['content_sha256'],False],
+                    'payload':state['payload'],'valid_for_identity_review':False,
+                    'reason':'withheld_missing_anchor; no usable source-fragment binding'})
         source_ids = {fragments[fid].source_id for eid in claim.evidence_step_ids
                       for fid in set(evidence[eid].source_fragment_ids or []) | ({evidence[eid].source_fragment_id} if evidence[eid].source_fragment_id else set())}
         if len(source_ids) != 1: raise ValueError("Claim has no unique bound own source")
@@ -218,7 +233,8 @@ def prepare_group(store, definition, group):
         sources[sid] = {"path":str(loaded[0]),"file_sha256":loaded[1]}
         compiled, findings = compile_review_claim(claim=claim,evidence_index=evidence,fragment_index=fragments,
             citation_index={oid:Citation.model_validate(value["payload"]) for (col,oid),value in records.items() if col=="citations"},
-            coverage_source_sha256={sid:doc["source_body_sha256"]},attestation_sha=sha256_json(admission))
+            coverage_source_sha256={sid:doc["source_body_sha256"]},attestation_sha=sha256_json(admission),
+            unavailable_evidence_ids=frozenset(missing_anchor_ids))
         if findings or compiled is None: raise ValueError("current Claim/Evidence qualification failed: " + str(findings))
         claims.append(attach_source_context(compiled,doc).model_dump(mode="json"))
     # Current heads only. Historical CVR chains are never loaded as context.
@@ -239,6 +255,9 @@ def prepare_group(store, definition, group):
     packet = {"batch_id":"CVPB-"+sha256_json({"campaign":definition["campaign_sha256"],"group":group["group_key"]}),
               "scope_label":group["group_key"],"claims":claims,"registry_context":views,"existing_links":links,
               "current_claim_manifest_sha256":sha256_json({"group":group,"authority":authority})}
+    if unavailable:
+        packet['unavailable_evidence_receipt']={'schema_version':'wang_withheld_unbound_evidence_disclosure_v1',
+            'rows':unavailable,'instruction':'Unavailable rows are disclosed history, NOT evidence or permission to restore qualification.'}
     size = len(canonical_json(packet).encode("utf-8"))
     sql_size = sum(len(canonical_json(r['payload']).encode()) for r in records.values())
     if size > 64*1024**2 or sql_size > 64*1024**2 or time.perf_counter()-started > 5:

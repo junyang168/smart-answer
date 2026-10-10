@@ -187,19 +187,26 @@ def coordinate_authority(store, cid, row):
     elif prior.get('source_kind') == 'wkp364_claim_evidence_pair_adjudication':
         from backend.pipeline.cvp_sql_pair_review_authority import pair_review
         review_authority = pair_review(store,cid,previous,prior,source,index,actual)
+    elif prior.get('source_kind') == 'wkp368_absent_machine_anchor_cleanup':
+        from backend.pipeline.cvp_sql_absent_anchor_authority import authority as absent_anchor_authority
+        review_authority=absent_anchor_authority(store,cid,previous,prior,source,index,actual)
     else:
         from backend.pipeline.cvp_sql_imported_claim_review import imported_passing_review
         from backend.pipeline.source_contract_cleanup import migrate_source_fragment
-        review_authority = imported_passing_review(cid, previous, prior, source)
+        review_authority = (imported_passing_review(cid, previous, prior, source,store=store)
+            if prior.get('source_kind')=='wkp353_relation_id_incident_recovery'
+            else imported_passing_review(cid, previous, prior, source))
         # The archived pass covers its exact imported graph, not any later
         # Evidence mutation. Read only these IDs; allow only this same proven
         # deterministic fragment-coordinate step, never another history walk.
         prior_ops = {(a['collection'],a['object_id']):a for a in prior['operations']}
         locator_ops = {(a['collection'],a['object_id']):a for a in actual}
         current_pins = []
+        recovered_posts={(p['collection'],p['object_id']):p['payload']
+            for p in review_authority.get('imported_dependency_postimages',[])}
         for pin in review_authority['imported_dependency_pins']:
             key = (pin['collection'],pin['object_id'])
-            original = prior_ops[key]['after']
+            original = recovered_posts[key] if key in recovered_posts else prior_ops[key]['after']
             expected = original
             if key in locator_ops:
                 op = locator_ops[key]

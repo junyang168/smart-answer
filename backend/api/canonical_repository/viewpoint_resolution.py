@@ -853,6 +853,7 @@ def compile_review_claim(
     coverage_source_sha256: Mapping[str, str],
     attestation_sha: str | None,
     active_full_viewpoint_id: str | None = None,
+    unavailable_evidence_ids: frozenset[str] = frozenset(),
 ) -> tuple[ReviewClaim | None, list[str]]:
     """Assemble one evidence-bound ``ReviewClaim`` from pinned master records.
 
@@ -866,8 +867,19 @@ def compile_review_claim(
     evidence_rows: list[ReviewEvidence] = []
     source_ids: set[str] = set()
     claim_id = claim.claim_id
+    if not unavailable_evidence_ids <= set(claim.evidence_step_ids):
+        return None, [f"{claim_id}: foreign unavailable Evidence"]
     for evidence_id in claim.evidence_step_ids:
         evidence = evidence_index.get(evidence_id)
+        if evidence_id in unavailable_evidence_ids:
+            # SQL callers separately disclose the exact current pinned row.
+            # This is absence of usable support, never an Evidence upgrade or
+            # omission of a bound quote. Default callers remain unchanged.
+            if (evidence is None or claim_id not in evidence.produced_claim_ids
+                    or evidence.support_eligibility != 'withheld_missing_anchor'
+                    or evidence.anchor_quality != 'missing' or evidence_fragment_ids(evidence)):
+                findings.append(f"{claim_id}: unavailable Evidence is not exact withheld/unbound")
+            continue
         if not evidence or not evidence_fragment_ids(evidence):
             findings.append(f"{claim_id}: missing evidence {evidence_id}")
             continue

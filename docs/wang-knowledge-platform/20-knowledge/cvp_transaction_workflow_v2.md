@@ -110,6 +110,12 @@ commit 後的新連線回讀用於确认可見結果與交接審計。它若失�
 
 舊 package 匯入可能保留另一語義版本的审核註記，卻漏登本版 SQL review event。註記或 `ai_consensus_reviewed` 不足以放行。精確 locator-only 更新的立即前版若屬已提交匯入，共同准入可核對該版的原獨立 pass、完整 SHA-bound 输入、实际模型身份／routing／hold、逐字来源，以及 SQL 已提交 Claim、Evidence、fragment 的完整語義後像。只有全部相同且审核唯一才消费；舊同 ID 不同內容、不完整／衝突审核、改過的證據或 merge／patch 後像均拒绝。講道 JSON 與母本 Markdown 各按真實正文投影驗證 locator compiler 的完整後像。這不新增 review event、不改舊註記、不推翻其他未決、不重放整包仲裁或遞迴歷史鏈；讀取只限立即前版及其確切輸入的有界 generations。
 
+歷史資格維護先對凍結 campaign 的全部原 Claim 做一次索引化類型盤點，不能等每個新組撞到相同類型才補程式。已結案且版本未變者消費原 SQL completion；未結案者使用與生產相同的資格驗證器。盤點不接納新資料、不補 review event、不呼叫模型，也不進入正常 startup 反覆掃描。新增或漂移的歷史類型仍 fail closed；「類型已登記」本身不是批准。
+
+共同驗證器支持固定、具完整後像證明的歷史轉換：原 SQL 審核後僅撤回實際不存在的 machine anchor／Evidence 資格，再做確定性 locator 更新；以及原獨立審核／實際匯入圖後的 ID-only namespace recovery，再做 locator 更新。後者如涉及合併接收者，另須全部原裁決、SHA-pinned 歷史純函式的完整記憶體後像重現及實際 SQL 圖完全一致；不能以接收者合併前的 pass 批准新 anchors。這是讀取已提交事實，不執行舊 recovery／migration／admission 入口、不遞迴找任意祖先。
+
+已撤回資格且無片段綁定的 Evidence 保留在原 Claim、SQL read pins 及不可用項 receipt 中，明示 `valid_for_identity_review=false`；不恢復資格、不充當證據、不刪原 Claim 成員。只有精確 `withheld_missing_anchor`／`anchor_quality=missing`、原 Claim 自有且確實無 fragment 的當前列可作這項披露。合格 Evidence 與完整自身來源仍照常編譯、審核和審計。context-only、hold、失蹤列或仍有片段的列不能借此略過。
+
 ## 6. 從正常路徑移除什麼
 
 | 目前責任 | v2 接替方式 |
