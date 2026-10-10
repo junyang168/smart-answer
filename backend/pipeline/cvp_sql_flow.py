@@ -164,6 +164,9 @@ def current_claim_authority(store, cid, row):
                                    AND decision=%s ORDER BY review_event_id""",
                               (cid,row["revision"],claim.get("review_status"))).fetchall()
     if not events:
+        from backend.pipeline.cvp_sql_retained_evidence_locator_authority import authority as fixed_authority
+        fixed=fixed_authority(store,cid,row)
+        if fixed is not None:return fixed
         return coordinate_predecessor_authority(store, cid, row)
     if len(events) != 1 or events[0][1] not in {"ai","human","system"} or not events[0][3]:
         raise ValueError("current Claim has missing/ambiguous exact SQL review: " + cid)
@@ -197,6 +200,13 @@ def prepare_group(store, definition, group):
         row = records.get(("claims",cid))
         if not row: raise ValueError("original Claim absent from SQL")
         admission = current_claim_authority(store,cid,row); authority.append(admission)
+        for p in admission.get('current_dependency_pins',[]):
+            if 'pin' not in p:continue  # other typed authority uses its own representation
+            key=(p['collection'],p['object_id']);live=store.get_record_state(*key)
+            if (not live or [live['revision'],live['content_sha256'],live['retired']]!=p['pin']
+                    or record_content_sha(live['payload'])!=p['pin'][1]):
+                raise ValueError('Claim authority current dependency drift')
+            records[key]=live
         claim = ClaimRecord.model_validate(row["payload"])
         evidence = {oid:EvidenceStepRecord.model_validate(value["payload"]) for (col,oid),value in records.items() if col=="evidence_steps" and not value.get("retired")}
         fragments = {oid:SourceFragmentRecord.model_validate(value["payload"]) for (col,oid),value in records.items() if col=="source_fragments" and not value.get("retired")}
