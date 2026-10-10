@@ -174,11 +174,11 @@ def eligibility_profile(packet):
     return bool(binding and read_policy(binding).evidence_eligibility_review)
 
 
-def policy_permissions(policy, states, sid, claim_ids):
+def policy_permissions(policy, states, sid, claim_ids, *, retained_occurrences=()):
     if (not set(policy.claim_fields) <= CLAIM_FIELDS or not set(policy.evidence_fields) <= EVIDENCE_FIELDS
             or not set(policy.link_fields) <= LINK_FIELDS):
         raise ValueError("Claim issue policy has unsupported fields/hold/source expansion")
-    inv = c.claim_inventory(states, sid, claim_ids)
+    inv = c.claim_inventory(states, sid, claim_ids, retained_occurrences=retained_occurrences)
     affected = set(inv["affected_keys"])
     result = []
     for k in sorted(affected):
@@ -195,6 +195,8 @@ def policy_permissions(policy, states, sid, claim_ids):
                     # Qualification only: do not rewrite speech/ownership to buy eligibility.
                     result.append(c.Permission(collection=col, object_id=oid, fields=sorted(ELIGIBILITY_FIELDS)))
                 continue
+            if col == 'claims' and any(r['claim_id'] == oid for r in retained_occurrences):
+                fields = set(fields) - {'occurrences'}
             result.append(c.Permission(collection=col, object_id=oid, fields=sorted(set(fields))))
     if policy.evidence_fields:
         result.append(c.Permission(collection="source_fragments", object_id="FR-claim-issue-allocation-slot",
@@ -239,7 +241,8 @@ def validate_authority(manifest, states, snapshots=None):
     if (auth.get("claim_issue") != manifest.claim_issue.model_dump() or auth.get("policy") != context["policy"]
             or auth.get("authorization_id") != policy.authorization_id):
         raise ValueError("issue policy not bound to actual owner authority")
-    expected=policy_permissions(policy, states, manifest.source_id, ids)
+    expected=policy_permissions(policy, states, manifest.source_id, ids,
+        retained_occurrences=context.get('retained_occurrence_context', []))
     if context.get('scope_amendment'):
         from backend.pipeline.claim_issue_rescope import permissions
         direction=json.loads(c.bound_bytes(context['scope_amendment'],snapshots))
@@ -312,7 +315,17 @@ def manifest_for_issues(store, run_id, issues, policy_binding, root):
     source = c.FileBinding(path=doc["source_path"], file_sha256=doc["source_file_sha256"])
     c.source_snapshot(source, source=doc)  # physical/body qualification before any model
     ids = sorted({i.claim_id for i in issues})
-    permissions = policy_permissions(policy, states, sid, ids)
+    retained = []
+    aliases = {sid, doc.get('transcript_id'), doc.get('canonical_source_id')} - {None, ''}
+    for cid in ids:
+        if any(not aliases.intersection(set(c.strings(o))) for o in states[c.key('claims', cid)]['occurrences']):
+            from backend.pipeline.claim_retained_occurrence_context import build
+            receipt = build(store, cid, sid)
+            pin = receipt['historical_source_pin']
+            row = store.get_record_state(pin['collection'], pin['object_id'])
+            states[c.key(pin['collection'], pin['object_id'])] = row['payload']
+            retained.append(receipt)
+    permissions = policy_permissions(policy, states, sid, ids, retained_occurrences=retained)
     definition = store.get_cvp_campaign(saved["campaign_sha256"])
     progress = {r["group_key"]:r for r in store.cvp_campaign_progress(saved["campaign_sha256"])}
     groups = [c.Group(group_key=g["group_key"], claim_ids=g["claim_ids"],
@@ -324,6 +337,8 @@ def manifest_for_issues(store, run_id, issues, policy_binding, root):
     context = {"schema_version":VERSION, "claim_ids":ids, "issues":[i.model_dump(mode="json") for i in issues],
                "issue_identities":issue_identities(issues),
                "policy":policy_binding, "original_run_id":run_id}
+    if retained:
+        context['retained_occurrence_context'] = retained
     write(root/"issue-context.json", context)
     issue_binding = binding(root/"issue-context.json")
     write(root/"scoped-authorization.json", {"source_id":sid, "authorization_id":policy.authorization_id,

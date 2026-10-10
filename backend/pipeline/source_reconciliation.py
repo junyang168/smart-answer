@@ -335,7 +335,7 @@ def inventory(states: dict[str, dict], source_id: str) -> dict:
     }
 
 
-def claim_inventory(states: dict[str, dict], source_id: str, claim_ids: list[str]) -> dict:
+def claim_inventory(states: dict[str, dict], source_id: str, claim_ids: list[str], *, retained_occurrences=()) -> dict:
     """Exact reverse impact plus all CVP members, not whole-sermon re-extraction."""
     forward, reverse = dependency_index(states)
     roots = {key("claims", cid) for cid in claim_ids}
@@ -343,8 +343,10 @@ def claim_inventory(states: dict[str, dict], source_id: str, claim_ids: list[str
         raise ValueError("deferred Claim identities missing/duplicated")
     doc = states[key("source_documents", source_id)]
     aliases = {source_id, doc.get("transcript_id"), doc.get("canonical_source_id")} - {None, ""}
+    from backend.pipeline.claim_retained_occurrence_context import validate
+    retained = validate(retained_occurrences, states, source_id, claim_ids)
     for k in roots:
-        if not states[k].get("occurrences") or any(not aliases.intersection(set(strings(o))) for o in states[k]["occurrences"]):
+        if split_key(k)[1] not in retained and (not states[k].get("occurrences") or any(not aliases.intersection(set(strings(o))) for o in states[k]["occurrences"])):
             raise ValueError("deferred Claim has foreign/ambiguous occurrence source")
     affected = roots | {key("evidence_steps", eid) for k in roots for eid in states[k].get("evidence_step_ids", [])}
     if not affected <= states.keys():
@@ -367,6 +369,8 @@ def claim_inventory(states: dict[str, dict], source_id: str, claim_ids: list[str
         affected.update({cv, key("viewpoint_revisions", states[cv]["current_revision_id"])})
         affected.update(reverse[cv])
     context = set(affected) | {key("source_documents", source_id)}
+    context.update(key(r['historical_source_pin']['collection'], r['historical_source_pin']['object_id'])
+                   for r in retained_occurrences)
     queue = deque(sorted(context))
     while queue:
         for target in forward[queue.popleft()]:
@@ -436,7 +440,8 @@ def freeze(manifest: Manifest, states: dict[str, dict], *, physical_snapshots: d
         if diagnosis.get('scope_amendment'):
             direction=json.loads(bound_bytes(diagnosis['scope_amendment'],physical_snapshots))
             ids.update(states[key(p['collection'],p['object_id'])]['claim_id'] for p in direction['link_permissions'])
-        inv = claim_inventory(states, manifest.source_id, sorted(ids))
+        inv = claim_inventory(states, manifest.source_id, sorted(ids),
+                              retained_occurrences=diagnosis.get('retained_occurrence_context', []))
         if diagnosis.get('scope_amendment'):
             # Additional current source Claims are read-only context, never
             # campaign members or automatic new CVP identity approvals.
@@ -495,6 +500,9 @@ def freeze(manifest: Manifest, states: dict[str, dict], *, physical_snapshots: d
         archive_bindings.append(manifest.claim_issue)
         archive_bindings.append(FileBinding.model_validate(diagnosis["policy"]))
         archive_bindings.extend(FileBinding.model_validate(r["report"]) for r in diagnosis["issues"])
+        archive_bindings.extend(FileBinding.model_validate(b)
+            for receipt in diagnosis.get('retained_occurrence_context', [])
+            for b in receipt['authority']['bindings'])
         if diagnosis.get('scope_amendment'):
             archive_bindings.append(FileBinding.model_validate(diagnosis['scope_amendment']))
             direction=json.loads(bound_bytes(diagnosis['scope_amendment'],physical_snapshots))
@@ -522,6 +530,9 @@ def guard_files(frozen: dict, *, historical: bool = False) -> None:
         context = frozen["claim_issue_context"]
         for b in [manifest.claim_issue, context["policy"], *(r["report"] for r in context["issues"])]:
             bound_bytes(b, frozen["physical_snapshots"] if historical else None)
+        for receipt in context.get('retained_occurrence_context', []):
+            for b in receipt['authority']['bindings']:
+                bound_bytes(b, frozen['physical_snapshots'] if historical else None)
         if context.get('scope_amendment'):
             bound_bytes(context['scope_amendment'],frozen['physical_snapshots'] if historical else None)
     if manifest.viewpoint_scope_repair:

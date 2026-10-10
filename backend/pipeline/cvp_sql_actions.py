@@ -124,6 +124,8 @@ def prepare_source_action(store,run_id,manifest,*,root):
         # Source is unchanged. Starting reverse closure at its document would
         # incorrectly load every unrelated Claim in the same sermon.
         keys=[('claims',cid) for cid in context['claim_ids']]
+        keys.extend((r['historical_source_pin']['collection'], r['historical_source_pin']['object_id'])
+                    for r in context.get('retained_occurrence_context', []))
         if context.get('scope_amendment'):
             from backend.pipeline.claim_issue_rescope import validate_direction,amendment_records
             direction=json.loads(content.bound_bytes(context['scope_amendment']))
