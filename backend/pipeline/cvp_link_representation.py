@@ -19,6 +19,7 @@ from backend.pipeline.cvp_link_replacement import saved_raw
 
 SCHEMA = 'wang_cvp_sql_link_representation_v1'
 DIRECTION = 'wang_cvp_link_representation_direction_v1'
+HUMAN = 'wang_cvp_link_representation_human_postimage_v1'
 PROMPT = '''负责人授权指定既有连接的成分范围及作用重新提议，不是批准新后像。
 完整自身正文、Claim、实际 current CVR、全部成员、原身份判定、原审计及 GPT 异议均提供。
 只返回本 Claim 中精确非空半开区间 spans 及准确 link_type。SHA 由程序计算。
@@ -179,8 +180,105 @@ def validate_package(package):
     check_binding(m['authorization']);validate_direction(read_artifact(m['authorization']['path']),m)
     for b in m['original_reports']:check_binding(b)
     for s in m['sources']:check_binding({'path':s['path'],'file_sha256':s['file_sha256']})
-    p,r=effective_saved(root,m)
-    if package!=compile_package(m,p,r,root):raise ValueError('representation differs from actual approved package')
+    if app.get('human_disposition'):
+        check_binding(app['human_disposition'])
+        expected=human_package(m,app['human_disposition'],root)
+    else:
+        p,r=effective_saved(root,m)
+        expected=compile_package(m,p,r,root)
+    if package!=expected:raise ValueError('representation differs from actual approved package')
+
+def human_saved(root,m,d):
+    """Consume the original failed round, never manufacture an approved raw."""
+    p=saved_raw(root,'proposal',m,adapter_factory=adapter)
+    r=saved_raw(root,'initial_review',review_packet(m,p),adapter_factory=adapter)
+    c=saved_raw(root,'correction',correction_packet(m,p,r),adapter_factory=adapter)
+    if any(root.glob('final_review*')):
+        raise ValueError('human representation requires the exact unresolved terminal boundary')
+    if c['response']['selection']['diagnosis']!='unresolved':
+        raise ValueError('human representation must preserve actual unresolved correction')
+    try: approved(m,r)
+    except Stop: pass
+    else: raise ValueError('already approved representation is not a human exception')
+    expected={'schema_version':HUMAN,'run_id':m['run_id'],'campaign_sha256':m['campaign_sha256'],
+        'materials_sha256':sha256_json(m),'before_link_sha256':sha256_json(m['before_link']),
+        'accepted_after_link':postimage(m,p['response']),
+        'original_raw_artifact_sha256s':[p['artifact_sha256'],r['artifact_sha256'],c['artifact_sha256']],
+        'authorized_by':'owner','human_content_approval':True,'automatic_future_repairs_authorized':False}
+    if any(d.get(k)!=v for k,v in expected.items()) or not d.get('authorization_quote') or not d.get('decided_at'):
+        raise ValueError('human representation exact postimage/round/owner binding drift')
+    if d.get('artifact_sha256')!=sha256_json({k:v for k,v in d.items() if k!='artifact_sha256'}):
+        raise ValueError('human representation seal drift')
+    quotes=d.get('context_citations',[])
+    if not quotes:raise ValueError('human contextual judgement requires physical source citations')
+    own={o['source_id'] for o in m['item']['claim']['occurrences']}
+    own_citation=False
+    for citation in quotes:
+        sources=[s for s in m['sources'] if s['source_id']==citation.get('source_id')]
+        if len(sources)!=1:raise ValueError('foreign human contextual source')
+        s=sources[0]
+        if any(citation.get(k)!=s[k] for k in ('path','file_sha256','body_sha256')):
+            raise ValueError('human contextual physical source drift')
+        rows=[x for x in s['paragraphs'] if x['index']==citation.get('paragraph_index')]
+        if len(rows)!=1 or not citation.get('exact_quote') or citation['exact_quote'] not in rows[0]['text']:
+            raise ValueError('human context quotation is not exact original text')
+        own_citation |= s['source_id'] in own
+    if not own_citation:raise ValueError('human context cannot borrow only another Claim source')
+    return p,r,c
+
+def human_package(m,authorization,root):
+    from backend.pipeline.cvp_link_retarget import fresh_identity_records
+    from backend.pipeline.cvp_sql_flow import check_binding
+    check_binding(authorization);d=read_artifact(authorization['path']);p,r,c=human_saved(root,m,d)
+    link=postimage(m,p['response']);states=content.index(m['records']+m['provenance_templates'])
+    seed=sha256_json({'contract':HUMAN,'materials':sha256_json(m),'disposition':d['artifact_sha256']})
+    candidate,decision=fresh_identity_records(states,m['before_link'],link,
+        m['item']['viewpoint_revision']['proposition_signature'],p,r,seed=seed,policy=HUMAN)
+    decision.update(reviewer_kind='human_editor',reviewer_id='owner',reviewer_model_ids=[],
+        approval_basis='human_exception_review',review_status='human_approved',
+        review_artifact_sha256=d['artifact_sha256'],
+        semantic_call_artifact_sha256s=sorted({p['artifact_sha256'],r['artifact_sha256'],c['artifact_sha256']}),
+        created_at=d['decided_at'],reason=d['authorization_quote'])
+    link.update(decision_id=decision['identity_decision_id'],review_status='human_approved')
+    return {'package_id':'CVP-LINK-REPRESENTATION-HUMAN-'+seed[:24],
+        'viewpoint_claim_links':[link],'viewpoint_identity_candidates':[candidate],
+        'viewpoint_identity_decisions':[decision],
+        'source_repair_application':{'schema_version':SCHEMA,'run_root':str(Path(root).resolve()),
+            'materials_sha256':sha256_json(m),'human_disposition':authorization}}
+
+def execute_human(store,run_id,*,authorization,disposition,root,ports):
+    """Same registered action/root, zero new calls, common commit/readback/audit."""
+    from backend.pipeline.cvp_sql_flow import check_binding,decoded_pins,commit_package,verified_group_backup
+    from backend.pipeline.cvp_sql_actions import resume_bound_action
+    check_binding(authorization);check_binding(disposition);d=read_artifact(authorization['path'])
+    aid='CVPA-'+sha256_json({'contract':SCHEMA,'link':d['link_id'],'before':d['before_link_sha256']})
+    root=Path(root)/aid;previous=store.get_cvp_action(run_id,aid)
+    if not previous or previous['authorization']!=authorization:
+        raise ValueError('human representation requires original registered action and authority')
+    receipt=root/'human-disposition-binding.json'
+    if receipt.exists() and read_artifact(receipt).get('disposition')!=disposition:
+        raise ValueError('human representation disposition cannot change across recovery')
+    resumed=resume_bound_action(store,run_id,aid)
+    if resumed:
+        if not receipt.exists():raise ValueError('non-human committed action cannot acquire human provenance')
+        return resumed
+    m=previous['materials'];validate_direction(d,m)
+    if body(read(root/'materials.json'))!=m:raise ValueError('human representation original materials drift')
+    for s in m['sources']:check_binding({'path':s['path'],'file_sha256':s['file_sha256']})
+    expected=decoded_pins(m['read_pins'])
+    with store.connect() as conn,conn.cursor() as cur:store._assert_transaction_read_pins(cur,expected)
+    package=human_package(m,disposition,root);validate_package(package)
+    from backend.pipeline.viewpoint_resolution_runtime import write_immutable
+    write_immutable(receipt,{'disposition':disposition})
+    plan=store.plan_package(package,source_kind=SCHEMA,transactional=True)
+    if len(plan.operations)!=3 or {(o.operation,o.collection) for o in plan.operations}!={('update','viewpoint_claim_links'),('create','viewpoint_identity_candidates'),('create','viewpoint_identity_decisions')}:
+        raise ValueError('human representation exact three-operation write set violated')
+    e=store.get_cvp_group(run_id)['reviewed']['evidence']
+    return commit_package(store,run_id,package=package,approval={'human_exact_disposition':disposition},
+        authorization=authorization,backup=verified_group_backup(root,package,ports),
+        sources=[{'path':s['path'],'file_sha256':s['file_sha256']} for s in m['sources']],read_pins=expected,
+        reason='human exact contextual equivalence; original model rejection retained',actor='owner',
+        source_kind=SCHEMA,viewpoint_ids=e['viewpoint_ids'],disposition=e.get('disposition'),action=previous)
 
 def execute(store,run_id,*,authorization,root,ports):
     from backend.pipeline.cvp_sql_flow import binding,check_binding,decoded_pins,commit_package,verified_group_backup

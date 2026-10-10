@@ -781,6 +781,7 @@ def main(argv=None):
     parser.add_argument('--link-id')
     parser.add_argument('--claim-issue-policy',type=Path,help='Explicit owner bounded Claim/Evidence/CVP policy; no inferred permission')
     parser.add_argument('--cvp-scope-policy',type=Path,help='Normal bounded CVP scope enrichment; no identity/core/Claim/source permission')
+    parser.add_argument('--link-representation-disposition',type=Path,help='Exact human acceptance of saved representation postimage; no new model budget')
     parser.add_argument('--request-limit-authorization',type=Path,help='Owner campaign request budget; does not change frozen model inputs or call budgets')
     parser.add_argument('--component-role-authorization', type=Path,
                         help='Exact owner acceptance of an existing structural duplicate finding; no new model/content permission')
@@ -1025,8 +1026,14 @@ def main(argv=None):
             elif args.action=='link-representation':
                 if not args.direction:raise ValueError('representation requires an exact owner direction')
                 from backend.pipeline.cvp_link_representation import execute,production_ports
-                execute(store,args.run_id,authorization=binding(args.direction),
+                if args.link_representation_disposition:
+                    from backend.pipeline.cvp_link_representation import execute_human
+                    execute_human(store,args.run_id,authorization=binding(args.direction),
+                        disposition=binding(args.link_representation_disposition),
                         root=action_root/'link-representation',ports=production_ports())
+                else:
+                    execute(store,args.run_id,authorization=binding(args.direction),
+                            root=action_root/'link-representation',ports=production_ports())
             elif args.action=='link-replace':
                 if not args.direction:raise ValueError('replacement requires an exact owner direction')
                 from backend.pipeline.cvp_link_replacement import execute, production_ports
