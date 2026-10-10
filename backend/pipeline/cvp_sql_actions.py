@@ -337,6 +337,65 @@ def execute_coverage_action(store,run_id,definition,group,*,root,ports,investiga
         pending_cvp_management_record_keys=materials.get('claim_management_resolution',{}).get('pending_existing_cvp_record_keys',[]))
 
 
+def supports_identity_dependencies(store, records, selected):
+    """Read exact forward candidate references omitted by consumer closure.
+
+    Candidates are provenance templates, not semantic review input. Keep the
+    saved packet and calls unchanged; pin these rows in the actual transaction.
+    """
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    keys=set()
+    for item in selected:
+        old=item['before_link']
+        decision=records.get(('viewpoint_identity_decisions',old['decision_id']))
+        if not decision or decision.get('retired'):
+            raise ValueError('bounded supports decision missing or retired')
+        value=decision['payload']
+        if value.get('review_status') not in {'approved','system_approved','human_approved','ai_consensus_reviewed'}:
+            raise ValueError('bounded supports decision not approved')
+        cid=value.get('identity_candidate_id')
+        if not cid:raise ValueError('bounded supports candidate reference missing')
+        keys.add(('viewpoint_identity_candidates',cid))
+    extra={}
+    with store.connect() as conn:
+        for key in sorted(keys):
+            row=conn.execute('SELECT revision,content_sha256,payload,retired_at IS NOT NULL FROM wang_knowledge.objects WHERE collection=%s AND object_id=%s',key).fetchone()
+            if not row:raise ValueError('bounded supports candidate missing')
+            history=conn.execute('''SELECT v.payload,v.content_sha256,o.after_sha256,c.status,o.operation
+                FROM wang_knowledge.object_versions v JOIN wang_knowledge.change_sets c
+                ON c.change_set_id=v.change_set_id JOIN wang_knowledge.change_operations o
+                ON o.change_set_id=v.change_set_id AND o.collection=v.collection AND o.object_id=v.object_id
+                AND o.after_revision=v.revision WHERE v.collection=%s AND v.object_id=%s AND v.revision=%s''',
+                (*key,row[0])).fetchall()
+            if (len(history)!=1 or history[0][1:4]!=(row[1],row[1],'applied')
+                    or history[0][0].get('revision')!=row[0]
+                    or {k:v for k,v in history[0][0].items() if k!='revision'}!={k:v for k,v in row[2].items() if k!='revision'}
+                    or (history[0][4]=='retire')!=row[3]):
+                raise ValueError('bounded supports candidate lacks exact committed history')
+            # Retired candidate is historical provenance only. Copy to a new ID;
+            # never revive it, reinterpret it as a current member or edit it.
+            extra[key]={'revision':row[0],'content_sha256':row[1],'payload':row[2],'retired':row[3]}
+    for key,row in extra.items():
+        value=row['payload']
+        if (value.get('identity_candidate_id')!=key[1]
+                or record_content_sha(value)!=row['content_sha256']
+                or value.get('review_status') in {'human_hold','human_review_required','withheld_unreviewed','rejected','superseded'}):
+            raise ValueError('bounded supports candidate identity, version or hold conflict')
+        if key in records and records[key]!=row:
+            # _existing omits the false retired field; compare actual pins/payload.
+            if pins({key:records[key]})!=pins({key:row}) or records[key]['payload']!=value:
+                raise ValueError('bounded supports candidate changed within readset')
+    for item in selected:
+        old=item['before_link'];decision=records['viewpoint_identity_decisions',old['decision_id']]['payload']
+        candidate=extra['viewpoint_identity_candidates',decision['identity_candidate_id']]['payload']
+        if (old['claim_id'] not in candidate.get('candidate_claim_ids',[])
+                or decision.get('resolved_viewpoint_id')!=old['viewpoint_id']
+                or not any(d.get('claim_id')==old['claim_id'] and d.get('link_type')==old['link_type']
+                           for d in decision.get('claim_link_decisions',[]))):
+            raise ValueError('bounded supports candidate has foreign Claim or viewpoint')
+    return extra
+
+
 def execute_supports_action(store,run_id,adjudication_root,*,root,ports):
     from backend.pipeline.viewpoint_adjudication_history import validated_history
     from backend.pipeline.viewpoint_audit_link_repair import select_repairs,link_review_adapter,package_for,POLICY,PROMPT
@@ -393,6 +452,13 @@ def execute_supports_action(store,run_id,adjudication_root,*,root,ports):
         if len(result.verdicts)!=len(ids) or {v.claim_id for v in result.verdicts}!=set(ids) or any(not v.approved or v.problems for v in result.verdicts):
             raise ValueError('bounded supports rejected; no second review or automatic content expansion')
         reviews[label]=result.model_dump(mode='json')
+    extra=supports_identity_dependencies(store,records,selected)
+    write_immutable(root/'identity-template-read-pins.json',{
+        'schema_version':'wang_cvp_supports_identity_template_read_pins_v1',
+        'action_id':action_id,'packet_sha256':sha256_json(repair),
+        'read_pins':pin_rows(pins(extra)),'semantic_review_input_changed':False})
+    records.update(extra)
+    states.update({k:r['payload'] for k,r in extra.items()})
     package=package_for(states,repair,reviews,root)
     plan=store.plan_package(package,source_kind='cvp_batch_resolution',transactional=True)
     expected={i['before_link']['viewpoint_claim_link_id'] for i in selected}
