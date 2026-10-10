@@ -832,6 +832,44 @@ def retained_historical_origin(viewpoint_id, viewpoint, existing):
         and not candidate.get('blocker_codes'))
 
 
+def scope_retained_route_revision_ids(normalized, existing):
+    """Keep immutable route snapshots during a same-core scripture-scope cut.
+
+    This permits storage, not runtime authoring use: the standalone projection
+    validator remains strict, and normal dependency invalidation still applies.
+    """
+    if any(normalized.get(c) for c in ('argument_routes','argument_route_revisions','argument_route_attestations')):
+        return set()
+    approved={'approved','system_approved','human_approved'}
+    metadata={'viewpoint_revision_id','revision','revision_number','supersedes_revision_id',
+              'review_status','provenance','approved_at','approved_by','scope'}
+    result=set()
+    for vid,new_head in normalized.get('canonical_viewpoints',{}).items():
+        old_row=existing.get(('canonical_viewpoints',vid)) or {};old_head=old_row.get('payload') or {}
+        old_id=old_head.get('current_revision_id');new_id=new_head.get('current_revision_id')
+        old_revision=(existing.get(('viewpoint_revisions',old_id)) or {}).get('payload') or {}
+        new_revision=normalized.get('viewpoint_revisions',{}).get(new_id) or {}
+        if (old_row.get('retired') or old_row.get('retired_at') is not None
+                or old_head.get('review_status') not in approved or old_revision.get('review_status') not in approved
+                or new_head.get('review_status') not in approved or new_revision.get('review_status') not in approved
+                or new_id==old_id or new_revision.get('supersedes_revision_id')!=old_id
+                or old_revision.get('viewpoint_id')!=vid or new_revision.get('viewpoint_id')!=vid
+                or {k:v for k,v in old_revision.items() if k not in metadata}!={k:v for k,v in new_revision.items() if k not in metadata}
+                or {k:v for k,v in old_revision.get('scope',{}).items() if k!='scripture_scope'}!={k:v for k,v in new_revision.get('scope',{}).items() if k!='scripture_scope'}):
+            continue
+        for (collection,rid),row in existing.items():
+            if collection!='argument_route_revisions' or row.get('retired') or row.get('retired_at') is not None:continue
+            payload=row.get('payload') or {};arid=payload.get('argument_route_id')
+            route_row=existing.get(('argument_routes',arid)) or {};route=route_row.get('payload') or {}
+            if (payload.get('review_status') in approved and route.get('review_status') in approved
+                    and not route_row.get('retired') and route_row.get('retired_at') is None
+                    and route.get('current_revision_id')==rid and route.get('conclusion_viewpoint_id')==vid
+                    and payload.get('validated_against_conclusion_viewpoint_revision_id')==old_id
+                    and payload.get('route_signature',{}).get('conclusion_viewpoint_id')==vid):
+                result.add(rid)
+    return result
+
+
 def validate_foundation_change_set(
     normalized: Mapping[str, Mapping[str, Mapping[str, Any]]],
     existing: Mapping[tuple[str, str], Mapping[str, Any]],
@@ -1622,7 +1660,8 @@ def validate_foundation_change_set(
             "argument_route_attestations", "viewpoint_relations",
         )
     }
-    findings.extend(validate_runtime_authoring_graph(runtime_collections))
+    findings.extend(validate_runtime_authoring_graph(runtime_collections,
+        retained_route_revision_ids=scope_retained_route_revision_ids(normalized,existing)))
 
     if findings:
         raise ViewpointFoundationValidationError(findings)

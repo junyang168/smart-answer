@@ -61,3 +61,50 @@ def test_origin_cannot_authorize_new_identity_or_revive(error):
     elif error=='foreign_candidate':row['payload']['identity_candidate_id']='foreign'
     elif error=='wrong_action':row['payload']['proposed_action']='needs_direction'
     assert not retained_historical_origin('V',view,existing)
+
+
+def route_scope_fixture():
+    old={'viewpoint_id':'V','viewpoint_revision_id':'R1','review_status':'system_approved',
+         'core_proposition':'same core','proposition_signature':{'subject':'same'},'scope':{'scripture_scope':['old']}}
+    new={**deepcopy(old),'viewpoint_revision_id':'R2','supersedes_revision_id':'R1','scope':{'scripture_scope':[]}}
+    head={'viewpoint_id':'V','current_revision_id':'R1','review_status':'system_approved'}
+    route={'argument_route_id':'A','current_revision_id':'AR1','conclusion_viewpoint_id':'V','review_status':'system_approved'}
+    revision={'argument_route_id':'A','argument_route_revision_id':'AR1','review_status':'system_approved',
+        'validated_against_conclusion_viewpoint_revision_id':'R1','route_signature':{'conclusion_viewpoint_id':'V'}}
+    existing={('canonical_viewpoints','V'):{'payload':head},('viewpoint_revisions','R1'):{'payload':old},
+        ('argument_routes','A'):{'payload':route},('argument_route_revisions','AR1'):{'payload':revision}}
+    normalized={'canonical_viewpoints':{'V':{**head,'current_revision_id':'R2'}},'viewpoint_revisions':{'R2':new}}
+    return normalized,existing
+
+
+@pytest.mark.parametrize('error',[None,'core','signature','audience','attribution','foreign','no_prior','route_write','hold','retired','route_retired'])
+def test_scope_historical_route_allowset_is_not_new_route_authority(error):
+    from backend.api.canonical_repository.viewpoint_foundation import scope_retained_route_revision_ids
+    n,e=route_scope_fixture();new=n['viewpoint_revisions']['R2']
+    if error=='core':new['core_proposition']='changed'
+    elif error=='signature':new['proposition_signature']={'subject':'changed'}
+    elif error=='audience':new['scope']['audience_scope']=['changed']
+    elif error=='attribution':new['attribution_subject']='editor'
+    elif error=='foreign':new['viewpoint_id']='foreign'
+    elif error=='no_prior':new['supersedes_revision_id']='foreign'
+    elif error=='route_write':n['argument_routes']={'A':e['argument_routes','A']['payload']}
+    elif error=='hold':e['argument_route_revisions','AR1']['payload']['review_status']='human_hold'
+    elif error=='retired':e['argument_route_revisions','AR1']['retired']=True
+    elif error=='route_retired':e['argument_routes','A']['retired']=True
+    assert scope_retained_route_revision_ids(n,e)==({'AR1'} if error is None else set())
+
+
+def test_runtime_use_still_refuses_unrevalidated_route_and_checks_retired_relation_endpoints():
+    from backend.api.canonical_repository.viewpoint_runtime_projection import validate_runtime_authoring_graph
+    n,e=route_scope_fixture()
+    graph={}
+    for (c,i),row in e.items():graph.setdefault(c,{})[i]=row['payload']
+    for c,rows in n.items():graph.setdefault(c,{}).update(rows)
+    assert 'AR1: conclusion viewpoint revision is stale' in validate_runtime_authoring_graph(graph)
+    assert validate_runtime_authoring_graph(graph,retained_route_revision_ids={'AR1'})==[]
+    graph['viewpoint_relations']={'REL':{'source_viewpoint_id':'V','target_viewpoint_id':'V',
+        'validated_source_viewpoint_revision_id':'R1','validated_target_viewpoint_revision_id':'R1',
+        'effective_state':'retired'}}
+    assert not any('REL:' in v for v in validate_runtime_authoring_graph(graph))
+    graph['viewpoint_relations']['REL']['validated_target_viewpoint_revision_id']='missing'
+    assert 'REL: invalid target viewpoint revision' in validate_runtime_authoring_graph(graph)
