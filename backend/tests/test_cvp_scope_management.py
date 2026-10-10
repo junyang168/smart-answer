@@ -143,6 +143,103 @@ def test_historical_structure_visible_but_never_rewritten(scoped):
     assert 'viewpoint_structure_revisions' in c.IMPACT_ONLY
 
 
+def historical_relation(frozen):
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    frozen=deepcopy(frozen);before=c.index(frozen['before_records'])
+    row=deepcopy(before['viewpoint_relations/REL-test'])
+    row.update(viewpoint_relation_id='REL-history',effective_state='retired',revision=2)
+    before['viewpoint_relations/REL-history']=row
+    frozen['before_records']=c.rows(before)
+    frozen['inventory']=m.scope_inventory(before,'CV-test')
+    frozen['sql_scope']={'read_pins':[{'collection':'viewpoint_relations','object_id':'REL-history',
+        'pin':[2,record_content_sha(row),False]}]}
+    return frozen
+
+
+def test_exact_retired_relation_and_old_cvr_are_read_only_impacts(scoped):
+    _,frozen,_,_=scoped;frozen=historical_relation(frozen)
+    p=proposal(frozen)
+    for d in p.dispositions:
+        if d.record_key in {'viewpoint_relations/REL-history','viewpoint_revisions/CVR-old'}:
+            d.action='impact_only'
+    original=p.model_dump();before=c.index(frozen['before_records'])
+    post=c.validate_proposal(frozen,p)
+    assert p.model_dump()==original
+    assert post['viewpoint_relations/REL-history']==before['viewpoint_relations/REL-history']
+    assert post['viewpoint_revisions/CVR-old']==before['viewpoint_revisions/CVR-old']
+    packet=c.review_packet(frozen,p)
+    assert packet['proposal']==original
+    raw={'artifact_sha256':'e'*64,'completed_at':'2026-10-10T00:00:00+00:00',
+        'response':{'verdicts':[{'record_key':d.record_key,'approved':True,'reason':'full review','problems':[]} for d in p.dispositions]}}
+    package=c.compile_package(frozen,p,raw)
+    assert all(row['viewpoint_relation_id']!='REL-history' for row in package.get('viewpoint_relations',[]))
+    assert all(row['viewpoint_revision_id']!='CVR-old' for row in package.get('viewpoint_revisions',[]))
+
+
+@pytest.mark.parametrize('problem',['missing','sha','revision','physical_retired','ambiguous','hold','active','foreign','changed_old_cvr','missing_domain','write_history'])
+def test_historical_scope_impact_proof_negatives(scoped,problem):
+    _,frozen,_,_=scoped;frozen=historical_relation(frozen)
+    if problem=='missing':frozen['sql_scope']['read_pins']=[]
+    if problem=='sha':frozen['sql_scope']['read_pins'][0]['pin'][1]='foreign'
+    if problem=='revision':frozen['sql_scope']['read_pins'][0]['pin'][0]=1
+    if problem=='physical_retired':frozen['sql_scope']['read_pins'][0]['pin'][2]=True
+    if problem=='ambiguous':frozen['sql_scope']['read_pins']*=2
+    before=c.index(frozen['before_records'])
+    if problem=='hold':before['viewpoint_relations/REL-history']['review_status']='human_hold'
+    if problem=='active':before['viewpoint_relations/REL-history']['effective_state']='active'
+    if problem=='foreign':before['viewpoint_relations/REL-history']['target_viewpoint_id']='foreign'
+    if problem=='changed_old_cvr':before['viewpoint_revisions/CVR-old']['core_proposition']='different'
+    frozen['before_records']=c.rows(before)
+    if problem=='missing_domain':frozen.pop('viewpoint_scope_context')
+    p=proposal(historical_relation(scoped[1]))
+    for d in p.dispositions:
+        if d.record_key in {'viewpoint_relations/REL-history','viewpoint_revisions/CVR-old'}:d.action='impact_only'
+    if problem=='write_history':p.records.append(c.Row.model_validate(c.rows({'viewpoint_relations/REL-history':before['viewpoint_relations/REL-history']})[0]))
+    with pytest.raises((ValueError,AttributeError)):c.validate_proposal(frozen,p)
+
+
+def human_relation_reference(frozen):
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    frozen=deepcopy(frozen);before=c.index(frozen['before_records'])
+    before['viewpoint_relations/REL-test']['review_status']='human_approved'
+    frozen['before_records']=c.rows(before)
+    frozen['sql_scope']={'read_pins':[{'collection':'viewpoint_relations','object_id':'REL-test',
+        'pin':[1,record_content_sha(before['viewpoint_relations/REL-test']),False]}]}
+    return frozen
+
+
+def test_human_relation_meaning_remains_exact_in_scope_version_review(scoped):
+    frozen=human_relation_reference(scoped[1]);p=proposal(frozen);before=c.index(frozen['before_records'])
+    post=c.validate_proposal(frozen,p)
+    assert m.approved_relation_reference_only(frozen,'viewpoint_relations/REL-test',c.index(p.records))
+    for f in ['reason','relation_type','source_viewpoint_id','target_viewpoint_id','effective_state']:
+        assert post['viewpoint_relations/REL-test'][f]==before['viewpoint_relations/REL-test'][f]
+    assert post['viewpoint_relations/REL-test']['review_status']=='candidate'
+
+
+@pytest.mark.parametrize('problem',['reason','type','endpoint','support','state','hold','superseded','missing_pin','pin_sha','retired','missing_scope','permission','old_revision','foreign_cvr','old_approval'])
+def test_human_relation_reference_exception_is_not_semantic_authority(scoped,problem):
+    frozen=human_relation_reference(scoped[1]);p=proposal(frozen);before=c.index(frozen['before_records']);proposed=c.index(p.records)
+    row=proposed['viewpoint_relations/REL-test']
+    if problem=='reason':row['reason']='changed'
+    if problem=='type':row['relation_type']='extends'
+    if problem=='endpoint':row['target_viewpoint_id']='foreign'
+    if problem=='support':row['supporting_claim_ids']=['new']
+    if problem=='state':row['effective_state']='retired'
+    if problem=='hold':before['viewpoint_relations/REL-test']['review_status']='human_review_required'
+    if problem=='superseded':before['viewpoint_relations/REL-test']['review_status']='superseded'
+    if problem=='missing_pin':frozen['sql_scope']['read_pins']=[]
+    if problem=='pin_sha':frozen['sql_scope']['read_pins'][0]['pin'][1]='changed'
+    if problem=='retired':frozen['sql_scope']['read_pins'][0]['pin'][2]=True
+    if problem=='missing_scope':frozen.pop('viewpoint_scope_context')
+    if problem=='permission':frozen['manifest']['permissions']=[x for x in frozen['manifest']['permissions'] if x['object_id']!='REL-test']
+    if problem=='old_revision':row['validated_target_viewpoint_revision_id']='CVR-old'
+    if problem=='foreign_cvr':proposed['viewpoint_revisions/CVR-new']['supersedes_revision_id']='foreign'
+    if problem=='old_approval':row['review_provenance']={'review_artifact_sha256':'a'*64}
+    frozen['before_records']=c.rows(before)
+    assert not m.approved_relation_reference_only(frozen,'viewpoint_relations/REL-test',proposed)
+
+
 def test_action_budget_not_changed_by_policy_reason_or_root(scoped,tmp_path):
     manifest,frozen,store,policy=scoped
     from backend.pipeline.cvp_sql_actions import source_action_id

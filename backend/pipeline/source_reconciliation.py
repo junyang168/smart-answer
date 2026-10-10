@@ -578,6 +578,10 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
         raise ValueError('unresolved review requires bounded unchanged CVP context and SQL retirement proof')
     if frozen["inventory"]["unknown_keys"] or (unresolved and not review_only):
         raise ValueError("unknown/unresolved consumer; owner scope or proof required")
+    historical_scope=set()
+    if frozen.get('viewpoint_scope_context'):
+        from backend.pipeline.cvp_scope_management import historical_impact_keys
+        historical_scope=historical_impact_keys(frozen)
     for k, d in dispositions.items():
         c, _ = split_key(k)
         if review_only and k in unresolved:
@@ -585,6 +589,9 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
         if c in IMPACT_ONLY:
             if d.action != "impact_only" or k in proposed:
                 raise ValueError("historical/output consumers may only be invalidated, not regenerated")
+        elif k in historical_scope and d.action=='impact_only':
+            if k in proposed or k in allowed:
+                raise ValueError('historical scope context cannot be proposed or writable: '+k)
         elif d.action == "update":
             if k not in proposed or k not in allowed:
                 raise ValueError("update outside exact permission: " + k)
@@ -604,7 +611,9 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
         if changed_fields - set(permission.fields) - {"revision", id_field} - PROVENANCE:
             raise ValueError("field change outside permission: " + k)
         if old and old.get("review_status") in HUMAN_HOLDS and new != old:
-            raise ValueError("existing human hold/ruling needs an exact separate owner disposition")
+            from backend.pipeline.cvp_scope_management import approved_relation_reference_only
+            if not approved_relation_reference_only(frozen,k,proposed):
+                raise ValueError("existing human hold/ruling needs an exact separate owner disposition")
         if new.get("review_status", "candidate") != "candidate":
             raise ValueError("proposal may not inherit or manufacture approval: " + k)
         if new.get("revision") != (old.get("revision", 1) + 1 if old else 1):

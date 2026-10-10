@@ -91,6 +91,69 @@ def active_links(states, vid):
             and p['viewpoint_id'] == vid and p.get('effective_state', 'active') == 'active'}
 
 
+def historical_impact_keys(frozen):
+    """Scope revision keeps its old CVR and logically withdrawn relations exact.
+
+    This is a read-only disposition, not permission to retire or reactivate.
+    SQL pins bind the complete withdrawn payload, not just its state label.
+    """
+    value=frozen.get('viewpoint_scope_context')
+    if not value or not frozen['manifest'].get('viewpoint_scope_repair'):
+        return set()
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    before=c.index(frozen['before_records'])
+    vid,rid=value['viewpoint_id'],value['before_revision_id']
+    rk=c.key('viewpoint_revisions',rid)
+    if (rk not in before or before[rk]['viewpoint_id']!=vid
+            or sha256_json(before[rk])!=value['before_revision_sha256']):
+        raise ValueError('scope historical revision authority drift')
+    result={rk}
+    pin_rows=frozen.get('sql_scope',{}).get('read_pins',[])
+    pins={(p['collection'],p['object_id']):p['pin'] for p in pin_rows}
+    if len(pins)!=len(pin_rows):raise ValueError('scope historical relation SQL pin ambiguity')
+    for k,p in before.items():
+        if (not k.startswith('viewpoint_relations/') or p.get('effective_state')!='retired'
+                or vid not in {p.get('source_viewpoint_id'),p.get('target_viewpoint_id')}
+                or rid not in {p.get('validated_source_viewpoint_revision_id'),p.get('validated_target_viewpoint_revision_id')}):
+            continue
+        pin=pins.get(tuple(c.split_key(k)))
+        if (pin is None or pin!=[p['revision'],record_content_sha(p),False]
+                or p.get('review_status') not in {'system_approved','human_approved','approved'}):
+            raise ValueError('scope historical relation lacks exact approved SQL payload pin')
+        result.add(k)
+    return result
+
+
+def approved_relation_reference_only(frozen, record_key, proposed):
+    """Existing human semantics remain exact; only a new CVR reference is reviewed."""
+    value=frozen.get('viewpoint_scope_context')
+    if not value or not frozen['manifest'].get('viewpoint_scope_repair'):
+        return False
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    before=c.index(frozen['before_records']);old=before.get(record_key);new=proposed.get(record_key)
+    if (not record_key.startswith('viewpoint_relations/') or not old or not new
+            or old.get('review_status') not in {'human_approved','approved'}
+            or old.get('effective_state','active')!='active'):
+        return False
+    vid,rid=value['viewpoint_id'],value['before_revision_id']
+    hk=c.key('canonical_viewpoints',vid)
+    new_id=proposed.get(hk,{}).get('current_revision_id')
+    if (not new_id or new_id==rid or proposed.get(c.key('viewpoint_revisions',new_id),{}).get('supersedes_revision_id')!=rid):
+        return False
+    fields={f for f in ('validated_source_viewpoint_revision_id','validated_target_viewpoint_revision_id') if old.get(f)==rid}
+    changed={f for f in set(old)|set(new) if old.get(f)!=new.get(f)}
+    if (not fields or changed-fields-{'revision','review_status','review_provenance'}
+            or new.get('review_provenance') is not None
+            or any(new.get(f)!=(new_id if f in fields else old.get(f)) for f in
+                   ('validated_source_viewpoint_revision_id','validated_target_viewpoint_revision_id'))):
+        return False
+    permissions={p.key:p for p in c.Manifest.model_validate(frozen['manifest']).permissions}
+    if record_key not in permissions or set(permissions[record_key].fields)!=fields|{'review_provenance'}:
+        return False
+    rows=[p for p in frozen.get('sql_scope',{}).get('read_pins',[]) if (p['collection'],p['object_id'])==tuple(c.split_key(record_key))]
+    return len(rows)==1 and rows[0]['pin']==[old['revision'],record_content_sha(old),False]
+
+
 def permissions(states, vid):
     head = states[c.key('canonical_viewpoints', vid)]
     rid = head['current_revision_id']
