@@ -3,6 +3,7 @@ from copy import deepcopy
 import pytest
 from backend.api.canonical_repository.postgres_store import record_content_sha
 from backend.pipeline.cvp_sql_actions import supports_identity_dependencies
+from backend.pipeline.cvp_sql_flow import exact_saved_upheld_items
 
 
 def fixture():
@@ -58,3 +59,21 @@ def test_missing_foreign_held_or_changed_forward_proof_rejected(failure):
     elif failure=='drift':r['viewpoint_identity_candidates','I']={**row,'content_sha256':'changed'}
     if failure not in {'hash','missing'}:row['content_sha256']=record_content_sha(p)
     with pytest.raises(ValueError):supports_identity_dependencies(s,r,i)
+
+
+def test_saved_upheld_resumes_exact_original_action_not_rejected_proof():
+    p={'items':[{'item_id':'x','audit_finding':{'reason':'original'},'claim':{'revision':1}}]}
+    r={'actions':[{'item_id':'x','verdict':'audit_objection_upheld'}]}
+    assert exact_saved_upheld_items(p,deepcopy(p),r,{'x'})=={'x'}
+    assert exact_saved_upheld_items(p,p,{'actions':[{'item_id':'x','verdict':'audit_objection_rejected'}]},{'x'})==set()
+
+
+@pytest.mark.parametrize('delta',['claim','finding','missing','extra_upheld'])
+def test_saved_upheld_changed_scope_cannot_resume(delta):
+    p={'items':[{'item_id':'x','audit_finding':{'reason':'original'},'claim':{'revision':1}}]};q=deepcopy(p)
+    r={'actions':[{'item_id':'x','verdict':'audit_objection_upheld'}]}
+    if delta=='claim':q['items'][0]['claim']['revision']=2
+    elif delta=='finding':q['items'][0]['audit_finding']['reason']='changed'
+    elif delta=='missing':q['items']=[]
+    else:r['actions'].append({'item_id':'foreign','verdict':'audit_objection_upheld'})
+    with pytest.raises(ValueError):exact_saved_upheld_items(p,q,r,{'x'})

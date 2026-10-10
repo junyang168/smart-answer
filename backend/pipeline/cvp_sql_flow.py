@@ -241,6 +241,18 @@ def prepare_group(store, definition, group):
                        "historical_snapshot_reads":0}}
 
 
+def exact_saved_upheld_items(old, packet, report, ids):
+    """Resume the existing narrow action; upheld is never a rejected proof."""
+    from backend.pipeline.viewpoint_reused_source_resolution import exact_item
+    upheld={a['item_id'] for a in report['actions'] if a['verdict']=='audit_objection_upheld'}
+    if not upheld & ids:return set()
+    old_index={i['item_id']:i for i in old['items']}
+    current_index={i['item_id']:i for i in packet['items']}
+    if not upheld <= ids or any(not exact_item(old_index.get(i),current_index.get(i)) for i in upheld):
+        raise ValueError('saved upheld postimage input changed; no implicit new review')
+    return upheld
+
+
 def next_group(store, campaign_sha):
     definition = dict(store.get_cvp_campaign(campaign_sha)); definition["campaign_sha256"] = campaign_sha
     progress = store.cvp_campaign_progress(campaign_sha)
@@ -666,6 +678,13 @@ def run_group(store, definition, group, row, *, root):
                 if unresolved:
                     raise ValueError('saved original-source adjudication unresolved; original once reservation retained: '
                                      + ', '.join(unresolved))
+                if exact_saved_upheld_items(old,packet,prior_report,ids):
+                    from backend.pipeline.cvp_sql_actions import execute_supports_action
+                    from backend.pipeline.source_reconciliation_runtime import ProductionPorts
+                    result=execute_supports_action(store,run_id,previous,root=Path(previous).parent/'bounded-supports',ports=ProductionPorts())
+                    if result.get('status')=='already_applied':
+                        raise ValueError('already repaired connection remains upheld; no repeated semantic repair')
+                    return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)
                 reuse_part(audit_path,previous,audit_dir/('known-'+subset_key(previous,ids))/'resolution.json',
                            store,only_item_ids=ids)
                 covered.update(ids)
