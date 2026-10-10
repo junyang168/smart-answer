@@ -272,6 +272,31 @@ def test_compiler_binds_actual_review_not_old_relation_approval(scoped):
     assert not set(result)&{'claims','evidence_steps','source_documents','source_fragments'}
 
 
+def test_scope_forward_template_does_not_change_review_input(scoped):
+    _,frozen,_,_=scoped
+    before=c.index(frozen['before_records'])
+    link=before['viewpoint_claim_links/VCL-test']
+    decision=before['viewpoint_identity_decisions/'+link['decision_id']]
+    k='viewpoint_identity_candidates/'+decision['identity_candidate_id']
+    template=before.pop(k)
+    frozen['before_records']=c.rows(before)
+    frozen['inventory']['affected_keys']=[x for x in frozen['inventory']['affected_keys'] if x!=k]
+    p=proposal(frozen)
+    packet=c.review_packet(frozen,p)
+    raw={'artifact_sha256':'e'*64,'completed_at':'2026-10-10T00:00:00+00:00',
+         'response':{'verdicts':[{'record_key':d.record_key,'approved':True,
+                                'reason':'完整独立核查','problems':[]} for d in p.dispositions]}}
+    result=c.compile_package(frozen,p,raw,provenance_templates={k:template})
+    assert c.review_packet(frozen,p)==packet
+    assert template not in result['viewpoint_identity_candidates']
+    assert all(x['identity_candidate_id']!=template['identity_candidate_id']
+               for x in result['viewpoint_identity_candidates'])
+    with pytest.raises(ValueError,match='foreign scope'):
+        c.compile_package(frozen,p,raw,provenance_templates={'viewpoint_identity_candidates/foreign':template})
+    frozen['manifest']['viewpoint_scope_repair']=None
+    with pytest.raises(ValueError):c.compile_package(frozen,p,raw,provenance_templates={k:template})
+
+
 def test_real_request_budget_keeps_legacy_saved_identity(tmp_path):
     from backend.pipeline.viewpoint_resolution_runtime import authorized_request_limit
     from backend.pipeline.cvp_sql_flow import binding

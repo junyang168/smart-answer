@@ -627,7 +627,7 @@ def validate_package(package: dict, *, historical: bool = False) -> None:
     validate_reviewed_records(package, frozen)
 
 
-def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str | None = None) -> None:
+def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str | None = None, provenance_templates: dict | None = None) -> None:
     """Exact saved proposal/review/package checks on their declared readset.
 
     Not a store authorization entry: validate_package above still reconstructs
@@ -707,7 +707,8 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
         raise ValueError("final review/proposal provenance drift")
     from backend.pipeline.claim_owner_revision import validate_joint
     validate_joint(frozen,proposal,package)
-    rebuilt = contract.compile_package(frozen, proposal, raw, frozen_sha256=frozen_sha256, claim_first=claim_first)
+    rebuilt = contract.compile_package(frozen, proposal, raw, frozen_sha256=frozen_sha256, claim_first=claim_first,
+                                        provenance_templates=provenance_templates)
     if packet.get('membership_resolution'):
         from backend.pipeline.cvp_membership_management import append_joint_package
         rebuilt = append_joint_package(rebuilt,root,frozen,corrected,correction)

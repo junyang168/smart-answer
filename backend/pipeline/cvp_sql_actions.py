@@ -79,7 +79,26 @@ def validate_source_package(package):
         raise ValueError('source action lacks exact SQL group/readset')
     # Shared pure content validator authenticates original model/prompt/once
     # reservation and the complete reviewed records. It does not rebuild freeze.
-    validate_reviewed_records(package,materials,frozen_sha256=application['materials_sha256'])
+    templates={}
+    proof=application.get('identity_template_read_pins')
+    if proof:
+        from backend.api.canonical_repository.postgres_store import record_content_sha
+        check_binding(proof);receipt=body(read(Path(proof['path'])))
+        if (not materials['manifest'].get('viewpoint_scope_repair')
+                or receipt.get('schema_version')!='wang_cvp_scope_identity_template_read_pins_v1'
+                or receipt.get('materials_sha256')!=application['materials_sha256']
+                or receipt.get('terminal_review_sha256')!=application['review_sha256']):
+            raise ValueError('scope template authority drift')
+        rp=decoded_pins(receipt['read_pins'])
+        for row in receipt['templates']:
+            k=(row['collection'],row['object_id']);p=row['payload']
+            if (content.key(*k) in templates or k[0]!='viewpoint_identity_candidates' or k not in rp
+                    or p.get('identity_candidate_id')!=k[1] or record_content_sha(p)!=rp[k][1]
+                    or p.get('review_status') in {'human_hold','human_review_required','withheld_unreviewed','rejected','superseded'}):
+                raise ValueError('scope template payload/pin conflict')
+            templates[content.key(*k)]=p
+        if len(templates)!=len(rp):raise ValueError('scope template denominator drift')
+    validate_reviewed_records(package,materials,frozen_sha256=application['materials_sha256'],provenance_templates=templates)
 
 
 def prepare_source_action(store,run_id,manifest,*,root):
@@ -197,7 +216,38 @@ def execute_source_action(store,run_id,manifest,*,root,ports,claim_first=False):
     proposal,raw=stages.reviewed(materials)
     if manifest.get('viewpoint_scope_repair') and not proposal.records:
         raise ValueError('scope assessment retained existing scope; unresolved original finding needs direction, no empty commit/retry loop')
-    package=content.compile_package(materials,proposal,raw,frozen_sha256=action['materials_sha256'],claim_first=claim_first)
+    templates={}
+    template_proof=None
+    if manifest.get('viewpoint_scope_repair'):
+        from backend.pipeline.viewpoint_resolution_runtime import write_immutable
+        before=content.index(materials['before_records'])
+        records={tuple(k.split('/',1)):{'payload':p,'revision':read_pins[tuple(k.split('/',1))][0],
+                 'content_sha256':read_pins[tuple(k.split('/',1))][1],
+                 'retired':read_pins[tuple(k.split('/',1))][2]} for k,p in before.items()}
+        selected=[]
+        for k in content.index(proposal.records):
+            if not k.startswith('viewpoint_claim_links/'):continue
+            old=before[k]
+            decision=before[content.key('viewpoint_identity_decisions',old['decision_id'])]
+            if content.key('viewpoint_identity_candidates',decision['identity_candidate_id']) not in before:
+                selected.append({'before_link':old})
+        extra=supports_identity_dependencies(store,records,selected)
+        templates={content.key(*k):r['payload'] for k,r in extra.items()}
+        for k,pin in pins(extra).items():
+            if k in read_pins and tuple(read_pins[k])!=tuple(pin):
+                raise ValueError('scope forward template readpin drift')
+            read_pins[k]=pin
+        receipt={
+            'schema_version':'wang_cvp_scope_identity_template_read_pins_v1',
+            'action_id':action['action_id'],'materials_sha256':action['materials_sha256'],
+            'terminal_review_sha256':raw['artifact_sha256'],
+            'read_pins':pin_rows(pins(extra)),
+            'templates':[{'collection':k[0],'object_id':k[1],'payload':r['payload']} for k,r in sorted(extra.items())],
+            'semantic_review_input_changed':False}
+        write_immutable(root/'identity-template-read-pins.json',{**receipt,'artifact_sha256':sha256_json(receipt)})
+        template_proof=binding(root/'identity-template-read-pins.json')
+    package=content.compile_package(materials,proposal,raw,frozen_sha256=action['materials_sha256'],claim_first=claim_first,
+                                    provenance_templates=templates)
     from backend.pipeline.claim_owner_revision import validate_joint
     joint_owner_claim=validate_joint(materials,proposal,package)
     if (root/'membership-resolution.json').exists():
@@ -210,12 +260,14 @@ def execute_source_action(store,run_id,manifest,*,root,ports,claim_first=False):
         'run_id':run_id,'materials':binding(root/'scoped-materials.json'),
         'materials_sha256':action['materials_sha256'],'terminal_stage':raw['stage'],
         'review_sha256':raw['artifact_sha256'],'proposal_sha256':sha256_json(proposal.model_dump())}
+    if template_proof:package['source_repair_application']['identity_template_read_pins']=template_proof
     validate_source_package(package)
     from backend.pipeline.cvp_sql_flow import verified_group_backup
     backup=verified_group_backup(root,package,ports) if issue_context or manifest.get('viewpoint_scope_repair') else ports.backup(root)
     original=store.get_cvp_group(run_id).get('reviewed',{}).get('evidence',{})
     approval={**(original.get('approval',{}) if joint_owner_claim else {}),
               'terminal_review':binding(root/(raw['stage']+'.raw.json'))}
+    if template_proof:approval['scope_identity_template_read_pins']=template_proof
     if joint_owner_claim:
         approval['owner_claim_completion']=materials['owner_claim_completion']
         if materials.get('prior_cvp_management'):

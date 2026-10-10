@@ -930,12 +930,27 @@ def validate_review(packet: dict, response: dict) -> bool:
             and all(v.approved and not v.problems for v in review.verdicts))
 
 
-def compile_package(frozen: dict, proposal: Proposal, raw: dict, *, frozen_sha256: str | None = None, claim_first: bool = False) -> dict:
+def compile_package(frozen: dict, proposal: Proposal, raw: dict, *, frozen_sha256: str | None = None, claim_first: bool = False, provenance_templates: dict | None = None) -> dict:
     """Only declared deterministic provenance changes after actual Opus approval."""
     packet = review_packet(frozen, proposal, claim_first=claim_first)
     if not validate_review(packet, raw["response"]):
         raise ValueError("partial/rejected review cannot authorize a package")
     before = index(frozen["before_records"])
+    # Missing forward candidate templates are not additional semantic input.
+    # The SQL caller authenticates their exact committed history and pins them
+    # in the write transaction; the reviewer packet stays byte-for-byte bound.
+    if provenance_templates:
+        if not frozen['manifest'].get('viewpoint_scope_repair'):
+            raise ValueError('extra provenance templates require scope management')
+        required = {key('viewpoint_identity_candidates', before[key('viewpoint_identity_decisions',
+                    before[k]['decision_id'])]['identity_candidate_id'])
+                    for k in index(proposal.records) if k.startswith('viewpoint_claim_links/')}
+        if set(provenance_templates) - required:
+            raise ValueError('foreign scope provenance template')
+        for k, value in provenance_templates.items():
+            if k in before and before[k] != value:
+                raise ValueError('scope provenance template drift')
+            before[k] = deepcopy(value)
     # A completed consumer may supply the authenticated original full-freeze
     # seal while reading only the exact original reviewer readset. IDs must not
     # change merely because unrelated predecessor rows were not materialized.
