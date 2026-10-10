@@ -89,6 +89,26 @@ def test_selected_exact_finding_cannot_expand_to_new_concern():
         h.verify_item(item,d,{})
 
 
+@pytest.mark.parametrize('fault',['target','authority_seal','not_human','no_commit','run'])
+def test_accepted_postimage_is_not_a_broad_audit_waiver(fault,monkeypatch):
+    d=multi_direction();item=deepcopy(d['items'][0]);item.pop('retained_link_ids')
+    accepted=deepcopy(item['connections'][0]);accepted['viewpoint_id']='v';item['connections'][0]['viewpoint_id']='v'
+    d['items'][0]['connections'][0]['viewpoint_id']='v'
+    d.update(run_id='r',campaign_sha256='c',accepted_postimage_authority={'path':'authority'},applied_change_set_id='KCS')
+    authority=seal({'schema_version':'wang_cvp_link_representation_human_postimage_v1',
+       'authorized_by':'owner','human_content_approval':True,'run_id':'r','campaign_sha256':'c','accepted_after_link':accepted})
+    if fault=='target':authority['accepted_after_link']['viewpoint_id']='foreign';seal(authority)
+    if fault=='authority_seal':authority['artifact_sha256']='wrong'
+    if fault=='not_human':authority['human_content_approval']=False;seal(authority)
+    if fault=='no_commit':d.pop('applied_change_set_id')
+    if fault=='run':authority['run_id']='foreign';seal(authority)
+    seal(d)
+    from backend.pipeline import cvp_sql_flow
+    monkeypatch.setattr(cvp_sql_flow,'check_binding',lambda _:None)
+    monkeypatch.setattr(h,'read_artifact',lambda _:authority)
+    with pytest.raises(ValueError):h.verify_item(item,d,{})
+
+
 def test_append_binding_preserves_original_and_requires_all_flags(tmp_path,monkeypatch):
     from backend.pipeline import cvp_sql_flow
     from backend.pipeline.viewpoint_resolution_runtime import write_immutable,read_artifact

@@ -93,6 +93,22 @@ def verify_item(item, d, audit):
     if d.get('exact_finding_only') and old['audit_finding']!=item['audit_finding']:
         raise ValueError('human retention outside exact authorized finding')
     from backend.pipeline.cvp_sql_flow import check_binding
+    # A human-approved new postimage is an existing current link after commit.
+    # Derive retention from that same explicit decision, not a fresh model pass.
+    if d.get('accepted_postimage_authority'):
+        check_binding(d['accepted_postimage_authority'])
+        authority=read_artifact(d['accepted_postimage_authority']['path'])
+        if (authority.get('schema_version')!='wang_cvp_link_representation_human_postimage_v1'
+                or authority.get('artifact_sha256')!=sha256_json({k:v for k,v in authority.items() if k!='artifact_sha256'})
+                or authority.get('authorized_by')!='owner' or authority.get('human_content_approval') is not True
+                or authority.get('run_id')!=d['run_id'] or authority.get('campaign_sha256')!=d['campaign_sha256']
+                or not d.get('applied_change_set_id')):
+            raise ValueError('human audit postimage authority drift')
+        accepted=authority['accepted_after_link']
+        selected=[l for l in item['connections'] if l['viewpoint_claim_link_id']==accepted['viewpoint_claim_link_id']]
+        ignored={'decision_id','review_status'}
+        if len(selected)!=1 or {k:v for k,v in selected[0].items() if k not in ignored}!={k:v for k,v in accepted.items() if k not in ignored}:
+            raise ValueError('human audit accepted postimage changed')
     check_binding(d['audit'])
     original=read_artifact(d['audit']['path'])
     from backend.pipeline.viewpoint_g035_temporary_audit import validate
@@ -109,7 +125,7 @@ def verify_item(item, d, audit):
             raise ValueError('human retention audited generation drift')
     current_row=next((r for r in audit['layers']['4']['results'] if r['viewpoint_id']==item['viewpoint']['viewpoint_id']),None)
     if (current_row != item['audit_finding'] or item['claim']['claim_id'] not in current_row.get('claim_ids_in_question',[])
-            or current_row.get('issue') not in {'different_proposition','over_merge','other'}):
+            or current_row.get('issue') not in {'different_proposition','over_merge','scope_mismatch','other'}):
         raise ValueError('human retention actual current role finding drift')
     for s in item['sources']:
         check_binding({'path':s['path'],'file_sha256':s['file_sha256']})
@@ -179,6 +195,19 @@ def human_items(audit, packet, root, store):
                         (p['collection'],p['object_id'],p['pin'][0])).fetchall()
                     if len(history)!=1 or history[0]!=(row[2],row[1],row[1],'applied'):
                         raise ValueError('human retention lacks exact committed SQL history')
+                    selected=next(i for i in d['items'] if i['item_id']==item['item_id']).get('retained_link_ids',[])
+                    if d.get('accepted_postimage_authority') and p['collection']=='viewpoint_claim_links' and p['object_id'] in selected:
+                        commit=c.execute('SELECT change_set_id FROM wang_knowledge.object_versions WHERE collection=%s AND object_id=%s AND revision=%s',
+                            (p['collection'],p['object_id'],p['pin'][0])).fetchall()
+                        decision=c.execute("SELECT payload FROM wang_knowledge.objects WHERE collection='viewpoint_identity_decisions' AND object_id=%s AND retired_at IS NULL",
+                            (row[2]['decision_id'],)).fetchone()
+                        authority=read_artifact(d['accepted_postimage_authority']['path'])
+                        if (commit!=[(d['applied_change_set_id'],)] or not decision
+                                or decision[0].get('review_artifact_sha256')!=authority['artifact_sha256']
+                                or decision[0].get('reviewer_kind')!='human_editor'
+                                or decision[0].get('approval_basis')!='human_exception_review'
+                                or decision[0].get('review_status')!='human_approved'):
+                            raise ValueError('human postimage lacks actual committed exception review')
             if item['item_id'] in accepted:raise ValueError('overlapping human retention directions')
             accepted.add(item['item_id']);used.append({'direction':b,'item_id':item['item_id']})
     return accepted,used
@@ -200,7 +229,8 @@ def complete(audit_path, root, store, run_id, output):
     human,used=human_items(audit,packet,root,store)
     if not human:return None
     remaining={i['item_id']:i for i in packet['items'] if i['item_id'] not in human};parts=[];covered=set()
-    for prior in store.adjudication_roots([target_identity(i) for i in remaining.values()]):
+    from backend.pipeline.cvp_sql_adjudication_input_repair import effective_roots
+    for prior in effective_roots(store.adjudication_roots([target_identity(i) for i in remaining.values()])):
         old,findings=validated_history(prior)
         ids={i['item_id'] for i in old['items'] if i['item_id'] in remaining and i['item_id'] not in covered
             and exact_item(i,remaining[i['item_id']]) and findings[i['item_id']]['verdict']=='audit_objection_rejected'}

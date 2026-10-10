@@ -3591,10 +3591,16 @@ class PostgresKnowledgeStore:
             conn.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now() WHERE run_id=%s",(canonical_json(value),run_id))
 
     def register_adjudication_input_repair(self, run_id, *, targets, original_root, original_packet,
-                                          root, packet_binding, authorization):
+                                          root, packet_binding, authorization, quota_resume=False):
         """Append one explicit complete-input call; retain first reservation unchanged."""
-        from backend.pipeline.cvp_sql_adjudication_input_repair import verify_proof
-        direction, proof = verify_proof(Path(root)/'owner-input-repair-proof.json')
+        if quota_resume:
+            from backend.pipeline.cvp_sql_quota_resume import verify_proof, PROOF
+            once_field='manual_quota_resume_once'
+        else:
+            from backend.pipeline.cvp_sql_adjudication_input_repair import verify_proof
+            PROOF='owner-input-repair-proof.json'
+            once_field='input_repair_once'
+        direction, proof = verify_proof(Path(root)/PROOF)
         if direction['run_id'] != run_id or direction['original_root'] != str(original_root):
             raise ChangeSetConflict('input repair SQL direction identity drift')
         from backend.pipeline.viewpoint_audit_owner_resolution import binding
@@ -3618,11 +3624,13 @@ class PostgresKnowledgeStore:
                 prior = history.get(key)
                 if not prior or prior['root'] != str(original_root) or prior['packet'] != original_packet:
                     raise ChangeSetConflict('input repair lacks exact original SQL reservation')
-                if prior.get('input_repair_once') and prior['input_repair_once'] != record:
+                if prior.get(once_field) and prior[once_field] != record:
                     raise ChangeSetConflict('input repair once already reserved; no additional call')
                 if prior.get('additional_roots') not in (None, [], [str(root)]):
                     raise ChangeSetConflict('input repair has another additional reservation')
-                prior['input_repair_once'] = record
+                if any(prior.get(k) for k in ('input_repair_once','manual_quota_resume_once') if k!=once_field):
+                    raise ChangeSetConflict('another explicit adjudication continuation already reserved')
+                prior[once_field] = record
                 prior['additional_roots'] = [str(root)]
             conn.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now() WHERE run_id=%s",(canonical_json(value),run_id))
 

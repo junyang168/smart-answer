@@ -594,6 +594,13 @@ def run_group(store, definition, group, row, *, root):
     validate_transaction_audit(read_artifact(audit_path),group['claim_ids'],views)
     audit_path = content_fallback(audit_path,root/run_id/"content-blocked-fallback")
     audit = read_artifact(audit_path)
+    from backend.pipeline.cvp_sql_quota_resume import NAME as QUOTA_NAME,execute as resume_quota
+    quota_binding=root/QUOTA_NAME
+    if quota_binding.exists():
+        auth=read_artifact(quota_binding)['authorization'];check_binding(auth)
+        quota_direction=read_artifact(auth['path'])
+        if quota_direction['run_id']==run_id and quota_direction['audit_binding']==binding(audit_path):
+            resume_quota(store,run_id,Path(auth['path']))
     resolution=None
     from backend.pipeline.cvp_exact_human_audit_retention import complete as exact_human_complete, partition as exact_human_partition
     if audit['layers']['3'].get('disputed') or audit['layers']['4'].get('disputed'):
@@ -782,6 +789,8 @@ def main(argv=None):
     parser.add_argument('--claim-issue-policy',type=Path,help='Explicit owner bounded Claim/Evidence/CVP policy; no inferred permission')
     parser.add_argument('--cvp-scope-policy',type=Path,help='Normal bounded CVP scope enrichment; no identity/core/Claim/source permission')
     parser.add_argument('--link-representation-disposition',type=Path,help='Exact human acceptance of saved representation postimage; no new model budget')
+    parser.add_argument('--manual-quota-resume-authorization',type=Path,
+                        help='Explicit owner once continuation of exact startup quota/no-answer receipt; never automatic retry')
     parser.add_argument('--request-limit-authorization',type=Path,help='Owner campaign request budget; does not change frozen model inputs or call budgets')
     parser.add_argument('--component-role-authorization', type=Path,
                         help='Exact owner acceptance of an existing structural duplicate finding; no new model/content permission')
@@ -804,6 +813,10 @@ def main(argv=None):
     parser.add_argument('--owner-claim-revision',type=Path,
                         help='Exact human identification of a Claim omission; normal GPT/Opus joint review still required')
     args = parser.parse_args(argv)
+    from backend.pipeline.cvp_sql_quota_resume import NAME as QUOTA_NAME,SCHEMA as QUOTA_SCHEMA
+    quota_binding=args.output_root/QUOTA_NAME
+    if quota_binding.exists() and not args.manual_quota_resume_authorization:
+        raise ValueError('manual quota continuation requires original explicit recovery authority')
     from backend.pipeline.cvp_exact_human_audit_retention import validate_direction,check_explicit_bindings,persist_bindings
     audit_retention_binding={'directions':[binding(p) for p in args.audit_link_retention]}
     check_explicit_bindings(args.output_root,audit_retention_binding['directions'])
@@ -829,6 +842,14 @@ def main(argv=None):
     load_dotenv(PROJECT/".env")
     if args.database_url:os.environ['KNOWLEDGE_DATABASE_URL']=args.database_url
     store = PostgresKnowledgeStore(args.database_url)
+    if args.manual_quota_resume_authorization:
+        d=read_artifact(args.manual_quota_resume_authorization)
+        from backend.pipeline.cvp_sql_quota_resume import sealed
+        sealed(d)
+        if d.get('schema_version')!=QUOTA_SCHEMA or d.get('campaign_sha256')!=args.sql_campaign:
+            raise ValueError('quota resume foreign execution campaign')
+        if not Path(d['original_root']).is_relative_to(args.output_root.resolve()):
+            raise ValueError('quota resume foreign execution root')
     definition,group,row = next_group(store,args.sql_campaign)
     execution_boundary(args.output_root,args.sql_campaign,definition,args.stop_after_group)
     if args.claim_first and args.action!='source':
@@ -882,6 +903,8 @@ def main(argv=None):
     from backend.pipeline.source_reconciliation_runtime import maintenance_lock
     from backend.pipeline.viewpoint_resolution_runtime import authorized_request_limit
     with maintenance_lock(), authorized_request_limit(args.output_root,args.sql_campaign,args.request_limit_authorization):
+        if args.manual_quota_resume_authorization:
+            write_immutable(quota_binding,{'authorization':binding(args.manual_quota_resume_authorization)})
         if args.retained_content_disposition:
             direction=read_artifact(args.retained_content_disposition)
             if direction['campaign_sha256']!=args.sql_campaign or not args.retained_link_review_policy:

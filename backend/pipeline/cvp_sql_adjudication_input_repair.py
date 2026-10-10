@@ -130,6 +130,10 @@ def effective_roots(roots):
     """Use the authorized complete-input result, never erase the original reply."""
     superseded = set()
     for root in roots:
+        from backend.pipeline.cvp_sql_quota_resume import PROOF,verify_proof as verify_quota
+        if (Path(root)/PROOF).exists():
+            direction,_=verify_quota(Path(root)/PROOF)
+            superseded.add(Path(direction['original_root']))
         proof_path = Path(root)/'owner-input-repair-proof.json'
         if proof_path.exists():
             direction, _ = verify_proof(proof_path)

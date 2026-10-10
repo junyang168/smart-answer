@@ -71,7 +71,11 @@ def test_real_saved_scoped_graph_isolated_three_ops_rollback_and_cached_resume(p
     load_dotenv('.env')
     root=Path('/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/staging/cvp-production-357/campaign-sql-20261008-v1-from-g059')
     auth=root/'owner-g098-cl007-link-representation.json';d=json.loads(auth.read_text())
-    m=f.prepare_material(PostgresKnowledgeStore(),d['run_id'],binding(auth));s=postgres_store
+    aid='CVPA-'+f.sha256_json({'contract':f.SCHEMA,'link':d['link_id'],'before':d['before_link_sha256']})
+    # The production action is now committed. Rehydrate its exact saved input
+    # into the isolated database, rather than requiring a stale live preimage.
+    m=deepcopy(PostgresKnowledgeStore().get_cvp_action(d['run_id'],aid)['materials'])
+    f.validate_direction(d,m);s=postgres_store
     # Real saved/current material, isolated database and simulated model answers
     # only. This is not approval of any production role/span postimage.
     rows={ (r['collection'],r['object_id']):r['payload'] for r in m['records']+m['provenance_templates']}

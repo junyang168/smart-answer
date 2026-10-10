@@ -62,6 +62,8 @@ def validated_history(root):
     if proof.exists():
         from backend.pipeline.cvp_sql_adjudication_input_repair import verify_proof
         verify_proof(proof)
+    from backend.pipeline.cvp_sql_quota_resume import PROOF,verify_proof as verify_quota
+    if (root/PROOF).exists():verify_quota(root/PROOF)
     return packet, findings
 
 

@@ -28,7 +28,8 @@ def setup(tmp_path, monkeypatch, verdict='audit_objection_rejected', layer='4'):
     audit_path = tmp_path / 'audit.json'
     write_immutable(audit_path, audit)
     item_id = '4:v:c' if layer == '4' else '3:c:c'
-    packet = seal({'audit_binding': resolution.binding(audit_path), 'items': [{
+    packet = seal({'schema_version':'wang_audit_source_adjudication_packet_v1',
+        'audit_binding': resolution.binding(audit_path), 'items': [{
         'item_id': item_id, 'claim': {'claim_id': 'c'}, 'viewpoint': {'viewpoint_id': 'v'},
         'sources': [{'source_id': 's', **resolution.binding(source),
                      'paragraphs': [{'paragraph_key': 'S0001', 'text': '自己的原文明确解释。'}]}]}]})
