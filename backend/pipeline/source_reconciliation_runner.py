@@ -36,6 +36,8 @@ def effective_proposal(frozen, response):
 
 
 def initial_review_base(frozen, proposal):
+    if frozen.get('claim_issue_context', {}).get('complete_input_repair'):
+        return contract.review_packet(frozen, proposal)
     if frozen.get('owner_claim_completion') and any(d.action=='unresolved' for d in proposal.dispositions):
         return contract.review_packet(frozen,proposal,review_only=True)
     if not frozen.get('claim_issue_context', {}).get('scope_amendment'):
@@ -351,6 +353,9 @@ class Runner:
         initial = self.call("initial_review", review_packet)
         if contract.validate_review(review_packet, initial["response"]):
             return proposed, initial
+        if frozen.get('claim_issue_context',{}).get('complete_input_repair'):
+            raise Stop('complete-input repair independent review rejected; no extra correction',
+                       status='root_cause_required',waiting_for='system')
         # Exactly one correction, never an extra GPT preapproval/review stage.
         correction_packet = {**packet, "initial_proposal": proposed.model_dump(), "Opus_review": initial["response"],
                              "correction_round": 1, "another_correction_allowed": False}
@@ -550,6 +555,9 @@ def build_proposal_packet(frozen: dict) -> dict:
         result["claim_issue_context"] = frozen["claim_issue_context"]
         result["writable_record_shapes"] = {col: contract.KNOWLEDGE_COLLECTIONS[col][0].model_json_schema()
             for col in sorted({p["collection"] for p in frozen["manifest"]["permissions"]})}
+        if frozen['claim_issue_context'].get('complete_input_repair'):
+            from backend.pipeline.claim_complete_input_repair import input_receipt
+            result['complete_input_repair_receipt'] = input_receipt(frozen)
     if any(contract.split_key(k)[0]=='knowledge_routes' for k in frozen['inventory']['unknown_keys']):
         result['inventory'] = {**frozen['inventory'], 'unknown_keys': contract.unresolved_consumers(frozen)}
         result['read_only_adapter_receipt'] = {'schema': 'knowledge_route_impact_only_v1',
@@ -569,6 +577,8 @@ def disclosed_review_base(frozen, base, *, saved=None):
     if 'read_only_adapter_receipt' in disclosed:
         base = {**base, 'inventory': disclosed['inventory'],
                 'read_only_adapter_receipt': disclosed['read_only_adapter_receipt']}
+    if 'complete_input_repair_receipt' in disclosed:
+        base = {**base, 'complete_input_repair_receipt': disclosed['complete_input_repair_receipt']}
     return base
 
 

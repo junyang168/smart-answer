@@ -15,6 +15,9 @@ NAME = 'claim-issue-rescope-authorization-binding.json'
 
 
 def validate_direction(direction, *, snapshots=None):
+    from backend.pipeline.claim_complete_input_repair import SCHEMA as REPAIR_SCHEMA, validate
+    if direction.get('schema_version') == REPAIR_SCHEMA:
+        return validate(direction,snapshots=snapshots)
     if (direction.get('schema_version') != SCHEMA or direction.get('authorized_by') != 'owner'
             or not direction.get('authorization_quote') or direction.get('human_content_approval') is not False
             or direction.get('additional_proposal_limit') != 1
@@ -83,7 +86,8 @@ def validate_live(store, direction):
     for issue in material['claim_issue_context']['issues']:
         from backend.pipeline.claim_issue_management import Issue
         row=store.get_claim_issue(Issue.model_validate(issue).issue_id)
-        if not row or row['correction_used'] or row['terminal_refusal']:
+        from backend.pipeline.claim_complete_input_repair import SCHEMA as REPAIR_SCHEMA
+        if not row or (direction['schema_version']!=REPAIR_SCHEMA and (row['correction_used'] or row['terminal_refusal'])):
             raise ValueError('original issue budget cannot acquire an amendment')
     return material, raw
 
@@ -94,6 +98,11 @@ def permissions(context, states, snapshots=None):
     if context['issues']!=old['claim_issue_context']['issues'] or context['policy']!=direction['new_policy']:
         raise ValueError('amendment cannot rename original issues or replace its new policy')
     result=[c.Permission.model_validate(p) for p in direction['link_permissions']]
+    from backend.pipeline.claim_complete_input_repair import SCHEMA as REPAIR_SCHEMA
+    if direction['schema_version']==REPAIR_SCHEMA:
+        if any(states.get(k)!=v for k,v in c.index(old['before_records']).items()):
+            raise ValueError('complete-input repair original graph changed')
+        return result
     before=c.index(old['before_records'])
     if any(states.get(p.key)!=before[p.key] for p in result):
         raise ValueError('amendment current link differs from original diagnosis')
@@ -110,10 +119,14 @@ def amend_manifest(store, direction, authorization, root):
     context=body(old['claim_issue_context'])
     context['policy']=direction['new_policy']
     context['scope_amendment']=authorization
+    from backend.pipeline.claim_complete_input_repair import SCHEMA as REPAIR_SCHEMA, mark_context
+    repair=direction['schema_version']==REPAIR_SCHEMA
+    if repair:mark_context(context)
     write(root/'issue-context.json',context)
     manifest.claim_issue=c.FileBinding.model_validate(binding(root/'issue-context.json'))
     policy=read_policy(direction['new_policy'])
-    manifest.permissions=policy_permissions(policy,states,manifest.source_id,context['claim_ids'])
+    manifest.permissions=policy_permissions(policy,states,manifest.source_id,context['claim_ids'],
+        retained_occurrences=context.get('retained_occurrence_context',[]),current_anchor_scope=repair)
     manifest.permissions=[p for p in manifest.permissions if p.collection!='evidence_steps' or p.object_id in direction['evidence_ids']]
     manifest.permissions += [c.Permission.model_validate(p) for p in direction['link_permissions']]
     auth={'source_id':manifest.source_id,'authorization_id':policy.authorization_id,
@@ -162,7 +175,8 @@ def execute(store, run_id, *, authorization, root, ports):
     direction=json.loads(c.bound_bytes(authorization))
     if direction['run_id']!=run_id:
         raise ValueError('scope amendment requires its original group')
-    work=Path(direction['old_action_root']).parent.parent/'scope-amendment-once'
+    from backend.pipeline.claim_complete_input_repair import SCHEMA as REPAIR_SCHEMA
+    work=Path(direction['old_action_root']).parent.parent/('complete-input-repair-once' if direction['schema_version']==REPAIR_SCHEMA else 'scope-amendment-once')
     if not work.resolve().is_relative_to(Path(root).resolve()):
         raise ValueError('scope amendment cannot move roots to acquire a budget')
     path=work/'manifest.json'

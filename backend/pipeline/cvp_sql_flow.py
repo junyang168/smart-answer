@@ -484,8 +484,11 @@ def run_group(store, definition, group, row, *, root):
     store.bind_cvp_execution_root(run_id,identity='group',root=root/run_id)
     model_root = root/run_id/"normal-review"
     if saved["checkpoint"] == "prepared":
+        from backend.pipeline.claim_complete_input_repair import NAME as INPUT_REPAIR_NAME
         from backend.pipeline.claim_issue_rescope import NAME, execute as amend
-        amendment=root/NAME
+        repair_binding=root/INPUT_REPAIR_NAME
+        amendment=repair_binding if repair_binding.exists() and read_artifact(
+            read_artifact(repair_binding)['authorization']['path'])['run_id']==run_id else root/NAME
         authorization=read_artifact(amendment)['authorization'] if amendment.exists() else None
         direction=read_artifact(authorization['path']) if authorization else None
         if direction and direction['run_id']==run_id:
@@ -812,6 +815,8 @@ def main(argv=None):
                         help='Exact once-only engineering review input repair; no content or correction permission')
     parser.add_argument('--claim-issue-rescope-authorization',type=Path,
                         help='Exact once-only pre-review scope amendment; original issue calls remain reserved')
+    parser.add_argument('--claim-complete-input-repair-authorization',type=Path,
+                        help='Exact once-only proven Claim input repair; original calls remain immutable')
     parser.add_argument('--retained-link-review-policy',type=Path,
                         help='Separate existing approved links from new proposed writes; no mutation/retry permission')
     parser.add_argument('--retained-generation-artifact',type=Path,action='append',default=[],
@@ -840,6 +845,9 @@ def main(argv=None):
     from backend.pipeline.claim_issue_rescope import NAME as AMENDMENT_NAME
     if (args.output_root/AMENDMENT_NAME).exists() and not args.claim_issue_rescope_authorization:
         raise ValueError('Claim issue scope amendment binding requires explicit recovery flag')
+    from backend.pipeline.claim_complete_input_repair import NAME as INPUT_REPAIR_NAME, SCHEMA as INPUT_REPAIR_SCHEMA
+    if (args.output_root/INPUT_REPAIR_NAME).exists() and not args.claim_complete_input_repair_authorization:
+        raise ValueError('Claim complete input repair binding requires explicit recovery flag')
     from backend.pipeline.cvp_retained_review_separation import NAME as RETAINED_NAME
     if (args.output_root/RETAINED_NAME).exists() and not args.retained_link_review_policy:
         raise ValueError('retained-link separation binding requires explicit recovery flag')
@@ -966,6 +974,19 @@ def main(argv=None):
             aid='CVPA-'+sha256_json({'kind':'claim_issue_scope_amendment_once','parent':direction['old_action_id']})
             if not store.cvp_action_committed(direction['run_id'],aid):validate_live(store,direction)
             write_immutable(args.output_root/AMENDMENT_NAME,{'authorization':authorization})
+        if args.claim_complete_input_repair_authorization:
+            from backend.pipeline.claim_issue_rescope import validate_live
+            authorization=binding(args.claim_complete_input_repair_authorization)
+            direction=read_artifact(args.claim_complete_input_repair_authorization)
+            target=store.get_cvp_group(direction['run_id'])
+            if (direction.get('schema_version')!=INPUT_REPAIR_SCHEMA or direction['campaign_sha256']!=args.sql_campaign
+                    or not target or target['campaign_sha256']!=args.sql_campaign
+                    or (invocation_limit is not None and target['sequence']>invocation_limit)
+                    or not Path(direction['old_action_root']).resolve().is_relative_to((args.output_root/direction['run_id']/'claim-issues').resolve())):
+                raise ValueError('Claim complete-input repair campaign/root/boundary drift')
+            aid='CVPA-'+sha256_json({'kind':'claim_issue_scope_amendment_once','parent':direction['old_action_id']})
+            if not store.cvp_action_committed(direction['run_id'],aid):validate_live(store,direction)
+            write_immutable(args.output_root/INPUT_REPAIR_NAME,{'authorization':authorization})
         if args.source_review_input_repair_authorization:
             from backend.pipeline.source_review_input_repair import SCHEMA, NAME
             direction = read_artifact(args.source_review_input_repair_authorization)

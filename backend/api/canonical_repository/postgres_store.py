@@ -3467,7 +3467,9 @@ class PostgresKnowledgeStore:
                 ident='CVPI-'+issue_id
                 row=conn.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE',(ident,)).fetchone()
                 value=row[0] if row else None
-                if (not value or value['owner_run_id']!=run_id or value['correction_used'] or value['terminal_refusal']
+                from backend.pipeline.claim_complete_input_repair import SCHEMA as REPAIR_SCHEMA
+                if (not value or value['owner_run_id']!=run_id
+                        or (direction['schema_version']!=REPAIR_SCHEMA and (value['correction_used'] or value['terminal_refusal']))
                         or value.get('action')!={'run_id':run_id,'action_id':direction['old_action_id']}):
                     raise ChangeSetConflict('scope amendment cannot replace original issue reservation')
                 bound={'run_id':run_id,'action_id':action_id,'authorization':authorization}
@@ -3534,6 +3536,7 @@ class PostgresKnowledgeStore:
         action_id=bound['action_id'];amendment=issue.get('scope_amendment')
         if amendment:
             from backend.pipeline.claim_issue_rescope import SCHEMA
+            from backend.pipeline.claim_complete_input_repair import SCHEMA as REPAIR_SCHEMA
             from backend.pipeline.cvp_sql_flow import check_binding
             from backend.pipeline.viewpoint_resolution_runtime import read_artifact
             auth=amendment['authorization'];check_binding(auth);direction=read_artifact(auth['path'])
@@ -3541,13 +3544,16 @@ class PostgresKnowledgeStore:
             cursor.execute("SELECT metadata->>'campaign_sha256' FROM wang_knowledge.pipeline_runs WHERE run_id=%s",(run_id,))
             campaign=cursor.fetchone()
             if (amendment.get('run_id')!=run_id or amendment.get('action_id')!=expected
-                    or direction.get('schema_version')!=SCHEMA or direction.get('authorized_by')!='owner'
+                    or direction.get('schema_version') not in {SCHEMA,REPAIR_SCHEMA} or direction.get('authorized_by')!='owner'
                     or direction.get('human_content_approval') is not False
                     or direction.get('additional_proposal_limit')!=1 or not direction.get('authorization_quote')
                     or direction.get('run_id')!=run_id or direction.get('old_action_id')!=action_id
                     or not campaign or direction.get('campaign_sha256')!=campaign[0]
                     or direction.get('artifact_sha256')!=sha256_json({k:v for k,v in direction.items() if k!='artifact_sha256'})):
                 raise ChangeSetConflict('Claim issue completion amendment authority drift')
+            if direction['schema_version']==REPAIR_SCHEMA and (direction.get('additional_review_limit')!=1
+                    or direction.get('additional_correction_limit')!=0):
+                raise ChangeSetConflict('Claim issue complete-input repair completion budget drift')
             action_id=expected
             ident='CVPA-'+sha256_json({'parent':run_id,'action':action_id})
             cursor.execute("""SELECT metadata->'action'->>'kind',
