@@ -76,6 +76,130 @@ def test_exact_original_context_separated_zero_mutation_and_zero_new_correction(
     assert flow.build_boundary(root,store,**kw)[1]==receipt
 
 
+@pytest.fixture
+def passed_null(sample):
+    root,store,records,kw,policy=sample
+    old=records['viewpoint_claim_links','L']['payload']
+    old.update(link_type='supports',component_locator=None)
+    decision=records['viewpoint_identity_decisions','D']['payload']
+    decision['claim_link_decisions'][0]['link_type']='supports'
+    for row in records.values():row['content_sha256']=record_content_sha(row['payload'])
+    kw['packet'].update(batch_id='B',packet_sha256='packet')
+    kw['packet']['retained_existing_claim_links']=[deepcopy(old)]
+    write_immutable(root/'batch-packet.json',kw['packet'])
+    policy['policy']={'path':'original-policy','file_sha256':'original-sha'}
+    write_immutable(root/'retained-review-input-profile.json',{
+        'schema_version':flow.VERSION,'batch_id':'B','packet_sha256':'packet',
+        'policy':policy['policy'],'old_answers_upgraded':False})
+    p=deepcopy(kw['original']);p['claim_decisions'][0]['components'][0]['disposition']='support_existing'
+    r=deepcopy(kw['review']);r['change_reviews'][0]['decision']='pass'
+    report={'_effective_proposal':SimpleNamespace(model_dump=lambda **_:p),
+            '_review':SimpleNamespace(model_dump=lambda **_:r),'_final_review':None,
+            'approval_outcome':'pass','escalations':[]}
+    materials={'packet':{'existing_links':[deepcopy(old)]},'read_pins':[
+        {'collection':col,'object_id':oid,'pin':[v['revision'],v['content_sha256'],False]}
+        for (col,oid),v in records.items()]}
+    return root,store,records,materials,report,kw['source_loader'],p,r
+
+
+def test_normal_pass_keeps_null_without_rejection_correction_or_sql_write(passed_null):
+    root,store,records,m,report,loader,p,r=passed_null
+    before=deepcopy(records);raw_before={f.name:f.read_bytes() for f in root.glob('raw*.json')}
+    receipt=flow.passed_null_locator_retention(root,store,m,report,loader)
+    assert receipt['retained_null_locator_links']==['L']
+    assert receipt['display_spans_are_storage_authority'] is False
+    assert records==before and raw_before=={f.name:f.read_bytes() for f in root.glob('raw*.json')}
+    assert flow.passed_null_locator_retention(root,store,m,report,loader)==receipt
+
+
+@pytest.mark.parametrize('fault',['reject','ambiguous','target','evidence','fragment','claim_version',
+    'sql_drift','retired','approval','foreign_decision','head','read_pin','source','escalation','legacy_profile'])
+def test_normal_null_retention_fails_closed(passed_null,fault):
+    root,store,records,m,report,loader,p,r=passed_null
+    part=p['claim_decisions'][0]['components'][0]
+    if fault=='reject':r['change_reviews'][0]['decision']='reject'
+    elif fault=='ambiguous':p['claim_decisions'][0]['components'].append(deepcopy(part))
+    elif fault=='target':part['target_viewpoint_revision_id']='foreign'
+    elif fault=='evidence':part['evidence_step_ids']=[]
+    elif fault=='fragment':part['source_fragment_ids']=[]
+    elif fault=='claim_version':m['packet']['existing_links'][0]['pinned_claim_revision']=99
+    elif fault=='sql_drift':records['viewpoint_claim_links','L']['content_sha256']='drift'
+    elif fault=='retired':records['viewpoint_claim_links','L']['retired']=True
+    elif fault in ('approval','foreign_decision'):
+        d=records['viewpoint_identity_decisions','D']
+        d['payload']['approval_basis' if fault=='approval' else 'resolved_viewpoint_id']='foreign'
+        d['content_sha256']=record_content_sha(d['payload'])
+        next(x for x in m['read_pins'] if x['object_id']=='D')['pin'][1]=d['content_sha256']
+    elif fault=='head':
+        h=records['canonical_viewpoints','V'];h['payload']['current_revision_id']='foreign'
+        h['content_sha256']=record_content_sha(h['payload'])
+        next(x for x in m['read_pins'] if x['object_id']=='V')['pin'][1]=h['content_sha256']
+    elif fault=='read_pin':m['read_pins']=[]
+    elif fault=='source':loader=lambda _:[]
+    elif fault=='escalation':report['escalations']=['unresolved']
+    elif fault=='legacy_profile':
+        # An absent original profile is not upgraded on recovery.
+        other=root/'legacy';other.mkdir();root=other
+        assert flow.passed_null_locator_retention(root,store,m,report,loader) is None
+        return
+    with pytest.raises(ValueError):flow.passed_null_locator_retention(root,store,m,report,loader)
+
+
+def test_actual_g108_passed_null_package_readonly(monkeypatch):
+    import os
+    if os.environ.get('WKP_CVP_G108_READONLY')!='1':
+        pytest.skip('explicit production saved-artifact read-only opt in')
+    from dotenv import load_dotenv
+    from backend.pipeline import cvp_sql_flow as sql, viewpoint_resolution_runtime as rt
+    from backend.pipeline import viewpoint_batch_resolution_runner as runner, cvp_model_retry_once as retry
+    from backend.pipeline.cvp_batch_identity_integration import ENABLED
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    load_dotenv('.env')
+    root=Path('/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/staging/cvp-production-357/campaign-sql-20261008-v1-from-g059')
+    run='CVPG-5286f56693a227f1052e124b3b72c0c2744b9f42dc70522b458c0020696c3091'
+    store=PostgresKnowledgeStore();group=store.get_cvp_group(run);out=root/'execution'/run/'normal-review'
+    before={p:p.read_bytes() for p in out.iterdir() if p.is_file()};captured={};calls=[]
+    def saved(adapter,payload,cache):
+        adapter=rt.response_adapter(adapter,rt.read_artifact(cache))
+        response=rt.read_saved_model_response(adapter,payload,cache);calls.append(cache.name)
+        return rt.bound_model_response(adapter,payload,response,cache,persist=False),0,0.0
+    def immutable(path,value,**_):
+        if Path(path).exists():assert rt.read_artifact(path)==value
+        else:captured[str(path)]=value
+    actual_binding=sql.binding
+    monkeypatch.setattr(runner,'_call',saved)
+    for obj,name in ((rt,'write_immutable'),(runner,'_write_immutable'),(sql,'write_immutable')):
+        monkeypatch.setattr(obj,name,immutable)
+    monkeypatch.setattr(runner,'_write_derived',lambda *a,**k:None)
+    monkeypatch.setattr(runner,'_write_current_state',lambda *a,**k:None)
+    # The bounded common runtime is reconstructed above with explicit sinks;
+    # also suppress its append-only measurements (not approval evidence).
+    monkeypatch.setattr(rt,'validating_saved_artifacts',lambda:True)
+    monkeypatch.setattr(sql,'binding',lambda p: {'path':str(p),'file_sha256':'nonpersistent-test-only'}
+                        if str(p) in captured else actual_binding(p))
+    auth=root/'owner-g108-model-timeout-retry-once.json'
+    token=retry.ACTIVE.set((actual_binding(auth),rt.read_artifact(auth)));integration=ENABLED.set(True)
+    try:
+        with store.connect() as conn,conn.cursor() as cursor:
+            store._assert_transaction_read_pins(cursor,sql.decoded_pins(group['materials']['read_pins']))
+        package,approval,_=sql.reviewed_cvp_package(out,group['materials'],store)
+        original={l['viewpoint_claim_link_id']:l for l in group['materials']['packet']['existing_links']}
+        for link in package['viewpoint_claim_links']:
+            if link['viewpoint_claim_link_id'] in original:assert link==original[link['viewpoint_claim_link_id']]
+        receipt=captured[str(out/'passed-null-locator-retention.json')]
+        assert receipt['retained_null_locator_links']==['VCL-221d7e13acd066f31a75','VCL-b0e4aebdee9fcbd78ca8']
+        plan=store.plan_package(package,transactional=True)
+        assert all(op.operation=='create' for op in plan.operations)
+        assert not any(op.object_id in original for op in plan.operations)
+        print('actual readonly write set:',len(plan.operations),'creates;',len(original),'existing links unchanged;',
+              len(group['materials']['read_pins']),'current SQL pins')
+        assert calls==['raw-proposal.json','raw-consolidation.json','raw-review.json']
+        assert before=={p:p.read_bytes() for p in out.iterdir() if p.is_file()}
+        assert 'passed_null_locator_retention' in approval
+    finally:
+        retry.ACTIVE.reset(token);ENABLED.reset(integration)
+
+
 def test_explicit_retained_doubt_still_requires_exact_existing_connection(sample):
     root,store,records,kw,_=sample
     kw['review']['change_reviews'][0]['finding_codes']=[

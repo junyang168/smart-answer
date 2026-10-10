@@ -363,6 +363,10 @@ def reviewed_cvp_package(root, materials, store, *, require_resolved=False):
                      else report.get('_initial_proposal_artifact_name', 'raw-proposal.json'))
     review_name = "raw-final-review.json" if report["_final_review"] is not None else report.get('_initial_review_artifact_name',"raw-review.json")
     proposal = read_artifact(root/proposal_name); review = read_artifact(root/review_name)
+    from backend.pipeline.cvp_retained_review_separation import passed_null_locator_retention
+    null_retention = passed_null_locator_retention(root,store,materials,report,identity_source_loader)
+    retained_null_ids = ((report.get('_retained_review_boundary') or {}).get('retained_null_locator_links',[])
+                         if null_retention is None else null_retention['retained_null_locator_links'])
     package = compile_cvp_batch_package(proposal=report["_effective_proposal"],review=report["_review"],
         deterministic_validation_sha256=report["_effective_validation"]["artifact_sha256"],
         scope_manifest_sha256=packet["current_claim_manifest_sha256"],claims=[ReviewClaim.model_validate(row) for row in packet["claims"]],
@@ -371,12 +375,14 @@ def reviewed_cvp_package(root, materials, store, *, require_resolved=False):
         proposer_model_id=proposal["model_id"],reviewer_model_id=review["model_id"],decided_at=stable_decided_at(root),
         current_claim_links=packet["existing_links"],
         retained_write_scope=write_scope,
-        retained_null_link_ids=(report.get('_retained_review_boundary') or {}).get('retained_null_locator_links',[]))
+        retained_null_link_ids=retained_null_ids)
     write_immutable(root/"reviewed-package.json",package)
     from backend.api.canonical_repository.viewpoint_batch_resolution import build_batch_disposition
     disposition = build_batch_disposition(proposal=report["_effective_proposal"],batch_identity={"batch_id":packet["batch_id"]},
         effective_proposal_sha256=sha256_json(report["_effective_proposal"].model_dump(mode="json")),apply_status="planned")
     approval = {"proposal":binding(root/proposal_name),"review":binding(root/review_name)}
+    if null_retention is not None:
+        approval['passed_null_locator_retention']=binding(root/'passed-null-locator-retention.json')
     if write_scope is not None:
         approval['retained_write_scope']=binding(root/'retained-write-scope-authority.json')
         approval['human_retained_content_disposition']=write_scope['human_disposition']

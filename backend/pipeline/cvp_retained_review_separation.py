@@ -287,6 +287,96 @@ def reflect_current_links(proposal, matched, claims):
     return result, changes
 
 
+def passed_null_locator_retention(root, store, materials, report, source_loader):
+    """A fresh retained-profile pass preserves SQL null, not display spans.
+
+    The disagreement/final-review boundary is a different path. A normal
+    initial pass already reviewed the stored representation with full own
+    bodies; requiring a prior rejection to preserve it is a compiler defect.
+    No reviewer prose is interpreted and no proposal/verdict is rewritten.
+    """
+    from backend.pipeline.cvp_sql_flow import binding, decoded_pins
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact, write_immutable
+    from backend.pipeline.cvp_link_target_selection import _approved
+    root = Path(root)
+    profile_path = root/'retained-review-input-profile.json'
+    if (not profile_path.exists() or report.get('_final_review') is not None
+            or not any(l['link_type']=='supports' and l.get('component_locator') is None
+                       for l in materials['packet']['existing_links'])):
+        return None
+    policy = policy_for(root)
+    profile = read_artifact(profile_path)
+    packet = read_artifact(root/'batch-packet.json')
+    if (policy is None or profile != {'schema_version':VERSION,
+            'batch_id':packet['batch_id'], 'packet_sha256':packet['packet_sha256'],
+            'policy':policy['policy'], 'old_answers_upgraded':False}):
+        raise ValueError('passed null retention requires original retained review profile')
+    proposal = report['_effective_proposal'].model_dump(mode='json')
+    review = report['_review'].model_dump(mode='json')
+    if report['approval_outcome'] != 'pass' or report['escalations']:
+        raise ValueError('passed null retention cannot resolve rejected content')
+    current = materials['packet']['existing_links']
+    claims = {c['claim_id']:c for c in packet['claims']}
+    decisions = {d['claim_id']:d['components'] for d in proposal['claim_decisions']}
+    judgments = {(r['claim_id'],r['component_index']):r for r in review['change_reviews']}
+    expected = decoded_pins(materials['read_pins'])
+    pins = []; selected = []
+    for link in current:
+        if link['link_type'] != 'supports' or link.get('component_locator') is not None:
+            continue
+        cid = link['claim_id']
+        alternatives = [i for i,p in enumerate(decisions.get(cid,[]))
+            if p['disposition']=='support_existing'
+            and p['target_viewpoint_revision_id']==link['validated_against_viewpoint_revision_id']
+            and sorted(p['evidence_step_ids'])==sorted({b['evidence_step_id'] for b in link['evidence_bindings']})
+            and sorted(p['source_fragment_ids'])==sorted({b['source_fragment_id'] for b in link['evidence_bindings']})]
+        if len(alternatives)!=1:
+            raise ValueError('passed null retention missing/ambiguous exact component')
+        judgment = judgments.get((cid,alternatives[0]))
+        if not judgment or judgment['decision']!='pass':
+            raise ValueError('passed null retention requires independent component pass')
+        claim = claims.get(cid)
+        if not claim or claim['pinned_claim_revision']!=link['pinned_claim_revision']:
+            raise ValueError('passed null retention stale Claim')
+        rows = {}
+        for col,oid in [('viewpoint_claim_links',link['viewpoint_claim_link_id']),
+                        ('viewpoint_identity_decisions',link['decision_id']),
+                        ('canonical_viewpoints',link['viewpoint_id']),
+                        ('viewpoint_revisions',link['validated_against_viewpoint_revision_id'])]:
+            row = store.get_record_state(col,oid)
+            if (not row or row.get('retired') or row['content_sha256']!=record_content_sha(row['payload'])
+                    or expected.get((col,oid))!=(row['revision'],row['content_sha256'],False)):
+                raise ValueError('passed null retention SQL/read pin drift')
+            _approved(row['payload']); rows[col]=row['payload']
+            pins.append({'collection':col,'object_id':oid,'revision':row['revision'],
+                         'content_sha256':row['content_sha256']})
+        d=rows['viewpoint_identity_decisions']
+        if (rows['viewpoint_claim_links']!=link
+                or rows['canonical_viewpoints']['current_revision_id']!=link['validated_against_viewpoint_revision_id']
+                or rows['viewpoint_revisions']['viewpoint_id']!=link['viewpoint_id']
+                or d['resolved_viewpoint_id']!=link['viewpoint_id']
+                or d.get('approval_basis')!='dual_model_consensus'
+                or not d.get('review_artifact_sha256')
+                or len(d.get('semantic_call_artifact_sha256s',[]))<2
+                or {'claim_id':cid,'link_type':'supports'} not in d['claim_link_decisions']):
+            raise ValueError('passed null retention lacks exact current independent approval')
+        selected.append(link['viewpoint_claim_link_id'])
+    if not selected:return None
+    if len(set(selected))!=len(selected):
+        raise ValueError('passed null retention duplicate stored link')
+    sources=source_loader(sorted({c['source_id'] for c in claims.values()}))
+    if {s['source_id'] for s in sources}!={c['source_id'] for c in claims.values()}:
+        raise ValueError('passed null retention missing full own source')
+    receipt={'schema_version':'wang_cvp_passed_null_locator_retention_v1',
+        'original_input_profile':binding(profile_path), 'original_review':binding(root/'raw-review.json'),
+        'proposal_sha256':sha256_json(proposal),'review_sha256':sha256_json(review),
+        'retained_null_locator_links':sorted(selected),'current_read_pins':pins,
+        'own_source_bodies':sources,'registry_mutations':0,'model_verdicts_changed':False,
+        'display_spans_are_storage_authority':False}
+    write_immutable(root/'passed-null-locator-retention.json',receipt)
+    return receipt
+
+
 def build_boundary(root, store, *, original, revised, review, packet, source_loader, reconsideration):
     from backend.pipeline.cvp_sql_flow import binding, check_binding
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact, write_immutable
