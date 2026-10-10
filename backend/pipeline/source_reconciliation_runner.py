@@ -36,6 +36,8 @@ def effective_proposal(frozen, response):
 
 
 def initial_review_base(frozen, proposal):
+    if frozen.get('owner_claim_completion') and any(d.action=='unresolved' for d in proposal.dispositions):
+        return contract.review_packet(frozen,proposal,review_only=True)
     if not frozen.get('claim_issue_context', {}).get('scope_amendment'):
         return contract.review_packet(frozen, proposal)
     unresolved = any(d.action == 'unresolved' for d in proposal.dispositions)

@@ -81,6 +81,34 @@ def test_external_dependency_not_added_to_campaign(direction_case):
     d,v,s=direction_case;before=deepcopy(v);seal(d);m.validate_direction(d,v,s);assert v==before
 
 
+def test_partial_review_never_approves_incomplete_connections(direction_case,tmp_path):
+    d,v,s=direction_case;seal(d)
+    path=tmp_path/'direction.json';path.write_text(json.dumps(d))
+    link={'claim_id':'C','viewpoint_id':'V','viewpoint_claim_link_id':'L','revision':2}
+    frozen={'owner_claim_completion':binding(path),'before_records':c.rows({'claims/C':s['payload'],'viewpoint_claim_links/L':link}),
+        'sql_scope':{'read_pins':v['reviewed']['evidence']['read_pins']+[{'collection':'viewpoint_claim_links',
+            'object_id':'L','pin':[2,record_content_sha(link),False]}]},
+        'manifest':{'permissions':[{'collection':'claims','object_id':'C','fields':['statement']},
+            {'collection':'viewpoint_claim_links','object_id':'L','fields':['pinned_claim_revision','component_locator','evidence_bindings']}]}}
+    proposal=NS(records=c.rows({'claims/C':{**s['payload'],'revision':4,'statement':'补全'}}),
+        dispositions=[NS(record_key='viewpoint_claim_links/L',action='unresolved')])
+    result=m.partial_review(frozen,proposal)
+    assert result['write_authority'] is False and result['pending_link_keys']==['viewpoint_claim_links/L']
+    from backend.pipeline.source_reconciliation import validate_review
+    packet={'unresolved_proposal_review':result,'proposal_sha256':'a'*64,
+        'proposal':{'dispositions':[{'record_key':'viewpoint_claim_links/L','action':'unresolved'}]}}
+    response={'proposal_sha256':'a'*64,'verdicts':[{'record_key':'viewpoint_claim_links/L',
+        'approved':True,'reason':'not an actual final approval','problems':[]}]}
+    assert validate_review(packet,response) is False
+    for fault in ('foreign','pin','changed-pending','historical-missing'):
+        bad=deepcopy(frozen);p=deepcopy(proposal)
+        if fault=='foreign':p.dispositions[0].record_key='viewpoint_claim_links/foreign'
+        elif fault=='pin':bad['sql_scope']['read_pins'][1]['pin'][0]=1
+        elif fault=='changed-pending':p.records+=c.rows({'viewpoint_claim_links/L':{**link,'revision':3}})
+        else:p.dispositions+=[NS(record_key='canonical_viewpoints/V',action='unresolved')]
+        with pytest.raises(ValueError):m.partial_review(bad,p)
+
+
 @pytest.mark.parametrize('fault',['campaign','group','claim','pin','statement','retired','source','approved','budget','membership','not-dependency','foreign-pin','instruction'])
 def test_exact_owner_correction_does_not_waive_current_proof_or_membership(direction_case,fault):
     d,v,s=direction_case
@@ -174,3 +202,67 @@ def test_actual_current_dependency_complete_packet_no_calls_or_registry_write(tm
     assert s.get_claim_issue(issue.issue_id) is None
     print(json.dumps({'issue':issue.issue_id,'action':source_action_id(manifest),'records':len(states),
                       'paragraphs':len(frozen['after'][0]['paragraphs']),'packet_bytes':len(json.dumps(packet,ensure_ascii=False).encode())}))
+
+
+@pytest.mark.skipif(os.environ.get('WKP_OWNER_CLAIM_SAVED_REVIEW')!='1',reason='actual saved response read-only preflight')
+def test_actual_incomplete_proposal_enters_only_unused_initial_review(tmp_path):
+    from dotenv import load_dotenv
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    from backend.pipeline import source_reconciliation_runner as r
+    from backend.pipeline.source_reconciliation_runtime import model_adapter
+    from backend.pipeline.source_review_input_repair import add_receipt
+    load_dotenv('.env');s=PostgresKnowledgeStore()
+    root=Path('/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/staging/cvp-production-357/campaign-sql-20261008-v1-from-g059/execution/CVPG-0490be727b9eef01497d20f558f7b437fc7beacd434324c8d71c1a82ce024c83/claim-issues/357b4822e214cfa79e54bfb6655021faed02c890efcbd5adf90f2b3f4851a9bb/action/CVPA-3c9563a838ccccf56ac2b9dc3b6b2f84544aaea99f4703d73b77e518686b8334')
+    frozen=r.body(r.read(root/'scoped-materials.json'));raw=r.read(root/'proposal.raw.json')
+    packet=r.body(r.read(root/'proposal.packet.json'))
+    assert r.validate_raw(root,'proposal',packet)==raw
+    with s.connect() as conn,conn.cursor() as cursor:
+        s._assert_transaction_read_pins(cursor,{(p['collection'],p['object_id']):tuple(p['pin']) for p in frozen['sql_scope']['read_pins']})
+    proposed=r.effective_proposal(frozen,raw['response'])
+    with pytest.raises(ValueError,match='unresolved'):
+        c.review_packet(frozen,proposed)  # Strict commit/final gate unchanged.
+    review=add_receipt(frozen,raw['response'],r.initial_review_base(frozen,proposed))
+    assert review['unresolved_proposal_review']['write_authority'] is False
+    assert len(review['unresolved_proposal_review']['pending_link_keys'])==4
+    assert len(review['unresolved_proposal_review']['historical_pending_keys'])==2
+    assert review['proposal']['records']==proposed.model_dump()['records']
+    old=r.read(root/'proposal.reservation.json')
+    assert raw['request_payload_sha256']==old['request_payload_sha256'] and old['request_bytes']==514081
+    assert not (root/'initial_review.reservation.json').exists()
+    from backend.pipeline.viewpoint_resolution_runtime import authorized_request_limit
+    campaign_root=root.parents[5]
+    with authorized_request_limit(campaign_root/'execution',
+            r.read(Path(frozen['owner_claim_completion']['path']))['campaign_sha256'],
+            campaign_root/'owner-request-limit-600k.json'):
+        adapter=r.stage_adapter(model_adapter('initial_review',live=False,deferred=True,issue=True),
+                                review,root/'initial_review.raw.json')
+        limit,_=r.request_limit(adapter,root/'initial_review.raw.json')
+        assert adapter.request_bytes(review)<limit==600000
+    from backend.api.canonical_repository.postgres_store import sha256_json
+    proof=adapter.request_encoding_proof(review)
+    assert proof['exact_roundtrip_verified'] and proof['restored_payload_sha256']==sha256_json(review)
+    # Redundant history assessments stay visible and impact-only. They cannot
+    # stand in for a missing real CVP, authorize writes or invent identities.
+    extras=[i.record_key for i in proposed.cvp_impacts if i.record_key.startswith('viewpoint_identity')]
+    for fault in ('missing-cvp','duplicate','history-write','history-retain','history-needs-direction',
+                  'foreign-history','no-owner','creation-not-retired','historical-cvr-drift','prior-proof-drift'):
+        p=proposed.model_copy(deep=True);f=deepcopy(frozen)
+        if fault=='missing-cvp':p.cvp_impacts=[i for i in p.cvp_impacts if not i.record_key.startswith('canonical_viewpoints/')]
+        elif fault=='duplicate':p.cvp_impacts.append(p.cvp_impacts[-1])
+        elif fault=='history-write':p.records+=c.rows({extras[0]:{**c.index(f['before_records'])[extras[0]],'revision':999}})
+        elif fault=='history-retain':next(d for d in p.dispositions if d.record_key==extras[0]).action='retain'
+        elif fault=='history-needs-direction':next(i for i in p.cvp_impacts if i.record_key==extras[0]).action='needs_direction'
+        elif fault=='foreign-history':next(i for i in p.cvp_impacts if i.record_key==extras[0]).record_key='viewpoint_identity_candidates/foreign'
+        elif fault=='creation-not-retired':
+            states=c.index(f['before_records']);head=states['canonical_viewpoints/CV-031b1f6eec4157cd37fe']
+            next(x for x in f['sql_scope']['read_pins'] if x['collection']=='viewpoint_identity_candidates'
+                 and x['object_id']==head['created_from_candidate_id'])['pin'][2]=False
+        elif fault=='historical-cvr-drift':
+            next(x for x in f['before_records'] if x['collection']=='canonical_viewpoints'
+                 and x['object_id']=='CV-031b1f6eec4157cd37fe')['payload']['current_revision_id']='foreign'
+        elif fault=='prior-proof-drift':f['prior_cvp_management']['file_sha256']='0'*64
+        else:f.pop('owner_claim_completion')
+        with pytest.raises(ValueError):r.initial_review_base(f,p)
+    print(json.dumps({'review_records':len(review['before_records']),'review_bytes':len(json.dumps(review,ensure_ascii=False).encode()),
+        'actual_request_bytes':adapter.request_bytes(review),'roundtrip_exact':True,
+        'pending_links':4,'historical_pending':2,'write_authority':False,'new_model_calls':0}))

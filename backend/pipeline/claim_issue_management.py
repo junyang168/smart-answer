@@ -464,11 +464,24 @@ def validate_resolution(frozen, proposal, post, *, review_only=False):
     required = {k for k in set(frozen["inventory"]["affected_keys"])|{row.key for row in proposal.records} if c.split_key(k)[0] in {
         "viewpoint_claim_links", "canonical_viewpoints", "viewpoint_revisions", "viewpoint_relations"}}
     actual = [i.record_key for i in proposal.cvp_impacts]
-    if len(actual) != len(set(actual)) or set(actual) != required:
+    extra=set(actual)-required
+    retained_identity_extras=(frozen.get('owner_claim_completion') and required<=set(actual)
+        and all(c.split_key(k)[0] in {'viewpoint_identity_candidates','viewpoint_identity_decisions'}
+            and k in before and post[k]==before[k]
+            and next(d.action for d in proposal.dispositions if d.record_key==k)=='impact_only'
+            and next(i.action for i in proposal.cvp_impacts if i.record_key==k)=='retain'
+            for k in extra))
+    if len(actual) != len(set(actual)) or (set(actual) != required and not retained_identity_extras):
         raise ValueError("complete CVP impact denominator including retained members required")
     dispositions = {d.record_key: d.action for d in proposal.dispositions}
     for impact in proposal.cvp_impacts:
         citations(impact.citations)
+        if retained_identity_extras and impact.record_key in extra:
+            # The additional rows describe immutable discovery/decision history,
+            # not fresh CVP membership approval. Their ordinary impact-only
+            # disposition and exact retained payload were checked above; keep
+            # the model's rows/reasons visible without widening the write set.
+            continue
         if (review_only and impact.action == 'needs_direction'
                 and dispositions[impact.record_key] == 'unresolved'
                 and post[impact.record_key] == before[impact.record_key]):

@@ -566,7 +566,11 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
                 or any(split_key(k)[0] not in SOURCE_COLUMNS for k in proposed)):
             raise ValueError('Claim-first must defer every CVP and write only source-owned records')
         review_only = True
-    if review_only and (not frozen.get('claim_issue_context', {}).get('scope_amendment')
+    pending_link_keys=set()
+    if review_only and frozen.get('owner_claim_completion'):
+        from backend.pipeline.claim_owner_revision import partial_review
+        pending_link_keys=set(partial_review(frozen,proposal)['pending_link_keys'])
+    elif review_only and (not frozen.get('claim_issue_context', {}).get('scope_amendment')
             or (not claim_first and not any(row['pin'][2] is True for row in frozen.get('sql_scope', {}).get('read_pins', [])))
             or any(split_key(k)[0] not in {'canonical_viewpoints', 'viewpoint_revisions'}
                    and not (claim_first and split_key(k)[0] in CVP_COLUMNS)
@@ -623,7 +627,7 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
         raise ValueError("source migration cannot change the registered source identity")
     if {split_key(k)[1] for k in before if k.startswith("claims/")} != {split_key(k)[1] for k in post if k.startswith("claims/")}:
         raise ValueError("source update cannot silently change Claim membership")
-    validate_graph(post, before, frozen)
+    validate_graph(post, before, frozen, pending_link_keys=pending_link_keys)
     if manifest.deferred_repair:
         from backend.pipeline.deferred_claim_repair import validate_postimages
         validate_postimages(frozen, post)
@@ -715,7 +719,7 @@ def retained_evidence_sequence_start(frozen, before, post, claim_key, evidence_k
     return text.index(full) + sum(len(q) for q in quotes[:position])
 
 
-def validate_graph(post: dict[str, dict], before: dict[str, dict], frozen: dict) -> None:
+def validate_graph(post: dict[str, dict], before: dict[str, dict], frozen: dict, *, pending_link_keys=()) -> None:
     """Mechanical checks over the entire affected graph, not just write rows."""
     source_id = frozen["manifest"]["source_id"]
     paragraphs = frozen["after"][0]["paragraphs"]
@@ -772,7 +776,11 @@ def validate_graph(post: dict[str, dict], before: dict[str, dict], frozen: dict)
                     spans.append((anchor["paragraph_key"], start, start + len(quote), anchor))
             validate_basis_groups(spans)
         if c == "viewpoint_claim_links":
-            claim = post[key("claims", p["claim_id"])]
+            if k in pending_link_keys:
+                if p!=before[k]:raise ValueError('incomplete review cannot change a pending connection')
+                claim=before[key("claims",p["claim_id"])]
+            else:
+                claim = post[key("claims", p["claim_id"])]
             viewpoint = post[key("canonical_viewpoints", p["viewpoint_id"])]
             if (p.get("effective_state", "active") == "active"
                     and p["validated_against_viewpoint_revision_id"] != viewpoint["current_revision_id"]):
@@ -888,6 +896,9 @@ def review_packet(frozen: dict, proposal: Proposal, *, review_only: bool = False
                 'the existing single correction, then a strict complete final review.',
             'write_authority': False,
         }
+        if frozen.get('owner_claim_completion'):
+            from backend.pipeline.claim_owner_revision import partial_review
+            result['unresolved_proposal_review']=partial_review(frozen,proposal)
     return result
 
 

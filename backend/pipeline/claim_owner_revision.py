@@ -129,6 +129,79 @@ def validate_joint(materials,proposal,package):
     return True
 
 
+def partial_review(materials,proposal):
+    """Review an explicitly incomplete draft, never authorize its graph.
+
+    Exact unchanged owned links can remain pending while the new Claim is
+    proposed. Opus sees BOTH versions and must not approve the pending links.
+    Only the ordinary single correction can supply complete link afterimages.
+    Previously pending unrelated identities remain a separate obligation.
+    """
+    from backend.pipeline import source_reconciliation as c
+    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.api.canonical_repository.viewpoint_foundation import semantic_record_sha
+    proof=materials.get('owner_claim_completion')
+    if not proof:raise ValueError('partial Claim review lacks exact owner direction')
+    check_binding(proof);d=read_artifact(proof['path'])
+    before=c.index(materials['before_records']);proposed=c.index(proposal.records)
+    cid=d['claim_id'];key='claims/'+cid
+    pins={(p['collection'],p['object_id']):p['pin'] for p in materials['sql_scope']['read_pins']}
+    state={'payload':before[key],'revision':before[key]['revision'],
+           'content_sha256':record_content_sha(before[key]),'retired':False}
+    validate_direction(d,{'run_id':d['run_id'],'campaign_sha256':d['campaign_sha256'],
+        'claim_ids':[],'reviewed':{'evidence':{'read_pins':materials['sql_scope']['read_pins']}}},state)
+    if pins.get(('claims',cid))!=d['before_claim_pin'] or key not in proposed or proposed[key]['statement']==before[key]['statement']:
+        raise ValueError('partial Claim review requires the exact new statement/current dependency pin')
+    permissions={c.key(p['collection'],p['object_id']):set(p['fields']) for p in materials['manifest']['permissions']}
+    owned={k for k,p in before.items() if k.startswith('viewpoint_claim_links/') and p['claim_id']==cid
+           and k in permissions}
+    prior=materials.get('prior_cvp_management')
+    pending=set()
+    if prior:
+        check_binding(prior);previous=read_artifact(prior['path'])
+        if previous['run_id']!=d['run_id']:raise ValueError('partial review foreign pending context')
+        pending=set(previous['reviewed']['evidence']['pending_cvp_management_record_keys'])
+    unresolved={x.record_key for x in proposal.dispositions if x.action=='unresolved'}
+    historical={k for k in unresolved if k.startswith(('canonical_viewpoints/','viewpoint_revisions/'))}
+    if (not unresolved or not unresolved<=owned|historical or not historical<=pending
+            or any(k not in before or k in proposed for k in unresolved)):
+        raise ValueError('partial review permits only exact unchanged owned links/pending retired context')
+    retired=[p for p in materials['sql_scope']['read_pins'] if p['pin'][2] is True]
+    historical_heads={k for k in historical if k.startswith('canonical_viewpoints/')}
+    covered=set()
+    for k in historical_heads:
+        head=before[k];rk=c.key('viewpoint_revisions',head['current_revision_id'])
+        candidate=head.get('created_from_candidate_id')
+        if (rk not in historical or before[rk]['viewpoint_id']!=head['viewpoint_id']
+                or not candidate or ('viewpoint_identity_candidates',candidate) not in pins
+                or pins['viewpoint_identity_candidates',candidate][2] is not True):
+            raise ValueError('partial review historical context lacks exact retired creation/current CVR proof')
+        covered|={k,rk}
+    if historical!=covered:
+        raise ValueError('partial review historical pending head/revision pairing is incomplete')
+    for k in unresolved & owned:
+        col,oid=c.split_key(k);p=before[k]
+        if pins.get((col,oid))!=[p['revision'],record_content_sha(p),False]:
+            raise ValueError('partial review owned connection current pin drift')
+    return {'schema_version':'owner_claim_incomplete_joint_review.v1',
+        'direction':proof,'claim_id':cid,'proposed_claim_revision':proposed[key]['revision'],
+        'proposed_claim_semantic_sha256':semantic_record_sha(proposed[key]),
+        'pending_link_keys':sorted(unresolved & owned),'historical_pending_keys':sorted(historical),
+        'retired_current_sql_pins':retired,
+        'write_authority':False,'another_proposal_allowed':False,'maximum_corrections':1,
+        'explanation':'This new Claim draft is source-supported but its owned connection afterimages are incomplete. '
+            'The displayed pending connections are CURRENT OLD versions, NOT approved new-version afterimages. '
+            'Review the proposed Claim and report the missing complete connections for the existing single correction. '
+            'The program already calculates locator Claim SHA BEFORE review from the normalized complete returned Claim; '
+            'GPT must return complete links with exact new spans/Evidence and pin, but may use null for locator claim_sha256. '
+            'No model must calculate/copy hashes or infer content from a hash. '
+            'Historical pending CVPs remain unchanged obligations from the previous action: retired creation Claims '
+            'are not missing current members. Evaluate whether THIS Claim completion changes them, not a new '
+            'global identity reconstruction. An unchanged THIS-DELTA impact may be retained with exact proof, '
+            'while the prior unresolved identity obligation remains separately pending. '
+            'No old unresolved decision is changed to pass/retain by this receipt.'}
+
+
 def execute(store,run_id,direction_path,root,ports):
     from backend.pipeline.claim_issue_management import IssuesDetected,handle_issues
     from backend.pipeline.cvp_sql_flow import binding
