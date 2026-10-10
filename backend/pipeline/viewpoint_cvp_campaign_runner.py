@@ -84,6 +84,9 @@ def validate_audit(audit, claim_ids, viewpoint_ids, *, owner_resolution_path=Non
         elif read(owner_resolution_path).get('schema_version') == 'wang_exact_composed_gpt_source_resolution_v2':
             from backend.pipeline.viewpoint_reused_source_resolution import verify_composed
             resolved_by_layer = verify_composed(audit,read(owner_resolution_path))
+        elif read(owner_resolution_path).get('schema_version') == 'wang_exact_human_audit_link_retention_resolution_v1':
+            from backend.pipeline.cvp_exact_human_audit_retention import verify
+            resolved_by_layer=verify(audit,read(owner_resolution_path))
         elif read(owner_resolution_path).get('schema_version') == 'wang_exact_human_retained_and_saved_source_audit_resolution_v1':
             from backend.pipeline.cvp_human_retained_audit_resolution import verify_resolution
             resolved_by_layer=verify_resolution(audit,read(owner_resolution_path))

@@ -583,7 +583,10 @@ def run_group(store, definition, group, row, *, root):
     audit_path = content_fallback(audit_path,root/run_id/"content-blocked-fallback")
     audit = read_artifact(audit_path)
     resolution=None
+    from backend.pipeline.cvp_exact_human_audit_retention import complete as exact_human_complete, partition as exact_human_partition
     if audit['layers']['3'].get('disputed') or audit['layers']['4'].get('disputed'):
+        resolution=exact_human_complete(audit_path,root,store,run_id,audit_dir/'exact-human-link-resolution.json')
+    if resolution is None and (audit['layers']['3'].get('disputed') or audit['layers']['4'].get('disputed')):
         from backend.pipeline.cvp_human_retained_audit_resolution import create_if_complete
         resolution=create_if_complete(audit_path,store,run_id,audit_dir/'human-retained-source-final-resolution.json')
     if resolution is None and (audit["layers"]["3"].get("disputed") or audit["layers"]["4"].get("disputed")):
@@ -592,6 +595,7 @@ def run_group(store, definition, group, row, *, root):
         packet=build_packet(audit_path,store,True)
         from backend.pipeline.cvp_human_retained_audit_resolution import partition_packet
         packet,human_retained_items=partition_packet(audit,packet,saved,store)
+        packet,exact_human_items=exact_human_partition(audit,packet,root,store)
         targets=[target_identity(i) for i in packet['items']]
         prior=store.adjudication_roots(targets)
         input_repair_binding = root/'adjudication-input-repair-authorization-binding.json'
@@ -700,7 +704,10 @@ def run_group(store, definition, group, row, *, root):
                 # another complete audit. Unchanged judgement inputs reuse cache.
                 return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)
             prior.append(adjudication)
-        if human_retained_items:
+        if exact_human_items:
+            resolution=exact_human_complete(audit_path,root,store,run_id,audit_dir/'exact-human-link-resolution.json')
+            if resolution is None:raise ValueError('exact human retention does not resolve remaining findings')
+        elif human_retained_items:
             # Excluding a human-owned target from adjudication is NOT a pass.
             # Rejoin the full actual audit population only after every remaining
             # finding has an exact authenticated source rejection.
@@ -772,9 +779,15 @@ def main(argv=None):
                         help='Exact original generation raw leaf; indexed by actual committed decision artifact SHA')
     parser.add_argument('--retained-content-disposition',type=Path,
                         help='Exact human no-change decision for current retained links; never a model pass or write permission')
+    parser.add_argument('--audit-link-retention',type=Path,action='append',default=[],
+                        help='Exact owner rejection of a named current audit link objection; zero writes or extra calls')
     parser.add_argument('--owner-claim-revision',type=Path,
                         help='Exact human identification of a Claim omission; normal GPT/Opus joint review still required')
     args = parser.parse_args(argv)
+    from backend.pipeline.cvp_exact_human_audit_retention import NAME as AUDIT_RETAIN_NAME,validate_direction
+    audit_retention_binding={'directions':[binding(p) for p in args.audit_link_retention]}
+    if (args.output_root/AUDIT_RETAIN_NAME).exists() and read_artifact(args.output_root/AUDIT_RETAIN_NAME)!=audit_retention_binding:
+        raise ValueError('audit link retention requires exact explicit recovery directions')
     from backend.pipeline.cvp_batch_identity_integration import ENABLED, VERSION
     ENABLED.set(args.integrate_batch_candidates)
     integration_binding=args.output_root/'batch-identity-integration-binding.json'
@@ -872,6 +885,14 @@ def main(argv=None):
             write_immutable(integration_binding, {'schema_version':VERSION,
                 'campaign_sha256':args.sql_campaign,'new_groups_only':True,'correction_budget':1})
         execution_boundary(args.output_root,args.sql_campaign,definition,args.stop_after_group,persist=True)
+        if args.audit_link_retention:
+            for p in args.audit_link_retention:
+                d=read_artifact(p);validate_direction(d);v=store.get_cvp_group(d['run_id'])
+                if (d['campaign_sha256']!=args.sql_campaign or not v or v['campaign_sha256']!=args.sql_campaign
+                        or not Path(d['audit']['path']).resolve().is_relative_to((args.output_root/d['run_id']).resolve())
+                        or (invocation_limit is not None and v['sequence']>invocation_limit)):
+                    raise ValueError('audit link retention campaign/root/boundary drift')
+            write_immutable(args.output_root/AUDIT_RETAIN_NAME,audit_retention_binding)
         if args.retained_link_review_policy:
             from backend.pipeline.cvp_retained_review_separation import validate_policy,generation_artifacts,VERSION as RETAINED_VERSION
             validate_policy(read_artifact(args.retained_link_review_policy))
