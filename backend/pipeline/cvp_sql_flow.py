@@ -829,7 +829,12 @@ def main(argv=None):
                         help='Exact owner rejection of a named current audit link objection; zero writes or extra calls')
     parser.add_argument('--owner-claim-revision',type=Path,
                         help='Exact human identification of a Claim omission; normal GPT/Opus joint review still required')
+    parser.add_argument('--owner-model-retry-authorization',type=Path,
+                        help='Explicit once retry of an exact unanswered transport timeout; original unknown preserved')
     args = parser.parse_args(argv)
+    from backend.pipeline.cvp_model_retry_once import NAME as RETRY_NAME
+    if (args.output_root/RETRY_NAME).exists() and not args.owner_model_retry_authorization:
+        raise ValueError('owner retry requires original explicit authorization')
     from backend.pipeline.cvp_sql_quota_resume import NAME as QUOTA_NAME,SCHEMA as QUOTA_SCHEMA
     quota_binding=args.output_root/QUOTA_NAME
     if quota_binding.exists() and not args.manual_quota_resume_authorization:
@@ -925,7 +930,9 @@ def main(argv=None):
         raise RuntimeError('production remains stopped; explicit new SQL --execute required, no legacy fallback')
     from backend.pipeline.source_reconciliation_runtime import maintenance_lock
     from backend.pipeline.viewpoint_resolution_runtime import authorized_request_limit
-    with maintenance_lock(), authorized_request_limit(args.output_root,args.sql_campaign,args.request_limit_authorization):
+    from backend.pipeline.cvp_model_retry_once import authorized_retry
+    with maintenance_lock(), authorized_request_limit(args.output_root,args.sql_campaign,args.request_limit_authorization), authorized_retry(
+            args.output_root,args.sql_campaign,args.owner_model_retry_authorization,store):
         if args.manual_quota_resume_authorization:
             write_immutable(quota_binding,{'authorization':binding(args.manual_quota_resume_authorization)})
         if args.retained_content_disposition:

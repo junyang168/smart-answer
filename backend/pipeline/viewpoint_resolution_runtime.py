@@ -317,9 +317,16 @@ def read_saved_model_response(adapter: Any, payload: dict[str, Any], cache: Path
     from backend.pipeline.viewpoint_validation_context import optional_file_exists
     has_intent = optional_file_exists(intent_path)
     if artifact.get('invocation_sha256') is not None or has_intent:
+        retry = artifact.get('owner_retry_once')
+        if retry is not None:
+            from backend.pipeline.cvp_model_retry_once import validate_saved
+            validate_saved(cache, adapter, payload, artifact)
+            intent_path = cache.with_name(cache.stem + '.owner-retry-once.call-intent.json')
         intent = read_artifact(intent_path)
         intent_body = {'schema_version': 'wang_model_call_intent_v1', **expected,
                        'cache_path': str(cache.resolve()), 'automatic_retry': False}
+        if retry is not None:
+            intent_body['owner_retry_once'] = retry
         if (intent != {**intent_body, 'artifact_sha256': sha256_json(intent_body)}
                 or artifact.get('invocation_sha256') != intent['artifact_sha256']):
             raise ValueError(f"cached model invocation identity drift: {cache}")
@@ -341,7 +348,12 @@ def call_model(
         raise ValueError(f'saved reconstruction has no response; no invocation/fallback: {cache}')
     if not saved and historical_context() is not None:
         raise ValueError(f"read-only historical validation has no saved response; no model fallback: {cache}")
-    adapter = response_adapter(adapter, read_artifact(cache) if saved else None)
+    original_intent = cache.with_name(cache.stem + '.call-intent.json')
+    from backend.pipeline.cvp_model_retry_once import ACTIVE, authority
+    retry_scope = ACTIVE.get()
+    exact_retry = retry_scope is not None and cache.resolve() == Path(retry_scope[1]['cache_path'])
+    adapter = response_adapter(adapter, read_artifact(cache) if saved else
+                               read_artifact(original_intent) if exact_retry else None)
     # Only an uninvoked stage may choose a smaller lossless wire encoding.
     # Saved answers and unknown intents retain their exact original identity.
     intent_path = cache.with_name(cache.stem + '.call-intent.json')
@@ -397,6 +409,7 @@ def call_model(
         else len(canonical_json(payload).encode("utf-8"))
     )
     max_request_bytes, request_budget = effective_request_limit(adapter, cache)
+    retry = authority(cache, model_request_identity(adapter,payload), encoding_proof, request_bytes) if exact_retry else None
     if max_request_bytes is not None and request_bytes > int(max_request_bytes):
         raise ValueError(
             f"model request is {request_bytes} bytes, exceeding the configured ceiling "
@@ -408,7 +421,9 @@ def call_model(
         return bound_model_response(adapter,payload,raw,cache), 0, 0.0
     intent_path = cache.with_name(cache.stem + '.call-intent.json')
     encoding_path = cache.with_name(cache.stem + '.request-encoding.json')
-    if intent_path.exists() or encoding_path.exists():
+    if retry is not None:
+        intent_path = cache.with_name(cache.stem + '.owner-retry-once.call-intent.json')
+    if intent_path.exists() or (encoding_path.exists() and retry is None):
         raise ValueError(f"prior model invocation has no saved response; outcome unknown, no automatic retry: {cache}")
     if request_budget is not None:
         write_immutable(cache.with_name(cache.stem+'.request-budget.json'), {
@@ -422,6 +437,7 @@ def call_model(
     if reused is None:
         body = {'schema_version': 'wang_model_call_intent_v1', **request_identity,
                 'cache_path': str(cache.resolve()), 'automatic_retry': False}
+        if retry is not None: body['owner_retry_once'] = retry
         intent = {**body, 'artifact_sha256': sha256_json(body)}
         write_immutable(intent_path, intent, require_new=True)
     if encoding_proof is not None:
@@ -432,7 +448,7 @@ def call_model(
     except BaseException as exc:
         body = {'schema_version': 'wang_model_call_failure_v1', 'invocation_sha256': intent['artifact_sha256'],
                 'error_type': type(exc).__name__, 'execution_status': 'outcome_unknown', 'automatic_retry': False}
-        write_immutable(cache.with_name(cache.stem + '.call-failure.json'),
+        write_immutable(cache.with_name(cache.stem + ('.owner-retry-once.call-failure.json' if retry else '.call-failure.json')),
                         body | {'artifact_sha256': sha256_json(body)})
         raise
     elapsed = round(time.monotonic() - started, 3)
@@ -443,6 +459,7 @@ def call_model(
         "response_sha256": sha256_json(raw),
         "response": raw,
     }
+    if retry is not None: artifact['owner_retry_once'] = retry
     if encoding_proof is not None:
         artifact['request_encoding_proof_sha256'] = sha256_json(encoding_proof)
     if reused is not None:
