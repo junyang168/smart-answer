@@ -766,8 +766,11 @@ def run_group(store, definition, group, row, *, root):
         from backend.pipeline.cvp_retained_impact_resolution import build
         pending_resolution=build(store,run_id,audit_path,audit_dir/'retained-impact-resolution.json',
                                  semantic_resolution=resolution)
+    from backend.pipeline.cvp_taxonomy_dependency import prepare as prepare_taxonomy
+    taxonomy=prepare_taxonomy(store,run_id,audit_path,current)
     store.complete_cvp_group(run_id,audit=audit,audit_binding=binding(audit_path),read_pins=pins(current),
-                             owner_resolution_path=resolution,retained_impacts_resolution_path=pending_resolution)
+                             owner_resolution_path=resolution,retained_impacts_resolution_path=pending_resolution,
+                             taxonomy_dependency_path=taxonomy)
     stage_event('audited', sequence=group['sequence'], run_id=run_id)
 
 

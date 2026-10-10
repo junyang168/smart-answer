@@ -3759,7 +3759,8 @@ class PostgresKnowledgeStore:
     def complete_cvp_group(self, run_id: str, *, audit: Mapping[str, Any],
                            audit_binding: Mapping[str, Any], read_pins: Mapping,
                            owner_resolution_path: Optional[Path] = None,
-                           retained_impacts_resolution_path: Optional[Path] = None) -> None:
+                           retained_impacts_resolution_path: Optional[Path] = None,
+                           taxonomy_dependency_path: Optional[Path] = None) -> None:
         """Audit outside the write transaction; register completion separately."""
         from backend.pipeline.viewpoint_cvp_campaign_runner import validate_audit
         from backend.pipeline.viewpoint_g035_temporary_audit import validate_completion_disclosure
@@ -3810,6 +3811,9 @@ class PostgresKnowledgeStore:
             # boundary: pin a named old decision, do not traverse its candidate
             # as though it were a current member after link replacement.
             required=self._existing_cvp_context(conn,roots,historical_pins_only=True)
+            if taxonomy_dependency_path is not None:
+                from backend.pipeline.cvp_taxonomy_dependency import verify
+                independent_pins=verify(taxonomy_dependency_path,run_id,audit_binding,required,independent_pins)
             if not set(required)<=set(independent_pins):
                 raise ChangeSetConflict('independent audit omitted complete current SQL dependencies: '+str(sorted(set(required)-set(independent_pins))))
             if any(k in read_pins and read_pins[k]!=pin for k,pin in independent_pins.items()):
@@ -3833,6 +3837,9 @@ class PostgresKnowledgeStore:
             if exception or not revisit:validate_completion_disclosure(disclosure,audit)
             completion = {"audit":dict(audit_binding),"owner_resolution_path":str(owner_resolution_path) if owner_resolution_path else None,
                           "read_pins":[{"collection":k[0],"object_id":k[1],"pin":list(v)} for k,v in sorted(independent_pins.items())]}
+            if taxonomy_dependency_path is not None:
+                completion['taxonomy_dependency']={'path':str(taxonomy_dependency_path),
+                    'file_sha256':file_sha256(Path(taxonomy_dependency_path))}
             if retained_resolution is not None:
                 completion['retained_impacts_resolution']={'path':str(retained_impacts_resolution_path),
                     'file_sha256':file_sha256(Path(retained_impacts_resolution_path))}

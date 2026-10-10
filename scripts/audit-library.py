@@ -328,7 +328,8 @@ class SqlGroupStore(Store):
                 def source_ids(value):
                     if isinstance(value,dict):
                         for field,child in value.items():
-                            if field=='source_id' and isinstance(child,str):yield child
+                            if field in {'source_id','topic_id','parent_topic_id'} and isinstance(child,str):yield child
+                            elif field=='topic_ids' and isinstance(child,list):yield from (v for v in child if isinstance(v,str))
                             elif isinstance(child,(dict,list)):yield from source_ids(child)
                     elif isinstance(value,list):
                         for child in value:yield from source_ids(child)
