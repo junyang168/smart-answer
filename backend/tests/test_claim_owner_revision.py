@@ -129,7 +129,8 @@ def test_exact_owner_correction_does_not_waive_current_proof_or_membership(direc
     with pytest.raises(ValueError):m.validate_direction(d,v,s)
 
 
-def test_joint_claim_revision_requires_all_active_links_and_no_type_or_target_change(tmp_path):
+@pytest.mark.parametrize('typed_rows',[False,True])
+def test_joint_claim_revision_requires_all_active_links_and_no_type_or_target_change(tmp_path,typed_rows):
     d={'claim_id':'C'};p=tmp_path/'direction.json';p.write_text(json.dumps(d))
     claim={'claim_id':'C','statement':'不完整','revision':3}
     link={'claim_id':'C','viewpoint_id':'V','link_type':'equivalent_component','effective_state':'active',
@@ -138,7 +139,10 @@ def test_joint_claim_revision_requires_all_active_links_and_no_type_or_target_ch
     f={'owner_claim_completion':binding(p),'before_records':rows}
     after={'claims/C':{**claim,'statement':'完整','revision':4},
            'viewpoint_claim_links/L':{**link,'pinned_claim_revision':4,'revision':3}}
-    def proposal():return NS(records=c.rows(after),claim_assessments=[NS(cause='claim_statement')])
+    def records(value):
+        result=c.rows(value)
+        return [c.Row.model_validate(r) for r in result] if typed_rows else result
+    def proposal():return NS(records=records(after),claim_assessments=[NS(cause='claim_statement')])
     assert m.validate_joint(f,proposal(),{})
     for fault in ('omit-link','type','target','revive','claim-retain','revision','cause','extra'):
         bad=deepcopy(after);pr=proposal()
@@ -150,7 +154,7 @@ def test_joint_claim_revision_requires_all_active_links_and_no_type_or_target_ch
         elif fault=='revision':bad['viewpoint_claim_links/L']['pinned_claim_revision']=3
         elif fault=='cause':pr.claim_assessments=[NS(cause='cvp_link')]
         else:bad['evidence_steps/E']={'evidence_id':'E'}
-        pr.records=c.rows(bad)
+        pr.records=records(bad)
         with pytest.raises(ValueError):m.validate_joint(f,pr,{})
 
 
@@ -266,3 +270,29 @@ def test_actual_incomplete_proposal_enters_only_unused_initial_review(tmp_path):
     print(json.dumps({'review_records':len(review['before_records']),'review_bytes':len(json.dumps(review,ensure_ascii=False).encode()),
         'actual_request_bytes':adapter.request_bytes(review),'roundtrip_exact':True,
         'pending_links':4,'historical_pending':2,'write_authority':False,'new_model_calls':0}))
+
+
+@pytest.mark.skipif(not os.environ.get('WKP_OWNER_CLAIM_SAVED_FINAL_ROOT'),reason='explicit saved final read-only preflight')
+def test_saved_owner_final_typed_graph_without_calls_or_writes():
+    from dotenv import load_dotenv
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    from backend.pipeline import source_reconciliation_runner as r
+    load_dotenv('.env');store=PostgresKnowledgeStore()
+    root=Path(os.environ['WKP_OWNER_CLAIM_SAVED_FINAL_ROOT'])
+    frozen=r.body(r.read(root/'scoped-materials.json'))
+    c.guard_files(frozen)
+    with store.connect() as conn,conn.cursor() as cursor:
+        store._assert_transaction_read_pins(cursor,{(p['collection'],p['object_id']):tuple(p['pin']) for p in frozen['sql_scope']['read_pins']})
+    raw={stage:r.validate_raw(root,stage,r.body(r.read(root/(stage+'.packet.json'))))
+         for stage in ('proposal','initial_review','correction','final_review')}
+    proposal=r.effective_proposal(frozen,raw['correction']['response'])
+    assert all(isinstance(row,c.Row) for row in proposal.records)
+    packet=r.body(r.read(root/'final_review.packet.json'))
+    assert c.validate_review(packet,raw['final_review']['response'])
+    package=c.compile_package(frozen,proposal,raw['final_review'])
+    assert m.validate_joint(frozen,proposal,package)
+    assert len(proposal.records)==5
+    assert {row.collection for row in proposal.records}=={'claims','viewpoint_claim_links'}
+    assert not (root/'apply-intent.json').exists()
+    print(json.dumps({'authenticated_stages':4,'review_verdicts':len(raw['final_review']['response']['verdicts']),
+        'review_approved':True,'typed_joint_rows':len(proposal.records),'new_model_calls':0,'registry_writes':0}))

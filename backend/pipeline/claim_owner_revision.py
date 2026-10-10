@@ -107,7 +107,7 @@ def validate_joint(materials,proposal,package):
             or any(a.cause!='claim_statement' for a in proposal.claim_assessments)
             or len(proposal.claim_assessments)!=1):
         raise ValueError('owner source omission requires actual minimal Claim completion, not retain/relabel')
-    changed={r['collection']+'/'+r['object_id'] for r in proposal.records}
+    changed=set(c.index(proposal.records))
     links={k:p for k,p in before.items() if k.startswith('viewpoint_claim_links/') and p['claim_id']==cid}
     if not changed<={'claims/'+cid,*links}:
         raise ValueError('owner Claim completion changed unrelated knowledge')
