@@ -269,6 +269,8 @@ class Runner:
         adapter = scoped_adapter(adapter, packet)
         from backend.pipeline.cvp_pending_link_management import scoped_adapter as link_scoped_adapter
         adapter = link_scoped_adapter(adapter,packet)
+        from backend.pipeline.claim_citation_purpose_review import scoped_adapter as citation_scoped_adapter
+        adapter = citation_scoped_adapter(adapter,packet)
         from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
         raw_path = self.root / (stage + '.raw.json')
         adapter = stage_adapter(adapter, packet, raw_path, saved=read(raw_path) if raw_path.exists() else None)
@@ -640,6 +642,8 @@ def validate_package(package: dict, *, historical: bool = False) -> None:
             'backend/pipeline/source_reconciliation.py',
             'backend/pipeline/source_reconciliation_runtime.py',
             'backend/pipeline/deferred_claim_repair.py',
+            'backend/pipeline/claim_citation_purpose_review.py',
+            'backend/pipeline/claim_issue_management.py',
             'backend/pipeline/source_projection.py',
             'backend/api/canonical_repository/knowledge_models.py',
             'backend/api/canonical_repository/postgres_store.py',
@@ -789,6 +793,8 @@ def validate_raw(root: Path, stage: str, packet: dict) -> dict:
     adapter = scoped_adapter(adapter, packet)
     from backend.pipeline.cvp_pending_link_management import scoped_adapter as link_scoped_adapter
     adapter = link_scoped_adapter(adapter,packet)
+    from backend.pipeline.claim_citation_purpose_review import scoped_adapter as citation_scoped_adapter
+    adapter = citation_scoped_adapter(adapter,packet)
     raw = read(root / (stage + ".raw.json"))
     from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
     adapter = stage_adapter(adapter, packet, root / (stage + '.raw.json'), saved=raw)

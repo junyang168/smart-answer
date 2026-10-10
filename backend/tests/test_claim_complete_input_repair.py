@@ -98,6 +98,20 @@ def test_complete_input_review_never_uses_draft_exception(monkeypatch):
     assert calls==[{}]
 
 
+def test_citation_review_prompt_isolated_from_legacy_adapter():
+    from types import SimpleNamespace
+    from backend.pipeline import claim_citation_purpose_review as p
+    adapter=SimpleNamespace(_base_prompt='base',_prompt='full',prompt_sha256='old')
+    assert p.scoped_adapter(adapter,{}) is adapter
+    packet={'claim_citation_purpose_review':{'schema_version':p.VERSION},
+            'claim_issue_context':{'complete_input_repair':{'correction_limit':0}}}
+    scoped=p.scoped_adapter(adapter,packet)
+    assert adapter._prompt=='full' and adapter.prompt_sha256=='old'
+    assert scoped._prompt=='full\n'+p.PROMPT and scoped.prompt_sha256!='old'
+    packet['claim_issue_context']={}
+    with pytest.raises(ValueError):p.scoped_adapter(adapter,packet)
+
+
 def test_complete_input_rejection_does_not_open_another_correction(monkeypatch,tmp_path):
     class Runner(r.Runner):
         def guard(self,*args,**kw):pass
@@ -141,4 +155,43 @@ def test_actual_saved_proposal_historical_anchors_are_readonly_not_current_sourc
         assert actual['occurrences'][0]==before['claims/DK-72483dc200ad-CL002']['occurrences'][0]
         assert len(normalized.records)==7
         # This is mechanical normalization, never content approval.
-        with pytest.raises(ValueError,match='Evidence diagnosis'):r.initial_review_base(frozen,normalized)
+        packet=r.initial_review_base(frozen,normalized)
+        purpose=packet['claim_citation_purpose_review']
+        assert len(purpose['items'])==1
+        assert purpose['automatic_content_approval'] is False
+        assert len(packet['proposal']['records'])==7
+        response={'proposal_sha256':packet['proposal_sha256'],'verdicts':[
+            dict(record_key=d['record_key'],approved=True,reason='test only',problems=[])
+            for d in packet['proposal']['dispositions']]}
+        with pytest.raises(ValueError,match='denominator'):c.validate_review(packet,response)
+        verdict=dict(record_key=purpose['items'][0]['record_key'],approved=False,reason='context needed',problems=['uncertain'])
+        response['verdicts'].append(verdict)
+        assert c.validate_review(packet,response) is False
+        verdict.update(approved=True,reason='diagnostic only',problems=[])
+        assert c.validate_review(packet,response) is True
+
+
+@pytest.mark.parametrize('fault',['missing','duplicate','changed','unresolved','hold','foreign','legacy','unbound_prefix','no_bound_support'])
+def test_actual_complete_input_diagnostic_and_readonly_impact_gates(actual_direction,fault):
+    path=next((Path(actual_direction['old_action_root']).parent.parent/'complete-input-repair-once/action').glob('*/proposal.raw.json'))
+    frozen=r.body(r.read(path.parent/'scoped-materials.json'))
+    raw=r.validate_raw(path.parent,'proposal',r.body(r.read(path.parent/'proposal.packet.json')))
+    proposal=r.effective_proposal(frozen,raw['response'])
+    extra=next(i for i in proposal.cvp_impacts if i.record_key.startswith('claim_relations/'))
+    if fault=='missing':proposal.cvp_impacts.pop(next(n for n,i in enumerate(proposal.cvp_impacts) if i.record_key.startswith('canonical_viewpoints/')))
+    elif fault=='duplicate':proposal.cvp_impacts.append(deepcopy(extra))
+    elif fault=='changed':
+        value=deepcopy(c.index(frozen['before_records'])[extra.record_key]);value['revision']+=1
+        proposal.records.extend(c.rows({extra.record_key:value}))
+    elif fault=='unresolved':extra.action='needs_direction'
+    elif fault=='hold':
+        before=c.index(frozen['before_records']);before[extra.record_key]['review_status']='human_review_required'
+        frozen['before_records']=c.rows(before)
+    elif fault=='foreign':frozen['inventory']['affected_keys'].remove(extra.record_key)
+    elif fault=='legacy':frozen['claim_issue_context'].pop('complete_input_repair')
+    else:
+        assessment=next(a for a in proposal.claim_assessments if any('也是當時' in cite.exact_quote for cite in a.citations))
+        diagnostic=next(cite for cite in assessment.citations if '也是當時' in cite.exact_quote)
+        if fault=='unbound_prefix':diagnostic.exact_quote='這不但是彼得自己的錯誤，也是當時猶太人普遍的錯誤。'
+        else:assessment.citations=[diagnostic]
+    with pytest.raises((ValueError,KeyError)):r.initial_review_base(frozen,proposal)

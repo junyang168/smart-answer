@@ -921,7 +921,7 @@ def validate_basis_groups(spans: list[tuple]) -> None:
 
 
 def review_packet(frozen: dict, proposal: Proposal, *, review_only: bool = False, claim_first: bool = False, initial_claim_draft: bool = False) -> dict:
-    validate_proposal(frozen, proposal, review_only=review_only, claim_first=claim_first,
+    post = validate_proposal(frozen, proposal, review_only=review_only, claim_first=claim_first,
                       initial_claim_draft=initial_claim_draft)
     selected = frozen["inventory"]["affected_keys"] + frozen["inventory"]["context_keys"]
     before = index(frozen["before_records"])
@@ -947,6 +947,10 @@ def review_packet(frozen: dict, proposal: Proposal, *, review_only: bool = False
                if frozen["manifest"].get("deferred_repair") else {}),
         },
     }
+    if frozen.get('claim_issue_context',{}).get('complete_input_repair'):
+        from backend.pipeline.claim_citation_purpose_review import receipt
+        value=receipt(frozen,proposal,post)
+        if value:result['claim_citation_purpose_review']=value
     if initial_claim_draft:
         findings = []
         try:
@@ -1006,6 +1010,15 @@ def validate_review(packet: dict, response: dict) -> bool:
     from backend.api.canonical_repository.viewpoint_response_binding import bind_response
     review = Review.model_validate(bind_response(Review,response,packet))
     required = {d["record_key"] for d in packet["proposal"]["dispositions"]}
+    if packet.get('claim_citation_purpose_review'):
+        from backend.pipeline.claim_citation_purpose_review import VERSION
+        value=packet['claim_citation_purpose_review']
+        if (value.get('schema_version')!=VERSION or value.get('automatic_content_approval') is not False
+                or not packet.get('claim_issue_context',{}).get('complete_input_repair')):
+            raise ValueError('citation purpose review authority drift')
+        extra=[v['record_key'] for v in value['items']]
+        if len(set(extra))!=len(extra) or set(extra)&required:raise ValueError('citation purpose denominator drift')
+        required.update(extra)
     actual = [v.record_key for v in review.verdicts]
     if (review.proposal_sha256 != packet["proposal_sha256"] or len(actual) != len(set(actual)) or set(actual) != required):
         raise ValueError("review did not cover the exact complete consumer denominator")

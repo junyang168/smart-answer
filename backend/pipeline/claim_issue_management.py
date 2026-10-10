@@ -475,6 +475,12 @@ def validate_resolution(frozen, proposal, post, *, review_only=False):
                     for cite in a.citations) for e in qualification_only)
             else:
                 represented=all(bound_citations) if a.cause=='evidence_binding' else any(bound_citations)
+            if not represented and a.cause=='evidence_binding' and context.get('complete_input_repair'):
+                from backend.pipeline.claim_citation_purpose_review import items
+                purposes=items(frozen,proposal,post)
+                represented=any(bound_citations) and all(bound or any(
+                    p['record_key']==f'claim_citation_purpose/{a.issue_id}/{index}' for p in purposes)
+                    for index,bound in enumerate(bound_citations))
             if not represented:
                 raise ValueError('Evidence diagnosis must be represented by actual eligible bound Evidence')
             if a.cause=='evidence_binding' and post[k]==before[k] and all(
@@ -491,12 +497,21 @@ def validate_resolution(frozen, proposal, post, *, review_only=False):
             and next(d.action for d in proposal.dispositions if d.record_key==k)=='impact_only'
             and next(i.action for i in proposal.cvp_impacts if i.record_key==k)=='retain'
             for k in extra))
-    if len(actual) != len(set(actual)) or (set(actual) != required and not retained_identity_extras):
+    retained_context_extras=(context.get('complete_input_repair') and required<=set(actual)
+        and all(k in frozen['inventory']['affected_keys'] and k in before and post[k]==before[k]
+            and c.split_key(k)[0] in {'viewpoint_identity_candidates','viewpoint_identity_decisions',
+                                     'claim_relations','knowledge_relations'}
+            and before[k].get('review_status') not in HOLDS
+            and next(d.action for d in proposal.dispositions if d.record_key==k) in {'retain','impact_only'}
+            and next(i.action for i in proposal.cvp_impacts if i.record_key==k)=='retain'
+            for k in extra))
+    retained_extras=retained_identity_extras or retained_context_extras
+    if len(actual) != len(set(actual)) or (set(actual) != required and not retained_extras):
         raise ValueError("complete CVP impact denominator including retained members required")
     dispositions = {d.record_key: d.action for d in proposal.dispositions}
     for impact in proposal.cvp_impacts:
         citations(impact.citations)
-        if retained_identity_extras and impact.record_key in extra:
+        if retained_extras and impact.record_key in extra:
             # The additional rows describe immutable discovery/decision history,
             # not fresh CVP membership approval. Their ordinary impact-only
             # disposition and exact retained payload were checked above; keep
