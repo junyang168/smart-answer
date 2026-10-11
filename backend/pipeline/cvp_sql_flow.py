@@ -509,10 +509,13 @@ def run_group(store, definition, group, row, *, root):
     store.bind_cvp_execution_root(run_id,identity='group',root=root/run_id)
     model_root = root/run_id/"normal-review"
     if saved["checkpoint"] == "prepared":
+        from backend.pipeline.claim_evidence_completion import NAME as COMPLETION_NAME
         from backend.pipeline.claim_complete_input_repair import NAME as INPUT_REPAIR_NAME
         from backend.pipeline.claim_issue_rescope import NAME, execute as amend
         repair_binding=root/INPUT_REPAIR_NAME
-        amendment=repair_binding if repair_binding.exists() and read_artifact(
+        completion_binding=root/COMPLETION_NAME
+        amendment=completion_binding if completion_binding.exists() and read_artifact(
+            read_artifact(completion_binding)['authorization']['path'])['run_id']==run_id else repair_binding if repair_binding.exists() and read_artifact(
             read_artifact(repair_binding)['authorization']['path'])['run_id']==run_id else root/NAME
         authorization=read_artifact(amendment)['authorization'] if amendment.exists() else None
         direction=read_artifact(authorization['path']) if authorization else None
@@ -845,6 +848,8 @@ def main(argv=None):
                         help='Exact once-only pre-review scope amendment; original issue calls remain reserved')
     parser.add_argument('--claim-complete-input-repair-authorization',type=Path,
                         help='Exact once-only proven Claim input repair; original calls remain immutable')
+    parser.add_argument('--claim-evidence-completion-authorization',type=Path,
+                        help='Exact owner joint Evidence binding/qualification and erroneous relation withdrawal; fixed parent, original budgets retained')
     parser.add_argument('--normalization-engineering-recovery-authorization',type=Path,
                         help='Fixed-parent flag-only program defect recovery; one independent review, no new proposal')
     parser.add_argument('--retained-link-review-policy',type=Path,
@@ -881,6 +886,9 @@ def main(argv=None):
     if (args.output_root/AMENDMENT_NAME).exists() and not args.claim_issue_rescope_authorization:
         raise ValueError('Claim issue scope amendment binding requires explicit recovery flag')
     from backend.pipeline.claim_complete_input_repair import NAME as INPUT_REPAIR_NAME, SCHEMA as INPUT_REPAIR_SCHEMA
+    from backend.pipeline.claim_evidence_completion import NAME as COMPLETION_NAME, SCHEMA as COMPLETION_SCHEMA
+    if (args.output_root/COMPLETION_NAME).exists() and not args.claim_evidence_completion_authorization:
+        raise ValueError('bound Claim Evidence completion direction must be explicit on recovery')
     if (args.output_root/INPUT_REPAIR_NAME).exists() and not args.claim_complete_input_repair_authorization:
         raise ValueError('Claim complete input repair binding requires explicit recovery flag')
     from backend.pipeline.source_normalization_recovery import BINDING as NORMALIZATION_BINDING
@@ -995,6 +1003,19 @@ def main(argv=None):
             persist_generation_binding(args.output_root/RETAINED_NAME,{'schema_version':RETAINED_VERSION,
                 'campaign_sha256':args.sql_campaign,'policy':binding(args.retained_link_review_policy),
                 'generation_artifacts':generation_artifacts(args.retained_generation_artifact)})
+        if args.claim_evidence_completion_authorization:
+            from backend.pipeline.claim_issue_rescope import validate_live
+            authorization=binding(args.claim_evidence_completion_authorization)
+            direction=read_artifact(args.claim_evidence_completion_authorization)
+            target=store.get_cvp_group(direction['run_id'])
+            if (direction.get('schema_version')!=COMPLETION_SCHEMA or direction['campaign_sha256']!=args.sql_campaign
+                    or not target or target['campaign_sha256']!=args.sql_campaign
+                    or (invocation_limit is not None and target['sequence']>invocation_limit)
+                    or not Path(direction['old_action_root']).resolve().is_relative_to((args.output_root/direction['run_id']/'claim-issues').resolve())):
+                raise ValueError('Claim Evidence completion campaign/root/boundary drift')
+            aid='CVPA-'+sha256_json({'kind':'claim_issue_scope_amendment_once','parent':direction['old_action_id']})
+            if not store.cvp_action_committed(direction['run_id'],aid):validate_live(store,direction)
+            write_immutable(args.output_root/COMPLETION_NAME,{'authorization':authorization})
         if args.claim_issue_rescope_authorization:
             from backend.pipeline.claim_issue_rescope import validate_live
             authorization=binding(args.claim_issue_rescope_authorization)

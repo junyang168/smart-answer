@@ -99,6 +99,8 @@ def validate_source_package(package):
             templates[content.key(*k)]=p
         if len(templates)!=len(rp):raise ValueError('scope template denominator drift')
     validate_reviewed_records(package,materials,frozen_sha256=application['materials_sha256'],provenance_templates=templates)
+    from backend.pipeline.claim_evidence_completion import package_withdrawals
+    return package_withdrawals(package,materials)
 
 
 def prepare_source_action(store,run_id,manifest,*,root):
@@ -262,6 +264,10 @@ def execute_source_action(store,run_id,manifest,*,root,ports,claim_first=False):
         'run_id':run_id,'materials':binding(root/'scoped-materials.json'),
         'materials_sha256':action['materials_sha256'],'terminal_stage':raw['stage'],
         'review_sha256':raw['artifact_sha256'],'proposal_sha256':sha256_json(proposal.model_dump())}
+    from backend.pipeline.claim_evidence_completion import direction_for
+    completion=direction_for(materials.get('claim_issue_context',{}))
+    if completion:
+        package['source_repair_application']['knowledge_relation_withdrawals']=completion['withdraw_relation_ids']
     if template_proof:package['source_repair_application']['identity_template_read_pins']=template_proof
     validate_source_package(package)
     from backend.pipeline.cvp_sql_flow import verified_group_backup

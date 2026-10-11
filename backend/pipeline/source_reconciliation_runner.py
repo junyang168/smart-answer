@@ -277,6 +277,8 @@ class Runner:
         adapter = citation_scoped_adapter(adapter,packet)
         from backend.pipeline.source_normalization_recovery import scoped_adapter as recovery_scoped_adapter
         adapter = recovery_scoped_adapter(adapter,packet)
+        from backend.pipeline.claim_evidence_completion import scoped_adapter as completion_adapter
+        adapter = completion_adapter(adapter,packet)
         from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
         raw_path = self.root / (stage + '.raw.json')
         adapter = stage_adapter(adapter, packet, raw_path, saved=read(raw_path) if raw_path.exists() else None)
@@ -574,6 +576,9 @@ def build_proposal_packet(frozen: dict) -> dict:
         if frozen['claim_issue_context'].get('complete_input_repair'):
             from backend.pipeline.claim_complete_input_repair import input_receipt
             result['complete_input_repair_receipt'] = input_receipt(frozen)
+        from backend.pipeline.claim_evidence_completion import packet_receipt
+        completion=packet_receipt(frozen)
+        if completion:result['evidence_completion_receipt']=completion
     if any(contract.split_key(k)[0]=='knowledge_routes' for k in frozen['inventory']['unknown_keys']):
         result['inventory'] = {**frozen['inventory'], 'unknown_keys': contract.unresolved_consumers(frozen)}
         result['read_only_adapter_receipt'] = {'schema': 'knowledge_route_impact_only_v1',
@@ -819,6 +824,8 @@ def validate_raw(root: Path, stage: str, packet: dict) -> dict:
     adapter = citation_scoped_adapter(adapter,packet)
     from backend.pipeline.source_normalization_recovery import scoped_adapter as recovery_scoped_adapter
     adapter = recovery_scoped_adapter(adapter,packet)
+    from backend.pipeline.claim_evidence_completion import scoped_adapter as completion_adapter
+    adapter = completion_adapter(adapter,packet)
     raw = read(root / (stage + ".raw.json"))
     from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
     adapter = stage_adapter(adapter, packet, root / (stage + '.raw.json'), saved=raw)

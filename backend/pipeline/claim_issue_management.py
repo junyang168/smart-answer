@@ -249,8 +249,11 @@ def validate_authority(manifest, states, snapshots=None):
     if context.get('scope_amendment'):
         from backend.pipeline.claim_issue_rescope import permissions
         direction=json.loads(c.bound_bytes(context['scope_amendment'],snapshots))
-        expected=[p for p in expected if p.collection!='evidence_steps' or p.object_id in direction['evidence_ids']]
-        expected += permissions(context,states,snapshots)
+        from backend.pipeline.claim_evidence_completion import evidence_permission_ids
+        expected=[p for p in expected if p.collection!='evidence_steps' or p.object_id in evidence_permission_ids(direction)]
+        from backend.pipeline.claim_evidence_completion import direction_for, merge_permissions
+        extra=permissions(context,states,snapshots)
+        expected=merge_permissions(expected,extra) if direction_for(context,snapshots) else expected+extra
     if manifest.permissions != expected:
         raise ValueError("Claim/CVP issue permission set exceeds separate domain authority")
     return context
@@ -528,6 +531,11 @@ def validate_resolution(frozen, proposal, post, *, review_only=False):
     if proposal.unadmitted_candidates:
         raise ValueError("Claim issue cannot add/split original campaign judgments")
     own_evidence={eid for issue in issues.values() for eid in post[c.key('claims',issue.claim_id)]['evidence_step_ids']}
+    from backend.pipeline.claim_evidence_completion import direction_for, validate_postimages
+    completion=direction_for(context,frozen.get('physical_snapshots'))
+    if completion:
+        validate_postimages(frozen,proposal,post)
+        own_evidence.update(completion['evidence_ids'])
     used_fragments={f['fragment_id'] for f in bound_fragments([post[c.key('evidence_steps',eid)] for eid in own_evidence],
                                                            lambda fid:post[c.key('source_fragments',fid)])}
     if any(c.split_key(k)[0]=='source_fragments' and c.split_key(k)[1] not in used_fragments for k in post.keys()-before.keys()):
@@ -539,6 +547,8 @@ def validate_resolution(frozen, proposal, post, *, review_only=False):
         if old.get("review_status") in HOLDS or col == "source_documents":
             raise ValueError("Claim issue cannot clear hold or change original source")
         if col == "evidence_steps":
+            if completion and c.split_key(k)[1] in completion['evidence_ids']:
+                continue  # Exact new binding/qualification was verified above; independently reviewed, not auto-approved.
             eligibility_changed = any(old.get(f) != post[k].get(f) for f in ELIGIBILITY_FIELDS)
             if eligibility_changed:
                 if (not policy.evidence_eligibility_review

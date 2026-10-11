@@ -3514,8 +3514,9 @@ class PostgresKnowledgeStore:
                 row=conn.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE',(ident,)).fetchone()
                 value=row[0] if row else None
                 from backend.pipeline.claim_complete_input_repair import SCHEMA as REPAIR_SCHEMA
+                from backend.pipeline.claim_evidence_completion import SCHEMA as COMPLETION_SCHEMA
                 if (not value or value['owner_run_id']!=run_id
-                        or (direction['schema_version']!=REPAIR_SCHEMA and (value['correction_used'] or value['terminal_refusal']))
+                        or (direction['schema_version'] not in {REPAIR_SCHEMA,COMPLETION_SCHEMA} and (value['correction_used'] or value['terminal_refusal']))
                         or value.get('action')!={'run_id':run_id,'action_id':direction['old_action_id']}):
                     raise ChangeSetConflict('scope amendment cannot replace original issue reservation')
                 bound={'run_id':run_id,'action_id':action_id,'authorization':authorization}
@@ -3583,6 +3584,7 @@ class PostgresKnowledgeStore:
         if amendment:
             from backend.pipeline.claim_issue_rescope import SCHEMA
             from backend.pipeline.claim_complete_input_repair import SCHEMA as REPAIR_SCHEMA
+            from backend.pipeline.claim_evidence_completion import SCHEMA as COMPLETION_SCHEMA
             from backend.pipeline.cvp_sql_flow import check_binding
             from backend.pipeline.viewpoint_resolution_runtime import read_artifact
             auth=amendment['authorization'];check_binding(auth);direction=read_artifact(auth['path'])
@@ -3590,7 +3592,7 @@ class PostgresKnowledgeStore:
             cursor.execute("SELECT metadata->>'campaign_sha256' FROM wang_knowledge.pipeline_runs WHERE run_id=%s",(run_id,))
             campaign=cursor.fetchone()
             if (amendment.get('run_id')!=run_id or amendment.get('action_id')!=expected
-                    or direction.get('schema_version') not in {SCHEMA,REPAIR_SCHEMA} or direction.get('authorized_by')!='owner'
+                    or direction.get('schema_version') not in {SCHEMA,REPAIR_SCHEMA,COMPLETION_SCHEMA} or direction.get('authorized_by')!='owner'
                     or direction.get('human_content_approval') is not False
                     or direction.get('additional_proposal_limit')!=1 or not direction.get('authorization_quote')
                     or direction.get('run_id')!=run_id or direction.get('old_action_id')!=action_id
@@ -3600,6 +3602,9 @@ class PostgresKnowledgeStore:
             if direction['schema_version']==REPAIR_SCHEMA and (direction.get('additional_review_limit')!=1
                     or direction.get('additional_correction_limit')!=0):
                 raise ChangeSetConflict('Claim issue complete-input repair completion budget drift')
+            if direction['schema_version']==COMPLETION_SCHEMA and (direction.get('additional_review_limit')!=1
+                    or direction.get('additional_correction_limit')!=1):
+                raise ChangeSetConflict('Claim Evidence completion review budget drift')
             action_id=expected
             ident='CVPA-'+sha256_json({'parent':run_id,'action':action_id})
             cursor.execute("""SELECT metadata->'action'->>'kind',
@@ -4859,6 +4864,12 @@ class PostgresKnowledgeStore:
         Retiring afterwards is too late: nothing was ever planned.
         """
 
+        if (package.get('source_repair_application') or {}).get('schema_version') == 'wang_source_sql_reconciliation_v2':
+            from backend.pipeline.cvp_sql_actions import validate_source_package
+            authorized_keys=validate_source_package(dict(package))
+            if retiring_keys and tuple(retiring_keys)!=authorized_keys:
+                raise ValueError('source retirement exceeds independently reviewed Evidence completion')
+            retiring_keys=authorized_keys
         if (package.get('source_repair_application') or {}).get('schema_version') in {'wang_source_sql_reconciliation_v2','wang_owner_sql_link_correction_v2','wang_cvp_sql_link_retarget_v1','wang_cvp_owner_sql_link_retirement_v1','wang_cvp_deferred_authorized_link_management_v1','wang_cvp_sql_link_replacement_v1','wang_cvp_sql_link_representation_v1'} and not transactional:
             raise ValueError('SQL source action cannot use the retired whole-store planning path')
         if (package.get('source_repair_application') or {}).get('schema_version') == 'wang_cvp_sql_link_replacement_v1':

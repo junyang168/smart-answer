@@ -479,6 +479,22 @@ def freeze(manifest: Manifest, states: dict[str, dict], *, physical_snapshots: d
                 if k in context:continue
                 context.add(k);queue.extend(forward[k]-context)
             inv['context_keys']=sorted(context-set(inv['affected_keys']))
+            from backend.pipeline.claim_evidence_completion import SCHEMA as COMPLETION_SCHEMA
+            if direction['schema_version']==COMPLETION_SCHEMA:
+                # New Evidence is a genuinely expanded authorized scope. Keep
+                # every indexed consumer visible, while held Claims are exact
+                # unchanged context rather than freshly approved write rows.
+                _,reverse=dependency_index(states)
+                affected=set(inv['affected_keys'])
+                queue=deque(key('evidence_steps',eid) for eid in direction['evidence_ids'])
+                held={key('claims',cid) for cid in direction['unchanged_held_context_claim_ids']}
+                while queue:
+                    k=queue.popleft()
+                    if k in affected:continue
+                    if k not in held:affected.add(k)
+                    queue.extend(reverse[k]-affected-held)
+                inv['affected_keys']=sorted(affected)
+                inv['context_keys']=sorted(set(states)-affected)
     elif manifest.deferred_repair:
         from backend.pipeline.deferred_claim_repair import validate_authority
         diagnosis = validate_authority(manifest, states, snapshots=physical_snapshots)
@@ -993,6 +1009,9 @@ def review_packet(frozen: dict, proposal: Proposal, *, review_only: bool = False
         from backend.pipeline.claim_citation_purpose_review import receipt
         value=receipt(frozen,proposal,post)
         if value:result['claim_citation_purpose_review']=value
+    from backend.pipeline.claim_evidence_completion import review_items
+    withdrawals=review_items(frozen)
+    if withdrawals:result['knowledge_relation_withdrawal_review']=withdrawals
     if initial_claim_draft:
         findings = []
         try:
@@ -1052,6 +1071,15 @@ def validate_review(packet: dict, response: dict) -> bool:
     from backend.api.canonical_repository.viewpoint_response_binding import bind_response
     review = Review.model_validate(bind_response(Review,response,packet))
     required = {d["record_key"] for d in packet["proposal"]["dispositions"]}
+    if packet.get('knowledge_relation_withdrawal_review'):
+        from backend.pipeline.claim_evidence_completion import direction_for
+        direction=direction_for(packet.get('claim_issue_context',{}))
+        wanted={'knowledge_relation_withdrawal/'+r for r in direction['withdraw_relation_ids']} if direction else set()
+        if direction:wanted.update('evidence_shared_owner/'+cid for cid in direction['unchanged_held_context_claim_ids'])
+        extra=[v['record_key'] for v in packet['knowledge_relation_withdrawal_review']]
+        if len(set(extra))!=len(extra) or set(extra)!=wanted or set(extra)&required:
+            raise ValueError('knowledge relation withdrawal review scope drift')
+        required.update(extra)
     if packet.get('claim_citation_purpose_review'):
         from backend.pipeline.claim_citation_purpose_review import VERSION
         value=packet['claim_citation_purpose_review']

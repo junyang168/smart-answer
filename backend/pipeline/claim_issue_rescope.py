@@ -15,6 +15,9 @@ NAME = 'claim-issue-rescope-authorization-binding.json'
 
 
 def validate_direction(direction, *, snapshots=None):
+    from backend.pipeline.claim_evidence_completion import SCHEMA as COMPLETION_SCHEMA, validate as validate_completion
+    if direction.get('schema_version') == COMPLETION_SCHEMA:
+        return validate_completion(direction,snapshots=snapshots)
     from backend.pipeline.claim_complete_input_repair import SCHEMA as REPAIR_SCHEMA, validate
     if direction.get('schema_version') == REPAIR_SCHEMA:
         return validate(direction,snapshots=snapshots)
@@ -87,7 +90,8 @@ def validate_live(store, direction):
         from backend.pipeline.claim_issue_management import Issue
         row=store.get_claim_issue(Issue.model_validate(issue).issue_id)
         from backend.pipeline.claim_complete_input_repair import SCHEMA as REPAIR_SCHEMA
-        if not row or (direction['schema_version']!=REPAIR_SCHEMA and (row['correction_used'] or row['terminal_refusal'])):
+        from backend.pipeline.claim_evidence_completion import SCHEMA as COMPLETION_SCHEMA
+        if not row or (direction['schema_version'] not in {REPAIR_SCHEMA,COMPLETION_SCHEMA} and (row['correction_used'] or row['terminal_refusal'])):
             raise ValueError('original issue budget cannot acquire an amendment')
     return material, raw
 
@@ -98,6 +102,11 @@ def permissions(context, states, snapshots=None):
     if context['issues']!=old['claim_issue_context']['issues'] or context['policy']!=direction['new_policy']:
         raise ValueError('amendment cannot rename original issues or replace its new policy')
     result=[c.Permission.model_validate(p) for p in direction['link_permissions']]
+    from backend.pipeline.claim_evidence_completion import SCHEMA as COMPLETION_SCHEMA, extra_permissions
+    if direction['schema_version']==COMPLETION_SCHEMA:
+        if any(states.get(k)!=v for k,v in c.index(old['before_records']).items()):
+            raise ValueError('Evidence completion original graph changed')
+        return extra_permissions(direction,states)
     from backend.pipeline.claim_complete_input_repair import SCHEMA as REPAIR_SCHEMA
     if direction['schema_version']==REPAIR_SCHEMA:
         if any(states.get(k)!=v for k,v in c.index(old['before_records']).items()):
@@ -119,6 +128,10 @@ def amend_manifest(store, direction, authorization, root):
     context=body(old['claim_issue_context'])
     context['policy']=direction['new_policy']
     context['scope_amendment']=authorization
+    from backend.pipeline.claim_evidence_completion import SCHEMA as COMPLETION_SCHEMA, merge_permissions, extra_permissions
+    completion=direction['schema_version']==COMPLETION_SCHEMA
+    if completion:
+        context['anchor_binding_validation_profile']='declared_local_own_containing_v1'
     from backend.pipeline.claim_complete_input_repair import SCHEMA as REPAIR_SCHEMA, mark_context
     repair=direction['schema_version']==REPAIR_SCHEMA
     if repair:mark_context(context)
@@ -127,8 +140,11 @@ def amend_manifest(store, direction, authorization, root):
     policy=read_policy(direction['new_policy'])
     manifest.permissions=policy_permissions(policy,states,manifest.source_id,context['claim_ids'],
         retained_occurrences=context.get('retained_occurrence_context',[]),current_anchor_scope=repair)
-    manifest.permissions=[p for p in manifest.permissions if p.collection!='evidence_steps' or p.object_id in direction['evidence_ids']]
+    from backend.pipeline.claim_evidence_completion import evidence_permission_ids
+    manifest.permissions=[p for p in manifest.permissions if p.collection!='evidence_steps' or p.object_id in evidence_permission_ids(direction)]
     manifest.permissions += [c.Permission.model_validate(p) for p in direction['link_permissions']]
+    if completion:
+        manifest.permissions=merge_permissions(manifest.permissions,extra_permissions(direction,states))
     auth={'source_id':manifest.source_id,'authorization_id':policy.authorization_id,
           'authorization_quote':direction['authorization_quote'],'human_content_approval':False,
           'policy':direction['new_policy'],'claim_issue':manifest.claim_issue.model_dump(),
@@ -155,13 +171,22 @@ def amendment_records(store, direction, old):
         store._assert_transaction_read_pins(cursor,wanted)
         write_ids=direction['evidence_ids']+[p['object_id'] for p in direction['link_permissions']]
         consumers=store._reference_consumers(cursor,write_ids,sorted(c.KNOWLEDGE_COLLECTIONS))
-        if any((col,oid) not in records for col,oid,_ in consumers):
+        from backend.pipeline.claim_evidence_completion import SCHEMA as COMPLETION_SCHEMA
+        completion=direction['schema_version']==COMPLETION_SCHEMA
+        if not completion and any((col,oid) not in records for col,oid,_ in consumers):
             raise ValueError('amendment has a new consumer outside original complete SQL proof')
     for key,payload in c.index(old['before_records']).items():
         row=records[c.split_key(key)]
         if row['retired'] or row['payload']!=payload:
             raise ValueError('amendment current original payload/retirement drift')
     extra=store.read_cvp_context(direction['context_claim_ids']) if direction['context_claim_ids'] else {}
+    if completion:
+        closure=store.read_affected_context([('evidence_steps',eid) for eid in direction['evidence_ids']]
+                                          +[('knowledge_relations',rid) for rid in direction['withdraw_relation_ids']])
+        for key,row in closure.items():
+            if key in extra and any(extra[key].get(f)!=row.get(f) for f in ('revision','content_sha256','payload','retired')):
+                raise ValueError('Evidence completion current closure conflict')
+            extra[key]=row
     for key,row in extra.items():
         if key in records and records[key]!=row:
             # Different helper metadata shapes do not replace payload/pins.
@@ -176,7 +201,9 @@ def execute(store, run_id, *, authorization, root, ports):
     if direction['run_id']!=run_id:
         raise ValueError('scope amendment requires its original group')
     from backend.pipeline.claim_complete_input_repair import SCHEMA as REPAIR_SCHEMA
-    work=Path(direction['old_action_root']).parent.parent/('complete-input-repair-once' if direction['schema_version']==REPAIR_SCHEMA else 'scope-amendment-once')
+    from backend.pipeline.claim_evidence_completion import SCHEMA as COMPLETION_SCHEMA
+    label='evidence-completion-once' if direction['schema_version']==COMPLETION_SCHEMA else ('complete-input-repair-once' if direction['schema_version']==REPAIR_SCHEMA else 'scope-amendment-once')
+    work=Path(direction['old_action_root']).parent.parent/label
     if not work.resolve().is_relative_to(Path(root).resolve()):
         raise ValueError('scope amendment cannot move roots to acquire a budget')
     path=work/'manifest.json'
