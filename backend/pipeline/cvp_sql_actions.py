@@ -329,7 +329,7 @@ def execute_source_action(store,run_id,manifest,*,root,ports,claim_first=False):
         source_kind=SOURCE_SCHEMA,viewpoint_ids=sorted(views),
         disposition=original.get('disposition'),action=action,
         pending_cvp_claim_ids=pending,
-        pending_cvp_management_record_keys=original.get('pending_cvp_management_record_keys',[]) if joint_owner_claim or manifest.get('anchor_qualification') or manifest.get('evidence_binding_repair') else ())
+        pending_cvp_management_record_keys=original.get('pending_cvp_management_record_keys',[]))
 
 
 def merge_dispositions(old,new):

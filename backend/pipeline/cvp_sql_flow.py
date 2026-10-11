@@ -460,8 +460,10 @@ def commit_package(store, run_id, *, package, approval, authorization, backup, s
                 "viewpoint_ids":list(viewpoint_ids),"disposition":disposition}
     evidence['execution']={'reason':reason,'actor':actor,'approval':approval,'authorization':authorization,'backup':backup}
     evidence['pending_cvp_claim_ids']=list(pending_cvp_claim_ids)
-    if pending_cvp_management_record_keys is None:
-        pending_cvp_management_record_keys=(store.get_cvp_group(run_id) or {}).get('reviewed',{}).get('evidence',{}).get('pending_cvp_management_record_keys',[])
+    previous_pending=(store.get_cvp_group(run_id) or {}).get('reviewed',{}).get('evidence',{}).get('pending_cvp_management_record_keys',[])
+    # Pending is a durable obligation, not a request to mutate every row.
+    # Even an explicit empty list must not erase an earlier obligation.
+    pending_cvp_management_record_keys=list(dict.fromkeys([*previous_pending,*(pending_cvp_management_record_keys or [])]))
     if pending_cvp_management_record_keys:
         evidence['pending_cvp_management_record_keys']=list(pending_cvp_management_record_keys)
     if action:evidence['action']=action

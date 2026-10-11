@@ -14,6 +14,129 @@ HANDOFF='wang_sequential_source_cvp_handoff_v1'
 SLICE_IMPACTS='wang_source_slice_current_impact_resolution_v1'
 
 
+def audited_claim_transition(cursor,cid,old_pin):
+    """One actual source commit and its SQL-recorded Claim-layer receipt.
+
+    Not an ancestor search or permission to infer a new Claim judgement from
+    a CVP audit. The complete old/current payloads are bound by actual SQL.
+    """
+    from backend.pipeline.cvp_sql_flow import check_binding,decoded_pins
+    from backend.pipeline.claim_first_management import validate_claim_audit_report
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    row=cursor.execute("SELECT payload,revision,content_sha256,retired_at IS NOT NULL FROM wang_knowledge.objects WHERE collection='claims' AND object_id=%s",(cid,)).fetchone()
+    if (not row or row[3] or record_content_sha(row[0])!=row[2]
+            or row[0].get('review_status') in {'human_hold','human_review_required','rejected','needs_review'}
+            or row[0].get('effective_state')=='held'):
+        raise ValueError('source dependency current Claim missing/held/retired')
+    current=(row[1],row[2],False)
+    if current==tuple(old_pin):return None
+    record=cursor.execute("SELECT v.change_set_id,c.metadata FROM wang_knowledge.object_versions v JOIN wang_knowledge.change_sets c USING(change_set_id) WHERE v.collection='claims' AND v.object_id=%s AND v.revision=%s AND v.content_sha256=%s AND c.status='applied'",(cid,row[1],row[2])).fetchone()
+    if not record or not record[1].get('run_id') or not record[1].get('reviewed_sha256'):
+        raise ValueError('source dependency lacks unique committed generation')
+    parent=cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s AND stage='cvp_group'",(record[1]['run_id'],)).fetchone()
+    if not parent:raise ValueError('source dependency committed parent missing')
+    owner={**parent[0],'run_id':record[1]['run_id']}
+    reviewed=applied_review(None,owner,record[1]['reviewed_sha256'],cursor=cursor)
+    plan=reviewed['plan'];e=reviewed['evidence'];package=e['package']['payload']
+    app=package.get('source_repair_application',{})
+    if (plan['change_set_id']!=record[0] or not app or app.get('run_id')!=owner['run_id']
+            or sha256_json(package)!=e['package']['sha256'] or plan['source_sha256']!=e['package']['sha256']):
+        raise ValueError('source dependency actual source approval drift')
+    ops=plan['operations'];fields=('operation','collection','object_id','before_revision','after_revision','before_sha256','after_sha256')
+    actual=cursor.execute('SELECT operation,collection,object_id,before_revision,after_revision,before_sha256,after_sha256 FROM wang_knowledge.change_operations WHERE change_set_id=%s ORDER BY operation_index',(record[0],)).fetchall()
+    if actual!=[tuple(o[k] for k in fields) for o in ops]:raise ValueError('source dependency complete write set drift')
+    claims=[o for o in ops if o['collection']=='claims' and o['object_id']==cid]
+    if (len(claims)!=1 or claims[0]['operation']!='update'
+            or tuple(old_pin)!=(claims[0]['before_revision'],claims[0]['before_sha256'],False)
+            or current!=(claims[0]['after_revision'],claims[0]['after_sha256'],False)
+            or claims[0]['payload']!=row[0]):
+        raise ValueError('source dependency is not the exact immediately approved Claim transition')
+    before=cursor.execute("SELECT payload,content_sha256 FROM wang_knowledge.object_versions WHERE collection='claims' AND object_id=%s AND revision=%s",(cid,old_pin[0])).fetchone()
+    if not before or before[1]!=old_pin[1] or record_content_sha(before[0])!=old_pin[1]:
+        raise ValueError('source dependency old complete Claim generation missing')
+    for proof in [app['materials'],*e['sources']]:check_binding(proof)
+    for proof in e['approval'].values():
+        if isinstance(proof,dict) and 'path' in proof:check_binding(proof)
+    marker=owner.get('claim_layer_audit',{})
+    if marker.get('status')!='claim_layer_audited_cvp_pending' or not marker.get('receipt'):
+        raise ValueError('source dependency new generation has no recorded complete Claim-layer audit')
+    proof=marker['receipt'];check_binding(proof);receipt=read_artifact(proof['path'])
+    if (receipt.get('status')!='claim_layer_audited_cvp_pending' or cid not in receipt.get('claim_ids',[])
+            or receipt.get('claim_ids')!=owner['claim_ids'] or record[0] not in receipt.get('change_set_ids',[])
+            or decoded_pins(receipt['read_pins']).get(('claims',cid))!=current):
+        raise ValueError('source dependency current Claim audit receipt drift')
+    check_binding(receipt['audit']);audit=read_artifact(receipt['audit']['path'])
+    validate_claim_audit_report(audit,receipt['claim_ids'])
+    if decoded_pins(audit['meta']['registry_read_scope']['read_pins']).get(('claims',cid))!=current:
+        raise ValueError('source dependency independently audited another Claim generation')
+    for b in receipt['source_proofs']:check_binding(b)
+    current_ops={(o['collection'],o['object_id']):(o['after_revision'],o['after_sha256'],False) for o in ops}
+    PostgresKnowledgeStore._assert_transaction_read_pins(cursor,current_ops)
+    reviewed_links={p['viewpoint_claim_link_id']:p for p in package.get('viewpoint_claim_links',[]) if p['claim_id']==cid}
+    links=cursor.execute("SELECT object_id,payload FROM wang_knowledge.objects WHERE collection='viewpoint_claim_links' AND retired_at IS NULL AND payload->>'claim_id'=%s AND payload->>'effective_state'='active'",(cid,)).fetchall()
+    if (not links or {i for i,p in links}!=set(reviewed_links)
+            or any(p!=reviewed_links[i] or p.get('pinned_claim_revision')!=row[0]['revision']
+                   or p.get('review_status')!='system_approved' for i,p in links)):
+        raise ValueError('source dependency current active connections lack complete joint approval')
+    return {'claim_id':cid,'before_pin':list(old_pin),'current_pin':list(current),
+            'source_change_set_id':record[0],'source_run_id':owner['run_id'],
+            'reviewed_sha256':record[1]['reviewed_sha256'],'claim_layer_receipt':proof,
+            'revisit_required':receipt.get('revisit_required',False),'independent_complete':receipt.get('independent_complete',True)}
+
+
+def completed_source_facts(value,*,store=None,cursor=None):
+    """Reuse only SQL-recorded closed source obligations; audit CVPs afresh.
+
+    Broad historical readsets are not current business obligations. Old
+    verdicts/pins remain in the bound receipt, never rewritten to current.
+    """
+    if cursor is None:
+        if store is None:return None
+        with store.connect() as conn,conn.cursor() as cur:return completed_source_facts(value,cursor=cur)
+    from backend.pipeline.cvp_sql_flow import check_binding,decoded_pins,pin_rows
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    saved=cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s AND stage='cvp_group'",(value['run_id'],)).fetchone()
+    if not saved or saved[0].get('reviewed_sha256')!=value['reviewed_sha256']:
+        raise ValueError('completed source facts current review drift')
+    completion=saved[0].get('completion',{});prior=completion.get('retained_impacts_resolution')
+    if not prior:return None
+    check_binding(prior);old=read_artifact(prior['path'])
+    if old.get('schema_version')!=VERSION:return None
+    pending=value['reviewed']['evidence'].get('pending_cvp_management_record_keys',[])
+    handoff=context(value,cursor=cursor)
+    if (old.get('artifact_sha256')!=sha256_json({k:v for k,v in old.items() if k!='artifact_sha256'})
+            or old.get('run_id')!=value['run_id'] or old.get('reviewed_sha256')!=value['reviewed_sha256']
+            or old.get('audit')!=completion.get('audit') or old.get('source_handoff')!=handoff
+            or old.get('pending_record_keys')!=pending or old.get('model_verdicts_changed') is not False
+            or old.get('original_pending_list_preserved') is not True):
+        raise ValueError('completed source facts lack exact recorded prior closure')
+    for b in old['bindings']+old['audit_proofs']:check_binding(b)
+    source=applied_review(None,value,handoff['prior_reviewed_sha256'],cursor=cursor)
+    # These actual source writes and all explicit source obligations must be
+    # unchanged. Unrelated broad material pins remain historical only.
+    old_pins=decoded_pins(old['read_pins']);critical={}
+    for op in source['plan']['operations']:
+        key=(op['collection'],op['object_id'])
+        if key[0] not in {'evidence_steps','source_fragments'}:
+            raise ValueError('completed source facts not an Evidence-only source domain')
+        critical[key]=(op['after_revision'],op['after_sha256'],False)
+    for item in old['items']:
+        if 'pin' in item:
+            key=tuple(item['record_key'].split('/',1));critical[key]=tuple(item['pin'])
+    transitions=[]
+    for dep in handoff['audited_dependency_impacts']:
+        cid=dep['claim_id'];transition=audited_claim_transition(cursor,cid,dep['claim_pin'])
+        critical['claims',cid]=tuple(transition['current_pin'] if transition else dep['claim_pin'])
+        if transition:transitions.append(transition)
+    for key,pin in critical.items():
+        if key[0]!='claims' and old_pins.get(key)!=pin:raise ValueError('completed source facts original target pin drift')
+    PostgresKnowledgeStore._assert_transaction_read_pins(cursor,critical)
+    return {'source_handoff':handoff,'pending_record_keys':list(pending),'items':old['items'],
+            'read_pins':pin_rows(critical),'bindings':old['bindings'],
+            'prior_completed_resolution':prior,'audited_claim_transitions':transitions,
+            'model_verdicts_changed':False,'original_pending_list_preserved':True}
+
+
 def statement_slice_context(store,value):
     """Recover the named committed slice after later sequential actions.
 
@@ -748,6 +871,8 @@ def prepare(store,value):
     from backend.pipeline.source_consumer_scope import declared_group_keys
     handoff=context(value,store)
     if not handoff:return None
+    completed=completed_source_facts(value,store=store)
+    if completed is not None:return completed
     if handoff.get('source_slice_mode') in {'policy_evidence_binding','policy_claim_source_revision'}:
         return prepare_question_slice(store,value)
     pending=value['reviewed']['evidence'].get('pending_cvp_management_record_keys',[])
@@ -838,6 +963,16 @@ def validate_for_completion(value,path,audit_binding,cursor,*,semantic_resolutio
             or body.get('semantic_resolution')!=(binding(semantic_resolution) if semantic_resolution else None)):
         raise ValueError('source impact completion proof drift')
     for b in body['bindings']+body['audit_proofs']:check_binding(b)
+    if body.get('prior_completed_resolution'):
+        expected=completed_source_facts(value,cursor=cursor)
+        if expected is None or any(body.get(k)!=v for k,v in expected.items()):
+            raise ValueError('completed source impact revalidation proof drift')
+        audit=read_artifact(audit_binding['path'])
+        independent=decoded_pins(audit['meta']['registry_read_scope']['read_pins'])
+        for transition in body['audited_claim_transitions']:
+            if independent.get(('claims',transition['claim_id']))!=tuple(transition['current_pin']):
+                raise ValueError('completed source dependency absent from current complete independent audit')
+        return body
     if body['source_handoff'].get('source_slice_mode') in {'policy_evidence_binding','policy_claim_source_revision'}:
         expected=prepare_question_slice(None,value,cursor=cursor)
         if any(body.get(k)!=v for k,v in expected.items()):

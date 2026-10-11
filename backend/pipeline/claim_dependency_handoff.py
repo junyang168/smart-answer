@@ -26,10 +26,9 @@ def subject(value):
     context = materials.get('claim_issue_context', {})
     issues = context.get('issues', [])
     ids = context.get('claim_ids', [])
-    if (len(ids) != 1 or len(issues) != 1
-            or issues[0].get('origin') not in {'opus_initial', 'gpt_proposal'}):
+    if len(ids) != 1 or len(issues) != 1:
         return None
-    if e.get('pending_cvp_claim_ids') != ids or e.get('pending_cvp_management_record_keys'):
+    if e.get('pending_cvp_claim_ids') != ids:
         # This accounting domain cannot resolve another Claim or source slice.
         return None
     if not e['package']['payload'].get('viewpoint_claim_links'):
@@ -77,7 +76,9 @@ def context(value, store=None, *, cursor=None):
             return context(value, cursor=cur)
     proof, cid, materials = selected
     e = value['reviewed']['evidence']; package = e['package']['payload']; plan = value['reviewed']['plan']
-    if e.get('pending_cvp_claim_ids') != [cid] or e.get('pending_cvp_management_record_keys'):
+    if sha256_json(value['reviewed'])!=value['reviewed_sha256']:
+        raise ValueError('dependency handoff supplied review differs from its actual commit identity')
+    if e.get('pending_cvp_claim_ids') != [cid]:
         raise ValueError('dependency handoff cannot clear unrelated pending obligations')
     from backend.pipeline.cvp_sql_actions import validate_source_package
     validate_source_package(package)  # Exact original actual model transport and full postimages.
@@ -126,8 +127,11 @@ def context(value, store=None, *, cursor=None):
     rows = cursor.execute("SELECT object_id FROM wang_knowledge.objects WHERE collection='viewpoint_claim_links' AND retired_at IS NULL AND payload->>'claim_id'=%s AND payload->>'effective_state'='active'", (cid,)).fetchall()
     if {r[0] for r in rows} != set(links):
         raise ValueError('dependency handoff current active owned-link population drift')
-    return {'schema_version': VERSION, 'materials': proof, 'claim_id': cid,
+    result={'schema_version': VERSION, 'materials': proof, 'claim_id': cid,
             'change_set_id': plan['change_set_id'], 'original_group_claim_ids': value['claim_ids'],
             'pending_claim_ids': [cid], 'link_ids': sorted(links), 'viewpoint_ids': sorted({p['viewpoint_id'] for p in links.values()}),
             'campaign_membership_changes': 0, 'content_write_authority': False,
             'group_complete': False}
+    if e.get('pending_cvp_management_record_keys'):
+        result['separate_pending_record_keys']=list(e['pending_cvp_management_record_keys'])
+    return result

@@ -3906,6 +3906,9 @@ class PostgresKnowledgeStore:
                 raise ChangeSetConflict("CVP group not prepared")
             value = row[0]
             from backend.pipeline.cvp_retained_impact_resolution import guard_operations
+            old_pending=value.get('reviewed',{}).get('evidence',{}).get('pending_cvp_management_record_keys',[])
+            if not set(old_pending)<=set(evidence.get('pending_cvp_management_record_keys',[])):
+                raise ChangeSetConflict('new review cannot erase existing pending management obligations')
             guard_operations({**value,'run_id':run_id},plan.operations,store=self,cursor=cursor)
             action=evidence.get('action')
             if action:
