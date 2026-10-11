@@ -150,7 +150,8 @@ def test_program_binding_does_not_remove_population_evidence_or_hold_guards(faul
             proposal=p,proposal_sha256=request['proposal_sha256'],claims=[c])
 
 
-def test_full_batch_one_correction_final_review_no_model_echo_sha(tmp_path):
+@pytest.mark.parametrize('fragment_reference', [False, True])
+def test_full_batch_one_correction_final_review_no_model_echo_sha(tmp_path, fragment_reference):
     from backend.pipeline.viewpoint_batch_resolution_runner import run_batch
     from backend.tests.test_viewpoint_batch_resolution import _candidate
     original=proposal();effective=proposal('new_viewpoint');calls=[]
@@ -164,6 +165,8 @@ def test_full_batch_one_correction_final_review_no_model_echo_sha(tmp_path):
         return result
     def review_response(request):
         raw=payload(Proposal.model_validate(request['proposal']))
+        if fragment_reference:
+            raw['change_reviews'][0]['coverage_evidence_step_ids']=['C1-F1']
         raw.pop('proposal_sha256');raw['change_reviews'][0].pop('coverage_claim_sha256')
         return raw
     correction={'finding_dispositions':[{'claim_id':'C1','component_index':0,'disposition':'accepted','reason':'補回遺漏'}],
@@ -184,5 +187,9 @@ def test_full_batch_one_correction_final_review_no_model_echo_sha(tmp_path):
         envelope=json.loads((tmp_path/(stage+'.json')).read_text())
         raw=json.loads((tmp_path/('raw-'+stage+'.json')).read_text())
         assert envelope['normalization']['raw_response_sha256']==raw['response_sha256']
+        if fragment_reference:
+            assert envelope['normalization']['coverage_reference_binding_sha256']
+            assert envelope['review']['change_reviews'][0]['coverage_evidence_step_ids']==['C1-E1']
+            assert raw['response']['change_reviews'][0]['coverage_evidence_step_ids']==['C1-F1']
     again=run_batch(**kwargs)
     assert calls==['gpt','opus','gpt','opus'] and again['approval_outcome']=='pass'

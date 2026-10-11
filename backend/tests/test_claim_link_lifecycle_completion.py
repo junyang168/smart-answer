@@ -135,6 +135,11 @@ def test_actual_disposable_sql_whole_completion_late_rollback_and_repeat(actual,
             cols=[c.name for c in result.description]
             insert=SQL('INSERT INTO wang_knowledge.{} ({}) VALUES ({})').format(Identifier(table),SQL(',').join(map(Identifier,cols)),SQL(',').join(Placeholder()*len(cols)))
             for row in result.fetchall():dst.execute(insert,tuple(Jsonb(x) if isinstance(x,(dict,list)) and name not in {'source_ids','output_paths'} else x for name,x in zip(cols,row)))
+        # The live scope may now be completed. Only the disposable clone is
+        # put at its pre-completion checkpoint to test a fresh transaction;
+        # synthetic accounting must never replace production audit identity.
+        pending=deepcopy(value);pending['checkpoint']='applied';pending.pop('completion',None)
+        dst.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s,status=\'running\' WHERE run_id=%s',(Jsonb(pending),run))
     with target.connect() as conn:
         required=target._existing_cvp_context(conn,{'claims':{i:{'claim_id':i} for i in value['claim_ids']},
             'canonical_viewpoints':{i:{'viewpoint_id':i} for i in facts['source_handoff']['viewpoint_ids']}},historical_pins_only=True)

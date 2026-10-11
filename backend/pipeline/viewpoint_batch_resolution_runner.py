@@ -408,6 +408,15 @@ def _response_normalization(raw_path: Path, response: Mapping[str, Any], changes
             raise ValueError('review normalization program binding drift')
         result['raw_response_sha256'] = proof['raw_response_sha256']
         result['program_binding_sha256'] = proof['artifact_sha256']
+    reference_path = raw_path.with_name(raw_path.stem+'-format-repair-coverage-reference-binding.json')
+    if reference_path.exists():
+        reference = _read(reference_path)
+        if (reference.get('schema_version') != 'wang_exact_own_coverage_reference_binding_v1'
+                or reference.get('original_response_sha256') != sha256_json(dict(response))
+                or reference.get('content_decisions_changed') is not False
+                or reference.get('model_calls_added') != 0):
+            raise ValueError('review coverage reference normalization binding drift')
+        result['coverage_reference_binding_sha256'] = sha256_json(reference)
     return result
 
 

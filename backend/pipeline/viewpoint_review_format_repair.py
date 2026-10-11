@@ -78,9 +78,68 @@ def repair_coverage_pin(review, *, adapter, request, claims, proposal,
     return parsed, changes, calls, seconds
 
 
+def bind_coverage_evidence_references(raw, request):
+    """Resolve exact own-fragment references, never infer IDs from spelling.
+
+    Coverage is an EvidenceStep set. Reviewers sometimes name its actual bound
+    fragments instead. Only a unique eligible owner in the authenticated Claim
+    packet permits that transport conversion. The raw fragment choices remain
+    in the normalization receipt, including multiple fragments of one step.
+    """
+    result = deepcopy(raw)
+    receipts = []
+    claims = request.get('packet', request).get('claims', [])
+    index = {c['claim_id']: c for c in claims}
+    if len(index) != len(claims):
+        raise ValueError('coverage reference binding has duplicate Claims')
+    for row in result.get('change_reviews', []):
+        ids = row.get('coverage_evidence_step_ids')
+        claim = index.get(row.get('claim_id'))
+        if not isinstance(ids, list) or claim is None:
+            continue  # Existing strict schema/Claim gate remains authoritative.
+        evidence = claim.get('evidence', [])
+        own = {e['evidence_step_id'] for e in evidence}
+        if all(i in own for i in ids):
+            continue  # Legacy IDs/multiplicity are deliberately unchanged.
+        if len(ids) != len(set(ids)):
+            raise ValueError('coverage reference binding has duplicate references')
+        mapped = []
+        for ref in ids:
+            fragment_matches = [e for e in evidence if e.get('source_fragment_id') == ref]
+            if ref in own:
+                if any(e['evidence_step_id'] != ref for e in fragment_matches):
+                    raise ValueError('coverage reference collides across ID namespaces')
+                matches = [e for e in evidence if e['evidence_step_id'] == ref]
+            else:
+                matches = fragment_matches
+                if len(matches) != 1:
+                    raise ValueError('coverage fragment does not have one exact own binding')
+            owners = {e['evidence_step_id'] for e in matches}
+            if len(owners) != 1 or not all(e.get('valid_for_identity_review') is True for e in matches):
+                raise ValueError('coverage reference is foreign, ambiguous or ineligible')
+            owner = next(iter(owners))
+            mapped.append({'original_reference': ref, 'evidence_step_id': owner})
+        bound = sorted({x['evidence_step_id'] for x in mapped})
+        receipts.append({'claim_id': row['claim_id'], 'component_index': row['component_index'],
+                         'original_references': list(ids), 'exact_own_bindings': mapped,
+                         'bound_evidence_step_ids': bound})
+        row['coverage_evidence_step_ids'] = bound
+    return result, receipts
+
+
 def parse_review(raw: dict[str, Any], *, adapter: Any, request: dict[str, Any],
                  cache: Path, call=call_model):
     canonical, changes = canonicalize_review(raw)
+    canonical, bindings = bind_coverage_evidence_references(canonical, request)
+    if bindings:
+        write_immutable(cache.with_name(cache.stem+'-coverage-reference-binding.json'), {
+            'schema_version': 'wang_exact_own_coverage_reference_binding_v1',
+            'request_sha256': sha256_json(request), 'original_response_sha256': sha256_json(raw),
+            'bound_response_sha256': sha256_json(canonical), 'bindings': bindings,
+            'model_calls_added': 0, 'content_decisions_changed': False})
+        changes += [f"/change_reviews/{i}/coverage_evidence_step_ids"
+                    for i, row in enumerate(canonical.get('change_reviews', []))
+                    if any(b['claim_id']==row['claim_id'] and b['component_index']==row['component_index'] for b in bindings)]
     response_model = getattr(adapter, '_response_model', CanonicalViewpointReviewResponse)
     try:
         return response_model.model_validate(canonical), changes, 0, 0.0
