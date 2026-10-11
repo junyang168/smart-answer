@@ -46,3 +46,24 @@ def test_audit_start_is_not_completion(monkeypatch):
     with pytest.raises(ValueError,match='actual SQL audited'):
         flow.revalidate_applied_run(store,d,'R',root=Path('/root'))
     assert len(store.failures)==1
+
+
+@pytest.mark.parametrize('schema',['wang_claim_sql_retirement_v1','wang_claim_relation_retirement_v1'])
+def test_retirement_does_not_require_source_anchor_manifest(tmp_path,schema):
+    from backend.pipeline.claim_owner_revision import dependency_direction
+    from backend.pipeline.cvp_sql_flow import binding
+    p=tmp_path/'materials.json';p.write_text('{}')
+    value={'reviewed':{'evidence':{'approval':{},'package':{'payload':{
+        'source_repair_application':{'schema_version':schema,'materials':binding(p)}}}}}}
+    assert dependency_direction(value)==(None,None)
+    p.write_text('{"changed":true}')
+    with pytest.raises(ValueError):dependency_direction(value)
+
+
+def test_unclassified_source_contract_still_requires_manifest(tmp_path):
+    from backend.pipeline.claim_owner_revision import dependency_direction
+    from backend.pipeline.cvp_sql_flow import binding
+    p=tmp_path/'materials.json';p.write_text('{}')
+    value={'reviewed':{'evidence':{'approval':{},'package':{'payload':{
+        'source_repair_application':{'schema_version':'unknown','materials':binding(p)}}}}}}
+    with pytest.raises(KeyError):dependency_direction(value)

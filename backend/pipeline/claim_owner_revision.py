@@ -303,6 +303,13 @@ def dependency_direction(value):
     app=e.get('package',{}).get('payload',{}).get('source_repair_application',{})
     if not app:return None,None
     check_binding(app['materials'])
+    # Logical retirement has its own fully validated application contract;
+    # it is not an anchor-repair manifest and introduces no corrected
+    # non-member Claim whose dependency audit could be waived here.
+    from backend.pipeline.claim_retirement import SCHEMA as CLAIM_RETIREMENT_SCHEMA
+    from backend.pipeline.claim_relation_retirement import SCHEMA as RELATION_RETIREMENT_SCHEMA
+    if app.get('schema_version') in {CLAIM_RETIREMENT_SCHEMA, RELATION_RETIREMENT_SCHEMA}:
+        return None,None
     materials=read_artifact(app['materials']['path'])
     proof=materials['manifest'].get('anchor_qualification')
     if not proof:return None,None
