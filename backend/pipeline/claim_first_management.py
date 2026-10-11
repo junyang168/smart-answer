@@ -158,12 +158,16 @@ def finish_claim_audit(store, run_id, root):
             env={**os.environ,'KNOWLEDGE_DATABASE_URL':store.database_url})
     if read_artifact(audit_root/'audit-intent.json')!=intent:
         raise ValueError('Claim audit committed version/readset changed')
+    from backend.pipeline.viewpoint_content_blocked_fallback import apply as content_fallback, KEY as FALLBACK_KEY
+    path=content_fallback(path,audit_root/'content-blocked-fallback')
     audit=read_artifact(path);validate_claim_audit_report(audit,saved['claim_ids'])
     source_proofs=verify_saved_full_audit(path,layers=('3',))
     receipt={'schema_version':VERSION,'status':'claim_layer_audited_cvp_pending',
         'audit':binding(path),'source_proofs':source_proofs,'claim_ids':saved['claim_ids'],
         'read_pins':current_pins,'change_set_ids':saved['change_set_ids'],
         'cvp_management_complete':False,'group_complete':False,'next_group_started':False}
+    if audit.get('meta',{}).get(FALLBACK_KEY):
+        receipt.update(revisit_required=True,independent_complete=False)
     receipt_path=audit_root/'claim-layer-completion.json';write_immutable(receipt_path,receipt)
     with store.connect() as conn,conn.cursor() as cursor:
         cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE",(run_id,))

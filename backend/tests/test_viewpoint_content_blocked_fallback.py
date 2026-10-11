@@ -7,6 +7,27 @@ from backend.pipeline import viewpoint_content_blocked_fallback as m
 from backend.pipeline.viewpoint_resolution_runtime import write_immutable
 
 
+def test_claim_only_fallback_preserves_original_and_nonindependent_flags():
+    original={'meta':{'model':'gemini-3.8-flash'},'layers':{'1':{},'2':{},'3':{
+        'complete':True,'blocked':1,'judged':1,'results':[
+            {'claim_id':'C','verdict':'blocked','provider_content_block':{'path':'actual','file_sha256':'sha'}},
+            {'claim_id':'OTHER','verdict':'supported','reason':'original'}]}}}
+    saved=deepcopy(original)
+    proof={'layer':'3','identity':'C','provider_binding':{'path':'actual','file_sha256':'sha'},
+           'response':{'verdict':'supported','issue':'none','reason':'full source'}}
+    result=m.derive(original,[proof])
+    assert original==saved and set(result['layers'])=={'1','2','3'}
+    assert result['layers']['3']['results'][1]==saved['layers']['3']['results'][1]
+    assert result['layers']['3']['results'][0]['independent'] is False
+    assert result['layers']['3']['results'][0]['revisit_required'] is True
+    assert result['layers']['3']['independent_judged']==1
+
+
+@pytest.mark.parametrize('scope',[{}, {'3':{}}, {'1':{},'3':{}}, {'1':{},'2':{},'4':{}}, {'1':{},'2':{},'3':{},'5':{}}])
+def test_fallback_refuses_incomplete_or_unknown_audit_scope(scope):
+    with pytest.raises(ValueError): m.semantic_layers({'layers':scope})
+
+
 @pytest.mark.parametrize('version',['legacy_v1','wang_cvp_contextual_semantics_v2','wang_cvp_component_roles_v1'])
 def test_saved_audit_capture_keeps_actual_semantic_role_profile(monkeypatch,version):
     import hashlib
