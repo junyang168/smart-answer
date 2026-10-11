@@ -861,7 +861,10 @@ def validate_graph(post: dict[str, dict], before: dict[str, dict], frozen: dict,
                 if not aliases.intersection(set(strings(occurrence))):
                     continue
                 for anchor in occurrence.get("anchors", []):
-                    eid = anchor_evidence_id(p, occurrence, anchor)
+                    current_anchor_profile = frozen.get('claim_issue_context', {}).get(
+                        'anchor_binding_validation_profile') == 'declared_local_own_containing_v1'
+                    eid = (anchor_evidence_id(p, occurrence, anchor) if current_anchor_profile
+                           else anchor.get('evidence_id'))
                     if eid not in p.get("evidence_step_ids", []):
                         raise ValueError("anchor is not owned by a Claim Evidence step")
                     evidence = post[key("evidence_steps", eid)]
@@ -873,7 +876,7 @@ def validate_graph(post: dict[str, dict], before: dict[str, dict], frozen: dict,
                                if post[key("source_fragments", fid)].get("source_id") == source_id
                                and post[key("source_fragments", fid)].get("paragraph_key") == anchor.get("paragraph_key")
                                and post[key("source_fragments", fid)].get("verbatim_excerpt") == quote]
-                    if not matches:
+                    if not matches and current_anchor_profile:
                         matches = containing_anchor_fragments(
                             [post[key('source_fragments', fid)] for fid in fids], quote, text,
                             source_id, anchor.get('paragraph_key'), body_sha)

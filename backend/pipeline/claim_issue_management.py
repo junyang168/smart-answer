@@ -340,6 +340,7 @@ def manifest_for_issues(store, run_id, issues, policy_binding, root):
     write(root/"membership.json", {"groups":[{"group_key":g.group_key,"claim_ids":g.claim_ids} for g in groups]})
     context = {"schema_version":VERSION, "claim_ids":ids, "issues":[i.model_dump(mode="json") for i in issues],
                "issue_identities":issue_identities(issues),
+               "anchor_binding_validation_profile":"declared_local_own_containing_v1",
                "policy":policy_binding, "original_run_id":run_id}
     if retained:
         context['retained_occurrence_context'] = retained

@@ -105,3 +105,23 @@ def test_initial_readonly_source_dependencies_never_approve_write(saved, fault):
         with pytest.raises(ValueError): c.compile_package(frozen, proposal, {'response': response})
     assert files == {p: hashlib.sha256(p.read_bytes()).hexdigest()
                      for p in action.iterdir() if p.is_file()}
+
+
+def test_saved_initial_packet_retains_old_validation_profile(saved):
+    action, frozen, raw, proposal = saved
+    from backend.pipeline.source_review_input_repair import check_packet
+    saved_packet = runner.body(runner.read(action / 'initial_review.packet.json'))
+    base = runner.initial_review_base(frozen, proposal)
+    base = runner.disclosed_review_base(frozen, base, saved=saved_packet)
+    check_packet(frozen, raw['response'], saved_packet, base)
+    assert 'anchor_binding_validation_profile' not in frozen['claim_issue_context']
+    assert 'anchor is not owned by a Claim Evidence step' in base['unresolved_proposal_review']['program_findings']
+    # New semantics are only a nonpersistent diagnostic here: never upgrade
+    # the already reserved model input, Claim payload or its approval.
+    new = deepcopy(frozen)
+    new['claim_issue_context']['anchor_binding_validation_profile'] = 'declared_local_own_containing_v1'
+    correction = runner.read(action / 'correction.raw.json')
+    corrected = runner.effective_proposal(new, correction['response'])
+    post = c.validate_proposal(new, corrected, initial_claim_draft=True)
+    c.validate_graph(post, c.index(new['before_records']), new)
+    with pytest.raises(ValueError): c.review_packet(new, corrected)
