@@ -284,6 +284,28 @@ def validate(audit):
     if audit!=expected: raise ValueError('fallback altered other verdicts/counters/disclosure')
     return bindings
 
+def assessment_output(audit_path, output):
+    """Separate immutable compositions by the actual audited generation.
+
+    Model reservations remain in the existing global exact-request cache.
+    A later committed link generation must not borrow an earlier assessment,
+    even when some blocked requests can reuse their identical saved answers.
+    """
+    output=Path(output);saved=output/'assessment.json'
+    if not saved.exists():return output
+    assessment=read_artifact(saved);validate(assessment)
+    manifest=read_artifact(assessment['meta'][KEY]['path'])
+    incoming=binding(audit_path)
+    if manifest['original_report_binding']==incoming:return output
+    selected=output/('audit-'+sha256_json(incoming))
+    if (selected/'assessment.json').exists():
+        current=read_artifact(selected/'assessment.json');validate(current)
+        bound=read_artifact(current['meta'][KEY]['path'])
+        if bound['original_report_binding']!=incoming:
+            raise ValueError('fallback composition generation collision')
+    return selected
+
+
 def apply(audit_path, output):
     """No retry after reserved call; preserve Gemini report and exact full input."""
     audit=read_artifact(audit_path)
@@ -293,6 +315,7 @@ def apply(audit_path, output):
     if any(not audit['layers'][k]['complete'] or any(audit['layers'][k].get(c,0)
            for c in ('model_errors','no_source_text')) for k in semantic_layers(audit)):
         raise ValueError('fallback cannot compensate unrelated audit gaps')
+    output=assessment_output(audit_path,output)
     if (output/'assessment.json').exists():
         validate(read_artifact(output/'assessment.json')); return output/'assessment.json'
     from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
