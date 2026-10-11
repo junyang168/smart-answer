@@ -578,7 +578,7 @@ def run_group(store, definition, group, row, *, root):
             return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)
         saved=store.get_cvp_group(run_id);evidence=saved['reviewed']['evidence']
     from backend.pipeline.cvp_source_impact_resolution import context as source_impact_context,prepare as prepare_source_impacts
-    source_impacts=prepare_source_impacts(store,saved) if source_impact_context(saved) else None
+    source_impacts=prepare_source_impacts(store,saved) if source_impact_context(saved,store) else None
     if evidence.get('pending_cvp_management_record_keys') and not evidence.get('approval',{}).get('retained_write_scope') and source_impacts is None:
         raise ValueError('new CVP coverage committed; existing CVP/link management remains pending, not group completion')
     if (evidence.get('pending_cvp_management_record_keys') and evidence.get('approval',{}).get('retained_write_scope')

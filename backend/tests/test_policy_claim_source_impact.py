@@ -77,7 +77,7 @@ def test_actual_policy_pending_transaction_scope_and_immutability(tmp_path):
     from backend.pipeline.cvp_sql_flow import binding
     from backend.pipeline.viewpoint_resolution_runtime import write_immutable
     load_dotenv('.env');store=PostgresKnowledgeStore();value=store.get_cvp_group(os.environ['WKP_POLICY_CLAIM_IMPACT_ACTUAL'])
-    before=deepcopy(value);handoff=flow.context(value)
+    before=deepcopy(value);handoff=flow.context(value,store)
     root=Path(handoff['source_terminal_review']['path']).parent
     files={p:p.read_bytes() for p in root.rglob('*') if p.is_file()}
     facts=flow.prepare(store,value)

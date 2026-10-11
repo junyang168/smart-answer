@@ -3798,7 +3798,7 @@ class PostgresKnowledgeStore:
             if retained_impacts_resolution_path is not None:
                 if not pending_management:raise ChangeSetConflict('foreign retained management completion proof')
                 from backend.pipeline.cvp_source_impact_resolution import context as source_impact_context
-                if source_impact_context({**value,'run_id':run_id}):
+                if source_impact_context({**value,'run_id':run_id},cursor=cursor):
                     from backend.pipeline.cvp_source_impact_resolution import validate_for_completion
                 else:
                     from backend.pipeline.cvp_retained_impact_resolution import validate_for_completion

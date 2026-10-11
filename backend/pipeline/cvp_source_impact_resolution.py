@@ -500,12 +500,50 @@ def validate_pre_model_startup_recovery(audit_dir, expected, *, corrected_record
     return receipt
 
 
-def context(value):
+def context(value,store=None,*,cursor=None):
     e=value.get('reviewed',{}).get('evidence',{})
     c=e.get('action',{}).get('materials',{}).get('claim_management_resolution',{})
-    return c if (c.get('schema_version')==HANDOFF or
+    direct=c if (c.get('schema_version')==HANDOFF or
         (c.get('schema_version')=='wang_post_claim_cvp_reproposal_v1'
          and c.get('source_slice_mode') in {'policy_evidence_binding','policy_claim_source_revision'})) else None
+    if direct is not None:return direct
+    if e.get('action',{}).get('kind')!='audit_supports_correction':return None
+    if cursor is None:
+        if store is None:return None
+        with store.connect() as conn,conn.cursor() as cur:return context(value,cursor=cur)
+    # Only the immediately preceding explicit commit. No recursive history
+    # search, inferred approval, changed pending population or new call budget.
+    ids=value.get('change_set_ids',[])
+    if len(ids)<2:raise ValueError('source handoff correction lacks preceding commit')
+    current=applied_review(None,value,value['reviewed_sha256'],cursor=cursor)
+    if current!=value['reviewed'] or current['plan']['change_set_id']!=ids[-1]:
+        raise ValueError('source handoff correction is not the actual current commit')
+    ops=current['plan']['operations']
+    if not ops or any(op['collection'] not in {'viewpoint_claim_links','viewpoint_identity_candidates','viewpoint_identity_decisions'}
+        or op['operation']!=('update' if op['collection']=='viewpoint_claim_links' else 'create') for op in ops):
+        raise ValueError('source handoff correction exceeds link-only domain')
+    targets=e['action'].get('materials',{}).get('packet',{}).get('targets',[])
+    links={op['object_id']:op['payload'] for op in ops if op['collection']=='viewpoint_claim_links'}
+    if (not targets or len(links)!=len(targets) or set(e.get('approval',{}))!={'gpt','opus'}
+            or any(t.get('before_link',{}).get('viewpoint_claim_link_id') not in links for t in targets)):
+        raise ValueError('source handoff correction lacks exact dual-reviewed targets')
+    for target in targets:
+        old=target['before_link'];new=links[old['viewpoint_claim_link_id']]
+        if (old.get('link_type')!='equivalent_component' or new.get('link_type')!='supports'
+                or any(new.get(k)!=old.get(k) for k in ('claim_id','viewpoint_id',
+                    'pinned_claim_revision','validated_against_viewpoint_revision_id','effective_state'))):
+            raise ValueError('source handoff correction changed protected link semantics')
+    row=cursor.execute('SELECT metadata FROM wang_knowledge.change_sets WHERE change_set_id=%s',(ids[-2],)).fetchone()
+    if not row or row[0].get('run_id')!=value['run_id'] or not row[0].get('reviewed_sha256'):
+        raise ValueError('source handoff preceding commit missing/foreign')
+    prior=applied_review(None,value,row[0]['reviewed_sha256'],cursor=cursor)
+    if prior['plan']['change_set_id']!=ids[-2]:raise ValueError('source handoff preceding plan drift')
+    pe=prior['evidence'];handoff=context({'reviewed':prior})
+    if (handoff is None or pe.get('pending_cvp_management_record_keys')!=e.get('pending_cvp_management_record_keys')
+            or pe.get('pending_cvp_claim_ids') or e.get('pending_cvp_claim_ids')
+            or pe.get('viewpoint_ids')!=e.get('viewpoint_ids')):
+        raise ValueError('source handoff correction lost original obligations/population')
+    return handoff
 
 
 def policy_relation_context_item(key,row,creation,*,references,reviews,edge):
@@ -628,7 +666,7 @@ def prepare_question_slice(store,value,*,cursor=None):
     from copy import deepcopy
     from backend.pipeline.cvp_sql_flow import check_binding,decoded_pins,pin_rows
     from backend.pipeline.claim_first_management import coverage_context
-    handoff=context(value);pending=value['reviewed']['evidence']['pending_cvp_management_record_keys']
+    handoff=context(value,store,cursor=cursor);pending=value['reviewed']['evidence']['pending_cvp_management_record_keys']
     policy_claim=handoff.get('source_slice_mode')=='policy_claim_source_revision'
     domains={'claims','claim_relations','knowledge_relations'} if policy_claim else {'questions'}
     if (not pending or len(pending)!=len(set(pending))
@@ -708,7 +746,7 @@ def prepare(store,value):
     from backend.pipeline.source_reconciliation_runner import body,read
     from backend.pipeline.claim_evidence_binding import coverage_context
     from backend.pipeline.source_consumer_scope import declared_group_keys
-    handoff=context(value)
+    handoff=context(value,store)
     if not handoff:return None
     if handoff.get('source_slice_mode') in {'policy_evidence_binding','policy_claim_source_revision'}:
         return prepare_question_slice(store,value)
@@ -794,7 +832,7 @@ def validate_for_completion(value,path,audit_binding,cursor,*,semantic_resolutio
     body=read_artifact(path)
     if (body.get('schema_version')!=VERSION or body.get('artifact_sha256')!=sha256_json({k:v for k,v in body.items() if k!='artifact_sha256'})
             or body.get('run_id')!=value['run_id'] or body.get('reviewed_sha256')!=value['reviewed_sha256']
-            or body.get('audit')!=audit_binding or body.get('source_handoff')!=context(value)
+            or body.get('audit')!=audit_binding or body.get('source_handoff')!=context(value,cursor=cursor)
             or body.get('pending_record_keys')!=value['reviewed']['evidence']['pending_cvp_management_record_keys']
             or body.get('model_verdicts_changed') is not False or body.get('original_pending_list_preserved') is not True
             or body.get('semantic_resolution')!=(binding(semantic_resolution) if semantic_resolution else None)):
