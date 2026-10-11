@@ -12,6 +12,80 @@ from backend.api.canonical_repository.postgres_store import sha256_json
 VERSION = 'wang_claim_source_write_slice_v1'
 
 
+def policy_source_projection(frozen, original, direction):
+    """Review every corrected policy source row while keeping readonly issues open.
+
+    This is not a second correction or a disposition rewrite. Shared Evidence
+    owners and unresolved source consumers remain visible in the final packet.
+    """
+    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    context = frozen['claim_issue_context']
+    if direction.get('claim_policy') != context['policy'] or direction.get('withdraw_relation_ids') != []:
+        raise ValueError('policy source slice policy/withdrawal drift')
+    check_binding(context['policy']); policy = read_artifact(context['policy']['path'])
+    if policy.get('schema_version') != 'wang_claim_issue_management_v1' or policy.get('human_content_approval') is not False:
+        raise ValueError('unknown policy source slice authority')
+    before = c.index(frozen['before_records']); proposed = c.index(original.records)
+    selected = direction['source_write_keys']
+    permissions = {c.key(p['collection'], p['object_id']): p for p in frozen['manifest']['permissions']}
+    pins = {(p['collection'], p['object_id']): p['pin'] for p in frozen['sql_scope']['read_pins']}
+    dispositions = {d.record_key: d for d in original.dispositions}
+    issues = context['issue_identities']; assessments = {a.issue_id: a for a in original.claim_assessments}
+    claim_ids = {i['claim_id'] for i in issues}
+    if (frozen['inventory'].get('unknown_keys') or not selected or selected != sorted(set(selected))
+            or set(selected) != set(proposed) or len(selected) != len(original.records)
+            or original.sentence_dispositions or original.unadmitted_candidates
+            or len(assessments) != len(original.claim_assessments)
+            or set(assessments) != {i['issue_id'] for i in issues}
+            or any(a.cause != 'claim_statement' for a in assessments.values())
+            or len(dispositions) != len(original.dispositions)
+            or set(dispositions) != set(frozen['inventory']['affected_keys']) | set(proposed)):
+        raise ValueError('policy source slice incomplete original draft/consumer denominator')
+    def current(k):
+        col, oid = c.split_key(k); old = before[k]
+        if (pins.get((col, oid)) != [old['revision'], record_content_sha(old), False]
+                or old.get('review_status') in c.HUMAN_HOLDS | {'human_hold', 'rejected', 'withheld_unreviewed'}):
+            raise ValueError('policy source slice stale/held/retired consumer')
+        return old
+    for k in selected:
+        col, oid = c.split_key(k); old = current(k); new = proposed[k]
+        allowed = set(policy['claim_fields']) if col == 'claims' else set(policy['evidence_fields']) if col == 'evidence_steps' else set()
+        allowed &= set(permissions.get(k, {}).get('fields', []))
+        if (not allowed or (col == 'claims' and oid not in claim_ids)
+                or new.get('revision') != old['revision'] + 1 or dispositions[k].action != 'update'
+                or {f:v for f,v in c._semantic(old).items() if f not in allowed}
+                   != {f:v for f,v in c._semantic(new).items() if f not in allowed}):
+            raise ValueError('policy source slice unauthorized postimage')
+        if col == 'evidence_steps':
+            owners = old.get('produced_claim_ids', [])
+            if (not owners or len(owners) != len(set(owners))
+                    or old.get('support_eligibility') not in {'eligible', 'eligible_candidate', 'eligible_with_label'}):
+                raise ValueError('policy source slice Evidence qualification/owners')
+            for owner in owners:
+                owned = current(c.key('claims', owner))
+                if oid not in owned.get('evidence_step_ids', []):
+                    raise ValueError('policy source slice nonreciprocal Evidence owner')
+    for k, d in dispositions.items():
+        if k in selected: continue
+        if d.action == 'unresolved':
+            col, _ = c.split_key(k); current(k)
+            if col not in {'claims', 'claim_relations', 'knowledge_relations', 'questions'} or k in permissions:
+                raise ValueError('policy source slice pending is not readonly')
+        elif d.action not in {'retain', 'impact_only'}:
+            raise ValueError('policy source slice omitted business delta')
+    scoped = deepcopy(frozen); scoped['source_write_slice_material'] = True
+    scoped['manifest'].pop('claim_issue', None)
+    scoped['manifest']['permissions'] = [permissions[k] for k in selected]
+    scoped['inventory'] = {'affected_keys': selected, 'context_keys': sorted(set(before)-set(selected)), 'unknown_keys': []}
+    scoped['sentence_inventory'] = []
+    proposal = c.Proposal(records=deepcopy(original.records), dispositions=[deepcopy(dispositions[k]) for k in selected],
+                         sentence_dispositions=[], unadmitted_candidates=[])
+    c.validate_proposal(scoped, proposal)
+    return scoped, proposal
+
+
 def evidence_binding_projection(frozen, original, direction):
     """Independently review the original complete source delta, not readonly QA.
 
@@ -190,6 +264,8 @@ def projection(frozen, original, direction):
         return owner_statement_projection(frozen, original, direction)
     if direction.get('mode') == 'policy_evidence_binding':
         return evidence_binding_projection(frozen, original, direction)
+    if direction.get('mode') == 'policy_claim_source_revision':
+        return policy_source_projection(frozen, original, direction)
     from backend.pipeline.claim_evidence_completion import direction_for, evidence_permission_ids
     parent = direction_for(frozen['claim_issue_context'])
     if not parent or direction['withdraw_relation_ids'] != parent['withdraw_relation_ids']:
@@ -342,7 +418,7 @@ def validate_claim_layer_authority(saved, root):
     value=saved['reviewed']['evidence']['package']['payload']
     app=value.get('source_repair_application', {})
     direction=app.get('source_write_slice', {})
-    if (saved.get('checkpoint')!='applied' or direction.get('mode') not in {'owner_statement_completion','policy_evidence_binding'}
+    if (saved.get('checkpoint')!='applied' or direction.get('mode') not in {'owner_statement_completion','policy_evidence_binding','policy_claim_source_revision'}
             or direction.get('run_id')!=saved['run_id']
             or Path(app.get('run_root','')).resolve()!=Path(root).resolve()
             or Path(direction.get('parent_root','')).resolve()!=Path(root).resolve()
