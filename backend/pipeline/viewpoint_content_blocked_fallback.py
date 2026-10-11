@@ -115,6 +115,12 @@ def verify_saved_full_audit(audit_path, *, layers=('3','4')):
     cache_root=Path(settings['DATA_BASE_DIR'])/'wang-knowledge-platform/staging/reports/library-audit/.judgements'
     audit=read_artifact(audit_path);bindings=[binding(audit_path)]
     if audit['meta']['model']!='gemini-3.8-flash':raise ValueError('foreign saved audit')
+    if audit['meta'].get(KEY):
+        # Authenticate the complete derived assessment, then independently
+        # verify the original Gemini cache. Never label GPT as Gemini raw.
+        bindings.extend(validate(audit))
+        manifest=read_artifact(Path(audit['meta'][KEY]['path']))
+        audit=read_artifact(Path(manifest['original_report_binding']['path']))
     if layers not in {('3','4'), ('3',)}:
         raise ValueError('unsupported exact audit domain')
     for layer,key in (('3','claim_id'),('4','viewpoint_id')):

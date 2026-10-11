@@ -28,6 +28,21 @@ def test_fallback_refuses_incomplete_or_unknown_audit_scope(scope):
     with pytest.raises(ValueError): m.semantic_layers({'layers':scope})
 
 
+def test_full_proof_validator_requires_derived_validation_before_original_cache(monkeypatch, tmp_path):
+    original=tmp_path/'original.json'; manifest=tmp_path/'manifest.json'; derived=tmp_path/'derived.json'
+    write_immutable(original, {'meta':{'model':'gemini-3.8-flash'},'layers':{
+        '3':{'complete':True,'results':[]},'4':{'complete':True,'results':[]}}})
+    write_immutable(manifest, {'original_report_binding':m.binding(original)})
+    write_immutable(derived, {'meta':{'model':'gemini-3.8-flash',m.KEY:m.binding(manifest)}})
+    seen=[]
+    monkeypatch.setattr(m,'validate',lambda a:seen.append(a) or [m.binding(manifest)])
+    assert m.binding(manifest) in m.verify_saved_full_audit(derived)
+    assert seen and seen[0]['meta'][m.KEY]==m.binding(manifest)
+    def reject(a): raise ValueError('derived proof drift')
+    monkeypatch.setattr(m,'validate',reject)
+    with pytest.raises(ValueError,match='derived proof drift'): m.verify_saved_full_audit(derived)
+
+
 @pytest.mark.parametrize('version',['legacy_v1','wang_cvp_contextual_semantics_v2','wang_cvp_component_roles_v1'])
 def test_saved_audit_capture_keeps_actual_semantic_role_profile(monkeypatch,version):
     import hashlib
