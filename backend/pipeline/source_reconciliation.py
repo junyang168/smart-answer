@@ -600,7 +600,7 @@ def _semantic(row: dict) -> dict:
     return {k: v for k, v in row.items() if k not in PROVENANCE | {"revision"}}
 
 
-def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = False, claim_first: bool = False, initial_claim_draft: bool = False, initial_anchor_draft: bool = False) -> dict[str, dict]:
+def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = False, claim_first: bool = False, initial_claim_draft: bool = False, initial_anchor_draft: bool = False, complete_anchor_review: bool = False) -> dict[str, dict]:
     before = index(frozen["before_records"])
     manifest = Manifest.model_validate(frozen["manifest"])
     allowed = {p.key: p for p in manifest.permissions}
@@ -624,6 +624,9 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
     if len(dispositions) != len(proposal.dispositions) or (set(dispositions) != required and not initial_anchor_draft):
         raise ValueError("every affected consumer requires exactly one disposition")
     unresolved = {d.record_key for d in proposal.dispositions if d.action == 'unresolved'}
+    if complete_anchor_review and (not manifest.anchor_qualification or not unresolved
+            or any(k not in proposed or k not in allowed or split_key(k)[0] not in {'evidence_steps','source_fragments'} for k in unresolved)):
+        raise ValueError('complete anchor review requires complete explicitly writable Evidence/fragment postimages')
     if initial_claim_draft:
         # An initial draft is not a write authority. Permit only unchanged,
         # current SQL-pinned dependencies to remain pending for the original
@@ -664,7 +667,7 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
                    and not (claim_first and split_key(k)[0] in CVP_COLUMNS)
                    or k not in before or k in proposed for k in unresolved)):
         raise ValueError('unresolved review requires bounded unchanged CVP context and SQL retirement proof')
-    if unresolved_consumers(frozen) or (unresolved and not review_only and not initial_claim_draft):
+    if unresolved_consumers(frozen) or (unresolved and not review_only and not initial_claim_draft and not complete_anchor_review):
         raise ValueError("unknown/unresolved consumer; owner scope or proof required")
     historical_scope=set()
     if frozen.get('viewpoint_scope_context'):
@@ -672,6 +675,8 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
         historical_scope=historical_impact_keys(frozen)
     for k, d in dispositions.items():
         c, _ = split_key(k)
+        if complete_anchor_review and k in unresolved:
+            continue  # Actual final Opus must approve the fully validated postimage; no GPT verdict is edited.
         if (review_only or initial_claim_draft) and k in unresolved:
             continue  # Review a retained unresolved object, never authorize a write.
         if c in IMPACT_ONLY or (c == 'knowledge_routes' and k in frozen['inventory']['unknown_keys']):
@@ -1002,9 +1007,9 @@ def validate_basis_groups(spans: list[tuple]) -> None:
             raise ValueError("overlapping anchors require one basis group and exactly one representative")
 
 
-def review_packet(frozen: dict, proposal: Proposal, *, review_only: bool = False, claim_first: bool = False, initial_claim_draft: bool = False, initial_anchor_draft: bool = False) -> dict:
+def review_packet(frozen: dict, proposal: Proposal, *, review_only: bool = False, claim_first: bool = False, initial_claim_draft: bool = False, initial_anchor_draft: bool = False, complete_anchor_review: bool = False) -> dict:
     post = validate_proposal(frozen, proposal, review_only=review_only, claim_first=claim_first,
-                      initial_claim_draft=initial_claim_draft,initial_anchor_draft=initial_anchor_draft)
+                      initial_claim_draft=initial_claim_draft,initial_anchor_draft=initial_anchor_draft,complete_anchor_review=complete_anchor_review)
     selected = frozen["inventory"]["affected_keys"] + frozen["inventory"]["context_keys"]
     before = index(frozen["before_records"])
     result = {
@@ -1036,6 +1041,18 @@ def review_packet(frozen: dict, proposal: Proposal, *, review_only: bool = False
     from backend.pipeline.claim_evidence_completion import review_items
     withdrawals=review_items(frozen)
     if withdrawals:result['knowledge_relation_withdrawal_review']=withdrawals
+    if complete_anchor_review:
+        result['anchor_create_permission_receipt']={
+            'schema_version':'anchor_complete_postimage_final_review_v1',
+            'pending_record_keys':sorted(d.record_key for d in proposal.dispositions if d.action=='unresolved'),
+            'exact_new_fragment_ids':sorted(r.object_id for r in proposal.records if r.collection=='source_fragments'),
+            'automatic_content_approval':False,
+            'explanation':'The create permission with parent_id is a same-source field contract, not a one-object allocation slot. '
+                'The program checked EVERY actual new fragment against that one exact parent permission and the retained own anchors. '
+                'All candidate postimages and dispositions are preserved, including GPT unresolved and its reasons. '
+                'This is the original unused final independent review, not another correction. Judge each complete postimage and its source directly; '
+                'approve only if the actual Evidence bindings, qualifications and unchanged Claim teaching are correct. '
+                'Only full independent approval can authorize these writes; any rejection stops.'}
     if initial_anchor_draft:
         missing=sorted(set(index(proposal.records))-set(d.record_key for d in proposal.dispositions))
         result['anchor_draft_missing_dispositions']=missing
@@ -1140,7 +1157,9 @@ def validate_review(packet: dict, response: dict) -> bool:
 
 def compile_package(frozen: dict, proposal: Proposal, raw: dict, *, frozen_sha256: str | None = None, claim_first: bool = False, provenance_templates: dict | None = None) -> dict:
     """Only declared deterministic provenance changes after actual Opus approval."""
-    packet = review_packet(frozen, proposal, claim_first=claim_first)
+    packet = review_packet(frozen, proposal, claim_first=claim_first,complete_anchor_review=bool(
+        frozen['manifest'].get('anchor_qualification') and raw.get('stage')=='final_review'
+        and any(d.action=='unresolved' for d in proposal.dispositions)))
     if not validate_review(packet, raw["response"]):
         raise ValueError("partial/rejected review cannot authorize a package")
     before = index(frozen["before_records"])

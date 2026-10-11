@@ -38,6 +38,42 @@ def effective_proposal(frozen, response):
     return contract.Proposal.model_validate(response)
 
 
+def corrected_proposal(root, frozen, response):
+    """Select only the exact already-approved anchor cut, never handwrite it."""
+    proposed=effective_proposal(frozen,response)
+    if not frozen['manifest'].get('anchor_qualification'):return proposed,None
+    from backend.pipeline.claim_anchor_qualification import direction,validate_delta
+    manifest=contract.Manifest.model_validate(frozen['manifest']);before=contract.index(frozen['before_records'])
+    d=direction(manifest,before,frozen.get('physical_snapshots'));key=contract.key('claims',d['claim_id'])
+    row=next(r for r in proposed.records if contract.key(r.collection,r.object_id)==key)
+    try:validate_delta(frozen,before[key],row.payload,key)
+    except ValueError:
+        from backend.pipeline.source_schema_recovery import select
+        packet=body(read(root/'proposal.packet.json'))
+        first=validate_raw(root,select(root,packet),packet)
+        initial=validate_raw(root,'initial_review',body(read(root/'initial_review.packet.json')))
+        approved=[v for v in initial['response']['verdicts'] if v['record_key']==key]
+        original=effective_proposal(frozen,first['response'])
+        kept=next(r for r in original.records if contract.key(r.collection,r.object_id)==key)
+        validate_delta(frozen,before[key],kept.payload,key)
+        if (len(approved)!=1 or not approved[0]['approved'] or approved[0]['problems']
+                or {k:v for k,v in contract._semantic(row.payload).items() if k!='occurrences'}
+                    !={k:v for k,v in contract._semantic(kept.payload).items() if k!='occurrences'}):
+            raise ValueError('anchor component cannot borrow approval for another Claim meaning')
+        proposed.records=[kept if contract.key(r.collection,r.object_id)==key else r for r in proposed.records]
+        kept_disposition=next(v for v in original.dispositions if v.record_key==key)
+        proposed.dispositions=[kept_disposition if v.record_key==key else v for v in proposed.dispositions]
+        return proposed,{'schema_version':'exact_initial_approved_anchor_component_v1','record_key':key,
+            'original_proposal_raw_sha256':first['artifact_sha256'],'initial_review_raw_sha256':initial['artifact_sha256'],
+            'actual_correction_response_sha256':sha256_json(response),
+            'selected_postimage_sha256':sha256_json(kept.payload),'automatic_content_approval':False,
+            'explanation':'Correction copied unrelated anchors despite saying it retained the initial cut. '
+                'Use the BYTE-EXACT initial Claim postimage and disposition already independently approved; '
+                'do not author another cut or edit correction raw. All other candidate records remain the actual correction. '
+                'The full joint postimage still requires the original unused independent final approval.'}
+    return proposed,None
+
+
 def initial_review_base(frozen, proposal):
     if frozen['manifest'].get('anchor_qualification'):
         missing=set(contract.index(proposal.records))-set(d.record_key for d in proposal.dispositions)
@@ -354,7 +390,13 @@ class Runner:
 
     def review_input(self, frozen, response, proposal, stage):
         from backend.pipeline.source_review_input_repair import add_receipt, check_packet
-        base = initial_review_base(frozen, proposal) if stage == 'initial_review' else contract.review_packet(frozen, proposal)
+        base = initial_review_base(frozen, proposal) if stage == 'initial_review' else contract.review_packet(frozen, proposal,
+            complete_anchor_review=bool(frozen['manifest'].get('anchor_qualification') and stage=='final_review'
+                and any(d.action=='unresolved' for d in proposal.dispositions)))
+        if stage=='final_review' and frozen['manifest'].get('anchor_qualification'):
+            selected,receipt=corrected_proposal(self.root,frozen,response)
+            if selected!=proposal:raise ValueError('anchor final component selection drift')
+            if receipt:base['program_anchor_component_selection']=receipt
         saved = self.root/(stage+'.packet.json')
         if saved.exists():
             packet = body(read(saved))
@@ -397,7 +439,7 @@ class Runner:
             correction_packet['unresolved_proposal_review'] = review_packet['unresolved_proposal_review']
         self.guard(frozen)
         correction = self.call("correction", correction_packet)
-        proposed = effective_proposal(frozen, correction["response"])
+        proposed,_ = corrected_proposal(self.root,frozen,correction["response"])
         # Diagnose the original correction without dropping auxiliary rows or
         # turning source/relationship pending into approved business consumers.
         # This record is not a review packet and grants no model/write budget.
@@ -751,7 +793,13 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
     else:
         proposal = effective_proposal(frozen, packet["proposal"]) if frozen["manifest"].get("claim_issue") else contract.Proposal.model_validate(packet["proposal"])
     claim_first = bool(packet.get('claim_first_management'))
-    base = contract.review_packet(frozen, proposal, claim_first=claim_first)
+    base = contract.review_packet(frozen, proposal, claim_first=claim_first,
+        complete_anchor_review=bool(packet.get('anchor_create_permission_receipt')))
+    if packet.get('program_anchor_component_selection'):
+        correction=validate_raw(root,'correction',body(read(root/'correction.packet.json')))
+        selected,receipt=corrected_proposal(root,frozen,correction['response'])
+        if selected!=proposal or receipt is None:raise ValueError('anchor terminal selected component drift')
+        base['program_anchor_component_selection']=receipt
     if not contract.validate_review(packet, raw["response"]):
         raise ValueError("terminal complete postimage review invalid")
     # Authenticate proposal and correction chain. A final reply cannot bypass initial review.
@@ -780,7 +828,7 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
         if correction_packet != expected_correction:
             raise ValueError("correction chain drift")
         correction = validate_raw(root, "correction", correction_packet)
-        corrected = effective_proposal(frozen, correction['response'])
+        corrected,_ = corrected_proposal(root,frozen,correction['response'])
         if claim_first:
             if stage != 'final_review':
                 raise ValueError('Claim-first cannot mint an additional terminal review')

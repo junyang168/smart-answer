@@ -57,6 +57,73 @@ def test_actual_saved_anchor_draft_negative_gates(fault):
     with pytest.raises(ValueError):r.initial_review_base(f,p)
 
 
+def test_actual_corrected_complete_postimages_require_real_final_approval():
+    from backend.pipeline import source_reconciliation_runner as r
+    root,f,_=saved_anchor_draft()
+    if not (root/'correction.raw.json').exists():pytest.skip('actual correction not saved')
+    raw=r.validate_raw(root,'correction',r.body(r.read(root/'correction.packet.json')))
+    p,receipt=r.corrected_proposal(root,f,raw['response'])
+    assert receipt and receipt['automatic_content_approval'] is False
+    before=deepcopy(p.model_dump())
+    packet=c.review_packet(f,p,complete_anchor_review=True)
+    assert p.model_dump()==before
+    assert len(packet['anchor_create_permission_receipt']['exact_new_fragment_ids'])==2
+    assert packet['anchor_create_permission_receipt']['automatic_content_approval'] is False
+    verdicts=[{'record_key':d.record_key,'approved':True,'problems':[],'reason':'own-source complete postimage approved'} for d in p.dispositions]
+    answer={'proposal_sha256':packet['proposal_sha256'],'verdicts':verdicts}
+    assert c.validate_review(packet,answer)
+    answer['verdicts'][0].update(approved=False,problems=['real substantive source objection'])
+    assert not c.validate_review(packet,answer)
+    with pytest.raises(ValueError):c.review_packet(f,p)  # Legacy/default never upgrades.
+    for fault in ('claim_unresolved','missing_postimage','foreign_parent','missing_disposition','words'):
+        changed=p.model_copy(deep=True)
+        if fault=='claim_unresolved':changed.dispositions[0].action='unresolved'
+        if fault=='missing_postimage':changed.records.pop()
+        if fault=='foreign_parent':changed.records[-1].payload['source_id']='foreign'
+        if fault=='missing_disposition':changed.dispositions.pop()
+        if fault=='words':changed.records[0].payload['statement']='new theology'
+        with pytest.raises(ValueError):c.review_packet(f,changed,complete_anchor_review=True)
+
+
+@pytest.mark.parametrize('fault',[None,'missing_claim','foreign_run','changed_words','rejected_initial'])
+def test_saved_component_selection_never_creates_or_borrows_content(monkeypatch,fault):
+    from backend.pipeline import source_reconciliation_runner as r
+    root,f,_=saved_anchor_draft()
+    if not (root/'correction.raw.json').exists():pytest.skip('actual correction unavailable')
+    raw=r.validate_raw(root,'correction',r.body(r.read(root/'correction.packet.json')))
+    response=deepcopy(raw['response'])
+    import json
+    row=next(x for x in response['records'] if x['collection']=='claims')
+    if fault=='changed_words':
+        payload=json.loads(row['payload_json']);payload['statement']='other meaning';row['payload_json']=json.dumps(payload)
+    if fault=='rejected_initial':
+        original=r.validate_raw
+        def reject(*args,**kwargs):
+            value=deepcopy(original(*args,**kwargs))
+            if args[1]=='initial_review':value['response']['verdicts'][0]['approved']=False
+            return value
+        monkeypatch.setattr(r,'validate_raw',reject)
+    if fault in {'changed_words','rejected_initial'}:
+        with pytest.raises(ValueError):r.corrected_proposal(root,f,response)
+        return
+    p,receipt=r.corrected_proposal(root,f,response)
+    from backend.pipeline.claim_owner_revision import dependency_direction
+    from backend.pipeline.cvp_sql_flow import binding
+    value={'run_id':'RUN','reviewed':{'evidence':{'approval':{},'package':{'payload':{
+        'claims':[p.records[0].payload], 'source_repair_application':{'run_id':'RUN','materials':binding(root/'scoped-materials.json')}}}}}}
+    if fault=='missing_claim':value['reviewed']['evidence']['package']['payload']['claims']=[]
+    if fault=='foreign_run':value['run_id']='FOREIGN'
+    if fault:
+        with pytest.raises(ValueError):dependency_direction(value)
+    else:
+        proof,cid=dependency_direction(value)
+        assert cid=='CL-0007' and proof==f['manifest']['anchor_qualification']
+        original=r.effective_proposal(f,r.validate_raw(root,'proposal_schema_recovery',r.body(r.read(root/'proposal_schema_recovery.packet.json')))['response'])
+        assert p.records[0]==original.records[0]
+        assert p.dispositions[0]==original.dispositions[0]
+        assert response==raw['response']
+
+
 def fixture(monkeypatch):
     claim={'claim_id':'C','revision':1,'statement':'unchanged',
         'evidence_step_ids':['E','OTHER'],'eligible_evidence_step_ids':['OTHER'],

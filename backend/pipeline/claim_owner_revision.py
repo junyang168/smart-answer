@@ -295,16 +295,35 @@ def managed_operations(value,*,store=None,cursor=None):
     return stitch(old,ops,set(old))
 
 
+def dependency_direction(value):
+    """Reuse one existing dependency audit for an exact source/anchor repair."""
+    from backend.pipeline.cvp_sql_flow import check_binding
+    e=value['reviewed']['evidence'];proof=e['approval'].get('owner_claim_completion')
+    if proof:return proof,read_artifact(proof['path'])['claim_id']
+    app=e.get('package',{}).get('payload',{}).get('source_repair_application',{})
+    if not app:return None,None
+    check_binding(app['materials'])
+    materials=read_artifact(app['materials']['path'])
+    proof=materials['manifest'].get('anchor_qualification')
+    if not proof:return None,None
+    check_binding(proof);direction=read_artifact(proof['path'])
+    cid=direction['claim_id']
+    claims=[p for p in e['package']['payload'].get('claims',[]) if p['claim_id']==cid]
+    if len(claims)!=1 or app['run_id']!=value['run_id']:
+        raise ValueError('dependency audit requires the exact applied Claim postimage')
+    return proof,cid
+
+
 def finish_dependency_audit(store,run_id):
     """Audit a corrected existing non-campaign Claim without enlarging the group."""
     import os,subprocess
     from backend.pipeline.cvp_sql_flow import PROJECT,binding
     from backend.pipeline.claim_first_management import validate_claim_audit_report
     from backend.pipeline.viewpoint_content_blocked_fallback import verify_saved_full_audit
-    value=store.get_cvp_group(run_id);e=value['reviewed']['evidence'];a=e['approval']
-    direction=read_artifact(a['owner_claim_completion']['path']);cid=direction['claim_id']
+    value=store.get_cvp_group(run_id);e=value['reviewed']['evidence']
+    proof,cid=dependency_direction(value)
+    if proof is None:return
     if cid in value['claim_ids']:return
-    proof=a['owner_claim_completion']
     from backend.pipeline.cvp_sql_flow import check_binding
     check_binding(proof)
     state=store.get_record_state('claims',cid);pin=[state['revision'],state['content_sha256'],False]
@@ -336,9 +355,9 @@ def validate_dependency_completion(value,*,cursor=None):
     from backend.pipeline.cvp_sql_flow import check_binding
     from backend.pipeline.claim_first_management import validate_claim_audit_report
     from backend.pipeline.viewpoint_content_blocked_fallback import verify_saved_full_audit
-    e=value['reviewed']['evidence'];proof=e['approval'].get('owner_claim_completion')
+    e=value['reviewed']['evidence'];proof,cid=dependency_direction(value)
     if not proof:return
-    check_binding(proof);d=read_artifact(proof['path']);cid=d['claim_id']
+    check_binding(proof)
     if cid in value['claim_ids']:return
     root=Path(e['package']['payload']['source_repair_application']['run_root'])/'dependency-claim-audit'
     receipt=read_artifact(root/'completion.json')
