@@ -3409,7 +3409,7 @@ class PostgresKnowledgeStore:
                          (ident,identity,canonical_json(metadata)))
 
     def prepare_cvp_action(self, run_id, *, action_id, kind, authorization, materials):
-        if kind not in {'claim_retirement','source_claim_revision','cvp_scope_revision','cvp_membership_revalidation','owner_link_correction','owner_link_retarget','owner_link_retirement','audit_supports_correction','required_cvp_coverage'} or not authorization:
+        if kind not in {'relation_retirement','claim_retirement','source_claim_revision','cvp_scope_revision','cvp_membership_revalidation','owner_link_correction','owner_link_retarget','owner_link_retirement','audit_supports_correction','required_cvp_coverage'} or not authorization:
             raise ValueError('bounded action authority required')
         action={'action_id':action_id,'kind':kind,'authorization':authorization,
                 'materials_sha256':sha256_json(materials),'materials':materials}
@@ -3894,7 +3894,7 @@ class PostgresKnowledgeStore:
                     return digest
                 action = evidence.get('action')
                 if (value.get('checkpoint') not in {'applied','audited'} or not action
-                        or action.get('kind') not in {'claim_retirement','source_claim_revision','cvp_scope_revision','owner_link_correction','owner_link_retarget','owner_link_retirement','audit_supports_correction','required_cvp_coverage'}
+                        or action.get('kind') not in {'relation_retirement','claim_retirement','source_claim_revision','cvp_scope_revision','owner_link_correction','owner_link_retarget','owner_link_retirement','audit_supports_correction','required_cvp_coverage'}
                         or not action.get('authorization') or not action.get('materials_sha256')
                         or plan.change_set_id in value.get('change_set_ids',[])
                         or not prepared or prepared[0]!=action):
@@ -4883,6 +4883,14 @@ class PostgresKnowledgeStore:
             authorized_keys = validate_package(package)
             if retiring_keys and tuple(retiring_keys) != authorized_keys:
                 raise ValueError('extra retirement is not authorized')
+            retiring_keys = authorized_keys
+
+        if (package.get('source_repair_application') or {}).get('schema_version') == 'wang_claim_relation_retirement_v1':
+            if not transactional: raise ValueError('relation retirement requires common SQL transaction')
+            from backend.pipeline.claim_relation_retirement import validate_package
+            authorized_keys = validate_package(package)
+            if retiring_keys and tuple(retiring_keys) != authorized_keys:
+                raise ValueError('extra relation retirement is not authorized')
             retiring_keys = authorized_keys
 
         if (package.get('source_repair_application') or {}).get('schema_version') == 'wang_claim_sql_retirement_v1':
@@ -6353,6 +6361,8 @@ class PostgresKnowledgeStore:
             _ClaimEvidenceSourceQueueApplyContext
         ] = None,
     ) -> dict[str, Any]:
+        if plan.source_kind == 'wang_claim_relation_retirement_v1' and transaction_context is None:
+            raise ValueError('relation retirement cannot bypass common SQL transaction')
         if plan.source_kind in {'wang_source_sql_reconciliation_v2','wang_owner_sql_link_correction_v2','wang_cvp_sql_link_retarget_v1','wang_cvp_owner_sql_link_retirement_v1','wang_cvp_deferred_authorized_link_management_v1','wang_cvp_sql_link_replacement_v1','wang_cvp_sql_link_representation_v1'} and transaction_context is None:
             raise ValueError('SQL v2 actions cannot bypass the shared transaction boundary')
         if transaction_context is not None:

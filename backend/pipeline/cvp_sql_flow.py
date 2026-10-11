@@ -822,7 +822,7 @@ def main(argv=None):
     parser.add_argument('--pause-after-group',type=int,help='Narrow this invocation for acceptance; never changes the immutable execution boundary')
     parser.add_argument('--integrate-batch-candidates',action='store_true',
                         help='Explicit new-group identity integration; never upgrades saved legacy answers')
-    parser.add_argument('--action',choices=('group','source','source-write-slice','claim-retire','owner-link','link-target','link-retarget','link-retire','link-replace','link-representation'),default='group')
+    parser.add_argument('--action',choices=('group','source','source-write-slice','relation-retire','claim-retire','owner-link','link-target','link-retarget','link-retire','link-replace','link-representation'),default='group')
     parser.add_argument('--claim-first',action='store_true',
                         help='Finish only the original bounded Claim/Evidence action; keep all CVPs pending and stop before CVP/group execution')
     parser.add_argument('--candidate-viewpoint-id',action='append',default=[],
@@ -1133,7 +1133,14 @@ def main(argv=None):
             action_root=args.output_root/args.run_id/'actions'
             from backend.pipeline.cvp_sql_actions import execute_source_action,execute_owner_link_action
             from backend.pipeline.source_reconciliation_runtime import ProductionPorts
-            if args.action=='source-write-slice':
+            if args.action=='relation-retire':
+                if not args.direction:raise ValueError('relation retirement requires exact owner direction')
+                from backend.pipeline.claim_relation_retirement import execute
+                result=execute(store,args.run_id,authorization=binding(args.direction),
+                               root=action_root/'relation-retire',ports=ProductionPorts())
+                stage_event('relation_retired_group_pending',run_id=args.run_id,result=result,group_complete=False)
+                return 0
+            elif args.action=='source-write-slice':
                 if not args.direction:raise ValueError('source write slice requires exact direction')
                 from backend.pipeline.claim_source_write_slice import execute
                 direction=read_artifact(args.direction)
