@@ -1200,6 +1200,11 @@ def main(argv=None):
                         raise ValueError('Claim-first original SQL action root drift')
                     source_root=bound.parent
                 execute_source_action(store,args.run_id,manifest,root=source_root,ports=ProductionPorts(),claim_first=args.claim_first)
+                if manifest.get('evidence_binding_repair'):
+                    from backend.pipeline.claim_evidence_binding import finish_claim_audit
+                    proof=finish_claim_audit(store,args.run_id)
+                    stage_event('evidence_binding_shared_owners_audited_cvp_pending',run_id=args.run_id,proof=proof,group_complete=False)
+                    return 0
                 if manifest.get('anchor_qualification'):
                     from backend.pipeline.claim_owner_revision import finish_dependency_audit
                     proof=finish_dependency_audit(store,args.run_id)

@@ -60,6 +60,7 @@ def action_sources(materials):
         result += [manifest.claim_issue.model_dump(),context['policy'],*(i['report'] for i in context['issues'])]
         if context.get('scope_amendment'):result.append(context['scope_amendment'])
     if manifest.anchor_qualification:result.append(manifest.anchor_qualification.model_dump())
+    if manifest.evidence_binding_repair:result.append(manifest.evidence_binding_repair.model_dump())
     return result
 
 
@@ -121,7 +122,10 @@ def prepare_source_action(store,run_id,manifest,*,root):
         return previous
     started=time.perf_counter()
     amendment=None
-    if manifest.anchor_qualification:
+    if manifest.evidence_binding_repair:
+        d=json.loads(content.bound_bytes(manifest.evidence_binding_repair))
+        keys=[('evidence_steps',d['evidence_id'])]
+    elif manifest.anchor_qualification:
         d=json.loads(content.bound_bytes(manifest.anchor_qualification))
         keys=[('claims',d['claim_id']),('evidence_steps',d['evidence_id'])]
     elif manifest.viewpoint_scope_repair:
@@ -164,6 +168,10 @@ def prepare_source_action(store,run_id,manifest,*,root):
 
 
 def source_action_id(manifest):
+    if manifest.evidence_binding_repair:
+        value=json.loads(content.bound_bytes(manifest.evidence_binding_repair))
+        return 'CVPA-'+sha256_json({'kind':'eligible_evidence_binding','evidence_id':value['evidence_id'],
+                                    'before_pin':value['before_pin'],'source_id':manifest.source_id})
     if manifest.viewpoint_scope_repair:
         from backend.pipeline.cvp_scope_management import direction
         value = direction(manifest)
@@ -278,7 +286,7 @@ def execute_source_action(store,run_id,manifest,*,root,ports,claim_first=False):
     if template_proof:package['source_repair_application']['identity_template_read_pins']=template_proof
     validate_source_package(package)
     from backend.pipeline.cvp_sql_flow import verified_group_backup
-    backup=verified_group_backup(root,package,ports) if issue_context or manifest.get('viewpoint_scope_repair') or manifest.get('anchor_qualification') else ports.backup(root)
+    backup=verified_group_backup(root,package,ports) if issue_context or manifest.get('viewpoint_scope_repair') or manifest.get('anchor_qualification') or manifest.get('evidence_binding_repair') else ports.backup(root)
     original=store.get_cvp_group(run_id).get('reviewed',{}).get('evidence',{})
     approval={**(original.get('approval',{}) if joint_owner_claim else {}),
               'terminal_review':binding(root/(raw['stage']+'.raw.json'))}
@@ -296,12 +304,15 @@ def execute_source_action(store,run_id,manifest,*,root,ports,claim_first=False):
         proof=root/(stage+'.raw.program-binding.json')
         if proof.exists():approval[stage+'_program_binding']=binding(proof)
     views=set(original.get('viewpoint_ids',[]))
-    if issue_context or manifest.get('viewpoint_scope_repair') or manifest.get('anchor_qualification'):
+    if issue_context or manifest.get('viewpoint_scope_repair') or manifest.get('anchor_qualification') or manifest.get('evidence_binding_repair'):
         views.update(p['viewpoint_id'] for p in content.index(materials['before_records']).values() if 'viewpoint_id' in p)
     pending=content.Manifest.model_validate(materials['manifest']).deferred_repair.claim_ids if materials['manifest'].get('deferred_repair') else []
     if manifest.get('anchor_qualification'):
         d=json.loads(content.bound_bytes(manifest['anchor_qualification']))
         pending=sorted(set(saved['claim_ids'])|set(original.get('pending_cvp_claim_ids',[]))|{d['claim_id']})
+    if manifest.get('evidence_binding_repair'):
+        d=json.loads(content.bound_bytes(manifest['evidence_binding_repair']))
+        pending=sorted(set(saved['claim_ids'])|set(original.get('pending_cvp_claim_ids',[]))|set(d['claim_ids']))
     if issue_context:
         # Uncommitted original model materials include the changed Claim. They
         # are retained as history, never re-labelled approved for the new cut.
@@ -318,7 +329,7 @@ def execute_source_action(store,run_id,manifest,*,root,ports,claim_first=False):
         source_kind=SOURCE_SCHEMA,viewpoint_ids=sorted(views),
         disposition=original.get('disposition'),action=action,
         pending_cvp_claim_ids=pending,
-        pending_cvp_management_record_keys=original.get('pending_cvp_management_record_keys',[]) if joint_owner_claim or manifest.get('anchor_qualification') else ())
+        pending_cvp_management_record_keys=original.get('pending_cvp_management_record_keys',[]) if joint_owner_claim or manifest.get('anchor_qualification') or manifest.get('evidence_binding_repair') else ())
 
 
 def merge_dispositions(old,new):

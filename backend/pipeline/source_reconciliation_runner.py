@@ -23,7 +23,7 @@ STAGES = ("proposal", "proposal_schema_recovery", "initial_review", "correction"
 
 
 def effective_proposal(frozen, response):
-    if frozen['manifest'].get('anchor_qualification'):
+    if frozen['manifest'].get('anchor_qualification') or frozen['manifest'].get('evidence_binding_repair'):
         from backend.pipeline.claim_anchor_qualification import normalized_proposal
         return normalized_proposal(frozen,response)
     if frozen['manifest'].get('viewpoint_scope_repair'):
@@ -315,6 +315,8 @@ class Runner:
         else:
             adapter = self.ports.scope_adapter(role) if scope else self.ports.claim_issue_adapter(role) if issue else self.ports.deferred_adapter(role) if deferred else self.ports.adapter(role)
         from backend.pipeline.claim_first_management import scoped_adapter
+        from backend.pipeline.claim_evidence_binding import scoped_adapter as evidence_adapter
+        adapter=evidence_adapter(adapter,packet,role)
         adapter = scoped_adapter(adapter, packet)
         from backend.pipeline.cvp_pending_link_management import scoped_adapter as link_scoped_adapter
         adapter = link_scoped_adapter(adapter,packet)
@@ -406,7 +408,7 @@ class Runner:
         # Saved review packets retain their exact old contract. New reviews
         # receive the same verified read-only adapter proof as the proposer.
         base = disclosed_review_base(frozen, base)
-        return add_receipt(frozen, response, base) if frozen['manifest'].get('claim_issue') or frozen['manifest'].get('anchor_qualification') else base
+        return add_receipt(frozen, response, base) if frozen['manifest'].get('claim_issue') or frozen['manifest'].get('anchor_qualification') or frozen['manifest'].get('evidence_binding_repair') else base
 
     def reviewed(self, frozen: dict) -> tuple[contract.Proposal, dict]:
         if contract.unresolved_consumers(frozen):
@@ -649,6 +651,11 @@ def build_proposal_packet(frozen: dict) -> dict:
         result['anchor_qualification']=json.loads(contract.bound_bytes(frozen['manifest']['anchor_qualification']))
         result['writable_record_shapes']={col:contract.KNOWLEDGE_COLLECTIONS[col][0].model_json_schema()
             for col in sorted({p['collection'] for p in frozen['manifest']['permissions']})}
+    if frozen['manifest'].get('evidence_binding_repair'):
+        import json
+        result['evidence_binding_repair']=json.loads(contract.bound_bytes(frozen['manifest']['evidence_binding_repair']))
+        result['writable_record_shapes']={col:contract.KNOWLEDGE_COLLECTIONS[col][0].model_json_schema()
+            for col in sorted({p['collection'] for p in frozen['manifest']['permissions']})}
     if any(contract.split_key(k)[0]=='knowledge_routes' for k in frozen['inventory']['unknown_keys']):
         result['inventory'] = {**frozen['inventory'], 'unknown_keys': contract.unresolved_consumers(frozen)}
         result['read_only_adapter_receipt'] = {'schema': 'knowledge_route_impact_only_v1',
@@ -889,11 +896,15 @@ def validate_raw(root: Path, stage: str, packet: dict) -> dict:
                 ctx.pin(PROMPTS / 'claim_evidence_eligibility_review_v2.md')
         if packet.get('manifest', {}).get('viewpoint_scope_repair'):
             ctx.pin(PROMPTS / 'cvp_scope_management_v1.md')
+        if packet.get('manifest', {}).get('evidence_binding_repair'):
+            ctx.pin(Path(__file__).with_name('claim_evidence_binding.py'))
     adapter = model_adapter('proposal' if stage=='proposal_schema_recovery' else 'initial_review' if stage=='normalization_recovery_review' else 'final_review' if stage=='final_review_input_repair' else stage, scope=bool(packet.get('manifest', {}).get('viewpoint_scope_repair')),
                             deferred=bool(packet.get("manifest", {}).get("deferred_repair")),
                             issue=bool(packet.get("manifest", {}).get("claim_issue")),
                             evidence_eligibility=eligibility_profile(packet))
     from backend.pipeline.claim_first_management import scoped_adapter
+    from backend.pipeline.claim_evidence_binding import scoped_adapter as evidence_adapter
+    adapter=evidence_adapter(adapter,packet,'proposal' if stage=='proposal_schema_recovery' else stage)
     adapter = scoped_adapter(adapter, packet)
     from backend.pipeline.cvp_pending_link_management import scoped_adapter as link_scoped_adapter
     adapter = link_scoped_adapter(adapter,packet)

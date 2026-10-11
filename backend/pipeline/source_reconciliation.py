@@ -117,6 +117,7 @@ class Manifest(Contract):
     # Exact owner CVP scope permission; never inherited from Claim permission.
     viewpoint_scope_repair: FileBinding | None = None
     anchor_qualification: FileBinding | None = None
+    evidence_binding_repair: FileBinding | None = None
 
     @model_serializer(mode="wrap")
     def serialize(self, handler):
@@ -130,6 +131,8 @@ class Manifest(Contract):
             result.pop("viewpoint_scope_repair", None)
         if self.anchor_qualification is None:
             result.pop("anchor_qualification", None)
+        if self.evidence_binding_repair is None:
+            result.pop("evidence_binding_repair", None)
         return result
 
 
@@ -455,7 +458,12 @@ def freeze(manifest: Manifest, states: dict[str, dict], *, physical_snapshots: d
     changed = sorted(k for k in keys if before["paragraphs"].get(k) != after[0]["paragraphs"].get(k))
     if not set(changed) <= set(manifest.authorized_paragraph_keys):
         raise ValueError("source change exceeds authorized paragraphs; no automatic scope expansion")
-    if manifest.anchor_qualification:
+    if manifest.evidence_binding_repair:
+        from backend.pipeline.claim_evidence_binding import inventory as binding_inventory
+        if changed or manifest.authorized_paragraph_keys:
+            raise ValueError('Evidence binding cannot edit professor sources')
+        inv = binding_inventory(manifest, states, physical_snapshots)
+    elif manifest.anchor_qualification:
         from backend.pipeline.claim_anchor_qualification import inventory as qualification_inventory
         if changed or manifest.authorized_paragraph_keys:
             raise ValueError('anchor qualification cannot edit professor sources')
@@ -545,6 +553,8 @@ def freeze(manifest: Manifest, states: dict[str, dict], *, physical_snapshots: d
     archive_bindings = [manifest.before_source, *manifest.current_sources, manifest.authorization,
                         manifest.accepted_membership, *manifest.prior_updates]
     archive_bindings += [FileBinding.model_validate(s["file"]) for s in context_sources]
+    if manifest.evidence_binding_repair:
+        archive_bindings.append(manifest.evidence_binding_repair)
     if manifest.claim_issue:
         archive_bindings.append(manifest.claim_issue)
         archive_bindings.append(FileBinding.model_validate(diagnosis["policy"]))
@@ -571,6 +581,8 @@ def freeze(manifest: Manifest, states: dict[str, dict], *, physical_snapshots: d
 
 def guard_files(frozen: dict, *, historical: bool = False) -> None:
     manifest = Manifest.model_validate(frozen["manifest"])
+    if manifest.evidence_binding_repair:
+        bound_bytes(manifest.evidence_binding_repair,frozen['physical_snapshots'] if historical else None)
     for b in [manifest.before_source, *manifest.current_sources, manifest.authorization, manifest.accepted_membership, *manifest.prior_updates]:
         bound_bytes(b, frozen["physical_snapshots"] if historical else None)
     for source in frozen.get("context_sources", []):
@@ -718,6 +730,9 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
         if manifest.anchor_qualification:
             from backend.pipeline.claim_anchor_qualification import validate_delta
             validate_delta(frozen,old,new,k)
+        if manifest.evidence_binding_repair:
+            from backend.pipeline.claim_evidence_binding import validate_delta
+            validate_delta(frozen,old,new,k)
         if new.get("review_status", "candidate") != "candidate":
             raise ValueError("proposal may not inherit or manufacture approval: " + k)
         if new.get("revision") != (old.get("revision", 1) + 1 if old else 1):
@@ -743,6 +758,9 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
     if initial_claim_draft:
         return post  # Review-only: graph/coverage findings are disclosed, never waived for final/write.
     validate_graph(post, before, frozen, pending_link_keys=pending_link_keys)
+    if manifest.evidence_binding_repair:
+        from backend.pipeline.claim_evidence_binding import validate_closure
+        validate_closure(frozen, proposal, post)
     if manifest.anchor_qualification:
         from backend.pipeline.claim_anchor_qualification import validate_binding_closure
         validate_binding_closure(frozen,proposal,post)
