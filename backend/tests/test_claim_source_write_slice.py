@@ -55,6 +55,103 @@ def test_no_extra_scope_or_fake_qualification(monkeypatch,fault):
     with pytest.raises((ValueError,KeyError)):m.projection(f,p,d)
 
 
+def owner_fixture(monkeypatch):
+    from backend.pipeline import claim_owner_revision as owner, cvp_sql_flow
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    from backend.pipeline.claim_issue_management import Proposal, Assessment
+    proof={'path':'owner','file_sha256':'sealed'}
+    monkeypatch.setattr(cvp_sql_flow,'check_binding',lambda b:None)
+    monkeypatch.setattr('backend.pipeline.viewpoint_resolution_runtime.read_artifact',lambda p:{'claim_id':'C','campaign_sha256':'campaign'})
+    monkeypatch.setattr(owner,'validate_direction',lambda *a:None)
+    monkeypatch.setattr(owner,'validate_joint',lambda *a:True)
+    monkeypatch.setattr(c,'validate_proposal',lambda *a,**kw:None)
+    old={'claim_id':'C','revision':1,'review_status':'ai_consensus_reviewed','statement':'old',
+         'context_evidence_step_ids':['E'], 'occurrences':[{'canonical_evidence_step_ids':['E'],
+         'project_id':'P','anchors':[{'text':'exact'}]}]}
+    link={'viewpoint_claim_link_id':'L','revision':1,'review_status':'system_approved','claim_id':'C','viewpoint_id':'V',
+          'effective_state':'active','link_type':'equivalent_component','validated_against_viewpoint_revision_id':'VR',
+          'pinned_claim_revision':1,'component_locator':None,'evidence_bindings':[]}
+    states={'claims/C':old,'viewpoint_claim_links/L':link,'knowledge_relations/R':{'relation_id':'R','revision':1}}
+    f={'manifest':{'claim_issue':proof,'permissions':[]},'sql_scope':{'run_id':'run', 'read_pins':[
+        {'collection':col,'object_id':oid,'pin':[v['revision'],record_content_sha(v),False]}
+        for k,v in states.items() for col,oid in [c.split_key(k)]]},
+       'before_records':c.rows(states),'owner_claim_completion':proof}
+    new=deepcopy(old);new.update(statement='model-authored new statement',revision=2,review_status='candidate')
+    new['canonical_evidence_step_ids']=new.pop('context_evidence_step_ids')
+    occ=new['occurrences'][0];occ['citation_ids']=occ.pop('canonical_evidence_step_ids');occ['parent_topic_id']=occ.pop('project_id')
+    p=Proposal(records=c.rows({'claims/C':new,'viewpoint_claim_links/L':{**link,'revision':2,
+        'review_status':'candidate','pinned_claim_revision':2}}),
+        dispositions=[c.Disposition(record_key=k,action='update' if k!='knowledge_relations/R' else 'unresolved',
+            reason='original reason') for k in states],sentence_dispositions=[],unadmitted_candidates=[],cvp_impacts=[],
+        claim_assessments=[Assessment(issue_id='I',cause='claim_statement',reason='owner requested',
+            citations=[{'source_id':'S','paragraph_key':'S0001','exact_quote':'exact'}])])
+    d={'schema_version':m.VERSION,'mode':'owner_statement_completion','human_content_approval':False,
+       'owner_claim_direction':proof,'source_write_keys':['claims/C','viewpoint_claim_links/L'],'withdraw_relation_ids':[]}
+    return f,p,d
+
+
+def test_owner_statement_slice_preserves_storage_and_pending(monkeypatch):
+    f,p,d=owner_fixture(monkeypatch);saved=deepcopy(p.model_dump());old=c.index(f['before_records'])
+    scoped,q=m.projection(f,p,d);new=c.index(q.records)['claims/C']
+    assert new['statement']==p.records[0].payload['statement']
+    assert new['occurrences']==old['claims/C']['occurrences']
+    assert new['context_evidence_step_ids']==['E'] and 'canonical_evidence_step_ids' not in new
+    assert len(scoped['owner_statement_storage_preservation'])==3
+    assert 'knowledge_relations/R' in scoped['inventory']['context_keys']
+    assert p.model_dump()==saved and p.dispositions[-1].action=='unresolved'
+
+
+@pytest.mark.parametrize('fault',['missing_link','extra_write','foreign_direction','retirement','stale_pin',
+    'held','changed_type','changed_target','changed_anchor','changed_bucket','changed_occurrence',
+    'wrong_project','approved_draft','empty_statement','changed_claim_type','duplicate_record'])
+def test_owner_statement_slice_refuses_scope_or_content_drift(monkeypatch,fault):
+    f,p,d=owner_fixture(monkeypatch);claim=p.records[0].payload;link=p.records[1].payload
+    if fault=='missing_link':p.records.pop()
+    if fault=='extra_write':p.records.append(c.Row(collection='knowledge_relations',object_id='R',payload={'relation_id':'R'}))
+    if fault=='foreign_direction':d['owner_claim_direction']={'path':'foreign'}
+    if fault=='retirement':d['withdraw_relation_ids']=['R']
+    if fault=='stale_pin':f['sql_scope']['read_pins'][0]['pin'][0]=0
+    if fault=='held':
+        f['before_records'][0]['payload']['review_status']='human_hold'
+    if fault=='changed_type':link['link_type']='supports'
+    if fault=='changed_target':link['viewpoint_id']='foreign'
+    if fault=='changed_anchor':claim['occurrences'][0]['anchors'][0]['text']='new'
+    if fault=='changed_bucket':claim['canonical_evidence_step_ids']=['new']
+    if fault=='changed_occurrence':claim['occurrences']=[]
+    if fault=='wrong_project':claim['occurrences'][0]['parent_topic_id']='other'
+    if fault=='approved_draft':claim['review_status']='approved'
+    if fault=='empty_statement':claim['statement']=''
+    if fault=='changed_claim_type':claim['claim_type']='new'
+    if fault=='duplicate_record':p.records.append(p.records[0])
+    with pytest.raises((ValueError,KeyError)):m.projection(f,p,d)
+
+
+@pytest.mark.skipif(os.environ.get('WKP357_G112_READONLY')!='1',reason='actual saved g112 readonly opt-in')
+def test_real_owner_statement_slice_is_strict_and_parent_byte_identical():
+    from dotenv import load_dotenv
+    load_dotenv('.env')
+    from backend.pipeline.source_reconciliation_runner import read,body,validate_raw
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    base=Path('/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/staging/cvp-production-357/campaign-sql-20261008-v1-from-g059')
+    direction=read(base/'owner-g112-statement-completion-write-slice.json')
+    root=Path(direction['parent_root']);hashes={p:c.file_sha256(p) for p in root.iterdir() if p.is_file()}
+    _,f,scoped,p,packet=m.prepare(direction)
+    store=PostgresKnowledgeStore()
+    with store.connect() as conn,conn.cursor() as cur:
+        store._assert_transaction_read_pins(cur,{(r['collection'],r['object_id']):tuple(r['pin']) for r in f['sql_scope']['read_pins']})
+    assert len(f['sql_scope']['read_pins'])==460
+    assert len(p.records)==4 and len(packet['proposal']['dispositions'])==4
+    assert len(packet['source_write_slice']['pending_dispositions'])==54
+    assert len(packet['source_write_slice']['program_projection_delta'])==3
+    old=c.index(f['before_records']);new=c.index(p.records)
+    cid=read(Path(direction['owner_claim_direction']['path']))['claim_id']
+    assert new['claims/'+cid]['occurrences']==old['claims/'+cid]['occurrences']
+    assert new['claims/'+cid]['context_evidence_step_ids']==old['claims/'+cid]['context_evidence_step_ids']
+    for stage in ('proposal','initial_review','correction'):validate_raw(root,stage,body(read(root/(stage+'.packet.json'))))
+    assert hashes=={p:c.file_sha256(p) for p in root.iterdir() if p.is_file()}
+
+
 @pytest.mark.skipif(os.environ.get('WKP357_REAL_SAVED_READONLY')!='1',reason='actual saved readonly opt-in')
 def test_real_saved_strict_source_projection_no_calls_writes():
     from dotenv import load_dotenv

@@ -12,11 +12,112 @@ from backend.api.canonical_repository.postgres_store import sha256_json
 VERSION = 'wang_claim_source_write_slice_v1'
 
 
+def owner_statement_projection(frozen, original, direction):
+    """A statement-only slice keeps protected storage fields, not model aliases.
+
+    The exact model statement and three/all owned link components still require
+    the original unused independent final review. The unsubmitted metadata and
+    every unrelated unresolved finding remain in its disclosed parent response.
+    """
+    from backend.pipeline.claim_owner_revision import validate_direction, validate_joint
+    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    from backend.api.canonical_repository.viewpoint_foundation import semantic_record_sha
+    proof = frozen.get('owner_claim_completion')
+    if not proof or direction.get('owner_claim_direction') != proof:
+        raise ValueError('statement slice requires the original exact owner direction')
+    check_binding(proof); owner = read_artifact(proof['path'])
+    before = c.index(frozen['before_records']); proposed = c.index(original.records)
+    cid = owner['claim_id']; claim_key = c.key('claims', cid)
+    old = before[claim_key]
+    validate_direction(owner, {'run_id': frozen['sql_scope']['run_id'],
+        'campaign_sha256': owner['campaign_sha256'], 'claim_ids': [cid]},
+        {'payload': old, 'revision': old['revision'], 'content_sha256': record_content_sha(old),
+         'retired': False})
+    pins = {(r['collection'], r['object_id']): r['pin'] for r in frozen['sql_scope']['read_pins']}
+    owned = {k for k,p in before.items() if k.startswith('viewpoint_claim_links/')
+             and p['claim_id'] == cid and p['effective_state'] == 'active'}
+    selected = direction['source_write_keys']
+    if (direction.get('withdraw_relation_ids') != [] or not owned
+            or selected != sorted({claim_key, *owned}) or set(proposed) != set(selected)
+            or len(original.records) != len(selected)
+            or len(original.claim_assessments) != 1
+            or original.claim_assessments[0].cause != 'claim_statement'):
+        raise ValueError('statement slice requires one complete Claim and ALL active owned link postimages')
+    masked = {}; changes = []
+    for k in selected:
+        current, candidate = before[k], proposed[k]
+        if (pins.get(c.split_key(k)) != [current['revision'], record_content_sha(current), False]
+                or current.get('review_status') in c.HUMAN_HOLDS | {'human_hold','rejected','withheld_unreviewed'}
+                or candidate.get('review_status') != 'candidate'
+                or candidate.get('revision') != current['revision'] + 1):
+            raise ValueError('statement slice exact current version/hold/draft conflict')
+        allowed = {'statement'} if k == claim_key else {'pinned_claim_revision','component_locator','evidence_bindings'}
+        compatible = deepcopy(candidate)
+        if k == claim_key:
+            # These are a model's storage-vocabulary substitutions, not valid
+            # aliases in the repository schema. Preserve the original semantic
+            # bucket and disclose the unsubmitted row to independent review.
+            if ('context_evidence_step_ids' in current and 'context_evidence_step_ids' not in compatible
+                    and 'canonical_evidence_step_ids' not in current
+                    and compatible.get('canonical_evidence_step_ids') == current['context_evidence_step_ids']):
+                compatible['context_evidence_step_ids'] = compatible.pop('canonical_evidence_step_ids')
+            if len(compatible.get('occurrences', [])) != len(current.get('occurrences', [])):
+                raise ValueError('statement slice cannot change occurrence membership')
+            for old_occ, new_occ in zip(current.get('occurrences', []), compatible.get('occurrences', [])):
+                for stored, unsubmitted in (('canonical_evidence_step_ids','citation_ids'),
+                                             ('project_id','parent_topic_id')):
+                    if (stored in old_occ and stored not in new_occ and unsubmitted not in old_occ
+                            and new_occ.get(unsubmitted) == old_occ[stored]):
+                        new_occ[stored] = new_occ.pop(unsubmitted)
+        if ({f:v for f,v in c._semantic(compatible).items() if f not in allowed}
+                != {f:v for f,v in c._semantic(current).items() if f not in allowed}):
+            raise ValueError('statement slice contains a non-storage content/ownership/anchor change')
+        if k != claim_key and any(candidate.get(f) != current.get(f) for f in (
+                'claim_id','viewpoint_id','link_type','effective_state','validated_against_viewpoint_revision_id')):
+            raise ValueError('statement slice cannot retarget, retire or change a connection role')
+        value = deepcopy(current)
+        for f in allowed | c.PROVENANCE | {'revision'}:
+            if f in candidate: value[f] = deepcopy(candidate[f])
+            elif f in c.PROVENANCE: value.pop(f, None)
+        for f in sorted(set(current) | set(candidate)):
+            if f not in allowed | c.PROVENANCE | {'revision'} and current.get(f) != candidate.get(f):
+                changes.append({'record_key': k, 'field': f,
+                    'unsubmitted_model_value': deepcopy(candidate.get(f)),
+                    'preserved_current_value': deepcopy(current.get(f))})
+        masked[k] = value
+    if not isinstance(masked[claim_key]['statement'], str) or not masked[claim_key]['statement'].strip():
+        raise ValueError('statement slice has no actual model-authored statement')
+    for k in owned:
+        locator = masked[k].get('component_locator')
+        if locator is not None:
+            locator['claim_sha256'] = semantic_record_sha(masked[claim_key])
+    proposal = type(original)(records=c.rows(masked), dispositions=[
+        c.Disposition(record_key=k, action='update', reason=next(d.reason for d in original.dispositions
+            if d.record_key == k)) for k in selected], sentence_dispositions=[],unadmitted_candidates=[],
+        claim_assessments=deepcopy(original.claim_assessments),cvp_impacts=[])
+    validate_joint(frozen, proposal, {})
+    scoped = deepcopy(frozen)
+    scoped['source_write_slice_material'] = True
+    scoped['manifest'].pop('claim_issue', None)
+    scoped['manifest']['permissions'] = [p for p in frozen['manifest']['permissions']
+        if c.key(p['collection'],p['object_id']) in selected]
+    scoped['inventory'] = {'affected_keys': selected, 'context_keys': sorted(set(before)-set(selected)),
+                           'unknown_keys': []}
+    scoped['sentence_inventory'] = []
+    scoped['owner_statement_storage_preservation'] = changes
+    c.validate_proposal(scoped, proposal)
+    return scoped, proposal
+
+
 def projection(frozen, original, direction):
     if direction.get('schema_version') != VERSION or direction.get('human_content_approval') is not False:
         raise ValueError('source slice requires exact independent-review authority')
     if not frozen.get('sql_scope') or not frozen['manifest'].get('claim_issue'):
         raise ValueError('source slice requires original SQL Claim management')
+    if direction.get('mode') == 'owner_statement_completion':
+        return owner_statement_projection(frozen, original, direction)
     from backend.pipeline.claim_evidence_completion import direction_for, evidence_permission_ids
     parent = direction_for(frozen['claim_issue_context'])
     if not parent or direction['withdraw_relation_ids'] != parent['withdraw_relation_ids']:
@@ -102,19 +203,28 @@ def prepare(direction):
     packet['source_write_slice']={'schema_version':VERSION,'direction':direction,
         'original_initial_review':read(root/'initial_review.raw.json')['response'],
         'original_corrected_proposal':original.model_dump(),
-        'program_projection_delta':[{ 'record_key':k,'field':'metrics',
+        'program_projection_delta':scoped.get('owner_statement_storage_preservation', [{ 'record_key':k,'field':'metrics',
             'unsubmitted_model_value':c.index(original.records)[k].get('metrics'),
             'preserved_current_value':c.index(frozen['before_records'])[k].get('metrics')}
             for k in direction['source_write_keys'] if k.startswith('claims/')
-            and c.index(original.records)[k].get('metrics')!=c.index(frozen['before_records'])[k].get('metrics')],
+            and c.index(original.records)[k].get('metrics')!=c.index(frozen['before_records'])[k].get('metrics')]),
         'pending_dispositions':[d.model_dump() for d in original.dispositions if d.record_key not in direction['source_write_keys']],
         'original_cvp_impacts':[i.model_dump() for i in original.cvp_impacts],
         'retirement_requires_no_new_model_verdict':True,
         'group_complete':False,'additional_gpt_calls':0,'additional_corrections':0,
-        'instructions':'Review only all source postimages and full own body. Other relations/group impacts are explicitly pending, not approved/retained. '
+        'instructions':'Review only ALL declared slice postimages and full own body, including every active owned link when this is owner_statement_completion. '
+            'The exact GPT statement is retained; protected storage metadata is restored from current SQL, not treated as aliases or promoted from context to canonical Evidence. '
+            'The original raw and every protected-field difference are disclosed. Independently judge the ACTUAL scoped postimages, never borrow approval for the unsubmitted model row. '
+            'Other relations/group impacts are explicitly pending, not approved/retained. '
             'Do not require this write slice to resolve those unrelated issues. Exact owner retirement is program-directed, not a model question. '
             'A source-bound Evidence still withheld_unreviewed remains ineligible and its held Claim stays unchanged; '
             'judge its binding and faithful excerpt, not approval of the held Claim. No CVP identity or group completion is approved.'}
+    if direction.get('mode') != 'owner_statement_completion':
+        # Reconstruct every already-saved source slice packet byte-for-byte.
+        packet['source_write_slice']['instructions'] = 'Review only all source postimages and full own body. Other relations/group impacts are explicitly pending, not approved/retained. ' \
+            'Do not require this write slice to resolve those unrelated issues. Exact owner retirement is program-directed, not a model question. ' \
+            'A source-bound Evidence still withheld_unreviewed remains ineligible and its held Claim stays unchanged; ' \
+            'judge its binding and faithful excerpt, not approval of the held Claim. No CVP identity or group completion is approved.'
     return root,frozen,scoped,proposal,packet
 
 
@@ -123,7 +233,9 @@ def scoped_adapter(adapter,packet):
     from copy import copy
     if packet['source_write_slice'].get('schema_version')!=VERSION:raise ValueError('unknown source write slice')
     result=copy(adapter)
-    text='\n本次仅审核 source_write_slice 明示的本源写集。其他完整保留的原未决属于下一独立步骤，不批准、不改成retain。只返回proposal.dispositions各项verdict。退役由具名人工方向/程序验证执行，不另作语义判读。绑定仍withheld_unreviewed的Evidence不提升identity资格、不释放其Claim hold。新绑定/引文/Claim锚点必须完整独立判断，拒绝仍停止；零追加纠正。'
+    text='\n本次仅审核 source_write_slice 明示的完整写集；owner_statement_completion 包含实际新Claim表述及全部active自有连接的新版成分/证据绑定。程序保留SQL原非授权字段，不把context Evidence提升为canonical，所有未提交模型字段差异已披露；必须独立审核此完整实际后像，不借旧行批准。其他完整保留的原未决属于下一独立步骤，不批准、不改成retain。只返回proposal.dispositions各项verdict。退役由具名人工方向/程序验证执行，不另作语义判读。绑定仍withheld_unreviewed的Evidence不提升identity资格、不释放其Claim hold。新绑定/引文/Claim锚点必须完整独立判断，拒绝仍停止；零追加纠正。'
+    if packet['source_write_slice']['direction'].get('mode') != 'owner_statement_completion':
+        text='\n本次仅审核 source_write_slice 明示的本源写集。其他完整保留的原未决属于下一独立步骤，不批准、不改成retain。只返回proposal.dispositions各项verdict。退役由具名人工方向/程序验证执行，不另作语义判读。绑定仍withheld_unreviewed的Evidence不提升identity资格、不释放其Claim hold。新绑定/引文/Claim锚点必须完整独立判断，拒绝仍停止；零追加纠正。'
     result._base_prompt=adapter._base_prompt+text;result._prompt=adapter._prompt+text
     result.prompt_sha256=sha256_json({'prompt':result._prompt})
     return result
@@ -197,8 +309,8 @@ def execute(store,authorization,*,ports):
         reason='exact owner relation withdrawal with independently reviewed source bindings; other issues pending',
         actor='owner-authorized-pipeline',source_kind=SOURCE_SCHEMA,action=action,
         pending_cvp_claim_ids=saved['claim_ids'],
-        pending_cvp_management_record_keys=[d.record_key for d in original_dispositions(direction)
-            if d.action=='unresolved'])
+        pending_cvp_management_record_keys=sorted(set(previous.get('pending_cvp_management_record_keys', [])) |
+            {d.record_key for d in original_dispositions(direction) if d.action=='unresolved'}))
     return {'status':'source_write_applied_pending','group_complete':False,**result}
 
 
