@@ -811,6 +811,38 @@ def handle_audit_scope(store,run_id,packet,report,*,reports,root):
     return True
 
 
+def revalidate_applied_run(store, definition, run_id, *, root):
+    """Audit one already applied group without entering another group's intake.
+
+    The ordinary audit, resolution and completion gates remain authoritative.
+    Pending source/coverage work must use its own management handoff first.
+    """
+    saved = store.get_cvp_group(run_id)
+    if not saved or saved['campaign_sha256'] != definition['campaign_sha256']:
+        raise ValueError('audit-run campaign drift')
+    groups = [g for g in definition['groups'] if g['group_key'] == saved['group_key']]
+    if (len(groups) != 1 or groups[0]['sequence'] != saved['sequence']
+            or groups[0]['claim_ids'] != saved['claim_ids']):
+        raise ValueError('audit-run original membership drift')
+    evidence = saved.get('reviewed', {}).get('evidence') or saved.get('import_certificate', {})
+    if (saved['checkpoint'] not in {'applied', 'audited'}
+            or evidence.get('pending_cvp_claim_ids')
+            or evidence.get('pending_cvp_management_record_keys')
+            or evidence.get('approval', {}).get('source_write_slice')):
+        raise ValueError('audit-run requires a complete applied write domain; management remains pending')
+    if saved['checkpoint'] == 'audited':
+        return {'status': 'already_audited', 'run_id': run_id}
+    try:
+        run_group(store, definition, groups[0], saved, root=root)
+        current = store.get_cvp_group(run_id)
+        if current['checkpoint'] != 'audited' or current['status'] != 'succeeded':
+            raise ValueError('audit-run returned without actual SQL audited completion')
+    except Exception as exc:
+        store.fail_cvp_group(run_id, str(exc))
+        raise
+    return {'status': 'audited', 'run_id': run_id}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sql-campaign",required=True)
@@ -822,7 +854,7 @@ def main(argv=None):
     parser.add_argument('--pause-after-group',type=int,help='Narrow this invocation for acceptance; never changes the immutable execution boundary')
     parser.add_argument('--integrate-batch-candidates',action='store_true',
                         help='Explicit new-group identity integration; never upgrades saved legacy answers')
-    parser.add_argument('--action',choices=('group','source','source-write-slice','relation-retire','claim-retire','owner-link','link-target','link-retarget','link-retire','link-replace','link-representation'),default='group')
+    parser.add_argument('--action',choices=('group','audit-run','source','source-write-slice','relation-retire','claim-retire','owner-link','link-target','link-retarget','link-retire','link-replace','link-representation'),default='group')
     parser.add_argument('--claim-first',action='store_true',
                         help='Finish only the original bounded Claim/Evidence action; keep all CVPs pending and stop before CVP/group execution')
     parser.add_argument('--candidate-viewpoint-id',action='append',default=[],
@@ -1133,7 +1165,11 @@ def main(argv=None):
             action_root=args.output_root/args.run_id/'actions'
             from backend.pipeline.cvp_sql_actions import execute_source_action,execute_owner_link_action
             from backend.pipeline.source_reconciliation_runtime import ProductionPorts
-            if args.action=='relation-retire':
+            if args.action=='audit-run':
+                result=revalidate_applied_run(store,definition,args.run_id,root=args.output_root)
+                stage_event('bounded_audit_completed',result=result)
+                return 0
+            elif args.action=='relation-retire':
                 if not args.direction:raise ValueError('relation retirement requires exact owner direction')
                 from backend.pipeline.claim_relation_retirement import execute
                 result=execute(store,args.run_id,authorization=binding(args.direction),
