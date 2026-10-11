@@ -12,6 +12,76 @@ from backend.api.canonical_repository.postgres_store import sha256_json
 VERSION = 'wang_claim_source_write_slice_v1'
 
 
+def evidence_binding_projection(frozen, original, direction):
+    """Independently review the original complete source delta, not readonly QA.
+
+    This reuses the policy's existing fields and the parent's unused final;
+    unresolved unrelated consumers stay in the packet and completion ledger.
+    No model row, reason or verdict is rewritten.
+    """
+    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    context = frozen['claim_issue_context']
+    policy_binding = context['policy']
+    if direction.get('claim_policy') != policy_binding or direction.get('withdraw_relation_ids') != []:
+        raise ValueError('binding slice requires exact original policy and no withdrawals')
+    check_binding(policy_binding)
+    policy = read_artifact(policy_binding['path'])
+    if policy.get('schema_version') != 'wang_claim_issue_management_v1' or policy.get('human_content_approval') is not False:
+        raise ValueError('binding slice unknown policy')
+    before = c.index(frozen['before_records']); proposed = c.index(original.records)
+    selected = direction['source_write_keys']
+    if (frozen['inventory'].get('unknown_keys') or not selected or selected != sorted(set(selected)) or set(selected) != set(proposed)
+            or len(original.records) != len(selected) or original.sentence_dispositions
+            or original.unadmitted_candidates):
+        raise ValueError('binding slice must retain every exact corrected source postimage')
+    assessments = {a.issue_id:a for a in original.claim_assessments}
+    issues = context['issue_identities']
+    if (len(assessments) != len(original.claim_assessments)
+            or set(assessments) != {i['issue_id'] for i in issues}
+            or any(a.cause != 'evidence_binding' for a in assessments.values())):
+        raise ValueError('binding slice requires complete source-grounded binding classification')
+    claim_ids = {i['claim_id'] for i in issues}
+    pins = {(r['collection'],r['object_id']):r['pin'] for r in frozen['sql_scope']['read_pins']}
+    permissions = {c.key(p['collection'],p['object_id']):p for p in frozen['manifest']['permissions']}
+    dispositions = {d.record_key:d for d in original.dispositions}
+    if len(dispositions) != len(original.dispositions) or set(dispositions) != set(frozen['inventory']['affected_keys']) | set(proposed):
+        raise ValueError('binding slice must disclose the full original consumer denominator')
+    for k in selected:
+        col, oid = c.split_key(k); old = before[k]; new = proposed[k]
+        allowed = {'occurrences'} if col == 'claims' else {'statement','source_fragment_id','source_fragment_ids'} if col == 'evidence_steps' else set()
+        if (not allowed or k not in permissions or not allowed <= set(permissions[k]['fields'])
+                or (col == 'claims' and oid not in claim_ids)
+                or (col == 'evidence_steps' and (not old.get('produced_claim_ids') or not set(old['produced_claim_ids']) <= claim_ids))
+                or pins.get((col,oid)) != [old['revision'],record_content_sha(old),False]
+                or old.get('review_status') in c.HUMAN_HOLDS | {'human_hold','rejected','withheld_unreviewed'}
+                or new.get('revision') != old['revision'] + 1 or dispositions[k].action != 'update'
+                or {f:v for f,v in c._semantic(old).items() if f not in allowed}
+                   != {f:v for f,v in c._semantic(new).items() if f not in allowed}):
+            raise ValueError('binding slice source/ownership/qualification/hold/permission drift')
+    for k,d in dispositions.items():
+        if k in selected: continue
+        col, oid = c.split_key(k); old = before[k]
+        if d.action == 'unresolved':
+            if (col not in {'questions','knowledge_relations'} or k in permissions
+                    or pins.get((col,oid)) != [old['revision'],record_content_sha(old),False]
+                    or old.get('review_status') != 'candidate' or old.get('visibility') != 'internal'):
+                raise ValueError('binding slice pending is not unchanged readonly candidate context')
+        elif d.action not in {'retain','impact_only'}:
+            raise ValueError('binding slice cannot omit another business change')
+    scoped = deepcopy(frozen)
+    scoped['source_write_slice_material'] = True
+    scoped['manifest'].pop('claim_issue',None)
+    scoped['manifest']['permissions'] = [permissions[k] for k in selected]
+    scoped['inventory'] = {'affected_keys':selected,'context_keys':sorted(set(before)-set(selected)), 'unknown_keys':[]}
+    scoped['sentence_inventory'] = []
+    proposal = c.Proposal(records=deepcopy(original.records),dispositions=[deepcopy(dispositions[k]) for k in selected],
+        sentence_dispositions=[],unadmitted_candidates=[])
+    c.validate_proposal(scoped,proposal)
+    return scoped,proposal
+
+
 def owner_statement_projection(frozen, original, direction):
     """A statement-only slice keeps protected storage fields, not model aliases.
 
@@ -118,6 +188,8 @@ def projection(frozen, original, direction):
         raise ValueError('source slice requires original SQL Claim management')
     if direction.get('mode') == 'owner_statement_completion':
         return owner_statement_projection(frozen, original, direction)
+    if direction.get('mode') == 'policy_evidence_binding':
+        return evidence_binding_projection(frozen, original, direction)
     from backend.pipeline.claim_evidence_completion import direction_for, evidence_permission_ids
     parent = direction_for(frozen['claim_issue_context'])
     if not parent or direction['withdraw_relation_ids'] != parent['withdraw_relation_ids']:
