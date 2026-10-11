@@ -92,6 +92,11 @@ def test_bounded_repair_consumes_saved_chain_without_second_correction(sample,tm
     monkeypatch.setattr(r,'effective_proposal',lambda *_:proposal)
     monkeypatch.setattr(r.contract,'review_packet',lambda *_, **kwargs:{'proposal':proposal.model_dump()})
     monkeypatch.setattr(r.contract,'validate_review',lambda p,v:v.get('approved',False))
+    # This test isolates normalization recovery using a deliberately skeletal
+    # proposal; auxiliary impact accounting has its own complete graph tests.
+    monkeypatch.setattr('backend.pipeline.claim_issue_management.retained_impact_context',lambda *args:None)
+    frozen['before_records']=[]
+    proposal.records=[]
     cache={};calls=[]
     class Runner(r.Runner):
         def guard(self,*a,**k):pass

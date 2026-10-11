@@ -410,8 +410,13 @@ class Runner:
             if selected!=proposal:raise ValueError('anchor final component selection drift')
             if receipt:base['program_anchor_component_selection']=receipt
         saved = self.root/(stage+'.packet.json')
+        packet = body(read(saved)) if saved.exists() else None
+        if stage=='final_review' and frozen['manifest'].get('claim_issue') and (packet is None or 'retained_auxiliary_impact_context' in packet):
+            from backend.pipeline.claim_issue_management import retained_impact_context
+            post=contract.index(frozen['before_records']);post.update(contract.index(proposal.records))
+            receipt=retained_impact_context(frozen,proposal,post)
+            if receipt:base['retained_auxiliary_impact_context']=receipt
         if saved.exists():
-            packet = body(read(saved))
             base = disclosed_review_base(frozen, base, saved=packet)
             check_packet(frozen, response, packet, base)
             return packet

@@ -535,6 +535,51 @@ def normalize_proposal(frozen, response):
     return Proposal.model_validate({**normalized.model_dump(), **fields})
 
 
+def retained_impact_context(frozen, proposal, post):
+    """Classify exact unchanged SQL-pinned auxiliary impact rows, not CVP members.
+
+    Never drop model rows/reasons or accept these as semantic/write approval.
+    Required CVP rows still form an exact complete, duplicate-free denominator.
+    """
+    before=c.index(frozen['before_records'])
+    required={k for k in set(frozen['inventory']['affected_keys'])|{r.key for r in proposal.records}
+              if c.split_key(k)[0] in {'viewpoint_claim_links','canonical_viewpoints',
+                                       'viewpoint_revisions','viewpoint_relations'}}
+    actual=[i.record_key for i in proposal.cvp_impacts]
+    extra=set(actual)-required
+    if not extra:return None
+    context=frozen.get('claim_issue_context',{})
+    if not context.get('issues') or not frozen.get('sql_scope'):
+        raise ValueError('retained impact context requires exact SQL Claim issue')
+    if len(actual)!=len(set(actual)) or not required<=set(actual):
+        raise ValueError('retained impact context cannot omit/duplicate required CVPs')
+    pins={(p['collection'],p['object_id']):p['pin'] for p in frozen['sql_scope']['read_pins']}
+    dispositions={d.record_key:d.action for d in proposal.dispositions}
+    impacts={i.record_key:i.action for i in proposal.cvp_impacts}
+    permissions={c.key(p['collection'],p['object_id']) for p in frozen['manifest']['permissions']}
+    proposed={r.key for r in proposal.records}
+    history={'viewpoint_identity_candidates','viewpoint_identity_decisions',
+             'argument_routes','argument_route_revisions'}
+    for k in extra:
+        col,ident=c.split_key(k);old=before.get(k)
+        if (col not in history|{'claim_relations','knowledge_relations'}
+                or k not in frozen['inventory']['affected_keys'] or old is None
+                or k in permissions or k in proposed or post.get(k)!=old
+                or old.get('review_status') in HOLDS
+                or pins.get((col,ident))!=[old.get('revision',1),
+                    sha256_json({f:v for f,v in old.items() if f!='revision'}),False]
+                or impacts[k]!='retain'
+                or dispositions.get(k) != ('impact_only' if col in history else 'retain')):
+            raise ValueError('retained impact context is changed/foreign/stale/held/writable')
+    return {'schema_version':'claim_retained_auxiliary_impact_context_v1',
+        'record_keys':sorted(extra),'required_cvp_record_keys':sorted(required),
+        'content_write_authority':False,'semantic_approval':False,
+        'explanation':'These additional model impact rows are exact unchanged, nonwritable SQL-pinned '
+            'source relations or historical identity/route context, not additional CVP members. '
+            'All original impact rows, reasons and dispositions remain visible to the full independent review. '
+            'They grant no relation/route/identity mutation, new membership approval or completion waiver.'}
+
+
 def validate_resolution(frozen, proposal, post, *, review_only=False):
     proposal = Proposal.model_validate(proposal.model_dump())
     before = c.index(frozen["before_records"])
@@ -635,6 +680,8 @@ def validate_resolution(frozen, proposal, post, *, review_only=False):
             and next(i.action for i in proposal.cvp_impacts if i.record_key==k)=='retain'
             for k in extra))
     retained_extras=retained_identity_extras or retained_context_extras
+    if extra and not retained_extras:
+        retained_extras=bool(retained_impact_context(frozen,proposal,post))
     if len(actual) != len(set(actual)) or (set(actual) != required and not retained_extras):
         raise ValueError("complete CVP impact denominator including retained members required")
     dispositions = {d.record_key: d.action for d in proposal.dispositions}
