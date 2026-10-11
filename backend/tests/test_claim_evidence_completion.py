@@ -84,6 +84,26 @@ def test_package_does_not_acquire_arbitrary_retirements(monkeypatch):
         with pytest.raises(ValueError):m.package_withdrawals({'source_repair_application':{'knowledge_relation_withdrawals':wrong}},f)
 
 
+def test_initial_incomplete_joint_draft_never_approves_or_changes_answer(monkeypatch):
+    d,f,_=material()
+    monkeypatch.setattr(m,'direction_for',lambda *a,**kw:d)
+    monkeypatch.setattr(c,'guard_files',lambda *a,**kw:None)
+    monkeypatch.setattr(c,'review_packet',lambda *a,**kw:(_ for _ in ()).throw(ValueError('complete denominator')))
+    f.update(sql_scope={'read_pins':[]}, update_id='U', before=[],after=[],sentence_inventory=[],
+             inventory={'affected_keys':list(c.index(f['before_records'])),'context_keys':[]})
+    proposal=c.Proposal(records=[],dispositions=[c.Disposition(record_key='claims/C2',action='retain',reason='context')],
+                        sentence_dispositions=[],unadmitted_candidates=[])
+    saved=deepcopy(proposal.model_dump())
+    packet=m.initial_draft_review(f,proposal)
+    assert packet['proposal']==saved==proposal.model_dump()
+    assert packet['unresolved_proposal_review']['program_findings']==['complete denominator']
+    verdicts=[{'record_key':k,'approved':True,'problems':[],'reason':'independent'} for k in
+              ['claims/C2','knowledge_relation_withdrawal/R1','evidence_shared_owner/C2']]
+    assert c.validate_review(packet,{'proposal_sha256':packet['proposal_sha256'],'verdicts':verdicts}) is False
+    f.pop('sql_scope')
+    with pytest.raises(ValueError):m.initial_draft_review(f,proposal)
+
+
 @pytest.mark.skipif(os.environ.get('WKP357_REAL_SAVED_READONLY')!='1',reason='actual production readonly opt-in')
 @pytest.mark.parametrize('fault',[None,'budget','policy','owner_denominator','evidence_denominator','withdrawal','hold_disclosure','root'])
 def test_actual_old_inputs_immutable_and_exact_new_scope(fault):

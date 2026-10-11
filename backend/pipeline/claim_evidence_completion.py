@@ -191,6 +191,49 @@ def review_items(frozen):
     return result
 
 
+def initial_draft_review(frozen, proposal):
+    """Expose an incomplete joint draft to its ORIGINAL initial reviewer.
+
+    No records/dispositions are discarded or repaired here. In particular an
+    explicit context retain or a misplaced withdrawal-review row stays visible.
+    This packet can never authorize writing, even if every verdict approves it;
+    the original single correction must produce a strictly valid proposal.
+    """
+    direction=direction_for(frozen.get('claim_issue_context',{}))
+    if not direction or not frozen.get('sql_scope'):
+        raise ValueError('joint Evidence draft requires exact bound SQL authority')
+    c.guard_files(frozen)
+    try:
+        return c.review_packet(frozen, proposal,
+            review_only=any(d.action=='unresolved' for d in proposal.dispositions))
+    except ValueError as exc:
+        finding=str(exc)
+    before=c.index(frozen['before_records'])
+    selected=frozen['inventory']['affected_keys']+frozen['inventory']['context_keys']
+    return {
+        'schema_version':c.VERSION, 'update_id':frozen['update_id'],
+        'manifest':frozen['manifest'], 'before_source':frozen['before'],
+        'current_sources':frozen['after'], 'context_sources':frozen.get('context_sources',[]),
+        'sentence_inventory':frozen['sentence_inventory'], 'inventory':frozen['inventory'],
+        'before_records':c.rows({k:before[k] for k in selected}),
+        'claim_issue_context':frozen['claim_issue_context'],
+        'proposal':proposal.model_dump(), 'proposal_sha256':sha256_json(proposal.model_dump()),
+        'knowledge_relation_withdrawal_review':review_items(frozen),
+        'provenance_contract':{'old_approval_is_history_only':True,
+            'approval_basis':'unapproved_initial_joint_evidence_draft','correction_limit':1},
+        'unresolved_proposal_review':{
+            'schema_version':'joint_evidence_initial_draft_review.v1',
+            'program_findings':[finding], 'content_write_authority':False,
+            'mandatory_original_unique_correction':True,
+            'explanation':'All raw candidate rows, reasons and dispositions are preserved. '
+                'Review all source/postimages/consumer problems, including readonly context '
+                'and misplaced review-only rows. A withdrawal is a separate review item, '
+                'not a business record. Original inherited Evidence repair permissions remain '
+                'available. No all-approved initial verdict can authorize this incomplete draft. '
+                'Only the original unique correction followed by strict final validation '
+                'and independent review can permit a write.'}}
+
+
 def packet_receipt(frozen):
     from backend.pipeline.source_reconciliation_runner import read
     direction=direction_for(frozen.get('claim_issue_context',{}))

@@ -36,6 +36,9 @@ def effective_proposal(frozen, response):
 
 
 def initial_review_base(frozen, proposal):
+    from backend.pipeline.claim_evidence_completion import direction_for, initial_draft_review
+    if direction_for(frozen.get('claim_issue_context',{})):
+        return initial_draft_review(frozen,proposal)
     if frozen.get('claim_issue_context', {}).get('complete_input_repair'):
         return contract.review_packet(frozen, proposal)
     if frozen.get('owner_claim_completion') and any(d.action=='unresolved' for d in proposal.dispositions):
