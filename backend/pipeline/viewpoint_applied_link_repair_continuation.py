@@ -101,7 +101,7 @@ def run(campaign, repair, output, prior_adjudication, saved_audit=None):
 def read_supports_review(campaign,repair,label,provider,model,packet):
     """Exact saved transport identity, never a generation/cache fallback."""
     from backend.pipeline.viewpoint_audit_link_repair import PROMPT,link_review_adapter
-    from backend.pipeline.viewpoint_resolution_runtime import subscription_client,read_saved_model_response
+    from backend.pipeline.viewpoint_resolution_runtime import subscription_client,read_saved_model_response,response_adapter
     raw=read_artifact(repair/f'raw-{label}.json')
     client=subscription_client(provider,model,'high')
     candidates=[link_review_adapter(client,PROMPT,legacy_serialization=legacy,contextual_semantics=contextual)
@@ -110,6 +110,7 @@ def read_supports_review(campaign,repair,label,provider,model,packet):
     if len({i['claim']['claim_id'] for i in targets})<len(targets):
         candidates.append(link_review_adapter(client,PROMPT,contextual_semantics=True,
                                                multiple_targets_per_claim=True))
+    candidates=[response_adapter(a,raw) for a in candidates]
     matches=[a for a in candidates if a.prompt_sha256==raw.get('prompt_sha256')
              and a.generation_config_sha256==raw.get('generation_config_sha256')]
     if len(matches)!=1:raise ValueError('saved supports transport identity missing or ambiguous')
