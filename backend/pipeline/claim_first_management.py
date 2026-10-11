@@ -128,7 +128,7 @@ def finish_claim_audit(store, run_id, root):
     saved=store.get_cvp_group(run_id); evidence=saved.get('reviewed',{}).get('evidence',{})
     application=evidence.get('package',{}).get('payload',{}).get('source_repair_application',{})
     original_root=Path(application.get('run_root',''))
-    statement_slice=application.get('source_write_slice',{}).get('mode') in {'owner_statement_completion','policy_evidence_binding'}
+    statement_slice=application.get('source_write_slice',{}).get('mode') in {'owner_statement_completion','policy_evidence_binding','policy_claim_source_revision'}
     if statement_slice:
         from backend.pipeline.claim_source_write_slice import validate_claim_layer_authority
         validate_claim_layer_authority(saved,root)
