@@ -58,6 +58,46 @@ def test_unproven_extras_refused(monkeypatch, fault):
     with pytest.raises(ValueError): m.receipt(f, p)
 
 
+@pytest.mark.parametrize('fault', [None, 'foreign', 'missing_pin', 'stale', 'retired',
+                                 'held', 'writable', 'update', 'proposed', 'schema'])
+def test_pinned_historical_reference_is_only_an_annotation(monkeypatch, fault):
+    f, p = fixture(monkeypatch)
+    k = 'viewpoint_structure_revisions/H'
+    row = {'structure_revision_id': 'H', 'revision': 1, 'review_status': 'system_approved'}
+    f['before_records'].append(c.Row(collection='viewpoint_structure_revisions', object_id='H', payload=row).model_dump())
+    pin = {'collection': 'viewpoint_structure_revisions', 'object_id': 'H',
+           'pin': [1, record_content_sha(row), False]}
+    f['sql_scope']['read_pins'].append(pin)
+    f['inventory']['reverse_edges'] = {'knowledge_relations/R': [k]}
+    p.dispositions.append(c.Disposition(record_key=k, action='unresolved', reason='historical reference pending'))
+    class Schema:
+        @classmethod
+        def model_validate(cls, value):
+            if fault == 'schema': raise ValueError('bad historical schema')
+    monkeypatch.setitem(c.KNOWLEDGE_COLLECTIONS, 'viewpoint_structure_revisions', (Schema, 'structure_revision_id'))
+    if fault == 'foreign': f['inventory']['reverse_edges'] = {}
+    if fault == 'missing_pin': f['sql_scope']['read_pins'].remove(pin)
+    if fault == 'stale': pin['pin'][0] = 2
+    if fault == 'retired': pin['pin'][2] = True
+    if fault == 'held':
+        row['review_status'] = 'human_hold'
+        f['before_records'][-1]['payload'] = row
+        pin['pin'][1] = record_content_sha(row)
+    if fault == 'writable': f['manifest']['permissions'] = [{'collection': 'viewpoint_structure_revisions', 'object_id': 'H'}]
+    if fault == 'update': p.dispositions[-1].action = 'update'
+    if fault == 'proposed': p.records.append(c.Row(collection='viewpoint_structure_revisions', object_id='H', payload=row))
+    old = deepcopy(p.model_dump())
+    if fault:
+        with pytest.raises(ValueError): m.receipt(f, p)
+    else:
+        out = m.receipt(f, p)
+        assert out['items'][-1]['kind'] == 'pinned_historical_output_reference_annotation'
+        assert k in out['unresolved_keys'] and out['content_write_authority'] is False
+        assert out['required_business_keys'] == ['knowledge_relations/R']
+        with pytest.raises(ValueError): c.validate_proposal(f, p)
+    assert p.model_dump() == old
+
+
 @pytest.mark.skipif(os.environ.get('WKP357_REAL_SAVED_READONLY') != '1', reason='actual saved readonly opt-in')
 def test_actual_correction_is_classified_without_calls_writes_or_verdict_changes():
     from dotenv import load_dotenv

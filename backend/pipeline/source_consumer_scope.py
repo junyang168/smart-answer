@@ -33,9 +33,13 @@ def receipt(frozen, proposal):
     context_claims = set(direction.get('unchanged_held_context_claim_ids', [])) if direction else set()
     review_ids = set(direction.get('withdraw_relation_ids', [])) if direction else set()
     group_keys=declared_group_keys(frozen)
+    referenced_outputs = {target for consumers in frozen['inventory'].get('reverse_edges', {}).values()
+                          for target in consumers}
     classified = []
     for d in proposal.dispositions:
         k = d.record_key
+        if k in proposed and c.split_key(k)[0] in {'viewpoint_structures', 'viewpoint_structure_revisions'}:
+            raise ValueError('historical reference annotation cannot be proposed')
         if k in proposed and k.startswith('claims/') and c.split_key(k)[1] in context_claims:
             raise ValueError('held readonly context cannot be proposed')
         if k in required:
@@ -53,6 +57,20 @@ def receipt(frozen, proposal):
             elif (col == 'knowledge_relation_withdrawal_review' and oid in review_ids
                     and d.action == 'impact_only' and 'knowledge_relations/'+oid in required):
                 kind = 'independent_review_annotation_not_business_record'
+            elif (col in {'viewpoint_structures', 'viewpoint_structure_revisions'}
+                    and k in referenced_outputs and k in before
+                    and d.action in {'unresolved', 'impact_only'}
+                    and k not in {p['collection']+'/'+p['object_id']
+                                  for p in frozen['manifest'].get('permissions', [])}
+                    and pins.get((col, oid)) == [before[k]['revision'], record_content_sha(before[k]), False]
+                    and before[k].get('review_status') not in {
+                        'human_hold', 'human_review_required', 'rejected', 'withheld_unreviewed'}):
+                # The frozen reverse index can mention an exact historical
+                # output outside the selected business denominator. Preserve
+                # the model annotation and expose its real row, not a missing
+                # business consumer or authority to regenerate the structure.
+                c.KNOWLEDGE_COLLECTIONS[col][0].model_validate(before[k])
+                kind = 'pinned_historical_output_reference_annotation'
             else:
                 raise ValueError('unproven extra consumer: '+k)
         classified.append({'record_key': k, 'kind': kind, 'action': d.action, 'reason': d.reason})
