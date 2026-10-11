@@ -1192,6 +1192,7 @@ def main(argv=None):
                 write_immutable(output,result)
                 stage_event('source_pending_commits_verified',receipt=binding(output),
                             verified=[i['record_key'] for i in result['items']],
+                            unapproved_context=[i['record_key'] for i in result['unapproved_context_items']],
                             remaining=result['remaining_record_keys'],group_complete=False)
                 return 0
             elif args.action=='audit-run':
