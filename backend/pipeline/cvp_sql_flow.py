@@ -1301,9 +1301,10 @@ def main(argv=None):
                             root=action_root/'link-representation',ports=production_ports())
             elif args.action=='link-replace':
                 if not args.direction:raise ValueError('replacement requires an exact owner direction')
-                from backend.pipeline.cvp_link_replacement import execute, production_ports
+                from backend.pipeline.cvp_link_replacement import execute, production_ports, WITHDRAWAL_DIRECTION
+                withdrawal_only = read_artifact(args.direction).get('schema_version') == WITHDRAWAL_DIRECTION
                 execute(store,args.run_id,authorization=binding(args.direction),
-                        root=action_root/'link-replace',ports=production_ports())
+                        root=action_root/'link-replace',ports=production_ports(withdrawal_only=withdrawal_only))
             elif args.action=='link-retire':
                 if not args.direction:raise ValueError('retirement requires exact human disposition')
                 from backend.pipeline.cvp_link_retirement import execute

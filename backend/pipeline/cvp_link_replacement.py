@@ -21,6 +21,13 @@ from backend.pipeline.viewpoint_semantic_contract import semantic_prompt
 
 SCHEMA = 'wang_cvp_sql_link_replacement_v1'
 DIRECTION = 'wang_cvp_link_replacement_direction_v1'
+WITHDRAWAL_DIRECTION = 'wang_cvp_reviewed_link_withdrawal_direction_v1'
+WITHDRAWAL_PROMPT = '''读取指定 Claim 完整自身正文、完整原证据、原生成判定、原审计与 GPT 判读，以及全部当前连接/CVR/成员。
+负责人要求修复明列连接的问题，不是批准撤回后像，也不是推翻原上下文判定。
+本次仅判断明列 supports/qualifies 连接能否逻辑撤回。若完整语境不能明确证明撤回正确，返回 unresolved，不能默认通过。
+撤回仅改变 SQL retired 状态，旧 payload 完整保留；Claim 仍须有其他当前已批准等价覆盖，原目标仍须有其他当前等价成员。
+不得修改 Claim/Evidence/fragment/source/CVP/core/scope/端点/其他连接，不解除 hold，不改旧审核或异议。
+这是新管理后像提案，不是再次判读原异议；后续独立 Opus 必须审核完整撤回后像及保留覆盖。'''
 PROMPT = '''读取指定 Claim 完整自身正文、完整原证据、原生成判定、原审计与 GPT 判读，比较新旧完整 CVR 及所有成员。
 负责人授权撤回明列旧连接并优先匹配候选既有 CVP，不是批准新的连接类型或内容。
 只为 replacement_link_id 对应 Claim 提出一个既有新目标及准确 link_type：equivalent_full/equivalent_component/supports/qualifies。
@@ -46,33 +53,48 @@ class Response(BaseModel):
     selection: Choice
 
 
-def adapter(stage):
+class WithdrawalChoice(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    claim_id: str
+    diagnosis: Literal['withdraw_only', 'unresolved']
+    reason: str = Field(min_length=1)
+    old_target_reason: str = Field(min_length=1)
+
+
+class WithdrawalResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    selection: WithdrawalChoice
+
+
+def adapter(stage, *, withdrawal_only=False):
     if stage not in {'proposal', 'initial_review', 'correction', 'final_review'}:
         raise ValueError('replacement uses the existing single-correction review boundary')
     proposal = stage in {'proposal', 'correction'}
-    prompt = PROMPT if proposal else PROMPT + '''\n独立审核 after_link 及全部 withdrawal_links 的完整后像，不重新提议。
+    base = WITHDRAWAL_PROMPT if withdrawal_only else PROMPT
+    prompt = base if proposal else base + '''\n独立审核 after_link 及全部 withdrawal_links 的完整后像，不重新提议。
 逐项核查保留 Claim/source/原目标其他成员、原正确连接、选择的具体语义作用、完整自身来源和 current CVR。
 before 中非批准/hold 的旧其他成员只读 impact_only，不得到新批准也不能解除。
 after_link 暂留旧 decision_id 仅作显示，提交时程序绑定本轮回答产生新 VIC/VID；旧连接 payload 原样历史退役。
 每个被撤回连接的 Claim 恰好一个 verdict，包含新连接语义；全部成立才 approved=true 且 problems=[]。'''
     obj = StructuredJsonReviewerAdapter(client=subscription_client(
         'codex' if proposal else 'claude', 'gpt-6.1-sol' if proposal else 'claude-opus-5-5', 'high'),
-        prompt=semantic_prompt(prompt), response_model=Response if proposal else Review,
-        schema_name=SCHEMA + '_' + stage, compact_payload=True,
+        prompt=semantic_prompt(prompt), response_model=(WithdrawalResponse if withdrawal_only else Response) if proposal else Review,
+        schema_name=SCHEMA + ('_withdrawal' if withdrawal_only else '') + '_' + stage, compact_payload=True,
         shared_text_payload=True, shared_record_payload=True)
     obj.max_request_bytes = 500000
     return obj
 
 
-def production_ports():
+def production_ports(*, withdrawal_only=False):
     from backend.pipeline.source_reconciliation_runtime import ProductionPorts
     class Ports(ProductionPorts):
-        def adapter(self, stage): return adapter(stage)
+        def adapter(self, stage): return adapter(stage, withdrawal_only=withdrawal_only)
     return Ports()
 
 
 def validate_direction(d, m):
-    expected = {'schema_version': DIRECTION, 'run_id': m['run_id'],
+    withdrawal_only = m.get('operation_mode') == 'withdrawal_only'
+    expected = {'schema_version': WITHDRAWAL_DIRECTION if withdrawal_only else DIRECTION, 'run_id': m['run_id'],
         'campaign_sha256': m['campaign_sha256'],
         'withdrawal_links': [{'link_id': p['viewpoint_claim_link_id'], 'sha256': sha256_json(p)} for p in m['withdrawal_links']],
         'replacement_link_id': m['replacement_link_id'], 'candidate_viewpoint_ids': m['candidate_viewpoint_ids'],
@@ -80,12 +102,16 @@ def validate_direction(d, m):
         'human_content_approval': False, 'automatic_future_repairs_authorized': False}
     if any(d.get(k) != v for k, v in expected.items()) or not d.get('authorization_quote'):
         raise ValueError('replacement exact owner scope drift')
+    if withdrawal_only and d.get('operation_mode') != 'withdrawal_only':
+        raise ValueError('withdrawal mode authority missing')
     old = m['withdrawal_links']
     ids = [p['viewpoint_claim_link_id'] for p in old]
     if (not old or len(ids) != len(set(ids)) or len({p['claim_id'] for p in old}) != len(old)
-            or m['replacement_link_id'] not in ids or not m['candidate_viewpoint_ids']
+            or m['replacement_link_id'] not in ids or (not withdrawal_only and not m['candidate_viewpoint_ids'])
             or len(set(m['candidate_viewpoint_ids'])) != len(m['candidate_viewpoint_ids'])):
         raise ValueError('replacement requires distinct exact withdrawals and one covered Claim')
+    if withdrawal_only and (m['candidate_viewpoint_ids'] or len(ids) != 1):
+        raise ValueError('withdrawal must be one exact link without replacement targets')
     states = content.index(m['records'])
     from backend.pipeline.cvp_link_target_selection import _approved
     def retained_coverage(link):
@@ -119,7 +145,7 @@ def validate_direction(d, m):
         equivalent = [v for k, v in states.items() if k.startswith('viewpoint_claim_links/')
             and v['viewpoint_id'] == p['viewpoint_id'] and v['claim_id'] != p['claim_id'] and retained_coverage(v)]
         if not equivalent: raise ValueError('withdrawal would orphan old CVP')
-        if p['viewpoint_claim_link_id'] != m['replacement_link_id']:
+        if withdrawal_only or p['viewpoint_claim_link_id'] != m['replacement_link_id']:
             if not any(v['claim_id'] == p['claim_id'] and retained_coverage(v)
                 for k, v in states.items() if k.startswith('viewpoint_claim_links/')):
                 raise ValueError('withdrawal would leave another Claim without correct coverage')
@@ -185,12 +211,21 @@ def prepare_material(store, run_id, authorization):
         'read_pins': pin_rows(pins(records)),
         'retained_unapproved_members': [{'collection': col, 'object_id': oid, 'impact_only': True}
             for (col, oid), p in sorted(states.items()) if col == 'claims' and p.get('review_status') in content.HUMAN_HOLDS]}
+    if d.get('schema_version') == WITHDRAWAL_DIRECTION:
+        m['operation_mode'] = d.get('operation_mode')
     if not sources: raise ValueError('replacement lacks complete own sources')
     validate_direction(d, m)
     return json.loads(canonical_json(m))
 
 
 def postimage(m, response):
+    if m.get('operation_mode') == 'withdrawal_only':
+        choice = WithdrawalResponse.model_validate(response).selection
+        if choice.claim_id != m['withdrawal_links'][0]['claim_id']:
+            raise ValueError('withdrawal foreign Claim')
+        if choice.diagnosis != 'withdraw_only':
+            raise Stop('withdrawal independently unresolved; no write/retry')
+        return None
     choice = Response.model_validate(response).selection
     old = next(p for p in m['withdrawal_links'] if p['viewpoint_claim_link_id'] == m['replacement_link_id'])
     if choice.claim_id != old['claim_id']: raise ValueError('replacement foreign Claim')
@@ -211,9 +246,15 @@ def postimage(m, response):
 
 
 def review_packet(m, raw):
-    return {'schema_version': SCHEMA, 'materials': m, 'proposal': raw['response'],
+    packet = {'schema_version': SCHEMA, 'materials': m, 'proposal': raw['response'],
             'after_link': postimage(m, raw['response']), 'withdrawal_links': m['withdrawal_links'],
             'provenance_receipt': 'Fresh candidate/decision bind actual new GPT and Opus; old judgments unchanged.'}
+    if m.get('operation_mode') == 'withdrawal_only':
+        packet['withdrawal_storage_postimages'] = [{'collection': 'viewpoint_claim_links',
+            'object_id': p['viewpoint_claim_link_id'], 'payload': p, 'payload_unchanged': True,
+            'storage_revision': p['revision'] + 1, 'retired': True} for p in m['withdrawal_links']]
+        packet['provenance_receipt'] = 'Only logical withdrawal after real independent approval; old payload/decisions/verdicts remain unchanged. No new Claim/CVP/link/identity rows.'
+    return packet
 
 
 def approved(m, raw):
@@ -247,12 +288,14 @@ def effective_saved_review(root, m):
     return proposal, review
 
 
-def saved_raw(root, stage, packet, *, adapter_factory=adapter):
+def saved_raw(root, stage, packet, *, adapter_factory=None):
     # Runner seals canonical key order before encoding. Reproduce that exact
     # request, including shape dictionaries; do not authenticate a new wire.
     packet = json.loads(canonical_json(packet))
     raw = read(root / (stage + '.raw.json'))
-    model = stage_adapter(adapter_factory(stage), packet, root / (stage + '.raw.json'), saved=raw)
+    m = packet.get('materials', packet)
+    factory = adapter_factory or ((lambda s: adapter(s, withdrawal_only=True)) if m.get('operation_mode') == 'withdrawal_only' else adapter)
+    model = stage_adapter(factory(stage), packet, root / (stage + '.raw.json'), saved=raw)
     # Authenticate this contract's actual adapter, never relabel an old review.
     from backend.pipeline.source_reconciliation_runner import request_limit
     proof = model.request_encoding_proof(packet)
@@ -285,6 +328,10 @@ def compile_package(m, proposal, review, root):
     old = next(p for p in m['withdrawal_links'] if p['viewpoint_claim_link_id'] == m['replacement_link_id'])
     seed = sha256_json({'contract': SCHEMA, 'materials': sha256_json(m),
                        'proposal': proposal['artifact_sha256'], 'review': review['artifact_sha256']})
+    if m.get('operation_mode') == 'withdrawal_only':
+        return {'package_id': 'CVP-LINK-WITHDRAW-' + seed[:24],
+            'viewpoint_claim_links': [], 'viewpoint_identity_candidates': [], 'viewpoint_identity_decisions': [],
+            'source_repair_application': {'schema_version': SCHEMA, 'run_root': str(Path(root).resolve()), 'materials_sha256': sha256_json(m)}}
     target = next(t for t in m['targets'] if t['viewpoint']['viewpoint_id'] == link['viewpoint_id'])
     candidate, decision = fresh_identity_records(states, old, link,
         target['current_revision']['proposition_signature'], proposal, review, seed=seed, policy=SCHEMA)
@@ -312,7 +359,10 @@ def execute(store, run_id, *, authorization, root, ports):
     from backend.pipeline.cvp_sql_flow import check_binding, binding, decoded_pins, commit_package, verified_group_backup
     from backend.pipeline.cvp_sql_actions import initialize_subscription_runtime, resume_bound_action
     check_binding(authorization); d = read_artifact(authorization['path'])
-    aid = 'CVPA-' + sha256_json({'contract': SCHEMA, 'withdrawals': d['withdrawal_links'], 'replacement': d['replacement_link_id']})
+    identity = {'contract': SCHEMA, 'withdrawals': d['withdrawal_links'], 'replacement': d['replacement_link_id']}
+    if d.get('schema_version') == WITHDRAWAL_DIRECTION:
+        identity['operation_mode'] = d.get('operation_mode')
+    aid = 'CVPA-' + sha256_json(identity)
     root = Path(root) / aid; store.bind_cvp_execution_root(run_id, identity=aid, root=root)
     previous = store.get_cvp_action(run_id, aid)
     if previous and previous['authorization'] != authorization: raise ValueError('replacement direction/root cannot reset once budget')

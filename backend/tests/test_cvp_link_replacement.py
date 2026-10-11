@@ -103,6 +103,60 @@ def test_fixed_models_and_no_unapproved_repeat_stage():
     with pytest.raises(ValueError): flow.adapter('second_correction')
 
 
+def withdrawal_material():
+    m, d, _ = synthetic()
+    m.update(operation_mode='withdrawal_only', withdrawal_links=m['withdrawal_links'][:1],
+             replacement_link_id='L1', candidate_viewpoint_ids=[], targets=[])
+    d.update(schema_version=flow.WITHDRAWAL_DIRECTION, operation_mode='withdrawal_only',
+             withdrawal_links=d['withdrawal_links'][:1], replacement_link_id='L1', candidate_viewpoint_ids=[])
+    a = {'selection': {'claim_id': 'C1', 'diagnosis': 'withdraw_only',
+                      'reason': 'TEST ONLY: wrong role', 'old_target_reason': 'TEST ONLY: original judgment preserved'}}
+    return m, d, a
+
+
+def test_reviewed_withdrawal_only_preserves_payload_and_has_no_replacement(tmp_path):
+    m, d, a = withdrawal_material(); before = deepcopy(m)
+    flow.validate_direction(d, m)
+    r = {'response': {'verdicts': [{'claim_id': 'C1', 'approved': True, 'problems': [], 'reason': 'TEST ONLY'}]}, 'artifact_sha256': 'review'}
+    p = flow.compile_package(m, {'response': a, 'artifact_sha256': 'proposal'}, r, tmp_path)
+    assert all(p[col] == [] for col in ('viewpoint_claim_links', 'viewpoint_identity_candidates', 'viewpoint_identity_decisions'))
+    assert m == before and flow.review_packet(m, {'response': a})['after_link'] is None
+
+
+@pytest.mark.parametrize('problem', ['no-claim-coverage', 'orphan-target', 'mode', 'candidate', 'multiple', 'hold', 'relation', 'stale'])
+def test_reviewed_withdrawal_refuses_scope_or_coverage_drift(problem):
+    m, d, _ = withdrawal_material()
+    if problem in {'no-claim-coverage', 'orphan-target'}:
+        omitted = 'CORRECT' if problem == 'no-claim-coverage' else 'KEPT'
+        m['records'] = [r for r in m['records'] if r['object_id'] != omitted]
+    elif problem == 'mode': d.pop('operation_mode')
+    elif problem == 'candidate': m['candidate_viewpoint_ids'] = d['candidate_viewpoint_ids'] = ['NEW']
+    elif problem == 'multiple':
+        m['withdrawal_links'].append(deepcopy(m['withdrawal_links'][0]))
+    else:
+        link = m['withdrawal_links'][0]
+        if problem == 'hold': link['effective_state'] = 'held'
+        elif problem == 'relation': link['supporting_relation_ids'] = ['dependent']
+        elif problem == 'stale': link['pinned_claim_revision'] = 1
+        d['withdrawal_links'][0]['sha256'] = flow.sha256_json(link)
+    with pytest.raises(ValueError): flow.validate_direction(d, m)
+
+
+@pytest.mark.parametrize('change', [{'claim_id': 'foreign'}, {'diagnosis': 'unresolved'}, {'viewpoint_id': 'NEW'}])
+def test_withdrawal_unresolved_or_extra_write_not_a_pass(change):
+    m, _, a = withdrawal_material(); a['selection'].update(change)
+    with pytest.raises(ValueError): flow.postimage(m, a)
+
+
+def test_withdrawal_prompt_and_schema_are_isolated_from_legacy():
+    old = flow.adapter('proposal'); new = flow.adapter('proposal', withdrawal_only=True)
+    assert old.prompt_sha256 != new.prompt_sha256
+    assert old._schema_name != new._schema_name
+    assert old._response_model.model_json_schema() != new._response_model.model_json_schema()
+    assert (new.model_id, new.backend) == ('gpt-6.1-sol', 'codex_subscription')
+    assert flow.adapter('initial_review', withdrawal_only=True).model_id == 'claude-opus-5-5'
+
+
 @pytest.mark.parametrize('second_refusal', [False, True])
 def test_saved_unique_correction_preserves_original_refusal_without_calls(tmp_path, monkeypatch, second_refusal):
     m, _, a = synthetic()
