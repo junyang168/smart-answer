@@ -38,7 +38,9 @@ def authorized_request_limit(root, campaign, authorization=None):
         return
     pin = binding(authorization)
     document = read_artifact(authorization)
-    if (set(document) != {'schema_version','campaign_sha256','max_request_bytes','authorized_by','owner_direction'}
+    fields = {'schema_version','campaign_sha256','max_request_bytes','authorized_by','owner_direction'}
+    temporary = {'supersedes_authorization', 'temporary_run_id'}
+    if (set(document) not in (fields, fields | temporary)
             or document['schema_version'] != 'cvp_sql_request_limit_authorization.v1'
             or document['campaign_sha256'] != campaign
             or type(document['max_request_bytes']) is not int or document['max_request_bytes'] <= 0
@@ -46,7 +48,21 @@ def authorized_request_limit(root, campaign, authorization=None):
         raise ValueError('invalid owner request limit authorization')
     budget = {'authorization':pin, 'campaign_sha256':campaign,
               'max_request_bytes':document['max_request_bytes']}
-    write_immutable(saved, budget)
+    if set(document) == fields | temporary:
+        original = read_artifact(saved)
+        predecessor = document['supersedes_authorization']
+        run = document['temporary_run_id']
+        if (original.get('campaign_sha256') != campaign
+                or original.get('authorization') != predecessor
+                or not isinstance(run, str) or not run.startswith('CVPG-')
+                or len(run) != 69 or any(c not in '0123456789abcdef' for c in run[5:])):
+            raise ValueError('invalid temporary request limit predecessor or run')
+        check_binding(predecessor)
+        budget.update(temporary_run_id=run, supersedes_authorization=predecessor,
+                      base_max_request_bytes=original['max_request_bytes'])
+        write_immutable(root / ('request-limit-amendment-' + pin['file_sha256'] + '.json'), budget)
+    else:
+        write_immutable(saved, budget)
     token = _authorized_limit.set((root, budget))
     try:
         check_binding(pin)
@@ -64,6 +80,10 @@ def effective_request_limit(adapter, cache):
         raise ValueError('model request outside authorized SQL execution root')
     from backend.pipeline.cvp_sql_flow import check_binding
     check_binding(budget['authorization'])
+    if 'temporary_run_id' in budget:
+        check_binding(budget['supersedes_authorization'])
+        if Path(cache).resolve().relative_to(root).parts[0] != budget['temporary_run_id']:
+            return budget['base_max_request_bytes'], budget
     return budget['max_request_bytes'], budget
 
 

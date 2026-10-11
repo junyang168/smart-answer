@@ -85,3 +85,26 @@ def test_unknown_intent_cannot_be_reissued_with_larger_budget(tmp_path):
         with pytest.raises(ValueError,match='outcome unknown'):
             runtime.call_model(a,{'bytes':511625},root/'raw.json')
     assert a.calls==0 and not (root/'raw.request-budget.json').exists()
+
+
+def test_temporary_run_amendment_preserves_original_and_other_runs(tmp_path):
+    from backend.pipeline.cvp_sql_flow import binding
+    root=tmp_path/'execution';auth=authorization(tmp_path)
+    with runtime.authorized_request_limit(root,'campaign',auth):pass
+    old=(root/'request-limit-binding.json').read_bytes()
+    run='CVPG-'+'a'*64
+    amended=tmp_path/'temporary.json'
+    body=json.loads(auth.read_text())
+    body.update(max_request_bytes=700000, supersedes_authorization=binding(auth), temporary_run_id=run)
+    amended.write_text(json.dumps(body))
+    a=SimpleNamespace(max_request_bytes=500000)
+    with runtime.authorized_request_limit(root,'campaign',amended):
+        assert runtime.effective_request_limit(a,root/run/'raw.json')[0]==700000
+        assert runtime.effective_request_limit(a,root/('CVPG-'+'b'*64)/'raw.json')[0]==600000
+    assert (root/'request-limit-binding.json').read_bytes()==old
+    with runtime.authorized_request_limit(root,'campaign',auth):
+        assert runtime.effective_request_limit(a,root/run/'raw.json')[0]==600000
+    body['supersedes_authorization']['file_sha256']='f'*64
+    amended.write_text(json.dumps(body))
+    with pytest.raises(ValueError,match='predecessor'):
+        with runtime.authorized_request_limit(root,'campaign',amended):pass
