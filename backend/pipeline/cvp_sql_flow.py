@@ -1242,10 +1242,11 @@ def main(argv=None):
                 direction=read_artifact(args.direction)
                 if direction.get('run_id')!=args.run_id:raise ValueError('source write slice foreign run')
                 result=execute(store,binding(args.direction),ports=ProductionPorts())
-                if direction.get('mode')=='owner_statement_completion':
+                if direction.get('mode') in {'owner_statement_completion','policy_evidence_binding'}:
                     from backend.pipeline.claim_first_management import finish_claim_audit
                     proof=finish_claim_audit(store,args.run_id,Path(direction['parent_root']))
-                    stage_event('owner_statement_slice_claim_layer_audited_cvp_pending',run_id=args.run_id,
+                    stage_event('owner_statement_slice_claim_layer_audited_cvp_pending' if direction['mode']=='owner_statement_completion'
+                                else 'evidence_binding_slice_claim_layer_audited_cvp_pending',run_id=args.run_id,
                                 proof=proof,group_complete=False)
                 stage_event('source_write_applied_pending',run_id=args.run_id,group_complete=False,result=result)
                 return 0  # Never complete the group or start unrelated management.

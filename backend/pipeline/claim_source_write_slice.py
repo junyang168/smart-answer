@@ -338,11 +338,11 @@ def validate_package(value):
 
 
 def validate_claim_layer_authority(saved, root):
-    """The applied statement slice may audit Claims, never complete CVP work."""
+    """An exact applied source slice may audit Claims, never complete CVP work."""
     value=saved['reviewed']['evidence']['package']['payload']
     app=value.get('source_repair_application', {})
     direction=app.get('source_write_slice', {})
-    if (saved.get('checkpoint')!='applied' or direction.get('mode')!='owner_statement_completion'
+    if (saved.get('checkpoint')!='applied' or direction.get('mode') not in {'owner_statement_completion','policy_evidence_binding'}
             or direction.get('run_id')!=saved['run_id']
             or Path(app.get('run_root','')).resolve()!=Path(root).resolve()
             or Path(direction.get('parent_root','')).resolve()!=Path(root).resolve()

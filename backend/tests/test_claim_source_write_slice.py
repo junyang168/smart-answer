@@ -241,9 +241,10 @@ def test_impact_projection_refuses_changed_semantics_or_missing_repair(fault):
 
 
 @pytest.mark.parametrize('fault',[None,'not_applied','foreign_run','wrong_mode','foreign_root','missing_pending','bad_package'])
-def test_claim_layer_authority_never_waives_source_or_group_gates(monkeypatch,tmp_path,fault):
+@pytest.mark.parametrize('mode',['owner_statement_completion','policy_evidence_binding'])
+def test_claim_layer_authority_never_waives_source_or_group_gates(monkeypatch,tmp_path,fault,mode):
     app={'run_root':str(tmp_path),'source_write_slice':{'parent_root':str(tmp_path),
-        'mode':'owner_statement_completion','run_id':'run'}}
+        'mode':mode,'run_id':'run'}}
     value={'source_repair_application':app}
     saved={'run_id':'run','checkpoint':'applied','reviewed':{'evidence':{'package':{'payload':value},
         'pending_cvp_claim_ids':['C']}}}
