@@ -138,6 +138,27 @@ def test_canonical_binding_order_preserves_full_payload_and_refuses_duplicates()
     with pytest.raises(KeyError):c.canonical_binding_order([{'evidence_step_id':'E1'}])
 
 
+@pytest.mark.parametrize('fault',[None,'not_applied','foreign_run','wrong_mode','foreign_root','missing_pending','bad_package'])
+def test_claim_layer_authority_never_waives_source_or_group_gates(monkeypatch,tmp_path,fault):
+    app={'run_root':str(tmp_path),'source_write_slice':{'parent_root':str(tmp_path),
+        'mode':'owner_statement_completion','run_id':'run'}}
+    value={'source_repair_application':app}
+    saved={'run_id':'run','checkpoint':'applied','reviewed':{'evidence':{'package':{'payload':value},
+        'pending_cvp_claim_ids':['C']}}}
+    def checked(v):
+        assert v==value
+        if fault=='bad_package':raise ValueError('bad actual raw')
+    monkeypatch.setattr(m,'validate_package',checked)
+    if fault=='not_applied':saved['checkpoint']='prepared'
+    if fault=='foreign_run':app['source_write_slice']['run_id']='other'
+    if fault=='wrong_mode':app['source_write_slice']['mode']='other'
+    if fault=='foreign_root':app['run_root']=str(tmp_path/'other')
+    if fault=='missing_pending':saved['reviewed']['evidence']['pending_cvp_claim_ids']=[]
+    if fault:
+        with pytest.raises(ValueError):m.validate_claim_layer_authority(saved,tmp_path)
+    else:assert m.validate_claim_layer_authority(saved,tmp_path) is True
+
+
 @pytest.mark.skipif(os.environ.get('WKP357_G112_READONLY')!='1',reason='actual saved g112 readonly opt-in')
 def test_real_owner_statement_slice_is_strict_and_parent_byte_identical():
     from dotenv import load_dotenv

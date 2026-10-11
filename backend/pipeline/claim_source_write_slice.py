@@ -265,6 +265,21 @@ def validate_package(value):
     return tuple(('knowledge_relations',rid) for rid in direction['withdraw_relation_ids'])
 
 
+def validate_claim_layer_authority(saved, root):
+    """The applied statement slice may audit Claims, never complete CVP work."""
+    value=saved['reviewed']['evidence']['package']['payload']
+    app=value.get('source_repair_application', {})
+    direction=app.get('source_write_slice', {})
+    if (saved.get('checkpoint')!='applied' or direction.get('mode')!='owner_statement_completion'
+            or direction.get('run_id')!=saved['run_id']
+            or Path(app.get('run_root','')).resolve()!=Path(root).resolve()
+            or Path(direction.get('parent_root','')).resolve()!=Path(root).resolve()
+            or not saved['reviewed']['evidence'].get('pending_cvp_claim_ids')):
+        raise ValueError('Claim-layer audit requires exact committed owner statement slice')
+    validate_package(value)
+    return True
+
+
 def execute(store,authorization,*,ports):
     from backend.pipeline.cvp_sql_flow import (check_binding,decoded_pins,commit_package,
                                              verified_group_backup,binding)

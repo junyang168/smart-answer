@@ -128,9 +128,13 @@ def finish_claim_audit(store, run_id, root):
     saved=store.get_cvp_group(run_id); evidence=saved.get('reviewed',{}).get('evidence',{})
     application=evidence.get('package',{}).get('payload',{}).get('source_repair_application',{})
     original_root=Path(application.get('run_root',''))
+    statement_slice=application.get('source_write_slice',{}).get('mode')=='owner_statement_completion'
+    if statement_slice:
+        from backend.pipeline.claim_source_write_slice import validate_claim_layer_authority
+        validate_claim_layer_authority(saved,root)
     if (saved['checkpoint'] not in {'applied','audited'} or original_root.resolve()!=Path(root).resolve()
             or not evidence.get('pending_cvp_claim_ids')
-            or not body(read(original_root/'final_review.packet.json')).get('claim_first_management')):
+            or not statement_slice and not body(read(original_root/'final_review.packet.json')).get('claim_first_management')):
         raise ValueError('Claim-only audit lacks actual committed source-first action and pending CVP state')
     material=body(read(original_root/'scoped-materials.json'));c.guard_files(material)
     current={}
