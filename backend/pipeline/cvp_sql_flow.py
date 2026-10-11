@@ -584,10 +584,13 @@ def run_group(store, definition, group, row, *, root):
     evidence = saved.get('reviewed',{}).get('evidence') or saved.get('import_certificate',{})
     from backend.pipeline.claim_dependency_handoff import subject as dependency_subject,context as dependency_context
     joint_dependency=dependency_context(saved,store) if dependency_subject(saved) is not None else None
+    from backend.pipeline.cvp_source_impact_resolution import context as source_impact_context,prepare as prepare_source_impacts,CLOSED_STATEMENT
+    source_impacts=prepare_source_impacts(store,saved) if source_impact_context(saved,store) else None
+    closed_statement=source_impacts is not None and source_impacts['source_handoff'].get('schema_version')==CLOSED_STATEMENT
     if evidence.get('approval',{}).get('owner_claim_completion') or joint_dependency:
         from backend.pipeline.claim_owner_revision import finish_dependency_audit
         finish_dependency_audit(store,run_id)
-    if evidence.get('pending_cvp_claim_ids') and not joint_dependency:
+    if evidence.get('pending_cvp_claim_ids') and not joint_dependency and not closed_statement:
         from backend.pipeline.cvp_sql_actions import execute_coverage_action
         from backend.pipeline.source_reconciliation_runtime import ProductionPorts
         try:
@@ -599,7 +602,6 @@ def run_group(store, definition, group, row, *, root):
                 prior_management_action=prior_management_action(evidence,detected.findings))
             return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)
         saved=store.get_cvp_group(run_id);evidence=saved['reviewed']['evidence']
-    from backend.pipeline.cvp_source_impact_resolution import context as source_impact_context,prepare as prepare_source_impacts
     source_impacts=prepare_source_impacts(store,saved) if source_impact_context(saved,store) else None
     if evidence.get('pending_cvp_management_record_keys') and not evidence.get('approval',{}).get('retained_write_scope') and source_impacts is None:
         raise ValueError('new CVP coverage committed; existing CVP/link management remains pending, not group completion')
@@ -648,6 +650,7 @@ def run_group(store, definition, group, row, *, root):
             current[col,oid]=state
     views=sorted(set(evidence['viewpoint_ids'])|{r['payload']['viewpoint_id'] for (col,_),r in current.items()
                  if col=='viewpoint_claim_links' and not r['retired'] and r['payload']['claim_id'] in group['claim_ids']})
+    if closed_statement:views=sorted(set(views)|set(source_impacts['source_handoff']['viewpoint_ids']))
     audit_dir = root/run_id/('audit-'+sha256_json(pin_rows(pins(current)))[:20]); audit_path = audit_dir/"audit.json"
     if not audit_path.exists():
         stage_event('independent_audit', sequence=group['sequence'], run_id=run_id)

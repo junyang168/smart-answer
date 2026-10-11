@@ -3796,6 +3796,12 @@ class PostgresKnowledgeStore:
                 if read_artifact(retained_impacts_resolution_path).get('schema_version')==SLICE_IMPACTS:
                     statement_resolution=validate_statement_impact_completion({**value,'run_id':run_id},
                         retained_impacts_resolution_path,audit_binding,cursor,semantic_resolution=owner_resolution_path)
+                else:
+                    from backend.pipeline.cvp_source_impact_resolution import CLOSED_STATEMENT,context as source_context,validate_for_completion as validate_closed_source
+                    handoff=source_context({**value,'run_id':run_id},cursor=cursor)
+                    if handoff and handoff.get('schema_version')==CLOSED_STATEMENT:
+                        statement_resolution=validate_closed_source({**value,'run_id':run_id},
+                            retained_impacts_resolution_path,audit_binding,cursor,semantic_resolution=owner_resolution_path)
             from backend.pipeline.claim_dependency_handoff import subject as dependency_subject,context as dependency_context
             dependency_resolution=dependency_context({**value,'run_id':run_id},cursor=cursor) if dependency_subject({**value,'run_id':run_id}) is not None else None
             if (value.get('reviewed',{}).get('evidence') or {}).get('pending_cvp_claim_ids') and statement_resolution is None and dependency_resolution is None:

@@ -136,7 +136,7 @@ def coverage_context(store,saved,group):
     app=package.get('source_repair_application',{})
     if not app:return None
     check_binding(app['materials']);material=body(read(Path(app['materials']['path'])))
-    if not material['manifest'].get('evidence_binding_repair'):return None
+    if not material.get('manifest',{}).get('evidence_binding_repair'):return None
     if (saved['checkpoint']!='applied' or app.get('run_id')!=saved['run_id']
             or saved['claim_ids']!=group['claim_ids']):
         raise ValueError('Evidence coverage original group/commit drift')
