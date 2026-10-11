@@ -6,8 +6,8 @@ import pytest
 from backend.pipeline import claim_first_management as flow
 
 
-@pytest.fixture
-def saved():
+@pytest.fixture(params=['evidence', 'claim_source'])
+def saved(request):
     if os.getenv('WKP357_SAVED_SLICE_COVERAGE_TEST') != '1':
         pytest.skip('explicit actual saved SQL readonly opt-in')
     from dotenv import load_dotenv
@@ -15,7 +15,12 @@ def saved():
     from backend.pipeline.cvp_sql_flow import binding
     load_dotenv('.env')
     store=PostgresKnowledgeStore()
-    value=store.get_cvp_group('CVPG-b9bdf23b7ec4f63b20fa5d69818109697a8fb808138b18557dffe2e225369031')
+    run_id = ('CVPG-b9bdf23b7ec4f63b20fa5d69818109697a8fb808138b18557dffe2e225369031'
+              if request.param == 'evidence' else
+              'CVPG-4c6083d8d5036f316dd620945c37974f4d6b3daf128752776490dec2b2f21cd4')
+    value=store.get_cvp_group(run_id)
+    if value['checkpoint'] != 'applied':
+        pytest.skip('historical slice already completed; live handoff requires applied generation')
     root=Path(value['reviewed']['evidence']['package']['payload']['source_repair_application']['run_root'])
     files={str(p):binding(p) for p in root.rglob('*') if p.is_file()}
     before=deepcopy(value)
@@ -53,7 +58,7 @@ def test_actual_source_slice_coverage_requires_complete_source_and_keeps_pending
     else:
         result=flow.coverage_context(store,value,group)
         assert result['schema_version']==flow.REPROPOSAL_VERSION
-        assert result['source_slice_mode']=='policy_evidence_binding'
+        assert result['source_slice_mode']==original['reviewed']['evidence']['package']['payload']['source_repair_application']['source_write_slice']['mode']
         assert result['pending_existing_cvp_record_keys']==original['reviewed']['evidence']['pending_cvp_management_record_keys']
         assert result['existing_cvp_content_approved'] is False
         assert result['old_proposals_and_budgets_preserved'] is True
@@ -65,6 +70,6 @@ def test_actual_current_source_prepares_all_original_claims_without_model_or_wri
                                  'campaign_sha256':value['campaign_sha256']}
     group=next(g for g in definition['groups'] if g['sequence']==value['sequence'])
     material=prepare_group(store,definition,group)
-    assert len(material['packet']['claims'])==len(value['claim_ids'])==13
+    assert len(material['packet']['claims'])==len(value['claim_ids'])
     assert {r['claim_id'] for r in material['packet']['claims']}==set(value['claim_ids'])
     assert material['metrics']['historical_snapshot_reads']==0

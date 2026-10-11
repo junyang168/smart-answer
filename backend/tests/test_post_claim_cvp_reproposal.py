@@ -122,7 +122,7 @@ def test_sql_completion_rejects_pending_existing_impacts_even_with_new_coverage(
         'groups':[{'sequence':1,'group_key':'g1','claim_ids':['CL1']}]})
     rid=store.prepare_cvp_group(campaign_sha256=campaign,group_key='g1',sequence=1,claim_ids=['CL1'],materials={})
     meta=store.get_cvp_group(rid);meta['checkpoint']='applied'
-    meta['reviewed']={'evidence':{'pending_cvp_claim_ids':[],
+    meta['reviewed']={'evidence':{'approval':{},'package':{'payload':{}},'pending_cvp_claim_ids':[],
         'pending_cvp_management_record_keys':['viewpoint_claim_links/VCL-old']}}
     with store.connect() as conn:
         conn.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb WHERE run_id=%s',(canonical_json(meta),rid))
@@ -138,7 +138,7 @@ def test_common_coverage_consumes_current_contract_and_keeps_existing_impacts(tm
     from backend.pipeline import cvp_sql_actions as actions
     saved={'run_id':'run','checkpoint':'applied','claim_ids':['CL1'],'claim_layer_audit':{'status':'done'},
         'reviewed_sha256':'same-parent-review','reviewed':{'evidence':{
-            'pending_cvp_claim_ids':['CL1'],'viewpoint_ids':['CV-old'],'authorization':{'bounded':True},
+            'package':{'payload':{}},'pending_cvp_claim_ids':['CL1'],'viewpoint_ids':['CV-old'],'authorization':{'bounded':True},
             'action':{'kind':'source_claim_revision','action_id':'source-action'},'disposition':None}}}
     resolution={'schema_version':m.REPROPOSAL_VERSION,'pending_existing_cvp_record_keys':['canonical_viewpoints/CV-old']}
     materials={'packet':{'claims':[{'claim_id':'CL1'}],'existing_links':[{'viewpoint_claim_link_id':'V-old'}]},

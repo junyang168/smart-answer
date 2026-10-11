@@ -508,7 +508,7 @@ def run_group(store, definition, group, row, *, root):
     saved = store.get_cvp_group(run_id); materials = saved["materials"]
     if saved.get('reviewed',{}).get('evidence',{}).get('approval',{}).get('source_write_slice'):
         app=saved['reviewed']['evidence']['package']['payload'].get('source_repair_application',{})
-        if (app.get('source_write_slice',{}).get('mode')!='policy_evidence_binding'
+        if (app.get('source_write_slice',{}).get('mode') not in {'policy_evidence_binding','policy_claim_source_revision'}
                 or not saved.get('claim_layer_audit')):
             raise ValueError('source write slice applied; remaining exact source/relationship management pending before group continuation')
     store.bind_cvp_execution_root(run_id,identity='group',root=root/run_id)

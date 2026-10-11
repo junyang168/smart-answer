@@ -238,7 +238,8 @@ def coverage_context(store, saved, group):
         raise ValueError('Claim-first transaction is not exclusively committed source work')
     packet_path = root/'final_review.packet.json'
     packet = body(read(packet_path))
-    if application.get('source_write_slice', {}).get('mode') == 'policy_evidence_binding':
+    slice_mode = application.get('source_write_slice', {}).get('mode')
+    if slice_mode in {'policy_evidence_binding', 'policy_claim_source_revision'}:
         from backend.pipeline.claim_source_write_slice import validate_claim_layer_authority
         validate_claim_layer_authority(saved, root)
         if (sha256_json(saved['reviewed']) != saved['reviewed_sha256']
@@ -278,7 +279,7 @@ def coverage_context(store, saved, group):
             'pending_existing_cvp_record_keys': sorted(pending),
             'source_only_approval': True, 'existing_cvp_content_approved': False,
             'old_proposals_and_budgets_preserved': True,
-            'source_slice_mode': 'policy_evidence_binding',
+            'source_slice_mode': slice_mode,
             'instructions': 'Propose required CVP coverage from the actually committed and independently '
                 'Claim-audited current source graph. The old unsubmitted CVP proposal and all consumed '
                 'budgets remain historical, not approval of current material. Do not repeat source '
