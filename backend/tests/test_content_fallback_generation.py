@@ -40,6 +40,19 @@ def test_empty_composition_keeps_legacy_output(tmp_path):
     assert m.assessment_output(tmp_path/'unused.json',tmp_path/'fallback')==tmp_path/'fallback'
 
 
+def test_derived_resolution_location_does_not_change_model_root(tmp_path):
+    from backend.pipeline.cvp_sql_flow import audit_resolution_directory
+    original=tmp_path/'audit-root';original.mkdir()
+    raw=original/'audit.json';write_immutable(raw,{'generation':1})
+    first=tmp_path/'first.json';second=tmp_path/'second.json'
+    write_immutable(first,{'generation':1});write_immutable(second,{'generation':2})
+    assert audit_resolution_directory(original,raw)==original
+    a=audit_resolution_directory(original,first);b=audit_resolution_directory(original,second)
+    assert a!=b and a.parent==b.parent==original
+    assert audit_resolution_directory(original,first)==a
+    assert not a.exists() and not b.exists()
+
+
 @pytest.mark.skipif(not os.environ.get('WKP_CURRENT_FALLBACK_AUDIT'),reason='explicit actual saved audit readonly opt-in')
 def test_actual_full_current_composition_reuses_saved_answers_only(tmp_path,monkeypatch):
     from backend.pipeline.codex_subscription_client import CodexSubscriptionClient

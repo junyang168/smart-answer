@@ -495,6 +495,13 @@ def commit_package(store, run_id, *, package, approval, authorization, backup, s
     return result
 
 
+def audit_resolution_directory(audit_dir,audit_path):
+    """Pure resolution artifacts, not model roots, bind their exact assessment."""
+    audit_dir=Path(audit_dir);audit_path=Path(audit_path)
+    if audit_path==audit_dir/'audit.json':return audit_dir
+    return audit_dir/('assessment-'+sha256_json(binding(audit_path))[:20])
+
+
 def run_group(store, definition, group, row, *, root):
     from backend.pipeline.claim_issue_management import IssuesDetected,handle_issues,audit_claim_findings,prior_management_action
     campaign = definition["campaign_sha256"]
@@ -651,6 +658,7 @@ def run_group(store, definition, group, row, *, root):
     from backend.pipeline.viewpoint_content_blocked_fallback import apply as content_fallback
     validate_transaction_audit(read_artifact(audit_path),group['claim_ids'],views)
     audit_path = content_fallback(audit_path,root/run_id/"content-blocked-fallback")
+    resolution_dir=audit_resolution_directory(audit_dir,audit_path)
     audit = read_artifact(audit_path)
     from backend.pipeline.cvp_sql_quota_resume import NAME as QUOTA_NAME,execute as resume_quota
     quota_binding=root/QUOTA_NAME
@@ -662,10 +670,10 @@ def run_group(store, definition, group, row, *, root):
     resolution=None
     from backend.pipeline.cvp_exact_human_audit_retention import complete as exact_human_complete, partition as exact_human_partition
     if audit['layers']['3'].get('disputed') or audit['layers']['4'].get('disputed'):
-        resolution=exact_human_complete(audit_path,root,store,run_id,audit_dir/'exact-human-link-resolution.json')
+        resolution=exact_human_complete(audit_path,root,store,run_id,resolution_dir/'exact-human-link-resolution.json')
     if resolution is None and (audit['layers']['3'].get('disputed') or audit['layers']['4'].get('disputed')):
         from backend.pipeline.cvp_human_retained_audit_resolution import create_if_complete
-        resolution=create_if_complete(audit_path,store,run_id,audit_dir/'human-retained-source-final-resolution.json',execution_root=root)
+        resolution=create_if_complete(audit_path,store,run_id,resolution_dir/'human-retained-source-final-resolution.json',execution_root=root)
     if resolution is None and (audit["layers"]["3"].get("disputed") or audit["layers"]["4"].get("disputed")):
         from backend.pipeline.viewpoint_audit_source_adjudication import build_packet,run as adjudicate
         from backend.pipeline.viewpoint_adjudication_history import target_identity
@@ -693,7 +701,7 @@ def run_group(store, definition, group, row, *, root):
                     prior = store.adjudication_roots(targets)
         from backend.pipeline.cvp_sql_adjudication_input_repair import effective_roots
         prior = effective_roots(prior)
-        resolution=audit_dir/'gpt-source-final-resolution.json'
+        resolution=resolution_dir/'gpt-source-final-resolution.json'
         component_binding = root/'component-role-authorization-binding.json'
         if component_binding.exists():
             saved_binding = read_artifact(component_binding)['authorization']
@@ -705,7 +713,7 @@ def run_group(store, definition, group, row, *, root):
                 exact = [p for p in prior if binding(p/'packet.json') == direction.get('packet_binding')]
                 if len(exact) != 1:
                     raise ValueError('owner component direction lacks unique actual saved adjudication')
-                resolution = audit_dir/'owner-component-role-resolution.json'
+                resolution = resolution_dir/'owner-component-role-resolution.json'
                 create(audit_path, exact[0], Path(saved_binding['path']), resolution, store,
                        campaign_sha256=saved['campaign_sha256'], run_id=run_id)
                 store.complete_cvp_group(run_id,audit=audit,audit_binding=binding(audit_path),read_pins=pins(current),
@@ -750,7 +758,7 @@ def run_group(store, definition, group, row, *, root):
                     if result.get('status')=='already_applied':
                         raise ValueError('already repaired connection remains upheld; no repeated semantic repair')
                     return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)
-                reuse_part(audit_path,previous,audit_dir/('known-'+subset_key(previous,ids))/'resolution.json',
+                reuse_part(audit_path,previous,resolution_dir/('known-'+subset_key(previous,ids))/'resolution.json',
                            store,only_item_ids=ids)
                 covered.update(ids)
         fresh={i['item_id'] for i in packet['items']}-covered
@@ -789,13 +797,13 @@ def run_group(store, definition, group, row, *, root):
                 return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)
             prior.append(adjudication)
         if exact_human_items and not human_retained_items:
-            resolution=exact_human_complete(audit_path,root,store,run_id,audit_dir/'exact-human-link-resolution.json')
+            resolution=exact_human_complete(audit_path,root,store,run_id,resolution_dir/'exact-human-link-resolution.json')
             if resolution is None:raise ValueError('exact human retention does not resolve remaining findings')
         elif human_retained_items:
             # Excluding a human-owned target from adjudication is NOT a pass.
             # Rejoin the full actual audit population only after every remaining
             # finding has an exact authenticated source rejection.
-            resolution=create_if_complete(audit_path,store,run_id,audit_dir/'human-retained-source-final-resolution.json',execution_root=root)
+            resolution=create_if_complete(audit_path,store,run_id,resolution_dir/'human-retained-source-final-resolution.json',execution_root=root)
             if resolution is None:
                 raise ValueError('human retained routing does not resolve remaining current audit findings')
         else:
@@ -806,7 +814,7 @@ def run_group(store, definition, group, row, *, root):
             from backend.pipeline.cvp_source_impact_resolution import build
         else:
             from backend.pipeline.cvp_retained_impact_resolution import build
-        pending_resolution=build(store,run_id,audit_path,audit_dir/'retained-impact-resolution.json',
+        pending_resolution=build(store,run_id,audit_path,resolution_dir/'retained-impact-resolution.json',
                                  semantic_resolution=resolution)
     from backend.pipeline.cvp_taxonomy_dependency import prepare as prepare_taxonomy
     taxonomy=prepare_taxonomy(store,run_id,audit_path,current)
