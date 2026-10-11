@@ -1,0 +1,208 @@
+"""Submit a precisely directed source write slice; retain every other issue.
+
+Uses the original authenticated correction and its unused final review. No new
+GPT proposal, root, correction budget, or model approval for exact retirement.
+"""
+from copy import deepcopy
+from pathlib import Path
+
+from backend.pipeline import source_reconciliation as c
+from backend.api.canonical_repository.postgres_store import sha256_json
+
+VERSION = 'wang_claim_source_write_slice_v1'
+
+
+def projection(frozen, original, direction):
+    if direction.get('schema_version') != VERSION or direction.get('human_content_approval') is not False:
+        raise ValueError('source slice requires exact independent-review authority')
+    if not frozen.get('sql_scope') or not frozen['manifest'].get('claim_issue'):
+        raise ValueError('source slice requires original SQL Claim management')
+    from backend.pipeline.claim_evidence_completion import direction_for, evidence_permission_ids
+    parent = direction_for(frozen['claim_issue_context'])
+    if not parent or direction['withdraw_relation_ids'] != parent['withdraw_relation_ids']:
+        raise ValueError('source slice retirement exceeds original exact direction')
+    before = c.index(frozen['before_records']); proposed = deepcopy(c.index(original.records))
+    selected = direction['source_write_keys']
+    if not selected or selected != sorted(set(selected)) or set(selected) != set(proposed):
+        raise ValueError('source slice cannot omit or invent corrected source postimages')
+    if any(c.split_key(k)[0] not in {'claims','evidence_steps','source_fragments'} for k in selected):
+        raise ValueError('source slice may not mutate CVP, relations or professor sources')
+    allowed = {c.key(p['collection'],p['object_id']):p for p in frozen['manifest']['permissions']}
+    evidence_ids = evidence_permission_ids(parent)
+    for k in selected:
+        col, oid = c.split_key(k); old = before.get(k); new = proposed[k]
+        if col == 'evidence_steps':
+            if oid not in evidence_ids: raise ValueError('source slice Evidence exceeds parent scope')
+            # Restore binding; an unchanged held owner is NOT cleared by this.
+            if oid in parent['evidence_ids']:
+                fields = {'source_fragment_id','source_fragment_ids','anchor_quality',
+                          'support_eligibility','valid_for_identity_review'}
+                if ({f:v for f,v in c._semantic(old).items() if f not in fields}
+                        != {f:v for f,v in c._semantic(new).items() if f not in fields}):
+                    raise ValueError('source slice cannot rewrite withdrawn Evidence teaching')
+                if new.get('support_eligibility') not in {'eligible','eligible_with_label','withheld_unreviewed'}:
+                    raise ValueError('source slice unsupported qualification')
+                if new.get('support_eligibility') == 'withheld_unreviewed' and new.get('valid_for_identity_review') is not False:
+                    raise ValueError('pending Evidence cannot become identity evidence')
+        if col == 'claims' and oid in parent['unchanged_held_context_claim_ids']:
+            raise ValueError('source slice may not change held shared Claim')
+        if col == 'claims' and old and any(new.get(f)!=old.get(f) for f in (
+                'statement','claim_type','attribution','discourse_mode','scripture_refs','evidence_step_ids')):
+            raise ValueError('source binding slice cannot change Claim words/ownership')
+        if col == 'claims' and old and new.get('metrics') != old.get('metrics'):
+            # Frequency/product navigation is not this source repair's scope.
+            # Keep its exact old metadata; disclose the delta to the reviewer.
+            new['metrics'] = deepcopy(old.get('metrics'))
+    target_permissions = [p for p in frozen['manifest']['permissions']
+        if c.key(p['collection'],p['object_id']) in selected or
+        (p.get('create') and p['collection']=='source_fragments' and p.get('parent_id')==frozen['manifest']['source_id'])]
+    scoped = deepcopy(frozen)
+    scoped['source_write_slice_material'] = True
+    # The parent Claim management and all its unresolved answers remain intact.
+    # This exact independently reviewed write set is not whole-issue approval.
+    scoped['manifest'].pop('claim_issue',None)
+    scoped['manifest']['permissions'] = target_permissions
+    scoped['inventory'] = {'affected_keys': sorted(set(selected)&set(before)),
+        'context_keys': sorted(set(before)-set(selected)), 'unknown_keys': []}
+    scoped['sentence_inventory'] = []
+    proposal = c.Proposal(records=c.rows(proposed),
+        dispositions=[c.Disposition(record_key=k,action='update',reason=next(
+            d.reason for d in original.dispositions if d.record_key==k)) for k in selected],
+        sentence_dispositions=[],unadmitted_candidates=[])
+    c.validate_proposal(scoped,proposal)
+    return scoped,proposal
+
+
+def prepare(direction):
+    from backend.pipeline.source_reconciliation_runner import read,body,validate_raw,effective_proposal
+    from backend.pipeline.cvp_sql_flow import check_binding
+    if direction.get('artifact_sha256') != sha256_json({k:v for k,v in direction.items() if k!='artifact_sha256'}):
+        raise ValueError('source slice direction seal drift')
+    if direction.get('authorized_by')!='owner' or not direction.get('authorization_quote'):
+        raise ValueError('source slice lacks explicit owner direction')
+    if (direction.get('new_gpt_calls')!=0 or direction.get('additional_corrections')!=0
+            or direction.get('original_unused_final_review_only') is not True):
+        raise ValueError('source slice cannot mint a second proposal/correction/review budget')
+    root = Path(direction['parent_root'])
+    for stage in ('proposal','initial_review','correction'):
+        for suffix in ('packet','raw'):
+            b=direction['original_leaves'][stage+'.'+suffix]
+            if Path(b['path']) != root/(stage+'.'+suffix+'.json'): raise ValueError('foreign parent answer')
+            check_binding(b)
+    check_binding(direction['original_materials'])
+    if Path(direction['original_materials']['path'])!=root/'scoped-materials.json':
+        raise ValueError('foreign source material')
+    frozen=body(read(root/'scoped-materials.json'));c.guard_files(frozen)
+    if frozen['sql_scope']['run_id']!=direction['run_id']:raise ValueError('source slice foreign SQL group')
+    for stage in ('proposal','initial_review','correction'):
+        validate_raw(root,stage,body(read(root/(stage+'.packet.json'))))
+    original=effective_proposal(frozen,read(root/'correction.raw.json')['response'])
+    scoped,proposal=projection(frozen,original,direction)
+    packet=c.review_packet(scoped,proposal)
+    packet['source_write_slice']={'schema_version':VERSION,'direction':direction,
+        'original_initial_review':read(root/'initial_review.raw.json')['response'],
+        'original_corrected_proposal':original.model_dump(),
+        'program_projection_delta':[{ 'record_key':k,'field':'metrics',
+            'unsubmitted_model_value':c.index(original.records)[k].get('metrics'),
+            'preserved_current_value':c.index(frozen['before_records'])[k].get('metrics')}
+            for k in direction['source_write_keys'] if k.startswith('claims/')
+            and c.index(original.records)[k].get('metrics')!=c.index(frozen['before_records'])[k].get('metrics')],
+        'pending_dispositions':[d.model_dump() for d in original.dispositions if d.record_key not in direction['source_write_keys']],
+        'original_cvp_impacts':[i.model_dump() for i in original.cvp_impacts],
+        'retirement_requires_no_new_model_verdict':True,
+        'group_complete':False,'additional_gpt_calls':0,'additional_corrections':0,
+        'instructions':'Review only all source postimages and full own body. Other relations/group impacts are explicitly pending, not approved/retained. '
+            'Do not require this write slice to resolve those unrelated issues. Exact owner retirement is program-directed, not a model question. '
+            'A source-bound Evidence still withheld_unreviewed remains ineligible and its held Claim stays unchanged; '
+            'judge its binding and faithful excerpt, not approval of the held Claim. No CVP identity or group completion is approved.'}
+    return root,frozen,scoped,proposal,packet
+
+
+def scoped_adapter(adapter,packet):
+    if not packet.get('source_write_slice'):return adapter
+    from copy import copy
+    if packet['source_write_slice'].get('schema_version')!=VERSION:raise ValueError('unknown source write slice')
+    result=copy(adapter)
+    text='\n本次仅审核 source_write_slice 明示的本源写集。其他完整保留的原未决属于下一独立步骤，不批准、不改成retain。只返回proposal.dispositions各项verdict。退役由具名人工方向/程序验证执行，不另作语义判读。绑定仍withheld_unreviewed的Evidence不提升identity资格、不释放其Claim hold。新绑定/引文/Claim锚点必须完整独立判断，拒绝仍停止；零追加纠正。'
+    result._base_prompt=adapter._base_prompt+text;result._prompt=adapter._prompt+text
+    result.prompt_sha256=sha256_json({'prompt':result._prompt})
+    return result
+
+
+def package(direction,raw):
+    root,original,scoped,proposal,packet=prepare(direction)
+    if not c.validate_review(packet,raw['response']):raise ValueError('source slice independent postimage rejected')
+    result=c.compile_package(scoped,proposal,raw,frozen_sha256=sha256_json(scoped))
+    from backend.pipeline.cvp_sql_actions import SOURCE_SCHEMA
+    from backend.pipeline.cvp_sql_flow import binding
+    result['source_repair_application']={'schema_version':SOURCE_SCHEMA,'run_id':direction['run_id'],
+        'run_root':str(root),'materials':binding(root/'scoped-materials.json'),
+        'materials_sha256':sha256_json(original),'terminal_stage':'final_review',
+        'review_sha256':raw['artifact_sha256'],'source_write_slice':direction}
+    return result
+
+
+def validate_package(value):
+    from backend.pipeline.source_reconciliation_runner import validate_raw,read,body
+    direction=value['source_repair_application']['source_write_slice']
+    root,original,scoped,proposal,packet=prepare(direction)
+    saved=body(read(root/'final_review.packet.json'))
+    if saved!=packet:raise ValueError('source slice independent full packet drift')
+    raw=validate_raw(root,'final_review',saved)
+    if value!=package(direction,raw):raise ValueError('source slice differs from actual independently reviewed postimages')
+    return tuple(('knowledge_relations',rid) for rid in direction['withdraw_relation_ids'])
+
+
+def execute(store,authorization,*,ports):
+    from backend.pipeline.cvp_sql_flow import (check_binding,decoded_pins,commit_package,
+                                             verified_group_backup,binding)
+    from backend.pipeline.source_reconciliation_runner import read,Runner,write
+    from backend.pipeline.cvp_sql_actions import SOURCE_SCHEMA,initialize_subscription_runtime
+    check_binding(authorization);direction=read(Path(authorization['path']))
+    root,frozen,scoped,proposal,packet=prepare(direction)
+    run_id=direction['run_id'];saved=store.get_cvp_group(run_id)
+    if (not saved or saved['campaign_sha256']!=direction['campaign_sha256']
+            or not str(root.resolve()).startswith(str(Path(direction['execution_root']).resolve()/run_id)+'/')
+            or saved.get('execution_roots',{}).get(root.name)!=str(root.resolve())
+            or store.get_cvp_action(run_id,root.name) is None):raise ValueError('source slice not original registered action')
+    previous=saved.get('reviewed',{}).get('evidence',{})
+    prior=previous.get('package',{}).get('payload',{}).get('source_repair_application',{})
+    if prior.get('source_write_slice')==direction and saved['checkpoint']=='applied':
+        history=store.get_change_history(saved['reviewed']['plan']['change_set_id'])
+        if not history or history['status']!='applied':raise ValueError('source slice committed history missing')
+        for op in history['operations']:
+            st=store.get_record_state(op['collection'],op['object_id'])
+            expected=op['after']
+            if op['operation']=='retire':expected={**expected,'revision':op['before_revision']}
+            if (not st or st['payload']!=expected or st['revision']!=op['after_revision']
+                    or st['content_sha256']!=op['after_sha256'] or st['retired']!=(op['operation']=='retire')):
+                raise ValueError('source slice committed current/history drift; never reapply')
+        return {'status':'source_write_applied_pending','change_set_ids':saved['change_set_ids'],'replayed':False}
+    if (root/'final_review.reservation.json').exists() and not (root/'final_review.packet.json').exists():
+        raise ValueError('source slice cannot reuse uncertain final review')
+    if (root/'final_review.packet.json').exists() and read(root/'final_review.packet.json').get('source_write_slice')!=packet['source_write_slice']:
+        raise ValueError('source slice cannot replace an already consumed final review')
+    read_pins=decoded_pins(frozen['sql_scope']['read_pins'])
+    with store.connect() as conn,conn.cursor() as cur:store._assert_transaction_read_pins(cur,read_pins)
+    initialize_subscription_runtime(ports)
+    stages=Runner(root,ports);stages.root=root
+    raw=stages.call('final_review',packet)
+    value=package(direction,raw);validate_package(value)
+    write(root/'source-write-slice-package.json',value)
+    action=store.get_cvp_action(run_id,root.name)
+    result=commit_package(store,run_id,package=value,
+        approval={'terminal_review':binding(root/'final_review.raw.json'),'source_write_slice':authorization},
+        authorization={'source_write_slice':authorization},backup=verified_group_backup(root,value,ports),
+        sources=[s['file'] for s in frozen['after']+frozen.get('context_sources',[])],read_pins=read_pins,
+        reason='exact owner relation withdrawal with independently reviewed source bindings; other issues pending',
+        actor='owner-authorized-pipeline',source_kind=SOURCE_SCHEMA,action=action,
+        pending_cvp_claim_ids=saved['claim_ids'],
+        pending_cvp_management_record_keys=[d.record_key for d in original_dispositions(direction)
+            if d.action=='unresolved'])
+    return {'status':'source_write_applied_pending','group_complete':False,**result}
+
+
+def original_dispositions(direction):
+    from backend.pipeline.source_reconciliation_runner import read,body,effective_proposal
+    root=Path(direction['parent_root']);frozen=body(read(root/'scoped-materials.json'))
+    return effective_proposal(frozen,read(root/'correction.raw.json')['response']).dispositions

@@ -174,6 +174,8 @@ def validate_postimages(frozen, proposal, post):
 
 
 def review_items(frozen):
+    if frozen.get('source_write_slice_material'):
+        return []  # Exact owner withdrawal is program-directed, not a new model verdict.
     direction=direction_for(frozen.get('claim_issue_context',{}),frozen.get('physical_snapshots'))
     if not direction:return []
     before=c.index(frozen['before_records'])
@@ -255,6 +257,8 @@ def packet_receipt(frozen):
 
 def scoped_adapter(adapter, packet):
     from copy import copy
+    if packet.get('source_write_slice'):
+        return adapter  # Separate bounded write-domain instructions, not joint completion.
     direction=direction_for(packet.get('claim_issue_context',{}))
     if not direction:return adapter
     prompt='''本次是精确 owner 授权的 Evidence 完整修复，不是重试原未决候选。

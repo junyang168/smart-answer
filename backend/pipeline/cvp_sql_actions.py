@@ -69,6 +69,9 @@ def validate_source_package(package):
     Current rows and consumer closure are checked inside apply_plan.
     """
     application=package['source_repair_application']
+    if application.get('source_write_slice'):
+        from backend.pipeline.claim_source_write_slice import validate_package
+        return validate_package(package)
     material_binding=application['materials'];check_binding(material_binding)
     materials=body(read(Path(material_binding['path'])))
     if sha256_json(materials)!=application['materials_sha256']:

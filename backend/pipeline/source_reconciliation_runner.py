@@ -282,6 +282,8 @@ class Runner:
         adapter = recovery_scoped_adapter(adapter,packet)
         from backend.pipeline.claim_evidence_completion import scoped_adapter as completion_adapter
         adapter = completion_adapter(adapter,packet)
+        from backend.pipeline.claim_source_write_slice import scoped_adapter as slice_adapter
+        adapter = slice_adapter(adapter,packet)
         from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
         raw_path = self.root / (stage + '.raw.json')
         adapter = stage_adapter(adapter, packet, raw_path, saved=read(raw_path) if raw_path.exists() else None)
@@ -836,6 +838,8 @@ def validate_raw(root: Path, stage: str, packet: dict) -> dict:
     adapter = recovery_scoped_adapter(adapter,packet)
     from backend.pipeline.claim_evidence_completion import scoped_adapter as completion_adapter
     adapter = completion_adapter(adapter,packet)
+    from backend.pipeline.claim_source_write_slice import scoped_adapter as slice_adapter
+    adapter = slice_adapter(adapter,packet)
     raw = read(root / (stage + ".raw.json"))
     from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
     adapter = stage_adapter(adapter, packet, root / (stage + '.raw.json'), saved=raw)

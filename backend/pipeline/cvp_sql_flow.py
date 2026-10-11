@@ -506,6 +506,8 @@ def run_group(store, definition, group, row, *, root):
     else:
         run_id = row["run_id"]
     saved = store.get_cvp_group(run_id); materials = saved["materials"]
+    if saved.get('reviewed',{}).get('evidence',{}).get('approval',{}).get('source_write_slice'):
+        raise ValueError('source write slice applied; remaining exact source/relationship management pending before group continuation')
     store.bind_cvp_execution_root(run_id,identity='group',root=root/run_id)
     model_root = root/run_id/"normal-review"
     if saved["checkpoint"] == "prepared":
@@ -820,7 +822,7 @@ def main(argv=None):
     parser.add_argument('--pause-after-group',type=int,help='Narrow this invocation for acceptance; never changes the immutable execution boundary')
     parser.add_argument('--integrate-batch-candidates',action='store_true',
                         help='Explicit new-group identity integration; never upgrades saved legacy answers')
-    parser.add_argument('--action',choices=('group','source','claim-retire','owner-link','link-target','link-retarget','link-retire','link-replace','link-representation'),default='group')
+    parser.add_argument('--action',choices=('group','source','source-write-slice','claim-retire','owner-link','link-target','link-retarget','link-retire','link-replace','link-representation'),default='group')
     parser.add_argument('--claim-first',action='store_true',
                         help='Finish only the original bounded Claim/Evidence action; keep all CVPs pending and stop before CVP/group execution')
     parser.add_argument('--candidate-viewpoint-id',action='append',default=[],
@@ -1131,7 +1133,15 @@ def main(argv=None):
             action_root=args.output_root/args.run_id/'actions'
             from backend.pipeline.cvp_sql_actions import execute_source_action,execute_owner_link_action
             from backend.pipeline.source_reconciliation_runtime import ProductionPorts
-            if args.action=='source':
+            if args.action=='source-write-slice':
+                if not args.direction:raise ValueError('source write slice requires exact direction')
+                from backend.pipeline.claim_source_write_slice import execute
+                direction=read_artifact(args.direction)
+                if direction.get('run_id')!=args.run_id:raise ValueError('source write slice foreign run')
+                result=execute(store,binding(args.direction),ports=ProductionPorts())
+                stage_event('source_write_applied_pending',run_id=args.run_id,group_complete=False,result=result)
+                return 0  # Never complete the group or start unrelated management.
+            elif args.action=='source':
                 if not args.manifest:raise ValueError('source action lacks bounded Manifest/authorization')
                 from backend.pipeline.cvp_sql_actions import read_source_manifest
                 manifest=read_source_manifest(args.manifest)
