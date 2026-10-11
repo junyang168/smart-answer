@@ -90,6 +90,9 @@ def validate_audit(audit, claim_ids, viewpoint_ids, *, owner_resolution_path=Non
         elif read(owner_resolution_path).get('schema_version') == 'wang_exact_human_retained_and_saved_source_audit_resolution_v1':
             from backend.pipeline.cvp_human_retained_audit_resolution import verify_resolution
             resolved_by_layer=verify_resolution(audit,read(owner_resolution_path))
+        elif read(owner_resolution_path).get('schema_version') == 'wang_source_slice_saved_impact_resolution_v1':
+            from backend.pipeline.claim_source_write_slice import verify_saved_statement_impact_resolution
+            resolved_by_layer=verify_saved_statement_impact_resolution(audit,read(owner_resolution_path))
         else:
             resolved_by_layer['4'] = validate_resolution(audit, owner_resolution_path)
     for layer, expected, id_key in (("3", set(claim_ids), "claim_id"), ("4", set(viewpoint_ids), "viewpoint_id")):

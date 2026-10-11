@@ -872,7 +872,7 @@ def main(argv=None):
     parser.add_argument('--pause-after-group',type=int,help='Narrow this invocation for acceptance; never changes the immutable execution boundary')
     parser.add_argument('--integrate-batch-candidates',action='store_true',
                         help='Explicit new-group identity integration; never upgrades saved legacy answers')
-    parser.add_argument('--action',choices=('group','audit-run','source-pending-check','source','source-write-slice','relation-retire','claim-retire','owner-link','link-target','link-retarget','link-retire','link-replace','link-representation'),default='group')
+    parser.add_argument('--action',choices=('group','audit-run','source-pending-check','source-impact-complete','source','source-write-slice','relation-retire','claim-retire','owner-link','link-target','link-retarget','link-retire','link-replace','link-representation'),default='group')
     parser.add_argument('--claim-first',action='store_true',
                         help='Finish only the original bounded Claim/Evidence action; keep all CVPs pending and stop before CVP/group execution')
     parser.add_argument('--candidate-viewpoint-id',action='append',default=[],
@@ -1185,7 +1185,36 @@ def main(argv=None):
             action_root=args.output_root/args.run_id/'actions'
             from backend.pipeline.cvp_sql_actions import execute_source_action,execute_owner_link_action
             from backend.pipeline.source_reconciliation_runtime import ProductionPorts
-            if args.action=='source-pending-check':
+            if args.action=='source-impact-complete':
+                from backend.pipeline.cvp_source_impact_resolution import SLICE_IMPACTS,build_statement_impact_resolution
+                if saved['checkpoint']=='audited':
+                    completion=saved['completion']
+                    proof=Path(completion['retained_impacts_resolution']['path'])
+                    check_binding(completion['retained_impacts_resolution'])
+                    if read_artifact(proof).get('schema_version')!=SLICE_IMPACTS:
+                        raise ValueError('completed group lacks exact statement-impact authority')
+                    audit=read_artifact(completion['audit']['path'])
+                    store.complete_cvp_group(args.run_id,audit=audit,audit_binding=completion['audit'],
+                        read_pins=decoded_pins(read_artifact(proof)['read_pins']),
+                        owner_resolution_path=Path(completion['owner_resolution_path']),
+                        retained_impacts_resolution_path=proof,
+                        taxonomy_dependency_path=Path(completion['taxonomy_dependency']['path'])
+                            if completion.get('taxonomy_dependency') else None)
+                    stage_event('audited_cached',run_id=args.run_id,new_model_calls=0,registry_writes=0)
+                    return 0
+                completion_root=action_root/('statement-impact-completion-'+sha256_json({
+                    'reviewed':saved['reviewed_sha256'],'change_set_ids':saved['change_set_ids']})[:20])
+                proof,resolution,audit,read_pins=build_statement_impact_resolution(store,saved,completion_root/'resolution.json')
+                from backend.pipeline.cvp_taxonomy_dependency import prepare as prepare_taxonomy
+                current=store.read_cvp_context(saved['claim_ids'],viewpoint_ids=read_artifact(proof)['viewpoint_ids'])
+                taxonomy=prepare_taxonomy(store,args.run_id,Path(read_artifact(proof)['audit']['path']),current)
+                store.complete_cvp_group(args.run_id,audit=audit,audit_binding=read_artifact(proof)['audit'],
+                    read_pins=decoded_pins(read_pins),owner_resolution_path=resolution,
+                    retained_impacts_resolution_path=proof,taxonomy_dependency_path=taxonomy)
+                stage_event('audited',sequence=saved['sequence'],run_id=args.run_id,
+                            management_resolution=binding(proof),new_model_calls=0,registry_writes=0)
+                return 0
+            elif args.action=='source-pending-check':
                 from backend.pipeline.cvp_source_impact_resolution import verify_pending_commits
                 result=verify_pending_commits(store,saved)
                 output=action_root/('source-pending-commits-'+sha256_json(result)[:20]+'.json')

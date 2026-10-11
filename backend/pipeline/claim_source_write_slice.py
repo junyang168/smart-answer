@@ -527,14 +527,14 @@ def unchanged_rejection_projection(old, current, findings, repaired_claim_ids):
         'saved_verdict':'audit_objection_rejected','model_verdicts_changed':False}
 
 
-def saved_impact_decisions(store,saved,audit_path,audit_root):
+def calculate_saved_impact_decisions(store,saved,audit_path):
     """Consume exact SQL-indexed history before any new semantic call.
 
     Sequential source management remains pending. Do not replay the old
     finding, mutate either raw report, or turn this receipt into group approval.
     """
     from backend.pipeline.cvp_sql_flow import binding,decoded_pins
-    from backend.pipeline.viewpoint_resolution_runtime import read_artifact,write_immutable
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact
     from backend.pipeline.viewpoint_audit_source_adjudication import build_packet
     from backend.pipeline.viewpoint_adjudication_history import target_identity,validated_history
     packet=build_packet(audit_path,store,True)
@@ -584,9 +584,87 @@ def saved_impact_decisions(store,saved,audit_path,audit_root):
         'pending_record_keys':saved['reviewed']['evidence']['pending_cvp_management_record_keys'],
         'new_model_calls':0,'registry_writes':0,'group_complete':False,'next_group_started':False,
         'model_verdicts_changed':False,'content_write_authority':False}
+    return result
+
+
+def saved_impact_decisions(store,saved,audit_path,audit_root):
+    from backend.pipeline.cvp_sql_flow import binding,decoded_pins
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact,write_immutable
+    result=calculate_saved_impact_decisions(store,saved,audit_path)
     receipt=read_artifact(audit_root/'impact-audit-receipt.json')
     with store.connect() as conn,conn.cursor() as cur:
         store._assert_transaction_read_pins(cur,decoded_pins(receipt['read_pins']))
     result['impact_audit_receipt']=binding(audit_root/'impact-audit-receipt.json')
     write_immutable(audit_root/'saved-impact-decisions.json',result)
     return result
+
+
+def verify_saved_statement_impact_resolution(audit,resolution):
+    """Authenticate a disjoint unchanged rejection, not a new adjudication."""
+    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.viewpoint_adjudication_history import validated_history,target_identity
+    from backend.pipeline.viewpoint_audit_source_adjudication import disputes
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    from backend.pipeline.source_reconciliation_runner import body,read
+    if (resolution.get('schema_version')!='wang_source_slice_saved_impact_resolution_v1'
+            or resolution.get('artifact_sha256')!=sha256_json({k:v for k,v in resolution.items() if k!='artifact_sha256'})
+            or resolution.get('new_model_calls')!=0 or resolution.get('registry_writes')!=0
+            or resolution.get('model_verdicts_changed') is not False):
+        raise ValueError('saved statement impact resolution identity/authority drift')
+    for b in resolution['bindings']:check_binding(b)
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+    if read_artifact(Path(resolution['audit']['path']))!=audit:
+        raise ValueError('saved statement resolution belongs to another full audit')
+    result=resolution['decisions'];packet=result['packet'];package=resolution['source_package']
+    if (result.get('unadjudicated_targets')!=[] or result.get('audit')!=resolution['audit']
+            or result.get('new_model_calls')!=0 or result.get('registry_writes')!=0
+            or result.get('group_complete') is not False or result.get('model_verdicts_changed') is not False):
+        raise ValueError('saved impact decisions are incomplete or changed verdicts')
+    validate_package(package)
+    app=package['source_repair_application'];direction=app['source_write_slice']
+    if direction.get('mode')!='owner_statement_completion':
+        raise ValueError('saved finding projection needs exact approved statement slice')
+    frozen=body(read(Path(app['run_root'])/'scoped-materials.json'))
+    before=c.index(frozen['before_records'])
+    after={p['claim_id']:p for p in package.get('claims',[])}
+    supported={r['claim_id'] for r in audit['layers']['3']['results'] if r['verdict']=='supported'}
+    actual_pins={(p['collection'],p['object_id']):p['pin'] for p in audit['meta']['registry_read_scope']['read_pins']}
+    repaired={cid for cid,p in after.items() if p['statement']!=before[c.key('claims',cid)]['statement']}
+    if not repaired or not repaired<=supported:
+        raise ValueError('removed co-member lacks actual independent current Claim audit')
+    for cid in repaired:
+        p=after[cid]
+        if actual_pins.get(('claims',cid))!=[p['revision'],record_content_sha(p),False]:
+            raise ValueError('repaired co-member generation differs from actual independent audit')
+    expected={f'{layer}:{row[key]}:{cid}' for layer,key,row in disputes(audit)
+        for cid in ([row[key]] if layer=='3' else row.get('claim_ids_in_question',[]))}
+    index={i['item_id']:i for i in packet['items']};covered=set()
+    if len(index)!=len(packet['items']) or set(index)!=expected:
+        raise ValueError('saved statement resolution lost actual disputed population')
+    bound=resolution['bindings']
+    for part in result['parts']:
+        for k in ('prior_packet','prior_raw','prior_handoff'):
+            if part[k] not in bound:raise ValueError('saved projection missing original raw binding')
+            check_binding(part[k])
+        old,findings=validated_history(Path(part['prior_packet']['path']).parent)
+        projection=part['projection'];item_id=projection['item_id']
+        if item_id not in index or item_id in covered:
+            raise ValueError('saved projection foreign/duplicate target')
+        previous=[i for i in old['items'] if i['item_id']==item_id]
+        if len(previous)!=1 or unchanged_rejection_projection(previous[0],index[item_id],findings,repaired)!=projection:
+            raise ValueError('saved statement projection differs from actual unchanged rejected target')
+        for cid in projection['removed_repaired_claim_ids']:
+            old_claims=[i['claim'] for i in old['items'] if i['claim']['claim_id']==cid]
+            if not old_claims or any(p!=before[c.key('claims',cid)] for p in old_claims):
+                raise ValueError('removed co-member is not the exact independently repaired beforeimage')
+        for source in index[item_id]['sources']:
+            check_binding({'path':source['path'],'file_sha256':source['file_sha256']})
+        layer,identity,_=item_id.split(':',2);key='claim_id' if layer=='3' else 'viewpoint_id'
+        rows=[r for r in audit['layers'][layer]['results'] if r[key]==identity]
+        if len(rows)!=1 or rows[0]!=index[item_id]['audit_finding']:
+            raise ValueError('saved projection actual current audit finding drift')
+        if target_identity(index[item_id])!=projection['unchanged_target_sha256']:
+            raise ValueError('saved projection target generation changed')
+        covered.add(item_id)
+    if covered!=expected:raise ValueError('saved statement resolution omitted an objection')
+    return {layer:{i.split(':')[1] for i in covered if i.startswith(layer+':')} for layer in ('3','4')}

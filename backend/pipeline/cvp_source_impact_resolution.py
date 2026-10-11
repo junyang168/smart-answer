@@ -1,8 +1,9 @@
 """Close typed source impacts after ordinary coverage and full group audit.
 
-No pending list or model verdict is rewritten. Only exact human-retired
-Evidence relations, independently retained relations, and declared source
-group annotations belong here. CVP/link/unknown impacts stay in their domain.
+No pending list or model verdict is rewritten. Exact committed source
+management and unchanged, fully audited CVP impacts have separate typed
+proofs. Unapproved unused candidate relations remain unresolved context;
+unknown, changed or unaudited dependencies cannot acquire closure authority.
 """
 from pathlib import Path
 from backend.api.canonical_repository.postgres_store import sha256_json,record_content_sha
@@ -10,6 +11,296 @@ from backend.pipeline.viewpoint_resolution_runtime import read_artifact,write_im
 
 VERSION='wang_sequential_source_impact_resolution_v1'
 HANDOFF='wang_sequential_source_cvp_handoff_v1'
+SLICE_IMPACTS='wang_source_slice_current_impact_resolution_v1'
+
+
+def statement_slice_context(store,value):
+    """Recover the named committed slice after later sequential actions.
+
+    The SQL Claim-layer receipt names its original action. This is a bounded
+    lookup over the group's explicit commits, not a second action or ancestry.
+    """
+    from copy import deepcopy
+    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.claim_source_write_slice import validate_package
+    marker=value.get('claim_layer_audit',{});proof=marker.get('receipt')
+    if not proof or marker.get('status')!='claim_layer_audited_cvp_pending':
+        raise ValueError('statement impact closure lacks actual SQL Claim-layer receipt')
+    check_binding(proof);receipt=read_artifact(proof['path'])
+    original=receipt.get('change_set_ids',[]);current=value['change_set_ids']
+    if (not original or len(original)!=len(set(original)) or current[:len(original)]!=original
+            or receipt.get('claim_ids')!=value['claim_ids'] or receipt.get('group_complete') is not False
+            or marker.get('cvp_management_complete') is not False):
+        raise ValueError('statement impact closure original commit/population drift')
+    root=Path(proof['path']).parent.parent;matches=[]
+    for cid in original:
+        history=store.get_change_history(cid)
+        if not history or history['status']!='applied' or history['metadata'].get('run_id')!=value['run_id']:
+            raise ValueError('statement impact original commit missing/foreign')
+        review=applied_review(store,value,history['metadata']['reviewed_sha256'])
+        app=review['evidence']['package']['payload'].get('source_repair_application',{})
+        if (app.get('source_write_slice',{}).get('mode')=='owner_statement_completion'
+                and Path(app.get('run_root','')).resolve()==root.resolve()):
+            matches.append((history,review))
+    if len(matches)!=1:raise ValueError('statement impact has no unique actual committed source slice')
+    history,review=matches[0];validate_package(review['evidence']['package']['payload'])
+    pending=review['evidence'].get('pending_cvp_management_record_keys',[])
+    if pending!=value['reviewed']['evidence'].get('pending_cvp_management_record_keys',[]):
+        raise ValueError('sequential action changed original pending obligations')
+    for cid in current[len(original):]:
+        h=store.get_change_history(cid)
+        if (not h or h['status']!='applied' or h['metadata'].get('run_id')!=value['run_id']
+                or h['source_kind']!='wang_claim_relation_retirement_v1'
+                or len(h['operations'])!=1 or h['operations'][0]['operation']!='retire'
+                or 'knowledge_relations/'+h['operations'][0]['object_id'] not in pending):
+            raise ValueError('unsupported sequential change after statement slice')
+    # Read-only reconstruction; SQL metadata, old answers and budgets stay put.
+    source=deepcopy(value);source['reviewed']=review
+    source['reviewed_sha256']=history['metadata']['reviewed_sha256'];source['change_set_ids']=list(original)
+    return source,receipt,root
+
+
+def current_receipt_pins(store,old_pins,commits):
+    """Only exact human withdrawal of unused candidate context may bridge pins."""
+    from backend.pipeline.cvp_sql_flow import decoded_pins,pin_rows
+    result=decoded_pins(old_pins)
+    for item in commits['items']:
+        if item['kind']!='exact_human_logical_retirement':continue
+        key=tuple(item['record_key'].split('/',1));old=result.get(key)
+        if old==tuple(item['pin']):continue
+        h=store.get_change_history(item['change_set_id']);op=h['operations'][0]
+        p=op['before']
+        if (old!=(op['before_revision'],op['before_sha256'],False)
+                or p.get('review_status')!='candidate' or p.get('visibility')!='internal'
+                or p.get('reason')!='' or key[0]!='knowledge_relations'
+                or record_content_sha(p)!=op['before_sha256']
+                or op['before_sha256']!=op['after_sha256']):
+            raise ValueError('receipt transition is not unchanged unapproved candidate withdrawal')
+        with store.connect() as conn,conn.cursor() as cur:
+            from backend.api.canonical_repository.knowledge_models import KNOWLEDGE_COLLECTIONS
+            refs=store._reference_consumers(cur,[key[1]],sorted(KNOWLEDGE_COLLECTIONS))
+            if any((c,i)!=key and key[1] in store._record_reference_ids(v,exclude_provenance=True) for c,i,v in refs):
+                raise ValueError('withdrawn candidate has an unaudited business consumer')
+            if cur.execute('SELECT 1 FROM wang_knowledge.edges WHERE (from_id=%s OR to_id=%s) AND retired_at IS NULL LIMIT 1',
+                           (key[1],key[1])).fetchone():
+                raise ValueError('withdrawn candidate has an unaudited edge consumer')
+            if cur.execute('SELECT 1 FROM wang_knowledge.review_events WHERE collection=%s AND object_id=%s LIMIT 1',key).fetchone():
+                raise ValueError('withdrawn relation was independently reviewed, not unused candidate context')
+        result[key]=tuple(item['pin'])
+    with store.connect() as conn,conn.cursor() as cur:
+        store._assert_transaction_read_pins(cur,result)
+    return pin_rows(result)
+
+
+def build_statement_impact_resolution(store,value,output):
+    """Close an actually audited statement slice; never delete candidate context."""
+    from backend.pipeline.cvp_sql_flow import binding,check_binding,decoded_pins,validate_transaction_audit,pins,pin_rows
+    from backend.pipeline import claim_source_write_slice as slice_flow
+    from backend.pipeline.claim_first_management import validate_claim_audit_report
+    from backend.pipeline.viewpoint_content_blocked_fallback import verify_saved_full_audit
+    from backend.pipeline.viewpoint_cvp_campaign_runner import validate_audit
+    from backend.pipeline.cvp_link_target_selection import _approved
+    source,claim_receipt,root=statement_slice_context(store,value)
+    commits=verify_pending_commits(store,value)
+    check_binding(claim_receipt['audit']);validate_claim_audit_report(read_artifact(claim_receipt['audit']['path']),value['claim_ids'])
+    for b in claim_receipt['source_proofs']:check_binding(b)
+    source_pins=current_receipt_pins(store,claim_receipt['read_pins'],commits)
+    scope=slice_flow.impact_audit_scope(store,source)
+    candidates=[]
+    for path in root.glob('cvp-impact-audit-*/impact-audit-receipt.json'):
+        r=read_artifact(path)
+        if (r.get('claim_ids')==scope['claim_ids'] and r.get('viewpoint_ids')==scope['viewpoint_ids']
+                and r.get('normal_review_archives')==scope['normal_review_archives']
+                and r.get('pending_record_keys')==scope['pending_record_keys']):candidates.append((path,r))
+    if len(candidates)!=1:raise ValueError('statement impact full audited population missing/ambiguous')
+    path,impact=candidates[0]
+    if (impact.get('group_complete') is not False or impact.get('model_verdicts_changed') is not False
+            or impact.get('cvp_record_keys')!=scope['cvp_record_keys']
+            or impact.get('source_record_keys')!=scope['source_record_keys']):
+        raise ValueError('statement impact receipt domain drift')
+    if current_receipt_pins(store,impact['read_pins'],commits)!=scope['read_pins']:
+        raise ValueError('statement impact audit producer scope changed beyond exact candidate withdrawal')
+    audit_binding=impact['audit'];check_binding(audit_binding);audit=read_artifact(audit_binding['path'])
+    validate_transaction_audit(audit,scope['claim_ids'],scope['viewpoint_ids'])
+    proofs=verify_saved_full_audit(Path(audit_binding['path']),layers=('3','4'))
+    independent=decoded_pins(audit['meta']['registry_read_scope']['read_pins'])
+    with store.connect() as conn,conn.cursor() as cur:store._assert_transaction_read_pins(cur,independent)
+    decisions=slice_flow.calculate_saved_impact_decisions(store,source,Path(audit_binding['path']))
+    saved_decisions=read_artifact(path.parent/'saved-impact-decisions.json')
+    if saved_decisions!={**decisions,'impact_audit_receipt':binding(path)}:
+        raise ValueError('statement impact saved decision receipt changed')
+    package=source['reviewed']['evidence']['package']['payload']
+    semantic={'schema_version':'wang_source_slice_saved_impact_resolution_v1','audit':audit_binding,
+        'source_package':package,'decisions':decisions,'bindings':[audit_binding,*proofs,
+            *[b for part in decisions['parts'] for k,b in part.items() if k.startswith('prior_')]],
+        'new_model_calls':0,'registry_writes':0,'model_verdicts_changed':False}
+    semantic={**semantic,'artifact_sha256':sha256_json(semantic)}
+    slice_flow.verify_saved_statement_impact_resolution(audit,semantic)
+    semantic_path=Path(output).parent/'statement-impact-semantic-resolution.json'
+    write_immutable(semantic_path,semantic)
+    validate_audit(audit,scope['claim_ids'],scope['viewpoint_ids'],owner_resolution_path=semantic_path)
+    items=list(commits['items'])+list(commits['unapproved_context_items'])
+    accounted={i['record_key'] for i in items};current_pins=decoded_pins(source_pins)
+    current_pins.update(decoded_pins(scope['read_pins']));current_pins.update(independent)
+    for key in scope['cvp_record_keys']:
+        col,oid=key.split('/',1);row=store.get_record_state(col,oid)
+        if not row or row['retired'] or record_content_sha(row['payload'])!=row['content_sha256']:
+            raise ValueError('statement pending CVP current generation drift')
+        _approved(row['payload']);pin=(row['revision'],row['content_sha256'],False)
+        if col=='viewpoint_structure_revisions':
+            # Historical approved editorial structure is not a new generation
+            # and has no Claim-version basis to silently rebind.
+            p=row['payload']
+            if any(f.get('basis_claim_ids') for f in p.get('focal_viewpoints',[])):
+                raise ValueError('historical structure has Claim basis requiring separate management')
+            matches=[]
+            for hinfo in scope['normal_review_archives']:
+                review=applied_review(store,value,hinfo['reviewed_sha256'])
+                for op in review['plan']['operations']:
+                    if (op['collection'],op['object_id'])==(col,oid):matches.append(op)
+            if (len(matches)!=1 or matches[0]['operation']!='create'
+                    or matches[0]['after_revision']!=pin[0] or matches[0]['after_sha256']!=pin[1]):
+                raise ValueError('historical structure lacks exact committed original independent approval')
+            kind='historical_approved_structure_unchanged_no_claim_basis'
+        else:
+            if independent.get((col,oid))!=pin:
+                raise ValueError('pending CVP generation not in complete actual independent audit')
+            kind='approved_current_cvp_impact_independently_audited'
+        items.append({'record_key':key,'kind':kind,'pin':list(pin)})
+        accounted.add(key);current_pins[col,oid]=pin
+    pending=value['reviewed']['evidence']['pending_cvp_management_record_keys']
+    if accounted!=set(pending) or len(items)!=len(pending):
+        raise ValueError('statement impact closure lost a pending obligation')
+    if any(tuple(i['record_key'].split('/',1)) in independent for i in commits['unapproved_context_items']):
+        raise ValueError('unapproved context was consumed as an independent semantic dependency')
+    with store.connect() as conn,conn.cursor() as cur:store._assert_transaction_read_pins(cur,current_pins)
+    body={'schema_version':SLICE_IMPACTS,'run_id':value['run_id'],'reviewed_sha256':value['reviewed_sha256'],
+        'source_reviewed_sha256':source['reviewed_sha256'],'source_change_set_id':source['reviewed']['plan']['change_set_id'],
+        'change_set_ids':value['change_set_ids'],'claim_layer_completion':value['claim_layer_audit']['receipt'],
+        'impact_audit_receipt':binding(path),'audit':audit_binding,'semantic_resolution':binding(semantic_path),
+        'claim_ids':scope['claim_ids'],'viewpoint_ids':scope['viewpoint_ids'],
+        'pending_record_keys':pending,'items':sorted(items,key=lambda i:i['record_key']),
+        'read_pins':pin_rows(current_pins),'partial_commits':commits,
+        'bindings':[*proofs,*claim_receipt['source_proofs'],*commits['bindings']],
+        'new_model_calls':0,'registry_writes':0,'model_verdicts_changed':False,
+        'original_pending_list_preserved':True,'unapproved_candidate_semantics_resolved':False}
+    write_immutable(output,{**body,'artifact_sha256':sha256_json(body)})
+    return Path(output),semantic_path,audit,pin_rows(current_pins)
+
+
+def validate_statement_impact_completion(value,path,audit_binding,cursor,*,semantic_resolution=None):
+    """Recheck exact current/committed authority in the completion transaction."""
+    from backend.pipeline.cvp_sql_flow import check_binding,decoded_pins,binding
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    from backend.pipeline.claim_relation_retirement import validate_package as retirement_package
+    from backend.pipeline.cvp_link_target_selection import _approved
+    body=read_artifact(path)
+    pending=value['reviewed']['evidence'].get('pending_cvp_management_record_keys',[])
+    if (body.get('schema_version')!=SLICE_IMPACTS
+            or body.get('artifact_sha256')!=sha256_json({k:v for k,v in body.items() if k!='artifact_sha256'})
+            or body.get('run_id')!=value['run_id'] or body.get('reviewed_sha256')!=value['reviewed_sha256']
+            or body.get('change_set_ids')!=value['change_set_ids'] or body.get('claim_ids')!=value['claim_ids']
+            or body.get('pending_record_keys')!=pending or body.get('audit')!=audit_binding
+            or body.get('claim_layer_completion')!=value.get('claim_layer_audit',{}).get('receipt')
+            or body.get('semantic_resolution')!=(binding(semantic_resolution) if semantic_resolution else None)
+            or body.get('new_model_calls')!=0 or body.get('registry_writes')!=0
+            or body.get('model_verdicts_changed') is not False
+            or body.get('original_pending_list_preserved') is not True
+            or body.get('unapproved_candidate_semantics_resolved') is not False):
+        raise ValueError('statement impact completion proof missing/foreign/changed authority')
+    for b in [body['claim_layer_completion'],body['impact_audit_receipt'],body['audit'],
+              body['semantic_resolution'],*body['bindings']]:check_binding(b)
+    source=applied_review(None,value,body['source_reviewed_sha256'],cursor=cursor)
+    if source['plan']['change_set_id']!=body['source_change_set_id']:
+        raise ValueError('statement impact source commit identity drift')
+    package=source['evidence']['package']['payload'];app=package.get('source_repair_application',{})
+    direction=app.get('source_write_slice',{})
+    claim_receipt=read_artifact(body['claim_layer_completion']['path'])
+    semantic=read_artifact(body['semantic_resolution']['path'])
+    impact=read_artifact(body['impact_audit_receipt']['path'])
+    if (direction.get('mode')!='owner_statement_completion'
+            or direction.get('run_id')!=value['run_id'] or semantic['source_package']!=package
+            or body['claim_layer_completion']['path']!=str(Path(app['run_root'])/'claim-first-audit/claim-layer-completion.json')
+            or claim_receipt['claim_ids']!=value['claim_ids']
+            or value['change_set_ids'][:len(claim_receipt['change_set_ids'])]!=claim_receipt['change_set_ids']
+            or source['evidence'].get('pending_cvp_management_record_keys')!=pending
+            or impact['pending_record_keys']!=pending or impact['claim_ids']!=value['claim_ids']
+            or impact['viewpoint_ids']!=body['viewpoint_ids'] or impact['audit']!=audit_binding):
+        raise ValueError('statement impact source/Claim/audit lineage drift')
+    required=source['evidence'].get('pending_cvp_claim_ids',[])
+    if (not required or required!=value['reviewed']['evidence'].get('pending_cvp_claim_ids',[])
+            or not set(required)<=set(body['claim_ids'])):
+        raise ValueError('statement impact did not cover original pending Claim population')
+    pins=decoded_pins(body['read_pins'])
+    if len(pins)!=len(body['read_pins']):raise ValueError('statement impact duplicate current pins')
+    actual={k:{**r,'retired':r.get('retired_at') is not None}
+            for k,r in PostgresKnowledgeStore._assert_transaction_read_pins(cursor,pins).items()}
+    items=body['items']
+    if (len(items)!=len(pending) or {i['record_key'] for i in items}!=set(pending)):
+        raise ValueError('statement impact incomplete pending population')
+    audit=read_artifact(body['audit']['path'])
+    independent=decoded_pins(audit['meta']['registry_read_scope']['read_pins'])
+    for i in items:
+        key=tuple(i['record_key'].split('/',1));row=actual.get(key)
+        if not row or tuple(i['pin'])!=pins.get(key):raise ValueError('statement impact item pin drift')
+        kind=i['kind']
+        if kind=='unchanged_unapproved_internal_relation_context':
+            if key in independent:raise ValueError('candidate context became audited semantic dependency')
+            history_row=cursor.execute('''SELECT c.change_set_id,c.status,c.source_kind,o.operation,
+                o.before_revision,o.before_sha256,o.after_revision,o.after_sha256,v.payload
+                FROM wang_knowledge.object_versions v JOIN wang_knowledge.change_sets c ON c.change_set_id=v.change_set_id
+                JOIN wang_knowledge.change_operations o ON o.change_set_id=v.change_set_id AND o.collection=v.collection
+                AND o.object_id=v.object_id AND o.after_revision=v.revision
+                WHERE v.collection=%s AND v.object_id=%s AND v.revision=%s''',(*key,row['revision'])).fetchall()
+            if len(history_row)!=1:raise ValueError('candidate context creation missing/ambiguous at completion')
+            h=history_row[0]
+            history={'change_set_id':h[0],'status':h[1],'source_kind':h[2],'operations':[{
+                'collection':key[0],'object_id':key[1],'operation':h[3],'before_revision':h[4],
+                'before':None if h[4] is None and h[5] is None else {},'after_revision':h[6],
+                'after_sha256':h[7],'after':h[8]}]}
+            edge=cursor.execute('SELECT payload,review_status,revision,retired_at IS NOT NULL FROM wang_knowledge.edges WHERE edge_collection=%s AND edge_id=%s',key).fetchone()
+            from backend.api.canonical_repository.knowledge_models import KNOWLEDGE_COLLECTIONS
+            refs=PostgresKnowledgeStore._reference_consumers(cursor,[key[1]],sorted(KNOWLEDGE_COLLECTIONS))
+            refs=[(c,j) for c,j,p in refs if (c,j)!=key and key[1] in PostgresKnowledgeStore._record_reference_ids(p,exclude_provenance=True)]
+            refs+=cursor.execute('SELECT edge_collection,edge_id FROM wang_knowledge.edges WHERE (from_id=%s OR to_id=%s) AND retired_at IS NULL',(key[1],key[1])).fetchall()
+            reviews=cursor.execute('SELECT review_event_id FROM wang_knowledge.review_events WHERE collection=%s AND object_id=%s',key).fetchall()
+            expected=candidate_relation_context(i['record_key'],row,history,references=refs,reviews=reviews,
+                edge={'payload':edge[0],'review_status':edge[1],'revision':edge[2],'retired':edge[3]} if edge else None)
+            if i!=expected:raise ValueError('candidate context completion classification drift')
+        elif kind=='exact_human_logical_retirement':
+            reviewed=applied_review(None,value,i['reviewed_sha256'],cursor=cursor)
+            if (reviewed['plan']['change_set_id']!=i['change_set_id']
+                    or retirement_package(reviewed['evidence']['package']['payload'])!=(key,)
+                    or not row['retired']):
+                raise ValueError('statement impact retirement lost exact committed owner authority')
+        elif kind=='independently_committed_source_evidence':
+            if (key[0]!='evidence_steps' or row['retired'] or row['payload'].get('review_status')!='independent_terminal_reviewed'
+                    or row['payload'].get('support_eligibility') not in {'eligible','eligible_with_label'}):
+                raise ValueError('statement impact Evidence lost actual reviewed generation')
+            creator=cursor.execute('SELECT metadata FROM wang_knowledge.change_sets WHERE change_set_id=%s AND status=\'applied\'',(i['change_set_id'],)).fetchone()
+            if not creator or creator[0].get('reviewed_sha256')!=i['reviewed_sha256']:
+                raise ValueError('statement impact Evidence committed approval drift')
+            current=cursor.execute('SELECT change_set_id FROM wang_knowledge.object_versions WHERE collection=%s AND object_id=%s AND revision=%s',(*key,row['revision'])).fetchone()
+            if current!=(i['change_set_id'],):raise ValueError('statement Evidence generation not from actual reviewed commit')
+        elif kind=='approved_current_cvp_impact_independently_audited':
+            if key[0] not in {'canonical_viewpoints','viewpoint_revisions','viewpoint_claim_links'} or independent.get(key)!=pins[key] or row['retired']:
+                raise ValueError('statement CVP impact missing from exact full independent audit')
+            _approved(row['payload'])
+        elif kind=='historical_approved_structure_unchanged_no_claim_basis':
+            if (key[0]!='viewpoint_structure_revisions' or row['retired']
+                    or any(f.get('basis_claim_ids') for f in row['payload'].get('focal_viewpoints',[]))):
+                raise ValueError('statement historical structure acquired unaudited Claim basis')
+            _approved(row['payload'])
+            match=cursor.execute('''SELECT c.metadata,o.operation,o.after_revision,o.after_sha256
+                FROM wang_knowledge.object_versions v JOIN wang_knowledge.change_sets c ON c.change_set_id=v.change_set_id
+                JOIN wang_knowledge.change_operations o ON o.change_set_id=v.change_set_id AND o.collection=v.collection
+                AND o.object_id=v.object_id AND o.after_revision=v.revision WHERE v.collection=%s AND v.object_id=%s AND v.revision=%s
+                AND c.status='applied' AND c.source_kind='cvp_batch_resolution' ''',(*key,row['revision'])).fetchall()
+            if len(match)!=1 or match[0][1:]!=('create',row['revision'],row['content_sha256']) or match[0][0].get('run_id')!=value['run_id']:
+                raise ValueError('historical structure original committed approval missing')
+            applied_review(None,value,match[0][0]['reviewed_sha256'],cursor=cursor)
+        else:raise ValueError('statement impact unknown closure kind')
+    return body
 
 
 def candidate_relation_context(key, row, history, *, references, reviews, edge):
