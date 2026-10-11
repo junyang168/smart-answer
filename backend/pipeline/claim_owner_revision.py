@@ -430,6 +430,8 @@ def finish_dependency_audit(store,run_id):
             '--no-status-file','--preserve-full-context','--sql-group-scope','--out',str(root)],
             cwd=PROJECT,check=True,env={**os.environ,'KNOWLEDGE_DATABASE_URL':store.database_url})
     if read_artifact(root/'audit-intent.json')!=intent:raise ValueError('dependency Claim audit generation drift')
+    from backend.pipeline.viewpoint_content_blocked_fallback import apply as content_fallback, KEY as FALLBACK_KEY
+    path=content_fallback(path,root/'content-blocked-fallback')
     audit=read_artifact(path);validate_claim_audit_report(audit,[cid])
     sources=verify_saved_full_audit(path,layers=('3',))
     row=store.get_record_state('claims',cid)
@@ -437,6 +439,8 @@ def finish_dependency_audit(store,run_id):
     receipt={'schema_version':VERSION,'status':'existing_dependency_claim_audited','run_id':run_id,
              'direction':proof,'audit':binding(path),'claim_pin':pin,'claim_id':cid,'source_proofs':sources,
              'original_group_claim_ids':value['claim_ids'],'campaign_membership_changes':0}
+    if audit.get('meta',{}).get(FALLBACK_KEY):
+        receipt.update(revisit_required=True,independent_complete=False)
     write_immutable(root/'completion.json',receipt)
     return binding(root/'completion.json')
 
@@ -457,6 +461,10 @@ def validate_dependency_completion(value,*,cursor=None):
             or receipt['original_group_claim_ids']!=value['claim_ids'] or receipt['campaign_membership_changes']!=0):
         raise ValueError('dependency Claim audit cannot alter original group or waive content')
     check_binding(receipt['audit']);audit=read_artifact(receipt['audit']['path']);validate_claim_audit_report(audit,[cid])
+    from backend.pipeline.viewpoint_content_blocked_fallback import KEY as FALLBACK_KEY
+    if audit.get('meta',{}).get(FALLBACK_KEY) and (
+            receipt.get('revisit_required') is not True or receipt.get('independent_complete') is not False):
+        raise ValueError('dependency safety supplement must preserve nonindependent revisit disclosure')
     if verify_saved_full_audit(Path(receipt['audit']['path']),layers=('3',))!=receipt['source_proofs']:
         raise ValueError('dependency Claim audit raw/source identity drift')
     if cursor is not None:

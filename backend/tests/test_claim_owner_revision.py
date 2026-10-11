@@ -36,6 +36,54 @@ def direction_case(tmp_path):
 def seal(d):d['artifact_sha256']=sha256_json({k:v for k,v in d.items() if k!='artifact_sha256'})
 
 
+@pytest.mark.parametrize('outcome',['supported','unknown','semantic'])
+def test_dependency_audit_reuses_existing_safety_fallback_without_gemini_retry(tmp_path,monkeypatch,outcome):
+    from backend.pipeline import claim_dependency_handoff as handoff,claim_first_management as first
+    from backend.pipeline import viewpoint_content_blocked_fallback as fallback
+    from backend.pipeline import cvp_sql_flow as flow
+    root=tmp_path/'dependency-claim-audit';root.mkdir()
+    state={'revision':3,'content_sha256':'a'*64,'retired':False}
+    proof={'path':'existing-approved-material','sha256':'b'*64}
+    value={'run_id':'G','claim_ids':['original'],'reviewed':{'plan':{'change_set_id':'KCS'},
+        'evidence':{'package':{'payload':{'source_repair_application':{'run_root':str(tmp_path)}}}}}}
+    intent={'schema_version':m.VERSION,'run_id':'G','claim_ids':['C'],'original_group_claim_ids':['original'],
+        'direction':proof,'pin':[3,'a'*64,False],'change_set_id':'KCS','model':'gemini-3.8-flash',
+        'workers':2,'layers':['1','2','3'],'automatic_retry':False}
+    m.write_immutable(root/'audit-intent.json',intent)
+    m.write_immutable(root/'audit.json',{'original':'blocked'})
+    assessment=root/'assessment.json'
+    m.write_immutable(assessment,{'meta':{fallback.KEY:proof},'result':outcome})
+    monkeypatch.setattr(handoff,'subject',lambda v:None)
+    monkeypatch.setattr(m,'dependency_direction',lambda v:(proof,'C'))
+    monkeypatch.setattr(flow,'check_binding',lambda p:None)
+    monkeypatch.setattr('subprocess.run',lambda *a,**kw:pytest.fail('must not rerun Gemini'))
+    calls=[]
+    def apply(path,output):
+        calls.append((path,output))
+        if outcome=='unknown':raise ValueError('fallback already attempted; no automatic retry')
+        return assessment
+    monkeypatch.setattr(fallback,'apply',apply)
+    monkeypatch.setattr(fallback,'verify_saved_full_audit',lambda p,**kw:[proof])
+    def validate(audit,ids):
+        assert ids==['C']
+        if outcome=='semantic':raise ValueError('actual unresolved')
+    monkeypatch.setattr(first,'validate_claim_audit_report',validate)
+    store=NS(get_cvp_group=lambda run:value,get_record_state=lambda *args:state)
+    if outcome!='supported':
+        with pytest.raises(ValueError):m.finish_dependency_audit(store,'G')
+        assert not (root/'completion.json').exists()
+    else:
+        m.finish_dependency_audit(store,'G')
+        receipt=m.read_artifact(root/'completion.json')
+        assert receipt['revisit_required'] is True and receipt['independent_complete'] is False
+        assert receipt['campaign_membership_changes']==0
+        m.validate_dependency_completion(value)
+        receipt.pop('independent_complete');monkeypatch.setattr(m,'read_artifact',lambda p: receipt if Path(p).name=='completion.json' else __import__('backend.pipeline.viewpoint_resolution_runtime',fromlist=['read_artifact']).read_artifact(p))
+        with pytest.raises(ValueError,match='nonindependent revisit'):m.validate_dependency_completion(value)
+    assert calls==[(root/'audit.json',root/'content-blocked-fallback')]
+    assert m.read_artifact(root/'audit.json')=={'original':'blocked'}
+
+
 def test_sql_dependency_intake_exact_owner_once_without_changing_membership(postgres_store,issue_setup,tmp_path):
     from backend.api.canonical_repository.postgres_store import canonical_json
     manifest,states,report,_=issue_setup
