@@ -5,6 +5,58 @@ from backend.pipeline import source_reconciliation as c
 from backend.api.canonical_repository.postgres_store import record_content_sha,sha256_json
 
 
+def saved_anchor_draft():
+    from pathlib import Path
+    from backend.pipeline import source_reconciliation_runner as r
+    root=Path('/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/staging/cvp-production-357/campaign-sql-20261008-v1-from-g059/execution/CVPG-e60b6130e0f7c81e810f4195c47f9eda0830bb1110e48c7999cc6fcfbe4e1e2a/actions/source/CVPA-c63afc3b70665e9d3209f9e1b75bda5443a5b26c3f9582a57b162e963fca4319')
+    if not root.exists():pytest.skip('actual saved anchor action unavailable')
+    frozen=r.body(r.read(root/'scoped-materials.json'))
+    raw=r.validate_raw(root,'proposal_schema_recovery',r.body(r.read(root/'proposal_schema_recovery.packet.json')))
+    return root,frozen,raw
+
+
+def test_actual_saved_draft_is_full_review_only_and_raw_immutable():
+    import hashlib
+    from backend.pipeline import source_reconciliation_runner as r
+    from backend.pipeline.source_review_input_repair import add_receipt
+    root,f,raw=saved_anchor_draft()
+    files={p:hashlib.sha256(p.read_bytes()).hexdigest() for p in root.rglob('*') if p.is_file()}
+    original=deepcopy(raw['response'])
+    proposal=r.effective_proposal(f,raw['response'])
+    packet=add_receipt(f,raw['response'],r.initial_review_base(f,proposal))
+    missing=packet['anchor_draft_missing_dispositions']
+    assert len(missing)==2 and all(k.startswith('source_fragments/') for k in missing)
+    assert len(packet['program_before_review']['records'])==2
+    assert packet['unresolved_proposal_review']['content_write_authority'] is False
+    with pytest.raises(ValueError,match='exactly one disposition'):c.review_packet(f,proposal)
+    keys={d.record_key for d in proposal.dispositions}|set(missing)
+    response={'proposal_sha256':packet['proposal_sha256'], 'verdicts':[
+        {'record_key':k,'approved':True,'problems':[],'reason':'full postimage reviewed'} for k in sorted(keys)]}
+    assert c.validate_review(packet,response) is False
+    assert raw['response']==original
+    assert all(hashlib.sha256(p.read_bytes()).hexdigest()==sha for p,sha in files.items())
+
+
+@pytest.mark.parametrize('fault',['missing_existing','extra','duplicate','unresolved','foreign_quote','repeat_quote'])
+def test_actual_saved_anchor_draft_negative_gates(fault):
+    from backend.pipeline import source_reconciliation_runner as r
+    _,f,raw=saved_anchor_draft()
+    p=r.effective_proposal(f,raw['response'])
+    if fault=='missing_existing':p.dispositions.pop(0)
+    if fault=='extra':p.dispositions.append(p.dispositions[0].model_copy(update={'record_key':'source_fragments/foreign'}))
+    if fault=='duplicate':p.dispositions.append(p.dispositions[0])
+    if fault=='unresolved':p.dispositions[0].action='unresolved'
+    if fault in {'foreign_quote','repeat_quote'}:
+        response=deepcopy(raw['response']);row=next(x for x in response['records'] if x['collection']=='source_fragments')
+        import json
+        value=json.loads(row['payload_json'])
+        if fault=='foreign_quote':value['source_id']='foreign';row['payload_json']=json.dumps(value)
+        else:f['after'][0]['paragraphs'][value['paragraph_key']]['text']+=value['verbatim_excerpt']
+        with pytest.raises(ValueError):r.effective_proposal(f,response)
+        return
+    with pytest.raises(ValueError):r.initial_review_base(f,p)
+
+
 def fixture(monkeypatch):
     claim={'claim_id':'C','revision':1,'statement':'unchanged',
         'evidence_step_ids':['E','OTHER'],'eligible_evidence_step_ids':['OTHER'],

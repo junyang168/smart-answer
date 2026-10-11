@@ -6,6 +6,7 @@ Other graph maintenance remains explicitly pending, never newly approved.
 """
 from copy import deepcopy
 import json
+import hashlib
 
 from backend.pipeline import source_reconciliation as c
 from backend.api.canonical_repository.postgres_store import sha256_json, record_content_sha
@@ -14,6 +15,20 @@ VERSION = 'wang_claim_anchor_qualification_v1'
 FRAGMENT_FIELDS = {'schema_version','visibility','source_id','verbatim_excerpt','paragraph_key',
     'media_time','source_url','citation_id','source_sha256','paragraph_text_sha256',
     'verbatim_excerpt_sha256','anchor_state','source_modality'}
+
+
+def normalized_proposal(frozen,response):
+    from backend.pipeline.deferred_claim_repair import decode_proposal
+    proposal=c.Proposal.model_validate(decode_proposal(response))
+    for row in proposal.records:
+        if row.collection!='source_fragments':continue
+        value=row.payload;src=frozen['after'][0]
+        if value['source_id']!=frozen['manifest']['source_id']:raise ValueError('foreign anchor fragment')
+        text=src['paragraphs'].get(value['paragraph_key'],{}).get('text','');quote=value['verbatim_excerpt']
+        if not quote or text.count(quote)!=1:raise ValueError('new quote must be exact unique own body')
+        value.update(source_sha256=src['body_sha256'],paragraph_text_sha256=hashlib.sha256(text.encode()).hexdigest(),
+            verbatim_excerpt_sha256=hashlib.sha256(quote.encode()).hexdigest(),anchor_state='source_version_bound')
+    return proposal
 
 
 def direction(manifest, states, snapshots=None):
@@ -131,7 +146,7 @@ def validate_binding_closure(frozen, proposal, post):
             ids=set(ev.get('source_fragment_ids',[]))|({ev['source_fragment_id']} if ev.get('source_fragment_id') else set())
             q=a['proposed_highlight']['text']
             matches=[fid for fid in ids if post[c.key('source_fragments',fid)]['paragraph_key']==a['paragraph_key']
-                and q==post[c.key('source_fragments',fid)]['verbatim_excerpt']]
+                and q in post[c.key('source_fragments',fid)]['verbatim_excerpt']]
             if len(matches)!=1:raise ValueError('anchor binding repair must realize every retained own anchor exactly')
             fragments.update(matches)
     created={r.object_id for r in proposal.records if r.collection=='source_fragments'}

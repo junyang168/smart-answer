@@ -600,7 +600,7 @@ def _semantic(row: dict) -> dict:
     return {k: v for k, v in row.items() if k not in PROVENANCE | {"revision"}}
 
 
-def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = False, claim_first: bool = False, initial_claim_draft: bool = False) -> dict[str, dict]:
+def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = False, claim_first: bool = False, initial_claim_draft: bool = False, initial_anchor_draft: bool = False) -> dict[str, dict]:
     before = index(frozen["before_records"])
     manifest = Manifest.model_validate(frozen["manifest"])
     allowed = {p.key: p for p in manifest.permissions}
@@ -616,7 +616,12 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
             allowed[k] = matches[0]
     dispositions = {d.record_key: d for d in proposal.dispositions}
     required = set(frozen["inventory"]["affected_keys"]) | set(proposed)
-    if len(dispositions) != len(proposal.dispositions) or set(dispositions) != required:
+    missing=required-set(dispositions)
+    if initial_anchor_draft and (not manifest.anchor_qualification or not missing or set(dispositions)-required
+            or any(k in before or k not in proposed or not k.startswith('source_fragments/') for k in missing)
+            or any(d.action=='unresolved' for d in proposal.dispositions)):
+        raise ValueError('anchor initial draft only permits disclosed missing new-fragment dispositions')
+    if len(dispositions) != len(proposal.dispositions) or (set(dispositions) != required and not initial_anchor_draft):
         raise ValueError("every affected consumer requires exactly one disposition")
     unresolved = {d.record_key for d in proposal.dispositions if d.action == 'unresolved'}
     if initial_claim_draft:
@@ -997,9 +1002,9 @@ def validate_basis_groups(spans: list[tuple]) -> None:
             raise ValueError("overlapping anchors require one basis group and exactly one representative")
 
 
-def review_packet(frozen: dict, proposal: Proposal, *, review_only: bool = False, claim_first: bool = False, initial_claim_draft: bool = False) -> dict:
+def review_packet(frozen: dict, proposal: Proposal, *, review_only: bool = False, claim_first: bool = False, initial_claim_draft: bool = False, initial_anchor_draft: bool = False) -> dict:
     post = validate_proposal(frozen, proposal, review_only=review_only, claim_first=claim_first,
-                      initial_claim_draft=initial_claim_draft)
+                      initial_claim_draft=initial_claim_draft,initial_anchor_draft=initial_anchor_draft)
     selected = frozen["inventory"]["affected_keys"] + frozen["inventory"]["context_keys"]
     before = index(frozen["before_records"])
     result = {
@@ -1031,7 +1036,16 @@ def review_packet(frozen: dict, proposal: Proposal, *, review_only: bool = False
     from backend.pipeline.claim_evidence_completion import review_items
     withdrawals=review_items(frozen)
     if withdrawals:result['knowledge_relation_withdrawal_review']=withdrawals
-    if initial_claim_draft:
+    if initial_anchor_draft:
+        missing=sorted(set(index(proposal.records))-set(d.record_key for d in proposal.dispositions))
+        result['anchor_draft_missing_dispositions']=missing
+        result['unresolved_proposal_review']={'schema_version':'anchor_qualification_initial_draft_v1',
+            'content_write_authority':False,'mandatory_original_unique_correction':True,
+            'pending_record_keys':missing,'program_findings':['Missing exact new-fragment dispositions: '+', '.join(missing)],
+            'explanation':'Review ALL complete postimages including each listed new fragment. Return verdicts for all dispositions AND listed missing fragment keys. '
+                'No program disposition/reason was added. Even all-approved initial review cannot authorize writing. '
+                'The original single correction must supply the missing dispositions and address all source/content findings; final remains strict.'}
+    elif initial_claim_draft:
         findings = []
         try:
             validate_proposal(frozen, proposal)
@@ -1090,6 +1104,7 @@ def validate_review(packet: dict, response: dict) -> bool:
     from backend.api.canonical_repository.viewpoint_response_binding import bind_response
     review = Review.model_validate(bind_response(Review,response,packet))
     required = {d["record_key"] for d in packet["proposal"]["dispositions"]}
+    required.update(packet.get('anchor_draft_missing_dispositions',[]))
     if packet.get('knowledge_relation_withdrawal_review'):
         from backend.pipeline.claim_evidence_completion import direction_for
         direction=direction_for(packet.get('claim_issue_context',{}))

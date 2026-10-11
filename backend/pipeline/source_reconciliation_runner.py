@@ -24,8 +24,8 @@ STAGES = ("proposal", "proposal_schema_recovery", "initial_review", "correction"
 
 def effective_proposal(frozen, response):
     if frozen['manifest'].get('anchor_qualification'):
-        from backend.pipeline.deferred_claim_repair import decode_proposal
-        return contract.Proposal.model_validate(decode_proposal(response))
+        from backend.pipeline.claim_anchor_qualification import normalized_proposal
+        return normalized_proposal(frozen,response)
     if frozen['manifest'].get('viewpoint_scope_repair'):
         from backend.pipeline.cvp_scope_management import effective_proposal as scoped
         return scoped(response)
@@ -39,6 +39,9 @@ def effective_proposal(frozen, response):
 
 
 def initial_review_base(frozen, proposal):
+    if frozen['manifest'].get('anchor_qualification'):
+        missing=set(contract.index(proposal.records))-set(d.record_key for d in proposal.dispositions)
+        return contract.review_packet(frozen,proposal,initial_anchor_draft=bool(missing))
     from backend.pipeline.claim_evidence_completion import direction_for, initial_draft_review
     if direction_for(frozen.get('claim_issue_context',{})):
         return initial_draft_review(frozen,proposal)
@@ -361,7 +364,7 @@ class Runner:
         # Saved review packets retain their exact old contract. New reviews
         # receive the same verified read-only adapter proof as the proposer.
         base = disclosed_review_base(frozen, base)
-        return add_receipt(frozen, response, base) if frozen['manifest'].get('claim_issue') else base
+        return add_receipt(frozen, response, base) if frozen['manifest'].get('claim_issue') or frozen['manifest'].get('anchor_qualification') else base
 
     def reviewed(self, frozen: dict) -> tuple[contract.Proposal, dict]:
         if contract.unresolved_consumers(frozen):
