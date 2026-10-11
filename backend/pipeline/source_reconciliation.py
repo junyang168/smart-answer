@@ -663,13 +663,13 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
             # Existing co-Claims and question/answer consumers can expose
             # separate concerns in a draft. They remain pinned, nonwritable review
             # context; this initial-only path cannot approve or edit them.
-            readonly_source_dependency = col in {'claims', 'evidence_steps', 'knowledge_relations', 'questions'}
+            readonly_source_dependency = col in {'claims', 'evidence_steps', 'knowledge_relations', 'questions', 'claim_relations'}
             if empty_owner and col=='claims' and ident==empty_owner['claim_id']:
                 continue  # Exact missing draft disclosed; never a final/write exemption.
             if empty_statement and col=='claims' and ident==empty_statement['claim_id']:
                 continue  # Only original initial diagnostic; strict final remains unchanged.
             if (col not in {'viewpoint_claim_links', 'canonical_viewpoints', 'viewpoint_revisions',
-                            'claims', 'evidence_steps', 'knowledge_relations', 'questions'}
+                            'claims', 'evidence_steps', 'knowledge_relations', 'questions', 'claim_relations'}
                     or old is None or k in proposed or pin != [old.get('revision', 1),
                         sha256_json({f:v for f,v in old.items() if f != 'revision'}), False]
                     or old.get('review_status') in HUMAN_HOLDS | {'human_hold', 'rejected', 'withheld_unreviewed'}

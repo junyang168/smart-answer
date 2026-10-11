@@ -120,15 +120,31 @@ def empty_statement_initial_draft(materials, proposal):
     pins = {(p['collection'], p['object_id']): p['pin'] for p in materials['sql_scope']['read_pins']}
     permissions = [p for p in materials['manifest']['permissions']
                    if c.key(p['collection'], p['object_id']) == key]
-    if (old is None or assessment.issue_id != issue.issue_id or assessment.cause != 'claim_statement'
+    retained_link_diagnostic = (assessment.cause == 'cvp_link'
+        and sum(d.record_key == key and d.action == 'retain' for d in proposal.dispositions) == 1)
+    if (old is None or assessment.issue_id != issue.issue_id
+            or assessment.cause not in {'claim_statement', 'cvp_link'}
+            or (assessment.cause == 'cvp_link' and not retained_link_diagnostic)
             or old.get('revision', 1) != issue.claim_revision
             or c.sha256_json({k:v for k,v in old.items() if k != 'revision'}) != issue.claim_sha256
             or pins.get(('claims', issue.claim_id)) != [issue.claim_revision, issue.claim_sha256, False]
             or old.get('review_status') in c.HUMAN_HOLDS | {'human_hold', 'rejected', 'withheld_unreviewed'}
             or len(permissions) != 1 or permissions[0].get('create')
             or 'statement' not in permissions[0]['fields']
-            or sum(d.record_key == key and d.action == 'unresolved' for d in proposal.dispositions) != 1):
+            or (not retained_link_diagnostic
+                and sum(d.record_key == key and d.action == 'unresolved' for d in proposal.dispositions) != 1)):
         raise ValueError('empty statement draft identity/permission/current pin mismatch')
+    if retained_link_diagnostic:
+        if not any(d.action == 'unresolved' for d in proposal.dispositions):
+            raise ValueError('retained Claim link diagnostic requires a pending management subject')
+        return {'schema_version': 'claim_retained_link_initial_diagnostic_v1',
+            'claim_id': issue.claim_id, 'issue_id': issue.issue_id,
+            'content_write_authority': False, 'mandatory_original_unique_correction': True,
+            'explanation': 'The proposer classified a connection issue and retained the Claim without '
+                'a typed write. Independently review the full own source and exact current graph. '
+                'No reason is parsed into a postimage; no unresolved connection or relation is approved. '
+                'Any correction stays within original permissions; unresolved CVP management must '
+                'remain a separate handoff, not a forced Claim rewrite or automatic supports change.'}
     return {'schema_version': 'claim_statement_empty_initial_draft_v1',
         'claim_id': issue.claim_id, 'issue_id': issue.issue_id,
         'content_write_authority': False, 'mandatory_original_unique_correction': True,
