@@ -298,10 +298,12 @@ def test_declined_supports_dependency_is_bound_diagnostic_only(tmp_path,monkeypa
     if mutation=='claim':state['payload']['statement']='changed'
     if mutation=='answered_pass':response['verdicts'][0].update(approved=True,problems=[])
     if mutation:
-        with pytest.raises(ValueError):m.declined_supports_dependency(issue,value,state)
+        from backend.pipeline.claim_owner_revision import dependency_issue
+        with pytest.raises(ValueError):dependency_issue(issue,value,state)
     else:
         before=deepcopy((value,state,packet,response))
-        m.declined_supports_dependency(issue,value,state)
+        from backend.pipeline.claim_owner_revision import dependency_issue
+        dependency_issue(issue,value,state)
         assert (value,state,packet,response)==before and value['claim_ids']==['ORIGINAL']
 
 

@@ -45,7 +45,11 @@ def validate_direction(direction,value,claim_state):
 
 
 def dependency_issue(issue,value,claim_state):
-    """No generic foreign Claim admission; consume only explicit current direction."""
+    """Shared intake/compiler authority for exact existing dependency Claims."""
+    if issue.origin in {'opus_initial','gpt_proposal'}:
+        from backend.pipeline.claim_issue_management import declined_supports_dependency
+        declined_supports_dependency(issue,value,claim_state)
+        return
     from backend.pipeline import source_reconciliation as c
     import json
     if issue.origin!='owner':raise ValueError('foreign finder cannot repair an out-of-group Claim')

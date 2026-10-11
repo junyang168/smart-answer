@@ -384,11 +384,8 @@ def manifest_for_issues(store, run_id, issues, policy_binding, root):
         raise ValueError("issue repair changed original group membership")
     for i in issues:
         if i.claim_id not in saved['claim_ids']:
-            if i.origin in {'opus_initial','gpt_proposal'} and str(i.report.path).endswith(('/raw-opus.json','/raw-gpt.json')):
-                declined_supports_dependency(i,saved,store.get_record_state('claims',i.claim_id))
-            else:
-                from backend.pipeline.claim_owner_revision import dependency_issue
-                dependency_issue(i,saved,store.get_record_state('claims',i.claim_id))
+            from backend.pipeline.claim_owner_revision import dependency_issue
+            dependency_issue(i,saved,store.get_record_state('claims',i.claim_id))
     policy = read_policy(policy_binding)
     sid = issues[0].source_id
     records = store.read_affected_context([("claims", i.claim_id) for i in issues])
