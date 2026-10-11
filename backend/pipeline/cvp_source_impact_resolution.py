@@ -473,7 +473,7 @@ def audit_record_keys(pending, facts):
     if facts is None:return list(pending)
     if list(pending)!=facts['pending_record_keys'] or [x['record_key'] for x in facts['items']]!=list(pending):
         raise ValueError('source audit root classification lost pending obligations')
-    if any(x['kind'] not in {'declared_source_group_not_cvp','independently_retained_source_relation','exact_human_logical_retirement'} for x in facts['items']):
+    if any(x['kind'] not in {'declared_source_group_not_cvp','independently_retained_source_relation','exact_human_logical_retirement','unchanged_unapproved_unconsumed_question_context'} for x in facts['items']):
         raise ValueError('source audit root classification contains unknown domain')
     return []
 
@@ -503,7 +503,109 @@ def validate_pre_model_startup_recovery(audit_dir, expected, *, corrected_record
 def context(value):
     e=value.get('reviewed',{}).get('evidence',{})
     c=e.get('action',{}).get('materials',{}).get('claim_management_resolution',{})
-    return c if c.get('schema_version')==HANDOFF else None
+    return c if (c.get('schema_version')==HANDOFF or
+        (c.get('schema_version')=='wang_post_claim_cvp_reproposal_v1'
+         and c.get('source_slice_mode')=='policy_evidence_binding')) else None
+
+
+def question_context_item(key,row,creation,*,references,reviews,edges):
+    """Account for unused candidate context, NOT its asserted answer or speaker.
+
+    An unresolved question is not an approved QA product. Its unchanged
+    extraction and every original pending judgment remain available for later
+    question management; they cannot supply a Claim or CVP premise.
+    """
+    from backend.api.canonical_repository.knowledge_models import QuestionRecord
+    col,oid=key.split('/',1);p=row['payload']
+    QuestionRecord.model_validate(p)
+    allowed={'schema_version','question_id','text','revision','questioner','question_type','visibility',
+        'answer_state','review_status','answer_claim_ids','source_fragment_id','source_fragment_ids'}
+    if (set(p)-allowed or p.get('schema_version')!=1 or col!='questions' or row['retired'] or row['revision']!=1 or p.get('revision')!=1
+            or p.get('question_id')!=oid or p.get('review_status')!='candidate'
+            or p.get('visibility')!='internal' or record_content_sha(p)!=row['content_sha256']
+            or references or reviews or edges):
+        raise ValueError('question context is changed, approved, held or consumed')
+    if (creation.get('source_kind')!='knowledge_package' or creation.get('status')!='applied'
+            or creation.get('operation')!='create' or creation.get('before_revision') is not None
+            or creation.get('after_revision')!=1 or creation.get('after')!=p
+            or creation.get('after_sha256')!=row['content_sha256']):
+        raise ValueError('question context lacks exact committed original extraction')
+    return {'record_key':key,'kind':'unchanged_unapproved_unconsumed_question_context',
+        'pin':[1,row['content_sha256'],False],'creation_change_set_id':creation['change_set_id'],
+        'semantic_judgment_resolved':False,'approved_dependency':False,
+        'content_write_authority':False,'pending_obligation_preserved':True}
+
+
+def read_question_context(cursor,key):
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    from backend.api.canonical_repository.knowledge_models import KNOWLEDGE_COLLECTIONS
+    col,oid=key.split('/',1)
+    st=cursor.execute('SELECT payload,revision,content_sha256,retired_at IS NOT NULL FROM wang_knowledge.objects WHERE collection=%s AND object_id=%s',
+                      (col,oid)).fetchone()
+    if not st:raise ValueError('question context current row missing')
+    row=dict(zip(('payload','revision','content_sha256','retired'),st))
+    refs=[(c,i) for c,i,p in PostgresKnowledgeStore._reference_consumers(cursor,[oid],sorted(KNOWLEDGE_COLLECTIONS))
+          if (c,i)!=(col,oid) and oid in PostgresKnowledgeStore._record_reference_ids(p,exclude_provenance=True)]
+    reviews=cursor.execute('SELECT 1 FROM wang_knowledge.review_events WHERE collection=%s AND object_id=%s LIMIT 1',(col,oid)).fetchall()
+    edges=cursor.execute('SELECT 1 FROM wang_knowledge.edges WHERE (from_id=%s OR to_id=%s) AND retired_at IS NULL LIMIT 1',(oid,oid)).fetchall()
+    rows=cursor.execute('''SELECT v.change_set_id,s.source_kind,s.status,o.operation,o.before_revision,
+        o.after_revision,v.payload,o.after_sha256 FROM wang_knowledge.object_versions v
+        JOIN wang_knowledge.change_sets s USING(change_set_id)
+        JOIN wang_knowledge.change_operations o ON o.change_set_id=v.change_set_id
+          AND o.collection=v.collection AND o.object_id=v.object_id AND o.after_revision=v.revision
+        WHERE v.collection=%s AND v.object_id=%s AND v.revision=%s''',(col,oid,row['revision'])).fetchall()
+    if len(rows)!=1:raise ValueError('question context creation missing/ambiguous')
+    creation=dict(zip(('change_set_id','source_kind','status','operation','before_revision','after_revision','after','after_sha256'),rows[0]))
+    return question_context_item(key,row,creation,references=refs,reviews=reviews,edges=edges)
+
+
+def prepare_question_slice(store,value,*,cursor=None):
+    """Exact source-first authority plus nonconsumption, never a semantic pass."""
+    from copy import deepcopy
+    from backend.pipeline.cvp_sql_flow import check_binding,decoded_pins,pin_rows
+    from backend.pipeline.claim_first_management import coverage_context
+    handoff=context(value);pending=value['reviewed']['evidence']['pending_cvp_management_record_keys']
+    if (not pending or len(pending)!=len(set(pending))
+            or pending!=handoff['pending_existing_cvp_record_keys']
+            or any(k.split('/',1)[0]!='questions' for k in pending)):
+        raise ValueError('question slice pending population/domain drift')
+    source=applied_review(store,value,handoff['prior_reviewed_sha256'],cursor=cursor)
+    check_binding(handoff['claim_layer_completion']);receipt=read_artifact(handoff['claim_layer_completion']['path'])
+    original=deepcopy(value);original['reviewed']=source;original['reviewed_sha256']=handoff['prior_reviewed_sha256']
+    original['change_set_ids']=receipt['change_set_ids']
+    if (value['change_set_ids'][:len(original['change_set_ids'])]!=original['change_set_ids']
+            or source['plan']['change_set_id']!=original['change_set_ids'][-1]):
+        raise ValueError('question slice source lineage drift')
+    if cursor is None:
+        if coverage_context(store,original,{'claim_ids':value['claim_ids']})!=handoff:
+            raise ValueError('question slice exact completed source handoff drift')
+        with store.connect() as conn,conn.cursor() as cur:
+            return prepare_question_slice(store,value,cursor=cur)
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    from backend.pipeline.claim_source_write_slice import validate_package
+    validate_package(source['evidence']['package']['payload'])
+    actual=cursor.execute('''SELECT collection,object_id,operation,before_revision,after_revision,
+        before_sha256,after_sha256 FROM wang_knowledge.change_operations
+        WHERE change_set_id=%s ORDER BY operation_index''',(source['plan']['change_set_id'],)).fetchall()
+    fields=('collection','object_id','operation','before_revision','after_revision','before_sha256','after_sha256')
+    planned=[tuple(o[k] for k in fields) for o in source['plan']['operations']]
+    if not planned or len(planned)!=len(set(planned)) or sorted(actual)!=sorted(planned):
+        raise ValueError('question slice actual source write set drift')
+    if (receipt['claim_ids']!=value['claim_ids'] or receipt.get('group_complete') is not False
+            or source['evidence'].get('pending_cvp_management_record_keys')!=pending
+            or handoff.get('source_only_approval') is not True
+            or handoff.get('existing_cvp_content_approved') is not False):
+        raise ValueError('question slice source receipt authority drift')
+    bindings=[handoff[k] for k in ('claim_layer_completion','source_terminal_packet','source_terminal_review')]
+    bindings.extend([receipt['audit'],*receipt['source_proofs']])
+    for b in bindings:check_binding(b)
+    pins=decoded_pins(receipt['read_pins']);items=[read_question_context(cursor,k) for k in pending]
+    for item in items:
+        key=tuple(item['record_key'].split('/',1))
+        if pins.get(key)!=tuple(item['pin']):raise ValueError('question slice lacks original audited source pin')
+    PostgresKnowledgeStore._assert_transaction_read_pins(cursor,pins)
+    return {'source_handoff':handoff,'pending_record_keys':pending,'items':items,'read_pins':pin_rows(pins),
+        'bindings':bindings,'model_verdicts_changed':False,'original_pending_list_preserved':True}
 
 
 def applied_review(store,value,sha,*,cursor=None):
@@ -542,6 +644,8 @@ def prepare(store,value):
     from backend.pipeline.source_consumer_scope import declared_group_keys
     handoff=context(value)
     if not handoff:return None
+    if handoff.get('source_slice_mode')=='policy_evidence_binding':
+        return prepare_question_slice(store,value)
     pending=value['reviewed']['evidence'].get('pending_cvp_management_record_keys',[])
     if (not pending or len(pending)!=len(set(pending)) or sorted(pending)!=sorted(handoff['pending_existing_cvp_record_keys'])
             or handoff['original_group_claim_ids']!=value['claim_ids']
@@ -630,6 +734,15 @@ def validate_for_completion(value,path,audit_binding,cursor,*,semantic_resolutio
             or body.get('semantic_resolution')!=(binding(semantic_resolution) if semantic_resolution else None)):
         raise ValueError('source impact completion proof drift')
     for b in body['bindings']+body['audit_proofs']:check_binding(b)
+    if body['source_handoff'].get('source_slice_mode')=='policy_evidence_binding':
+        expected=prepare_question_slice(None,value,cursor=cursor)
+        if any(body.get(k)!=v for k,v in expected.items()):
+            raise ValueError('question context completion proof changed')
+        audit=read_artifact(audit_binding['path'])
+        independent=decoded_pins(audit['meta']['registry_read_scope']['read_pins'])
+        if any(tuple(k.split('/',1)) in independent for k in body['pending_record_keys']):
+            raise ValueError('unapproved question was consumed by independent semantic audit')
+        return body
     source=applied_review(None,value,body['source_handoff']['prior_reviewed_sha256'],cursor=cursor)
     if (source['evidence']['package']['sha256']!=body['source_handoff']['source_package_sha256']
             or source['plan']['change_set_id']!=body['source_handoff']['source_change_set_id']):
