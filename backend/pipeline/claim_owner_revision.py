@@ -298,6 +298,16 @@ def managed_operations(value,*,store=None,cursor=None):
 def dependency_direction(value):
     """Reuse one existing dependency audit for an exact source/anchor repair."""
     from backend.pipeline.cvp_sql_flow import check_binding
+    if 'reviewed' not in value:
+        certificate=value.get('import_certificate',{})
+        if (value.get('materials')=={'origin':'explicit_historical_import'}
+                and certificate.get('status')=='verified_historical_completion'
+                and certificate.get('change_set_ids')==value.get('change_set_ids')):
+            # No source/Claim delta was executed by this historical group.
+            # Current full group audit and import/transaction gates still run;
+            # this separate owner-revision audit hook has no subject here.
+            return None,None
+        raise ValueError('dependency completion missing reviewed source authority')
     e=value['reviewed']['evidence'];proof=e['approval'].get('owner_claim_completion')
     if proof:return proof,read_artifact(proof['path'])['claim_id']
     app=e.get('package',{}).get('payload',{}).get('source_repair_application',{})
@@ -327,9 +337,10 @@ def finish_dependency_audit(store,run_id):
     from backend.pipeline.cvp_sql_flow import PROJECT,binding
     from backend.pipeline.claim_first_management import validate_claim_audit_report
     from backend.pipeline.viewpoint_content_blocked_fallback import verify_saved_full_audit
-    value=store.get_cvp_group(run_id);e=value['reviewed']['evidence']
+    value=store.get_cvp_group(run_id)
     proof,cid=dependency_direction(value)
     if proof is None:return
+    e=value['reviewed']['evidence']
     if cid in value['claim_ids']:return
     from backend.pipeline.cvp_sql_flow import check_binding
     check_binding(proof)
@@ -362,8 +373,9 @@ def validate_dependency_completion(value,*,cursor=None):
     from backend.pipeline.cvp_sql_flow import check_binding
     from backend.pipeline.claim_first_management import validate_claim_audit_report
     from backend.pipeline.viewpoint_content_blocked_fallback import verify_saved_full_audit
-    e=value['reviewed']['evidence'];proof,cid=dependency_direction(value)
+    proof,cid=dependency_direction(value)
     if not proof:return
+    e=value['reviewed']['evidence']
     check_binding(proof)
     if cid in value['claim_ids']:return
     root=Path(e['package']['payload']['source_repair_application']['run_root'])/'dependency-claim-audit'

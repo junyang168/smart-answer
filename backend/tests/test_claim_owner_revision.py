@@ -296,3 +296,17 @@ def test_saved_owner_final_typed_graph_without_calls_or_writes():
     assert not (root/'apply-intent.json').exists()
     print(json.dumps({'authenticated_stages':4,'review_verdicts':len(raw['final_review']['response']['verdicts']),
         'review_approved':True,'typed_joint_rows':len(proposal.records),'new_model_calls':0,'registry_writes':0}))
+@pytest.mark.parametrize('fault',[None,'origin','certificate','new_delta','missing'])
+def test_imported_group_revalidation_has_no_owner_claim_revision_subject(fault):
+    from backend.pipeline.claim_owner_revision import dependency_direction,validate_dependency_completion
+    value={'materials':{'origin':'explicit_historical_import'},'change_set_ids':['KCS-old'],
+           'import_certificate':{'status':'verified_historical_completion','change_set_ids':['KCS-old']}}
+    if fault=='origin':value['materials']['origin']='source_revision'
+    if fault=='certificate':value['import_certificate']['status']='unverified'
+    if fault=='new_delta':value['change_set_ids'].append('KCS-new-source')
+    if fault=='missing':value.pop('import_certificate')
+    if fault:
+        with pytest.raises(ValueError,match='missing reviewed'):dependency_direction(value)
+    else:
+        assert dependency_direction(value)==(None,None)
+        validate_dependency_completion(value)
