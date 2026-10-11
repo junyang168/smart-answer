@@ -1245,7 +1245,7 @@ def main(argv=None):
                 direction=read_artifact(args.direction)
                 if direction.get('run_id')!=args.run_id:raise ValueError('source write slice foreign run')
                 result=execute(store,binding(args.direction),ports=ProductionPorts())
-                if direction.get('mode') in {'owner_statement_completion','policy_evidence_binding'}:
+                if direction.get('mode') in {'owner_statement_completion','policy_evidence_binding','policy_claim_source_revision'}:
                     from backend.pipeline.claim_first_management import finish_claim_audit
                     proof=finish_claim_audit(store,args.run_id,Path(direction['parent_root']))
                     stage_event('owner_statement_slice_claim_layer_audited_cvp_pending' if direction['mode']=='owner_statement_completion'

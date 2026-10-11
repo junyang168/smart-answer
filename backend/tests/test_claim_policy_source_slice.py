@@ -8,6 +8,27 @@ from backend.pipeline import source_reconciliation_runner as r
 ROOT = Path('/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/staging/cvp-production-357/campaign-sql-20261008-v1-from-g059/execution/CVPG-4c6083d8d5036f316dd620945c37974f4d6b3daf128752776490dec2b2f21cd4/claim-issues/90279628408c1c38f142b72f7e53419bc216fbf8d0594f6989d686b3a2fae951/action/CVPA-aee8d874759e1887d164d7e9ec7836c3ec2f559fcfa9cbf4499bd71853f8468c')
 
 
+@pytest.mark.parametrize('fault', [None, 'unapplied', 'foreign', 'empty', 'mode', 'root'])
+def test_claim_audit_still_requires_exact_committed_policy_slice(monkeypatch, tmp_path, fault):
+    calls = []
+    monkeypatch.setattr(m, 'validate_package', lambda value: calls.append(value))
+    d = {'mode':'policy_claim_source_revision', 'run_id':'RUN', 'parent_root':str(tmp_path)}
+    package = {'source_repair_application':{'source_write_slice':d, 'run_root':str(tmp_path)}}
+    saved = {'run_id':'RUN', 'checkpoint':'applied', 'reviewed':{'evidence':{
+        'package':{'payload':package}, 'pending_cvp_claim_ids':['C']}}}
+    if fault == 'unapplied': saved['checkpoint'] = 'reviewed'
+    if fault == 'foreign': d['run_id'] = 'foreign'
+    if fault == 'empty': saved['reviewed']['evidence']['pending_cvp_claim_ids'] = []
+    if fault == 'mode': d['mode'] = 'unknown'
+    if fault == 'root': d['parent_root'] = str(tmp_path/'foreign')
+    if fault:
+        with pytest.raises(ValueError): m.validate_claim_layer_authority(saved, tmp_path)
+        assert calls == []
+    else:
+        assert m.validate_claim_layer_authority(saved, tmp_path)
+        assert calls == [package]
+
+
 @pytest.fixture
 def saved():
     if os.getenv('WKP357_SAVED_POLICY_SOURCE_SLICE') != '1':
