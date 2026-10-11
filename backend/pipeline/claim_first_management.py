@@ -101,9 +101,14 @@ def final_packet(root, frozen, original, correction):
     return proposal, packet
 
 
-def validate_claim_audit_report(audit, claim_ids):
+def validate_claim_audit_report(audit, claim_ids, *, store=None, saved=None, root=None):
     from backend.pipeline.cvp_sql_flow import validate_transaction_audit
-    validate_transaction_audit(audit,claim_ids,[])
+    accounting = None
+    validation = audit
+    if store is not None:
+        from backend.pipeline.claim_source_write_slice import pending_locator_audit_view
+        validation, accounting = pending_locator_audit_view(store, saved, root, audit)
+    validate_transaction_audit(validation,claim_ids,[])
     if set(audit['layers'])!={'1','2','3'} or audit.get('meta',{}).get('model')!='gemini-3.8-flash':
         raise ValueError('Claim audit must use independent model without CVP content management')
     report=audit['layers']['3'];results=report['results']
@@ -113,6 +118,7 @@ def validate_claim_audit_report(audit, claim_ids):
             or any(r.get('verdict')!='supported' or r.get('paragraphs_dropped_to_pass_filter',0) for r in results)
             or any(report.get(k,0) for k in ('model_errors','blocked','no_source_text','disputed'))):
         raise ValueError('Claim independent audit has actual unresolved/error; preserve original result, no retry')
+    return accounting
 
 
 def finish_claim_audit(store, run_id, root):
@@ -160,7 +166,8 @@ def finish_claim_audit(store, run_id, root):
         raise ValueError('Claim audit committed version/readset changed')
     from backend.pipeline.viewpoint_content_blocked_fallback import apply as content_fallback, KEY as FALLBACK_KEY
     path=content_fallback(path,audit_root/'content-blocked-fallback')
-    audit=read_artifact(path);validate_claim_audit_report(audit,saved['claim_ids'])
+    audit=read_artifact(path)
+    accounting=validate_claim_audit_report(audit,saved['claim_ids'],store=store,saved=saved,root=root)
     source_proofs=verify_saved_full_audit(path,layers=('3',))
     receipt={'schema_version':VERSION,'status':'claim_layer_audited_cvp_pending',
         'audit':binding(path),'source_proofs':source_proofs,'claim_ids':saved['claim_ids'],
@@ -168,6 +175,8 @@ def finish_claim_audit(store, run_id, root):
         'cvp_management_complete':False,'group_complete':False,'next_group_started':False}
     if audit.get('meta',{}).get(FALLBACK_KEY):
         receipt.update(revisit_required=True,independent_complete=False)
+    if accounting is not None:
+        receipt['pending_cvp_locator_accounting']=accounting
     receipt_path=audit_root/'claim-layer-completion.json';write_immutable(receipt_path,receipt)
     with store.connect() as conn,conn.cursor() as cursor:
         cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE",(run_id,))
@@ -257,7 +266,9 @@ def coverage_context(store, saved, group):
             row=current.get((op['collection'],op['object_id']))
             if not row or row['retired'] or row['payload'] != op['after']:
                 raise ValueError('source slice coverage current/history postimage drift')
-        validate_claim_audit_report(read_artifact(receipt['audit']['path']), saved['claim_ids'])
+        accounting=validate_claim_audit_report(read_artifact(receipt['audit']['path']), saved['claim_ids'],store=store,saved=saved,root=root)
+        if receipt.get('pending_cvp_locator_accounting') != accounting:
+            raise ValueError('source slice pending locator accounting receipt drift')
         from backend.pipeline.viewpoint_content_blocked_fallback import verify_saved_full_audit
         if verify_saved_full_audit(Path(receipt['audit']['path']), layers=('3',)) != receipt['source_proofs']:
             raise ValueError('source slice complete Claim audit proof drift')

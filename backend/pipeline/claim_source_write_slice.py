@@ -486,6 +486,119 @@ def validate_claim_layer_authority(saved, root):
     return True
 
 
+def pending_locator_audit_view(store, saved, root, audit):
+    """Account for exact old-generation locators in a Claim-only audit.
+
+    The original report remains unchanged. This is NOT locator approval: full
+    CVP/group validation still sees the original findings and pending rows.
+    """
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    from backend.pipeline.cvp_sql_flow import pin_rows, pins
+    app = saved['reviewed']['evidence']['package']['payload'].get('source_repair_application', {})
+    direction = app.get('source_write_slice', {})
+    if not direction.get('defer_owned_links'):
+        return audit, None
+    validate_claim_layer_authority(saved, root)
+    if direction.get('mode') != 'policy_claim_source_revision':
+        raise ValueError('pending locator accounting requires exact policy Claim slice')
+    _, original, scoped, proposal, packet = prepare(direction)
+    pending = validate_pending_owned_links(scoped, proposal)
+    if packet['source_write_slice'].get('pending_owned_link_keys') != sorted(pending):
+        raise ValueError('pending locator packet denominator drift')
+    before = c.index(original['before_records'])
+    # validate_claim_layer_authority authenticated the actual terminal compiler
+    # postimages, including program-added independent-review provenance.
+    value = saved['reviewed']['evidence']['package']['payload']
+    after = {c.key('claims', row['claim_id']):row for row in value.get('claims', [])}
+    if set(after) != set(c.index(proposal.records)):
+        raise ValueError('pending locator compiled Claim population drift')
+    plan = saved['reviewed']['plan']; history = store.get_change_history(plan['change_set_id'])
+    evidence = saved['reviewed']['evidence']
+    if (sha256_json(saved['reviewed']) != saved['reviewed_sha256']
+            or not history or history['status'] != 'applied'
+            or history['fingerprint_sha256'] != plan['fingerprint_sha256']
+            or history['source_sha256'] != plan['source_sha256']
+            or history['metadata'].get('run_id') != saved['run_id']
+            or history['metadata'].get('reviewed_sha256') != saved['reviewed_sha256']
+            or history['metadata'].get('approval') != evidence['approval']
+            or plan['change_set_id'] not in saved['change_set_ids']):
+        raise ValueError('pending locator actual SQL source approval drift')
+    operations = history['operations']
+    def operation_identity(op):
+        return op['collection'], op['object_id'], op['operation'], op['after_revision'], op['after_sha256']
+    if (len(operations) != len(after) or {c.key(op['collection'], op['object_id']) for op in operations} != set(after)
+            or sorted(map(operation_identity, operations)) != sorted(map(operation_identity, plan['operations']))):
+        raise ValueError('pending locator actual source write set drift')
+    current = {}
+    for p in original['sql_scope']['read_pins']:
+        key = c.key(p['collection'], p['object_id'])
+        row = store.get_record_state(p['collection'], p['object_id'])
+        if not row or row['retired'] or record_content_sha(row['payload']) != row['content_sha256']:
+            raise ValueError('pending locator current dependency missing/retired')
+        if key not in after and [row['revision'], row['content_sha256'], row['retired']] != p['pin']:
+            raise ValueError('pending locator unchanged dependency drift')
+        current[key] = row
+    for op in operations:
+        key = c.key(op['collection'], op['object_id']); old = before[key]; new = after[key]
+        row = current[key]
+        if (op['operation'] != 'update' or op['collection'] != 'claims'
+                or op['before'] != old or op['before_revision'] != old['revision']
+                or op['before_sha256'] != record_content_sha(old)
+                or op['after'] != new or op['after_sha256'] != record_content_sha(new)
+                or row['payload'] != new or row['revision'] != op['after_revision']
+                or row['content_sha256'] != op['after_sha256']):
+            raise ValueError('pending locator actual Claim before/current after drift')
+    scope = audit.get('meta', {}).get('registry_read_scope', {})
+    audit_pins = {c.key(p['collection'], p['object_id']): p['pin'] for p in scope.get('read_pins', [])}
+    if len(audit_pins) != len(scope.get('read_pins', [])):
+        raise ValueError('pending locator duplicate audit pins')
+    for key, pin in audit_pins.items():
+        state = current.get(key) or store.get_record_state(*c.split_key(key))
+        if (not state or record_content_sha(state['payload']) != state['content_sha256']
+                or [state['revision'], state['content_sha256'], state['retired']] != pin):
+            raise ValueError('pending locator complete audit current pins drift')
+    expected = []
+    for key in sorted(pending):
+        link = before[key]; claim_key = c.key('claims', link['claim_id'])
+        old = before[claim_key]; new = after[claim_key]
+        row = current[key]
+        if row['payload'] != link:
+            raise ValueError('pending locator original link payload drift')
+        for dependency in (key, claim_key):
+            state = current[dependency]
+            if audit_pins.get(dependency) != [state['revision'], state['content_sha256'], False]:
+                raise ValueError('pending locator audit generation missing/stale')
+        locator = link.get('component_locator') or {}; spans = locator.get('canonical_spans') or []
+        if not spans or not locator.get('statement_component'):
+            raise ValueError('pending locator cannot account for absent/legacy spans')
+        misplaced = []; pieces = []
+        for span in spans:
+            start, end, exact = span.get('start_char'), span.get('end_char'), span.get('exact_text')
+            if (type(start) is not int or type(end) is not int or not isinstance(exact, str) or not exact
+                    or not 0 <= start < end <= len(old['statement'])
+                    or old['statement'][start:end] != exact):
+                raise ValueError('pending locator was not exact in original Claim')
+            pieces.append(exact)
+            actual = new['statement'][start:end]
+            if actual != exact:
+                misplaced.append({'expected':exact[:60], 'at_offsets':actual[:60]})
+        if ''.join(pieces) != locator['statement_component']:
+            raise ValueError('pending locator original component is not exact spans')
+        if misplaced:
+            expected.append({'object_id':c.split_key(key)[1], 'claim_id':link['claim_id'],
+                'verdict':'span_offsets_wrong', 'spans':misplaced, 'statement':new['statement'][:120]})
+    actual = audit['layers']['2'].get('component_locator_findings', [])
+    if actual != expected:
+        raise ValueError('pending locator findings are not exact unchanged old-generation effects')
+    view = deepcopy(audit); view['layers']['2']['component_locator_findings'] = []
+    accounting = {'schema_version':'wang_claim_pending_locator_accounting_v1',
+        'change_set_id':plan['change_set_id'], 'reviewed_sha256':saved['reviewed_sha256'],
+        'pending_owned_link_keys':sorted(pending), 'original_findings':deepcopy(actual),
+        'current_domain_pins':pin_rows(pins({tuple(c.split_key(k)):current[k] for k in pending | set(after)})),
+        'cvp_content_approved':False, 'group_complete':False}
+    return view, accounting
+
+
 def execute(store,authorization,*,ports):
     from backend.pipeline.cvp_sql_flow import (check_binding,decoded_pins,commit_package,
                                              verified_group_backup,binding)
@@ -654,7 +767,9 @@ def finish_impact_audit(store, saved):
     from backend.pipeline.claim_first_management import VERSION as CLAIM_VERSION,validate_claim_audit_report
     if receipt.get('schema_version')!=CLAIM_VERSION or receipt.get('status')!=marker['status']:
         raise ValueError('slice impact audit Claim-layer receipt schema/status drift')
-    validate_claim_audit_report(read_artifact(receipt['audit']['path']),saved['claim_ids'])
+    accounting=validate_claim_audit_report(read_artifact(receipt['audit']['path']),saved['claim_ids'],store=store,saved=saved,root=root)
+    if receipt.get('pending_cvp_locator_accounting') != accounting:
+        raise ValueError('slice impact audit pending locator accounting receipt drift')
     for b in receipt['source_proofs']:check_binding(b)
     # This exact receipt was registered only after complete independent Claim
     # validation. Consume its SQL binding, complete leaf hashes and unchanged
