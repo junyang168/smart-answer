@@ -1326,7 +1326,7 @@ def main(argv=None):
                         root=action_root/'claim-retire',ports=ProductionPorts())
             elif args.action=='link-representation':
                 if not args.direction:raise ValueError('representation requires an exact owner direction')
-                from backend.pipeline.cvp_link_representation import execute,production_ports
+                from backend.pipeline.cvp_link_representation import execute,production_ports,GENERATION
                 if args.link_representation_disposition:
                     from backend.pipeline.cvp_link_representation import execute_human
                     execute_human(store,args.run_id,authorization=binding(args.direction),
@@ -1334,7 +1334,11 @@ def main(argv=None):
                         root=action_root/'link-representation',ports=production_ports())
                 else:
                     execute(store,args.run_id,authorization=binding(args.direction),
-                            root=action_root/'link-representation',ports=production_ports())
+                            root=action_root/'link-representation',ports=production_ports(
+                                generation=read_artifact(args.direction).get('schema_version')==GENERATION))
+                    if read_artifact(args.direction).get('schema_version')==GENERATION:
+                        stage_event('reviewed_claim_link_generation_applied_pending',run_id=args.run_id,group_complete=False)
+                        return 0
             elif args.action=='link-replace':
                 if not args.direction:raise ValueError('replacement requires an exact owner direction')
                 from backend.pipeline.cvp_link_replacement import execute, production_ports, WITHDRAWAL_DIRECTION

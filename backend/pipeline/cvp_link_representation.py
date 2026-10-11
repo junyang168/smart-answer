@@ -8,7 +8,7 @@ from pathlib import Path
 import json
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
-from backend.api.canonical_repository.postgres_store import canonical_json, sha256_json
+from backend.api.canonical_repository.postgres_store import canonical_json, sha256_json, record_content_sha
 from backend.api.canonical_repository.viewpoint_resolution import StructuredJsonReviewerAdapter
 from backend.pipeline import source_reconciliation as content
 from backend.pipeline.source_reconciliation_runner import Runner, Stop, body, read, write
@@ -20,6 +20,7 @@ from backend.pipeline.cvp_link_replacement import saved_raw
 SCHEMA = 'wang_cvp_sql_link_representation_v1'
 DIRECTION = 'wang_cvp_link_representation_direction_v1'
 HUMAN = 'wang_cvp_link_representation_human_postimage_v1'
+GENERATION = 'wang_cvp_reviewed_claim_link_generation_v1'
 PROMPT = '''负责人授权指定既有连接的成分范围及作用重新提议，不是批准新后像。
 完整自身正文、Claim、实际 current CVR、全部成员、原身份判定、原审计及 GPT 异议均提供。
 只返回本 Claim 中精确非空半开区间 spans 及准确 link_type。SHA 由程序计算。
@@ -46,7 +47,14 @@ class Response(BaseModel):
     model_config = ConfigDict(extra='forbid')
     selection: Choice
 
-def adapter(stage):
+class GenerationChoice(Choice):
+    viewpoint_claim_link_id: str
+
+class GenerationResponse(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    selections: list[GenerationChoice]
+
+def adapter(stage, *, generation=False):
     if stage not in {'proposal','initial_review','correction','final_review'}:
         raise ValueError('one proposal/review and at most one correction/final review')
     proposal = stage in {'proposal','correction'}
@@ -59,15 +67,193 @@ decision_id 旧值仅显示，提交后程序以本轮真实审核产生 fresh V
         prompt=semantic_prompt(prompt),response_model=Response if proposal else Review,
         schema_name=SCHEMA+'_'+stage,compact_payload=True,shared_text_payload=True,shared_record_payload=True)
     obj.max_request_bytes=500000
+    if generation:
+        prompt=semantic_prompt(PROMPT + '\n这是实际新Claim已独立批准并完成Claim原文审计后的必要连接版本管理，不是重新纠正Claim。'
+            '\n必须返回每个 before_links 的精确ID、完整新Claim成分spans及理由，角色保持原link_type；无法成立明确unresolved。'
+            '\nClaim、Evidence、原文、CVP核心、端点、状态全部不改。旧连接与全部原source回答/未决保留。'
+            '\n审核时独立检查全部 after_links 与所有完整当前成员及自身正文，每个不同Claim一个联合verdict，全部连接都成立才批准。')
+        obj=StructuredJsonReviewerAdapter(client=subscription_client('codex' if proposal else 'claude',
+            'gpt-6.1-sol' if proposal else 'claude-opus-5-5','high'),prompt=prompt,
+            response_model=GenerationResponse if proposal else Review,schema_name=GENERATION+'_'+stage,
+            compact_payload=True,shared_text_payload=True,shared_record_payload=True)
+        obj.max_request_bytes=500000
     return obj
 
-def production_ports():
+def production_ports(*, generation=False):
     from backend.pipeline.source_reconciliation_runtime import ProductionPorts
     class Ports(ProductionPorts):
-        def adapter(self,stage): return adapter(stage)
+        def adapter(self,stage): return adapter(stage,generation=generation)
     return Ports()
 
+def representation_action_id(d):
+    if d.get('schema_version')==GENERATION:
+        return 'CVPA-'+sha256_json({'contract':GENERATION,'claim_pin':d['claim_pin'],
+            'link_pins':d['link_pins'],'source_change_set_id':d['source_change_set_id']})
+    return 'CVPA-'+sha256_json({'contract':SCHEMA,'link':d['link_id'],'before':d['before_link_sha256']})
+
+def generation_direction(store,run_id):
+    """Program bound policy direction, never human afterimage approval."""
+    from backend.pipeline.cvp_sql_flow import binding,check_binding
+    from backend.pipeline.claim_first_management import validate_claim_audit_report
+    from backend.pipeline.claim_source_write_slice import prepare
+    from backend.pipeline.viewpoint_content_blocked_fallback import verify_saved_full_audit
+    saved=store.get_cvp_group(run_id);e=saved['reviewed']['evidence']
+    app=e['package']['payload']['source_repair_application'];root=Path(app['run_root'])
+    proof=saved['claim_layer_audit']['receipt'];check_binding(proof);receipt=read_artifact(proof['path'])
+    audit=read_artifact(receipt['audit']['path']);check_binding(receipt['audit'])
+    accounting=validate_claim_audit_report(audit,saved['claim_ids'],store=store,saved=saved,root=root)
+    if (not accounting or receipt.get('pending_cvp_locator_accounting')!=accounting
+            or receipt.get('group_complete') is not False or receipt['change_set_ids']!=saved['change_set_ids']
+            or verify_saved_full_audit(Path(receipt['audit']['path']),layers=('3',))!=receipt['source_proofs']):
+        raise ValueError('link generation lacks exact complete source Claim audit')
+    _,frozen,_,proposal,_=prepare(app['source_write_slice'])
+    claims=content.index(proposal.records)
+    if len(claims)!=1:raise ValueError('link generation requires one exact completed Claim')
+    claim_id=next(iter(claims)).split('/',1)[1]
+    claim=store.get_record_state('claims',claim_id)
+    links=accounting['pending_owned_link_keys']
+    policy=frozen['claim_issue_context']['policy'];check_binding(policy)
+    from backend.pipeline.cvp_source_impact_resolution import applied_review
+    views=set()
+    for cid in saved['change_set_ids']:
+        history=store.get_change_history(cid)
+        if not history or history['status']!='applied' or history['metadata'].get('run_id')!=run_id:
+            raise ValueError('link generation original committed group history missing')
+        if history['source_kind']=='cvp_batch_resolution':
+            review=applied_review(store,saved,history['metadata']['reviewed_sha256'])
+            if review['plan']['change_set_id']!=cid:raise ValueError('link generation normal archive identity drift')
+            views.update(review['evidence']['viewpoint_ids'])
+    if not views:raise ValueError('link generation original normal CVP population missing')
+    views.update(store.get_record_state(*content.split_key(k))['payload']['viewpoint_id'] for k in links)
+    result={'schema_version':GENERATION,'run_id':run_id,'campaign_sha256':saved['campaign_sha256'],
+        'claim_id':claim_id,'claim_pin':[claim['revision'],claim['content_sha256'],False],
+        'link_pins':[p for p in accounting['current_domain_pins'] if p['collection']=='viewpoint_claim_links'],
+        'link_keys':links,'claim_policy':policy,'claim_layer_completion':proof,
+        'source_package':binding(root/'source-write-slice-package.json'),
+        'source_change_set_id':accounting['change_set_id'],'source_reviewed_sha256':accounting['reviewed_sha256'],
+        'viewpoint_ids':sorted(views),'pending_record_keys':e['pending_cvp_management_record_keys'],
+        'authorized_by':'bound_claim_policy','human_content_approval':False,
+        'allowed_fields':['pinned_claim_revision','component_locator'],
+        'roles_targets_states_evidence_unchanged':True}
+    result['artifact_sha256']=sha256_json(result)
+    return result
+
+def validate_generation_direction(d,m):
+    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.claim_source_write_slice import validate_package as source_validate
+    if d.get('artifact_sha256')!=sha256_json({k:v for k,v in d.items() if k!='artifact_sha256'}):
+        raise ValueError('link generation direction seal drift')
+    if (d.get('schema_version')!=GENERATION or d.get('authorized_by')!='bound_claim_policy'
+            or d.get('human_content_approval') is not False
+            or d.get('allowed_fields')!=['pinned_claim_revision','component_locator']
+            or d.get('roles_targets_states_evidence_unchanged') is not True
+            or d['run_id']!=m['run_id'] or d['campaign_sha256']!=m['campaign_sha256']
+            or d['claim_pin']!=[m['claim']['revision'],record_content_sha(m['claim']),False]):
+        raise ValueError('link generation policy/current Claim identity drift')
+    for field in ('claim_policy','claim_layer_completion','source_package'):check_binding(d[field])
+    policy=read_artifact(d['claim_policy']['path'])
+    fields=policy.get('connection_fields',policy.get('link_fields',[]))
+    if not {'pinned_claim_revision','component_locator'}<=set(fields):
+        raise ValueError('link generation fields outside original Claim policy')
+    package=body(read(Path(d['source_package']['path'])));source_validate(package)
+    app=package['source_repair_application']
+    if (app['run_id']!=d['run_id'] or app['source_write_slice']['mode']!='policy_claim_source_revision'
+            or app['source_write_slice'].get('defer_owned_links') is not True
+            or package['claims']!=[m['claim']]):raise ValueError('link generation completed source postimage drift')
+    source_root=Path(app['run_root'])
+    original_answers={stage:read(source_root/(stage+'.raw.json'))['response']
+        for stage in ('proposal','initial_review','correction','final_review')}
+    if m.get('original_source_responses')!=original_answers:
+        raise ValueError('link generation omitted or changed original source decisions')
+    receipt=read_artifact(d['claim_layer_completion']['path'])
+    check_binding(receipt['audit'])
+    for proof in receipt['source_proofs']:check_binding(proof)
+    accounting=receipt.get('pending_cvp_locator_accounting',{})
+    if (accounting.get('change_set_id')!=d['source_change_set_id']
+            or accounting.get('reviewed_sha256')!=d['source_reviewed_sha256']
+            or accounting.get('pending_owned_link_keys')!=d['link_keys']
+            or receipt.get('status')!='claim_layer_audited_cvp_pending'
+            or receipt.get('group_complete') is not False):raise ValueError('link generation completed audit authority drift')
+    links=m['before_links']
+    expected=[{'collection':'viewpoint_claim_links','object_id':p['viewpoint_claim_link_id'],
+        'pin':[p['revision'],record_content_sha(p),False]} for p in links]
+    if (expected!=d['link_pins'] or sorted(content.key('viewpoint_claim_links',p['viewpoint_claim_link_id']) for p in links)!=d['link_keys']
+            or any(p['claim_id']!=d['claim_id'] or p['effective_state']!='active' or p['supporting_relation_ids']
+                or p['pinned_claim_revision']!=m['old_claim']['revision'] for p in links)):
+        raise ValueError('link generation incomplete/stale/foreign/held scope')
+
+def prepare_generation_material(store,group,authorization):
+    from backend.pipeline.cvp_sql_flow import pins,pin_rows
+    from backend.pipeline.cvp_sql_actions import supports_identity_dependencies
+    from backend.pipeline.cvp_link_target_selection import _approved
+    from backend.pipeline.viewpoint_evidence_source_context import load_context_source
+    d=read_artifact(authorization['path'])
+    if generation_direction(store,group['run_id'])!=d:raise ValueError('link generation actual source/current proof drift')
+    history=store.get_change_history(d['source_change_set_id'])
+    old_claim=next(o['before'] for o in history['operations'] if o['collection']=='claims' and o['object_id']==d['claim_id'])
+    records=store.read_cvp_context(group['claim_ids'],viewpoint_ids=d['viewpoint_ids'])
+    active={k:r['payload'] for k,r in records.items() if not r['retired']}
+    claim=active['claims',d['claim_id']]
+    links=[active[tuple(content.split_key(k))] for k in d['link_keys']]
+    actual={content.key(col,oid) for (col,oid),p in active.items() if col=='viewpoint_claim_links'
+        and p['claim_id']==d['claim_id'] and p['effective_state']=='active'}
+    if actual!=set(d['link_keys']):raise ValueError('link generation omitted active owned connection')
+    extra=supports_identity_dependencies(store,records,[{'before_link':p} for p in links]);records.update(extra)
+    for p in [claim,*links]:_approved(p)
+    for link in links:
+        head=active['canonical_viewpoints',link['viewpoint_id']];revision=active['viewpoint_revisions',head['current_revision_id']]
+        _approved(head);_approved(revision)
+        if head['current_revision_id']!=link['validated_against_viewpoint_revision_id']:raise ValueError('link generation current target drift')
+    sources=[]
+    for (col,_),doc in sorted(active.items()):
+        if col=='source_documents':
+            path,physical,projection=load_context_source(doc)
+            sources.append({'source_id':doc['source_id'],'path':str(path),'file_sha256':physical,
+                'body_sha256':projection.body_sha256,'paragraphs':deepcopy(projection.spoken_rows)})
+    m={'generation':True,'run_id':group['run_id'],'campaign_sha256':group['campaign_sha256'],
+        'authorization':authorization,'claim':claim,'old_claim':old_claim,'before_links':links,
+        'viewpoint_ids':d['viewpoint_ids'],'sources':sources,'original_reports':[d['source_package'],d['claim_layer_completion']],
+        'records':[{'collection':c,'object_id':i,'payload':p} for (c,i),p in sorted(active.items())],
+        'provenance_templates':[{'collection':c,'object_id':i,'payload':r['payload']} for (c,i),r in sorted(extra.items()) if (c,i) not in active],
+        'read_pins':pin_rows(pins(records))}
+    source_root=Path(body(read(Path(d['source_package']['path'])))['source_repair_application']['run_root'])
+    m['original_source_responses']={stage:read(source_root/(stage+'.raw.json'))['response']
+        for stage in ('proposal','initial_review','correction','final_review')}
+    validate_generation_direction(d,m)
+    return json.loads(canonical_json(m))
+
+def generation_postimages(m,response):
+    choices=GenerationResponse.model_validate(response).selections
+    indexed={p.viewpoint_claim_link_id:p for p in choices}
+    if len(indexed)!=len(choices) or set(indexed)!={p['viewpoint_claim_link_id'] for p in m['before_links']}:
+        raise ValueError('link generation requires ALL exact owned links once')
+    result=[]
+    for old in m['before_links']:
+        choice=indexed[old['viewpoint_claim_link_id']]
+        if choice.link_type!=old['link_type']:raise ValueError('generation cannot change old connection role')
+        local={'before_link':old,'item':{'claim':m['claim']}}
+        link=postimage(local,{'selection':choice.model_dump(exclude={'viewpoint_claim_link_id'})})
+        link['pinned_claim_revision']=m['claim']['revision'];result.append(link)
+    return result
+
+def compile_generation_package(m,p,r,root):
+    from backend.pipeline.cvp_link_retarget import fresh_identity_records
+    approved(m,r);links=generation_postimages(m,p['response']);states=content.index(m['records']+m['provenance_templates'])
+    candidates=[];decisions=[];choices={x['viewpoint_claim_link_id']:x for x in p['response']['selections']}
+    for old,link in zip(m['before_links'],links):
+        seed=sha256_json({'contract':GENERATION,'material':sha256_json(m),'link':old['viewpoint_claim_link_id'],
+            'proposal':p['artifact_sha256'],'review':r['artifact_sha256']})
+        projected={**p,'response':{'selection':choices[old['viewpoint_claim_link_id']]}}
+        revision=states[content.key('viewpoint_revisions',link['validated_against_viewpoint_revision_id'])]
+        candidate,decision=fresh_identity_records(states,old,link,revision['proposition_signature'],projected,r,seed=seed,policy=GENERATION)
+        link['decision_id']=decision['identity_decision_id'];candidates.append(candidate);decisions.append(decision)
+    return {'package_id':'CVP-LINK-GENERATION-'+sha256_json(m)[:24],'viewpoint_claim_links':links,
+        'viewpoint_identity_candidates':candidates,'viewpoint_identity_decisions':decisions,
+        'source_repair_application':{'schema_version':SCHEMA,'run_root':str(Path(root).resolve()),'materials_sha256':sha256_json(m)}}
+
 def validate_direction(d,m):
+    if m.get('generation'):
+        return validate_generation_direction(d,m)
     expected={'schema_version':DIRECTION,'run_id':m['run_id'],'campaign_sha256':m['campaign_sha256'],
         'link_id':m['before_link']['viewpoint_claim_link_id'],'before_link_sha256':sha256_json(m['before_link']),
         'adjudication_root':m['adjudication_root'],'original_reports':m['original_reports'],
@@ -85,6 +271,8 @@ def prepare_material(store,run_id,authorization):
     from backend.pipeline.viewpoint_evidence_source_context import load_context_source
     from backend.pipeline.cvp_link_target_selection import _approved
     check_binding(authorization);d=read_artifact(authorization['path']);group=store.get_cvp_group(run_id)
+    if d.get('schema_version')==GENERATION:
+        return prepare_generation_material(store,group,authorization)
     packet,findings=validated_history(Path(d['adjudication_root']))
     items=[i for i in packet['items'] if any(l['viewpoint_claim_link_id']==d['link_id'] for l in i['connections'])]
     if len(items)!=1 or findings[items[0]['item_id']]['verdict']!='audit_objection_upheld':
@@ -139,11 +327,15 @@ def postimage(m,response):
     return new
 
 def review_packet(m,raw):
+    if m.get('generation'):
+        return {'schema_version':GENERATION,'materials':m,'proposal':raw['response'],
+            'after_links':generation_postimages(m,raw['response']),
+            'provenance_receipt':'Full current Claim generation and ALL owned links jointly reviewed; fresh VIC/VID only after actual approval.'}
     return {'schema_version':SCHEMA,'materials':m,'proposal':raw['response'],'after_link':postimage(m,raw['response']),
         'provenance_receipt':'Only role/spans change; fresh VIC/VID bind actual new approved model answers.'}
 
 def approved(m,raw):
-    r=Review.model_validate(raw['response']);cid=m['before_link']['claim_id']
+    r=Review.model_validate(raw['response']);cid=m['claim']['claim_id'] if m.get('generation') else m['before_link']['claim_id']
     if len(r.verdicts)!=1 or r.verdicts[0].claim_id!=cid or not r.verdicts[0].approved or r.verdicts[0].problems:
         raise Stop('representation independently rejected')
 
@@ -152,18 +344,21 @@ def correction_packet(m,p,r):
         'prior_artifacts':{'proposal':p['artifact_sha256'],'review':r['artifact_sha256']},'correction_boundary':'One correction only, same exact role/span scope.'}
 
 def effective_saved(root,m):
-    p=saved_raw(root,'proposal',m,adapter_factory=adapter)
-    r=saved_raw(root,'initial_review',review_packet(m,p),adapter_factory=adapter)
+    factory=(lambda stage:adapter(stage,generation=True)) if m.get('generation') else adapter
+    p=saved_raw(root,'proposal',m,adapter_factory=factory)
+    r=saved_raw(root,'initial_review',review_packet(m,p),adapter_factory=factory)
     try:approved(m,r)
     except Stop:
-        p=saved_raw(root,'correction',correction_packet(m,p,r),adapter_factory=adapter)
-        r=saved_raw(root,'final_review',review_packet(m,p),adapter_factory=adapter);approved(m,r)
+        p=saved_raw(root,'correction',correction_packet(m,p,r),adapter_factory=factory)
+        r=saved_raw(root,'final_review',review_packet(m,p),adapter_factory=factory);approved(m,r)
     else:
         if any((root/(s+suffix)).exists() for s in ('correction','final_review') for suffix in ('.raw.json','.reservation.json','.call-intent.json')):
             raise ValueError('approved representation cannot acquire another round')
     return p,r
 
 def compile_package(m,p,r,root):
+    if m.get('generation'):
+        return compile_generation_package(m,p,r,root)
     from backend.pipeline.cvp_link_retarget import fresh_identity_records
     approved(m,r);link=postimage(m,p['response']);states=content.index(m['records']+m['provenance_templates'])
     seed=sha256_json({'contract':SCHEMA,'materials':sha256_json(m),'proposal':p['artifact_sha256'],'review':r['artifact_sha256']})
@@ -251,7 +446,8 @@ def execute_human(store,run_id,*,authorization,disposition,root,ports):
     from backend.pipeline.cvp_sql_flow import check_binding,decoded_pins,commit_package,verified_group_backup
     from backend.pipeline.cvp_sql_actions import resume_bound_action
     check_binding(authorization);check_binding(disposition);d=read_artifact(authorization['path'])
-    aid='CVPA-'+sha256_json({'contract':SCHEMA,'link':d['link_id'],'before':d['before_link_sha256']})
+    if d.get('schema_version')==GENERATION:raise ValueError('generation requires normal independent model review')
+    aid=representation_action_id(d)
     root=Path(root)/aid;previous=store.get_cvp_action(run_id,aid)
     if not previous or previous['authorization']!=authorization:
         raise ValueError('human representation requires original registered action and authority')
@@ -284,7 +480,7 @@ def execute(store,run_id,*,authorization,root,ports):
     from backend.pipeline.cvp_sql_flow import binding,check_binding,decoded_pins,commit_package,verified_group_backup
     from backend.pipeline.cvp_sql_actions import initialize_subscription_runtime,resume_bound_action
     check_binding(authorization);d=read_artifact(authorization['path'])
-    aid='CVPA-'+sha256_json({'contract':SCHEMA,'link':d['link_id'],'before':d['before_link_sha256']})
+    aid=representation_action_id(d)
     root=Path(root)/aid;store.bind_cvp_execution_root(run_id,identity=aid,root=root)
     previous=store.get_cvp_action(run_id,aid)
     if previous and previous['authorization']!=authorization:raise ValueError('representation direction cannot reset once budget')
@@ -304,11 +500,14 @@ def execute(store,run_id,*,authorization,root,ports):
         r=runner.call('final_review',review_packet(m,p));approved(m,r);guard();ps,rs='correction','final_review'
     package=compile_package(m,p,r,root);validate_package(package)
     plan=store.plan_package(package,source_kind=SCHEMA,transactional=True)
-    if len(plan.operations)!=3 or {(o.operation,o.collection) for o in plan.operations}!={('update','viewpoint_claim_links'),('create','viewpoint_identity_candidates'),('create','viewpoint_identity_decisions')}:
+    expected_count=3*len(m['before_links']) if m.get('generation') else 3
+    if len(plan.operations)!=expected_count or {(o.operation,o.collection) for o in plan.operations}!={('update','viewpoint_claim_links'),('create','viewpoint_identity_candidates'),('create','viewpoint_identity_decisions')}:
         raise ValueError('representation exact three-operation write set violated')
     e=store.get_cvp_group(run_id)['reviewed']['evidence']
     return commit_package(store,run_id,package=package,approval={'gpt':binding(root/(ps+'.raw.json')),'opus':binding(root/(rs+'.raw.json'))},
       authorization=authorization,backup=verified_group_backup(root,package,ports),
       sources=[{'path':s['path'],'file_sha256':s['file_sha256']} for s in m['sources']],read_pins=expected,
-      reason='owner scoped same-target role/span revision; prior objections unchanged',actor='owner-authorized-pipeline',
-      source_kind=SCHEMA,viewpoint_ids=e['viewpoint_ids'],disposition=e.get('disposition'),action=action)
+      reason=('bound Claim policy reviewed generation rebind; prior source decisions unchanged' if m.get('generation')
+              else 'owner scoped same-target role/span revision; prior objections unchanged'),
+      actor='policy-authorized-pipeline' if m.get('generation') else 'owner-authorized-pipeline',
+      source_kind=SCHEMA,viewpoint_ids=m['viewpoint_ids'] if m.get('generation') else e['viewpoint_ids'],disposition=e.get('disposition'),action=action)
