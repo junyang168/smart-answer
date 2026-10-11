@@ -90,7 +90,7 @@ def test_bounded_repair_consumes_saved_chain_without_second_correction(sample,tm
     frozen['update_id']='original'
     monkeypatch.setattr(r,'build_proposal_packet',lambda *_:{'complete':'own body'})
     monkeypatch.setattr(r,'effective_proposal',lambda *_:proposal)
-    monkeypatch.setattr(r.contract,'review_packet',lambda *_:{'proposal':proposal.model_dump()})
+    monkeypatch.setattr(r.contract,'review_packet',lambda *_, **kwargs:{'proposal':proposal.model_dump()})
     monkeypatch.setattr(r.contract,'validate_review',lambda p,v:v.get('approved',False))
     cache={};calls=[]
     class Runner(r.Runner):
