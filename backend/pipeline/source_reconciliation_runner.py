@@ -90,6 +90,8 @@ def initial_review_base(frozen, proposal):
     if frozen.get('claim_issue_context', {}).get('complete_input_repair'):
         return contract.review_packet(frozen, proposal)
     if frozen.get('owner_claim_completion') and any(d.action=='unresolved' for d in proposal.dispositions):
+        if not proposal.records:
+            return contract.review_packet(frozen,proposal,initial_claim_draft=True)
         return contract.review_packet(frozen,proposal,review_only=True)
     if not frozen.get('claim_issue_context', {}).get('scope_amendment'):
         if frozen['manifest'].get('claim_issue') and frozen.get('sql_scope'):

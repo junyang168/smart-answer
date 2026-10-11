@@ -202,6 +202,57 @@ def partial_review(materials,proposal):
             'No old unresolved decision is changed to pass/retain by this receipt.'}
 
 
+def empty_initial_draft(materials,proposal):
+    """Expose a missing typed Claim draft to the ORIGINAL initial reviewer.
+
+    A suggestion inside a reason is never parsed into a postimage. All rows
+    remain the exact current preimages; only the original single correction
+    can return the actual Claim and owned-link records. Final/write validation
+    does not call this helper and cannot consume its diagnostic as approval.
+    """
+    from backend.pipeline import source_reconciliation as c
+    from backend.pipeline.cvp_sql_flow import check_binding
+    proof=materials.get('owner_claim_completion')
+    if not proof or proposal.records:
+        raise ValueError('empty owner draft requires direction and zero proposed records')
+    check_binding(proof);d=read_artifact(proof['path']);cid=d['claim_id']
+    before=c.index(materials['before_records']);key=c.key('claims',cid)
+    pins={(p['collection'],p['object_id']):p['pin'] for p in materials['sql_scope']['read_pins']}
+    state={'payload':before[key],'revision':before[key]['revision'],
+           'content_sha256':record_content_sha(before[key]),'retired':False}
+    validate_direction(d,{'run_id':d['run_id'],'campaign_sha256':d['campaign_sha256'],
+        'claim_ids':[],'reviewed':{'evidence':{'read_pins':materials['sql_scope']['read_pins']}}},state)
+    issues=materials.get('claim_issue_context',{}).get('issues',[])
+    from backend.pipeline.claim_issue_management import Issue
+    if (len(issues)!=1 or issues[0]['claim_id']!=cid or issues[0]['origin']!='owner'
+            or len(proposal.claim_assessments)!=1
+            or proposal.claim_assessments[0].issue_id!=Issue.model_validate(issues[0]).issue_id
+            or proposal.claim_assessments[0].cause!='claim_statement'):
+        raise ValueError('empty owner draft lacks the exact single Claim assessment')
+    pending=[x.record_key for x in proposal.dispositions if x.action=='unresolved']
+    if key not in pending or len(pending)!=len(set(pending)):
+        raise ValueError('empty owner draft must disclose the missing Claim postimage')
+    for k in pending:
+        col,oid=c.split_key(k);old=before.get(k)
+        if (col not in {'claims','viewpoint_claim_links','canonical_viewpoints','viewpoint_revisions','knowledge_relations'}
+                or (col=='claims' and k!=key) or old is None
+                or pins.get((col,oid))!=[old.get('revision',1),record_content_sha(old),False]
+                or old.get('review_status') in c.HUMAN_HOLDS|{'human_hold','rejected','withheld_unreviewed'}):
+            raise ValueError('empty owner draft pending context is foreign/stale/held')
+    return {'schema_version':'owner_claim_empty_initial_draft_v1','direction':proof,'claim_id':cid,
+        'pending_record_keys':sorted(pending),'write_authority':False,
+        'mandatory_original_unique_correction':True,'automatic_content_approval':False,
+        'explanation':'No typed Claim or link postimage was returned. Do not approve a suggestion inside a reason '
+            'as an actual record and do not generate it programmatically. Review the original assessment and full own source. '
+            'The original unique correction must return the complete revised Claim and ALL active owned connections, '
+            'with exact new component spans and own Evidence bindings, preserving type/target/state. '
+            'The PROGRAM calculates locator claim_sha256 from the complete returned Claim BEFORE independent review; '
+            'the proposer may leave that field null and must NOT calculate/copy a SHA or withhold records for lack of one. '
+            'Other unchanged dependencies remain visible: findings about them do not grant authority to change them, '
+            'and this receipt does not resolve their objections or establish group completion. '
+            'Strict complete final review, joint validation, SQL and full affected audits remain mandatory.'}
+
+
 def execute(store,run_id,direction_path,root,ports):
     from backend.pipeline.claim_issue_management import IssuesDetected,handle_issues
     from backend.pipeline.cvp_sql_flow import binding

@@ -109,6 +109,68 @@ def test_partial_review_never_approves_incomplete_connections(direction_case,tmp
         with pytest.raises(ValueError):m.partial_review(bad,p)
 
 
+@pytest.mark.parametrize('fault',[None,'records','missing-claim','foreign-claim','pin','retired','hold','cause','issue','owner'])
+def test_empty_owner_draft_is_diagnostic_not_a_postimage(direction_case,tmp_path,fault):
+    d,v,s=direction_case;seal(d)
+    path=tmp_path/'direction.json';path.write_text(json.dumps(d))
+    link={'viewpoint_claim_link_id':'L','claim_id':'C','revision':2}
+    from backend.pipeline.claim_issue_management import Issue
+    issue=Issue(claim_id='C',claim_revision=3,claim_sha256='a'*64,source_id='S',source_file_sha256='b'*64,
+        evidence_sha256='c'*64,spans=[(0,1,'原')],origin='owner',report=d['source'],reason='complete')
+    f={'owner_claim_completion':binding(path),'before_records':c.rows({'claims/C':s['payload'],'viewpoint_claim_links/L':link}),
+       'sql_scope':{'read_pins':deepcopy(v['reviewed']['evidence']['read_pins'])+[
+           {'collection':'viewpoint_claim_links','object_id':'L','pin':[2,record_content_sha(link),False]}]},
+       'claim_issue_context':{'issues':[issue.model_dump(mode='json')]}}
+    p=NS(records=[],claim_assessments=[NS(issue_id=issue.issue_id,cause='claim_statement')],
+        dispositions=[NS(record_key='claims/C',action='unresolved'),NS(record_key='viewpoint_claim_links/L',action='unresolved')])
+    if fault=='records':p.records=c.rows({'claims/C':{**s['payload'],'revision':4,'statement':'new'}})
+    elif fault=='missing-claim':p.dispositions=p.dispositions[1:]
+    elif fault=='foreign-claim':p.dispositions.append(NS(record_key='claims/foreign',action='unresolved'))
+    elif fault=='pin':f['sql_scope']['read_pins'][1]['pin'][0]=1
+    elif fault=='retired':f['sql_scope']['read_pins'][1]['pin'][2]=True
+    elif fault=='hold':f['before_records'][1]['payload']['review_status']='human_review_required'
+    elif fault=='cause':p.claim_assessments[0].cause='source_unresolved'
+    elif fault=='issue':p.claim_assessments[0].issue_id='foreign'
+    elif fault=='owner':f['claim_issue_context']['issues'][0]['origin']='gemini_audit'
+    original=deepcopy((f,p))
+    if fault:
+        with pytest.raises(ValueError):m.empty_initial_draft(f,p)
+    else:
+        receipt=m.empty_initial_draft(f,p)
+        assert receipt['write_authority'] is False and receipt['mandatory_original_unique_correction']
+        assert (f,p)==original and p.records==[]
+        packet={'proposal_sha256':'a'*64,'proposal':{'dispositions':[{'record_key':x.record_key} for x in p.dispositions]},
+                'unresolved_proposal_review':receipt}
+        response={'proposal_sha256':'a'*64,'verdicts':[{'record_key':x.record_key,'approved':True,'problems':[],
+                    'reason':'diagnostic only'} for x in p.dispositions]}
+        assert c.validate_review(packet,response) is False
+
+
+@pytest.mark.skipif(not os.environ.get('WKP_OWNER_EMPTY_DRAFT_ROOT'),reason='explicit actual saved readonly input')
+def test_actual_empty_owner_draft_reuses_answer_and_only_unused_initial_review(monkeypatch):
+    from dotenv import load_dotenv
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    from backend.pipeline import source_reconciliation_runner as r
+    load_dotenv('.env');store=PostgresKnowledgeStore();root=Path(os.environ['WKP_OWNER_EMPTY_DRAFT_ROOT'])
+    leaves=[p for p in root.iterdir() if p.is_file()];before={p:p.read_bytes() for p in leaves}
+    monkeypatch.setattr(r,'write',lambda *a,**k:pytest.fail('readonly preflight wrote artifact'))
+    f=r.body(r.read(root/'scoped-materials.json'));c.guard_files(f)
+    with store.connect() as conn,conn.cursor() as cursor:
+        store._assert_transaction_read_pins(cursor,{(p['collection'],p['object_id']):tuple(p['pin']) for p in f['sql_scope']['read_pins']})
+    raw=r.validate_raw(root,'proposal',r.body(r.read(root/'proposal.packet.json')))
+    proposed=r.effective_proposal(f,raw['response']);assert proposed.records==[]
+    packet=r.initial_review_base(f,proposed)
+    selected=f['inventory']['affected_keys']+f['inventory']['context_keys'];states=c.index(f['before_records'])
+    assert packet['proposal']==proposed.model_dump()
+    assert packet['before_records']==c.rows({k:states[k] for k in selected})
+    assert packet['unresolved_proposal_review']['owner_claim_draft_diagnostic']['write_authority'] is False
+    with pytest.raises(ValueError):c.review_packet(f,proposed)
+    with pytest.raises(ValueError):m.validate_joint(f,proposed,{})
+    with pytest.raises(ValueError):r.initial_review_base({k:v for k,v in f.items() if k!='owner_claim_completion'},proposed)
+    assert not (root/'initial_review.reservation.json').exists()
+    assert all(p.read_bytes()==data for p,data in before.items()) and set(root.iterdir())==set(leaves)
+
+
 @pytest.mark.parametrize('fault',['campaign','group','claim','pin','statement','retired','source','approved','budget','membership','not-dependency','foreign-pin','instruction'])
 def test_exact_owner_correction_does_not_waive_current_proof_or_membership(direction_case,fault):
     d,v,s=direction_case
