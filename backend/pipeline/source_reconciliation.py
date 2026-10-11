@@ -612,7 +612,7 @@ def _semantic(row: dict) -> dict:
     return {k: v for k, v in row.items() if k not in PROVENANCE | {"revision"}}
 
 
-def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = False, claim_first: bool = False, initial_claim_draft: bool = False, initial_anchor_draft: bool = False, complete_anchor_review: bool = False) -> dict[str, dict]:
+def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = False, claim_first: bool = False, initial_claim_draft: bool = False, initial_anchor_draft: bool = False, complete_anchor_review: bool = False, initial_evidence_draft: bool = False) -> dict[str, dict]:
     before = index(frozen["before_records"])
     manifest = Manifest.model_validate(frozen["manifest"])
     allowed = {p.key: p for p in manifest.permissions}
@@ -757,10 +757,14 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
         raise ValueError("source update cannot silently change Claim membership")
     if initial_claim_draft:
         return post  # Review-only: graph/coverage findings are disclosed, never waived for final/write.
-    validate_graph(post, before, frozen, pending_link_keys=pending_link_keys)
     if manifest.evidence_binding_repair:
         from backend.pipeline.claim_evidence_binding import validate_closure
         validate_closure(frozen, proposal, post)
+    if initial_evidence_draft:
+        if not manifest.evidence_binding_repair or unresolved or review_only or claim_first:
+            raise ValueError('Evidence draft review requires complete scope-bound postimages')
+        return post
+    validate_graph(post, before, frozen, pending_link_keys=pending_link_keys)
     if manifest.anchor_qualification:
         from backend.pipeline.claim_anchor_qualification import validate_binding_closure
         validate_binding_closure(frozen,proposal,post)
@@ -910,6 +914,12 @@ def validate_graph(post: dict[str, dict], before: dict[str, dict], frozen: dict,
             for fid in set(p.get("source_fragment_ids", [])) | ({p["source_fragment_id"]} if p.get("source_fragment_id") else set()):
                 if key("source_fragments", fid) not in post:
                     raise ValueError("dangling Evidence fragment")
+                if frozen['manifest'].get('evidence_binding_repair') and p!=before.get(k):
+                    frag=post[key('source_fragments',fid)]
+                    text=paragraphs.get(frag.get('paragraph_key'),{}).get('text','')
+                    if (frag.get('source_id')!=source_id or len(containing_anchor_fragments(
+                            [frag],frag.get('verbatim_excerpt',''),text,source_id,frag.get('paragraph_key'),body_sha))!=1):
+                        raise ValueError('Evidence binding references a foreign/unverified own fragment')
             for cid in p.get("produced_claim_ids", []):
                 if object_id not in post[key("claims", cid)].get("evidence_step_ids", []):
                     raise ValueError("Evidence reverse pointer is not reciprocal")
@@ -924,12 +934,20 @@ def validate_graph(post: dict[str, dict], before: dict[str, dict], frozen: dict,
                 if not aliases.intersection(set(strings(occurrence))):
                     continue
                 for anchor in occurrence.get("anchors", []):
-                    current_anchor_profile = bool(frozen['manifest'].get('anchor_qualification')) or frozen.get('claim_issue_context', {}).get(
+                    current_anchor_profile = bool(frozen['manifest'].get('anchor_qualification') or frozen['manifest'].get('evidence_binding_repair')) or frozen.get('claim_issue_context', {}).get(
                         'anchor_binding_validation_profile') == 'declared_local_own_containing_v1'
                     eid = (anchor_evidence_id(p, occurrence, anchor) if current_anchor_profile
                            else anchor.get('evidence_id'))
                     if eid not in p.get("evidence_step_ids", []):
                         raise ValueError("anchor is not owned by a Claim Evidence step")
+                    if frozen['manifest'].get('evidence_binding_repair'):
+                        from backend.pipeline.claim_evidence_binding import direction
+                        m=Manifest.model_validate(frozen['manifest'])
+                        scope=direction(m,before,frozen.get('physical_snapshots'))
+                        if eid!=scope['evidence_id']:
+                            if p!=before[k] or post[key('evidence_steps',eid)]!=before[key('evidence_steps',eid)]:
+                                raise ValueError('readonly non-target anchor changed during Evidence binding')
+                            continue
                     evidence = post[key("evidence_steps", eid)]
                     fids = set(evidence.get("source_fragment_ids", [])) | ({evidence["source_fragment_id"]} if evidence.get("source_fragment_id") else set())
                     text = paragraphs.get(str(anchor.get("paragraph_key")), {}).get("text", "")
@@ -1025,9 +1043,9 @@ def validate_basis_groups(spans: list[tuple]) -> None:
             raise ValueError("overlapping anchors require one basis group and exactly one representative")
 
 
-def review_packet(frozen: dict, proposal: Proposal, *, review_only: bool = False, claim_first: bool = False, initial_claim_draft: bool = False, initial_anchor_draft: bool = False, complete_anchor_review: bool = False) -> dict:
+def review_packet(frozen: dict, proposal: Proposal, *, review_only: bool = False, claim_first: bool = False, initial_claim_draft: bool = False, initial_anchor_draft: bool = False, complete_anchor_review: bool = False, initial_evidence_draft: bool = False) -> dict:
     post = validate_proposal(frozen, proposal, review_only=review_only, claim_first=claim_first,
-                      initial_claim_draft=initial_claim_draft,initial_anchor_draft=initial_anchor_draft,complete_anchor_review=complete_anchor_review)
+                      initial_claim_draft=initial_claim_draft,initial_anchor_draft=initial_anchor_draft,complete_anchor_review=complete_anchor_review,initial_evidence_draft=initial_evidence_draft)
     selected = frozen["inventory"]["affected_keys"] + frozen["inventory"]["context_keys"]
     before = index(frozen["before_records"])
     result = {
@@ -1071,7 +1089,20 @@ def review_packet(frozen: dict, proposal: Proposal, *, review_only: bool = False
                 'This is the original unused final independent review, not another correction. Judge each complete postimage and its source directly; '
                 'approve only if the actual Evidence bindings, qualifications and unchanged Claim teaching are correct. '
                 'Only full independent approval can authorize these writes; any rejection stops.'}
-    if initial_anchor_draft:
+    if frozen['manifest'].get('evidence_binding_repair'):
+        result['evidence_binding_review_scope']={'schema_version':'evidence_binding_readonly_owner_context_v1',
+            'unchanged_shared_claims':[k for k in frozen['inventory']['affected_keys'] if k.startswith('claims/')],
+            'full_claim_audit_required_after_commit':True,'other_evidence_anchors_unchanged_not_newly_approved':True,
+            'group_completion':False}
+    if initial_evidence_draft:
+        findings=[]
+        try:validate_graph(post,before,frozen)
+        except ValueError as exc:findings.append(str(exc))
+        result['unresolved_proposal_review']={'schema_version':'eligible_evidence_binding_initial_draft_v1',
+            'program_findings':findings,'content_write_authority':False,'mandatory_original_unique_correction':True,
+            'explanation':'Review all complete proposed bindings/full own sources. Target Evidence must realize every existing own Claim anchor assigned to it. '
+                'The original unique correction must supply missing target fragments. Other unchanged Evidence anchors are readonly context, not newly approved or repaired. Strict final graph and full shared-owner audit remain mandatory.'}
+    elif initial_anchor_draft:
         missing=sorted(set(index(proposal.records))-set(d.record_key for d in proposal.dispositions))
         result['anchor_draft_missing_dispositions']=missing
         result['unresolved_proposal_review']={'schema_version':'anchor_qualification_initial_draft_v1',

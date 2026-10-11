@@ -75,6 +75,9 @@ def corrected_proposal(root, frozen, response):
 
 
 def initial_review_base(frozen, proposal):
+    if frozen['manifest'].get('evidence_binding_repair'):
+        try:return contract.review_packet(frozen,proposal)
+        except ValueError:return contract.review_packet(frozen,proposal,initial_evidence_draft=True)
     if frozen['manifest'].get('anchor_qualification'):
         missing=set(contract.index(proposal.records))-set(d.record_key for d in proposal.dispositions)
         return contract.review_packet(frozen,proposal,initial_anchor_draft=bool(missing))

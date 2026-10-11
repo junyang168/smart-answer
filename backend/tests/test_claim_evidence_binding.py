@@ -69,3 +69,30 @@ def test_inventory_keeps_all_shared_owners_and_relations_readonly(monkeypatch):
     inv=b.inventory(m,s)
     assert set(inv['affected_keys'])=={'evidence_steps/E','claims/C','knowledge_relations/R'}
     assert [p.key for p in m.permissions if not p.create]==['evidence_steps/E']
+
+
+@pytest.mark.parametrize('fault',[None,'foreign_write','word_change','drop_old_binding'])
+def test_real_saved_initial_draft_no_approval_or_file_mutation(fault):
+    import os
+    from pathlib import Path
+    from backend.pipeline.source_reconciliation_runner import read,body,validate_raw,effective_proposal,initial_review_base
+    name=os.environ.get('WKP_EVIDENCE_BINDING_SAVED_ROOT')
+    if not name:pytest.skip('explicit actual readonly fixture')
+    root=Path(name);original={p:p.read_bytes() for p in root.iterdir() if p.is_file()}
+    frozen=body(read(root/'scoped-materials.json'))
+    raw=validate_raw(root,'proposal',body(read(root/'proposal.packet.json')))
+    proposal=effective_proposal(frozen,raw['response'])
+    if fault:
+        ev=next(r for r in proposal.records if r.collection=='evidence_steps')
+        if fault=='word_change':ev.payload['statement']='foreign words'
+        elif fault=='drop_old_binding':ev.payload['source_fragment_ids']=[];ev.payload['source_fragment_id']='new'
+        else:
+            claim=next(r for r in frozen['before_records'] if r['collection']=='claims')
+            proposal.records.append(c.Row.model_validate(claim))
+        with pytest.raises(ValueError):initial_review_base(frozen,proposal)
+    else:
+        packet=initial_review_base(frozen,proposal)
+        assert packet['unresolved_proposal_review']['content_write_authority'] is False
+        assert packet['unresolved_proposal_review']['mandatory_original_unique_correction'] is True
+        with pytest.raises(ValueError):c.validate_proposal(frozen,proposal)
+    assert {p:p.read_bytes() for p in original}==original
