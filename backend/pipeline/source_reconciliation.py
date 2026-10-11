@@ -116,6 +116,7 @@ class Manifest(Contract):
     claim_issue: FileBinding | None = None
     # Exact owner CVP scope permission; never inherited from Claim permission.
     viewpoint_scope_repair: FileBinding | None = None
+    anchor_qualification: FileBinding | None = None
 
     @model_serializer(mode="wrap")
     def serialize(self, handler):
@@ -127,6 +128,8 @@ class Manifest(Contract):
             result.pop("claim_issue", None)
         if self.viewpoint_scope_repair is None:
             result.pop("viewpoint_scope_repair", None)
+        if self.anchor_qualification is None:
+            result.pop("anchor_qualification", None)
         return result
 
 
@@ -452,7 +455,12 @@ def freeze(manifest: Manifest, states: dict[str, dict], *, physical_snapshots: d
     changed = sorted(k for k in keys if before["paragraphs"].get(k) != after[0]["paragraphs"].get(k))
     if not set(changed) <= set(manifest.authorized_paragraph_keys):
         raise ValueError("source change exceeds authorized paragraphs; no automatic scope expansion")
-    if manifest.viewpoint_scope_repair:
+    if manifest.anchor_qualification:
+        from backend.pipeline.claim_anchor_qualification import inventory as qualification_inventory
+        if changed or manifest.authorized_paragraph_keys:
+            raise ValueError('anchor qualification cannot edit professor sources')
+        inv = qualification_inventory(manifest, states, physical_snapshots)
+    elif manifest.viewpoint_scope_repair:
         from backend.pipeline.cvp_scope_management import validate_authority, scope_inventory
         diagnosis = validate_authority(manifest, states, snapshots=physical_snapshots)
         if changed or manifest.authorized_paragraph_keys:
@@ -686,12 +694,20 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
         if changed_fields - set(permission.fields) - {"revision", id_field} - PROVENANCE:
             raise ValueError("field change outside permission: " + k)
         if old and c == 'claims' and 'occurrences' in changed_fields:
-            from backend.pipeline.claim_retained_occurrence_context import validate_occurrence_delta
-            validate_occurrence_delta(frozen, object_id, old, new)
+            if manifest.anchor_qualification:
+                from backend.pipeline.claim_anchor_qualification import validate_delta
+                validate_delta(frozen,old,new,k)
+            else:
+                from backend.pipeline.claim_retained_occurrence_context import validate_occurrence_delta
+                validate_occurrence_delta(frozen, object_id, old, new)
         if old and old.get("review_status") in HUMAN_HOLDS and new != old:
             from backend.pipeline.cvp_scope_management import approved_relation_reference_only
-            if not approved_relation_reference_only(frozen,k,proposed):
+            from backend.pipeline.claim_anchor_qualification import validate_delta
+            if not (manifest.anchor_qualification and validate_delta(frozen,old,new,k)) and not approved_relation_reference_only(frozen,k,proposed):
                 raise ValueError("existing human hold/ruling needs an exact separate owner disposition")
+        if manifest.anchor_qualification:
+            from backend.pipeline.claim_anchor_qualification import validate_delta
+            validate_delta(frozen,old,new,k)
         if new.get("review_status", "candidate") != "candidate":
             raise ValueError("proposal may not inherit or manufacture approval: " + k)
         if new.get("revision") != (old.get("revision", 1) + 1 if old else 1):
@@ -717,6 +733,9 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
     if initial_claim_draft:
         return post  # Review-only: graph/coverage findings are disclosed, never waived for final/write.
     validate_graph(post, before, frozen, pending_link_keys=pending_link_keys)
+    if manifest.anchor_qualification:
+        from backend.pipeline.claim_anchor_qualification import validate_binding_closure
+        validate_binding_closure(frozen,proposal,post)
     if manifest.deferred_repair:
         from backend.pipeline.deferred_claim_repair import validate_postimages
         validate_postimages(frozen, post)
@@ -877,7 +896,7 @@ def validate_graph(post: dict[str, dict], before: dict[str, dict], frozen: dict,
                 if not aliases.intersection(set(strings(occurrence))):
                     continue
                 for anchor in occurrence.get("anchors", []):
-                    current_anchor_profile = frozen.get('claim_issue_context', {}).get(
+                    current_anchor_profile = bool(frozen['manifest'].get('anchor_qualification')) or frozen.get('claim_issue_context', {}).get(
                         'anchor_binding_validation_profile') == 'declared_local_own_containing_v1'
                     eid = (anchor_evidence_id(p, occurrence, anchor) if current_anchor_profile
                            else anchor.get('evidence_id'))

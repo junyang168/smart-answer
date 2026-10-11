@@ -1,0 +1,104 @@
+from copy import deepcopy
+import pytest
+from backend.pipeline import claim_anchor_qualification as m
+from backend.pipeline import source_reconciliation as c
+from backend.api.canonical_repository.postgres_store import record_content_sha,sha256_json
+
+
+def fixture(monkeypatch):
+    claim={'claim_id':'C','revision':1,'statement':'unchanged',
+        'evidence_step_ids':['E','OTHER'],'eligible_evidence_step_ids':['OTHER'],
+        'withheld_evidence_step_ids':['E'],'occurrences':[{'transcript_id':'own',
+            'anchors':[{'proposed_highlight':{'text':'bad'}},{'proposed_highlight':{'text':'good'}}]}]}
+    ev={'evidence_step_id':'E','revision':1,'statement':'same evidence','source_fragment_id':'F',
+        'source_fragment_ids':['F'],'support_eligibility':'withheld_unreviewed','valid_for_identity_review':False}
+    old={'claims/C':claim,'evidence_steps/E':ev,'source_fragments/F':{'fragment_id':'F','source_id':'S','paragraph_key':'S0001','verbatim_excerpt':'own'}}
+    f={'manifest':{'source_id':'S','before_source':{'path':'x','file_sha256':'0'*64},
+        'current_sources':[{'path':'x','file_sha256':'0'*64}], 'authorization':{'path':'a','file_sha256':'0'*64},
+        'authorized_paragraph_keys':[], 'permissions':[{'collection':'claims','object_id':'C','fields':['occurrences']}],
+        'groups':[{'group_key':'G','claim_ids':['C']}],'campaign_claim_ids':['C'],
+        'accepted_membership':{'path':'m','file_sha256':'0'*64},'created_at':'test',
+        'anchor_qualification':{'path':'d','file_sha256':'0'*64}},
+        'before_records':c.rows(old),'after':[{'body_sha256':'b','paragraphs':{'S0001':{'text':'own'}}}], 'context_sources':[]}
+    monkeypatch.setattr(m,'direction',lambda *a,**kw:{'claim_id':'C','evidence_id':'E','withdraw_anchor_quote':'bad'})
+    monkeypatch.setattr(c,'containing_anchor_fragments',lambda *a,**kw:[{}])
+    new=deepcopy(claim);new['occurrences'][0]['anchors'].pop(0)
+    new['eligible_evidence_step_ids'].append('E');new['withheld_evidence_step_ids']=[]
+    nev={**ev,'support_eligibility':'eligible_with_label','valid_for_identity_review':True}
+    return f,claim,new,ev,nev
+
+
+def test_exact_anchor_and_qualification_only(monkeypatch):
+    f,old,new,ev,nev=fixture(monkeypatch)
+    assert m.validate_delta(f,old,new,'claims/C')
+    assert not m.validate_delta(f,ev,nev,'evidence_steps/E')
+    assert old['occurrences'][0]['anchors'][0]['proposed_highlight']['text']=='bad'
+
+
+@pytest.mark.parametrize('fault',['words','other_anchor','all_anchors','occurrence_identity','ownership','bucket','binding','evidence_words','not_eligible','not_valid','foreign'])
+def test_scope_counterexamples(monkeypatch,fault):
+    f,old,new,ev,nev=fixture(monkeypatch);k='claims/C'
+    if fault=='words':new['statement']='changed'
+    if fault=='other_anchor':new['occurrences'][0]['anchors'][0]['proposed_highlight']['text']='changed'
+    if fault=='all_anchors':new['occurrences'][0]['anchors']=[]
+    if fault=='occurrence_identity':new['occurrences'][0]['transcript_id']='foreign'
+    if fault=='ownership':new['evidence_step_ids']=[]
+    if fault=='bucket':new['eligible_evidence_step_ids']=['E']
+    if fault in {'binding','evidence_words','not_eligible','not_valid'}:
+        k='evidence_steps/E';old,new=ev,nev
+        if fault=='binding':new['source_fragment_id']='OTHER'
+        if fault=='evidence_words':new['statement']='changed'
+        if fault=='not_eligible':new['support_eligibility']='eligible'
+        if fault=='not_valid':new['valid_for_identity_review']=False
+    if fault=='foreign':k='claims/FOREIGN'
+    with pytest.raises(ValueError):m.validate_delta(f,old,new,k)
+
+
+def test_binding_physical_proof_required(monkeypatch):
+    f,old,new,ev,nev=fixture(monkeypatch)
+    monkeypatch.setattr(c,'containing_anchor_fragments',lambda *a,**kw:[])
+    with pytest.raises(ValueError):m.validate_delta(f,ev,nev,'evidence_steps/E')
+
+
+def test_legacy_manifest_shape_unchanged(monkeypatch):
+    f,*_=fixture(monkeypatch);f['manifest'].pop('anchor_qualification')
+    assert 'anchor_qualification' not in c.Manifest.model_validate(f['manifest']).model_dump()
+
+
+@pytest.mark.parametrize('fault',[None,'owner','seal','human_approval','shared_owner','pin','human_hold',
+    'human_reviewer','substantive','human_reason','statement','ambiguous_anchor','extra_permission','extra_correction'])
+def test_authority_never_waives_content_or_real_holds(monkeypatch,fault):
+    import json
+    f,claim,_,ev,_=fixture(monkeypatch)
+    # Restore real direction validator after the delta-only fixture.
+    monkeypatch.undo()
+    claim.update(review_status='human_review_required',reviewed_by='independent_ai_review')
+    ev.update(review_status='independent_terminal_reviewed',produced_claim_ids=['C'])
+    permissions=[{'collection':'claims','object_id':'C','fields':['occurrences','eligible_evidence_step_ids','withheld_evidence_step_ids']},
+        {'collection':'evidence_steps','object_id':'E','fields':['support_eligibility','valid_for_identity_review']}]
+    f['manifest']['permissions']=permissions
+    d={'schema_version':m.VERSION,'authorized_by':'owner','authorization_quote':'resolve exact anchor and qualification',
+        'human_content_approval':False,'source_id':'S','claim_id':'C','evidence_id':'E','maximum_corrections':1,
+        'withdraw_anchor_quote':'bad','original_review':{'path':'r','file_sha256':'0'*64},
+        'before_pins':{'claims/C':[1,record_content_sha(claim),False],'evidence_steps/E':[1,record_content_sha(ev),False]}}
+    review={'claim_reviews':[{'claim_id':'C','decision':'changes_suggested','human_review_reason':'',
+        'proposed_statement':'','issues':[{'issue_type':'insufficient_anchor','severity':'low'}]}]}
+    if fault=='owner':d['authorized_by']='system'
+    if fault=='human_approval':d['human_content_approval']=True
+    if fault=='shared_owner':ev['produced_claim_ids'].append('OTHER')
+    if fault=='pin':d['before_pins']['claims/C'][0]=2
+    if fault=='human_hold':claim['review_status']='human_hold'
+    if fault=='human_reviewer':claim['reviewed_by']='owner'
+    if fault=='substantive':review['claim_reviews'][0]['issues'][0]['issue_type']='source_conflict'
+    if fault=='human_reason':review['claim_reviews'][0]['human_review_reason']='actual unresolved attribution'
+    if fault=='statement':review['claim_reviews'][0]['proposed_statement']='different teaching'
+    if fault=='ambiguous_anchor':claim['occurrences'][0]['anchors'].append(deepcopy(claim['occurrences'][0]['anchors'][0]))
+    if fault=='extra_permission':permissions[0]['fields'].append('statement')
+    if fault=='extra_correction':d['maximum_corrections']=2
+    d['artifact_sha256']=sha256_json(d)
+    if fault=='seal':d['artifact_sha256']='0'*64
+    monkeypatch.setattr(c,'bound_bytes',lambda b,*a:json.dumps(review if (b.path if isinstance(b,c.FileBinding) else b['path'])=='r' else d).encode())
+    manifest=c.Manifest.model_validate(f['manifest'])
+    if fault:
+        with pytest.raises(ValueError):m.direction(manifest,{'claims/C':claim,'evidence_steps/E':ev})
+    else:assert m.direction(manifest,{'claims/C':claim,'evidence_steps/E':ev})==d

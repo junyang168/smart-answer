@@ -591,6 +591,11 @@ def build_proposal_packet(frozen: dict) -> dict:
         from backend.pipeline.claim_evidence_completion import packet_receipt
         completion=packet_receipt(frozen)
         if completion:result['evidence_completion_receipt']=completion
+    if frozen['manifest'].get('anchor_qualification'):
+        import json
+        result['anchor_qualification']=json.loads(contract.bound_bytes(frozen['manifest']['anchor_qualification']))
+        result['writable_record_shapes']={col:contract.KNOWLEDGE_COLLECTIONS[col][0].model_json_schema()
+            for col in sorted({p['collection'] for p in frozen['manifest']['permissions']})}
     if any(contract.split_key(k)[0]=='knowledge_routes' for k in frozen['inventory']['unknown_keys']):
         result['inventory'] = {**frozen['inventory'], 'unknown_keys': contract.unresolved_consumers(frozen)}
         result['read_only_adapter_receipt'] = {'schema': 'knowledge_route_impact_only_v1',

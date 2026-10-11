@@ -1157,6 +1157,9 @@ def main(argv=None):
                         raise ValueError('Claim-first original SQL action root drift')
                     source_root=bound.parent
                 execute_source_action(store,args.run_id,manifest,root=source_root,ports=ProductionPorts(),claim_first=args.claim_first)
+                if manifest.get('anchor_qualification'):
+                    stage_event('anchor_qualification_applied_pending_audit',run_id=args.run_id,group_complete=False)
+                    return 0
                 if args.claim_first:
                     from backend.pipeline.claim_first_management import finish_claim_audit
                     finish_claim_audit(store,args.run_id,bound)
