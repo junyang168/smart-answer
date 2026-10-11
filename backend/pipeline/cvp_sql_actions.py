@@ -368,6 +368,8 @@ def validated_sufficient_deferred(root):
 def execute_coverage_action(store,run_id,definition,group,*,root,ports,investigation_root=None):
     from backend.pipeline.cvp_sql_flow import prepare_group,reviewed_cvp_package,NORMAL_COLLECTIONS
     saved=store.get_cvp_group(run_id);old=saved['reviewed']['evidence']
+    from backend.pipeline.claim_evidence_binding import coverage_context as evidence_coverage_context
+    sequential=evidence_coverage_context(store,saved,group) if investigation_root is None else None
     if investigation_root is not None:
         ids,investigation=validated_sufficient_deferred(investigation_root)
         check_binding(definition['cvp_policy'])
@@ -378,13 +380,18 @@ def execute_coverage_action(store,run_id,definition,group,*,root,ports,investiga
         ids=old['pending_cvp_claim_ids'];investigation=None
         if old.get('action',{}).get('kind')!='source_claim_revision':
             raise ValueError('required coverage must follow the approved bounded Claim revision')
-    if not ids or not set(ids)<=set(saved['claim_ids']):raise ValueError('coverage changes original membership')
+    if sequential:ids=sequential['coverage_claim_ids']
+    allowed=set(sequential['coverage_claim_ids']) if sequential else set(saved['claim_ids'])
+    if not ids or (set(ids)!=allowed if sequential else not set(ids)<=allowed):
+        raise ValueError('coverage changes original membership or audited dependency scope')
     action_id='CVPA-'+sha256_json({'prior':saved['reviewed_sha256'],'kind':'required_cvp_coverage','claims':ids})
     root=root/action_id
     store.bind_cvp_execution_root(run_id,identity=action_id,root=root)
     previous=store.get_cvp_action(run_id,action_id)
     materials=previous['materials'] if previous else prepare_group(store,definition,{**group,'claim_ids':ids})
-    if not previous and saved.get('claim_layer_audit'):
+    if not previous and sequential:
+        materials['claim_management_resolution']=sequential
+    elif not previous and saved.get('claim_layer_audit'):
         from backend.pipeline.claim_first_management import coverage_context
         materials['claim_management_resolution']=coverage_context(store,saved,group)
     elif not previous and old.get('action',{}).get('materials',{}).get('claim_issue_context'):

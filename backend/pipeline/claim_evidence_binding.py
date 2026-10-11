@@ -118,6 +118,99 @@ def finish_claim_audit(store,run_id):
     return binding(root/'completion.json')
 
 
+def coverage_context(store,saved,group):
+    """Hand an applied, audited Evidence repair to ordinary CVP coverage.
+
+    Shared owners are impact dependencies, not new campaign members. The
+    original group roster and every existing pending impact remain intact.
+    This authenticates source approval; it grants no CVP content approval.
+    """
+    from pathlib import Path
+    from backend.pipeline.cvp_sql_flow import binding,check_binding,decoded_pins
+    from backend.pipeline.cvp_sql_actions import validate_source_package
+    from backend.pipeline.source_reconciliation_runner import read,body
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+    from backend.pipeline.claim_first_management import validate_claim_audit_report
+    from backend.pipeline.viewpoint_content_blocked_fallback import verify_saved_full_audit
+    evidence=saved['reviewed']['evidence'];package=evidence['package']['payload']
+    app=package.get('source_repair_application',{})
+    if not app:return None
+    check_binding(app['materials']);material=body(read(Path(app['materials']['path'])))
+    if not material['manifest'].get('evidence_binding_repair'):return None
+    if (saved['checkpoint']!='applied' or app.get('run_id')!=saved['run_id']
+            or saved['claim_ids']!=group['claim_ids']):
+        raise ValueError('Evidence coverage original group/commit drift')
+    validate_source_package(package)
+    manifest=c.Manifest.model_validate(material['manifest'])
+    d=direction(manifest,c.index(material['before_records']),material.get('physical_snapshots'))
+    pending_ids=sorted(set(group['claim_ids'])|set(d['claim_ids']))
+    if sorted(evidence.get('pending_cvp_claim_ids',[]))!=pending_ids:
+        raise ValueError('Evidence coverage pending shared-owner denominator drift')
+    root=Path(app['run_root']);receipt_path=root/'shared-owner-claim-audit/completion.json'
+    receipt=read_artifact(receipt_path)
+    plan=saved['reviewed']['plan'];history=store.get_change_history(plan['change_set_id'])
+    if (not history or history['status']!='applied'
+            or plan['change_set_id'] not in saved['change_set_ids']
+            or history['fingerprint_sha256']!=plan['fingerprint_sha256']
+            or history['source_sha256']!=plan['source_sha256']
+            or len(history['operations'])!=len(plan['operations'])
+            or receipt.get('run_id')!=saved['run_id']
+            or receipt.get('change_set_id')!=plan['change_set_id']
+            or receipt.get('materials')!=app['materials']
+            or receipt.get('claim_ids')!=sorted(d['claim_ids'])
+            or receipt.get('status')!='source_binding_shared_owners_audited_cvp_pending'
+            or receipt.get('group_complete') is not False):
+        raise ValueError('Evidence coverage lacks exact committed source/owner audit')
+    expected=decoded_pins(material['sql_scope']['read_pins'])
+    for op,h in zip(plan['operations'],history['operations']):
+        key=op['collection'],op['object_id']
+        live=store.get_record_state(*key)
+        if (op['collection'] not in {'evidence_steps','source_fragments'}
+                or not live or live['retired']
+                or h['collection']!=key[0] or h['object_id']!=key[1]
+                or h['after']!=op['payload'] or live['payload']!=op['payload']
+                or h['after_revision']!=op['after_revision'] or live['revision']!=op['after_revision']
+                or h['after_sha256']!=op['after_sha256'] or live['content_sha256']!=op['after_sha256']
+                or record_content_sha(live['payload'])!=op['after_sha256']):
+            raise ValueError('Evidence coverage actual current/history postimage drift')
+        expected[key]=(live['revision'],live['content_sha256'],False)
+    for cid in d['claim_ids']:
+        row=store.get_record_state('claims',cid)
+        if (not row or row['retired'] or receipt['claim_pins'].get(cid)!=
+                [row['revision'],row['content_sha256'],False]):
+            raise ValueError('Evidence coverage shared Claim audit version drift')
+    dependencies=[]
+    for cid in sorted(set(d['claim_ids'])-set(group['claim_ids'])):
+        context=store.read_cvp_context([cid])
+        links=[row for (col,_),row in context.items() if col=='viewpoint_claim_links'
+               and not row['retired'] and row['payload'].get('claim_id')==cid
+               and row['payload'].get('effective_state')=='active']
+        if links:
+            raise ValueError('shared owner has existing CVP impacts; requires complete link management')
+        dependencies.append({'claim_id':cid,'claim_pin':receipt['claim_pins'][cid],
+            'active_cvp_links':[],'source_audited':True,'new_coverage_authority':False})
+    with store.connect() as conn,conn.cursor() as cursor:
+        store._assert_transaction_read_pins(cursor,expected)
+    check_binding(receipt['audit']);audit=read_artifact(receipt['audit']['path'])
+    validate_claim_audit_report(audit,d['claim_ids'])
+    verify_saved_full_audit(Path(receipt['audit']['path']),layers=('3',))
+    return {'schema_version':'wang_sequential_source_cvp_handoff_v1',
+        'management_action_id':evidence['action']['action_id'],
+        'prior_reviewed_sha256':saved['reviewed_sha256'],
+        'source_package_sha256':evidence['package']['sha256'],
+        'source_terminal_review':evidence['approval']['terminal_review'],
+        'shared_owner_audit':binding(receipt_path),'source_change_set_id':plan['change_set_id'],
+        'original_group_claim_ids':list(group['claim_ids']),
+        'coverage_claim_ids':list(group['claim_ids']),'audited_dependency_impacts':dependencies,
+        'pending_existing_cvp_record_keys':evidence.get('pending_cvp_management_record_keys',[]),
+        'existing_cvp_content_approved':False,'campaign_membership_changes':0,
+        'old_proposals_and_budgets_preserved':True,
+        'instructions':'Use the current approved source graph for normal coverage of original Claims. '
+            'Exact shared-owner dependencies have completed source audits and no active CVP links. '
+            'They are not added to the campaign roster or required to produce new CVPs by this handoff. '
+            'Existing impacts remain pending, not modified or approved by this source audit.'}
+
+
 def direction(manifest,states,snapshots=None):
     d=json.loads(c.bound_bytes(manifest.evidence_binding_repair,snapshots))
     if (d.get('schema_version')!=VERSION or d.get('authorized_by')!='owner'
