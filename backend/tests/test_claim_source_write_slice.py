@@ -127,6 +127,17 @@ def test_owner_statement_slice_refuses_scope_or_content_drift(monkeypatch,fault)
     with pytest.raises((ValueError,KeyError)):m.projection(f,p,d)
 
 
+def test_canonical_binding_order_preserves_full_payload_and_refuses_duplicates():
+    values=[{'evidence_step_id':'E2','source_fragment_id':'F','extra':'unchanged'},
+            {'evidence_step_id':'E1','source_fragment_id':'F','extra':{'precise':'field'}}]
+    saved=deepcopy(values)
+    result=c.canonical_binding_order(values)
+    assert result==[values[1],values[0]] and values==saved
+    assert c.canonical_binding_order(result)==result
+    with pytest.raises(ValueError):c.canonical_binding_order([values[0],values[0]])
+    with pytest.raises(KeyError):c.canonical_binding_order([{'evidence_step_id':'E1'}])
+
+
 @pytest.mark.skipif(os.environ.get('WKP357_G112_READONLY')!='1',reason='actual saved g112 readonly opt-in')
 def test_real_owner_statement_slice_is_strict_and_parent_byte_identical():
     from dotenv import load_dotenv
@@ -149,6 +160,14 @@ def test_real_owner_statement_slice_is_strict_and_parent_byte_identical():
     assert new['claims/'+cid]['occurrences']==old['claims/'+cid]['occurrences']
     assert new['claims/'+cid]['context_evidence_step_ids']==old['claims/'+cid]['context_evidence_step_ids']
     for stage in ('proposal','initial_review','correction'):validate_raw(root,stage,body(read(root/(stage+'.packet.json'))))
+    if (root/'final_review.raw.json').exists():
+        final=validate_raw(root,'final_review',body(read(root/'final_review.packet.json')))
+        package=m.package(direction,final);m.validate_package(package)
+        assert len(package['claims'])==1 and len(package['viewpoint_claim_links'])==3
+        assert len(package['viewpoint_identity_candidates'])==len(package['viewpoint_identity_decisions'])==3
+        for link in package['viewpoint_claim_links']:
+            pairs=[(x['evidence_step_id'],x['source_fragment_id']) for x in link['evidence_bindings']]
+            assert pairs==sorted(set(pairs))
     assert hashes=={p:c.file_sha256(p) for p in root.iterdir() if p.is_file()}
 
 

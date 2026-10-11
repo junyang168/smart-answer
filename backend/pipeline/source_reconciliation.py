@@ -1213,6 +1213,14 @@ def validate_review(packet: dict, response: dict) -> bool:
             and all(v.approved and not v.problems for v in review.verdicts))
 
 
+def canonical_binding_order(bindings):
+    """Serialize an exact evidence set; never discard a duplicate or a field."""
+    pairs = [(b['evidence_step_id'], b['source_fragment_id']) for b in bindings]
+    if len(pairs) != len(set(pairs)):
+        raise ValueError('source slice cannot discard duplicate Evidence bindings')
+    return [deepcopy(b) for _, b in sorted(zip(pairs, bindings))]
+
+
 def compile_package(frozen: dict, proposal: Proposal, raw: dict, *, frozen_sha256: str | None = None, claim_first: bool = False, provenance_templates: dict | None = None) -> dict:
     """Only declared deterministic provenance changes after actual Opus approval."""
     packet = review_packet(frozen, proposal, claim_first=claim_first,complete_anchor_review=bool(
@@ -1264,6 +1272,12 @@ def compile_package(frozen: dict, proposal: Proposal, raw: dict, *, frozen_sha25
     for k, link in list(data.items()):
         if not k.startswith("viewpoint_claim_links/"):
             continue
+        if (frozen.get('source_write_slice_material')
+                and 'owner_statement_storage_preservation' in frozen):
+            # The reviewed binding SET is unordered semantic evidence. The
+            # repository serialization requires sorted unique pairs. Preserve
+            # every complete binding; duplicate pairs are errors, not deduped.
+            link['evidence_bindings'] = canonical_binding_order(link.get('evidence_bindings', []))
         previous = before[key("viewpoint_identity_decisions", before[k]["decision_id"])]
         candidate = deepcopy(before[key("viewpoint_identity_candidates", previous["identity_candidate_id"])])
         seed = sha256_json({"version": VERSION, "update": frozen["update_id"], "review": digest, "link": k})
