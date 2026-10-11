@@ -44,11 +44,11 @@ def validate_direction(direction,value,claim_state):
         raise ValueError('owner completion cannot change source/Evidence/CVP/type/identity or add/delete Claims')
 
 
-def dependency_issue(issue,value,claim_state):
+def dependency_issue(issue,value,claim_state,action=None):
     """Shared intake/compiler authority for exact existing dependency Claims."""
     if issue.origin in {'opus_initial','gpt_proposal'}:
         from backend.pipeline.claim_issue_management import declined_supports_dependency
-        declined_supports_dependency(issue,value,claim_state)
+        declined_supports_dependency(issue,value,claim_state,action=action)
         return
     from backend.pipeline import source_reconciliation as c
     import json

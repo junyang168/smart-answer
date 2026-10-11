@@ -3450,8 +3450,17 @@ class PostgresKnowledgeStore:
                 claim=conn.execute('SELECT payload,revision,content_sha256,retired_at IS NOT NULL FROM wang_knowledge.objects WHERE collection=%s AND object_id=%s',
                                    ('claims',value.claim_id)).fetchone()
                 if not claim:raise ChangeSetConflict('owner dependency Claim missing')
+                action=None
+                if value.origin in {'opus_initial','gpt_proposal'}:
+                    from pathlib import Path
+                    aid=Path(value.report.path).parent.name
+                    ar=conn.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s',
+                        ('CVPA-'+sha256_json({'parent':run_id,'action':aid}),)).fetchone()
+                    if not ar or ar[0].get('parent_run_id')!=run_id or ar[0].get('action_id')!=aid:
+                        raise ChangeSetConflict('declined supports dependency missing exact SQL action')
+                    action=ar[0]['action']
                 dependency_issue(value,{**parent[0],'run_id':run_id},
-                                 dict(zip(('payload','revision','content_sha256','retired'),claim)))
+                                 dict(zip(('payload','revision','content_sha256','retired'),claim)),action=action)
             row = conn.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE', (ident,)).fetchone()
             if row:
                 result = row[0]

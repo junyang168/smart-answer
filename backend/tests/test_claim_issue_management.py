@@ -305,6 +305,17 @@ def test_declined_supports_dependency_is_bound_diagnostic_only(tmp_path,monkeypa
         from backend.pipeline.claim_owner_revision import dependency_issue
         dependency_issue(issue,value,state)
         assert (value,state,packet,response)==before and value['claim_ids']==['ORIGINAL']
+        action={'action_id':a.name,'kind':'audit_supports_correction',
+            'materials':{'packet':packet,'read_pins':deepcopy(value['reviewed']['evidence']['read_pins'])}}
+        action['materials_sha256']=m.sha256_json(action['materials'])
+        value['reviewed']['evidence']['read_pins']=[]
+        dependency_issue(issue,value,state,action=action)
+        for field,bad in [('action_id','foreign'),('kind','source_claim_revision'),('materials_sha256','wrong')]:
+            invalid=deepcopy(action);invalid[field]=bad
+            with pytest.raises(ValueError):dependency_issue(issue,value,state,action=invalid)
+        invalid=deepcopy(action);invalid['materials']['read_pins'][0]['pin'][0]=1
+        invalid['materials_sha256']=m.sha256_json(invalid['materials'])
+        with pytest.raises(ValueError):dependency_issue(issue,value,state,action=invalid)
 
 
 def test_prior_management_blocks_same_claim_not_unrelated_claim_or_link_action():

@@ -7,6 +7,7 @@ There is no database, snapshot engine, retry loop or production CLI here.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field
@@ -189,7 +190,7 @@ def declined_supports_findings(targets, review):
             for v in verdicts if not v.approved and v.problems]
 
 
-def declined_supports_dependency(issue, value, claim_state):
+def declined_supports_dependency(issue, value, claim_state, *, action=None):
     """Admit only a current, already-scoped dependency for source diagnosis.
 
     Authenticate the actual declined transport rather than trusting finder prose.
@@ -219,6 +220,16 @@ def declined_supports_dependency(issue, value, claim_state):
     matching=[f for f in findings if f['claim_id']==issue.claim_id]
     current=[t['claim'] for t in targets if t['claim']['claim_id']==issue.claim_id]
     admitted={(p['collection'],p['object_id']):p['pin'] for p in value['reviewed']['evidence']['read_pins']}
+    if action is not None:
+        materials=action.get('materials',{})
+        if (action.get('action_id')!=action_root.name or action.get('kind')!='audit_supports_correction'
+                or action.get('materials_sha256')!=sha256_json(materials)
+                or materials.get('packet')!=packet):
+            raise ValueError('declined supports dependency SQL action proof drift')
+        rows=materials.get('read_pins',[])
+        if len({(p['collection'],p['object_id']) for p in rows})!=len(rows):
+            raise ValueError('declined supports dependency duplicate SQL action pins')
+        admitted={(p['collection'],p['object_id']):p['pin'] for p in rows}
     if (len(matching)!=1 or matching[0]['reason']!=issue.reason
             or matching[0]['spans']!=[tuple(s) for s in issue.spans]
             or not current or any(c!=claim_state['payload'] for c in current)
@@ -385,7 +396,8 @@ def manifest_for_issues(store, run_id, issues, policy_binding, root):
     for i in issues:
         if i.claim_id not in saved['claim_ids']:
             from backend.pipeline.claim_owner_revision import dependency_issue
-            dependency_issue(i,saved,store.get_record_state('claims',i.claim_id))
+            action=store.get_cvp_action(run_id,Path(i.report.path).parent.name) if i.origin in {'opus_initial','gpt_proposal'} else None
+            dependency_issue(i,saved,store.get_record_state('claims',i.claim_id),action=action)
     policy = read_policy(policy_binding)
     sid = issues[0].source_id
     records = store.read_affected_context([("claims", i.claim_id) for i in issues])
