@@ -234,6 +234,77 @@ def test_audit_only_upheld_claims_route_no_rejected_or_link_disguise():
     assert len(m.audit_claim_findings(packet,report))==1
 
 
+def test_declined_supports_is_classification_not_prose_matched_approval():
+    from backend.pipeline.viewpoint_authorized_source_repair_357 import Review
+    target={'claim':{'claim_id':'C','statement':'甲乙'},'before_link':{
+        'claim_id':'C','viewpoint_claim_link_id':'L','link_type':'equivalent_component'}}
+    review=Review.model_validate({'verdicts':[{'claim_id':'C','approved':False,
+        'reason':'Unclassified diagnostic; do not infer permission.','problems':['connection or source needs classification']}]})
+    before=deepcopy(target); raw=review.model_dump(mode='json')
+    finding=m.declined_supports_findings([target],review)[0]
+    assert finding['spans']==[(0,2,'甲乙')]
+    diagnostic=json.loads(finding['reason'])
+    assert diagnostic['content_approval'] is False and diagnostic['verdict']==raw['verdicts'][0]
+    assert target==before and review.model_dump(mode='json')==raw
+    review.verdicts[0].approved=True;review.verdicts[0].problems=[]
+    assert m.declined_supports_findings([target],review)==[]
+    review.verdicts[0].approved=False
+    assert m.declined_supports_findings([target],review)==[]  # malformed refusal stays strict validation
+
+
+@pytest.mark.parametrize('mutation',['foreign','duplicate','inactive','non_equivalent','generation','population'])
+def test_declined_supports_scope_refuses_unsafe_diagnostics(mutation):
+    from backend.pipeline.viewpoint_authorized_source_repair_357 import Review
+    target={'claim':{'claim_id':'C','statement':'甲乙'},'before_link':{
+        'claim_id':'C','viewpoint_claim_link_id':'L','link_type':'equivalent_component'}}
+    targets=[target]
+    review=Review.model_validate({'verdicts':[{'claim_id':'C','approved':False,'reason':'reason','problems':['problem']}]})
+    if mutation=='foreign':target['before_link']['claim_id']='OTHER'
+    if mutation=='duplicate':targets.append(deepcopy(target))
+    if mutation=='inactive':target['before_link']['effective_state']='retired'
+    if mutation=='non_equivalent':target['before_link']['link_type']='supports'
+    if mutation=='generation':
+        other=deepcopy(target);other['before_link']['viewpoint_claim_link_id']='L2';other['claim']['statement']='不同';targets.append(other)
+    if mutation=='population':review.verdicts[0].claim_id='OTHER'
+    with pytest.raises(ValueError):m.declined_supports_findings(targets,review)
+
+
+@pytest.mark.parametrize('mutation',[None,'root','origin','pin','reason','held','retired','claim','answered_pass'])
+def test_declined_supports_dependency_is_bound_diagnostic_only(tmp_path,monkeypatch,mutation):
+    from backend.pipeline import viewpoint_resolution_runtime as runtime
+    from backend.pipeline.viewpoint_authorized_source_repair_357 import Review
+    from backend.api.canonical_repository.viewpoint_foundation import semantic_record_sha
+    a=tmp_path/'bound-action';a.mkdir();report=put(a/'raw-opus.json',{'original':'raw'})
+    claim={'claim_id':'C','revision':2,'statement':'甲乙','review_status':'ai_consensus_reviewed'}
+    pin=[2,semantic_record_sha(claim),False]
+    target={'claim':claim,'before_link':{'claim_id':'C','viewpoint_claim_link_id':'L','link_type':'equivalent_component'}}
+    packet={'schema_version':'wang_audit_link_repair_packet_v1','targets':[target]}
+    put(a/'packet.json',packet)
+    response={'verdicts':[{'claim_id':'C','approved':False,'reason':'diagnostic','problems':['classify source or link']}]}
+    review=Review.model_validate(response);finding=m.declined_supports_findings([target],review)[0]
+    issue=NS(report=NS(path=report['path']),origin='opus_initial',claim_id='C',reason=finding['reason'],
+        spans=finding['spans'],claim_revision=2,claim_sha256=pin[1])
+    value={'claim_ids':['ORIGINAL'],'execution_roots':{a.name:str(a)},'reviewed':{'evidence':{'read_pins':[
+        {'collection':'claims','object_id':'C','pin':pin.copy()}]}}}
+    state={'revision':2,'content_sha256':pin[1],'retired':False,'payload':deepcopy(claim)}
+    monkeypatch.setattr(runtime,'subscription_client',lambda *args:NS(model='claude-opus-5-5',backend='claude_subscription'))
+    monkeypatch.setattr(runtime,'read_saved_model_response',lambda adapter,p,path:response)
+    if mutation=='root':value['execution_roots']={}
+    if mutation=='origin':issue.origin='owner'
+    if mutation=='pin':value['reviewed']['evidence']['read_pins'][0]['pin'][0]=1
+    if mutation=='reason':issue.reason='invented'
+    if mutation=='held':state['payload']['review_status']='human_hold'
+    if mutation=='retired':state['retired']=True
+    if mutation=='claim':state['payload']['statement']='changed'
+    if mutation=='answered_pass':response['verdicts'][0].update(approved=True,problems=[])
+    if mutation:
+        with pytest.raises(ValueError):m.declined_supports_dependency(issue,value,state)
+    else:
+        before=deepcopy((value,state,packet,response))
+        m.declined_supports_dependency(issue,value,state)
+        assert (value,state,packet,response)==before and value['claim_ids']==['ORIGINAL']
+
+
 def test_prior_management_blocks_same_claim_not_unrelated_claim_or_link_action():
     evidence={'action':{'action_id':'CM','materials':{'claim_issue_context':{'issues':[{'claim_id':'A'}]}}}}
     assert m.prior_management_action(evidence,[{'claim_id':'A'}])=='CM'

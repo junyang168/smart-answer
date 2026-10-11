@@ -513,6 +513,17 @@ def run_group(store, definition, group, row, *, root):
     else:
         run_id = row["run_id"]
     saved = store.get_cvp_group(run_id); materials = saved["materials"]
+    def supports_or_source(adjudication, action_root, evidence):
+        from backend.pipeline.cvp_sql_actions import execute_supports_action
+        from backend.pipeline.source_reconciliation_runtime import ProductionPorts
+        try:
+            return execute_supports_action(store,run_id,adjudication,root=action_root,ports=ProductionPorts())
+        except IssuesDetected as detected:
+            policy=root/'claim-issue-policy-binding.json'
+            handle_issues(store,run_id,detected,root=root/run_id/'claim-issues',
+                policy_binding=read_artifact(policy).get('policy') if policy.exists() else None,
+                ports=ProductionPorts(),prior_management_action=prior_management_action(evidence,detected.findings))
+            return {'status':'source_management'}
     if saved.get('reviewed',{}).get('evidence',{}).get('approval',{}).get('source_write_slice'):
         app=saved['reviewed']['evidence']['package']['payload'].get('source_repair_application',{})
         if (app.get('source_write_slice',{}).get('mode') not in {'policy_evidence_binding','policy_claim_source_revision'}
@@ -754,7 +765,7 @@ def run_group(store, definition, group, row, *, root):
                 if exact_saved_upheld_items(old,packet,prior_report,ids):
                     from backend.pipeline.cvp_sql_actions import execute_supports_action
                     from backend.pipeline.source_reconciliation_runtime import ProductionPorts
-                    result=execute_supports_action(store,run_id,previous,root=Path(previous).parent/'bounded-supports',ports=ProductionPorts())
+                    result=supports_or_source(previous,Path(previous).parent/'bounded-supports',evidence)
                     if result.get('status')=='already_applied':
                         raise ValueError('already repaired connection remains upheld; no repeated semantic repair')
                     return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)
@@ -791,7 +802,7 @@ def run_group(store, definition, group, row, *, root):
             if any(a['verdict']!='audit_objection_rejected' for a in report['actions']):
                 from backend.pipeline.cvp_sql_actions import execute_supports_action
                 from backend.pipeline.source_reconciliation_runtime import ProductionPorts
-                execute_supports_action(store,run_id,adjudication,root=audit_dir/'bounded-supports',ports=ProductionPorts())
+                supports_or_source(adjudication,audit_dir/'bounded-supports',evidence)
                 # Exactly one narrow correction; the new committed pins choose
                 # another complete audit. Unchanged judgement inputs reuse cache.
                 return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)

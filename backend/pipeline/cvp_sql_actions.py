@@ -564,6 +564,14 @@ def execute_supports_action(store,run_id,adjudication_root,*,root,ports):
         adapter.max_request_bytes=500000
         response,_,_=review_call(adapter,repair,root,label)
         result=Review.model_validate(response)
+        from backend.pipeline.claim_issue_management import declined_supports_findings,IssuesDetected
+        findings=declined_supports_findings(selected,result)
+        if findings:
+            # This preserves the link refusal and hands its actual full reason
+            # to the already-authorized source classifier. It does not approve
+            # a Claim change or repeat the failed supports proposal.
+            raise IssuesDetected(findings,origin='opus_initial' if label=='opus' else 'gpt_proposal',
+                                 report=binding(root/f'raw-{label}.json'))
         validate_supports_review(result,selected)
         reviews[label]=result.model_dump(mode='json')
     extra=supports_identity_dependencies(store,records,selected)

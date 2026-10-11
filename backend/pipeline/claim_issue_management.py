@@ -155,6 +155,79 @@ def audit_claim_findings(packet, report):
             for i in packet['items'] if i['item_id'] in upheld and i['item_id'].startswith('3:')]
 
 
+def declined_supports_findings(targets, review):
+    """A declined link proposal requests Claim/source classification, not repair approval.
+
+    No reason-text matching or invented typed verdict: the original full verdict
+    is diagnostic material. Claim management may conclude cvp_link instead of
+    proposing any source change. Its existing policy and independent review are
+    still required; the declined link never receives another review budget.
+    """
+    claims = {}
+    links = set()
+    for target in targets:
+        claim = target['claim']; cid = claim['claim_id']
+        link=target['before_link']; lid=link['viewpoint_claim_link_id']
+        if (link['claim_id']!=cid or lid in links or not claim['statement']
+                or link.get('effective_state','active')!='active'
+                or link['link_type'] not in {'equivalent_full','equivalent_component'}):
+            raise ValueError('declined supports foreign/duplicate/inactive scope')
+        links.add(lid)
+        if cid in claims and claims[cid] != claim:
+            raise ValueError('declined supports conflicting Claim generations')
+        claims[cid] = claim
+    verdicts = review.verdicts
+    if (not claims or len(verdicts) != len(claims)
+            or {v.claim_id for v in verdicts} != set(claims)):
+        raise ValueError('declined supports review population mismatch')
+    return [{'claim_id':v.claim_id,
+             'spans':[(0,len(claims[v.claim_id]['statement']),claims[v.claim_id]['statement'])],
+             'reason':json.dumps({'diagnostic_origin':'declined_supports_postimage',
+                 'content_approval':False,'verdict':v.model_dump(mode='json'),
+                 'connection_ids':[t['before_link']['viewpoint_claim_link_id'] for t in targets
+                                   if t['claim']['claim_id']==v.claim_id]},ensure_ascii=False)}
+            for v in verdicts if not v.approved and v.problems]
+
+
+def declined_supports_dependency(issue, value, claim_state):
+    """Admit only a current, already-scoped dependency for source diagnosis.
+
+    Authenticate the actual declined transport rather than trusting finder prose.
+    This does not add it to the frozen group or approve any content change.
+    """
+    from pathlib import Path
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact,read_saved_model_response,subscription_client
+    from backend.pipeline.viewpoint_audit_link_repair import link_review_adapter,PROMPT
+    from backend.pipeline.viewpoint_authorized_source_repair_357 import Review
+    report=Path(issue.report.path); action_root=report.parent
+    if (issue.origin not in {'opus_initial','gpt_proposal'}
+            or report.name not in {'raw-opus.json','raw-gpt.json'}
+            or value.get('execution_roots',{}).get(action_root.name)!=str(action_root)
+            or claim_state['retired'] or claim_state['payload'].get('review_status') in HOLDS):
+        raise ValueError('declined supports dependency lacks original bound action')
+    packet=read_artifact(action_root/'packet.json')
+    if packet.get('schema_version')!='wang_audit_link_repair_packet_v1':
+        raise ValueError('declined supports dependency wrong packet')
+    targets=packet['targets']; ids={t['claim']['claim_id'] for t in targets}
+    provider,model=('claude','claude-opus-5-5') if report.name=='raw-opus.json' else ('codex','gpt-6.1-sol')
+    expected_origin='opus_initial' if provider=='claude' else 'gpt_proposal'
+    if issue.origin!=expected_origin:raise ValueError('declined supports dependency reviewer origin drift')
+    adapter=link_review_adapter(subscription_client(provider,model,'high'),PROMPT,
+        contextual_semantics=True,multiple_targets_per_claim=len(ids)!=len(targets))
+    review=Review.model_validate(read_saved_model_response(adapter,packet,report))
+    findings=declined_supports_findings(targets,review)
+    matching=[f for f in findings if f['claim_id']==issue.claim_id]
+    current=[t['claim'] for t in targets if t['claim']['claim_id']==issue.claim_id]
+    admitted={(p['collection'],p['object_id']):p['pin'] for p in value['reviewed']['evidence']['read_pins']}
+    if (len(matching)!=1 or matching[0]['reason']!=issue.reason
+            or matching[0]['spans']!=[tuple(s) for s in issue.spans]
+            or not current or any(c!=claim_state['payload'] for c in current)
+            or admitted.get(('claims',issue.claim_id))!=[claim_state['revision'],claim_state['content_sha256'],False]
+            or issue.claim_revision!=claim_state['payload']['revision']
+            or issue.claim_sha256!=semantic_record_sha(claim_state['payload'])):
+        raise ValueError('declined supports dependency current scope/pin/finding drift')
+
+
 def eligibility_review_candidate(evidence, states, sid):
     """A classification may be reviewed; this is NOT content approval."""
     if (evidence.get('support_eligibility') != 'context_only'
@@ -311,8 +384,11 @@ def manifest_for_issues(store, run_id, issues, policy_binding, root):
         raise ValueError("issue repair changed original group membership")
     for i in issues:
         if i.claim_id not in saved['claim_ids']:
-            from backend.pipeline.claim_owner_revision import dependency_issue
-            dependency_issue(i,saved,store.get_record_state('claims',i.claim_id))
+            if i.origin in {'opus_initial','gpt_proposal'} and str(i.report.path).endswith(('/raw-opus.json','/raw-gpt.json')):
+                declined_supports_dependency(i,saved,store.get_record_state('claims',i.claim_id))
+            else:
+                from backend.pipeline.claim_owner_revision import dependency_issue
+                dependency_issue(i,saved,store.get_record_state('claims',i.claim_id))
     policy = read_policy(policy_binding)
     sid = issues[0].source_id
     records = store.read_affected_context([("claims", i.claim_id) for i in issues])
