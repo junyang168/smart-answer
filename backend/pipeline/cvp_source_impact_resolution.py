@@ -786,9 +786,16 @@ def context(value,store=None,*,cursor=None):
     prior=applied_review(None,value,row[0]['reviewed_sha256'],cursor=cursor)
     if prior['plan']['change_set_id']!=ids[-2]:raise ValueError('source handoff preceding plan drift')
     pe=prior['evidence'];handoff=context({'reviewed':prior})
-    if (handoff is None or pe.get('pending_cvp_management_record_keys')!=e.get('pending_cvp_management_record_keys')
+    if (pe.get('pending_cvp_management_record_keys')!=e.get('pending_cvp_management_record_keys')
             or pe.get('pending_cvp_claim_ids') or e.get('pending_cvp_claim_ids')
             or pe.get('viewpoint_ids')!=e.get('viewpoint_ids')):
+        raise ValueError('source handoff correction lost original obligations/population')
+    if handoff is None:
+        # An exact immediately committed ordinary CVP generation has no source
+        # handoff to recover. Do not misclassify a later link-only correction as
+        # source management; an action or pending source obligation still fails.
+        if 'action' not in pe and not pe.get('pending_cvp_management_record_keys'):
+            return None
         raise ValueError('source handoff correction lost original obligations/population')
     return handoff
 

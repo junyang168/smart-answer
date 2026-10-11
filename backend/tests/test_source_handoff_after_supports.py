@@ -4,7 +4,7 @@ from backend.pipeline import cvp_source_impact_resolution as flow
 
 
 @pytest.mark.parametrize('fault',[None,'foreign','missing','plan','current','pending','population','unfinished',
-    'nohandoff','domain','type','target','claim','approval','targets'])
+    'nohandoff','normal','normalpending','normalpopulation','domain','type','target','claim','approval','targets'])
 def test_exact_immediate_committed_supports_handoff(monkeypatch,fault):
     handoff={'schema_version':flow.HANDOFF}
     old={'viewpoint_claim_link_id':'L','link_type':'equivalent_component','claim_id':'C','viewpoint_id':'V',
@@ -26,6 +26,14 @@ def test_exact_immediate_committed_supports_handoff(monkeypatch,fault):
     elif fault=='population':prior['evidence']['viewpoint_ids']=['foreign']
     elif fault=='unfinished':prior['evidence']['pending_cvp_claim_ids']=['C']
     elif fault=='nohandoff':prior['evidence']['action']['materials']={}
+    elif fault in {'normal','normalpending','normalpopulation'}:
+        prior['evidence'].pop('action')
+        prior['evidence'].pop('pending_cvp_management_record_keys')
+        current['evidence'].pop('pending_cvp_management_record_keys')
+        if fault=='normalpending':
+            prior['evidence']['pending_cvp_management_record_keys']=['claims/X']
+            current['evidence']['pending_cvp_management_record_keys']=['claims/X']
+        if fault=='normalpopulation':prior['evidence']['viewpoint_ids']=['foreign']
     elif fault=='domain':current['plan']['operations'][0]['collection']='claims'
     elif fault=='type':new['link_type']='qualifies'
     elif fault=='target':new['viewpoint_id']='other'
@@ -40,7 +48,8 @@ def test_exact_immediate_committed_supports_handoff(monkeypatch,fault):
         def execute(self,*args):return self
         def fetchone(self):return row
     before=deepcopy(value)
-    if fault:
+    if fault=='normal':assert flow.context(value,cursor=Cursor()) is None
+    elif fault:
         with pytest.raises(ValueError):flow.context(value,cursor=Cursor())
     else:assert flow.context(value,cursor=Cursor())==handoff
     assert value==before
