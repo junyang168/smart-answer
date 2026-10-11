@@ -297,3 +297,50 @@ def test_actual_closed_statement_saved_rejection_no_new_calls(actual,monkeypatch
         assert result['decisions']['parts'][0]['projection']['removed_repaired_claim_ids']==['CL-0029']
     assert store.get_cvp_group(run)==original
     assert files=={p:hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
+
+
+@pytest.mark.parametrize('fault',[None,'pending','source_mode','source_write_set','context_approval','context_pin'])
+def test_actual_closed_policy_source_facts(actual,monkeypatch,fault):
+    store,_=actual;run='CVPG-4c6083d8d5036f316dd620945c37974f4d6b3daf128752776490dec2b2f21cd4'
+    value=store.get_cvp_group(run);original=deepcopy(value)
+    if fault=='pending':value['reviewed']['evidence']['pending_cvp_management_record_keys'].pop()
+    if fault=='source_mode':
+        context=impact.context
+        def wrong(*a,**kw):return {**context(*a,**kw),'source_slice_mode':'policy_evidence_binding'}
+        monkeypatch.setattr(impact,'context',wrong)
+    if fault=='source_write_set':
+        reviewed=impact.applied_review
+        def wrong(*a,**kw):
+            r=deepcopy(reviewed(*a,**kw));r['plan']['operations'].pop();return r
+        monkeypatch.setattr(impact,'applied_review',wrong)
+    if fault in {'context_approval','context_pin'}:
+        read=impact.read_policy_slice_item
+        def wrong(*a,**kw):
+            r=deepcopy(read(*a,**kw))
+            if fault=='context_approval':r['kind']='approved'
+            else:r['pin'][1]='foreign'
+            return r
+        monkeypatch.setattr(impact,'read_policy_slice_item',wrong)
+    with store.connect() as conn,conn.cursor() as cur:
+        conn.execute('SET TRANSACTION READ ONLY')
+        class Readonly:
+            def execute(self,q,args=None):return cur.execute(q.removesuffix(' FOR UPDATE'),args)
+            def __getattr__(self,k):return getattr(cur,k)
+        if fault:
+            with pytest.raises((ValueError,KeyError,ChangeSetConflict)):impact.completed_source_facts(value,cursor=Readonly())
+        else:
+            facts=impact.completed_source_facts(value,cursor=Readonly())
+            assert len(facts['items'])==4 and len(facts['read_pins'])==6
+            assert not facts['model_verdicts_changed']
+            assert facts['pending_record_keys']==value['reviewed']['evidence']['pending_cvp_management_record_keys']
+    assert store.get_cvp_group(run)==original
+
+
+def test_new_review_generation_never_inherits_old_closed_authority(actual):
+    store,old=actual;value=deepcopy(old)
+    value['reviewed']['evidence']['new_unapproved_scope']='distinct new generation'
+    value['reviewed_sha256']=sha256_json(value['reviewed'])
+    class Cursor:
+        def execute(self,q,args=None):return NS(fetchone=lambda:(value,))
+    assert impact.completed_source_facts(value,cursor=Cursor()) is None
+    assert store.get_cvp_group(old['run_id'])==old
