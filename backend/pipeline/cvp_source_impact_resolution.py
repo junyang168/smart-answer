@@ -12,6 +12,106 @@ VERSION='wang_sequential_source_impact_resolution_v1'
 HANDOFF='wang_sequential_source_cvp_handoff_v1'
 
 
+def pending_commit_item(key, row, history, review):
+    """Exact committed generation; this is not whole-group resolution."""
+    col,oid=key.split('/',1)
+    if (not row or record_content_sha(row['payload'])!=row['content_sha256']
+            or row['payload'].get('review_status') in {'human_hold','human_review_required','rejected','needs_review'}
+            or row['payload'].get('effective_state')=='held'):
+        raise ValueError('pending committed item missing/SHA/hold')
+    plan=review['plan']
+    identity=lambda o:(o['collection'],o['object_id'],o['operation'],o['before_revision'],o['after_revision'],o['before_sha256'],o['after_sha256'])
+    planned=[identity(o) for o in plan['operations']]
+    actual=[identity(o) for o in history['operations']]
+    if (history['status']!='applied' or history['change_set_id']!=plan['change_set_id']
+            or history['fingerprint_sha256']!=plan['fingerprint_sha256']
+            or history['source_sha256']!=plan['source_sha256']
+            or history['metadata']['reviewed_sha256']!=sha256_json(review)
+            or history['metadata']['approval']!=review['evidence']['approval']
+            or len(planned)!=len(set(planned)) or sorted(actual)!=sorted(planned)):
+        raise ValueError('pending item actual complete committed write set drift')
+    matches=[o for o in history['operations'] if (o['collection'],o['object_id'])==(col,oid)]
+    if len(matches)!=1:raise ValueError('pending item missing/ambiguous operation')
+    op=matches[0]
+    if (op['after_revision']!=row['revision'] or op['after_sha256']!=row['content_sha256']
+            or not op['after'] or record_content_sha(op['after'])!=row['content_sha256']):
+        raise ValueError('pending item current generation differs from committed afterimage')
+    if col=='knowledge_relations':
+        from backend.pipeline.claim_relation_retirement import SCHEMA
+        if (history['source_kind']!=SCHEMA or op['operation']!='retire' or not row['retired']
+                or len(actual)!=1 or row['payload']!=op['before']
+                or {k:v for k,v in op['before'].items() if k!='revision'}!={k:v for k,v in op['after'].items() if k!='revision'}):
+            raise ValueError('pending relation is not exact logical retirement')
+        kind='exact_human_logical_retirement'
+    elif col=='evidence_steps':
+        if (op['operation']!='update' or row['retired'] or row['payload']!=op['after']
+                or row['payload'].get('review_status')!='independent_terminal_reviewed'
+                or row['payload'].get('support_eligibility') not in {'eligible','eligible_with_label'}):
+            raise ValueError('pending Evidence lacks current independent eligible postimage')
+        kind='independently_committed_source_evidence'
+    else:raise ValueError('pending committed item outside source domain')
+    return {'record_key':key,'kind':kind,'pin':[row['revision'],row['content_sha256'],row['retired']],
+            'change_set_id':history['change_set_id'],'reviewed_sha256':sha256_json(review)}
+
+
+def verify_pending_commits(store, value):
+    """Saved-only partial accounting. Unknown/unapproved items stay pending.
+
+    One indexed current-generation lookup, one named committed review per
+    eligible item. No ancestor search, models, business writes or audit waiver.
+    """
+    from backend.pipeline.cvp_sql_flow import check_binding,pins,pin_rows,decoded_pins
+    pending=value['reviewed']['evidence'].get('pending_cvp_management_record_keys',[])
+    if not pending or len(pending)!=len(set(pending)):
+        raise ValueError('pending commit accounting missing/duplicate population')
+    items=[];current={};bindings=[]
+    for key in pending:
+        col,oid=key.split('/',1)
+        row=store.get_record_state(col,oid)
+        if not row or record_content_sha(row['payload'])!=row['content_sha256']:
+            raise ValueError('pending commit accounting missing/current SHA drift')
+        current[col,oid]=row
+        if row['payload'].get('review_status')=='human_hold' or row['payload'].get('effective_state')=='held':
+            raise ValueError('pending commit accounting cannot clear hold')
+        eligible=(col=='knowledge_relations' and row['retired']) or (
+            col=='evidence_steps' and not row['retired'] and row['payload'].get('review_status')=='independent_terminal_reviewed'
+            and row['payload'].get('support_eligibility') in {'eligible','eligible_with_label'})
+        if not eligible:continue
+        with store.connect() as conn,conn.cursor() as cur:
+            found=cur.execute('SELECT change_set_id FROM wang_knowledge.object_versions WHERE collection=%s AND object_id=%s AND revision=%s',
+                (col,oid,row['revision'])).fetchone()
+        if not found:raise ValueError('pending current generation has no committed history')
+        history=store.get_change_history(found[0]);parent=store.get_cvp_group(history['metadata']['run_id'])
+        if not parent or parent['campaign_sha256']!=value['campaign_sha256']:
+            raise ValueError('pending item foreign campaign commit')
+        if col=='knowledge_relations' and parent['run_id']!=value['run_id']:
+            raise ValueError('pending retirement belongs to another group')
+        review=applied_review(store,parent,history['metadata']['reviewed_sha256'])
+        item=pending_commit_item(key,row,history,review)
+        package=review['evidence']['package']['payload']
+        if col=='knowledge_relations':
+            from backend.pipeline.claim_relation_retirement import validate_package
+            if validate_package(package)!=((col,oid),):raise ValueError('pending retirement authority target drift')
+            own=[review['evidence']['approval']['human_exact_disposition']]
+        else:
+            from backend.pipeline.cvp_sql_actions import validate_source_package
+            validate_source_package(package)
+            app=package['source_repair_application']
+            if app['run_id']!=parent['run_id']:raise ValueError('pending source package foreign run')
+            own=[app['materials'],review['evidence']['approval']['terminal_review']]
+        for b in own:check_binding(b)
+        item['bindings']=own;bindings.extend(own);items.append(item)
+    read_pins=pin_rows(pins(current))
+    with store.connect() as conn,conn.cursor() as cur:
+        store._assert_transaction_read_pins(cur,decoded_pins(read_pins))
+    verified={i['record_key'] for i in items}
+    return {'schema_version':'wang_partial_source_pending_commits_v1','run_id':value['run_id'],
+        'reviewed_sha256':value['reviewed_sha256'],'pending_record_keys':list(pending),'items':items,
+        'remaining_record_keys':[k for k in pending if k not in verified],'read_pins':read_pins,
+        'bindings':bindings,'new_model_calls':0,'registry_writes':0,'group_complete':False,
+        'content_write_authority':False,'model_verdicts_changed':False,'original_pending_list_preserved':True}
+
+
 def audit_record_keys(pending, facts):
     """Source impacts have their own exact proof, not CVP audit root IDs."""
     if facts is None:return list(pending)
@@ -57,6 +157,14 @@ def applied_review(store,value,sha,*,cursor=None):
             return applied_review(store,value,sha,cursor=cur)
     ident='CVPR-'+sha256_json({'parent':value['run_id'],'reviewed_sha256':sha})
     row=cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s",(ident,)).fetchone()
+    if not row:
+        # The most recent committed review is still the group's current row;
+        # it is archived only when another review replaces it. Same SQL-bound
+        # proof, not a fallback to status labels or arbitrary old approvals.
+        current=cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s AND stage='cvp_group' AND metadata->>'reviewed_sha256'=%s",
+                               (value['run_id'],sha)).fetchone()
+        if current:
+            row=({**current[0],'parent_run_id':value['run_id']},)
     if not row or row[0].get('parent_run_id')!=value['run_id'] or row[0].get('reviewed_sha256')!=sha:
         raise ValueError('source impact original SQL review archive missing/foreign')
     review=row[0]['reviewed'];p=review['plan']

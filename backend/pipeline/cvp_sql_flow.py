@@ -872,7 +872,7 @@ def main(argv=None):
     parser.add_argument('--pause-after-group',type=int,help='Narrow this invocation for acceptance; never changes the immutable execution boundary')
     parser.add_argument('--integrate-batch-candidates',action='store_true',
                         help='Explicit new-group identity integration; never upgrades saved legacy answers')
-    parser.add_argument('--action',choices=('group','audit-run','source','source-write-slice','relation-retire','claim-retire','owner-link','link-target','link-retarget','link-retire','link-replace','link-representation'),default='group')
+    parser.add_argument('--action',choices=('group','audit-run','source-pending-check','source','source-write-slice','relation-retire','claim-retire','owner-link','link-target','link-retarget','link-retire','link-replace','link-representation'),default='group')
     parser.add_argument('--claim-first',action='store_true',
                         help='Finish only the original bounded Claim/Evidence action; keep all CVPs pending and stop before CVP/group execution')
     parser.add_argument('--candidate-viewpoint-id',action='append',default=[],
@@ -1185,7 +1185,16 @@ def main(argv=None):
             action_root=args.output_root/args.run_id/'actions'
             from backend.pipeline.cvp_sql_actions import execute_source_action,execute_owner_link_action
             from backend.pipeline.source_reconciliation_runtime import ProductionPorts
-            if args.action=='audit-run':
+            if args.action=='source-pending-check':
+                from backend.pipeline.cvp_source_impact_resolution import verify_pending_commits
+                result=verify_pending_commits(store,saved)
+                output=action_root/('source-pending-commits-'+sha256_json(result)[:20]+'.json')
+                write_immutable(output,result)
+                stage_event('source_pending_commits_verified',receipt=binding(output),
+                            verified=[i['record_key'] for i in result['items']],
+                            remaining=result['remaining_record_keys'],group_complete=False)
+                return 0
+            elif args.action=='audit-run':
                 result=revalidate_applied_run(store,definition,args.run_id,root=args.output_root)
                 stage_event('independent_impact_audited_management_pending' if result.get('group_complete') is False
                             else 'bounded_audit_completed',result=result)
