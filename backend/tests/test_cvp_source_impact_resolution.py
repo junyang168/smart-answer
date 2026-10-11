@@ -17,7 +17,8 @@ def test_audit_root_domains_do_not_discard_obligations():
     with pytest.raises(ValueError):impact.audit_record_keys(keys,facts)
 
 @pytest.mark.parametrize('fault',[None,'used','raw','unknown','changed_intent','changed_log','foreign_auditor'])
-def test_constructor_recovery_never_retries_model_execution(tmp_path,fault):
+@pytest.mark.parametrize('corrected',[[],['canonical_viewpoints/V']])
+def test_constructor_recovery_never_retries_model_execution(tmp_path,fault,corrected):
     from backend.pipeline.viewpoint_resolution_runtime import write_immutable
     from backend.pipeline.cvp_sql_flow import binding
     expected={'claim_ids':['C'],'automatic_retry':False}
@@ -26,7 +27,7 @@ def test_constructor_recovery_never_retries_model_execution(tmp_path,fault):
     log.write_text("File auditor, in __init__\nraise ValueError('independent SQL pending record is outside CVP management')\ngroups/G\n")
     proof={'schema_version':'wang_source_audit_constructor_recovery_v1','intent':binding(intent),
            'failure_log':binding(log),'auditor':binding(Path(impact.__file__).resolve().parents[2]/'scripts/audit-library.py'),
-           'vendor_model_constructed':False,'original_record_keys':['groups/G'],'corrected_record_keys':[]}
+           'vendor_model_constructed':False,'original_record_keys':['groups/G'],'corrected_record_keys':corrected}
     if fault=='unknown':proof['vendor_model_constructed']=True
     if fault=='foreign_auditor':proof['auditor']=binding(log)
     proof['artifact_sha256']=sha256_json(proof)
@@ -35,8 +36,11 @@ def test_constructor_recovery_never_retries_model_execution(tmp_path,fault):
     if fault=='changed_intent':expected={'claim_ids':['foreign']}
     if fault=='changed_log':log.write_text('timeout after vendor model construction')
     if fault:
-        with pytest.raises(ValueError):impact.validate_pre_model_startup_recovery(tmp_path,expected)
-    else:assert impact.validate_pre_model_startup_recovery(tmp_path,expected)==proof
+        with pytest.raises(ValueError):impact.validate_pre_model_startup_recovery(tmp_path,expected,corrected_record_keys=corrected)
+    else:
+        assert impact.validate_pre_model_startup_recovery(tmp_path,expected,corrected_record_keys=corrected)==proof
+        with pytest.raises(ValueError):
+            impact.validate_pre_model_startup_recovery(tmp_path,expected,corrected_record_keys=['foreign/X'])
 
 @pytest.fixture
 def actual():

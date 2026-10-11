@@ -22,7 +22,7 @@ def audit_record_keys(pending, facts):
     return []
 
 
-def validate_pre_model_startup_recovery(audit_dir, expected):
+def validate_pre_model_startup_recovery(audit_dir, expected, *, corrected_record_keys=()):
     """Consume a sealed constructor failure, never an unknown model intent."""
     from backend.pipeline.cvp_sql_flow import binding,check_binding
     receipt=read_artifact(audit_dir/'source-domain-startup-recovery.json')
@@ -31,7 +31,7 @@ def validate_pre_model_startup_recovery(audit_dir, expected):
             or receipt.get('intent')!=binding(audit_dir/'audit-intent.json')
             or read_artifact(audit_dir/'audit-intent.json')!=expected
             or receipt.get('vendor_model_constructed') is not False
-            or receipt.get('original_record_keys')==[] or receipt.get('corrected_record_keys')!=[]
+            or receipt.get('original_record_keys')==[] or receipt.get('corrected_record_keys')!=list(corrected_record_keys)
             or receipt.get('auditor')!=binding(Path(__file__).resolve().parents[2]/'scripts/audit-library.py')
             or {p.name for p in audit_dir.iterdir()}!={'audit-intent.json','source-domain-startup-recovery.json'}):
         raise ValueError('source audit startup recovery proof missing/drift/possible model execution')

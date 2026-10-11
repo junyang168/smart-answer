@@ -463,18 +463,29 @@ def finish_impact_audit(store, saved):
         'change_set_ids':saved['change_set_ids'],**scope,'model':'gemini-3.8-flash','workers':2,
         'layers':['1','2','3','4'],'automatic_retry':False,'group_complete':False}
     path=audit_root/'audit.json';intent_path=audit_root/'audit-intent.json'
+    # Historical structure revisions remain pinned and pending. They are not
+    # independent auditor CVP roots (heads, CVRs, links and relations are).
+    audit_keys=[k for k in scope['cvp_record_keys'] if c.split_key(k)[0] in {
+        'canonical_viewpoints','viewpoint_revisions','viewpoint_claim_links','viewpoint_relations'}]
     if intent_path.exists() and read_artifact(intent_path)!=intent:
         raise ValueError('slice impact audit original intent drift')
     if path.exists() and not intent_path.exists():
         raise ValueError('slice impact audit result lacks original exact intent')
     if not path.exists():
-        if intent_path.exists():raise ValueError('slice impact audit outcome unknown; no automatic replay')
-        write_immutable(intent_path,intent)
+        if intent_path.exists():
+            from backend.pipeline.cvp_source_impact_resolution import validate_pre_model_startup_recovery
+            recovery=validate_pre_model_startup_recovery(audit_root,intent,corrected_record_keys=audit_keys)
+            if recovery['original_record_keys']!=scope['cvp_record_keys']:
+                raise ValueError('slice audit constructor recovery lost original pending roots')
+            write_immutable(audit_root/'source-domain-startup-recovery-used.json',{
+                'recovery':binding(audit_root/'source-domain-startup-recovery.json'),
+                'corrected_record_keys':audit_keys,'automatic_retry':False})
+        else:write_immutable(intent_path,intent)
         subprocess.run([str(PROJECT/'backend/.venv/bin/python'),'scripts/audit-library.py',
             '--scope','all','--layers','1,2,3,4','--claim-ids',','.join(scope['claim_ids']),
             '--viewpoint-ids',','.join(scope['viewpoint_ids']),'--workers','2','--model','gemini-3.8-flash',
             '--no-status-file','--preserve-full-context','--component-roles','--sql-group-scope',
-            *[a for k in scope['cvp_record_keys'] for a in ('--sql-record-key',k)],'--out',str(audit_root)],
+            *[a for k in audit_keys for a in ('--sql-record-key',k)],'--out',str(audit_root)],
             cwd=PROJECT,check=True,env={**os.environ,'KNOWLEDGE_DATABASE_URL':store.database_url})
     audit=read_artifact(path)
     validate_transaction_audit(audit,scope['claim_ids'],scope['viewpoint_ids'])
