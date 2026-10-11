@@ -368,12 +368,15 @@ def dependency_direction(value):
     app=e.get('package',{}).get('payload',{}).get('source_repair_application',{})
     if not app:return None,None
     from backend.pipeline.cvp_link_replacement import SCHEMA as LINK_REPLACEMENT_SCHEMA, validate_package as validate_link_replacement
-    if app.get('schema_version') == LINK_REPLACEMENT_SCHEMA:
+    from backend.pipeline.cvp_link_representation import SCHEMA as LINK_REPRESENTATION_SCHEMA, validate_package as validate_link_representation
+    link_validators={LINK_REPLACEMENT_SCHEMA:validate_link_replacement,
+                     LINK_REPRESENTATION_SCHEMA:validate_link_representation}
+    if app.get('schema_version') in link_validators:
         package = e['package']['payload']
         # This producer has an independently sealed link-only write domain,
         # not a source/anchor manifest. Validate its actual cached approval
         # before concluding that there is no corrected dependency Claim.
-        validate_link_replacement(package)
+        link_validators[app['schema_version']](package)
         if package.get('claims'):
             raise ValueError('link management cannot waive a dependency Claim audit')
         return None,None

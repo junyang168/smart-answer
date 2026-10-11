@@ -700,11 +700,17 @@ def verify_pending_commits(store, value):
 def audit_record_keys(pending, facts):
     """Source impacts have their own exact proof, not CVP audit root IDs."""
     if facts is None:return list(pending)
+    from backend.pipeline.cvp_link_representation import GENERATION_HANDOFF
+    generation=facts.get('source_handoff',{}).get('schema_version')==GENERATION_HANDOFF
     closed=facts.get('source_handoff',{}).get('schema_version')==CLOSED_STATEMENT
     item_keys=[x['record_key'] for x in facts['items']]
     if (list(pending)!=facts['pending_record_keys'] or len(item_keys)!=len(pending)
             or (set(item_keys)!=set(pending) if closed else item_keys!=list(pending))):
         raise ValueError('source audit root classification lost pending obligations')
+    if generation:
+        allowed={'approved_current_cvp_impact_independently_audited','unchanged_unapproved_unconsumed_policy_relation_context'}
+        if any(i['kind'] not in allowed for i in facts['items']):raise ValueError('joint generation unknown pending domain')
+        return [i['record_key'] for i in facts['items'] if i['kind']=='approved_current_cvp_impact_independently_audited']
     if closed:
         allowed={'approved_current_cvp_impact_independently_audited','exact_human_logical_retirement','historical_approved_structure_unchanged_no_claim_basis','independently_committed_source_evidence','unchanged_unapproved_internal_relation_context'}
         if any(i['kind'] not in allowed for i in facts['items']):raise ValueError('closed statement unknown pending domain')
@@ -737,6 +743,9 @@ def validate_pre_model_startup_recovery(audit_dir, expected, *, corrected_record
 
 
 def context(value,store=None,*,cursor=None):
+    from backend.pipeline.cvp_link_representation import generation_handoff
+    generation=generation_handoff(value)
+    if generation:return generation
     e=value.get('reviewed',{}).get('evidence',{})
     c=e.get('action',{}).get('materials',{}).get('claim_management_resolution',{})
     direct=c if (c.get('schema_version')==HANDOFF or
@@ -986,6 +995,9 @@ def prepare(store,value):
     from backend.pipeline.source_consumer_scope import declared_group_keys
     handoff=context(value,store)
     if not handoff:return None
+    from backend.pipeline.cvp_link_representation import GENERATION_HANDOFF,committed_generation_facts
+    if handoff['schema_version']==GENERATION_HANDOFF:
+        return committed_generation_facts(store,value)
     completed=completed_source_facts(value,store=store)
     if completed is not None:return completed
     if handoff.get('source_slice_mode') in {'policy_evidence_binding','policy_claim_source_revision'}:
@@ -1083,6 +1095,22 @@ def validate_for_completion(value,path,audit_binding,cursor,*,semantic_resolutio
             or body.get('semantic_resolution')!=(binding(semantic_resolution) if semantic_resolution else None)):
         raise ValueError('source impact completion proof drift')
     for b in body['bindings']+body['audit_proofs']:check_binding(b)
+    from backend.pipeline.cvp_link_representation import GENERATION_HANDOFF,committed_generation_facts
+    if body['source_handoff']['schema_version']==GENERATION_HANDOFF:
+        expected=committed_generation_facts(None,value,cursor=cursor)
+        if any(body.get(k)!=v for k,v in expected.items()):
+            raise ValueError('joint generation completion facts drift')
+        audit=read_artifact(audit_binding['path'])
+        independent=decoded_pins(audit['meta']['registry_read_scope']['read_pins'])
+        pin=decoded_pins(expected['read_pins'])[('claims',expected['source_handoff']['claim_id'])]
+        if independent.get(('claims',expected['source_handoff']['claim_id']))!=pin:
+            raise ValueError('joint generation current Claim absent from full independent audit')
+        for item in body['items']:
+            key=tuple(item['record_key'].split('/',1))
+            if item['kind']=='approved_current_cvp_impact_independently_audited':
+                if independent.get(key)!=tuple(item['pin']):raise ValueError('joint generation current link absent from complete audit')
+            elif key in independent:raise ValueError('joint generation candidate relation consumed by semantic audit')
+        return body
     if body.get('prior_completed_resolution'):
         expected=completed_source_facts(value,cursor=cursor)
         if expected is None or any(body.get(k)!=v for k,v in expected.items()):

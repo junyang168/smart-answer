@@ -21,6 +21,140 @@ SCHEMA = 'wang_cvp_sql_link_representation_v1'
 DIRECTION = 'wang_cvp_link_representation_direction_v1'
 HUMAN = 'wang_cvp_link_representation_human_postimage_v1'
 GENERATION = 'wang_cvp_reviewed_claim_link_generation_v1'
+GENERATION_HANDOFF = 'wang_reviewed_claim_owned_link_transition_v1'
+
+
+def generation_handoff(value):
+    """Identify a typed domain, not approval or completion authority."""
+    m=value.get('reviewed',{}).get('evidence',{}).get('action',{}).get('materials',{})
+    if not m.get('generation'):return None
+    return {'schema_version':GENERATION_HANDOFF,'claim_id':m['claim']['claim_id'],
+            'viewpoint_ids':m['viewpoint_ids']}
+
+
+def committed_generation_facts(store,value,*,cursor=None):
+    """One source commit -> one jointly reviewed ALL-owned-link commit.
+
+    This SAME authority is consumed at startup, audit scope, pending accounting
+    and short SQL completion. Original Claim audit pins remain old facts; only
+    actual approved before/after operations may bridge them. No ancestry search,
+    implicit reapproval, model calls, or pending-list mutation.
+    """
+    from backend.pipeline.cvp_sql_flow import check_binding,decoded_pins,pin_rows
+    from backend.pipeline.cvp_source_impact_resolution import applied_review,read_policy_slice_item
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    if generation_handoff(value) is None:return None
+    if cursor is None:
+        with store.connect() as conn,conn.cursor() as cur:
+            facts=committed_generation_facts(store,value,cursor=cur)
+        # Expensive complete model/compiler validation is outside transactions.
+        validate_package(value['reviewed']['evidence']['package']['payload'])
+        return facts
+    e=value['reviewed']['evidence'];m=e['action']['materials'];auth=e['authorization']
+    check_binding(auth);d=read_artifact(auth['path'])
+    if (d.get('schema_version')!=GENERATION or d.get('artifact_sha256')!=sha256_json({k:v for k,v in d.items() if k!='artifact_sha256'})
+            or d.get('allowed_fields')!=['pinned_claim_revision','component_locator']
+            or d.get('roles_targets_states_evidence_unchanged') is not True
+            or d.get('human_content_approval') is not False or d.get('authorized_by')!='bound_claim_policy'):
+        raise ValueError('joint generation policy direction drift')
+    ids=value['change_set_ids'];receipt=read_artifact(d['claim_layer_completion']['path'])
+    if (value['checkpoint'] not in {'applied','audited'} or len(ids)<2
+            or ids[-2]!=d['source_change_set_id'] or ids[:-1]!=receipt['change_set_ids']
+            or value['campaign_sha256']!=d['campaign_sha256'] or value['run_id']!=d['run_id']
+            or value['claim_ids']!=receipt['claim_ids'] or len(value['claim_ids'])!=len(set(value['claim_ids']))
+            or value.get('claim_layer_audit',{}).get('receipt')!=d['claim_layer_completion']
+            or e.get('pending_cvp_claim_ids') or e.get('viewpoint_ids')!=d['viewpoint_ids']
+            or e.get('pending_cvp_management_record_keys')!=d['pending_record_keys']
+            or e['action']['action_id']!=representation_action_id(d)
+            or m['authorization']!=auth or set(e['approval'])!={'gpt','opus'}):
+        raise ValueError('joint generation original roster/receipt/pending/commit drift')
+    current=applied_review(None,value,value['reviewed_sha256'],cursor=cursor)
+    source=applied_review(None,value,d['source_reviewed_sha256'],cursor=cursor)
+    se=source['evidence'];package=e['package']['payload'];app=package['source_repair_application']
+    if (current!=value['reviewed'] or current['plan']['change_set_id']!=ids[-1]
+            or source['plan']['change_set_id']!=ids[-2]
+            or se.get('pending_cvp_management_record_keys')!=d['pending_record_keys']
+            or se.get('pending_cvp_claim_ids')!=value['claim_ids']
+            or se['package']['sha256']!=sha256_json(body(read(Path(d['source_package']['path']))))
+            or e['package']['sha256']!=sha256_json(package)
+            or app.get('schema_version')!=SCHEMA or app.get('materials_sha256')!=sha256_json(m)
+            or body(read(Path(app['run_root'])/'materials.json'))!=m):
+        raise ValueError('joint generation exact named source/current package drift')
+    ident='CVPA-'+sha256_json({'parent':value['run_id'],'action':e['action']['action_id']})
+    registered=cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s',(ident,)).fetchone()
+    if (not registered or registered[0].get('parent_run_id')!=value['run_id']
+            or registered[0].get('action')!=e['action']):
+        raise ValueError('joint generation registered action/material authority drift')
+    bindings=[auth,d['claim_policy'],d['claim_layer_completion'],d['source_package'],receipt['audit'],
+              *receipt['source_proofs'],*e['approval'].values(),
+              *[b for b in se['approval'].values() if isinstance(b,dict) and 'path' in b]]
+    bindings.extend({'path':s['path'],'file_sha256':s['file_sha256']} for s in m['sources'])
+    for b in bindings:check_binding(b)
+    for rev in (source,current):
+        plan=rev['plan'];ops=plan['operations']
+        fields=('collection','object_id','operation','before_revision','after_revision','before_sha256','after_sha256')
+        actual=cursor.execute('SELECT '+','.join(fields)+' FROM wang_knowledge.change_operations WHERE change_set_id=%s ORDER BY operation_index',
+            (plan['change_set_id'],)).fetchall()
+        if not ops or actual!=[tuple(o[k] for k in fields) for o in ops] or len({(o['collection'],o['object_id']) for o in ops})!=len(ops):
+            raise ValueError('joint generation complete actual write set drift')
+        for op in ops:
+            history=cursor.execute('SELECT payload,content_sha256,change_set_id FROM wang_knowledge.object_versions WHERE collection=%s AND object_id=%s AND revision=%s',
+                (op['collection'],op['object_id'],op['after_revision'])).fetchone()
+            if not history or history!=(op['payload'],op['after_sha256'],plan['change_set_id']) or record_content_sha(history[0])!=history[1]:
+                raise ValueError('joint generation committed full afterimage drift')
+    source_ops=source['plan']['operations'];ops=current['plan']['operations']
+    if (len(source_ops)!=1 or source_ops[0]['operation']!='update' or source_ops[0]['collection']!='claims'
+            or source_ops[0]['object_id']!=d['claim_id'] or source_ops[0]['payload']!=m['claim']):
+        raise ValueError('joint generation source exceeds independently audited Claim')
+    old_claim=cursor.execute("SELECT payload,content_sha256 FROM wang_knowledge.object_versions WHERE collection='claims' AND object_id=%s AND revision=%s",
+        (d['claim_id'],source_ops[0]['before_revision'])).fetchone()
+    if old_claim!=(m['old_claim'],source_ops[0]['before_sha256']):raise ValueError('joint generation original complete Claim drift')
+    before={p['viewpoint_claim_link_id']:p for p in m['before_links']}
+    new={p['viewpoint_claim_link_id']:p for p in package['viewpoint_claim_links']}
+    declared=content.index([{'collection':col,'object_id':p[field],'payload':p}
+        for col,field in [('viewpoint_claim_links','viewpoint_claim_link_id'),
+            ('viewpoint_identity_candidates','identity_candidate_id'),('viewpoint_identity_decisions','identity_decision_id')]
+        for p in package[col]])
+    if (set(before)!=set(new) or len(before)!=len(m['before_links']) or len(new)!=len(package['viewpoint_claim_links'])
+            or len(ops)!=3*len(before) or len(declared)!=len(ops)
+            or any(declared.get(content.key(o['collection'],o['object_id']))!=o['payload'] for o in ops)
+            or {(o['operation'],o['collection']) for o in ops}!={('update','viewpoint_claim_links'),('create','viewpoint_identity_candidates'),('create','viewpoint_identity_decisions')}):
+        raise ValueError('joint generation incomplete/foreign write domain')
+    old_pins=decoded_pins(receipt['read_pins']);pins=dict(old_pins)
+    for op in ops:
+        key=op['collection'],op['object_id']
+        if key[0]=='viewpoint_claim_links':
+            old=before.get(key[1]);after=new.get(key[1])
+            previous=cursor.execute('SELECT payload,content_sha256 FROM wang_knowledge.object_versions WHERE collection=%s AND object_id=%s AND revision=%s',
+                (*key,op['before_revision'])).fetchone()
+            allowed={'revision','pinned_claim_revision','component_locator','decision_id'}
+            if (not old or not after or previous!=(old,op['before_sha256'])
+                    or old_pins.get(key)!=(op['before_revision'],op['before_sha256'],False)
+                    or op['payload']!=after or after['pinned_claim_revision']!=m['claim']['revision']
+                    or {k:v for k,v in old.items() if k not in allowed}!={k:v for k,v in after.items() if k not in allowed}):
+                raise ValueError('joint generation changed role/target/Evidence or old/new full payload drift')
+        elif op['before_revision'] is not None or key in old_pins:
+            raise ValueError('joint generation identity must be genuinely fresh')
+        pins[key]=(op['after_revision'],op['after_sha256'],False)
+    if pins.get(('claims',d['claim_id']))!=tuple(d['claim_pin']):
+        raise ValueError('joint generation Claim audit pin drift')
+    actual_links=cursor.execute("SELECT object_id FROM wang_knowledge.objects WHERE collection='viewpoint_claim_links' AND retired_at IS NULL AND payload->>'claim_id'=%s AND payload->>'effective_state'='active'",(d['claim_id'],)).fetchall()
+    if {i for i, in actual_links}!=set(new):raise ValueError('joint generation omitted active owned link')
+    PostgresKnowledgeStore._assert_transaction_read_pins(cursor,pins)
+    items=[]
+    for key in d['pending_record_keys']:
+        col,oid=content.split_key(key)
+        if col=='viewpoint_claim_links':
+            if oid not in new:raise ValueError('joint generation foreign pending link')
+            items.append({'record_key':key,'kind':'approved_current_cvp_impact_independently_audited',
+                'pin':list(pins[col,oid]),'change_set_id':ids[-1]})
+        else:
+            item=read_policy_slice_item(cursor,key)
+            if old_pins.get((col,oid))!=tuple(item['pin']):raise ValueError('joint generation candidate context source pin drift')
+            items.append(item)
+    return {'source_handoff':generation_handoff(value),'pending_record_keys':list(d['pending_record_keys']),
+        'items':items,'read_pins':pin_rows(pins),'bindings':bindings,
+        'model_verdicts_changed':False,'original_pending_list_preserved':True}
 PROMPT = '''负责人授权指定既有连接的成分范围及作用重新提议，不是批准新后像。
 完整自身正文、Claim、实际 current CVR、全部成员、原身份判定、原审计及 GPT 异议均提供。
 只返回本 Claim 中精确非空半开区间 spans 及准确 link_type。SHA 由程序计算。

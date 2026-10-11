@@ -878,9 +878,11 @@ def revalidate_applied_run(store, definition, run_id, *, root):
     if evidence.get('approval', {}).get('source_write_slice'):
         from backend.pipeline.claim_source_write_slice import finish_impact_audit
         return finish_impact_audit(store,saved)
+    from backend.pipeline.cvp_link_representation import generation_handoff
+    generation=generation_handoff(saved)
     if (saved['checkpoint'] not in {'applied', 'audited'}
             or evidence.get('pending_cvp_claim_ids')
-            or evidence.get('pending_cvp_management_record_keys')
+            or evidence.get('pending_cvp_management_record_keys') and generation is None
             or evidence.get('approval', {}).get('source_write_slice')):
         raise ValueError('audit-run requires a complete applied write domain; management remains pending')
     if saved['checkpoint'] == 'audited':
