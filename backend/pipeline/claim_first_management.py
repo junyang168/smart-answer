@@ -189,7 +189,7 @@ def coverage_context(store, saved, group):
     cannot be cleared merely by creating replacement coverage.
     """
     from pathlib import Path
-    from backend.pipeline.cvp_sql_flow import check_binding, decoded_pins
+    from backend.pipeline.cvp_sql_flow import check_binding, decoded_pins, binding
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact
     from backend.pipeline.source_reconciliation_runner import body, read
     marker = saved.get('claim_layer_audit')
@@ -234,6 +234,53 @@ def coverage_context(store, saved, group):
         raise ValueError('Claim-first transaction is not exclusively committed source work')
     packet_path = root/'final_review.packet.json'
     packet = body(read(packet_path))
+    if application.get('source_write_slice', {}).get('mode') == 'policy_evidence_binding':
+        from backend.pipeline.claim_source_write_slice import validate_claim_layer_authority
+        validate_claim_layer_authority(saved, root)
+        if (sha256_json(saved['reviewed']) != saved['reviewed_sha256']
+                or history['fingerprint_sha256'] != plan['fingerprint_sha256']
+                or history['source_sha256'] != plan['source_sha256']
+                or history['metadata'].get('run_id') != saved['run_id']
+                or history['metadata'].get('reviewed_sha256') != saved['reviewed_sha256']
+                or history['metadata'].get('approval') != evidence['approval']):
+            raise ValueError('source slice coverage actual SQL approval drift')
+        def identity(op):
+            return op['collection'],op['object_id'],op['operation'],op['after_revision'],op['after_sha256']
+        if sorted(map(identity, plan['operations'])) != sorted(map(identity, history['operations'])):
+            raise ValueError('source slice coverage actual write set drift')
+        for op in history['operations']:
+            row=current.get((op['collection'],op['object_id']))
+            if not row or row['retired'] or row['payload'] != op['after']:
+                raise ValueError('source slice coverage current/history postimage drift')
+        validate_claim_audit_report(read_artifact(receipt['audit']['path']), saved['claim_ids'])
+        from backend.pipeline.viewpoint_content_blocked_fallback import verify_saved_full_audit
+        if verify_saved_full_audit(Path(receipt['audit']['path']), layers=('3',)) != receipt['source_proofs']:
+            raise ValueError('source slice complete Claim audit proof drift')
+        pending = evidence.get('pending_cvp_management_record_keys', [])
+        declared = packet.get('source_write_slice', {}).get('pending_dispositions', [])
+        unresolved = sorted(d['record_key'] for d in declared if d['action'] == 'unresolved')
+        if sorted(pending) != unresolved or len(pending) != len(set(pending)):
+            raise ValueError('source slice coverage lost separate pending obligations')
+        terminal = evidence['approval']['terminal_review']
+        if terminal.get('path') != str(root/'final_review.raw.json'):
+            raise ValueError('source slice coverage terminal review root drift')
+        check_binding(terminal)
+        return {'schema_version': REPROPOSAL_VERSION,
+            'management_action_id': evidence['action']['action_id'],
+            'prior_reviewed_sha256': saved['reviewed_sha256'],
+            'claim_layer_completion': receipt_binding,
+            'source_terminal_review': terminal,
+            'source_terminal_packet': binding(packet_path),
+            'pending_existing_cvp_record_keys': sorted(pending),
+            'source_only_approval': True, 'existing_cvp_content_approved': False,
+            'old_proposals_and_budgets_preserved': True,
+            'source_slice_mode': 'policy_evidence_binding',
+            'instructions': 'Propose required CVP coverage from the actually committed and independently '
+                'Claim-audited current source graph. The old unsubmitted CVP proposal and all consumed '
+                'budgets remain historical, not approval of current material. Do not repeat source '
+                'repair or reopen a rejected unchanged candidate. Existing links/core remain unchanged. '
+                'All separate pending source/question/relationship obligations remain unresolved and '
+                'block group completion; this handoff grants no mutation or semantic approval for them.'}
     if not packet.get('claim_first_management'):
         raise ValueError('source terminal review did not defer CVP approval')
     pending = packet.get('source_first_pending_cvp', {}).get('pending_record_keys', [])

@@ -507,7 +507,10 @@ def run_group(store, definition, group, row, *, root):
         run_id = row["run_id"]
     saved = store.get_cvp_group(run_id); materials = saved["materials"]
     if saved.get('reviewed',{}).get('evidence',{}).get('approval',{}).get('source_write_slice'):
-        raise ValueError('source write slice applied; remaining exact source/relationship management pending before group continuation')
+        app=saved['reviewed']['evidence']['package']['payload'].get('source_repair_application',{})
+        if (app.get('source_write_slice',{}).get('mode')!='policy_evidence_binding'
+                or not saved.get('claim_layer_audit')):
+            raise ValueError('source write slice applied; remaining exact source/relationship management pending before group continuation')
     store.bind_cvp_execution_root(run_id,identity='group',root=root/run_id)
     model_root = root/run_id/"normal-review"
     if saved["checkpoint"] == "prepared":
