@@ -12,6 +12,38 @@ VERSION='wang_sequential_source_impact_resolution_v1'
 HANDOFF='wang_sequential_source_cvp_handoff_v1'
 
 
+def audit_record_keys(pending, facts):
+    """Source impacts have their own exact proof, not CVP audit root IDs."""
+    if facts is None:return list(pending)
+    if list(pending)!=facts['pending_record_keys'] or [x['record_key'] for x in facts['items']]!=list(pending):
+        raise ValueError('source audit root classification lost pending obligations')
+    if any(x['kind'] not in {'declared_source_group_not_cvp','independently_retained_source_relation','exact_human_logical_retirement'} for x in facts['items']):
+        raise ValueError('source audit root classification contains unknown domain')
+    return []
+
+
+def validate_pre_model_startup_recovery(audit_dir, expected):
+    """Consume a sealed constructor failure, never an unknown model intent."""
+    from backend.pipeline.cvp_sql_flow import binding,check_binding
+    receipt=read_artifact(audit_dir/'source-domain-startup-recovery.json')
+    if (receipt.get('schema_version')!='wang_source_audit_constructor_recovery_v1'
+            or receipt.get('artifact_sha256')!=sha256_json({k:v for k,v in receipt.items() if k!='artifact_sha256'})
+            or receipt.get('intent')!=binding(audit_dir/'audit-intent.json')
+            or read_artifact(audit_dir/'audit-intent.json')!=expected
+            or receipt.get('vendor_model_constructed') is not False
+            or receipt.get('original_record_keys')==[] or receipt.get('corrected_record_keys')!=[]
+            or receipt.get('auditor')!=binding(Path(__file__).resolve().parents[2]/'scripts/audit-library.py')
+            or {p.name for p in audit_dir.iterdir()}!={'audit-intent.json','source-domain-startup-recovery.json'}):
+        raise ValueError('source audit startup recovery proof missing/drift/possible model execution')
+    check_binding(receipt['failure_log'])
+    log=Path(receipt['failure_log']['path']).read_text()
+    if ('raise ValueError(\'independent SQL pending record is outside CVP management\')' not in log
+            or 'File ' not in log or 'in __init__' not in log
+            or any(x not in log for x in receipt['original_record_keys'])):
+        raise ValueError('source audit recovery is not the exact pre-model constructor failure')
+    return receipt
+
+
 def context(value):
     e=value.get('reviewed',{}).get('evidence',{})
     c=e.get('action',{}).get('materials',{}).get('claim_management_resolution',{})

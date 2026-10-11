@@ -628,13 +628,22 @@ def run_group(store, definition, group, row, *, root):
         stage_event('independent_audit', sequence=group['sequence'], run_id=run_id)
         audit_dir.mkdir(parents=True,exist_ok=True)
         intent=audit_dir/'audit-intent.json'
-        if intent.exists():raise ValueError('independent audit intent lacks saved complete result; no automatic replay')
-        write_immutable(intent,{'claim_ids':group['claim_ids'],'viewpoint_ids':views,'read_pins':pin_rows(pins(current)),
-                                'model':'gemini-3.8-flash','workers':2,'automatic_retry':False})
+        expected_intent={'claim_ids':group['claim_ids'],'viewpoint_ids':views,'read_pins':pin_rows(pins(current)),
+                         'model':'gemini-3.8-flash','workers':2,'automatic_retry':False}
+        from backend.pipeline.cvp_source_impact_resolution import audit_record_keys,validate_pre_model_startup_recovery
+        audit_keys=audit_record_keys(pending_keys,source_impacts)
+        if intent.exists():
+            if source_impacts is None:raise ValueError('independent audit intent lacks saved complete result; no automatic replay')
+            receipt=validate_pre_model_startup_recovery(audit_dir,expected_intent)
+            if receipt['original_record_keys']!=pending_keys:raise ValueError('source audit recovery changed pending domain')
+            write_immutable(audit_dir/'source-domain-startup-recovery-used.json',
+                            {'recovery':binding(audit_dir/'source-domain-startup-recovery.json'),
+                             'corrected_record_keys':audit_keys,'automatic_retry':False})
+        else:write_immutable(intent,expected_intent)
         subprocess.run([str(PROJECT/"backend/.venv/bin/python"),"scripts/audit-library.py","--scope","all","--layers","1,2,3,4",
                         "--claim-ids",",".join(group["claim_ids"]),"--viewpoint-ids",",".join(views),
                         "--workers","2","--model","gemini-3.8-flash","--no-status-file","--preserve-full-context","--component-roles","--sql-group-scope",
-                        *[a for k in pending_keys for a in ('--sql-record-key',k)],"--out",str(audit_dir)],
+                        *[a for k in audit_keys for a in ('--sql-record-key',k)],"--out",str(audit_dir)],
                        cwd=PROJECT,check=True,env={**os.environ,'KNOWLEDGE_DATABASE_URL':store.database_url})
     from backend.pipeline.viewpoint_content_blocked_fallback import apply as content_fallback
     validate_transaction_audit(read_artifact(audit_path),group['claim_ids'],views)

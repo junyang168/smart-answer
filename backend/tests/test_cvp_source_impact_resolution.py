@@ -6,6 +6,38 @@ import pytest
 from backend.pipeline import cvp_source_impact_resolution as impact
 from backend.api.canonical_repository.postgres_store import sha256_json
 
+def test_audit_root_domains_do_not_discard_obligations():
+    keys=['groups/declared','knowledge_relations/retired']
+    facts={'pending_record_keys':keys,'items':[{'record_key':keys[0],'kind':'declared_source_group_not_cvp'},
+                                              {'record_key':keys[1],'kind':'exact_human_logical_retirement'}]}
+    assert impact.audit_record_keys(keys,facts)==[]
+    assert impact.audit_record_keys(['viewpoint_relations/x'],None)==['viewpoint_relations/x']
+    with pytest.raises(ValueError):impact.audit_record_keys(keys[:-1],facts)
+    facts['items'][1]['kind']='unknown'
+    with pytest.raises(ValueError):impact.audit_record_keys(keys,facts)
+
+@pytest.mark.parametrize('fault',[None,'used','raw','unknown','changed_intent','changed_log','foreign_auditor'])
+def test_constructor_recovery_never_retries_model_execution(tmp_path,fault):
+    from backend.pipeline.viewpoint_resolution_runtime import write_immutable
+    from backend.pipeline.cvp_sql_flow import binding
+    expected={'claim_ids':['C'],'automatic_retry':False}
+    intent=tmp_path/'audit-intent.json';write_immutable(intent,expected)
+    log=tmp_path.parent/(tmp_path.name+'-failure.log')
+    log.write_text("File auditor, in __init__\nraise ValueError('independent SQL pending record is outside CVP management')\ngroups/G\n")
+    proof={'schema_version':'wang_source_audit_constructor_recovery_v1','intent':binding(intent),
+           'failure_log':binding(log),'auditor':binding(Path(impact.__file__).resolve().parents[2]/'scripts/audit-library.py'),
+           'vendor_model_constructed':False,'original_record_keys':['groups/G'],'corrected_record_keys':[]}
+    if fault=='unknown':proof['vendor_model_constructed']=True
+    if fault=='foreign_auditor':proof['auditor']=binding(log)
+    proof['artifact_sha256']=sha256_json(proof)
+    write_immutable(tmp_path/'source-domain-startup-recovery.json',proof)
+    if fault in {'used','raw'}:write_immutable(tmp_path/(('source-domain-startup-recovery-used' if fault=='used' else 'raw')+'.json'),{})
+    if fault=='changed_intent':expected={'claim_ids':['foreign']}
+    if fault=='changed_log':log.write_text('timeout after vendor model construction')
+    if fault:
+        with pytest.raises(ValueError):impact.validate_pre_model_startup_recovery(tmp_path,expected)
+    else:assert impact.validate_pre_model_startup_recovery(tmp_path,expected)==proof
+
 @pytest.fixture
 def actual():
     run=os.environ.get('WKP_SOURCE_IMPACT_ACTUAL')
