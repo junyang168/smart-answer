@@ -78,6 +78,80 @@ def test_only_three_fields_change_and_inputs_stay_immutable():
     assert new['evidence_step_ids']==['E'] and new['claim_revision']==1
 
 
+def two_targets():
+    packet,report=case()
+    item=deepcopy(packet['items'][0]);item['item_id']='4:V2:C'
+    item['viewpoint']['viewpoint_id']='V2'
+    item['connections'][0].update(viewpoint_claim_link_id='L2',viewpoint_id='V2')
+    packet['items'].append(item)
+    report['actions'].append({'item_id':item['item_id'],'verdict':'audit_objection_upheld','gpt':{'reason':'second target'}})
+    return packet,report
+
+
+def test_same_claim_distinct_viewpoints_are_distinct_repair_connections():
+    packet,report=two_targets();before=deepcopy((packet,report))
+    targets=select_repairs(packet,report)
+    assert len(targets)==2
+    assert {i['before_link']['viewpoint_claim_link_id'] for i in targets}=={'L','L2'}
+    assert {i['after_link']['viewpoint_id'] for i in targets}=={'V','V2'}
+    assert (packet,report)==before
+
+
+@pytest.mark.parametrize('fault',['link_id','same_target','claim_generation','supports','foreign'])
+def test_multiple_target_repair_keeps_exact_connection_and_generation_gates(fault):
+    packet,report=two_targets();item=packet['items'][1]
+    if fault=='link_id':item['connections'][0]['viewpoint_claim_link_id']='L'
+    if fault=='same_target':
+        item['connections'][0]['viewpoint_id']='V';item['viewpoint']['viewpoint_id']='V'
+    if fault=='claim_generation':item['claim']['revision']=2
+    if fault=='supports':item['connections'][0]['link_type']='supports'
+    if fault=='foreign':item['connections'][0]['claim_id']='OTHER'
+    with pytest.raises(ValueError):select_repairs(packet,report)
+
+
+def test_multi_target_reviewer_has_separate_prompt_and_requires_all_connections():
+    from types import SimpleNamespace
+    from backend.pipeline.viewpoint_audit_link_repair import link_review_adapter,PROMPT
+    client=SimpleNamespace(model='gpt-6.1-sol',backend='codex_subscription',reasoning_effort='high')
+    old=link_review_adapter(client,PROMPT,contextual_semantics=True)
+    new=link_review_adapter(client,PROMPT,contextual_semantics=True,multiple_targets_per_claim=True)
+    assert old.prompt_sha256!=new.prompt_sha256
+    with pytest.raises(ValueError):link_review_adapter(client,PROMPT,multiple_targets_per_claim=True)
+
+
+@pytest.mark.parametrize('fault',[None,'duplicate','missing','foreign','reject','problem'])
+def test_multi_target_requires_one_complete_approved_claim_verdict(fault):
+    from types import SimpleNamespace
+    from backend.pipeline.viewpoint_audit_link_repair import validate_supports_review
+    p,r=two_targets();targets=select_repairs(p,r)
+    verdict=SimpleNamespace(claim_id='C',approved=True,problems=[])
+    verdicts=[verdict]
+    if fault=='duplicate':verdicts.append(verdict)
+    if fault=='missing':verdicts=[]
+    if fault=='foreign':verdict.claim_id='OTHER'
+    if fault=='reject':verdict.approved=False
+    if fault=='problem':verdict.problems=['L2 has no argument role']
+    result=SimpleNamespace(verdicts=verdicts)
+    if fault:
+        with pytest.raises(ValueError):validate_supports_review(result,targets)
+    else:validate_supports_review(result,targets)
+
+
+def test_same_claim_two_targets_package_has_two_separate_fresh_authorities(tmp_path):
+    import json
+    packet,report=two_targets()
+    states={}
+    for n,item in enumerate(packet['items']):
+        item['connections'][0]['decision_id']=f'D{n}'
+        states['viewpoint_identity_decisions',f'D{n}']={'identity_candidate_id':f'I{n}'}
+        states['viewpoint_identity_candidates',f'I{n}']={'seed_relation_ids':[]}
+    for label in ('gpt','opus'):(tmp_path/f'raw-{label}.json').write_text(json.dumps({'artifact_sha256':label}))
+    package=package_for(states,{'targets':select_repairs(packet,report)},{'gpt':{},'opus':{}},tmp_path)
+    for key in ('viewpoint_claim_links','viewpoint_identity_candidates','viewpoint_identity_decisions'):
+        assert len(package[key])==2
+    assert len({d['identity_decision_id'] for d in package['viewpoint_identity_decisions']})==2
+
+
 @pytest.mark.parametrize('verdict',['unresolved','audit_objection_rejected'])
 def test_other_verdict_cannot_launch(verdict, monkeypatch):
     packet, report=case(); report['actions'][0]['verdict']=verdict

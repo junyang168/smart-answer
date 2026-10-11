@@ -44,7 +44,8 @@ after_link必须忠于自身Claim完整命题，不补入原文中另有但Claim
 def select_repairs(packet, report):
     actions = report.get('actions', [])
     items = {i['item_id']: i for i in packet['items']}
-    if not actions or len(actions) != len(items) or {a['item_id'] for a in actions} != set(items):
+    if (len(items)!=len(packet['items']) or not actions or len(actions) != len(items)
+            or {a['item_id'] for a in actions} != set(items)):
         raise ValueError('adjudication population mismatch')
     selected = []
     for action in actions:
@@ -68,12 +69,21 @@ def select_repairs(packet, report):
                          'adjudication': action['gpt'], 'evidence': item['evidence'], 'sources': item['sources']})
     if not selected:
         raise ValueError('no upheld connection to repair')
-    if len({i['claim']['claim_id'] for i in selected}) != len(selected):
-        raise ValueError('duplicate repair Claim')
+    if len({i['before_link']['viewpoint_claim_link_id'] for i in selected}) != len(selected):
+        raise ValueError('duplicate repair connection')
+    if len({(i['claim']['claim_id'], i['before_link']['viewpoint_id']) for i in selected}) != len(selected):
+        raise ValueError('ambiguous multiple repair components for one Claim/viewpoint')
+    claims = {}
+    for item in selected:
+        cid = item['claim']['claim_id']
+        if cid in claims and claims[cid] != item['claim']:
+            raise ValueError('conflicting repair Claim generations')
+        claims[cid] = item['claim']
     return selected
 
 
-def link_review_adapter(client, prompt, *, legacy_serialization=False, contextual_semantics=False):
+def link_review_adapter(client, prompt, *, legacy_serialization=False, contextual_semantics=False,
+                        multiple_targets_per_claim=False):
     # New bounded supports reviews use the same proven lossless transport as
     # production. Explicit historical/human/other owner scopes retain their
     # exact cached configuration; never relabel old raw replies as new format.
@@ -88,12 +98,24 @@ def link_review_adapter(client, prompt, *, legacy_serialization=False, contextua
 Claim/Evidence/来源/CVP文字、端点、其他成员及依赖须保持不变，只检查已授权连接修订。
 每个指定 Claim 恰好一个 verdict；全部成立才 approved=true、problems=[]。
 拒绝须说明缺失的论证作用或实质范围差异；证据不足或需新范围诚实拒绝，不修改内容。''')
+    if multiple_targets_per_claim:
+        if not contextual_semantics or legacy_serialization:
+            raise ValueError('multiple-target review requires current contextual contract')
+        prompt += '\n同一 Claim 可有多个不同目标的 targets。必须逐条按 connection ID 和目标 CVR 核查完整后像；每个不同 Claim 恰好一个 verdict，只有其全部 targets 均获批准才能 approved=true。任一连接不成立就拒绝该 Claim，problems 明列连接 ID 和理由；不得只审核其中一个目标。'
     adapter = StructuredJsonReviewerAdapter(client=client, prompt=prompt,
         response_model=Review, schema_name='audit_link_repair_review_v1',
         compact_payload=True, shared_text_payload=not legacy_serialization,
         shared_record_payload=contextual_semantics)
     adapter.max_request_bytes = 500000
     return adapter
+
+
+def validate_supports_review(result, targets):
+    """One verdict per Claim covers every disclosed, distinct target link."""
+    ids={i['claim']['claim_id'] for i in targets}
+    if (len(result.verdicts)!=len(ids) or {v.claim_id for v in result.verdicts}!=ids
+            or any(not v.approved or v.problems for v in result.verdicts)):
+        raise ValueError('bounded supports rejected; no second review or automatic content expansion')
 
 
 def bound_group_audit(group, packet):

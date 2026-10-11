@@ -106,6 +106,10 @@ def read_supports_review(campaign,repair,label,provider,model,packet):
     client=subscription_client(provider,model,'high')
     candidates=[link_review_adapter(client,PROMPT,legacy_serialization=legacy,contextual_semantics=contextual)
                 for legacy,contextual in ((True,False),(False,False),(False,True))]
+    targets=packet.get('targets',[])
+    if len({i['claim']['claim_id'] for i in targets})<len(targets):
+        candidates.append(link_review_adapter(client,PROMPT,contextual_semantics=True,
+                                               multiple_targets_per_claim=True))
     matches=[a for a in candidates if a.prompt_sha256==raw.get('prompt_sha256')
              and a.generation_config_sha256==raw.get('generation_config_sha256')]
     if len(matches)!=1:raise ValueError('saved supports transport identity missing or ambiguous')

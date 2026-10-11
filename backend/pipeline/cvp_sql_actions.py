@@ -509,7 +509,7 @@ def supports_identity_dependencies(store, records, selected):
 
 def execute_supports_action(store,run_id,adjudication_root,*,root,ports):
     from backend.pipeline.viewpoint_adjudication_history import validated_history
-    from backend.pipeline.viewpoint_audit_link_repair import select_repairs,link_review_adapter,package_for,POLICY,PROMPT
+    from backend.pipeline.viewpoint_audit_link_repair import select_repairs,link_review_adapter,package_for,validate_supports_review,POLICY,PROMPT
     from backend.pipeline.viewpoint_authorized_source_repair_357 import Review,review_call
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact,subscription_client,write_immutable
     packet,_=validated_history(adjudication_root)
@@ -522,7 +522,7 @@ def execute_supports_action(store,run_id,adjudication_root,*,root,ports):
     policy=read_artifact(POLICY)
     if (policy['allowed_after_type']!='supports' or not policy['require_dual_model_postimage_review']
             or policy['maximum_corrections_per_adjudication']!=1):raise ValueError('standing narrow policy drift')
-    ids=[i['claim']['claim_id'] for i in selected]
+    ids=sorted({i['claim']['claim_id'] for i in selected})
     action_id='CVPA-'+sha256_json({'adjudication':packet['artifact_sha256'],'handoff':report['artifact_sha256'],
                                  'policy':binding(POLICY),'links':[i['before_link']['viewpoint_claim_link_id'] for i in selected]})
     root=root/action_id
@@ -559,12 +559,12 @@ def execute_supports_action(store,run_id,adjudication_root,*,root,ports):
             import os
             from backend.pipeline.viewpoint_s201129_source_continuation import canonical_runtime
             os.environ['CODEX_EXECUTABLE']=canonical_runtime()['identity']['cli']['path']
-        adapter=link_review_adapter(subscription_client(provider,model,'high'),PROMPT,contextual_semantics=True)
+        adapter=link_review_adapter(subscription_client(provider,model,'high'),PROMPT,contextual_semantics=True,
+                                    multiple_targets_per_claim=len(ids)!=len(selected))
         adapter.max_request_bytes=500000
         response,_,_=review_call(adapter,repair,root,label)
         result=Review.model_validate(response)
-        if len(result.verdicts)!=len(ids) or {v.claim_id for v in result.verdicts}!=set(ids) or any(not v.approved or v.problems for v in result.verdicts):
-            raise ValueError('bounded supports rejected; no second review or automatic content expansion')
+        validate_supports_review(result,selected)
         reviews[label]=result.model_dump(mode='json')
     extra=supports_identity_dependencies(store,records,selected)
     write_immutable(root/'identity-template-read-pins.json',{

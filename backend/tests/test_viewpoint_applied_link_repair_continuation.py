@@ -56,3 +56,23 @@ def test_saved_supports_review_uses_exact_transport_without_generation(tmp_path,
     else:
         assert m.read_supports_review(tmp_path,tmp_path,'opus','claude','M',{})=={'saved':True}
         assert len(calls)==1
+
+
+def test_saved_multiple_target_transport_requires_actual_packet_and_exact_identity(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    from backend.pipeline import viewpoint_applied_link_repair_continuation as m
+    from backend.pipeline import viewpoint_audit_link_repair as repair
+    from backend.pipeline import viewpoint_resolution_runtime as runtime
+    monkeypatch.setattr(m,'read_artifact',lambda _:dict(prompt_sha256='multi',generation_config_sha256='multi-config'))
+    monkeypatch.setattr(runtime,'subscription_client',lambda *a:object())
+    def adapter(c,p,**kw):
+        return SimpleNamespace(prompt_sha256='multi' if kw.get('multiple_targets_per_claim') else str(kw),
+                               generation_config_sha256='multi-config' if kw.get('multiple_targets_per_claim') else 'old')
+    monkeypatch.setattr(repair,'link_review_adapter',adapter)
+    calls=[]
+    monkeypatch.setattr(runtime,'read_saved_model_response',lambda a,p,r:calls.append(p) or {'saved':True})
+    packet={'targets':[{'claim':{'claim_id':'C'}},{'claim':{'claim_id':'C'}}]}
+    assert m.read_supports_review(tmp_path,tmp_path,'gpt','codex','M',packet)=={'saved':True}
+    assert calls==[packet]
+    with pytest.raises(ValueError):m.read_supports_review(tmp_path,tmp_path,'gpt','codex','M',{'targets':[packet['targets'][0]]})
+    assert calls==[packet]
