@@ -259,7 +259,7 @@ def response_adapter(adapter, saved=None):
     if all(saved.get(k) == getattr(bound, k) for k in keys): return bound
     for base in (roles,bound,adapter):
         if not getattr(base,'_shared_record_payload',False):continue
-        for factory in ('shared_keys_copy','shared_keys_v2_copy','shared_values_copy','shared_shapes_copy','shared_shapes_v2_copy'):
+        for factory in ('shared_keys_copy','shared_keys_v2_copy','shared_values_copy','shared_shapes_copy','shared_shapes_v2_copy','shared_shapes_v3_copy'):
             method=getattr(base,factory,None)
             if callable(method):
                 candidate=method()
@@ -385,6 +385,11 @@ def call_model(
             typed_factory = getattr(adapter, 'shared_shapes_v2_copy', None)
             if callable(typed_factory) and adapter.request_bytes(payload) > int(limit):
                 smaller = typed_factory()
+                if smaller.request_bytes(payload) < adapter.request_bytes(payload):
+                    adapter = smaller
+            pieces_factory = getattr(adapter, 'shared_shapes_v3_copy', None)
+            if callable(pieces_factory) and adapter.request_bytes(payload) > int(limit):
+                smaller = pieces_factory()
                 if smaller.request_bytes(payload) < adapter.request_bytes(payload):
                     adapter = smaller
     elif saved:
