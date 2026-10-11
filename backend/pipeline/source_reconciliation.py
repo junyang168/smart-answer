@@ -656,14 +656,14 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
             col, ident = split_key(k)
             old = before.get(k)
             pin = pins.get((col, ident))
-            # Existing question/answer consumers can expose ambiguity in a
-            # Claim draft too. They remain exact pinned, nonwritable review
+            # Existing co-Claims and question/answer consumers can expose
+            # separate concerns in a draft. They remain pinned, nonwritable review
             # context; this initial-only path cannot approve or edit them.
-            readonly_source_dependency = col in {'evidence_steps', 'knowledge_relations', 'questions'}
+            readonly_source_dependency = col in {'claims', 'evidence_steps', 'knowledge_relations', 'questions'}
             if empty_owner and col=='claims' and ident==empty_owner['claim_id']:
                 continue  # Exact missing draft disclosed; never a final/write exemption.
             if (col not in {'viewpoint_claim_links', 'canonical_viewpoints', 'viewpoint_revisions',
-                            'evidence_steps', 'knowledge_relations', 'questions'}
+                            'claims', 'evidence_steps', 'knowledge_relations', 'questions'}
                     or old is None or k in proposed or pin != [old.get('revision', 1),
                         sha256_json({f:v for f,v in old.items() if f != 'revision'}), False]
                     or old.get('review_status') in HUMAN_HOLDS | {'human_hold', 'rejected', 'withheld_unreviewed'}
