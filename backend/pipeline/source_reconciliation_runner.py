@@ -120,13 +120,31 @@ def request_limit(adapter, path, *, saved=None):
         auth=read_artifact(Path(budget['authorization']['path']))
         binding_path=next((p/'request-limit-binding.json' for p in Path(path).resolve().parents
                            if (p/'request-limit-binding.json').exists()),None)
-        if (binding_path is None or read_artifact(binding_path)!=budget
+        temporary = 'temporary_run_id' in budget
+        expected_path = (binding_path.parent / ('request-limit-amendment-' + budget['authorization']['file_sha256'] + '.json')
+                         if binding_path is not None and temporary else binding_path)
+        if (expected_path is None or not expected_path.exists() or read_artifact(expected_path)!=budget
                 or auth.get('schema_version')!='cvp_sql_request_limit_authorization.v1'
                 or auth.get('campaign_sha256')!=budget['campaign_sha256']
                 or auth.get('max_request_bytes')!=budget['max_request_bytes']
                 or auth.get('authorized_by')!='owner' or not auth.get('owner_direction')):
             raise ValueError('source model campaign request budget drift')
         limit=budget['max_request_bytes']
+        if temporary:
+            original=read_artifact(binding_path)
+            predecessor=budget.get('supersedes_authorization')
+            run=budget['temporary_run_id']
+            if (auth.get('temporary_run_id')!=run or auth.get('supersedes_authorization')!=predecessor
+                    or original.get('authorization')!=predecessor
+                    or original.get('campaign_sha256')!=budget['campaign_sha256']
+                    or original.get('max_request_bytes')!=budget.get('base_max_request_bytes')
+                    or not isinstance(run,str) or not run.startswith('CVPG-') or len(run)!=69
+                    or any(c not in '0123456789abcdef' for c in run[5:])):
+                raise ValueError('source model temporary request budget drift')
+            check_binding(predecessor)
+            relative=Path(path).resolve().relative_to(binding_path.parent)
+            if relative.parts[0]!=run:
+                limit=budget['base_max_request_bytes']
     return limit or 500000,budget
 
 
