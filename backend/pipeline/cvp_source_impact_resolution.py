@@ -205,6 +205,24 @@ def completed_statement_facts(value,old,prior,handoff,cursor):
             'model_verdicts_changed':False,'original_pending_list_preserved':True}
 
 
+def closed_statement_saved_resolution(store,value,audit_path):
+    """Reuse the existing generic disjoint-rejection verifier, not a new call."""
+    from backend.pipeline.cvp_sql_flow import binding
+    from backend.pipeline.claim_source_write_slice import calculate_saved_impact_decisions,verify_saved_statement_impact_resolution
+    facts=completed_source_facts(value,store=store)
+    if not facts or facts['source_handoff'].get('schema_version')!=CLOSED_STATEMENT:return None
+    source,receipt,root=statement_slice_context(store,value)
+    decisions=calculate_saved_impact_decisions(store,source,Path(audit_path))
+    if decisions['unadjudicated_targets']:return None
+    result={'schema_version':'wang_source_slice_saved_impact_resolution_v1','audit':binding(audit_path),
+        'source_package':source['reviewed']['evidence']['package']['payload'],'decisions':decisions,
+        'bindings':[binding(audit_path),*[b for part in decisions['parts'] for k,b in part.items() if k.startswith('prior_')]],
+        'new_model_calls':0,'registry_writes':0,'model_verdicts_changed':False}
+    result['artifact_sha256']=sha256_json(result)
+    verify_saved_statement_impact_resolution(read_artifact(audit_path),result)
+    return result
+
+
 def statement_slice_context(store,value):
     """Recover the named committed slice after later sequential actions.
 

@@ -686,8 +686,14 @@ def run_group(store, definition, group, row, *, root):
         if quota_direction['run_id']==run_id and quota_direction['audit_binding']==binding(audit_path):
             resume_quota(store,run_id,Path(auth['path']))
     resolution=None
+    if closed_statement and (audit['layers']['3'].get('disputed') or audit['layers']['4'].get('disputed')):
+        from backend.pipeline.cvp_source_impact_resolution import closed_statement_saved_resolution
+        verified=closed_statement_saved_resolution(store,saved,audit_path)
+        if verified is not None:
+            resolution=resolution_dir/'closed-statement-saved-source-resolution.json'
+            write_immutable(resolution,verified)
     from backend.pipeline.cvp_exact_human_audit_retention import complete as exact_human_complete, partition as exact_human_partition
-    if audit['layers']['3'].get('disputed') or audit['layers']['4'].get('disputed'):
+    if resolution is None and (audit['layers']['3'].get('disputed') or audit['layers']['4'].get('disputed')):
         resolution=exact_human_complete(audit_path,root,store,run_id,resolution_dir/'exact-human-link-resolution.json')
     if resolution is None and (audit['layers']['3'].get('disputed') or audit['layers']['4'].get('disputed')):
         from backend.pipeline.cvp_human_retained_audit_resolution import create_if_complete

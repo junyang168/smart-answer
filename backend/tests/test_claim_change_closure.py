@@ -265,3 +265,35 @@ def test_closed_statement_transaction_and_late_rollback(actual,postgres_store,tm
         assert postgres_store.get_cvp_group(run)['isolated_closed_validation'] is True
         with postgres_store.connect() as conn,conn.cursor() as cur:impact.validate_for_completion(value,proof,binding(audit),cur)
     assert production.get_cvp_group(run)==value
+
+
+@pytest.mark.parametrize('fault',[None,'projection','unknown','verdict','original_raw_binding'])
+def test_actual_closed_statement_saved_rejection_no_new_calls(actual,monkeypatch,fault):
+    from backend.pipeline import claim_source_write_slice as slice_flow
+    store,_=actual;run='CVPG-6b3b1929820ae88b774aece78956585cc7a28085f543c314c0e9461a0067dc5f'
+    value=store.get_cvp_group(run);original=deepcopy(value)
+    root=Path(value['reviewed']['evidence']['action']['materials'].get('execution_root',
+        '/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/staging/cvp-production-357/campaign-sql-20261008-v1-from-g059/execution'))
+    audit=root/run/'audit-5a013ca0d42ec3b417d9/audit.json'
+    source,receipt,source_root=impact.statement_slice_context(store,value)
+    files={p:hashlib.sha256(p.read_bytes()).hexdigest() for p in source_root.iterdir() if p.is_file()}
+    calculate=slice_flow.calculate_saved_impact_decisions
+    if fault:
+        def modified(*a,**kw):
+            d=calculate(*a,**kw)
+            if fault=='unknown':d['unadjudicated_targets']=['foreign']
+            if fault=='projection':d['parts'][0]['projection']['removed_repaired_claim_ids']=[]
+            if fault=='verdict':d['parts'][0]['projection']['saved_verdict']='audit_objection_upheld'
+            if fault=='original_raw_binding':d['parts'][0]['prior_raw']['file_sha256']='foreign'
+            return d
+        monkeypatch.setattr(slice_flow,'calculate_saved_impact_decisions',modified)
+    if fault=='unknown':assert impact.closed_statement_saved_resolution(store,value,audit) is None
+    elif fault:
+        with pytest.raises(ValueError):impact.closed_statement_saved_resolution(store,value,audit)
+    else:
+        result=impact.closed_statement_saved_resolution(store,value,audit)
+        assert result['new_model_calls']==0 and result['registry_writes']==0
+        assert not result['model_verdicts_changed']
+        assert result['decisions']['parts'][0]['projection']['removed_repaired_claim_ids']==['CL-0029']
+    assert store.get_cvp_group(run)==original
+    assert files=={p:hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
