@@ -164,3 +164,25 @@ def test_actual_pending_link_repair_cannot_loop_new_semantic_objection(tmp_path,
         with pytest.raises(ValueError,match='no second automatic link repair'):
             management.guard_repeated_semantic_repair(value,packet,report)
     else:management.guard_repeated_semantic_repair(value,packet,report)
+
+
+def test_historical_import_has_no_new_pending_link_repair_subject():
+    value={'materials':{'origin':'explicit_historical_import'},'change_set_ids':['K'],
+           'import_certificate':{'status':'verified_historical_completion','change_set_ids':['K']}}
+    before=deepcopy(value)
+    packet={'items':[{'item_id':'I','connections':[{'viewpoint_claim_link_id':'L'}]}]}
+    report={'actions':[{'item_id':'I','verdict':'audit_objection_upheld'}]}
+    management.guard_repeated_semantic_repair(value,packet,report)
+    assert value==before and report['actions'][0]['verdict']=='audit_objection_upheld'
+
+
+@pytest.mark.parametrize('fault',['missing','origin','status','history'])
+def test_missing_native_review_is_not_historical_guard_waiver(fault):
+    value={'materials':{'origin':'explicit_historical_import'},'change_set_ids':['K'],
+           'import_certificate':{'status':'verified_historical_completion','change_set_ids':['K']}}
+    if fault=='missing':value.pop('import_certificate')
+    elif fault=='origin':value['materials']['origin']='native'
+    elif fault=='status':value['import_certificate']['status']='unverified'
+    else:value['import_certificate']['change_set_ids']=['foreign']
+    with pytest.raises(ValueError,match='missing reviewed SQL authority'):
+        management.guard_repeated_semantic_repair(value,{}, {})

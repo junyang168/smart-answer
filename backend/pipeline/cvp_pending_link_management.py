@@ -265,6 +265,16 @@ def resolved_pending_operations(value,store=None,cursor=None):
 
 def guard_repeated_semantic_repair(value,packet,report):
     """A newly reviewed/applied link rejected again is a content stop, not a loop."""
+    if 'reviewed' not in value:
+        certificate=value.get('import_certificate',{})
+        if (value.get('materials')=={'origin':'explicit_historical_import'}
+                and certificate.get('status')=='verified_historical_completion'
+                and certificate.get('change_set_ids')==value.get('change_set_ids')):
+            # A verified historical import has no new pending-link management
+            # write domain. This hook does not resolve its current objection;
+            # ordinary adjudication/repair/completion gates still apply.
+            return
+        raise ValueError('semantic repair guard missing reviewed SQL authority')
     approval=value['reviewed']['evidence']['approval']
     if not approval.get('pending_link_material'):return
     from backend.pipeline.cvp_sql_flow import check_binding
