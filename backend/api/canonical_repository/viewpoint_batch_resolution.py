@@ -2184,7 +2184,18 @@ def canonicalize_review(raw: Mapping[str, Any]) -> tuple[dict[str, Any], list[st
     Raw model output remains immutable beside the normalized envelope.
     """
 
-    return canonicalize_proposal(raw)
+    payload, changes = canonicalize_proposal(raw)
+    # Coverage IDs are an order-free reviewer set, but duplicate IDs still
+    # indicate a malformed coverage judgment and must reach strict validation.
+    # Preserve the immutable raw, decisions, reasons and exact multiplicity.
+    for index, row in enumerate(payload.get("change_reviews") or []):
+        ids = row.get("coverage_evidence_step_ids")
+        if isinstance(ids, list) and all(isinstance(item, str) for item in ids):
+            ordered = sorted(ids)
+            if ordered != ids:
+                row["coverage_evidence_step_ids"] = ordered
+                changes.append(f"/change_reviews/{index}/coverage_evidence_step_ids")
+    return payload, sorted(changes)
 
 
 def anchor_proposal_spans(

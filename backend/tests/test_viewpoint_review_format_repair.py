@@ -8,6 +8,35 @@ from backend.pipeline.viewpoint_review_format_repair import parse_review
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 
 
+@pytest.mark.parametrize('duplicate', [False, True])
+def test_coverage_id_order_is_zero_call_but_duplicates_remain_invalid(tmp_path, duplicate):
+    from backend.api.canonical_repository.viewpoint_batch_resolution import CoverageCanonicalViewpointReviewResponse
+    original = review()
+    original['schema_version'] = 'wang_canonical_viewpoint_review_v2'
+    original['change_reviews'][0].update(finding_codes=[])
+    for row in original['change_reviews']:
+        row.update(coverage_requirement='cvp_required', coverage_claim_sha256='sha',
+                   coverage_evidence_step_ids=['E2', 'E1'] + (['E1'] if duplicate else []),
+                   coverage_reason='完整自身證據', cvp_covered=True)
+    before = deepcopy(original)
+    a, calls = adapter(original)
+    a._response_model = CoverageCanonicalViewpointReviewResponse
+    if duplicate:
+        with pytest.raises(ValidationError, match='sorted and unique'):
+            parse_review(original, adapter=a, request={}, cache=tmp_path/'unused.json')
+    else:
+        parsed, changes, count, _ = parse_review(original, adapter=a, request={}, cache=tmp_path/'unused.json')
+        assert count == 0
+        assert len(changes) == 2
+        for raw_row, parsed_row in zip(original['change_reviews'], parsed.change_reviews):
+            actual = parsed_row.model_dump()
+            actual['coverage_evidence_step_ids'] = raw_row['coverage_evidence_step_ids']
+            # Base schema defaults are allowed; every supplied semantic field is exact.
+            assert all(actual[key] == value for key, value in raw_row.items())
+    assert original == before and calls == []
+    assert not (tmp_path/'unused.json').exists()
+
+
 def review():
     return {'schema_version': 'wang_canonical_viewpoint_review_v1',
         'proposal_sha256': 'p', 'change_reviews': [
