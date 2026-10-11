@@ -3790,7 +3790,11 @@ class PostgresKnowledgeStore:
             retained_resolution=None
             if retained_impacts_resolution_path is not None:
                 if not pending_management:raise ChangeSetConflict('foreign retained management completion proof')
-                from backend.pipeline.cvp_retained_impact_resolution import validate_for_completion
+                from backend.pipeline.cvp_source_impact_resolution import context as source_impact_context
+                if source_impact_context({**value,'run_id':run_id}):
+                    from backend.pipeline.cvp_source_impact_resolution import validate_for_completion
+                else:
+                    from backend.pipeline.cvp_retained_impact_resolution import validate_for_completion
                 # The original reviewed evidence/pending list is immutable.
                 # Record a SEPARATE exact no-change resolution, never edit it.
                 retained_resolution=validate_for_completion({**value,'run_id':run_id},

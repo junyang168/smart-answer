@@ -8,6 +8,17 @@ from backend.pipeline import source_reconciliation as c
 from backend.api.canonical_repository.postgres_store import record_content_sha, sha256_json
 
 
+def declared_group_keys(frozen):
+    before=c.index(frozen['before_records'])
+    pins={(p['collection'],p['object_id']):p['pin'] for p in frozen.get('sql_scope',{}).get('read_pins',[])}
+    groups={g['group_key'] for g in frozen['manifest']['groups']}
+    for k,old in before.items():
+        if pins.get(c.split_key(k))!=[old.get('revision',1),record_content_sha(old),False]:continue
+        groups.update(old.get('claim_group_ids',[]))
+        groups.update(v for v in (old.get('group_id'),old.get('claim_group_id')) if v)
+    return groups
+
+
 def receipt(frozen, proposal):
     before = c.index(frozen['before_records'])
     proposed = c.index(proposal.records)
@@ -21,14 +32,7 @@ def receipt(frozen, proposal):
     direction = direction_for(frozen.get('claim_issue_context', {}), frozen.get('physical_snapshots'))
     context_claims = set(direction.get('unchanged_held_context_claim_ids', [])) if direction else set()
     review_ids = set(direction.get('withdraw_relation_ids', [])) if direction else set()
-    group_keys = {g['group_key'] for g in frozen['manifest']['groups']}
-    # Source group labels are metadata on actual pinned records, not CVP IDs.
-    for k, old in before.items():
-        col, oid = c.split_key(k)
-        if pins.get((col, oid)) != [old.get('revision', 1), record_content_sha(old), False]:
-            continue
-        group_keys.update(old.get('claim_group_ids', []))
-        group_keys.update(v for v in (old.get('group_id'), old.get('claim_group_id')) if v)
+    group_keys=declared_group_keys(frozen)
     classified = []
     for d in proposal.dispositions:
         k = d.record_key

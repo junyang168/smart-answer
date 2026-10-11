@@ -574,7 +574,9 @@ def run_group(store, definition, group, row, *, root):
                 prior_management_action=prior_management_action(evidence,detected.findings))
             return run_group(store,definition,group,store.get_cvp_group(run_id),root=root)
         saved=store.get_cvp_group(run_id);evidence=saved['reviewed']['evidence']
-    if evidence.get('pending_cvp_management_record_keys') and not evidence.get('approval',{}).get('retained_write_scope'):
+    from backend.pipeline.cvp_source_impact_resolution import context as source_impact_context,prepare as prepare_source_impacts
+    source_impacts=prepare_source_impacts(store,saved) if source_impact_context(saved) else None
+    if evidence.get('pending_cvp_management_record_keys') and not evidence.get('approval',{}).get('retained_write_scope') and source_impacts is None:
         raise ValueError('new CVP coverage committed; existing CVP/link management remains pending, not group completion')
     if (evidence.get('pending_cvp_management_record_keys') and evidence.get('approval',{}).get('retained_write_scope')
             and not evidence['approval'].get('pending_link_material')):
@@ -614,6 +616,7 @@ def run_group(store, definition, group, row, *, root):
     pending_keys=evidence.get('pending_cvp_management_record_keys',[])
     for key in pending_keys:
         col,oid=key.split('/',1)
+        if source_impacts is not None and col=='groups':continue  # exact declared metadata, not SQL/CVP object
         if (col,oid) not in current:
             state=store.get_record_state(col,oid)
             if state is None:raise ValueError('pending management record missing from current SQL: '+key)
@@ -787,7 +790,10 @@ def run_group(store, definition, group, row, *, root):
             compose(audit_path,prior,resolution,store)
     pending_resolution=None
     if evidence.get('pending_cvp_management_record_keys'):
-        from backend.pipeline.cvp_retained_impact_resolution import build
+        if source_impacts is not None:
+            from backend.pipeline.cvp_source_impact_resolution import build
+        else:
+            from backend.pipeline.cvp_retained_impact_resolution import build
         pending_resolution=build(store,run_id,audit_path,audit_dir/'retained-impact-resolution.json',
                                  semantic_resolution=resolution)
     from backend.pipeline.cvp_taxonomy_dependency import prepare as prepare_taxonomy
