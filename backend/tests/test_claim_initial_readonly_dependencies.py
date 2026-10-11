@@ -9,6 +9,49 @@ from backend.pipeline import source_reconciliation as c
 from backend.pipeline import source_reconciliation_runner as runner
 
 
+@pytest.mark.parametrize('fault', [None, 'source', 'paragraph', 'body', 'paragraph_sha',
+                                  'excerpt_sha', 'anchor_state', 'duplicate_quote', 'absent'])
+def test_continuous_own_fragment_contains_anchor_exactly(fault):
+    text = 'prefix quoted anchor suffix'
+    quote = 'quoted anchor'
+    fragment = {'source_id': 'SRC', 'paragraph_key': 'S1', 'source_sha256': 'body',
+        'anchor_state': 'source_version_bound', 'verbatim_excerpt': text,
+        'paragraph_text_sha256': hashlib.sha256(text.encode()).hexdigest(),
+        'verbatim_excerpt_sha256': hashlib.sha256(text.encode()).hexdigest()}
+    fields = {'source': 'source_id', 'paragraph': 'paragraph_key', 'body': 'source_sha256',
+              'paragraph_sha': 'paragraph_text_sha256', 'excerpt_sha': 'verbatim_excerpt_sha256',
+              'anchor_state': 'anchor_state'}
+    if fault in fields: fragment[fields[fault]] = 'foreign'
+    if fault == 'duplicate_quote': text += ' quoted anchor'
+    if fault == 'absent': quote = 'absent'
+    result = c.containing_anchor_fragments([fragment], quote, text, 'SRC', 'S1', 'body')
+    assert result == ([] if fault else [fragment])
+    if not fault:
+        assert len(c.containing_anchor_fragments([fragment, deepcopy(fragment)], quote, text,
+                                                 'SRC', 'S1', 'body')) == 2  # caller refuses ambiguity
+
+
+@pytest.mark.parametrize('fault', [None, 'length', 'duplicate_local', 'duplicate_canonical',
+                                  'foreign_canonical', 'unknown_local'])
+def test_declared_local_anchor_identity_is_not_guessed(fault):
+    claim = {'evidence_step_ids': ['L3-E045', 'L3-E046']}
+    occurrence = {'local_source_evidence_ids': ['E045', 'E046'],
+                  'canonical_evidence_step_ids': ['L3-E045', 'L3-E046']}
+    anchor = {'evidence_id': 'E045'}
+    if fault == 'length': occurrence['canonical_evidence_step_ids'].pop()
+    if fault == 'duplicate_local': occurrence['local_source_evidence_ids'][1] = 'E045'
+    if fault == 'duplicate_canonical': occurrence['canonical_evidence_step_ids'][1] = 'L3-E045'
+    if fault == 'foreign_canonical': occurrence['canonical_evidence_step_ids'][1] = 'foreign'
+    if fault == 'unknown_local': anchor['evidence_id'] = 'E999'
+    original = deepcopy((claim, occurrence, anchor))
+    if fault:
+        with pytest.raises(ValueError): c.anchor_evidence_id(claim, occurrence, anchor)
+    else:
+        assert c.anchor_evidence_id(claim, occurrence, anchor) == 'L3-E045'
+        assert c.anchor_evidence_id(claim, occurrence, {'evidence_id': 'L3-E045'}) == 'L3-E045'
+    assert (claim, occurrence, anchor) == original
+
+
 @pytest.fixture
 def saved():
     if os.environ.get('WKP357_REAL_SAVED_READONLY') != '1':

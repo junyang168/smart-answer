@@ -792,6 +792,38 @@ def retained_evidence_sequence_start(frozen, before, post, claim_key, evidence_k
     return text.index(full) + sum(len(q) for q in quotes[:position])
 
 
+def anchor_evidence_id(claim, occurrence, anchor):
+    """Resolve a declared local ID, never infer one from spelling or position."""
+    eid = anchor.get('evidence_id')
+    owned = claim.get('evidence_step_ids', [])
+    if eid in owned:
+        return eid
+    local = occurrence.get('local_source_evidence_ids', [])
+    canonical = occurrence.get('canonical_evidence_step_ids', [])
+    if (len(local) != len(canonical) or len(local) != len(set(local))
+            or len(canonical) != len(set(canonical)) or eid not in local
+            or not set(canonical) <= set(owned)):
+        raise ValueError('anchor is not owned by a Claim Evidence step')
+    return canonical[local.index(eid)]
+
+
+def containing_anchor_fragments(fragments, quote, text, source_id, paragraph_key, body_sha):
+    """A unique exact quote may be inside its own reviewed continuous excerpt."""
+    result = []
+    for fragment in fragments:
+        excerpt = fragment.get('verbatim_excerpt', '')
+        if (not quote or not excerpt or fragment.get('source_id') != source_id
+                or fragment.get('paragraph_key') != paragraph_key
+                or fragment.get('source_sha256') != body_sha
+                or fragment.get('anchor_state') != 'source_version_bound'
+                or fragment.get('paragraph_text_sha256') != hashlib.sha256(text.encode()).hexdigest()
+                or fragment.get('verbatim_excerpt_sha256') != hashlib.sha256(excerpt.encode()).hexdigest()
+                or text.count(excerpt) != 1 or text.count(quote) != 1 or excerpt.count(quote) != 1):
+            continue
+        result.append(fragment)
+    return result
+
+
 def validate_graph(post: dict[str, dict], before: dict[str, dict], frozen: dict, *, pending_link_keys=()) -> None:
     """Mechanical checks over the entire affected graph, not just write rows."""
     source_id = frozen["manifest"]["source_id"]
@@ -829,7 +861,7 @@ def validate_graph(post: dict[str, dict], before: dict[str, dict], frozen: dict,
                 if not aliases.intersection(set(strings(occurrence))):
                     continue
                 for anchor in occurrence.get("anchors", []):
-                    eid = anchor.get("evidence_id")
+                    eid = anchor_evidence_id(p, occurrence, anchor)
                     if eid not in p.get("evidence_step_ids", []):
                         raise ValueError("anchor is not owned by a Claim Evidence step")
                     evidence = post[key("evidence_steps", eid)]
@@ -841,6 +873,10 @@ def validate_graph(post: dict[str, dict], before: dict[str, dict], frozen: dict,
                                if post[key("source_fragments", fid)].get("source_id") == source_id
                                and post[key("source_fragments", fid)].get("paragraph_key") == anchor.get("paragraph_key")
                                and post[key("source_fragments", fid)].get("verbatim_excerpt") == quote]
+                    if not matches:
+                        matches = containing_anchor_fragments(
+                            [post[key('source_fragments', fid)] for fid in fids], quote, text,
+                            source_id, anchor.get('paragraph_key'), body_sha)
                     if not quote or text.count(quote) < 1 or len(matches) != 1:
                         raise ValueError("anchor -> Evidence -> exact own fragment chain missing/ambiguous")
                     start = (text.index(quote) if text.count(quote) == 1 else
