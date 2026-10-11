@@ -363,6 +363,16 @@ def dependency_direction(value):
     if proof:return proof,read_artifact(proof['path'])['claim_id']
     app=e.get('package',{}).get('payload',{}).get('source_repair_application',{})
     if not app:return None,None
+    from backend.pipeline.cvp_link_replacement import SCHEMA as LINK_REPLACEMENT_SCHEMA, validate_package as validate_link_replacement
+    if app.get('schema_version') == LINK_REPLACEMENT_SCHEMA:
+        package = e['package']['payload']
+        # This producer has an independently sealed link-only write domain,
+        # not a source/anchor manifest. Validate its actual cached approval
+        # before concluding that there is no corrected dependency Claim.
+        validate_link_replacement(package)
+        if package.get('claims'):
+            raise ValueError('link management cannot waive a dependency Claim audit')
+        return None,None
     check_binding(app['materials'])
     # Logical retirement has its own fully validated application contract;
     # it is not an anchor-repair manifest and introduces no corrected

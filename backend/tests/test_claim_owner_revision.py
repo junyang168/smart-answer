@@ -372,3 +372,21 @@ def test_imported_group_revalidation_has_no_owner_claim_revision_subject(fault):
     else:
         assert dependency_direction(value)==(None,None)
         validate_dependency_completion(value)
+
+
+@pytest.mark.parametrize('fault',[None,'approval','claim-delta'])
+def test_reviewed_link_only_package_has_no_dependency_claim_subject(monkeypatch,fault):
+    from backend.pipeline.claim_owner_revision import dependency_direction
+    from backend.pipeline import cvp_link_replacement as link
+    package={'source_repair_application':{'schema_version':link.SCHEMA,'run_root':'/TEST_ONLY'},'claims':[]}
+    calls=[]
+    def validate(p):
+        calls.append(p)
+        if fault=='approval':raise ValueError('cached link approval missing')
+    monkeypatch.setattr(link,'validate_package',validate)
+    if fault=='claim-delta':package['claims']=[{'claim_id':'C'}]
+    value={'reviewed':{'evidence':{'approval':{},'package':{'payload':package}}}}
+    if fault:
+        with pytest.raises(ValueError):dependency_direction(value)
+    else:assert dependency_direction(value)==(None,None)
+    assert calls==[package]
