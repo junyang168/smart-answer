@@ -597,7 +597,7 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
     unresolved = {d.record_key for d in proposal.dispositions if d.action == 'unresolved'}
     if initial_claim_draft:
         # An initial draft is not a write authority. Permit only unchanged,
-        # current SQL-pinned CVP dependencies to remain pending for the original
+        # current SQL-pinned dependencies to remain pending for the original
         # independent review and unique correction. Unknown/source/hold failures
         # and all permission, identity and epoch gates still apply below.
         if (not manifest.claim_issue or not frozen.get('claim_issue_context')
@@ -608,10 +608,13 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
             col, ident = split_key(k)
             old = before.get(k)
             pin = pins.get((col, ident))
-            if (col not in {'viewpoint_claim_links', 'canonical_viewpoints', 'viewpoint_revisions'}
+            readonly_source_dependency = col in {'evidence_steps', 'knowledge_relations'}
+            if (col not in {'viewpoint_claim_links', 'canonical_viewpoints', 'viewpoint_revisions',
+                            'evidence_steps', 'knowledge_relations'}
                     or old is None or k in proposed or pin != [old.get('revision', 1),
                         sha256_json({f:v for f,v in old.items() if f != 'revision'}), False]
-                    or old.get('review_status') in HUMAN_HOLDS):
+                    or old.get('review_status') in HUMAN_HOLDS | {'human_hold', 'rejected', 'withheld_unreviewed'}
+                    or (readonly_source_dependency and k in allowed)):
                 raise ValueError('initial Claim draft pending dependency is foreign/stale/held/writable')
         if any(a.cause == 'source_unresolved' for a in proposal.claim_assessments):
             raise ValueError('source/attribution uncertainty needs content owner')
