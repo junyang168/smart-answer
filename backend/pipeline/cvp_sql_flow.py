@@ -898,6 +898,8 @@ def main(argv=None):
                         help='Exact human identification of a Claim omission; normal GPT/Opus joint review still required')
     parser.add_argument('--owner-model-retry-authorization',type=Path,
                         help='Explicit once retry of an exact unanswered transport timeout; original unknown preserved')
+    parser.add_argument('--source-permission-recovery-authorization',type=Path,
+                        help='Fixed-parent source create-contract engineering input repair; original final only')
     args = parser.parse_args(argv)
     from backend.pipeline.cvp_model_retry_once import NAME as RETRY_NAME
     if (args.output_root/RETRY_NAME).exists() and not args.owner_model_retry_authorization:
@@ -1188,6 +1190,9 @@ def main(argv=None):
                 if not args.manifest:raise ValueError('source action lacks bounded Manifest/authorization')
                 from backend.pipeline.cvp_sql_actions import read_source_manifest
                 manifest=read_source_manifest(args.manifest)
+                if args.source_permission_recovery_authorization:
+                    from backend.pipeline.source_permission_recovery import enable
+                    enable(store,binding(args.source_permission_recovery_authorization),args.output_root)
                 source_root=action_root/'source'
                 if args.claim_first:
                     from backend.pipeline.cvp_sql_actions import source_action_id

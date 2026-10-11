@@ -19,7 +19,7 @@ from backend.api.canonical_repository.viewpoint_foundation import canonical_json
 from backend.pipeline import source_reconciliation as contract
 from backend.pipeline.viewpoint_validation_context import validated_history
 
-STAGES = ("proposal", "proposal_schema_recovery", "initial_review", "correction", "final_review", "final_review_input_repair", "normalization_recovery_review")
+STAGES = ("proposal", "proposal_schema_recovery", "permission_input_recovery_proposal", "initial_review", "correction", "final_review", "final_review_input_repair", "normalization_recovery_review")
 
 
 def effective_proposal(frozen, response):
@@ -311,7 +311,7 @@ class Runner:
         deferred = bool(packet.get("manifest", {}).get("deferred_repair"))
         issue = bool(packet.get("manifest", {}).get("claim_issue"))
         scope = bool(packet.get('manifest', {}).get('viewpoint_scope_repair'))
-        role = 'proposal' if stage == 'proposal_schema_recovery' else 'initial_review' if stage == 'normalization_recovery_review' else 'final_review' if stage == 'final_review_input_repair' else stage
+        role = 'proposal' if stage in {'proposal_schema_recovery','permission_input_recovery_proposal'} else 'initial_review' if stage == 'normalization_recovery_review' else 'final_review' if stage == 'final_review_input_repair' else stage
         from backend.pipeline.claim_issue_management import eligibility_profile
         if issue and eligibility_profile(packet):
             adapter = self.ports.claim_issue_adapter(role, evidence_eligibility=True)
@@ -320,6 +320,8 @@ class Runner:
         from backend.pipeline.claim_first_management import scoped_adapter
         from backend.pipeline.claim_evidence_binding import scoped_adapter as evidence_adapter
         adapter=evidence_adapter(adapter,packet,role)
+        from backend.pipeline.source_permission_recovery import adapter as permission_adapter
+        adapter=permission_adapter(adapter,packet)
         adapter = scoped_adapter(adapter, packet)
         from backend.pipeline.cvp_pending_link_management import scoped_adapter as link_scoped_adapter
         adapter = link_scoped_adapter(adapter,packet)
@@ -414,6 +416,9 @@ class Runner:
         return add_receipt(frozen, response, base) if frozen['manifest'].get('claim_issue') or frozen['manifest'].get('anchor_qualification') or frozen['manifest'].get('evidence_binding_repair') else base
 
     def reviewed(self, frozen: dict) -> tuple[contract.Proposal, dict]:
+        from backend.pipeline.source_permission_recovery import NAME as PERMISSION_RECOVERY_NAME, reviewed as permission_reviewed
+        if self.root is not None and (self.root/PERMISSION_RECOVERY_NAME).exists():
+            return permission_reviewed(self,frozen)
         if contract.unresolved_consumers(frozen):
             raise Stop("unknown affected consumer requires a proven schema adapter; no model calls", status="proof_failure", waiting_for="system")
         packet = build_proposal_packet(frozen)
@@ -788,6 +793,7 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
     packet = body(read(root / (stage + ".packet.json")))
     raw = read(root / (stage + ".raw.json"))
     expected = validate_raw(root, stage, packet)
+    permission_recovery=bool(packet.get('permission_input_recovery'))
     engineering = stage == 'normalization_recovery_review'
     if engineering:
         from backend.pipeline.source_normalization_recovery import packet as recovery_packet
@@ -821,6 +827,17 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
     if stage == "initial_review":
         if effective_proposal(frozen, first["response"]) != proposal:
             raise ValueError("initial review is not of the actual proposal")
+    elif permission_recovery:
+        from backend.pipeline.source_permission_recovery import packet as recovery_packet,STAGE as RECOVERY_STAGE
+        recovery_input=recovery_packet(root,frozen)
+        recovered=validate_raw(root,RECOVERY_STAGE,body(read(root/(RECOVERY_STAGE+'.packet.json'))))
+        if body(read(root/(RECOVERY_STAGE+'.packet.json')))!=recovery_input:
+            raise ValueError('permission recovery complete input drift')
+        if effective_proposal(frozen,recovered['response'])!=proposal:
+            raise ValueError('permission recovery final is not actual new proposal')
+        from backend.pipeline.source_permission_recovery import final_packet
+        final=final_packet(root,frozen,proposal,recovered,recovery_input)
+        if packet!=final:raise ValueError('permission recovery original final complete input drift')
     elif not engineering:
         initial_packet = body(read(root / "initial_review.packet.json"))
         initial = validate_raw(root, "initial_review", initial_packet)
@@ -863,7 +880,7 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
                      disclosed_review_base(frozen, base, saved=old_packet))
         if contract.validate_review(old_packet, old_raw['response']) or packet != repaired_packet(root, frozen, proposal, old_packet, old_raw, correction):
             raise ValueError('input repair must preserve the exact rejected terminal review')
-    elif not engineering and not packet.get('membership_resolution') and not claim_first:
+    elif not engineering and not permission_recovery and not packet.get('membership_resolution') and not claim_first:
         check_packet(frozen, first['response'] if stage=='initial_review' else correction['response'], packet,
                      disclosed_review_base(frozen, base, saved=packet))
     if expected["artifact_sha256"] != app.get("review_sha256") or sha256_json(proposal.model_dump()) != app.get("proposal_sha256"):
@@ -901,13 +918,17 @@ def validate_raw(root: Path, stage: str, packet: dict) -> dict:
             ctx.pin(PROMPTS / 'cvp_scope_management_v1.md')
         if packet.get('manifest', {}).get('evidence_binding_repair'):
             ctx.pin(Path(__file__).with_name('claim_evidence_binding.py'))
-    adapter = model_adapter('proposal' if stage=='proposal_schema_recovery' else 'initial_review' if stage=='normalization_recovery_review' else 'final_review' if stage=='final_review_input_repair' else stage, scope=bool(packet.get('manifest', {}).get('viewpoint_scope_repair')),
+        if packet.get('permission_input_recovery'):
+            ctx.pin(Path(__file__).with_name('source_permission_recovery.py'))
+    adapter = model_adapter('proposal' if stage in {'proposal_schema_recovery','permission_input_recovery_proposal'} else 'initial_review' if stage=='normalization_recovery_review' else 'final_review' if stage=='final_review_input_repair' else stage, scope=bool(packet.get('manifest', {}).get('viewpoint_scope_repair')),
                             deferred=bool(packet.get("manifest", {}).get("deferred_repair")),
                             issue=bool(packet.get("manifest", {}).get("claim_issue")),
                             evidence_eligibility=eligibility_profile(packet))
     from backend.pipeline.claim_first_management import scoped_adapter
     from backend.pipeline.claim_evidence_binding import scoped_adapter as evidence_adapter
-    adapter=evidence_adapter(adapter,packet,'proposal' if stage=='proposal_schema_recovery' else stage)
+    adapter=evidence_adapter(adapter,packet,'proposal' if stage in {'proposal_schema_recovery','permission_input_recovery_proposal'} else stage)
+    from backend.pipeline.source_permission_recovery import adapter as permission_adapter
+    adapter=permission_adapter(adapter,packet)
     adapter = scoped_adapter(adapter, packet)
     from backend.pipeline.cvp_pending_link_management import scoped_adapter as link_scoped_adapter
     adapter = link_scoped_adapter(adapter,packet)
