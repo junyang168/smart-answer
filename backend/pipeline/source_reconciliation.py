@@ -649,9 +649,13 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
             raise ValueError('initial Claim draft requires exact SQL Claim management context')
         pins = {(r['collection'], r['object_id']): r['pin'] for r in frozen['sql_scope']['read_pins']}
         empty_owner=None
+        empty_statement=None
         if frozen.get('owner_claim_completion') and not proposal.records:
             from backend.pipeline.claim_owner_revision import empty_initial_draft
             empty_owner=empty_initial_draft(frozen,proposal)
+        elif not proposal.records:
+            from backend.pipeline.claim_issue_management import empty_statement_initial_draft
+            empty_statement=empty_statement_initial_draft(frozen,proposal)
         for k in unresolved:
             col, ident = split_key(k)
             old = before.get(k)
@@ -662,6 +666,8 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
             readonly_source_dependency = col in {'claims', 'evidence_steps', 'knowledge_relations', 'questions'}
             if empty_owner and col=='claims' and ident==empty_owner['claim_id']:
                 continue  # Exact missing draft disclosed; never a final/write exemption.
+            if empty_statement and col=='claims' and ident==empty_statement['claim_id']:
+                continue  # Only original initial diagnostic; strict final remains unchanged.
             if (col not in {'viewpoint_claim_links', 'canonical_viewpoints', 'viewpoint_revisions',
                             'claims', 'evidence_steps', 'knowledge_relations', 'questions'}
                     or old is None or k in proposed or pin != [old.get('revision', 1),
@@ -1152,6 +1158,9 @@ def review_packet(frozen: dict, proposal: Proposal, *, review_only: bool = False
         if frozen.get('owner_claim_completion') and not proposal.records:
             from backend.pipeline.claim_owner_revision import empty_initial_draft
             result['unresolved_proposal_review']['owner_claim_draft_diagnostic']=empty_initial_draft(frozen,proposal)
+        elif not proposal.records:
+            from backend.pipeline.claim_issue_management import empty_statement_initial_draft
+            result['unresolved_proposal_review']['claim_draft_diagnostic']=empty_statement_initial_draft(frozen,proposal)
     elif claim_first:
         from backend.pipeline.claim_first_management import CVP_COLUMNS, VERSION as CLAIM_FIRST_VERSION
         result['source_first_pending_cvp'] = {

@@ -101,6 +101,46 @@ class IssuesDetected(ValueError):
         self.correction_used, self.terminal_refusal = correction_used, terminal_refusal
 
 
+def empty_statement_initial_draft(materials, proposal):
+    """A missing typed statement is diagnostic input, never a write approval.
+
+    Use only the original initial review and correction of one exact admitted
+    Claim issue. Suggestions in reasons are not parsed into postimages.
+    """
+    issues = materials.get('claim_issue_context', {}).get('issues', [])
+    if (proposal.records or len(issues) != 1 or len(proposal.claim_assessments) != 1
+            or materials.get('owner_claim_completion') or not materials.get('sql_scope')
+            or not materials['manifest'].get('claim_issue')):
+        raise ValueError('empty statement draft requires one admitted SQL Claim issue')
+    issue = Issue.model_validate(issues[0])
+    assessment = proposal.claim_assessments[0]
+    key = c.key('claims', issue.claim_id)
+    before = c.index(materials['before_records'])
+    old = before.get(key)
+    pins = {(p['collection'], p['object_id']): p['pin'] for p in materials['sql_scope']['read_pins']}
+    permissions = [p for p in materials['manifest']['permissions']
+                   if c.key(p['collection'], p['object_id']) == key]
+    if (old is None or assessment.issue_id != issue.issue_id or assessment.cause != 'claim_statement'
+            or old.get('revision', 1) != issue.claim_revision
+            or c.sha256_json({k:v for k,v in old.items() if k != 'revision'}) != issue.claim_sha256
+            or pins.get(('claims', issue.claim_id)) != [issue.claim_revision, issue.claim_sha256, False]
+            or old.get('review_status') in c.HUMAN_HOLDS | {'human_hold', 'rejected', 'withheld_unreviewed'}
+            or len(permissions) != 1 or permissions[0].get('create')
+            or 'statement' not in permissions[0]['fields']
+            or sum(d.record_key == key and d.action == 'unresolved' for d in proposal.dispositions) != 1):
+        raise ValueError('empty statement draft identity/permission/current pin mismatch')
+    return {'schema_version': 'claim_statement_empty_initial_draft_v1',
+        'claim_id': issue.claim_id, 'issue_id': issue.issue_id,
+        'content_write_authority': False, 'mandatory_original_unique_correction': True,
+        'explanation': 'No typed postimage was returned. Review the original assessment and full own source; '
+            'do not approve or programmatically parse a suggestion inside a reason. The original unique '
+            'correction must return the complete Claim and all necessary owned-link postimages within '
+            'the existing permissions. The program calculates the returned complete Claim SHA before '
+            'independent review; the model must not abandon a postimage because it cannot compute SHA. '
+            'All other pending dependencies remain unchanged and unapproved. Strict final validation '
+            'and the original independent final review remain mandatory.'}
+
+
 def prior_management_action(evidence, findings):
     action=evidence.get('action',{})
     materials=action.get('materials',{})
