@@ -42,13 +42,26 @@ def receipt(frozen, response, proposal):
         proofs.append({'record_key': 'source_fragments/'+row['object_id'],
                        'model_fields': {k:old.get(k) for k in sorted(FIELDS)},
                        'program_fields': computed, 'exact_unique_quote_verified': True})
-    return {'schema_version': 'source_before_review_normalization.v1', 'records': proofs,
+    result = {'schema_version': 'source_before_review_normalization.v1', 'records': proofs,
             'model_reasons_preserved': True,
             'explanation': 'Model reasons describe its RAW candidate (including null hashes). '
             'The program then deterministically binds exact source/paragraph/quote hashes BEFORE review. '
             'These verified hashes are program metadata, not model claims or content changes. '
             'Review the complete normalized postimage; do not treat a preserved raw null-hash reason '
             'as a different substantive proposal. No rejection is automatically approved.'}
+    if frozen['manifest'].get('evidence_binding_repair'):
+        from backend.pipeline import source_reconciliation as c
+        before=c.index(frozen['before_records']);projected=c.index(proposal.records)
+        actions={d.record_key:d.action for d in proposal.dispositions};readonly=[]
+        for (col,oid),payload in original.items():
+            key=c.key(col,oid)
+            if key in projected:continue
+            if actions.get(key)!='retain' or before.get(key)!=payload:
+                raise ValueError('readonly operational projection changed a model record/verdict')
+            readonly.append({'record_key':key,'payload_sha256':sha256_json(payload),
+                'current_payload_byte_equal':True,'retain_reason_unchanged':True,'content_write':False})
+        if readonly:result['exact_readonly_presentation_projection']=readonly
+    return result
 
 
 def add_receipt(frozen, response, packet):

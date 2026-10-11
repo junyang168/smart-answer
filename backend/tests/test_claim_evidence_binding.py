@@ -71,6 +71,19 @@ def test_inventory_keeps_all_shared_owners_and_relations_readonly(monkeypatch):
     assert [p.key for p in m.permissions if not p.create]==['evidence_steps/E']
 
 
+@pytest.mark.parametrize('change',[False,True])
+def test_operational_projection_never_rewrites_retained_content(change):
+    before={'claims/C':{'claim_id':'C','statement':'own exact statement','revision':2}}
+    raw={'records':c.rows(deepcopy(before)),
+         'dispositions':[{'record_key':'claims/C','action':'retain','reason':'exact readonly'}]}
+    if change:raw['records'][0]['payload']['statement']='different'
+    frozen={'manifest':{'source_id':'S','evidence_binding_repair':{'exact':True}},'before_records':c.rows(before)}
+    original=deepcopy(raw);pro=b.normalized_proposal(frozen,raw)
+    assert raw==original
+    assert len(pro.records)==(1 if change else 0)
+    assert pro.dispositions[0].reason=='exact readonly'
+
+
 @pytest.mark.parametrize('fault',[None,'foreign_write','word_change','drop_old_binding'])
 def test_real_saved_initial_draft_no_approval_or_file_mutation(fault):
     import os

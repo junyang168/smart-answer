@@ -23,7 +23,10 @@ STAGES = ("proposal", "proposal_schema_recovery", "permission_input_recovery_pro
 
 
 def effective_proposal(frozen, response):
-    if frozen['manifest'].get('anchor_qualification') or frozen['manifest'].get('evidence_binding_repair'):
+    if frozen['manifest'].get('evidence_binding_repair'):
+        from backend.pipeline.claim_evidence_binding import normalized_proposal
+        return normalized_proposal(frozen,response)
+    if frozen['manifest'].get('anchor_qualification'):
         from backend.pipeline.claim_anchor_qualification import normalized_proposal
         return normalized_proposal(frozen,response)
     if frozen['manifest'].get('viewpoint_scope_repair'):

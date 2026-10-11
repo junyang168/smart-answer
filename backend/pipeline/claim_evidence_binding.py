@@ -12,6 +12,19 @@ VERSION='wang_claim_evidence_binding_v1'
 FIELDS={'source_fragment_id','source_fragment_ids'}
 
 
+def normalized_proposal(frozen,response):
+    from backend.pipeline.claim_anchor_qualification import normalized_proposal as normalize_fragments
+    proposal=normalize_fragments(frozen,response)
+    before=c.index(frozen['before_records']);dispositions={d.record_key:d.action for d in proposal.dispositions}
+    # A full readonly before row is redundant model presentation, NOT a write.
+    # Preserve the original raw, exact retain verdict/reason and full before
+    # packet. Only byte-equal current rows with explicit retain are projected.
+    proposal.records=[r for r in proposal.records if not (
+        dispositions.get(c.key(r.collection,r.object_id))=='retain'
+        and r.payload==before.get(c.key(r.collection,r.object_id)))]
+    return proposal
+
+
 def scoped_adapter(original,packet,stage):
     if not packet.get('manifest',{}).get('evidence_binding_repair'):return original
     from copy import copy
