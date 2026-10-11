@@ -386,6 +386,10 @@ def dependency_direction(value):
     if app.get('schema_version') in {CLAIM_RETIREMENT_SCHEMA, RELATION_RETIREMENT_SCHEMA}:
         return None,None
     materials=read_artifact(app['materials']['path'])
+    from backend.pipeline.claim_dependency_handoff import subject
+    joint=subject(value)
+    if joint is not None:
+        return joint[0],joint[1]
     proof=materials['manifest'].get('anchor_qualification')
     if not proof:return None,None
     check_binding(proof);direction=read_artifact(proof['path'])
@@ -403,6 +407,9 @@ def finish_dependency_audit(store,run_id):
     from backend.pipeline.claim_first_management import validate_claim_audit_report
     from backend.pipeline.viewpoint_content_blocked_fallback import verify_saved_full_audit
     value=store.get_cvp_group(run_id)
+    from backend.pipeline.claim_dependency_handoff import subject,context
+    if subject(value) is not None:
+        context(value,store)
     proof,cid=dependency_direction(value)
     if proof is None:return
     e=value['reviewed']['evidence']

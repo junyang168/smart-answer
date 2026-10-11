@@ -580,10 +580,12 @@ def run_group(store, definition, group, row, *, root):
     if saved["checkpoint"] != "applied": return
     stage_event('applied', sequence=group['sequence'], run_id=run_id)
     evidence = saved.get('reviewed',{}).get('evidence') or saved.get('import_certificate',{})
-    if evidence.get('approval',{}).get('owner_claim_completion'):
+    from backend.pipeline.claim_dependency_handoff import subject as dependency_subject,context as dependency_context
+    joint_dependency=dependency_context(saved,store) if dependency_subject(saved) is not None else None
+    if evidence.get('approval',{}).get('owner_claim_completion') or joint_dependency:
         from backend.pipeline.claim_owner_revision import finish_dependency_audit
         finish_dependency_audit(store,run_id)
-    if evidence.get('pending_cvp_claim_ids'):
+    if evidence.get('pending_cvp_claim_ids') and not joint_dependency:
         from backend.pipeline.cvp_sql_actions import execute_coverage_action
         from backend.pipeline.source_reconciliation_runtime import ProductionPorts
         try:
