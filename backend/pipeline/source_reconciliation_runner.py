@@ -412,10 +412,7 @@ class Runner:
         saved = self.root/(stage+'.packet.json')
         packet = body(read(saved)) if saved.exists() else None
         if stage=='final_review' and frozen['manifest'].get('claim_issue') and (packet is None or 'retained_auxiliary_impact_context' in packet):
-            from backend.pipeline.claim_issue_management import retained_impact_context
-            post=contract.index(frozen['before_records']);post.update(contract.index(proposal.records))
-            receipt=retained_impact_context(frozen,proposal,post)
-            if receipt:base['retained_auxiliary_impact_context']=receipt
+            base=auxiliary_review_base(frozen,proposal,base)
         if saved.exists():
             base = disclosed_review_base(frozen, base, saved=packet)
             check_packet(frozen, response, packet, base)
@@ -686,6 +683,13 @@ def build_proposal_packet(frozen: dict) -> dict:
     return result
 
 
+def auxiliary_review_base(frozen, proposal, base):
+    from backend.pipeline.claim_issue_management import retained_impact_context
+    post=contract.index(frozen['before_records']);post.update(contract.index(proposal.records))
+    receipt=retained_impact_context(frozen,proposal,post)
+    return {**base,'retained_auxiliary_impact_context':receipt} if receipt else base
+
+
 def disclosed_review_base(frozen, base, *, saved=None):
     if saved is not None and 'read_only_adapter_receipt' not in saved:
         return base  # Never upgrade a historical reviewer input.
@@ -891,6 +895,8 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
         if contract.validate_review(old_packet, old_raw['response']) or packet != repaired_packet(root, frozen, proposal, old_packet, old_raw, correction):
             raise ValueError('input repair must preserve the exact rejected terminal review')
     elif not engineering and not permission_recovery and not packet.get('membership_resolution') and not claim_first:
+        if stage=='final_review' and packet.get('retained_auxiliary_impact_context'):
+            base=auxiliary_review_base(frozen,proposal,base)
         check_packet(frozen, first['response'] if stage=='initial_review' else correction['response'], packet,
                      disclosed_review_base(frozen, base, saved=packet))
     if expected["artifact_sha256"] != app.get("review_sha256") or sha256_json(proposal.model_dump()) != app.get("proposal_sha256"):

@@ -86,6 +86,14 @@ def test_exact_saved_auxiliary_context(fault,tmp_path):
         assert full['proposal_sha256']==packet['proposal_sha256']
         r.write(tmp_path/'final_review.packet.json',full)
         assert obj.review_input(frozen,raw['response'],proposal,'final_review')==full
+        if fault is None and (root/'final_review.raw.json').exists():
+            final=r.validate_raw(root,'final_review',r.body(r.read(root/'final_review.packet.json')))
+            assert c.validate_review(full,final['response'])
+            material_sha=frozen['artifact_sha256']
+            package=c.compile_package(frozen,proposal,final,frozen_sha256=material_sha)
+            package['source_repair_application']={'run_root':str(root),'terminal_stage':'final_review',
+                'review_sha256':final['artifact_sha256'],'proposal_sha256':sha256_json(proposal.model_dump())}
+            r.validate_reviewed_records(package,frozen,frozen_sha256=material_sha)
         if fault=='cache':
             full['retained_auxiliary_impact_context']['semantic_approval']=True
             r.write(tmp_path/'final_review.packet.json',full,immutable=False)
