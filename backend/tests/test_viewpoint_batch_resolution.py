@@ -7254,6 +7254,68 @@ def test_a_relation_can_be_retyped_by_the_correction():
     assert [r.relation_type for r in effective.viewpoint_relations] == ["extends"]
 
 
+@pytest.mark.parametrize("mutation", [None, "no_delete", "wrong_delete_type", "third_endpoint", "rebutted", "passed"])
+def test_relation_direction_replacement_requires_exact_accepted_withdrawal(mutation):
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        CanonicalViewpointReconsiderationResponse,
+        apply_reconsideration_patches,
+        validate_reconsideration,
+    )
+    original = {
+        "source_local_key": "ROCK-NOT-PETER",
+        "target_viewpoint_revision_id": "CVR-1",
+        "relation_type": "applies", "reason": "Original reason preserved.",
+    }
+    proposal = _proposal(viewpoint_relations=[original])
+    review = _review_for(proposal, relation_reviews=[{
+        "source_ref": "ROCK-NOT-PETER", "target_ref": "CVR-1",
+        "relation_type": "applies",
+        "decision": "pass" if mutation == "passed" else "correct",
+        "finding_codes": ["relation_type_imprecise"],
+        "reason": "Reverse this pair and use entails.",
+        "correction": "CVR-1 entails ROCK-NOT-PETER.",
+        "direction_correct": True,
+    }])
+    deletion = dict(original)
+    if mutation == "wrong_delete_type":
+        deletion["relation_type"] = "extends"
+    replacement = {
+        "source_viewpoint_revision_id": "CVR-1",
+        "target_local_key": "OTHER" if mutation == "third_endpoint" else "ROCK-NOT-PETER",
+        "relation_type": "entails", "reason": "Source-grounded corrected direction.",
+    }
+    patches = [{"action": "delete", "relation": deletion},
+               {"action": "upsert", "relation": replacement}]
+    if mutation == "no_delete":
+        patches.pop(0)
+    correction = CanonicalViewpointReconsiderationResponse.model_validate({
+        "proposal_sha256": sha256_json(proposal.model_dump(mode="json")),
+        "review_sha256": sha256_json(review.model_dump(mode="json")),
+        "relation_dispositions": [{
+            "source_ref": "ROCK-NOT-PETER", "target_ref": "CVR-1",
+            "relation_type": "applies",
+            "disposition": "rebutted" if mutation == "rebutted" else "accepted",
+            "reason": "Answer retained.",
+        }], "relation_patches": patches,
+    })
+    kwargs = dict(reconsideration=correction, proposal=proposal, review=review)
+    if mutation:
+        with pytest.raises(BatchResolutionError):
+            validate_reconsideration(**kwargs,
+                proposal_sha256=sha256_json(proposal.model_dump(mode="json")),
+                review_sha256=sha256_json(review.model_dump(mode="json")))
+        return
+    report = validate_reconsideration(**kwargs,
+        proposal_sha256=sha256_json(proposal.model_dump(mode="json")),
+        review_sha256=sha256_json(review.model_dump(mode="json")))
+    assert report["outcome"] == "resolved"
+    effective = apply_reconsideration_patches(**kwargs)
+    assert len(effective.viewpoint_relations) == 1
+    assert effective.viewpoint_relations[0].endpoints() == (("existing", "CVR-1"), ("new", "ROCK-NOT-PETER"))
+    assert effective.viewpoint_relations[0].relation_type == "entails"
+    assert proposal.viewpoint_relations[0].model_dump(exclude_none=True) == original
+
+
 def test_a_structure_finding_authorises_its_own_patch():
     """matt16 batch-004, 2026-08-26: the only finding was about the structure.
 

@@ -2731,6 +2731,27 @@ def apply_reconsideration_patches(
         for item in reconsideration.relation_dispositions
         if item.disposition == "accepted"
     }
+    # Reversing a reviewed edge is also a replacement of that same pair, not
+    # authority to reach a third viewpoint. Require the exact flagged original
+    # edge to be explicitly withdrawn. The unused independent final review
+    # still judges the replacement's type, direction and source-grounded reason.
+    flagged_relation_edges = {
+        item.edge() for item in review.relation_reviews if item.decision != "pass"
+    }
+    accepted_relation_edges = {
+        item.edge() for item in reconsideration.relation_dispositions
+        if item.disposition == "accepted"
+    }
+    withdrawn_reviewed_pairs = {
+        patch.relation.endpoints()
+        for patch in reconsideration.relation_patches
+        if patch.action == "delete"
+        and patch.edge() in relations
+        and tuple(endpoint[1] for endpoint in patch.relation.endpoints())
+            + (patch.relation.relation_type,) in flagged_relation_edges
+        and tuple(endpoint[1] for endpoint in patch.relation.endpoints())
+            + (patch.relation.relation_type,) in accepted_relation_edges
+    }
     for patch in reconsideration.relation_patches:
         endpoints = patch.relation.endpoints()
         patch_ends = (
@@ -2743,7 +2764,12 @@ def apply_reconsideration_patches(
                 or patch.relation.target_local_key
             ),
         )
-        reachable = patch_ends in accepted_relations or any(
+        inverse_replacement = (
+            patch.action == "upsert"
+            and endpoints[0] != endpoints[1]
+            and (endpoints[1], endpoints[0]) in withdrawn_reviewed_pairs
+        )
+        reachable = inverse_replacement or patch_ends in accepted_relations or any(
             key in affected_candidate_keys if kind == "new" else key in affected_revision_ids
             for kind, key in endpoints
         )
