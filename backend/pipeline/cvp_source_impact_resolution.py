@@ -473,7 +473,7 @@ def audit_record_keys(pending, facts):
     if facts is None:return list(pending)
     if list(pending)!=facts['pending_record_keys'] or [x['record_key'] for x in facts['items']]!=list(pending):
         raise ValueError('source audit root classification lost pending obligations')
-    if any(x['kind'] not in {'declared_source_group_not_cvp','independently_retained_source_relation','exact_human_logical_retirement','unchanged_unapproved_unconsumed_question_context'} for x in facts['items']):
+    if any(x['kind'] not in {'declared_source_group_not_cvp','independently_retained_source_relation','exact_human_logical_retirement','unchanged_unapproved_unconsumed_question_context','unchanged_unapproved_unconsumed_policy_relation_context','unchanged_independently_approved_readonly_claim_context'} for x in facts['items']):
         raise ValueError('source audit root classification contains unknown domain')
     return []
 
@@ -505,7 +505,71 @@ def context(value):
     c=e.get('action',{}).get('materials',{}).get('claim_management_resolution',{})
     return c if (c.get('schema_version')==HANDOFF or
         (c.get('schema_version')=='wang_post_claim_cvp_reproposal_v1'
-         and c.get('source_slice_mode')=='policy_evidence_binding')) else None
+         and c.get('source_slice_mode') in {'policy_evidence_binding','policy_claim_source_revision'})) else None
+
+
+def policy_relation_context_item(key,row,creation,*,references,reviews,edge):
+    """Original internal extraction only; the unresolved relation is NOT approved."""
+    from backend.api.canonical_repository.knowledge_models import ClaimRelationRecord,KnowledgeRelationRecord
+    col,oid=key.split('/',1);p=row['payload']
+    if col not in {'claim_relations','knowledge_relations'}:
+        raise ValueError('policy relation context foreign domain')
+    id_field='claim_relation_id' if col=='claim_relations' else 'relation_id'
+    (ClaimRelationRecord if col=='claim_relations' else KnowledgeRelationRecord).model_validate(p)
+    allowed={'schema_version',id_field,'from_id','to_id','relation_type','reason','review_status','visibility','revision'}
+    if (set(p)!=allowed or p.get(id_field)!=oid or row['retired'] or row['revision']!=1
+            or p.get('revision')!=1 or p.get('schema_version')!=1
+            or p.get('review_status')!='candidate' or p.get('visibility')!='internal'
+            or record_content_sha(p)!=row['content_sha256'] or references or reviews
+            or not edge or edge!= {'payload':p,'review_status':'candidate','revision':1,'retired':False}):
+        raise ValueError('policy relation context changed/approved/held/consumed')
+    if (creation.get('source_kind')!='knowledge_package' or creation.get('status')!='applied'
+            or creation.get('operation')!='create' or creation.get('before_revision') is not None
+            or creation.get('after_revision')!=1 or creation.get('after')!=p
+            or creation.get('after_sha256')!=row['content_sha256']):
+        raise ValueError('policy relation lacks exact original committed extraction')
+    return {'record_key':key,'kind':'unchanged_unapproved_unconsumed_policy_relation_context',
+        'pin':[1,row['content_sha256'],False],'creation_change_set_id':creation['change_set_id'],
+        'semantic_judgment_resolved':False,'approved_dependency':False,
+        'content_write_authority':False,'pending_obligation_preserved':True}
+
+
+def read_policy_slice_item(cursor,key):
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    from backend.api.canonical_repository.knowledge_models import KNOWLEDGE_COLLECTIONS
+    col,oid=key.split('/',1)
+    st=cursor.execute('SELECT payload,revision,content_sha256,retired_at IS NOT NULL FROM wang_knowledge.objects WHERE collection=%s AND object_id=%s',(col,oid)).fetchone()
+    if not st:raise ValueError('policy pending current row missing')
+    row=dict(zip(('payload','revision','content_sha256','retired'),st))
+    if col=='claims':
+        from backend.api.canonical_repository.knowledge_models import ClaimRecord
+        p=row['payload']
+        ClaimRecord.model_validate(p)
+        reviews=cursor.execute('SELECT reviewer_kind,decision FROM wang_knowledge.review_events WHERE collection=%s AND object_id=%s AND object_revision=%s',(col,oid,row['revision'])).fetchall()
+        if (row['retired'] or p.get('claim_id')!=oid or p.get('review_status')!='ai_consensus_reviewed'
+                or p.get('revision')!=row['revision'] or reviews!=[('ai','ai_consensus_reviewed')]
+                or p.get('visibility')!='internal' or record_content_sha(p)!=row['content_sha256']
+                ):
+            raise ValueError('policy pending Claim lacks exact current independent source approval')
+        return {'record_key':key,'kind':'unchanged_independently_approved_readonly_claim_context',
+            'pin':[row['revision'],row['content_sha256'],False],
+            'content_write_authority':False,'pending_obligation_preserved':True,
+            'original_annotation_resolved':False}
+    refs=[(c,i) for c,i,p in PostgresKnowledgeStore._reference_consumers(cursor,[oid],sorted(KNOWLEDGE_COLLECTIONS))
+        if (c,i)!=(col,oid) and oid in PostgresKnowledgeStore._record_reference_ids(p,exclude_provenance=True)]
+    refs+=cursor.execute('SELECT edge_collection,edge_id FROM wang_knowledge.edges WHERE (from_id=%s OR to_id=%s) AND retired_at IS NULL',(oid,oid)).fetchall()
+    reviews=cursor.execute('SELECT 1 FROM wang_knowledge.review_events WHERE collection=%s AND object_id=%s LIMIT 1',(col,oid)).fetchall()
+    edge=cursor.execute('SELECT payload,review_status,revision,retired_at IS NOT NULL FROM wang_knowledge.edges WHERE edge_collection=%s AND edge_id=%s',(col,oid)).fetchone()
+    versions=cursor.execute('''SELECT v.change_set_id,s.source_kind,s.status,o.operation,o.before_revision,
+        o.after_revision,v.payload,o.after_sha256 FROM wang_knowledge.object_versions v
+        JOIN wang_knowledge.change_sets s USING(change_set_id)
+        JOIN wang_knowledge.change_operations o ON o.change_set_id=v.change_set_id AND o.collection=v.collection
+          AND o.object_id=v.object_id AND o.after_revision=v.revision
+        WHERE v.collection=%s AND v.object_id=%s AND v.revision=%s''',(col,oid,row['revision'])).fetchall()
+    if len(versions)!=1:raise ValueError('policy relation original extraction missing/ambiguous')
+    creation=dict(zip(('change_set_id','source_kind','status','operation','before_revision','after_revision','after','after_sha256'),versions[0]))
+    return policy_relation_context_item(key,row,creation,references=refs,reviews=reviews,
+        edge=dict(zip(('payload','review_status','revision','retired'),edge)) if edge else None)
 
 
 def question_context_item(key,row,creation,*,references,reviews,edges):
@@ -565,9 +629,11 @@ def prepare_question_slice(store,value,*,cursor=None):
     from backend.pipeline.cvp_sql_flow import check_binding,decoded_pins,pin_rows
     from backend.pipeline.claim_first_management import coverage_context
     handoff=context(value);pending=value['reviewed']['evidence']['pending_cvp_management_record_keys']
+    policy_claim=handoff.get('source_slice_mode')=='policy_claim_source_revision'
+    domains={'claims','claim_relations','knowledge_relations'} if policy_claim else {'questions'}
     if (not pending or len(pending)!=len(set(pending))
             or pending!=handoff['pending_existing_cvp_record_keys']
-            or any(k.split('/',1)[0]!='questions' for k in pending)):
+            or any(k.split('/',1)[0] not in domains for k in pending)):
         raise ValueError('question slice pending population/domain drift')
     source=applied_review(store,value,handoff['prior_reviewed_sha256'],cursor=cursor)
     check_binding(handoff['claim_layer_completion']);receipt=read_artifact(handoff['claim_layer_completion']['path'])
@@ -599,7 +665,7 @@ def prepare_question_slice(store,value,*,cursor=None):
     bindings=[handoff[k] for k in ('claim_layer_completion','source_terminal_packet','source_terminal_review')]
     bindings.extend([receipt['audit'],*receipt['source_proofs']])
     for b in bindings:check_binding(b)
-    pins=decoded_pins(receipt['read_pins']);items=[read_question_context(cursor,k) for k in pending]
+    pins=decoded_pins(receipt['read_pins']);items=[(read_policy_slice_item if policy_claim else read_question_context)(cursor,k) for k in pending]
     for item in items:
         key=tuple(item['record_key'].split('/',1))
         if pins.get(key)!=tuple(item['pin']):raise ValueError('question slice lacks original audited source pin')
@@ -644,7 +710,7 @@ def prepare(store,value):
     from backend.pipeline.source_consumer_scope import declared_group_keys
     handoff=context(value)
     if not handoff:return None
-    if handoff.get('source_slice_mode')=='policy_evidence_binding':
+    if handoff.get('source_slice_mode') in {'policy_evidence_binding','policy_claim_source_revision'}:
         return prepare_question_slice(store,value)
     pending=value['reviewed']['evidence'].get('pending_cvp_management_record_keys',[])
     if (not pending or len(pending)!=len(set(pending)) or sorted(pending)!=sorted(handoff['pending_existing_cvp_record_keys'])
@@ -734,14 +800,19 @@ def validate_for_completion(value,path,audit_binding,cursor,*,semantic_resolutio
             or body.get('semantic_resolution')!=(binding(semantic_resolution) if semantic_resolution else None)):
         raise ValueError('source impact completion proof drift')
     for b in body['bindings']+body['audit_proofs']:check_binding(b)
-    if body['source_handoff'].get('source_slice_mode')=='policy_evidence_binding':
+    if body['source_handoff'].get('source_slice_mode') in {'policy_evidence_binding','policy_claim_source_revision'}:
         expected=prepare_question_slice(None,value,cursor=cursor)
         if any(body.get(k)!=v for k,v in expected.items()):
             raise ValueError('question context completion proof changed')
         audit=read_artifact(audit_binding['path'])
         independent=decoded_pins(audit['meta']['registry_read_scope']['read_pins'])
-        if any(tuple(k.split('/',1)) in independent for k in body['pending_record_keys']):
-            raise ValueError('unapproved question was consumed by independent semantic audit')
+        for item in body['items']:
+            key=tuple(item['record_key'].split('/',1))
+            if item['kind']=='unchanged_independently_approved_readonly_claim_context':
+                if independent.get(key)!=tuple(item['pin']):
+                    raise ValueError('policy source Claim missing from complete current independent audit')
+            elif key in independent:
+                raise ValueError('unapproved context was consumed by independent semantic audit')
         return body
     source=applied_review(None,value,body['source_handoff']['prior_reviewed_sha256'],cursor=cursor)
     if (source['evidence']['package']['sha256']!=body['source_handoff']['source_package_sha256']
