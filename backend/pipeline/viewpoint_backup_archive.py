@@ -25,13 +25,18 @@ RECEIPT='ssd-archive-receipt.json'
 SCOPE='357-owner-backup-scope.json'
 
 
+def foreign_ticket(value):
+    # Hashes may contain 358; only a delimited ticket token denotes #358.
+    return re.search(r'(?:^|[-/])358(?:[-/]|$)', str(value)) is not None
+
+
 def authorize_backup(path, proof):
     """Explicit owner-scoped migration of an old unlabelled backup; never glob it."""
     p=Path(path).absolute(); proof=Path(proof).absolute()
-    if p.name!=NAME or p.parent.parent!=LOCAL or '358' in p.parent.name:
+    if p.name!=NAME or p.parent.parent!=LOCAL or foreign_ticket(p.parent.name):
         raise ValueError('foreign backup')
     allowed=(BASE, BASE.parent/'source-reconciliation')
-    if not any(proof.is_relative_to(root) for root in allowed) or '358' in str(proof):
+    if not any(proof.is_relative_to(root) for root in allowed) or foreign_ticket(proof):
         raise ValueError('foreign backup proof')
     value=json.loads(proof.read_text())
     dump=value.get('dump',value)
@@ -75,13 +80,13 @@ def verify_volume():
 def eligible(path):
     p=Path(path).absolute()
     return (p.name==NAME and p.parent.parent==LOCAL and p.parent.name.startswith('registry-backup-')
-        and '358' not in p.parent.name
+        and not foreign_ticket(p.parent.name)
         and (re.search(r'(?:^|-)357(?:-|$)',p.parent.name) is not None or explicit_scope(p)))
 
 
 def create_backup(label, database_url):
     """#357 writes directly to the verified SSD, retaining its logical proof path."""
-    if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,60}',label) or not re.search(r'(?:^|-)357(?:-|$)',label) or '358' in label:
+    if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,60}',label) or not re.search(r'(?:^|-)357(?:-|$)',label) or foreign_ticket(label):
         raise ValueError('exact #357 label required')
     from datetime import datetime,timezone
     verify_volume()

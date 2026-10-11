@@ -29,7 +29,7 @@ DB_URL="${KNOWLEDGE_DATABASE_URL:-$(env_value KNOWLEDGE_DATABASE_URL)}"
 
 # Only this owner's #357 worktree and explicit ticket label use Jun SSD.
 # Other cards, including #358, retain their original behavior.
-if [[ "${SOURCE_REPO##*/}" == "wkp-357-worktree-per-session" && "$LABEL" != *358* ]]; then
+if [[ "${SOURCE_REPO##*/}" == "wkp-357-worktree-per-session" && ! "$LABEL" =~ (^|-)358(-|$) ]]; then
     SSD_LABEL="$LABEL"
     [[ "$SSD_LABEL" =~ (^|-)357(-|$) ]] || SSD_LABEL="357-$SSD_LABEL"
     KNOWLEDGE_DATABASE_URL="$DB_URL" "$SOURCE_REPO/backend/.venv/bin/python" -m backend.pipeline.viewpoint_backup_archive --create-label "$SSD_LABEL"

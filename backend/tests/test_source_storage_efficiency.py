@@ -58,6 +58,42 @@ def test_direct_backup_missing_ssd_no_local_fallback(archive,monkeypatch):
     assert list(local.iterdir())==[]
 
 
+def test_hash_containing_other_ticket_digits_still_writes_direct_ssd(archive,monkeypatch):
+    def dump(argv,**kwargs):Path(argv[2].split('=',1)[1]).write_bytes(b'complete dump')
+    monkeypatch.setattr(a.subprocess,'run',dump)
+    label='before-source-357-dbdca135e8df8fb73589a9a84d502ceb'
+    r=a.create_backup(label,'not-a-real-db')
+    assert r['direct_ssd'] and Path(r['original_path']).is_symlink()
+    assert a.eligible(Path(r['original_path']))
+
+
+@pytest.mark.parametrize('value',['before-358-357','/task/358/raw.json','before-357-358'])
+def test_explicit_foreign_ticket_still_rejected(value):
+    assert a.foreign_ticket(value)
+
+
+def test_shell_dispatch_uses_ticket_token_not_hash_substring():
+    import subprocess
+    from backend.pipeline.source_reconciliation_runtime import PROJECT
+    script=(PROJECT/'scripts/backup-registry.sh').read_text()
+    assert '! "$LABEL" =~ (^|-)358(-|$)' in script
+    for label,expected in [('before-source-357-dbdca135e8df8fb73589a9a84d502ceb',0),('before-358-357',1)]:
+        assert subprocess.run(['bash','-c','[[ ! "$1" =~ (^|-)358(-|$) ]]','test',label]).returncode==expected
+
+
+def test_runtime_rejects_internal_fallback_before_backup_authority(archive,monkeypatch):
+    from backend.pipeline import source_reconciliation_runtime as r
+    from types import SimpleNamespace
+    local,_,_=archive
+    path=local/'registry-backup-2026-10-11-before-source-357-test'/a.NAME
+    path.parent.mkdir();path.write_bytes(b'internal backup')
+    ports=object.__new__(r.ProductionPorts)
+    monkeypatch.setattr(r.ProductionPorts,'_environment_guard',lambda self:None)
+    monkeypatch.setattr(r.subprocess,'run',lambda *args,**kwargs:SimpleNamespace(stdout=f'backup-registry: wrote {path} (12 bytes)'))
+    with pytest.raises(ValueError,match='no internal fallback'):
+        ports.backup(local/'action')
+
+
 def test_new_snapshots_share_exact_rows_old_files_unchanged(tmp_path,monkeypatch):
     from backend.pipeline import immutable_proof_reuse as p
     from backend.pipeline.source_reconciliation_runner import write,read

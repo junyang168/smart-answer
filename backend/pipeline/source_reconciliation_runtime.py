@@ -235,6 +235,9 @@ class ProductionPorts:
         if not match:
             raise ValueError("backup did not identify the actual dump")
         path = Path(match.group(1))
+        from backend.pipeline.viewpoint_backup_archive import eligible, logical_binding_path
+        if not eligible(path) or not path.is_symlink() or logical_binding_path(path) != path:
+            raise ValueError('new #357 backup must be verified on Jun SSD; no internal fallback')
         listing = subprocess.run(["pg_restore", "--list", str(path)], capture_output=True, check=True)
         if not listing.stdout.strip():
             raise ValueError("empty pg_restore catalog")
