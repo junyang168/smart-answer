@@ -385,6 +385,13 @@ class Runner:
         self.guard(frozen)
         correction = self.call("correction", correction_packet)
         proposed = effective_proposal(frozen, correction["response"])
+        # Diagnose the original correction without dropping auxiliary rows or
+        # turning source/relationship pending into approved business consumers.
+        # This record is not a review packet and grants no model/write budget.
+        from backend.pipeline.claim_evidence_completion import direction_for
+        if direction_for(frozen.get('claim_issue_context', {})):
+            from backend.pipeline.source_consumer_scope import receipt
+            write(self.root/'consumer-scope-diagnostic.json', receipt(frozen, proposed))
         if getattr(self, 'claim_first', False):
             from backend.pipeline.claim_first_management import final_packet
             proposed, review_packet = final_packet(self.root, frozen, proposed, correction)
