@@ -12,6 +12,36 @@ from backend.api.canonical_repository.postgres_store import sha256_json
 VERSION = 'wang_claim_source_write_slice_v1'
 
 
+def validate_pending_owned_links(frozen, proposal):
+    """Authenticate the unchanged old link domain, not a new link approval."""
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    before = c.index(frozen['before_records']); proposed = c.index(proposal.records)
+    context = frozen.get('claim_issue_context', {})
+    ids = {i['claim_id'] for i in context.get('issue_identities', [])}
+    selected = {c.key('claims', cid) for cid in ids}
+    pending = set(frozen.get('source_slice_pending_owned_links', []))
+    expected = {k for k, row in before.items() if k.startswith('viewpoint_claim_links/')
+                and row.get('claim_id') in ids and row.get('effective_state') == 'active'}
+    pins = {c.key(p['collection'], p['object_id']): p['pin'] for p in frozen['sql_scope']['read_pins']}
+    if (not frozen.get('source_write_slice_material') or not ids or not pending
+            or len(pending) != len(frozen['source_slice_pending_owned_links'])
+            or pending != expected or set(proposed) != selected
+            or set(frozen['inventory']['affected_keys']) != selected
+            or set(c.key(p['collection'], p['object_id']) for p in frozen['manifest']['permissions']) != selected
+            or any(k not in frozen['inventory']['context_keys'] for k in pending)):
+        raise ValueError('source slice pending link domain is incomplete/foreign/writable')
+    for k in pending | selected:
+        old = before[k]
+        if (pins.get(k) != [old['revision'], record_content_sha(old), False]
+                or old.get('review_status') in c.HUMAN_HOLDS | {'human_hold','rejected','withheld_unreviewed'}):
+            raise ValueError('source slice pending link domain stale/held/retired')
+    for k in pending:
+        row = before[k]; claim = before[c.key('claims', row['claim_id'])]
+        if row.get('pinned_claim_revision') != claim['revision']:
+            raise ValueError('source slice cannot defer a previously stale connection')
+    return pending
+
+
 def policy_source_projection(frozen, original, direction):
     """Review every corrected policy source row while keeping readonly issues open.
 
@@ -67,10 +97,29 @@ def policy_source_projection(frozen, original, direction):
                 owned = current(c.key('claims', owner))
                 if oid not in owned.get('evidence_step_ids', []):
                     raise ValueError('policy source slice nonreciprocal Evidence owner')
+    pending_owned = set()
+    if direction.get('defer_owned_links') is True:
+        # A source-only terminal review cannot invent missing link postimages.
+        # Keep every active owned connection at its exact before generation,
+        # explicitly pending; completion must still rebuild/audit that domain.
+        if any(c.split_key(k)[0] != 'claims' for k in selected):
+            raise ValueError('deferred owned links require Claim-only source postimages')
+        pending_owned = {k for k, row in before.items()
+                         if k.startswith('viewpoint_claim_links/')
+                         and row.get('claim_id') in claim_ids
+                         and row.get('effective_state') == 'active'}
+        if not pending_owned or any(dispositions[k].action != 'unresolved' for k in pending_owned):
+            raise ValueError('all active owned links must remain explicitly unresolved')
+        for k in pending_owned:
+            row = current(k); claim = current(c.key('claims', row['claim_id']))
+            if row.get('pinned_claim_revision') != claim['revision']:
+                raise ValueError('deferred owned connection was already stale')
     for k, d in dispositions.items():
         if k in selected: continue
         if d.action == 'unresolved':
             col, _ = c.split_key(k); current(k)
+            if k in pending_owned:
+                continue
             if col not in {'claims', 'claim_relations', 'knowledge_relations', 'questions'} or k in permissions:
                 raise ValueError('policy source slice pending is not readonly')
         elif d.action not in {'retain', 'impact_only'}:
@@ -80,6 +129,8 @@ def policy_source_projection(frozen, original, direction):
     scoped['manifest']['permissions'] = [permissions[k] for k in selected]
     scoped['inventory'] = {'affected_keys': selected, 'context_keys': sorted(set(before)-set(selected)), 'unknown_keys': []}
     scoped['sentence_inventory'] = []
+    if pending_owned:
+        scoped['source_slice_pending_owned_links'] = sorted(pending_owned)
     proposal = c.Proposal(records=deepcopy(original.records), dispositions=[deepcopy(dispositions[k]) for k in selected],
                          sentence_dispositions=[], unadmitted_candidates=[])
     c.validate_proposal(scoped, proposal)
@@ -373,6 +424,13 @@ def prepare(direction):
             'Do not require this write slice to resolve those unrelated issues. Exact owner retirement is program-directed, not a model question. ' \
             'A source-bound Evidence still withheld_unreviewed remains ineligible and its held Claim stays unchanged; ' \
             'judge its binding and faithful excerpt, not approval of the held Claim. No CVP identity or group completion is approved.'
+    if scoped.get('source_slice_pending_owned_links'):
+        packet['source_write_slice']['pending_owned_link_keys'] = scoped['source_slice_pending_owned_links']
+        packet['source_write_slice']['instructions'] += (
+            ' The listed active owned links remain exact old-generation rows, explicitly pending, not approved or rebound. '
+            'Independently judge only the actual Claim source postimage and safety of this sequential source-first step. '
+            'Neither old nor new CVP equivalence is approved here; complete link generation management and full affected audit '
+            'remain mandatory before group completion.')
     return root,frozen,scoped,proposal,packet
 
 

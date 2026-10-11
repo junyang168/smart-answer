@@ -779,6 +779,9 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
         if not manifest.evidence_binding_repair or unresolved or review_only or claim_first:
             raise ValueError('Evidence draft review requires complete scope-bound postimages')
         return post
+    if frozen.get('source_slice_pending_owned_links'):
+        from backend.pipeline.claim_source_write_slice import validate_pending_owned_links
+        pending_link_keys |= validate_pending_owned_links(frozen, proposal)
     validate_graph(post, before, frozen, pending_link_keys=pending_link_keys)
     if manifest.anchor_qualification:
         from backend.pipeline.claim_anchor_qualification import validate_binding_closure
