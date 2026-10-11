@@ -48,6 +48,19 @@ def test_audit_start_is_not_completion(monkeypatch):
     assert len(store.failures)==1
 
 
+def test_slice_impact_audit_never_enters_normal_generation_or_completion(monkeypatch):
+    from backend.pipeline import claim_source_write_slice
+    d,s,store=fixture()
+    s['reviewed']['evidence']['approval']={'source_write_slice':True}
+    s['reviewed']['evidence']['pending_cvp_management_record_keys']=['evidence_steps/E']
+    result={'status':'independent_impact_audited_management_pending','group_complete':False}
+    monkeypatch.setattr(claim_source_write_slice,'finish_impact_audit',lambda actual,saved:result)
+    monkeypatch.setattr(flow,'run_group',lambda *a,**kw:pytest.fail('no normal replay/completion'))
+    assert flow.revalidate_applied_run(store,d,'R',root=Path('/root'))==result
+    assert s['checkpoint']=='applied' and s['status']=='running'
+    assert s['reviewed']['evidence']['pending_cvp_management_record_keys']==['evidence_steps/E']
+
+
 @pytest.mark.parametrize('schema',['wang_claim_sql_retirement_v1','wang_claim_relation_retirement_v1'])
 def test_retirement_does_not_require_source_anchor_manifest(tmp_path,schema):
     from backend.pipeline.claim_owner_revision import dependency_direction

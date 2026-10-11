@@ -840,6 +840,9 @@ def revalidate_applied_run(store, definition, run_id, *, root):
             or groups[0]['claim_ids'] != saved['claim_ids']):
         raise ValueError('audit-run original membership drift')
     evidence = saved.get('reviewed', {}).get('evidence') or saved.get('import_certificate', {})
+    if evidence.get('approval', {}).get('source_write_slice'):
+        from backend.pipeline.claim_source_write_slice import finish_impact_audit
+        return finish_impact_audit(store,saved)
     if (saved['checkpoint'] not in {'applied', 'audited'}
             or evidence.get('pending_cvp_claim_ids')
             or evidence.get('pending_cvp_management_record_keys')
@@ -1184,7 +1187,8 @@ def main(argv=None):
             from backend.pipeline.source_reconciliation_runtime import ProductionPorts
             if args.action=='audit-run':
                 result=revalidate_applied_run(store,definition,args.run_id,root=args.output_root)
-                stage_event('bounded_audit_completed',result=result)
+                stage_event('independent_impact_audited_management_pending' if result.get('group_complete') is False
+                            else 'bounded_audit_completed',result=result)
                 return 0
             elif args.action=='relation-retire':
                 if not args.direction:raise ValueError('relation retirement requires exact owner direction')

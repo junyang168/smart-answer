@@ -6,6 +6,66 @@ from backend.pipeline import claim_source_write_slice as m
 from backend.pipeline import source_reconciliation as c
 
 
+def impact_fixture(monkeypatch):
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    from backend.pipeline import cvp_source_impact_resolution as impacts
+    monkeypatch.setattr(m,'validate_claim_layer_authority',lambda *a:True)
+    review={'plan':{'change_set_id':'NORMAL'},'evidence':{'viewpoint_ids':['OLD','NEW']}}
+    monkeypatch.setattr(impacts,'applied_review',lambda s,v,sha:v['reviewed'] if sha=='current' else review)
+    payloads={('claims','C'):{'claim_id':'C','revision':2},
+        **{('canonical_viewpoints',v):{'viewpoint_id':v,'revision':1} for v in ['OLD','NEW','CURRENT']},
+        ('viewpoint_claim_links','L'):{'claim_id':'C','viewpoint_id':'CURRENT','effective_state':'active','revision':2},
+        ('evidence_steps','E'):{'evidence_step_id':'E','revision':1}}
+    states={k:{'payload':p,'revision':p['revision'],'content_sha256':record_content_sha(p),'retired':False} for k,p in payloads.items()}
+    operation={'collection':'claims','object_id':'C','operation':'update','after_revision':2,
+        'after_sha256':states['claims','C']['content_sha256'],'after':payloads['claims','C']}
+    class Store:
+        calls=[]
+        def get_change_history(self,cid):
+            return {'status':'applied','source_kind':'cvp_batch_resolution' if cid=='NORMAL' else 'source',
+                'fingerprint_sha256':'fingerprint','source_sha256':'source','operations':[operation],
+                'metadata':{'run_id':'RUN','reviewed_sha256':'review' if cid=='NORMAL' else 'current','approval':{}}}
+        def read_cvp_context(self,claims,*,viewpoint_ids):
+            self.calls.append((claims,viewpoint_ids));return dict(states)
+        def get_record_state(self,col,oid):return states.get((col,oid))
+    value={'run_id':'RUN','checkpoint':'applied','reviewed_sha256':'current','claim_ids':['C'],'change_set_ids':['NORMAL','SOURCE'],
+        'reviewed':{'plan':{'change_set_id':'SOURCE','fingerprint_sha256':'fingerprint','source_sha256':'source','operations':[operation]},
+            'evidence':{'approval':{},'viewpoint_ids':[],
+            'package':{'payload':{'source_repair_application':{'run_root':'root'}}},
+            'pending_cvp_management_record_keys':['evidence_steps/E','canonical_viewpoints/OLD']}}}
+    return Store(),value,states,review
+
+
+def test_complete_impact_scope_uses_original_archive_and_all_current_links(monkeypatch):
+    store,value,states,_=impact_fixture(monkeypatch)
+    result=m.impact_audit_scope(store,value)
+    assert result['viewpoint_ids']==['CURRENT','NEW','OLD']
+    assert store.calls[-1]==(['C'],['CURRENT','NEW','OLD'])
+    assert result['pending_record_keys']==value['reviewed']['evidence']['pending_cvp_management_record_keys']
+    assert result['source_record_keys']==['evidence_steps/E']
+    assert result['cvp_record_keys']==['canonical_viewpoints/OLD']
+    assert value['reviewed']['evidence']['viewpoint_ids']==[]
+
+
+@pytest.mark.parametrize('fault',['missing_archive','empty_population','duplicate_population','foreign_commit',
+    'uncommitted','missing_pending','duplicate_pending','unknown_domain','sha_drift','hold','retired_view','missing_view'])
+def test_complete_impact_scope_fails_closed(monkeypatch,fault):
+    store,value,states,review=impact_fixture(monkeypatch)
+    if fault=='missing_archive':value['change_set_ids']=['SOURCE']
+    if fault=='empty_population':review['evidence']['viewpoint_ids']=[]
+    if fault=='duplicate_population':review['evidence']['viewpoint_ids']=['OLD','OLD']
+    if fault=='foreign_commit':review['plan']['change_set_id']='foreign'
+    if fault=='uncommitted':store.get_change_history=lambda cid:{'status':'prepared'}
+    if fault=='missing_pending':states.pop(('evidence_steps','E'))
+    if fault=='duplicate_pending':value['reviewed']['evidence']['pending_cvp_management_record_keys']*=2
+    if fault=='unknown_domain':value['reviewed']['evidence']['pending_cvp_management_record_keys']=['arbitrary/X']
+    if fault=='sha_drift':states['claims','C']['content_sha256']='wrong'
+    if fault=='hold':states['claims','C']['payload']['review_status']='human_hold'
+    if fault=='retired_view':states['canonical_viewpoints','OLD']['retired']=True
+    if fault=='missing_view':states.pop(('canonical_viewpoints','NEW'))
+    with pytest.raises((ValueError,KeyError)):m.impact_audit_scope(store,value)
+
+
 def fixture(monkeypatch):
     from backend.pipeline import claim_evidence_completion
     monkeypatch.setattr(claim_evidence_completion,'direction_for',lambda *a,**kw:{

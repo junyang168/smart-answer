@@ -333,3 +333,156 @@ def original_dispositions(direction):
     from backend.pipeline.source_reconciliation_runner import read,body,effective_proposal
     root=Path(direction['parent_root']);frozen=body(read(root/'scoped-materials.json'))
     return effective_proposal(frozen,read(root/'correction.raw.json')['response']).dispositions
+
+
+def impact_audit_scope(store, saved):
+    """Recover a complete audit population, not approval of pending impacts.
+
+    The current source-only review deliberately has no CVP denominator. Read
+    the named committed normal review archives and the indexed current graph;
+    never infer the population from only the changed links or the empty list.
+    """
+    from backend.pipeline.cvp_source_impact_resolution import applied_review
+    from backend.pipeline.cvp_sql_flow import pins, pin_rows
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    evidence=saved.get('reviewed',{}).get('evidence',{})
+    app=evidence.get('package',{}).get('payload',{}).get('source_repair_application',{})
+    root=Path(app.get('run_root',''))
+    validate_claim_layer_authority(saved,root)
+    plan=saved['reviewed']['plan']
+    committed=store.get_change_history(plan['change_set_id'])
+    if (not committed or committed['status']!='applied'
+            or committed['fingerprint_sha256']!=plan['fingerprint_sha256']
+            or committed['source_sha256']!=plan['source_sha256']
+            or committed['metadata'].get('run_id')!=saved['run_id']
+            or committed['metadata'].get('reviewed_sha256')!=saved['reviewed_sha256']
+            or committed['metadata'].get('approval')!=evidence['approval']):
+        raise ValueError('slice audit current SQL review is not the exact committed source slice')
+    def operation_identity(op):
+        return (op['collection'],op['object_id'],op['operation'],op['after_revision'],op['after_sha256'])
+    expected=[operation_identity(op) for op in plan['operations']]
+    actual=[operation_identity(op) for op in committed['operations']]
+    if not expected or len(expected)!=len(set(expected)) or sorted(expected)!=sorted(actual):
+        raise ValueError('slice audit actual committed write set differs from approved plan')
+    views=set(); archives=[]
+    for cid in saved['change_set_ids']:
+        history=store.get_change_history(cid)
+        if not history or history['status']!='applied' or history['metadata'].get('run_id')!=saved['run_id']:
+            raise ValueError('slice audit lacks exact committed group history')
+        if history['source_kind']!='cvp_batch_resolution':continue
+        sha=history['metadata']['reviewed_sha256']
+        review=applied_review(store,saved,sha)
+        if review['plan']['change_set_id']!=cid:
+            raise ValueError('slice audit normal review/commit identity drift')
+        declared=review['evidence'].get('viewpoint_ids')
+        if not declared or len(declared)!=len(set(declared)):
+            raise ValueError('slice audit original normal population missing/duplicate')
+        views.update(declared)
+        archives.append({'change_set_id':cid,'reviewed_sha256':sha})
+    if not archives:raise ValueError('slice audit requires original committed normal CVP population')
+    # The first indexed read discovers all active original-member links; the
+    # second reads complete members of their full union with the original set.
+    current=store.read_cvp_context(saved['claim_ids'],viewpoint_ids=sorted(views))
+    original_views=set(views)
+    views.update(r['payload']['viewpoint_id'] for (col,_),r in current.items()
+        if col=='viewpoint_claim_links' and not r['retired']
+        and r['payload']['effective_state']=='active' and r['payload']['claim_id'] in saved['claim_ids'])
+    if views!=original_views:
+        current=store.read_cvp_context(saved['claim_ids'],viewpoint_ids=sorted(views))
+    pending=evidence.get('pending_cvp_management_record_keys',[])
+    if len(pending)!=len(set(pending)):raise ValueError('slice audit duplicate pending obligations')
+    cvp_keys=[];source_keys=[]
+    from backend.pipeline.cvp_sql_flow import NORMAL_COLLECTIONS
+    for key in pending:
+        col,oid=c.split_key(key)
+        if col not in NORMAL_COLLECTIONS and col not in {'evidence_steps','knowledge_relations'}:
+            raise ValueError('slice audit unknown pending management domain')
+        row=current.get((col,oid)) or store.get_record_state(col,oid)
+        if row is None:raise ValueError('slice audit missing pending current record')
+        current[col,oid]=row
+        (cvp_keys if col in NORMAL_COLLECTIONS else source_keys).append(key)
+    for (col,oid),row in current.items():
+        if record_content_sha(row['payload'])!=row['content_sha256']:
+            raise ValueError('slice audit current payload SHA drift')
+        # Protected approved/superseded rows are readable audit context, not
+        # writable candidates. The audit does not clear any protected status.
+        if row['payload'].get('review_status')=='human_hold':
+            raise ValueError('slice audit current dependency hold')
+        if col=='canonical_viewpoints' and oid in views and row['retired']:
+            raise ValueError('slice audit declared viewpoint retired')
+    if any(('canonical_viewpoints',v) not in current for v in views):
+        raise ValueError('slice audit complete viewpoint population missing')
+    for op in committed['operations']:
+        key=op['collection'],op['object_id']
+        row=current.get(key) or store.get_record_state(*key)
+        if (op['operation']=='retire' or not row or row['retired'] or row['payload']!=op['after']
+                or row['revision']!=op['after_revision'] or row['content_sha256']!=op['after_sha256']):
+            raise ValueError('slice audit committed source postimage drift')
+        current[key]=row
+    return {'claim_ids':saved['claim_ids'],'viewpoint_ids':sorted(views),
+        'normal_review_archives':archives,'read_pins':pin_rows(pins(current)),
+        'pending_record_keys':pending,'cvp_record_keys':cvp_keys,'source_record_keys':source_keys}
+
+
+def finish_impact_audit(store, saved):
+    """Full current independent audit only; pending management stays pending."""
+    import os
+    import subprocess
+    from backend.pipeline.cvp_sql_flow import binding,check_binding,decoded_pins,PROJECT,validate_transaction_audit
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact,write_immutable
+    from backend.pipeline.viewpoint_content_blocked_fallback import verify_saved_full_audit
+    from backend.pipeline.source_reconciliation_runner import body,read
+    marker=saved.get('claim_layer_audit',{})
+    proof=marker.get('receipt')
+    app=saved.get('reviewed',{}).get('evidence',{}).get('package',{}).get('payload',{}).get('source_repair_application',{})
+    root=Path(app.get('run_root',''))
+    if not proof or marker.get('status')!='claim_layer_audited_cvp_pending' or marker.get('cvp_management_complete') is not False:
+        raise ValueError('slice impact audit requires actual completed Claim layer')
+    if proof.get('path')!=str(root/'claim-first-audit/claim-layer-completion.json'):
+        raise ValueError('slice impact audit foreign Claim-layer receipt')
+    check_binding(proof);receipt=read_artifact(proof['path'])
+    if (receipt['claim_ids']!=saved['claim_ids'] or receipt['change_set_ids']!=saved['change_set_ids']
+            or any(receipt.get(k) is not False for k in ('cvp_management_complete','group_complete','next_group_started'))):
+        raise ValueError('slice impact audit Claim-layer population/commit drift')
+    check_binding(receipt['audit'])
+    from backend.pipeline.claim_first_management import VERSION as CLAIM_VERSION,validate_claim_audit_report
+    if receipt.get('schema_version')!=CLAIM_VERSION or receipt.get('status')!=marker['status']:
+        raise ValueError('slice impact audit Claim-layer receipt schema/status drift')
+    validate_claim_audit_report(read_artifact(receipt['audit']['path']),saved['claim_ids'])
+    for b in receipt['source_proofs']:check_binding(b)
+    # This exact receipt was registered only after complete independent Claim
+    # validation. Consume its SQL binding, complete leaf hashes and unchanged
+    # current readset; do not rebuild every old model request again at handoff.
+    with store.connect() as conn,conn.cursor() as cur:
+        store._assert_transaction_read_pins(cur,decoded_pins(receipt['read_pins']))
+    scope=impact_audit_scope(store,saved)
+    c.guard_files(body(read(root/'scoped-materials.json')))
+    audit_root=root/('cvp-impact-audit-'+sha256_json(scope)[:20])
+    intent={'schema_version':'wang_source_slice_complete_impact_audit_v1','run_id':saved['run_id'],
+        'reviewed_sha256':saved['reviewed_sha256'],'claim_layer_completion':proof,
+        'change_set_ids':saved['change_set_ids'],**scope,'model':'gemini-3.8-flash','workers':2,
+        'layers':['1','2','3','4'],'automatic_retry':False,'group_complete':False}
+    path=audit_root/'audit.json';intent_path=audit_root/'audit-intent.json'
+    if intent_path.exists() and read_artifact(intent_path)!=intent:
+        raise ValueError('slice impact audit original intent drift')
+    if path.exists() and not intent_path.exists():
+        raise ValueError('slice impact audit result lacks original exact intent')
+    if not path.exists():
+        if intent_path.exists():raise ValueError('slice impact audit outcome unknown; no automatic replay')
+        write_immutable(intent_path,intent)
+        subprocess.run([str(PROJECT/'backend/.venv/bin/python'),'scripts/audit-library.py',
+            '--scope','all','--layers','1,2,3,4','--claim-ids',','.join(scope['claim_ids']),
+            '--viewpoint-ids',','.join(scope['viewpoint_ids']),'--workers','2','--model','gemini-3.8-flash',
+            '--no-status-file','--preserve-full-context','--component-roles','--sql-group-scope',
+            *[a for k in scope['cvp_record_keys'] for a in ('--sql-record-key',k)],'--out',str(audit_root)],
+            cwd=PROJECT,check=True,env={**os.environ,'KNOWLEDGE_DATABASE_URL':store.database_url})
+    audit=read_artifact(path)
+    validate_transaction_audit(audit,scope['claim_ids'],scope['viewpoint_ids'])
+    proofs=verify_saved_full_audit(path,layers=('3','4'))
+    with store.connect() as conn,conn.cursor() as cur:
+        store._assert_transaction_read_pins(cur,decoded_pins(scope['read_pins']))
+    result={'status':'independent_impact_audited_management_pending','audit':binding(path),
+        'audit_proofs':proofs,'intent':binding(intent_path),**scope,
+        'group_complete':False,'next_group_started':False,'model_verdicts_changed':False}
+    write_immutable(audit_root/'impact-audit-receipt.json',result)
+    return result
