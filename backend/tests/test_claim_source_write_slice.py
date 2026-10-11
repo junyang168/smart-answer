@@ -198,6 +198,48 @@ def test_canonical_binding_order_preserves_full_payload_and_refuses_duplicates()
     with pytest.raises(KeyError):c.canonical_binding_order([{'evidence_step_id':'E1'}])
 
 
+def impact_reuse_fixture():
+    item={'item_id':'4:V:C','claim':{'claim_id':'C','revision':3},
+        'viewpoint':{'current_revision_id':'VR'},'connections':[{'link_type':'equivalent_component'}],
+        'audit_finding':{'viewpoint_id':'V','revision_id':'VR','issue':'over_merge',
+            'verdict':'disputed','linked_claims':2,'reason':'original two member objection',
+            'claim_ids_in_question':['C','repaired']}}
+    new=deepcopy(item);new['audit_finding']['reason']='same current target, repaired co-member accepted'
+    new['audit_finding']['claim_ids_in_question']=['C']
+    findings={'4:V:C':{'verdict':'audit_objection_rejected'}}
+    return item,new,findings
+
+
+def test_impact_projection_keeps_both_findings_and_exact_saved_verdict():
+    old,new,findings=impact_reuse_fixture();before=deepcopy((old,new,findings))
+    result=m.unchanged_rejection_projection(old,new,findings,{'repaired'})
+    assert result['saved_verdict']=='audit_objection_rejected'
+    assert result['original_finding']==old['audit_finding']
+    assert result['current_finding']==new['audit_finding']
+    assert result['removed_repaired_claim_ids']==['repaired']
+    assert result['model_verdicts_changed'] is False
+    assert (old,new,findings)==before
+
+
+@pytest.mark.parametrize('fault',['claim','connection','revision','issue','population','upheld','unresolved',
+    'no_repair','added','duplicate','empty','same_members','foreign_item'])
+def test_impact_projection_refuses_changed_semantics_or_missing_repair(fault):
+    old,new,findings=impact_reuse_fixture();repairs={'repaired'}
+    if fault=='claim':new['claim']['revision']=4
+    if fault=='connection':new['connections'][0]['link_type']='supports'
+    if fault=='revision':new['audit_finding']['revision_id']='new'
+    if fault=='issue':new['audit_finding']['issue']='scope_mismatch'
+    if fault=='population':new['audit_finding']['linked_claims']=3
+    if fault in {'upheld','unresolved'}:findings['4:V:C']['verdict']=fault
+    if fault=='no_repair':repairs=set()
+    if fault=='added':new['audit_finding']['claim_ids_in_question']=['C','other']
+    if fault=='duplicate':new['audit_finding']['claim_ids_in_question']=['C','C']
+    if fault=='empty':new['audit_finding']['claim_ids_in_question']=[]
+    if fault=='same_members':new['audit_finding']['claim_ids_in_question']=['C','repaired']
+    if fault=='foreign_item':new['item_id']='4:V:other'
+    with pytest.raises(ValueError):m.unchanged_rejection_projection(old,new,findings,repairs)
+
+
 @pytest.mark.parametrize('fault',[None,'not_applied','foreign_run','wrong_mode','foreign_root','missing_pending','bad_package'])
 def test_claim_layer_authority_never_waives_source_or_group_gates(monkeypatch,tmp_path,fault):
     app={'run_root':str(tmp_path),'source_write_slice':{'parent_root':str(tmp_path),

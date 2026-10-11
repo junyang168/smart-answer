@@ -496,4 +496,97 @@ def finish_impact_audit(store, saved):
         'audit_proofs':proofs,'intent':binding(intent_path),**scope,
         'group_complete':False,'next_group_started':False,'model_verdicts_changed':False}
     write_immutable(audit_root/'impact-audit-receipt.json',result)
+    result['semantic_management']=saved_impact_decisions(store,saved,path,audit_root)
+    return result
+
+
+def unchanged_rejection_projection(old, current, findings, repaired_claim_ids):
+    """Only remove independently repaired, no-longer-questioned co-members.
+
+    Finding prose is retained separately, never used as a fuzzy cache key.
+    The complete unchanged semantic target, issue and audit population must
+    match. This receipt is not an audit pass or group completion authority.
+    """
+    from backend.pipeline.viewpoint_adjudication_history import target_identity
+    if (old['item_id']!=current['item_id'] or target_identity(old)!=target_identity(current)
+            or findings.get(current['item_id'],{}).get('verdict')!='audit_objection_rejected'):
+        raise ValueError('impact reuse requires exact unchanged rejected target')
+    before,after=old['audit_finding'],current['audit_finding']
+    if ({k:v for k,v in before.items() if k not in {'reason','claim_ids_in_question'}}
+            !={k:v for k,v in after.items() if k not in {'reason','claim_ids_in_question'}}):
+        raise ValueError('impact reuse issue/population/version changed')
+    old_ids,new_ids=before.get('claim_ids_in_question',[]),after.get('claim_ids_in_question',[])
+    removed=set(old_ids)-set(new_ids)
+    if (not old_ids or not new_ids or len(old_ids)!=len(set(old_ids))
+            or len(new_ids)!=len(set(new_ids)) or not set(new_ids)<=set(old_ids)
+            or not removed or not removed<=set(repaired_claim_ids)
+            or current['claim']['claim_id'] not in new_ids):
+        raise ValueError('impact reuse requires only actual repaired co-member removal')
+    return {'item_id':current['item_id'],'unchanged_target_sha256':target_identity(current),
+        'removed_repaired_claim_ids':sorted(removed),'original_finding':before,'current_finding':after,
+        'saved_verdict':'audit_objection_rejected','model_verdicts_changed':False}
+
+
+def saved_impact_decisions(store,saved,audit_path,audit_root):
+    """Consume exact SQL-indexed history before any new semantic call.
+
+    Sequential source management remains pending. Do not replay the old
+    finding, mutate either raw report, or turn this receipt into group approval.
+    """
+    from backend.pipeline.cvp_sql_flow import binding,decoded_pins
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact,write_immutable
+    from backend.pipeline.viewpoint_audit_source_adjudication import build_packet
+    from backend.pipeline.viewpoint_adjudication_history import target_identity,validated_history
+    packet=build_packet(audit_path,store,True)
+    targets=[target_identity(i) for i in packet['items']]
+    if len(targets)!=len(set(targets)):raise ValueError('duplicate impact semantic target')
+    prior=store.adjudication_roots(targets)
+    # Actual approved/applied statement updates, not model descriptions or
+    # arbitrary old Claims, establish which co-members may leave the finding.
+    plan=saved['reviewed']['plan'];history=store.get_change_history(plan['change_set_id'])
+    if (history['status']!='applied' or history['fingerprint_sha256']!=plan['fingerprint_sha256']
+            or history['metadata']['reviewed_sha256']!=saved['reviewed_sha256']
+            or history['metadata']['run_id']!=saved['run_id']):
+        raise ValueError('saved impact decisions require exact committed slice')
+    repairs={o['object_id']:o for o in history['operations'] if o['collection']=='claims'
+        and o['operation']=='update' and o['before']['statement']!=o['after']['statement']}
+    repaired=set(repairs)
+    audit=read_artifact(audit_path)
+    supported={r['claim_id'] for r in audit['layers']['3']['results'] if r['verdict']=='supported'}
+    if not repaired<=supported:raise ValueError('repaired co-member lacks actual full Claim audit')
+    parts=[];covered=set()
+    for previous in prior:
+        old,findings=validated_history(previous)
+        index={target_identity(i):i for i in old['items']}
+        for item in packet['items']:
+            identity=target_identity(item)
+            if identity not in index:continue
+            if identity in covered:raise ValueError('ambiguous prior impact adjudication')
+            projection=unchanged_rejection_projection(index[identity],item,findings,repaired)
+            for cid in projection['removed_repaired_claim_ids']:
+                old_claims=[i['claim'] for i in old['items'] if i['claim']['claim_id']==cid]
+                op=repairs[cid];state=store.get_record_state('claims',cid)
+                if (not old_claims or any(p!=op['before'] for p in old_claims)
+                        or not state or state['retired'] or state['payload']!=op['after']
+                        or state['revision']!=op['after_revision']
+                        or state['content_sha256']!=op['after_sha256']):
+                    raise ValueError('removed co-member is not exact prior/current approved Claim delta')
+            parts.append({'projection':projection,'prior_packet':binding(previous/'packet.json'),
+                'prior_raw':binding(previous/'raw-gpt.json'),
+                'prior_handoff':binding(previous/'gpt-final-handoff.json')})
+            covered.add(identity)
+    # Unknown targets do not acquire a fresh budget through this saved-only
+    # consumer. A normal complete-source adjudication must handle them later.
+    result={'schema_version':'wang_source_slice_saved_impact_decisions_v1',
+        'status':'saved_target_decisions_verified_management_pending','audit':binding(audit_path),
+        'reviewed_sha256':saved['reviewed_sha256'],'change_set_id':plan['change_set_id'],
+        'packet':packet,'parts':parts,'unadjudicated_targets':sorted(set(targets)-covered),
+        'pending_record_keys':saved['reviewed']['evidence']['pending_cvp_management_record_keys'],
+        'new_model_calls':0,'registry_writes':0,'group_complete':False,'next_group_started':False,
+        'model_verdicts_changed':False,'content_write_authority':False}
+    receipt=read_artifact(audit_root/'impact-audit-receipt.json')
+    with store.connect() as conn,conn.cursor() as cur:
+        store._assert_transaction_read_pins(cur,decoded_pins(receipt['read_pins']))
+    result['impact_audit_receipt']=binding(audit_root/'impact-audit-receipt.json')
+    write_immutable(audit_root/'saved-impact-decisions.json',result)
     return result
