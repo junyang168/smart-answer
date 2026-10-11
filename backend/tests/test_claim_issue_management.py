@@ -220,6 +220,8 @@ def test_typed_finder_routes_proposed_defer_and_opus_evidence_not_link_errors():
     assert m.review_findings(proposal,None)[0]['claim_id']=='C'
     review=NS(change_reviews=[NS(claim_id='C',component_index=0,coverage_requirement='evidence_insufficient',coverage_reason='正文不足')])
     assert len(m.review_findings(proposal,review))==1
+    review.change_reviews[0].coverage_requirement='source_conflict'
+    assert m.review_findings(proposal,review)==[{'claim_id':'C','spans':[(0,1,'甲')],'reason':'正文不足'}]
     review.change_reviews[0].coverage_requirement='cvp_required'
     assert m.review_findings(proposal,review)==[]
 

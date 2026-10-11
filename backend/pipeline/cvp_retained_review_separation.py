@@ -221,10 +221,22 @@ def prior_review_context(decision, policy, claim_id):
     return result
 
 
-def guard_other_findings(review, reconsideration):
+def guard_other_findings(review, reconsideration, revised=None):
     """Existing-link separation is never a bypass for unresolved NEW content."""
-    if review['novelty_review']['status'] != 'pass':
-        raise ValueError('new novelty finding cannot be separated as an existing connection')
+    novelty = review['novelty_review']
+    if novelty['status'] != 'pass':
+        missed = novelty.get('missed_claim_ids', [])
+        accepted = {r['claim_id'] for r in reconsideration.get('finding_dispositions', [])
+                    if r['disposition'] == 'accepted'}
+        new_claims = {r['claim_id'] for r in (revised or {}).get('claim_decisions', [])
+                      if any(p['disposition'] == 'new_viewpoint' for p in r['components'])}
+        # The ordinary reconsideration validator already requires the actual
+        # patched proposal. This only admits its resolved novelty to the still
+        # unused independent final review; it is not a novelty pass or approval.
+        if (novelty['status'] != 'missed_novelty' or not missed
+                or len(missed) != len(set(missed))
+                or not set(missed) <= accepted & new_claims):
+            raise ValueError('new novelty finding cannot be separated as an existing connection')
     groups = [('revision_reviews','revision_dispositions'),('structure_reviews','structure_dispositions'),
               ('relation_reviews','relation_dispositions')]
     for reviews, dispositions in groups:
@@ -385,7 +397,7 @@ def build_boundary(root, store, *, original, revised, review, packet, source_loa
     root = Path(root)
     policy = policy_for(root)
     if policy is None: return None
-    guard_other_findings(review,reconsideration)
+    guard_other_findings(review,reconsideration,revised)
     # Only the original still unused final review. Existing final intent/raw is
     # consumed below through the immutable receipt, never a replacement packet.
     matched = match_retained(original, review, packet['retained_existing_claim_links'])

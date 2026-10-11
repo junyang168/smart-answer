@@ -137,7 +137,7 @@ def review_findings(proposal, review):
                         'reason':component.reason})
         return values
     for row in review.change_reviews:
-        if getattr(row, "coverage_requirement", None) not in {"evidence_insufficient", "attribution_unresolved"}:
+        if getattr(row, "coverage_requirement", None) not in {"evidence_insufficient", "attribution_unresolved", "source_conflict"}:
             continue
         component = by_claim[row.claim_id].components[row.component_index]
         values.append({"claim_id": row.claim_id,

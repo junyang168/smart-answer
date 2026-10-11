@@ -294,6 +294,25 @@ def test_accepted_new_structure_still_gets_real_unused_independent_final(sample)
     assert flow.build_boundary(root,store,**kw)[1]['registry_mutations']==0
 
 
+@pytest.mark.parametrize('fault',[None,'no-new-viewpoint','unresolved','missing','duplicate','unknown-status'])
+def test_resolved_novelty_is_not_confused_with_unresolved_new_content(fault):
+    review={'novelty_review':{'status':'missed_novelty','missed_claim_ids':['N']}}
+    correction={'finding_dispositions':[{'claim_id':'N','disposition':'accepted'}]}
+    revised={'claim_decisions':[{'claim_id':'N','components':[{'disposition':'new_viewpoint'}]}]}
+    before=deepcopy((review,correction,revised))
+    if fault=='no-new-viewpoint':revised['claim_decisions'][0]['components'][0]['disposition']='member_existing'
+    elif fault=='unresolved':correction['finding_dispositions'][0]['disposition']='unresolved'
+    elif fault=='missing':review['novelty_review']['missed_claim_ids']=[]
+    elif fault=='duplicate':review['novelty_review']['missed_claim_ids']=['N','N']
+    elif fault=='unknown-status':review['novelty_review']['status']='fail'
+    actual=deepcopy((review,correction,revised))
+    if fault:
+        with pytest.raises(ValueError,match='novelty'):flow.guard_other_findings(review,correction,revised)
+    else:flow.guard_other_findings(review,correction,revised)
+    assert (review,correction,revised)==actual
+    if fault is None:assert actual==before
+
+
 @pytest.mark.parametrize('decision',['pass','reject','defer'])
 def test_real_final_uncertainty_separate_human_handoff_not_retry_or_fake_pass(sample,decision):
     root,store,_,kw,_=sample;_,receipt=flow.build_boundary(root,store,**kw)
