@@ -289,7 +289,8 @@ def compose_proposal(frozen, response):
     """
     context, states = execution_context(frozen)
     plan = context['partition']; proof = plan['proof']
-    semantic = c.Proposal.model_validate(deepcopy(response))
+    from backend.pipeline.deferred_claim_repair import decode_proposal
+    semantic = c.Proposal.model_validate(deepcopy(decode_proposal(response)))
     for row in semantic.records:
         if row.collection!='source_fragments':continue
         value=row.payload;source=frozen['after'][0]

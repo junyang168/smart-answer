@@ -188,6 +188,18 @@ def test_execution_proposal_review_compile_plan_whole_path(executable, monkeypat
     assert post['source_documents/SRC-test']['review_status'] == states['source_documents/SRC-test']['review_status']
 
 
+def test_paragraph_lossless_json_postimages_compile_without_raw_rewrite(executable):
+    _,_,frozen,semantic=executable
+    wire={'records':[{'collection':r.collection,'object_id':r.object_id,
+                     'payload_json':json.dumps(r.payload,ensure_ascii=False)} for r in semantic.records],
+          'dispositions':[d.model_dump() for d in semantic.dispositions],
+          'sentence_dispositions':[d.model_dump() for d in semantic.sentence_dispositions],
+          'unadmitted_candidates_json':[]}
+    original=deepcopy(wire)
+    assert p.compose_proposal(frozen,wire)==p.compose_proposal(frozen,semantic.model_dump())
+    assert wire==original
+
+
 @pytest.mark.parametrize('late_failure', [False, True])
 def test_common_sql_paragraph_full_saved_stages_commit_rollback_cache(executable, postgres_store, tmp_path, monkeypatch, late_failure):
     from backend.tests.test_cvp_sql_actions_postgres import source_run

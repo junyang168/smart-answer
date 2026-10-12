@@ -12,13 +12,18 @@ STAGE='proposal_schema_recovery'
 NAME='proposal-schema-recovery-binding.json'
 
 
+def eligible(packet):
+    return bool(packet.get('manifest',{}).get('anchor_qualification') or
+                packet.get('source_paragraph_profile')=='wang_source_paragraph_execution_v1')
+
+
 def select(root, packet, *, persist=False):
     from backend.pipeline.source_reconciliation_runner import read,body,write
     from backend.pipeline.cvp_sql_flow import binding
     root=Path(root)
     if (root/'proposal.raw.json').exists() or not (root/'proposal.reservation.json').exists():return 'proposal'
     # This source management schema is the exact defective open-record transport.
-    if not packet.get('manifest',{}).get('anchor_qualification'):
+    if not eligible(packet):
         return 'proposal'  # Normal missing-answer reservation remains uncertain.
     failed=body(read(root/'proposal.failure.json'));provider=failed.get('provider_raw') or {}
     errors=[]
@@ -47,7 +52,7 @@ def select(root, packet, *, persist=False):
 
 
 def adapter(original,packet,stage):
-    if not packet.get('manifest',{}).get('anchor_qualification') or stage not in {STAGE,'correction'}:
+    if not eligible(packet) or stage not in {STAGE,'correction'}:
         return original
     from backend.pipeline.deferred_claim_repair import JsonProposal
     result=copy(original)
