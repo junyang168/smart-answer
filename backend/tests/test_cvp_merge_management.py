@@ -100,6 +100,49 @@ def test_initial_approved_cannot_repeat_budget(tmp_path,monkeypatch):
     assert calls==['proposal','initial_review']
 
 
+def test_initial_invalid_locator_preserved_review_only_and_strict_final():
+    m,a=synthetic();a['members'][0]['links'][0]['spans'][0]['end_char']=5
+    p={'response':a,'artifact_sha256':'ORIGINAL'};before=deepcopy(p)
+    packet=f.initial_review_packet(m,p)
+    assert packet['proposal']==a and packet['compiled_postimage'] is None
+    assert packet['initial_draft_validation']['content_write_authority'] is False
+    assert packet['initial_draft_validation']['mandatory_original_single_correction'] is True
+    review={'response':{'verdicts':[{'claim_id':i,'approved':True,'problems':[],
+        'reason':'SYNTHETIC NOT PROVIDER APPROVAL'} for i in f.required_verdict_ids(m)]},'artifact_sha256':'R'}
+    assert f.needs_correction(m,p,review)
+    assert f.correction_packet(m,p,review)['initial_draft_validation']==packet['initial_draft_validation']
+    with pytest.raises(ValueError):f.review_packet(m,p)
+    with pytest.raises(ValueError):f.compile_package(m,p,review,Path('/synthetic'))
+    assert p==before
+
+
+@pytest.mark.parametrize('fault',['empty-text','negative','schema','missing','overlap','foreign-evidence','context-only'])
+def test_initial_draft_does_not_bypass_other_schema_source_evidence_guards(fault):
+    m,a=synthetic();span=a['members'][0]['links'][0]['spans'][0]
+    if fault=='empty-text':span['exact_text']=''
+    elif fault=='negative':span['start_char']=-1
+    elif fault=='schema':a['foreign']=True
+    elif fault=='missing':a['members']=[]
+    elif fault=='overlap':a['members'][0]['links'][0]['spans']*=2
+    elif fault=='foreign-evidence':a['members'][0]['links'][0]['evidence_bindings'][0]['evidence_step_id']='foreign'
+    elif fault=='context-only':m['records'][1]['payload']['support_eligibility']='context_only'
+    with pytest.raises((ValueError,KeyError)):f.initial_review_packet(m,{'response':a,'artifact_sha256':'P'})
+
+
+def test_initial_invalid_locator_requires_only_original_correction_and_final(tmp_path,monkeypatch):
+    m,a=synthetic();bad=deepcopy(a);bad['members'][0]['links'][0]['spans'][0]['end_char']=5
+    p={'response':bad,'artifact_sha256':'P'};fixed={'response':a,'artifact_sha256':'C'}
+    r={'response':{'verdicts':[{'claim_id':i,'approved':True,'problems':[],
+        'reason':'SYNTHETIC NOT PROVIDER APPROVAL'} for i in f.required_verdict_ids(m)]},'artifact_sha256':'R'}
+    calls=[]
+    def cached(root,stage,packet,**kw):
+        calls.append(stage)
+        return p if stage=='proposal' else fixed if stage=='correction' else r
+    monkeypatch.setattr(f,'saved_raw',cached)
+    assert f.effective_saved(tmp_path,m)==(fixed,r)
+    assert calls==['proposal','initial_review','correction','final_review']
+
+
 @pytest.mark.parametrize('refuse',[False,True])
 def test_original_only_correction_and_final_preserve_refusal(tmp_path,monkeypatch,refuse):
     m,a=synthetic();p={'response':a,'artifact_sha256':'P'}
@@ -215,6 +258,31 @@ def test_actual_complete_prepare_models_original_approval_sources_and_no_writes(
         bad=deepcopy(d);bad[field]='foreign';bad['artifact_sha256']=sha256_json({k:v for k,v in bad.items() if k!='artifact_sha256'})
         with pytest.raises((ValueError,TypeError,KeyError)):f.validate_direction(bad,m)
     assert s.get_cvp_group(RUN)==before
+
+
+@pytest.mark.skipif(os.getenv('WKP357_MERGE_SAVED')!='1',reason='actual immutable proposal and unused initial draft review')
+def test_actual_saved_invalid_locator_initial_review_roundtrip_without_writes():
+    from dotenv import load_dotenv
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    from backend.pipeline.source_reconciliation_runner import body,read,stage_adapter
+    from backend.pipeline.cvp_sql_flow import decoded_pins,check_binding
+    load_dotenv('.env');s=PostgresKnowledgeStore()
+    root=ROOT/'execution'/RUN/'actions'/'cvp-merge'/'CVPA-5c529f7521cbc4ff874cb483ebbe29bdbb37e8c0047863cae3a9f45a67266251'
+    m=body(read(root/'materials.json'));files={x:x.read_bytes() for x in root.iterdir() if x.is_file()}
+    before=s.get_cvp_group(RUN)
+    p=f.saved_raw(root,'proposal',f.proposal_packet(m),adapter_factory=f.adapter)
+    packet=f.initial_review_packet(m,p)
+    assert packet['compiled_postimage'] is None and packet['proposal']==p['response']
+    assert packet['initial_draft_validation']['mandatory_original_single_correction'] is True
+    assert len(packet['required_verdict_ids'])==10
+    for source in m['sources']:check_binding({'path':source['path'],'file_sha256':source['file_sha256']})
+    with s.connect() as c,c.cursor() as q:s._assert_transaction_read_pins(q,decoded_pins(m['read_pins']))
+    a=stage_adapter(f.adapter('initial_review'),packet,root/'initial_review.raw.json')
+    proof=a.request_encoding_proof(packet);size=a.request_bytes(packet)
+    assert size<=600000 and proof['exact_roundtrip_verified']
+    assert proof['semantic_payload_sha256']==proof['restored_payload_sha256']==sha256_json(packet)
+    assert s.get_cvp_group(RUN)==before and {x:x.read_bytes() for x in files}==files
+    print('ACTUAL readonly initial draft request',size,'ten review items, no model/write')
 
 
 @pytest.mark.skipif(os.getenv('WKP357_MERGE_SAVED')!='1',reason='actual saved graph disposableSQL merge lifecycle')

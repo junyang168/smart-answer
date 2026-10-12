@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Literal
 import json
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from backend.api.canonical_repository.postgres_store import canonical_json, record_content_sha, sha256_json
 from backend.api.canonical_repository.knowledge_models import (
     ViewpointPropositionSignature, ViewpointScope, ViewpointComponentSpan,
@@ -455,17 +455,56 @@ def review_packet(m, p):
         'provenance_receipt':'Draft provenance not approval; final program binds actual reviewed effective proposal and terminal raw.'}
 
 
+def initial_review_packet(m, p):
+    """An invalid locator draft may be reviewed, never compiled or approved.
+
+    Preserve the exact proposal. Only the initial, unused review can diagnose
+    component length errors; the original single correction must supply the
+    complete valid postimage before the strict final review and SQL compiler.
+    Other schema, evidence, hold and source failures still fail closed.
+    """
+    try:
+        return review_packet(m,p)
+    except ValidationError as exc:
+        errors=exc.errors(include_url=False,include_context=False)
+        for error in errors:
+            loc=error['loc']
+            # Pydantic reports the model-level validator at the complete span.
+            if not (len(loc)==6 and loc[0]=='members' and loc[2]=='links' and loc[4]=='spans'
+                    and all(isinstance(loc[i],int) for i in (1,3,5))):
+                raise
+            if (error['type']!='value_error' or
+                    error['msg']!='Value error, component span exact_text length does not match its range'):
+                raise
+        return {'schema_version':SCHEMA,'materials':proposal_packet(m),'proposal':p['response'],
+            'compiled_postimage':None,'required_verdict_ids':required_verdict_ids(m),
+            'initial_draft_validation':{'schema_version':'wang_cvp_merge_locator_draft_v1',
+                'proposal_artifact_sha256':p['artifact_sha256'],'errors':errors,
+                'content_write_authority':False,'mandatory_original_single_correction':True,
+                'instruction':'Review the complete unchanged draft and own sources. These locators are invalid, '
+                    'not program-normalized. No approval here authorizes a write. The original single GPT '
+                    'correction must provide all complete valid postimages for the strict Opus final review.'}}
+
+
+def needs_correction(m,p,r):
+    try:approved(m,r)
+    except Stop:return True
+    return 'initial_draft_validation' in initial_review_packet(m,p)
+
+
 def correction_packet(m,p,r):
-    return {'schema_version':SCHEMA,'materials':proposal_packet(m),'proposal':p['response'],'initial_review':r['response'],
+    packet={'schema_version':SCHEMA,'materials':proposal_packet(m),'proposal':p['response'],'initial_review':r['response'],
         'prior_artifacts':{'proposal':p['artifact_sha256'],'review':r['artifact_sha256']},
         'correction_boundary':'One correction only; no Claim/source edit or expanded identity set.'}
+    draft=initial_review_packet(m,p)
+    if 'initial_draft_validation' in draft:packet['initial_draft_validation']=draft['initial_draft_validation']
+    return packet
 
 
 def effective_saved(root,m):
     p=saved_raw(root,'proposal',proposal_packet(m),adapter_factory=adapter)
-    r=saved_raw(root,'initial_review',review_packet(m,p),adapter_factory=adapter)
-    try:approved(m,r)
-    except Stop:
+    r=saved_raw(root,'initial_review',initial_review_packet(m,p),adapter_factory=adapter)
+    if needs_correction(m,p,r):
         p=saved_raw(root,'correction',correction_packet(m,p,r),adapter_factory=adapter)
         r=saved_raw(root,'final_review',review_packet(m,p),adapter_factory=adapter);approved(m,r)
     else:
@@ -547,9 +586,8 @@ def execute(store,run_id,*,authorization,root,ports):
         for s in m['sources']:check_binding({'path':s['path'],'file_sha256':s['file_sha256']})
         with store.connect() as conn,conn.cursor() as cur:store._assert_transaction_read_pins(cur,expected)
     guard();initialize_subscription_runtime(ports);runner=Runner(root,ports);runner.root=root
-    p=runner.call('proposal',proposal_packet(m));guard();r=runner.call('initial_review',review_packet(m,p));guard();ps,rs='proposal','initial_review'
-    try:approved(m,r)
-    except Stop:
+    p=runner.call('proposal',proposal_packet(m));guard();r=runner.call('initial_review',initial_review_packet(m,p));guard();ps,rs='proposal','initial_review'
+    if needs_correction(m,p,r):
         p=runner.call('correction',correction_packet(m,p,r));guard()
         r=runner.call('final_review',review_packet(m,p));approved(m,r);guard();ps,rs='correction','final_review'
     package=compile_package(m,p,r,root);validate_package(package)
