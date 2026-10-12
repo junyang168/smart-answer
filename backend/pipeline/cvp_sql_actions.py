@@ -166,6 +166,9 @@ def prepare_source_action(store,run_id,manifest,*,root):
                            'read_pins':pin_rows(pins(records)),'consumer_roots':[list(k) for k in keys]}
     if len(canonical_json(materials).encode())>64*1024**2 or time.perf_counter()-started>5:
         raise ValueError('bounded source materials exceed mechanical guard; no whole-store fallback')
+    if manifest.claim_issue:
+        from backend.pipeline.source_permission_recovery import program_contract
+        materials['program_provenance_contract']=program_contract()
     write(root/'scoped-materials.json',materials)
     return store.prepare_cvp_action(run_id,action_id=action_id,
         kind='cvp_scope_revision' if manifest.viewpoint_scope_repair else 'source_claim_revision',
@@ -205,7 +208,7 @@ class ScopedSourceModelStages(ModelStages):
             self.store._assert_transaction_read_pins(cursor,self.read_pins)
 
     def call(self,stage,packet):
-        if stage in {'proposal','correction'} and not (self.root/(stage+'.raw.json')).exists():
+        if stage in {'proposal','correction','permission_input_recovery_proposal'} and not (self.root/(stage+'.raw.json')).exists():
             from backend.pipeline.source_reconciliation_runtime import ProductionPorts
             if isinstance(self.ports,ProductionPorts):
                 from backend.pipeline.viewpoint_s201129_source_continuation import canonical_runtime

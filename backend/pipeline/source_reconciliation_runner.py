@@ -713,6 +713,11 @@ def build_proposal_packet(frozen: dict) -> dict:
         from backend.pipeline.claim_evidence_completion import packet_receipt
         completion=packet_receipt(frozen)
         if completion:result['evidence_completion_receipt']=completion
+    if frozen.get('program_provenance_contract'):
+        from backend.pipeline.source_permission_recovery import program_contract
+        if frozen['program_provenance_contract']!=program_contract():
+            raise ValueError('source program provenance contract drift')
+        result['provenance_contract']=frozen['program_provenance_contract']
     if frozen['manifest'].get('anchor_qualification'):
         import json
         result['anchor_qualification']=json.loads(contract.bound_bytes(frozen['manifest']['anchor_qualification']))

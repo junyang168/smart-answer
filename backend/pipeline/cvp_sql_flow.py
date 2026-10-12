@@ -1295,11 +1295,11 @@ def main(argv=None):
                     from backend.pipeline.source_permission_recovery import enable
                     enable(store,binding(args.source_permission_recovery_authorization),args.output_root)
                 source_root=action_root/'source'
-                if args.claim_first:
+                if args.claim_first or args.source_permission_recovery_authorization:
                     from backend.pipeline.source_reconciliation import Manifest
                     aid=source_action_id(Manifest.model_validate(manifest))
                     registered=saved.get('execution_roots',{}).get(aid)
-                    if not registered:raise ValueError('Claim-first requires original registered action; no new root/budget')
+                    if not registered:raise ValueError('source recovery requires original registered action; no new root/budget')
                     bound=Path(registered).resolve()
                     if not bound.is_relative_to(args.output_root.resolve()/args.run_id) or bound.name!=aid:
                         raise ValueError('Claim-first original SQL action root drift')
