@@ -359,6 +359,12 @@ Claim 的邏輯退役屬 Claim management，不是刪除教授原話。對沒有
 
 ### 13.6 Claim 變更到 CVP management 的交接
 
+既有觀點合併是獨立的 CVP management operation，不是拼接摘要或批內候選去重。共同 `--action cvp-merge` 消費精確當前身份方向及 `wang_cvp_merge_management_v1.json`：完整讀取兩個以上 CVP/CVR、所有唯一成員、全部有效连接、相關關係、原生成判定和理由、完整自身正文及當前證據。GPT 提議完整新命題與每個唯一 Claim 的作用、成分、證據，Opus 獨立審核完整後像；必要最多原唯一一輪纠正與終審。相同主題或正反兩半本身不是合併批准。
+
+模型內容投影逐值保留完整語義反向影響圖、所有當前成員／關係端點、原判定及全部自身正文。SQL 全讀集／consumer／原組賬本另由程序驗證並綁不可變材料 SHA，不要求模型抄寫交易 pins。無關的原組 CVP 及產品／導航 payload 完整保留在交易材料，不送模型取得新的內容批准。投影不得漏任何待改對象、成員或證據；原已完成 Claim 本源只可通過精確立即 merge 的完整後像證明接入新连接，舊本源批准不重寫，新完整 CVP 審計仍必須成立。新身份、全部新连接、必要關係重接／顯式合併或撤回，以及舊身份 `merged` 跳轉和舊连接邏輯退役在同一共同 SQL transaction 提交。Claim／Evidence／來源及舊 CVR、結構、判定和歷史不變；不改原組分母，不生成 ArgumentRoute／文章。
+
+未決成員／關係、未知 consumer、hold、未處置 redirect chain、完整證據或版本缺失均拒絕；不機械搬運旧连接，不把 supports 當等價，不循環重審。交易提交後完整回讀、SSD 備份、所有受影響舊組的當前全量審計和正常 completion 均須通過。舊組原聲明不重寫，共同 reader、獨立審計目標與短 SQL completion 只按實際已提交 merge 歷史解析一次新身份，不沿 redirect chain 猜測批准。實際生產驗收另記，隔離測試不是模型內容批准。
+
 **先完成 Claim／Evidence 本源，再處理 CVP。** 已保存聯合提案中的本源修訂若可獨立成立，不得因另一 CVP 成員／身份問題而先執行 CVP 管理、阻擋本源終審與提交。共同入口 `--action source --claim-first` 只消費原註冊 action／root、精確舊提議與唯一纠正；從原纠正後像選取 Claim／Evidence／fragment 寫集，另把全部 CVP 影響明示為 pending，不把原未決改成 retain 或 pass。仍使用原尚未消費的完整 Opus 終審，逐項批准本源後像；CVP verdict 明示未審、非內容批准。無合法本源修訂、原終審已另有 intent／回答、未知呼叫、缺來源／版本／hold 或真正本源拒絕均不產生新預算。
 
 本源合法批准後共用短 SQL transaction、實際完整 RETURNING／後像／歷史／新連線回讀及直接 SSD backup。交易保留完整 `pending_cvp_claim_ids` 並失效相關舊完成資格，不能留下看似已審的新版本下游。以當前原組全部 Claims、完整自身正文作獨立 Gemini 第 1／2／3 層審計，逐項驗證實際模型回答及來源，保存 `claim_layer_audited_cvp_pending` 證明；不作第 4 層 CVP 身份判讀。這個入口隨即退出，不啟動 CVP 管理、不標 group audited、不啟動下一組。CVP 只在本源確已完成後依新當前材料另行管理；原 CVP 提案、拒絕和預算保持歷史，不能沿用舊前像重新整包提交。

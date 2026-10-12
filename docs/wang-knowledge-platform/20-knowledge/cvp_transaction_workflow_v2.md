@@ -69,6 +69,8 @@ flowchart LR
 | 完整組獨立審計 | commit 後先以新連線讀取實際寫入記錄，再走原完整組 Gemini 審計、standing GPT 終局與既有例外規則；審計分母包含保留及新建 CVPs |
 | 完成或停止 | 審計結案結果、所審精確版本和 flags 以短 transaction 登記。下一組只在前一組達到原放行條件後開始 |
 
+既有身份合併由同一入口 `--action cvp-merge`、同一 prepared/reviewed/applied/audited 契約執行。精確 owner 方向只授权生成與審核，不批准尚未生成的後像；完整合併寫集及全部有效舊成员／關係退役在同一 transaction，旧身份與 CVR 保留。未完成來源／Claim obligations 不因合併消失。受影響歷史組按實際 merge ChangeSet 解析新身份並重新完整審計，不重放舊生成、不改原 Claim 分母、不沿任意歷史鏈繼承批准。內容與交易材料分層規則見 [Claim 與 CVP 管理的變更閉環](./cvp_production_process_v1.md#136-claim-變更到-cvp-management-的交接)。
+
 物理來源在材料建立、恢復使用及審計時按本組來源核驗；檔案不受 SQL rollback 保護。來源內容變更仍走原完整授權流程，不因資料庫有 transaction 就省略原文驗證。
 
 新的觀點異議原文仲裁包必須包含實際當前 `viewpoint_revision` 的完整命題、`proposition_signature`、`scope` 及批准來源；只有 CVP 身份與 `current_revision_id` 不足以判讀。組包時核對 audited revision、CVP 端點與批准狀態，缺失／錯版在模型呼叫前停止。舊 v1 回答按原精確包消費，不能補欄位後冒充它已看過完整 CVR。v2 補足材料不產生第二份仲裁預算；原未決回答及 reservation 保留，未獲新一次呼叫方向不得自動重問。

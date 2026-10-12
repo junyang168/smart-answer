@@ -3409,7 +3409,7 @@ class PostgresKnowledgeStore:
                          (ident,identity,canonical_json(metadata)))
 
     def prepare_cvp_action(self, run_id, *, action_id, kind, authorization, materials):
-        if kind not in {'relation_retirement','claim_retirement','source_claim_revision','cvp_scope_revision','cvp_membership_revalidation','owner_link_correction','owner_link_retarget','owner_link_retirement','audit_supports_correction','required_cvp_coverage'} or not authorization:
+        if kind not in {'cvp_identity_merge','relation_retirement','claim_retirement','source_claim_revision','cvp_scope_revision','cvp_membership_revalidation','owner_link_correction','owner_link_retarget','owner_link_retirement','audit_supports_correction','required_cvp_coverage'} or not authorization:
             raise ValueError('bounded action authority required')
         action={'action_id':action_id,'kind':kind,'authorization':authorization,
                 'materials_sha256':sha256_json(materials),'materials':materials}
@@ -3718,6 +3718,13 @@ class PostgresKnowledgeStore:
             cursor.execute("SELECT payload->>'viewpoint_id' FROM wang_knowledge.objects WHERE collection='viewpoint_claim_links' AND object_id=%s",(op.object_id,))
             previous=cursor.fetchone()
             if previous and previous[0]:views.add(previous[0])
+        # A relation replacement changes the current graph of BOTH endpoints,
+        # not just the merged heads or Claim membership. Their old completed
+        # audits must not remain qualified against obsolete relation pins.
+        for op in plan.operations:
+            if op.collection=='viewpoint_relations':
+                views.update(v for v in ((op.payload or {}).get('source_viewpoint_id'),
+                    (op.payload or {}).get('target_viewpoint_id')) if v)
         if any(op.collection in {'source_documents','source_fragments','evidence_steps'} for op in changed):
             claims.update(oid for col,oid in context.read_pins if col=='claims')
         cursor.execute("""SELECT run_id,metadata FROM wang_knowledge.pipeline_runs
@@ -3883,6 +3890,8 @@ class PostgresKnowledgeStore:
                                 AND e.to_id=ANY(%s) AND o.retired_at IS NULL
                                 AND o.payload->>'effective_state'='active'""",(value['claim_ids'],))
             views=sorted(set(declared_views)|{r[0] for r in cursor.fetchall()})
+            from backend.pipeline.cvp_merge_management import current_viewpoint_ids
+            views=current_viewpoint_ids(cursor,views)
             from backend.pipeline.cvp_sql_flow import validate_transaction_audit
             validate_transaction_audit(audit,value['claim_ids'],views)
             validate_audit(audit,value["claim_ids"],views,owner_resolution_path=owner_resolution_path)
@@ -3978,7 +3987,7 @@ class PostgresKnowledgeStore:
                     return digest
                 action = evidence.get('action')
                 if (value.get('checkpoint') not in {'applied','audited'} or not action
-                        or action.get('kind') not in {'relation_retirement','claim_retirement','source_claim_revision','cvp_scope_revision','owner_link_correction','owner_link_retarget','owner_link_retirement','audit_supports_correction','required_cvp_coverage'}
+                        or action.get('kind') not in {'relation_retirement','claim_retirement','source_claim_revision','cvp_scope_revision','cvp_identity_merge','owner_link_correction','owner_link_retarget','owner_link_retirement','audit_supports_correction','required_cvp_coverage'}
                         or not action.get('authorization') or not action.get('materials_sha256')
                         or plan.change_set_id in value.get('change_set_ids',[])
                         or not prepared or prepared[0]!=action):
@@ -4860,9 +4869,12 @@ class PostgresKnowledgeStore:
             cursor.execute("""SELECT edge_id FROM wang_knowledge.edges
                               WHERE edge_collection='viewpoint_claim_links' AND retired_at IS NULL
                                 AND to_id=ANY(%s)""", (list(claim_ids),))
+            link_roots={row[0]:{"viewpoint_claim_link_id":row[0]} for row in cursor.fetchall()}
+            from backend.pipeline.cvp_merge_management import current_viewpoint_ids
+            viewpoint_ids=current_viewpoint_ids(cursor,viewpoint_ids)
             roots = {"claims":{oid:{"claim_id":oid} for oid in claim_ids},
                      "canonical_viewpoints":{oid:{"viewpoint_id":oid} for oid in viewpoint_ids},
-                     "viewpoint_claim_links":{row[0]:{"viewpoint_claim_link_id":row[0]} for row in cursor.fetchall()}}
+                     "viewpoint_claim_links":link_roots}
             # Evidence can also point to a Claim which omitted its forward ID.
             for cid in claim_ids:
                 cursor.execute("""SELECT object_id FROM wang_knowledge.objects
@@ -4959,6 +4971,13 @@ class PostgresKnowledgeStore:
             retiring_keys=authorized_keys
         if (package.get('source_repair_application') or {}).get('schema_version') in {'wang_source_sql_reconciliation_v2','wang_owner_sql_link_correction_v2','wang_cvp_sql_link_retarget_v1','wang_cvp_owner_sql_link_retirement_v1','wang_cvp_deferred_authorized_link_management_v1','wang_cvp_sql_link_replacement_v1','wang_cvp_sql_link_representation_v1'} and not transactional:
             raise ValueError('SQL source action cannot use the retired whole-store planning path')
+        if (package.get('source_repair_application') or {}).get('schema_version') == 'wang_cvp_merge_management_v1':
+            if not transactional: raise ValueError('CVP merge requires common SQL transaction')
+            from backend.pipeline.cvp_merge_management import validate_package
+            authorized_keys = validate_package(package)
+            if retiring_keys and tuple(retiring_keys) != authorized_keys:
+                raise ValueError('extra merge retirement is not authorized')
+            retiring_keys = authorized_keys
         if (package.get('source_repair_application') or {}).get('schema_version') == 'wang_cvp_sql_link_replacement_v1':
             from backend.pipeline.cvp_link_replacement import validate_package
             authorized_keys = validate_package(package)
@@ -6450,7 +6469,7 @@ class PostgresKnowledgeStore:
     ) -> dict[str, Any]:
         if plan.source_kind == 'wang_claim_relation_retirement_v1' and transaction_context is None:
             raise ValueError('relation retirement cannot bypass common SQL transaction')
-        if plan.source_kind in {'wang_source_sql_reconciliation_v2','wang_owner_sql_link_correction_v2','wang_cvp_sql_link_retarget_v1','wang_cvp_owner_sql_link_retirement_v1','wang_cvp_deferred_authorized_link_management_v1','wang_cvp_sql_link_replacement_v1','wang_cvp_sql_link_representation_v1'} and transaction_context is None:
+        if plan.source_kind in {'wang_cvp_merge_management_v1','wang_source_sql_reconciliation_v2','wang_owner_sql_link_correction_v2','wang_cvp_sql_link_retarget_v1','wang_cvp_owner_sql_link_retirement_v1','wang_cvp_deferred_authorized_link_management_v1','wang_cvp_sql_link_replacement_v1','wang_cvp_sql_link_representation_v1'} and transaction_context is None:
             raise ValueError('SQL v2 actions cannot bypass the shared transaction boundary')
         if transaction_context is not None:
             from .transaction_validation import TransactionValidation

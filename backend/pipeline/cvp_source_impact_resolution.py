@@ -1163,6 +1163,9 @@ def build(store,run_id,audit_path,output,*,semantic_resolution=None):
         current=store.read_cvp_context(value['claim_ids'],viewpoint_ids=retained)
         views=sorted(set(views)|set(retained)|{r['payload']['viewpoint_id'] for (col,_),r in current.items()
             if col=='viewpoint_claim_links' and not r['retired'] and r['payload']['claim_id'] in value['claim_ids']})
+    from backend.pipeline.cvp_merge_management import current_viewpoint_ids
+    with store.connect() as conn,conn.cursor() as cur:
+        views=current_viewpoint_ids(cur,views)
     validate_transaction_audit(audit,value['claim_ids'],views)
     validate_audit(audit,value['claim_ids'],views,owner_resolution_path=semantic_resolution)
     proofs=verify_saved_full_audit(Path(audit_path),layers=('3','4'))

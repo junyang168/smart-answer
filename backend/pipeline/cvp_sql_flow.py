@@ -651,6 +651,9 @@ def run_group(store, definition, group, row, *, root):
     views=sorted(set(evidence['viewpoint_ids'])|{r['payload']['viewpoint_id'] for (col,_),r in current.items()
                  if col=='viewpoint_claim_links' and not r['retired'] and r['payload']['claim_id'] in group['claim_ids']})
     if closed_statement:views=sorted(set(views)|set(source_impacts['source_handoff']['viewpoint_ids']))
+    from backend.pipeline.cvp_merge_management import current_viewpoint_ids
+    with store.connect() as conn,conn.cursor() as cursor:
+        views=current_viewpoint_ids(cursor,views)
     audit_dir = root/run_id/('audit-'+sha256_json(pin_rows(pins(current)))[:20]); audit_path = audit_dir/"audit.json"
     if not audit_path.exists():
         stage_event('independent_audit', sequence=group['sequence'], run_id=run_id)
@@ -909,7 +912,7 @@ def main(argv=None):
     parser.add_argument('--pause-after-group',type=int,help='Narrow this invocation for acceptance; never changes the immutable execution boundary')
     parser.add_argument('--integrate-batch-candidates',action='store_true',
                         help='Explicit new-group identity integration; never upgrades saved legacy answers')
-    parser.add_argument('--action',choices=('group','audit-run','source-pending-check','source-impact-complete','source','source-write-slice','relation-retire','claim-retire','owner-link','link-target','link-retarget','link-retire','link-replace','link-representation'),default='group')
+    parser.add_argument('--action',choices=('group','audit-run','source-pending-check','source-impact-complete','source','source-write-slice','relation-retire','claim-retire','owner-link','link-target','link-retarget','link-retire','link-replace','link-representation','cvp-merge'),default='group')
     parser.add_argument('--claim-first',action='store_true',
                         help='Finish only the original bounded Claim/Evidence action; keep all CVPs pending and stop before CVP/group execution')
     parser.add_argument('--candidate-viewpoint-id',action='append',default=[],
@@ -1334,6 +1337,11 @@ def main(argv=None):
                 from backend.pipeline.claim_retirement import execute
                 execute(store,args.run_id,authorization=binding(args.direction),
                         root=action_root/'claim-retire',ports=ProductionPorts())
+            elif args.action=='cvp-merge':
+                if not args.direction:raise ValueError('merge requires exact owner identity direction')
+                from backend.pipeline.cvp_merge_management import execute,production_ports
+                execute(store,args.run_id,authorization=binding(args.direction),
+                    root=action_root/'cvp-merge',ports=production_ports())
             elif args.action=='link-representation':
                 if not args.direction:raise ValueError('representation requires an exact owner direction')
                 from backend.pipeline.cvp_link_representation import execute,production_ports,GENERATION

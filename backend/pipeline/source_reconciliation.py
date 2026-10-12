@@ -1144,7 +1144,11 @@ def review_packet(frozen: dict, proposal: Proposal, *, review_only: bool = False
     if frozen.get('claim_issue_context'):
         from backend.pipeline.claim_issue_management import Issue, statement_repair_for_binding_diagnosis
         issues={i.issue_id:i for i in map(Issue.model_validate,frozen['claim_issue_context']['issues'])}
-        routed=[a.issue_id for a in proposal.claim_assessments
+        # A historically approved source-only slice deliberately uses the
+        # base Proposal after removing manifest.claim_issue. Its bound packet
+        # must not acquire a later Claim-assessment receipt or crash trying
+        # to read a field that this exact historical contract never had.
+        routed=[a.issue_id for a in getattr(proposal,'claim_assessments',[])
                 if statement_repair_for_binding_diagnosis(frozen,proposal,before,post,a,issues[a.issue_id])]
         if routed:
             result['claim_diagnosis_operation_scope']={

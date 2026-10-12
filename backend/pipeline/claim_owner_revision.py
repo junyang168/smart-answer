@@ -369,8 +369,10 @@ def dependency_direction(value):
     if not app:return None,None
     from backend.pipeline.cvp_link_replacement import SCHEMA as LINK_REPLACEMENT_SCHEMA, validate_package as validate_link_replacement
     from backend.pipeline.cvp_link_representation import SCHEMA as LINK_REPRESENTATION_SCHEMA, validate_package as validate_link_representation
+    from backend.pipeline.cvp_merge_management import SCHEMA as MERGE_SCHEMA, validate_package as validate_merge
     link_validators={LINK_REPLACEMENT_SCHEMA:validate_link_replacement,
-                     LINK_REPRESENTATION_SCHEMA:validate_link_representation}
+                     LINK_REPRESENTATION_SCHEMA:validate_link_representation,
+                     MERGE_SCHEMA:validate_merge}
     if app.get('schema_version') in link_validators:
         package = e['package']['payload']
         # This producer has an independently sealed link-only write domain,

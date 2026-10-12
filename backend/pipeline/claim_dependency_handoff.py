@@ -123,15 +123,28 @@ def context(value, store=None, *, cursor=None):
                 or record_content_sha(history[0]) != history[1]):
             raise ValueError('dependency handoff full historical afterimage drift')
         pins[key] = (op['after_revision'], op['after_sha256'], False)
+    from backend.pipeline.cvp_merge_management import current_dependency_pins,current_viewpoint_ids
+    pins,merge_transitions=current_dependency_pins(cursor,pins)
     PostgresKnowledgeStore._assert_transaction_read_pins(cursor, pins)
     rows = cursor.execute("SELECT object_id FROM wang_knowledge.objects WHERE collection='viewpoint_claim_links' AND retired_at IS NULL AND payload->>'claim_id'=%s AND payload->>'effective_state'='active'", (cid,)).fetchall()
-    if {r[0] for r in rows} != set(links):
+    active={r[0] for r in rows}
+    if merge_transitions:
+        package_row=cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE metadata->>\'reviewed_sha256\'=%s AND stage=\'cvp_group\'',(merge_transitions[0]['reviewed_sha256'],)).fetchall()
+        if len(package_row)!=1:raise ValueError('merge dependency current approval missing/ambiguous')
+        merge=package_row[0][0]['reviewed']['evidence']['package']['payload']
+        retired={i for c,i in merge['source_repair_application']['retiring_keys'] if c=='viewpoint_claim_links'}
+        new={l['viewpoint_claim_link_id'] for l in merge['viewpoint_claim_links'] if l['claim_id']==cid}
+        expected=(set(links)-retired)|new
+    else:expected=set(links)
+    if active != expected:
         raise ValueError('dependency handoff current active owned-link population drift')
     result={'schema_version': VERSION, 'materials': proof, 'claim_id': cid,
             'change_set_id': plan['change_set_id'], 'original_group_claim_ids': value['claim_ids'],
-            'pending_claim_ids': [cid], 'link_ids': sorted(links), 'viewpoint_ids': sorted({p['viewpoint_id'] for p in links.values()}),
+            'pending_claim_ids': [cid], 'link_ids': sorted(active),
+            'viewpoint_ids':current_viewpoint_ids(cursor,sorted({p['viewpoint_id'] for p in links.values()})),
             'campaign_membership_changes': 0, 'content_write_authority': False,
             'group_complete': False}
     if e.get('pending_cvp_management_record_keys'):
         result['separate_pending_record_keys']=list(e['pending_cvp_management_record_keys'])
+    if merge_transitions:result['subsequent_merge_transitions']=merge_transitions
     return result
