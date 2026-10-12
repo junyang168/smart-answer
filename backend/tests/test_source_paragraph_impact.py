@@ -579,6 +579,8 @@ def test_actual_saved_source_scope_no_calls_writes_or_input_upgrade():
     m = c.Manifest.model_validate(json.loads(raw_manifest))
     store = ReadOnly()
     run = 'CVPG-54aa85ab845ff2d1539132d522bf23971678e6de928bc8353d88533caa310f8d'
+    if store.get_cvp_group(run).get('change_set_ids'):
+        pytest.skip('pre-commit partition preview requires original SQL generations; committed proof tested separately')
     old_group = sha256_json(store.get_cvp_group(run))
     records = store.read_affected_context([('source_documents', m.source_id)])
     states = {c.key(*k): v['payload'] for k, v in records.items() if not v.get('retired')}
@@ -736,3 +738,59 @@ def test_actual_saved_correction_source_and_cvp_pending_domains(mutation):
         assert len(proposal.records)==381
     assert response==unchanged
     assert all(path.read_bytes()==data for path,data in originals.items())
+@pytest.mark.parametrize('claim_first', [False, True])
+def test_common_source_dispatch_resumes_applied_paragraph_audit_without_replay(tmp_path, monkeypatch, claim_first):
+    """Execute the actual CLI source branch, including its conditional imports."""
+    import ast
+    import inspect
+    from types import SimpleNamespace
+    from backend.pipeline import cvp_sql_flow as flow, cvp_sql_actions as actions
+    from backend.pipeline import source_reconciliation as source, claim_first_management as first
+    tree = ast.parse(inspect.getsource(flow.main))
+    branch = next(n for n in ast.walk(tree) if isinstance(n, ast.If)
+                  and ast.unparse(n.test) == "args.action == 'source'")
+    function = ast.FunctionDef(name='dispatch', args=ast.arguments(posonlyargs=[], args=[],
+        kwonlyargs=[], kw_defaults=[], defaults=[]), body=branch.body, decorator_list=[])
+    module = ast.fix_missing_locations(ast.Module(body=[function], type_ignores=[]))
+    aid = 'CVPA-test'; run = 'CVPG-test'; bound = tmp_path/run/'source'/aid
+    calls = []
+    monkeypatch.setattr(actions, 'read_source_manifest', lambda path: {'source_paragraph_profile': True})
+    monkeypatch.setattr(actions, 'source_action_id', lambda manifest: aid)
+    monkeypatch.setattr(source, 'Manifest', SimpleNamespace(model_validate=lambda value: value))
+    monkeypatch.setattr(first, 'finish_claim_audit', lambda store, rid, root:
+        calls.append(('audit', rid, root)) or {'group_complete': False})
+    state = {'execution_roots': {aid: str(bound)}}
+    env = {'args': SimpleNamespace(manifest=tmp_path/'manifest', source_permission_recovery_authorization=None,
+           claim_first=claim_first, output_root=tmp_path, run_id=run),
+           'action_root': tmp_path/run, 'saved': state, 'Path': Path,
+           'store': SimpleNamespace(get_cvp_group=lambda rid: state), 'ProductionPorts': lambda: None,
+           'execute_source_action': lambda *a, **kw: calls.append(('already_applied', kw['root'])),
+           'stage_event': lambda *a, **kw: calls.append(('event', a[0], kw['group_complete']))}
+    exec(compile(module, '<actual common source dispatch>', 'exec'), env)
+    assert env['dispatch']() == 0
+    assert calls == [('already_applied', bound.parent), ('audit', run, bound),
+                     ('event', 'source_epoch_claim_layer_audited_cvp_pending', False)]
+
+
+@pytest.mark.skipif(os.environ.get('WANG_SOURCE_PARAGRAPH_SAVED_ACCEPTANCE') != '1',
+                    reason='explicit actual committed readonly acceptance only')
+def test_actual_saved_source_commit_complete_history_and_current_no_replay():
+    from dotenv import load_dotenv
+    from backend.tests.test_statement_impact_completion import ReadOnly
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    load_dotenv('.env'); store = ReadOnly()
+    run = 'CVPG-54aa85ab845ff2d1539132d522bf23971678e6de928bc8353d88533caa310f8d'
+    group = store.get_cvp_group(run)
+    if not group.get('change_set_ids'): pytest.skip('source transaction not committed yet')
+    plan = group['reviewed']['plan']
+    history = store.get_change_history(plan['change_set_id'])
+    assert history['status'] == 'applied' and history['fingerprint_sha256'] == plan['fingerprint_sha256']
+    assert len(history['operations']) == len(plan['operations']) == 381
+    for op, actual in zip(plan['operations'], history['operations'], strict=True):
+        state = store.get_record_state(op['collection'], op['object_id'])
+        assert actual['collection'] == op['collection'] and actual['object_id'] == op['object_id']
+        assert actual['after'] == state['payload'] == op['payload']
+        assert actual['after_revision'] == state['revision'] == op['after_revision']
+        assert actual['after_sha256'] == state['content_sha256'] == record_content_sha(op['payload'])
+        assert not state['retired']
+    assert store.get_cvp_group(run) == group

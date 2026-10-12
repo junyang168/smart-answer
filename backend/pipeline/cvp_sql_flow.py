@@ -1289,14 +1289,13 @@ def main(argv=None):
                 return 0  # Never complete the group or start unrelated management.
             elif args.action=='source':
                 if not args.manifest:raise ValueError('source action lacks bounded Manifest/authorization')
-                from backend.pipeline.cvp_sql_actions import read_source_manifest
+                from backend.pipeline.cvp_sql_actions import read_source_manifest, source_action_id
                 manifest=read_source_manifest(args.manifest)
                 if args.source_permission_recovery_authorization:
                     from backend.pipeline.source_permission_recovery import enable
                     enable(store,binding(args.source_permission_recovery_authorization),args.output_root)
                 source_root=action_root/'source'
                 if args.claim_first:
-                    from backend.pipeline.cvp_sql_actions import source_action_id
                     from backend.pipeline.source_reconciliation import Manifest
                     aid=source_action_id(Manifest.model_validate(manifest))
                     registered=saved.get('execution_roots',{}).get(aid)
