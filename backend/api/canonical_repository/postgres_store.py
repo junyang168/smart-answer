@@ -3626,6 +3626,9 @@ class PostgresKnowledgeStore:
                     or issue['issue_id'] not in {Issue.model_validate(i).issue_id for i in prepared[1]['issues']}):
                 raise ChangeSetConflict('Claim issue completion lacks exact prepared amendment/issue')
         if not self._cvp_action_committed(cursor,run_id,action_id):
+            from backend.pipeline.source_paragraph_impact import assert_issue_resolution
+            if assert_issue_resolution(cursor,run_id,issue):
+                return
             raise ChangeSetConflict('Claim issue management action not committed')
 
     def adjudication_roots(self, target_ids):
@@ -3813,8 +3816,12 @@ class PostgresKnowledgeStore:
                 raise ChangeSetConflict('new coverage cannot clear pending existing CVP/link management')
             retained_resolution=statement_resolution
             if retained_impacts_resolution_path is not None:
-                if not pending_management:raise ChangeSetConflict('foreign retained management completion proof')
                 from backend.pipeline.cvp_source_impact_resolution import context as source_impact_context
+                if not pending_management:
+                    source_handoff=source_impact_context({**value,'run_id':run_id},cursor=cursor)
+                    if (not source_handoff or source_handoff.get('source_slice_mode')!='wang_source_paragraph_execution_v1'
+                            or source_handoff.get('pending_existing_cvp_record_keys')!=[]):
+                        raise ChangeSetConflict('foreign retained management completion proof')
                 if source_impact_context({**value,'run_id':run_id},cursor=cursor):
                     from backend.pipeline.cvp_source_impact_resolution import validate_for_completion
                 else:

@@ -1306,6 +1306,15 @@ def main(argv=None):
                         raise ValueError('Claim-first original SQL action root drift')
                     source_root=bound.parent
                 execute_source_action(store,args.run_id,manifest,root=source_root,ports=ProductionPorts(),claim_first=args.claim_first)
+                if manifest.get('source_paragraph_profile'):
+                    from backend.pipeline.claim_first_management import finish_claim_audit
+                    from backend.pipeline.source_reconciliation import Manifest
+                    aid=source_action_id(Manifest.model_validate(manifest))
+                    bound=Path(store.get_cvp_group(args.run_id)['execution_roots'][aid])
+                    proof=finish_claim_audit(store,args.run_id,bound)
+                    stage_event('source_epoch_claim_layer_audited_cvp_pending',run_id=args.run_id,
+                                proof=proof,group_complete=False)
+                    return 0
                 if manifest.get('evidence_binding_repair'):
                     from backend.pipeline.claim_evidence_binding import finish_claim_audit
                     proof=finish_claim_audit(store,args.run_id)

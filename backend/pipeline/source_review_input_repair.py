@@ -14,6 +14,9 @@ FIELDS = {'source_sha256', 'paragraph_text_sha256', 'verbatim_excerpt_sha256', '
 
 def receipt(frozen, response, proposal):
     """Prove exact source-derived fields without editing model content/reasons."""
+    if frozen.get('source_paragraph_execution'):
+        from backend.pipeline.source_paragraph_impact import semantic_proposal
+        proposal=semantic_proposal(frozen,proposal)
     original = {}
     for row in response['records']:
         payload = json.loads(row['payload_json']) if 'payload_json' in row else row['payload']

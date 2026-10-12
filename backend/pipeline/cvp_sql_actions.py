@@ -119,6 +119,8 @@ def prepare_source_action(store,run_id,manifest,*,root):
         check_binding(binding(root/'scoped-materials.json'))
         if body(read(root/'scoped-materials.json'))!=previous['materials']:
             raise ValueError('saved SQL source action materials differ')
+        if bool(manifest.source_paragraph_profile) != bool(previous['materials'].get('source_paragraph_execution')):
+            raise ValueError('saved source action cannot acquire/drop a new paragraph review profile')
         return previous
     started=time.perf_counter()
     amendment=None
@@ -155,6 +157,9 @@ def prepare_source_action(store,run_id,manifest,*,root):
     # The existing content compiler gets only the complete affected current
     # graph. Its before_records are scoped model evidence, not a Registry dump.
     materials=content.freeze(manifest,states)
+    if manifest.source_paragraph_profile:
+        from backend.pipeline.source_paragraph_impact import attach
+        attach(materials, store, run_id=run_id)
     from backend.pipeline.claim_owner_revision import attach_material
     attach_material(store,saved,materials,root)
     materials['sql_scope']={'contract':'wang_cvp_sql_transaction_v2','run_id':run_id,
@@ -184,7 +189,9 @@ def source_action_id(manifest):
             direction=json.loads(content.bound_bytes(context['scope_amendment']))
             return 'CVPA-'+sha256_json({'kind':'claim_issue_scope_amendment_once','parent':direction['old_action_id']})
         return 'CVPA-'+sha256_json({'claim_issues':sorted(Issue.model_validate(i).issue_id for i in context['issues'])})
-    return 'CVPA-'+sha256_json(manifest.model_dump(mode='json'))
+    identity = manifest.model_dump(mode='json')
+    identity.pop('source_paragraph_profile', None)  # A profile cannot create another action/budget.
+    return 'CVPA-'+sha256_json(identity)
 
 
 class ScopedSourceModelStages(ModelStages):
@@ -304,7 +311,7 @@ def execute_source_action(store,run_id,manifest,*,root,ports,claim_first=False):
         proof=root/(stage+'.raw.program-binding.json')
         if proof.exists():approval[stage+'_program_binding']=binding(proof)
     views=set(original.get('viewpoint_ids',[]))
-    if issue_context or manifest.get('viewpoint_scope_repair') or manifest.get('anchor_qualification') or manifest.get('evidence_binding_repair'):
+    if issue_context or manifest.get('viewpoint_scope_repair') or manifest.get('anchor_qualification') or manifest.get('evidence_binding_repair') or manifest.get('source_paragraph_profile'):
         views.update(p['viewpoint_id'] for p in content.index(materials['before_records']).values() if 'viewpoint_id' in p)
     pending=content.Manifest.model_validate(materials['manifest']).deferred_repair.claim_ids if materials['manifest'].get('deferred_repair') else []
     if manifest.get('anchor_qualification'):
@@ -322,6 +329,15 @@ def execute_source_action(store,run_id,manifest,*,root,ports,claim_first=False):
         # connection against the new Claim. This is not create-only coverage.
         # Other already-pending Claims are never cleared by this repair.
         pending=sorted(set(original.get('pending_cvp_claim_ids',[]))-set(issue_context['claim_ids']))
+    pending_keys = list(original.get('pending_cvp_management_record_keys', []))
+    if manifest.get('source_paragraph_profile'):
+        from backend.pipeline.source_paragraph_impact import pending_candidates
+        # The complete original roster awaits current-source Claim/CVP audits.
+        # Internal extraction ambiguity is preserved separately, never approved.
+        if set(original.get('pending_cvp_claim_ids', [])) - set(saved['claim_ids']):
+            raise ValueError('paragraph source cannot erase a separate dependency coverage obligation')
+        pending = list(saved['claim_ids'])
+        pending_keys = sorted(set(pending_keys) | set(pending_candidates(materials, proposal)))
     return commit_package(store,run_id,package=package,
         approval=approval,
         authorization=action['authorization'],backup=backup,sources=action_sources(materials),
@@ -329,7 +345,7 @@ def execute_source_action(store,run_id,manifest,*,root,ports,claim_first=False):
         source_kind=SOURCE_SCHEMA,viewpoint_ids=sorted(views),
         disposition=original.get('disposition'),action=action,
         pending_cvp_claim_ids=pending,
-        pending_cvp_management_record_keys=original.get('pending_cvp_management_record_keys',[]))
+        pending_cvp_management_record_keys=pending_keys)
 
 
 def merge_dispositions(old,new):

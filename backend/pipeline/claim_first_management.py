@@ -135,12 +135,14 @@ def finish_claim_audit(store, run_id, root):
     application=evidence.get('package',{}).get('payload',{}).get('source_repair_application',{})
     original_root=Path(application.get('run_root',''))
     statement_slice=application.get('source_write_slice',{}).get('mode') in {'owner_statement_completion','policy_evidence_binding','policy_claim_source_revision'}
+    from backend.pipeline.source_paragraph_impact import committed_context
+    paragraph = committed_context(store, saved)
     if statement_slice:
         from backend.pipeline.claim_source_write_slice import validate_claim_layer_authority
         validate_claim_layer_authority(saved,root)
     if (saved['checkpoint'] not in {'applied','audited'} or original_root.resolve()!=Path(root).resolve()
             or not evidence.get('pending_cvp_claim_ids')
-            or not statement_slice and not body(read(original_root/'final_review.packet.json')).get('claim_first_management')):
+            or not statement_slice and not paragraph and not body(read(original_root/'final_review.packet.json')).get('claim_first_management')):
         raise ValueError('Claim-only audit lacks actual committed source-first action and pending CVP state')
     material=body(read(original_root/'scoped-materials.json'));c.guard_files(material)
     current={}
@@ -149,16 +151,22 @@ def finish_claim_audit(store, run_id, root):
         if row is None:raise ValueError('Claim audit current readset missing')
         current[key]=row
     current_pins=pin_rows(pins(current)); audit_root=original_root/'claim-first-audit'
-    intent={'schema_version':VERSION,'claim_ids':saved['claim_ids'],'viewpoint_ids':[],
+    dependency_ids = sorted({op['object_id'] for op in paragraph['plan']['operations']
+                             if op['collection']=='claims'} - set(saved['claim_ids'])) if paragraph else []
+    audit_ids = sorted(set(saved['claim_ids']) | set(dependency_ids)) if paragraph else saved['claim_ids']
+    intent={'schema_version':VERSION,'claim_ids':audit_ids,'viewpoint_ids':[],
         'read_pins':current_pins,'change_set_ids':saved['change_set_ids'],
         'model':'gemini-3.8-flash','workers':2,'layers':['1','2','3'],'automatic_retry':False}
+    if paragraph:
+        intent.update(original_group_claim_ids=saved['claim_ids'], dependency_claim_ids=dependency_ids,
+                      campaign_membership_changes=0, source_paragraph_profile=paragraph['frozen']['source_paragraph_execution']['schema_version'])
     path=audit_root/'audit.json'
     if not path.exists():
         if (audit_root/'audit-intent.json').exists():
             raise ValueError('Claim audit intent has no complete result; no automatic replay')
         write_immutable(audit_root/'audit-intent.json',intent)
         subprocess.run([str(PROJECT/'backend/.venv/bin/python'),'scripts/audit-library.py',
-            '--scope','all','--layers','1,2,3','--claim-ids',','.join(saved['claim_ids']),
+            '--scope','all','--layers','1,2,3','--claim-ids',','.join(audit_ids),
             '--workers','2','--model','gemini-3.8-flash','--no-status-file','--preserve-full-context',
             '--sql-group-scope','--out',str(audit_root)],cwd=PROJECT,check=True,
             env={**os.environ,'KNOWLEDGE_DATABASE_URL':store.database_url})
@@ -167,12 +175,15 @@ def finish_claim_audit(store, run_id, root):
     from backend.pipeline.viewpoint_content_blocked_fallback import apply as content_fallback, KEY as FALLBACK_KEY
     path=content_fallback(path,audit_root/'content-blocked-fallback')
     audit=read_artifact(path)
-    accounting=validate_claim_audit_report(audit,saved['claim_ids'],store=store,saved=saved,root=root)
+    accounting=validate_claim_audit_report(audit,audit_ids,**({} if paragraph else {'store':store,'saved':saved,'root':root}))
     source_proofs=verify_saved_full_audit(path,layers=('3',))
     receipt={'schema_version':VERSION,'status':'claim_layer_audited_cvp_pending',
         'audit':binding(path),'source_proofs':source_proofs,'claim_ids':saved['claim_ids'],
         'read_pins':current_pins,'change_set_ids':saved['change_set_ids'],
         'cvp_management_complete':False,'group_complete':False,'next_group_started':False}
+    if paragraph:
+        receipt.update(dependency_claim_ids=dependency_ids, audited_claim_ids=audit_ids,
+                       campaign_membership_changes=0, source_paragraph_profile=intent['source_paragraph_profile'])
     if audit.get('meta',{}).get(FALLBACK_KEY):
         receipt.update(revisit_required=True,independent_complete=False)
     if accounting is not None:
@@ -241,10 +252,38 @@ def coverage_context(store, saved, group):
         raise ValueError('completed Claim audit current dependency drift')
     plan = saved['reviewed']['plan']
     history = store.get_change_history(plan['change_set_id'])
+    from backend.pipeline.source_paragraph_impact import committed_context, PROFILE
+    paragraph = committed_context(store, saved)
     if (not history or history['status'] != 'applied' or not history['operations']
-            or any(op['collection'] not in SOURCE_COLUMNS for op in history['operations'])
+            or not paragraph and any(op['collection'] not in SOURCE_COLUMNS for op in history['operations'])
             or plan['change_set_id'] not in receipt['change_set_ids']):
         raise ValueError('Claim-first transaction is not exclusively committed source work')
+    if paragraph:
+        audit_ids = sorted(set(saved['claim_ids']) | {op['object_id'] for op in plan['operations'] if op['collection']=='claims'})
+        if (receipt.get('source_paragraph_profile') != PROFILE or receipt.get('campaign_membership_changes') != 0
+                or receipt.get('audited_claim_ids') != audit_ids
+                or receipt.get('dependency_claim_ids') != sorted(set(audit_ids)-set(saved['claim_ids']))):
+            raise ValueError('paragraph Claim audit lost exact dependency/original roster accounting')
+        validate_claim_audit_report(read_artifact(receipt['audit']['path']), audit_ids)
+        from backend.pipeline.viewpoint_content_blocked_fallback import verify_saved_full_audit
+        if verify_saved_full_audit(Path(receipt['audit']['path']), layers=('3',)) != receipt['source_proofs']:
+            raise ValueError('paragraph complete Claim audit proof drift')
+        terminal_stage = application['terminal_stage']
+        packet_path = root/(terminal_stage+'.packet.json')
+        check_binding(binding(packet_path))
+        return {'schema_version': REPROPOSAL_VERSION,
+                'management_action_id': evidence['action']['action_id'],
+                'prior_reviewed_sha256': saved['reviewed_sha256'],
+                'claim_layer_completion': receipt_binding,
+                'source_terminal_review': paragraph['terminal_review'],
+                'source_terminal_packet': binding(packet_path),
+                'pending_existing_cvp_record_keys': sorted(evidence.get('pending_cvp_management_record_keys', [])),
+                'source_only_approval': True, 'existing_cvp_content_approved': False,
+                'old_proposals_and_budgets_preserved': True, 'source_slice_mode': PROFILE,
+                'instructions': 'Use the actually committed new source and fully Claim-audited current graph. '
+                    'Original proposals, failed source judgments and budgets remain historical. '
+                    'Every existing/current CVP and all source pending obligations require separate full current audits. '
+                    'No Claim roster change, candidate promotion, old verdict rewrite or CVP content approval is granted.'}
     packet_path = root/'final_review.packet.json'
     packet = body(read(packet_path))
     slice_mode = application.get('source_write_slice', {}).get('mode')

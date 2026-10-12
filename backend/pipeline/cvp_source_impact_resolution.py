@@ -13,6 +13,24 @@ VERSION='wang_sequential_source_impact_resolution_v1'
 HANDOFF='wang_sequential_source_cvp_handoff_v1'
 SLICE_IMPACTS='wang_source_slice_current_impact_resolution_v1'
 CLOSED_STATEMENT='wang_completed_statement_impact_revalidation_v1'
+PARAGRAPH_MODE='wang_source_paragraph_execution_v1'
+POLICY_SOURCE_MODES={'policy_evidence_binding','policy_claim_source_revision',PARAGRAPH_MODE}
+
+
+def validate_source_handoff_package(package, mode):
+    if mode == PARAGRAPH_MODE:
+        from backend.pipeline.cvp_sql_actions import validate_source_package
+        from backend.pipeline.source_paragraph_impact import execution_context
+        material=package.get('source_epoch_binding_material',{}).get('frozen')
+        if not material or material.get('manifest',{}).get('source_paragraph_profile') != mode:
+            raise ValueError('paragraph source impact lacks exact execution material')
+        execution_context(material)
+        validate_source_package(package)
+    else:
+        from backend.pipeline.claim_source_write_slice import validate_package
+        validate_package(package)
+        if package['source_repair_application']['source_write_slice']['mode'] != mode:
+            raise ValueError('source impact package mode drift')
 
 
 def closed_statement_context(value):
@@ -137,12 +155,10 @@ def completed_source_facts(value,*,store=None,cursor=None):
     if statement:
         return completed_statement_facts(value,old,prior,handoff,cursor)
     source=applied_review(None,value,handoff['prior_reviewed_sha256'],cursor=cursor)
-    policy_slice=handoff.get('source_slice_mode') in {'policy_evidence_binding','policy_claim_source_revision'}
+    policy_slice=handoff.get('source_slice_mode') in POLICY_SOURCE_MODES
     if policy_slice:
-        from backend.pipeline.claim_source_write_slice import validate_package
-        package=source['evidence']['package']['payload'];validate_package(package)
-        if (package['source_repair_application']['source_write_slice']['mode']!=handoff['source_slice_mode']
-                or handoff.get('source_only_approval') is not True
+        package=source['evidence']['package']['payload'];validate_source_handoff_package(package,handoff['source_slice_mode'])
+        if (handoff.get('source_only_approval') is not True
                 or handoff.get('existing_cvp_content_approved') is not False
                 or pending!=handoff['pending_existing_cvp_record_keys']):
             raise ValueError('closed policy slice original source domain drift')
@@ -151,14 +167,18 @@ def completed_source_facts(value,*,store=None,cursor=None):
                               (source['plan']['change_set_id'],)).fetchall()
         if actual!=[tuple(o[k] for k in fields) for o in source['plan']['operations']]:
             raise ValueError('closed policy slice actual full write set drift')
-        expected=[(read_policy_slice_item if handoff['source_slice_mode']=='policy_claim_source_revision' else read_question_context)(cursor,k) for k in pending]
+        expected=[(read_policy_slice_item if k.split('/',1)[0]!='questions' else read_question_context)(cursor,k) for k in pending]
         if expected!=old['items']:raise ValueError('closed policy pending context/approval/consumer drift')
     # These actual source writes and all explicit source obligations must be
     # unchanged. Unrelated broad material pins remain historical only.
     old_pins=decoded_pins(old['read_pins']);critical={}
     for op in source['plan']['operations']:
         key=(op['collection'],op['object_id'])
-        if key[0] not in ({'claims','evidence_steps','source_fragments'} if policy_slice else {'evidence_steps','source_fragments'}):
+        source_columns=({'source_documents','claims','evidence_steps','source_fragments','observations',
+                         'questions','knowledge_relations','claim_relations','position_nodes'}
+                        if handoff.get('source_slice_mode')==PARAGRAPH_MODE else
+                        {'claims','evidence_steps','source_fragments'} if policy_slice else {'evidence_steps','source_fragments'})
+        if key[0] not in source_columns:
             raise ValueError('completed source facts not an Evidence-only source domain')
         critical[key]=(op['after_revision'],op['after_sha256'],False)
     for item in old['items']:
@@ -750,7 +770,7 @@ def context(value,store=None,*,cursor=None):
     c=e.get('action',{}).get('materials',{}).get('claim_management_resolution',{})
     direct=c if (c.get('schema_version')==HANDOFF or
         (c.get('schema_version')=='wang_post_claim_cvp_reproposal_v1'
-         and c.get('source_slice_mode') in {'policy_evidence_binding','policy_claim_source_revision'})) else None
+         and c.get('source_slice_mode') in POLICY_SOURCE_MODES)) else None
     if direct is not None:return direct
     closed=closed_statement_context(value)
     if closed:return closed
@@ -920,10 +940,11 @@ def prepare_question_slice(store,value,*,cursor=None):
     from copy import deepcopy
     from backend.pipeline.cvp_sql_flow import check_binding,decoded_pins,pin_rows
     from backend.pipeline.claim_first_management import coverage_context
-    handoff=context(value,store,cursor=cursor);pending=value['reviewed']['evidence']['pending_cvp_management_record_keys']
+    handoff=context(value,store,cursor=cursor);pending=value['reviewed']['evidence'].get('pending_cvp_management_record_keys',[])
     policy_claim=handoff.get('source_slice_mode')=='policy_claim_source_revision'
-    domains={'claims','claim_relations','knowledge_relations'} if policy_claim else {'questions'}
-    if (not pending or len(pending)!=len(set(pending))
+    paragraph=handoff.get('source_slice_mode')==PARAGRAPH_MODE
+    domains={'questions','claim_relations','knowledge_relations'} if paragraph else {'claims','claim_relations','knowledge_relations'} if policy_claim else {'questions'}
+    if ((not pending and not paragraph) or len(pending)!=len(set(pending))
             or pending!=handoff['pending_existing_cvp_record_keys']
             or any(k.split('/',1)[0] not in domains for k in pending)):
         raise ValueError('question slice pending population/domain drift')
@@ -940,8 +961,7 @@ def prepare_question_slice(store,value,*,cursor=None):
         with store.connect() as conn,conn.cursor() as cur:
             return prepare_question_slice(store,value,cursor=cur)
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
-    from backend.pipeline.claim_source_write_slice import validate_package
-    validate_package(source['evidence']['package']['payload'])
+    validate_source_handoff_package(source['evidence']['package']['payload'], handoff['source_slice_mode'])
     actual=cursor.execute('''SELECT collection,object_id,operation,before_revision,after_revision,
         before_sha256,after_sha256 FROM wang_knowledge.change_operations
         WHERE change_set_id=%s ORDER BY operation_index''',(source['plan']['change_set_id'],)).fetchall()
@@ -950,14 +970,14 @@ def prepare_question_slice(store,value,*,cursor=None):
     if not planned or len(planned)!=len(set(planned)) or sorted(actual)!=sorted(planned):
         raise ValueError('question slice actual source write set drift')
     if (receipt['claim_ids']!=value['claim_ids'] or receipt.get('group_complete') is not False
-            or source['evidence'].get('pending_cvp_management_record_keys')!=pending
+            or source['evidence'].get('pending_cvp_management_record_keys',[])!=pending
             or handoff.get('source_only_approval') is not True
             or handoff.get('existing_cvp_content_approved') is not False):
         raise ValueError('question slice source receipt authority drift')
     bindings=[handoff[k] for k in ('claim_layer_completion','source_terminal_packet','source_terminal_review')]
     bindings.extend([receipt['audit'],*receipt['source_proofs']])
     for b in bindings:check_binding(b)
-    pins=decoded_pins(receipt['read_pins']);items=[(read_policy_slice_item if policy_claim else read_question_context)(cursor,k) for k in pending]
+    pins=decoded_pins(receipt['read_pins']);items=[(read_question_context if k.split('/',1)[0]=='questions' else read_policy_slice_item)(cursor,k) for k in pending]
     for item in items:
         key=tuple(item['record_key'].split('/',1))
         if pins.get(key)!=tuple(item['pin']):raise ValueError('question slice lacks original audited source pin')
@@ -1007,7 +1027,7 @@ def prepare(store,value):
         return committed_generation_facts(store,value)
     completed=completed_source_facts(value,store=store)
     if completed is not None:return completed
-    if handoff.get('source_slice_mode') in {'policy_evidence_binding','policy_claim_source_revision'}:
+    if handoff.get('source_slice_mode') in POLICY_SOURCE_MODES:
         return prepare_question_slice(store,value)
     pending=value['reviewed']['evidence'].get('pending_cvp_management_record_keys',[])
     if (not pending or len(pending)!=len(set(pending)) or sorted(pending)!=sorted(handoff['pending_existing_cvp_record_keys'])
@@ -1097,7 +1117,7 @@ def validate_for_completion(value,path,audit_binding,cursor,*,semantic_resolutio
     if (body.get('schema_version')!=VERSION or body.get('artifact_sha256')!=sha256_json({k:v for k,v in body.items() if k!='artifact_sha256'})
             or body.get('run_id')!=value['run_id'] or body.get('reviewed_sha256')!=value['reviewed_sha256']
             or body.get('audit')!=audit_binding or body.get('source_handoff')!=context(value,cursor=cursor)
-            or body.get('pending_record_keys')!=value['reviewed']['evidence']['pending_cvp_management_record_keys']
+            or body.get('pending_record_keys')!=value['reviewed']['evidence'].get('pending_cvp_management_record_keys',[])
             or body.get('model_verdicts_changed') is not False or body.get('original_pending_list_preserved') is not True
             or body.get('semantic_resolution')!=(binding(semantic_resolution) if semantic_resolution else None)):
         raise ValueError('source impact completion proof drift')
@@ -1134,14 +1154,14 @@ def validate_for_completion(value,path,audit_binding,cursor,*,semantic_resolutio
         for transition in body['audited_claim_transitions']:
             if independent.get(('claims',transition['claim_id']))!=tuple(transition['current_pin']):
                 raise ValueError('completed source dependency absent from current complete independent audit')
-        if body['source_handoff'].get('source_slice_mode') in {'policy_evidence_binding','policy_claim_source_revision'}:
+        if body['source_handoff'].get('source_slice_mode') in POLICY_SOURCE_MODES:
             for item in body['items']:
                 key=tuple(item['record_key'].split('/',1))
                 if item['kind']=='unchanged_independently_approved_readonly_claim_context':
                     if independent.get(key)!=tuple(item['pin']):raise ValueError('closed policy Claim absent from current full independent audit')
                 elif key in independent:raise ValueError('closed unapproved context consumed by current audit')
         return body
-    if body['source_handoff'].get('source_slice_mode') in {'policy_evidence_binding','policy_claim_source_revision'}:
+    if body['source_handoff'].get('source_slice_mode') in POLICY_SOURCE_MODES:
         expected=prepare_question_slice(None,value,cursor=cursor)
         if any(body.get(k)!=v for k,v in expected.items()):
             raise ValueError('question context completion proof changed')

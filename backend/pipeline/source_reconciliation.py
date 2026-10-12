@@ -118,6 +118,7 @@ class Manifest(Contract):
     viewpoint_scope_repair: FileBinding | None = None
     anchor_qualification: FileBinding | None = None
     evidence_binding_repair: FileBinding | None = None
+    source_paragraph_profile: Literal['wang_source_paragraph_execution_v1'] | None = None
 
     @model_serializer(mode="wrap")
     def serialize(self, handler):
@@ -133,6 +134,8 @@ class Manifest(Contract):
             result.pop("anchor_qualification", None)
         if self.evidence_binding_repair is None:
             result.pop("evidence_binding_repair", None)
+        if self.source_paragraph_profile is None:
+            result.pop('source_paragraph_profile', None)
         return result
 
 
@@ -617,6 +620,16 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
     manifest = Manifest.model_validate(frozen["manifest"])
     allowed = {p.key: p for p in manifest.permissions}
     proposed = index(proposal.records)
+    paragraph_mechanical = set()
+    if frozen.get('source_paragraph_execution'):
+        from backend.pipeline.source_paragraph_impact import mechanical_keys, execution_context, document_postimage
+        paragraph_mechanical = mechanical_keys(frozen)
+        context, _ = execution_context(frozen)
+        exact_mechanical = index(context['partition']['binding_postimages'])
+        doc_key, doc = document_postimage(frozen)
+        exact_mechanical[doc_key] = doc
+        if any(proposed.get(k) != value for k, value in exact_mechanical.items()):
+            raise ValueError('paragraph proposal changed/omitted deterministic binding postimage')
     for k, payload in proposed.items():
         if k in before or k in allowed:
             continue
@@ -636,6 +649,10 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
     if len(dispositions) != len(proposal.dispositions) or (set(dispositions) != required and not initial_anchor_draft):
         raise ValueError("every affected consumer requires exactly one disposition")
     unresolved = {d.record_key for d in proposal.dispositions if d.action == 'unresolved'}
+    paragraph_pending = set()
+    if frozen.get('source_paragraph_execution'):
+        from backend.pipeline.source_paragraph_impact import pending_candidates
+        paragraph_pending = pending_candidates(frozen,proposal)
     if complete_anchor_review and (not manifest.anchor_qualification or not unresolved
             or any(k not in proposed or k not in allowed or split_key(k)[0] not in {'evidence_steps','source_fragments'} for k in unresolved)):
         raise ValueError('complete anchor review requires complete explicitly writable Evidence/fragment postimages')
@@ -694,7 +711,7 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
                    and not (claim_first and split_key(k)[0] in CVP_COLUMNS)
                    or k not in before or k in proposed for k in unresolved)):
         raise ValueError('unresolved review requires bounded unchanged CVP context and SQL retirement proof')
-    if unresolved_consumers(frozen) or (unresolved and not review_only and not initial_claim_draft and not complete_anchor_review):
+    if unresolved_consumers(frozen) or (unresolved - paragraph_pending and not review_only and not initial_claim_draft and not complete_anchor_review):
         raise ValueError("unknown/unresolved consumer; owner scope or proof required")
     historical_scope=set()
     if frozen.get('viewpoint_scope_context'):
@@ -702,6 +719,8 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
         historical_scope=historical_impact_keys(frozen)
     for k, d in dispositions.items():
         c, _ = split_key(k)
+        if k in paragraph_pending:
+            continue  # Exact unconsumed candidate remains unresolved/nonwritable, never semantic approval.
         if complete_anchor_review and k in unresolved:
             continue  # Actual final Opus must approve the fully validated postimage; no GPT verdict is edited.
         if (review_only or initial_claim_draft) and k in unresolved:
@@ -740,7 +759,11 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
         if old and old.get("review_status") in HUMAN_HOLDS and new != old:
             from backend.pipeline.cvp_scope_management import approved_relation_reference_only
             from backend.pipeline.claim_anchor_qualification import validate_delta
-            if not (manifest.anchor_qualification and validate_delta(frozen,old,new,k)) and not approved_relation_reference_only(frozen,k,proposed):
+            paragraph_anchor = False
+            if frozen.get('source_paragraph_execution') and k.startswith('claims/'):
+                from backend.pipeline.source_paragraph_impact import protected_anchor_delta
+                paragraph_anchor = protected_anchor_delta(frozen,k,old,new,proposed)
+            if k not in paragraph_mechanical and not paragraph_anchor and not (manifest.anchor_qualification and validate_delta(frozen,old,new,k)) and not approved_relation_reference_only(frozen,k,proposed):
                 raise ValueError("existing human hold/ruling needs an exact separate owner disposition")
         if manifest.anchor_qualification:
             from backend.pipeline.claim_anchor_qualification import validate_delta
@@ -748,7 +771,7 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
         if manifest.evidence_binding_repair:
             from backend.pipeline.claim_evidence_binding import validate_delta
             validate_delta(frozen,old,new,k)
-        if new.get("review_status", "candidate") != "candidate":
+        if k not in paragraph_mechanical and new.get("review_status", "candidate") != "candidate":
             raise ValueError("proposal may not inherit or manufacture approval: " + k)
         if new.get("revision") != (old.get("revision", 1) + 1 if old else 1):
             raise ValueError("proposed version is not the next stored revision")
@@ -834,7 +857,15 @@ def retained_evidence_sequence_start(frozen, before, post, claim_key, evidence_k
     No first-occurrence choice, new Evidence, qualification change or inferred
     gap/order is permitted. All quotes must already be bound to THIS Evidence.
     """
-    if frozen['manifest']['before_source'] != frozen['manifest']['current_sources'][0]:
+    paragraph_cohort={}
+    if frozen.get('source_paragraph_execution'):
+        from backend.pipeline.source_paragraph_impact import execution_context
+        context,_=execution_context(frozen)
+        paragraph_cohort=index(context['partition']['binding_postimages'])
+        if (frozen['before']['paragraphs'].get(fragment['paragraph_key'],{}).get('text')!=text
+                or key('source_fragments',fragment['fragment_id']) not in paragraph_cohort):
+            raise ValueError('retained sequence paragraph changed or is not exact binding-only cohort')
+    elif frozen['manifest']['before_source'] != frozen['manifest']['current_sources'][0]:
         raise ValueError('retained Evidence sequence requires unchanged physical source')
     evidence = post[evidence_key]
     ids = evidence.get('source_fragment_ids') or ([evidence['source_fragment_id']]
@@ -847,7 +878,10 @@ def retained_evidence_sequence_start(frozen, before, post, claim_key, evidence_k
             for row in frozen.get('sql_scope', {}).get('read_pins', [])}
     for k in [claim_key, evidence_key, *keys]:
         pin = pins.get(split_key(k))
-        if (not pin or pin[2] is not False or before.get(k) != post.get(k)
+        unchanged=before.get(k)==post.get(k)
+        if k.startswith('source_fragments/') and paragraph_cohort:
+            unchanged=post.get(k)==paragraph_cohort.get(k) and k in paragraph_cohort
+        if (not pin or pin[2] is not False or not unchanged
                 or pin[0] != before[k].get('revision') or pin[1] != record_content_sha(before[k])):
             raise ValueError('retained Evidence sequence current SQL chain changed/missing/retired')
     source_id = frozen['manifest']['source_id']
@@ -917,13 +951,16 @@ def validate_graph(post: dict[str, dict], before: dict[str, dict], frozen: dict,
     all_paragraphs = {source_id: paragraphs, **{s["source_id"]: s["paragraphs"] for s in frozen.get("context_sources", [])}}
     own_doc = post[key("source_documents", source_id)]
     aliases = {own_doc.get("transcript_id"), source_id, own_doc.get("canonical_source_id")} - {None, ""}
+    paragraph_bindings = set()
+    if frozen.get('source_paragraph_execution'):
+        paragraph_bindings = set(index(frozen['source_paragraph_execution']['partition']['binding_postimages']))
     for k in sorted(set(frozen["inventory"]["affected_keys"]) | (set(post) - set(before))):
         p = post[k]
         c, object_id = split_key(k)
         if c == "source_fragments" and p.get("source_id") == source_id:
             quote = p.get("verbatim_excerpt", "")
             text = paragraphs.get(str(p.get("paragraph_key")), {}).get("text", "")
-            if not quote or text.count(quote) != 1 or p.get("source_sha256") != body_sha:
+            if not quote or (text.count(quote) != 1 and k not in paragraph_bindings) or p.get("source_sha256") != body_sha:
                 raise ValueError("quote must resolve uniquely in its own new-source paragraph: " + k)
             for name, actual in (("paragraph_text_sha256", text), ("verbatim_excerpt_sha256", quote)):
                 if p.get(name) and p[name] != hashlib.sha256(actual.encode("utf-8")).hexdigest():
@@ -952,7 +989,7 @@ def validate_graph(post: dict[str, dict], before: dict[str, dict], frozen: dict,
                 if not aliases.intersection(set(strings(occurrence))):
                     continue
                 for anchor in occurrence.get("anchors", []):
-                    current_anchor_profile = bool(frozen['manifest'].get('anchor_qualification') or frozen['manifest'].get('evidence_binding_repair')) or frozen.get('claim_issue_context', {}).get(
+                    current_anchor_profile = bool(frozen.get('source_paragraph_execution') or frozen['manifest'].get('anchor_qualification') or frozen['manifest'].get('evidence_binding_repair')) or frozen.get('claim_issue_context', {}).get(
                         'anchor_binding_validation_profile') == 'declared_local_own_containing_v1'
                     eid = (anchor_evidence_id(p, occurrence, anchor) if current_anchor_profile
                            else anchor.get('evidence_id'))
@@ -1062,6 +1099,11 @@ def validate_basis_groups(spans: list[tuple]) -> None:
 
 
 def review_packet(frozen: dict, proposal: Proposal, *, review_only: bool = False, claim_first: bool = False, initial_claim_draft: bool = False, initial_anchor_draft: bool = False, complete_anchor_review: bool = False, initial_evidence_draft: bool = False) -> dict:
+    if frozen.get('source_paragraph_execution'):
+        if any((review_only, claim_first, initial_claim_draft, initial_anchor_draft, complete_anchor_review, initial_evidence_draft)):
+            raise ValueError('paragraph source review cannot borrow another draft/write-slice authority')
+        from backend.pipeline.source_paragraph_impact import review_packet as paragraph_packet
+        return paragraph_packet(frozen, proposal)
     post = validate_proposal(frozen, proposal, review_only=review_only, claim_first=claim_first,
                       initial_claim_draft=initial_claim_draft,initial_anchor_draft=initial_anchor_draft,complete_anchor_review=complete_anchor_review,initial_evidence_draft=initial_evidence_draft)
     selected = frozen["inventory"]["affected_keys"] + frozen["inventory"]["context_keys"]
@@ -1200,6 +1242,17 @@ def validate_review(packet: dict, response: dict) -> bool:
         if item in required:
             raise ValueError('source epoch binding item collides with semantic review scope')
         required.add(item)
+    if packet.get('prior_source_issues') or packet.get('prior_source_issue_resolution_scope'):
+        from backend.pipeline.source_paragraph_impact import PROFILE
+        prior=packet.get('prior_source_issues',[])
+        expected={'source_issue_resolution/'+p['issue']['issue_id'] for p in prior}
+        extra=[p['record_key'] for p in packet.get('prior_source_issue_resolution_scope',[])]
+        if (packet.get('source_paragraph_profile')!=PROFILE or len(set(extra))!=len(extra)
+                or set(extra)!=expected or set(extra)&required
+                or any(p.get('old_action_committed') is not False or p.get('original_verdicts_changed') is not False
+                       for p in packet['prior_source_issue_resolution_scope'])):
+            raise ValueError('new-source issue resolution review scope drift')
+        required.update(extra)
     required.update(packet.get('anchor_draft_missing_dispositions',[]))
     if packet.get('knowledge_relation_withdrawal_review'):
         from backend.pipeline.claim_evidence_completion import direction_for
@@ -1224,6 +1277,16 @@ def validate_review(packet: dict, response: dict) -> bool:
         raise ValueError("review did not cover the exact complete consumer denominator")
     if any(v.approved and v.problems for v in review.verdicts):
         raise ValueError("pass with problems is not an approval")
+    if packet.get('source_readonly_pending'):
+        from backend.pipeline.source_paragraph_impact import PROFILE
+        value = packet['source_readonly_pending']; pending=set(value['pending_record_keys'])
+        if (value.get('schema_version')!=PROFILE or packet.get('source_paragraph_profile')!=PROFILE
+                or value.get('content_write_authority') is not False or value.get('semantic_approval') is not False
+                or value.get('group_completion') is not False or pending-set(packet.get('internal_candidate_context',{}))
+                or any(r['collection']+'/'+r['object_id'] in pending for r in packet['proposal']['records'])):
+            raise ValueError('source candidate pending review domain drift')
+        return all((not v.approved and v.problems==['unapproved_internal_context_not_a_semantic_write'])
+                   if v.record_key in pending else v.approved and not v.problems for v in review.verdicts)
     if packet.get('source_first_pending_cvp'):
         from backend.pipeline.claim_first_management import PENDING_PROBLEM
         pending = set(packet['source_first_pending_cvp']['pending_record_keys'])
@@ -1276,7 +1339,22 @@ def compile_package(frozen: dict, proposal: Proposal, raw: dict, *, frozen_sha25
     digest = raw["artifact_sha256"]
     reviewed_at = raw["completed_at"]
     identity_by_viewpoint = defaultdict(list)
+    paragraph_mechanical = set()
+    protected = {}
+    if frozen.get('source_paragraph_execution'):
+        from backend.pipeline.source_paragraph_impact import mechanical_keys
+        paragraph_mechanical = mechanical_keys(frozen)
+        protected = frozen['source_paragraph_execution']['protected_anchor_reviews']
     for k, p in data.items():
+        if frozen.get('source_paragraph_execution'):
+            if k in paragraph_mechanical or k in protected:
+                if k in protected:
+                    # The actual review approves only the new source anchor;
+                    # it does NOT lift legacy human_review_required status.
+                    for f in PROVENANCE:
+                        if f in before[k]: p[f] = deepcopy(before[k][f])
+                        else: p.pop(f, None)
+                continue
         if split_key(k)[0] in {"claims", "evidence_steps", "source_documents", "source_fragments",
                                "observations", "questions", "position_nodes", "knowledge_relations", "claim_relations"}:
             p.update(review_status="independent_terminal_reviewed", reviewed_by="claude-opus-5-5",
@@ -1288,6 +1366,9 @@ def compile_package(frozen: dict, proposal: Proposal, raw: dict, *, frozen_sha25
     # Normalize Claim defaults BEFORE computing the final dependent locator SHA.
     for k, p in list(data.items()):
         if k.startswith("claims/"):
+            if k in protected:
+                KNOWLEDGE_COLLECTIONS['claims'][0].model_validate(p)
+                continue  # Only the explicitly reviewed anchor changes; no schema-default cleanup.
             data[k] = KNOWLEDGE_COLLECTIONS["claims"][0].model_validate(p).model_dump(mode="json")
     claims = {k: p for k, p in {**before, **data}.items() if k.startswith("claims/")}
     for k, link in list(data.items()):
@@ -1378,7 +1459,17 @@ def compile_package(frozen: dict, proposal: Proposal, raw: dict, *, frozen_sha25
         body.setdefault(split_key(k)[0], []).append(p)
     # Shape/default normalization is part of the store contract, not a semantic rewrite.
     normalized = normalize_package(body)
-    return {"package_id": body["package_id"], **{c: list(by_id.values()) for c, by_id in normalized.items() if by_id}}
+    result = {"package_id": body["package_id"], **{c: list(by_id.values()) for c, by_id in normalized.items() if by_id}}
+    if frozen.get('source_paragraph_execution'):
+        # Schema validation may expand optional defaults. Mechanical epoch
+        # rows and protected anchors must retain their original storage shape.
+        for k in paragraph_mechanical | set(protected):
+            if k not in data:continue
+            col,oid=split_key(k)
+            result[col]=[deepcopy(data[k]) if row[KNOWLEDGE_COLLECTIONS[col][1]]==oid else row for row in result[col]]
+        result['source_epoch_binding_material'] = {'frozen': frozen,
+            'partition': frozen['source_paragraph_execution']['partition']}
+    return result
 
 
 def assert_plan_postimages(package: dict, plan: dict, before: dict[str, dict]) -> dict[str, dict]:

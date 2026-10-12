@@ -45,6 +45,9 @@ def archive_source_version(binding, archive_root, *, physical_snapshots=None):
 
 
 def effective_proposal(frozen, response):
+    if frozen.get('source_paragraph_execution'):
+        from backend.pipeline.source_paragraph_impact import compose_proposal
+        return compose_proposal(frozen, response)
     if frozen['manifest'].get('evidence_binding_repair'):
         from backend.pipeline.claim_evidence_binding import normalized_proposal
         return normalized_proposal(frozen,response)
@@ -173,6 +176,8 @@ def request_limit(adapter, path, *, saved=None):
 def stage_adapter(adapter, packet, path, *, saved=None):
     """Select existing lossless wire only before reservation; authenticate saved wire exactly."""
     from backend.pipeline.viewpoint_resolution_runtime import response_adapter
+    from backend.pipeline.source_paragraph_impact import scoped_adapter
+    adapter = scoped_adapter(adapter, packet)
     path = Path(path)
     selected = response_adapter(adapter, saved)
     if saved is not None:
@@ -451,7 +456,7 @@ class Runner:
         # Saved review packets retain their exact old contract. New reviews
         # receive the same verified read-only adapter proof as the proposer.
         base = disclosed_review_base(frozen, base)
-        return add_receipt(frozen, response, base) if frozen['manifest'].get('claim_issue') or frozen['manifest'].get('anchor_qualification') or frozen['manifest'].get('evidence_binding_repair') else base
+        return add_receipt(frozen, response, base) if frozen.get('source_paragraph_execution') or frozen['manifest'].get('claim_issue') or frozen['manifest'].get('anchor_qualification') or frozen['manifest'].get('evidence_binding_repair') else base
 
     def reviewed(self, frozen: dict) -> tuple[contract.Proposal, dict]:
         from backend.pipeline.source_permission_recovery import NAME as PERMISSION_RECOVERY_NAME, reviewed as permission_reviewed
@@ -481,7 +486,7 @@ class Runner:
             raise Stop('complete-input repair independent review rejected; no extra correction',
                        status='root_cause_required',waiting_for='system')
         # Exactly one correction, never an extra GPT preapproval/review stage.
-        correction_packet = {**packet, "initial_proposal": proposed.model_dump(), "Opus_review": initial["response"],
+        correction_packet = {**packet, "initial_proposal": model_proposal_dump(frozen,proposed), "Opus_review": initial["response"],
                              "correction_round": 1, "another_correction_allowed": False}
         if 'unresolved_proposal_review' in review_packet:
             correction_packet['unresolved_proposal_review'] = review_packet['unresolved_proposal_review']
@@ -672,6 +677,9 @@ def binding(path: Path) -> dict:
 
 
 def build_proposal_packet(frozen: dict) -> dict:
+    if frozen.get('source_paragraph_execution'):
+        from backend.pipeline.source_paragraph_impact import proposal_packet
+        return proposal_packet(frozen)
     selected = frozen["inventory"]["affected_keys"] + frozen["inventory"]["context_keys"]
     states = contract.index(frozen["before_records"])
     result = {"schema_version": contract.VERSION, "update_id": frozen["update_id"],
@@ -712,6 +720,13 @@ def build_proposal_packet(frozen: dict) -> dict:
         result['writable_record_shapes'] = {col: contract.KNOWLEDGE_COLLECTIONS[col][0].model_json_schema()
             for col in sorted({p['collection'] for p in frozen['manifest']['permissions']})}
     return result
+
+
+def model_proposal_dump(frozen, proposal):
+    if frozen.get('source_paragraph_execution'):
+        from backend.pipeline.source_paragraph_impact import semantic_proposal
+        return semantic_proposal(frozen,proposal).model_dump()
+    return proposal.model_dump()
 
 
 def auxiliary_review_base(frozen, proposal, base):
@@ -852,7 +867,7 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
         from backend.pipeline.cvp_scope_management import Proposal
         proposal=Proposal.model_validate(packet['proposal'])
     else:
-        proposal = effective_proposal(frozen, packet["proposal"]) if frozen["manifest"].get("claim_issue") else contract.Proposal.model_validate(packet["proposal"])
+        proposal = effective_proposal(frozen, packet["proposal"]) if frozen["manifest"].get("claim_issue") or frozen.get('source_paragraph_execution') else contract.Proposal.model_validate(packet["proposal"])
     claim_first = bool(packet.get('claim_first_management'))
     base = contract.review_packet(frozen, proposal, claim_first=claim_first,
         complete_anchor_review=bool(packet.get('anchor_create_permission_receipt')))
@@ -886,7 +901,7 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
     elif not engineering:
         initial_packet = body(read(root / "initial_review.packet.json"))
         initial = validate_raw(root, "initial_review", initial_packet)
-        first_proposal = effective_proposal(frozen, first["response"]).model_dump()
+        first_proposal = model_proposal_dump(frozen,effective_proposal(frozen, first["response"]))
         from backend.pipeline.source_review_input_repair import check_packet
         initial_base = initial_review_base(frozen, effective_proposal(frozen, first['response']))
         check_packet(frozen, first['response'], initial_packet,
