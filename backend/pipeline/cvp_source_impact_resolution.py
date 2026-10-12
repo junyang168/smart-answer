@@ -735,6 +735,17 @@ def audit_record_keys(pending, facts):
         allowed={'approved_current_cvp_impact_independently_audited','exact_human_logical_retirement','historical_approved_structure_unchanged_no_claim_basis','independently_committed_source_evidence','unchanged_unapproved_internal_relation_context'}
         if any(i['kind'] not in allowed for i in facts['items']):raise ValueError('closed statement unknown pending domain')
         return [i['record_key'] for i in facts['items'] if i['kind']=='approved_current_cvp_impact_independently_audited']
+    if facts.get('source_handoff',{}).get('source_slice_mode')==PARAGRAPH_MODE:
+        allowed={'unchanged_cvp_context_requires_complete_current_audit',
+                 'unchanged_unapproved_unconsumed_question_context',
+                 'unchanged_unapproved_unconsumed_policy_relation_context'}
+        if any(i['kind'] not in allowed for i in facts['items']):
+            raise ValueError('paragraph source audit root classification contains unknown domain')
+        roots=[i['record_key'] for i in facts['items']
+               if i['kind']=='unchanged_cvp_context_requires_complete_current_audit']
+        if any(k.split('/',1)[0] not in {'canonical_viewpoints','viewpoint_revisions','viewpoint_claim_links'} for k in roots):
+            raise ValueError('paragraph source audit root has foreign CVP domain')
+        return roots
     if any(x['kind'] not in {'declared_source_group_not_cvp','independently_retained_source_relation','exact_human_logical_retirement','unchanged_unapproved_unconsumed_question_context','unchanged_unapproved_unconsumed_policy_relation_context','unchanged_independently_approved_readonly_claim_context'} for x in facts['items']):
         raise ValueError('source audit root classification contains unknown domain')
     return []

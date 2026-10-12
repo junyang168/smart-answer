@@ -16,6 +16,25 @@ def test_audit_root_domains_do_not_discard_obligations():
     facts['items'][1]['kind']='unknown'
     with pytest.raises(ValueError):impact.audit_record_keys(keys,facts)
 
+@pytest.mark.parametrize('fault',[None,'mode','kind','domain','missing','duplicate'])
+def test_paragraph_pending_roots_require_complete_cvp_audit(fault):
+    keys=['canonical_viewpoints/V','viewpoint_revisions/R','knowledge_relations/internal']
+    facts={'source_handoff':{'source_slice_mode':impact.PARAGRAPH_MODE},
+           'pending_record_keys':keys.copy(),'items':[
+               {'record_key':keys[0],'kind':'unchanged_cvp_context_requires_complete_current_audit'},
+               {'record_key':keys[1],'kind':'unchanged_cvp_context_requires_complete_current_audit'},
+               {'record_key':keys[2],'kind':'unchanged_unapproved_unconsumed_policy_relation_context'}]}
+    if fault=='mode':facts['source_handoff']['source_slice_mode']='foreign'
+    elif fault=='kind':facts['items'][2]['kind']='approved_candidate'
+    elif fault=='domain':facts['items'][2]['kind']='unchanged_cvp_context_requires_complete_current_audit'
+    elif fault=='missing':facts['items'].pop()
+    elif fault=='duplicate':facts['items'][1]=deepcopy(facts['items'][0])
+    old=deepcopy(facts)
+    if fault:
+        with pytest.raises(ValueError):impact.audit_record_keys(keys,facts)
+    else:assert impact.audit_record_keys(keys,facts)==keys[:2]
+    assert facts==old
+
 @pytest.mark.parametrize('fault',[None,'used','raw','unknown','changed_intent','changed_log','foreign_auditor'])
 @pytest.mark.parametrize('corrected',[[],['canonical_viewpoints/V']])
 def test_constructor_recovery_never_retries_model_execution(tmp_path,fault,corrected):

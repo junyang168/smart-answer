@@ -373,6 +373,9 @@ def test_common_sql_paragraph_full_saved_stages_commit_rollback_cache(executable
         viewpoint_ids=['CV-test'] if pending_cvp else [],
         pending_cvp_claim_ids=[],pending_cvp_management_record_keys=[])
     value=store.get_cvp_group(run);all_current={}
+    classified=impact.prepare(store,value)
+    audit_roots=impact.audit_record_keys(classified['pending_record_keys'],classified)
+    assert audit_roots==(['viewpoint_claim_links/VCL-test','viewpoint_revisions/CVR-old'] if pending_cvp else [])
     with store.connect() as conn,conn.cursor() as cursor:
         if not pending_cvp:assert p.assert_issue_resolution(cursor,run,original_issue) is True
         for field in (() if pending_cvp else ('reports','action','correction_used','terminal_refusal')):
