@@ -56,6 +56,8 @@
 | 文档 | 它回答什么 |
 | --- | --- |
 | ★ [CanonicalViewpoint 设计](./20-knowledge/canonical_viewpoint_design.md) | 观点身份、论证路线、观点关系：怎样判断两条主张是同一个观点，以及谁能读什么 |
+| [CVP 生成质量评估设计 v1](./20-knowledge/cvp_generation_quality_design_v1.md) | 生产结案之外怎样评估忠实度、归并、粒度、连接和原文覆盖；设计阶段，非已测结果 |
+| [CVP 生成质量评估流程 v1](./20-knowledge/cvp_generation_quality_workflow_v1.md) | 冻结基线、分层抽样、双向初评、历史复核与只读报告怎样执行 |
 | [Claim 设计](./20-knowledge/claim_design.md) | 单篇之内的主张：结构、怎样产生、与证据步骤的关系 |
 | [跨讲道主张比较与双模型归并流程 v1](./20-knowledge/cross_sermon_relation_workflow_v1.md) | 不同讲道的主张怎样比较成关系 |
 | [母题—子专题—篇章段落自动发现与双模型复核 v1](./20-knowledge/topic_structure_discovery_workflow_v1.md) | 主题层级怎样从主张与关系里长出来 |
