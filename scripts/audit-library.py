@@ -1514,9 +1514,13 @@ class IndependentModel:
         timeout: int = 300,
         cache_dir: Path | None = None,
         preserve_full_context: bool = False,
+        durable_once: bool = False,
     ) -> None:
         self.model = model
         self.preserve_full_context = preserve_full_context
+        self.durable_once = durable_once
+        if durable_once and cache_dir is None:
+            raise ValueError('independent revisit requires durable request/result directory')
         self.api_key = api_key
         self.timeout = timeout
         self.calls = 0
@@ -1539,6 +1543,25 @@ class IndependentModel:
     def judge(self, prompt: str, schema: dict[str, Any]) -> dict[str, Any]:
         cached = self._cache_path(prompt)
         if cached is not None and cached.is_file():
+            if self.durable_once:
+                intent = json.loads(cached.with_name(cached.stem + '.call-intent.json').read_text())
+                provider = json.loads(cached.with_name(cached.stem + '.provider-response.json').read_text())
+                if (intent.get('model') != self.model or intent.get('prompt') != prompt
+                        or intent.get('schema') != schema or provider.get('request') != intent):
+                    raise ValueError('independent revisit exact cached request identity drift')
+                raw = provider['provider_response']
+                block = (raw.get('promptFeedback') or {}).get('blockReason')
+                candidates = raw.get('candidates') or []
+                if not block and len(candidates) == 1 and candidates[0].get('finishReason') == 'SAFETY':
+                    block = 'SAFETY'
+                saved = json.loads(cached.read_text())
+                if block:
+                    if saved.get('verdict') != 'blocked':
+                        raise ValueError('independent revisit cannot turn provider block into approval')
+                else:
+                    actual = json.loads(raw['candidates'][0]['content']['parts'][0]['text'])
+                    if saved != actual:
+                        raise ValueError('independent revisit raw/cache response drift')
             try:
                 with self._lock:
                     self.cached += 1
@@ -1559,9 +1582,20 @@ class IndependentModel:
                 "responseSchema": schema,
             },
         }).encode("utf-8")
+        if self.durable_once:
+            from backend.pipeline.viewpoint_resolution_runtime import write_immutable
+            intent = cached.with_name(cached.stem + '.call-intent.json')
+            request_payload = {'model': self.model, 'prompt': prompt, 'schema': schema,
+                               'request_bytes': len(body), 'request_sha256': hashlib.sha256(body).hexdigest(),
+                               'maximum_calls': 1, 'automatic_retry': False}
+            if len(body) > 600000:
+                raise ValueError('independent revisit request exceeds 600000 bytes')
+            if intent.exists():
+                raise ValueError('independent revisit outcome unknown; no automatic resend')
+            write_immutable(intent, request_payload)
         url = GEMINI_ENDPOINT.format(model=self.model) + f"?key={self.api_key}"
         last_error = ""
-        for attempt in range(3):
+        for attempt in range(1 if self.durable_once else 3):
             request = urllib.request.Request(
                 url, data=body, headers={"Content-Type": "application/json"}
             )
@@ -1570,6 +1604,9 @@ class IndependentModel:
                     request, timeout=self.timeout, context=self.ssl_context
                 ) as response:
                     parsed = json.loads(response.read().decode("utf-8"))
+                if self.durable_once:
+                    write_immutable(cached.with_name(cached.stem + '.provider-response.json'),
+                                    {'request': request_payload, 'provider_response': parsed})
                 with self._lock:
                     self.calls += 1
                 blocked = (parsed.get("promptFeedback") or {}).get("blockReason")
@@ -1615,6 +1652,10 @@ class IndependentModel:
             # 抽樣上崩掉。
             except (OSError, KeyError, IndexError, ValueError) as error:
                 last_error = str(error)
+                if self.durable_once:
+                    write_immutable(cached.with_name(cached.stem + '.failure.json'),
+                                    {'request': request_payload, 'error': last_error, 'outcome_unknown': True})
+                    break
                 time.sleep(2 * (attempt + 1))
         return {"verdict": "model_error", "reason": last_error[:400]}
 

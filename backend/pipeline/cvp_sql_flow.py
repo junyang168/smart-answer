@@ -933,7 +933,7 @@ def main(argv=None):
     parser.add_argument('--pause-after-group',type=int,help='Narrow this invocation for acceptance; never changes the immutable execution boundary')
     parser.add_argument('--integrate-batch-candidates',action='store_true',
                         help='Explicit new-group identity integration; never upgrades saved legacy answers')
-    parser.add_argument('--action',choices=('group','audit-run','source-pending-check','source-impact-complete','source','source-write-slice','relation-retire','claim-retire','owner-link','link-target','link-retarget','link-retire','link-replace','link-representation','cvp-merge'),default='group')
+    parser.add_argument('--action',choices=('group','independent-revisit','audit-run','source-pending-check','source-impact-complete','source','source-write-slice','relation-retire','claim-retire','owner-link','link-target','link-retarget','link-retire','link-replace','link-representation','cvp-merge'),default='group')
     parser.add_argument('--claim-first',action='store_true',
                         help='Finish only the original bounded Claim/Evidence action; keep all CVPs pending and stop before CVP/group execution')
     parser.add_argument('--candidate-viewpoint-id',action='append',default=[],
@@ -1043,6 +1043,28 @@ def main(argv=None):
             or args.stop_after_group is None or args.pause_after_group > args.stop_after_group):
         raise ValueError('acceptance pause must narrow an explicit original execution boundary')
     invocation_limit = args.pause_after_group or args.stop_after_group
+    if args.action == 'independent-revisit':
+        if not args.run_id or not args.direction or args.dry_run == args.execute:
+            raise ValueError('independent revisit requires exact run/direction and dry-run or execute')
+        saved = store.get_cvp_group(args.run_id)
+        if (not saved or saved['campaign_sha256'] != args.sql_campaign
+                or invocation_limit is None or saved['sequence'] > invocation_limit):
+            raise ValueError('independent revisit outside original campaign boundary')
+        from backend.pipeline.cvp_independent_revisit import prepare, execute, validate_direction
+        from backend.pipeline.source_reconciliation_runtime import maintenance_lock
+        with maintenance_lock():
+            if args.dry_run:
+                packet = prepare(store, saved)
+                validate_direction(read_artifact(args.direction), packet)
+                stage_event('independent_revisit_prepared_no_calls_no_writes',
+                            run_id=args.run_id, packet_sha256=sha256_json(packet),
+                            targets=len(packet['targets']))
+            else:
+                result = execute(store, saved, authorization=binding(args.direction), root=args.output_root)
+                stage_event('independent_revisit_targets_assessed',run_id=args.run_id,
+                            independently_supported=result['targets_independently_supported'],
+                            group_complete=False, registry_writes=0)
+        return 0
     if args.action == 'link-target':
         if args.dry_run == args.execute or not args.link_id or not args.run_id:
             raise ValueError('link-target requires dry-run or explicitly authorized review, run/link IDs')
