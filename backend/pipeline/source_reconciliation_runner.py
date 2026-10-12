@@ -194,7 +194,8 @@ def stage_adapter(adapter, packet, path, *, saved=None):
     if not any(p.exists() for p in blockers):
         limit, _ = request_limit(selected, path)
         if getattr(selected, '_shared_record_payload', False):
-            for name in ('shared_keys_copy', 'shared_keys_v2_copy', 'shared_values_copy', 'shared_shapes_copy', 'shared_shapes_v2_copy'):
+            for name in ('shared_keys_copy', 'shared_keys_v2_copy', 'shared_values_copy', 'shared_shapes_copy', 'shared_shapes_v2_copy',
+                         'shared_shapes_v3_copy', 'shared_shapes_v4_copy'):
                 if selected.request_bytes(packet) <= limit: break
                 factory = getattr(selected, name, None)
                 if callable(factory):

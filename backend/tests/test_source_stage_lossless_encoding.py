@@ -66,6 +66,23 @@ def test_under_limit_preserves_original_wire(tmp_path):
     assert chosen.generation_config_sha256 == original.generation_config_sha256
 
 
+def test_unreserved_source_stage_uses_existing_string_piece_codec_without_loss(tmp_path):
+    packet = {'rows': [{'statement': 'same long exact prefix ' * 12 + str(i) + ' same exact suffix' * 12,
+                        'id': f'C{i}', 'values': [i, None, False, {'nested': [i, 'retained']}]}
+                       for i in range(80)]}
+    adapter = model_adapter('proposal')
+    original = response_adapter(adapter)
+    smaller = original.shared_shapes_v3_copy()
+    assert smaller.request_bytes(packet) < original.shared_shapes_v2_copy().request_bytes(packet)
+    adapter.max_request_bytes = smaller.request_bytes(packet)
+    chosen = r.stage_adapter(adapter, packet, tmp_path/'proposal.raw.json')
+    assert chosen.request_bytes(packet) <= adapter.max_request_bytes
+    proof = chosen.request_encoding_proof(packet)
+    assert proof['exact_roundtrip_verified']
+    assert proof['semantic_payload_sha256'] == proof['restored_payload_sha256'] == r.sha256_json(packet)
+    assert chosen.prompt_sha256 == original.prompt_sha256
+
+
 @pytest.mark.skipif(os.getenv('WKP_G094_ENCODING_READONLY') != '1', reason='explicit saved read-only acceptance')
 def test_saved_g094_correction_exact_roundtrip_no_call_or_write():
     root = Path('/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/staging/cvp-production-357/campaign-sql-20261008-v1-from-g059/execution/CVPG-0490be727b9eef01497d20f558f7b437fc7beacd434324c8d71c1a82ce024c83/claim-issues/670ae7487f38ca391a0b3ca9c1a7a5e42814a32d14da50ff4e951299559bfdd0/scope-amendment-once/action/CVPA-949e353397967feb493ede9b46da08843748930954cdd9338ca28088ca1480c5')
