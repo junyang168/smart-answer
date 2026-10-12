@@ -120,23 +120,34 @@ def empty_statement_initial_draft(materials, proposal):
     pins = {(p['collection'], p['object_id']): p['pin'] for p in materials['sql_scope']['read_pins']}
     permissions = [p for p in materials['manifest']['permissions']
                    if c.key(p['collection'], p['object_id']) == key]
-    retained_link_diagnostic = (assessment.cause == 'cvp_link'
+    retained_claim_diagnostic = (assessment.cause in {'cvp_link', 'already_sufficient'}
         and sum(d.record_key == key and d.action == 'retain' for d in proposal.dispositions) == 1)
     if (old is None or assessment.issue_id != issue.issue_id
-            or assessment.cause not in {'claim_statement', 'cvp_link'}
-            or (assessment.cause == 'cvp_link' and not retained_link_diagnostic)
+            or assessment.cause not in {'claim_statement', 'cvp_link', 'already_sufficient'}
+            or (assessment.cause in {'cvp_link', 'already_sufficient'} and not retained_claim_diagnostic)
             or old.get('revision', 1) != issue.claim_revision
             or c.sha256_json({k:v for k,v in old.items() if k != 'revision'}) != issue.claim_sha256
             or pins.get(('claims', issue.claim_id)) != [issue.claim_revision, issue.claim_sha256, False]
             or old.get('review_status') in c.HUMAN_HOLDS | {'human_hold', 'rejected', 'withheld_unreviewed'}
             or len(permissions) != 1 or permissions[0].get('create')
             or 'statement' not in permissions[0]['fields']
-            or (not retained_link_diagnostic
+            or (not retained_claim_diagnostic
                 and sum(d.record_key == key and d.action == 'unresolved' for d in proposal.dispositions) != 1)):
         raise ValueError('empty statement draft identity/permission/current pin mismatch')
-    if retained_link_diagnostic:
+    if retained_claim_diagnostic:
         if not any(d.action == 'unresolved' for d in proposal.dispositions):
             raise ValueError('retained Claim link diagnostic requires a pending management subject')
+        if assessment.cause == 'already_sufficient':
+            return {'schema_version': 'claim_retained_source_initial_diagnostic_v1',
+                'claim_id': issue.claim_id, 'issue_id': issue.issue_id,
+                'content_write_authority': False, 'mandatory_original_unique_correction': True,
+                'explanation': 'The proposer retained the Claim and Evidence as sufficient, but disclosed '
+                    'a separate unresolved consumer. Review the exact original finding, full own source '
+                    'and ALL unchanged consumers in the original independent initial review. No Claim '
+                    'postimage is required merely to diagnose retention. This is not source approval, '
+                    'consumer resolution or write authority: unresolved consumers remain unapproved, '
+                    'cannot be edited without permission, and strict final/package/SQL/completion gates '
+                    'remain mandatory. Preserve the original single correction budget and raw decisions.'}
         return {'schema_version': 'claim_retained_link_initial_diagnostic_v1',
             'claim_id': issue.claim_id, 'issue_id': issue.issue_id,
             'content_write_authority': False, 'mandatory_original_unique_correction': True,
