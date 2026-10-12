@@ -607,6 +607,37 @@ def retained_impact_context(frozen, proposal, post):
             'They grant no relation/route/identity mutation, new membership approval or completion waiver.'}
 
 
+def statement_repair_for_binding_diagnosis(frozen, proposal, before, post, assessment, issue):
+    """Root cause is not the authorized operation; never rewrite the assessment.
+
+    A binding deficiency can be addressed by a narrower statement instead of
+    promoting its Evidence. Only an explicit statement/occurrence permission
+    and completely unchanged Evidence/fragment graph permit this route.
+    The actual full Claim postimage still needs independent terminal approval.
+    """
+    k=c.key('claims',issue.claim_id)
+    if assessment.cause!='evidence_binding' or before[k].get('statement')==post[k].get('statement'):
+        return False
+    permissions=[p for p in frozen['manifest']['permissions']
+                 if not p['create'] and c.key(p['collection'],p['object_id'])==k]
+    changed={f for f in set(before[k])|set(post[k])
+             if before[k].get(f)!=post[k].get(f)}-c.PROVENANCE-{'revision'}
+    candidates=[r for r in proposal.records if r.key==k]
+    dispositions=[d for d in proposal.dispositions if d.record_key==k]
+    if (len(permissions)!=1 or 'statement' not in permissions[0]['fields']
+            or len(candidates)!=1 or candidates[0].payload!=post[k]
+            or len(dispositions)!=1 or dispositions[0].action!='update'
+            or not changed<= {'statement','occurrences'}
+            or not changed<=set(permissions[0]['fields'])
+            or before[k].get('review_status') in HOLDS
+            or any(post.get(r)!=v for r,v in before.items()
+                   if r.startswith(('evidence_steps/','source_fragments/','source_documents/')))
+            or any(r not in before for r in post
+                   if r.startswith(('evidence_steps/','source_fragments/','source_documents/')))):
+        raise ValueError('binding diagnosis cannot rewrite Claim without exact proposed update/permission/unchanged Evidence graph')
+    return True
+
+
 def validate_resolution(frozen, proposal, post, *, review_only=False):
     proposal = Proposal.model_validate(proposal.model_dump())
     before = c.index(frozen["before_records"])
@@ -630,7 +661,8 @@ def validate_resolution(frozen, proposal, post, *, review_only=False):
             raise ValueError("source/attribution uncertainty needs content owner")
         k = c.key("claims", issue.claim_id)
         changed_statement = any(before[k].get(f) != post[k].get(f) for f in ("statement", "claim_type", "attribution", "discourse_mode", "scripture_refs"))
-        if changed_statement and a.cause != "claim_statement":
+        statement_route=statement_repair_for_binding_diagnosis(frozen,proposal,before,post,a,issue)
+        if changed_statement and a.cause != "claim_statement" and not statement_route:
             raise ValueError("Evidence/link repair cannot rewrite the Claim meaning")
         if a.cause in {"already_sufficient", "cvp_link"} and post[k] != before[k]:
             raise ValueError("correct Claim must be retained")
@@ -675,7 +707,7 @@ def validate_resolution(frozen, proposal, post, *, review_only=False):
                     for f in bound_fragments([e], lambda fid: post[c.key('source_fragments', fid)])
                     for cite in a.citations) for e in qualification_only)
             else:
-                represented=all(bound_citations) if a.cause=='evidence_binding' else any(bound_citations)
+                represented=all(bound_citations) if a.cause=='evidence_binding' and not statement_route else any(bound_citations)
             if not represented and a.cause=='evidence_binding' and context.get('complete_input_repair'):
                 from backend.pipeline.claim_citation_purpose_review import items
                 purposes=items(frozen,proposal,post)

@@ -156,3 +156,47 @@ def test_actual_g149_saved_provenance_recovery_readonly(tmp_path):
     with pytest.raises(ValueError):r.packet(root,changed,authorization=binding(tmp_path/'direction.json'))
     assert store.get_cvp_group(frozen['sql_scope']['run_id'])==group
     assert all(p.read_bytes()==b for p,b in files.items())
+
+
+def test_actual_saved_binding_diagnosis_statement_operation(tmp_path):
+    import os
+    if os.environ.get('WKP_G149_READONLY')!='1':pytest.skip('explicit saved SQL/source readonly acceptance')
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    from backend.pipeline.cvp_sql_actions import ScopedSourceModelStages,decoded_pins
+    from backend.pipeline.source_reconciliation_runner import effective_proposal,validate_raw
+    from backend.pipeline import source_reconciliation as c
+    root=Path('/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/staging/cvp-production-357/campaign-sql-20261008-v1-from-g059/execution/CVPG-a85c3d6eb392f97e945d88a18fbf33a76ed136eefefbb4554759e82e0e26deb2/claim-issues/c10ca41b59907553e2d5e889de766d755c22402fa25bd34444b9a19ade492256/action/CVPA-2a5ec68080812cfefbc8721693925c22a7f353b1e11bf8e7159ef03184499db2')
+    frozen=body(read(root/'scoped-materials.json'));store=PostgresKnowledgeStore()
+    group=store.get_cvp_group(frozen['sql_scope']['run_id'])
+    files={p:p.read_bytes() for p in root.iterdir() if p.is_file()}
+    stages=ScopedSourceModelStages(root,None,store,decoded_pins(frozen['sql_scope']['read_pins']))
+    stages.guard(frozen);packet=r.packet(root,frozen)
+    saved=body(read(root/(r.STAGE+'.packet.json')))
+    assert saved==packet  # Original wire order, not reconstructed SQL JSONB order.
+    raw=validate_raw(root,r.STAGE,saved);proposal=effective_proposal(frozen,raw['response'])
+    original=proposal.model_dump()
+    final=r.final_packet(root,frozen,proposal,raw,packet)
+    assert final['claim_diagnosis_operation_scope']['automatic_content_approval'] is False
+    assert proposal.model_dump()==original
+    assert proposal.claim_assessments[0].cause=='evidence_binding'
+    c.validate_proposal(frozen,proposal)
+    from backend.pipeline.claim_issue_management import statement_repair_for_binding_diagnosis,Issue
+    before=c.index(frozen['before_records']);post=c.validate_proposal(frozen,proposal)
+    issue=Issue.model_validate(frozen['claim_issue_context']['issues'][0]);a=proposal.claim_assessments[0]
+    for fault in ('permission','evidence','fragment','type','hold','foreign_fragment'):
+        f=deepcopy(frozen);b=deepcopy(before);p=deepcopy(post);k=c.key('claims',issue.claim_id)
+        if fault=='permission':
+            next(v for v in f['manifest']['permissions'] if c.key(v['collection'],v['object_id'])==k)['fields'].remove('statement')
+        elif fault=='hold':b[k]['review_status']='human_review_required'
+        elif fault=='type':p[k]['claim_type']='theological_judgment'
+        elif fault=='foreign_fragment':p['source_fragments/foreign']={}
+        else:
+            key=next(key for key in p if key.startswith('evidence_steps/' if fault=='evidence' else 'source_fragments/'))
+            p[key]['statement' if fault=='evidence' else 'verbatim_excerpt']='changed'
+        with pytest.raises(ValueError):statement_repair_for_binding_diagnosis(f,proposal,b,p,a,issue)
+    rejected={d.record_key:True for d in proposal.dispositions}
+    rejected[next(r.key for r in proposal.records)]=False
+    response={'verdicts':[{'record_key':k,'approved':v,'problems':[] if v else ['unsupported'], 'reason':'synthetic gate test'} for k,v in rejected.items()]}
+    assert c.validate_review(final,response) is False
+    assert store.get_cvp_group(frozen['sql_scope']['run_id'])==group
+    assert all(p.read_bytes()==b for p,b in files.items())

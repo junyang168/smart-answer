@@ -151,6 +151,24 @@ def test_statement_diagnosis_context_is_not_automatically_evidence(issue_setup,t
         with pytest.raises(ValueError,match='eligible bound'):m.validate_resolution(frozen,proposal,post)
 
 
+def test_binding_diagnosis_can_use_permitted_statement_operation_without_reclassifying(issue_setup,tmp_path):
+    _,frozen,issue=materials(issue_setup,tmp_path)
+    frozen['after'][0]['paragraphs']['S0002']={'text':'另一句说明旧词过强。'}
+    proposal=retain_proposal(frozen,issue,'evidence_binding')
+    proposal.claim_assessments[0].citations.append(m.Citation(
+        source_id='SRC-test',paragraph_key='S0002',exact_quote='另一句说明旧词过强。'))
+    post=c.index(frozen['before_records'])
+    post['claims/CL-test']['statement']='甲属于假设。'
+    proposal.records=[c.Row(collection='claims',object_id='CL-test',payload=deepcopy(post['claims/CL-test']))]
+    next(d for d in proposal.dispositions if d.record_key=='claims/CL-test').action='update'
+    original=proposal.model_dump()
+    assert m.validate_resolution(frozen,proposal,post)==post
+    assert proposal.model_dump()==original
+    post['evidence_steps/E-test']['statement']='different'
+    with pytest.raises(ValueError,match='unchanged Evidence graph'):
+        m.validate_resolution(frozen,proposal,post)
+
+
 def test_evidence_repair_adds_actual_own_quote_keeps_old_context_and_statement(issue_setup,tmp_path):
     _,states,report,policy_binding=issue_setup
     own=put(tmp_path/'complete-own-source.json',{'script':[{'text':'甲是假设。'},{'text':'甲不是断言。'}]})

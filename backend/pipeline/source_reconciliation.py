@@ -1141,6 +1141,21 @@ def review_packet(frozen: dict, proposal: Proposal, *, review_only: bool = False
         from backend.pipeline.claim_citation_purpose_review import receipt
         value=receipt(frozen,proposal,post)
         if value:result['claim_citation_purpose_review']=value
+    if frozen.get('claim_issue_context'):
+        from backend.pipeline.claim_issue_management import Issue, statement_repair_for_binding_diagnosis
+        issues={i.issue_id:i for i in map(Issue.model_validate,frozen['claim_issue_context']['issues'])}
+        routed=[a.issue_id for a in proposal.claim_assessments
+                if statement_repair_for_binding_diagnosis(frozen,proposal,before,post,a,issues[a.issue_id])]
+        if routed:
+            result['claim_diagnosis_operation_scope']={
+                'schema_version':'claim_binding_diagnosis_statement_operation_v1',
+                'issue_ids':routed,'original_assessments_changed':False,
+                'evidence_graph_unchanged':True,'automatic_content_approval':False,
+                'explanation':'Original evidence_binding is the diagnosed root cause, not a binding-write instruction. '
+                    'The actual candidate instead changes the explicitly permitted statement/occurrences. '
+                    'All Evidence/fragment/source rows are unchanged; unbound own-body diagnostic citations are not new Evidence. '
+                    'Independently judge every complete Claim postimage against its actual eligible bound Evidence and full own source. '
+                    'Reject unsupported narrowing or any missing teaching; no qualification promotion or inherited approval.'}
     from backend.pipeline.claim_evidence_completion import review_items
     withdrawals=review_items(frozen)
     if withdrawals:result['knowledge_relation_withdrawal_review']=withdrawals
