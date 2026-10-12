@@ -1,7 +1,7 @@
 {
   "schema_version": "wang_cvp_merge_management_v1",
   "authorization_id": "owner-20261012-cvp-management-merge",
-  "authorization_quote": "将两个 CVP 和附带的 claim 全交给 AI 去合并，就像生成 CVP 的流程一样；实现通用 merge operation，仔细考虑 end to end process。",
+  "authorization_quote": "好，按你实现吧，一定要仔细地考虑到 end to end 的 process，不要写得一大堆 bug。",
   "human_content_approval": false,
   "required_direction": "exact current CVP generations and owner requested complete proposition",
   "allowed_operations": ["new complete CVP", "merge old identities with historical redirect", "replace all affected Claim links after independent role/span/evidence review", "explicitly reviewed affected relation reconnection/internalization/withdrawal"],
