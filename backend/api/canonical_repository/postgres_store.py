@@ -3837,12 +3837,20 @@ class PostgresKnowledgeStore:
             raise ChangeSetConflict("full audit artifact drift")
         if json.loads(Path(audit_binding["path"]).read_text()) != audit:
             raise ChangeSetConflict("completion supplied a different audit body")
+        relation_profile_proof=None
+        if audit.get('meta',{}).get('unchanged_relation_profile_reuse'):
+            from backend.pipeline.viewpoint_relation_profile_reuse import validate,_proof
+            validate(audit)  # Complete provider/source checks outside the short transaction.
+            relation_profile_proof=_proof(audit)
         with self.connect() as conn, conn.cursor() as cursor:
             cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s AND stage='cvp_group' FOR UPDATE",(run_id,))
             row = cursor.fetchone()
             if not row or row[0].get("checkpoint") not in {"applied","audited"}:
                 raise ChangeSetConflict("group has no committed CVP write")
             value = row[0]
+            if relation_profile_proof is not None:
+                from backend.pipeline.viewpoint_relation_profile_reuse import validate_sql_parent
+                validate_sql_parent(audit,{**value,'run_id':run_id},audit_binding,proof=relation_profile_proof)
             statement_resolution=None
             if retained_impacts_resolution_path is not None:
                 from backend.pipeline.viewpoint_resolution_runtime import read_artifact

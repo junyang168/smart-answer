@@ -114,6 +114,9 @@ def verify_saved_full_audit(audit_path, *, layers=('3','4')):
     settings=dotenv_values(Path(__file__).resolve().parents[2]/'.env')
     cache_root=Path(settings['DATA_BASE_DIR'])/'wang-knowledge-platform/staging/reports/library-audit/.judgements'
     audit=read_artifact(audit_path);bindings=[binding(audit_path)]
+    if audit.get('meta',{}).get('unchanged_relation_profile_reuse'):
+        from backend.pipeline.viewpoint_relation_profile_reuse import validate as validate_role_profile
+        bindings.extend(validate_role_profile(audit))
     if audit['meta']['model']!='gemini-3.8-flash':raise ValueError('foreign saved audit')
     if audit['meta'].get(KEY):
         # Authenticate the complete derived assessment, then independently
@@ -141,23 +144,26 @@ def verify_saved_full_audit(audit_path, *, layers=('3','4')):
 
 def capture_for_audit(audit, layer, identity):
     version = audit.get('meta', {}).get('semantic_contract_version')
+    if layer=='4' and audit.get('meta',{}).get('unchanged_relation_profile_reuse'):
+        from backend.pipeline.viewpoint_relation_profile_reuse import profile
+        version=profile(audit,identity,version)
     if version is None:
         return capture(layer, identity)
-    from backend.pipeline.viewpoint_semantic_contract import CONTRACT_PATH, CONTEXTUAL_SEMANTICS, COMPONENT_ROLES, COMPONENT_PATH, RELATION_ROLES, RELATION_PATH
-    if (version not in {CONTEXTUAL_SEMANTICS,COMPONENT_ROLES,RELATION_ROLES} or
+    from backend.pipeline.viewpoint_semantic_contract import CONTRACT_PATH, CONTEXTUAL_SEMANTICS, COMPONENT_ROLES, COMPONENT_PATH, RELATION_ROLES, RELATION_PATH, SCOPED_RELATION_ROLES
+    if (version not in {CONTEXTUAL_SEMANTICS,COMPONENT_ROLES,RELATION_ROLES,SCOPED_RELATION_ROLES} or
             audit['meta'].get('semantic_contract_file_sha256') != hashlib.sha256(CONTRACT_PATH.read_bytes()).hexdigest()):
         raise ValueError('saved audit semantic contract identity/physical SHA drift')
-    if (version in {COMPONENT_ROLES,RELATION_ROLES} and audit['meta'].get('component_role_contract_file_sha256')
+    if (version in {COMPONENT_ROLES,RELATION_ROLES,SCOPED_RELATION_ROLES} and audit['meta'].get('component_role_contract_file_sha256')
             !=hashlib.sha256(COMPONENT_PATH.read_bytes()).hexdigest()):
         raise ValueError('saved audit component role contract identity/physical SHA drift')
-    if (version==RELATION_ROLES and audit['meta'].get('relation_role_contract_file_sha256')
+    if (version in {RELATION_ROLES,SCOPED_RELATION_ROLES} and audit['meta'].get('relation_role_contract_file_sha256')
             !=hashlib.sha256(RELATION_PATH.read_bytes()).hexdigest()):
         raise ValueError('saved audit relation role contract identity/physical SHA drift')
     scope=audit.get('meta',{}).get('registry_read_scope')
     return capture(layer, identity, semantic_contract_version=version, **({'sql_scope':scope} if scope else {}))
 
 
-def capture(layer, identity, *, semantic_contract_version='legacy_v1',sql_scope=None):
+def capture(layer, identity, *, semantic_contract_version='legacy_v1',sql_scope=None,with_pins=False):
     import importlib.util
     import sys
     project = Path(__file__).resolve().parents[2]
@@ -183,7 +189,12 @@ def capture(layer, identity, *, semantic_contract_version='legacy_v1',sql_scope=
     report = fn(store, sources, model, None, random.Random(0), workers=1, only={identity}, **kwargs)
     if len(report['results']) != 1 or not hasattr(model, 'prompt'):
         raise ValueError('missing unique current full-source audit input')
-    return model.prompt, model.schema, [binding(f.path) for f in sources._files.values() if f]
+    result=(model.prompt, model.schema, [binding(f.path) for f in sources._files.values() if f])
+    if with_pins:
+        if sql_scope is None:raise ValueError('exact current target pins require scoped independent reader')
+        return (*result,[{'collection':k[0],'object_id':k[1],'pin':v} for k,v in sorted(store.read_pins.items())],
+                [r['payload'] for r in store.collection('viewpoint_claim_links')])
+    return result
 
 def derive(original, proofs):
     result = deepcopy(original)

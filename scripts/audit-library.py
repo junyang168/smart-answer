@@ -77,6 +77,7 @@ SEMANTIC_RULES_PATH = REPO_ROOT / "config" / "wang_cvp_contextual_semantics_v2.m
 COMPONENT_SEMANTICS = "wang_cvp_component_roles_v1"
 COMPONENT_RULES_PATH = SEMANTIC_RULES_PATH.with_name(COMPONENT_SEMANTICS + '.md')
 RELATION_SEMANTICS = 'wang_cvp_relation_roles_v1'
+SCOPED_RELATION_SEMANTICS = 'wang_cvp_relation_roles_scoped_v1'
 RELATION_RULES_PATH = SEMANTIC_RULES_PATH.with_name(RELATION_SEMANTICS + '.md')
 
 
@@ -2159,7 +2160,7 @@ def audit_viewpoints(
                 f"    連接 ID：{link.get('viewpoint_claim_link_id')}；Claim 版本：{link.get('pinned_claim_revision')}\n"
                 f"    精確區間：{json.dumps(locator.get('canonical_spans') or [], ensure_ascii=False)}\n"
                 f"    自身證據綁定：{json.dumps(link.get('evidence_bindings') or [], ensure_ascii=False)}\n"
-            ) if semantic_contract_version in {COMPONENT_SEMANTICS, RELATION_SEMANTICS} else ''
+            ) if semantic_contract_version in {COMPONENT_SEMANTICS, RELATION_SEMANTICS, SCOPED_RELATION_SEMANTICS} else ''
             blocks.append(
                 f"- 主張 [{claim_id}]（連結類型 {link.get('link_type')}）\n"
                 f"{component_details}"
@@ -2167,7 +2168,14 @@ def audit_viewpoints(
                 f"    主張全文：{str(claim.get('statement') or '（庫裡找不到這條主張）').strip()}\n"
                 f"{source_block}"
             )
-        prompt = _viewpoint_prompt(viewpoint_id, revision, blocks, semantic_contract_version=semantic_contract_version)
+        target_version = semantic_contract_version
+        if target_version == SCOPED_RELATION_SEMANTICS:
+            # An irrelevant rule rollout is not a reason to re-judge completed
+            # unchanged equivalent/support targets or discard their once history.
+            target_version = (RELATION_SEMANTICS if any(l.get('link_type') not in
+                {'equivalent_full','equivalent_component','supports'} for l in links_by_viewpoint[viewpoint_id])
+                else COMPONENT_SEMANTICS)
+        prompt = _viewpoint_prompt(viewpoint_id, revision, blocks, semantic_contract_version=target_version)
         prior = (reconsiderations or {}).get(viewpoint_id)
         if prior:
             if prior.get('revision_id') != viewpoint.get('current_revision_id'):
@@ -2654,6 +2662,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--preserve-full-context',action='store_true',help='Return the full-source content block; do not retry shortened inputs')
     parser.add_argument('--component-roles', action='store_true', help='Versioned conclusion/reason component semantics; preserves historical audit prompts')
     parser.add_argument('--relation-roles',action='store_true',help='Complete nonmember role contract; independently versioned, no historic prompt upgrade')
+    parser.add_argument('--scoped-relation-roles',action='store_true',help='Full roles only for targets using those roles; unchanged equivalent/support prompt retained')
     parser.add_argument(
         "--scope",
         choices=("current-run", "all"),
@@ -2795,7 +2804,7 @@ def main(argv: list[str] | None = None) -> int:
             progress,
             {x.strip() for x in args.viewpoint_ids.split(",") if x.strip()} or None,
             reconsiderations,
-            semantic_contract_version=RELATION_SEMANTICS if args.relation_roles else (COMPONENT_SEMANTICS if args.component_roles else CONTEXTUAL_SEMANTICS),
+            semantic_contract_version=SCOPED_RELATION_SEMANTICS if args.scoped_relation_roles else (RELATION_SEMANTICS if args.relation_roles else (COMPONENT_SEMANTICS if args.component_roles else CONTEXTUAL_SEMANTICS)),
         )
 
     meta = {
@@ -2803,7 +2812,7 @@ def main(argv: list[str] | None = None) -> int:
         "model": args.model if model else "未使用",
         "seed": args.seed,
         "scope": args.scope,
-        "semantic_contract_version": RELATION_SEMANTICS if args.relation_roles else (COMPONENT_SEMANTICS if args.component_roles else CONTEXTUAL_SEMANTICS),
+        "semantic_contract_version": SCOPED_RELATION_SEMANTICS if args.scoped_relation_roles else (RELATION_SEMANTICS if args.relation_roles else (COMPONENT_SEMANTICS if args.component_roles else CONTEXTUAL_SEMANTICS)),
         "semantic_contract_file_sha256": hashlib.sha256(SEMANTIC_RULES_PATH.read_bytes()).hexdigest(),
         "sources": len(sources.in_scope) if sources.in_scope is not None else len(sources.documents),
         "sources_out_of_scope": len(sources.out_of_scope),
@@ -2816,9 +2825,9 @@ def main(argv: list[str] | None = None) -> int:
         "claims": len(store.collection("claims")),
         "viewpoints": len(store.collection("canonical_viewpoints")),
     }
-    if args.component_roles or args.relation_roles:
+    if args.component_roles or args.relation_roles or args.scoped_relation_roles:
         meta['component_role_contract_file_sha256'] = hashlib.sha256(COMPONENT_RULES_PATH.read_bytes()).hexdigest()
-    if args.relation_roles:
+    if args.relation_roles or args.scoped_relation_roles:
         meta['relation_role_contract_file_sha256'] = hashlib.sha256(RELATION_RULES_PATH.read_bytes()).hexdigest()
     if reconsidered_binding:
         if hashlib.sha256(args.reconsider_audit.read_bytes()).hexdigest() != reconsidered_binding['file_sha256']:

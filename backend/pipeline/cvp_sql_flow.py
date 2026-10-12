@@ -661,14 +661,16 @@ def run_group(store, definition, group, row, *, root):
         intent=audit_dir/'audit-intent.json'
         relation_profile=audit_dir/'relation-role-input-profile.json'
         if not intent.exists():
-            from backend.pipeline.viewpoint_semantic_contract import RELATION_ROLES,RELATION_PATH
-            write_immutable(relation_profile,{'version':RELATION_ROLES,'contract':binding(RELATION_PATH)})
+            from backend.pipeline.viewpoint_semantic_contract import SCOPED_RELATION_ROLES,RELATION_PATH
+            write_immutable(relation_profile,{'version':SCOPED_RELATION_ROLES,'contract':binding(RELATION_PATH)})
         relation_args=[]
         if relation_profile.exists():
-            from backend.pipeline.viewpoint_semantic_contract import RELATION_ROLES,RELATION_PATH
-            if read_artifact(relation_profile)!={'version':RELATION_ROLES,'contract':binding(RELATION_PATH)}:
+            from backend.pipeline.viewpoint_semantic_contract import RELATION_ROLES,SCOPED_RELATION_ROLES,RELATION_PATH
+            profile=read_artifact(relation_profile)
+            if profile not in ({'version':RELATION_ROLES,'contract':binding(RELATION_PATH)},
+                               {'version':SCOPED_RELATION_ROLES,'contract':binding(RELATION_PATH)}):
                 raise ValueError('independent audit relation role profile drift')
-            relation_args=['--relation-roles']
+            relation_args=['--scoped-relation-roles' if profile['version']==SCOPED_RELATION_ROLES else '--relation-roles']
         expected_intent={'claim_ids':group['claim_ids'],'viewpoint_ids':views,'read_pins':pin_rows(pins(current)),
                          'model':'gemini-3.8-flash','workers':2,'automatic_retry':False}
         from backend.pipeline.cvp_source_impact_resolution import audit_record_keys,validate_pre_model_startup_recovery
@@ -688,6 +690,8 @@ def run_group(store, definition, group, row, *, root):
                        cwd=PROJECT,check=True,env={**os.environ,'KNOWLEDGE_DATABASE_URL':store.database_url})
     from backend.pipeline.viewpoint_content_blocked_fallback import apply as content_fallback
     validate_transaction_audit(read_artifact(audit_path),group['claim_ids'],views)
+    from backend.pipeline.viewpoint_relation_profile_reuse import prepare as reuse_unchanged_profiles
+    audit_path=reuse_unchanged_profiles(store,run_id,audit_path,audit_dir/'unchanged-role-profile-assessment')
     audit_path = content_fallback(audit_path,root/run_id/"content-blocked-fallback")
     resolution_dir=audit_resolution_directory(audit_dir,audit_path)
     audit = read_artifact(audit_path)

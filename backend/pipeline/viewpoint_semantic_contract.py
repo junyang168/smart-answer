@@ -12,6 +12,7 @@ CONTRACT_PATH = Path(__file__).resolve().parents[2] / "config" / "wang_cvp_conte
 COMPONENT_ROLES = "wang_cvp_component_roles_v1"
 COMPONENT_PATH = CONTRACT_PATH.with_name(COMPONENT_ROLES + ".md")
 RELATION_ROLES = "wang_cvp_relation_roles_v1"
+SCOPED_RELATION_ROLES = "wang_cvp_relation_roles_scoped_v1"
 RELATION_PATH = CONTRACT_PATH.with_name(RELATION_ROLES + ".md")
 
 
