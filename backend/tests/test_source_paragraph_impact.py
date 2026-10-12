@@ -200,6 +200,34 @@ def test_paragraph_lossless_json_postimages_compile_without_raw_rewrite(executab
     assert wire==original
 
 
+def test_epoch_proposer_echo_is_disclosed_not_an_approval(executable):
+    _,_,frozen,semantic=executable
+    original=semantic.model_dump()
+    scope=p.binding_review_scope(frozen['source_paragraph_execution']['partition'])
+    echoed=deepcopy(original)
+    echoed['dispositions'].append({'record_key':scope['record_key'],'action':'retain','reason':'Proposer echo, not independent approval'})
+    before=deepcopy(echoed)
+    assert p.compose_proposal(frozen,echoed)==p.compose_proposal(frozen,original)
+    receipt=p.epoch_proposal_declaration(frozen,echoed)
+    assert receipt['disposition']==echoed['dispositions'][-1]
+    assert receipt['independent_approval'] is False
+    assert receipt['content_write_authority'] is False
+    assert echoed==before
+
+
+@pytest.mark.parametrize('change',['duplicate','update','foreign','missing'])
+def test_epoch_echo_cannot_relax_exact_semantic_denominator(executable,change):
+    _,_,frozen,semantic=executable
+    response=semantic.model_dump()
+    k=p.binding_review_scope(frozen['source_paragraph_execution']['partition'])['record_key']
+    response['dispositions'].append({'record_key':k,'action':'retain','reason':'Echo'})
+    if change=='duplicate':response['dispositions'].append(deepcopy(response['dispositions'][-1]))
+    if change=='update':response['dispositions'][-1]['action']='update'
+    if change=='foreign':response['dispositions'][-1]['record_key']='source_epoch_binding/foreign'
+    if change=='missing':response['dispositions'].pop(0)
+    with pytest.raises(ValueError):p.compose_proposal(frozen,response)
+
+
 @pytest.mark.parametrize('late_failure', [False, True])
 def test_common_sql_paragraph_full_saved_stages_commit_rollback_cache(executable, postgres_store, tmp_path, monkeypatch, late_failure):
     from backend.tests.test_cvp_sql_actions_postgres import source_run
@@ -570,3 +598,45 @@ def test_actual_saved_source_scope_no_calls_writes_or_input_upgrade():
         else: tampered[field]['semantic_inventory']['affected_keys'].pop()
         with pytest.raises(ValueError, match='proof drift'):
             p.verify(tampered, m, states, frozen['before'], frozen['after'][0])
+
+
+@pytest.mark.skipif(os.environ.get('WANG_SOURCE_PARAGRAPH_SAVED_ACCEPTANCE') != '1',
+                    reason='explicit current saved answer readonly acceptance only')
+@pytest.mark.parametrize('mutation',[None,'pin','hold','permission','proposed','status','notes','statement','epoch','missing'])
+def test_actual_saved_initial_draft_preserves_raw_and_strict_final(mutation):
+    from backend.pipeline import source_reconciliation_runner as runner
+    from backend.api.canonical_repository.viewpoint_foundation import sha256_json
+    root=Path('/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/staging/cvp-production-357/campaign-sql-20261008-v1-from-g059/execution/CVPG-54aa85ab845ff2d1539132d522bf23971678e6de928bc8353d88533caa310f8d/actions/source/CVPA-32986ef4887696a984ec13fe4185331fdefe905a452580b5688943149ef36fcc')
+    originals={path:path.read_bytes() for path in root.iterdir() if path.is_file()}
+    frozen=runner.read(root/'scoped-materials.json')
+    packet=runner.body(runner.read(root/'proposal_schema_recovery.packet.json'))
+    assert packet==runner.build_proposal_packet(frozen)
+    raw=runner.validate_raw(root,'proposal_schema_recovery',packet)
+    response=deepcopy(raw['response']);before=deepcopy(response)
+    proposal=runner.effective_proposal(frozen,response)
+    pending=next(d.record_key for d in proposal.dispositions if d.action=='unresolved' and d.record_key.startswith('viewpoint_claim_links/'))
+    protected=next(iter(frozen['source_paragraph_execution']['protected_anchor_reviews']))
+    if mutation=='pin':
+        next(r for r in frozen['sql_scope']['read_pins'] if c.key(r['collection'],r['object_id'])==pending)['pin'][0]+=1
+    if mutation=='hold':next(r for r in frozen['before_records'] if c.key(r['collection'],r['object_id'])==pending)['payload']['review_status']='human_review_required'
+    if mutation=='permission':frozen['manifest']['permissions'].append({'collection':c.split_key(pending)[0],'object_id':c.split_key(pending)[1],'fields':['link_type']})
+    if mutation=='proposed':proposal.records.append(c.Row.model_validate(next(r for r in frozen['before_records'] if c.key(r['collection'],r['object_id'])==pending)))
+    if mutation in {'status','notes','statement'}:
+        row=next(r for r in proposal.records if r.key==protected)
+        field={'status':'review_status','notes':'review_notes','statement':'statement'}[mutation]
+        row.payload[field]='unauthorized mutation'
+    if mutation=='epoch':next(r for r in proposal.records if r.collection=='source_fragments').payload['source_sha256']='foreign'
+    if mutation=='missing':proposal.dispositions.pop(0)
+    if mutation:
+        with pytest.raises(ValueError):runner.initial_review_base(frozen,proposal)
+    else:
+        review=runner.initial_review_base(frozen,proposal)
+        receipt=p.epoch_proposal_declaration(frozen,response)
+        assert receipt['independent_approval'] is False
+        keys=[d['record_key'] for d in review['proposal']['dispositions']]+[review['source_epoch_binding_scope']['record_key']]+[d['record_key'] for d in review['prior_source_issue_resolution_scope']]
+        synthetic={'proposal_sha256':review['proposal_sha256'],'verdicts':[{'record_key':k,'approved':True,'reason':'Synthetic refusal boundary, not provider approval','problems':[]} for k in keys]}
+        assert c.validate_review(review,synthetic) is False
+        with pytest.raises(ValueError):p.review_packet(frozen,proposal)
+        assert p.semantic_proposal(frozen,proposal).model_dump()['dispositions']==[d for d in response['dispositions'] if not d['record_key'].startswith('source_epoch_binding/')]
+    assert response==before
+    assert all(path.read_bytes()==data for path,data in originals.items())

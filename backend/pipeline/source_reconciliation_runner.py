@@ -103,6 +103,9 @@ def corrected_proposal(root, frozen, response):
 
 
 def initial_review_base(frozen, proposal):
+    if frozen.get('source_paragraph_execution'):
+        from backend.pipeline.source_paragraph_impact import review_packet
+        return review_packet(frozen, proposal, initial_only=True)
     if frozen['manifest'].get('evidence_binding_repair'):
         try:return contract.review_packet(frozen,proposal)
         except ValueError:return contract.review_packet(frozen,proposal,initial_evidence_draft=True)
@@ -129,6 +132,15 @@ def initial_review_base(frozen, proposal):
         return contract.review_packet(frozen, proposal)
     unresolved = any(d.action == 'unresolved' for d in proposal.dispositions)
     return contract.review_packet(frozen, proposal, review_only=unresolved)
+
+
+def paragraph_declaration_base(frozen, response, base):
+    if frozen.get('source_paragraph_execution'):
+        from backend.pipeline.source_paragraph_impact import epoch_proposal_declaration
+        declaration = epoch_proposal_declaration(frozen, response)
+        if declaration:
+            base = {**base, 'proposer_epoch_declaration': declaration}
+    return base
 
 
 def request_limit(adapter, path, *, saved=None):
@@ -441,6 +453,7 @@ class Runner:
         base = initial_review_base(frozen, proposal) if stage == 'initial_review' else contract.review_packet(frozen, proposal,
             complete_anchor_review=bool(frozen['manifest'].get('anchor_qualification') and stage=='final_review'
                 and any(d.action=='unresolved' for d in proposal.dispositions)))
+        base = paragraph_declaration_base(frozen, response, base)
         if stage=='final_review' and frozen['manifest'].get('anchor_qualification'):
             selected,receipt=corrected_proposal(self.root,frozen,response)
             if selected!=proposal:raise ValueError('anchor final component selection drift')
@@ -904,6 +917,7 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
         first_proposal = model_proposal_dump(frozen,effective_proposal(frozen, first["response"]))
         from backend.pipeline.source_review_input_repair import check_packet
         initial_base = initial_review_base(frozen, effective_proposal(frozen, first['response']))
+        initial_base = paragraph_declaration_base(frozen, first['response'], initial_base)
         check_packet(frozen, first['response'], initial_packet,
                      disclosed_review_base(frozen, initial_base, saved=initial_packet))
         if contract.validate_review(initial_packet, initial["response"]):
@@ -943,7 +957,9 @@ def validate_reviewed_records(package: dict, frozen: dict, *, frozen_sha256: str
     elif not engineering and not permission_recovery and not packet.get('membership_resolution') and not claim_first:
         if stage=='final_review' and packet.get('retained_auxiliary_impact_context'):
             base=auxiliary_review_base(frozen,proposal,base)
-        check_packet(frozen, first['response'] if stage=='initial_review' else correction['response'], packet,
+        response = first['response'] if stage=='initial_review' else correction['response']
+        base = paragraph_declaration_base(frozen, response, base)
+        check_packet(frozen, response, packet,
                      disclosed_review_base(frozen, base, saved=packet))
     if expected["artifact_sha256"] != app.get("review_sha256") or sha256_json(proposal.model_dump()) != app.get("proposal_sha256"):
         raise ValueError("final review/proposal provenance drift")

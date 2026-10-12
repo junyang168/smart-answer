@@ -291,6 +291,10 @@ def compose_proposal(frozen, response):
     plan = context['partition']; proof = plan['proof']
     from backend.pipeline.deferred_claim_repair import decode_proposal
     semantic = c.Proposal.model_validate(deepcopy(decode_proposal(response)))
+    declaration = epoch_proposal_declaration(frozen, response)
+    if declaration:
+        semantic.dispositions = [d for d in semantic.dispositions
+                                 if d.record_key != declaration['disposition']['record_key']]
     for row in semantic.records:
         if row.collection!='source_fragments':continue
         value=row.payload;source=frozen['after'][0]
@@ -323,18 +327,52 @@ def compose_proposal(frozen, response):
         sentence_dispositions=semantic.sentence_dispositions)
 
 
+def epoch_proposal_declaration(frozen, response):
+    """Disclose a proposer declaration, never treat it as an independent verdict.
+
+    The review-only epoch scope is present in the complete proposal material.
+    A proposer may echo its exact nonwritable key. Preserve that echo separately
+    from the semantic disposition denominator and require the real Opus verdict.
+    """
+    from backend.pipeline.deferred_claim_repair import decode_proposal
+    context, _ = execution_context(frozen)
+    semantic = c.Proposal.model_validate(deepcopy(decode_proposal(response)))
+    scope = binding_review_scope(context['partition'])
+    rows = [d for d in semantic.dispositions if d.record_key == scope['record_key']]
+    if not rows:
+        return None
+    if (len(rows) != 1 or rows[0].action != 'retain'
+            or any(r.key == scope['record_key'] for r in semantic.records)):
+        raise ValueError('epoch proposer declaration cannot authorize or modify binding cohort')
+    return {'schema_version': 'source_epoch_proposer_declaration_v1',
+            'disposition': rows[0].model_dump(), 'scope_sha256': sha256_json(scope),
+            'independent_approval': False, 'content_write_authority': False,
+            'required_independent_verdict': scope['record_key']}
+
+
 def mechanical_keys(frozen):
     context, _ = execution_context(frozen)
     return set(c.index(context['partition']['binding_postimages'])) | {document_postimage(frozen)[0]}
 
 
-def pending_candidates(frozen, proposal):
+def pending_candidates(frozen, proposal, *, initial_only=False):
     context, before = execution_context(frozen)
     unresolved = {d.record_key for d in proposal.dispositions if d.action == 'unresolved'}
-    if unresolved - set(context['internal_candidate_context']):
+    initial = unresolved - set(context['internal_candidate_context'])
+    if initial and not initial_only:
         raise ValueError('paragraph source unresolved item is not exact unconsumed internal context')
     proposed = c.index(proposal.records)
-    for k in unresolved:
+    pins = {(r['collection'], r['object_id']): r['pin'] for r in frozen.get('sql_scope', {}).get('read_pins', [])}
+    permissions = {v.key for v in c.Manifest.model_validate(frozen['manifest']).permissions}
+    initial_context = initial | {d.record_key for d in proposal.dispositions
+        if initial_only and d.action == 'impact_only' and d.record_key.startswith('viewpoint_revisions/')}
+    for k in initial_context:
+        col, ident = c.split_key(k); old = before.get(k)
+        if (col not in {'canonical_viewpoints','viewpoint_revisions','viewpoint_claim_links'} or k in permissions or k in proposed or not old
+                or old.get('review_status') in c.HUMAN_HOLDS
+                or pins.get((col, ident)) != [old['revision'], record_content_sha(old), False]):
+            raise ValueError('initial paragraph pending context must be exact pinned unchanged nonwritable CVP')
+    for k in unresolved - initial:
         receipt = context['internal_candidate_context'][k]
         if (k in proposed or receipt['pin'] != [before[k]['revision'],record_content_sha(before[k]),False]
                 or receipt['content_write_authority'] is not False or receipt['semantic_approval'] is not False):
@@ -395,10 +433,10 @@ def proposal_packet(frozen):
     return result
 
 
-def review_packet(frozen, proposal):
+def review_packet(frozen, proposal, *, initial_only=False):
     # The existing complete graph/permissions/source validator checks the
     # expanded program+semantic postimage BEFORE any independent review.
-    c.validate_proposal(frozen, proposal)
+    c.validate_proposal(frozen, proposal, initial_paragraph_draft=initial_only)
     packet = proposal_packet(frozen)
     packet['before_records'] = packet.pop('records')
     semantic = semantic_proposal(frozen, proposal)
@@ -420,7 +458,17 @@ def review_packet(frozen, proposal):
                        'old_action_committed':False,'original_verdicts_changed':False,
                        'new_source_postimage':proposed[k]})
     if issues:packet['prior_source_issue_resolution_scope']=issues
-    pending = pending_candidates(frozen,proposal)
+    pending = pending_candidates(frozen,proposal, initial_only=initial_only)
+    context = frozen['source_paragraph_execution']
+    initial = pending - set(context['internal_candidate_context'])
+    if initial_only:
+        initial |= {d.record_key for d in proposal.dispositions
+                    if d.action == 'impact_only' and d.record_key.startswith('viewpoint_revisions/')}
+    if initial:
+        packet['unresolved_proposal_review'] = {'schema_version':'source_paragraph_initial_draft_v1',
+            'pending_record_keys':sorted(initial),'content_write_authority':False,
+            'mandatory_original_unique_correction':True}
+    pending -= initial
     if pending:
         packet['source_readonly_pending'] = {'schema_version':PROFILE,'pending_record_keys':sorted(pending),
             'problem':'unapproved_internal_context_not_a_semantic_write','semantic_approval':False,
@@ -444,6 +492,8 @@ def scoped_adapter(adapter, packet):
         prompt += ' 必须逐项审查 prior_source_issue_resolution_scope：完整旧异议及原回答保留，新录音校订来源和当前实际 Claim 后像是否解决该来源问题；仅对新来源后像作新的批准，不把旧未决改 pass，不声称旧 action 已提交。对每个精确 record_key 独立返回 verdict，真实未解决则拒绝。'
     if packet.get('source_readonly_pending'):
         prompt += ' 对 source_readonly_pending.pending_record_keys 返回 approved=false、problems=["unapproved_internal_context_not_a_semantic_write"]；说明只是未批准内部候选，未决不变，不授予写入/语义批准。其他项照常独立审核。'
+    if packet.get('unresolved_proposal_review',{}).get('schema_version')=='source_paragraph_initial_draft_v1':
+        prompt += ' 这是原首次独立审核的未完成草稿：unresolved_proposal_review 所列既有CVP记录仅为完整、精确当前的只读上下文，不是待写后像。判读其原未决/表示问题并给出实际理由，不修改或批准其存储状态。即使本次全部同意也无写入权，必须接原唯一GPT纠正；最终包仍须完整严格审核。proposer_epoch_declaration 只是原GPT自己的声明，绝不是独立批准，来源epoch项仍须你逐项真实审核。'
     result = StructuredJsonReviewerAdapter(client=adapter._client, prompt=prompt,
         response_model=adapter._response_model, schema_name=adapter._schema_name + '_paragraph_v1',
         compact_payload=True, shared_text_payload=True, shared_record_payload=True)

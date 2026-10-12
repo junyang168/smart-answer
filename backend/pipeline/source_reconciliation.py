@@ -615,7 +615,7 @@ def _semantic(row: dict) -> dict:
     return {k: v for k, v in row.items() if k not in PROVENANCE | {"revision"}}
 
 
-def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = False, claim_first: bool = False, initial_claim_draft: bool = False, initial_anchor_draft: bool = False, complete_anchor_review: bool = False, initial_evidence_draft: bool = False) -> dict[str, dict]:
+def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = False, claim_first: bool = False, initial_claim_draft: bool = False, initial_anchor_draft: bool = False, complete_anchor_review: bool = False, initial_evidence_draft: bool = False, initial_paragraph_draft: bool = False) -> dict[str, dict]:
     before = index(frozen["before_records"])
     manifest = Manifest.model_validate(frozen["manifest"])
     allowed = {p.key: p for p in manifest.permissions}
@@ -652,7 +652,9 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
     paragraph_pending = set()
     if frozen.get('source_paragraph_execution'):
         from backend.pipeline.source_paragraph_impact import pending_candidates
-        paragraph_pending = pending_candidates(frozen,proposal)
+        paragraph_pending = pending_candidates(frozen,proposal, initial_only=initial_paragraph_draft)
+    elif initial_paragraph_draft:
+        raise ValueError('paragraph draft requires exact paragraph execution authority')
     if complete_anchor_review and (not manifest.anchor_qualification or not unresolved
             or any(k not in proposed or k not in allowed or split_key(k)[0] not in {'evidence_steps','source_fragments'} for k in unresolved)):
         raise ValueError('complete anchor review requires complete explicitly writable Evidence/fragment postimages')
@@ -721,6 +723,8 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
         c, _ = split_key(k)
         if k in paragraph_pending:
             continue  # Exact unconsumed candidate remains unresolved/nonwritable, never semantic approval.
+        if initial_paragraph_draft and c == 'viewpoint_revisions' and d.action == 'impact_only':
+            continue  # Checked exact unchanged/nonwritable by the paragraph draft validator; final remains strict.
         if complete_anchor_review and k in unresolved:
             continue  # Actual final Opus must approve the fully validated postimage; no GPT verdict is edited.
         if (review_only or initial_claim_draft) and k in unresolved:
@@ -756,6 +760,7 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
             else:
                 from backend.pipeline.claim_retained_occurrence_context import validate_occurrence_delta
                 validate_occurrence_delta(frozen, object_id, old, new)
+        paragraph_anchor = False
         if old and old.get("review_status") in HUMAN_HOLDS and new != old:
             from backend.pipeline.cvp_scope_management import approved_relation_reference_only
             from backend.pipeline.claim_anchor_qualification import validate_delta
@@ -771,7 +776,9 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
         if manifest.evidence_binding_repair:
             from backend.pipeline.claim_evidence_binding import validate_delta
             validate_delta(frozen,old,new,k)
-        if k not in paragraph_mechanical and new.get("review_status", "candidate") != "candidate":
+        protected_state = (paragraph_anchor and new.get('review_status') == old.get('review_status')
+                           and new.get('review_notes') == old.get('review_notes'))
+        if k not in paragraph_mechanical and not protected_state and new.get("review_status", "candidate") != "candidate":
             raise ValueError("proposal may not inherit or manufacture approval: " + k)
         if new.get("revision") != (old.get("revision", 1) + 1 if old else 1):
             raise ValueError("proposed version is not the next stored revision")
@@ -1285,7 +1292,7 @@ def validate_review(packet: dict, response: dict) -> bool:
                 or value.get('group_completion') is not False or pending-set(packet.get('internal_candidate_context',{}))
                 or any(r['collection']+'/'+r['object_id'] in pending for r in packet['proposal']['records'])):
             raise ValueError('source candidate pending review domain drift')
-        return all((not v.approved and v.problems==['unapproved_internal_context_not_a_semantic_write'])
+        return not packet.get('unresolved_proposal_review') and all((not v.approved and v.problems==['unapproved_internal_context_not_a_semantic_write'])
                    if v.record_key in pending else v.approved and not v.problems for v in review.verdicts)
     if packet.get('source_first_pending_cvp'):
         from backend.pipeline.claim_first_management import PENDING_PROBLEM
