@@ -327,6 +327,9 @@ def execute_source_action(store,run_id,manifest,*,root,ports,claim_first=False):
         # Uncommitted original model materials include the changed Claim. They
         # are retained as history, never re-labelled approved for the new cut.
         pending=list(saved['claim_ids']) if not original else sorted(set(original.get('pending_cvp_claim_ids',[]))|set(issue_context['claim_ids']))
+        from backend.pipeline.claim_evidence_intake import enabled as intake_enabled
+        if intake_enabled(materials):
+            pending=sorted(set(original.get('pending_cvp_claim_ids',[]))|set(issue_context['claim_ids']))
     if joint_owner_claim:
         # Actual complete joint proposal/Opus reviewed every existing active
         # connection against the new Claim. This is not create-only coverage.

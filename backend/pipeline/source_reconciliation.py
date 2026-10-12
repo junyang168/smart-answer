@@ -439,12 +439,15 @@ def freeze(manifest: Manifest, states: dict[str, dict], *, physical_snapshots: d
         if p.collection not in WRITABLE or len(p.fields) != len(set(p.fields)):
             raise ValueError("unsupported or duplicate field permission")
         if p.create and p.collection not in {"source_fragments", "viewpoint_revisions"}:
-            raise ValueError("new judgments/identities require a separate membership decision")
+            from backend.pipeline.claim_evidence_intake import manifest_enabled
+            if p.collection != 'evidence_steps' or not manifest_enabled(manifest, physical_snapshots):
+                raise ValueError("new judgments/identities require a separate membership decision")
         if p.collection == "viewpoint_revisions" and not p.create:
             raise ValueError("CVP content changes create a new revision; historical CVR cannot be overwritten")
         if p.create == (p.key in states):
             raise ValueError("create/update permission does not match Registry")
         if p.parent_id and (not p.create or (p.collection == "source_fragments" and p.parent_id != manifest.source_id)
+                or (p.collection == 'evidence_steps' and p.parent_id != manifest.source_id)
                 or (p.collection == "viewpoint_revisions" and key("canonical_viewpoints", p.parent_id) not in states)):
             raise ValueError("creation parent is outside the exact existing source/viewpoint identity")
     old = states[key("source_documents", manifest.source_id)]
@@ -637,6 +640,10 @@ def validate_proposal(frozen: dict, proposal: Proposal, *, review_only: bool = F
         parent_field = "source_id" if collection == "source_fragments" else "viewpoint_id" if collection == "viewpoint_revisions" else None
         matches = [p for p in manifest.permissions if p.create and p.collection == collection
                    and p.parent_id and payload.get(parent_field) == p.parent_id]
+        if collection == 'evidence_steps':
+            from backend.pipeline.claim_evidence_intake import allocation_matches
+            matches = [p for p in manifest.permissions if p.create and p.collection == collection
+                       and allocation_matches(frozen, payload, p)]
         if len(matches) == 1:
             allowed[k] = matches[0]
     dispositions = {d.record_key: d for d in proposal.dispositions}

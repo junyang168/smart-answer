@@ -24,6 +24,9 @@ def subject(value):
     check_binding(app['materials'])
     materials = body(read(Path(app['materials']['path'])))
     context = materials.get('claim_issue_context', {})
+    from backend.pipeline.claim_evidence_intake import enabled as intake_enabled
+    if intake_enabled(materials):
+        return None  # Separate typed all-owner intake audit; no old single-dependency shortcut.
     issues = context.get('issues', [])
     ids = context.get('claim_ids', [])
     if len(ids) != 1 or len(issues) != 1:

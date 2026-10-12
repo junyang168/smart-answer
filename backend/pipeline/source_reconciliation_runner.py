@@ -373,6 +373,8 @@ class Runner:
         from backend.pipeline.claim_first_management import scoped_adapter
         from backend.pipeline.claim_evidence_binding import scoped_adapter as evidence_adapter
         adapter=evidence_adapter(adapter,packet,role)
+        from backend.pipeline.claim_evidence_intake import scoped_adapter as intake_adapter
+        adapter=intake_adapter(adapter,packet)
         from backend.pipeline.source_permission_recovery import adapter as permission_adapter
         adapter=permission_adapter(adapter,packet)
         adapter = scoped_adapter(adapter, packet)
@@ -827,6 +829,7 @@ def validate_package(package: dict, *, historical: bool = False) -> None:
             'backend/pipeline/claim_citation_purpose_review.py',
             'backend/pipeline/source_normalization_recovery.py',
             'backend/pipeline/claim_issue_management.py',
+            'backend/pipeline/claim_evidence_intake.py',
             'backend/pipeline/source_projection.py',
             'backend/api/canonical_repository/knowledge_models.py',
             'backend/api/canonical_repository/postgres_store.py',
@@ -995,6 +998,8 @@ def validate_raw(root: Path, stage: str, packet: dict) -> dict:
             ctx.pin(PROMPTS / 'deferred_claim_evidence_repair_v1.md')
         if packet.get('manifest', {}).get('claim_issue'):
             ctx.pin(PROMPTS / 'claim_issue_management_v1.md')
+            from backend.pipeline.claim_evidence_intake import enabled as intake_enabled
+            if intake_enabled(packet):ctx.pin(Path(__file__).with_name('claim_evidence_intake.py'))
             if eligibility_profile(packet):
                 ctx.pin(PROMPTS / 'claim_evidence_eligibility_review_v2.md')
         if packet.get('manifest', {}).get('viewpoint_scope_repair'):
@@ -1010,6 +1015,8 @@ def validate_raw(root: Path, stage: str, packet: dict) -> dict:
     from backend.pipeline.claim_first_management import scoped_adapter
     from backend.pipeline.claim_evidence_binding import scoped_adapter as evidence_adapter
     adapter=evidence_adapter(adapter,packet,'proposal' if stage in {'proposal_schema_recovery','permission_input_recovery_proposal'} else stage)
+    from backend.pipeline.claim_evidence_intake import scoped_adapter as intake_adapter
+    adapter=intake_adapter(adapter,packet)
     from backend.pipeline.source_permission_recovery import adapter as permission_adapter
     adapter=permission_adapter(adapter,packet)
     adapter = scoped_adapter(adapter, packet)

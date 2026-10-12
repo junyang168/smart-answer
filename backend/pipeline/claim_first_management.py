@@ -137,12 +137,14 @@ def finish_claim_audit(store, run_id, root):
     statement_slice=application.get('source_write_slice',{}).get('mode') in {'owner_statement_completion','policy_evidence_binding','policy_claim_source_revision'}
     from backend.pipeline.source_paragraph_impact import committed_context
     paragraph = committed_context(store, saved)
+    from backend.pipeline.claim_evidence_intake import committed_context as intake_context
+    intake = intake_context(saved,store)
     if statement_slice:
         from backend.pipeline.claim_source_write_slice import validate_claim_layer_authority
         validate_claim_layer_authority(saved,root)
     if (saved['checkpoint'] not in {'applied','audited'} or original_root.resolve()!=Path(root).resolve()
             or not evidence.get('pending_cvp_claim_ids')
-            or not statement_slice and not paragraph and not body(read(original_root/'final_review.packet.json')).get('claim_first_management')):
+            or not statement_slice and not paragraph and not intake and not body(read(original_root/'final_review.packet.json')).get('claim_first_management')):
         raise ValueError('Claim-only audit lacks actual committed source-first action and pending CVP state')
     material=body(read(original_root/'scoped-materials.json'));c.guard_files(material)
     current={}
@@ -150,6 +152,10 @@ def finish_claim_audit(store, run_id, root):
         key=pin['collection'],pin['object_id'];row=store.get_record_state(*key)
         if row is None:raise ValueError('Claim audit current readset missing')
         current[key]=row
+    if intake:
+        for op in saved['reviewed']['plan']['operations']:
+            key=op['collection'],op['object_id']
+            current[key]=store.get_record_state(*key)
     current_pins=pin_rows(pins(current)); audit_root=original_root/'claim-first-audit'
     dependency_ids = sorted({op['object_id'] for op in paragraph['plan']['operations']
                              if op['collection']=='claims'} - set(saved['claim_ids'])) if paragraph else []
@@ -222,13 +228,15 @@ def coverage_context(store, saved, group):
     evidence = saved['reviewed']['evidence']
     application = evidence['package']['payload'].get('source_repair_application', {})
     root = Path(application.get('run_root', ''))
+    from backend.pipeline.claim_evidence_intake import committed_context as intake_context
+    intake = intake_context(saved,store)
     receipt_binding = marker.get('receipt', {})
     if (saved['checkpoint'] != 'applied' or marker.get('status') != 'claim_layer_audited_cvp_pending'
             or marker.get('cvp_management_complete') is not False
             or receipt_binding.get('path') != str(root/'claim-first-audit/claim-layer-completion.json')
             or application.get('run_id') != saved['run_id']
             or saved['claim_ids'] != group['claim_ids']
-            or evidence.get('pending_cvp_claim_ids') != saved['claim_ids']):
+            or (not intake and evidence.get('pending_cvp_claim_ids') != saved['claim_ids'])):
         raise ValueError('CVP reproposal requires exact completed original Claim layer')
     check_binding(receipt_binding)
     receipt = read_artifact(receipt_binding['path'])
@@ -241,6 +249,22 @@ def coverage_context(store, saved, group):
     check_binding(receipt['audit'])
     for proof in receipt['source_proofs']:
         check_binding(proof)
+    if intake:
+        from backend.pipeline.claim_evidence_intake import validate_completion
+        with store.connect() as conn, conn.cursor() as cursor:
+            validate_completion(saved,cursor)
+        return {'schema_version':REPROPOSAL_VERSION,
+            'management_action_id':evidence['action']['action_id'],
+            'prior_reviewed_sha256':saved['reviewed_sha256'],
+            'claim_layer_completion':receipt_binding,
+            'source_terminal_review':evidence['approval']['terminal_review'],
+            'source_terminal_packet':binding(root/(application['terminal_stage']+'.packet.json')),
+            'pending_existing_cvp_record_keys':list(evidence.get('pending_cvp_management_record_keys',[])),
+            'source_only_approval':True,'existing_cvp_content_approved':False,
+            'old_proposals_and_budgets_preserved':True,
+            'instructions':'Use the actual reviewed new Evidence and unchanged Claim teaching. '
+                'All incomplete coverage and retained CVP impacts still require normal management/full audits. '
+                'No source/Claim retry, new member, endpoint or CVP-core permission is granted.'}
     from backend.pipeline.viewpoint_validation_context import read_current_objects
     from backend.pipeline.cvp_sql_flow import pins
     from backend.api.canonical_repository.postgres_store import record_content_sha

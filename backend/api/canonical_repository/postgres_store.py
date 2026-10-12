@@ -3866,7 +3866,9 @@ class PostgresKnowledgeStore:
                             retained_impacts_resolution_path,audit_binding,cursor,semantic_resolution=owner_resolution_path)
             from backend.pipeline.claim_dependency_handoff import subject as dependency_subject,context as dependency_context
             dependency_resolution=dependency_context({**value,'run_id':run_id},cursor=cursor) if dependency_subject({**value,'run_id':run_id}) is not None else None
-            if (value.get('reviewed',{}).get('evidence') or {}).get('pending_cvp_claim_ids') and statement_resolution is None and dependency_resolution is None:
+            from backend.pipeline.claim_evidence_intake import validate_completion as validate_intake_completion
+            intake_resolution=validate_intake_completion({**value,'run_id':run_id},cursor)
+            if (value.get('reviewed',{}).get('evidence') or {}).get('pending_cvp_claim_ids') and statement_resolution is None and dependency_resolution is None and not (intake_resolution and intake_resolution['joint_links_approved']):
                 raise ChangeSetConflict('Claim management committed; CVP coverage/impact remains pending')
             from backend.pipeline.claim_owner_revision import validate_dependency_completion
             validate_dependency_completion({**value,'run_id':run_id},cursor=cursor)
@@ -3940,6 +3942,8 @@ class PostgresKnowledgeStore:
                           "read_pins":[{"collection":k[0],"object_id":k[1],"pin":list(v)} for k,v in sorted(independent_pins.items())]}
             if dependency_resolution is not None:
                 completion['joint_dependency_handoff']=dependency_resolution
+            if intake_resolution:
+                completion['evidence_intake_handoff']=intake_resolution
             if taxonomy_dependency_path is not None:
                 completion['taxonomy_dependency']={'path':str(taxonomy_dependency_path),
                     'file_sha256':file_sha256(Path(taxonomy_dependency_path))}

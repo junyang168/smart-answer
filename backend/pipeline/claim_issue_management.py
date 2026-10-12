@@ -56,6 +56,7 @@ class Policy(c.Contract):
     evidence_fields: list[str]
     # Explicit versioned opt-in. Old policies/materials retain their exact scope.
     evidence_eligibility_review: bool = False
+    evidence_intake: Literal['wang_claim_evidence_intake_v1'] | None = None
     link_fields: list[str]
     # CVP body/identity/retirement is never implied by Claim permission.
     cvp_permissions: list[c.Permission] = Field(default_factory=list)
@@ -349,7 +350,22 @@ def policy_permissions(policy, states, sid, claim_ids, *, retained_occurrences=(
             if col == 'claims' and not current_anchor_scope and any(r['claim_id'] == oid for r in retained_occurrences):
                 fields = set(fields) - {'occurrences'}
             result.append(c.Permission(collection=col, object_id=oid, fields=sorted(set(fields))))
-    if policy.evidence_fields:
+    if policy.evidence_intake:
+        from backend.pipeline.claim_evidence_intake import BUCKETS
+        for cid in claim_ids:
+            k = c.key('claims', cid)
+            if states[k].get('review_status') in HOLDS:
+                raise ValueError('Evidence intake cannot append to held Claim')
+            fields = {'evidence_step_ids'} | (BUCKETS & states[k].keys())
+            previous = next((p for p in result if p.key == k), None)
+            if previous:
+                previous.fields = sorted(set(previous.fields) | fields)
+            else:
+                result.append(c.Permission(collection='claims', object_id=cid, fields=sorted(fields)))
+        result.append(c.Permission(collection='evidence_steps', object_id='E-claim-intake-allocation-slot',
+            create=True, parent_id=sid, fields=sorted(set(c.KNOWLEDGE_COLLECTIONS['evidence_steps'][0].model_fields)
+                                                   | {'valid_for_identity_review'})))
+    if policy.evidence_fields or policy.evidence_intake:
         result.append(c.Permission(collection="source_fragments", object_id="FR-claim-issue-allocation-slot",
             create=True, parent_id=sid, fields=sorted(c.KNOWLEDGE_COLLECTIONS["source_fragments"][0].model_fields)))
     for permission in policy.cvp_permissions:
@@ -644,6 +660,8 @@ def validate_resolution(frozen, proposal, post, *, review_only=False):
     context = frozen["claim_issue_context"]
     issues = {Issue.model_validate(r).issue_id: Issue.model_validate(r) for r in context["issues"]}
     policy = read_policy(context['policy'], frozen.get('physical_snapshots'))
+    from backend.pipeline.claim_evidence_intake import validate as validate_intake
+    validate_intake(frozen, proposal, before, post)
     actual = [a.issue_id for a in proposal.claim_assessments]
     if len(actual) != len(set(actual)) or set(actual) != set(issues):
         raise ValueError("every exact Claim issue requires one assessment")
@@ -671,7 +689,7 @@ def validate_resolution(frozen, proposal, post, *, review_only=False):
                 ek=c.key('evidence_steps',eid)
                 if post[ek]!=before[ek]:
                     raise ValueError('correct Claim/Evidence must be retained; link diagnosis is not Evidence permission')
-        if post[k].get('evidence_step_ids') != before[k].get('evidence_step_ids'):
+        if not policy.evidence_intake and post[k].get('evidence_step_ids') != before[k].get('evidence_step_ids'):
             raise ValueError('Claim issue cannot replace the existing Evidence ownership buckets')
         if a.cause in {'evidence_binding','claim_statement'}:
             evidence=[post[c.key('evidence_steps',eid)] for eid in post[k]['evidence_step_ids']]
@@ -688,7 +706,7 @@ def validate_resolution(frozen, proposal, post, *, review_only=False):
             # after-state must still have bound supporting citations plus the
             # independent complete-postimage review. A binding repair, in
             # contrast, must materialize every claimed new Evidence citation.
-            qualification_only = [e for e in evidence
+            qualification_only = [e for e in evidence if c.key('evidence_steps', e['evidence_step_id']) in before
                 if post[c.key('evidence_steps', e['evidence_step_id'])] != before[c.key('evidence_steps', e['evidence_step_id'])]]
             qualification_only = (qualification_only if policy.evidence_eligibility_review and post[k] == before[k]
                 and qualification_only and all(

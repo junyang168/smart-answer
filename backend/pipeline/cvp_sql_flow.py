@@ -589,13 +589,23 @@ def run_group(store, definition, group, row, *, root):
     evidence = saved.get('reviewed',{}).get('evidence') or saved.get('import_certificate',{})
     from backend.pipeline.claim_dependency_handoff import subject as dependency_subject,context as dependency_context
     joint_dependency=dependency_context(saved,store) if dependency_subject(saved) is not None else None
+    from backend.pipeline.claim_evidence_intake import committed_context as intake_context
+    intake=intake_context(saved,store)
+    if intake:
+        from backend.pipeline.claim_first_management import finish_claim_audit
+        from backend.pipeline.claim_evidence_intake import validate_completion as validate_intake_audit
+        app=evidence['package']['payload']['source_repair_application']
+        finish_claim_audit(store,run_id,Path(app['run_root']))
+        saved=store.get_cvp_group(run_id)
+        with store.connect() as conn,conn.cursor() as cursor:
+            validate_intake_audit(saved,cursor)
     from backend.pipeline.cvp_source_impact_resolution import context as source_impact_context,prepare as prepare_source_impacts,CLOSED_STATEMENT
     source_impacts=prepare_source_impacts(store,saved) if source_impact_context(saved,store) else None
     closed_statement=source_impacts is not None and source_impacts['source_handoff'].get('schema_version')==CLOSED_STATEMENT
     if evidence.get('approval',{}).get('owner_claim_completion') or joint_dependency:
         from backend.pipeline.claim_owner_revision import finish_dependency_audit
         finish_dependency_audit(store,run_id)
-    if evidence.get('pending_cvp_claim_ids') and not joint_dependency and not closed_statement:
+    if evidence.get('pending_cvp_claim_ids') and not joint_dependency and not closed_statement and not (intake and intake['joint_links_approved']):
         from backend.pipeline.cvp_sql_actions import execute_coverage_action
         from backend.pipeline.source_reconciliation_runtime import ProductionPorts
         try:
@@ -1380,6 +1390,16 @@ def main(argv=None):
                         raise ValueError('Claim-first original SQL action root drift')
                     source_root=bound.parent
                 execute_source_action(store,args.run_id,manifest,root=source_root,ports=ProductionPorts(),claim_first=args.claim_first)
+                from backend.pipeline.claim_evidence_intake import committed_context as intake_context
+                intake=intake_context(store.get_cvp_group(args.run_id),store)
+                if intake:
+                    from backend.pipeline.claim_first_management import finish_claim_audit
+                    current=store.get_cvp_group(args.run_id)
+                    app=current['reviewed']['evidence']['package']['payload']['source_repair_application']
+                    proof=finish_claim_audit(store,args.run_id,Path(app['run_root']))
+                    stage_event('evidence_intake_claim_layer_audited_cvp_pending',run_id=args.run_id,
+                                proof=proof,group_complete=False)
+                    return 0
                 if manifest.get('source_paragraph_profile'):
                     from backend.pipeline.claim_first_management import finish_claim_audit
                     from backend.pipeline.source_reconciliation import Manifest

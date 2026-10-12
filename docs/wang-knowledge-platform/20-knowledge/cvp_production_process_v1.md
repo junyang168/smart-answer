@@ -456,6 +456,10 @@ Claim management 的修訂已提交／本源復驗完成，與 CVP management �
 
 目前支援的明確 policy 欄位：Claim 的 statement／claim_type／attribution／discourse_mode／scripture_refs／occurrences，既有 eligible Evidence 的 statement／source_fragment_id(s)，及既有連接的 pinned_claim_revision／component_locator／evidence_bindings／link_type。可新增同自身正文的精確 fragment，不替換 Evidence 所有權 buckets。CVP 正文／新 CVR／關係只接受另列的精確 permission；不自动取得身份、退役、端點改換或新 Claim 權限。
 
+常規新增證據以另列的 `wang_claim_evidence_intake_v1.json` 明示啟用，不就地擴大已綁定的舊 Claim policy。沿用同一 Claim issue、source runner 和共同 SQL 入口：GPT 讀完整自身正文，提議新的完整 EvidenceStep／必要逐字 fragment，Opus 核查完整後像，必要最多原唯一糾正／終審。只在已有、未 hold 的 Claim 下追加 reciprocal Evidence 所有權；全部共享 owners 都須有本次精確判讀，舊 Evidence、context／withheld buckets、Claim 正文／anchors、教授原文及原組成員不變。相同表述與相同來源片段的已有證據不得换 ID 重建。
+
+新增 Evidence 使 Claim 版本改變；全部有效自有 CVP 連接須在同一審核包提供完整後像，只准必要版本／成分定位／Evidence 引用，type、端點、當前 CVR、狀態及其他語義不變。沒有完整後像、來源／版本／hold 或語義未決時不得寫入。提交沿用完整 actual RETURNING、current／history 回讀及直接 SSD backup；本源完整 Claim 第 1／2／3 層審計必須包含新 Evidence／fragment 的當前 pins，並明示 CVP pending。已有覆蓋仍須完整當前 CVP／成員審計；缺覆蓋才接原 required coverage，不能用新 Evidence 自動批准觀點。共同 completion 同 transaction 消費精確 applied intake、完整 Claim 審計與正常 CVP 完成證明；缺項不結案、不洗掉原 pending／復審 flags。
+
 `context_only` 是證據用途分類，不是永久禁止修訂或人工裁決的證明。明示 `evidence_eligibility_review` 的新版 policy 允許對教授 asserted、角色明示、已綁完整自身片段的既有證據提出 `eligible_with_label` 及必要 `valid_for_identity_review` 修訂。此分支只改資格，保留表述、說話者、角色、引文及綁定；教授轉述耶穌的解釋不得變成逐字經文。所有共享 Claim 都須有精確判讀，相關 CVP 仍完整影響审核。GPT 提議、Opus 獨立审核及原交易／審計門檻不變。
 
 受保護的审核狀態、withheld／rejected 不由資格分支順帶覆蓋；這不表示它們永久不可管理，更不能僅憑字段名宣稱 owner 曾要求 hold，須核查實際來源及裁決。舊 policy、prompt、回答與預算保持原契約；新版使用獨立 prompt 身份，不就地改既有 binding 或重問已消費的呼叫。
