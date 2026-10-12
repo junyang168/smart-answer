@@ -2124,6 +2124,7 @@ class StructuredJsonReviewerAdapter:
         self._shared_shape_payload_v3 = False
         self._shared_shape_payload_v4 = False
         self._shared_shape_payload_v5 = False
+        self._shared_shape_payload_v6 = False
         if shared_record_payload and not shared_text_payload:
             raise ValueError('shared-record encoding requires shared text')
         if shared_text_payload and not compact_payload:
@@ -2304,6 +2305,16 @@ class StructuredJsonReviewerAdapter:
             'payload_serialization':'wkp_shared_shapes_json_v5'})
         return result
 
+    def shared_shapes_v6_copy(self):
+        from copy import copy
+        if self._shared_shape_payload_v6:return self
+        result=copy(self.shared_shapes_v5_copy())
+        result._shared_shape_payload_v6=True
+        result.generation_config_sha256=sha256_json({
+            'base_config_sha256':result.generation_config_sha256,
+            'payload_serialization':'wkp_shared_shapes_json_v6'})
+        return result
+
     def generate(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         request = structured_json_request(
             payload,
@@ -2322,6 +2333,7 @@ class StructuredJsonReviewerAdapter:
             shared_shape_payload_v3=self._shared_shape_payload_v3,
             shared_shape_payload_v4=self._shared_shape_payload_v4,
             shared_shape_payload_v5=self._shared_shape_payload_v5,
+            shared_shape_payload_v6=self._shared_shape_payload_v6,
         )
         return self._client.generate_json(
             **request,
@@ -2347,6 +2359,7 @@ class StructuredJsonReviewerAdapter:
                     shared_shape_payload_v3=self._shared_shape_payload_v3,
                     shared_shape_payload_v4=self._shared_shape_payload_v4,
                     shared_shape_payload_v5=self._shared_shape_payload_v5,
+                    shared_shape_payload_v6=self._shared_shape_payload_v6,
                 )
             ).encode("utf-8")
         )
@@ -2361,6 +2374,7 @@ class StructuredJsonReviewerAdapter:
         from .viewpoint_request_encoding import SHAPE_FORMAT_V3,decode_shared_shapes_v3
         from .viewpoint_request_encoding import SHAPE_FORMAT_V4,decode_shared_shapes_v4
         from .viewpoint_request_encoding import SHAPE_FORMAT_V5,decode_shared_shapes_v5
+        from .viewpoint_request_encoding import SHAPE_FORMAT_V6,decode_shared_shapes_v6
         request = structured_json_request(payload, prompt=self._prompt,
             response_model=self._response_model, schema_name=self._schema_name,
             compact_payload=self._compact_payload, shared_text_payload=True,
@@ -2373,6 +2387,7 @@ class StructuredJsonReviewerAdapter:
             shared_shape_payload_v3=self._shared_shape_payload_v3,
             shared_shape_payload_v4=self._shared_shape_payload_v4,
             shared_shape_payload_v5=self._shared_shape_payload_v5,
+            shared_shape_payload_v6=self._shared_shape_payload_v6,
             response_schema=self._wire_response_schema())
         wire = json.loads(request['user_prompt'])
         encoded = wire.get('format') == FORMAT and 'shared_text' in wire
@@ -2385,15 +2400,16 @@ class StructuredJsonReviewerAdapter:
         shapes_v3_encoded = wire.get('format') == SHAPE_FORMAT_V3
         shapes_v4_encoded = wire.get('format') == SHAPE_FORMAT_V4
         shapes_v5_encoded = wire.get('format') == SHAPE_FORMAT_V5
-        restored = decode_shared_shapes_v5(wire) if shapes_v5_encoded else decode_shared_shapes_v4(wire) if shapes_v4_encoded else decode_shared_shapes_v3(wire) if shapes_v3_encoded else decode_shared_shapes_v2(wire) if shapes_v2_encoded else decode_shared_shapes(wire) if shapes_encoded else decode_shared_values(wire) if values_encoded else decode_shared_keys_v2(wire) if keys_v2_encoded else decode_shared_keys(wire) if keys_encoded else decode_shared_records(wire) if records_encoded else decode_shared_text(wire) if encoded else wire
+        shapes_v6_encoded = wire.get('format') == SHAPE_FORMAT_V6
+        restored = decode_shared_shapes_v6(wire) if shapes_v6_encoded else decode_shared_shapes_v5(wire) if shapes_v5_encoded else decode_shared_shapes_v4(wire) if shapes_v4_encoded else decode_shared_shapes_v3(wire) if shapes_v3_encoded else decode_shared_shapes_v2(wire) if shapes_v2_encoded else decode_shared_shapes(wire) if shapes_encoded else decode_shared_values(wire) if values_encoded else decode_shared_keys_v2(wire) if keys_v2_encoded else decode_shared_keys(wire) if keys_encoded else decode_shared_records(wire) if records_encoded else decode_shared_text(wire) if encoded else wire
         if canonical_json(restored) != canonical_json(payload):
             raise ValueError('actual outgoing request lost semantic content')
         original = structured_json_request(payload, prompt=self._prompt,
             response_model=self._response_model, schema_name=self._schema_name,
             compact_payload=self._compact_payload,
             response_schema=self._wire_response_schema())
-        return {'serialization_contract': SHAPE_FORMAT_V5 if self._shared_shape_payload_v5 else SHAPE_FORMAT_V4 if self._shared_shape_payload_v4 else SHAPE_FORMAT_V3 if self._shared_shape_payload_v3 else SHAPE_FORMAT_V2 if self._shared_shape_payload_v2 else SHAPE_FORMAT if self._shared_shape_payload else VALUE_FORMAT if self._shared_value_payload else KEY_FORMAT_V2 if self._shared_key_payload_v2 else KEY_FORMAT if self._shared_key_payload else RECORD_FORMAT if self._shared_record_payload else FORMAT,
-                'effective_serialization': SHAPE_FORMAT_V5 if shapes_v5_encoded else SHAPE_FORMAT_V4 if shapes_v4_encoded else SHAPE_FORMAT_V3 if shapes_v3_encoded else SHAPE_FORMAT_V2 if shapes_v2_encoded else SHAPE_FORMAT if shapes_encoded else VALUE_FORMAT if values_encoded else KEY_FORMAT_V2 if keys_v2_encoded else KEY_FORMAT if keys_encoded else RECORD_FORMAT if records_encoded else FORMAT if encoded else 'compact_json_v1',
+        return {'serialization_contract': SHAPE_FORMAT_V6 if self._shared_shape_payload_v6 else SHAPE_FORMAT_V5 if self._shared_shape_payload_v5 else SHAPE_FORMAT_V4 if self._shared_shape_payload_v4 else SHAPE_FORMAT_V3 if self._shared_shape_payload_v3 else SHAPE_FORMAT_V2 if self._shared_shape_payload_v2 else SHAPE_FORMAT if self._shared_shape_payload else VALUE_FORMAT if self._shared_value_payload else KEY_FORMAT_V2 if self._shared_key_payload_v2 else KEY_FORMAT if self._shared_key_payload else RECORD_FORMAT if self._shared_record_payload else FORMAT,
+                'effective_serialization': SHAPE_FORMAT_V6 if shapes_v6_encoded else SHAPE_FORMAT_V5 if shapes_v5_encoded else SHAPE_FORMAT_V4 if shapes_v4_encoded else SHAPE_FORMAT_V3 if shapes_v3_encoded else SHAPE_FORMAT_V2 if shapes_v2_encoded else SHAPE_FORMAT if shapes_encoded else VALUE_FORMAT if values_encoded else KEY_FORMAT_V2 if keys_v2_encoded else KEY_FORMAT if keys_encoded else RECORD_FORMAT if records_encoded else FORMAT if encoded else 'compact_json_v1',
                 'semantic_payload_sha256': sha256_json(payload),
                 'restored_payload_sha256': sha256_json(restored),
                 'wire_request_sha256': sha256_json(request),
@@ -2424,11 +2440,20 @@ def structured_json_request(
     shared_shape_payload_v3: bool = False,
     shared_shape_payload_v4: bool = False,
     shared_shape_payload_v5: bool = False,
+    shared_shape_payload_v6: bool = False,
     response_schema: dict | None = None,
 ) -> dict[str, Any]:
     """The exact arguments passed to generate_json, before transport wrapping."""
 
-    if shared_shape_payload_v5:
+    if shared_shape_payload_v6:
+        if not (shared_shape_payload_v5 and shared_shape_payload_v4 and shared_shape_payload_v3
+                and shared_shape_payload_v2 and shared_shape_payload and shared_value_payload
+                and shared_key_payload_v2 and shared_key_payload and shared_record_payload
+                and shared_text_payload and compact_payload):
+            raise ValueError('wide inline-piece encoding requires inline-piece encoding')
+        from .viewpoint_request_encoding import encode_shared_shapes_v6
+        user_prompt=encode_shared_shapes_v6(payload)
+    elif shared_shape_payload_v5:
         if not shared_shape_payload_v4 or not shared_shape_payload_v3 or not shared_shape_payload_v2 or not shared_shape_payload or not shared_value_payload or not shared_key_payload_v2 or not shared_key_payload or not shared_record_payload or not shared_text_payload or not compact_payload:
             raise ValueError('inline-piece encoding requires compact string-piece encoding')
         from .viewpoint_request_encoding import encode_shared_shapes_v5

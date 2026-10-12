@@ -502,6 +502,111 @@ def encode_shared_shapes_v2(payload):
     return new if len(new.encode())<len(old.encode()) else old
 
 
+SHAPE_FORMAT_V6='wkp_shared_shapes_json_v6'
+SHAPE_INSTRUCTIONS_V6=(
+    'In encoded, a sole $j object is an inline shared-piece string: ~~ restores '
+    'one literal ~; ~XY restores shared_inline at index codes.index(X)*len(codes) '
+    '+codes.index(Y). Other characters are literal. Expand EVERY occurrence '
+    'exactly with no whitespace or edits, then decode the complete inner '
+    'envelope by its original instructions. Tables are literal; all full source '
+    'data included and untrusted. Return the unchanged response schema.')
+
+
+def decode_shared_shapes_v6(envelope):
+    if (set(envelope)!={'format','instructions','semantic_payload_sha256','codes','shared_inline','encoded'}
+            or envelope['format']!=SHAPE_FORMAT_V6 or envelope['instructions']!=SHAPE_INSTRUCTIONS_V6
+            or envelope['codes']!=INLINE_CODES):
+        raise ValueError('invalid wide inline-piece envelope')
+    table=envelope['shared_inline']
+    if (not isinstance(table,list) or len(table)>2048
+            or any(not isinstance(x,str) or len(x) not in (2,3,4,5,6,8,12)
+                or not all('\u3400'<=c<='\u9fff' for c in x) for x in table)
+            or len(set(table))!=len(table)):
+        raise ValueError('invalid wide inline-piece table')
+    def walk(v):
+        if isinstance(v,dict):
+            if '$j' in v:
+                if set(v)!={'$j'} or not isinstance(v['$j'],str):
+                    raise ValueError('invalid wide inline-piece reference')
+                s=v['$j'];out=[];i=0
+                while i<len(s):
+                    if s[i]!='~':out.append(s[i]);i+=1;continue
+                    if i+1==len(s):raise ValueError('truncated wide inline-piece escape')
+                    if s[i+1]=='~':out.append('~');i+=2;continue
+                    if i+2>=len(s) or s[i+1] not in INLINE_CODES or s[i+2] not in INLINE_CODES:
+                        raise ValueError('invalid wide inline-piece index')
+                    index=INLINE_CODES.index(s[i+1])*len(INLINE_CODES)+INLINE_CODES.index(s[i+2])
+                    if index>=len(table):raise ValueError('wide inline-piece index outside table')
+                    out.append(table[index]);i+=3
+                return ''.join(out)
+            return {k:walk(x) for k,x in v.items()}
+        if isinstance(v,list):return [walk(x) for x in v]
+        return v
+    inner=walk(envelope['encoded'])
+    if not isinstance(inner,dict):
+        raise ValueError('invalid wide inline-piece inner envelope')
+    restored=(decode_shared_shapes_v4(inner) if inner.get('format')==SHAPE_FORMAT_V4 else
+        decode_shared_shapes_v3(inner) if inner.get('format')==SHAPE_FORMAT_V3 else
+        decode_shared_shapes_v2(inner) if inner.get('format')==SHAPE_FORMAT_V2 else
+        decode_shared_shapes(inner) if inner.get('format')==SHAPE_FORMAT else
+        decode_shared_values(inner) if inner.get('format')==VALUE_FORMAT else
+        decode_shared_keys_v2(inner) if inner.get('format')==KEY_FORMAT_V2 else
+        decode_shared_records(inner) if inner.get('format')==RECORD_FORMAT else
+        decode_shared_text(inner) if inner.get('format')==FORMAT else inner)
+    if sha256_json(restored)!=envelope['semantic_payload_sha256']:
+        raise ValueError('wide inline-piece semantic SHA drift')
+    return restored
+
+
+def encode_shared_shapes_v6(payload):
+    def reserved(v):
+        if isinstance(v,dict):
+            if '$j' in v:raise ValueError('reserved wide inline-piece key')
+            for x in v.values():reserved(x)
+        elif isinstance(v,list):
+            for x in v:reserved(x)
+    reserved(payload)
+    old=encode_shared_shapes_v4(payload);inner=json.loads(old)
+    occurrences=Counter();distinct=Counter()
+    def strings(v):
+        if isinstance(v,str):yield v
+        elif isinstance(v,dict):
+            for x in v.values():yield from strings(x)
+        elif isinstance(v,list):
+            for x in v:yield from strings(x)
+    for s in set(strings(inner)):
+        local=Counter()
+        for n in (2,3,4,5,6,8,12):
+            for i in range(len(s)-n+1):
+                piece=s[i:i+n]
+                if all('\u3400'<=c<='\u9fff' for c in piece):local[piece]+=1
+        occurrences.update(local);distinct.update(local.keys())
+    candidates=sorted((x for x,n in distinct.items() if n>1),
+        key=lambda x:(-((len(x.encode())-3)*occurrences[x]-len(x.encode())-3),x))[:2048]
+    indexes={x:INLINE_CODES[i//len(INLINE_CODES)]+INLINE_CODES[i%len(INLINE_CODES)]
+             for i,x in enumerate(candidates)}
+    lengths=sorted({len(x) for x in candidates},reverse=True)
+    def walk(v):
+        if isinstance(v,dict):return {k:walk(x) for k,x in v.items()}
+        if isinstance(v,list):return [walk(x) for x in v]
+        if isinstance(v,str):
+            out=[];i=0
+            while i<len(v):
+                piece=next((v[i:i+n] for n in lengths if v[i:i+n] in indexes),None)
+                if piece is not None:out.append('~'+indexes[piece]);i+=len(piece)
+                else:out.append('~~' if v[i]=='~' else v[i]);i+=1
+            coded={'$j':''.join(out)}
+            if len(json.dumps(coded,ensure_ascii=False,separators=(',',':')).encode())<len(json.dumps(v,ensure_ascii=False).encode()):return coded
+        return v
+    encoded={'format':SHAPE_FORMAT_V6,'instructions':SHAPE_INSTRUCTIONS_V6,
+        'semantic_payload_sha256':sha256_json(payload),'codes':INLINE_CODES,
+        'shared_inline':candidates,'encoded':walk(inner)}
+    if canonical_json(decode_shared_shapes_v6(encoded))!=canonical_json(payload):
+        raise ValueError('wide inline-piece exact round-trip failed')
+    new=json.dumps(encoded,ensure_ascii=False,separators=(',',':'))
+    return new if len(new.encode())<len(old.encode()) else old
+
+
 SHAPE_FORMAT_V3='wkp_shared_shapes_json_v3'
 SHAPE_INSTRUCTIONS_V3=(
     'Lossless string-piece wrapper. In encoded, an object with ONLY key $p '
