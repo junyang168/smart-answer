@@ -983,6 +983,8 @@ def main(argv=None):
                         help='Fixed-parent source create-contract engineering input repair; original final only')
     parser.add_argument('--cvp-correction-source-input-repair',type=Path,
                         help='Exact omitted full-source correction input engineering generation; unused final only')
+    parser.add_argument('--review-claim-id-format-repair',type=Path,
+                        help='Owner-bound one fixed-parent ID-only transport repair; no semantic re-review')
     args = parser.parse_args(argv)
     from backend.pipeline.cvp_model_retry_once import NAME as RETRY_NAME
     if (args.output_root/RETRY_NAME).exists() and not args.owner_model_retry_authorization:
@@ -1220,6 +1222,12 @@ def main(argv=None):
             write_immutable(args.output_root/'adjudication-input-repair-authorization-binding.json',
                             {'authorization': binding(args.adjudication_input_repair_authorization)})
         from backend.pipeline.cvp_correction_source_context import BINDING as CORRECTION_SCOPE_BINDING
+        from backend.pipeline.viewpoint_review_identity_repair import BINDING as REVIEW_ID_BINDING
+        if (args.output_root/REVIEW_ID_BINDING).exists() and not args.review_claim_id_format_repair:
+            raise ValueError('resume requires exact bound review ID format direction')
+        if args.review_claim_id_format_repair:
+            from backend.pipeline.viewpoint_review_identity_repair import enable
+            enable(store,binding(args.review_claim_id_format_repair),args.output_root,args.sql_campaign)
         if (args.output_root / CORRECTION_SCOPE_BINDING).exists() and not args.cvp_correction_source_input_repair:
             raise ValueError('resume must explicitly retain the bound correction source repair direction')
         if args.cvp_correction_source_input_repair:

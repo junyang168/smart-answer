@@ -295,13 +295,18 @@ def bound_model_response(adapter, payload, raw, cache, *, persist=True):
     # Completed legacy reconstructions keep their exact old interpretation.
     if (historical_context() is not None or validating_saved_artifacts()) and not getattr(adapter, '_program_response_binding', False):
         return raw
-    result = bind_response(model, raw, payload)
+    from backend.pipeline.viewpoint_review_identity_repair import repair
+    exact_raw, identity_receipt = repair(adapter, payload, raw, cache, persist=persist)
+    result = bind_response(model, exact_raw, payload)
     artifact = read_artifact(cache)
     proof = {'schema_version':VERSION, 'request_identity':model_request_identity(adapter,payload),
         'raw_artifact_sha256':artifact['artifact_sha256'], 'raw_response_sha256':sha256_json(raw),
         'bound_response_sha256':sha256_json(result), 'bound_response':result,
         'model_raw_preserved':True, 'semantic_decisions_unchanged':True}
     proof['artifact_sha256'] = sha256_json(proof)
+    if identity_receipt is not None:
+        proof['owner_claim_id_format_repair'] = identity_receipt
+        proof['artifact_sha256'] = sha256_json({k:v for k,v in proof.items() if k != 'artifact_sha256'})
     path = cache.with_name(cache.stem+'.program-binding.json')
     if path.exists():
         if read_artifact(path) != proof: raise ValueError('program response binding proof drift')
