@@ -659,6 +659,16 @@ def run_group(store, definition, group, row, *, root):
         stage_event('independent_audit', sequence=group['sequence'], run_id=run_id)
         audit_dir.mkdir(parents=True,exist_ok=True)
         intent=audit_dir/'audit-intent.json'
+        relation_profile=audit_dir/'relation-role-input-profile.json'
+        if not intent.exists():
+            from backend.pipeline.viewpoint_semantic_contract import RELATION_ROLES,RELATION_PATH
+            write_immutable(relation_profile,{'version':RELATION_ROLES,'contract':binding(RELATION_PATH)})
+        relation_args=[]
+        if relation_profile.exists():
+            from backend.pipeline.viewpoint_semantic_contract import RELATION_ROLES,RELATION_PATH
+            if read_artifact(relation_profile)!={'version':RELATION_ROLES,'contract':binding(RELATION_PATH)}:
+                raise ValueError('independent audit relation role profile drift')
+            relation_args=['--relation-roles']
         expected_intent={'claim_ids':group['claim_ids'],'viewpoint_ids':views,'read_pins':pin_rows(pins(current)),
                          'model':'gemini-3.8-flash','workers':2,'automatic_retry':False}
         from backend.pipeline.cvp_source_impact_resolution import audit_record_keys,validate_pre_model_startup_recovery
@@ -673,7 +683,7 @@ def run_group(store, definition, group, row, *, root):
         else:write_immutable(intent,expected_intent)
         subprocess.run([str(PROJECT/"backend/.venv/bin/python"),"scripts/audit-library.py","--scope","all","--layers","1,2,3,4",
                         "--claim-ids",",".join(group["claim_ids"]),"--viewpoint-ids",",".join(views),
-                        "--workers","2","--model","gemini-3.8-flash","--no-status-file","--preserve-full-context","--component-roles","--sql-group-scope",
+                        "--workers","2","--model","gemini-3.8-flash","--no-status-file","--preserve-full-context","--component-roles",*relation_args,"--sql-group-scope",
                         *[a for k in audit_keys for a in ('--sql-record-key',k)],"--out",str(audit_dir)],
                        cwd=PROJECT,check=True,env={**os.environ,'KNOWLEDGE_DATABASE_URL':store.database_url})
     from backend.pipeline.viewpoint_content_blocked_fallback import apply as content_fallback
@@ -710,8 +720,10 @@ def run_group(store, definition, group, row, *, root):
         packet,exact_human_items=exact_human_partition(audit,packet,root,store)
         targets=[target_identity(i) for i in packet['items']]
         prior=store.adjudication_roots(targets)
-        input_repair_binding = root/'adjudication-input-repair-authorization-binding.json'
-        if input_repair_binding.exists():
+        input_repair_bindings = [root/'adjudication-input-repair-authorization-binding.json',
+                                *sorted((root/'adjudication-input-repairs').glob('*.json'))]
+        for input_repair_binding in input_repair_bindings:
+            if not input_repair_binding.exists():continue
             auth = read_artifact(input_repair_binding)['authorization']
             if binding(auth['path']) != auth:
                 raise ValueError('adjudication input repair direction physical drift')
@@ -932,6 +944,8 @@ def main(argv=None):
                         help='Exact owner acceptance of an existing structural duplicate finding; no new model/content permission')
     parser.add_argument('--adjudication-input-repair-authorization', type=Path,
                         help='One owner-directed complete-CVR call for an exact saved unresolved incomplete input')
+    parser.add_argument('--adjudication-relation-contract-repair',type=Path,action='append',default=[],
+                        help='Fixed-parent once standing-engineering omitted relation-contract repair; no semantic retry')
     parser.add_argument('--candidate-identity-authorization', type=Path,
                         help='Owner-directed same-batch identity revision; original unresolved answer is retained')
     parser.add_argument('--source-review-input-repair-authorization', type=Path,
@@ -1194,6 +1208,14 @@ def main(argv=None):
                 raise ValueError('adjudication input repair direction identity/campaign drift')
             write_immutable(args.output_root/'adjudication-input-repair-authorization-binding.json',
                             {'authorization': binding(args.adjudication_input_repair_authorization)})
+        for path in args.adjudication_relation_contract_repair:
+            from backend.pipeline.cvp_sql_adjudication_input_repair import RELATION_SCHEMA
+            direction = read_artifact(path)
+            if (direction.get('schema_version') != RELATION_SCHEMA
+                    or direction.get('campaign_sha256') != args.sql_campaign):
+                raise ValueError('relation contract repair direction campaign/identity drift')
+            write_immutable(args.output_root/'adjudication-input-repairs'/
+                            (direction['artifact_sha256']+'.json'), {'authorization':binding(path)})
         if args.component_role_authorization:
             from backend.pipeline.viewpoint_component_role_resolution import AUTH_SCHEMA
             direction = read_artifact(args.component_role_authorization)

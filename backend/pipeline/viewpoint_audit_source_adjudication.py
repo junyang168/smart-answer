@@ -45,15 +45,19 @@ component 必须在完整 Claim 和自己原文中理解，不要求截取片段
 context 只是诊断材料，不授予新增引用权威。结果只是提案，不是审计通过或写库批准。'''
 
 
-def contextual_adjudication_prompt():
+def contextual_adjudication_prompt(*, relation_roles=False):
     from backend.pipeline.viewpoint_semantic_contract import semantic_prompt
-    return semantic_prompt('''只读原文仲裁。逐项判断独立审计异议是否成立；不生成修改、不授权写入。
+    prompt = semantic_prompt('''只读原文仲裁。逐项判断独立审计异议是否成立；不生成修改、不授权写入。
 完整 Claim、实际 CVP、现行连接及其自己绑定的原文均提供，先理解自身语境，再按实际关系判断。
 每个 item 恰好返回一次 audit_objection_upheld / audit_objection_rejected / unresolved。
 前两者须给本 item 原文逐字引文、source_id 和 paragraph_key，明确回应原异议。
 reason 须说明语境对应或承重差异及误读；supports 须解释具体论证作用，不要求独自证明全部 CVP。
 证据不足保留 unresolved，不靠想象反例否决，也不为通过而补条件、改关系或扩范围。
 结果不是独立审计通过，不取代原有完成与写库门槛。''')
+    if relation_roles:
+        from backend.pipeline.viewpoint_semantic_contract import relation_rules
+        prompt += '\n\n' + relation_rules()
+    return prompt
 
 
 def disputes(audit):
@@ -262,7 +266,19 @@ def source_review_adapter(client, cache):
         response_model=Findings, schema_name='wang_audit_source_findings_v1', compact_payload=True,
         shared_text_payload=True, shared_record_payload=True)
     from backend.pipeline.viewpoint_resolution_runtime import response_adapter
-    return response_adapter(contextual, read_artifact(cache) if cache.exists() else None)
+    # Historical requests (including unknown intents) retain their exact prompt.
+    # New unused calls explicitly disclose the complete nonmember role contract.
+    intent = cache.with_name(cache.stem + '.call-intent.json')
+    saved = read_artifact(cache) if cache.exists() else (read_artifact(intent) if intent.exists() else None)
+    old_actual = response_adapter(contextual, saved)
+    if (saved and saved.get('prompt_sha256') == old_actual.prompt_sha256
+            and saved.get('generation_config_sha256') == old_actual.generation_config_sha256):
+        return old_actual
+    complete = StructuredJsonReviewerAdapter(client=client,
+        prompt=contextual_adjudication_prompt(relation_roles=True), response_model=Findings,
+        schema_name='wang_audit_source_findings_v1', compact_payload=True,
+        shared_text_payload=True, shared_record_payload=True)
+    return response_adapter(complete, saved)
 
 
 def restricted_packet(packet, only_item_ids):

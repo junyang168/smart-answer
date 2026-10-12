@@ -76,19 +76,26 @@ CONTEXTUAL_SEMANTICS = "wang_cvp_contextual_semantics_v2"
 SEMANTIC_RULES_PATH = REPO_ROOT / "config" / "wang_cvp_contextual_semantics_v2.md"
 COMPONENT_SEMANTICS = "wang_cvp_component_roles_v1"
 COMPONENT_RULES_PATH = SEMANTIC_RULES_PATH.with_name(COMPONENT_SEMANTICS + '.md')
+RELATION_SEMANTICS = 'wang_cvp_relation_roles_v1'
+RELATION_RULES_PATH = SEMANTIC_RULES_PATH.with_name(RELATION_SEMANTICS + '.md')
 
 
 def contextual_semantic_rules(version: str) -> str:
     # Independent text loader; deliberately no backend import/model/reader.
-    if version not in {CONTEXTUAL_SEMANTICS, COMPONENT_SEMANTICS}:
+    if version not in {CONTEXTUAL_SEMANTICS, COMPONENT_SEMANTICS, RELATION_SEMANTICS}:
         raise ValueError("unknown independent-audit semantic contract")
     rules = SEMANTIC_RULES_PATH.read_text(encoding="utf-8")
     if not rules.startswith("## 统一语义规则：" + CONTEXTUAL_SEMANTICS + "\n"):
         raise ValueError("independent-audit semantic contract identity drift")
-    if version == COMPONENT_SEMANTICS:
+    if version in {COMPONENT_SEMANTICS, RELATION_SEMANTICS}:
         extra = COMPONENT_RULES_PATH.read_text(encoding='utf-8')
         if not extra.startswith('## 成分角色規則：' + COMPONENT_SEMANTICS + '\n'):
             raise ValueError('independent component role contract drift')
+        rules += '\n\n' + extra
+    if version == RELATION_SEMANTICS:
+        extra = RELATION_RULES_PATH.read_text(encoding='utf-8')
+        if not extra.startswith('## 连接作用规则：' + RELATION_SEMANTICS + '\n'):
+            raise ValueError('independent relation role contract drift')
         rules += '\n\n' + extra
     return rules
 
@@ -2152,7 +2159,7 @@ def audit_viewpoints(
                 f"    連接 ID：{link.get('viewpoint_claim_link_id')}；Claim 版本：{link.get('pinned_claim_revision')}\n"
                 f"    精確區間：{json.dumps(locator.get('canonical_spans') or [], ensure_ascii=False)}\n"
                 f"    自身證據綁定：{json.dumps(link.get('evidence_bindings') or [], ensure_ascii=False)}\n"
-            ) if semantic_contract_version == COMPONENT_SEMANTICS else ''
+            ) if semantic_contract_version in {COMPONENT_SEMANTICS, RELATION_SEMANTICS} else ''
             blocks.append(
                 f"- 主張 [{claim_id}]（連結類型 {link.get('link_type')}）\n"
                 f"{component_details}"
@@ -2646,6 +2653,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default=DEFAULT_MODEL, help="第 3、4 層用的獨立模型")
     parser.add_argument('--preserve-full-context',action='store_true',help='Return the full-source content block; do not retry shortened inputs')
     parser.add_argument('--component-roles', action='store_true', help='Versioned conclusion/reason component semantics; preserves historical audit prompts')
+    parser.add_argument('--relation-roles',action='store_true',help='Complete nonmember role contract; independently versioned, no historic prompt upgrade')
     parser.add_argument(
         "--scope",
         choices=("current-run", "all"),
@@ -2787,7 +2795,7 @@ def main(argv: list[str] | None = None) -> int:
             progress,
             {x.strip() for x in args.viewpoint_ids.split(",") if x.strip()} or None,
             reconsiderations,
-            semantic_contract_version=COMPONENT_SEMANTICS if args.component_roles else CONTEXTUAL_SEMANTICS,
+            semantic_contract_version=RELATION_SEMANTICS if args.relation_roles else (COMPONENT_SEMANTICS if args.component_roles else CONTEXTUAL_SEMANTICS),
         )
 
     meta = {
@@ -2795,7 +2803,7 @@ def main(argv: list[str] | None = None) -> int:
         "model": args.model if model else "未使用",
         "seed": args.seed,
         "scope": args.scope,
-        "semantic_contract_version": COMPONENT_SEMANTICS if args.component_roles else CONTEXTUAL_SEMANTICS,
+        "semantic_contract_version": RELATION_SEMANTICS if args.relation_roles else (COMPONENT_SEMANTICS if args.component_roles else CONTEXTUAL_SEMANTICS),
         "semantic_contract_file_sha256": hashlib.sha256(SEMANTIC_RULES_PATH.read_bytes()).hexdigest(),
         "sources": len(sources.in_scope) if sources.in_scope is not None else len(sources.documents),
         "sources_out_of_scope": len(sources.out_of_scope),
@@ -2808,8 +2816,10 @@ def main(argv: list[str] | None = None) -> int:
         "claims": len(store.collection("claims")),
         "viewpoints": len(store.collection("canonical_viewpoints")),
     }
-    if args.component_roles:
+    if args.component_roles or args.relation_roles:
         meta['component_role_contract_file_sha256'] = hashlib.sha256(COMPONENT_RULES_PATH.read_bytes()).hexdigest()
+    if args.relation_roles:
+        meta['relation_role_contract_file_sha256'] = hashlib.sha256(RELATION_RULES_PATH.read_bytes()).hexdigest()
     if reconsidered_binding:
         if hashlib.sha256(args.reconsider_audit.read_bytes()).hexdigest() != reconsidered_binding['file_sha256']:
             raise ValueError('original independent audit changed during reconsideration')

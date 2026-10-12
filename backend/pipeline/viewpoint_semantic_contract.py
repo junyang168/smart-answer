@@ -11,6 +11,15 @@ CONTEXTUAL_SEMANTICS = "wang_cvp_contextual_semantics_v2"
 CONTRACT_PATH = Path(__file__).resolve().parents[2] / "config" / "wang_cvp_contextual_semantics_v2.md"
 COMPONENT_ROLES = "wang_cvp_component_roles_v1"
 COMPONENT_PATH = CONTRACT_PATH.with_name(COMPONENT_ROLES + ".md")
+RELATION_ROLES = "wang_cvp_relation_roles_v1"
+RELATION_PATH = CONTRACT_PATH.with_name(RELATION_ROLES + ".md")
+
+
+def relation_rules():
+    text = RELATION_PATH.read_text(encoding="utf-8")
+    if not text.startswith("## 连接作用规则：" + RELATION_ROLES + "\n"):
+        raise ValueError("CVP relation role contract identity drift")
+    return text
 
 
 def component_rules():

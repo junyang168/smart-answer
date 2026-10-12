@@ -143,13 +143,16 @@ def capture_for_audit(audit, layer, identity):
     version = audit.get('meta', {}).get('semantic_contract_version')
     if version is None:
         return capture(layer, identity)
-    from backend.pipeline.viewpoint_semantic_contract import CONTRACT_PATH, CONTEXTUAL_SEMANTICS, COMPONENT_ROLES, COMPONENT_PATH
-    if (version not in {CONTEXTUAL_SEMANTICS,COMPONENT_ROLES} or
+    from backend.pipeline.viewpoint_semantic_contract import CONTRACT_PATH, CONTEXTUAL_SEMANTICS, COMPONENT_ROLES, COMPONENT_PATH, RELATION_ROLES, RELATION_PATH
+    if (version not in {CONTEXTUAL_SEMANTICS,COMPONENT_ROLES,RELATION_ROLES} or
             audit['meta'].get('semantic_contract_file_sha256') != hashlib.sha256(CONTRACT_PATH.read_bytes()).hexdigest()):
         raise ValueError('saved audit semantic contract identity/physical SHA drift')
-    if (version==COMPONENT_ROLES and audit['meta'].get('component_role_contract_file_sha256')
+    if (version in {COMPONENT_ROLES,RELATION_ROLES} and audit['meta'].get('component_role_contract_file_sha256')
             !=hashlib.sha256(COMPONENT_PATH.read_bytes()).hexdigest()):
         raise ValueError('saved audit component role contract identity/physical SHA drift')
+    if (version==RELATION_ROLES and audit['meta'].get('relation_role_contract_file_sha256')
+            !=hashlib.sha256(RELATION_PATH.read_bytes()).hexdigest()):
+        raise ValueError('saved audit relation role contract identity/physical SHA drift')
     scope=audit.get('meta',{}).get('registry_read_scope')
     return capture(layer, identity, semantic_contract_version=version, **({'sql_scope':scope} if scope else {}))
 
