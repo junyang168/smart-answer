@@ -378,7 +378,7 @@ def reviewed_cvp_package(root, materials, store, *, require_resolved=False):
                 or any(c.disposition=='deferred' for d in p.claim_decisions for c in d.components)
                 or p.viewpoint_revisions or getattr(p,'argument_route_candidates',[])):
             raise ValueError('split authority cannot waive unresolved coverage/CVP revision boundary')
-    proposal_name = ("raw-reconsideration.json" if report["_final_review"] is not None
+    proposal_name = (report.get('_effective_correction_artifact_name', "raw-reconsideration.json") if report["_final_review"] is not None
                      else report.get('_initial_proposal_artifact_name', 'raw-proposal.json'))
     review_name = "raw-final-review.json" if report["_final_review"] is not None else report.get('_initial_review_artifact_name',"raw-review.json")
     proposal = read_artifact(root/proposal_name); review = read_artifact(root/review_name)
@@ -415,7 +415,12 @@ def reviewed_cvp_package(root, materials, store, *, require_resolved=False):
         for name in ('owner-candidate-identity-authorization.json', 'owner-identity-validation.json',
                      'raw-proposal.json', 'raw-consolidation.json', 'raw-owner-identity-proposal.json'):
             approval[name] = binding(root/name)
-    for stage in ('raw-review', 'raw-reconsideration', 'raw-final-review'):
+    from backend.pipeline.cvp_correction_source_context import RAW as CORRECTION_REPAIR_RAW, BINDING as CORRECTION_REPAIR_BINDING
+    if proposal_name == CORRECTION_REPAIR_RAW:
+        for name in (CORRECTION_REPAIR_BINDING,'correction-source-input-repair.json',
+                     'raw-proposal.json','raw-review.json','raw-reconsideration.json'):
+            approval[name]=binding(root/name)
+    for stage in ('raw-review', 'raw-reconsideration', 'raw-final-review', CORRECTION_REPAIR_RAW.removesuffix('.json')):
         proof = root/(stage+'.program-binding.json')
         if proof.exists(): approval[stage+'_program_binding'] = binding(proof)
     if review_name == 'raw-review-pin-format-repair.json':
@@ -976,6 +981,8 @@ def main(argv=None):
                         help='Explicit once retry of an exact unanswered transport timeout; original unknown preserved')
     parser.add_argument('--source-permission-recovery-authorization',type=Path,
                         help='Fixed-parent source create-contract engineering input repair; original final only')
+    parser.add_argument('--cvp-correction-source-input-repair',type=Path,
+                        help='Exact omitted full-source correction input engineering generation; unused final only')
     args = parser.parse_args(argv)
     from backend.pipeline.cvp_model_retry_once import NAME as RETRY_NAME
     if (args.output_root/RETRY_NAME).exists() and not args.owner_model_retry_authorization:
@@ -1212,6 +1219,15 @@ def main(argv=None):
                 raise ValueError('adjudication input repair direction identity/campaign drift')
             write_immutable(args.output_root/'adjudication-input-repair-authorization-binding.json',
                             {'authorization': binding(args.adjudication_input_repair_authorization)})
+        from backend.pipeline.cvp_correction_source_context import BINDING as CORRECTION_SCOPE_BINDING
+        if (args.output_root / CORRECTION_SCOPE_BINDING).exists() and not args.cvp_correction_source_input_repair:
+            raise ValueError('resume must explicitly retain the bound correction source repair direction')
+        if args.cvp_correction_source_input_repair:
+            from backend.pipeline.cvp_correction_source_context import enable
+            target=store.get_cvp_group(read_artifact(args.cvp_correction_source_input_repair)['run_id'])
+            if not target or (invocation_limit is not None and target['sequence'] > invocation_limit):
+                raise ValueError('correction source repair outside invocation boundary')
+            enable(store,binding(args.cvp_correction_source_input_repair),args.output_root,args.sql_campaign)
         for path in args.adjudication_relation_contract_repair:
             from backend.pipeline.cvp_sql_adjudication_input_repair import RELATION_SCHEMA
             direction = read_artifact(path)

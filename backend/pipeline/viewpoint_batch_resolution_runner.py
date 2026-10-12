@@ -565,6 +565,9 @@ def run_batch(
     if (output_dir / 'batch-packet.json').exists():
         packet = _read(output_dir / 'batch-packet.json')
         registry_context = packet['registry_context']
+    from backend.pipeline import cvp_correction_source_context as correction_context
+    correction_source_profile = correction_context.profile(
+        output_dir, packet, complete_initial=retained_initial_profile is not None)
     from backend.pipeline.cvp_batch_identity_integration import ENABLED, VERSION
     integration_path=output_dir/'batch-identity-integration.json'
     if ENABLED.get() and not any(output_dir.glob('raw-proposal*')):
@@ -842,6 +845,10 @@ def run_batch(
             "review": review_payload,
             "connection_required": connection_required,
         }
+        if correction_source_profile is not None:
+            reconsider_packet = correction_context.complete_packet(
+                reconsider_packet, review_packet['own_source_bodies'], correction_source_profile)
+            reconsiderer = correction_context.adapter(reconsiderer)
         raw_reconsideration, reconsideration_calls, reconsideration_seconds = _call(
             reconsiderer, reconsider_packet, output_dir / "raw-reconsideration.json"
         )
@@ -881,6 +888,10 @@ def run_batch(
             ],
         )
         if reconsideration_report["outcome"] == "resolved":
+            if correction_source_profile is not None:
+                correction_context.validate_scope_preservation(proposal_payload,
+                    revised_proposal.model_dump(mode='json'),review_payload,
+                    reconsider_packet['correction_source_context']['related_claim_ids'])
             effective_proposal = revised_proposal
             effective_validation = revised_validation
         _write_immutable(
@@ -907,8 +918,58 @@ def run_batch(
             },
         )
 
+    correction_raw_name = 'raw-reconsideration.json'
+    correction_repair = None
+    if (reconsideration_report and reconsideration_report['outcome'] != 'resolved'
+            and (output_dir / correction_context.BINDING).exists()):
+        if identity_source_loader is None:
+            raise ValueError('correction source repair missing current physical source loader')
+        repair_input = correction_context.repair_packet(output_dir,
+            original={n:_read(output_dir/n) for n in
+                      ('raw-proposal.json','raw-review.json','raw-reconsideration.json')},
+            review_packet=review_packet, correction_packet=reconsider_packet,
+            sources=identity_source_loader(sorted({c.source_id for c in claims})),
+            reconsideration=reconsideration, proposal=proposal, review=review)
+        repair_raw, repair_calls, repair_seconds = _call(
+            correction_context.adapter(reconsiderer), repair_input, output_dir/correction_context.RAW)
+        reconsideration_calls += repair_calls
+        reconsideration_seconds += repair_seconds
+        repair_payload, repair_normalization = canonicalize_proposal(repair_raw)
+        repair_payload, repair_spans = anchor_proposal_spans(repair_payload,
+            claim_statements={c.claim_id:c.statement for c in claims})
+        repaired = CanonicalViewpointReconsiderationResponse.model_validate(repair_payload)
+        repaired_report = validate_reconsideration(reconsideration=repaired, proposal=proposal,
+            review=review, proposal_sha256=proposal_sha, review_sha256=review_sha)
+        repaired_proposal = apply_reconsideration_patches(reconsideration=repaired,
+            proposal=proposal, review=review)
+        repaired_validation = validate_proposal(proposal=repaired_proposal, batch_id=batch_id,
+            claims=claims, registry_revision_ids=[str(r['viewpoint_revision_id'])
+            for r in registry_context if r.get('viewpoint_revision_id')])
+        correction_context.validate_scope_preservation(proposal.model_dump(mode='json'),
+            repaired_proposal.model_dump(mode='json'),review.model_dump(mode='json'),
+            repair_input['correction_source_context']['related_claim_ids'])
+        _write_immutable(output_dir/'correction-source-input-repair.json', {
+            'schema_version':correction_context.REPAIR,
+            'receipt':repair_input['correction_source_context'],
+            'reconsideration':repaired.model_dump(mode='json'),
+            'effective_proposal':repaired_proposal.model_dump(mode='json'),
+            'validation_report':repaired_report, 'revised_validation_report':repaired_validation,
+            'normalization_paths':sorted({*repair_normalization,*repair_spans})})
+        if repaired_report['outcome'] != 'resolved':
+            raise BatchResolutionError(['complete source input repair remains unresolved; zero further correction'])
+        correction_repair=repair_input['correction_source_context']
+        reconsideration,reconsideration_report=repaired,repaired_report
+        revised_proposal=effective_proposal=repaired_proposal
+        effective_validation=repaired_validation
+        correction_raw_name=correction_context.RAW
+
     retained_boundary = None
     final_packet = packet
+    if correction_source_profile is not None or correction_repair is not None:
+        scoped = correction_context.complete_packet(reconsider_packet,
+            review_packet['own_source_bodies'],correction_repair or correction_source_profile)
+        final_packet={**packet,'own_source_bodies':scoped['own_source_bodies'],
+            'correction_source_context':scoped['correction_source_context']}
     if (reconsideration_report and reconsideration_report['outcome'] != 'resolved'
             and retained_review_loader is not None):
         projected = retained_review_loader(original=proposal.model_dump(mode='json'),
@@ -924,6 +985,8 @@ def run_batch(
 
     if reconsideration_report and (reconsideration_report["outcome"] == "resolved" or retained_boundary is not None):
         assert reconsideration is not None
+        if correction_repair is not None or correction_source_profile is not None:
+            final_reviewer = correction_context.adapter(final_reviewer if final_reviewer is not None else reviewer)
         (
             final_review,
             final_review_validation,
@@ -1000,6 +1063,7 @@ def run_batch(
             "consolidation": "raw-consolidation.json",
             "review": review_artifact_name,
             "reconsideration": "raw-reconsideration.json",
+            "correction_source_input_repair": correction_context.RAW,
             "final_review": "raw-final-review.json",
             "owner_identity_proposal": "raw-owner-identity-proposal.json",
         },
@@ -1133,6 +1197,7 @@ def run_batch(
         "_initial_review": review,
         "_final_review": final_review,
         "_reconsideration": reconsideration,
+        "_effective_correction_artifact_name": correction_raw_name,
         "_revision_dependents": revision_dependents,
         "_effective_validation": effective_validation,
         "_retained_review_boundary": retained_boundary,
