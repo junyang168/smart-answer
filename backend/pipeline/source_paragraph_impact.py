@@ -16,6 +16,8 @@ from backend.pipeline import source_reconciliation as c
 VERSION = "wang_source_paragraph_impact_v1"
 REVIEW_VERSION = "wang_source_epoch_binding_review_v1"
 PROFILE = "wang_source_paragraph_execution_v1"
+CVP_PENDING_PROBLEM = 'pending_cvp_management'
+CVP_PENDING_COLUMNS = {'canonical_viewpoints', 'viewpoint_revisions', 'viewpoint_claim_links'}
 
 
 def committed_context(store, saved):
@@ -341,7 +343,7 @@ def epoch_proposal_declaration(frozen, response):
     rows = [d for d in semantic.dispositions if d.record_key == scope['record_key']]
     if not rows:
         return None
-    if (len(rows) != 1 or rows[0].action != 'retain'
+    if (len(rows) != 1 or rows[0].action not in {'retain', 'impact_only'}
             or any(r.key == scope['record_key'] for r in semantic.records)):
         raise ValueError('epoch proposer declaration cannot authorize or modify binding cohort')
     return {'schema_version': 'source_epoch_proposer_declaration_v1',
@@ -359,8 +361,6 @@ def pending_candidates(frozen, proposal, *, initial_only=False):
     context, before = execution_context(frozen)
     unresolved = {d.record_key for d in proposal.dispositions if d.action == 'unresolved'}
     initial = unresolved - set(context['internal_candidate_context'])
-    if initial and not initial_only:
-        raise ValueError('paragraph source unresolved item is not exact unconsumed internal context')
     proposed = c.index(proposal.records)
     pins = {(r['collection'], r['object_id']): r['pin'] for r in frozen.get('sql_scope', {}).get('read_pins', [])}
     permissions = {v.key for v in c.Manifest.model_validate(frozen['manifest']).permissions}
@@ -368,7 +368,7 @@ def pending_candidates(frozen, proposal, *, initial_only=False):
         if initial_only and d.action == 'impact_only' and d.record_key.startswith('viewpoint_revisions/')}
     for k in initial_context:
         col, ident = c.split_key(k); old = before.get(k)
-        if (col not in {'canonical_viewpoints','viewpoint_revisions','viewpoint_claim_links'} or k in permissions or k in proposed or not old
+        if (col not in CVP_PENDING_COLUMNS or k in permissions or k in proposed or not old
                 or old.get('review_status') in c.HUMAN_HOLDS
                 or pins.get((col, ident)) != [old['revision'], record_content_sha(old), False]):
             raise ValueError('initial paragraph pending context must be exact pinned unchanged nonwritable CVP')
@@ -465,9 +465,20 @@ def review_packet(frozen, proposal, *, initial_only=False):
         initial |= {d.record_key for d in proposal.dispositions
                     if d.action == 'impact_only' and d.record_key.startswith('viewpoint_revisions/')}
     if initial:
-        packet['unresolved_proposal_review'] = {'schema_version':'source_paragraph_initial_draft_v1',
-            'pending_record_keys':sorted(initial),'content_write_authority':False,
-            'mandatory_original_unique_correction':True}
+        if initial_only:
+            packet['unresolved_proposal_review'] = {'schema_version':'source_paragraph_initial_draft_v1',
+                'pending_record_keys':sorted(initial),'content_write_authority':False,
+                'mandatory_original_unique_correction':True}
+        else:
+            # Source-owned final approval is not an approval of unchanged CVP
+            # context. Preserve the actual unresolved disposition and its pin;
+            # full current CVP audit/resolution is still a completion obligation.
+            pins = {(r['collection'],r['object_id']):r['pin'] for r in frozen['sql_scope']['read_pins']}
+            packet['source_cvp_pending'] = {'schema_version':PROFILE,
+                'pending_record_keys':sorted(initial),
+                'read_pins':[{'collection':c.split_key(k)[0],'object_id':c.split_key(k)[1],
+                              'pin':pins[c.split_key(k)]} for k in sorted(initial)],
+                'content_write_authority':False,'semantic_approval':False,'group_completion':False}
     pending -= initial
     if pending:
         packet['source_readonly_pending'] = {'schema_version':PROFILE,'pending_record_keys':sorted(pending),
@@ -492,6 +503,8 @@ def scoped_adapter(adapter, packet):
         prompt += ' 必须逐项审查 prior_source_issue_resolution_scope：完整旧异议及原回答保留，新录音校订来源和当前实际 Claim 后像是否解决该来源问题；仅对新来源后像作新的批准，不把旧未决改 pass，不声称旧 action 已提交。对每个精确 record_key 独立返回 verdict，真实未解决则拒绝。'
     if packet.get('source_readonly_pending'):
         prompt += ' 对 source_readonly_pending.pending_record_keys 返回 approved=false、problems=["unapproved_internal_context_not_a_semantic_write"]；说明只是未批准内部候选，未决不变，不授予写入/语义批准。其他项照常独立审核。'
+    if packet.get('source_cvp_pending'):
+        prompt += ' 本次是来源先行终审。source_cvp_pending所列既有CVP/head/revision/link必须逐字不变并保留原未决，不是本次待写内容或身份批准。对每项返回approved=false、problems=["pending_cvp_management"]，说明留待完整当前CVP审计及独立处置，不要求把未决伪造retain。其他实际来源后像、来源epoch及来源问题解决项仍逐项独立审核；其拒绝仍阻止提交。来源提交不能使group完成或解除这些待验义务。'
     if packet.get('unresolved_proposal_review',{}).get('schema_version')=='source_paragraph_initial_draft_v1':
         prompt += ' 这是原首次独立审核的未完成草稿：unresolved_proposal_review 所列既有CVP记录仅为完整、精确当前的只读上下文，不是待写后像。判读其原未决/表示问题并给出实际理由，不修改或批准其存储状态。即使本次全部同意也无写入权，必须接原唯一GPT纠正；最终包仍须完整严格审核。proposer_epoch_declaration 只是原GPT自己的声明，绝不是独立批准，来源epoch项仍须你逐项真实审核。'
     result = StructuredJsonReviewerAdapter(client=adapter._client, prompt=prompt,

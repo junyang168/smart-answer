@@ -200,12 +200,13 @@ def test_paragraph_lossless_json_postimages_compile_without_raw_rewrite(executab
     assert wire==original
 
 
-def test_epoch_proposer_echo_is_disclosed_not_an_approval(executable):
+@pytest.mark.parametrize('action',['retain','impact_only'])
+def test_epoch_proposer_echo_is_disclosed_not_an_approval(executable,action):
     _,_,frozen,semantic=executable
     original=semantic.model_dump()
     scope=p.binding_review_scope(frozen['source_paragraph_execution']['partition'])
     echoed=deepcopy(original)
-    echoed['dispositions'].append({'record_key':scope['record_key'],'action':'retain','reason':'Proposer echo, not independent approval'})
+    echoed['dispositions'].append({'record_key':scope['record_key'],'action':action,'reason':'Proposer echo, not independent approval'})
     before=deepcopy(echoed)
     assert p.compose_proposal(frozen,echoed)==p.compose_proposal(frozen,original)
     receipt=p.epoch_proposal_declaration(frozen,echoed)
@@ -229,11 +230,33 @@ def test_epoch_echo_cannot_relax_exact_semantic_denominator(executable,change):
 
 
 @pytest.mark.parametrize('late_failure', [False, True])
-def test_common_sql_paragraph_full_saved_stages_commit_rollback_cache(executable, postgres_store, tmp_path, monkeypatch, late_failure):
+@pytest.mark.parametrize('pending_cvp',[False,True])
+def test_common_sql_paragraph_full_saved_stages_commit_rollback_cache(executable, postgres_store, tmp_path, monkeypatch, late_failure,pending_cvp):
     from backend.tests.test_cvp_sql_actions_postgres import source_run
     from backend.tests.test_source_reconciliation import FakePorts
     from backend.pipeline.cvp_sql_actions import execute_source_action
     m, states, frozen, semantic = executable
+    if pending_cvp:
+        from backend.tests.test_source_reconciliation import add_viewpoint
+        # Use an unchanged Claim/connection for this pending-domain fixture.
+        # A changed Claim with an old owned-link pin must still be refused.
+        add_viewpoint((m,states,frozen['after'][0]))
+        states['viewpoint_revisions/CVR-old']['review_status']='system_approved'
+        m.permissions=[v for v in m.permissions if v.collection!='viewpoint_claim_links']
+        semantic.records=[r for r in semantic.records if r.collection!='claims']
+        next(d for d in semantic.dispositions if d.record_key=='claims/CL-test').action='retain'
+        auth=json.loads(Path(m.authorization.path).read_text())
+        auth['permissions']=[v.model_dump() for v in m.permissions]
+        Path(m.authorization.path).write_text(json.dumps(auth,ensure_ascii=False))
+        m.authorization.file_sha256=hashlib.sha256(Path(m.authorization.path).read_bytes()).hexdigest()
+        frozen=c.freeze(m,states);p.attach(frozen)
+        inv=frozen['source_paragraph_execution']['partition']['proof']['semantic_inventory']
+        existing={d.record_key for d in semantic.dispositions}
+        for k in inv['affected_keys']:
+            if k not in existing:
+                semantic.dispositions.append(c.Disposition(record_key=k,
+                    action='unresolved' if k in {'viewpoint_revisions/CVR-old','viewpoint_claim_links/VCL-test'} else 'impact_only' if c.split_key(k)[0] in c.IMPACT_ONLY else 'retain',
+                    reason='Synthetic unchanged CVP obligation, not identity approval'))
     store = postgres_store
     run = source_run(store, (m, states, frozen['after'][0]))
     ports = FakePorts(m, states, frozen['after'][0], tmp_path)
@@ -248,7 +271,7 @@ def test_common_sql_paragraph_full_saved_stages_commit_rollback_cache(executable
     actual_attach=p.attach
     def with_original_issue(material,*args,**kwargs):
         actual_attach(material,*args,**kwargs)
-        material['source_paragraph_execution']['prior_source_issues']=[{
+        material['source_paragraph_execution']['prior_source_issues']=[] if pending_cvp else [{
             'issue':deepcopy(original_issue),'original_answers':[],
             'old_action_committed':False,'original_verdicts_changed':False}]
     monkeypatch.setattr(p,'attach',with_original_issue)
@@ -257,13 +280,17 @@ def test_common_sql_paragraph_full_saved_stages_commit_rollback_cache(executable
         result = actual_adapter(stage)
         def generate(packet):
             ports.calls.append(stage)
-            if 'review' not in stage: return semantic.model_dump()
+            if 'review' not in stage:
+                value=semantic.model_dump()
+                if stage=='correction':value['dispositions'].append({'record_key':p.binding_review_scope(frozen['source_paragraph_execution']['partition'])['record_key'],'action':'impact_only','reason':'Synthetic readonly echo'})
+                return value
             keys = [d['record_key'] for d in packet['proposal']['dispositions']]
             keys.append(packet['source_epoch_binding_scope']['record_key'])
             keys.extend(i['record_key'] for i in packet.get('prior_source_issue_resolution_scope',[]))
             approved = stage != 'initial_review'  # Exercise the sole correction + actual final reconstruction.
-            return {'verdicts':[{'record_key':k, 'approved':approved, 'reason':'Synthetic full lifecycle fixture, not provider approval',
-                'problems':[] if approved else ['Synthetic initial disagreement']} for k in keys]}
+            pending=set(packet.get('source_cvp_pending',{}).get('pending_record_keys',[]))
+            return {'verdicts':[{'record_key':k, 'approved':approved and k not in pending, 'reason':'Synthetic full lifecycle fixture, not provider approval',
+                'problems':[p.CVP_PENDING_PROBLEM] if k in pending else [] if approved else ['Synthetic initial disagreement']} for k in keys]}
         result.generate = generate
         return result
     ports.adapter = adapter
@@ -343,11 +370,12 @@ def test_common_sql_paragraph_full_saved_stages_commit_rollback_cache(executable
         sources=saved['reviewed']['evidence']['sources'],read_pins=pins(current),
         reason='isolated source lifecycle test',actor='pytest',source_kind='isolated_source_lifecycle_fixture',
         action=coverage_action,
+        viewpoint_ids=['CV-test'] if pending_cvp else [],
         pending_cvp_claim_ids=[],pending_cvp_management_record_keys=[])
     value=store.get_cvp_group(run);all_current={}
     with store.connect() as conn,conn.cursor() as cursor:
-        assert p.assert_issue_resolution(cursor,run,original_issue) is True
-        for field in ('reports','action','correction_used','terminal_refusal'):
+        if not pending_cvp:assert p.assert_issue_resolution(cursor,run,original_issue) is True
+        for field in (() if pending_cvp else ('reports','action','correction_used','terminal_refusal')):
             foreign=deepcopy(original_issue)
             if field=='reports':foreign[field][0]['claim_sha256']='0'*64
             elif field=='action':foreign[field]['action_id']='CVPA-foreign'
@@ -357,13 +385,24 @@ def test_common_sql_paragraph_full_saved_stages_commit_rollback_cache(executable
     with store.connect() as conn:
         rows=conn.execute('SELECT collection,object_id FROM wang_knowledge.objects').fetchall()
     for key in rows:all_current[key]=store.get_record_state(*key)
-    full=deepcopy(audit);full['layers']['4']={'complete':True,'judged':0,'results':[]}
+    full=deepcopy(audit);full['layers']['4']={'complete':True,'judged':int(pending_cvp),'results':[{'viewpoint_id':'CV-test','verdict':'same'}] if pending_cvp else []}
+    if pending_cvp:full['meta']['registry_read_scope']['viewpoint_ids']=['CV-test']
     full['meta']['registry_read_scope']['read_pins']=pin_rows(pins(all_current))
     full_path=tmp_path/'full-transaction-domain-audit.json';write_immutable(full_path,full)
     proof=impact.build(store,run,full_path,tmp_path/'source-impact-resolution.json')
     kwargs={'audit':full,'audit_binding':binding(full_path),'read_pins':pins(all_current),
             'retained_impacts_resolution_path':proof}
     original=store.get_cvp_group(run);histories=list(original['change_set_ids'])
+    if pending_cvp:
+        incomplete=deepcopy(full)
+        incomplete['meta']['registry_read_scope']['read_pins']=[r for r in incomplete['meta']['registry_read_scope']['read_pins']
+            if (r['collection'],r['object_id'])!=('viewpoint_revisions','CVR-old')]
+        bad_path=tmp_path/'missing-pending-cvp-current-audit-pin.json';write_immutable(bad_path,incomplete)
+        bad_proof=impact.build(store,run,bad_path,tmp_path/'incomplete-source-impact-resolution.json')
+        with pytest.raises(ValueError,match='missing from complete current independent audit'):
+            store.complete_cvp_group(run,audit=incomplete,audit_binding=binding(bad_path),
+                read_pins=pins(all_current),retained_impacts_resolution_path=bad_proof)
+        assert store.get_cvp_group(run)==original
     actual_pin_check=store._assert_transaction_read_pins
     def late_completion(*a,**kw):raise RuntimeError('late paragraph completion rollback')
     monkeypatch.setattr(store,'_assert_transaction_read_pins',late_completion)
@@ -636,7 +675,64 @@ def test_actual_saved_initial_draft_preserves_raw_and_strict_final(mutation):
         keys=[d['record_key'] for d in review['proposal']['dispositions']]+[review['source_epoch_binding_scope']['record_key']]+[d['record_key'] for d in review['prior_source_issue_resolution_scope']]
         synthetic={'proposal_sha256':review['proposal_sha256'],'verdicts':[{'record_key':k,'approved':True,'reason':'Synthetic refusal boundary, not provider approval','problems':[]} for k in keys]}
         assert c.validate_review(review,synthetic) is False
+        # The original initial draft still has uncorrected source fields;
+        # allowing readonly CVP pending must not make that draft writable.
         with pytest.raises(ValueError):p.review_packet(frozen,proposal)
         assert p.semantic_proposal(frozen,proposal).model_dump()['dispositions']==[d for d in response['dispositions'] if not d['record_key'].startswith('source_epoch_binding/')]
     assert response==before
+    assert all(path.read_bytes()==data for path,data in originals.items())
+
+
+@pytest.mark.skipif(os.environ.get('WANG_SOURCE_PARAGRAPH_SAVED_ACCEPTANCE') != '1',
+                    reason='explicit current saved correction readonly acceptance only')
+@pytest.mark.parametrize('mutation',[None,'pin','permission','postimage','hold','drop','duplicate',
+                                     'semantic_approval','cvp_pass','source_reject','epoch_reject'])
+def test_actual_saved_correction_source_and_cvp_pending_domains(mutation):
+    """Synthetic final verdicts test contracts only, never provider approval."""
+    from backend.pipeline import source_reconciliation_runner as runner
+    root=Path('/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/staging/cvp-production-357/campaign-sql-20261008-v1-from-g059/execution/CVPG-54aa85ab845ff2d1539132d522bf23971678e6de928bc8353d88533caa310f8d/actions/source/CVPA-32986ef4887696a984ec13fe4185331fdefe905a452580b5688943149ef36fcc')
+    originals={path:path.read_bytes() for path in root.iterdir() if path.is_file()}
+    frozen=runner.read(root/'scoped-materials.json')
+    for stage in ('proposal_schema_recovery','initial_review','correction'):
+        packet=runner.body(runner.read(root/(stage+'.packet.json')))
+        raw=runner.validate_raw(root,stage,packet)
+    response=deepcopy(raw['response']);unchanged=deepcopy(response)
+    proposal=runner.effective_proposal(frozen,response)
+    run=runner.Runner.__new__(runner.Runner);run.root=root
+    packet=run.review_input(frozen,response,proposal,'final_review')
+    pending=packet['source_cvp_pending']['pending_record_keys']
+    assert len(pending)==2 and len(packet['source_readonly_pending']['pending_record_keys'])==5
+    assert packet['source_cvp_pending']['semantic_approval'] is False
+    assert packet['source_cvp_pending']['group_completion'] is False
+    candidate=set(packet['source_readonly_pending']['pending_record_keys'])
+    keys=[d['record_key'] for d in packet['proposal']['dispositions']]
+    epoch=packet['source_epoch_binding_scope']['record_key'];keys.append(epoch)
+    keys.extend(d['record_key'] for d in packet['prior_source_issue_resolution_scope'])
+    verdicts=[]
+    for key in keys:
+        problem=('unapproved_internal_context_not_a_semantic_write' if key in candidate
+                 else p.CVP_PENDING_PROBLEM if key in pending else None)
+        verdicts.append({'record_key':key,'approved':not bool(problem),
+                         'reason':'Synthetic domain boundary, not provider approval',
+                         'problems':[problem] if problem else []})
+    review={'proposal_sha256':packet['proposal_sha256'],'verdicts':verdicts}
+    if mutation=='pin':packet['source_cvp_pending']['read_pins'][0]['pin'][0]+=1
+    if mutation=='permission':packet['manifest']['permissions'].append({'collection':c.split_key(pending[0])[0],'object_id':c.split_key(pending[0])[1],'fields':['review_status']})
+    if mutation=='postimage':packet['proposal']['records'].append(deepcopy(next(r for r in packet['before_records'] if c.key(r['collection'],r['object_id'])==pending[0])))
+    if mutation=='hold':next(r for r in packet['before_records'] if c.key(r['collection'],r['object_id'])==pending[0])['payload']['review_status']='human_review_required'
+    if mutation=='drop':packet['source_cvp_pending']['pending_record_keys'].pop()
+    if mutation=='duplicate':packet['source_cvp_pending']['pending_record_keys'].append(pending[0])
+    if mutation=='semantic_approval':packet['source_cvp_pending']['semantic_approval']=True
+    if mutation=='cvp_pass':next(v for v in verdicts if v['record_key']==pending[0]).update(approved=True,problems=[])
+    if mutation in {'source_reject','epoch_reject'}:
+        target=epoch if mutation=='epoch_reject' else next(r['collection']+'/'+r['object_id'] for r in packet['proposal']['records'] if r['collection']=='claims')
+        next(v for v in verdicts if v['record_key']==target).update(approved=False,problems=['actual source rejection'])
+    if mutation in {'cvp_pass','source_reject','epoch_reject'}:
+        assert c.validate_review(packet,review) is False
+    elif mutation:
+        with pytest.raises(ValueError):c.validate_review(packet,review)
+    else:
+        assert c.validate_review(packet,review) is True
+        assert len(proposal.records)==381
+    assert response==unchanged
     assert all(path.read_bytes()==data for path,data in originals.items())

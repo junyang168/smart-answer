@@ -943,7 +943,7 @@ def prepare_question_slice(store,value,*,cursor=None):
     handoff=context(value,store,cursor=cursor);pending=value['reviewed']['evidence'].get('pending_cvp_management_record_keys',[])
     policy_claim=handoff.get('source_slice_mode')=='policy_claim_source_revision'
     paragraph=handoff.get('source_slice_mode')==PARAGRAPH_MODE
-    domains={'questions','claim_relations','knowledge_relations'} if paragraph else {'claims','claim_relations','knowledge_relations'} if policy_claim else {'questions'}
+    domains={'questions','claim_relations','knowledge_relations','canonical_viewpoints','viewpoint_revisions','viewpoint_claim_links'} if paragraph else {'claims','claim_relations','knowledge_relations'} if policy_claim else {'questions'}
     if ((not pending and not paragraph) or len(pending)!=len(set(pending))
             or pending!=handoff['pending_existing_cvp_record_keys']
             or any(k.split('/',1)[0] not in domains for k in pending)):
@@ -977,13 +977,59 @@ def prepare_question_slice(store,value,*,cursor=None):
     bindings=[handoff[k] for k in ('claim_layer_completion','source_terminal_packet','source_terminal_review')]
     bindings.extend([receipt['audit'],*receipt['source_proofs']])
     for b in bindings:check_binding(b)
-    pins=decoded_pins(receipt['read_pins']);items=[(read_question_context if k.split('/',1)[0]=='questions' else read_policy_slice_item)(cursor,k) for k in pending]
+    pins=decoded_pins(receipt['read_pins']);items=[]
+    for k in pending:
+        col=k.split('/',1)[0]
+        if paragraph and col in {'canonical_viewpoints','viewpoint_revisions','viewpoint_claim_links'}:
+            items.append(read_paragraph_cvp_context(cursor,k,source,handoff))
+        else:
+            items.append((read_question_context if col=='questions' else read_policy_slice_item)(cursor,k))
     for item in items:
         key=tuple(item['record_key'].split('/',1))
         if pins.get(key)!=tuple(item['pin']):raise ValueError('question slice lacks original audited source pin')
     PostgresKnowledgeStore._assert_transaction_read_pins(cursor,pins)
     return {'source_handoff':handoff,'pending_record_keys':pending,'items':items,'read_pins':pin_rows(pins),
         'bindings':bindings,'model_verdicts_changed':False,'original_pending_list_preserved':True}
+
+
+def read_paragraph_cvp_context(cursor,key,source,handoff):
+    """Unchanged CVP pending is a FULL current audit obligation, not approval.
+
+    Consume only the actual source final packet's nonwritable scope. The source
+    commit must not have touched it; completion independently checks its current
+    version in the full CVP audit. No model reason or status is a replacement for
+    this exact generation/permission/postimage proof.
+    """
+    from backend.pipeline.source_paragraph_impact import CVP_PENDING_COLUMNS,CVP_PENDING_PROBLEM
+    from backend.pipeline.cvp_sql_flow import check_binding,decoded_pins
+    from backend.pipeline.source_reconciliation_runner import read,body
+    package=source['evidence']['package']['payload']
+    frozen=package['source_epoch_binding_material']['frozen']
+    check_binding(handoff['source_terminal_packet']);check_binding(handoff['source_terminal_review'])
+    packet=read_artifact(handoff['source_terminal_packet']['path'])
+    scope=packet.get('source_cvp_pending',{})
+    col,oid=key.split('/',1)
+    before={(r['collection'],r['object_id']):r['payload'] for r in frozen['before_records']}
+    pins=decoded_pins(frozen['sql_scope']['read_pins'])
+    declared=decoded_pins(scope.get('read_pins',[]))
+    state=cursor.execute('SELECT payload,revision,content_sha256,retired_at IS NOT NULL FROM wang_knowledge.objects WHERE collection=%s AND object_id=%s',(col,oid)).fetchone()
+    raw=body(read(Path(handoff['source_terminal_review']['path'])))
+    verdicts=[v for v in raw['response']['verdicts'] if v['record_key']==key]
+    if (col not in CVP_PENDING_COLUMNS or key not in scope.get('pending_record_keys',[])
+            or scope.get('schema_version')!=PARAGRAPH_MODE
+            or any(scope.get(f) is not False for f in ('content_write_authority','semantic_approval','group_completion'))
+            or not state or state[3] or state[0]!=before.get((col,oid))
+            or pins.get((col,oid))!=tuple(state[1:]) or declared.get((col,oid))!=tuple(state[1:])
+            or record_content_sha(state[0])!=state[2]
+            or state[0].get('review_status') not in {'system_approved','human_approved','approved'}
+            or any(p['collection']==col and p['object_id']==oid for p in frozen['manifest']['permissions'])
+            or any(o['collection']==col and o['object_id']==oid for o in source['plan']['operations'])
+            or len(verdicts)!=1 or verdicts[0]['approved'] is not False
+            or verdicts[0]['problems']!=[CVP_PENDING_PROBLEM] or not verdicts[0]['reason']):
+        raise ValueError('paragraph pending CVP source/current-generation authority drift')
+    return {'record_key':key,'kind':'unchanged_cvp_context_requires_complete_current_audit',
+            'pin':list(state[1:]),'content_write_authority':False,'pending_obligation_preserved':True,
+            'original_annotation_resolved':False,'source_semantic_approval':False}
 
 
 def applied_review(store,value,sha,*,cursor=None):
@@ -1157,7 +1203,8 @@ def validate_for_completion(value,path,audit_binding,cursor,*,semantic_resolutio
         if body['source_handoff'].get('source_slice_mode') in POLICY_SOURCE_MODES:
             for item in body['items']:
                 key=tuple(item['record_key'].split('/',1))
-                if item['kind']=='unchanged_independently_approved_readonly_claim_context':
+                if item['kind'] in {'unchanged_independently_approved_readonly_claim_context',
+                                    'unchanged_cvp_context_requires_complete_current_audit'}:
                     if independent.get(key)!=tuple(item['pin']):raise ValueError('closed policy Claim absent from current full independent audit')
                 elif key in independent:raise ValueError('closed unapproved context consumed by current audit')
         return body
@@ -1169,7 +1216,8 @@ def validate_for_completion(value,path,audit_binding,cursor,*,semantic_resolutio
         independent=decoded_pins(audit['meta']['registry_read_scope']['read_pins'])
         for item in body['items']:
             key=tuple(item['record_key'].split('/',1))
-            if item['kind']=='unchanged_independently_approved_readonly_claim_context':
+            if item['kind'] in {'unchanged_independently_approved_readonly_claim_context',
+                                'unchanged_cvp_context_requires_complete_current_audit'}:
                 if independent.get(key)!=tuple(item['pin']):
                     raise ValueError('policy source Claim missing from complete current independent audit')
             elif key in independent:

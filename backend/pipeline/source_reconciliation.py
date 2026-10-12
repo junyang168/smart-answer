@@ -1284,6 +1284,27 @@ def validate_review(packet: dict, response: dict) -> bool:
         raise ValueError("review did not cover the exact complete consumer denominator")
     if any(v.approved and v.problems for v in review.verdicts):
         raise ValueError("pass with problems is not an approval")
+    cvp_pending=set()
+    if packet.get('source_cvp_pending'):
+        from backend.pipeline.source_paragraph_impact import PROFILE, CVP_PENDING_COLUMNS
+        from backend.api.canonical_repository.postgres_store import record_content_sha
+        value=packet['source_cvp_pending'];cvp_pending=set(value['pending_record_keys'])
+        before=index(packet['before_records']);proposed=index(packet['proposal']['records'])
+        # Runtime paragraph packets carry a scoped manifest; the full campaign
+        # roster is independently bound, not repeated in this model packet.
+        permissions={Permission.model_validate(p).key for p in packet['manifest']['permissions']}
+        expected=[{'collection':split_key(k)[0],'object_id':split_key(k)[1],
+                   'pin':[before[k]['revision'],record_content_sha(before[k]),False]} for k in sorted(cvp_pending) if k in before]
+        unresolved={d['record_key'] for d in packet['proposal']['dispositions'] if d['action']=='unresolved'}
+        internal=set(packet.get('source_readonly_pending',{}).get('pending_record_keys',[]))
+        if (packet.get('source_paragraph_profile')!=PROFILE or value.get('schema_version')!=PROFILE
+                or not cvp_pending or len(cvp_pending)!=len(value['pending_record_keys'])
+                or cvp_pending!=unresolved-internal or value.get('read_pins')!=expected
+                or any(value.get(f) is not False for f in ('content_write_authority','semantic_approval','group_completion'))
+                or any(k not in before or split_key(k)[0] not in CVP_PENDING_COLUMNS
+                       or k in proposed or k in permissions or before[k].get('review_status') in HUMAN_HOLDS
+                       for k in cvp_pending)):
+            raise ValueError('paragraph source pending CVP domain/pin drift')
     if packet.get('source_readonly_pending'):
         from backend.pipeline.source_paragraph_impact import PROFILE
         value = packet['source_readonly_pending']; pending=set(value['pending_record_keys'])
@@ -1293,7 +1314,12 @@ def validate_review(packet: dict, response: dict) -> bool:
                 or any(r['collection']+'/'+r['object_id'] in pending for r in packet['proposal']['records'])):
             raise ValueError('source candidate pending review domain drift')
         return not packet.get('unresolved_proposal_review') and all((not v.approved and v.problems==['unapproved_internal_context_not_a_semantic_write'])
-                   if v.record_key in pending else v.approved and not v.problems for v in review.verdicts)
+                   if v.record_key in pending else (not v.approved and v.problems==['pending_cvp_management'] and bool(v.reason))
+                   if v.record_key in cvp_pending else v.approved and not v.problems for v in review.verdicts)
+    if cvp_pending:
+        return not packet.get('unresolved_proposal_review') and all(
+            (not v.approved and v.problems==['pending_cvp_management'] and bool(v.reason))
+            if v.record_key in cvp_pending else v.approved and not v.problems for v in review.verdicts)
     if packet.get('source_first_pending_cvp'):
         from backend.pipeline.claim_first_management import PENDING_PROBLEM
         pending = set(packet['source_first_pending_cvp']['pending_record_keys'])
