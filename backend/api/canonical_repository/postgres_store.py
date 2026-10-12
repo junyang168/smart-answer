@@ -3773,6 +3773,50 @@ class PostgresKnowledgeStore:
                            (run_id,campaign_sha256,group["group_key"],canonical_json(value)))
         return run_id
 
+    @staticmethod
+    def _assert_completion_source_generations(cursor, sources, audited_current):
+        """A historical proposal stays historical; completion uses audited epochs.
+
+        Only the immediate, actually committed source transition may bridge a
+        changed physical binding. Never infer approval from a current file hash.
+        """
+        from backend.api.canonical_repository.viewpoint_production_safety import file_sha256
+        for source in sources:
+            physical=file_sha256(Path(source['path']))
+            if physical==source['file_sha256']:continue
+            matches=[(oid,r) for (collection,oid),r in audited_current.items()
+                     if collection=='source_documents' and not r['retired']
+                     and r['payload'].get('source_path')==source['path']]
+            if len(matches)!=1:raise ChangeSetConflict('changed source absent/ambiguous in current independent audit')
+            sid,current=matches[0];doc=current['payload']
+            if doc.get('source_file_sha256')!=physical or record_content_sha(doc)!=current['content_sha256']:
+                raise ChangeSetConflict('changed source current physical/audit generation mismatch')
+            row=cursor.execute("""SELECT b.payload,a.payload,op.before_revision,op.after_revision,
+                    op.before_sha256,op.after_sha256,cs.status,cs.source_kind,cs.metadata
+                FROM wang_knowledge.change_operations op JOIN wang_knowledge.change_sets cs USING(change_set_id)
+                JOIN wang_knowledge.object_versions b ON (b.collection,b.object_id,b.revision)=
+                    (op.collection,op.object_id,op.before_revision)
+                JOIN wang_knowledge.object_versions a ON (a.collection,a.object_id,a.revision)=
+                    (op.collection,op.object_id,op.after_revision) AND a.change_set_id=cs.change_set_id
+                WHERE op.collection='source_documents' AND op.object_id=%s AND op.after_revision=%s
+                    AND op.operation='update'""",(sid,current['revision'])).fetchall()
+            if len(row)!=1:raise ChangeSetConflict('changed source has no unique immediate committed transition')
+            before,after,br,ar,bsha,asha,status,kind,meta=row[0]
+            if (status!='applied' or kind!='wang_source_sql_reconciliation_v2'
+                    or meta.get('transaction_contract')!='wang_cvp_sql_transaction_v2'
+                    or not meta.get('run_id') or not meta.get('reviewed_sha256')
+                    or not meta.get('approval',{}).get('terminal_review')
+                    or br+1!=ar or ar!=current['revision'] or after!=doc
+                    or asha!=current['content_sha256'] or record_content_sha(before)!=bsha
+                    or before.get('source_id')!=sid or after.get('source_id')!=sid
+                    or before.get('source_path')!=source['path']
+                    or before.get('source_file_sha256')!=source['file_sha256']):
+                raise ChangeSetConflict('changed source lacks exact approved before/current epoch authority')
+            for proof in (meta.get('authorization'),meta['approval']['terminal_review'],
+                          meta['approval'].get('final_review_program_binding')):
+                if not proof or file_sha256(Path(proof['path']))!=proof['file_sha256']:
+                    raise ChangeSetConflict('changed source approval/authorization physical proof drift')
+
     def complete_cvp_group(self, run_id: str, *, audit: Mapping[str, Any],
                            audit_binding: Mapping[str, Any], read_pins: Mapping,
                            owner_resolution_path: Optional[Path] = None,
@@ -3831,9 +3875,7 @@ class PostgresKnowledgeStore:
                 if statement_resolution is None:
                     retained_resolution=validate_for_completion({**value,'run_id':run_id},
                         retained_impacts_resolution_path,audit_binding,cursor,semantic_resolution=owner_resolution_path)
-            for source in (value.get('reviewed',{}).get('evidence') or {}).get('sources',[]):
-                if file_sha256(Path(source['path'])) != source['file_sha256']:
-                    raise ChangeSetConflict('physical own source changed since independent audit')
+            reviewed_sources=(value.get('reviewed',{}).get('evidence') or {}).get('sources',[])
             declared_views = (value.get('reviewed',{}).get('evidence') or value.get('import_certificate',{}))["viewpoint_ids"]
             cursor.execute("""SELECT DISTINCT e.from_id FROM wang_knowledge.edges e JOIN wang_knowledge.objects o
                               ON (o.collection,o.object_id)=(e.edge_collection,e.edge_id)
@@ -3865,6 +3907,7 @@ class PostgresKnowledgeStore:
                     doc=record['payload']
                     if not doc.get('source_file_sha256') or file_sha256(Path(doc['source_path']))!=doc['source_file_sha256']:
                         raise ChangeSetConflict('physical source changed after independent judgement')
+            self._assert_completion_source_generations(cursor,reviewed_sources,actual)
             # No source/model call is made by the completion transaction.
             from backend.pipeline.viewpoint_content_blocked_fallback import KEY
             from backend.pipeline.viewpoint_g035_temporary_audit import KEY as legacy_key, validate as validate_exception
