@@ -6,6 +6,64 @@ import pytest
 from backend.pipeline import cvp_source_impact_resolution as impact
 from backend.api.canonical_repository.postgres_store import sha256_json
 
+@pytest.mark.parametrize('mode',[impact.PARAGRAPH_MODE,'policy_claim_source_revision','policy_evidence_binding','foreign'])
+@pytest.mark.parametrize('collection',['canonical_viewpoints','viewpoint_revisions','viewpoint_claim_links','questions','knowledge_relations'])
+def test_source_pending_reader_preserves_exact_mode_domain(monkeypatch,mode,collection):
+    cursor=object();source={'complete':'original'};handoff={'source_slice_mode':mode}
+    key=collection+'/original';calls=[]
+    def paragraph(c,k,s,h):
+        assert (c,k,s,h)==(cursor,key,source,handoff)
+        calls.append('paragraph');return {'kind':'pending_not_approval'}
+    def question(c,k):
+        assert (c,k)==(cursor,key);calls.append('question');return {'kind':'unresolved'}
+    def policy(c,k):
+        assert (c,k)==(cursor,key);calls.append('policy')
+        if collection not in {'claims','claim_relations','knowledge_relations'}:
+            raise ValueError('policy relation context foreign domain')
+        return {'kind':'internal_not_approval'}
+    monkeypatch.setattr(impact,'read_paragraph_cvp_context',paragraph)
+    monkeypatch.setattr(impact,'read_question_context',question)
+    monkeypatch.setattr(impact,'read_policy_slice_item',policy)
+    protected=deepcopy((source,handoff))
+    cvp=collection in {'canonical_viewpoints','viewpoint_revisions','viewpoint_claim_links'}
+    if cvp and mode!=impact.PARAGRAPH_MODE:
+        with pytest.raises(ValueError,match='foreign domain'):
+            impact.read_source_pending_item(cursor,key,source,handoff)
+    else:
+        result=impact.read_source_pending_item(cursor,key,source,handoff)
+        assert result['kind'] in {'pending_not_approval','unresolved','internal_not_approval'}
+    assert calls==['paragraph' if cvp and mode==impact.PARAGRAPH_MODE else 'question' if collection=='questions' else 'policy']
+    assert (source,handoff)==protected
+
+@pytest.mark.parametrize('fault',[None,'pin','permission','kind'])
+def test_actual_completed_paragraph_revalidation_is_readonly(monkeypatch,fault):
+    run=os.environ.get('WKP_COMPLETED_PARAGRAPH_ACTUAL')
+    if not run:pytest.skip('explicit saved completed paragraph SQL proof')
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+    store=PostgresKnowledgeStore();value=store.get_cvp_group(run);original=deepcopy(value)
+    old=read_artifact(value['completion']['retained_impacts_resolution']['path'])
+    assert old['source_handoff']['source_slice_mode']==impact.PARAGRAPH_MODE
+    reader=impact.read_source_pending_item
+    def changed(*args):
+        result=deepcopy(reader(*args))
+        if fault=='pin':result['pin'][1]='foreign'
+        elif fault=='permission':result['content_write_authority']=True
+        elif fault=='kind':result['kind']='approved_candidate'
+        return result
+    monkeypatch.setattr(impact,'read_source_pending_item',changed)
+    if fault:
+        with pytest.raises(ValueError,match='pending context/approval/consumer drift'):
+            impact.prepare(store,value)
+    else:
+        facts=impact.prepare(store,value)
+        assert facts['items']==old['items']
+        assert facts['pending_record_keys']==old['pending_record_keys']
+        assert facts['prior_completed_resolution']==value['completion']['retained_impacts_resolution']
+        assert facts['model_verdicts_changed'] is False
+        assert facts['original_pending_list_preserved'] is True
+    assert store.get_cvp_group(run)==original and value==original
+
 def test_audit_root_domains_do_not_discard_obligations():
     keys=['groups/declared','knowledge_relations/retired']
     facts={'pending_record_keys':keys,'items':[{'record_key':keys[0],'kind':'declared_source_group_not_cvp'},

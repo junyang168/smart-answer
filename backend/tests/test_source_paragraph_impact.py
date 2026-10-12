@@ -418,6 +418,25 @@ def test_common_sql_paragraph_full_saved_stages_commit_rollback_cache(executable
     assert completed['checkpoint']=='audited' and completed['change_set_ids']==histories
     store.complete_cvp_group(run,**kwargs)
     assert store.get_cvp_group(run)==completed
+    # A later affected-group revalidation must consume the identical domain
+    # proof, not feed the unchanged CVP rows to the internal-relation reader.
+    closed=impact.prepare(store,completed)
+    assert closed['items']==classified['items']
+    assert closed['pending_record_keys']==classified['pending_record_keys']
+    assert closed['prior_completed_resolution']==completed['completion']['retained_impacts_resolution']
+    assert store.get_cvp_group(run)==completed
+    original_reader=impact.read_source_pending_item
+    def changed_pending(*args):
+        result=deepcopy(original_reader(*args));result['content_write_authority']=True
+        return result
+    monkeypatch.setattr(impact,'read_source_pending_item',changed_pending)
+    if classified['items']:
+        with pytest.raises(ValueError,match='pending context/approval/consumer drift'):
+            impact.prepare(store,completed)
+    else:
+        assert impact.prepare(store,completed)['items']==[]
+    assert store.get_cvp_group(run)==completed
+    monkeypatch.setattr(impact,'read_source_pending_item',original_reader)
     assert ports.calls==['proposal','initial_review','correction','final_review']
 
 

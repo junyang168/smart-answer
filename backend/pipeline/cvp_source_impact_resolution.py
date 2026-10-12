@@ -167,7 +167,7 @@ def completed_source_facts(value,*,store=None,cursor=None):
                               (source['plan']['change_set_id'],)).fetchall()
         if actual!=[tuple(o[k] for k in fields) for o in source['plan']['operations']]:
             raise ValueError('closed policy slice actual full write set drift')
-        expected=[(read_policy_slice_item if k.split('/',1)[0]!='questions' else read_question_context)(cursor,k) for k in pending]
+        expected=[read_source_pending_item(cursor,k,source,handoff) for k in pending]
         if expected!=old['items']:raise ValueError('closed policy pending context/approval/consumer drift')
     # These actual source writes and all explicit source obligations must be
     # unchanged. Unrelated broad material pins remain historical only.
@@ -946,6 +946,15 @@ def read_question_context(cursor,key):
     return question_context_item(key,row,creation,references=refs,reviews=reviews,edges=edges)
 
 
+def read_source_pending_item(cursor,key,source,handoff):
+    """Use the same exact domain proof for first closure and later revalidation."""
+    col=key.split('/',1)[0]
+    if handoff.get('source_slice_mode')==PARAGRAPH_MODE and col in {
+            'canonical_viewpoints','viewpoint_revisions','viewpoint_claim_links'}:
+        return read_paragraph_cvp_context(cursor,key,source,handoff)
+    return (read_question_context if col=='questions' else read_policy_slice_item)(cursor,key)
+
+
 def prepare_question_slice(store,value,*,cursor=None):
     """Exact source-first authority plus nonconsumption, never a semantic pass."""
     from copy import deepcopy
@@ -990,11 +999,7 @@ def prepare_question_slice(store,value,*,cursor=None):
     for b in bindings:check_binding(b)
     pins=decoded_pins(receipt['read_pins']);items=[]
     for k in pending:
-        col=k.split('/',1)[0]
-        if paragraph and col in {'canonical_viewpoints','viewpoint_revisions','viewpoint_claim_links'}:
-            items.append(read_paragraph_cvp_context(cursor,k,source,handoff))
-        else:
-            items.append((read_question_context if col=='questions' else read_policy_slice_item)(cursor,k))
+        items.append(read_source_pending_item(cursor,k,source,handoff))
     for item in items:
         key=tuple(item['record_key'].split('/',1))
         if pins.get(key)!=tuple(item['pin']):raise ValueError('question slice lacks original audited source pin')
