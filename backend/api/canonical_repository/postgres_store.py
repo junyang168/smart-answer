@@ -4826,11 +4826,14 @@ class PostgresKnowledgeStore:
         if not ids or not collections:return []
         # Equality jsonpath predicates use the existing payload GIN index. The
         # validators still check actual named fields; no fuzzy text matching.
-        predicates = ["payload @? %s::jsonpath" for _ in ids]
+        # One indexed jsonpath disjunction is equivalent to the previous OR
+        # of predicates, without hundreds of separate planner branches for a
+        # real source's fragments. Keep exact JSON equality and the caller's
+        # named-business-reference filter; this is not a text search.
+        predicate = "$.** ? (" + " || ".join("@ == " + json.dumps(oid) for oid in ids) + ")"
         cursor.execute("SELECT collection,object_id,payload FROM wang_knowledge.objects "
-                       "WHERE retired_at IS NULL AND collection=ANY(%s) AND ("+
-                       " OR ".join(predicates)+") ORDER BY collection,object_id",
-                       (list(collections),*["$.** ? (@ == "+json.dumps(oid)+")" for oid in ids]))
+                       "WHERE retired_at IS NULL AND collection=ANY(%s) AND payload @? %s::jsonpath "
+                       "ORDER BY collection,object_id", (list(collections),predicate))
         return cursor.fetchall()
 
     def read_affected_context(self, keys):

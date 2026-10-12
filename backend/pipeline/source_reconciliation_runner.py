@@ -22,6 +22,28 @@ from backend.pipeline.viewpoint_validation_context import validated_history
 STAGES = ("proposal", "proposal_schema_recovery", "permission_input_recovery_proposal", "initial_review", "correction", "final_review", "final_review_input_repair", "normalization_recovery_review")
 
 
+def archive_source_version(binding, archive_root, *, physical_snapshots=None):
+    """Preserve exact source bytes, including their original final newline.
+
+    This is an archive operation, never a live source edit, model call or
+    approval. Saved snapshots are checked by bound_bytes before exclusive
+    creation; an existing content-addressed file must be byte-identical.
+    """
+    bound = contract.FileBinding.model_validate(binding)
+    raw = contract.bound_bytes(bound, physical_snapshots)
+    archive = Path(archive_root) / (bound.file_sha256 + ".json")
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    if archive.exists():
+        if archive.read_bytes() != raw:
+            raise ValueError("immutable physical source archive drift")
+    else:
+        with archive.open("xb") as output:
+            output.write(raw)
+            output.flush()
+            os.fsync(output.fileno())
+    return {"path": str(archive.resolve()), "file_sha256": bound.file_sha256}
+
+
 def effective_proposal(frozen, response):
     if frozen['manifest'].get('evidence_binding_repair'):
         from backend.pipeline.claim_evidence_binding import normalized_proposal
@@ -296,18 +318,8 @@ class Runner:
             # Exact physical source versions survive later edits to the live
             # transcript. This is a content-addressed archive, not a new source.
             for b in [manifest.before_source, *manifest.current_sources]:
-                archive = self.workspace / "source-versions" / (b.file_sha256 + ".json")
-                raw = contract.bound_bytes(b, frozen["physical_snapshots"])
-                archive.parent.mkdir(parents=True, exist_ok=True)
-                if archive.exists():
-                    if archive.read_bytes() != raw:
-                        raise ValueError("immutable physical source archive drift")
-                else:
-                    # Exclusive creation prevents overwriting another task's archive.
-                    with archive.open("xb") as output:
-                        output.write(raw)
-                        output.flush()
-                        os.fsync(output.fileno())
+                archive_source_version(b, self.workspace / "source-versions",
+                                       physical_snapshots=frozen["physical_snapshots"])
             self.state("prepared", next_action="run the bounded proposal/review workflow")
             return frozen
 
