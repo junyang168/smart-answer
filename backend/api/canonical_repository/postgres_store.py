@@ -3785,7 +3785,7 @@ class PostgresKnowledgeStore:
             physical=file_sha256(Path(source['path']))
             if physical==source['file_sha256']:continue
             matches=[(oid,r) for (collection,oid),r in audited_current.items()
-                     if collection=='source_documents' and not r['retired']
+                     if collection=='source_documents' and r['retired_at'] is None
                      and r['payload'].get('source_path')==source['path']]
             if len(matches)!=1:raise ChangeSetConflict('changed source absent/ambiguous in current independent audit')
             sid,current=matches[0];doc=current['payload']
