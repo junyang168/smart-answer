@@ -965,7 +965,7 @@ def run_batch(
 
     retained_boundary = None
     final_packet = packet
-    if correction_source_profile is not None or correction_repair is not None:
+    if reconsideration_report is not None and (correction_source_profile is not None or correction_repair is not None):
         scoped = correction_context.complete_packet(reconsider_packet,
             review_packet['own_source_bodies'],correction_repair or correction_source_profile)
         final_packet={**packet,'own_source_bodies':scoped['own_source_bodies'],

@@ -1578,7 +1578,14 @@ def test_explicit_model_roles_use_separate_subscription_providers():
     )
 
 
-def test_run_batch_writes_artifacts_measures_time_and_resumes(tmp_path: Path):
+@pytest.mark.parametrize('correction_profile', [False, True])
+def test_run_batch_writes_artifacts_measures_time_and_resumes(tmp_path: Path, monkeypatch, correction_profile):
+    if correction_profile:
+        from backend.pipeline import cvp_correction_source_context as correction_context
+        monkeypatch.setattr(correction_context, 'profile', lambda *a, **k: {'enabled': True})
+        def no_correction_packet(*a, **k):
+            pytest.fail('passing initial review must not construct an unused correction/final packet')
+        monkeypatch.setattr(correction_context, 'complete_packet', no_correction_packet)
     claims = [_claim("C1", ROCK_STATEMENT)]
     proposal_payload = _proposal().model_dump(mode="json")
     review_payload = {
