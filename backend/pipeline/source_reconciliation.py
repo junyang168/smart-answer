@@ -1194,6 +1194,12 @@ def validate_review(packet: dict, response: dict) -> bool:
     from backend.api.canonical_repository.viewpoint_response_binding import bind_response
     review = Review.model_validate(bind_response(Review,response,packet))
     required = {d["record_key"] for d in packet["proposal"]["dispositions"]}
+    if 'source_epoch_binding_scope' in packet:
+        from backend.pipeline.source_paragraph_impact import validate_review_scope
+        item = validate_review_scope(packet['source_epoch_binding_scope'])
+        if item in required:
+            raise ValueError('source epoch binding item collides with semantic review scope')
+        required.add(item)
     required.update(packet.get('anchor_draft_missing_dispositions',[]))
     if packet.get('knowledge_relation_withdrawal_review'):
         from backend.pipeline.claim_evidence_completion import direction_for
@@ -1376,6 +1382,12 @@ def compile_package(frozen: dict, proposal: Proposal, raw: dict, *, frozen_sha25
 
 
 def assert_plan_postimages(package: dict, plan: dict, before: dict[str, dict]) -> dict[str, dict]:
+    if 'source_epoch_binding_material' in package:
+        from backend.pipeline.source_paragraph_impact import validate_binding_operations
+        material = package['source_epoch_binding_material']
+        if not isinstance(material, dict) or set(material) != {'frozen', 'partition'}:
+            raise ValueError('source epoch binding plan material mismatch')
+        validate_binding_operations(material['frozen'], material['partition'], plan['operations'], before)
     normalized, stated = _normalize_records(package)
     # Mirror the store's explicit-field merge. New schema defaults must never
     # turn omitted historical fields into unreviewed null/empty writes.

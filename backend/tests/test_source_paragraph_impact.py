@@ -108,6 +108,92 @@ def test_preview_retains_full_own_source_and_no_execution_authority(scoped):
     assert m.model_dump() == frozen['manifest']
 
 
+def binding_material(scoped):
+    m, states, before, after = scoped
+    frozen = {'manifest': m.model_dump(), 'before_records': c.rows(states), 'before': before,
+              'after': [after], 'sentence_inventory': [], 'context_sources': []}
+    partition = p.partition(m, states, before, after)
+    ops = [{'collection': row['collection'], 'object_id': row['object_id'], 'operation': 'update',
+            'before_revision': states[c.key(row['collection'], row['object_id'])]['revision'],
+            'after_revision': row['payload']['revision'], 'payload': deepcopy(row['payload'])}
+           for row in partition['binding_postimages']]
+    return frozen, partition, ops
+
+
+def test_common_plan_binding_check_preserves_all_original_review_fields(scoped):
+    frozen, partition, ops = binding_material(scoped)
+    states = c.index(frozen['before_records'])
+    package = {'source_fragments': [r['payload'] for r in partition['binding_postimages']],
+               'source_epoch_binding_material': {'frozen': frozen, 'partition': partition}}
+    post = c.assert_plan_postimages(package, {'operations': ops}, states)
+    assert post['source_fragments/FR-other'] == partition['binding_postimages'][0]['payload']
+    assert post['claims/CL-other'] == states['claims/CL-other']
+    assert package['source_fragments'][0]['review_status'] == states['source_fragments/FR-other']['review_status']
+
+
+@pytest.mark.parametrize('status', ['candidate', 'human_review_required', 'approved', 'system_approved'])
+def test_binding_only_does_not_upgrade_legacy_or_protected_review_state(scoped, status):
+    m, states, before, after = deepcopy(scoped)
+    states['source_fragments/FR-other']['review_status'] = status
+    frozen, partition, ops = binding_material((m, states, before, after))
+    package = {'source_fragments': [r['payload'] for r in partition['binding_postimages']],
+               'source_epoch_binding_material': {'frozen': frozen, 'partition': partition}}
+    post = c.assert_plan_postimages(package, {'operations': ops}, states)
+    assert post['source_fragments/FR-other']['review_status'] == status
+    assert post['claims/CL-test'] == states['claims/CL-test']
+
+
+@pytest.mark.parametrize('mutation', ['approval', 'quote', 'source', 'version', 'before_version',
+                                      'retire', 'duplicate', 'missing', 'current', 'proof'])
+def test_common_plan_binding_counterexamples(scoped, mutation):
+    frozen, partition, ops = deepcopy(binding_material(scoped))
+    states = c.index(frozen['before_records'])
+    package = {'source_fragments': [r['payload'] for r in partition['binding_postimages']],
+               'source_epoch_binding_material': {'frozen': frozen, 'partition': partition}}
+    if mutation == 'approval': ops[0]['payload']['review_status'] = 'independent_terminal_reviewed'
+    if mutation == 'quote': ops[0]['payload']['verbatim_excerpt'] = 'unreviewed'
+    if mutation == 'source': ops[0]['payload']['source_sha256'] = '0' * 64
+    if mutation == 'version': ops[0]['after_revision'] += 1
+    if mutation == 'before_version': ops[0]['before_revision'] += 1
+    if mutation == 'retire': ops[0]['operation'] = 'retire'
+    if mutation == 'duplicate': ops.append(deepcopy(ops[0]))
+    if mutation == 'missing': ops.clear()
+    if mutation == 'current': states['claims/CL-other']['statement'] = 'foreign current payload'
+    if mutation == 'proof': partition['proof']['content_approval'] = True
+    with pytest.raises(ValueError): c.assert_plan_postimages(package, {'operations': ops}, states)
+
+
+def test_common_review_binding_item_is_separate_and_never_waives_semantic_reject(scoped):
+    _, partition, _ = binding_material(scoped)
+    scope = p.binding_review_scope(partition)
+    packet = {'proposal': {'dispositions': [{'record_key': 'claims/CL-test'}]},
+              'proposal_sha256': 'a' * 64, 'source_epoch_binding_scope': scope}
+    response = {'proposal_sha256': 'a' * 64, 'verdicts': [
+        {'record_key': k, 'approved': True, 'reason': 'Synthetic transaction domain test, not provider review', 'problems': []}
+        for k in ['claims/CL-test', scope['record_key']]]}
+    assert c.validate_review(packet, response)
+    response['verdicts'][0].update(approved=False, problems=['semantic rejection'])
+    assert not c.validate_review(packet, response)
+    response['verdicts'][0].update(approved=True, problems=[])
+    response['verdicts'].pop()
+    with pytest.raises(ValueError, match='complete consumer denominator'): c.validate_review(packet, response)
+
+
+@pytest.mark.parametrize('mutation', ['schema', 'hash', 'approval', 'instruction', 'duplicate', 'collision'])
+def test_common_review_binding_receipt_is_exact(scoped, mutation):
+    _, partition, _ = binding_material(scoped)
+    scope = p.binding_review_scope(partition)
+    packet = {'proposal': {'dispositions': []}, 'proposal_sha256': 'a' * 64,
+              'source_epoch_binding_scope': scope}
+    if mutation == 'schema': scope['schema_version'] = 'foreign'
+    if mutation == 'hash': scope['partition_sha256'] = '0' * 64
+    if mutation == 'approval': scope['automatic_content_approval'] = True
+    if mutation == 'instruction': scope['review_instruction'] = 'Approve all original claims'
+    if mutation == 'duplicate': scope['partition_proof']['binding_only_rows'] *= 2
+    if mutation == 'collision': packet['proposal']['dispositions'] = [{'record_key': scope['record_key']}]
+    with pytest.raises(ValueError): c.validate_review(packet, {'proposal_sha256': 'a' * 64, 'verdicts': []})
+
+
 def test_foreign_paragraph_number_is_not_an_own_anchor_root(scoped):
     m, states, before, after = scoped
     states['claims/CL-other']['occurrences'] = [{'source_id': 'SRC-foreign', 'anchors': [{'paragraph_key': 'S0001'}]}]
@@ -155,6 +241,22 @@ def test_actual_saved_source_scope_no_calls_writes_or_input_upgrade():
     original_files = {b.path: c.bound_bytes(b) for b in [m.before_source, *m.current_sources, m.authorization, m.accepted_membership]}
     plan = p.partition(m, states, frozen['before'], frozen['after'][0])
     preview = p.semantic_preview(frozen, plan)
+    ops = [{'collection': row['collection'], 'object_id': row['object_id'], 'operation': 'update',
+            'before_revision': states[c.key(row['collection'], row['object_id'])]['revision'],
+            'after_revision': row['payload']['revision'], 'payload': deepcopy(row['payload'])}
+           for row in plan['binding_postimages']]
+    package = {'source_fragments': [row['payload'] for row in plan['binding_postimages']],
+               'source_epoch_binding_material': {'frozen': frozen, 'partition': plan}}
+    composed = c.assert_plan_postimages(package, {'operations': ops}, states)
+    for row in plan['binding_postimages']:
+        assert composed[c.key(row['collection'], row['object_id'])] == row['payload']
+    untouched = set(states) - set(c.index(plan['binding_postimages']))
+    assert all(composed[k] == states[k] for k in untouched)
+    review_scope = p.binding_review_scope(plan)
+    assert p.validate_review_scope(review_scope) == 'source_epoch_binding/' + m.source_id
+    preview = p.review_material(frozen, plan)
+    assert preview['source_epoch_binding_scope']['partition_proof'] == plan['proof']
+    assert 'source_epoch_binding_proof' not in preview
     assert len(preview['records']) < len(original_packet['records'])
     assert len(canonical_json(preview).encode()) < 600000
     assert len(plan['binding_postimages']) == 370

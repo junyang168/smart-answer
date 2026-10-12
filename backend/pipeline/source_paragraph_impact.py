@@ -14,6 +14,7 @@ from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.pipeline import source_reconciliation as c
 
 VERSION = "wang_source_paragraph_impact_v1"
+REVIEW_VERSION = "wang_source_epoch_binding_review_v1"
 
 
 def partition(manifest, states, before, after):
@@ -147,6 +148,96 @@ def verify(plan, manifest, states, before, after):
     if plan != partition(manifest, states, before, after):
         raise ValueError("paragraph scope/binding full postimage proof drift")
     return plan
+
+
+def binding_review_scope(plan):
+    """An explicit reviewer item for bookkeeping, never 370 content approvals.
+
+    The full deterministic postimages remain in program material. The reviewer
+    sees their complete ID/version/hash denominator and the preservation rule,
+    separately from the semantic postimages it must actually judge. The common
+    review validator requires this item in addition to every semantic verdict.
+    This function alone neither approves a package nor enables runtime dispatch.
+    """
+    proof = plan["proof"]
+    if (proof.get("schema_version") != VERSION or proof.get("content_approval") is not False
+            or proof.get("group_completion") is not False):
+        raise ValueError("binding review requires a non-approval paragraph partition")
+    bindings = proof["binding_only_rows"]
+    keys = [r["record_key"] for r in bindings]
+    if keys != sorted(set(keys)) or any(not k.startswith("source_fragments/") for k in keys):
+        raise ValueError("binding review cohort is duplicate/foreign/unordered")
+    return {
+        "schema_version": REVIEW_VERSION,
+        "record_key": "source_epoch_binding/" + proof["source_id"],
+        "partition_proof": deepcopy(proof),
+        "partition_sha256": sha256_json(proof),
+        "automatic_content_approval": False,
+        "review_instruction": "Judge the exact source epoch transition and preservation accounting. "
+            "Each cohort row retains its complete original quote, coordinates, ownership, qualification "
+            "and review state; only source_sha256 and storage revision change. This verdict is NOT "
+            "a fresh semantic approval of these rows or of unrelated Claims/CVPs. All semantic "
+            "postimages require their own complete verdicts; all original affected groups require "
+            "current independent audit before completion.",
+    }
+
+
+def validate_review_scope(scope):
+    """Require the exact typed item; raw reviewer reasons/verdicts stay untouched."""
+    if not isinstance(scope, dict) or scope.get("schema_version") != REVIEW_VERSION:
+        raise ValueError("source epoch binding review schema mismatch")
+    proof = scope.get("partition_proof")
+    if not isinstance(proof, dict) or scope != binding_review_scope({"proof": proof}):
+        raise ValueError("source epoch binding review receipt drift")
+    return scope["record_key"]
+
+
+def review_material(frozen, partition_plan):
+    """Full semantic material plus ONE complete binding-accounting receipt.
+
+    Do not duplicate the large complete cohort proof under two packet fields.
+    Its exact value is retained in the typed scope, not dropped/summarized. This
+    remains no-call material until the runtime/semantic compiler/completion
+    integration is enabled and tested as a whole.
+    """
+    material = semantic_preview(frozen, partition_plan)
+    original_proof = material.pop("source_epoch_binding_proof")
+    material["source_epoch_binding_scope"] = binding_review_scope(partition_plan)
+    if material["source_epoch_binding_scope"]["partition_proof"] != original_proof:
+        raise ValueError("binding review material lost complete partition proof")
+    return material
+
+
+def validate_binding_operations(frozen, partition_plan, operations, current_before):
+    """Validate the REAL plan cohort before the common transaction boundary.
+
+    No reviewer boolean substitutes for recomputation. Do not normalize the
+    mechanical rows through semantic provenance: doing so would manufacture
+    approval for unchanged professor text. This is a stricter plan check only;
+    it does not supply the still-required semantic approval or completion proof.
+    """
+    original = c.index(frozen["before_records"])
+    if current_before != original:
+        raise ValueError("source binding plan current readset drift")
+    verify(partition_plan, frozen["manifest"], original, frozen["before"], frozen["after"][0])
+    expected = c.index(partition_plan["binding_postimages"])
+    actual = {}
+    for op in operations:
+        k = c.key(op["collection"], op["object_id"])
+        if k not in expected:
+            continue  # The common semantic plan validator checks all other ops.
+        if k in actual:
+            raise ValueError("duplicate source binding operation")
+        old, new = original[k], expected[k]
+        if (op["operation"] != "update" or op["before_revision"] != old["revision"]
+                or op["after_revision"] != new["revision"]
+                or record_content_sha(op["payload"]) != record_content_sha(new)
+                or ("revision" in op["payload"] and op["payload"]["revision"] != new["revision"])):
+            raise ValueError("source binding operation differs from exact unchanged-text postimage")
+        actual[k] = op
+    if set(actual) != set(expected):
+        raise ValueError("source binding plan omitted a cohort operation")
+    return sorted(actual)
 
 
 def semantic_preview(frozen, plan):
