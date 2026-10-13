@@ -3,6 +3,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import missionStatement from '../../../../content/mission-statement.json';
 import Image from 'next/image';
 import { ArrowRight, ChevronLeft, ChevronRight, Search, BrainCircuit, Users, Church } from 'lucide-react';
 
@@ -21,7 +22,7 @@ const featuredHeroItems: FeaturedHeroItem[] = [
         id: "welcome",
         eyebrow: "達拉斯聖道教會",
         title: "在真理中生根建造",
-        description: "達拉斯聖道教會 (Dallas Holy Logos Church) 歡迎您！",
+        description: "達拉斯聖道教會歡迎您！",
         imageSrc: "/images/church.jpeg",
         href: "/resources",
         ctaLabel: "探索神的真理",
@@ -213,7 +214,7 @@ export const HomePageView = () => {
                 <div className="container mx-auto px-6 text-center max-w-4xl">
                      <h2 className="text-3xl font-bold font-display text-gray-800">我們的使命</h2>
                      <p className="mt-4 text-xl text-gray-600 italic leading-relaxed">
-                        “依靠神的恩典，聖道教會追求深度，準確釋經，幫助弟兄姐妹們真明白、遵行、持守聖經真理，並在愛的環境中訓練，造就他們成為主的門徒，以完成主的命令，使萬民做祂的門徒。”
+                        “{missionStatement.zhHant}”
                      </p>
                 </div>
             </section>
