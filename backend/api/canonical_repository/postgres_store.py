@@ -14,7 +14,7 @@ import os
 import re
 import tempfile
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Sequence
@@ -1988,6 +1988,27 @@ def planned_ai_review_events(
 ) -> tuple[PlannedReviewEvent, ...]:
     """Compile exact-once review events from a sealed candidate manifest."""
 
+    scoped = package.get('source_repair_application') or {}
+    if scoped.get('schema_version') == 'wang_source_sql_reconciliation_v2':
+        # The package authorizer already verified the exact GPT proposal and
+        # single Opus terminal answer. Record the new Claim's actual review in
+        # the same transaction, so downstream normal CVP reads SQL authority
+        # rather than reconstructing a source/parent proof chain.
+        events=[]
+        for op in operations:
+            if op.collection!='claims' or op.payload.get('review_status')!='independent_terminal_reviewed':continue
+            artifact={'schema_version':'cvp_sql_source_claim_review.v2','source_package_sha256':source_sha256,
+                      'source_application':dict(scoped),'terminal_review_sha256':scoped['review_sha256']}
+            reason=str(op.payload.get('review_note') or 'Actual independently reviewed bounded Claim postimage')
+            reviewer=str(op.payload['reviewed_by'])
+            artifact['resolution']={'claim_id':op.object_id,'target_review_status':'independent_terminal_reviewed',
+                                    'reviewer_id':reviewer,'reason':reason}
+            identity={'collection':'claims','object_id':op.object_id,'object_revision':op.after_revision,
+                      'after_sha256':op.after_sha256,'artifact':artifact}
+            events.append(PlannedReviewEvent('REV-AI-'+sha256_json(identity)[:32], 'claims',op.object_id,
+                op.after_revision,'ai',reviewer,'independent_terminal_reviewed',reason,artifact))
+        return tuple(events)
+
     application = package.get("consensus_application")
     if not isinstance(application, Mapping) or application.get("review_completion") != "complete":
         return ()
@@ -2867,6 +2888,12 @@ def build_change_set_plan(
                     f"claims/{object_id}: cannot change a superseded claim "
                     "whose review authority is unknown"
                 )
+            reference_only=False
+            if (collection=='viewpoint_relations' and current_payload
+                    and current_payload.get('review_status') in {'human_approved','approved'}
+                    and source_kind=='wang_source_sql_reconciliation_v2'):
+                from backend.pipeline.cvp_scope_management import approved_relation_package_reference_only
+                reference_only=approved_relation_package_reference_only(package,f'{collection}/{object_id}',current_payload,merged)
             if (
                 current_payload
                 and _is_human_settled(
@@ -2875,6 +2902,7 @@ def build_change_set_plan(
                 )
                 and _substantive_payload(merged)
                 != _substantive_payload(current_payload)
+                and not reference_only
             ):
                 raise PostgresKnowledgeStoreError(
                     f"{collection}/{object_id}: incoming package changes content "
@@ -2899,11 +2927,11 @@ def build_change_set_plan(
                         f"SourceDocument id {object_id!r} cannot change identity "
                         f"from {current_identity!r} to {incoming_identity!r}"
                     )
-            incoming = preserve_human_review(
-                merged,
-                current_payload,
-                existing_reviewer_kind=existing_reviewer_kind,
-            )
+            # Scope-reference-only changes have their own real Opus approval.
+            # Keep the original human semantic reason/history, but do not label
+            # the new version references as a new human ruling or copy its raw.
+            incoming = dict(merged) if reference_only else preserve_human_review(
+                merged,current_payload,existing_reviewer_kind=existing_reviewer_kind)
             removed_fields = fields_removed(current_payload, incoming)
             after_sha = record_content_sha(incoming)
             before_sha = str((current or {}).get("content_sha256") or "") or None
@@ -3209,6 +3237,930 @@ class PostgresKnowledgeStore:
     def connect(self) -> Any:
         return self.psycopg.connect(self.database_url)
 
+    def get_cvp_group(self, run_id: str) -> Optional[dict[str, Any]]:
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute("SELECT metadata,status,error_message FROM wang_knowledge.pipeline_runs WHERE run_id=%s AND stage='cvp_group'", (run_id,))
+            row = cursor.fetchone()
+            if row and row[0].get('run_id',run_id)!=run_id:
+                raise ChangeSetConflict('SQL group metadata conflicts with its actual primary key')
+            # Point reads and campaign-list reads have the same identity
+            # contract. Metadata need not duplicate the SQL primary key.
+            return {**row[0], "run_id":run_id, "status": row[1], "error": row[2]} if row else None
+
+    def get_cvp_retained_scope_bindings(self, run_id, *, cursor=None):
+        """Direct owned SQL review archives, not a recursive proof/history walk.
+
+        Replacing the active review for another legitimate action cannot erase
+        an already committed human no-change authority. Project only its binding
+        and exact commit identity; do not load old material packets.
+        """
+        if cursor is None:
+            with self.connect() as conn,conn.cursor() as cur:
+                return self.get_cvp_retained_scope_bindings(run_id,cursor=cur)
+        rows=cursor.execute("""SELECT a.run_id,a.metadata->>'reviewed_sha256',
+                a.metadata->'reviewed'->'evidence'->'approval'->'retained_write_scope'
+            FROM wang_knowledge.pipeline_runs a
+            JOIN wang_knowledge.pipeline_runs parent ON parent.run_id=%s
+            LEFT JOIN wang_knowledge.change_sets cs
+              ON cs.change_set_id=a.metadata->'reviewed'->'plan'->>'change_set_id'
+            WHERE a.stage='cvp_group' AND a.metadata->>'kind'='cvp_review_archive'
+              AND a.metadata->>'parent_run_id'=%s
+              AND a.metadata->>'checkpoint' IN ('applied','audited')
+              AND a.metadata->'reviewed'->'evidence'->'approval'->'retained_write_scope' IS NOT NULL
+              AND ((cs.status='applied'
+                AND cs.fingerprint_sha256=a.metadata->'reviewed'->'plan'->>'fingerprint_sha256'
+                AND cs.source_sha256=a.metadata->'reviewed'->'plan'->>'source_sha256'
+                AND (parent.metadata->'change_set_ids') ? cs.change_set_id
+                AND cs.metadata->>'run_id'=%s
+                AND cs.metadata->>'reviewed_sha256'=a.metadata->>'reviewed_sha256'
+                AND cs.metadata->'approval'->'retained_write_scope'=
+                    a.metadata->'reviewed'->'evidence'->'approval'->'retained_write_scope')
+                OR (a.metadata->'reviewed'->'plan'->'operations'='[]'::jsonb
+                  AND a.metadata->>'reviewed_sha256'=COALESCE(a.metadata->>'no_content_write_reviewed_sha256',
+                      parent.metadata->>'no_content_write_reviewed_sha256')))
+            ORDER BY a.run_id""",(run_id,run_id,run_id)).fetchall()
+        count=cursor.execute("""SELECT count(*) FROM wang_knowledge.pipeline_runs
+            WHERE stage='cvp_group' AND metadata->>'kind'='cvp_review_archive'
+              AND metadata->>'parent_run_id'=%s AND metadata->>'checkpoint' IN ('applied','audited')
+              AND metadata->'reviewed'->'evidence'->'approval'->'retained_write_scope' IS NOT NULL""",
+            (run_id,)).fetchone()[0]
+        if len(rows)!=count:
+            raise ChangeSetConflict('retained scope archived approval lacks exact committed authority')
+        result=[]
+        for ident,sha,b in rows:
+            if ident!='CVPR-'+sha256_json({'parent':run_id,'reviewed_sha256':sha}):
+                raise ChangeSetConflict('retained scope archived review identity drift')
+            if b not in result:result.append(b)
+        return result
+
+    def initialize_cvp_campaign(self, definition: Mapping[str, Any]) -> str:
+        from .transaction_validation import CONTRACT
+        groups = definition.get("groups", [])
+        claims = [cid for group in groups for cid in group["claim_ids"]]
+        if (not groups or len({g["group_key"] for g in groups}) != len(groups)
+                or len(claims) != len(set(claims))
+                or any(g["sequence"] != i or not 1 <= len(g["claim_ids"]) <= 20 for i,g in enumerate(groups,1))):
+            raise ValueError("original unique ordered campaign definition required")
+        campaign = sha256_json({"accepted_grouping_sha256":definition["accepted_grouping_sha256"],"groups":groups})
+        run_id = "CVPC-" + campaign
+        metadata = {"contract":CONTRACT,"kind":"campaign","campaign_sha256":campaign,"definition":dict(definition)}
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE",(run_id,))
+            row = cursor.fetchone()
+            if row:
+                if row[0] != metadata: raise ChangeSetConflict("original campaign definition/config drift")
+                return campaign
+            cursor.execute("""INSERT INTO wang_knowledge.pipeline_runs(run_id,subject_kind,subject_id,stage,trigger,status,metadata)
+                              VALUES (%s,'batch',%s,'cvp_group','cli','running',%s::jsonb)""",(run_id,campaign,canonical_json(metadata)))
+        return campaign
+
+    def get_cvp_campaign(self, campaign_sha256: str) -> Mapping[str, Any]:
+        with self.connect() as conn:
+            row = conn.execute("SELECT metadata->'definition' FROM wang_knowledge.pipeline_runs WHERE run_id=%s AND stage='cvp_group'",("CVPC-"+campaign_sha256,)).fetchone()
+        if not row: raise ChangeSetConflict("SQL campaign not admitted; no legacy startup fallback")
+        if sha256_json({"accepted_grouping_sha256":row[0]["accepted_grouping_sha256"],"groups":row[0]["groups"]}) != campaign_sha256:
+            raise ChangeSetConflict("SQL original campaign membership drift")
+        return row[0]
+
+    def cvp_campaign_progress(self, campaign_sha256: str) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute("""SELECT run_id,metadata->>'group_key',metadata->'sequence',
+                                          metadata->'claim_ids',metadata->>'checkpoint',
+                                          metadata->'revisit_required',metadata->'independent_audit_complete',
+                                          status,error_message
+                                   FROM wang_knowledge.pipeline_runs
+                                   WHERE stage='cvp_group' AND metadata->>'campaign_sha256'=%s
+                                     AND metadata ? 'group_key'
+                                   ORDER BY (metadata->>'sequence')::int""",(campaign_sha256,)).fetchall()
+        fields = ("run_id","group_key","sequence","claim_ids","checkpoint","revisit_required","independent_audit_complete","status","error")
+        return [dict(zip(fields,row)) for row in rows]
+
+    def prepare_cvp_group(self, *, campaign_sha256: str, group_key: str, sequence: int,
+                          claim_ids: Sequence[str], materials: Mapping[str, Any]) -> str:
+        from .transaction_validation import CONTRACT
+        definition = self.get_cvp_campaign(campaign_sha256)
+        if (sequence > len(definition["groups"]) or
+                definition["groups"][sequence-1] != {"group_key":group_key,"sequence":sequence,"claim_ids":list(claim_ids)}):
+            raise ChangeSetConflict("group differs from original admitted campaign membership")
+        if (not re.fullmatch(r"[0-9a-f]{64}", campaign_sha256) or not group_key
+                or sequence < 1 or not claim_ids or len(claim_ids) != len(set(claim_ids))):
+            raise ValueError("exact original campaign/group membership required")
+        identity = {"contract": CONTRACT, "campaign_sha256": campaign_sha256,
+                    "group_key": group_key, "sequence": sequence, "claim_ids": list(claim_ids)}
+        run_id = "CVPG-" + sha256_json({"campaign": campaign_sha256, "group": group_key})
+        value = {**identity, "checkpoint": "prepared", "materials": dict(materials),
+                 "change_set_ids": [], "revisit_required": False, "independent_audit_complete": False}
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
+            cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE", (run_id,))
+            row = cursor.fetchone()
+            if row:
+                if any(row[0].get(k) != v for k, v in identity.items()) or row[0].get("materials") != materials:
+                    raise ChangeSetConflict("CVP group identity/materials changed; original history retained")
+                return run_id
+            cursor.execute("""SELECT metadata->>'checkpoint' FROM wang_knowledge.pipeline_runs
+                              WHERE stage='cvp_group' AND metadata->>'campaign_sha256'=%s
+                                AND (metadata->>'sequence')::int=%s""", (campaign_sha256, sequence - 1))
+            if sequence > 1 and cursor.fetchone() != ("audited",):
+                raise ChangeSetConflict("previous original group not audited; no next group")
+            cursor.execute("""INSERT INTO wang_knowledge.pipeline_runs
+                              (run_id,batch_id,subject_kind,subject_id,stage,trigger,status,metadata)
+                              VALUES (%s,%s,'batch',%s,'cvp_group','cli','running',%s::jsonb)""",
+                           (run_id, campaign_sha256, group_key, canonical_json(value)))
+        return run_id
+
+    def fail_cvp_group(self, run_id: str, error: str) -> None:
+        # An error changes execution status, never erases an applied checkpoint.
+        with self.connect() as conn:
+            conn.execute("UPDATE wang_knowledge.pipeline_runs SET status='failed',error_message=%s,heartbeat_at=now() WHERE run_id=%s AND stage='cvp_group'",(error,run_id))
+
+    def bind_cvp_execution_root(self, run_id: str, *, identity: str, root: Path) -> Path:
+        """Durable role/action location. A new output directory is not a retry.
+
+        SQL owns this reservation before any model, audit or backup effect. The
+        original call intents remain authoritative across processes and CLI roots.
+        """
+        root = Path(root).resolve()
+        with self.connect() as conn:
+            row = conn.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s AND stage='cvp_group' FOR UPDATE", (run_id,)).fetchone()
+            if not row: raise ChangeSetConflict('execution root has no admitted group')
+            value = row[0]; roots = value.setdefault('execution_roots', {})
+            if identity in roots:
+                if roots[identity] != str(root):
+                    raise ChangeSetConflict('execution root changed; original once intents must not be reset')
+                return root
+            roots[identity] = str(root)
+            conn.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now() WHERE run_id=%s", (canonical_json(value),run_id))
+        return root
+
+    def reserve_cvp_membership_identity(self, *, identity, parent_run_id, root, handoff_id):
+        """One current CVP/CVR management identity across finders/groups/roots."""
+        ident='CVPM-'+identity
+        metadata={'kind':'cvp_membership_identity','parent_run_id':parent_run_id,
+                  'root':str(Path(root).resolve()),'handoff_id':handoff_id,'identity':identity}
+        with self.connect() as conn:
+            conn.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))',(ident,))
+            existing=conn.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s',(ident,)).fetchone()
+            if existing:
+                if existing[0]!=metadata:
+                    raise ChangeSetConflict('same CVP/CVR membership cannot reset once budget across groups/roots/finders')
+                return
+            conn.execute("INSERT INTO wang_knowledge.pipeline_runs(run_id,subject_kind,subject_id,stage,trigger,status,metadata) VALUES (%s,'batch',%s,'cvp_group','cli','running',%s::jsonb)",
+                         (ident,identity,canonical_json(metadata)))
+
+    def prepare_cvp_action(self, run_id, *, action_id, kind, authorization, materials):
+        if kind not in {'cvp_identity_merge','relation_retirement','claim_retirement','source_claim_revision','cvp_scope_revision','cvp_membership_revalidation','owner_link_correction','owner_link_retarget','owner_link_retirement','audit_supports_correction','required_cvp_coverage'} or not authorization:
+            raise ValueError('bounded action authority required')
+        action={'action_id':action_id,'kind':kind,'authorization':authorization,
+                'materials_sha256':sha256_json(materials),'materials':materials}
+        ident='CVPA-'+sha256_json({'parent':run_id,'action':action_id})
+        record={'kind':'cvp_action','parent_run_id':run_id,'action_id':action_id,'action':action}
+        with self.connect() as conn:
+            row=conn.execute("SELECT metadata->>'checkpoint' FROM wang_knowledge.pipeline_runs WHERE run_id=%s AND stage='cvp_group' FOR UPDATE",(run_id,)).fetchone()
+            if not row:raise ChangeSetConflict('bounded action has no admitted group')
+            existing=conn.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s",(ident,)).fetchone()
+            if existing:
+                if existing[0]!=record:raise ChangeSetConflict('bounded action materials/authority drift')
+                return existing[0]['action']
+            if row[0] not in {'prepared','applied','audited'}:
+                raise ChangeSetConflict('current action must commit or stop before another action')
+            conn.execute("INSERT INTO wang_knowledge.pipeline_runs(run_id,subject_kind,subject_id,stage,trigger,status,metadata) VALUES (%s,'batch',%s,'cvp_group','cli','running',%s::jsonb)",
+                         (ident,action_id,canonical_json(record)))
+        return action
+
+    def register_claim_issue(self, run_id, issue):
+        """One indexed problem reservation across finders/roots/campaigns.
+
+        Metadata lives in the existing run table; it never changes content or
+        resets a call. A later report can tighten, not relax, the original budget.
+        """
+        from backend.pipeline.claim_issue_management import Issue
+        value = Issue.model_validate(issue)
+        ident = 'CVPI-' + value.issue_id
+        origin = {'run_id':run_id, **value.model_dump(mode='json')}
+        with self.connect() as conn:
+            conn.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))', (POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
+            if not conn.execute("SELECT 1 FROM wang_knowledge.schema_migrations WHERE migration_id='007_claim_issue_lookup'").fetchone():
+                raise ChangeSetConflict('Claim issue indexed schema not activated; no unbounded fallback')
+            parent = conn.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s AND stage='cvp_group'", (run_id,)).fetchone()
+            if not parent:
+                raise ChangeSetConflict('Claim issue must belong to the original admitted group')
+            if value.claim_id not in parent[0].get('claim_ids', []):
+                from backend.pipeline.claim_owner_revision import dependency_issue
+                claim=conn.execute('SELECT payload,revision,content_sha256,retired_at IS NOT NULL FROM wang_knowledge.objects WHERE collection=%s AND object_id=%s',
+                                   ('claims',value.claim_id)).fetchone()
+                if not claim:raise ChangeSetConflict('owner dependency Claim missing')
+                action=None
+                if value.origin in {'opus_initial','gpt_proposal'}:
+                    from pathlib import Path
+                    aid=Path(value.report.path).parent.name
+                    ar=conn.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s',
+                        ('CVPA-'+sha256_json({'parent':run_id,'action':aid}),)).fetchone()
+                    if not ar or ar[0].get('parent_run_id')!=run_id or ar[0].get('action_id')!=aid:
+                        raise ChangeSetConflict('declined supports dependency missing exact SQL action')
+                    action=ar[0]['action']
+                dependency_issue(value,{**parent[0],'run_id':run_id},
+                                 dict(zip(('payload','revision','content_sha256','retired'),claim)),action=action)
+            row = conn.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE', (ident,)).fetchone()
+            if row:
+                result = row[0]
+                if origin not in result['reports']:
+                    result['reports'].append(origin)
+                result['correction_used'] |= value.correction_used
+                result['terminal_refusal'] |= value.terminal_refusal
+                conn.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now() WHERE run_id=%s', (canonical_json(result), ident))
+            else:
+                result = {'kind':'claim_issue', 'issue_id':value.issue_id, 'owner_run_id':run_id,
+                    'reports':[origin], 'state':'detected', 'correction_used':value.correction_used,
+                    'terminal_refusal':value.terminal_refusal}
+                conn.execute("INSERT INTO wang_knowledge.pipeline_runs(run_id,subject_kind,subject_id,stage,trigger,status,metadata) VALUES (%s,'batch',%s,'cvp_group','cli','running',%s::jsonb)",
+                             (ident, value.claim_id, canonical_json(result)))
+            return result
+
+    def get_claim_issue(self, issue_id):
+        with self.connect() as conn:
+            row = conn.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s AND metadata->>'kind'='claim_issue'", ('CVPI-'+issue_id,)).fetchone()
+        return row[0] if row else None
+
+    def bind_claim_issue_action(self, issue_ids, *, run_id, action_id):
+        with self.connect() as conn:
+            conn.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))', (POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
+            for issue_id in sorted(issue_ids):
+                ident = 'CVPI-'+issue_id
+                row = conn.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE', (ident,)).fetchone()
+                if not row or row[0]['owner_run_id'] != run_id:
+                    raise ChangeSetConflict('original issue owner must resume; no duplicate pipeline')
+                value = row[0]
+                if value['terminal_refusal'] or value['correction_used']:
+                    raise ChangeSetConflict('original issue correction/terminal budget cannot restart')
+                bound = {'run_id':run_id,'action_id':action_id}
+                if value.get('action') and value['action'] != bound:
+                    raise ChangeSetConflict('same Claim issue already has an action; no new budget')
+                value['action'] = bound
+                value['state'] = 'action_reserved'
+                conn.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now() WHERE run_id=%s', (canonical_json(value), ident))
+
+    def bind_claim_issue_scope_amendment(self, issue_ids, *, run_id, action_id, authorization):
+        """Append one owner-scoped amendment; retain original action/budgets."""
+        from backend.pipeline.claim_issue_rescope import validate_live
+        from backend.pipeline.source_reconciliation import bound_bytes
+        direction=json.loads(bound_bytes(authorization))
+        material,_=validate_live(self,direction)
+        from backend.pipeline.claim_issue_management import Issue
+        if set(issue_ids)!={Issue.model_validate(i).issue_id for i in material['claim_issue_context']['issues']} or len(issue_ids)!=len(set(issue_ids)):
+            raise ChangeSetConflict('scope amendment must preserve complete original issue denominator')
+        expected='CVPA-'+sha256_json({'kind':'claim_issue_scope_amendment_once','parent':direction['old_action_id']})
+        if action_id!=expected or run_id!=direction['run_id']:
+            raise ChangeSetConflict('scope amendment action identity drift')
+        with self.connect() as conn:
+            conn.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))',(POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
+            from backend.pipeline.cvp_sql_flow import decoded_pins
+            old=self.get_cvp_action(run_id,direction['old_action_id'])
+            with conn.cursor() as cursor:
+                self._assert_transaction_read_pins(cursor,decoded_pins(old['materials']['sql_scope']['read_pins']))
+            for issue_id in sorted(issue_ids):
+                ident='CVPI-'+issue_id
+                row=conn.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE',(ident,)).fetchone()
+                value=row[0] if row else None
+                from backend.pipeline.claim_complete_input_repair import SCHEMA as REPAIR_SCHEMA
+                from backend.pipeline.claim_evidence_completion import SCHEMA as COMPLETION_SCHEMA
+                if (not value or value['owner_run_id']!=run_id
+                        or (direction['schema_version'] not in {REPAIR_SCHEMA,COMPLETION_SCHEMA} and (value['correction_used'] or value['terminal_refusal']))
+                        or value.get('action')!={'run_id':run_id,'action_id':direction['old_action_id']}):
+                    raise ChangeSetConflict('scope amendment cannot replace original issue reservation')
+                bound={'run_id':run_id,'action_id':action_id,'authorization':authorization}
+                if value.get('scope_amendment') and value['scope_amendment']!=bound:
+                    raise ChangeSetConflict('scope amendment already reserved; no second authority/budget')
+                value['scope_amendment']=bound
+                conn.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now() WHERE run_id=%s',
+                             (canonical_json(value),ident))
+
+    def get_cvp_action(self, run_id, action_id):
+        ident='CVPA-'+sha256_json({'parent':run_id,'action':action_id})
+        with self.connect() as conn:
+            row=conn.execute("SELECT metadata->'action' FROM wang_knowledge.pipeline_runs WHERE run_id=%s",(ident,)).fetchone()
+        return row[0] if row else None
+
+    def cvp_action_committed(self, run_id, action_id):
+        with self.connect() as conn, conn.cursor() as cursor:
+            return self._cvp_action_committed(cursor,run_id,action_id)
+
+    @staticmethod
+    def _cvp_action_committed(cursor,run_id,action_id):
+        """One indexed SQL commit authority for resume AND completion."""
+        return cursor.execute("""SELECT EXISTS(SELECT 1 FROM wang_knowledge.pipeline_runs a
+                LEFT JOIN wang_knowledge.change_sets cs
+                  ON cs.change_set_id=a.metadata->'reviewed'->'plan'->>'change_set_id'
+                JOIN wang_knowledge.pipeline_runs parent ON parent.run_id=%s
+                WHERE a.stage='cvp_group' AND a.metadata->>'kind'='cvp_review_archive'
+                  AND a.metadata->>'parent_run_id'=%s AND a.metadata->>'action_id'=%s
+                  AND a.metadata->>'checkpoint' IN ('applied','audited')
+                  AND ((cs.status='applied'
+                    AND cs.fingerprint_sha256=a.metadata->'reviewed'->'plan'->>'fingerprint_sha256'
+                    AND cs.source_sha256=a.metadata->'reviewed'->'plan'->>'source_sha256'
+                    AND (parent.metadata->'change_set_ids') ? cs.change_set_id)
+                    OR (a.metadata->'reviewed'->'plan'->'operations'='[]'::jsonb
+                      AND a.metadata->>'reviewed_sha256'=COALESCE(a.metadata->>'no_content_write_reviewed_sha256',
+                          parent.metadata->>'no_content_write_reviewed_sha256'))))
+                OR EXISTS(SELECT 1 FROM wang_knowledge.pipeline_runs r
+                  JOIN wang_knowledge.change_sets cs
+                    ON cs.change_set_id=r.metadata->'reviewed'->'plan'->>'change_set_id'
+                  WHERE r.run_id=%s AND r.stage='cvp_group'
+                    AND r.metadata->>'checkpoint' IN ('applied','audited')
+                    AND r.metadata->'reviewed'->'evidence'->'action'->>'action_id'=%s
+                    AND cs.status='applied'
+                    AND cs.fingerprint_sha256=r.metadata->'reviewed'->'plan'->>'fingerprint_sha256'
+                    AND cs.source_sha256=r.metadata->'reviewed'->'plan'->>'source_sha256'
+                    AND (r.metadata->'change_set_ids') ? cs.change_set_id)
+                OR EXISTS(SELECT 1 FROM wang_knowledge.pipeline_runs r
+                  WHERE r.run_id=%s AND r.stage='cvp_group'
+                    AND r.metadata->>'checkpoint' IN ('applied','audited')
+                    AND r.metadata->'reviewed'->'evidence'->'action'->>'action_id'=%s
+                    AND r.metadata->'reviewed'->'plan'->'operations'='[]'::jsonb
+                    AND r.metadata->>'reviewed_sha256'=r.metadata->>'no_content_write_reviewed_sha256')""",
+                (run_id,run_id,action_id,run_id,action_id,run_id,action_id)).fetchone()[0]
+
+    def _assert_claim_issue_committed(self,cursor,run_id,issue):
+        """An authorized amendment resolves its original issue, not a new one.
+
+        Keep both reservations/budgets. Accept the exact prepared amendment
+        only after its real KCS commit, including when a later action is current.
+        """
+        bound=issue.get('action')
+        if not bound or issue.get('owner_run_id')!=run_id or bound.get('run_id')!=run_id:
+            raise ChangeSetConflict('unresolved/foreign Claim issue blocks group completion')
+        action_id=bound['action_id'];amendment=issue.get('scope_amendment')
+        if amendment:
+            from backend.pipeline.claim_issue_rescope import SCHEMA
+            from backend.pipeline.claim_complete_input_repair import SCHEMA as REPAIR_SCHEMA
+            from backend.pipeline.claim_evidence_completion import SCHEMA as COMPLETION_SCHEMA
+            from backend.pipeline.cvp_sql_flow import check_binding
+            from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+            auth=amendment['authorization'];check_binding(auth);direction=read_artifact(auth['path'])
+            expected='CVPA-'+sha256_json({'kind':'claim_issue_scope_amendment_once','parent':action_id})
+            cursor.execute("SELECT metadata->>'campaign_sha256' FROM wang_knowledge.pipeline_runs WHERE run_id=%s",(run_id,))
+            campaign=cursor.fetchone()
+            if (amendment.get('run_id')!=run_id or amendment.get('action_id')!=expected
+                    or direction.get('schema_version') not in {SCHEMA,REPAIR_SCHEMA,COMPLETION_SCHEMA} or direction.get('authorized_by')!='owner'
+                    or direction.get('human_content_approval') is not False
+                    or direction.get('additional_proposal_limit')!=1 or not direction.get('authorization_quote')
+                    or direction.get('run_id')!=run_id or direction.get('old_action_id')!=action_id
+                    or not campaign or direction.get('campaign_sha256')!=campaign[0]
+                    or direction.get('artifact_sha256')!=sha256_json({k:v for k,v in direction.items() if k!='artifact_sha256'})):
+                raise ChangeSetConflict('Claim issue completion amendment authority drift')
+            if direction['schema_version']==REPAIR_SCHEMA and (direction.get('additional_review_limit')!=1
+                    or direction.get('additional_correction_limit')!=0):
+                raise ChangeSetConflict('Claim issue complete-input repair completion budget drift')
+            if direction['schema_version']==COMPLETION_SCHEMA and (direction.get('additional_review_limit')!=1
+                    or direction.get('additional_correction_limit')!=1):
+                raise ChangeSetConflict('Claim Evidence completion review budget drift')
+            action_id=expected
+            ident='CVPA-'+sha256_json({'parent':run_id,'action':action_id})
+            cursor.execute("""SELECT metadata->'action'->>'kind',
+                metadata->'action'->'materials'->'claim_issue_context'
+                FROM wang_knowledge.pipeline_runs WHERE run_id=%s""",(ident,))
+            prepared=cursor.fetchone()
+            from backend.pipeline.claim_issue_management import Issue
+            if (not prepared or prepared[0]!='source_claim_revision'
+                    or prepared[1].get('scope_amendment')!=auth
+                    or issue['issue_id'] not in {Issue.model_validate(i).issue_id for i in prepared[1]['issues']}):
+                raise ChangeSetConflict('Claim issue completion lacks exact prepared amendment/issue')
+        if not self._cvp_action_committed(cursor,run_id,action_id):
+            from backend.pipeline.source_paragraph_impact import assert_issue_resolution
+            if assert_issue_resolution(cursor,run_id,issue):
+                return
+            raise ChangeSetConflict('Claim issue management action not committed')
+
+    def adjudication_roots(self, target_ids):
+        with self.connect() as conn:
+            rows=conn.execute("""SELECT metadata->'semantic_adjudications' FROM wang_knowledge.pipeline_runs
+                                 WHERE stage='cvp_group' AND (metadata->'semantic_adjudication_targets') ?| %s""",
+                              (list(target_ids),)).fetchall()
+        return sorted({Path(root) for row in rows for key,value in (row[0] or {}).items() if key in target_ids
+                       for root in [value['root'],*value.get('additional_roots',[])]})
+
+    def register_adjudication(self, run_id, *, targets, root, packet_binding):
+        with self.connect() as conn:
+            conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",(POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
+            rows=conn.execute("""SELECT run_id,metadata->'semantic_adjudications' FROM wang_knowledge.pipeline_runs
+                                 WHERE stage='cvp_group' AND (metadata->'semantic_adjudication_targets') ?| %s FOR UPDATE""",
+                              (list(targets),)).fetchall()
+            for ident,existing in rows:
+                for key,value in (existing or {}).items():
+                    if key in targets and (ident!=run_id or value['root']!=str(root)):
+                        raise ChangeSetConflict('unchanged target already has an adjudication reservation; no second call')
+            row=conn.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s AND stage='cvp_group' FOR UPDATE",(run_id,)).fetchone()
+            if not row:raise ChangeSetConflict('adjudication lacks SQL group')
+            value=row[0];history=value.setdefault('semantic_adjudications',{})
+            for key in targets:
+                record={'root':str(root),'packet':packet_binding}
+                if key in history and history[key]!=record:raise ChangeSetConflict('adjudication packet changed; reservation retained')
+                history[key]=record
+            value['semantic_adjudication_targets']=sorted(history)
+            conn.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now() WHERE run_id=%s",(canonical_json(value),run_id))
+
+    def register_adjudication_input_repair(self, run_id, *, targets, original_root, original_packet,
+                                          root, packet_binding, authorization, quota_resume=False):
+        """Append one explicit complete-input call; retain first reservation unchanged."""
+        if quota_resume:
+            from backend.pipeline.cvp_sql_quota_resume import verify_proof, PROOF
+            once_field='manual_quota_resume_once'
+        else:
+            from backend.pipeline.cvp_sql_adjudication_input_repair import verify_proof
+            PROOF='owner-input-repair-proof.json'
+            once_field='input_repair_once'
+        direction, proof = verify_proof(Path(root)/PROOF)
+        if direction['run_id'] != run_id or direction['original_root'] != str(original_root):
+            raise ChangeSetConflict('input repair SQL direction identity drift')
+        from backend.pipeline.viewpoint_audit_owner_resolution import binding
+        from backend.pipeline.viewpoint_adjudication_history import target_identity
+        from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+        current = read_artifact(Path(root)/'packet.json')
+        if (set(targets) != {target_identity(i) for i in current['items']}
+                or len(targets) != len(set(targets)) or authorization != proof['authorization']
+                or packet_binding != binding(Path(root)/'packet.json')
+                or original_packet != direction['original_bindings'][0]):
+            raise ChangeSetConflict('input repair SQL packet/population/authorization drift')
+        record = {'root': str(root), 'packet': packet_binding, 'authorization': authorization}
+        with self.connect() as conn:
+            conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",(POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
+            row = conn.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s AND stage='cvp_group' FOR UPDATE",(run_id,)).fetchone()
+            if (not row or row[0]['campaign_sha256'] != direction['campaign_sha256']
+                    or row[0]['checkpoint'] not in {'applied', 'audited'}):
+                raise ChangeSetConflict('input repair lacks original SQL group/campaign')
+            value = row[0]; history = value.get('semantic_adjudications', {})
+            for key in targets:
+                prior = history.get(key)
+                if not prior or prior['root'] != str(original_root) or prior['packet'] != original_packet:
+                    raise ChangeSetConflict('input repair lacks exact original SQL reservation')
+                if prior.get(once_field) and prior[once_field] != record:
+                    raise ChangeSetConflict('input repair once already reserved; no additional call')
+                if prior.get('additional_roots') not in (None, [], [str(root)]):
+                    raise ChangeSetConflict('input repair has another additional reservation')
+                if any(prior.get(k) for k in ('input_repair_once','manual_quota_resume_once') if k!=once_field):
+                    raise ChangeSetConflict('another explicit adjudication continuation already reserved')
+                prior[once_field] = record
+                prior['additional_roots'] = [str(root)]
+            conn.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now() WHERE run_id=%s",(canonical_json(value),run_id))
+
+    @staticmethod
+    def _affected_cvp_groups(cursor, plan, context, group):
+        changed=[op for op in plan.operations if op.operation in {'update','retire','revive'}]
+        links=[op for op in plan.operations if op.collection=='viewpoint_claim_links']
+        if not changed and not links:return []
+        claims={op.object_id for op in changed if op.collection=='claims'}
+        views={op.object_id for op in changed if op.collection=='canonical_viewpoints'}
+        views.update(op.payload['viewpoint_id'] for op in changed if op.collection=='viewpoint_revisions')
+        # Membership changes alter the full current-member audit denominator
+        # even when neither the CVP head nor an old member payload changed.
+        for op in links:
+            if (op.payload or {}).get('viewpoint_id'):views.add(op.payload['viewpoint_id'])
+            cursor.execute("SELECT payload->>'viewpoint_id' FROM wang_knowledge.objects WHERE collection='viewpoint_claim_links' AND object_id=%s",(op.object_id,))
+            previous=cursor.fetchone()
+            if previous and previous[0]:views.add(previous[0])
+        # A relation replacement changes the current graph of BOTH endpoints,
+        # not just the merged heads or Claim membership. Their old completed
+        # audits must not remain qualified against obsolete relation pins.
+        for op in plan.operations:
+            if op.collection=='viewpoint_relations':
+                views.update(v for v in ((op.payload or {}).get('source_viewpoint_id'),
+                    (op.payload or {}).get('target_viewpoint_id')) if v)
+        if any(op.collection in {'source_documents','source_fragments','evidence_steps'} for op in changed):
+            claims.update(oid for col,oid in context.read_pins if col=='claims')
+        cursor.execute("""SELECT run_id,metadata FROM wang_knowledge.pipeline_runs
+                          WHERE stage='cvp_group' AND run_id<>%s
+                            AND metadata->>'campaign_sha256'=%s
+                            AND metadata->>'checkpoint'='audited'
+                            AND ((metadata->'claim_ids') ?| %s
+                                 OR (metadata->'reviewed'->'evidence'->'viewpoint_ids') ?| %s
+                                 OR (metadata->'import_certificate'->'viewpoint_ids') ?| %s)
+                          ORDER BY run_id FOR UPDATE""",
+                       (context.run_id,group['campaign_sha256'],sorted(claims),sorted(views),sorted(views)))
+        return cursor.fetchall()
+
+    def admit_cvp_completion(self, *, campaign_sha256: str, group: Mapping[str, Any],
+                             certificate: Mapping[str, Any]) -> str:
+        """Explicit historical import only; caller verifies saved source/audit/KCS.
+
+        No object, version, review event or prior model budget is rewritten.
+        Normal startup calls get_cvp_campaign/progress, never this method.
+        """
+        from .transaction_validation import CONTRACT
+        if certificate.get("status") != "verified_historical_completion" or not certificate.get("bindings") or not certificate.get("change_set_ids"):
+            raise ValueError("historical completion certificate missing")
+        definition = self.get_cvp_campaign(campaign_sha256)
+        if definition["groups"][group["sequence"]-1] != group:
+            raise ChangeSetConflict("import changed original membership")
+        run_id = "CVPG-" + sha256_json({"campaign":campaign_sha256,"group":group["group_key"]})
+        value = {"contract":CONTRACT,"campaign_sha256":campaign_sha256,**dict(group),
+                 "checkpoint":"audited","materials":{"origin":"explicit_historical_import"},
+                 "import_certificate":dict(certificate),"change_set_ids":certificate["change_set_ids"],
+                 "revisit_required":certificate["revisit_required"],
+                 "independent_audit_complete":certificate["independent_audit_complete"]}
+        if certificate.get('semantic_adjudications'):
+            value['semantic_adjudications'] = dict(certificate['semantic_adjudications'])
+            value['semantic_adjudication_targets'] = sorted(value['semantic_adjudications'])
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE",(run_id,))
+            row = cursor.fetchone()
+            if row:
+                if row[0] != value: raise ChangeSetConflict("previous historical admission differs")
+                return run_id
+            if group["sequence"] > 1:
+                cursor.execute("""SELECT metadata->>'checkpoint' FROM wang_knowledge.pipeline_runs
+                                  WHERE stage='cvp_group' AND metadata->>'campaign_sha256'=%s
+                                    AND (metadata->>'sequence')::int=%s""",(campaign_sha256,group["sequence"]-1))
+                if cursor.fetchone() != ("audited",): raise ChangeSetConflict("historical import must be in original order")
+            for change_set in value["change_set_ids"]:
+                cursor.execute("SELECT status FROM wang_knowledge.change_sets WHERE change_set_id=%s",(change_set,))
+                if cursor.fetchone() != ("applied",): raise ChangeSetConflict("historical ChangeSet not committed in this database")
+            cursor.execute("""INSERT INTO wang_knowledge.pipeline_runs
+                              (run_id,batch_id,subject_kind,subject_id,stage,trigger,status,metadata,finished_at)
+                              VALUES (%s,%s,'batch',%s,'cvp_group','cli','succeeded',%s::jsonb,now())""",
+                           (run_id,campaign_sha256,group["group_key"],canonical_json(value)))
+        return run_id
+
+    @staticmethod
+    def _assert_completion_source_generations(cursor, sources, audited_current):
+        """A historical proposal stays historical; completion uses audited epochs.
+
+        Only the immediate, actually committed source transition may bridge a
+        changed physical binding. Never infer approval from a current file hash.
+        """
+        from backend.api.canonical_repository.viewpoint_production_safety import file_sha256
+        for source in sources:
+            physical=file_sha256(Path(source['path']))
+            if physical==source['file_sha256']:continue
+            matches=[(oid,r) for (collection,oid),r in audited_current.items()
+                     if collection=='source_documents' and r['retired_at'] is None
+                     and r['payload'].get('source_path')==source['path']]
+            if len(matches)!=1:raise ChangeSetConflict('changed source absent/ambiguous in current independent audit')
+            sid,current=matches[0];doc=current['payload']
+            if doc.get('source_file_sha256')!=physical or record_content_sha(doc)!=current['content_sha256']:
+                raise ChangeSetConflict('changed source current physical/audit generation mismatch')
+            row=cursor.execute("""SELECT b.payload,a.payload,op.before_revision,op.after_revision,
+                    op.before_sha256,op.after_sha256,cs.status,cs.source_kind,cs.metadata
+                FROM wang_knowledge.change_operations op JOIN wang_knowledge.change_sets cs USING(change_set_id)
+                JOIN wang_knowledge.object_versions b ON (b.collection,b.object_id,b.revision)=
+                    (op.collection,op.object_id,op.before_revision)
+                JOIN wang_knowledge.object_versions a ON (a.collection,a.object_id,a.revision)=
+                    (op.collection,op.object_id,op.after_revision) AND a.change_set_id=cs.change_set_id
+                WHERE op.collection='source_documents' AND op.object_id=%s AND op.after_revision=%s
+                    AND op.operation='update'""",(sid,current['revision'])).fetchall()
+            if len(row)!=1:raise ChangeSetConflict('changed source has no unique immediate committed transition')
+            before,after,br,ar,bsha,asha,status,kind,meta=row[0]
+            if (status!='applied' or kind!='wang_source_sql_reconciliation_v2'
+                    or meta.get('transaction_contract')!='wang_cvp_sql_transaction_v2'
+                    or not meta.get('run_id') or not meta.get('reviewed_sha256')
+                    or not meta.get('approval',{}).get('terminal_review')
+                    or br+1!=ar or ar!=current['revision'] or after!=doc
+                    or asha!=current['content_sha256'] or record_content_sha(before)!=bsha
+                    or before.get('source_id')!=sid or after.get('source_id')!=sid
+                    or before.get('source_path')!=source['path']
+                    or before.get('source_file_sha256')!=source['file_sha256']):
+                raise ChangeSetConflict('changed source lacks exact approved before/current epoch authority')
+            for proof in (meta.get('authorization'),meta['approval']['terminal_review'],
+                          meta['approval'].get('final_review_program_binding')):
+                if not proof or file_sha256(Path(proof['path']))!=proof['file_sha256']:
+                    raise ChangeSetConflict('changed source approval/authorization physical proof drift')
+
+    def complete_cvp_group(self, run_id: str, *, audit: Mapping[str, Any],
+                           audit_binding: Mapping[str, Any], read_pins: Mapping,
+                           owner_resolution_path: Optional[Path] = None,
+                           retained_impacts_resolution_path: Optional[Path] = None,
+                           taxonomy_dependency_path: Optional[Path] = None) -> None:
+        """Audit outside the write transaction; register completion separately."""
+        from backend.pipeline.viewpoint_cvp_campaign_runner import validate_audit
+        from backend.pipeline.viewpoint_g035_temporary_audit import validate_completion_disclosure
+        from backend.api.canonical_repository.viewpoint_production_safety import file_sha256
+        if file_sha256(Path(audit_binding["path"])) != audit_binding["file_sha256"]:
+            raise ChangeSetConflict("full audit artifact drift")
+        if json.loads(Path(audit_binding["path"]).read_text()) != audit:
+            raise ChangeSetConflict("completion supplied a different audit body")
+        relation_profile_proof=None
+        if audit.get('meta',{}).get('unchanged_relation_profile_reuse'):
+            from backend.pipeline.viewpoint_relation_profile_reuse import validate,_proof
+            validate(audit)  # Complete provider/source checks outside the short transaction.
+            relation_profile_proof=_proof(audit)
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s AND stage='cvp_group' FOR UPDATE",(run_id,))
+            row = cursor.fetchone()
+            if not row or row[0].get("checkpoint") not in {"applied","audited"}:
+                raise ChangeSetConflict("group has no committed CVP write")
+            value = row[0]
+            if relation_profile_proof is not None:
+                from backend.pipeline.viewpoint_relation_profile_reuse import validate_sql_parent
+                validate_sql_parent(audit,{**value,'run_id':run_id},audit_binding,proof=relation_profile_proof)
+            statement_resolution=None
+            if retained_impacts_resolution_path is not None:
+                from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+                from backend.pipeline.cvp_source_impact_resolution import SLICE_IMPACTS,validate_statement_impact_completion
+                if read_artifact(retained_impacts_resolution_path).get('schema_version')==SLICE_IMPACTS:
+                    statement_resolution=validate_statement_impact_completion({**value,'run_id':run_id},
+                        retained_impacts_resolution_path,audit_binding,cursor,semantic_resolution=owner_resolution_path)
+                else:
+                    from backend.pipeline.cvp_source_impact_resolution import CLOSED_STATEMENT,context as source_context,validate_for_completion as validate_closed_source
+                    handoff=source_context({**value,'run_id':run_id},cursor=cursor)
+                    if handoff and handoff.get('schema_version')==CLOSED_STATEMENT:
+                        statement_resolution=validate_closed_source({**value,'run_id':run_id},
+                            retained_impacts_resolution_path,audit_binding,cursor,semantic_resolution=owner_resolution_path)
+            from backend.pipeline.claim_dependency_handoff import subject as dependency_subject,context as dependency_context
+            dependency_resolution=dependency_context({**value,'run_id':run_id},cursor=cursor) if dependency_subject({**value,'run_id':run_id}) is not None else None
+            from backend.pipeline.claim_evidence_intake import validate_completion as validate_intake_completion
+            intake_resolution=validate_intake_completion({**value,'run_id':run_id},cursor)
+            if (value.get('reviewed',{}).get('evidence') or {}).get('pending_cvp_claim_ids') and statement_resolution is None and dependency_resolution is None and not (intake_resolution and intake_resolution['joint_links_approved']):
+                raise ChangeSetConflict('Claim management committed; CVP coverage/impact remains pending')
+            from backend.pipeline.claim_owner_revision import validate_dependency_completion
+            validate_dependency_completion({**value,'run_id':run_id},cursor=cursor)
+            pending_management=(value.get('reviewed',{}).get('evidence') or {}).get('pending_cvp_management_record_keys')
+            if pending_management and retained_impacts_resolution_path is None:
+                raise ChangeSetConflict('new coverage cannot clear pending existing CVP/link management')
+            retained_resolution=statement_resolution
+            if retained_impacts_resolution_path is not None:
+                from backend.pipeline.cvp_source_impact_resolution import context as source_impact_context
+                if not pending_management:
+                    source_handoff=source_impact_context({**value,'run_id':run_id},cursor=cursor)
+                    if (not source_handoff or source_handoff.get('source_slice_mode')!='wang_source_paragraph_execution_v1'
+                            or source_handoff.get('pending_existing_cvp_record_keys')!=[]):
+                        raise ChangeSetConflict('foreign retained management completion proof')
+                if source_impact_context({**value,'run_id':run_id},cursor=cursor):
+                    from backend.pipeline.cvp_source_impact_resolution import validate_for_completion
+                else:
+                    from backend.pipeline.cvp_retained_impact_resolution import validate_for_completion
+                # The original reviewed evidence/pending list is immutable.
+                # Record a SEPARATE exact no-change resolution, never edit it.
+                if statement_resolution is None:
+                    retained_resolution=validate_for_completion({**value,'run_id':run_id},
+                        retained_impacts_resolution_path,audit_binding,cursor,semantic_resolution=owner_resolution_path)
+            reviewed_sources=(value.get('reviewed',{}).get('evidence') or {}).get('sources',[])
+            declared_views = (value.get('reviewed',{}).get('evidence') or value.get('import_certificate',{}))["viewpoint_ids"]
+            cursor.execute("""SELECT DISTINCT e.from_id FROM wang_knowledge.edges e JOIN wang_knowledge.objects o
+                              ON (o.collection,o.object_id)=(e.edge_collection,e.edge_id)
+                              WHERE e.edge_collection='viewpoint_claim_links' AND e.retired_at IS NULL
+                                AND e.to_id=ANY(%s) AND o.retired_at IS NULL
+                                AND o.payload->>'effective_state'='active'""",(value['claim_ids'],))
+            views=sorted(set(declared_views)|{r[0] for r in cursor.fetchall()})
+            from backend.pipeline.cvp_merge_management import current_viewpoint_ids
+            views=current_viewpoint_ids(cursor,views)
+            from backend.pipeline.cvp_sql_flow import validate_transaction_audit
+            validate_transaction_audit(audit,value['claim_ids'],views)
+            validate_audit(audit,value["claim_ids"],views,owner_resolution_path=owner_resolution_path)
+            independent_pins={(r['collection'],r['object_id']):tuple(r['pin']) for r in audit['meta']['registry_read_scope'].get('read_pins',[])}
+            if not independent_pins:raise ChangeSetConflict('independent audit omitted actual SQL version pins')
+            roots={'claims':{oid:{'claim_id':oid} for oid in value['claim_ids']},
+                   'canonical_viewpoints':{oid:{'viewpoint_id':oid} for oid in views}}
+            # Match the independent reader's explicit historical-provenance
+            # boundary: pin a named old decision, do not traverse its candidate
+            # as though it were a current member after link replacement.
+            required=self._existing_cvp_context(conn,roots,historical_pins_only=True)
+            if taxonomy_dependency_path is not None:
+                from backend.pipeline.cvp_taxonomy_dependency import verify
+                independent_pins=verify(taxonomy_dependency_path,run_id,audit_binding,required,independent_pins)
+            if not set(required)<=set(independent_pins):
+                raise ChangeSetConflict('independent audit omitted complete current SQL dependencies: '+str(sorted(set(required)-set(independent_pins))))
+            if any(k in read_pins and read_pins[k]!=pin for k,pin in independent_pins.items()):
+                raise ChangeSetConflict('producer and independent audit consumed different current versions')
+            actual=self._assert_transaction_read_pins(cursor,independent_pins)
+            for (collection,_),record in actual.items():
+                if collection=='source_documents' and record['payload'].get('source_path'):
+                    doc=record['payload']
+                    if not doc.get('source_file_sha256') or file_sha256(Path(doc['source_path']))!=doc['source_file_sha256']:
+                        raise ChangeSetConflict('physical source changed after independent judgement')
+            self._assert_completion_source_generations(cursor,reviewed_sources,actual)
+            # No source/model call is made by the completion transaction.
+            from backend.pipeline.viewpoint_content_blocked_fallback import KEY
+            from backend.pipeline.viewpoint_g035_temporary_audit import KEY as legacy_key, validate as validate_exception
+            exception = audit.get("meta",{}).get(KEY) or audit.get("meta",{}).get(legacy_key)
+            revisit=bool(exception) or bool(value.get('revisit_required'))
+            flags = {"revisit_required":revisit,"independent_audit_complete":not revisit}
+            disclosure = {**flags,"group_key":value["group_key"],"bindings":validate_exception(audit)}
+            if exception: disclosure["temporary_audit_exception_path"] = exception["path"]
+            # Preserve imported 35/37 flags even after unrelated revisions;
+            # this transaction cannot clear an owner revisit obligation.
+            if exception or not revisit:validate_completion_disclosure(disclosure,audit)
+            completion = {"audit":dict(audit_binding),"owner_resolution_path":str(owner_resolution_path) if owner_resolution_path else None,
+                          "read_pins":[{"collection":k[0],"object_id":k[1],"pin":list(v)} for k,v in sorted(independent_pins.items())]}
+            if dependency_resolution is not None:
+                completion['joint_dependency_handoff']=dependency_resolution
+            if intake_resolution:
+                completion['evidence_intake_handoff']=intake_resolution
+            if taxonomy_dependency_path is not None:
+                completion['taxonomy_dependency']={'path':str(taxonomy_dependency_path),
+                    'file_sha256':file_sha256(Path(taxonomy_dependency_path))}
+            if retained_resolution is not None:
+                completion['retained_impacts_resolution']={'path':str(retained_impacts_resolution_path),
+                    'file_sha256':file_sha256(Path(retained_impacts_resolution_path))}
+            if value["checkpoint"] == "audited":
+                if value.get("completion") != completion: raise ChangeSetConflict("group completion identity drift")
+                return
+            value.update(checkpoint="audited",completion=completion,**flags)
+            value.pop('pending_audit_from_change_set_ids',None)
+            cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,status='succeeded',finished_at=now(),heartbeat_at=now(),error_message=NULL WHERE run_id=%s",(canonical_json(value),run_id))
+            # Close discovery records in the SAME audited transaction. This is
+            # owner-group completion, not permission to skip other invalidated
+            # groups. Their existing SQL applied checkpoints remain pending.
+            cursor.execute("""SELECT run_id,metadata FROM wang_knowledge.pipeline_runs
+                              WHERE metadata->>'kind'='claim_issue' AND metadata->>'owner_run_id'=%s
+                              FOR UPDATE""",(run_id,))
+            for issue_run, issue in cursor.fetchall():
+                self._assert_claim_issue_committed(cursor,run_id,issue)
+                issue.update(state='owner_group_audited',completion=completion,
+                             independent_audit_complete=flags['independent_audit_complete'],
+                             revisit_required=flags['revisit_required'])
+                cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,status='succeeded',finished_at=now() WHERE run_id=%s",
+                               (canonical_json(issue),issue_run))
+
+    def review_cvp_group(self, run_id: str, *, plan: ChangeSetPlan, evidence: Mapping[str, Any]) -> str:
+        required = {"package", "approval", "authorization", "backup", "sources", "read_pins"}
+        if not required <= set(evidence) or any(not evidence[k] for k in required - {"read_pins"}):
+            raise ValueError("CVP reviewed state lacks source/approval/backup authority")
+        review = json.loads(canonical_json({"plan": plan.as_dict(), "evidence": dict(evidence)}))
+        digest = sha256_json(review)
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s AND stage='cvp_group' FOR UPDATE", (run_id,))
+            row = cursor.fetchone()
+            if not row:
+                raise ChangeSetConflict("CVP group not prepared")
+            value = row[0]
+            from backend.pipeline.cvp_retained_impact_resolution import guard_operations
+            old_pending=value.get('reviewed',{}).get('evidence',{}).get('pending_cvp_management_record_keys',[])
+            if not set(old_pending)<=set(evidence.get('pending_cvp_management_record_keys',[])):
+                raise ChangeSetConflict('new review cannot erase existing pending management obligations')
+            guard_operations({**value,'run_id':run_id},plan.operations,store=self,cursor=cursor)
+            action=evidence.get('action')
+            if action:
+                ident='CVPA-'+sha256_json({'parent':run_id,'action':action.get('action_id')})
+                prepared=cursor.execute("SELECT metadata->'action' FROM wang_knowledge.pipeline_runs WHERE run_id=%s",(ident,)).fetchone()
+            else:prepared=None
+            if action and (not prepared or prepared[0]!=action):
+                raise ChangeSetConflict('review lacks the exact prepared bounded action')
+            if value.get("checkpoint") != "prepared":
+                if value.get("reviewed_sha256") == digest and value.get("reviewed") == review:
+                    return digest
+                action = evidence.get('action')
+                if (value.get('checkpoint') not in {'applied','audited'} or not action
+                        or action.get('kind') not in {'relation_retirement','claim_retirement','source_claim_revision','cvp_scope_revision','cvp_identity_merge','owner_link_correction','owner_link_retarget','owner_link_retirement','audit_supports_correction','required_cvp_coverage'}
+                        or not action.get('authorization') or not action.get('materials_sha256')
+                        or plan.change_set_id in value.get('change_set_ids',[])
+                        or not prepared or prepared[0]!=action):
+                    raise ChangeSetConflict("CVP approval changed without a new bounded action")
+                archive={
+                    'kind':'cvp_review_archive','parent_run_id':run_id,
+                    'action_id':value.get('reviewed',{}).get('evidence',{}).get('action',{}).get('action_id'),
+                    'reviewed_sha256':value.get('reviewed_sha256'),'reviewed':value.get('reviewed'),
+                    'checkpoint':value['checkpoint'],'completion':value.get('completion')}
+                if value.get('no_content_write_reviewed_sha256')==value.get('reviewed_sha256'):
+                    archive['no_content_write_reviewed_sha256']=value['no_content_write_reviewed_sha256']
+                ident='CVPR-'+sha256_json({'parent':run_id,'reviewed_sha256':value.get('reviewed_sha256')})
+                stored=cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s",(ident,)).fetchone()
+                if stored and stored[0]!=archive:raise ChangeSetConflict('prior SQL approval archive drift')
+                if not stored:
+                    cursor.execute("INSERT INTO wang_knowledge.pipeline_runs(run_id,subject_kind,subject_id,stage,trigger,status,metadata) VALUES (%s,'batch',%s,'cvp_group','cli','succeeded',%s::jsonb)",
+                                   (ident,run_id,canonical_json(archive)))
+                value.pop('completion',None)
+                value['independent_audit_complete']=False
+            value.update(checkpoint="reviewed", reviewed=review, reviewed_sha256=digest)
+            cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now(),error_message=NULL WHERE run_id=%s", (canonical_json(value),run_id))
+        return digest
+
+    def retain_reviewed_cvp_relations(self, run_id, *, plan, reviewed_sha256):
+        """Derive a no-edge-write plan; archive the exact prior SQL approval.
+
+        No content review changes: every remaining operation, original package,
+        backup, source and model receipt is identical. Never repairs applied KCS.
+        """
+        from .cvp_relation_retention import derive
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s AND stage='cvp_group' FOR UPDATE", (run_id,))
+            row = cursor.fetchone()
+            if not row:
+                raise ChangeSetConflict("relation retention group missing")
+            value = row[0]
+            review = value.get('reviewed')
+            if (value.get('checkpoint') != 'reviewed' or not review
+                    or value.get('reviewed_sha256') != reviewed_sha256
+                    or sha256_json(review) != reviewed_sha256
+                    or canonical_json(review['plan']) != canonical_json(plan.as_dict())
+                    or plan.source_kind != 'cvp_batch_resolution'):
+                raise ChangeSetConflict("relation retention exact unapplied SQL review missing")
+            evidence = review['evidence']
+            if evidence.get('relation_retention'):
+                return reviewed_sha256
+            if (evidence['package'].get('sha256') != plan.source_sha256
+                    or sha256_json(evidence['package']['payload']) != plan.source_sha256):
+                raise ChangeSetConflict("relation retention original package seal drift")
+            if cursor.execute("SELECT 1 FROM wang_knowledge.change_sets WHERE change_set_id=%s OR fingerprint_sha256=%s",
+                              (plan.change_set_id,plan.fingerprint_sha256)).fetchone():
+                raise ChangeSetConflict("relation retention cannot change an existing ChangeSet")
+            old_pins = {(r['collection'],r['object_id']):tuple(r['pin']) if r['pin'] else None
+                        for r in evidence['read_pins']}
+            self._assert_transaction_read_pins(cursor, old_pins)
+            derived, new_pins, receipt = derive(cursor,plan,old_pins)
+            if not receipt:
+                return reviewed_sha256
+            self._assert_transaction_read_pins(cursor, new_pins)
+            archive = {'kind':'cvp_mechanical_relation_retention_archive',
+                       'parent_run_id':run_id,'reviewed_sha256':reviewed_sha256,
+                       'reviewed':review,'checkpoint':value['checkpoint'],
+                       'retention':receipt}
+            ident = 'CVPR-'+sha256_json({'parent':run_id,'reviewed_sha256':reviewed_sha256})
+            stored = cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s",(ident,)).fetchone()
+            if stored and stored[0] != archive:
+                raise ChangeSetConflict("relation retention archive identity conflict")
+            if not stored:
+                cursor.execute("INSERT INTO wang_knowledge.pipeline_runs(run_id,subject_kind,subject_id,stage,trigger,status,metadata) VALUES (%s,'batch',%s,'cvp_group','cli','succeeded',%s::jsonb)",
+                               (ident,run_id,canonical_json(archive)))
+            next_evidence = {**evidence,'relation_retention':receipt,
+                'read_pins':[{'collection':k[0],'object_id':k[1],'pin':list(v) if v else None}
+                             for k,v in sorted(new_pins.items())]}
+            next_review = {'plan':derived.as_dict(),'evidence':next_evidence}
+            digest = sha256_json(next_review)
+            value.update(reviewed=next_review,reviewed_sha256=digest)
+            cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now(),error_message=NULL WHERE run_id=%s",(canonical_json(value),run_id))
+            return digest
+
+    @staticmethod
+    def _lock_reviewed_cvp_group(cursor, plan, context):
+        from .transaction_validation import CONTRACT
+        cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s AND stage='cvp_group' FOR UPDATE", (context.run_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise ChangeSetConflict("SQL CVP approval missing")
+        value = row[0]
+        reviewed = value.get("reviewed")
+        if value.get('reviewed_sha256') != context.reviewed_sha256 and plan.change_set_id in value.get('change_set_ids',[]):
+            ident='CVPR-'+sha256_json({'parent':context.run_id,'reviewed_sha256':context.reviewed_sha256})
+            prior=cursor.execute("SELECT metadata->'reviewed' FROM wang_knowledge.pipeline_runs WHERE run_id=%s",(ident,)).fetchone()
+            if prior:reviewed=prior[0]
+        if (value.get("contract") != CONTRACT or value.get("checkpoint") not in {"reviewed", "applied", "audited"}
+                or not reviewed or sha256_json(reviewed) != context.reviewed_sha256
+                or canonical_json(reviewed["plan"]) != canonical_json(plan.as_dict())):
+            raise ChangeSetConflict("SQL CVP exact approved plan/identity drift")
+        pins = [{"collection":k[0],"object_id":k[1],"pin":list(v) if v else None} for k,v in sorted(context.read_pins.items())]
+        if reviewed["evidence"]["read_pins"] != pins:
+            raise ChangeSetConflict("SQL CVP complete readset identity drift")
+        return value
+
+    @staticmethod
+    def _assert_transaction_read_pins(cursor, pins):
+        records = {}
+        for (collection, oid), expected in sorted(pins.items()):
+            cursor.execute("SELECT revision,content_sha256,retired_at IS NOT NULL,payload,review_status,visibility FROM wang_knowledge.objects WHERE collection=%s AND object_id=%s FOR UPDATE", (collection,oid))
+            row = cursor.fetchone()
+            observed = (int(row[0]),str(row[1]),bool(row[2])) if row else None
+            if observed != expected or (row and record_content_sha(row[3]) != row[1]):
+                raise ChangeSetConflict("transaction current dependency drift: " + collection + "/" + oid)
+            if row and (row[4]!=row[3].get('review_status','candidate') or row[5]!=row[3].get('visibility','internal')):
+                raise ChangeSetConflict('transaction current review/hold metadata differs from payload')
+            if row:
+                records[collection,oid] = {"revision":row[0],"content_sha256":row[1],
+                                           "payload":row[3],"retired_at":True if row[2] else None}
+        return records
+
+    @classmethod
+    def _assert_transaction_edges_and_reviews(cls, cursor, plan):
+        for op in plan.operations:
+            if op.collection not in EDGE_COLLECTIONS:
+                continue
+            cursor.execute("SELECT from_id,to_id,relation_type,revision,payload,retired_at IS NOT NULL FROM wang_knowledge.edges WHERE edge_collection=%s AND edge_id=%s", (op.collection,op.object_id))
+            row = cursor.fetchone()
+            if (not row or tuple(row[:3]) != cls._edge_values(op.collection,stored_operation_payload(op))
+                    or row[3] != op.after_revision or row[5] != (op.operation == "retire")
+                    or {k:v for k,v in row[4].items() if k != "revision"} !=
+                       {k:v for k,v in stored_operation_payload(op).items() if k != "revision"}):
+                raise ChangeSetConflict("edge readback differs from approved transaction")
+        for event in plan.review_events:
+            cursor.execute("SELECT collection,object_id,object_revision,reviewer_kind,reviewer_id,decision,reason,artifact FROM wang_knowledge.review_events WHERE review_event_id=%s", (event.review_event_id,))
+            expected = (event.collection,event.object_id,event.object_revision,event.reviewer_kind,
+                        event.reviewer_id,event.decision,event.reason,event.artifact)
+            if cursor.fetchone() != expected:
+                raise ChangeSetConflict("review history differs from actual approved event")
+
+    def get_change_history(self, change_set_id: str) -> Optional[dict[str, Any]]:
+        """One changelog from existing history; never a whole Registry export."""
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute("SELECT source_kind,source_sha256,fingerprint_sha256,status,metadata,summary FROM wang_knowledge.change_sets WHERE change_set_id=%s", (change_set_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            cursor.execute("""SELECT o.operation_index,o.operation,o.collection,o.object_id,
+                                     o.before_revision,o.after_revision,o.before_sha256,o.after_sha256,o.details,
+                                     b.payload,a.payload
+                              FROM wang_knowledge.change_operations o
+                              LEFT JOIN wang_knowledge.object_versions b ON
+                                (b.collection,b.object_id,b.revision)=(o.collection,o.object_id,o.before_revision)
+                              LEFT JOIN wang_knowledge.object_versions a ON
+                                (a.collection,a.object_id,a.revision)=(o.collection,o.object_id,o.after_revision)
+                              WHERE o.change_set_id=%s ORDER BY o.operation_index""", (change_set_id,))
+            fields = ("index","operation","collection","object_id","before_revision","after_revision","before_sha256","after_sha256","details","before","after")
+            operations = [dict(zip(fields,r)) for r in cursor.fetchall()]
+            cursor.execute("""SELECT review_event_id,collection,object_id,object_revision,reviewer_kind,reviewer_id,decision,reason,artifact
+                              FROM wang_knowledge.review_events WHERE review_event_id=ANY(%s)""",
+                           (list((row[4] or {}).get("review_event_ids", [])),))
+            return {"change_set_id":change_set_id,"source_kind":row[0],"source_sha256":row[1],
+                    "fingerprint_sha256":row[2],"status":row[3],"metadata":row[4],"summary":row[5],
+                    "operations":operations,"review_events":[list(r) for r in cursor.fetchall()]}
+
     def get_record(self, collection: str, object_id: str) -> Optional[dict[str, Any]]:
         with self.connect() as conn, conn.cursor() as cursor:
             cursor.execute(
@@ -3253,7 +4205,9 @@ class PostgresKnowledgeStore:
 
     def list_records(self, collection: str) -> list[dict[str, Any]]:
         """Read the active collection in stable object-id order."""
-
+        from backend.pipeline.viewpoint_validation_context import active_context, current_registry_view
+        if active_context() is not None:
+            return current_registry_view(self).list_records(collection)
         with self.connect() as conn, conn.cursor() as cursor:
             cursor.execute(
                 """SELECT payload FROM wang_knowledge.objects
@@ -3815,12 +4769,201 @@ class PostgresKnowledgeStore:
             for row in rows
         }
 
+    @staticmethod
+    def _record_reference_ids(value: Any, *, include_predecessor=False, exclude_provenance=False) -> set[str]:
+        """Business references only; raw review/history is not a read graph."""
+        excluded = {"review_provenance","audit_provenance","generation_provenance",
+                    "source_repair_application","raw_response","provider_raw"}
+        if exclude_provenance:excluded.add('provenance')
+        found: set[str] = set()
+        def visit(node):
+            if isinstance(node, Mapping):
+                for name, child in node.items():
+                    if name in excluded:
+                        continue
+                    if not include_predecessor and name.startswith(("previous_","supersedes_")):
+                        continue
+                    if name == "id" or name.endswith(("_id","_ids")):
+                        if isinstance(child,str): found.add(child)
+                        elif isinstance(child,(list,tuple)): found.update(x for x in child if isinstance(x,str))
+                    if isinstance(child,(Mapping,list,tuple)): visit(child)
+            elif isinstance(node,(list,tuple)):
+                for child in node: visit(child)
+        visit(value)
+        return found
+
+    @staticmethod
+    def _origin_candidate_history_authority(cursor, object_id, row):
+        """One exact committed retirement generation; no ancestry traversal."""
+        cursor.execute('''SELECT v.payload,v.content_sha256,o.after_sha256,c.status,o.operation
+            FROM wang_knowledge.object_versions v JOIN wang_knowledge.change_sets c
+            ON c.change_set_id=v.change_set_id JOIN wang_knowledge.change_operations o
+            ON o.change_set_id=v.change_set_id AND o.collection=v.collection AND o.object_id=v.object_id
+            AND o.after_revision=v.revision WHERE v.collection='viewpoint_identity_candidates'
+            AND v.object_id=%s AND v.revision=%s''',(object_id,row['revision']))
+        history=cursor.fetchall();payload=row['payload']
+        if (len(history)!=1 or history[0][1:]!=(row['content_sha256'],row['content_sha256'],'applied','retire')
+                or history[0][0].get('revision')!=row['revision']
+                or {k:v for k,v in history[0][0].items() if k!='revision'}!={k:v for k,v in payload.items() if k!='revision'}
+                or payload.get('identity_candidate_id')!=object_id
+                or record_content_sha(payload)!=row['content_sha256']
+                or not row.get('retired')):
+            raise ChangeSetConflict('retired CVP origin lacks exact committed history')
+        return [row['revision'],row['content_sha256']]
+
+    def _existing_cvp_context(self, conn, normalized, retiring_keys=(), *, historical_pins_only=False):
+        """Indexed forward closure and complete affected CVP memberships.
+
+        Never load a whole collection or silently fall back to the old store
+        picture. Retired rows remain visible to validators as retired.
+        """
+        ids = {oid for objects in normalized.values() for oid in objects}
+        historical_ids=set()
+        for objects in normalized.values():
+            for payload in objects.values():
+                ids.update(self._record_reference_ids(payload,include_predecessor=True,exclude_provenance=historical_pins_only))
+                if historical_pins_only:historical_ids.update(self._record_reference_ids(payload.get('provenance',{})))
+        ids.update(oid for _,oid in retiring_keys)
+        result = {}; seen = set(); expanded_views = set(); bytes_read = 0
+        import time
+        started = time.perf_counter()
+        with conn.cursor() as cursor:
+            while ids - seen:
+                requested = sorted(ids - seen); seen.update(requested)
+                cursor.execute("""SELECT collection,object_id,revision,content_sha256,payload,retired_at
+                                  FROM wang_knowledge.objects WHERE object_id=ANY(%s)""", (requested,))
+                views = set()
+                for col,oid,revision,content_sha,payload,retired in cursor.fetchall():
+                    if record_content_sha(payload) != content_sha:
+                        raise ChangeSetConflict("current dependency payload SHA drift")
+                    bytes_read += len(canonical_json(payload).encode("utf-8"))
+                    result[col,oid] = {"revision":revision,"content_sha256":content_sha,"payload":payload,
+                                       "retired_at":retired,"retired":retired is not None}
+                    if not historical_pins_only:
+                        ids.update(self._record_reference_ids(payload))
+                    else:
+                        ids.update(self._record_reference_ids(payload,exclude_provenance=True))
+                        historical_ids.update(self._record_reference_ids(payload.get('provenance',{})))
+                    if col == "canonical_viewpoints" and retired is None: views.add(oid)
+                new_views = sorted(views - expanded_views)
+                expanded_views.update(new_views)
+                if new_views:
+                    cursor.execute("""SELECT edge_id FROM wang_knowledge.edges
+                                      WHERE edge_collection='viewpoint_claim_links' AND retired_at IS NULL
+                                        AND from_id=ANY(%s)""", (new_views,))
+                    ids.update(row[0] for row in cursor.fetchall())
+                if bytes_read > 64*1024**2 or time.perf_counter()-started > 5:
+                    raise ValueError("SQL dependency read budget exceeded; no whole-store fallback")
+            origins={p['payload'].get('created_from_candidate_id') for (col,_),p in result.items()
+                     if col=='canonical_viewpoints' and not p.get('retired')}
+            for cid in sorted(origins-{None,''}):
+                row=result.get(('viewpoint_identity_candidates',cid))
+                if row and row.get('retired'):
+                    row['historical_origin_authority']=self._origin_candidate_history_authority(cursor,cid,row)
+            # Exact direct provenance pins only. Do not recurse into old
+            # decision/candidate payloads; active business paths above always
+            # take precedence and retain their full current dependency closure.
+            if historical_ids-seen:
+                cursor.execute('SELECT collection,object_id,revision,content_sha256,payload,retired_at FROM wang_knowledge.objects WHERE object_id=ANY(%s)',
+                    (sorted(historical_ids-seen),))
+                for col,oid,revision,content_sha,payload,retired in cursor.fetchall():
+                    if record_content_sha(payload)!=content_sha:raise ChangeSetConflict('historical dependency payload SHA drift')
+                    bytes_read+=len(canonical_json(payload).encode('utf-8'))
+                    result[col,oid]={'revision':revision,'content_sha256':content_sha,'payload':payload,
+                                    'retired_at':retired,'retired':retired is not None}
+            if bytes_read > 64*1024**2 or time.perf_counter()-started > 5:
+                raise ValueError('SQL origin proof read budget exceeded')
+        return result
+
+    def read_cvp_context(self, claim_ids: Sequence[str], *, viewpoint_ids: Sequence[str] = ()):
+        """Current group graph for all flow branches, without history snapshots."""
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute("""SELECT edge_id FROM wang_knowledge.edges
+                              WHERE edge_collection='viewpoint_claim_links' AND retired_at IS NULL
+                                AND to_id=ANY(%s)""", (list(claim_ids),))
+            link_roots={row[0]:{"viewpoint_claim_link_id":row[0]} for row in cursor.fetchall()}
+            from backend.pipeline.cvp_merge_management import current_viewpoint_ids
+            viewpoint_ids=current_viewpoint_ids(cursor,viewpoint_ids)
+            roots = {"claims":{oid:{"claim_id":oid} for oid in claim_ids},
+                     "canonical_viewpoints":{oid:{"viewpoint_id":oid} for oid in viewpoint_ids},
+                     "viewpoint_claim_links":link_roots}
+            # Evidence can also point to a Claim which omitted its forward ID.
+            for cid in claim_ids:
+                cursor.execute("""SELECT object_id FROM wang_knowledge.objects
+                                  WHERE collection='evidence_steps' AND retired_at IS NULL
+                                    AND payload->'produced_claim_ids' @> %s::jsonb""", (canonical_json([cid]),))
+                roots.setdefault("evidence_steps",{}).update({r[0]:{"evidence_step_id":r[0]} for r in cursor.fetchall()})
+            return self._existing_cvp_context(conn,roots)
+
+    @staticmethod
+    def _reference_consumers(cursor, ids, collections):
+        if not ids or not collections:return []
+        # Equality jsonpath predicates use the existing payload GIN index. The
+        # validators still check actual named fields; no fuzzy text matching.
+        # One indexed jsonpath disjunction is equivalent to the previous OR
+        # of predicates, without hundreds of separate planner branches for a
+        # real source's fragments. Keep exact JSON equality and the caller's
+        # named-business-reference filter; this is not a text search.
+        predicate = "$.** ? (" + " || ".join("@ == " + json.dumps(oid) for oid in ids) + ")"
+        cursor.execute("SELECT collection,object_id,payload FROM wang_knowledge.objects "
+                       "WHERE retired_at IS NULL AND collection=ANY(%s) AND payload @? %s::jsonpath "
+                       "ORDER BY collection,object_id", (list(collections),predicate))
+        return cursor.fetchall()
+
+    def read_affected_context(self, keys):
+        """Complete current consumers for a source/Claim/link action.
+
+        Reverse closure is used only for an actual affected object, never for
+        startup or all previous groups. Pure content validators receive this
+        same full readset and the transaction rechecks the closure.
+        """
+        with self.connect() as conn:
+            return self._affected_cvp_context(conn,keys)
+
+    def _affected_cvp_context(self,conn,keys):
+        import time
+        roots={};seen=set();pending={oid for _,oid in keys};started=time.perf_counter();size=0
+        with conn.cursor() as cursor:
+            while pending-seen:
+                current=sorted(pending-seen);seen.update(current)
+                rows=self._reference_consumers(cursor,current,sorted(KNOWLEDGE_COLLECTIONS))
+                for col,oid,payload in rows:
+                    if self._record_reference_ids(payload)&set(current):
+                        roots.setdefault(col,{})[oid]=payload;pending.add(oid)
+                    size+=len(canonical_json(payload).encode())
+                if size>64*1024**2 or time.perf_counter()-started>5:
+                    raise ValueError('affected reverse readset exceeds budget; no whole-store fallback')
+            for col,oid in keys:roots.setdefault(col,{})[oid]={"id":oid}
+            return self._existing_cvp_context(conn,roots)
+
+    def load_revision_dependents(self, target_revision_ids):
+        from .viewpoint_batch_changeset import load_revision_dependents
+        records=self.read_affected_context([('viewpoint_revisions',rid) for rid in target_revision_ids])
+        class ScopedStore:
+            def list_records(self,collection):
+                return [r['payload'] for (col,_),r in records.items() if col==collection and not r['retired']]
+        return load_revision_dependents(store=ScopedStore(),target_revision_ids=target_revision_ids)
+
+    def claim_links(self, claim_ids):
+        with self.connect() as conn:
+            rows=conn.execute("""SELECT o.payload FROM wang_knowledge.edges e JOIN wang_knowledge.objects o
+                ON (o.collection,o.object_id)=(e.edge_collection,e.edge_id)
+                WHERE e.edge_collection='viewpoint_claim_links' AND e.retired_at IS NULL
+                  AND e.to_id=ANY(%s) AND o.retired_at IS NULL ORDER BY e.edge_id""",(list(claim_ids),)).fetchall()
+        return [r[0] for r in rows]
+
+    def sources_by_transcript(self, transcript_id):
+        with self.connect() as conn:
+            rows=conn.execute("SELECT payload FROM wang_knowledge.objects WHERE collection='source_documents' AND retired_at IS NULL AND payload->>'transcript_id'=%s ORDER BY object_id",(transcript_id,)).fetchall()
+        return [r[0] for r in rows]
+
     def plan_package(
         self,
         package: Mapping[str, Any],
         *,
         source_kind: str = "knowledge_package",
         retiring_keys: Sequence[tuple[str, str]] = (),
+        transactional: bool = False,
     ) -> ChangeSetPlan:
         """Plan one package, optionally withdrawing records it makes obsolete.
 
@@ -3831,6 +4974,50 @@ class PostgresKnowledgeStore:
         package is refused for a state neither half intends to leave behind.
         Retiring afterwards is too late: nothing was ever planned.
         """
+
+        if (package.get('source_repair_application') or {}).get('schema_version') == 'wang_source_sql_reconciliation_v2':
+            from backend.pipeline.cvp_sql_actions import validate_source_package
+            authorized_keys=validate_source_package(dict(package))
+            if retiring_keys and tuple(retiring_keys)!=authorized_keys:
+                raise ValueError('source retirement exceeds independently reviewed Evidence completion')
+            retiring_keys=authorized_keys
+        if (package.get('source_repair_application') or {}).get('schema_version') in {'wang_source_sql_reconciliation_v2','wang_owner_sql_link_correction_v2','wang_cvp_sql_link_retarget_v1','wang_cvp_owner_sql_link_retirement_v1','wang_cvp_deferred_authorized_link_management_v1','wang_cvp_sql_link_replacement_v1','wang_cvp_sql_link_representation_v1'} and not transactional:
+            raise ValueError('SQL source action cannot use the retired whole-store planning path')
+        if (package.get('source_repair_application') or {}).get('schema_version') == 'wang_cvp_merge_management_v1':
+            if not transactional: raise ValueError('CVP merge requires common SQL transaction')
+            from backend.pipeline.cvp_merge_management import validate_package
+            authorized_keys = validate_package(package)
+            if retiring_keys and tuple(retiring_keys) != authorized_keys:
+                raise ValueError('extra merge retirement is not authorized')
+            retiring_keys = authorized_keys
+        if (package.get('source_repair_application') or {}).get('schema_version') == 'wang_cvp_sql_link_replacement_v1':
+            from backend.pipeline.cvp_link_replacement import validate_package
+            authorized_keys = validate_package(package)
+            if retiring_keys and tuple(retiring_keys) != authorized_keys:
+                raise ValueError('extra replacement withdrawal is not authorized')
+            retiring_keys = authorized_keys
+        if (package.get('source_repair_application') or {}).get('schema_version') == 'wang_cvp_owner_sql_link_retirement_v1':
+            from backend.pipeline.cvp_link_retirement import validate_package
+            authorized_keys = validate_package(package)
+            if retiring_keys and tuple(retiring_keys) != authorized_keys:
+                raise ValueError('extra retirement is not authorized')
+            retiring_keys = authorized_keys
+
+        if (package.get('source_repair_application') or {}).get('schema_version') == 'wang_claim_relation_retirement_v1':
+            if not transactional: raise ValueError('relation retirement requires common SQL transaction')
+            from backend.pipeline.claim_relation_retirement import validate_package
+            authorized_keys = validate_package(package)
+            if retiring_keys and tuple(retiring_keys) != authorized_keys:
+                raise ValueError('extra relation retirement is not authorized')
+            retiring_keys = authorized_keys
+
+        if (package.get('source_repair_application') or {}).get('schema_version') == 'wang_claim_sql_retirement_v1':
+            if not transactional: raise ValueError('Claim retirement requires common SQL transaction')
+            from backend.pipeline.claim_retirement import validate_package
+            authorized_keys = validate_package(package)
+            if retiring_keys and tuple(retiring_keys) != authorized_keys:
+                raise ValueError('extra Claim retirement is not authorized')
+            retiring_keys = authorized_keys
 
         try:
             validate_store_package_authorization(package)
@@ -3895,7 +5082,9 @@ class PostgresKnowledgeStore:
                 and int((existing.get(key) or {}).get("revision") or 0)
                 == object_revision
             }
-            if any(
+            if transactional:
+                existing.update(self._existing_cvp_context(conn,normalized,retiring_keys))
+            elif any(
                 collection in VIEWPOINT_VALIDATION_COLLECTIONS - {
                     "source_documents", "source_fragments", "claims",
                     "evidence_steps", "claim_relations",
@@ -4528,6 +5717,7 @@ class PostgresKnowledgeStore:
         plan: ChangeSetPlan,
         metadata: Mapping[str, Any],
         summary: Mapping[str, Any],
+        operation_details: Optional[Mapping[int, Mapping[str, Any]]] = None,
     ) -> None:
         """Verify the exact KCS, ChangeOperation and ObjectVersion ledger."""
 
@@ -4597,7 +5787,7 @@ class PostgresKnowledgeStore:
                 operation.after_sha256,
                 operation.before_revision,
                 operation.after_revision,
-                (
+                (dict(operation_details[index]) if operation_details and index in operation_details else
                     {"removed_fields": list(operation.removed_fields)}
                     if operation.removed_fields
                     else {}
@@ -5284,11 +6474,54 @@ class PostgresKnowledgeStore:
             Mapping[str, Sequence[tuple[str, str, int, str]]]
         ] = None,
         expected_claim_evidence_guard: Optional[Mapping[str, Any]] = None,
+        transaction_context: Any = None,
         _claim_evidence_source_queue_context: Optional[
             _ClaimEvidenceSourceQueueApplyContext
         ] = None,
     ) -> dict[str, Any]:
+        if plan.source_kind == 'wang_claim_relation_retirement_v1' and transaction_context is None:
+            raise ValueError('relation retirement cannot bypass common SQL transaction')
+        if plan.source_kind in {'wang_cvp_merge_management_v1','wang_source_sql_reconciliation_v2','wang_owner_sql_link_correction_v2','wang_cvp_sql_link_retarget_v1','wang_cvp_owner_sql_link_retirement_v1','wang_cvp_deferred_authorized_link_management_v1','wang_cvp_sql_link_replacement_v1','wang_cvp_sql_link_representation_v1'} and transaction_context is None:
+            raise ValueError('SQL v2 actions cannot bypass the shared transaction boundary')
+        if transaction_context is not None:
+            from .transaction_validation import TransactionValidation
+            if not isinstance(transaction_context, TransactionValidation):
+                raise ValueError("typed SQL transaction context required")
+            if plan.source_kind in {'wang_source_reconciliation_v1','wang_owner_approved_link_correction_v1'}:
+                raise ValueError('retired whole-snapshot authority cannot execute a SQL v2 action')
+            if expected_registry_fingerprint_sha256 is not None or expected_claim_evidence_guard is not None:
+                raise ValueError("SQL transaction cannot fall back to whole Registry guards")
+            if not metadata or not metadata.get("reason") or not metadata.get("actor"):
+                raise ValueError("transaction changelog requires reason and actor")
+            metadata = {**metadata, "transaction_contract":"wang_cvp_sql_transaction_v2",
+                        "run_id":transaction_context.run_id,"reviewed_sha256":transaction_context.reviewed_sha256,
+                        "review_event_ids":[e.review_event_id for e in plan.review_events]}
+            if not {(op.collection,op.object_id) for op in plan.operations} <= set(transaction_context.read_pins):
+                raise ValueError("transaction readset must pin every write target or its absence")
         source_queue_context = _claim_evidence_source_queue_context
+        if (any(op.collection == "viewpoint_identity_decisions"
+                and op.payload.get("policy_version") == "wang_owner_approved_link_correction_v1"
+                for op in getattr(plan, "operations", ()))
+                and plan.source_kind != "wang_owner_approved_link_correction_v1"):
+            raise ValueError("approved link correction cannot bypass its exact SQL store authority")
+        if plan.source_kind == "wang_owner_approved_link_correction_v1":
+            from backend.pipeline.owner_approved_link_correction import validate_apply_plan
+            frozen_registry_sha256 = validate_apply_plan(plan, metadata)
+            if (expected_registry_fingerprint_sha256 is not None
+                    and expected_registry_fingerprint_sha256 != frozen_registry_sha256):
+                raise ValueError("approved link Registry guard differs from exact reviewed predecessor")
+            expected_registry_fingerprint_sha256 = frozen_registry_sha256
+            registry_collections = tuple(KNOWLEDGE_COLLECTIONS)
+        if plan.source_kind == "wang_source_reconciliation_v1":
+            from backend.pipeline.source_reconciliation_runtime import validate_apply_plan
+            frozen_registry_sha256 = validate_apply_plan(plan, metadata)
+            if (expected_registry_fingerprint_sha256 is not None
+                    and expected_registry_fingerprint_sha256 != frozen_registry_sha256):
+                raise ValueError("source reconciliation Registry guard differs from reviewed freeze")
+            # Every entry point, not only the CLI, guards the complete frozen
+            # read set inside the existing advisory-locked SQL transaction.
+            expected_registry_fingerprint_sha256 = frozen_registry_sha256
+            registry_collections = tuple(KNOWLEDGE_COLLECTIONS)
         if plan.source_kind in CLAIM_EVIDENCE_SOURCE_QUEUE_SOURCE_KINDS:
             if (
                 source_queue_context is None
@@ -5314,6 +6547,7 @@ class PostgresKnowledgeStore:
             )
         if (
             not plan.operations
+            and transaction_context is None
             and plan.source_kind not in CLAIM_EVIDENCE_REPAIR_SOURCE_KINDS
         ):
             return {
@@ -5322,13 +6556,98 @@ class PostgresKnowledgeStore:
                 "summary": plan.as_dict()["summary"],
             }
         with self.connect() as conn:
-            with conn.cursor() as cursor:
+            with conn.cursor() as raw_cursor:
+                if transaction_context is not None:
+                    from .transaction_validation import reject_untracked_triggers, SideEffectPlanningCursor
+                    reject_untracked_triggers(raw_cursor)
+                    from .transaction_validation import WriteTrackingCursor
+                    cursor = WriteTrackingCursor(raw_cursor)
+                else:
+                    cursor = raw_cursor
                 # Serialize every short ChangeSet transaction because source
                 # supersession and CVP writes share cross-record invariants.
                 cursor.execute(
                     "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
                     (POSTGRES_APPLY_ADVISORY_LOCK_KEY,),
                 )
+                sql_group = None
+                if transaction_context is not None:
+                    sql_group = self._lock_reviewed_cvp_group(cursor, plan, transaction_context)
+                    approved_execution=sql_group.get('reviewed',{}).get('evidence',{}).get('execution')
+                    if sql_group.get('reviewed_sha256')==transaction_context.reviewed_sha256 and approved_execution:
+                        supplied={k:v for k,v in (metadata or {}).items() if k not in {'transaction_contract','run_id','reviewed_sha256','review_event_ids'}}
+                        if supplied!=approved_execution:raise ChangeSetConflict('transaction execution metadata differs from approved SQL action')
+                    if not plan.operations:
+                        if sql_group.get('no_content_write_reviewed_sha256')==transaction_context.reviewed_sha256:
+                            return {'status':'already_applied','change_set_id':None,'summary':plan.as_dict()['summary']}
+                        if sql_group['checkpoint']!='reviewed':
+                            raise ChangeSetConflict('no-content completion requires exact reviewed state')
+                        self._assert_transaction_read_pins(cursor,transaction_context.read_pins)
+                        if plan.review_events:raise ChangeSetConflict('empty business plan cannot write review events')
+                        sql_group.update(checkpoint='applied',no_content_write_reviewed_sha256=transaction_context.reviewed_sha256)
+                        cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now(),error_message=NULL WHERE run_id=%s",(canonical_json(sql_group),transaction_context.run_id))
+                        cursor.verify_no_content_write(transaction_context.run_id)
+                        return {'status':'no_content_write','change_set_id':None,'summary':plan.as_dict()['summary']}
+                    # Committed identity wins over obsolete preimage pins. A
+                    # lost commit reply must never cause a second write.
+                    cursor.execute("SELECT fingerprint_sha256,source_sha256,source_kind,status,metadata,summary FROM wang_knowledge.change_sets WHERE change_set_id=%s", (plan.change_set_id,))
+                    committed = cursor.fetchone()
+                    if committed:
+                        if (tuple(committed[:4]) != (plan.fingerprint_sha256,plan.source_sha256,plan.source_kind,"applied")
+                                or committed[4] != (metadata or {})
+                                or plan.change_set_id not in sql_group["change_set_ids"]):
+                            raise ChangeSetConflict("committed transaction identity/checkpoint conflict")
+                        if any(cursor.writes.values()):
+                            raise ChangeSetConflict("committed transaction recovery performed DML")
+                        return {"status":"already_applied","change_set_id":plan.change_set_id,"summary":committed[5]}
+                    if sql_group['checkpoint']!='reviewed' or sql_group['reviewed_sha256']!=transaction_context.reviewed_sha256:
+                        raise ChangeSetConflict('new write requires the current exact reviewed action')
+                    transaction_before = self._assert_transaction_read_pins(cursor, transaction_context.read_pins)
+                    normalized = {}
+                    retiring = {(op.collection,op.object_id) for op in plan.operations if op.operation == "retire"}
+                    for op in plan.operations:
+                        if op.operation == "retire": continue
+                        model,id_field = KNOWLEDGE_COLLECTIONS[op.collection]
+                        payload = stored_operation_payload(op)
+                        if getattr(model.model_validate(payload),id_field) != op.object_id:
+                            raise ChangeSetConflict("transaction object identity differs")
+                        normalized.setdefault(op.collection,{})[op.object_id] = payload
+                    required = self._existing_cvp_context(conn,normalized,retiring)
+                    if not set(required) <= set(transaction_context.read_pins):
+                        raise ChangeSetConflict("transaction contains an unreviewed current dependency")
+                    for k,row in required.items():
+                        authority=row.get('historical_origin_authority')
+                        if authority is not None:
+                            locked=transaction_before[k]
+                            if ([locked['revision'],locked['content_sha256']]!=authority
+                                    or locked['payload']!=row['payload']
+                                    or not (locked.get('retired') or locked.get('retired_at') is not None)):
+                                raise ChangeSetConflict('locked historical origin proof drift')
+                            locked['historical_origin_authority']=authority
+                    scope=sql_group['reviewed']['evidence'].get('action',{}).get('materials',{}).get('sql_scope')
+                    if scope:
+                        affected=self._affected_cvp_context(conn,[tuple(k) for k in scope['consumer_roots']])
+                        if not set(affected)<=set(transaction_context.read_pins):
+                            raise ChangeSetConflict('transaction omitted a current affected consumer')
+                    from .viewpoint_foundation import validate_foundation_change_set
+                    validate_foundation_change_set(normalized,{k:v for k,v in transaction_before.items() if k not in retiring})
+                    if any(op.collection in {'source_documents','source_fragments','claims','evidence_steps'} for op in plan.operations):
+                        scoped_pairs={key:value['payload'] for key,value in transaction_before.items()
+                                      if key[0] in CLAIM_EVIDENCE_COLLECTIONS and not value.get('retired_at') and key not in retiring}
+                        for col in CLAIM_EVIDENCE_COLLECTIONS:
+                            for oid,payload in normalized.get(col,{}).items():scoped_pairs[col,oid]=payload
+                        pair_snapshot=build_claim_evidence_active_snapshot([
+                            (col,oid,int(payload['revision']),record_content_sha(payload),payload)
+                            for (col,oid),payload in scoped_pairs.items()])
+                        if any(pair_snapshot['counts'][key] for key in ('claim_only_pairs','evidence_only_pairs','duplicate_array_references','dangling_endpoints')):
+                            raise ChangeSetConflict('affected Claim/Evidence graph is not complete and reciprocal')
+                    declared_side_operations: list[ChangeOperation] = []
+                    declared_side_details: dict[int, Mapping[str, Any]] = {}
+                    declared_changes = [(op.collection,op.object_id,op.before_revision or 0,op.after_revision)
+                                        for op in plan.operations if op.operation in {"update","retire","revive"}]
+                    self._invalidate_dependencies(SideEffectPlanningCursor(cursor),plan,declared_changes,len(plan.operations),
+                        side_operations=declared_side_operations,side_details=declared_side_details)
+                    affected_runs=self._affected_cvp_groups(cursor,plan,transaction_context,sql_group)
                 if expected_registry_fingerprint_sha256 is not None:
                     if not registry_collections:
                         raise ValueError(
@@ -5553,8 +6872,13 @@ class PostgresKnowledgeStore:
                 self._assert_global_id_uniqueness(cursor, plan)
                 self._assert_source_identity_uniqueness(cursor, plan)
                 self._assert_edge_integrity(cursor, plan)
-                self._assert_no_dangling_package_references(cursor, plan)
-                self._assert_no_uncoordinated_semantic_references(cursor, plan)
+                self._assert_no_dangling_package_references(cursor, plan, scoped=transaction_context is not None)
+                retirement_package = None
+                if plan.source_kind == 'wang_claim_sql_retirement_v1':
+                    if transaction_context is None: raise ChangeSetConflict('Claim retirement lacks transaction authority')
+                    retirement_package = sql_group['reviewed']['evidence']['package']['payload']
+                self._assert_no_uncoordinated_semantic_references(cursor, plan, scoped=transaction_context is not None,
+                                                                 retirement_package=retirement_package)
 
                 self._assert_current_viewpoint_revisions(
                     cursor, expected_current_viewpoint_revisions or {}
@@ -5700,7 +7024,14 @@ class PostgresKnowledgeStore:
                         ),
                     )
 
-                invalidated = self._invalidate_dependencies(cursor, plan, changed_records, len(plan.operations))
+                side_operations: list[ChangeOperation] = []
+                side_details: dict[int, Mapping[str, Any]] = {}
+                invalidated = self._invalidate_dependencies(cursor, plan, changed_records, len(plan.operations),
+                    side_operations=side_operations if transaction_context is not None else None,
+                    side_details=side_details)
+                if transaction_context is not None and (
+                        side_operations != declared_side_operations or side_details != declared_side_details):
+                    raise ChangeSetConflict("actual derived effects differ from predeclared transaction write set")
                 if (
                     plan.source_kind
                     in (
@@ -5769,6 +7100,20 @@ class PostgresKnowledgeStore:
                     self._assert_claim_evidence_source_queue_post_state(
                         cursor, plan, source_queue_context
                     )
+                if transaction_context is not None:
+                    write_plan = replace(plan, operations=(*plan.operations, *side_operations))
+                    self._assert_change_set_write_ledger(cursor,write_plan,metadata or {},summary,side_details)
+                    self._assert_change_set_object_readback(cursor,write_plan)
+                    self._assert_transaction_edges_and_reviews(cursor,write_plan)
+                    sql_group.update(checkpoint="applied", change_set_ids=[*sql_group["change_set_ids"],plan.change_set_id])
+                    cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now(),error_message=NULL WHERE run_id=%s", (canonical_json(sql_group),transaction_context.run_id))
+                    for affected_id,value in affected_runs:
+                        value.update(checkpoint='applied',independent_audit_complete=False,
+                                     pending_audit_from_change_set_ids=[*value.get('pending_audit_from_change_set_ids',[]),plan.change_set_id])
+                        cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,status='running',finished_at=NULL,heartbeat_at=now() WHERE run_id=%s",
+                                       (canonical_json(value),affected_id))
+                    cursor.verify(plan=plan,side_operations=side_operations,run_id=transaction_context.run_id,
+                                  affected_runs=[r[0] for r in affected_runs])
         return {"status": "applied", "change_set_id": plan.change_set_id, "summary": summary}
 
     @staticmethod
@@ -5905,7 +7250,8 @@ class PostgresKnowledgeStore:
             if operation.operation != "retire"
         }
         incoming_edges: list[tuple[str, str, str, str, str]] = []
-        incoming_signatures: dict[tuple[str, str, str, str], str] = {}
+        incoming_signatures: dict[tuple[str, str, str, str], list[str]] = {}
+        incoming_payloads: dict[tuple[str, str], dict[str, Any]] = {}
         endpoint_ids: set[str] = set()
         for operation in plan.operations:
             if operation.collection not in EDGE_COLLECTIONS or operation.operation == "retire":
@@ -5927,13 +7273,20 @@ class PostgresKnowledgeStore:
                     f"Edge {operation.collection}/{operation.object_id} points to itself"
                 )
             signature = (operation.collection, from_id, to_id, relation_type)
-            prior = incoming_signatures.setdefault(signature, operation.object_id)
-            if prior != operation.object_id:
+            prior_ids = incoming_signatures.setdefault(signature, [])
+            if any(prior != operation.object_id and not (
+                operation.collection == "viewpoint_claim_links"
+                and cls._disjoint_support_components(
+                    incoming_payloads[operation.collection, prior], payload
+                )
+            ) for prior in prior_ids):
                 raise ChangeSetConflict(
                     "Duplicate semantic edge in one ChangeSet: "
-                    f"{operation.collection}/{prior} and {operation.object_id} "
+                    f"{operation.collection}/{prior_ids[0]} and {operation.object_id} "
                     f"both name {from_id}->{to_id} ({relation_type})"
                 )
+            prior_ids.append(operation.object_id)
+            incoming_payloads[operation.collection, operation.object_id] = payload
             incoming_edges.append(
                 (operation.collection, operation.object_id, from_id, to_id, relation_type)
             )
@@ -6018,9 +7371,12 @@ class PostgresKnowledgeStore:
                     f"{final_owners[to_id]}, expected {sorted(allowed_to)}"
                 )
 
+        signatures = sorted(incoming_signatures)
+        predicates = " OR ".join("(edge_collection=%s AND from_id=%s AND to_id=%s AND relation_type=%s)" for _ in signatures)
         cursor.execute(
-            """SELECT edge_collection, edge_id, from_id, to_id, relation_type
-               FROM wang_knowledge.edges WHERE retired_at IS NULL FOR UPDATE"""
+            "SELECT edge_collection,edge_id,from_id,to_id,relation_type FROM wang_knowledge.edges "
+            "WHERE retired_at IS NULL AND (" + predicates + ") FOR UPDATE",
+            tuple(value for signature in signatures for value in signature),
         )
         existing: dict[tuple[str, str, str, str], set[str]] = {}
         for collection, edge_id, from_id, to_id, relation_type in cursor.fetchall():
@@ -6040,6 +7396,26 @@ class PostgresKnowledgeStore:
             other_owners = existing.get(
                 (collection, from_id, to_id, relation_type), set()
             ) - {edge_id}
+            if collection == "viewpoint_claim_links" and other_owners:
+                conflicting = set()
+                for owner in sorted(other_owners):
+                    planned = planned_edge_operations.get((collection, owner))
+                    if planned is not None:
+                        other_payload = stored_operation_payload(planned)
+                    else:
+                        cursor.execute(
+                            """SELECT payload FROM wang_knowledge.edges
+                               WHERE edge_collection = %s AND edge_id = %s
+                                 AND retired_at IS NULL FOR UPDATE""",
+                            (collection, owner),
+                        )
+                        rows = cursor.fetchall()
+                        other_payload = rows[0][0] if len(rows) == 1 else None
+                    if not cls._disjoint_support_components(
+                        incoming_payloads[collection, edge_id], other_payload
+                    ):
+                        conflicting.add(owner)
+                other_owners = conflicting
             if other_owners:
                 owner = sorted(other_owners)[0]
                 raise ChangeSetConflict(
@@ -6049,8 +7425,37 @@ class PostgresKnowledgeStore:
                 )
 
     @staticmethod
+    def _disjoint_support_components(left: Any, right: Any) -> bool:
+        """Distinct approved, same-version support components are not one edge.
+
+        This does not authorize either link: package/foundation validation still
+        verifies decision provenance, exact Claim text and evidence. Full-Claim,
+        overlapping, unapproved or differently pinned links remain duplicates.
+        """
+        from .knowledge_models import ViewpointClaimLinkRecord
+
+        try:
+            a = ViewpointClaimLinkRecord.model_validate(left)
+            b = ViewpointClaimLinkRecord.model_validate(right)
+        except (ValueError, TypeError):
+            return False
+        if any(x.link_type != "supports" or x.effective_state != "active"
+               or not x.component_locator or not x.evidence_bindings for x in (a, b)):
+            return False
+        if (a.viewpoint_id, a.claim_id, a.pinned_claim_revision,
+            a.validated_against_viewpoint_revision_id) != (
+            b.viewpoint_id, b.claim_id, b.pinned_claim_revision,
+            b.validated_against_viewpoint_revision_id):
+            return False
+        ac, bc = a.component_locator, b.component_locator
+        if ac.claim_sha256 != bc.claim_sha256 or not re.fullmatch(r"[0-9a-f]{64}", ac.claim_sha256):
+            return False
+        return all(x.end_char <= y.start_char or y.end_char <= x.start_char
+                   for x in ac.canonical_spans for y in bc.canonical_spans)
+
+    @staticmethod
     def _assert_no_uncoordinated_semantic_references(
-        cursor: Any, plan: ChangeSetPlan
+        cursor: Any, plan: ChangeSetPlan, *, scoped: bool = False, retirement_package=None
     ) -> None:
         """Do not retire extraction identity under current CVR records.
 
@@ -6072,15 +7477,39 @@ class PostgresKnowledgeStore:
             for operation in plan.operations
         ):
             return
-        cursor.execute(
-            """SELECT collection, object_id, payload
+        if scoped:
+            rows = PostgresKnowledgeStore._reference_consumers(cursor,
+                [op.object_id for op in plan.operations if op.operation=='retire'],
+                sorted(SEMANTIC_REFERENCE_COLLECTIONS))
+        else:
+            cursor.execute(
+                """SELECT collection, object_id, payload
                FROM wang_knowledge.objects
                WHERE collection = ANY(%s) AND retired_at IS NULL
                FOR UPDATE""",
-            (sorted(SEMANTIC_REFERENCE_COLLECTIONS),),
-        )
+                (sorted(SEMANTIC_REFERENCE_COLLECTIONS),),
+            )
+            rows = cursor.fetchall()
+        if retirement_package is not None:
+            from backend.pipeline.claim_retirement import historical_reference_rows, validate_package
+            if (plan.source_kind != 'wang_claim_sql_retirement_v1'
+                    or set(validate_package(retirement_package)) != {(o.collection,o.object_id) for o in plan.operations}
+                    or any(o.operation!='retire' for o in plan.operations)):
+                raise ChangeSetConflict('historical Claim references lack exact retire-only approval')
+            historical = {(r['collection'],r['object_id']):r['payload'] for r in historical_reference_rows(retirement_package)}
+            retired_claims={o.object_id for o in plan.operations if o.collection=='claims'}
+            checked=[]
+            for col,oid,payload in rows:
+                if (col,oid) in historical:
+                    if payload != historical[col,oid] or col!='viewpoint_identity_candidates':
+                        raise ChangeSetConflict('historical Claim candidate current payload drift')
+                    # Only the applied candidate's extraction list is history.
+                    # Unknown fields/other live semantic consumers stay strict.
+                    payload={**payload,'candidate_claim_ids':[i for i in payload['candidate_claim_ids'] if i not in retired_claims]}
+                checked.append((col,oid,payload))
+            rows=checked
         blockers = uncoordinated_semantic_reference_blockers(
-            plan, cursor.fetchall()
+            plan, rows
         )
         if blockers:
             raise ChangeSetConflict(
@@ -7181,7 +8610,7 @@ class PostgresKnowledgeStore:
 
     @staticmethod
     def _assert_no_dangling_package_references(
-        cursor: Any, plan: ChangeSetPlan
+        cursor: Any, plan: ChangeSetPlan, *, scoped: bool = False
     ) -> None:
         """Do not retire a package object while a current package row cites it.
 
@@ -7238,16 +8667,20 @@ class PostgresKnowledgeStore:
                 found.update(references(collection, child))
             return found
 
-        cursor.execute(
-            """SELECT collection, object_id, payload
+        if scoped:
+            rows = PostgresKnowledgeStore._reference_consumers(cursor,sorted(retired_ids),sorted(PACKAGE_REFERENCE_FIELDS))
+        else:
+            cursor.execute(
+                """SELECT collection, object_id, payload
                FROM wang_knowledge.objects
                WHERE collection = ANY(%s) AND retired_at IS NULL
                FOR UPDATE""",
-            (sorted(PACKAGE_REFERENCE_FIELDS),),
-        )
+                (sorted(PACKAGE_REFERENCE_FIELDS),),
+            )
+            rows = cursor.fetchall()
         blockers: list[str] = []
         seen_planned: set[tuple[str, str]] = set()
-        for collection, object_id, payload in cursor.fetchall():
+        for collection, object_id, payload in rows:
             key = (str(collection), str(object_id))
             planned = planned_operations.get(key)
             if planned is not None:
@@ -7343,6 +8776,8 @@ class PostgresKnowledgeStore:
         plan: ChangeSetPlan,
         changed_records: list[tuple[str, str, int, int]],
         operation_offset: int,
+        *, side_operations: Optional[list[ChangeOperation]] = None,
+        side_details: Optional[dict[int, Mapping[str, Any]]] = None,
     ) -> int:
         matched_by_change: dict[tuple[str, str, int, int], list[str]] = {}
         dependencies: dict[str, tuple[int, dict[str, Any]]] = {}
@@ -7399,6 +8834,11 @@ class PostgresKnowledgeStore:
             next_revision = revision + 1
             updated["revision"] = next_revision
             content_sha = record_content_sha(updated)
+            if side_operations is not None:
+                details = {"changed_records":[{"collection":col,"record_id":oid} for col,oid,_,_ in reasons]}
+                side_operations.append(ChangeOperation("invalidate","product_dependencies",dependency_id,
+                    record_content_sha(payload),content_sha,revision,next_revision,updated))
+                side_details[operation_offset+count] = details
             cursor.execute(
                 """UPDATE wang_knowledge.objects SET revision=%s, review_status=%s,
                    visibility=%s, content_sha256=%s, payload=%s::jsonb, updated_at=now()
@@ -7421,8 +8861,8 @@ class PostgresKnowledgeStore:
             cursor.execute(
                 """INSERT INTO wang_knowledge.change_operations
                    (change_set_id, operation_index, operation, collection, object_id,
-                    after_sha256, before_revision, after_revision, details)
-                   VALUES (%s,%s,'invalidate','product_dependencies',%s,%s,%s,%s,%s::jsonb)""",
+                    after_sha256, before_revision, after_revision, details, before_sha256)
+                   VALUES (%s,%s,'invalidate','product_dependencies',%s,%s,%s,%s,%s::jsonb,%s)""",
                 (
                     plan.change_set_id, operation_offset + count, dependency_id,
                     content_sha, revision, next_revision,
@@ -7432,6 +8872,7 @@ class PostgresKnowledgeStore:
                             for collection, record_id, _, _ in reasons
                         ],
                     }),
+                    record_content_sha(payload) if side_operations is not None else None,
                 ),
             )
 
@@ -7475,6 +8916,11 @@ class PostgresKnowledgeStore:
                     "revision": 1,
                 }
                 content_sha = record_content_sha(event)
+                if side_operations is not None:
+                    if owners:
+                        raise ChangeSetConflict("new transaction impact event already exists")
+                    side_operations.append(ChangeOperation("create","impact_events",event_id,
+                        None,content_sha,None,1,event))
                 cursor.execute(
                     """INSERT INTO wang_knowledge.objects
                        (collection, object_id, revision, review_status, visibility,
@@ -7490,6 +8936,12 @@ class PostgresKnowledgeStore:
                        ON CONFLICT DO NOTHING""",
                     (event_id, content_sha, canonical_json(event), plan.change_set_id),
                 )
+                if side_operations is not None:
+                    cursor.execute("""INSERT INTO wang_knowledge.change_operations
+                                      (change_set_id,operation_index,operation,collection,object_id,
+                                       before_sha256,after_sha256,before_revision,after_revision,details)
+                                      VALUES (%s,%s,'create','impact_events',%s,NULL,%s,NULL,1,'{}'::jsonb)""",
+                                   (plan.change_set_id,operation_offset+len(side_operations)-1,event_id,content_sha))
         return len(dependencies)
 
     def ingest_package(

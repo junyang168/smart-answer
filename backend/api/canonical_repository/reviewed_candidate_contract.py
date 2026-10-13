@@ -46,6 +46,14 @@ def package_requires_reviewed_candidate_contract(package: Mapping[str, Any]) -> 
 def validate_store_package_authorization(package: Mapping[str, Any]) -> None:
     """Fail closed before DB access for packages carrying claim-layer authority."""
 
+    if package.get("source_repair_application") is not None:
+        validate_source_repair_application(package)
+        return
+    if (any(r.get('approval_basis') == 'owner_scoped_independent_terminal_review'
+            for r in package.get('viewpoint_identity_decisions', []))
+            or any(r.get('review_status') == 'independent_terminal_reviewed'
+                   for r in package.get('claims', []))):
+        raise ConsensusApplicationError('scoped Opus provenance requires exact source repair authority')
     if not package_requires_reviewed_candidate_contract(package):
         return
     if package.get("consensus_application") is None:
@@ -68,6 +76,200 @@ def validate_store_package_authorization(package: Mapping[str, Any]) -> None:
         raise ConsensusApplicationError(
             f"reviewed candidate graph is invalid: {exc}"
         ) from exc
+
+
+def validate_source_repair_application(package: Mapping[str, Any]) -> None:
+    """A bounded repair is not a complete extraction or its historical review.
+
+    Dispatch only an exact versioned authority. Historical adapters retain
+    their original dual-review boundaries; the generic source reconciliation
+    contract uses one independent Opus terminal review and bounded CVR writes.
+    Every adapter must prove its own exact records, never borrow old approval.
+    """
+    app = package.get('source_repair_application') or {}
+    if app.get('schema_version') == 'wang_cvp_merge_management_v1':
+        from backend.pipeline.cvp_merge_management import validate_package
+        validate_package(dict(package))
+        return
+    if app.get('schema_version') == 'wang_claim_relation_retirement_v1':
+        from backend.pipeline.claim_relation_retirement import validate_package
+        validate_package(dict(package))
+        return
+    if app.get('schema_version') == 'wang_claim_sql_retirement_v1':
+        from backend.pipeline.claim_retirement import validate_package
+        validate_package(dict(package))
+        return
+    if app.get('schema_version') == 'wang_cvp_sql_link_representation_v1':
+        from backend.pipeline.cvp_link_representation import validate_package
+        validate_package(dict(package))
+        return
+    if app.get('schema_version') == 'wang_cvp_sql_link_replacement_v1':
+        from backend.pipeline.cvp_link_replacement import validate_package
+        validate_package(dict(package))
+        return
+    if app.get('schema_version') == 'wang_cvp_deferred_authorized_link_management_v1':
+        from backend.pipeline.cvp_pending_link_management import validate_package
+        validate_package(dict(package))
+        return
+    if app.get('schema_version') == 'wang_cvp_owner_sql_link_retirement_v1':
+        from backend.pipeline.cvp_link_retirement import validate_package
+        validate_package(dict(package))
+        return
+    if app.get('schema_version') == 'wang_cvp_sql_link_retarget_v1':
+        from backend.pipeline.cvp_link_retarget import validate_package
+        validate_package(dict(package))
+        return
+    if app.get('schema_version') == 'wang_owner_sql_link_correction_v2':
+        from backend.pipeline.cvp_sql_actions import validate_owner_link_package
+        validate_owner_link_package(dict(package))
+        return
+    if app.get('schema_version') == 'wang_source_sql_reconciliation_v2':
+        from backend.pipeline.cvp_sql_actions import validate_source_package
+        validate_source_package(dict(package))
+        return
+    if app.get('schema_version') == 'wang_owner_approved_link_correction_v1':
+        from backend.pipeline.owner_approved_link_correction import validate_reviewed_package
+        validate_reviewed_package(dict(package))
+        return
+    if app.get('schema_version') == 'wang_owner_claim_statement_revision_v1':
+        from backend.pipeline.claim_statement_revision import validate_package
+        validate_package(dict(package))
+        return
+    if app.get('schema_version') == 'wang_source_reconciliation_v1':
+        from backend.pipeline.source_reconciliation_runner import validate_package
+        validate_package(dict(package))
+        return
+    if app.get('schema_version') == 'wang_s201129_owner_cl005_supports_v1':
+        from backend.pipeline.viewpoint_s201129_link_support_apply import validate_package
+        validate_package(package)
+        return
+    if app.get('schema_version') == 'wang_s201129_owner_opus_source_reconciliation_v1':
+        from backend.pipeline.viewpoint_s201129_source_repair import validate_package
+        validate_package(package)
+        return
+    if app.get('schema_version') == 'wang_g041_owner_qualified_transcript_reconciliation_v2':
+        from backend.pipeline.viewpoint_g041_qualified_transcript_repair import validate_package
+        validate_package(package)
+        return
+    if app.get('schema_version') == 'wang_g037_claim_statement_repair_v2':
+        from backend.pipeline.viewpoint_g037_claim_condition_repair import validate_package
+        validate_package(package)
+        return
+    if app.get('schema_version') == 'wang_g037_claim_statement_repair_v1':
+        from backend.pipeline.viewpoint_g037_claim_statement_repair import validate_package
+        validate_package(package)
+        return
+    if app.get('schema_version') == 'wang_owner_evidence_annotation_v1':
+        from backend.pipeline.viewpoint_owner_evidence_annotation import validate_package
+        validate_package(package)
+        return
+    if app.get('schema_version') == 'wang_claim_qualifier_repair_v2':
+        validate_claim_qualifier_repair(package)
+        return
+    if app.get('schema_version') != 'wang_authorized_source_repair_v1':
+        raise ConsensusApplicationError('unsupported source repair application')
+    if set(package) - {'package_id','claims','evidence_steps','source_fragments','viewpoint_claim_links','source_repair_application'}:
+        raise ConsensusApplicationError('source repair contains unauthorized collections')
+    body = {k:v for k,v in package.items() if k != 'source_repair_application'}
+    packet = app.get('review_packet') or {}
+    if not app.get('user_authorization') or app.get('approval_status') != 'not_human_approved':
+        raise ConsensusApplicationError('source repair lacks bounded authorization')
+    if packet.get('package_sha256') != _canonical_sha256(body):
+        raise ConsensusApplicationError('source repair package changed after review')
+    items = packet.get('items') or []
+    if [i.get('after') for i in items] != list(body.get('claims') or []):
+        raise ConsensusApplicationError('review packet does not match repaired Claims')
+    if [i.get('new_evidence_step') for i in items] != list(body.get('evidence_steps') or []) or [i.get('new_fragment') for i in items] != list(body.get('source_fragments') or []):
+        raise ConsensusApplicationError('review packet does not match repaired evidence')
+    if [l for i in items for l in i.get('updated_links',[])] != list(body.get('viewpoint_claim_links') or []):
+        raise ConsensusApplicationError('review packet does not match repaired links')
+    ids = [c.get('claim_id') for c in body.get('claims') or []]
+    if not ids or not all(ids) or len(ids) != len(set(ids)):
+        raise ConsensusApplicationError('source repair repeats or omits Claim identities')
+    for item in items:
+        old, new = item['before'], item['after']
+        if old.get('claim_id') != new.get('claim_id') or new.get('revision') != old.get('revision',0)+1:
+            raise ConsensusApplicationError('source repair is not a next Claim revision')
+        mutable = {'revision','statement','evidence_step_ids','occurrences','review_note','reviewed_at','reviewed_by'}
+        if {k:v for k,v in old.items() if k not in mutable} != {k:v for k,v in new.items() if k not in mutable}:
+            raise ConsensusApplicationError('source repair changes unrelated Claim fields')
+        if not set(old.get('evidence_step_ids',[])) <= set(new.get('evidence_step_ids',[])):
+            raise ConsensusApplicationError('source repair removes existing Claim evidence')
+        step, frag = item['new_evidence_step'], item['new_fragment']
+        if step.get('produced_claim_ids') != [new['claim_id']] or step.get('evidence_step_id') not in new.get('evidence_step_ids',[]) or step.get('source_fragment_ids') != [frag.get('fragment_id')]:
+            raise ConsensusApplicationError('source repair evidence is not reciprocal and owned')
+        quote = frag.get('verbatim_excerpt')
+        if not quote or quote not in item.get('source_paragraph','') or frag.get('source_sha256') != packet.get('source_body_sha256'):
+            raise ConsensusApplicationError('source repair quote is not bound to its paragraph')
+        if frag.get('verbatim_excerpt_sha256') != hashlib.sha256(quote.encode()).hexdigest() or frag.get('paragraph_text_sha256') != hashlib.sha256(item['source_paragraph'].encode()).hexdigest():
+            raise ConsensusApplicationError('source repair physical quote SHA mismatch')
+        old_occ, new_occ = old.get('occurrences',[]), new.get('occurrences',[])
+        if len(old_occ) != 1 or len(new_occ) != 1 or {k:v for k,v in old_occ[0].items() if k!='anchors'} != {k:v for k,v in new_occ[0].items() if k!='anchors'}:
+            raise ConsensusApplicationError('source repair changes occurrence identity')
+        if frag.get('source_id') != new_occ[0].get('source_id') or new_occ[0].get('anchors',[])[:-1] != old_occ[0].get('anchors',[]) or new_occ[0]['anchors'][-1].get('evidence_id') != step.get('evidence_step_id'):
+            raise ConsensusApplicationError('source repair changes existing anchors or crosses source')
+    artifacts = app.get('review_artifacts') or []
+    if len(artifacts) != 2 or {r.get('backend') for r in artifacts} != {'codex_subscription','claude_subscription'}:
+        raise ConsensusApplicationError('source repair requires two independent subscription reviews')
+    for artifact in artifacts:
+        raw = {k:v for k,v in artifact.items() if k != 'artifact_sha256'}
+        response = artifact.get('response') or {}
+        if artifact.get('artifact_sha256') != _canonical_sha256(raw) or artifact.get('request_payload_sha256') != _canonical_sha256(packet) or artifact.get('response_sha256') != _canonical_sha256(response):
+            raise ConsensusApplicationError('source repair review SHA mismatch')
+        verdicts = response.get('verdicts') or []
+        if len(verdicts) != len(ids) or {v.get('claim_id') for v in verdicts} != set(ids) or not all(v.get('approved') is True and v.get('problems') == [] for v in verdicts):
+            raise ConsensusApplicationError('source repair lacks unanimous complete approvals')
+
+
+def validate_claim_qualifier_repair(package: Mapping[str, Any]) -> None:
+    """Add a reviewed local qualifier; never remove evidence or change identity.
+
+    This separate contract does not relax the original evidence-addition repair.
+    Existing identity decisions remain historical; fresh exact-postimage reviews
+    in this ChangeSet authorize revalidation of the same component membership.
+    """
+    app = package['source_repair_application']
+    if set(package) != {'package_id', 'claims', 'viewpoint_claim_links', 'source_repair_application'}:
+        raise ConsensusApplicationError('qualifier repair has unauthorized collections')
+    body = {k: v for k, v in package.items() if k != 'source_repair_application'}
+    packet = app.get('review_packet') or {}
+    if not app.get('user_authorization') or app.get('approval_status') != 'not_human_approved':
+        raise ConsensusApplicationError('qualifier repair lacks authorization')
+    if packet.get('package_sha256') != _canonical_sha256(body) or packet.get('proposed_package') != body:
+        raise ConsensusApplicationError('qualifier repair postimage changed')
+    if len(body['claims']) != 1 or len(body['viewpoint_claim_links']) != 1:
+        raise ConsensusApplicationError('qualifier repair must have one Claim and one link')
+    old, new = packet['before_claim'], body['claims'][0]
+    prefix = packet.get('qualifier_prefix')
+    if not prefix or new.get('statement') != prefix + old.get('statement', ''):
+        raise ConsensusApplicationError('qualifier repair must preserve the complete old statement')
+    mutable = {'revision', 'statement', 'review_note', 'reviewed_at', 'reviewed_by'}
+    if new.get('revision') != old.get('revision', 0) + 1 or {k:v for k,v in old.items() if k not in mutable} != {k:v for k,v in new.items() if k not in mutable}:
+        raise ConsensusApplicationError('qualifier repair changed evidence, occurrence, or unrelated Claim fields')
+    previous, link = packet['before_link'], body['viewpoint_claim_links'][0]
+    mutable_link = {'revision', 'pinned_claim_revision', 'component_locator'}
+    if {k:v for k,v in previous.items() if k not in mutable_link} != {k:v for k,v in link.items() if k not in mutable_link}:
+        raise ConsensusApplicationError('qualifier repair changed identity or evidence bindings')
+    if link['revision'] != previous['revision'] + 1 or link['pinned_claim_revision'] != new['revision'] or link['claim_id'] != new['claim_id'] or link['link_type'] != 'equivalent_component':
+        raise ConsensusApplicationError('qualifier repair link revision or type mismatch')
+    locator = {'claim_sha256': _canonical_sha256(new), 'statement_component': new['statement'],
+               'canonical_spans': [{'start_char': 0, 'end_char': len(new['statement']), 'exact_text': new['statement']}]}
+    # semantic_record_sha includes the normalized Claim fields; packet supplies
+    # that independently computed digest, which store graph validation rechecks.
+    locator['claim_sha256'] = packet.get('after_claim_semantic_sha256')
+    if not locator['claim_sha256'] or link['component_locator'] != locator:
+        raise ConsensusApplicationError('qualifier repair locator mismatch')
+    artifacts = app.get('review_artifacts') or []
+    if len(artifacts) != 2 or {r.get('backend') for r in artifacts} != {'codex_subscription', 'claude_subscription'}:
+        raise ConsensusApplicationError('qualifier repair needs independent subscription reviews')
+    for artifact in artifacts:
+        raw = {k:v for k,v in artifact.items() if k != 'artifact_sha256'}
+        response = artifact.get('response') or {}
+        verdicts = response.get('verdicts') or []
+        if artifact.get('artifact_sha256') != _canonical_sha256(raw) or artifact.get('request_payload_sha256') != _canonical_sha256(packet) or artifact.get('response_sha256') != _canonical_sha256(response):
+            raise ConsensusApplicationError('qualifier repair review SHA mismatch')
+        if len(verdicts) != 1 or verdicts[0].get('claim_id') != new['claim_id'] or verdicts[0].get('approved') is not True or verdicts[0].get('problems') != []:
+            raise ConsensusApplicationError('qualifier repair lacks exact unanimous approval')
 
 
 def reviewed_candidate_artifact_sha256(package: Mapping[str, Any]) -> str:

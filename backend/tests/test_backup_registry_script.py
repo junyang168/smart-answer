@@ -73,9 +73,16 @@ def _run(
             "FAKE_PG_RESTORE_MODE": restore_mode,
         }
     )
+    # Exercise the ordinary backup path in a disposable checkout. Running the
+    # real script in the #357 checkout selects its owner-bound SSD transport,
+    # which must never receive this test's fake pg_dump/restore output.
+    source_repo = tmp_path / "disposable-repo"
+    script = source_repo / "scripts" / "backup-registry.sh"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_bytes(SCRIPT.read_bytes())
     return subprocess.run(
-        ["bash", str(SCRIPT), label],
-        cwd=PROJECT_ROOT,
+        ["bash", str(script), label],
+        cwd=source_repo,
         env=env,
         text=True,
         capture_output=True,
@@ -158,3 +165,25 @@ def test_invalid_archive_leaves_no_final_and_same_label_can_retry(
     retried = _run(tmp_path, "invalid-archive")
     assert retried.returncode == 0, retried.stderr
     assert (target / "smart_answer_knowledge.dump").is_file()
+
+
+def test_357_transport_dispatch_is_isolated_from_real_ssd(tmp_path: Path):
+    source_repo = tmp_path / "wkp-357-worktree-per-session"
+    script = source_repo / "scripts" / "backup-registry.sh"
+    script.parent.mkdir(parents=True)
+    script.write_bytes(SCRIPT.read_bytes())
+    python = source_repo / "backend" / ".venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n", encoding="utf-8")
+    python.chmod(0o755)
+    result = subprocess.run(
+        ["bash", str(script), "isolated"], cwd=source_repo,
+        env={**os.environ, "DATA_BASE_DIR": str(tmp_path / "data"),
+             "KNOWLEDGE_DATABASE_URL": "postgresql://test.invalid/registry"},
+        text=True, capture_output=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        "-m", "backend.pipeline.viewpoint_backup_archive", "--create-label", "357-isolated",
+    ]
+    assert not (tmp_path / "data").exists()

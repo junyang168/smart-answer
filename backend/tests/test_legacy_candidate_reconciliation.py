@@ -18,6 +18,40 @@ from backend.pipeline.corpus_survey_runner import _transcript_for_prompt
 
 import pytest
 
+@pytest.mark.parametrize('mutation', [None, 'missing', 'wrong_sha', 'ambiguous'])
+def test_legacy_bundle_reads_exact_archived_generation_before_validation(tmp_path, monkeypatch, mutation):
+    import json
+    import backend.pipeline.legacy_candidate_reconciliation as module
+    reviewed = tmp_path/'reviewed/source.reviewed-candidate.json'
+    reviewed.parent.mkdir()
+    reviewed.write_text('{}')
+    current = tmp_path/'cross-section/source.cross-section.json'
+    current.parent.mkdir()
+    current.write_text('{"generation":"later"}')
+    archive = current.parent/'generations/source.cross-section.old.json'
+    archive.parent.mkdir()
+    archive.write_text('{"generation":"reviewed"}')
+    pin = hashlib.sha256(archive.read_bytes()).hexdigest()
+    review = tmp_path/'reviews/source.independent-review.json'
+    review.parent.mkdir()
+    review.write_text(json.dumps({'source':{'package_path':str(current),'package_sha256':pin}}))
+    monkeypatch.setattr(module, '_normalize_records', lambda payload: ({'claims':{},'sources':{}}, None))
+    observed = []
+    def validate_input(payload):
+        observed.append(payload)
+        raise ValueError('test downstream validation sentinel')
+    monkeypatch.setattr(module, '_normalize_claim_layer', validate_input)
+    if mutation == 'missing': archive.unlink()
+    elif mutation == 'wrong_sha': archive.write_text('{"generation":"wrong"}')
+    elif mutation == 'ambiguous': archive.with_name('source.cross-section.copy.json').write_bytes(archive.read_bytes())
+    result = module.inspect_legacy_bundle(reviewed)
+    if mutation:
+        assert observed == []
+        assert result['reason'] == 'review_package_missing_or_ambiguous'
+    else:
+        assert observed == [{'generation':'reviewed'}]
+        assert result['reason'] is not None  # Locating bytes is never approval.
+
 
 def _snapshot():
     payload = {

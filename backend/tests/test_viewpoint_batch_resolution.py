@@ -100,6 +100,46 @@ def _span(statement: str, text: str) -> dict[str, Any]:
     return {"start_char": start, "end_char": start + len(text), "exact_text": text}
 
 
+def test_run_batch_canonicalizes_packet_without_reordering_accepted_group(tmp_path, monkeypatch):
+    import backend.pipeline.viewpoint_batch_resolution_runner as runner
+
+    claims = [_claim("C2", "第二條"), _claim("C1", "第一條")]
+    before = [item.model_dump(mode="json") for item in claims]
+    captured = []
+
+    class StopBeforeModel(Exception):
+        pass
+
+    def capture_packet(path, packet):
+        captured.append(packet)
+        raise StopBeforeModel
+
+    monkeypatch.setattr(runner, "_write_immutable", capture_packet)
+    with pytest.raises(StopBeforeModel):
+        runner.run_batch(batch_id="B1", scope_label="Matthew", claims=claims,
+                         registry_context=[], pending_candidates=[], output_dir=tmp_path,
+                         proposer=None, reviewer=None)
+    assert [row["claim_id"] for row in captured[0]["claims"]] == ["C1", "C2"]
+    assert captured[0] == build_batch_packet(batch_id="B1", scope_label="Matthew",
+                                            claims=list(reversed(claims)), registry_context=[])
+    assert [item.model_dump(mode="json") for item in claims] == before
+
+
+def test_run_batch_keeps_duplicate_rejection_before_models_or_artifacts(tmp_path, monkeypatch):
+    import backend.pipeline.viewpoint_batch_resolution_runner as runner
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("duplicate Claims must fail before artifacts or model calls")
+
+    monkeypatch.setattr(runner, "_write_immutable", forbidden)
+    monkeypatch.setattr(runner, "_call", forbidden)
+    claim = _claim("C1", "第一條")
+    with pytest.raises(ValueError, match="id-sorted and unique"):
+        runner.run_batch(batch_id="B1", scope_label="Matthew", claims=[claim, claim],
+                         registry_context=[], pending_candidates=[], output_dir=tmp_path,
+                         proposer=None, reviewer=None)
+
+
 def _component(
     statement: str,
     text: str,
@@ -236,7 +276,7 @@ def test_versioned_route_policy_fingerprint_binds_prompt_content():
     assert policy["review"]["targets_per_batch"] == 12
 
 
-def test_default_cvp_policy_uses_fable_and_preserves_cross_vendor_review():
+def test_default_cvp_policy_uses_contextual_rules_and_preserves_cross_vendor_models():
     from backend.pipeline.viewpoint_cvp_policy import (
         DEFAULT_CVP_POLICY_PATH,
         load_cvp_policy,
@@ -244,7 +284,8 @@ def test_default_cvp_policy_uses_fable_and_preserves_cross_vendor_review():
 
     policy = load_cvp_policy(DEFAULT_CVP_POLICY_PATH)
 
-    assert policy["schema_version"] == "wang_cvp_resolution_policy_v2"
+    assert policy["schema_version"] == "wang_cvp_resolution_policy_v3"
+    assert policy["semantic_contract_version"] == "wang_cvp_contextual_semantics_v2"
     assert policy["proposal"]["provider"] == "codex"
     assert policy["proposal"]["model"] == "gpt-5.6-sol"
     assert policy["correction"]["provider"] == "codex"
@@ -1513,7 +1554,7 @@ def test_request_ceiling_blocks_before_model_call(tmp_path: Path):
 
     adapter = _StubAdapter({"ok": True})
     adapter.max_request_bytes = 10
-    with pytest.raises(ValueError, match="exceeding the frozen ceiling"):
+    with pytest.raises(ValueError, match="exceeding the configured ceiling"):
         _call(adapter, {"input": "payload is too large"}, tmp_path / "raw.json")
     assert adapter.calls == 0
     assert not (tmp_path / "raw.json").exists()
@@ -1537,7 +1578,14 @@ def test_explicit_model_roles_use_separate_subscription_providers():
     )
 
 
-def test_run_batch_writes_artifacts_measures_time_and_resumes(tmp_path: Path):
+@pytest.mark.parametrize('correction_profile', [False, True])
+def test_run_batch_writes_artifacts_measures_time_and_resumes(tmp_path: Path, monkeypatch, correction_profile):
+    if correction_profile:
+        from backend.pipeline import cvp_correction_source_context as correction_context
+        monkeypatch.setattr(correction_context, 'profile', lambda *a, **k: {'enabled': True})
+        def no_correction_packet(*a, **k):
+            pytest.fail('passing initial review must not construct an unused correction/final packet')
+        monkeypatch.setattr(correction_context, 'complete_packet', no_correction_packet)
     claims = [_claim("C1", ROCK_STATEMENT)]
     proposal_payload = _proposal().model_dump(mode="json")
     review_payload = {
@@ -7211,6 +7259,68 @@ def test_a_relation_can_be_retyped_by_the_correction():
         reconsideration=reconsideration, proposal=proposal, review=review
     )
     assert [r.relation_type for r in effective.viewpoint_relations] == ["extends"]
+
+
+@pytest.mark.parametrize("mutation", [None, "no_delete", "wrong_delete_type", "third_endpoint", "rebutted", "passed"])
+def test_relation_direction_replacement_requires_exact_accepted_withdrawal(mutation):
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        CanonicalViewpointReconsiderationResponse,
+        apply_reconsideration_patches,
+        validate_reconsideration,
+    )
+    original = {
+        "source_local_key": "ROCK-NOT-PETER",
+        "target_viewpoint_revision_id": "CVR-1",
+        "relation_type": "applies", "reason": "Original reason preserved.",
+    }
+    proposal = _proposal(viewpoint_relations=[original])
+    review = _review_for(proposal, relation_reviews=[{
+        "source_ref": "ROCK-NOT-PETER", "target_ref": "CVR-1",
+        "relation_type": "applies",
+        "decision": "pass" if mutation == "passed" else "correct",
+        "finding_codes": ["relation_type_imprecise"],
+        "reason": "Reverse this pair and use entails.",
+        "correction": "CVR-1 entails ROCK-NOT-PETER.",
+        "direction_correct": True,
+    }])
+    deletion = dict(original)
+    if mutation == "wrong_delete_type":
+        deletion["relation_type"] = "extends"
+    replacement = {
+        "source_viewpoint_revision_id": "CVR-1",
+        "target_local_key": "OTHER" if mutation == "third_endpoint" else "ROCK-NOT-PETER",
+        "relation_type": "entails", "reason": "Source-grounded corrected direction.",
+    }
+    patches = [{"action": "delete", "relation": deletion},
+               {"action": "upsert", "relation": replacement}]
+    if mutation == "no_delete":
+        patches.pop(0)
+    correction = CanonicalViewpointReconsiderationResponse.model_validate({
+        "proposal_sha256": sha256_json(proposal.model_dump(mode="json")),
+        "review_sha256": sha256_json(review.model_dump(mode="json")),
+        "relation_dispositions": [{
+            "source_ref": "ROCK-NOT-PETER", "target_ref": "CVR-1",
+            "relation_type": "applies",
+            "disposition": "rebutted" if mutation == "rebutted" else "accepted",
+            "reason": "Answer retained.",
+        }], "relation_patches": patches,
+    })
+    kwargs = dict(reconsideration=correction, proposal=proposal, review=review)
+    if mutation:
+        with pytest.raises(BatchResolutionError):
+            validate_reconsideration(**kwargs,
+                proposal_sha256=sha256_json(proposal.model_dump(mode="json")),
+                review_sha256=sha256_json(review.model_dump(mode="json")))
+        return
+    report = validate_reconsideration(**kwargs,
+        proposal_sha256=sha256_json(proposal.model_dump(mode="json")),
+        review_sha256=sha256_json(review.model_dump(mode="json")))
+    assert report["outcome"] == "resolved"
+    effective = apply_reconsideration_patches(**kwargs)
+    assert len(effective.viewpoint_relations) == 1
+    assert effective.viewpoint_relations[0].endpoints() == (("existing", "CVR-1"), ("new", "ROCK-NOT-PETER"))
+    assert effective.viewpoint_relations[0].relation_type == "entails"
+    assert proposal.viewpoint_relations[0].model_dump(exclude_none=True) == original
 
 
 def test_a_structure_finding_authorises_its_own_patch():

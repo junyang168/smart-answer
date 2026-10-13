@@ -93,7 +93,49 @@ def review_source_binding_mode(
     return None
 
 
-def inspect_legacy_bundle(path: Path) -> dict[str, Any]:
+def scoped_applied_adjudication(adjudication, actionable, claim_ids):
+    """Select only explicitly applied patches; never release a human hold."""
+    results = {r['claim_id']: r for r in adjudication['results']}
+    if not claim_ids or any(
+        cid not in results or results[cid].get('status') != 'auto_applied'
+        or results[cid].get('human_review_reason')
+        or results[cid].get('openai', {}).get('decision') != 'accept'
+        for cid in claim_ids
+    ):
+        raise ValueError('scoped replay requires resolved applied patches')
+    response = adjudication['openai_adjudication']
+    return (dict(response, adjudications=[r for r in response['adjudications'] if r['claim_id'] in claim_ids]),
+            [r for r in actionable if r['claim_id'] in claim_ids])
+
+
+def authenticate_batched_review(review_path, review, package_path, package):
+    """Read-only exact aggregate reconstruction and physical source binding."""
+    from backend.pipeline.claim_layer_review_batch import merge_review_artifacts
+    stem = review_path.name.removesuffix('.independent-review.json')
+    directory = review_path.parent / (stem + '.independent-review-batches') / 'reviews'
+    paths = sorted(directory.glob('batch-*.independent-review.json'))
+    artifacts = [_read(p) for p in paths]
+    rebuilt = merge_review_artifacts(artifacts, source_package=package, source_package_path=package_path)
+    if rebuilt != review:
+        raise ValueError('batched review does not exactly reconstruct from sealed batches')
+    hashes, source_paths = {}, {}
+    for artifact in artifacts:
+        for sid, value in (artifact.get('source', {}).get('transcript_sha256') or {}).items():
+            if sid in hashes and hashes[sid] != value:
+                raise ValueError('batched source hashes conflict')
+            hashes[sid] = value
+    sources = package.get('source_documents') or []
+    if len(sources) != len({s['source_id'] for s in sources}) or set(hashes) != {s['source_id'] for s in sources}:
+        raise ValueError('batched source coverage mismatch')
+    for source in sources:
+        p = Path(str(source.get('source_path') or ''))
+        if not p.is_absolute() or not p.is_file() or _sha(p) != source.get('source_file_sha256'):
+            raise ValueError('batched physical source SHA drift')
+        source_paths[source['source_id']] = str(p)
+    return hashes, source_paths
+
+
+def inspect_legacy_bundle(path: Path, *, validation_claim_ids: set[str] | None = None) -> dict[str, Any]:
     """Return evidence for one bundle; failures never become positive evidence."""
 
     reviewed = _read(path)
@@ -123,6 +165,13 @@ def inspect_legacy_bundle(path: Path) -> dict[str, Any]:
         named = str((review.get("source") or {}).get("package_path") or "")
         if named and Path(named).is_absolute():
             candidates.add(Path(named))
+        # A passing merge recipient still requires the complete original
+        # application replay. Locate the exact reviewed generation, not the
+        # later overwritten package at its historical logical path.
+        from backend.pipeline.viewpoint_lineage_inventory import bound_review_input
+        archived = bound_review_input(review)
+        if archived is not None:
+            candidates.add(archived)
         matching = sorted(p for p in candidates if p.is_file() and _sha(p) == stated_package_sha)
         if len(matching) != 1:
             result["reason"] = "review_package_missing_or_ambiguous"
@@ -144,7 +193,12 @@ def inspect_legacy_bundle(path: Path) -> dict[str, Any]:
             if key not in {"fingerprint_sha256", "generated_at", "artifact_sha256", "provider"}
         }
         review_fingerprint = str(reviewer.get("fingerprint_sha256") or "")
-        if review_fingerprint != sha256_json(reviewer_identity):
+        batched_sources = None
+        if reviewer.get('provider') == 'anthropic_batched':
+            # Reconstruct the sealed aggregate from its actual per-batch
+            # artifacts; a provider string is never a fingerprint waiver.
+            batched_sources = authenticate_batched_review(review_path, review, package_path, package)
+        elif review_fingerprint != sha256_json(reviewer_identity):
             result["reason"] = "review_fingerprint_invalid"
             return result
         review_seal = reviewer.get("artifact_sha256")
@@ -174,6 +228,8 @@ def inspect_legacy_bundle(path: Path) -> dict[str, Any]:
         result["review_transcript_paths"] = dict(
             (review.get("source") or {}).get("transcript_paths") or {}
         )
+        if batched_sources is not None:
+            result['review_transcript_sha256'], result['review_transcript_paths'] = batched_sources
         result["review_fingerprint"] = str(
             (review.get("reviewer") or {}).get("fingerprint_sha256") or ""
         )
@@ -226,8 +282,8 @@ def inspect_legacy_bundle(path: Path) -> dict[str, Any]:
         if any(adjudication.get(key) != value for key, value in expected_outcome.items()):
             result["reason"] = "adjudication_outcome_invalid"
             return result
-        source_paths = (review.get("source") or {}).get("transcript_paths") or {}
-        reviewed_source_hashes = (review.get("source") or {}).get("transcript_sha256") or {}
+        source_paths = result['review_transcript_paths']
+        reviewed_source_hashes = result['review_transcript_sha256']
         transcript_segments = {}
         current_source_matches = True
         source_binding_modes: dict[str, str] = {}
@@ -260,8 +316,14 @@ def inspect_legacy_bundle(path: Path) -> dict[str, Any]:
                 str(row["claim_id"]): row for row in survey["candidate_claims"]
             }
             actionable = actionable_reviews(review)
+            response = adjudication["openai_adjudication"]
+            if validation_claim_ids is not None:
+                # A scoped read-only consumer must explicitly name its applied
+                # patches. Unapplied human-held suggestions are not authority
+                # for those patches, nor does this validate the whole bundle.
+                response, actionable = scoped_applied_adjudication(adjudication, actionable, validation_claim_ids)
             validate_openai_adjudication(
-                adjudication["openai_adjudication"], reviews=actionable,
+                response, reviews=actionable,
                 claims_by_id=claim_snapshots,
                 transcript_segments=transcript_segments,
             )
@@ -271,7 +333,9 @@ def inspect_legacy_bundle(path: Path) -> dict[str, Any]:
                 for row in adjudication["openai_adjudication"]["adjudications"]
                 if row.get("decision") == "reject"
             }
-            if rejected_ids:
+            if validation_claim_ids is not None:
+                result['validated_adjudication_claim_ids'] = sorted(validation_claim_ids)
+            elif rejected_ids:
                 validate_claude_reconsideration(
                     reconsideration, rejected_claim_ids=rejected_ids,
                     claims_by_id=claim_snapshots,
@@ -279,7 +343,8 @@ def inspect_legacy_bundle(path: Path) -> dict[str, Any]:
             elif reconsideration is not None:
                 result["reason"] = "unexpected_claude_reconsideration"
                 return result
-        result["adjudication_structurally_validated"] = current_source_matches
+        result["adjudication_structurally_validated"] = current_source_matches and validation_claim_ids is None
+        result['scoped_adjudication_structurally_validated'] = current_source_matches and validation_claim_ids is not None
         result["review_source_binding_modes"] = source_binding_modes
         result["adjudication_path"] = str(adjudication_path)
         result["adjudication_sha256"] = _sha(adjudication_path)

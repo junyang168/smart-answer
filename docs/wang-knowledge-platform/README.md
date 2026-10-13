@@ -56,10 +56,15 @@
 | 文档 | 它回答什么 |
 | --- | --- |
 | ★ [CanonicalViewpoint 设计](./20-knowledge/canonical_viewpoint_design.md) | 观点身份、论证路线、观点关系：怎样判断两条主张是同一个观点，以及谁能读什么 |
+| [Claim／CVP Management 2.0 主控设计](./20-knowledge/claim_cvp_management_2_design.md) | #357 两管理域的目标职责、Claim 多轮修订与独立终审、必要人工出口及完整生命周期验收；尚未启用 |
+| [Claims → CVP 現行完整流程](./20-knowledge/cvp_production_process_v1.md) | 正常生成、唯一纠正、來源／Claim／連接例外、完整審計、人工出口與恢復；區分已實作與尚未自動接通 |
+| [CVP 特殊案例索引](./90-ops/cvp_special_cases_20261007.md) | #357 實際 special cases 如何改變流程；歷史特批不等於永久授權（記錄） |
+| [来源修订 → Claim → CVP 更新流程](./20-knowledge/source_reconciliation_workflow_v1.md) | 已授權來源變更及 deferred Claim 修訂，如何傳遞到完整受影響範圍 |
 | [Claim 设计](./20-knowledge/claim_design.md) | 单篇之内的主张：结构、怎样产生、与证据步骤的关系 |
 | [跨讲道主张比较与双模型归并流程 v1](./20-knowledge/cross_sermon_relation_workflow_v1.md) | 不同讲道的主张怎样比较成关系 |
 | [母题—子专题—篇章段落自动发现与双模型复核 v1](./20-knowledge/topic_structure_discovery_workflow_v1.md) | 主题层级怎样从主张与关系里长出来 |
 | [PostgreSQL 共享知识主库 v1](./20-knowledge/postgresql_authoring_store_v1.md) | 谁是编辑权威，ChangeSet 怎么写入 |
+| [CVP 交易與恢復設計 v2](./20-knowledge/cvp_transaction_workflow_v2.md) | 待實作的簡化設計：transaction 內驗證、SQL changelog、按已提交狀態恢復；先驗收第 57 組完整續跑入口 |
 | [文库 Functional Specification](./20-knowledge/exegesis_topic_repository_functional_spec.md) | 面向读者的文库：canonical unit、圣经/主题索引、来源可追溯 |
 | [文库 Technical Specification](./20-knowledge/repository-tech-spec/README.md) | 文库的实现架构、存储布局与标识符。原为一份 1,994 行文档，已拆成五个： |
 | &nbsp;&nbsp;└ [Data Models](./20-knowledge/repository-tech-spec/data-models.md) | 23 个存储记录类型，开头有速查表 |

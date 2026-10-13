@@ -34,6 +34,7 @@ from backend.pipeline.legacy_candidate_reconciliation import (
     _encode_report,
     apply_frozen,
     inspect_legacy_bundle,
+    review_source_binding_mode,
     inventory,
     plan_review_migration,
 )
@@ -50,6 +51,20 @@ HISTORICAL_CODE_SHA256 = (
     "147397b660af6f35109b5eaaa710bebf57c227970e173459d749b926557853d9"
 )
 _historical_function: Any = None
+HISTORICAL_SOURCE_PATH = 'backend/pipeline/knowledge_source.py'
+HISTORICAL_SOURCE_CODE_SHA256 = '62794ba3d28024b6dc5ed85f306886a8b73e1c4c840ef19f106b0ec07a42cfb5'
+
+
+def historical_markdown_source(source):
+    """Replay original block coordinates from unchanged physical Markdown."""
+    repo = Path(__file__).resolve().parents[2]
+    code = subprocess.run(['git', 'show', f'{HISTORICAL_COMMIT}:{HISTORICAL_SOURCE_PATH}'],
+                          cwd=repo, capture_output=True, check=True).stdout
+    if hashlib.sha256(code).hexdigest() != HISTORICAL_SOURCE_CODE_SHA256:
+        raise ValueError('historical source reader code SHA changed')
+    module = types.ModuleType('wang_legacy_source_reader_readonly')
+    exec(compile(code, f'{HISTORICAL_COMMIT}:{HISTORICAL_SOURCE_PATH}', 'exec'), module.__dict__)
+    return module.markdown_source_document(source)
 
 
 def _historical_applier() -> Any:
@@ -76,10 +91,10 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def verify_historical_replay(reviewed_path: Path) -> dict[str, str] | None:
+def verify_historical_replay(reviewed_path: Path, *, validation_claim_ids: set[str] | None = None) -> dict[str, str] | None:
     """Prove the exact old package came from its original, adjudicated inputs."""
 
-    bundle = inspect_legacy_bundle(reviewed_path)
+    bundle = inspect_legacy_bundle(reviewed_path, validation_claim_ids=validation_claim_ids) if validation_claim_ids is not None else inspect_legacy_bundle(reviewed_path)
     if bundle["reason"] is not None:
         return None
     package = json.loads(Path(bundle["package_path"]).read_text(encoding="utf-8"))
@@ -102,12 +117,26 @@ def verify_historical_replay(reviewed_path: Path) -> dict[str, str] | None:
     unsealed.pop("artifact_sha256", None)
     if overrides != compiled and overrides != unsealed:
         return None
+    review = json.loads(Path(bundle['review_path']).read_text(encoding='utf-8'))
+    sealed_batched = review.get('reviewer', {}).get('provider') == 'anthropic_batched'
     transcripts: dict[str, dict[str, Any]] = {}
     for source in package.get("source_documents") or []:
         source_id = str(source["source_id"])
         transcript_id = str(source.get("transcript_id") or source_id)
         if source.get("source_type") == "notes_manuscript":
-            payload, _, _ = markdown_source_document(source)
+            if sealed_batched:
+                # Sealed batches pin both physical Markdown and the rendered
+                # visual-aware review projection, not the old reader's bytes.
+                payload, raw, _ = markdown_source_document(source)
+                if (hashlib.sha256(raw).hexdigest() != source.get('source_file_sha256') or
+                        review_source_binding_mode(bundle['review_transcript_sha256'][source_id], raw, payload) is None):
+                    return None
+            elif validation_claim_ids is not None:
+                payload, raw, _ = historical_markdown_source(source)
+                if hashlib.sha256(raw).hexdigest() != bundle['review_transcript_sha256'][source_id]:
+                    return None
+            else:
+                payload, _, _ = markdown_source_document(source)
         else:
             source_path = Path(bundle["review_transcript_paths"][source_id])
             raw = json.loads(source_path.read_text(encoding="utf-8"))
@@ -115,15 +144,37 @@ def verify_historical_replay(reviewed_path: Path) -> dict[str, str] | None:
         if not isinstance(payload, dict):
             return None
         transcripts[transcript_id] = payload
-    replayed = _historical_applier()(package, overrides, transcripts)
+    if sealed_batched:
+        # This later sealed format is not the retired September-04 applier.
+        # Reconstruct its full operation graph and final review seal, then
+        # require exact equality below. No new model or database write.
+        from backend.pipeline import knowledge_consensus_applier as applier
+        replayed = applier.apply_consensus_overrides(package, overrides, transcripts)
+        applier.apply_final_ai_review_outcomes(replayed, review=review,
+            review_artifact_sha256=bundle['review_sha256'], adjudication=adjudication,
+            adjudication_artifact_sha256=bundle['adjudication_sha256'],
+            overrides_artifact_sha256=_sha(overrides_path))
+        replay_code_sha = _sha(Path(applier.__file__))
+    else:
+        replayed = _historical_applier()(package, overrides, transcripts)
+        replay_code_sha = HISTORICAL_CODE_SHA256
     reviewed = json.loads(reviewed_path.read_text(encoding="utf-8"))
     if replayed != reviewed:
         return None
-    return {
+    proof = {
         "historical_replay_sha256": sha256_json(replayed),
-        "historical_replay_code_sha256": HISTORICAL_CODE_SHA256,
+        "historical_replay_code_sha256": replay_code_sha,
         "overrides_sha256": _sha(overrides_path),
     }
+    if validation_claim_ids is not None and not sealed_batched and any(
+            s.get('source_type') == 'notes_manuscript' for s in package.get('source_documents', [])):
+        proof['historical_source_reader_code_sha256'] = HISTORICAL_SOURCE_CODE_SHA256
+    if sealed_batched and any(s.get('source_type') == 'notes_manuscript' for s in package.get('source_documents', [])):
+        from backend.pipeline import knowledge_source
+        proof['source_reader_code_sha256'] = _sha(Path(knowledge_source.__file__))
+    if sealed_batched:
+        proof['replay_contract'] = 'sealed_batched_exact_full_package_v1'
+    return proof
 
 
 def dry_run(

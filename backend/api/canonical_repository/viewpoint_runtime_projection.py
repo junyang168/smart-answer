@@ -140,7 +140,7 @@ class ViewpointKnowledgeProjection(ImmutableArtifact):
 
 
 def validate_runtime_authoring_graph(
-    collections: Mapping[str, Mapping[str, Mapping[str, Any]]]
+    collections: Mapping[str, Mapping[str, Mapping[str, Any]]], *, retained_route_revision_ids=()
 ) -> list[str]:
     """Return cross-collection findings for route and relation authoring records."""
     routes = collections.get("argument_routes", {})
@@ -176,6 +176,7 @@ def validate_runtime_authoring_graph(
             findings.append(f"{revision_id}: missing argument route {revision['argument_route_id']}")
         elif (
             route.get("current_revision_id") == revision_id
+            and revision_id not in retained_route_revision_ids
             and viewpoint_revision_id
             != viewpoints.get(str(route["conclusion_viewpoint_id"]), {}).get("current_revision_id")
         ):
@@ -281,7 +282,8 @@ def validate_runtime_authoring_graph(
             viewpoint = viewpoints.get(viewpoint_id)
             if not viewpoint:
                 findings.append(f"{relation_id}: missing {side} viewpoint {viewpoint_id}")
-            elif viewpoint.get("current_revision_id") != revision_id:
+            elif (relation.get('effective_state','active')=='active'
+                    and viewpoint.get("current_revision_id") != revision_id):
                 findings.append(f"{relation_id}: {side} viewpoint revision is stale")
             if viewpoint_revisions.get(revision_id, {}).get("viewpoint_id") != viewpoint_id:
                 findings.append(f"{relation_id}: invalid {side} viewpoint revision")

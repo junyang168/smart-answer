@@ -1,0 +1,842 @@
+"""One Claim/Evidence issue boundary, using the existing SQL/source compiler.
+
+Detection is not repair approval. Model origins and raw refusals stay intact.
+The caller supplies a physically bound owner policy, never inferred permission.
+There is no database, snapshot engine, retry loop or production CLI here.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Literal
+
+from pydantic import Field
+
+from backend.pipeline import source_reconciliation as c
+from backend.api.canonical_repository.viewpoint_foundation import sha256_json, semantic_record_sha
+
+VERSION = "wang_claim_issue_management_v1"
+CLAIM_FIELDS = frozenset({"statement", "claim_type", "attribution", "discourse_mode", "scripture_refs", "occurrences"})
+EVIDENCE_FIELDS = frozenset({"statement", "source_fragment_id", "source_fragment_ids"})
+ELIGIBILITY_FIELDS = frozenset({"support_eligibility", "valid_for_identity_review"})
+LINK_FIELDS = frozenset({"pinned_claim_revision", "component_locator", "evidence_bindings", "link_type"})
+HOLDS = c.HUMAN_HOLDS | {"human_hold", "withheld_unreviewed", "rejected"}
+# These are protected review states, not proof a human personally requested a
+# hold. Provenance must be inspected before attributing any restriction to owner.
+
+
+class Issue(c.Contract):
+    claim_id: str
+    claim_revision: int = Field(ge=1)
+    claim_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_id: str
+    source_file_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    evidence_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    spans: list[tuple[int, int, str]] = Field(min_length=1)
+    origin: Literal["admission", "gpt_proposal", "opus_initial", "opus_final", "deferred", "gemini_audit", "owner"]
+    report: c.FileBinding
+    reason: str = Field(min_length=1)
+    correction_used: bool = False
+    terminal_refusal: bool = False
+
+    @property
+    def issue_id(self):
+        # Renaming a reason/cause/finder or changing root/policy cannot buy calls.
+        return "CI-" + sha256_json({k: getattr(self, k) for k in (
+            "claim_id", "claim_revision", "claim_sha256", "source_id",
+            "source_file_sha256", "evidence_sha256", "spans")})
+
+
+class Policy(c.Contract):
+    schema_version: Literal["wang_claim_issue_management_v1"] = VERSION
+    authorization_id: str = Field(min_length=1)
+    authorization_quote: str = Field(min_length=1)
+    human_content_approval: Literal[False] = False
+    claim_fields: list[str]
+    evidence_fields: list[str]
+    # Explicit versioned opt-in. Old policies/materials retain their exact scope.
+    evidence_eligibility_review: bool = False
+    evidence_intake: Literal['wang_claim_evidence_intake_v1'] | None = None
+    link_fields: list[str]
+    # CVP body/identity/retirement is never implied by Claim permission.
+    cvp_permissions: list[c.Permission] = Field(default_factory=list)
+
+
+class Citation(c.Contract):
+    source_id: str
+    paragraph_key: str
+    exact_quote: str = Field(min_length=1)
+
+
+class Assessment(c.Contract):
+    issue_id: str
+    cause: Literal["already_sufficient", "evidence_binding", "claim_statement", "cvp_link", "source_unresolved"]
+    reason: str = Field(min_length=1)
+    citations: list[Citation] = Field(min_length=1)
+
+
+class Impact(c.Contract):
+    record_key: str
+    action: Literal["retain", "rebind", "update", "needs_direction"]
+    reason: str = Field(min_length=1)
+    citations: list[Citation] = Field(min_length=1)
+
+
+class Proposal(c.Proposal):
+    claim_assessments: list[Assessment] = Field(min_length=1)
+    cvp_impacts: list[Impact]
+
+
+from backend.pipeline.deferred_claim_repair import JsonProposal
+
+
+class JsonIssueProposal(JsonProposal):
+    claim_assessments: list[Assessment] = Field(min_length=1)
+    cvp_impacts: list[Impact]
+
+
+class IssuesDetected(ValueError):
+    def __init__(self, findings, *, origin, report, correction_used=False, terminal_refusal=False):
+        super().__init__("Claim management issue; no CVP commit before disposition")
+        self.findings, self.origin, self.report = findings, origin, report
+        self.correction_used, self.terminal_refusal = correction_used, terminal_refusal
+
+
+def empty_statement_initial_draft(materials, proposal):
+    """A missing typed statement is diagnostic input, never a write approval.
+
+    Use only the original initial review and correction of one exact admitted
+    Claim issue. Suggestions in reasons are not parsed into postimages.
+    """
+    issues = materials.get('claim_issue_context', {}).get('issues', [])
+    if (proposal.records or len(issues) != 1 or len(proposal.claim_assessments) != 1
+            or materials.get('owner_claim_completion') or not materials.get('sql_scope')
+            or not materials['manifest'].get('claim_issue')):
+        raise ValueError('empty statement draft requires one admitted SQL Claim issue')
+    issue = Issue.model_validate(issues[0])
+    assessment = proposal.claim_assessments[0]
+    key = c.key('claims', issue.claim_id)
+    before = c.index(materials['before_records'])
+    old = before.get(key)
+    pins = {(p['collection'], p['object_id']): p['pin'] for p in materials['sql_scope']['read_pins']}
+    permissions = [p for p in materials['manifest']['permissions']
+                   if c.key(p['collection'], p['object_id']) == key]
+    retained_claim_diagnostic = (assessment.cause in {'cvp_link', 'already_sufficient'}
+        and sum(d.record_key == key and d.action == 'retain' for d in proposal.dispositions) == 1)
+    if (old is None or assessment.issue_id != issue.issue_id
+            or assessment.cause not in {'claim_statement', 'cvp_link', 'already_sufficient'}
+            or (assessment.cause in {'cvp_link', 'already_sufficient'} and not retained_claim_diagnostic)
+            or old.get('revision', 1) != issue.claim_revision
+            or c.sha256_json({k:v for k,v in old.items() if k != 'revision'}) != issue.claim_sha256
+            or pins.get(('claims', issue.claim_id)) != [issue.claim_revision, issue.claim_sha256, False]
+            or old.get('review_status') in c.HUMAN_HOLDS | {'human_hold', 'rejected', 'withheld_unreviewed'}
+            or len(permissions) != 1 or permissions[0].get('create')
+            or 'statement' not in permissions[0]['fields']
+            or (not retained_claim_diagnostic
+                and sum(d.record_key == key and d.action == 'unresolved' for d in proposal.dispositions) != 1)):
+        raise ValueError('empty statement draft identity/permission/current pin mismatch')
+    if retained_claim_diagnostic:
+        if not any(d.action == 'unresolved' for d in proposal.dispositions):
+            raise ValueError('retained Claim link diagnostic requires a pending management subject')
+        if assessment.cause == 'already_sufficient':
+            return {'schema_version': 'claim_retained_source_initial_diagnostic_v1',
+                'claim_id': issue.claim_id, 'issue_id': issue.issue_id,
+                'content_write_authority': False, 'mandatory_original_unique_correction': True,
+                'explanation': 'The proposer retained the Claim and Evidence as sufficient, but disclosed '
+                    'a separate unresolved consumer. Review the exact original finding, full own source '
+                    'and ALL unchanged consumers in the original independent initial review. No Claim '
+                    'postimage is required merely to diagnose retention. This is not source approval, '
+                    'consumer resolution or write authority: unresolved consumers remain unapproved, '
+                    'cannot be edited without permission, and strict final/package/SQL/completion gates '
+                    'remain mandatory. Preserve the original single correction budget and raw decisions.'}
+        return {'schema_version': 'claim_retained_link_initial_diagnostic_v1',
+            'claim_id': issue.claim_id, 'issue_id': issue.issue_id,
+            'content_write_authority': False, 'mandatory_original_unique_correction': True,
+            'explanation': 'The proposer classified a connection issue and retained the Claim without '
+                'a typed write. Independently review the full own source and exact current graph. '
+                'No reason is parsed into a postimage; no unresolved connection or relation is approved. '
+                'Any correction stays within original permissions; unresolved CVP management must '
+                'remain a separate handoff, not a forced Claim rewrite or automatic supports change.'}
+    return {'schema_version': 'claim_statement_empty_initial_draft_v1',
+        'claim_id': issue.claim_id, 'issue_id': issue.issue_id,
+        'content_write_authority': False, 'mandatory_original_unique_correction': True,
+        'explanation': 'No typed postimage was returned. Review the original assessment and full own source; '
+            'do not approve or programmatically parse a suggestion inside a reason. The original unique '
+            'correction must return the complete Claim and all necessary owned-link postimages within '
+            'the existing permissions. The program calculates the returned complete Claim SHA before '
+            'independent review; the model must not abandon a postimage because it cannot compute SHA. '
+            'All other pending dependencies remain unchanged and unapproved. Strict final validation '
+            'and the original independent final review remain mandatory.'}
+
+
+def prior_management_action(evidence, findings):
+    action=evidence.get('action',{})
+    materials=action.get('materials',{})
+    context=materials.get('claim_issue_context') or materials.get('claim_management_resolution')
+    if context and {f['claim_id'] for f in findings}&{i['claim_id'] for i in context['issues']}:
+        return context.get('management_action_id') or action['action_id']
+    return None
+
+
+def make_issue(claim, evidence, source, *, spans, origin, report, reason,
+               correction_used=False, terminal_refusal=False, snapshots=None, fragments=()):
+    statement = claim["statement"]
+    if len(spans) != len(set(tuple(s) for s in spans)) or any(
+            lo < 0 or hi <= lo or statement[lo:hi] != text for lo, hi, text in spans):
+        raise ValueError("issue span is not an exact current Claim component")
+    c.bound_bytes(report, snapshots)
+    return Issue(claim_id=claim["claim_id"], claim_revision=claim["revision"],
+        claim_sha256=semantic_record_sha(claim), source_id=source["source_id"],
+        source_file_sha256=source["source_file_sha256"],
+        evidence_sha256=sha256_json({"evidence":evidence,"fragments":sorted(fragments,key=lambda f:f['fragment_id'])}),
+        spans=sorted(spans), origin=origin, report=report, reason=reason,
+        correction_used=correction_used, terminal_refusal=terminal_refusal)
+
+
+def review_findings(proposal, review):
+    """Typed codes only: no matching prose, no relabelling link-only findings."""
+    values = []
+    by_claim = {r.claim_id: r for r in proposal.claim_decisions}
+    if review is None:
+        for row in proposal.claim_decisions:
+            for component in row.components:
+                if component.disposition == 'deferred':
+                    values.append({'claim_id':row.claim_id,
+                        'spans':[(s.start_char,s.end_char,s.exact_text) for s in component.spans],
+                        'reason':component.reason})
+        return values
+    for row in review.change_reviews:
+        if getattr(row, "coverage_requirement", None) not in {"evidence_insufficient", "attribution_unresolved", "source_conflict"}:
+            continue
+        component = by_claim[row.claim_id].components[row.component_index]
+        values.append({"claim_id": row.claim_id,
+            "spans": [(s.start_char, s.end_char, s.exact_text) for s in component.spans],
+            "reason": row.coverage_reason})
+    return values
+
+
+def audit_claim_findings(packet, report):
+    """Only GPT-upheld layer-3 Claim findings, never rejected/link-only cases."""
+    upheld={a['item_id'] for a in report['actions'] if a['verdict']=='audit_objection_upheld'}
+    return [{'claim_id':i['claim']['claim_id'],
+             'spans':[(0,len(i['claim']['statement']),i['claim']['statement'])],
+             'reason':json.dumps(next(a for a in report['actions'] if a['item_id']==i['item_id']),ensure_ascii=False)}
+            for i in packet['items'] if i['item_id'] in upheld and i['item_id'].startswith('3:')]
+
+
+def declined_supports_findings(targets, review):
+    """A declined link proposal requests Claim/source classification, not repair approval.
+
+    No reason-text matching or invented typed verdict: the original full verdict
+    is diagnostic material. Claim management may conclude cvp_link instead of
+    proposing any source change. Its existing policy and independent review are
+    still required; the declined link never receives another review budget.
+    """
+    claims = {}
+    links = set()
+    for target in targets:
+        claim = target['claim']; cid = claim['claim_id']
+        link=target['before_link']; lid=link['viewpoint_claim_link_id']
+        if (link['claim_id']!=cid or lid in links or not claim['statement']
+                or link.get('effective_state','active')!='active'
+                or link['link_type'] not in {'equivalent_full','equivalent_component'}):
+            raise ValueError('declined supports foreign/duplicate/inactive scope')
+        links.add(lid)
+        if cid in claims and claims[cid] != claim:
+            raise ValueError('declined supports conflicting Claim generations')
+        claims[cid] = claim
+    verdicts = review.verdicts
+    if (not claims or len(verdicts) != len(claims)
+            or {v.claim_id for v in verdicts} != set(claims)):
+        raise ValueError('declined supports review population mismatch')
+    return [{'claim_id':v.claim_id,
+             'spans':[(0,len(claims[v.claim_id]['statement']),claims[v.claim_id]['statement'])],
+             'reason':json.dumps({'diagnostic_origin':'declined_supports_postimage',
+                 'content_approval':False,'verdict':v.model_dump(mode='json'),
+                 'connection_ids':[t['before_link']['viewpoint_claim_link_id'] for t in targets
+                                   if t['claim']['claim_id']==v.claim_id]},ensure_ascii=False)}
+            for v in verdicts if not v.approved and v.problems]
+
+
+def declined_supports_dependency(issue, value, claim_state, *, action=None):
+    """Admit only a current, already-scoped dependency for source diagnosis.
+
+    Authenticate the actual declined transport rather than trusting finder prose.
+    This does not add it to the frozen group or approve any content change.
+    """
+    from pathlib import Path
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact,read_saved_model_response,subscription_client
+    from backend.pipeline.viewpoint_audit_link_repair import link_review_adapter,PROMPT
+    from backend.pipeline.viewpoint_authorized_source_repair_357 import Review
+    report=Path(issue.report.path); action_root=report.parent
+    if (issue.origin not in {'opus_initial','gpt_proposal'}
+            or report.name not in {'raw-opus.json','raw-gpt.json'}
+            or value.get('execution_roots',{}).get(action_root.name)!=str(action_root)
+            or claim_state['retired'] or claim_state['payload'].get('review_status') in HOLDS):
+        raise ValueError('declined supports dependency lacks original bound action')
+    packet=read_artifact(action_root/'packet.json')
+    if packet.get('schema_version')!='wang_audit_link_repair_packet_v1':
+        raise ValueError('declined supports dependency wrong packet')
+    targets=packet['targets']; ids={t['claim']['claim_id'] for t in targets}
+    provider,model=('claude','claude-opus-5-5') if report.name=='raw-opus.json' else ('codex','gpt-6.1-sol')
+    expected_origin='opus_initial' if provider=='claude' else 'gpt_proposal'
+    if issue.origin!=expected_origin:raise ValueError('declined supports dependency reviewer origin drift')
+    adapter=link_review_adapter(subscription_client(provider,model,'high'),PROMPT,
+        contextual_semantics=True,multiple_targets_per_claim=len(ids)!=len(targets))
+    review=Review.model_validate(read_saved_model_response(adapter,packet,report))
+    findings=declined_supports_findings(targets,review)
+    matching=[f for f in findings if f['claim_id']==issue.claim_id]
+    current=[t['claim'] for t in targets if t['claim']['claim_id']==issue.claim_id]
+    admitted={(p['collection'],p['object_id']):p['pin'] for p in value['reviewed']['evidence']['read_pins']}
+    if action is not None:
+        materials=action.get('materials',{})
+        if (action.get('action_id')!=action_root.name or action.get('kind')!='audit_supports_correction'
+                or action.get('materials_sha256')!=sha256_json(materials)
+                or materials.get('packet')!=packet):
+            raise ValueError('declined supports dependency SQL action proof drift')
+        rows=materials.get('read_pins',[])
+        if len({(p['collection'],p['object_id']) for p in rows})!=len(rows):
+            raise ValueError('declined supports dependency duplicate SQL action pins')
+        admitted={(p['collection'],p['object_id']):p['pin'] for p in rows}
+    if (len(matching)!=1 or matching[0]['reason']!=issue.reason
+            or matching[0]['spans']!=[tuple(s) for s in issue.spans]
+            or not current or any(c!=claim_state['payload'] for c in current)
+            or admitted.get(('claims',issue.claim_id))!=[claim_state['revision'],claim_state['content_sha256'],False]
+            or issue.claim_revision!=claim_state['payload']['revision']
+            or issue.claim_sha256!=semantic_record_sha(claim_state['payload'])):
+        raise ValueError('declined supports dependency current scope/pin/finding drift')
+
+
+def eligibility_review_candidate(evidence, states, sid):
+    """A classification may be reviewed; this is NOT content approval."""
+    if (evidence.get('support_eligibility') != 'context_only'
+            or evidence.get('review_status') in HOLDS
+            or evidence.get('speaker') != 'professor' or evidence.get('stance') != 'asserted'
+            or not evidence.get('discourse_role')):
+        return False
+    fragments = bound_fragments([evidence], lambda fid: states.get(c.key('source_fragments', fid), {}))
+    return bool(fragments) and all(
+        f.get('source_id') == sid and f.get('review_status') not in HOLDS
+        and f.get('verbatim_excerpt') for f in fragments)
+
+
+def eligibility_profile(packet):
+    context = packet.get('claim_issue_context', {})
+    binding = context.get('policy')
+    return bool(binding and read_policy(binding).evidence_eligibility_review)
+
+
+def policy_permissions(policy, states, sid, claim_ids, *, retained_occurrences=(), current_anchor_scope=False):
+    if (not set(policy.claim_fields) <= CLAIM_FIELDS or not set(policy.evidence_fields) <= EVIDENCE_FIELDS
+            or not set(policy.link_fields) <= LINK_FIELDS):
+        raise ValueError("Claim issue policy has unsupported fields/hold/source expansion")
+    inv = c.claim_inventory(states, sid, claim_ids, retained_occurrences=retained_occurrences)
+    affected = set(inv["affected_keys"])
+    result = []
+    for k in sorted(affected):
+        col, oid = c.split_key(k)
+        fields = policy.claim_fields if col == "claims" and oid in claim_ids else (
+            policy.evidence_fields if col == "evidence_steps" else policy.link_fields if col == "viewpoint_claim_links" else [])
+        if col=='evidence_steps' and policy.evidence_eligibility_review and eligibility_review_candidate(states[k],states,sid):
+            result.append(c.Permission(collection=col,object_id=oid,fields=sorted(ELIGIBILITY_FIELDS)))
+            continue
+        if fields and states[k].get("review_status") not in HOLDS:
+            if col == "evidence_steps" and (states[k].get("valid_for_identity_review") is False
+                    or states[k].get("support_eligibility") not in {"eligible", "eligible_candidate", "eligible_with_label"}):
+                if policy.evidence_eligibility_review and eligibility_review_candidate(states[k], states, sid):
+                    # Qualification only: do not rewrite speech/ownership to buy eligibility.
+                    result.append(c.Permission(collection=col, object_id=oid, fields=sorted(ELIGIBILITY_FIELDS)))
+                continue
+            if col == 'claims' and not current_anchor_scope and any(r['claim_id'] == oid for r in retained_occurrences):
+                fields = set(fields) - {'occurrences'}
+            result.append(c.Permission(collection=col, object_id=oid, fields=sorted(set(fields))))
+    if policy.evidence_intake:
+        from backend.pipeline.claim_evidence_intake import BUCKETS
+        for cid in claim_ids:
+            k = c.key('claims', cid)
+            if states[k].get('review_status') in HOLDS:
+                raise ValueError('Evidence intake cannot append to held Claim')
+            fields = {'evidence_step_ids'} | (BUCKETS & states[k].keys())
+            previous = next((p for p in result if p.key == k), None)
+            if previous:
+                previous.fields = sorted(set(previous.fields) | fields)
+            else:
+                result.append(c.Permission(collection='claims', object_id=cid, fields=sorted(fields)))
+        result.append(c.Permission(collection='evidence_steps', object_id='E-claim-intake-allocation-slot',
+            create=True, parent_id=sid, fields=sorted(set(c.KNOWLEDGE_COLLECTIONS['evidence_steps'][0].model_fields)
+                                                   | {'valid_for_identity_review'})))
+    if policy.evidence_fields or policy.evidence_intake:
+        result.append(c.Permission(collection="source_fragments", object_id="FR-claim-issue-allocation-slot",
+            create=True, parent_id=sid, fields=sorted(c.KNOWLEDGE_COLLECTIONS["source_fragments"][0].model_fields)))
+    for permission in policy.cvp_permissions:
+        if permission.collection not in {"canonical_viewpoints", "viewpoint_revisions", "viewpoint_relations"}:
+            raise ValueError("CVP permission crosses management boundary")
+        target = c.key("canonical_viewpoints", permission.parent_id) if permission.create else permission.key
+        if target not in affected:
+            raise ValueError("CVP permission is not in the exact affected set")
+        if "effective_state" in permission.fields or "identity_status" in permission.fields:
+            raise ValueError("CVP retirement/identity needs a separate exact direction")
+        result.append(permission)
+    return result
+
+
+def validate_authority(manifest, states, snapshots=None):
+    context = json.loads(c.bound_bytes(manifest.claim_issue, snapshots))
+    if context.get("schema_version") != VERSION:
+        raise ValueError("unknown Claim issue context")
+    policy = read_policy(context["policy"], snapshots)
+    issues = [Issue.model_validate(r) for r in context["issues"]]
+    if context.get('issue_identities') != issue_identities(issues):
+        raise ValueError('program Claim issue routing identities drift')
+    ids = sorted({i.claim_id for i in issues})
+    if context.get("claim_ids") != ids or len({i.issue_id for i in issues}) != len(issues):
+        raise ValueError("Claim issue denominator duplicate/drift")
+    if (manifest.deferred_repair or manifest.prior_updates or len(manifest.current_sources) != 1
+            or manifest.current_sources[0] != manifest.before_source):
+        raise ValueError("Claim issue cannot change/migrate source or reuse deferred budget")
+    for issue in issues:
+        claim = states[c.key("claims", issue.claim_id)]
+        source = states[c.key("source_documents", issue.source_id)]
+        evidence = [states[c.key("evidence_steps", eid)] for eid in sorted(claim["evidence_step_ids"])]
+        fragments = bound_fragments(evidence, lambda fid:states[c.key('source_fragments',fid)])
+        rebuilt = make_issue(claim, evidence, source, spans=issue.spans, origin=issue.origin,
+            report=issue.report, reason=issue.reason, correction_used=issue.correction_used,
+            terminal_refusal=issue.terminal_refusal, snapshots=snapshots, fragments=fragments)
+        if issue.source_id != manifest.source_id or issue != rebuilt or claim.get("review_status") in HOLDS:
+            raise ValueError("issue current Claim/source/evidence identity/hold drift")
+    auth = json.loads(c.bound_bytes(manifest.authorization, snapshots))
+    if (auth.get("claim_issue") != manifest.claim_issue.model_dump() or auth.get("policy") != context["policy"]
+            or auth.get("authorization_id") != policy.authorization_id):
+        raise ValueError("issue policy not bound to actual owner authority")
+    profile=context.get('current_occurrence_anchor_scope')
+    if profile not in (None, 'current_source_anchors_historical_exact_v1'):
+        raise ValueError('unknown retained occurrence anchor scope')
+    expected=policy_permissions(policy, states, manifest.source_id, ids,
+        retained_occurrences=context.get('retained_occurrence_context', []), current_anchor_scope=bool(profile))
+    if context.get('scope_amendment'):
+        from backend.pipeline.claim_issue_rescope import permissions
+        direction=json.loads(c.bound_bytes(context['scope_amendment'],snapshots))
+        from backend.pipeline.claim_evidence_completion import evidence_permission_ids
+        expected=[p for p in expected if p.collection!='evidence_steps' or p.object_id in evidence_permission_ids(direction)]
+        from backend.pipeline.claim_evidence_completion import direction_for, merge_permissions
+        extra=permissions(context,states,snapshots)
+        expected=merge_permissions(expected,extra) if direction_for(context,snapshots) else expected+extra
+    if manifest.permissions != expected:
+        raise ValueError("Claim/CVP issue permission set exceeds separate domain authority")
+    return context
+
+
+def read_policy(binding, snapshots=None):
+    value = json.loads(c.bound_bytes(binding, snapshots))
+    if "artifact_sha256" in value:
+        stated = value.pop("artifact_sha256")
+        if stated != sha256_json(value):
+            raise ValueError("owner policy seal drift")
+    return Policy.model_validate(value)
+
+
+def intake(store, run_id, findings, *, origin, report, correction_used=False, terminal_refusal=False):
+    """All finders share exact current identity and the existing SQL run table."""
+    records = store.read_cvp_context(sorted({f["claim_id"] for f in findings}))
+    issues = []
+    for finding in findings:
+        claim = records["claims", finding["claim_id"]]["payload"]
+        evidence = [records["evidence_steps", eid]["payload"] for eid in sorted(claim["evidence_step_ids"])]
+        fragments = bound_fragments(evidence, lambda fid:records['source_fragments',fid]['payload'])
+        source_ids = {records["source_fragments", fid]["payload"]["source_id"] for e in evidence
+                      for fid in set(e.get("source_fragment_ids", [])) | ({e["source_fragment_id"]} if e.get("source_fragment_id") else set())}
+        if len(source_ids) != 1:
+            raise ValueError("Claim issue has no unique own source; engineering/source owner must supply proof")
+        source = records["source_documents", next(iter(source_ids))]["payload"]
+        issue = make_issue(claim, evidence, source, spans=finding["spans"], origin=origin,
+            report=report, reason=finding["reason"], correction_used=correction_used,
+            terminal_refusal=terminal_refusal, fragments=fragments)
+        store.register_claim_issue(run_id, issue.model_dump(mode="json"))
+        issues.append(issue)
+    return issues
+
+
+def bound_fragments(evidence, read):
+    ids={fid for e in evidence for fid in set(e.get('source_fragment_ids',[])) |
+         ({e['source_fragment_id']} if e.get('source_fragment_id') else set())}
+    return [read(fid) for fid in sorted(ids)]
+
+
+def issue_identities(issues):
+    # Opaque routing IDs are supplied, never calculated from hashes by a model.
+    return [{'issue_id':i.issue_id,'claim_id':i.claim_id,'spans':[list(s) for s in i.spans]} for i in issues]
+
+
+def manifest_for_issues(store, run_id, issues, policy_binding, root):
+    """Program scopes a pre-authorized policy; no human content approval forged."""
+    from backend.pipeline.source_reconciliation_runner import write, binding
+    issues = [Issue.model_validate(i) if isinstance(i, dict) else i for i in issues]
+    if not issues or len({i.source_id for i in issues}) != 1:
+        raise ValueError("issue repair uses one own source at a time, not a mixed-source extraction")
+    saved = store.get_cvp_group(run_id)
+    if not saved:
+        raise ValueError("issue repair changed original group membership")
+    for i in issues:
+        if i.claim_id not in saved['claim_ids']:
+            from backend.pipeline.claim_owner_revision import dependency_issue
+            action=store.get_cvp_action(run_id,Path(i.report.path).parent.name) if i.origin in {'opus_initial','gpt_proposal'} else None
+            dependency_issue(i,saved,store.get_record_state('claims',i.claim_id),action=action)
+    policy = read_policy(policy_binding)
+    sid = issues[0].source_id
+    records = store.read_affected_context([("claims", i.claim_id) for i in issues])
+    states = {c.key(col, oid): r["payload"] for (col, oid), r in records.items() if not r.get("retired")}
+    doc = states[c.key("source_documents", sid)]
+    source = c.FileBinding(path=doc["source_path"], file_sha256=doc["source_file_sha256"])
+    c.source_snapshot(source, source=doc)  # physical/body qualification before any model
+    ids = sorted({i.claim_id for i in issues})
+    retained = []
+    aliases = {sid, doc.get('transcript_id'), doc.get('canonical_source_id')} - {None, ''}
+    for cid in ids:
+        if any(not aliases.intersection(set(c.strings(o))) for o in states[c.key('claims', cid)]['occurrences']):
+            from backend.pipeline.claim_retained_occurrence_context import build
+            receipt = build(store, cid, sid)
+            pin = receipt['historical_source_pin']
+            row = store.get_record_state(pin['collection'], pin['object_id'])
+            states[c.key(pin['collection'], pin['object_id'])] = row['payload']
+            retained.append(receipt)
+    permissions = policy_permissions(policy, states, sid, ids, retained_occurrences=retained,
+                                     current_anchor_scope=True)
+    definition = store.get_cvp_campaign(saved["campaign_sha256"])
+    progress = {r["group_key"]:r for r in store.cvp_campaign_progress(saved["campaign_sha256"])}
+    groups = [c.Group(group_key=g["group_key"], claim_ids=g["claim_ids"],
+                     revisit_required=p.get("revisit_required", False),
+                     independent_audit_complete=p.get("independent_audit_complete", True))
+              for g in definition["groups"]
+              for p in [progress.get(g["group_key"], {})]]
+    write(root/"membership.json", {"groups":[{"group_key":g.group_key,"claim_ids":g.claim_ids} for g in groups]})
+    context = {"schema_version":VERSION, "claim_ids":ids, "issues":[i.model_dump(mode="json") for i in issues],
+               "issue_identities":issue_identities(issues),
+               "anchor_binding_validation_profile":"declared_local_own_containing_v1",
+               "policy":policy_binding, "original_run_id":run_id}
+    if retained:
+        context['retained_occurrence_context'] = retained
+        context['current_occurrence_anchor_scope'] = 'current_source_anchors_historical_exact_v1'
+    write(root/"issue-context.json", context)
+    issue_binding = binding(root/"issue-context.json")
+    write(root/"scoped-authorization.json", {"source_id":sid, "authorization_id":policy.authorization_id,
+        "authorization_quote":policy.authorization_quote, "human_content_approval":False,
+        "policy":policy_binding,"claim_issue":issue_binding,"permissions":[p.model_dump() for p in permissions]})
+    return c.Manifest(source_id=sid, before_source=source, current_sources=[source],
+        # Source is unchanged; full body remains model context, but this is not
+        # a new sentence-extraction campaign over unrelated sermon paragraphs.
+        authorization=binding(root/"scoped-authorization.json"), authorized_paragraph_keys=[],
+        permissions=permissions, groups=groups, campaign_claim_ids=[cid for g in groups for cid in g.claim_ids],
+        accepted_membership=binding(root/"membership.json"), created_at="program-scoped-existing-owner-policy",
+        claim_issue=issue_binding)
+
+
+def handle_issues(store, run_id, detected, *, root, policy_binding=None, ports=None, prior_management_action=None):
+    """Persist discovery before permission/terminal checks; never ask for 'continue'."""
+    issues = intake(store, run_id, detected.findings, origin=detected.origin, report=detected.report,
+                    correction_used=detected.correction_used, terminal_refusal=detected.terminal_refusal)
+    existing = [store.get_claim_issue(i.issue_id) for i in issues]
+    if prior_management_action:
+        raise ValueError('Claim issue after joint management repair '+prior_management_action+
+                         '; original facts retained, no automatic second repair cycle')
+    if any(r["terminal_refusal"] or r["correction_used"] for r in existing):
+        raise ValueError("existing same-issue terminal/correction budget requires exact owner decision")
+    if policy_binding is None:
+        raise ValueError("Claim issue recorded; owner must approve bounded Claim/Evidence and CVP fields once")
+    from pathlib import Path
+    from backend.pipeline.cvp_sql_actions import execute_source_action
+    from backend.pipeline.source_reconciliation_runner import read, write, body
+    source_sets = {}
+    for issue in issues:
+        source_sets.setdefault(issue.source_id, []).append(issue)
+    # Each own-source action is exact-once. A partially completed multi-source
+    # intake does not discard earlier commits or reset later calls.
+    results = []
+    for sid, selected in sorted(source_sets.items()):
+        identity = sha256_json(sorted(i.issue_id for i in selected))
+        work = Path(root)/identity
+        manifest_path = work/"manifest.json"
+        if manifest_path.exists():
+            manifest = c.Manifest.model_validate(body(read(manifest_path)))
+            context = json.loads(c.bound_bytes(manifest.claim_issue))
+            if context["policy"] != policy_binding:
+                raise ValueError("original issue policy must resume, not reset")
+        else:
+            manifest = manifest_for_issues(store, run_id, selected, policy_binding, work)
+            write(manifest_path, manifest.model_dump(mode="json"))
+        results.append(execute_source_action(store, run_id, manifest.model_dump(mode="json"), root=work/"action", ports=ports))
+    if results and all(r.get('status')=='already_applied' for r in results):
+        raise ValueError('same adjudicated Claim issue remains unresolved after its committed repair; no repair loop')
+    return results
+
+
+def normalize_proposal(frozen, response):
+    """Reuse only declared deterministic shape normalization BEFORE review."""
+    from backend.pipeline.deferred_claim_repair import decode_proposal, normalize_proposal as normalize
+    fields = {k: response[k] for k in ("claim_assessments", "cvp_impacts")}
+    base = {k: v for k, v in response.items() if k not in fields}
+    normalized = normalize(frozen, decode_proposal(base))
+    return Proposal.model_validate({**normalized.model_dump(), **fields})
+
+
+def retained_impact_context(frozen, proposal, post):
+    """Classify exact unchanged SQL-pinned auxiliary impact rows, not CVP members.
+
+    Never drop model rows/reasons or accept these as semantic/write approval.
+    Required CVP rows still form an exact complete, duplicate-free denominator.
+    """
+    before=c.index(frozen['before_records'])
+    required={k for k in set(frozen['inventory']['affected_keys'])|{r.key for r in proposal.records}
+              if c.split_key(k)[0] in {'viewpoint_claim_links','canonical_viewpoints',
+                                       'viewpoint_revisions','viewpoint_relations'}}
+    actual=[i.record_key for i in proposal.cvp_impacts]
+    extra=set(actual)-required
+    if not extra:return None
+    context=frozen.get('claim_issue_context',{})
+    if not context.get('issues') or not frozen.get('sql_scope'):
+        raise ValueError('retained impact context requires exact SQL Claim issue')
+    if len(actual)!=len(set(actual)) or not required<=set(actual):
+        raise ValueError('retained impact context cannot omit/duplicate required CVPs')
+    pins={(p['collection'],p['object_id']):p['pin'] for p in frozen['sql_scope']['read_pins']}
+    dispositions={d.record_key:d.action for d in proposal.dispositions}
+    impacts={i.record_key:i.action for i in proposal.cvp_impacts}
+    permissions={c.key(p['collection'],p['object_id']) for p in frozen['manifest']['permissions']}
+    proposed={r.key for r in proposal.records}
+    history={'viewpoint_identity_candidates','viewpoint_identity_decisions',
+             'argument_routes','argument_route_revisions'}
+    for k in extra:
+        col,ident=c.split_key(k);old=before.get(k)
+        if (col not in history|{'claim_relations','knowledge_relations'}
+                or k not in frozen['inventory']['affected_keys'] or old is None
+                or k in permissions or k in proposed or post.get(k)!=old
+                or old.get('review_status') in HOLDS
+                or pins.get((col,ident))!=[old.get('revision',1),
+                    sha256_json({f:v for f,v in old.items() if f!='revision'}),False]
+                or impacts[k]!='retain'
+                or dispositions.get(k) != ('impact_only' if col in history else 'retain')):
+            raise ValueError('retained impact context is changed/foreign/stale/held/writable')
+    return {'schema_version':'claim_retained_auxiliary_impact_context_v1',
+        'record_keys':sorted(extra),'required_cvp_record_keys':sorted(required),
+        'content_write_authority':False,'semantic_approval':False,
+        'explanation':'These additional model impact rows are exact unchanged, nonwritable SQL-pinned '
+            'source relations or historical identity/route context, not additional CVP members. '
+            'All original impact rows, reasons and dispositions remain visible to the full independent review. '
+            'They grant no relation/route/identity mutation, new membership approval or completion waiver.'}
+
+
+def statement_repair_for_binding_diagnosis(frozen, proposal, before, post, assessment, issue):
+    """Root cause is not the authorized operation; never rewrite the assessment.
+
+    A binding deficiency can be addressed by a narrower statement instead of
+    promoting its Evidence. Only an explicit statement/occurrence permission
+    and completely unchanged Evidence/fragment graph permit this route.
+    The actual full Claim postimage still needs independent terminal approval.
+    """
+    k=c.key('claims',issue.claim_id)
+    if assessment.cause!='evidence_binding' or before[k].get('statement')==post[k].get('statement'):
+        return False
+    permissions=[p for p in frozen['manifest']['permissions']
+                 if not p['create'] and c.key(p['collection'],p['object_id'])==k]
+    changed={f for f in set(before[k])|set(post[k])
+             if before[k].get(f)!=post[k].get(f)}-c.PROVENANCE-{'revision'}
+    candidates=[r for r in proposal.records if r.key==k]
+    dispositions=[d for d in proposal.dispositions if d.record_key==k]
+    if (len(permissions)!=1 or 'statement' not in permissions[0]['fields']
+            or len(candidates)!=1 or candidates[0].payload!=post[k]
+            or len(dispositions)!=1 or dispositions[0].action!='update'
+            or not changed<= {'statement','occurrences'}
+            or not changed<=set(permissions[0]['fields'])
+            or before[k].get('review_status') in HOLDS
+            or any(post.get(r)!=v for r,v in before.items()
+                   if r.startswith(('evidence_steps/','source_fragments/','source_documents/')))
+            or any(r not in before for r in post
+                   if r.startswith(('evidence_steps/','source_fragments/','source_documents/')))):
+        raise ValueError('binding diagnosis cannot rewrite Claim without exact proposed update/permission/unchanged Evidence graph')
+    return True
+
+
+def validate_resolution(frozen, proposal, post, *, review_only=False):
+    proposal = Proposal.model_validate(proposal.model_dump())
+    before = c.index(frozen["before_records"])
+    context = frozen["claim_issue_context"]
+    issues = {Issue.model_validate(r).issue_id: Issue.model_validate(r) for r in context["issues"]}
+    policy = read_policy(context['policy'], frozen.get('physical_snapshots'))
+    from backend.pipeline.claim_evidence_intake import validate as validate_intake
+    validate_intake(frozen, proposal, before, post)
+    actual = [a.issue_id for a in proposal.claim_assessments]
+    if len(actual) != len(set(actual)) or set(actual) != set(issues):
+        raise ValueError("every exact Claim issue requires one assessment")
+    paragraphs = {frozen["manifest"]["source_id"]: frozen["after"][0]["paragraphs"],
+                  **{s["source_id"]: s["paragraphs"] for s in frozen["context_sources"]}}
+    def citations(values, *, own=None):
+        for value in values:
+            text = paragraphs.get(value.source_id, {}).get(value.paragraph_key, {}).get("text", "")
+            if (own and value.source_id != own) or text.count(value.exact_quote) != 1:
+                raise ValueError("assessment quote not exact own approved body; editorial heading is not evidence")
+    for a in proposal.claim_assessments:
+        issue = issues[a.issue_id]
+        citations(a.citations, own=issue.source_id)
+        if a.cause == "source_unresolved":
+            raise ValueError("source/attribution uncertainty needs content owner")
+        k = c.key("claims", issue.claim_id)
+        changed_statement = any(before[k].get(f) != post[k].get(f) for f in ("statement", "claim_type", "attribution", "discourse_mode", "scripture_refs"))
+        statement_route=statement_repair_for_binding_diagnosis(frozen,proposal,before,post,a,issue)
+        if changed_statement and a.cause != "claim_statement" and not statement_route:
+            raise ValueError("Evidence/link repair cannot rewrite the Claim meaning")
+        if a.cause in {"already_sufficient", "cvp_link"} and post[k] != before[k]:
+            raise ValueError("correct Claim must be retained")
+        if a.cause in {'already_sufficient','cvp_link'}:
+            for eid in before[k]['evidence_step_ids']:
+                ek=c.key('evidence_steps',eid)
+                if post[ek]!=before[ek]:
+                    raise ValueError('correct Claim/Evidence must be retained; link diagnosis is not Evidence permission')
+        if not policy.evidence_intake and post[k].get('evidence_step_ids') != before[k].get('evidence_step_ids'):
+            raise ValueError('Claim issue cannot replace the existing Evidence ownership buckets')
+        if a.cause in {'evidence_binding','claim_statement'}:
+            evidence=[post[c.key('evidence_steps',eid)] for eid in post[k]['evidence_step_ids']]
+            usable=[e for e in evidence if e.get('valid_for_identity_review') is not False
+                    and e.get('support_eligibility') in {'eligible','eligible_candidate','eligible_with_label'}
+                    and e.get('review_status') not in HOLDS]
+            fragments=bound_fragments(usable,lambda fid:post[c.key('source_fragments',fid)])
+            bound_citations=[any(f.get('source_id')==cite.source_id and f.get('paragraph_key')==cite.paragraph_key
+                                and cite.exact_quote in f.get('verbatim_excerpt','') for f in fragments)
+                             for cite in a.citations]
+            # A statement diagnosis may cite additional own-body context to
+            # explain why the OLD wording was too strong. Those citations are
+            # not new Evidence: all were authenticated above, and the actual
+            # after-state must still have bound supporting citations plus the
+            # independent complete-postimage review. A binding repair, in
+            # contrast, must materialize every claimed new Evidence citation.
+            qualification_only = [e for e in evidence if c.key('evidence_steps', e['evidence_step_id']) in before
+                if post[c.key('evidence_steps', e['evidence_step_id'])] != before[c.key('evidence_steps', e['evidence_step_id'])]]
+            qualification_only = (qualification_only if policy.evidence_eligibility_review and post[k] == before[k]
+                and qualification_only and all(
+                    {f:v for f,v in c._semantic(e).items() if f not in ELIGIBILITY_FIELDS}
+                    == {f:v for f,v in c._semantic(before[c.key('evidence_steps', e['evidence_step_id'])]).items()
+                        if f not in ELIGIBILITY_FIELDS}
+                    for e in qualification_only)
+                and all(post[fk] == before.get(fk) for fk in post if fk.startswith('source_fragments/')) else [])
+            # Qualification-only review does not propose any new quote binding.
+            # Additional full-own-body diagnostic citations stay diagnostic;
+            # each requalified Evidence must still have an actual bound cite.
+            if a.cause == 'evidence_binding' and qualification_only:
+                represented = all(any(
+                    f.get('source_id') == cite.source_id and f.get('paragraph_key') == cite.paragraph_key
+                    and cite.exact_quote in f.get('verbatim_excerpt', '')
+                    for f in bound_fragments([e], lambda fid: post[c.key('source_fragments', fid)])
+                    for cite in a.citations) for e in qualification_only)
+            else:
+                represented=all(bound_citations) if a.cause=='evidence_binding' and not statement_route else any(bound_citations)
+            if not represented and a.cause=='evidence_binding' and context.get('complete_input_repair'):
+                from backend.pipeline.claim_citation_purpose_review import items
+                purposes=items(frozen,proposal,post)
+                represented=any(bound_citations) and all(bound or any(
+                    p['record_key']==f'claim_citation_purpose/{a.issue_id}/{index}' for p in purposes)
+                    for index,bound in enumerate(bound_citations))
+            if not represented:
+                raise ValueError('Evidence diagnosis must be represented by actual eligible bound Evidence')
+            if a.cause=='evidence_binding' and post[k]==before[k] and all(
+                    post[c.key('evidence_steps',eid)]==before[c.key('evidence_steps',eid)]
+                    for eid in before[k]['evidence_step_ids']):
+                raise ValueError('Evidence binding repair must change an actual binding; otherwise classify already sufficient')
+    required = {k for k in set(frozen["inventory"]["affected_keys"])|{row.key for row in proposal.records} if c.split_key(k)[0] in {
+        "viewpoint_claim_links", "canonical_viewpoints", "viewpoint_revisions", "viewpoint_relations"}}
+    actual = [i.record_key for i in proposal.cvp_impacts]
+    extra=set(actual)-required
+    retained_identity_extras=(frozen.get('owner_claim_completion') and required<=set(actual)
+        and all(c.split_key(k)[0] in {'viewpoint_identity_candidates','viewpoint_identity_decisions'}
+            and k in before and post[k]==before[k]
+            and next(d.action for d in proposal.dispositions if d.record_key==k)=='impact_only'
+            and next(i.action for i in proposal.cvp_impacts if i.record_key==k)=='retain'
+            for k in extra))
+    retained_context_extras=(context.get('complete_input_repair') and required<=set(actual)
+        and all(k in frozen['inventory']['affected_keys'] and k in before and post[k]==before[k]
+            and c.split_key(k)[0] in {'viewpoint_identity_candidates','viewpoint_identity_decisions',
+                                     'claim_relations','knowledge_relations'}
+            and before[k].get('review_status') not in HOLDS
+            and next(d.action for d in proposal.dispositions if d.record_key==k) in {'retain','impact_only'}
+            and next(i.action for i in proposal.cvp_impacts if i.record_key==k)=='retain'
+            for k in extra))
+    retained_extras=retained_identity_extras or retained_context_extras
+    if extra and not retained_extras:
+        retained_extras=bool(retained_impact_context(frozen,proposal,post))
+    if len(actual) != len(set(actual)) or (set(actual) != required and not retained_extras):
+        raise ValueError("complete CVP impact denominator including retained members required")
+    dispositions = {d.record_key: d.action for d in proposal.dispositions}
+    for impact in proposal.cvp_impacts:
+        citations(impact.citations)
+        if retained_extras and impact.record_key in extra:
+            # The additional rows describe immutable discovery/decision history,
+            # not fresh CVP membership approval. Their ordinary impact-only
+            # disposition and exact retained payload were checked above; keep
+            # the model's rows/reasons visible without widening the write set.
+            continue
+        if (review_only and impact.action == 'needs_direction'
+                and dispositions[impact.record_key] == 'unresolved'
+                and post[impact.record_key] == before[impact.record_key]):
+            continue
+        expected = "retain" if impact.action == "retain" else "update"
+        if impact.action == "needs_direction" or dispositions[impact.record_key] != expected:
+            raise ValueError("CVP impact unresolved or differs from exact after-state")
+    if proposal.unadmitted_candidates:
+        raise ValueError("Claim issue cannot add/split original campaign judgments")
+    own_evidence={eid for issue in issues.values() for eid in post[c.key('claims',issue.claim_id)]['evidence_step_ids']}
+    from backend.pipeline.claim_evidence_completion import direction_for, validate_postimages
+    completion=direction_for(context,frozen.get('physical_snapshots'))
+    if completion:
+        validate_postimages(frozen,proposal,post)
+        own_evidence.update(completion['evidence_ids'])
+    used_fragments={f['fragment_id'] for f in bound_fragments([post[c.key('evidence_steps',eid)] for eid in own_evidence],
+                                                           lambda fid:post[c.key('source_fragments',fid)])}
+    if any(c.split_key(k)[0]=='source_fragments' and c.split_key(k)[1] not in used_fragments for k in post.keys()-before.keys()):
+        raise ValueError('new quote fragment must be bound to actual own Claim Evidence, not orphan source extraction')
+    for k, old in before.items():
+        if post[k] == old:
+            continue
+        col, _ = c.split_key(k)
+        if old.get("review_status") in HOLDS or col == "source_documents":
+            raise ValueError("Claim issue cannot clear hold or change original source")
+        if col == "evidence_steps":
+            if completion and c.split_key(k)[1] in completion['evidence_ids']:
+                continue  # Exact new binding/qualification was verified above; independently reviewed, not auto-approved.
+            eligibility_changed = any(old.get(f) != post[k].get(f) for f in ELIGIBILITY_FIELDS)
+            if eligibility_changed:
+                if (not policy.evidence_eligibility_review
+                        or not eligibility_review_candidate(old, before, frozen['manifest']['source_id'])
+                        or post[k].get('support_eligibility') != 'eligible_with_label'
+                        or post[k].get('valid_for_identity_review') is False
+                        or {f:v for f,v in c._semantic(old).items() if f not in ELIGIBILITY_FIELDS}
+                           != {f:v for f,v in c._semantic(post[k]).items() if f not in ELIGIBILITY_FIELDS}):
+                    raise ValueError('Evidence eligibility review cannot clear hold, alter attribution/body or bypass policy')
+                eid = c.split_key(k)[1]
+                owners = [a for a in proposal.claim_assessments
+                          if eid in before[c.key('claims', issues[a.issue_id].claim_id)]['evidence_step_ids']]
+                fragments = bound_fragments([old], lambda fid: before[c.key('source_fragments', fid)])
+                if not owners or any(a.cause != 'evidence_binding' or not any(
+                        cite.source_id == fragment['source_id'] and cite.paragraph_key == fragment['paragraph_key']
+                        and cite.exact_quote in fragment['verbatim_excerpt']
+                        for cite in a.citations for fragment in fragments) for a in owners):
+                    raise ValueError('Evidence eligibility review requires exact own bound quote and binding assessment')
+                # All shared owners must have their own exact issue/assessment.
+                if set(old.get('produced_claim_ids', [])) - {issues[a.issue_id].claim_id for a in owners}:
+                    raise ValueError('Evidence eligibility review lacks shared Claim assessments')
+                continue
+            old_ids=set(old.get('source_fragment_ids',[]))|({old['source_fragment_id']} if old.get('source_fragment_id') else set())
+            new_ids=set(post[k].get('source_fragment_ids',[]))|({post[k]['source_fragment_id']} if post[k].get('source_fragment_id') else set())
+            if (old.get("valid_for_identity_review") is False
+                    or old.get("support_eligibility") not in {"eligible", "eligible_candidate", "eligible_with_label"}
+                    or not old_ids <= new_ids):
+                raise ValueError("Evidence repair cannot promote held evidence or discard quotes")
+        if col == "viewpoint_claim_links":
+            new = post[k]
+            if context.get('scope_amendment'):
+                from backend.pipeline.claim_issue_rescope import permissions
+                exact={p.key:p for p in permissions(context,before,frozen.get('physical_snapshots'))}
+                if k in exact and set(exact[k].fields)=={'effective_state'}:
+                    if (new.get('effective_state')!='retired' or
+                            {f:v for f,v in c._semantic(old).items() if f!='effective_state'} !=
+                            {f:v for f,v in c._semantic(new).items() if f!='effective_state'}):
+                        raise ValueError('exact link withdrawal must retain role/endpoints/body')
+                    continue
+            if any(old.get(f) != new.get(f) for f in ("claim_id", "viewpoint_id", "effective_state")):
+                raise ValueError("Claim issue cannot retarget/retire a link")
+    return post
