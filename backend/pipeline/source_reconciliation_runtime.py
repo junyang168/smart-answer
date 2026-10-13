@@ -90,6 +90,26 @@ def model_adapter(stage: str, *, live: bool = False, deferred: bool = False, iss
     return adapter
 
 
+def claim_management_model_adapter(role, policy, *, live=False):
+    """The new content contract shares the existing subscription transport."""
+    from backend.pipeline.claim_management import Candidate, Review, MODELS
+    if role not in {"gpt", "opus"}:
+        raise ValueError("independent Gemini audit uses audit-library's own transport")
+    model, _ = MODELS[role]
+    client = subscription_client("codex" if role == "gpt" else "claude", model, "high") if live else SimpleNamespace(
+        model=model, backend=MODELS[role][1], reasoning_effort="high",
+        max_output_tokens=policy.budget.max_output_tokens)
+    client.max_output_tokens = policy.budget.max_output_tokens
+    prompt = semantic_prompt((PROMPTS / ("claim_management_proposal_v2.md" if role == "gpt"
+                                          else "claim_management_review_v2.md")).read_text())
+    adapter = StructuredJsonReviewerAdapter(client=client, prompt=prompt,
+        response_model=Candidate if role == "gpt" else Review,
+        schema_name="claim_management_candidate_v2" if role == "gpt" else "claim_management_review_v2",
+        compact_payload=True, shared_text_payload=True, shared_record_payload=True)
+    adapter.max_request_bytes = policy.budget.max_request_bytes
+    return adapter
+
+
 def expected_invalidations(before: dict, planned_post: dict, plan: dict) -> dict:
     """Mirror SQL effects with one reverse-index pass, preserving every cause.
 
@@ -217,6 +237,18 @@ class ProductionPorts:
 
     def scope_adapter(self, stage: str):
         return model_adapter(stage, live=True, scope=True)
+
+    def claim_management_adapter(self, role, policy):
+        """Explicit v2 contract; historical proposal/review prompts stay intact."""
+        return claim_management_model_adapter(role, policy, live=True)
+
+    def claim_management_audit(self, root, audit_input):
+        """Existing standalone auditor reads current SQL and own physical files."""
+        from backend.pipeline.viewpoint_cvp_recovery_executor import run_logged, PYTHON
+        run_logged([PYTHON, 'scripts/audit-library.py', '--layers', '3', '--scope', 'all',
+            '--model', 'gemini-3.8-flash', '--claim-management-input', root / 'audit-input.json',
+            '--out', root / 'independent-audit', '--no-status-file', '--preserve-full-context'],
+            root, 'independent-audit')
 
     def before_model_call(self, stage: str) -> None:
         # Cached responses do not run model/auth diagnostics. A new actual

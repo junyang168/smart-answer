@@ -49,6 +49,7 @@ import ssl
 import subprocess
 import sys
 import threading
+import tempfile
 import time
 import urllib.request
 from collections import Counter, defaultdict
@@ -1500,6 +1501,30 @@ def _trust_store() -> ssl.SSLContext:
     return ssl.create_default_context()
 
 
+def write_audit_immutable(path, payload):
+    """Independent audit evidence, durably published without backend imports."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as stream:
+        temporary = Path(stream.name)
+        try:
+            stream.write((json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode())
+            stream.flush()
+            os.fsync(stream.fileno())
+            try:
+                os.link(temporary, path)
+            except FileExistsError:
+                if json.loads(path.read_text()) != payload:
+                    raise ValueError("independent immutable evidence differs")
+            directory = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
 class IndependentModel:
     """第 3、4 層要判斷的部分，交給沒參與過原判定的模型。
 
@@ -1515,10 +1540,16 @@ class IndependentModel:
         cache_dir: Path | None = None,
         preserve_full_context: bool = False,
         durable_once: bool = False,
+        max_request_bytes: int = 600000,
+        max_output_tokens: int | None = None,
+        json_schema: bool = False,
     ) -> None:
         self.model = model
         self.preserve_full_context = preserve_full_context
         self.durable_once = durable_once
+        self.max_request_bytes = max_request_bytes
+        self.max_output_tokens = max_output_tokens
+        self.json_schema = json_schema
         if durable_once and cache_dir is None:
             raise ValueError('independent revisit requires durable request/result directory')
         self.api_key = api_key
@@ -1574,22 +1605,24 @@ class IndependentModel:
                 return verdict
             except (json.JSONDecodeError, OSError):
                 pass
+        generation = {
+            "temperature": 0, "responseMimeType": "application/json",
+            "responseJsonSchema" if self.json_schema else "responseSchema": schema,
+        }
+        if self.max_output_tokens is not None:
+            generation["maxOutputTokens"] = self.max_output_tokens
         body = json.dumps({
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": 0,
-                "responseMimeType": "application/json",
-                "responseSchema": schema,
-            },
+            "generationConfig": generation,
         }).encode("utf-8")
         if self.durable_once:
-            from backend.pipeline.viewpoint_resolution_runtime import write_immutable
+            write_immutable = write_audit_immutable
             intent = cached.with_name(cached.stem + '.call-intent.json')
             request_payload = {'model': self.model, 'prompt': prompt, 'schema': schema,
                                'request_bytes': len(body), 'request_sha256': hashlib.sha256(body).hexdigest(),
                                'maximum_calls': 1, 'automatic_retry': False}
-            if len(body) > 600000:
-                raise ValueError('independent revisit request exceeds 600000 bytes')
+            if len(body) > self.max_request_bytes:
+                raise ValueError('independent request exceeds its complete-input budget')
             if intent.exists():
                 raise ValueError('independent revisit outcome unknown; no automatic resend')
             write_immutable(intent, request_payload)
@@ -1627,12 +1660,12 @@ class IndependentModel:
                         "reason": f"審計模型的安全過濾器擋下了這一條（{blocked}），沒有判讀。",
                     }
                     if cached is not None:
-                        from backend.pipeline.viewpoint_resolution_runtime import write_immutable
-                        from backend.pipeline.viewpoint_g035_temporary_audit import binding
+                        write_immutable = write_audit_immutable
                         receipt = cached.with_name(cached.stem + '.provider-block.json')
                         write_immutable(receipt, {'model':self.model, 'provider_response':parsed,
                                                  'prompt':prompt, 'schema':schema})
-                        verdict['provider_content_block'] = binding(receipt)
+                        verdict['provider_content_block'] = {"path": str(receipt),
+                            "file_sha256": hashlib.sha256(receipt.read_bytes()).hexdigest()}
                     if cached is not None:
                         cached.write_text(
                             json.dumps(verdict, ensure_ascii=False), encoding="utf-8"
@@ -1894,8 +1927,12 @@ def audit_claims(
     workers: int = 8,
     progress: "Progress | None" = None,
     only: set[str] | None = None,
+    management: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """抽樣問一件確定性檢查問不出來的事：這條主張能不能從它引的證據推出來。"""
+
+    if management is not None:
+        return audit_claim_operation(store, sources, model, management)
 
     # 抽的是**文庫現在有的**主張，不是其中已批准的那 6 條。主張層絕大多數還掛在
     # `candidate`，只抽已批准的等於用一個 6 條的母體去代表 1,587 條——那個比率沒
@@ -2000,6 +2037,89 @@ def audit_claims(
         "review_status_mix": dict(status_mix),
         "results": results,
     }
+
+
+def audit_claim_operation(store, sources, model, management):
+    """Layer 3's versioned whole-operation judgement, including retirement.
+
+    The input chooses a denominator and states the original task. Current
+    objects are read independently from SQL, original objects from SQL history,
+    and full sources from disk. No pipeline approval is sent to Gemini.
+    """
+    if model.model != "gemini-3.8-flash" or not model.durable_once or not model.preserve_full_context:
+        raise ValueError("Claim management requires the exact independent once/full-source model")
+    expected = management["read_pins"]
+    keys = management["denominator"]
+    if len(keys) != len(set(keys)) or set(keys) != {r["collection"] + "/" + r["object_id"] for r in expected}:
+        raise ValueError("independent Claim denominator/pins omitted or repeated")
+    records = {}
+    for pin in expected:
+        col, oid = pin["collection"], pin["object_id"]
+        rows = store._query("SELECT json_build_object('revision',revision,'sha',content_sha256,"
+            "'retired',retired_at IS NOT NULL,'payload',payload)::text FROM wang_knowledge.objects WHERE collection="
+            + SqlGroupStore.literal(col) + " AND object_id=" + SqlGroupStore.literal(oid))
+        if len(rows) != 1:
+            raise ValueError("independent Claim dependency missing")
+        row = rows[0]
+        semantic = {k: v for k, v in row["payload"].items() if k != "revision"}
+        digest = hashlib.sha256(json.dumps(semantic, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        if digest != row["sha"] or [row["revision"], row["sha"], row["retired"]] != pin["pin"]:
+            raise ValueError("independent current Claim SQL pin drift")
+        records[col + "/" + oid] = row
+    original = {}
+    for key, stated in management["original_goal"]["original_objects"].items():
+        col, oid = key.split('/', 1)
+        rows = store._query("SELECT json_build_object('payload',payload,'sha',content_sha256)::text "
+            "FROM wang_knowledge.object_versions WHERE collection=" + SqlGroupStore.literal(col)
+            + " AND object_id=" + SqlGroupStore.literal(oid) + " AND revision=" + str(int(stated["revision"])))
+        if (len(rows) != 1 or rows[0]["sha"] != stated["content_sha256"]
+                or {k: v for k, v in rows[0]['payload'].items() if k != 'revision'}
+                   != {k: v for k, v in stated['payload'].items() if k != 'revision'}):
+            raise ValueError("original task object does not bind actual SQL history")
+        original[key] = stated
+    full_sources = {}
+    for sid, bound in management["source_bindings"].items():
+        file = sources.file_for(sid)
+        if file is None or file.sha256 != bound["file_sha256"] or str(file.path.resolve()) != str(Path(bound["path"]).resolve()):
+            raise ValueError("independent physical own source missing or changed")
+        paragraphs = [r for r in file.segments if not _is_editorial_row(r)]
+        full_sources[sid] = {f"S{i:04d}": {"text": live_text(str(r.get("text") or ""))}
+                             for i, r in enumerate(paragraphs, 1)}
+    # Exact active forward references must be in the actual audit denominator.
+    for key, row in records.items():
+        if row["retired"]:
+            continue
+        payload = row["payload"]
+        refs = []
+        if key.startswith("claims/"):
+            refs += ["evidence_steps/" + v for v in payload.get("evidence_step_ids", [])]
+            refs += ["source_documents/" + v["source_id"] for v in payload.get("occurrences", []) if v.get("source_id")]
+        if key.startswith("evidence_steps/"):
+            refs += ["claims/" + v for v in payload.get("produced_claim_ids", [])]
+            refs += ["source_fragments/" + v for v in _step_fragment_ids(payload)]
+        if key.startswith("source_fragments/"):
+            refs += ["source_documents/" + payload["source_id"]]
+        if any(ref not in records or records[ref]["retired"] for ref in refs):
+            raise ValueError("independent current Claim graph omitted an active dependency")
+    packet = {"schema_version": "wang_claim_management_v2", "original_goal": {
+        **management["original_goal"], "original_objects": original}, "actual_records": records,
+        "full_sources": full_sources, "denominator": keys, "replacements": management["replacements"],
+        "candidate_sha256": management["candidate_sha256"], "unresolved": management["unresolved"]}
+    packet['required_questions'] = management['required_questions']
+    instructions = (REPO_ROOT / 'backend/pipeline/prompts/claim_management_audit_v2.md').read_text().strip()
+    prompt = instructions + '\n' + json.dumps(packet, ensure_ascii=False, sort_keys=True)
+    schema = management["response_schema"]
+    response = model.judge(prompt, schema)
+    cached = model._cache_path(prompt)
+    bindings = {}
+    for name, path in {"intent": cached.with_name(cached.stem + '.call-intent.json'),
+                        "provider": cached.with_name(cached.stem + '.provider-response.json'), "response": cached}.items():
+        if path.exists():
+            bindings[name] = {"path": str(path), "file_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+    return {"schema_version": "wang_claim_management_v2", "layer": 3, "model": model.model,
+            "round_id": management["round_id"], "candidate_sha256": management["candidate_sha256"],
+            "packet": packet, "prompt": prompt, "schema": schema, "response": response,
+            "read_pins": expected, "source_bindings": management["source_bindings"], "bindings": bindings}
 
 
 def _claim_in_scope(
@@ -2716,6 +2836,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, default=None, help="報告輸出目錄")
     parser.add_argument('--sql-group-scope',action='store_true',
         help='Read every requested Claim and target CVP member directly from indexed SQL; no historical payload traversal')
+    parser.add_argument('--claim-management-input', type=Path,
+        help='Versioned whole Claim operation Layer 3 audit; exact SQL/history and full physical own sources')
     parser.add_argument('--sql-record-key',action='append',default=[],
         help='Exact pending CVP management collection/ID to read independently; no status or content approval')
     parser.add_argument(
@@ -2745,6 +2867,27 @@ def main(argv: list[str] | None = None) -> int:
     data_base_dir = Path(settings.get("DATA_BASE_DIR", ""))
     if not data_base_dir.is_dir():
         raise SystemExit(f"DATA_BASE_DIR 不是目錄：{data_base_dir}")
+
+    if args.claim_management_input:
+        if args.model != 'gemini-3.8-flash' or args.layers != '3' or args.out is None:
+            raise ValueError('Claim operation audit requires exact independent model, layer 3 and explicit output')
+        management = json.loads(args.claim_management_input.read_text())
+        management.pop('artifact_sha256', None)
+        store = Store(database_url)
+        source_ids = management['source_bindings']
+        documents = store._query("SELECT json_build_object('object_id',object_id,'payload',payload)::text "
+            "FROM wang_knowledge.objects WHERE collection='source_documents' AND object_id=ANY("
+            + 'ARRAY[' + ','.join(SqlGroupStore.literal(s) for s in sorted(source_ids)) + ']::text[]' + ")")
+        sources = SourceIndex(documents, data_base_dir)
+        budget = management['budget']
+        key = settings.get('GEMINI_API_KEY1')
+        if not key:
+            raise SystemExit('Independent Gemini API key unavailable')
+        model = IndependentModel(args.model, key, cache_dir=args.out / 'cache', preserve_full_context=True,
+            durable_once=True, max_request_bytes=budget['max_request_bytes'], max_output_tokens=budget['max_output_tokens'], json_schema=True)
+        result = audit_claims(store, sources, model, None, random.Random(args.seed), management=management)
+        write_audit_immutable(args.out / 'audit.json', result)
+        return 0
 
     reports_root = (
         data_base_dir / "wang-knowledge-platform/staging/reports/library-audit"

@@ -3247,6 +3247,355 @@ class PostgresKnowledgeStore:
             # contract. Metadata need not duplicate the SQL primary key.
             return {**row[0], "run_id":run_id, "status": row[1], "error": row[2]} if row else None
 
+    def prepare_claim_management_action(self, request, *, goal, read_pins, root):
+        """Keep new Claim authority and its original goal in the run table."""
+        from backend.pipeline.claim_management import Request, load_authority, source_documents, VERSION
+        request = Request.model_validate(request)
+        policy, _ = load_authority(request, source_documents=source_documents(goal.get('original_objects', {})))
+        if (goal.get("operation") != request.operation or goal.get("target_keys") != request.target_keys
+                or not goal.get("units") or not set(request.target_keys) <= set(goal.get("original_objects", {}))):
+            raise ValueError("Claim original goal does not match its authorized target denominator")
+        run_id = "CMA-" + sha256_json(request.action_id)
+        identity = {"kind": "claim_management_action", "schema_version": VERSION,
+                    "action_id": request.action_id, "request": request.model_dump(mode="json"),
+                    "policy": policy.model_dump(mode="json"), "execution_root": str(Path(root).resolve())}
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
+            cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE", (run_id,))
+            row = cursor.fetchone()
+            if row:
+                if any(row[0].get(k) != v for k, v in identity.items()):
+                    raise ChangeSetConflict("Claim action authority/root/policy changed; budget cannot reset")
+                return {**row[0], "run_id": run_id}
+            self._assert_transaction_read_pins(cursor, read_pins)
+            value = {**identity, "original_goal": goal, "latest_rounds": {},
+                     "call_reservations": {}, "findings": {}, "created_keys": [],
+                     "revision_rounds": {},
+                     "claim_ids": [key.split("/", 1)[1] for key in request.target_keys],
+                     "result": {"status": "prepared"}}
+            cursor.execute("""INSERT INTO wang_knowledge.pipeline_runs
+                              (run_id,subject_kind,subject_id,stage,trigger,status,metadata)
+                              VALUES (%s,'batch',%s,'cvp_group','cli','running',%s::jsonb)""",
+                           (run_id, request.action_id, canonical_json(value)))
+        return {**value, "run_id": run_id}
+
+    def prepare_claim_management_round(self, action_run_id, *, unit_id, round_number, materials, roles):
+        """Reserve the complete next round under one original action budget."""
+        from backend.pipeline.claim_management import Policy, Request, VERSION, required_roles
+        from .transaction_validation import CONTRACT
+        if round_number < 0 or set(roles) - {"gpt", "opus", "gemini"} or len(set(roles)) != len(roles):
+            raise ValueError("bounded Claim round/roles required")
+        round_id = "CMR-" + sha256_json({"action": action_run_id, "unit": unit_id, "round": round_number})
+        frozen = json.loads(canonical_json(materials))
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
+            cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE", (action_run_id,))
+            row = cursor.fetchone()
+            if not row or row[0].get("kind") != "claim_management_action":
+                raise ChangeSetConflict("round has no versioned original Claim action")
+            parent = row[0]
+            policy = Policy.model_validate(parent["policy"])
+            request = parent["request"]
+            needed = set(required_roles(Request.model_validate(request), round_number))
+            if request["operation"] == "Read" or set(roles) != needed:
+                raise ChangeSetConflict("Claim round must reserve every required role; Read has no model round")
+            identity = {"kind": "claim_management_round", "schema_version": VERSION,
+                        "contract": CONTRACT, "parent_run_id": action_run_id, "unit_id": unit_id,
+                        "round_number": round_number, "materials": frozen}
+            stored = cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE", (round_id,)).fetchone()
+            if stored:
+                if any(stored[0].get(k) != v for k, v in identity.items()):
+                    raise ChangeSetConflict("Claim round identity/materials drift")
+                return round_id
+            if unit_id not in parent["original_goal"].get("units", {}):
+                raise ChangeSetConflict("Claim round cannot invent a new original unit")
+            if frozen.get('schema_version') == VERSION:
+                from backend.pipeline.claim_management import audit_keys, source, source_documents
+                unit_request = Request.model_validate(frozen['unit_request'])
+                original = parent['original_goal']
+                expected_goal = {**original, 'target_keys': original['units'][unit_id]}
+                original_keys = set(audit_keys(unit_request, original['original_objects'])) | {
+                    source.key('source_documents', sid) for sid in parent['request']['source_bindings']}
+                expected_goal['original_objects'] = {k: v for k, v in original['original_objects'].items() if k in original_keys}
+                if (frozen['request'] != parent['request'] or frozen['policy'] != parent['policy']
+                        or frozen['action_original_goal'] != original or frozen['original_goal'] != expected_goal
+                        or unit_request.target_keys != original['units'][unit_id]
+                        or frozen['created_keys'] != parent['created_keys']
+                        or frozen['replacements'] != parent.get('replacements', {})):
+                    raise ChangeSetConflict('Claim round cannot prune original goals/history or widen authority')
+            previous_id = parent["latest_rounds"].get(unit_id)
+            if previous_id:
+                previous = cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE", (previous_id,)).fetchone()[0]
+                if round_number != previous["round_number"] + 1 or previous.get("outcome") != "revision_required":
+                    raise ChangeSetConflict("new round requires the exact prior revision-required outcome")
+            elif round_number != 0:
+                raise ChangeSetConflict("first Claim round must have ordinal zero")
+            used_revisions = sum(bool(v) for v in parent["revision_rounds"].values())
+            if round_number and used_revisions >= policy.budget.max_revisions:
+                raise ChangeSetConflict("original Claim action revision budget exhausted")
+            reservations = parent["call_reservations"]
+            for role in roles:
+                count = sum(v["role"] == role and v["state"] != "cancelled" for v in reservations.values())
+                if count >= policy.budget.limit(role):
+                    raise ChangeSetConflict("original Claim budget cannot fund the complete next round")
+            for role in roles:
+                reservations[round_id + ":" + role] = {"role": role, "state": "planned", "round_id": round_id}
+            parent["revision_rounds"][round_id] = False
+            parent["latest_rounds"][unit_id] = round_id
+            value = {**identity, "checkpoint": "prepared", "change_set_ids": [],
+                     "claim_ids": list(frozen.get("claim_ids", [])), "revisit_required": False,
+                     "independent_audit_complete": False}
+            cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now() WHERE run_id=%s",
+                           (canonical_json(parent), action_run_id))
+            cursor.execute("""INSERT INTO wang_knowledge.pipeline_runs
+                              (run_id,subject_kind,subject_id,stage,trigger,status,metadata)
+                              VALUES (%s,'batch',%s,'cvp_group','cli','running',%s::jsonb)""",
+                           (round_id, parent["action_id"], canonical_json(value)))
+        return round_id
+
+    def begin_claim_management_call(self, action_run_id, *, round_id, role, intent):
+        """An existing durable call intent consumes its allocated slot once."""
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE", (action_run_id,))
+            row = cursor.fetchone()
+            if not row or row[0].get("kind") != "claim_management_action":
+                raise ChangeSetConflict("model call has no original Claim action")
+            value = row[0]
+            slot = value["call_reservations"].get(round_id + ":" + role)
+            if not slot or slot["state"] != "planned":
+                raise ChangeSetConflict("Claim call absent/already started/unknown; do not resend")
+            slot.update(state="started", intent_sha256=sha256_json(intent), intent=intent)
+            cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now() WHERE run_id=%s",
+                           (canonical_json(value), action_run_id))
+
+    def record_claim_management_stage(self, round_id, receipt_binding):
+        """Append an authenticated result; applied and completed are distinct.
+
+        Only unused planned slots can be released. Started/unknown calls and
+        all prior candidates, findings and committed rounds remain facts.
+        """
+        from backend.pipeline import claim_management as cm
+        from backend.pipeline.cvp_sql_actions import validate_claim_stage_receipt
+        from backend.pipeline.source_reconciliation_runner import read, body
+        from backend.pipeline.cvp_sql_flow import check_binding, decoded_pins, pins
+        check_binding(receipt_binding)
+        receipt = body(read(Path(receipt_binding['path'])))
+        materials, candidate, review, passed = validate_claim_stage_receipt(receipt)
+        stage = receipt['stage']
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
+            child = cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE", (round_id,)).fetchone()
+            if not child or child[0].get('kind') != 'claim_management_round' or child[0]['materials'] != materials:
+                raise ChangeSetConflict('Claim result differs from its original SQL round/materials')
+            value = child[0]
+            parent_id = value['parent_run_id']
+            parent = cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE", (parent_id,)).fetchone()[0]
+            if (parent['request'] != materials['request'] or parent['policy'] != materials['policy']
+                    or materials['unit_id'] != value['unit_id']):
+                raise ChangeSetConflict('Claim result cannot reset original authority/budget')
+            stages = value.setdefault('stage_results', {})
+            if stage in stages:
+                if stages[stage] != receipt_binding:
+                    raise ChangeSetConflict('Claim stage result already recorded differently')
+                return {**value, 'run_id': round_id}
+            if stage != 'candidate' and 'candidate' not in stages:
+                raise ChangeSetConflict('review requires its exact persisted current candidate')
+            if stage == 'audit' and ('opus' not in stages or not value.get('opus_approved')
+                                     or value['checkpoint'] != 'applied'):
+                raise ChangeSetConflict('independent Claim audit requires actual applied/readback round')
+            if stage == 'candidate':
+                fingerprint = cm.candidate_state(materials['before'], candidate)
+                prior = parent.setdefault('candidate_fingerprints', {}).setdefault(value['unit_id'], [])
+                if value['round_number'] and (fingerprint in prior or fingerprint == cm.candidate_state(
+                        materials['before'], cm.existing_candidate(materials['before'], replacements=materials['replacements']))):
+                    raise ChangeSetConflict('Claim correction made no semantic progress or repeats a previous candidate')
+                prior.append(fingerprint)
+                parent['revision_rounds'][round_id] = bool(value['round_number'])
+                value['candidate'] = candidate.model_dump(mode='json')
+                value['claim_ids'] = [k.split('/',1)[1] for k in cm.audit_keys(
+                    cm.Request.model_validate(materials['unit_request']), materials['before'], candidate) if k.startswith('claims/')]
+            else:
+                if stage == 'opus':
+                    value['opus_approved'] = passed
+                if stage == 'audit':
+                    report = json.loads(Path(receipt['audit']['path']).read_text())
+                    self._assert_transaction_read_pins(cursor, decoded_pins(report['read_pins']))
+                    value['audited_pins'] = report['read_pins']
+                    value['independent_audit_complete'] = bool(passed)
+                    # The audit may reject content already committed. These
+                    # identities/mappings are still applied facts for correction.
+                    parent['created_keys'] = sorted(set(parent['created_keys']) | {
+                        d.record_key for d in candidate.dispositions if d.action == 'create'})
+                    parent.setdefault('replacements', {}).update(candidate.replacements)
+                unresolved = cm.unresolved_after(parent['action_id'], materials['unresolved'], review)
+                for finding in candidate.findings:
+                    unresolved[finding.identity(parent['action_id'])] = finding.model_dump(mode='json')
+                parent['findings'] = {k: v for k, v in parent['findings'].items() if k not in materials['unresolved']}
+                parent['findings'].update(unresolved)
+                value['findings'] = unresolved
+                parent.setdefault('finding_occurrences', {})[round_id + ':' + stage] = {
+                    'receipt': receipt_binding, 'findings': unresolved}
+                report_only = materials['request']['operation'] == 'Review' and not materials['request']['confirm_current']
+                if materials['request']['operation'] == 'Review' and unresolved:
+                    # A formal read-only Review still protects current use.
+                    # Register its exact finding and affected run obligations
+                    # atomically; preserve the actual content and old reports.
+                    self._assert_transaction_read_pins(cursor, pins({cm.source.split_key(k): v
+                        for k, v in materials['before'].items()}))
+                    value['blocked_current_claim_ids'] = value['claim_ids']
+                    affected = cursor.execute("""SELECT run_id,metadata FROM wang_knowledge.pipeline_runs
+                        WHERE stage='cvp_group' AND run_id<>%s AND metadata->>'checkpoint'='audited'
+                          AND metadata->'claim_ids' ?| %s ORDER BY run_id FOR UPDATE""",
+                        (round_id, value['claim_ids'])).fetchall()
+                    value['affected_run_ids'] = [run for run, _ in affected]
+                    for run, consumer in affected:
+                        consumer.update(independent_audit_complete=False, revisit_required=True)
+                        consumer.setdefault('pending_review_findings', {})[round_id] = receipt_binding
+                        cursor.execute("""UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,
+                            status='running',finished_at=NULL,heartbeat_at=now() WHERE run_id=%s""",
+                            (canonical_json(consumer), run))
+                if report_only:
+                    current_pins = pins({cm.source.split_key(k): v for k, v in materials['before'].items()})
+                    self._assert_transaction_read_pins(cursor, current_pins)
+                    value['outcome'] = 'reported'
+                    value['blocked_current_claim_ids'] = value['claim_ids'] if unresolved else []
+                elif not passed:
+                    reason = cm.failure_reason(unresolved)
+                    value['outcome'] = reason
+                    parent['result'] = {'status': 'paused' if reason != 'revision_required' else 'running', 'reason': reason,
+                                        'unit_id': value['unit_id'], 'round_id': round_id}
+                elif stage == 'audit':
+                    value.update(outcome='completed', checkpoint='audited')
+                    created = [d.record_key for d in candidate.dispositions if d.action == 'create']
+                    parent['created_keys'] = sorted(set(parent['created_keys']) | set(created))
+                    parent.setdefault('replacements', {}).update(candidate.replacements)
+                if value.get('outcome'):
+                    for slot in parent['call_reservations'].values():
+                        if slot['round_id'] == round_id and slot['state'] == 'planned':
+                            slot['state'] = 'cancelled'
+            role = 'gpt' if stage == 'candidate' else 'gemini' if stage == 'audit' else 'opus'
+            slot = parent['call_reservations'].get(round_id + ':' + role)
+            if slot:
+                if slot['state'] != 'started':
+                    raise ChangeSetConflict('Claim content result has no single actual started call')
+                slot.update(state='completed', result=receipt_binding)
+            stages[stage] = receipt_binding
+            cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now() WHERE run_id=%s",
+                           (canonical_json(value), round_id))
+            cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now() WHERE run_id=%s",
+                           (canonical_json(parent), parent_id))
+        return {**value, 'run_id': round_id}
+
+    def finish_claim_management_action(self, action_run_id):
+        """Program-only final coverage/currentness check; no extra model audit."""
+        from backend.pipeline.claim_management import goal_satisfied
+        from backend.pipeline.cvp_sql_flow import decoded_pins
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
+            row = cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE", (action_run_id,)).fetchone()
+            if not row or row[0].get('kind') != 'claim_management_action':
+                raise ChangeSetConflict('missing original Claim action')
+            value = row[0]
+            units = value['original_goal']['units']
+            if set(value['latest_rounds']) != set(units):
+                raise ChangeSetConflict('whole Claim action still has an unreviewed original unit')
+            report_only = value['request']['operation'] == 'Review' and not value['request']['confirm_current']
+            observed = {}
+            for unit, rid in value['latest_rounds'].items():
+                child = cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE", (rid,)).fetchone()[0]
+                if child.get('outcome') != ('reported' if report_only else 'completed'):
+                    raise ChangeSetConflict('single round pass is not whole Claim action completion')
+                if not report_only:
+                    if not child.get('independent_audit_complete'):
+                        raise ChangeSetConflict('Claim action has an invalidated independent audit')
+                    current = self._assert_transaction_read_pins(cursor, decoded_pins(child['audited_pins']))
+                    self._assert_claim_management_scope(cursor, decoded_pins(child['audited_pins']), records=current)
+                    observed.update({col + '/' + oid: {**state, 'retired': state['retired_at'] is not None}
+                                     for (col, oid), state in current.items()})
+            if not report_only:
+                if value['findings']:
+                    raise ChangeSetConflict('whole Claim action retains unresolved stable findings')
+                goal_satisfied(value['original_goal'], observed, value.get('replacements', {}))
+            value['result'] = {'status': 'completed', 'qualification_confirmed': not report_only,
+                               'original_target_keys': value['original_goal']['target_keys']}
+            cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,status='succeeded',finished_at=now(),heartbeat_at=now() WHERE run_id=%s",
+                           (canonical_json(value), action_run_id))
+        return value['result']
+
+    def pause_claim_management_action(self, action_run_id, *, reason, detail):
+        """Pause without deleting authority, unknown calls or applied facts."""
+        if reason not in {'human_required','engineering_required','permission_required','no_progress','budget_exhausted','model_failed','call_uncertain','source_drift','disagreement'}:
+            raise ValueError('explicit Claim pause reason required')
+        with self.connect() as conn:
+            row = conn.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE", (action_run_id,)).fetchone()
+            if not row or row[0].get('kind') != 'claim_management_action':
+                raise ChangeSetConflict('missing original Claim action')
+            value = row[0]
+            if value['result'].get('status') == 'completed':
+                raise ChangeSetConflict('completed Claim action cannot be relabelled as a failed attempt')
+            value['result'] = {'status': 'paused', 'reason': reason, 'detail': detail}
+            conn.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,status='running',heartbeat_at=now() WHERE run_id=%s",
+                         (canonical_json(value), action_run_id))
+        return value['result']
+
+    def _assert_claim_management_scope(self, cursor, read_pins, *, records=None):
+        """New shared owners/relations must not hide behind unchanged row pins."""
+        from backend.pipeline.claim_management import CLAIM_COLLECTIONS, domain_dependencies
+        if records is None:
+            records = self._assert_transaction_read_pins(cursor, read_pins)
+        payloads = {col + '/' + oid: state['payload'] for (col, oid), state in records.items()}
+        ids = sorted(oid for col, oid in read_pins if col in CLAIM_COLLECTIONS)
+        for col, oid, payload in self._reference_consumers(cursor, ids, sorted(CLAIM_COLLECTIONS)):
+            key = col + '/' + oid
+            refs = domain_dependencies(col, payload, payloads)
+            if col == 'evidence_steps':
+                refs.update('claims/' + cid for cid in payload.get('produced_claim_ids', []))
+            if key not in payloads and refs & set(payloads):
+                raise ChangeSetConflict('Claim audit omitted a current shared owner or relation: ' + key)
+
+    def claim_management_qualification(self, claim_id):
+        """Exact current v2 qualification, or None for untouched legacy content.
+
+        Human/AI review_status and maturity are not rewritten. This predicate
+        reads necessary current pins, not an ancestor chain or whole Registry.
+        """
+        from backend.pipeline.cvp_sql_flow import check_binding, decoded_pins
+        with self.connect() as conn, conn.cursor() as cursor:
+            rows = cursor.execute("""SELECT run_id,metadata FROM wang_knowledge.pipeline_runs
+                WHERE metadata->>'kind'='claim_management_round' AND metadata->'claim_ids' ? %s
+                  AND (metadata->>'checkpoint' IN ('applied','audited')
+                       OR metadata->'blocked_current_claim_ids' ? %s)
+                ORDER BY started_at DESC,run_id DESC""", (claim_id, claim_id)).fetchall()
+            if not rows:
+                return None
+            for rid, value in rows:
+                if claim_id in value.get('blocked_current_claim_ids', []):
+                    # The formal finding was registered against exact current
+                    # inputs. A later content change needs its own qualification.
+                    found = value['materials']['before'].get('claims/' + claim_id)
+                    state = cursor.execute("SELECT revision,content_sha256 FROM wang_knowledge.objects WHERE collection='claims' AND object_id=%s",
+                                           (claim_id,)).fetchone()
+                    if found and state == (found['revision'], found['content_sha256']):
+                        return {'ready': False, 'reason': 'formal_review_findings', 'run_id': rid}
+                if value.get('outcome') != 'completed' or not value.get('independent_audit_complete'):
+                    continue
+                try:
+                    for bound in value['materials']['request']['source_bindings'].values():
+                        check_binding(bound)
+                    check_binding(value['stage_results']['audit'])
+                    records = self._assert_transaction_read_pins(cursor, decoded_pins(value['audited_pins']))
+                    self._assert_claim_management_scope(cursor, decoded_pins(value['audited_pins']), records=records)
+                except (ValueError, ChangeSetConflict):
+                    continue
+                state = records.get(('claims', claim_id))
+                if not state or state['retired_at'] is not None or state['payload'].get('review_status') in {
+                        'human_hold','human_review_required','withheld_unreviewed','rejected','superseded'}:
+                    continue
+                return {'ready': True, 'run_id': rid, 'revision': state['revision'],
+                        'content_sha256': state['content_sha256'], 'audit': value['stage_results']['audit'],
+                        'question_scope': value['materials']['original_goal']['required_questions']}
+        return {'ready': False, 'reason': 'current_independent_qualification_required'}
+
     def get_cvp_retained_scope_bindings(self, run_id, *, cursor=None):
         """Direct owned SQL review archives, not a recursive proof/history walk.
 
@@ -3729,13 +4078,13 @@ class PostgresKnowledgeStore:
             claims.update(oid for col,oid in context.read_pins if col=='claims')
         cursor.execute("""SELECT run_id,metadata FROM wang_knowledge.pipeline_runs
                           WHERE stage='cvp_group' AND run_id<>%s
-                            AND metadata->>'campaign_sha256'=%s
+                            AND (%s::text IS NULL OR metadata->>'campaign_sha256'=%s)
                             AND metadata->>'checkpoint'='audited'
                             AND ((metadata->'claim_ids') ?| %s
                                  OR (metadata->'reviewed'->'evidence'->'viewpoint_ids') ?| %s
                                  OR (metadata->'import_certificate'->'viewpoint_ids') ?| %s)
                           ORDER BY run_id FOR UPDATE""",
-                       (context.run_id,group['campaign_sha256'],sorted(claims),sorted(views),sorted(views)))
+                       (context.run_id,group.get('campaign_sha256'),group.get('campaign_sha256'),sorted(claims),sorted(views),sorted(views)))
         return cursor.fetchall()
 
     def admit_cvp_completion(self, *, campaign_sha256: str, group: Mapping[str, Any],
@@ -4975,6 +5324,16 @@ class PostgresKnowledgeStore:
         Retiring afterwards is too late: nothing was ever planned.
         """
 
+        claim_writes = None
+        if (package.get('source_repair_application') or {}).get('schema_version') == 'wang_claim_management_v2':
+            if not transactional or source_kind != 'wang_claim_management_v2':
+                raise ValueError('new Claim operations require their explicit shared SQL transaction')
+            from backend.pipeline.cvp_sql_actions import validate_claim_management_package
+            claim_writes = validate_claim_management_package(dict(package))
+            authorized_keys = tuple(k for k, v in claim_writes.items() if v['action'] == 'retire')
+            if retiring_keys and tuple(retiring_keys) != authorized_keys:
+                raise ValueError('Claim retirement exceeds reviewed original operation')
+            retiring_keys = authorized_keys
         if (package.get('source_repair_application') or {}).get('schema_version') == 'wang_source_sql_reconciliation_v2':
             from backend.pipeline.cvp_sql_actions import validate_source_package
             authorized_keys=validate_source_package(dict(package))
@@ -5105,12 +5464,29 @@ class PostgresKnowledgeStore:
                 if retiring_keys
                 else None
             )
+        revival_keys = {k for k, v in (claim_writes or {}).items() if v['action'] == 'restore'}
+        for key in revival_keys:
+            if key not in existing or not existing[key].get('retired'):
+                raise ChangeSetConflict('Restore lost its exact retired current preimage')
         arrival = build_change_set_plan(
             package,
-            {key: row for key, row in existing.items() if key not in set(retiring_keys)},
+            {key: ({**row, 'retired': False, 'retired_at': None} if key in revival_keys else row)
+             for key, row in existing.items() if key not in set(retiring_keys)},
             source_kind=source_kind,
             existing_review_authorities=existing_review_authorities,
         )
+        if revival_keys:
+            operations = [op for op in arrival.operations if (op.collection, op.object_id) not in revival_keys]
+            for col, oid in sorted(revival_keys):
+                row = existing[col, oid]
+                payload = dict(normalized[col][oid])
+                operations.append(ChangeOperation(operation='revive', collection=col, object_id=oid,
+                    before_sha256=row['content_sha256'], after_sha256=record_content_sha(payload),
+                    before_revision=row['revision'], after_revision=row['revision'] + 1, payload=payload))
+            digest = sha256_json({'arrival': arrival.fingerprint_sha256,
+                                 'operations': operation_fingerprint_rows(operations)})
+            arrival = replace(arrival, operations=tuple(operations), change_set_id='KCS-' + digest[:20],
+                              fingerprint_sha256=digest, unchanged=0)
         return combined_plan(arrival, withdrawal) if withdrawal else arrival
 
     def plan_retirement(
@@ -6481,7 +6857,7 @@ class PostgresKnowledgeStore:
     ) -> dict[str, Any]:
         if plan.source_kind == 'wang_claim_relation_retirement_v1' and transaction_context is None:
             raise ValueError('relation retirement cannot bypass common SQL transaction')
-        if plan.source_kind in {'wang_cvp_merge_management_v1','wang_source_sql_reconciliation_v2','wang_owner_sql_link_correction_v2','wang_cvp_sql_link_retarget_v1','wang_cvp_owner_sql_link_retirement_v1','wang_cvp_deferred_authorized_link_management_v1','wang_cvp_sql_link_replacement_v1','wang_cvp_sql_link_representation_v1'} and transaction_context is None:
+        if plan.source_kind in {'wang_claim_management_v2','wang_cvp_merge_management_v1','wang_source_sql_reconciliation_v2','wang_owner_sql_link_correction_v2','wang_cvp_sql_link_retarget_v1','wang_cvp_owner_sql_link_retirement_v1','wang_cvp_deferred_authorized_link_management_v1','wang_cvp_sql_link_replacement_v1','wang_cvp_sql_link_representation_v1'} and transaction_context is None:
             raise ValueError('SQL v2 actions cannot bypass the shared transaction boundary')
         if transaction_context is not None:
             from .transaction_validation import TransactionValidation
@@ -6625,6 +7001,8 @@ class PostgresKnowledgeStore:
                                 raise ChangeSetConflict('locked historical origin proof drift')
                             locked['historical_origin_authority']=authority
                     scope=sql_group['reviewed']['evidence'].get('action',{}).get('materials',{}).get('sql_scope')
+                    if plan.source_kind == 'wang_claim_management_v2':
+                        scope = sql_group['reviewed']['evidence'].get('claim_management_scope')
                     if scope:
                         affected=self._affected_cvp_context(conn,[tuple(k) for k in scope['consumer_roots']])
                         if not set(affected)<=set(transaction_context.read_pins):
@@ -6876,6 +7254,8 @@ class PostgresKnowledgeStore:
                 retirement_package = None
                 if plan.source_kind == 'wang_claim_sql_retirement_v1':
                     if transaction_context is None: raise ChangeSetConflict('Claim retirement lacks transaction authority')
+                    retirement_package = sql_group['reviewed']['evidence']['package']['payload']
+                if plan.source_kind == 'wang_claim_management_v2':
                     retirement_package = sql_group['reviewed']['evidence']['package']['payload']
                 self._assert_no_uncoordinated_semantic_references(cursor, plan, scoped=transaction_context is not None,
                                                                  retirement_package=retirement_package)
@@ -7490,7 +7870,26 @@ class PostgresKnowledgeStore:
                 (sorted(SEMANTIC_REFERENCE_COLLECTIONS),),
             )
             rows = cursor.fetchall()
-        if retirement_package is not None:
+        if retirement_package is not None and plan.source_kind == 'wang_claim_management_v2':
+            from backend.pipeline.cvp_sql_actions import validate_claim_management_package, pending_consumer_validation_payload
+            from backend.pipeline.source_reconciliation_runner import body, read
+            app = retirement_package['source_repair_application']
+            writes = validate_claim_management_package(retirement_package)
+            if {(o.collection,o.object_id) for o in plan.operations} != set(writes):
+                raise ChangeSetConflict('Claim pending consumers lack the exact reviewed write set')
+            before = body(read(Path(app['materials']['path'])))['before']
+            pending = set(app['pending_consumers'])
+            retired_ids = {o.object_id for o in plan.operations if o.operation == 'retire'}
+            checked = []
+            for col, oid, payload in rows:
+                key = col + '/' + oid
+                if key in pending:
+                    if key not in before or before[key]['payload'] != payload:
+                        raise ChangeSetConflict('pending historical consumer current payload drift')
+                    payload = pending_consumer_validation_payload(col, payload, retired_ids)
+                checked.append((col, oid, payload))
+            rows = checked
+        elif retirement_package is not None:
             from backend.pipeline.claim_retirement import historical_reference_rows, validate_package
             if (plan.source_kind != 'wang_claim_sql_retirement_v1'
                     or set(validate_package(retirement_package)) != {(o.collection,o.object_id) for o in plan.operations}
@@ -8730,13 +9129,22 @@ class PostgresKnowledgeStore:
 
         payload = stored_operation_payload(operation)
         retiring = operation.operation == "retire"
-        cursor.execute(
+        if plan.source_kind == 'wang_claim_management_v2' and not retiring:
+            # An explicitly reviewed Restore may correct the full postimage in
+            # the same CAS/history operation that makes the identity active.
+            cursor.execute("""UPDATE wang_knowledge.objects SET revision=%s,content_sha256=%s,payload=%s::jsonb,
+                review_status=%s,visibility=%s,updated_at=now(),retired_at=NULL
+                WHERE collection=%s AND object_id=%s""", (operation.after_revision, operation.after_sha256,
+                canonical_json(payload), payload.get('review_status','candidate'), payload.get('visibility','internal'),
+                operation.collection, operation.object_id))
+        else:
+            cursor.execute(
             """UPDATE wang_knowledge.objects
                SET revision=%s, updated_at=now(),
                    retired_at = CASE WHEN %s THEN now() ELSE NULL END
                WHERE collection=%s AND object_id=%s""",
             (operation.after_revision, retiring, operation.collection, operation.object_id),
-        )
+            )
         cursor.execute(
             """INSERT INTO wang_knowledge.object_versions
                (collection, object_id, revision, content_sha256, payload, change_set_id)
@@ -8762,6 +9170,14 @@ class PostgresKnowledgeStore:
             # An edge outlives its object otherwise: `edges` is a separate
             # table with its own `retired_at`, and every traversal reads it
             # rather than `objects`.
+            if plan.source_kind == 'wang_claim_management_v2' and not retiring:
+                from_id, to_id, relation_type = self._edge_values(operation.collection, payload)
+                cursor.execute("""UPDATE wang_knowledge.edges SET from_id=%s,to_id=%s,relation_type=%s,
+                    review_status=%s,revision=%s,payload=%s::jsonb,updated_at=now(),retired_at=NULL
+                    WHERE edge_collection=%s AND edge_id=%s""",
+                    (from_id, to_id, relation_type, payload.get('review_status', 'candidate'),
+                     operation.after_revision, canonical_json(payload), operation.collection, operation.object_id))
+                return
             cursor.execute(
                 """UPDATE wang_knowledge.edges
                    SET revision=%s, updated_at=now(),

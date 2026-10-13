@@ -392,10 +392,20 @@ class Runner:
         if stage=='proposal_schema_recovery' and schema_stage(self.root,packet)!=stage:
             raise Stop('schema recovery lacks fixed-parent rejection proof')
         adapter=schema_adapter(adapter,packet,stage)
+        expected = ("claude-opus-5-5", "claude_subscription") if "review" in stage else ("gpt-6.1-sol", "codex_subscription")
+        return self.call_bound(stage, packet, adapter, expected=expected)
+
+    def call_bound(self, stage: str, packet: dict, adapter, *, expected) -> dict:
+        """One existing immutable intent/raw boundary for versioned contracts.
+
+        Callers validate their stage and authority before selecting an adapter.
+        This method owns encoding, request identity, once reservation and raw;
+        no business contract gets an alternative model transport or retry.
+        """
+        packet = json.loads(canonical_json(packet))
         from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
         raw_path = self.root / (stage + '.raw.json')
         adapter = stage_adapter(adapter, packet, raw_path, saved=read(raw_path) if raw_path.exists() else None)
-        expected = ("claude-opus-5-5", "claude_subscription") if "review" in stage else ("gpt-6.1-sol", "codex_subscription")
         if (adapter.model_id, adapter.backend) != expected:
             raise Stop("model/backend differs from frozen subscription policy", status="proof_failure", waiting_for="system")
         proof = adapter.request_encoding_proof(packet)
@@ -428,6 +438,9 @@ class Runner:
             preflight(stage)
         # Persist the reservation before any side effect. Errors do not reset it.
         write(reservation, request)
+        reserved = getattr(self.ports, "model_call_reserved", None)
+        if reserved:
+            reserved(stage, request)
         self.state(stage, next_action="await the single subscription response")
         try:
             response = dict(adapter.generate(packet))
@@ -1034,6 +1047,12 @@ def validate_raw(root: Path, stage: str, packet: dict) -> dict:
     if stage=='proposal_schema_recovery' and schema_stage(root,packet)!=stage:
         raise ValueError('schema recovery original rejection proof differs')
     adapter=schema_adapter(adapter,packet,stage)
+    return validate_bound_call(root, stage, packet, adapter)
+
+
+def validate_bound_call(root, stage, packet, adapter):
+    """Authenticate the common saved wire/intent/raw boundary, without a call."""
+    packet = json.loads(canonical_json(packet))
     raw = read(root / (stage + ".raw.json"))
     from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
     adapter = stage_adapter(adapter, packet, root / (stage + '.raw.json'), saved=raw)
