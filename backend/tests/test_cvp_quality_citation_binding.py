@@ -28,3 +28,15 @@ def test_deleted_words_missing_qualifier_and_changed_greek_cannot_be_normalized_
                             ('甲，乙', '甲乙')]:
         with pytest.raises(ValueError):
             bind(original, quote)
+
+
+def test_nonverbatim_citation_does_not_become_a_semantic_defect_or_drop_other_observations():
+    source = {'segments': [{'physical_ordinal': 1, 'editorial': False,
+                           'physical_text': '只在有条件时成立。', 'live_text': '只在有条件时成立。'}]}
+    bad = MODULE.observation_evidence({'observation_id': 'O1', 'citations': [
+        {'physical_ordinal': 1, 'quote': '成立。'}]}, source)
+    assert bad['semantic_judgment_state'] == 'not_evaluated' and bad['is_content_defect'] is None
+    uncertain = MODULE.observation_evidence({'observation_id': 'O2', 'citations': [
+        {'physical_ordinal': 1, 'quote': '只在条件时成立。'}]}, source)
+    assert uncertain['requires_semantic_source_check']
+    assert uncertain['block_entire_source'] is False and uncertain['retained_in_denominator']

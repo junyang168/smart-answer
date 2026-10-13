@@ -48,3 +48,19 @@ def bind(citation, source):
     return {'physical_ordinal': ordinal, 'binding_kind': kind,
             'quote_sha256': digest(quote), 'physical_segment_sha256': digest(physical),
             'quote_unchanged': True, 'physical_source_unchanged': True}
+
+
+def observation_evidence(observation, source):
+    """Literal citation integrity never decides whether a judgment is faithful."""
+    citations = []
+    for citation in observation.get('citations', []):
+        try:
+            citations.append({'citation_integrity': 'bound', **bind(citation, source)})
+        except ValueError as error:
+            citations.append({'physical_ordinal': citation.get('physical_ordinal'),
+                'citation_integrity': 'needs_source_check', 'reason': str(error),
+                'quote_sha256': digest(citation.get('quote', ''))})
+    return {'observation_id': observation['observation_id'], 'citations': citations,
+            'semantic_judgment_state': 'not_evaluated', 'is_content_defect': None,
+            'requires_semantic_source_check': any(c['citation_integrity'] != 'bound' for c in citations),
+            'retained_in_denominator': True, 'block_entire_source': False}
