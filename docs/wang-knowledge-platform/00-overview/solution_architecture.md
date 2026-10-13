@@ -195,11 +195,11 @@ flowchart TD
 **决策**：整理工作按四步走，人只出现在最后一步。
 
 1. **提议**——一个强模型（当前 `gpt-5.6-sol`）读受限的材料包，提出候选数据。
-2. **复核**——程序先做确定性校验（结构完整、引用的 ID 是否真实存在、来源能否解析）；再由**另一个厂商的**强模型（当前 `claude-fable-5-1`）独立复核。复核者不读提议者的结论，只读同一份材料。
+2. **复核**——程序先做确定性校验（结构完整、引用的 ID 是否真实存在、来源能否解析）；再由**另一个厂商的**强模型（现行 CVP policy 为 `claude-fable-5-1`）独立复核。独立意味着依据来源作判断，不把提议者的自评或负责人解释当批准。新 Claim Management 中，Opus 读取完整候选和实际修改来审阅；Gemini 独立终审直接读取原件和精确记录，首次判断不由 GPT／Opus 的通过结论引导。旧 CVP 的具体材料和角色仍沿用其原 policy。
 3. **修正**——复核意见交回提议者。旧生产契约和未改版的 CVP 身份流程仍是**至多一轮**；新的 Claim Management 2.0 action 使用预先绑定轮次与总资源上限的多轮修正，每轮核查完整后像与实际进展，最后由独立 Claim 审计核实当前版本。新契约不会重开旧预算。
 4. **转人工**——旧契约保留其既有分歧处置。新的 Claim Management 2.0 排除工程、漏材料和版本问题后，只有无法由完整原文决定的转录、归属或实质来源冲突才需要内容人工。模型分歧、无进展或预算耗尽只表示未完成，不能单独作为转人工依据；这不改写旧 CVP 身份判断的人工出口。
 
-Claim Management 的 Read、Create、Review、Update、Retire、Restore、Split、Merge 及多轮出口见 [Claim Management 2.0 operations 与审核流程设计](../20-knowledge/claim_management_2_design.md)。这是新 action 的目标契约，启用前仍须完成实现、版本化 policy 和有界验收；此架构决定不授权模型执行或内容写入。
+Claim Management 的 Read、Create、Review、Update、Retire、Restore、Split、Merge 及多轮出口见 [Claim Management 2.0 operations 与生命周期设计](../20-knowledge/claim_management_2_design.md)。各 operation 共用现有短 transaction、SQL 进度、版本历史和独立审计，模型调用在事务之外。这是新 action 的目标契约，启用前仍须完成实现、版本化 policy 和有界验收；此架构决定不授权模型执行或内容写入。
 
 用两个**不同厂商**的模型，而不是同一个模型跑两遍：同一个模型会犯同一种错，自己复核自己等于没核。
 

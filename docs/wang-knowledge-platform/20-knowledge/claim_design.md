@@ -47,7 +47,7 @@
 erDiagram
     SOURCE_FRAGMENT }o--|| SOURCE_DOCUMENT : "锚定到"
     SOURCE_FRAGMENT ||--o{ CLAIM_OCCURRENCE : "锚定"
-    CLAIM ||--o{ CLAIM_OCCURRENCE : "在各篇的出现"
+    CLAIM ||--o{ CLAIM_OCCURRENCE : "在本篇的出现"
     CLAIM ||--o{ EVIDENCE_STEP : "推论步骤"
     CLAIM ||--o{ CLAIM_RELATION : "与别的主张相连"
     CLAIM_RELATION }o--|| POSITION_NODE : "或指向反方立场"
@@ -74,7 +74,7 @@ erDiagram
 
 这是 [Solution Architecture D4](../00-overview/solution_architecture.md#d4最小化人工提议--复核--仲裁--转人工)「提议 → 复核 → 仲裁 → 转人工」在 Claim 这一层的落地。
 
-本节下图及字段快照描述旧抽取与治理形态，不表示 Claim Management 2.0 已启用。新获准 action 的 operations、既有 Claim 入口、多轮修正、独立终审及当前可用证明以 [Claim Management 2.0 operations 与审核流程设计](./claim_management_2_design.md) 为目标契约。Review 是审阅，Verify 是其中的核实，Cleanup 属于 Update；旧一轮回答和预算保持原样。
+本节下图及字段快照描述旧抽取与治理形态，不表示 Claim Management 2.0 已启用。新获准 action 的 operations、既有 Claim 入口、多轮修正、独立终审及当前可用资格以 [Claim Management 2.0 operations 与生命周期设计](./claim_management_2_design.md) 为目标契约。Review 是审阅，Verify 是其中的核实，Cleanup 属于 Update；旧一轮回答和预算保持原样。
 
 ```mermaid
 flowchart TD
