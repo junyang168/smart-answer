@@ -68,6 +68,17 @@ def observe(database,args):
     with psycopg.connect(database) as conn:return t.observe_committed_plan(conn,**args)
 
 
+def assert_change_set_index_path(explain):
+    # Both installed indexes begin with the exact ChangeSet key. PostgreSQL
+    # may choose either; an index name alone does not prove a bounded lookup.
+    plan = explain[0][0]['Plan']
+    assert plan['Node Type'] in {'Index Scan', 'Index Only Scan'}
+    assert plan['Index Name'] in {
+        'integrity_object_versions_change_set_idx', 'object_versions_change_set_idx',
+    }
+    assert 'change_set_id =' in plan['Index Cond']
+
+
 def test_actual_committed_exact_ledger_and_index_plan_not_semantic_approval(indexed,tmp_path):
     args=prepare(indexed,tmp_path)
     with psycopg.connect(indexed) as conn:
@@ -80,7 +91,7 @@ def test_actual_committed_exact_ledger_and_index_plan_not_semantic_approval(inde
     with psycopg.connect(indexed) as conn:
         explain=conn.execute('EXPLAIN (FORMAT JSON) SELECT * FROM wang_knowledge.object_versions WHERE change_set_id=%s',
                              (args['plan'].change_set_id,)).fetchone()
-        assert 'integrity_object_versions_change_set_idx' in str(explain)
+        assert_change_set_index_path(explain)
 
 
 def test_uncommitted_same_connection_is_refused_before_any_receipt(indexed,tmp_path):
@@ -221,7 +232,7 @@ def test_actual_transaction_observation_rows_do_not_grow_with_unrelated_N_or_ver
             cursor.execute('EXPLAIN (FORMAT JSON) SELECT * FROM wang_knowledge.object_versions WHERE change_set_id=%s',
                            (args['plan'].change_set_id,))
             explain=cursor.fetchone()
-            assert 'integrity_object_versions_change_set_idx' in str(explain)
+            assert_change_set_index_path(explain)
     assert len({(r['queries'],r['explicit_rows']) for _,_,r in results})==1
     print('new-connection component observation N/H growth, NOT cold whole-flow acceptance:',results)
 

@@ -124,7 +124,9 @@ def test_complete_input_rejection_does_not_open_another_correction(monkeypatch,t
     monkeypatch.setattr(r,'effective_proposal',lambda *args:None)
     monkeypatch.setattr(c,'validate_review',lambda *args:False)
     frozen={'claim_issue_context':{'complete_input_repair':{'correction_limit':0}}}
-    with pytest.raises(r.Stop,match='no extra correction'):Runner(tmp_path,None).reviewed(frozen)
+    runner=Runner(tmp_path,None)
+    runner.root=tmp_path/'fixed-parent'
+    with pytest.raises(r.Stop,match='no extra correction'):runner.reviewed(frozen)
     assert calls==['proposal','initial_review']
 
 

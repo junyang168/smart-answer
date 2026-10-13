@@ -105,9 +105,13 @@ def test_partial_parent_readset_includes_all_exact_child_identities(monkeypatch,
             'viewpoint_claim_links',repair.review.LINK]['payload']=={'revision':2}
 
 
-def test_apply_never_replays_an_existing_root(monkeypatch,tmp_path):
-    monkeypatch.setattr(repair,'ROOT',tmp_path)
-    with pytest.raises(ValueError,match='already attempted'):repair.run()
+@pytest.mark.parametrize('existing', [True, False])
+def test_retired_apply_never_reaches_existing_or_new_root(monkeypatch,tmp_path,existing):
+    root = tmp_path if existing else tmp_path/'unused'
+    monkeypatch.setattr(repair,'ROOT',root)
+    monkeypatch.setattr(repair,'reviewed_inputs',lambda:pytest.fail('retired runtime must not read/apply'))
+    with pytest.raises(RuntimeError,match='runtime is retired'):repair.run()
+    assert list(tmp_path.iterdir()) == []
 
 
 @pytest.mark.parametrize('mutation',[None,'link_payload','link_revision','candidate','sha','retired'])
@@ -137,7 +141,11 @@ def test_child_proof_composes_exact_postimages_not_ignore_link_guard(mutation):
     assert records==original
 
 
-def test_composed_continuation_never_restarts_existing_audit(monkeypatch,tmp_path):
+@pytest.mark.parametrize('existing', [True, False])
+def test_retired_continuation_never_restarts_existing_or_new_audit(monkeypatch,tmp_path,existing):
     from backend.pipeline import viewpoint_s201129_link_support_continuation as continuation
-    monkeypatch.setattr(continuation,'ROOT',tmp_path)
-    with pytest.raises(ValueError,match='already attempted'):continuation.run()
+    root = tmp_path if existing else tmp_path/'unused'
+    monkeypatch.setattr(continuation,'ROOT',root)
+    monkeypatch.setattr(continuation.epoch,'verified_applied',lambda *_:pytest.fail('retired runtime must not read/audit'))
+    with pytest.raises(RuntimeError,match='runtime is retired'):continuation.run()
+    assert list(tmp_path.iterdir()) == []

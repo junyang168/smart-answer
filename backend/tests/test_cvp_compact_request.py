@@ -37,6 +37,6 @@ def test_compact_does_not_weaken_ceiling_or_call_model_on_excess(tmp_path):
     small, client = adapter(True)
     small.max_request_bytes = 10
     client.generate_json = lambda **kw: pytest.fail("must stop before model")
-    with pytest.raises(ValueError, match="exceeding the frozen ceiling"):
+    with pytest.raises(ValueError, match="exceeding the configured ceiling 10"):
         call_model(small, {"evidence": "a" * 100}, tmp_path / "raw.json")
     assert not (tmp_path / "raw.json").exists()

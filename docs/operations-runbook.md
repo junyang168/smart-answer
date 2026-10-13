@@ -294,6 +294,22 @@ Design: `docs/wang-knowledge-platform/60-reference-commentary/reference_commenta
 
 ---
 
+### nginx logs
+
+nginx runs as root (LaunchDaemon `homebrew.mxcl.nginx`) and writes to
+`/opt/homebrew/var/log/nginx/`. macOS `newsyslog` rotates every `*.log` there:
+at midnight or past 100 MB, 14 gzip copies kept, then nginx gets `SIGUSR1` to
+reopen its files. The config is `scripts/ops/newsyslog-nginx.conf`, installed
+as `/etc/newsyslog.d/smart-answer-nginx.conf`:
+
+```bash
+scripts/install-nginx-log-rotation.sh   # asks for the sudo password; ends with a dry run
+```
+
+Until OPS-35 (#421) nothing rotated them: `access.log` reached 3.1 GB on
+2026-10-07 with the disk at 98%. To empty a log by hand, truncate it
+(`: > access.log`). Deleting it frees nothing while nginx holds it open.
+
 ## Things that will bite
 
 **Ambient shell state changes the outcome.** The Python failure above came from

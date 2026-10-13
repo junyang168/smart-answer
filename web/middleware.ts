@@ -19,7 +19,7 @@ export default withAuth(
       return NextResponse.next();
     }
 
-    if (token?.role === "editor") {
+    if (token?.role === "editor" || token?.role === "admin") {
       return NextResponse.next();
     }
 

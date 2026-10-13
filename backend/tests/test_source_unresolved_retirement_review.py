@@ -13,7 +13,13 @@ from backend.tests.test_claim_issue_management import issue_setup, materials, re
 @pytest.fixture
 def pending(issue_setup, tmp_path):
     _, frozen, issue = materials(issue_setup, tmp_path)
-    frozen['claim_issue_context']['scope_amendment'] = {'fixture': 'exact owner direction'}
+    # Routing is synthetic, but the direction must still be a real SHA-bound
+    # file when shared proposal validation inspects its schema/domain.
+    direction = tmp_path / 'synthetic-scope-direction.json'
+    r.write(direction, {'schema_version': 'synthetic-retirement-routing-v1'})
+    proof = r.binding(direction)
+    frozen['claim_issue_context']['scope_amendment'] = proof
+    frozen['physical_snapshots'][proof['path'] + ':' + proof['file_sha256']] = direction.read_bytes().hex()
     frozen['sql_scope'] = {'read_pins': [
         {'collection': 'claims', 'object_id': 'OLD', 'pin': [2, 'saved-history', True]}]}
     cv = 'canonical_viewpoints/CV-test'
