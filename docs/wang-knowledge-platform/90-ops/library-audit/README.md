@@ -8,6 +8,8 @@
 
 報告本身**不進版本控制**：它逐條列出引文與主張原文，屬於教授材料，依專案規則不得進入 Git。
 
+本文既有四層審計不是完整的「CVP 生成品質評估」：它不能單靠已記錄成員證明原文的重要觀點沒有遗漏，也沒有定義隨機／風險樣本分開的品質報告。新增評估的範圍與指標見 [CVP 生成质量评估设计 v1](../../20-knowledge/cvp_generation_quality_design_v1.md)，次序見[評估流程](../../20-knowledge/cvp_generation_quality_workflow_v1.md)。兩份目前是設計契約，不是本文 CLI 已支援的新模式；不可照舊命令重審已耗盡爭議來冒充新評估。
+
 產出位置：`$DATA_BASE_DIR/wang-knowledge-platform/staging/reports/library-audit/<UTC 時間戳>/`
 
 ## 怎麼跑
