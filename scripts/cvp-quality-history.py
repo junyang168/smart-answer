@@ -21,7 +21,22 @@ CAMPAIGN = 'a155c59979a3a1fe65fccd3368c9abca8ea0f1d4238b1624f4a7cfdbdc522ced'
 OLD_STAGING = Path('/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/staging')
 FORBIDDEN = {'review_status', 'review_note', 'reviewed_by', 'reviewed_at', 'approved_by', 'approved_at',
              'provenance', 'review_provenance', 'metrics', 'decision_id', 'approval_basis',
-             'review_artifact_sha256', 'rejected_highlights', 'reviewer_model_ids'}
+             'review_artifact_sha256', 'rejected_highlights', 'reviewer_model_ids',
+             'ai_adjudication', 'approval_status'}
+
+
+def blind_leaks(value, path='$'):
+    result = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            child = f'{path}.{key}'
+            if key in FORBIDDEN and item is not None:
+                result.append(child)
+            result.extend(blind_leaks(item, child))
+    elif isinstance(value, list):
+        for i, item in enumerate(value):
+            result.extend(blind_leaks(item, f'{path}[{i}]'))
+    return result
 
 
 def blind(value):

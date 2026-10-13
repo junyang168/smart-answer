@@ -275,7 +275,7 @@ def main():
         def blind(row):
             return {k: v for k, v in row['payload'].items() if k not in {
                 'review_status', 'review_note', 'reviewed_by', 'reviewed_at', 'approved_by', 'approved_at',
-                'provenance', 'metrics', 'review_provenance'}}
+                'provenance', 'metrics', 'review_provenance', 'ai_adjudication', 'approval_status'}}
         save(f'{vid}.forward.json', {'stage': 'forward_material_preview', 'roles': ROLES,
             'viewpoint': {k: revision['payload'].get(k) for k in revision_fields},
             'links': [{k: l.get(k) for k in link_fields} for l in links],

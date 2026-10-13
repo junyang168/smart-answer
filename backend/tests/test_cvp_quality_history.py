@@ -10,6 +10,7 @@ SPEC.loader.exec_module(MODULE)
 def test_blind_projection_removes_nested_old_decisions_and_keeps_source_roles():
     result = MODULE.blind({'claims': [{'statement': 'source judgment', 'attribution': 'professor',
          'occurrences': [{'speaker': 'professor', 'review_note': 'old reviewer reason'}],
+         'ai_adjudication': {'approval_status': 'approved', 'structural_notes': ['old verdict']},
          'provenance': {'approved_by': 'old model'}}], 'evidence': [{'support_eligibility': 'context_only',
          'rejected_highlights': ['old rejection'], 'review_status': 'approved'}]})
     assert result == {'claims': [{'statement': 'source judgment', 'attribution': 'professor',
