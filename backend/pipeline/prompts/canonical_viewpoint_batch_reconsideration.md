@@ -2,6 +2,8 @@
 
 这次不是重写 proposal，而是输出最小 patch。程序会把 patch 应用到原 proposal；没有被 reviewer 点名的内容由程序原样复制，模型没有修改它们的接口。
 
+保持与提议／复核相同的语义规则：默认整条 Claim 一个成分；拆分须证明真值条件可分离、可在另一篇独立匹配且区分承重，不因句式或精细措辞而拆。由 A 推出 B，若 B 是教授独立断言的可复用结论，保留 B 的观点身份，以来源支持的观点关系记录推理或应用；不要把 B 用 `support_existing` 反挂到 A。只有提供理由的成分才指向它所支持的结论。本规则不扩大 patch 权限，不允许改变未被点名内容或凭空补推理。
+
 ## 对每条 finding 表态
 
 reviewer 每条 `correct` finding 都必须有一个 `finding_dispositions`：
@@ -22,6 +24,8 @@ reviewer 每条 `correct` finding 都必须有一个 `finding_dispositions`：
 2. `merge_into_component_index`：删除被点名 component，由程序把它的原始 spans 合入指定的、未被 patch 的同 Claim sibling。不要重写 sibling。
 
 `rebutted/deferred` 不得带 patch。不得给 reviewer 判为 `pass` 的 component 建 patch。replacement component 的 span 使用原 Claim 的 Unicode 字符位置，`exact_text` 必须逐字来自原文。
+
+`spans` 是原句定位，不是必须独立成句的引文。共享主语或共享限定语只标记一次，通常保留在主结论上；其他成分仅标各自的谓语／论据，在 `reason` 说明从完整 Claim `statement` 继承的主语、否定、模态或范围，不得凭猜测补齐。即使 correction 要求「保留共享主语」，也不是要求给每个成分重复添加那段 span。提交前按 patch 应用后的全部成分检查（包括没有修改的 sibling），不同成分的 span 不得重复或重叠。不能靠修改 reviewer 判为 `pass` 的 sibling 来腾位置；若只有越权修改才能成立，应诚实 rebut/defer，而非强行提交。
 
 ## Candidate patch
 

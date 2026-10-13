@@ -6,6 +6,8 @@
 
 它是[知识库](../00-overview/solution_architecture.md#3-架构总览)三个 component 里管「观点」的那一个。单篇之内的判断由 [Claim](./claim_design.md) 承担。
 
+本文定義觀點身份與知識模型。實際生產的正常路徑、special cases、現行 #357 模型政策、人工出口和恢復接點，集中見 [Claims → CVP 現行完整流程](./cvp_production_process_v1.md)；已實作的 SQL 交易／changelog 與恢復入口另見 [CVP 交易與恢復設計 v2](./cvp_transaction_workflow_v2.md)。
+
 ## 术语
 
 本文用到的词，凡是这个项目里已经在用的就照用；下面七个是本文新引入的，先定义再使用。已有的词(论证路线、反方立场、真值条件、推理骨架)不在此列。
@@ -35,6 +37,7 @@
 | [8. 不变量](#8-不变量) | 机器可查的规则 |
 | [9. 谁读观点](#9-谁读观点) | 文章、问答怎样取用 |
 | [10. 明确不做](#10-明确不做) | |
+| [11. 来源改变后的观点更新](#11-来源改变后的观点更新) | 新版本批准与完整影响证明 |
 
 ## 1. 观点是什么
 
@@ -117,6 +120,12 @@ erDiagram
 
 这是 [Solution Architecture D4](../00-overview/solution_architecture.md#d4最小化人工提议--复核--仲裁--转人工) 四步在这一层的落地。
 
+**观点会随新讲道持续丰富，范围修订是正常 CVP management，不是逐例 exception。** 新 Claim 可能为同一核心判断增加经文依据或另一种论证。程序读取该观点全部当前成员与支持材料，判断命题是否仍是教授同一意思，再提议最小新修订并独立复核。原 Claim、各篇论证及旧 CVR 保留，不把不同讲道拼成教授未说过的一条综合论证。
+
+观点修订的 `scope.scripture_scope` 表示命题的经文适用限定，不能充当「目前在哪些经文讲过」的覆盖列表；覆盖从来源、Claim 经文与连接另行取得。一般判断不因最初来自某段经文就永远只适用于该段。修订经文范围仍须确认教授没有真实的对象、条件或时期限定；不能仅凭不同经文都出现同一个词扩大身份。
+
+有界 scope policy 目前只允许同一核心、完整 proposition signature、归属及人群／历史限定不变时，修订经文范围并复核必要连接和关系的版本引用。每个相关 Claim 的自身正文、现有完整成员和关系作用交 GPT／Opus，至多一轮纠正；改核心、改变关系语义、解除 hold 或未消解教导张力不在该权内。提交与受影响组复验沿用[共同 SQL 流程](./cvp_transaction_workflow_v2.md)，不逐例增加执行器。
+
 ```mermaid
 flowchart TD
     SC["scope 内的全部主张"] --> G["智能分组<br/>claude-fable-5-1"]
@@ -133,6 +142,9 @@ flowchart TD
     C -->|"仍不一致"| H["转人工"]
     FR -->|"全部通过"| W
     FR -->|"仍有问题"| H
+    H --> HR["人工裁决绑定精确待写状态<br/>不改写模型结论"]
+    HR -->|"明确接受完整状态，程序验证通过"| W
+    HR -->|"只有解释意见／暂缓／需新提议"| HS["保留裁决，停止写入"]
     W --> RB["回读校验"]
     RB --> B
 ```
@@ -174,17 +186,23 @@ flowchart TD
 3. **最多一轮改正。** 不设第二轮。CanonicalViewpoint 或 ArgumentRoute 若发生改正，同一独立 reviewer 角色必须再审核一次实际可能写库的 B；这次只准通过或转人工，不再产生 C。
 4. **写完要回读。** 从库里读回来逐条比对，不一致就是失败。
 
+**人工出口不是另一轮模型审核。** `viewpoint_human_review.py` 将终局生产分歧或单次受控修订的拒绝保存为不可变 handoff，绑定待写材料及原始审核；受控修订另绑定物理来源与写前 Registry 指纹，普通批次保留原有 freeze 的来源准入门槛。原模型结论原样保留。人工回答分为解释意见（`interpretation`）、接受精确待写状态（`accept_exact_postimage`）、授权新修订（`authorize_revision`）和暂缓（`defer`）。解释意见、授权新修订及暂缓均不批准现有状态；授权新修订也不批准尚未生成的新内容。解释裁决与执行许可分开保存，不能从一句「相容」推导出退役或改关系的权限。
+
+所有异议都被明确接受且精确材料与当前 Registry 指纹仍匹配时，受控修订执行器可消费 `human_exception_review` 许可，复用已绑定模型回答，不再调用模型重审同一裁决。新记录使用 `human_approved`／`human_editor`，详细决定放在现有 provenance 的 `review_artifact_sha256` 所指 artifact，不增加 Registry schema 字段，也不伪造 `dual_model_consensus`。写入前仍通过原有结构、依赖、备份和 dry-run 门槛；全局锁下跨 root 一次消费，已有 apply-intent／receipt 不重放。写后严格回读及独立审计完成之前，不能推进下一组。普通批次的 handoff 只提供裁决入口，不自行绕过 batch writer 的审核门槛。
+
 ## 4. 怎样判断两条主张是同一个观点
 
 这是这一层最难、也最容易出错的判断。
 
-**判据是真值条件，不是措辞。** 两条主张说法不同但真假总是一致，就是同一个观点；共用一节经文、或者词句相似，都不算。
+**判据是教授自身语境中的实际主张，不是措辞一致。** 真值条件指在该语境中影响主张意思的重要条件，不是把短摘要当成跨所有想象情形的逻辑公式。先读完整 Claim、定位成分、实际 CVP 和自己绑定的原文，再判断是否表达同一个主张。措辞、语态、详略、明确省略及同一判断的正反表达可以不同；共同主题、结论相容、单向推出或共享经文都不足以证明等价。
+
+对象、人群、经文与时间范围、必要／充分条件、否定、因果、模态和归属必须保留。双向反事实只是查找实质差异的辅助，拒绝须指出来源语境中的承重差异和具体误读；不能靠抽象边缘反例拒绝同义表达，也不能以「意思差不多」放过真实限定。自身上下文可消解指代、口语省略及明确的正反边界，不能借其他 Claim、未绑定来源或原文另一项独立结论补当前主张。字段之间实质矛盾或证据不足保留未决。
 
 递给模型的问题是这样分岔的：
 
 ```mermaid
 flowchart TD
-    C["一条主张（或其中一个成分）"] --> Q{"与某个已有观点的真值条件等价？"}
+    C["完整语境中的主张或定位成分"] --> Q{"与已有观点表达同一实际主张且重要条件不变？"}
     Q -->|"是"| M["成为该观点的成员"]
     Q -->|"证据不足"| D["暂缓"]
     Q -->|"否"| R{"那它与已有观点是什么关系？"}
@@ -200,18 +218,24 @@ flowchart TD
 
 | 连接类型 | 含义 | 算成员 |
 | --- | --- | --- |
-| `equivalent_full` | 整条主张与观点真值条件等价 | 是 |
+| `equivalent_full` | 完整主张在自身语境中与观点同义，承重条件不变 | 是 |
 | `equivalent_component` | 主张里某个明确成分与观点等价，必须能定位到那一段 | 是 |
-| `supports` | 提供论据，但结论不是同一个命题 | 否 |
+| `supports` | 提供具体理由、证据、例证或有论证作用的背景；不要求单条独自证明或完整复述目标 | 否 |
 | `extends` | 保留核心但加了会改变真值条件的内容 | 否 |
 | `qualifies` | 加条件、范围或防误解的边界 | 否 |
 | `applies` | 用到具体对象或行动上 | 否 |
 | `tension_evidence` | 为未解决的张力提供材料 | 否 |
 | `superseding_evidence` | 为后期明确修正提供材料 | 否 |
 
-**成分定位必须是结构化的**，不能只凭模型说「这条里包含同一个观点」。定不稳就先记成 `extends`，或退回上游把主张拆细，**不得硬塞成成员**。
+**成分定位必须是结构化的**，不能只凭模型说「这条里包含同一个观点」。定位工具不要求成分脱离全文独立成句；共享语境只用于解释成分，不因此成为成员。定不稳就保留未决，**不得硬塞成成员，也不得自动改成 `extends` 或 `supports`**；每种关系都要有自己的依据，正文或定位修订另经授权与审核。
+
+支持须说明哪句话以什么论证作用支持目标哪一部分，不能只是相关或相容，不能把局部依据冒充完整证明。批准给出原文对应依据，拒绝给出实质差异或缺失作用；完整 CVP 的所有实质内容仍须有来源。生成、整合、复核、纠正、审计、内容过滤补充与原文仲裁使用同一版本的简短语义规则，不把本文全文交给 runtime 模型。历史规则、缓存和裁决保留；改变规则创建新身份，不借旧审核批准新请求。
 
 **一条完整主张最多属于一个观点**(以 `equivalent_full` 计)。复合主张可以有多个成分各属不同观点，但每个成分要有互不冒充的定位。
+
+同一 Claim 對同一 CVP 可以保留兩種不同作用：`equivalent_component` 記錄結論，`supports` 記錄教授給出的理由。程序要求它們綁定同一當前 Claim 版本及 CVR、成分精確且字元區間不重疊、各有可用的自身 EvidenceStep／SourceFragment、已有批准；完整主張成員不能與局部支持重疊。區間不重疊只證明定位不同，論據是否真的支持目標仍由正常獨立审核與原文審計判斷。不能靠不同 `link_type` 放過重複或缺證據。
+
+統計分開報告唯一 Claim 數、連接數和唯一等價成員 Claim 數；同一 Claim 的結論和理由不計成兩條 Claim，`supports` 不計為第二次成員資格。新模型调用使用版本化 `wang_cvp_component_roles_v1` 短規則，舊 prompt／原始回答保留且按原身份驗證，不追認為新規則审核。
 
 ## 5. 论证路线
 
@@ -284,12 +308,14 @@ flowchart TD
 | --- | --- | --- |
 | 生成状态 | 这一轮跑完了没有 | `generated / validated / failed` |
 | 审核状态 | 谁认可了 | `candidate / ai_consensus / system_approved / human_approved / rejected` |
-| 批准依据 | 凭什么认可的 | `deterministic / dual_model_consensus / human_exception_review` |
+| 批准依据 | 凭什么认可的 | `deterministic / dual_model_consensus / owner_scoped_independent_terminal_review / human_exception_review` |
 | 身份状态 | 这个观点还是不是它自己 | `active / redirected / split / merged / retired` |
 | 可见性 | 谁能看到 | `internal / active_snapshot_eligible / public` |
 | 依赖状态 | 用了它的产品还有效吗 | `current / invalidated / withdrawn / rebuilt` |
 
-**`system_approved` 不等于同工看过。** 它表示两个模型一致且属于低风险，界面上不得显示成人工批准。批准依据这一栏就是用来防止这种混淆的。
+**`system_approved` 不等于同工看过。** 它表示系统按该版本契约批准；正常观点解析依靠两个模型一致且属于低风险，界面上不得显示成人工批准。批准依据这一栏就是用来防止这种混淆的。
+
+另有明确受控来源修订的 `owner_scoped_independent_terminal_review`：GPT 只提议／纠正，Opus 对精确完整后像独立终审；必须绑定该版本契约、真实 Opus 回答与单次应用证明，不假称双模型共识，也不把 owner 的执行授权称为内容批准。不能只凭状态或政策名称放行。
 
 当前实际状态(2026-08-25):32 条修订全部是 `system_approved` / `internal`——**没有一条对外**。
 
@@ -308,7 +334,7 @@ flowchart TD
 9. 结论相同不足以证明两条路线是同一条。
 10. 观点修订里不得内嵌成员、路线、关系或覆盖数组——它们是各自独立的记录。
 11. 同样的输入必须编译出同样的结果：语义修订、覆盖范围与编译器版本相同时，产出的内容哈希必须一致。
-12. correction 后写库的 effective proposal SHA 必须与终局复核绑定的 proposal SHA 相同；初审 A 的批准不得为 B 背书，终局复核任一维度非 `pass` 时不得产生 ChangeSet。
+12. correction 后写库的 effective proposal SHA 必须与终局复核绑定的 proposal SHA 相同；初审 A 的批准不得为 B 背书，终局复核任一维度非 `pass` 时不得按模型共识产生 ChangeSet。人工例外只按第 3 节的精确状态许可另行批准，不改写原终局结果，不豁免机械门槛。
 13. 每条被路线结论引用的观点，其 scope 内可 attesting 成员来源必须 exact-once 落在 `attestation` 或经独立 reviewer 确认的无路线 disposition；缺席与重复都失败。
 14. ArgumentRoute correction 后写库的 effective proposal SHA 必须与终局复核绑定的 proposal SHA 相同；终局复核有任一非 `pass`，该 effective proposal 不得产生 ChangeSet。
 15. source eligibility attestation 若依据 `withdrawn` 或 `auto_applied` 裁定，row 与顶层 artifact hash 必须覆盖 exact adjudication SHA、状态以及适用时的 overrides SHA；不含这些字段的 legacy hash 只兼容无需仲裁的旧 `pass` 行。
@@ -338,6 +364,16 @@ flowchart TD
 - 不把不同来源的证据步骤拼成一条虚构的完整论证；
 - 不把出现次数当作重要性。
 
+## 11. 来源改变后的观点更新
+
+按[来源修订 → Claim → CVP 更新流程](./source_reconciliation_workflow_v1.md)，先检查改变来源的全部 consumer，再检查目标 CVP 所有其他成员及其完整来源。编辑推论与教授直说分开；逐字引用成立仍须核对主体、归属、范围、模态、必要／充分条件及上下文。
+
+来源修改不必导致 CVP 核心命题改变。可保留核心命题而更新 Claim 版本、连接及证据绑定；partial supports 必须指出具体作用，不能要求 Claim 复述整个 CVP，也不能把它不支持的部分凑成等价。确有获准的核心意思变化，创建新 CVR 并保留旧 CVR／supersedes 链，不自动合并、拆分或退役身份。
+
+终审批准后的 fresh provenance 明确单一 Opus 实际依据；连接绑定最终 Claim SHA、当前 CVR 和精确 locator，不能沿用旧 decision 冒充新批准。原子应用后失效相关产品依赖，但本流程不生成路线／文章或发布。完整受影响组独立审计与准确 flags 是完成门槛，SQL 成功不是完成。
+
+通用来源版本证明只读还原冻结成员的历史 pins；未来执行仍须核验当前知识与新来源批准。旧硬编码修订包不自动升级为通用证明；缺少、歧义、冲突或 human hold 均停止。
+
 ## 待定
 
 **复杂论证体系可能需要扩展。** 当前模型是「观点 + 论证路线 + 观点关系」。多层嵌套的论证、几个观点联合才成立的结论、有条件才成立的结论，现有对象是否够用，尚未论证。本文不擅自扩展模型，记录为公开问题。
@@ -347,5 +383,7 @@ flowchart TD
 > **读者**:Solution architect、Developer。同工不需要读本文；同工要知道的在 [Solution Architecture](../00-overview/solution_architecture.md)。
 > **类型**:规范
 > **状态**:当前。取代 `canonical_viewpoint_design.md`。
-> **与代码对齐**:未核对。第 1、7 节的数字仍取自 2026-08-25 的 PostgreSQL 快照；partition 实施以 #395 的验证记录为准。
+> **来源更新代码对齐**:第 11 节与受控终审依据于 2026-10-06 核对到 `eacc753`、`c5bc74a`、`1bcb34f` 及离线回归；新入口未作真实模型／SQL 端到端实跑，不追认旧包。其余数字与旧规则的原核对范围保持。
+> **与代码对齐**:第 4 节语境语义规则于 2026-10-05 核对到 `config/wang_cvp_contextual_semantics_v2.md`、`viewpoint_semantic_contract.py`、新版本角色模板及 `scripts/audit-library.py`；身份归并未决出口核对到 v2 response，重复仲裁保护核对到 `viewpoint_adjudication_history.py`。新规则目前只完成离线回归，尚非真实模型校准或生产通过。第 3 节人工交接与受控修订续跑保持 2026-10-04 对 `viewpoint_human_review.py`、`viewpoint_audit_link_repair.py`、`viewpoint_batch_resolution_runner.py` 及对应回归测试的核对；其余未核对。第 1、7 节的数字仍取自 2026-08-25 的 PostgreSQL 快照；partition 实施以 #395 的验证记录为准。
 > **权威范围**:观点、论证路线、观点关系的语义、身份判定与消费边界。
+> **范围管理代码对齐**:第 3 节常规 scope enrichment 于 2026-10-09 核对本次 `cvp_scope_management.py`、共享 SQL action 与隔离交易测试；真实模型／组验收另存，不用离线结果追认新内容。

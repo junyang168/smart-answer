@@ -1,0 +1,10 @@
+{
+  "schema_version": "wang_claim_issue_management_v1",
+  "authorization_id": "357-owner-claim-management-20261008-v1",
+  "authorization_quote": "claim 相关的变化分两类。 一类是 claim 本身的变化，一类是 claim 与 CVP 的 连接。 第一类应该归于 claim management, 第二类是 CVP management. claim 的变化又细分为 claim 与 claim evidence 的变化。 而 claim 的 change 又可能影响到相关的 CVP。\n开始\n好，继续",
+  "human_content_approval": false,
+  "claim_fields": ["statement", "claim_type", "attribution", "discourse_mode", "scripture_refs", "occurrences"],
+  "evidence_fields": ["statement", "source_fragment_id", "source_fragment_ids"],
+  "link_fields": ["pinned_claim_revision", "component_locator", "evidence_bindings", "link_type"],
+  "cvp_permissions": []
+}

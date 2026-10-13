@@ -6,6 +6,8 @@
 
 字符区间、ID 可解析性、证据归属、覆盖完整性已由程序验过，不必重复检查。你只判断语义。
 
+`spans` 是原句定位，不是必须独立成句的引文。复合 Claim 的共享主语或共享限定语只标记一次，其余成分的含义须结合完整 `statement` 判断。只要原句指代明确、否定／模态／范围没有被丢掉，不得仅因某个成分没有重复标出主语或限定语就要求补标；在 correction 中说明继承的原句语境即可。不得要求把同一段原文重复分配给多个成分，也不得借别的 Claim 补齐欠定的指代。
+
 ## 逐项复核
 
 proposal 里每一个 component 都必须有一条 `change_reviews`，用 `claim_id` 加 `component_index`（该 Claim 的 components 数组下标，从 0 开始）定位。不能只给批次级总评，不能跳过任何一项。
@@ -20,10 +22,12 @@ proposal 里每一个 component 都必须有一条 `change_reviews`，用 `claim
 - **复合 Claim 的切分**：component 是否准确切出了那个真值条件，有没有把共享的限定语丢在外面，导致成分脱离限定后含义变了；
 - **`new_viewpoint` 是否成立**：它是否其实与某个现有 viewpoint 重复，或者把多个真值条件揉成了一个；
 - **新候选之间是否重复**：两个 `new_viewpoint_candidates` 是否其实是同一个真值条件，只是换了主语、语态或正反说法。若是，它们必须合成一个候选、共用一个 local key。这一项和「与现有 viewpoint 重复」同样重要——批次内漏合并会让每条 Claim 各自变成一个 viewpoint；
-- **角色是否判对**：支持某观点成立的理由、划定边界的限定、由观点推出的后果，都不应成为独立 viewpoint。它们应当是 `support_existing` / `qualification_existing`，target 指向所服务的观点（可以是本批的 local key）；反过来，承重的主张也不该被降级成论据；
+- **角色是否判对**：仅为结论服务的理由与限定用 `support_existing` / `qualification_existing`，target 指向所服务的观点（可以是本批的 local key）。由 A 推出 B，若 B 是教授独立断言的可复用结论，保留 B 的观点身份，以来源支持的 `viewpoint_relations` 记录推理或应用关系；不要把 B 用 `support_existing` 反挂到 A。不能因同段出现就凭空建立推理关系。承重的主张不该被降级成论据；
 - **证据是否真的支持**：引用的 EvidenceStep 是否确实推出这个 component，还是只是碰巧出现在同一段。
 
 ## 拆分同样要有代价
+
+默认整条 Claim 一个成分，先按完整命题及原文范围判断身份，再检查等价、支持或限定。整条处理不意味着每条 Claim 新建一个 viewpoint，也不允许把独立结论或限定藏起来。提议已经拆分时，同样核对下面三关；不得仅因较细就接受提议，也不得仅因合取句式就要求拆分。
 
 上面多数检查是防「不该合而合了」。**漏合并的代价一样大**：一条 Claim 一个 viewpoint，Registry 就退化成 Claim 表的改名版，讲员在六篇讲道里反复讲的同一个观点会散成六条，谁也答不出「他到底主张什么」。
 
@@ -123,3 +127,4 @@ proposal 若提出 `viewpoint_relations`，每一条都要有一条 `relation_re
 宁可标出问题让人来看，也不要为了让批次通过而放行有疑问的判断。
 
 用中文。术语（Claim、viewpoint、component、disposition 等）保持英文。
+证据若带 `source_context`，应连同原引文阅读：它是 SHA-bound 同来源同段上下文，专门用于解析「这一」「因此」等回指，不是新增 EvidenceStep、Claim 或成员资格。仍核对本 Claim 的原有证据 ID，不借用其他 Claim 的证据，不补充上下文没有的前提。

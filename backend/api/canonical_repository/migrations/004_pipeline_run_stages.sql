@@ -32,4 +32,4 @@ ALTER TABLE wang_knowledge.pipeline_runs
 ALTER TABLE wang_knowledge.pipeline_runs
     ADD CONSTRAINT pipeline_runs_stage_check
     CHECK (stage IN ('sectioning', 'extraction', 'cross_section', 'review',
-                     'adjudication', 'merge', 'ingest', 'article'));
+                     'adjudication', 'merge', 'ingest', 'article', 'cvp_group'));

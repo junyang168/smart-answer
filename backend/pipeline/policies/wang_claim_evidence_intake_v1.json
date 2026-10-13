@@ -1,0 +1,11 @@
+{
+  "schema_version": "wang_claim_issue_management_v1",
+  "authorization_id": "owner-routine-fresh-evidence-intake-v1",
+  "authorization_quote": "好，你改好",
+  "human_content_approval": false,
+  "claim_fields": [],
+  "evidence_fields": [],
+  "evidence_intake": "wang_claim_evidence_intake_v1",
+  "link_fields": ["pinned_claim_revision", "component_locator", "evidence_bindings"],
+  "cvp_permissions": []
+}

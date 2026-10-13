@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from dotenv import load_dotenv
+from backend.pipeline.viewpoint_validation_context import typed_records, active_context
 
 from backend.api.canonical_repository.knowledge_models import (
     ArgumentRouteRecord,
@@ -51,9 +52,16 @@ from backend.api.canonical_repository.viewpoint_claim_repin import (
 from backend.api.canonical_repository.viewpoint_source_attestation import (
     IdentitySourceEligibilityArtifact,
 )
+from backend.pipeline.viewpoint_historical_source_eligibility import HistoricalSourceEligibilityArtifact
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SCOPE_PACKET_VERSION = "wang_canonical_viewpoint_scope_packet_v3"
+
+
+def load_source_eligibility(payload: dict[str, Any]):
+    if payload.get("schema_version") == "wang_historical_viewpoint_source_eligibility_v1":
+        return HistoricalSourceEligibilityArtifact.model_validate(payload)
+    return IdentitySourceEligibilityArtifact.model_validate(payload)
 
 
 def _read(path: Path) -> dict[str, Any]:
@@ -193,12 +201,13 @@ def build_scope_packet(
     scope_label: str,
     passage_unit_ids: list[str],
     claim_manifest: dict[str, Any],
-    source_attestation: IdentitySourceEligibilityArtifact,
+    source_attestation: IdentitySourceEligibilityArtifact | HistoricalSourceEligibilityArtifact,
     repository_root: Path,
     database_url: str | None,
     partition_claim_ids: Sequence[str] | None = None,
     partition_manifest_sha256: str | None = None,
     all_corpus: bool = False,
+    include_source_context: bool = False,
 ) -> dict[str, Any]:
     if all_corpus:
         if scope is not None or partition_claim_ids is not None or passage_unit_ids:
@@ -250,32 +259,20 @@ def build_scope_packet(
     exceptions = {row.claim_id: row for row in source_attestation.exceptions}
 
     store = PostgresKnowledgeStore(database_url)
-    claims = {
-        row.claim_id: row
-        for row in (
-            ClaimRecord.model_validate(raw) for raw in store.list_records("claims")
-        )
-    }
-    evidence_index = {
-        row.evidence_step_id: row
-        for row in (
-            EvidenceStepRecord.model_validate(raw)
-            for raw in store.list_records("evidence_steps")
-        )
-    }
-    fragment_index = {
-        row.fragment_id: row
-        for row in (
-            SourceFragmentRecord.model_validate(raw)
-            for raw in store.list_records("source_fragments")
-        )
-    }
+    if active_context() is not None and hasattr(store,'database_url'):
+        from backend.pipeline.viewpoint_current_scope import read_current_scope
+        claims,evidence_index,fragment_index,selected_sources = read_current_scope(store,in_scope)
+        source_sha256 = {sid:str(row.get('source_sha256') or '') for sid,row in selected_sources.items()}
+    else:
+        claims = typed_records(store,'claims',ClaimRecord,'claim_id')
+        all_evidence = typed_records(store,'evidence_steps',EvidenceStepRecord,'evidence_step_id')
+        forward_ids={eid for cid in in_scope if cid in claims for eid in getattr(claims[cid],'evidence_step_ids',[])}
+        evidence_index=all_evidence.reciprocal_subset(set(in_scope),forward_ids)
+        fragment_index = typed_records(store,'source_fragments',SourceFragmentRecord,'fragment_id')
+        source_sha256 = {sid:str(sha or '') for sid,sha in fragment_index.project_last('source_id','source_sha256').items()}
+        selected_sources = {row['source_id']:row for row in store.list_records('source_documents')} if include_source_context else {}
     citation_index = {
         item.citation_id: item for item in RepositoryStore(repository_root).list_citations()
-    }
-    source_sha256 = {
-        fragment.source_id: str(fragment.source_sha256 or "")
-        for fragment in fragment_index.values()
     }
 
     # A Claim review moves every reviewed Claim's revision and fingerprint
@@ -294,6 +291,8 @@ def build_scope_packet(
         ],
     )
     review_claims = []
+    context_sources = selected_sources if include_source_context else {}
+    context_cache = {}
     blocked: list[dict[str, Any]] = []
     excluded: list[dict[str, Any]] = []
     advanced_review_pins: list[dict[str, Any]] = []
@@ -400,6 +399,12 @@ def build_scope_packet(
             blocked.append({"claim_id": claim_id, "reason_code": "no_identity_eligible_evidence",
                             "detail": "No evidence pair is citation- or attestation-bound."})
             continue
+        if include_source_context:
+            from backend.pipeline.viewpoint_evidence_source_context import attach_source_context, load_context_source
+            source = context_sources[review_claim.source_id]
+            if review_claim.source_id not in context_cache:
+                context_cache[review_claim.source_id] = load_context_source(source)
+            review_claim = attach_source_context(review_claim, source, context_cache[review_claim.source_id])
         review_claims.append(review_claim)
 
     if partition_claim_ids is not None and (blocked or excluded):
@@ -445,6 +450,8 @@ def build_scope_packet(
     }
     if partition_claim_ids is not None:
         packet["partition_manifest_sha256"] = partition_manifest_sha256
+    if include_source_context:
+        packet["source_context_policy"] = "same_registered_live_paragraph_v1"
     if all_corpus:
         packet["scope_kind"] = "all_corpus"
     packet["packet_sha256"] = sha256_json(packet)
@@ -516,9 +523,7 @@ def main() -> int:
         scope_label=scope_label,
         passage_unit_ids=args.passage_unit_id or [],
         claim_manifest=_read(args.claim_manifest),
-        source_attestation=IdentitySourceEligibilityArtifact.model_validate(
-            _read(args.source_attestation)
-        ),
+        source_attestation=load_source_eligibility(_read(args.source_attestation)),
         repository_root=args.repository_root,
         database_url=args.database_url,
         partition_claim_ids=partition_claim_ids,
