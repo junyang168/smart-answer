@@ -68,11 +68,13 @@ erDiagram
 | **反方立场** | 教授引用、质疑或驳斥的**别人的**观点。必须独立成节点，不能混进他自己的主张 | `position_nodes` |
 | **观点连接** | 把这条 Claim 挂到某个跨讲道观点上 | `viewpoint_claim_links` |
 
-**为什么「出现」是 Claim 的一部分，而不是另一张表**：同一个判断在不同讲道里讲过，仍然是同一条 Claim；每次讲到就多一个 occurrence。这样「他讲过几次、在哪几篇」是这条记录自己就能回答的问题。
+**为什么「出现」是 Claim 的一部分，而不是另一张表**：同一个判断在同一篇里反复讲到，每次讲到就多一个 occurrence。不同讲道里的同一看法分别记录为 Claim，由观点层关联。历史跨来源记录保留其实际形态，迁移须明确授权及替代映射，不因规范澄清自动改动存量。
 
 ## 3. Claim 怎样产生
 
 这是 [Solution Architecture D4](../00-overview/solution_architecture.md#d4最小化人工提议--复核--仲裁--转人工)「提议 → 复核 → 仲裁 → 转人工」在 Claim 这一层的落地。
+
+本节下图及字段快照描述旧抽取与治理形态，不表示 Claim Management 2.0 已启用。新获准 action 的 operations、既有 Claim 入口、多轮修正、独立终审及当前可用证明以 [Claim Management 2.0 operations 与审核流程设计](./claim_management_2_design.md) 为目标契约。Review 是审阅，Verify 是其中的核实，Cleanup 属于 Update；旧一轮回答和预算保持原样。
 
 ```mermaid
 flowchart TD
