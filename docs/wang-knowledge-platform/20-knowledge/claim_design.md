@@ -73,6 +73,8 @@ erDiagram
 
 ## 3. Claim 怎样产生
 
+本节保留原 extraction 流程；已有 Claim／Evidence 的 Management 2.0 多轮修订与独立终审目标见 [主控设计](./claim_cvp_management_2_design.md)。目标尚未启用，不追认旧审核、不重开旧预算；Claim 清理与 CVP 生成／维护是两个管理域。
+
 这是 [Solution Architecture D4](../00-overview/solution_architecture.md#d4最小化人工提议--复核--仲裁--转人工)「提议 → 复核 → 仲裁 → 转人工」在 Claim 这一层的落地。
 
 ```mermaid

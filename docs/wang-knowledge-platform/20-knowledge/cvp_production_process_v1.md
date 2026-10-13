@@ -276,6 +276,8 @@ owner 暫停／指定 checkpoint 優先於自動恢復。停止時明確交代�
 
 ## 13. Claim 與 CVP 管理的變更閉環
 
+Claim／CVP Management 2.0 的新目标、多轮 Claim 修订、Gemini 独立终审及必要人工出口见 [主控设计](./claim_cvp_management_2_design.md)。该契约尚未启用，不用目标设计升级下述旧单轮回答、权限或预算；#357 的原生产里程碑完成不等于 2.0 主控完成。
+
 本節是共同流程及有界實作契約，不是執行授權。新接點已接入共同 SQL flow；正式使用须有已綁定 policy 和實際驗收。新增通用 Claim／Evidence 或 CVP 連接修訂權限須分域由 owner 確認有界 policy；確認一次後，由 code 完成各自權限內的後續步驟，不逐條、逐步再問「繼續」。一域的批准不擴大另一域的權限。
 
 ### 13.1 管理域、職責與現有缺口
