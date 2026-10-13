@@ -61,6 +61,9 @@ export default function AboutPage() {
                 Apostles Creed: <br/>
 I believe in God the Father Almighty, maker of heaven and earth. And in Jesus Christ, His only Son, our Lord; Who was conceived by the Holy Spirit, Born of the virgin Mary, Suffered under Pontius Pilate, Was crucified, dead and buried. On the third day, He rose again from the dead. He ascended to heaven, And sits at the right hand of God the Father Almighty; From thence He will come to judge the living and the dead. I believe in the Holy Spirit, The holy universal church, The communion of saints, The forgiveness of sins, The resurrection of the body, And the life everlasting.
               </p>
+              <Link href="/about/our-faith" className="mt-6 inline-flex items-center gap-2 font-semibold text-blue-600 hover:text-blue-800">
+                閱讀信仰宣告 <ChevronRight className="w-4 h-4" />
+              </Link>
            </div>
       </section>
 
