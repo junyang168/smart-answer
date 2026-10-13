@@ -199,7 +199,9 @@ flowchart TD
 3. **修正**——复核意见交回提议者。旧生产契约和未改版的 CVP 身份流程仍是**至多一轮**；新的 Claim Management 2.0 action 使用预先绑定轮次与总资源上限的多轮修正，每轮核查完整后像与实际进展，最后由独立 Claim 审计核实当前版本。新契约不会重开旧预算。
 4. **转人工**——旧契约保留其既有分歧处置。新的 Claim Management 2.0 排除工程、漏材料和版本问题后，只有无法由完整原文决定的转录、归属或实质来源冲突才需要内容人工。模型分歧、无进展或预算耗尽只表示未完成，不能单独作为转人工依据；这不改写旧 CVP 身份判断的人工出口。
 
-Claim Management 的 Read、Create、Review、Update、Retire、Restore、Split、Merge 及多轮出口见 [Claim Management 2.0 operations 与生命周期设计](../20-knowledge/claim_management_2_design.md)。各 operation 共用现有短 transaction、SQL 进度、版本历史和独立审计，模型调用在事务之外。这是新 action 的目标契约，启用前仍须完成实现、版本化 policy 和有界验收；此架构决定不授权模型执行或内容写入。
+Claim Management 的 Read、Create、Review、Update、Retire、Restore、Split、Merge 及多轮出口见 [Claim Management 2.0 operations 与生命周期设计](../20-knowledge/claim_management_2_design.md)。Review 作为独立审阅 operation 保留，Update 内含审阅与必要修正，不要求另发 Review 请求。内容操作共用现有短 transaction、SQL 进度、版本历史和独立审计，模型调用在事务之外；Read 不触发模型，Review 报告完成与内容维护完成分别判断。多轮保留原始任务目标，后续修订或补偿不能只凭最后一轮通过宣称整个任务完成。
+
+这是新 action 的目标契约，启用前仍须完成实现、版本化 policy 和有界验收；此架构决定不授权模型执行或内容写入。
 
 用两个**不同厂商**的模型，而不是同一个模型跑两遍：同一个模型会犯同一种错，自己复核自己等于没核。
 

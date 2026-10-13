@@ -171,6 +171,8 @@ flowchart TD
 
 三者都**只读**已批准的部分，且都要能顺着 `occurrences[].anchors` 回到教授原话。
 
+新的 [Claim Management 2.0 operations 与生命周期设计](./claim_management_2_design.md#10-审核有效性与下游交接) 启用后，当前使用还须核验审核对精确内容、来源、依赖和用途仍然有效；`review_status` 记录结论，`maturity` 记录治理／出版阶段，均不单独代替这项核验。原审核保留真实身份与范围，新流程上线本身不使其失效。
+
 ## 8. 不变量
 
 机器可查，不依赖判断力：
