@@ -223,6 +223,51 @@ def seed_claims(store, ids):
          'occurrences': [{'source_id': 'S', 'anchors': []}]} for cid in ids]}))
 
 
+@pytest.mark.parametrize('operation',['Create','Update','Retire','Restore','Split','Merge'])
+def test_opus_only_completes_with_real_program_readback_and_no_gemini(action,operation):
+    store,original,_,_,tmp_path,_=action
+    targets=['C','D'] if operation=='Merge' else ['C']
+    if operation!='Create':seed_claims(store,targets)
+    if operation=='Restore':
+        store.apply_plan(store.plan_retirement([('claims','C')],reason='synthetic retirement',package_id='before-restore'))
+    request,root=operation_request(action,operation,[] if operation=='Create' else targets)
+    request.policy=cm.source.FileBinding.model_validate(binding(cm.DEFAULT_POLICY))
+    direction_path=Path(request.authorization.path)
+    direction=json.loads(direction_path.read_text());direction['policy']=request.policy.model_dump(mode='json')
+    direction_path.write_text(json.dumps(direction));request.authorization=cm.source.FileBinding.model_validate(binding(direction_path))
+    def propose(packet):
+        result=cm.existing_candidate(packet['before'])
+        if operation in {'Retire','Restore','Split','Merge'}:
+            action_name='restore' if operation=='Restore' else 'retire'
+            for cid in targets:
+                result.dispositions=[d for d in result.dispositions if d.record_key!='claims/'+cid]+[
+                    cm.ObjectDisposition(record_key='claims/'+cid,action=action_name,reason='synthetic',citations=[cm.Citation(source_id='S',paragraph_key='S0001',exact_quote='甲是假设，不是断言。')])]
+                if operation=='Restore':
+                    result.records.append(cm.source.Row(collection='claims',object_id=cid,payload=packet['before']['claims/'+cid]['payload']))
+        new_ids=['C'] if operation=='Create' else ['A','B'] if operation=='Split' else ['M'] if operation=='Merge' else []
+        for cid in new_ids:
+            result.records.append(cm.source.Row(collection='claims',object_id=cid,payload={'claim_id':cid,'statement':'甲是假设。','claim_type':'exegesis','occurrences':[{'source_id':'S','anchors':[]}]}))
+            result.dispositions.append(cm.ObjectDisposition(record_key='claims/'+cid,action='create',reason='synthetic',citations=[cm.Citation(source_id='S',paragraph_key='S0001',exact_quote='甲是假设，不是断言。')]))
+        if operation in {'Split','Merge'}:result.replacements={'claims/'+cid:['claims/'+n for n in new_ids] for cid in targets}
+        return result.model_dump(mode='json')
+    ports=SyntheticPorts(store,tmp_path,proposal=propose)
+    def forbidden(*a,**k):raise AssertionError('Gemini is disabled')
+    ports.claim_management_audit=forbidden
+    result=execute_claim_management(store,request,root=root,ports=ports)
+    assert result['status']=='completed',result
+    assert result['validation_kind']=='opus_and_program_readback'
+    assert result['independent_audit_complete'] is False
+    assert ports.calls==(['opus'] if operation=='Update' else ['gpt','opus'])
+    parent=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id))
+    assert not any(v['role']=='gemini' for v in parent['call_reservations'].values())
+    child=store.get_cvp_group(next(iter(parent['latest_rounds'].values())))
+    assert child['program_readback_complete'] and not child['independent_audit_complete']
+    if operation in {'Create','Update','Restore'}:
+        qualified=store.claim_management_qualification('C')
+        assert qualified['ready'] and qualified['independent_audit_complete'] is False
+    assert execute_claim_management(store,request,root=root,ports=ports)==result
+
+
 def test_argon_update_completes_without_qualifying_readonly_related_claim(action):
     store, _, _, _, tmp_path, _ = action
     seed_claims(store, ['C', 'D'])

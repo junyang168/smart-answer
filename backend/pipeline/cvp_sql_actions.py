@@ -396,6 +396,28 @@ def validate_claim_stage_receipt(receipt):
                                      materials['unresolved'], sources,
                                      request=cm.Request.model_validate(materials['unit_request']), records=materials['before'])
         return materials, candidate, review, (passed and not candidate.findings)
+    if stage == 'readback':
+        if policy.independent_audit_required:
+            raise ValueError('program readback cannot replace a required independent audit')
+        packet = claim_management_review_packet(materials, candidate)
+        raw = validate_claim_stage(root, 'opus', policy, packet)
+        review = cm.Review.model_validate(raw['response'])
+        passed = cm.validate_review(candidate, review, packet['denominator'], packet['required_questions'],
+            materials['unresolved'], sources, request=cm.Request.model_validate(materials['unit_request']), records=materials['before'])
+        check_binding(receipt['readback'])
+        if receipt['readback'] != binding(root / 'readback.json'):
+            raise ValueError('program readback belongs to a different round')
+        report = body(read(root / 'readback.json'))
+        if (report['round_id'] != materials['round_id'] or report['candidate_sha256'] != candidate.digest
+                or report['validation_kind'] != 'opus_and_program_readback'):
+            raise ValueError('program readback identity drift')
+        states = report['actual_records']
+        denominator = cm.audit_keys(cm.Request.model_validate(materials['unit_request']), states, candidate)
+        if set(states) != set(denominator) or pin_rows(pins({content.split_key(k):v for k,v in states.items()})) != report['read_pins']:
+            raise ValueError('program readback omitted or changed its current scope')
+        if passed and not cm.is_source_impact(materials['request']):
+            cm.goal_satisfied(materials['original_goal'], states, candidate.replacements)
+        return materials, candidate, review, (passed and not candidate.findings)
     raise ValueError('unknown Claim content stage')
 
 
@@ -484,7 +506,7 @@ def execute_claim_management(store, request, *, root, ports):
                         unit_request.creation_permissions = [p for p in request.creation_permissions if p.source_id in source_ids]
                         _, unit_sources = cm.load_authority(request, source_documents=cm.source_documents(before), selected_source_ids=source_ids)
                         unit_goal = cm.unit_goal(parent['original_goal'], unit_request)
-                        roles = cm.required_roles(request, ordinal)
+                        roles = cm.required_roles(request, ordinal, policy)
                         rid = 'CMR-' + sha256_json({'action': parent_id, 'unit': unit_id, 'round': ordinal})
                         materials = {'schema_version': cm.VERSION, 'round_id': rid, 'unit_id': unit_id,
                             'round_number': ordinal, 'request': request.model_dump(mode='json'),
@@ -574,6 +596,13 @@ def execute_claim_management(store, request, *, root, ports):
                         denominator = cm.audit_keys(cm.Request.model_validate(materials['unit_request']), states, candidate)
                         cm.require_full_sources(cm.Request.model_validate(materials['unit_request']), states, candidate,
                                                 qualification=not cm.is_source_impact(request))
+                        if not policy.independent_audit_required:
+                            write(round_root / 'readback.json', {'round_id':rid, 'candidate_sha256':candidate.digest,
+                                'validation_kind':'opus_and_program_readback',
+                                'actual_records':{k:cm.model_state(states[k]) for k in denominator},
+                                'read_pins':pin_rows(pins({content.split_key(k):states[k] for k in denominator}))})
+                            prior = record('readback', readback=binding(round_root / 'readback.json'))
+                            break
                         audit_input = {'schema_version': cm.VERSION, 'round_id': rid, 'original_goal': cm.goal_packet(materials['original_goal']),
                             'model': policy.models['gemini']['model_id'],
                             'denominator': denominator, 'read_pins': pin_rows(pins({content.split_key(k): states[k] for k in denominator})),

@@ -3313,7 +3313,7 @@ class PostgresKnowledgeStore:
             parent = row[0]
             policy = Policy.model_validate(parent["policy"])
             request = parent["request"]
-            needed = set(required_roles(Request.model_validate(request), round_number))
+            needed = set(required_roles(Request.model_validate(request), round_number, policy))
             if request["operation"] == "Read" or set(roles) != needed:
                 raise ChangeSetConflict("Claim round must reserve every required role; Read has no model round")
             identity = {"kind": "claim_management_round", "schema_version": VERSION,
@@ -3415,7 +3415,7 @@ class PostgresKnowledgeStore:
                 return {**value, 'run_id': round_id}
             if stage != 'candidate' and 'candidate' not in stages:
                 raise ChangeSetConflict('review requires its exact persisted current candidate')
-            if stage == 'audit' and ('opus' not in stages or not value.get('opus_approved')
+            if stage in {'audit','readback'} and ('opus' not in stages or not value.get('opus_approved')
                                      or value['checkpoint'] != 'applied'):
                 raise ChangeSetConflict('independent Claim audit requires actual applied/readback round')
             if stage == 'candidate':
@@ -3432,11 +3432,29 @@ class PostgresKnowledgeStore:
             else:
                 if stage == 'opus':
                     value['opus_approved'] = passed
-                if stage == 'audit':
-                    report = json.loads(Path(receipt['audit']['path']).read_text())
-                    self._assert_transaction_read_pins(cursor, decoded_pins(report['read_pins']))
+                if stage in {'audit','readback'}:
+                    report = (json.loads(Path(receipt['audit']['path']).read_text()) if stage == 'audit'
+                              else body(read(Path(receipt['materials']['path']).parent / 'readback.json')))
+                    observed = self._assert_transaction_read_pins(cursor, decoded_pins(report['read_pins']))
+                    if stage == 'readback':
+                        actual = {cm.source.key(*k):cm.model_state(v) for k,v in observed.items()}
+                        if actual != report['actual_records']:
+                            raise ChangeSetConflict('program readback payload differs from actual SQL')
+                        plan = value['reviewed']['plan']
+                        expected = {k:dict(v) for k,v in materials['before'].items()}
+                        for op in plan['operations']:
+                            key = cm.source.key(op['collection'],op['object_id'])
+                            payload = dict(op['payload'])
+                            if op['operation'] != 'retire':
+                                payload['revision'] = op['after_revision']
+                            expected[key] = {'payload':payload, 'revision':op['after_revision'],
+                                'content_sha256':op['after_sha256'], 'retired':op['operation']=='retire'}
+                        if any(k not in expected or v != expected[k] for k,v in actual.items()):
+                            raise ChangeSetConflict('program readback differs from approved SQL postimages')
+                        value['program_readback_complete'] = bool(passed)
+                        value['validation_kind'] = 'opus_and_program_readback'
                     value['audited_pins'] = report['read_pins']
-                    value['independent_audit_complete'] = bool(passed)
+                    value['independent_audit_complete'] = bool(passed) and stage == 'audit'
                     # The audit may reject content already committed. These
                     # identities/mappings are still applied facts for correction.
                     parent['created_keys'] = sorted(set(parent['created_keys']) | {
@@ -3515,7 +3533,7 @@ class PostgresKnowledgeStore:
                     value['outcome'] = reason
                     parent['result'] = {'status': 'paused' if reason != 'revision_required' else 'running', 'reason': reason,
                                         'unit_id': value['unit_id'], 'round_id': round_id}
-                elif stage == 'audit':
+                elif stage in {'audit','readback'}:
                     value.update(outcome='completed', checkpoint='audited')
                     created = [d.record_key for d in candidate.dispositions if d.action == 'create']
                     parent['created_keys'] = sorted(set(parent['created_keys']) | set(created))
@@ -3524,8 +3542,8 @@ class PostgresKnowledgeStore:
                     for slot in parent['call_reservations'].values():
                         if slot['round_id'] == round_id and slot['state'] == 'planned':
                             slot['state'] = 'cancelled'
-            role = 'gpt' if stage == 'candidate' else 'gemini' if stage == 'audit' else 'opus'
-            slot = parent['call_reservations'].get(round_id + ':' + role)
+            role = 'gpt' if stage == 'candidate' else 'gemini' if stage == 'audit' else None if stage == 'readback' else 'opus'
+            slot = parent['call_reservations'].get(round_id + ':' + role) if role else None
             if slot:
                 if slot['state'] != 'started':
                     raise ChangeSetConflict('Claim content result has no single actual started call')
@@ -3539,7 +3557,7 @@ class PostgresKnowledgeStore:
 
     def finish_claim_management_action(self, action_run_id):
         """Program-only final coverage/currentness check; no extra model audit."""
-        from backend.pipeline.claim_management import goal_satisfied, is_source_impact
+        from backend.pipeline.claim_management import goal_satisfied, is_source_impact, Policy
         from backend.pipeline.cvp_sql_flow import decoded_pins
         with self.connect() as conn, conn.cursor() as cursor:
             cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
@@ -3560,8 +3578,10 @@ class PostgresKnowledgeStore:
                 if child.get('outcome') != ('reported' if report_only else 'completed'):
                     raise ChangeSetConflict('single round pass is not whole Claim action completion')
                 if not report_only:
-                    if not child.get('independent_audit_complete'):
-                        raise ChangeSetConflict('Claim action has an invalidated independent audit')
+                    independent = Policy.model_validate(value['policy']).independent_audit_required
+                    if (not child.get('independent_audit_complete') if independent else
+                            not child.get('program_readback_complete') or child.get('revisit_required')):
+                        raise ChangeSetConflict('Claim action has an invalidated ' + ('independent audit' if independent else 'program readback'))
                     current = self._assert_transaction_read_pins(cursor, decoded_pins(child['audited_pins']))
                     self._assert_claim_management_scope(cursor, decoded_pins(child['audited_pins']), records=current)
                     observed.update({col + '/' + oid: {**state, 'retired': state['retired_at'] is not None}
@@ -3577,6 +3597,9 @@ class PostgresKnowledgeStore:
                 goal_satisfied(value['original_goal'], observed, value.get('replacements', {}))
             value['result'] = {'status': 'completed', 'qualification_confirmed': not report_only and not source_impact,
                                'original_target_keys': value['original_goal']['target_keys']}
+            if not Policy.model_validate(value['policy']).independent_audit_required:
+                value['result']['validation_kind'] = 'opus_and_program_readback'
+                value['result']['independent_audit_complete'] = False
             if source_impact:
                 value['result']['source_impact_reviewed'] = True
                 value['result']['pending_maintenance'] = bool(value['findings'])
@@ -3625,7 +3648,7 @@ class PostgresKnowledgeStore:
         reads necessary current pins, not an ancestor chain or whole Registry.
         """
         from backend.pipeline.cvp_sql_flow import check_binding, decoded_pins
-        from backend.pipeline.claim_management import is_source_impact
+        from backend.pipeline.claim_management import is_source_impact, Policy
         with self.connect() as conn, conn.cursor() as cursor:
             rows = cursor.execute("""SELECT run_id,metadata FROM wang_knowledge.pipeline_runs
                 WHERE metadata->>'kind'='claim_management_round' AND metadata->'claim_ids' ? %s
@@ -3670,12 +3693,15 @@ class PostgresKnowledgeStore:
                     return {'ready': True, 'run_id': rid, 'revision': state['revision'],
                         'content_sha256': state['content_sha256'], 'audit': revalidation['impact_audit'],
                         'content_audit': revalidation['content_audit'], 'question_scope': revalidation['question_scope']}
-                if value.get('outcome') != 'completed' or not value.get('independent_audit_complete'):
+                independent = Policy.model_validate(value['materials']['policy']).independent_audit_required
+                complete = value.get('independent_audit_complete') if independent else value.get('program_readback_complete')
+                if value.get('outcome') != 'completed' or not complete or value.get('revisit_required'):
                     continue
                 try:
                     for bound in value['materials']['request']['source_bindings'].values():
                         check_binding(bound)
-                    check_binding(value['stage_results']['audit'])
+                    proof = value['stage_results']['audit' if independent else 'readback']
+                    check_binding(proof)
                     records = self._assert_transaction_read_pins(cursor, decoded_pins(value['audited_pins']))
                     self._assert_claim_management_scope(cursor, decoded_pins(value['audited_pins']), records=records)
                 except (ValueError, ChangeSetConflict):
@@ -3684,10 +3710,16 @@ class PostgresKnowledgeStore:
                 if not state or state['retired_at'] is not None or state['payload'].get('review_status') in {
                         'human_hold','human_review_required','withheld_unreviewed','rejected','superseded'}:
                     continue
-                return {'ready': True, 'run_id': rid, 'revision': state['revision'],
-                        'content_sha256': state['content_sha256'], 'audit': value['stage_results']['audit'],
+                result = {'ready': True, 'run_id': rid, 'revision': state['revision'],
+                        'content_sha256': state['content_sha256'], 'audit': proof,
                         'question_scope': value['materials']['original_goal']['required_questions']}
-        return {'ready': False, 'reason': 'current_independent_qualification_required'}
+                if not independent:
+                    result.update(validation_kind='opus_and_program_readback', independent_audit_complete=False)
+                return result
+        reason = ('current_program_readback_required' if any(
+            not Policy.model_validate(v['materials']['policy']).independent_audit_required for _,v in rows)
+            else 'current_independent_qualification_required')
+        return {'ready': False, 'reason': reason}
 
     def get_cvp_retained_scope_bindings(self, run_id, *, cursor=None):
         """Direct owned SQL review archives, not a recursive proof/history walk.

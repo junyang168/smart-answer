@@ -13,7 +13,7 @@ from pathlib import Path
 from collections import Counter
 from difflib import SequenceMatcher
 
-from pydantic import Field, model_validator
+from pydantic import Field, model_validator, model_serializer
 
 from backend.pipeline import source_reconciliation as source
 from backend.api.canonical_repository.postgres_store import (
@@ -21,6 +21,7 @@ from backend.api.canonical_repository.postgres_store import (
 )
 
 VERSION = "wang_claim_management_v2"
+DEFAULT_POLICY = Path(__file__).parent / 'policies/wang_claim_management_opus_only_v1.json'
 Operation = Literal["Read", "Create", "Review", "Update", "Retire", "Restore", "Split", "Merge"]
 Role = Literal["gpt", "opus", "gemini"]
 Disposition = Literal["retain", "update", "create", "retire", "restore"]
@@ -70,6 +71,18 @@ class Policy(source.Contract):
     clarification_per_problem: Literal[1] = 1
     review_purpose: Literal['content', 'source_impact'] = 'content'
     source_impact_batch_size: int | None = Field(default=None, gt=0)
+    independent_audit: bool | None = None
+
+    @model_serializer(mode='wrap')
+    def serialize_policy(self, handler):
+        value = handler(self)
+        if self.independent_audit is None:
+            value.pop('independent_audit', None)
+        return value
+
+    @property
+    def independent_audit_required(self):
+        return self.independent_audit is not False
 
     @model_validator(mode="after")
     def exact_roles(self):
@@ -774,11 +787,12 @@ def model_packet(materials):
     return packet
 
 
-def required_roles(request, round_number):
+def required_roles(request, round_number, policy=None):
     if request.operation == "Read":
         return []
     roles = ["opus"]
-    if request.operation != "Review" or request.confirm_current or request.source_transition:
+    if ((policy is None or policy.independent_audit_required)
+            and (request.operation != "Review" or request.confirm_current or request.source_transition)):
         roles.append("gemini")
     if request.operation not in {"Review", "Read"} and (request.operation != "Update" or round_number):
         roles.insert(0, "gpt")

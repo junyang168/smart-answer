@@ -8,6 +8,8 @@
 
 Claim Management 的目标是让新建和既有 Claim 都忠于教授的完整自身来源，保留证据、论证和限定，并通过同一套管理流程持续审阅和更新。Create 从 GPT 候选开始；既有 Claim 直接作为候选进入 Review。Verify 是审阅中的核实，Cleanup 是 Update 的用途。
 
+当前新 action 暂停 Gemini 终审，默认采用 [Opus-only policy](../../../backend/pipeline/policies/wang_claim_management_opus_only_v1.json)：`independent_audit=false`、Gemini 调用预算为 0。Opus 内容审阅、版本／来源校验、事务、真实写集、回读和原始目标核实保留；结果明确为 `opus_and_program_readback`，不标成独立终审通过。本文的 Gemini 分支只适用于明确启用独立终审的 policy；既有已绑定任务和完成记录不改变。
+
 Review 就是审阅，作为独立业务 operation 保留。Update 内含审阅、必要修正与独立审计，不需要另发 Review 请求。Create、Retire、Restore、Split、Merge 同样内含审核；这些操作共用现有执行机制。Read 只读取，不触发模型或内容事务。
 
 本域归 [#435](https://github.com/junyang168/smart-answer/issues/435)，共同协调归 [#357](https://github.com/junyang168/smart-answer/issues/357)，下游观点与连接管理归 [#436](https://github.com/junyang168/smart-answer/issues/436)。
@@ -156,7 +158,7 @@ finding 身份按原 action、目标判断／成分、问题类别与来源依�
 
 Read 按读取契约返回。Review 只要求报告时，Opus 审阅后保存逐项结论和未决即可完成，不修改 Claim／Evidence，也不自动开展修订。Opus 明示为实质异议、且经程序核验完整材料、引文与版本的 finding，按第 10.2 节原子登记问题与受影响资格；未经核实的提示只留在报告，不据此撤销有效结果。要求独立核实或确认当前可用性的 Review，沿执行路径使用 no-content-write，不因操作名称省略缺少的审核。
 
-所有内容操作默认沿提交后审计路径：准备 → Opus 审阅与必要修正 → 共同短事务 → 新连接回读 → Gemini 独立审计 → 原始目标与当前资格核实。模型和人工等待始终在数据库事务之外。
+所有内容操作沿提交后核实路径：准备 → Opus 审阅与必要修正 → 共同短事务 → 新连接回读 → 原始目标与当前资格核实。policy 启用 Gemini 时，回读后追加其独立内容审计；暂停时由程序核对实际 SQL 完整后像与获准计划，不安排第二个内容模型。模型和人工等待始终在数据库事务之外。
 
 Claim action 不以每次整库备份或外接 SSD 可用作为前置条件。原子 transaction、精确版本／来源校验、实际写集验证、ChangeSet／版本历史和独立回读承担业务修改的保护；提交后发现的内容问题由获准修订或恢复处理，不把已提交事实冒充事务撤销。整库备份属于数据库运维的灾难恢复职责，与单条 Claim 操作分开。
 
@@ -171,7 +173,9 @@ flowchart TD
     OC -->|"仍有分歧"| PAUSE["保存阶段与原因，暂停"]
     REVIEW -->|"执行候选通过"| APPLY["共同短事务或 no-content-write"]
     APPLY --> READBACK["新连接回读"]
-    READBACK --> AUDIT["Gemini 审原目标与当前处置"]
+    READBACK --> MODE{"policy 启用 Gemini？"}
+    MODE -->|"否：程序核实际后像"| COMPLETE
+    MODE -->|"是"| AUDIT["Gemini 审原目标与当前处置"]
     AUDIT -->|"获准实际修订"| FIX
     AUDIT -->|"有据澄清，内容不变"| GC["GPT 回应，Gemini 复核一次"]
     GC -->|"全部审核条件满足"| COMPLETE
@@ -193,6 +197,7 @@ flowchart TD
 | 报告／暂停 | 保存原答、未决及范围；暂停另保存 checkpoint、原因和恢复条件 |
 | 共同短事务 | 校验 read pins，提交完整联合写集或已有 no-content-write 核实 |
 | 新连接回读 | 确认实际提交；回复丢失先查事实，不再 apply |
+| policy 启用 Gemini？ | 按原 action 的绑定配置选择终审路径，不运行中切换或重开预算 |
 | Gemini 审计 | 独立读原件、当前与必要历史，审核原始操作要求和当前完整处置 |
 | 人工问题包 | 准确来源疑点转人工；来源返回路径见第 9 节 |
 | 完成核实 | 验证第 5.2 节原目标和第 10 节资格／交接；Claim 完成不替代 CVP 完成 |
@@ -217,6 +222,8 @@ Opus 或 Gemini 要求实际修订时，新完整候选均进入下一轮 prepar
 ### 7.1 角色与输入
 
 GPT 6.1 Sol high 订阅负责提案、修订和回应；Opus 5.5 high 订阅负责审阅完整候选；Gemini 负责独立终审。新的 [Argon policy](../../../backend/pipeline/policies/wang_claim_management_argon_v1.json) 精确绑定 `gemini-4-argon`，既有 Flash policy 仍绑定 `gemini-3.8-flash`，不得改变已启动 action 的模型或重开其预算。policy 绑定精确模型 ID、backend、effort、prompt 与 schema，角色名称不代替执行配置。
+
+当前默认 Opus-only policy 不预留或调用 Gemini；其内容结论来自 Opus，完成资格同时绑定实际 SQL 后像、当前依赖和程序回读，`independent_audit_complete=false`。重新启用需为新任务明确选择 Argon policy，不改写已有任务的审核类型。
 
 Opus 读取候选及 delta，以来源判断，不沿用 GPT 自评或旧批准。Gemini 使用自己的读取路径直接核物理原件、实际当前与必要历史、完整操作处置及理由、原始目标、已绑定来源核实记录和必要依赖；首次判断不由 GPT／Opus 的 pass 引导。先保存首次独立判断，再对账旧问题和异议回应。
 

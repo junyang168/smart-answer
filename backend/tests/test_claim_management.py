@@ -30,6 +30,18 @@ def test_audit_model_selection_preserves_flash_and_explicitly_binds_argon():
             m.Policy.model_validate(altered)
 
 
+def test_opus_only_policy_is_explicit_and_does_not_change_old_policy_serialization(case):
+    old=policy();saved=old.model_dump(mode='json')
+    assert 'independent_audit' not in saved
+    assert m.Policy.model_validate(saved).model_dump(mode='json')==saved
+    new=m.Policy.model_validate_json(m.DEFAULT_POLICY.read_text())
+    assert not new.independent_audit_required and new.budget.gemini_calls==0
+    request=case[0]
+    assert m.required_roles(request,0,new)==['opus']
+    assert m.required_roles(request,1,new)==['gpt','opus']
+    assert m.required_roles(request,0,old)==['opus','gemini']
+
+
 @pytest.fixture
 def case():
     sources = {"S": {"paragraphs": {"S0001": {"text": "甲是假设。乙只在特定情况下成立。"}}}}

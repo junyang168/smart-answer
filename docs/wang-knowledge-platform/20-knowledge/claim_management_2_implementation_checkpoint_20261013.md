@@ -84,3 +84,13 @@ Audit 收据委托独立结果校验时，只读取一次实际来源；原先�
 临时 PostgreSQL 的全路径测试把 Claim backup port 改为一旦调用就失败，Create、Update 修订、Review 确认、Retire、Restore、Split、Merge 均通过。新增末项验证失败的完整回滚和提交回复丢失的恢复反例，验证内容仅提交一次、审核不重跑、独立审计完成后才授予资格；同时修复了工程恢复完成后仍返回 parent 旧 paused 结果的问题。SSD 不可用不再阻止 Claim 的模型启动，旧来源流程的 SSD 门槛仍保留。
 
 移除业务备份门槛后的相关回归为 **444 passed、43 skipped**，包含保存的旧失败材料和共同 SQL 执行／恢复。文档检查只有既有的无关 notes-to-sermon 附录锚点错误。整体 #435 的其他开放事项仍保留，未扩大整组维护、合并或部署。
+
+## 暂停 Gemini 内容终审（2026-10-14）
+
+第二条 `DK-4eca17ff4e50fa50aa01-P01-CL003` 在暂停前也已完成正式 Update：Opus 与 Argon 各一次通过，现有文字保留，其他对象及第一条资格不变，没有备份，完成重入没有追加模型调用。记录在 `claim-management-435/son-of-man-second-formal-argon-v1/single-update-result.json`。
+
+负责人随后要求暂时 disable Gemini。新任务默认 policy 改为 `wang_claim_management_opus_only_v1`，明确绑定 `independent_audit=false` 和 Gemini 预算 0。Opus 审阅后沿原有事务和回读路径核对实际 SQL 与获准完整后像，以现有阶段收据保存 `opus_and_program_readback`；不建立新运行器或状态表。当前资格仍检查来源、版本、holds、范围和原始目标，但明确 `independent_audit_complete=false`，不伪造 Gemini 结果。
+
+旧 policy 未声明开关时保留原语义和序列化形状，已完成的两条 Argon 任务及其 raw、调用预算和独立审计记录不改写。此修改没有启动新模型或内容写入。
+
+相关回归为 **451 passed、43 skipped**。新增临时 PostgreSQL 用例覆盖关闭 Gemini 后的 Create、Update、Retire、Restore、Split、Merge，Gemini port 一旦调用即令测试失败；验证不预留 Gemini、真实 SQL 后像回读、当前资格明确标为 Opus／程序依据，以及完成重入不增加模型调用。旧独立终审、零预算拒绝和真实旧失败材料仍通过；文档检查仅有已知的无关 notes-to-sermon 锚点错误。

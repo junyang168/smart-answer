@@ -232,6 +232,8 @@ Claim Management 的 Read、Create、Review、Update、Retire、Restore、Split�
 
 Claim operation 的保护由原子 transaction、精确版本／来源校验、实际写集、版本历史和提交后回读承担，不要求每次整库备份或外接 SSD。整库备份属于数据库运维的灾难恢复职责。既有 CVP／来源维护及人工例外的已绑定备份契约保留，不能借 Claim 的简化改变旧任务依据。
 
+当前新 Claim action 按负责人指示暂时关闭 Gemini 的重复内容终审，使用版本化 Opus-only policy。Opus 内容审阅和程序对实际后像、版本、来源、完整范围及原始目标的核实保留；完成结果披露 `opus_and_program_readback`，不得标为 Gemini 或独立终审通过。上文 Gemini 分支适用于启用独立终审的 policy；已绑定旧任务、文库独立审计和文章审核规则保持其原契约。
+
 这是新 action 的目标契约，启用前仍须完成实现、版本化 policy 和有界验收；此架构决定不授权模型执行或内容写入。
 
 **Human in the loop 的原则：只要不是必需，就不停下来等负责人。** Agent 自主承担已授权的常规执行、Claim／CVP 管理、排错、测试和安全恢复；人负责确实不能由现有证据与规则决定的内容判断，不充当每一步的启动按钮。常规管理接点尚未实现是工程欠账，不是逐案请求内容批准的理由；也不能因审核写了「最终拒绝」就省略根因调查。
