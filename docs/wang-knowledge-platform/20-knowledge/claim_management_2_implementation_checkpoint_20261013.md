@@ -132,3 +132,13 @@ CL005 第二轮 Opus 通过，实际写集为空。提交后读回一度出现 P
 三条 action 的 `*-continuation-20261014-v1` 均为 completed／qualification_confirmed，round 为 audited／completed；CL005、CL008 各仅新增一次 Opus 调用，未调用 GPT。三条的 Gemini 调用和全库备份均为零。CL005、CL008 最终报告保存于 `son-of-man-three-opus-only-v1/CL005/continuation-20261014-v1/continuation-result.json` 和对应 CL008 目录；CL004 恢复结果为对应目录的 `continuation-result-after-readset-recovery.json`。
 
 CL008 的 OBS009 原文疑点保持 persistent，原答说明它不影响 CL008 的证据与 statement，保存在 context_findings 中；具体人工问题仍要求核对 S0004／S0006 的录音及文本层次，没有虚称已解决。CL004 修正共享依赖后，CL002、CL003 的旧资格当前返回 `current_independent_qualification_required`；内容未改，原资格事实未删除，但不能宣称当前有效。此次未擅自重审或授予这两条新资格。整体 #435 仍未完成，未合并或部署。
+
+## 新两条按顺序实测（2026-10-14）
+
+负责人要求再测两条、一次一条，并避免逐案堆补丁。选择未连接 CVP、尚未运行本轮维护的 CL006、CL007；运行冻结于 `b2b6875`，CL006 返回后才启动 CL007。记录保存在 `claim-management-435/son-of-man-two-sequential-20261014-v1/` 两个目标目录的 `single-update-result.json`。两条各实际调用一次 Opus，没有 GPT、Gemini 或全库备份，均无内容写入。
+
+CL007 Opus 没有 findings，普通事务／readback／原目标完成检查通过，资格为 ready；完成重入结果一致、调用预留不增加。CL006 的 Opus 报告目标 statement「猶太學者」比讲道的「對希伯來文很強的學者／希伯來文專家」多了译者身份限定，建议贴近来源修正。另报告 S0004／S0006 冠词疑点不影响 CL006 的主张，但拒绝 E006 和 OBS004。正式 finding 只绑定 E006，OBS004 仅在该 finding 的 component／reason 与自身 verdict 中被提及，未获同 record_key 的独立 finding。因此程序拒绝这份不完整 Review，action 为 engineering_required，未执行 GPT 修正或提交；不把内容意见当作已接受的审阅收据。原 raw 及实际调用事实保留，不能把调用状态仍为 started 解释为没有调用或重新发送许可。
+
+这是通用「对象 verdict 与正式 finding 的逐项对应」问题：不按 CL006／OBS004 特判，不让自然语言提及充当另一对象的结构化问题，也不放宽来源疑点处理。审阅 prompt 现在明确要求每个 rejected record_key 有相同 target_key 的 finding 或该对象的 persistent／reopened prior_finding；同一问题涉及多个对象须逐个登记，affected_target_keys 仍只表示本轮 Claim 目标影响范围。错误信息列出缺项 ID，新增反例验证 prose 跨对象提及不能满足契约，补齐逐项 finding 也仍保持内容拒绝。相关回归 **462 passed、43 skipped**。
+
+此修改仅验证新 prompt 契约与现有严格校验，未重新调用 CL006 模型，也未人工复制其 finding 冒充新原答；CL006 仍未完成。两条的内容审核材料分别为 21 项与 35 项，对应 Opus packet 文件约 70,603 bytes／89,953 bytes，没有强制把整篇其他 Claim 带入当前审核分母。旧冠词疑点仍待人工核对；整体 #435 未完成，未合并或部署。

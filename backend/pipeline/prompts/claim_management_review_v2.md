@@ -6,7 +6,7 @@ proposal_sha256 必须原样返回 packet.candidate_sha256。verdicts 对 denomi
 
 program_owned_fields 声明的来源、段落及引文 SHA 由程序据完整原件计算，candidate-normalization 保留原答及仅机械字段变化的证明。检查引文和语义，不要求 GPT 计算、抄写 hash 或以这些字段代替内容审核；若实际绑定不符，报告工程问题。
 
-新问题写入 findings：目标、component、类别、逐字 citations、实质影响、acceptance_condition。不要只有笼统拒绝；每个拒绝必须有可修复的具体 finding。对 unresolved 的每个 finding_id 恰好给一次 prior_findings 处置，resolved 必须从当前原文/实际修正证明，仍有同一问题标 persistent，已结案又出现标 reopened，不用改措辞重新消耗预算。
+新问题写入 findings：目标、component、类别、逐字 citations、实质影响、acceptance_condition。不要只有笼统拒绝；每个拒绝必须有可修复的具体 finding。verdicts 中每个 approved=false 或 problems 非空的 record_key，都必须有 target_key 与它逐字相同的 finding（或该对象的 persistent/reopened prior_finding）。同一问题涉及多个对象时，为每个被拒对象分别给出 finding；不能只在另一对象的 component、reason 中提及它，也不能用 affected_target_keys 代替该对应，因为该字段只表示本轮 Claim 目标的影响范围。输出前核对全部被拒 record_key 均已对应。对 unresolved 的每个 finding_id 恰好给一次 prior_findings 处置，resolved 必须从当前原文/实际修正证明，仍有同一问题标 persistent，已结案又出现标 reopened，不用改措辞重新消耗预算。
 
 普通内容审核的每个 finding 必须填写 affected_target_keys 和 impact_reason：前者只列本轮 unit_request.target_keys 或本轮新建 Claim 中实际受该问题影响的目标，后者说明问题怎样改变其主张、归属、承重证据或本次修改。只读上下文有问题，但不影响本轮目标及实际写入时，列表为空并说明为何不影响；仍拒绝那个有问题的上下文对象，不能为让任务通过而隐瞒。共享 owner、同篇来源、图上相连或另一 Claim 的独立论据，不自动构成当前目标的阻断理由。目标自身或本轮实际写入对象的问题不得标成无影响。原文疑点只阻断实际依赖该疑点的目标；不要求当前目标替整篇来源解决所有问题。修关系应改错的关系，不为迁就关系给正确 Claim 添加原本没有的独立命题。
 

@@ -562,7 +562,7 @@ def validate_review(candidate, review, expected_keys, questions, unresolved, sou
     explained.update(unresolved[r.finding_id]["target_key"] for r in review.prior_findings
                      if r.disposition != "resolved")
     if rejected - explained:
-        raise ValueError("rejected objects require concrete current or persistent findings")
+        raise ValueError("rejected objects require concrete current or persistent findings: " + ", ".join(sorted(rejected - explained)))
     if request is not None and is_source_impact(request):
         return validate_source_impacts(review, expected_keys, sources, request=request, records=records, unresolved=unresolved)
     blocking = [f for f in review.findings if finding_blocks(f.model_dump(mode='json'), request, candidate)]

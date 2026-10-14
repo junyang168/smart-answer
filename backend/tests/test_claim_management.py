@@ -387,3 +387,17 @@ def test_single_record_table_packet_preserves_current_and_original_facts(case):
     assert m.required_roles(request,0,reduced)==['opus','gemini']
     assert m.required_roles(request,1,reduced)==['gpt','opus','gemini']
     assert m.required_roles(request,0,policy())==['gpt','opus','gemini']
+
+
+def test_one_finding_cannot_explain_another_rejected_object_by_prose(case):
+    request,before,candidate,sources=case
+    findings=[m.Finding(target_key='evidence_steps/E',component='E and F',category='content',
+        reason='Both E and F have this issue',citations=[citation()],acceptance_condition='Fix both',
+        affected_target_keys=['claims/C'],impact_reason='This evidence supports C')]
+    review=m.Review(proposal_sha256=candidate.digest,answered_questions=list(m.QUESTIONS['Update']),
+        verdicts=[c.Verdict(record_key=k,approved=k=='claims/C',reason='explicit review',
+            problems=[] if k=='claims/C' else ['same issue']) for k in before],findings=findings,prior_findings=[])
+    with pytest.raises(ValueError,match='findings: source_fragments/F'):
+        m.validate_review(candidate,review,before,m.QUESTIONS['Update'],{},sources,request=request)
+    review.findings.append(findings[0].model_copy(update={'target_key':'source_fragments/F'}))
+    assert not m.validate_review(candidate,review,before,m.QUESTIONS['Update'],{},sources,request=request)
