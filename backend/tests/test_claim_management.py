@@ -349,3 +349,22 @@ def test_readonly_finding_requires_reviewers_explicit_target_impact(case):
     finding.target_key = 'evidence_steps/E'; finding.impact_reason = None
     with pytest.raises(ValueError, match='impact and explanation'):
         m.validate_review(candidate, contextual, before, ['own_source'], {}, sources, request=request)
+
+
+def test_persistent_unrelated_prior_finding_is_disclosed_not_falsely_resolved(case):
+    request,before,candidate,sources=case
+    finding=m.Finding(target_key='evidence_steps/E',component='statement',category='source_uncertain',
+        citations=[citation()],reason='ambiguous independent clause',acceptance_condition='check source',human_question='which word?')
+    unresolved={finding.identity('original'):finding.model_dump(mode='json')}
+    resolution=m.FindingResolution(finding_id=next(iter(unresolved)),disposition='persistent',
+        reason='ambiguity persists without affecting target',citations=[citation()],affected_target_keys=[],
+        impact_reason='C uses the independent clear clause')
+    review=m.Review(proposal_sha256=candidate.digest,verdicts=[c.Verdict(record_key=k,approved=k!='evidence_steps/E',
+        problems=[] if k!='evidence_steps/E' else ['ambiguity persists'],reason='specific judgment') for k in before],
+        findings=[],prior_findings=[resolution],answered_questions=['own_source'])
+    assert m.validate_review(candidate,review,before,['own_source'],unresolved,sources,request=request)
+    assert m.unresolved_after('continued',unresolved,review,request=request,candidate=candidate)=={}
+    assert m.resolution_finding(resolution,unresolved)['human_question']=='which word?'
+    resolution.affected_target_keys=['claims/C']
+    assert not m.validate_review(candidate,review,before,['own_source'],unresolved,sources,request=request)
+    assert m.unresolved_after('continued',unresolved,review,request=request,candidate=candidate)

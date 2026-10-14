@@ -591,3 +591,60 @@ def test_claim_reader_includes_incoming_relation_to_forward_loaded_evidence(acti
     store._reference_consumers=downstream_only
     try: assert store.read_claim_context([('claims','C')])==records
     finally: store._reference_consumers=original
+
+
+def test_explicit_schema_recovery_carries_budget_history_and_prevents_fork(action):
+    store, _, _, _, tmp_path, _ = action
+    seed_claims(store,['C'])
+    request,root=operation_request(action,'Update',['C'])
+    request.policy=cm.source.FileBinding.model_validate(binding(cm.DEFAULT_POLICY))
+    direction_path=Path(request.authorization.path);direction=json.loads(direction_path.read_text())
+    direction['policy']=request.policy.model_dump(mode='json');direction_path.write_text(json.dumps(direction))
+    request.authorization=cm.source.FileBinding.model_validate(binding(direction_path))
+    ports=SyntheticPorts(store,tmp_path,opus=rejected)
+    factory=ports.claim_management_adapter
+    def adapter(role,policy):
+        result=factory(role,policy)
+        if role=='gpt':
+            def schema_rejected(packet):
+                ports.calls.append('gpt')
+                result._client.last_raw_response={'last_message':None,'stdout':'','stderr':'ERROR: '+json.dumps({
+                    'status':400,'error':{'code':'invalid_json_schema','param':'text.format.schema'}})}
+                raise RuntimeError('synthetic pre-generation schema rejection')
+            result.generate=schema_rejected
+        return result
+    ports.claim_management_adapter=adapter
+    assert execute_claim_management(store,request,root=root,ports=ports)['reason']=='model_failed'
+    previous=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id))
+    assert ports.calls==['opus','gpt']
+    next_request,next_root=operation_request(action,'Update',['C'])
+    next_request.predecessor_action_id=request.action_id
+    reduced=cm.Policy.model_validate(previous['policy']);reduced.budget.opus_calls=1
+    policy_file=tmp_path/'remaining-policy.json';policy_file.write_text(reduced.model_dump_json())
+    next_request.policy=cm.source.FileBinding.model_validate(binding(policy_file))
+    next_direction=Path(next_request.authorization.path);authority=json.loads(next_direction.read_text())
+    authority['request']=next_request.model_dump(mode='json',exclude={'authorization','policy'})
+    authority['policy']=next_request.policy.model_dump(mode='json');next_direction.write_text(json.dumps(authority))
+    next_request.authorization=cm.source.FileBinding.model_validate(binding(next_direction))
+    proof=cm.continuation_budget(previous,next_request,reduced)
+    assert proof['spent_generations']=={'gpt':0,'opus':1,'gemini':0}
+    assert proof['pre_generation_schema_rejections']
+    too_many=reduced.model_copy(deep=True);too_many.budget.opus_calls=2
+    with pytest.raises(ValueError,match='reset or increase'):cm.continuation_budget(previous,next_request,too_many)
+    resumed_ports=SyntheticPorts(store,tmp_path,proposal=corrected)
+    result=execute_claim_management(store,next_request,root=next_root,ports=resumed_ports)
+    assert result['status']=='completed',result
+    assert resumed_ports.calls==['gpt','opus']
+    current=store.get_cvp_group('CMA-'+cm.sha256_json(next_request.action_id))
+    assert current['continuation']['prior_findings']==previous['findings']
+    assert current['continuation']['original_goal']==previous['original_goal']
+    assert sum(current['revision_rounds'].values())==1
+    assert execute_claim_management(store,next_request,root=next_root,ports=resumed_ports)==result
+    assert resumed_ports.calls==['gpt','opus']
+    assert execute_claim_management(store,request,root=root,ports=ports)['reason']=='continued_in_linked_action'
+    # A timeout or partial answer cannot obtain the schema rejection exception.
+    failed=next(Path(previous['execution_root']).glob('CMR-*/gpt.failure.json'))
+    from backend.pipeline.source_reconciliation_runner import write
+    write(failed, {'provider_raw':{'last_message':'partial','stdout':'','stderr':'ERROR: '+json.dumps({
+        'status':400,'error':{'code':'invalid_json_schema','param':'text.format.schema'}})}}, immutable=False)
+    with pytest.raises(ValueError,match='proven pre-generation'):cm.continuation_budget(previous,next_request,reduced)

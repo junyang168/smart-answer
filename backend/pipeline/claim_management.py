@@ -264,6 +264,16 @@ class FindingResolution(source.Contract):
     disposition: Literal["resolved", "persistent", "reopened"]
     reason: str = Field(min_length=1)
     citations: list[Citation] = Field(min_length=1)
+    affected_target_keys: list[str] | None = None
+    impact_reason: str | None = None
+
+    @model_serializer(mode='wrap')
+    def historical_shape(self, handler):
+        result = handler(self)
+        for name in ('affected_target_keys', 'impact_reason'):
+            if result[name] is None:
+                result.pop(name)
+        return result
 
 
 class Review(source.Contract):
@@ -542,6 +552,8 @@ def validate_review(candidate, review, expected_keys, questions, unresolved, sou
         finding_blocks(finding.model_dump(mode='json'), request, candidate)
     for resolution in review.prior_findings:
         validate_citations(resolution.citations, sources)
+        if resolution.disposition != 'resolved':
+            finding_blocks(resolution_finding(resolution, unresolved), request, candidate)
     rejected = {v.record_key for v in review.verdicts if not v.approved or v.problems}
     explained = {f.target_key for f in review.findings}
     explained.update(unresolved[r.finding_id]["target_key"] for r in review.prior_findings
@@ -552,9 +564,12 @@ def validate_review(candidate, review, expected_keys, questions, unresolved, sou
         return validate_source_impacts(review, expected_keys, sources, request=request, records=records, unresolved=unresolved)
     blocking = [f for f in review.findings if finding_blocks(f.model_dump(mode='json'), request, candidate)]
     context_rejections = {f.target_key for f in review.findings if f not in blocking}
+    persistent = [r for r in review.prior_findings if r.disposition != 'resolved']
+    context_rejections.update(unresolved[r.finding_id]['target_key'] for r in persistent
+        if not finding_blocks(resolution_finding(r, unresolved), request, candidate))
     return (all(v.approved and not v.problems or v.record_key in context_rejections for v in review.verdicts)
             and not blocking
-            and all(r.disposition == "resolved" for r in review.prior_findings))
+            and not any(finding_blocks(resolution_finding(r, unresolved), request, candidate) for r in persistent))
 
 
 def finding_blocks(finding, request=None, candidate=None):
@@ -575,11 +590,24 @@ def finding_blocks(finding, request=None, candidate=None):
     return bool(affected)
 
 
+def resolution_finding(resolution, unresolved):
+    finding = deepcopy(unresolved[resolution.finding_id])
+    if resolution.affected_target_keys is not None:
+        finding.update(affected_target_keys=resolution.affected_target_keys, impact_reason=resolution.impact_reason)
+    return finding
+
+
 def unresolved_after(action_id, previous, review, *, request=None, candidate=None):
     result = deepcopy(previous)
     for resolution in review.prior_findings:
         if resolution.disposition == "resolved":
             result.pop(resolution.finding_id, None)
+        else:
+            finding = resolution_finding(resolution, previous)
+            if finding_blocks(finding, request, candidate):
+                result[resolution.finding_id] = finding
+            else:
+                result.pop(resolution.finding_id, None)
     for finding in review.findings:
         if finding_blocks(finding.model_dump(mode='json'), request, candidate):
             result[finding.identity(action_id)] = finding.model_dump(mode="json")
@@ -867,7 +895,8 @@ def required_roles(request, round_number, policy=None):
     if ((policy is None or policy.independent_audit_required)
             and (request.operation != "Review" or request.confirm_current or request.source_transition)):
         roles.append("gemini")
-    if request.operation not in {"Review", "Read"} and (request.operation != "Update" or round_number):
+    if request.operation not in {"Review", "Read"} and (request.operation != "Update" or round_number
+            or request.predecessor_action_id and not request.source_transition):
         roles.insert(0, "gpt")
     return roles
 
@@ -895,6 +924,65 @@ def failure_reason(findings):
     if any(f.get("category") == "engineering" for f in findings.values()):
         return "engineering_required"
     return "revision_required"
+
+
+def continuation_budget(previous, request, policy):
+    """One explicitly authorized successor carries history and unspent budget.
+
+    A proven HTTP 400 schema rejection generated nothing. Its failed attempt
+    remains in the predecessor ledger and is never represented as a completion.
+    Unknown calls, completed writes and changed source versions cannot use this
+    engineering-input continuation.
+    """
+    from backend.pipeline.source_reconciliation_runner import read, body
+    old = Request.model_validate(previous['request'])
+    original = Policy.model_validate(previous['policy'])
+    if (previous.get('kind') != 'claim_management_action' or previous['result']['status'] != 'paused'
+            or old.operation != 'Update' or request.operation != 'Update'
+            or old.target_keys != request.target_keys or old.source_bindings != request.source_bindings
+            or old.creation_permissions or request.creation_permissions
+            or previous.get('created_keys') or previous.get('replacements')):
+        raise ValueError('engineering continuation must retain original Update targets and source without structural writes')
+    old_permissions = {p.key:set(p.fields) for p in old.permissions}
+    permissions = {p.key:set(p.fields) for p in request.permissions}
+    if any(not fields <= permissions.get(key,set()) for key,fields in old_permissions.items()):
+        raise ValueError('continuation cannot discard original write obligations')
+    spent = {role:0 for role in MODELS}
+    failures = {}
+    root = Path(previous['execution_root'])
+    for key, slot in previous['call_reservations'].items():
+        if slot['state'] in {'planned','cancelled'}:
+            continue
+        if slot['state'] == 'completed':
+            spent[slot['role']] += 1
+            continue
+        failure_path = root / slot['round_id'] / (slot['role'] + '.failure.json')
+        if slot['role'] != 'gpt' or not failure_path.is_file() or (failure_path.parent / 'gpt.raw.json').exists():
+            raise ValueError('uncertain original call cannot be repeated in a continuation')
+        failure = body(read(failure_path))
+        raw = failure.get('provider_raw') or {}
+        errors = []
+        for line in raw.get('stderr','').splitlines():
+            if line.startswith('ERROR: '):
+                errors.append(json.loads(line[7:]))
+        if (raw.get('last_message') is not None or raw.get('stdout') or not errors
+                or any(e.get('status') != 400 or e.get('error',{}).get('code') != 'invalid_json_schema'
+                       or e.get('error',{}).get('param') != 'text.format.schema' for e in errors)):
+            raise ValueError('not a proven pre-generation Claim schema rejection')
+        failures[key] = {'path':str(failure_path), 'file_sha256':hashlib.sha256(failure_path.read_bytes()).hexdigest()}
+    remaining = {role:original.budget.limit(role)-spent[role] for role in MODELS}
+    if (policy.models != original.models or policy.independent_audit != original.independent_audit
+            or policy.review_purpose != original.review_purpose
+            or any(policy.budget.limit(role) > remaining[role] for role in MODELS)
+            or policy.budget.max_revisions > original.budget.max_revisions - sum(previous['revision_rounds'].values())
+            or policy.budget.max_request_bytes > original.budget.max_request_bytes
+            or policy.budget.max_output_tokens > original.budget.max_output_tokens):
+        raise ValueError('continuation cannot reset or increase original Claim budget or change review policy')
+    if not policy.budget.gpt_calls or not policy.budget.opus_calls:
+        raise ValueError('original remaining budget cannot fund correction and review')
+    return {'predecessor_action_id':old.action_id, 'original_goal':deepcopy(previous['original_goal']),
+        'prior_findings':deepcopy(previous['findings']), 'prior_call_reservations':deepcopy(previous['call_reservations']),
+        'pre_generation_schema_rejections':failures, 'spent_generations':spent, 'remaining_generations':remaining}
 
 
 def operation_questions(goal, candidate):

@@ -15,3 +15,5 @@ program_owned_fields 声明的来源、段落及引文 SHA 由程序据完整原
 一次候选通过仅表示本轮 Opus 审阅通过。不得宣布动作完成、独立 Gemini 审计通过或人工批准。被拒后允许在同一 action 剩余预算内多轮实际修正；你仍只判断眼前精确候选。澄清时 candidate 不变，只评估自身原先 finding 与新引用证据；持续异议保留拒绝，不追加预算。
 
 policy.review_purpose 为 source_impact 时，本轮是来源影响 Review。读取 sources 的完整 current/before 原文与 delta，主动检查引用段落之外的新限定、否定、归属、论证与新增教导。source_impacts 对 denominator 中每个 Claim 恰好一次 unaffected／maintenance／source_uncertain，带逐字引文和理由；引用旧原文标 source_epoch=before。maintenance 指明普通 operation、具体 finding 和接受条件，原文疑点给具体 human_question。verdict.approved 在这个 policy 下判断影响结论是否成立，不表示该 Claim 内容获完整批准；保留具体维护 findings 并可认可该影响结论。无影响不补成缺失的旧审核；不提出写入、不改变候选。source_impacts 在普通内容审核中留空。
+
+旧 finding 若仍存在于只读上下文、但与当前目标和实际写入无关，prior_findings 保留 persistent，并填写 affected_target_keys=[] 和 impact_reason；不把未修的原文矛盾谎称 resolved。只有当前原文或修正真的消除了旧问题，才使用 resolved。

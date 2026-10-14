@@ -3290,6 +3290,32 @@ class PostgresKnowledgeStore:
                      "revision_rounds": {},
                      "claim_ids": [key.split("/", 1)[1] for key in request.target_keys],
                      "result": {"status": "prepared"}}
+            if request.predecessor_action_id and not request.source_transition:
+                previous_id = 'CMA-' + sha256_json(request.predecessor_action_id)
+                prior = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE',
+                    (previous_id,)).fetchone()
+                if not prior:
+                    raise ChangeSetConflict('Claim continuation has no original action')
+                prior = prior[0]
+                from backend.pipeline.claim_management import continuation_budget
+                continuation = continuation_budget(prior, request, policy)
+                prior_rounds = sorted({slot['round_id'] for slot in prior['call_reservations'].values()})
+                for (child,) in cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=ANY(%s)',
+                        (prior_rounds,)).fetchall():
+                    if child.get('change_set_ids') or child.get('checkpoint') in {'reviewed','applied','audited'}:
+                        raise ChangeSetConflict('engineering input continuation cannot replay a committed or reviewed write')
+                if any(before[key] != prior['original_goal']['original_objects'][key] for key in request.target_keys):
+                    raise ChangeSetConflict('original target changed before its explicit engineering continuation')
+                if prior.get('continued_by'):
+                    raise ChangeSetConflict('original Claim action already has a continuation; no budget fork')
+                value['continuation'] = continuation
+                value['findings'] = prior['findings']
+                prior['continued_by'] = run_id
+                for slot in prior['call_reservations'].values():
+                    if slot['state'] == 'planned':
+                        slot.update(state='cancelled', transferred_to=run_id)
+                cursor.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb WHERE run_id=%s',
+                    (canonical_json(prior), previous_id))
             cursor.execute("""INSERT INTO wang_knowledge.pipeline_runs
                               (run_id,subject_kind,subject_id,stage,trigger,status,metadata)
                               VALUES (%s,'batch',%s,'cvp_group','cli','running',%s::jsonb)""",
@@ -3425,7 +3451,7 @@ class PostgresKnowledgeStore:
                         materials['before'], cm.existing_candidate(materials['before'], replacements=materials['replacements']))):
                     raise ChangeSetConflict('Claim correction made no semantic progress or repeats a previous candidate')
                 prior.append(fingerprint)
-                parent['revision_rounds'][round_id] = bool(value['round_number'])
+                parent['revision_rounds'][round_id] = bool(value['round_number'] or parent.get('continuation'))
                 value['candidate'] = candidate.model_dump(mode='json')
                 value['claim_ids'] = [k.split('/',1)[1] for k in cm.audit_keys(
                     cm.Request.model_validate(materials['unit_request']), materials['before'], candidate) if k.startswith('claims/')]
@@ -3500,6 +3526,9 @@ class PostgresKnowledgeStore:
                     request=unit_request, candidate=candidate)
                 context_findings = {f.identity(parent['action_id']): f.model_dump(mode='json') for f in review.findings
                     if not cm.finding_blocks(f.model_dump(mode='json'), unit_request, candidate)}
+                context_findings.update({r.finding_id: cm.resolution_finding(r, materials['unresolved'])
+                    for r in review.prior_findings if r.disposition != 'resolved'
+                    and not cm.finding_blocks(cm.resolution_finding(r, materials['unresolved']), unit_request, candidate)})
                 if context_findings:
                     value['context_findings'] = context_findings
                     parent.setdefault('context_findings', {}).update(context_findings)

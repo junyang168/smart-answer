@@ -452,6 +452,8 @@ def execute_claim_management(store, request, *, root, ports):
             goal = cm.original_goal(request, before)
             parent = store.prepare_claim_management_action(request, goal=goal, read_pins=pins(records), root=root)
         policy, sources = cm.load_authority(request, source_documents=cm.source_documents(parent['original_goal']['original_objects']))
+        if parent.get('continued_by'):
+            return {'status':'paused', 'reason':'continued_in_linked_action', 'run_id':parent['continued_by']}
         if parent['result'].get('status') == 'completed':
             return store.finish_claim_management_action(parent_id)
         if parent['result'].get('reason') in {'human_required','no_progress','disagreement','permission_required','budget_exhausted'}:
@@ -524,6 +526,8 @@ def execute_claim_management(store, request, *, root, ports):
                             'claim_ids': [k.split('/',1)[1] for k in unit_keys if k.startswith('claims/')],
                             'writable_record_shapes': {col: cm.KNOWLEDGE_COLLECTIONS[col][0].model_json_schema()
                                 for col in sorted({p.collection for p in unit_request.permissions} | {p.collection for p in request.creation_permissions})}}
+                        if parent.get('continuation'):
+                            materials['continuation'] = parent['continuation']
                         rid = store.prepare_claim_management_round(parent_id, unit_id=unit_id, round_number=ordinal,
                                                                   materials=materials, roles=roles)
                         prior = store.get_cvp_group(rid)
