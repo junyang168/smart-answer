@@ -368,13 +368,19 @@ def corrected(packet):
     return result.model_dump(mode='json')
 
 
-def test_update_starts_with_real_existing_candidate_then_revises_and_reviews(action):
+def test_update_starts_with_real_existing_candidate_then_revises_and_reviews(action,monkeypatch):
     store, _, _, _, tmp_path, _ = action
     seed_claims(store, ['C'])
     request, root = operation_request(action, 'Update', ['C'])
     def opus(packet):
         return rejected(packet) if packet['round_number'] == 0 else passing(packet)
     ports = SyntheticPorts(store, tmp_path, proposal=corrected, opus=opus)
+    read_context=store.read_claim_context
+    def scoped_readback(keys):
+        if ports.calls and ports.calls[-1]=='opus' and ports.calls.count('opus')==2:
+            assert set(keys)=={('claims','C')}
+        return read_context(keys)
+    monkeypatch.setattr(store,'read_claim_context',scoped_readback)
     result = execute_claim_management(store, request, root=root, ports=ports)
     assert result['status'] == 'completed', result
     assert ports.calls == ['opus','gpt','opus','gemini']

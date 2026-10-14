@@ -596,6 +596,11 @@ def execute_claim_management(store, request, *, root, ports):
                     if prior['checkpoint'] == 'applied':
                         candidate = cm.Candidate.model_validate(prior['candidate'])
                         roots = {content.split_key(k) for k in materials['before']}
+                        if request.operation != 'Create' and not cm.is_source_impact(request):
+                            unit = cm.Request.model_validate(materials['unit_request'])
+                            roots = {content.split_key(k) for k in unit.target_keys}
+                            roots.update((p.collection,p.object_id) for p in unit.permissions)
+                            roots.update(content.split_key(k) for k in parent['created_keys'])
                         roots.update(content.split_key(r.key) for r in candidate.records)
                         actual = read_context(sorted(roots))
                         states = {content.key(*k): v for k, v in actual.items()}
