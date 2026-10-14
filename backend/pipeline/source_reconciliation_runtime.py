@@ -262,16 +262,16 @@ class ProductionPorts:
         # environment too, not only a check after the models have finished.
         self._environment_guard()
 
+    def before_claim_model_call(self, role: str) -> None:
+        self._environment_guard(require_backup=False)
+
     def plan(self, package: dict) -> dict:
         return json.loads(json.dumps(self.store.plan_package(package, source_kind=contract.VERSION).as_dict()))
 
     def backup(self, root: Path) -> dict:
         self._environment_guard()
-        claim = (root / 'materials.json').exists() and body(read(root / 'materials.json')).get('schema_version') == 'wang_claim_management_v2'
-        ticket = '435' if claim else '357'
-        command = ['scripts/backup-registry.sh', '--ssd'] if claim else ['scripts/backup-registry.sh']
-        command.append('before-source-' + ticket + '-' + contract.sha256_json(str(root))[:32])
-        completed = subprocess.run(command, cwd=PROJECT, env={**os.environ, 'KNOWLEDGE_DATABASE_URL': self.store.database_url},
+        completed = subprocess.run(['scripts/backup-registry.sh', 'before-source-357-' + contract.sha256_json(str(root))[:32]],
+            cwd=PROJECT, env={**os.environ, 'KNOWLEDGE_DATABASE_URL': self.store.database_url},
             capture_output=True, text=True, check=True)
         match = re.search(r"backup-registry: wrote (.+\.dump) \(", completed.stdout)
         if not match:
@@ -279,14 +279,14 @@ class ProductionPorts:
         path = Path(match.group(1))
         from backend.pipeline.viewpoint_backup_archive import eligible, logical_binding_path
         if not eligible(path) or not path.is_symlink() or logical_binding_path(path) != path:
-            raise ValueError('new source/Claim backup must be verified on Jun SSD; no internal fallback')
+            raise ValueError('new #357 backup must be verified on Jun SSD; no internal fallback')
         listing = subprocess.run(["pg_restore", "--list", str(path)], capture_output=True, check=True)
         if not listing.stdout.strip():
             raise ValueError("empty pg_restore catalog")
         return {"dump": binding(path), "restore_catalog_nonempty": True,
                 "catalog_sha256": hashlib.sha256(listing.stdout).hexdigest(), "restore_list_exit_code": listing.returncode}
 
-    def _environment_guard(self, *, planned_snapshot_bytes=0):
+    def _environment_guard(self, *, planned_snapshot_bytes=0, require_backup=True):
         if subprocess.check_output(["git", "status", "--porcelain"], cwd=PROJECT, text=True).strip():
             raise ValueError("committed clean implementation required before production apply")
         if shutil.disk_usage(PROJECT).free < 2 * 1024**3:
@@ -294,8 +294,9 @@ class ProductionPorts:
         if shutil.disk_usage(PROJECT).free < 2*1024**3 + planned_snapshot_bytes*2:
             raise ValueError('insufficient disk for planned snapshot plus verification reserve')
         # Preserve the owner's SSD requirement and UUID/archive validation.
-        from backend.pipeline.viewpoint_backup_archive import verify_volume
-        verify_volume()
+        if require_backup:
+            from backend.pipeline.viewpoint_backup_archive import verify_volume
+            verify_volume()
 
     def committed(self, plan: dict) -> bool:
         with self.store.connect() as conn, conn.cursor() as cursor:

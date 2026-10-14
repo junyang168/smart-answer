@@ -125,7 +125,8 @@ def resume_reviewed_action(store, run_id):
     if saved['checkpoint'] != 'reviewed': return None
     evidence = saved['reviewed']['evidence']
     for source in evidence['sources']: check_binding(source)
-    check_binding(evidence['backup']['dump'])
+    if saved['reviewed']['plan']['source_kind'] != 'wang_claim_management_v2':
+        check_binding(evidence['backup']['dump'])
     for proof in evidence['approval'].values():
         if isinstance(proof,dict) and {'path','file_sha256'} <= proof.keys(): check_binding(proof)
     plan = plan_from_document(saved['reviewed']['plan'])
@@ -447,9 +448,10 @@ def commit_package(store, run_id, *, package, approval, authorization, backup, s
                    pending_cvp_claim_ids=(), pending_cvp_management_record_keys=None):
     """The shared normal/source/link execution boundary after content approval."""
     for source in sources:check_binding(source)
-    if not backup.get('restore_catalog_nonempty') or not backup.get('dump'):
-        raise ValueError('fresh backup lacks verified restore-list proof')
-    check_binding(backup['dump'])
+    if source_kind != 'wang_claim_management_v2':
+        if not backup.get('restore_catalog_nonempty') or not backup.get('dump'):
+            raise ValueError('fresh backup lacks verified restore-list proof')
+        check_binding(backup['dump'])
     from backend.api.canonical_repository.reviewed_candidate_contract import validate_store_package_authorization
     validate_store_package_authorization(package)
     plan = store.plan_package(package,source_kind=source_kind,transactional=True)

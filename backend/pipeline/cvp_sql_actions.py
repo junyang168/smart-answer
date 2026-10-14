@@ -515,7 +515,8 @@ def execute_claim_management(store, request, *, root, ports):
                                           selected_source_ids=materials['unit_request']['source_bindings'])
                         with store.connect() as conn, conn.cursor() as cursor:
                             store._assert_transaction_read_pins(cursor, pins(records))
-                    transport = SimpleNamespace(before_model_call=getattr(ports, 'before_model_call', lambda stage: None),
+                    before_call = getattr(ports, 'before_claim_model_call', getattr(ports, 'before_model_call', lambda stage: None))
+                    transport = SimpleNamespace(before_model_call=before_call,
                         model_call_reserved=lambda role, intent: store.begin_claim_management_call(
                             parent_id, round_id=rid, role=role, intent=intent))
                     stages = ModelStages(root, transport)
@@ -554,15 +555,9 @@ def execute_claim_management(store, request, *, root, ports):
                             'opus_raw': binding(round_root / 'opus.raw.json'),
                             'pending_consumers': claim_pending_consumers(materials['transaction_before'], writes)}
                         write(round_root / 'package.json', package)
-                        backup_path = round_root / 'backup.json'
-                        if backup_path.exists():
-                            backup = body(read(backup_path))
-                        else:
-                            backup = ports.backup(round_root)
-                            write(backup_path, backup)
                         guard()
                         commit_package(store, rid, package=package, approval=binding(round_root / 'opus.raw.json'),
-                            authorization=request.authorization.model_dump(), backup=backup,
+                            authorization=request.authorization.model_dump(), backup={},
                             sources=[b for b in materials['unit_request']['source_bindings'].values()], read_pins=pins(records),
                             reason='Claim ' + request.operation + ' independently reviewed current candidate', actor='claim-management-v2',
                             source_kind=cm.VERSION, pending_cvp_claim_ids=prior['claim_ids'])
@@ -600,15 +595,18 @@ def execute_claim_management(store, request, *, root, ports):
                             slot = store.get_cvp_group(parent_id)['call_reservations'][rid + ':gemini']
                             if slot['state'] != 'planned':
                                 raise Stop('independent call has no complete saved reply; do not repeat', status='call_uncertain')
-                            getattr(ports, 'before_model_call', lambda stage: None)('gemini')
+                            before_call('gemini')
                             store.begin_claim_management_call(parent_id, round_id=rid, role='gemini', intent={'input': binding(input_path)})
                             ports.claim_management_audit(round_root, audit_input)
                         prior = record('audit', audit=binding(audit_path))
                         if prior['outcome'] == 'revision_required':
                             continue
                     break
-            outcome = store.get_cvp_group(parent_id)['result']
-            if outcome.get('status') == 'paused':
+            parent = store.get_cvp_group(parent_id)
+            outcome = parent['result']
+            latest = parent['latest_rounds'].values()
+            if outcome.get('status') == 'paused' and not all(
+                    store.get_cvp_group(rid).get('outcome') in {'completed', 'reported'} for rid in latest):
                 return outcome
             return store.finish_claim_management_action(parent_id)
         except (ValueError, RuntimeError) as exc:

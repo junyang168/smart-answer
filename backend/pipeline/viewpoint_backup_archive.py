@@ -1,4 +1,4 @@
-"""Owner-authorized snapshots on Jun SSD, preserving old #357 proof paths."""
+"""#357 SSD snapshots and reading of the already saved #435 archive."""
 from __future__ import annotations
 import argparse
 import fcntl
@@ -94,14 +94,13 @@ def eligible(path):
 
 
 def create_backup(label, database_url):
-    """Write directly to the verified ticket's SSD directory."""
-    ticket = backup_ticket(label)
-    if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,60}',label) or not ticket:
-        raise ValueError('exact #357 or #435 label required')
+    """#357 writes directly to the verified SSD, retaining its logical proof path."""
+    if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,60}',label) or not re.search(r'(?:^|-)357(?:-|$)',label) or foreign_ticket(label):
+        raise ValueError('exact #357 label required')
     from datetime import datetime,timezone
     verify_volume()
     name='registry-backup-'+datetime.now(timezone.utc).strftime('%Y-%m-%d')+'-'+label
-    p=LOCAL/name/NAME; target=archive_destination(ticket)/name/NAME
+    p=LOCAL/name/NAME; target=DEST/name/NAME
     if p.parent.exists() or target.parent.exists():raise ValueError('backup already attempted; no overwrite')
     if shutil.disk_usage(MOUNT).free<2*1024**3:raise ValueError('SSD backup reserve below 2GiB')
     target.parent.mkdir(parents=True,mode=0o700); p.parent.mkdir(parents=True,mode=0o700)
@@ -112,7 +111,7 @@ def create_backup(label, database_url):
     cat=catalog(temp); sha=digest(temp); size=temp.stat().st_size
     with temp.open('rb') as f:os.fsync(f.fileno())
     verify_volume(); os.replace(temp,target)
-    body={'schema_version':'wang_registry_backup_ssd_archive_v1','task':'#'+ticket,
+    body={'schema_version':'wang_registry_backup_ssd_archive_v1','task':'#357',
         'original_path':str(p),'archive_path':str(target),'volume_uuid':UUID,
         'file_sha256':sha,'size':size,'restore_catalog_sha256':cat,
         'status':'copied_sha_and_restore_catalog_verified','registry_writes':0,'model_calls':0,
@@ -206,13 +205,10 @@ def main():
     parser=argparse.ArgumentParser();parser.add_argument('--apply',action='store_true')
     parser.add_argument('--create-label');parser.add_argument('--migration-root',type=Path)
     parser.add_argument('--backup-proof',type=Path,action='append',default=[]);args=parser.parse_args()
-    if args.create_label:
-        if (Path(__file__).resolve().parents[2].name != 'wkp-357-worktree-per-session'
-                and backup_ticket(args.create_label) != '435'):
-            raise ValueError('only #357 worktree may create #357 backups')
-        create_backup(args.create_label,os.environ['KNOWLEDGE_DATABASE_URL']);return
     if Path(__file__).resolve().parents[2].name!='wkp-357-worktree-per-session':
         raise ValueError('only #357 worktree may migrate these backups')
+    if args.create_label:
+        create_backup(args.create_label,os.environ['KNOWLEDGE_DATABASE_URL']);return
     with (BASE/'immediate-recovery-20261002-v1/recovery.lock').open('a') as lock, (BASE/'registry-cvp.lock').open('a') as registry:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB);fcntl.flock(registry,fcntl.LOCK_EX|fcntl.LOCK_NB)
         verify_volume()

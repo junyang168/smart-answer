@@ -56,9 +56,7 @@ class SyntheticPorts:
         return adapter
 
     def backup(self, root):
-        path = root / 'synthetic-disposable-db-backup.dump'
-        path.write_bytes(b'synthetic backup receipt for isolated tests')
-        return {'dump': binding(path), 'restore_catalog_nonempty': True}
+        raise AssertionError('Claim operations must not call the whole-registry backup port')
 
     def claim_management_audit(self, root, audit_input):
         self.calls.append('gemini')
@@ -135,6 +133,41 @@ def test_gpt_unknown_call_pauses_without_resending(action):
     recovered = execute_claim_management(store, request, root=tmp_path / 'original-root', ports=ports)
     assert recovered['reason'] == 'call_uncertain'
     assert ports.calls == ['gpt']
+
+
+@pytest.mark.parametrize('failure',['late_validation','committed_reply_lost'])
+def test_claim_transaction_recovers_without_backup_or_repeated_models(action,monkeypatch,failure):
+    store,request,_,_,tmp_path,_=action
+    ports=SyntheticPorts(store,tmp_path)
+    if failure=='late_validation':
+        original=store._assert_transaction_edges_and_reviews
+        def fail(*args,**kwargs):raise RuntimeError('synthetic late transaction failure')
+        monkeypatch.setattr(store,'_assert_transaction_edges_and_reviews',fail)
+    else:
+        original=store.apply_plan
+        def fail(plan,*args,**kwargs):
+            result=original(plan,*args,**kwargs)
+            if plan.source_kind==cm.VERSION:
+                raise RuntimeError('synthetic committed reply lost')
+            return result
+        monkeypatch.setattr(store,'apply_plan',fail)
+    root=tmp_path/'original-root'
+    first=execute_claim_management(store,request,root=root,ports=ports)
+    assert first['status']=='paused'
+    assert ports.calls==['gpt','opus']
+    assert (store.get_record_state('claims','C') is None)==(failure=='late_validation')
+    with store.connect() as conn:
+        count=conn.execute('SELECT count(*) FROM wang_knowledge.change_sets WHERE source_kind=%s',(cm.VERSION,)).fetchone()[0]
+    assert count==(0 if failure=='late_validation' else 1)
+    method='_assert_transaction_edges_and_reviews' if failure=='late_validation' else 'apply_plan'
+    monkeypatch.setattr(store,method,original)
+    result=execute_claim_management(store,request,root=root,ports=ports)
+    assert result['status']=='completed',result
+    assert ports.calls==['gpt','opus','gemini']
+    with store.connect() as conn:
+        assert conn.execute('SELECT count(*) FROM wang_knowledge.change_sets WHERE source_kind=%s',(cm.VERSION,)).fetchone()==(1,)
+    assert store.get_record_state('claims','C')['revision']==1
+    assert store.claim_management_qualification('C')['ready']
 
 
 def test_zero_revision_budget_stops_before_proposal_and_preserves_existing_claim(action):
@@ -248,6 +281,22 @@ def test_production_auditor_uses_current_checkout_policy_and_actual_database(mon
     monkeypatch.setattr(runtime.subprocess,'run',lambda *a,**k:SimpleNamespace(returncode=1))
     with pytest.raises(ValueError,match='inspect saved logs'):
         runtime.ProductionPorts(store).claim_management_audit(root,{'model':'gemini-4-argon'})
+
+
+def test_claim_model_start_does_not_require_backup_disk(monkeypatch,tmp_path):
+    from backend.pipeline import source_reconciliation_runtime as runtime
+    from backend.pipeline import viewpoint_backup_archive as backup
+    monkeypatch.setattr(runtime,'PROJECT',tmp_path)
+    monkeypatch.setattr(runtime.subprocess,'check_output',lambda *a,**k:'')
+    monkeypatch.setattr(runtime.shutil,'disk_usage',lambda *a:SimpleNamespace(free=4*1024**3))
+    def missing():raise ValueError('SSD unavailable')
+    monkeypatch.setattr(backup,'verify_volume',missing)
+    ports=runtime.ProductionPorts(SimpleNamespace(database_url='synthetic'))
+    for role in ('gpt','opus','gemini'):
+        ports.before_claim_model_call(role)
+    # The separate old source/CVP transport keeps its original contract.
+    with pytest.raises(ValueError,match='SSD unavailable'):
+        ports.before_model_call('initial_review')
 
 
 def rejected(packet, key='claims/C', *, category='content'):

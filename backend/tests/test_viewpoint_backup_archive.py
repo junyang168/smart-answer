@@ -83,24 +83,24 @@ def test_volume_identity_rejects_wrong_disk(monkeypatch,tmp_path):
     with pytest.raises(ValueError,match='identity'):m.verify_volume()
 
 
-def test_435_backup_is_separate_and_cannot_enter_357_migration(archive,monkeypatch):
-    from types import SimpleNamespace
+def test_saved_435_archive_remains_readable_without_a_claim_backup_creation_path(archive):
+    from backend.pipeline.viewpoint_resolution_runtime import write_immutable
     p,dest=archive
-    def dump(argv,**kwargs):
-        output=next(value.split('=',1)[1] for value in argv if value.startswith('--file='))
-        Path(output).write_bytes(b'synthetic complete 435 dump')
-        return SimpleNamespace(returncode=0)
-    monkeypatch.setattr(m.subprocess,'run',dump)
-    receipt=m.create_backup('before-source-435-test','postgresql://synthetic.invalid/test')
-    local=Path(receipt['original_path'])
+    local=p.parent.parent/'registry-backup-2026-10-13-before-source-435-test'/m.NAME
+    target=dest.parent/'435'/local.parent.name/m.NAME
+    local.parent.mkdir();target.parent.mkdir(parents=True)
+    target.write_bytes(b'synthetic saved 435 archive');local.symlink_to(target)
+    receipt={'task':'#435','original_path':str(local),'archive_path':str(target),'volume_uuid':m.UUID,
+        'status':'copied_sha_and_restore_catalog_verified','size':target.stat().st_size,'file_sha256':m.digest(target)}
+    write_immutable(local.parent/m.RECEIPT,{**receipt,'artifact_sha256':m.sha256_json(receipt)})
     assert receipt['task']=='#435'
     assert Path(receipt['archive_path']).is_relative_to(dest.parent/'435')
     assert m.logical_binding_path(local)==local
-    assert local.read_bytes()==b'synthetic complete 435 dump'
+    assert local.read_bytes()==b'synthetic saved 435 archive'
     assert local not in sum(m.inventory(),[])
     with pytest.raises(ValueError,match='exact #357'):
         m.migrate_one(local)
-    with pytest.raises(ValueError,match='already attempted'):
+    with pytest.raises(ValueError,match='exact #357 label'):
         m.create_backup('before-source-435-test','postgresql://synthetic.invalid/test')
     Path(receipt['archive_path']).write_bytes(b'drift')
     with pytest.raises(ValueError,match='size/SHA'):

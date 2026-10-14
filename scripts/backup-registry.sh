@@ -15,11 +15,6 @@ set -Eeuo pipefail
 
 fail() { printf 'backup-registry: %s\n' "$*" >&2; exit 1; }
 
-SSD_MODE=0
-if [[ "${1:-}" == '--ssd' ]]; then
-    SSD_MODE=1
-    shift
-fi
 LABEL="${1:-}"
 [[ -n "$LABEL" ]] || fail "usage: backup-registry.sh <label>  (e.g. before-lane-repair)"
 [[ "$LABEL" =~ ^[a-z0-9][a-z0-9-]{0,60}$ ]] || fail "label must be lowercase words and hyphens"
@@ -31,12 +26,6 @@ DATA_BASE_DIR="${DATA_BASE_DIR:-$(env_value DATA_BASE_DIR)}"
 [[ -n "$DATA_BASE_DIR" ]] || fail "DATA_BASE_DIR is required (from .env)"
 DB_URL="${KNOWLEDGE_DATABASE_URL:-$(env_value KNOWLEDGE_DATABASE_URL)}"
 [[ -n "$DB_URL" ]] || fail "KNOWLEDGE_DATABASE_URL is required (from .env)"
-
-if [[ "$SSD_MODE" == 1 ]]; then
-    [[ "$LABEL" =~ (^|-)435(-|$) && ! "$LABEL" =~ (^|-)(357|358)(-|$) ]] || fail "explicit #435 SSD label required"
-    KNOWLEDGE_DATABASE_URL="$DB_URL" "$SOURCE_REPO/backend/.venv/bin/python" -m backend.pipeline.viewpoint_backup_archive --create-label "$LABEL"
-    exit 0
-fi
 
 # Only this owner's #357 worktree and explicit ticket label use Jun SSD.
 # Other cards, including #358, retain their original behavior.

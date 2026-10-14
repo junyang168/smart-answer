@@ -230,6 +230,8 @@ flowchart TD
 
 Claim Management 的 Read、Create、Review、Update、Retire、Restore、Split、Merge 及多轮出口见 [Claim Management 2.0 operations 与生命周期设计](../20-knowledge/claim_management_2_design.md)。Review 作为独立审阅 operation 保留，Update 内含审阅与必要修正，不要求另发 Review 请求。内容操作共用现有短 transaction、SQL 进度、版本历史和独立审计，模型调用在事务之外；Read 不触发模型，Review 报告完成与内容维护完成分别判断。多轮保留原始任务目标，后续修订或补偿不能只凭最后一轮通过宣称整个任务完成。
 
+Claim operation 的保护由原子 transaction、精确版本／来源校验、实际写集、版本历史和提交后回读承担，不要求每次整库备份或外接 SSD。整库备份属于数据库运维的灾难恢复职责。既有 CVP／来源维护及人工例外的已绑定备份契约保留，不能借 Claim 的简化改变旧任务依据。
+
 这是新 action 的目标契约，启用前仍须完成实现、版本化 policy 和有界验收；此架构决定不授权模型执行或内容写入。
 
 **Human in the loop 的原则：只要不是必需，就不停下来等负责人。** Agent 自主承担已授权的常规执行、Claim／CVP 管理、排错、测试和安全恢复；人负责确实不能由现有证据与规则决定的内容判断，不充当每一步的启动按钮。常规管理接点尚未实现是工程欠账，不是逐案请求内容批准的理由；也不能因审核写了「最终拒绝」就省略根因调查。

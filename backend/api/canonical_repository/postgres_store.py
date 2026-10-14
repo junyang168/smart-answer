@@ -4414,6 +4414,8 @@ class PostgresKnowledgeStore:
 
     def review_cvp_group(self, run_id: str, *, plan: ChangeSetPlan, evidence: Mapping[str, Any]) -> str:
         required = {"package", "approval", "authorization", "backup", "sources", "read_pins"}
+        if plan.source_kind == 'wang_claim_management_v2':
+            required.remove('backup')
         if not required <= set(evidence) or any(not evidence[k] for k in required - {"read_pins"}):
             raise ValueError("CVP reviewed state lacks source/approval/backup authority")
         review = json.loads(canonical_json({"plan": plan.as_dict(), "evidence": dict(evidence)}))

@@ -74,3 +74,13 @@ Audit 收据委托独立结果校验时，只读取一次实际来源；原先�
 本次相关回归为 **442 passed、43 skipped**，含只读启用的真实旧失败输入；新反例验证 Argon 与 Flash 不能互换证明、单条 Update 不授予只读关联 Claim 资格、完成恢复不重发模型、审计进程不能读取错误数据库或固定旧 checkout、#435 SSD 备份不能进入 #357 迁移，以及损坏备份拒绝消费。新增自检段落后，隔离模型替身的 prompt 分隔方式同步为读取最后一行 packet JSON；真实传输仍消费完整多行 instructions。
 
 此记录对应正式单条试运行前的开发验证；整体 #435 尚未完成，没有启用整组批量维护或部署。
+
+## 正式单条完成与移除业务备份门槛
+
+`435-son-of-man-first-formal-argon-v1` 已在正式库完成。目标仍是 `DK-4eca17ff4e50fa50aa01-P01-CL002`，仅允许 Update 这一条未连接 CVP 的 Claim。Opus 与 Argon 各调用一次并通过；round 为 audited／completed，原 action 为 completed，目标当前资格确认通过。审核认为原有内容可以保留，实际内容写集为空，没有创建内容 ChangeSet；只读对象及其资格保持不变。完成状态重入没有增加模型调用。保存输入、原答与最终结果位于运行资料目录的 `wang-knowledge-platform/staging/claim-management-435/son-of-man-first-formal-argon-v1/`，最终记录是 `single-update-result.json`。
+
+负责人指出数据库 transaction 与版本历史足以承担 Claim 业务保护后，移除了 Claim action 的整库备份／SSD 前置要求；共同执行和恢复只对明确的 Claim source_kind 使用此契约，旧 CVP／来源维护契约保持不变。事务原子性、精确 pins、实际写集、版本历史、回读及独立终审没有取消。删除新增 #435 备份创建和 shell 分派；已在途旧实现生成的一份备份保留真实记录，仅保留其旧逻辑路径与 SHA 的读取兼容，不再为 Claim 创建备份。
+
+临时 PostgreSQL 的全路径测试把 Claim backup port 改为一旦调用就失败，Create、Update 修订、Review 确认、Retire、Restore、Split、Merge 均通过。新增末项验证失败的完整回滚和提交回复丢失的恢复反例，验证内容仅提交一次、审核不重跑、独立审计完成后才授予资格；同时修复了工程恢复完成后仍返回 parent 旧 paused 结果的问题。SSD 不可用不再阻止 Claim 的模型启动，旧来源流程的 SSD 门槛仍保留。
+
+移除业务备份门槛后的相关回归为 **444 passed、43 skipped**，包含保存的旧失败材料和共同 SQL 执行／恢复。文档检查只有既有的无关 notes-to-sermon 附录锚点错误。整体 #435 的其他开放事项仍保留，未扩大整组维护、合并或部署。
