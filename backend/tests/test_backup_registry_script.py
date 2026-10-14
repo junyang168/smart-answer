@@ -167,8 +167,12 @@ def test_invalid_archive_leaves_no_final_and_same_label_can_retry(
     assert (target / "smart_answer_knowledge.dump").is_file()
 
 
-def test_357_transport_dispatch_is_isolated_from_real_ssd(tmp_path: Path):
-    source_repo = tmp_path / "wkp-357-worktree-per-session"
+@pytest.mark.parametrize('checkout,arguments,expected_label',[
+    ('wkp-357-worktree-per-session',['isolated'],'357-isolated'),
+    ('wkp-435-claim-management-design',['--ssd','before-source-435-isolated'],'before-source-435-isolated'),
+])
+def test_ticket_transport_dispatch_is_isolated_from_real_ssd(tmp_path: Path,checkout,arguments,expected_label):
+    source_repo = tmp_path / checkout
     script = source_repo / "scripts" / "backup-registry.sh"
     script.parent.mkdir(parents=True)
     script.write_bytes(SCRIPT.read_bytes())
@@ -177,13 +181,13 @@ def test_357_transport_dispatch_is_isolated_from_real_ssd(tmp_path: Path):
     python.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n", encoding="utf-8")
     python.chmod(0o755)
     result = subprocess.run(
-        ["bash", str(script), "isolated"], cwd=source_repo,
+        ["bash", str(script), *arguments], cwd=source_repo,
         env={**os.environ, "DATA_BASE_DIR": str(tmp_path / "data"),
              "KNOWLEDGE_DATABASE_URL": "postgresql://test.invalid/registry"},
         text=True, capture_output=True, check=False,
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
-        "-m", "backend.pipeline.viewpoint_backup_archive", "--create-label", "357-isolated",
+        "-m", "backend.pipeline.viewpoint_backup_archive", "--create-label", expected_label,
     ]
     assert not (tmp_path / "data").exists()

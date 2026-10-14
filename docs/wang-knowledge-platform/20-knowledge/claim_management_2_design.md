@@ -214,7 +214,7 @@ Opus 或 Gemini 要求实际修订时，新完整候选均进入下一轮 prepar
 
 ### 7.1 角色与输入
 
-GPT 6.1 Sol high 订阅负责提案、修订和回应；Opus 5.5 high 订阅负责审阅完整候选；Gemini 3.8 Flash 负责独立终审。新 policy 绑定精确模型 ID、backend、effort、prompt 与 schema，角色名称不代替执行配置。
+GPT 6.1 Sol high 订阅负责提案、修订和回应；Opus 5.5 high 订阅负责审阅完整候选；Gemini 负责独立终审。新的 [Argon policy](../../../backend/pipeline/policies/wang_claim_management_argon_v1.json) 精确绑定 `gemini-4-argon`，既有 Flash policy 仍绑定 `gemini-3.8-flash`，不得改变已启动 action 的模型或重开其预算。policy 绑定精确模型 ID、backend、effort、prompt 与 schema，角色名称不代替执行配置。
 
 Opus 读取候选及 delta，以来源判断，不沿用 GPT 自评或旧批准。Gemini 使用自己的读取路径直接核物理原件、实际当前与必要历史、完整操作处置及理由、原始目标、已绑定来源核实记录和必要依赖；首次判断不由 GPT／Opus 的 pass 引导。先保存首次独立判断，再对账旧问题和异议回应。
 

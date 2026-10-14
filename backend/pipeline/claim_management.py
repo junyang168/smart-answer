@@ -37,6 +37,7 @@ MODELS = {
     "opus": ("claude-opus-5-5", "claude_subscription"),
     "gemini": ("gemini-3.8-flash", "gemini_api"),
 }
+AUDIT_MODELS = frozenset({'gemini-3.8-flash', 'gemini-4-argon'})
 QUESTIONS = {
     "Create": {"own_source", "attribution", "limitations", "evidence", "relations", "not_duplicate"},
     "Update": {"own_source", "attribution", "limitations", "evidence", "relations", "same_judgment", "shared_owners"},
@@ -75,7 +76,9 @@ class Policy(source.Contract):
         if set(self.models) != set(MODELS):
             raise ValueError("all three independent model roles must be bound")
         for role, (model, backend) in MODELS.items():
-            if self.models[role] != {"model_id": model, "backend": backend, "effort": "high"}:
+            selected = self.models[role].get('model_id')
+            allowed = AUDIT_MODELS if role == 'gemini' else {model}
+            if selected not in allowed or self.models[role] != {"model_id": selected, "backend": backend, "effort": "high"}:
                 raise ValueError("Claim policy must bind the exact model/backend/effort")
         if self.source_impact_batch_size and self.review_purpose != 'source_impact':
             raise ValueError('source impact batching belongs to its explicitly bound Review policy')

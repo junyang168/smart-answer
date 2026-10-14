@@ -15,6 +15,21 @@ def policy(**limits):
                 for r, v in m.MODELS.items()})
 
 
+def test_audit_model_selection_preserves_flash_and_explicitly_binds_argon():
+    from pathlib import Path
+    old = policy()
+    assert old.models['gemini']['model_id'] == 'gemini-3.8-flash'
+    path = Path(m.__file__).parent / 'policies/wang_claim_management_argon_v1.json'
+    current = m.Policy.model_validate_json(path.read_text())
+    assert current.models['gemini']['model_id'] == 'gemini-4-argon'
+    assert current.budget.max_output_tokens <= 32768
+    for field, bad in [('model_id', 'gemini-pro-latest'), ('backend', 'codex_subscription'), ('effort', 'low')]:
+        altered = current.model_dump(mode='json')
+        altered['models']['gemini'][field] = bad
+        with pytest.raises(ValueError, match='exact model'):
+            m.Policy.model_validate(altered)
+
+
 @pytest.fixture
 def case():
     sources = {"S": {"paragraphs": {"S0001": {"text": "甲是假设。乙只在特定情况下成立。"}}}}

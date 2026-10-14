@@ -1,4 +1,4 @@
-"""Owner-authorized #357 snapshots on Jun SSD, preserving old proof paths."""
+"""Owner-authorized snapshots on Jun SSD, preserving old #357 proof paths."""
 from __future__ import annotations
 import argparse
 import fcntl
@@ -28,6 +28,15 @@ SCOPE='357-owner-backup-scope.json'
 def foreign_ticket(value):
     # Hashes may contain 358; only a delimited ticket token denotes #358.
     return re.search(r'(?:^|[-/])358(?:[-/]|$)', str(value)) is not None
+
+
+def backup_ticket(label):
+    tickets = [ticket for ticket in ('357', '435') if re.search(r'(?:^|-)'+ticket+r'(?:-|$)', label)]
+    return tickets[0] if len(tickets) == 1 and not foreign_ticket(label) else None
+
+
+def archive_destination(ticket):
+    return DEST if ticket == '357' else DEST.parent / '435'
 
 
 def authorize_backup(path, proof):
@@ -81,17 +90,18 @@ def eligible(path):
     p=Path(path).absolute()
     return (p.name==NAME and p.parent.parent==LOCAL and p.parent.name.startswith('registry-backup-')
         and not foreign_ticket(p.parent.name)
-        and (re.search(r'(?:^|-)357(?:-|$)',p.parent.name) is not None or explicit_scope(p)))
+        and (backup_ticket(p.parent.name) is not None or explicit_scope(p)))
 
 
 def create_backup(label, database_url):
-    """#357 writes directly to the verified SSD, retaining its logical proof path."""
-    if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,60}',label) or not re.search(r'(?:^|-)357(?:-|$)',label) or foreign_ticket(label):
-        raise ValueError('exact #357 label required')
+    """Write directly to the verified ticket's SSD directory."""
+    ticket = backup_ticket(label)
+    if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,60}',label) or not ticket:
+        raise ValueError('exact #357 or #435 label required')
     from datetime import datetime,timezone
     verify_volume()
     name='registry-backup-'+datetime.now(timezone.utc).strftime('%Y-%m-%d')+'-'+label
-    p=LOCAL/name/NAME; target=DEST/name/NAME
+    p=LOCAL/name/NAME; target=archive_destination(ticket)/name/NAME
     if p.parent.exists() or target.parent.exists():raise ValueError('backup already attempted; no overwrite')
     if shutil.disk_usage(MOUNT).free<2*1024**3:raise ValueError('SSD backup reserve below 2GiB')
     target.parent.mkdir(parents=True,mode=0o700); p.parent.mkdir(parents=True,mode=0o700)
@@ -102,7 +112,7 @@ def create_backup(label, database_url):
     cat=catalog(temp); sha=digest(temp); size=temp.stat().st_size
     with temp.open('rb') as f:os.fsync(f.fileno())
     verify_volume(); os.replace(temp,target)
-    body={'schema_version':'wang_registry_backup_ssd_archive_v1','task':'#357',
+    body={'schema_version':'wang_registry_backup_ssd_archive_v1','task':'#'+ticket,
         'original_path':str(p),'archive_path':str(target),'volume_uuid':UUID,
         'file_sha256':sha,'size':size,'restore_catalog_sha256':cat,
         'status':'copied_sha_and_restore_catalog_verified','registry_writes':0,'model_calls':0,
@@ -124,9 +134,10 @@ def logical_binding_path(path):
     r=json.loads(receipt.read_text())
     if r.get('artifact_sha256')!=sha256_json({k:v for k,v in r.items() if k!='artifact_sha256'}):
         raise ValueError('backup archive receipt SHA drift')
-    expected=DEST/p.parent.name/NAME
+    ticket = backup_ticket(p.parent.name) or '357'
+    expected=archive_destination(ticket)/p.parent.name/NAME
     if (r.get('original_path')!=str(p) or r.get('archive_path')!=str(expected)
-            or r.get('volume_uuid')!=UUID or r.get('task')!='#357'
+            or r.get('volume_uuid')!=UUID or r.get('task')!='#'+ticket
             or r.get('status')!='copied_sha_and_restore_catalog_verified'
             or p.resolve()!=expected or not expected.is_file()):
         raise ValueError('backup archive exact path/identity drift or disk missing')
@@ -144,7 +155,8 @@ def catalog(path):
 
 def migrate_one(p):
     p=Path(p).absolute()
-    if not eligible(p) or p.parent.is_symlink() or p.is_symlink() or not p.is_file():raise ValueError('outside exact #357 regular backup scope')
+    if (not eligible(p) or backup_ticket(p.parent.name) == '435'
+            or p.parent.is_symlink() or p.is_symlink() or not p.is_file()):raise ValueError('outside exact #357 regular backup scope')
     verify_volume()
     before=p.stat();sha=digest(p)
     target=DEST/p.parent.name/NAME
@@ -185,7 +197,7 @@ def migrate_one(p):
 
 
 def inventory():
-    paths=[p for p in LOCAL.glob('registry-backup-*/'+NAME) if eligible(p) and p.is_file() and not p.is_symlink()]
+    paths=[p for p in LOCAL.glob('registry-backup-*/'+NAME) if eligible(p) and backup_ticket(p.parent.name) != '435' and p.is_file() and not p.is_symlink()]
     paths.sort(key=lambda p:(p.stat().st_mtime_ns,str(p)),reverse=True)
     return paths[2:],paths[:2]
 
@@ -194,10 +206,13 @@ def main():
     parser=argparse.ArgumentParser();parser.add_argument('--apply',action='store_true')
     parser.add_argument('--create-label');parser.add_argument('--migration-root',type=Path)
     parser.add_argument('--backup-proof',type=Path,action='append',default=[]);args=parser.parse_args()
+    if args.create_label:
+        if (Path(__file__).resolve().parents[2].name != 'wkp-357-worktree-per-session'
+                and backup_ticket(args.create_label) != '435'):
+            raise ValueError('only #357 worktree may create #357 backups')
+        create_backup(args.create_label,os.environ['KNOWLEDGE_DATABASE_URL']);return
     if Path(__file__).resolve().parents[2].name!='wkp-357-worktree-per-session':
         raise ValueError('only #357 worktree may migrate these backups')
-    if args.create_label:
-        create_backup(args.create_label,os.environ['KNOWLEDGE_DATABASE_URL']);return
     with (BASE/'immediate-recovery-20261002-v1/recovery.lock').open('a') as lock, (BASE/'registry-cvp.lock').open('a') as registry:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB);fcntl.flock(registry,fcntl.LOCK_EX|fcntl.LOCK_NB)
         verify_volume()

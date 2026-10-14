@@ -62,3 +62,15 @@ Audit 收据委托独立结果校验时，只读取一次实际来源；原先�
 上述冷进程单次 audit 对照耗时为改前 0.008697 秒、改后 0.012934 秒，峰值为 1,379,029／1,401,512 bytes；小输入没有测出时间或内存改善，不能据减少重复读取宣称完整流程变快，更不能当作 1,000 篇容量验收。对照脚本和结果位于 `/var/folders/s0/899st79150z63778jn0381pr0000gn/T/claim-435-simplification-8ou3di38/`，仅用于本次记录，没有加入运行器或生产证明体系。
 
 本次只提交简化和验证，整体重构仍未完成；未修改正式数据、未合并或部署。
+
+## 人子单条实测与 Argon 接入
+
+目标为未连接 CVP 的 `DK-4eca17ff4e50fa50aa01-P01-CL002`。在真实数据的隔离 PostgreSQL 复制库中，首次 Opus 认可该 Claim，但报告只读上下文 Claim 引用的反方 Position 未进入审核包；已补齐引用依赖。修复后 Opus 通过，独立 Flash 返回的一个对象 ID 将 `P05-CL013` 写成 `P01-CL013`，结果被程序拒绝。加入输出前自检后，Flash 在相同完整材料上仍犯同一错误，未替换 ID 或追认为通过。
+
+负责人指定 Gemini 4 Argon 后，API 模型清单确认 `gemini-4-argon` 可用。同一份完整 prompt、schema 和 132 个对象经一次真实 Argon 调用全部通过，ID 无遗漏、重复或清单外项，没有内容 findings。三个独立审核原答均保留于单条隔离试验的 `operation/CMR-*/` 下；Argon 对比结果位于 `gemini-4-argon-comparison/comparison-result.json`。正式库 payload 保持不变，比较结果没有冒充原 Flash policy 下的正式完成。
+
+开发分支随后加入版本化 Argon policy；独立审计模型按原 policy 精确核验，旧 Flash policy 不变。正式审计子进程改用当前 checkout 的 backend interpreter、独立 auditor 和实际 store database_url，不再进入 #357 固定 checkout。备份复用已有 SSD 校验及 SHA／恢复目录证明，#435 写入 SSD 的 `registry-backups/435/`，#357 备份和迁移范围保留。只读上下文进入完整审核和 pins，但不因另一 Claim 的 Update 获得新资格。
+
+本次相关回归为 **442 passed、43 skipped**，含只读启用的真实旧失败输入；新反例验证 Argon 与 Flash 不能互换证明、单条 Update 不授予只读关联 Claim 资格、完成恢复不重发模型、审计进程不能读取错误数据库或固定旧 checkout、#435 SSD 备份不能进入 #357 迁移，以及损坏备份拒绝消费。新增自检段落后，隔离模型替身的 prompt 分隔方式同步为读取最后一行 packet JSON；真实传输仍消费完整多行 instructions。
+
+此记录对应正式单条试运行前的开发验证；整体 #435 尚未完成，没有启用整组批量维护或部署。

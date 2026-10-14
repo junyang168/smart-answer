@@ -66,11 +66,11 @@ class SyntheticPorts:
         docs = store._query("SELECT json_build_object('object_id',object_id,'payload',payload)::text "
                             "FROM wang_knowledge.objects WHERE collection='source_documents'")
         sources = AUDIT.SourceIndex(docs, self.tmp_path)
-        model = AUDIT.IndependentModel('gemini-3.8-flash', 'synthetic-no-provider-call', cache_dir=root / 'independent-audit/cache',
+        model = AUDIT.IndependentModel(audit_input.get('model', 'gemini-3.8-flash'), 'synthetic-no-provider-call', cache_dir=root / 'independent-audit/cache',
             preserve_full_context=True, durable_once=True, max_request_bytes=audit_input['budget']['max_request_bytes'],
             max_output_tokens=audit_input['budget']['max_output_tokens'], json_schema=True)
         def fake_judge(prompt, schema):
-            packet = json.loads(prompt[prompt.index('\n') + 1:])
+            packet = json.loads(prompt.rsplit('\n', 1)[1])
             response = self.gemini(packet) if self.gemini else passing(packet)
             wire = json.dumps({'contents': [{'parts': [{'text': prompt}]}], 'generationConfig': {
                 'temperature': 0, 'responseMimeType': 'application/json', 'responseJsonSchema': schema,
@@ -188,6 +188,66 @@ def seed_claims(store, ids):
     store.apply_plan(store.plan_package({'package_id': 'synthetic-' + uuid.uuid4().hex, 'claims': [
         {'claim_id': cid, 'statement': '甲是假设。' + cid, 'claim_type': 'exegesis',
          'occurrences': [{'source_id': 'S', 'anchors': []}]} for cid in ids]}))
+
+
+def test_argon_update_completes_without_qualifying_readonly_related_claim(action):
+    store, _, _, _, tmp_path, _ = action
+    seed_claims(store, ['C', 'D'])
+    store.apply_plan(store.plan_package({'package_id':'synthetic-related-context', 'claim_relations':[
+        {'claim_relation_id':'R', 'from_id':'C', 'to_id':'D', 'relation_type':'supports', 'reason':'synthetic context'}]}))
+    request, root = operation_request(action, 'Update', ['C'])
+    path = Path(cm.__file__).parent / 'policies/wang_claim_management_argon_v1.json'
+    request.policy = cm.source.FileBinding.model_validate(binding(path))
+    direction = json.loads(Path(request.authorization.path).read_text())
+    direction['policy'] = request.policy.model_dump(mode='json')
+    Path(request.authorization.path).write_text(json.dumps(direction))
+    request.authorization = cm.source.FileBinding.model_validate(binding(Path(request.authorization.path)))
+    original = {cid:store.get_record_state('claims',cid) for cid in ('C','D')}
+    ports = SyntheticPorts(store, tmp_path)
+    result = execute_claim_management(store,request,root=root,ports=ports)
+    assert result['status'] == 'completed', result
+    assert result['original_target_keys'] == ['claims/C']
+    assert ports.calls == ['opus','gemini']
+    assert store.claim_management_qualification('C')['ready']
+    assert store.claim_management_qualification('D') is None
+    assert {cid:store.get_record_state('claims',cid) for cid in original} == original
+    parent = store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id))
+    child = store.get_cvp_group(next(iter(parent['latest_rounds'].values())))
+    report = json.loads((root/child['run_id']/'independent-audit/audit.json').read_text())
+    assert report['model'] == 'gemini-4-argon'
+    assert 'claims/D' in report['packet']['denominator']
+    from backend.pipeline.cvp_sql_actions import validate_claim_audit
+    altered = deepcopy(child['materials'])
+    altered['policy']['models']['gemini']['model_id'] = 'gemini-3.8-flash'
+    with pytest.raises(ValueError,match='identity drift'):
+        validate_claim_audit(report,altered,cm.Candidate.model_validate(child['candidate']))
+    assert execute_claim_management(store,request,root=root,ports=ports) == result
+    assert ports.calls == ['opus','gemini']
+
+
+def test_production_auditor_uses_current_checkout_policy_and_actual_database(monkeypatch,tmp_path):
+    from backend.pipeline import source_reconciliation_runtime as runtime
+    project = tmp_path / 'current-checkout'
+    project.mkdir()
+    monkeypatch.setattr(runtime,'PROJECT',project)
+    calls=[]
+    def run(argv,**kwargs):
+        calls.append((argv,kwargs))
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(runtime.subprocess,'run',run)
+    monkeypatch.setenv('KNOWLEDGE_DATABASE_URL','postgresql://wrong.invalid/database')
+    store=SimpleNamespace(database_url='postgresql://isolated.invalid/database')
+    root=tmp_path/'operation'
+    runtime.ProductionPorts(store).claim_management_audit(root,{'model':'gemini-4-argon'})
+    argv,options=calls[0]
+    assert options['cwd']==project
+    assert argv[0]==str(project/'backend/.venv/bin/python')
+    assert argv[argv.index('--model')+1]=='gemini-4-argon'
+    assert options['env']['KNOWLEDGE_DATABASE_URL']==store.database_url
+    assert (root/'independent-audit/stdout.log').is_file()
+    monkeypatch.setattr(runtime.subprocess,'run',lambda *a,**k:SimpleNamespace(returncode=1))
+    with pytest.raises(ValueError,match='inspect saved logs'):
+        runtime.ProductionPorts(store).claim_management_audit(root,{'model':'gemini-4-argon'})
 
 
 def rejected(packet, key='claims/C', *, category='content'):

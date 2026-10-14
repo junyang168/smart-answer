@@ -2046,7 +2046,9 @@ def audit_claim_operation(store, sources, model, management):
     objects are read independently from SQL, original objects from SQL history,
     and full sources from disk. No pipeline approval is sent to Gemini.
     """
-    if model.model != "gemini-3.8-flash" or not model.durable_once or not model.preserve_full_context:
+    expected_model = management.get('model', 'gemini-3.8-flash')
+    if (expected_model not in {'gemini-3.8-flash', 'gemini-4-argon'} or model.model != expected_model
+            or not model.durable_once or not model.preserve_full_context):
         raise ValueError("Claim management requires the exact independent once/full-source model")
     expected = management["read_pins"]
     keys = management["denominator"]
@@ -2921,10 +2923,13 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"DATA_BASE_DIR 不是目錄：{data_base_dir}")
 
     if args.claim_management_input:
-        if args.model != 'gemini-3.8-flash' or args.layers != '3' or args.out is None:
+        if args.layers != '3' or args.out is None:
             raise ValueError('Claim operation audit requires exact independent model, layer 3 and explicit output')
         management = json.loads(args.claim_management_input.read_text())
         management.pop('artifact_sha256', None)
+        if (args.model not in {'gemini-3.8-flash', 'gemini-4-argon'}
+                or args.model != management.get('model', 'gemini-3.8-flash')):
+            raise ValueError('Claim operation audit model differs from its bound policy input')
         store = Store(database_url)
         source_ids = management['source_bindings']
         documents = store._query("SELECT json_build_object('object_id',object_id,'payload',payload)::text "

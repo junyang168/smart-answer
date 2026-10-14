@@ -244,11 +244,17 @@ class ProductionPorts:
 
     def claim_management_audit(self, root, audit_input):
         """Existing standalone auditor reads current SQL and own physical files."""
-        from backend.pipeline.viewpoint_cvp_recovery_executor import run_logged, PYTHON
-        run_logged([PYTHON, 'scripts/audit-library.py', '--layers', '3', '--scope', 'all',
-            '--model', 'gemini-3.8-flash', '--claim-management-input', root / 'audit-input.json',
-            '--out', root / 'independent-audit', '--no-status-file', '--preserve-full-context'],
-            root, 'independent-audit')
+        root = Path(root).resolve()
+        destination = root / 'independent-audit'
+        destination.mkdir(parents=True, exist_ok=True)
+        env = {**os.environ, 'KNOWLEDGE_DATABASE_URL': self.store.database_url}
+        with (destination / 'stdout.log').open('w') as out, (destination / 'stderr.log').open('w') as err:
+            result = subprocess.run([str(PROJECT / 'backend/.venv/bin/python'), 'scripts/audit-library.py',
+                '--layers', '3', '--scope', 'all', '--model', audit_input.get('model', 'gemini-3.8-flash'),
+                '--claim-management-input', str(root / 'audit-input.json'), '--out', str(destination),
+                '--no-status-file', '--preserve-full-context'], cwd=PROJECT, env=env, stdout=out, stderr=err)
+        if result.returncode:
+            raise ValueError('independent Claim audit failed; inspect saved logs before recovery')
 
     def before_model_call(self, stage: str) -> None:
         # Cached responses do not run model/auth diagnostics. A new actual
@@ -261,15 +267,19 @@ class ProductionPorts:
 
     def backup(self, root: Path) -> dict:
         self._environment_guard()
-        completed = subprocess.run(["scripts/backup-registry.sh", "before-source-357-" + contract.sha256_json(str(root))[:32]],
-            cwd=PROJECT, capture_output=True, text=True, check=True)
+        claim = (root / 'materials.json').exists() and body(read(root / 'materials.json')).get('schema_version') == 'wang_claim_management_v2'
+        ticket = '435' if claim else '357'
+        command = ['scripts/backup-registry.sh', '--ssd'] if claim else ['scripts/backup-registry.sh']
+        command.append('before-source-' + ticket + '-' + contract.sha256_json(str(root))[:32])
+        completed = subprocess.run(command, cwd=PROJECT, env={**os.environ, 'KNOWLEDGE_DATABASE_URL': self.store.database_url},
+            capture_output=True, text=True, check=True)
         match = re.search(r"backup-registry: wrote (.+\.dump) \(", completed.stdout)
         if not match:
             raise ValueError("backup did not identify the actual dump")
         path = Path(match.group(1))
         from backend.pipeline.viewpoint_backup_archive import eligible, logical_binding_path
         if not eligible(path) or not path.is_symlink() or logical_binding_path(path) != path:
-            raise ValueError('new #357 backup must be verified on Jun SSD; no internal fallback')
+            raise ValueError('new source/Claim backup must be verified on Jun SSD; no internal fallback')
         listing = subprocess.run(["pg_restore", "--list", str(path)], capture_output=True, check=True)
         if not listing.stdout.strip():
             raise ValueError("empty pg_restore catalog")

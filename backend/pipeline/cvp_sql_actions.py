@@ -283,7 +283,8 @@ def validate_claim_audit(report, materials, candidate, *, historical=False):
     """Consume independent HTTP raw, exact SQL pins and physical own sources."""
     from backend.pipeline import claim_management as cm
     from hashlib import sha256
-    if (report.get('schema_version') != cm.VERSION or report.get('model') != cm.MODELS['gemini'][0]
+    audit_model = cm.Policy.model_validate(materials['policy']).models['gemini']['model_id']
+    if (report.get('schema_version') != cm.VERSION or report.get('model') != audit_model
             or report.get('layer') != 3 or report.get('round_id') != materials['round_id']
             or report.get('candidate_sha256') != candidate.digest
             or report.get('source_bindings') != materials['unit_request']['source_bindings']):
@@ -299,7 +300,7 @@ def validate_claim_audit(report, materials, candidate, *, historical=False):
     provider = json.loads(Path(bindings['provider']['path']).read_text())
     response = json.loads(Path(bindings['response']['path']).read_text())
     raw = provider['provider_response']
-    if (intent['model'] != cm.MODELS['gemini'][0] or intent['prompt'] != report['prompt']
+    if (intent['model'] != audit_model or intent['prompt'] != report['prompt']
             or intent['schema'] != report['schema'] or intent.get('automatic_retry') is not False
             or intent.get('maximum_calls') != 1 or provider['request'] != intent
             or raw.get('promptFeedback', {}).get('blockReason')
@@ -579,6 +580,7 @@ def execute_claim_management(store, request, *, root, ports):
                         cm.require_full_sources(cm.Request.model_validate(materials['unit_request']), states, candidate,
                                                 qualification=not cm.is_source_impact(request))
                         audit_input = {'schema_version': cm.VERSION, 'round_id': rid, 'original_goal': cm.goal_packet(materials['original_goal']),
+                            'model': policy.models['gemini']['model_id'],
                             'denominator': denominator, 'read_pins': pin_rows(pins({content.split_key(k): states[k] for k in denominator})),
                             'source_bindings': materials['unit_request']['source_bindings'], 'replacements': candidate.replacements,
                             'candidate_sha256': candidate.digest, 'unresolved': materials['unresolved'],

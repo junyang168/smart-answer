@@ -3632,6 +3632,13 @@ class PostgresKnowledgeStore:
                   AND (metadata->>'checkpoint' IN ('applied','audited')
                        OR metadata->'blocked_current_claim_ids' ? %s)
                 ORDER BY started_at DESC,run_id DESC""", (claim_id, claim_id)).fetchall()
+            # Read-only context is audited for completeness, but does not
+            # become the target of another Claim's maintenance operation.
+            rows = [(rid, value) for rid, value in rows if
+                claim_id in value.get('blocked_current_claim_ids', [])
+                or 'claims/' + claim_id in value['materials']['original_goal']['target_keys']
+                or any(d['record_key'] == 'claims/' + claim_id and d['action'] != 'retain'
+                       for d in value.get('candidate', {}).get('dispositions', []))]
             if not rows:
                 return None
             for rid, value in rows:

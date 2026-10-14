@@ -81,3 +81,27 @@ def test_volume_identity_rejects_wrong_disk(monkeypatch,tmp_path):
     monkeypatch.setattr(m,'MOUNT',tmp_path);monkeypatch.setattr(m.os.path,'ismount',lambda p:True)
     monkeypatch.setattr(m.subprocess,'check_output',lambda argv:plistlib.dumps({'VolumeUUID':'wrong','MountPoint':str(tmp_path)}))
     with pytest.raises(ValueError,match='identity'):m.verify_volume()
+
+
+def test_435_backup_is_separate_and_cannot_enter_357_migration(archive,monkeypatch):
+    from types import SimpleNamespace
+    p,dest=archive
+    def dump(argv,**kwargs):
+        output=next(value.split('=',1)[1] for value in argv if value.startswith('--file='))
+        Path(output).write_bytes(b'synthetic complete 435 dump')
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(m.subprocess,'run',dump)
+    receipt=m.create_backup('before-source-435-test','postgresql://synthetic.invalid/test')
+    local=Path(receipt['original_path'])
+    assert receipt['task']=='#435'
+    assert Path(receipt['archive_path']).is_relative_to(dest.parent/'435')
+    assert m.logical_binding_path(local)==local
+    assert local.read_bytes()==b'synthetic complete 435 dump'
+    assert local not in sum(m.inventory(),[])
+    with pytest.raises(ValueError,match='exact #357'):
+        m.migrate_one(local)
+    with pytest.raises(ValueError,match='already attempted'):
+        m.create_backup('before-source-435-test','postgresql://synthetic.invalid/test')
+    Path(receipt['archive_path']).write_bytes(b'drift')
+    with pytest.raises(ValueError,match='size/SHA'):
+        m.logical_binding_path(local)
