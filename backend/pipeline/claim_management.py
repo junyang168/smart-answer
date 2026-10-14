@@ -281,6 +281,7 @@ def domain_dependencies(collection, payload, records):
     refs = set()
     if collection == 'claims':
         refs.update(source.key('evidence_steps', eid) for eid in payload.get('evidence_step_ids', []))
+        refs.update(source.key('position_nodes', oid) for oid in payload.get('opposed_position_ids', []))
     if collection in RELATION_COLLECTIONS:
         for field in ('from_id', 'to_id', 'source_id', 'target_id', 'from_claim_id', 'to_claim_id'):
             oid = payload.get(field)
@@ -319,7 +320,10 @@ def own_source_ids(payload, records):
                if o.get('source_id') or o.get('transcript_id')}
         if value.get('source_id') and collection not in RELATION_COLLECTIONS:
             ids.add(canonical(value['source_id']))
-        for key in domain_dependencies(collection, value, records) - seen:
+        dependencies = domain_dependencies(collection, value, records)
+        if collection == 'claims':
+            dependencies = {key for key in dependencies if not key.startswith('position_nodes/')}
+        for key in dependencies - seen:
             if key not in records:
                 raise ValueError('own source has a missing dependency: ' + key)
             ids.update(resolve(records[key], seen | {key}))

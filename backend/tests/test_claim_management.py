@@ -68,6 +68,20 @@ def test_occurrence_transcript_alias_resolves_to_the_same_registered_fragment_so
         m.own_source_ids(records['claims/C'],records)
 
 
+def test_opposed_position_is_in_the_review_packet_but_does_not_change_claim_own_source(case):
+    request, before, _, _ = case
+    before['claims/C']['payload']['opposed_position_ids'] = ['P']
+    before['position_nodes/P'] = {'payload':{'position_id':'P','source_id':'OTHER-SOURCE'},'retired':False}
+    for sid in ('S','OTHER-SOURCE'):
+        before['source_documents/'+sid] = {'payload':{'source_id':sid},'retired':False}
+    records={key:state['payload'] for key,state in before.items()}
+    assert m.own_source_ids(records['claims/C'],records) == {'S'}
+    assert 'position_nodes/P' in m.audit_keys(request,before)
+    del before['position_nodes/P']
+    with pytest.raises(ValueError,match='missing dependency'):
+        m.audit_keys(request,before)
+
+
 def test_update_includes_complete_dependency_denominator(case):
     request, before, candidate, sources = case
     payload = {**before["claims/C"]["payload"], "statement": "甲属于假设。", "revision": 2}

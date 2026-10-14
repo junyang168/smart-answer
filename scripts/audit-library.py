@@ -2125,6 +2125,7 @@ def audit_claim_operation(store, sources, model, management):
         refs = []
         if key.startswith("claims/"):
             refs += ["evidence_steps/" + v for v in payload.get("evidence_step_ids", [])]
+            refs += ['position_nodes/' + v for v in payload.get('opposed_position_ids', [])]
             for occurrence in payload.get('occurrences', []):
                 sid = occurrence.get('source_id') or occurrence.get('transcript_id')
                 if not sid:
