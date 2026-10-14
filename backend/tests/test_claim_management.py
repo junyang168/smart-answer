@@ -57,6 +57,17 @@ def test_existing_candidate_keeps_exact_content_without_invented_gpt_origin(case
     assert "generated_by" not in post["claims/C"]
 
 
+def test_occurrence_transcript_alias_resolves_to_the_same_registered_fragment_source(case):
+    _, before, _, _ = case
+    records = {key: deepcopy(state['payload']) for key, state in before.items()}
+    records['source_documents/S'] = {'source_id':'S','transcript_id':'lecture-name'}
+    records['claims/C']['occurrences'] = [{'source_id':'lecture-name','transcript_id':'lecture-name'}]
+    assert m.own_source_ids(records['claims/C'],records) == {'S'}
+    records['source_documents/OTHER'] = {'source_id':'OTHER','transcript_id':'lecture-name'}
+    with pytest.raises(ValueError,match='alias is ambiguous'):
+        m.own_source_ids(records['claims/C'],records)
+
+
 def test_update_includes_complete_dependency_denominator(case):
     request, before, candidate, sources = case
     payload = {**before["claims/C"]["payload"], "statement": "甲属于假设。", "revision": 2}

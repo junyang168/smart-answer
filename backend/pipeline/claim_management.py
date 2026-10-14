@@ -303,11 +303,22 @@ def domain_dependencies(collection, payload, records):
 
 def own_source_ids(payload, records):
     """Resolve own source without confusing Claim endpoints with SourceDocs."""
+    documents = {source.split_key(key)[1]: value for key, value in records.items()
+                 if key.startswith('source_documents/')}
+    def canonical(sid):
+        if sid in documents:
+            return sid
+        matches = [key for key, doc in documents.items()
+                   if sid in {doc.get('transcript_id'), doc.get('canonical_source_id')}]
+        if len(matches) > 1:
+            raise ValueError('own source alias is ambiguous: ' + str(sid))
+        return matches[0] if matches else sid
     def resolve(value, seen):
         collection = domain_collection(value)
-        ids = {o.get('source_id') for o in value.get('occurrences', [])} - {None, ''}
+        ids = {canonical(o.get('source_id') or o.get('transcript_id')) for o in value.get('occurrences', [])
+               if o.get('source_id') or o.get('transcript_id')}
         if value.get('source_id') and collection not in RELATION_COLLECTIONS:
-            ids.add(value['source_id'])
+            ids.add(canonical(value['source_id']))
         for key in domain_dependencies(collection, value, records) - seen:
             if key not in records:
                 raise ValueError('own source has a missing dependency: ' + key)

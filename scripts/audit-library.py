@@ -2125,7 +2125,19 @@ def audit_claim_operation(store, sources, model, management):
         refs = []
         if key.startswith("claims/"):
             refs += ["evidence_steps/" + v for v in payload.get("evidence_step_ids", [])]
-            refs += ["source_documents/" + v["source_id"] for v in payload.get("occurrences", []) if v.get("source_id")]
+            for occurrence in payload.get('occurrences', []):
+                sid = occurrence.get('source_id') or occurrence.get('transcript_id')
+                if not sid:
+                    continue
+                exact = 'source_documents/' + sid
+                matches = [k for k, r in records.items() if k.startswith('source_documents/')
+                    and sid in {r['payload'].get('transcript_id'), r['payload'].get('canonical_source_id')}]
+                if exact in records:
+                    refs.append(exact)
+                elif len(matches) == 1:
+                    refs.append(matches[0])
+                else:
+                    raise ValueError('independent Claim source alias is missing or ambiguous')
         if key.startswith("evidence_steps/"):
             refs += ["claims/" + v for v in payload.get("produced_claim_ids", [])]
             refs += ["source_fragments/" + v for v in _step_fragment_ids(payload)]
