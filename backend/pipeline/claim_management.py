@@ -645,13 +645,13 @@ def finding_blocks(finding, request=None, candidate=None):
     if len(affected) != len(set(affected)) or not set(affected) <= targets or not (finding.get('impact_reason') or '').strip():
         raise ValueError('finding requires exact authorized target impact and explanation')
     written = {d.record_key for d in candidate.dispositions if d.action != 'retain'} if candidate else set()
-    if not affected and finding['target_key'] in targets | written:
+    if not affected and finding['target_key'] in targets:
         raise ValueError('target or actual write finding cannot be dismissed as readonly context')
     if finding['target_key'] in targets and finding['target_key'] not in affected:
         raise ValueError('finding on a target must include that target in its impact')
     # Explicitly authorized maintenance objects are part of this Update's
     # obligations even when the proposer keeps them unchanged.
-    return bool(affected) or finding['target_key'] in {p.key for p in request.permissions}
+    return bool(affected) or finding['target_key'] in written | {p.key for p in request.permissions}
 
 
 def resolution_finding(resolution, unresolved):

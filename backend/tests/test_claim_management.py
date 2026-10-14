@@ -465,3 +465,11 @@ def test_gpt_adjudication_requires_every_objection_and_exact_source_quote(case):
     assert m.adjudication_outcome({'new':{'category':'source_uncertain'}},candidate)=='revision_required'
     assert m.adjudication_outcome({'context':{'category':'source_uncertain'}},candidate)=='human_required'
     assert m.adjudication_outcome({'first':{'category':'source_uncertain'}},candidate)=='disagreement'
+
+
+def test_written_dependency_blocks_even_when_no_claim_target_depends_on_question(case):
+    request,before,candidate,sources=case
+    candidate=change(candidate,'evidence_steps/E','update',before['evidence_steps/E']['payload'])
+    finding={'target_key':'evidence_steps/E','affected_target_keys':[],
+        'impact_reason':'source question on written evidence, not the unchanged Claim'}
+    assert m.finding_blocks(finding,request,candidate)

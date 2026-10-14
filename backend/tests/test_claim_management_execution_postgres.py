@@ -974,3 +974,61 @@ def test_saved_context_follow_up_preserves_claim_and_history_and_cannot_fork(act
     authorize(fork,extra)
     with pytest.raises(Exception,match='continuation|already assigned'):
         execute_claim_management(store,fork,root=tmp_path/'fork',ports=ports)
+
+
+def test_unrecorded_negative_review_recovery_records_human_outcome_without_calls_or_writes(action,monkeypatch):
+    from backend.pipeline.claim_review_recovery import recover_returned_review,VERSION
+    store,_,_,_,tmp_path,_=action
+    seed_claims(store,['C'])
+    store.apply_plan(store.plan_package({'package_id':'written-source-question',
+        'claims':[{**store.get_record_state('claims','C')['payload'],'evidence_step_ids':['E']}],
+        'evidence_steps':[{'evidence_step_id':'E','statement':'甲是假设。','produced_claim_ids':['C']}],
+        'observations':[{'observation_id':'O','statement':'甲是假设。'}],
+        'knowledge_relations':[{'relation_id':'R','from_id':'O','to_id':'E','relation_type':'supports','reason':'context'}]}))
+    request,root=operation_request(action,'Update',['C'])
+    request.permissions.append(cm.source.Permission(collection='observations',object_id='O',fields=['statement']))
+    request.policy=cm.source.FileBinding.model_validate(binding(cm.DEFAULT_POLICY))
+    auth_path=Path(request.authorization.path);auth=json.loads(auth_path.read_text());auth.update(
+        policy=request.policy.model_dump(mode='json'),request=request.model_dump(mode='json',exclude={'authorization','policy'}))
+    auth_path.write_text(json.dumps(auth));request.authorization=cm.source.FileBinding.model_validate(binding(auth_path))
+    def opus(packet):
+        if not packet['round_number']:
+            report=rejected(packet,category='source_uncertain');report['findings'][0].update(
+                target_key='observations/O',affected_target_keys=[],impact_reason='does not affect C')
+        else:
+            report=passing(packet)
+            for r in report['prior_findings']:r.update(disposition='persistent',affected_target_keys=[],impact_reason='written O still has source doubt')
+        for v in report['verdicts']:v.update(approved=v['record_key']!='observations/O',problems=['question'] if v['record_key']=='observations/O' else [])
+        return report
+    def propose(packet):
+        result=cm.existing_candidate(packet['before']);result.operation='Update'
+        payload={**packet['before']['observations/O']['payload'],'statement':'甲是假设，不是断言。'}
+        result.records=[cm.source.Row(collection='observations',object_id='O',payload=payload)]
+        for d in result.dispositions:
+            if d.record_key=='observations/O':d.action='update';d.citations=[cm.Citation(source_id='S',paragraph_key='S0001',exact_quote='甲是假设，不是断言。')]
+        result.finding_resolutions=[cm.FindingResolution(finding_id=fid,disposition='persistent',reason='source needs clarification',citations=[cm.Citation(source_id='S',paragraph_key='S0001',exact_quote='甲是假设，不是断言。')]) for fid in packet['unresolved']]
+        return result.model_dump(mode='json')
+    actual=cm.finding_blocks
+    def old(finding,request=None,candidate=None):
+        if candidate and not finding.get('affected_target_keys') and any(d.record_key==finding['target_key'] and d.action!='retain' for d in candidate.dispositions):
+            raise ValueError('target or actual write finding cannot be dismissed as readonly context')
+        return actual(finding,request,candidate)
+    monkeypatch.setattr(cm,'finding_blocks',old)
+    before=store.get_record_state('observations','O');ports=SyntheticPorts(store,tmp_path,opus=opus,proposal=propose)
+    result=execute_claim_management(store,request,root=root,ports=ports)
+    assert result['reason']=='engineering_required'
+    parent=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id));rid=next(iter(parent['latest_rounds'].values()))
+    monkeypatch.setattr(cm,'finding_blocks',actual)
+    with store.connect() as conn:metadata=conn.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s',(rid,)).fetchone()[0]
+    direction=tmp_path/'negative-recovery.json';direction.write_text(json.dumps({'schema_version':VERSION,
+        'round_id':rid,'authorized_by':'owner','authorization_quote':'record the unchanged returned rejection after validator fix',
+        'human_content_approval':False,'record_unaccepted_result':True,'prior_metadata_sha256':cm.sha256_json(metadata)}))
+    path=recover_returned_review(store,rid,authorization=binding(direction),unrecorded=True)
+    assert recover_returned_review(store,rid,authorization=binding(direction),unrecorded=True)==path
+    result=execute_claim_management(store,request,root=root,ports=ports)
+    assert result['reason']=='human_required',result
+    assert store.get_record_state('observations','O')==before
+    assert ports.calls==['opus','gpt','opus']
+    current=store.get_cvp_group(rid)
+    assert not current['opus_approved'] and not current['change_set_ids']
+    assert store.get_cvp_group(parent['run_id'])['call_reservations'][rid+':opus']['state']=='completed'

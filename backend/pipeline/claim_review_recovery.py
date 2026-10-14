@@ -16,12 +16,13 @@ from backend.api.canonical_repository.postgres_store import POSTGRES_APPLY_ADVIS
 VERSION='wang_claim_review_engineering_recovery_v1'
 
 
-def recover_returned_review(store,round_id,*,authorization):
+def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
     check_binding(authorization)
     direction=json.loads(Path(authorization['path']).read_text())
     if (direction.get('schema_version')!=VERSION or direction.get('round_id')!=round_id
             or direction.get('authorized_by')!='owner' or not direction.get('authorization_quote')
-            or direction.get('human_content_approval') is not False):
+            or direction.get('human_content_approval') is not False
+            or unrecorded and direction.get('record_unaccepted_result') is not True):
         raise ValueError('exact engineering recovery direction required; no content approval')
     with store.connect() as conn,conn.cursor() as cursor:
         cursor.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))',(POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
@@ -29,7 +30,7 @@ def recover_returned_review(store,round_id,*,authorization):
         history=value.get('engineering_review_recoveries',[])
         if history and history[-1]['authorization']==authorization:return history[-1]['recovery_root']
         if (value.get('kind')!='claim_management_round' or value['checkpoint']!='prepared' or value.get('change_set_ids')
-                or value.get('opus_approved') or set(value.get('stage_results',{}))!={'candidate','opus'}
+                or value.get('opus_approved') or set(value.get('stage_results',{}))!=({'candidate'} if unrecorded else {'candidate','opus'})
                 or sha256_json(value)!=direction.get('prior_metadata_sha256')):
             raise ValueError('recovery requires the exact uncommitted, returned candidate and review')
         parent=cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE',
@@ -38,12 +39,20 @@ def recover_returned_review(store,round_id,*,authorization):
             raise ValueError('review recovery cannot fork or revise other units')
         for role in value['materials']['roles']:
             slot=parent['call_reservations'].get(round_id+':'+role,{})
+            if unrecorded and role=='opus':
+                if slot.get('state')!='started':raise ValueError('unrecorded recovery requires the original returned Opus call')
+                continue
             if role not in {'gpt','opus'} or slot.get('state')!='completed' or slot.get('result')!=value['stage_results']['candidate' if role=='gpt' else 'opus']:
                 raise ValueError('review recovery cannot repeat an unknown or unrecorded call')
         store._assert_transaction_read_pins(cursor,pins({cm.source.split_key(k):v
             for k,v in value['materials']['transaction_before'].items()}))
         original=deepcopy(value);original_parent=deepcopy(parent)
         old_root=Path(value['stage_results']['candidate']['path']).parent
+        if unrecorded:
+            intent=body(read(old_root/'opus.reservation.json'))
+            slot=parent['call_reservations'][round_id+':opus']
+            if intent!=slot.get('intent') or sha256_json(intent)!=slot.get('intent_sha256'):
+                raise ValueError('unrecorded result differs from its original started call intent')
         current_contract=cm.audit_contract(old_root/'recovery-contract')
         # Role instructions must be identical: this is a program validator fix,
         # not permission to reinterpret an old answer under a different prompt.
@@ -68,6 +77,23 @@ def recover_returned_review(store,round_id,*,authorization):
             receipt={'round_id':round_id,'stage':stage,'materials':binding(root/'materials.json'),'candidate':binding(root/'candidate.json')}
             write(root/(stage+'-result.json'),receipt);receipts[stage]=binding(root/(stage+'-result.json'))
             _,candidate,review,passed=validate_claim_stage_receipt(receipt)
+        if unrecorded:
+            # Authenticate the returned answer, including a real rejection.
+            # Resume its ordinary recording path; do not declare approval.
+            record={'authorization':authorization,'original_round':original,'original_parent':original_parent,
+                'recovery_root':str(root),'current_contract':current_contract,'model_inputs_unchanged':True,
+                'model_calls':0,'candidate_unchanged':True,'human_content_approval':False,
+                'unaccepted_result_validated':True,'returned_review_passed':passed}
+            write(root/'engineering-recovery.json',record)
+            parent.update(audit_contract=current_contract,result={'status':'running'})
+            if 'gpt' in value['materials']['roles']:
+                parent['call_reservations'][round_id+':gpt']['result']=receipts['candidate']
+            value.update(materials=materials,stage_results={'candidate':receipts['candidate']},
+                opus_approved=False,outcome=None,recovery_root=str(root),engineering_review_recoveries=history+[record])
+            for rid,metadata in [(round_id,value),(value['parent_run_id'],parent)]:
+                cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,status='running',finished_at=NULL,heartbeat_at=now() WHERE run_id=%s",
+                    (canonical_json(metadata),rid))
+            return str(root)
         if not passed:raise ValueError('unchanged independent review still rejects this candidate')
         request=cm.Request.model_validate(materials['unit_request'])
         unresolved=cm.unresolved_after(parent['action_id'],materials['unresolved'],review,request=request,candidate=candidate)
