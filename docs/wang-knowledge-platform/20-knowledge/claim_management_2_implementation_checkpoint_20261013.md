@@ -120,3 +120,15 @@ Audit 收据委托独立结果校验时，只读取一次实际来源；原先�
 CL004 接续的 GPT 与第二轮 Opus 都已返回，Opus 审阅通过。GPT 约 582 秒、请求 456,961 bytes、回答约 65,745 bytes；Opus 约 134 秒、请求 476,434 bytes、回答约 28,077 bytes。候选仅改 CR005、ER023 和 E032，目标 Claim statement 保留。提交前被共同事务检查挡住：已固定 458 项，而通用消费者闭包需要 649 项，缺项来自 CVP 的事务上下文，没有内容写入。
 
 新增程序恢复入口只扩展这份已获准、未提交的交易 read pins：核原 pins 全部仍有效、Model 分母和事实完全不变、当前包仍有可重构的 GPT／Opus 原答，保留原 plan、候选、原模型收据和原 reviewed 状态的完整归档，记录精确新 pins。已经变动的内容或扩大内容审核分母不能用这个恢复入口。临时 PostgreSQL 验证恢复后原计划完成，重入不增加 GPT、Opus 或 Gemini 调用；此处不声明实库提交已完成。
+
+## 三条逐条接续完成（2026-10-14）
+
+CL004 已使用原 GPT／第二轮 Opus 结果完成事务 readset 恢复并提交，未追加模型调用。ChangeSet 为 `KCS-aebdcd61672ed4572ad8`，仅修正 CR005、ER023 和 E032；目标 statement 保留，当前资格通过。原提交失败记录与恢复后结果分别保存，没有覆盖失败历史。
+
+后续 `31a78a2` 在常规准备阶段补齐与提交相同的消费者 pins，并把模型输入里的相同原快照改为引用完整当前表。程序验证引用展开后逐项等于原事实；原事实不同的旧状态和完整原文仍独立保留。以 CL004 保存输入对照，模型包由 455,776 bytes 降至 217,601 bytes，约减少 52.3%，不据此推定模型耗时比例。接续可以先将现有内容送 Opus，避免没有修改需要时调用 GPT；旧 policy 序列化与已保存运行包不变。相关回归为 **461 passed、43 skipped**。
+
+CL005 第二轮 Opus 通过，实际写集为空。提交后读回一度出现 PostgreSQL statement timeout：代码把整个内容包里的依赖记录全部作为消费者闭包起点，扩大了查询。按原授权目标与实际候选读取完整闭包，再由普通 readback 收据事务校验所有真实后像完成恢复，没有追加模型调用。`becd12b` 把相同根范围修复进入常规流程；相关执行与来源影响回归 **41 passed**。CL008 随后沿修复后的常规流程完成，也没有内容修改。
+
+三条 action 的 `*-continuation-20261014-v1` 均为 completed／qualification_confirmed，round 为 audited／completed；CL005、CL008 各仅新增一次 Opus 调用，未调用 GPT。三条的 Gemini 调用和全库备份均为零。CL005、CL008 最终报告保存于 `son-of-man-three-opus-only-v1/CL005/continuation-20261014-v1/continuation-result.json` 和对应 CL008 目录；CL004 恢复结果为对应目录的 `continuation-result-after-readset-recovery.json`。
+
+CL008 的 OBS009 原文疑点保持 persistent，原答说明它不影响 CL008 的证据与 statement，保存在 context_findings 中；具体人工问题仍要求核对 S0004／S0006 的录音及文本层次，没有虚称已解决。CL004 修正共享依赖后，CL002、CL003 的旧资格当前返回 `current_independent_qualification_required`；内容未改，原资格事实未删除，但不能宣称当前有效。此次未擅自重审或授予这两条新资格。整体 #435 仍未完成，未合并或部署。
