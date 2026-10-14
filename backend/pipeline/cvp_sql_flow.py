@@ -159,7 +159,9 @@ def current_claim_authority(store, cid, row):
         raise ValueError("current Claim held or not reviewed: " + cid)
     qualification = store.claim_management_qualification(cid)
     if qualification is not None:
-        if not qualification['ready']:
+        if (not qualification['ready']
+                or [qualification.get('revision'), qualification.get('content_sha256')]
+                   != [row['revision'], row['content_sha256']]):
             raise ValueError('current Claim requires exact independent qualification: ' + cid)
         return {'claim_id': cid, 'revision': row['revision'], 'content_sha256': row['content_sha256'],
                 'qualification': qualification, 'reviewer_kind': 'ai',

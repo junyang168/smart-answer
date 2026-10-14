@@ -2085,6 +2085,38 @@ def audit_claim_operation(store, sources, model, management):
         paragraphs = [r for r in file.segments if not _is_editorial_row(r)]
         full_sources[sid] = {f"S{i:04d}": {"text": live_text(str(r.get("text") or ""))}
                              for i, r in enumerate(paragraphs, 1)}
+    before_sources = {}
+    transition = management.get('source_transition')
+    if transition:
+        if (transition.get('schema_version') != 'wang_claim_source_transition_v2'
+                or set(transition['before_sources']) != set(transition['source_change_set_ids'])):
+            raise ValueError('independent source impact lacks a complete actual transition')
+        for sid, bound in transition['before_sources'].items():
+            document = records.get('source_documents/' + sid, {}).get('payload')
+            if not document:
+                raise ValueError('independent source impact omits its current source document')
+            previous = SourceFile(Path(bound['path']), document['source_type'], document)
+            if previous.sha256 != bound['file_sha256']:
+                raise ValueError('independent old source bytes drift')
+            change = store._query("SELECT json_build_object('status',c.status,'before',b.payload,'after',a.payload,"
+                "'after_revision',o.after_revision,'after_sha',o.after_sha256)::text FROM wang_knowledge.change_sets c "
+                "JOIN wang_knowledge.change_operations o USING(change_set_id) "
+                "JOIN wang_knowledge.object_versions b ON b.collection=o.collection AND b.object_id=o.object_id "
+                "AND b.revision=o.before_revision JOIN wang_knowledge.object_versions a ON a.collection=o.collection "
+                "AND a.object_id=o.object_id AND a.revision=o.after_revision WHERE c.change_set_id="
+                + SqlGroupStore.literal(transition['source_change_set_ids'][sid])
+                + " AND o.collection='source_documents' AND o.operation='update' AND o.object_id=" + SqlGroupStore.literal(sid))
+            current = records['source_documents/' + sid]
+            if (len(change) != 1 or change[0]['status'] != 'applied'
+                    or any(change[0]['before'].get(field) != change[0]['after'].get(field)
+                           for field in ('source_id', 'source_type', 'transcript_id'))
+                    or change[0]['before'].get('source_file_sha256') != previous.sha256
+                    or change[0]['after'].get('source_file_sha256') != management['source_bindings'][sid]['file_sha256']
+                    or [change[0]['after_revision'],change[0]['after_sha']] != [current['revision'],current['sha']]):
+                raise ValueError('independent source impact is not the actual current SQL source transition')
+            paragraphs = [r for r in previous.segments if not _is_editorial_row(r)]
+            before_sources[sid] = {f'S{i:04d}': {'text': live_text(str(r.get('text') or ''))}
+                                   for i, r in enumerate(paragraphs, 1)}
     # Exact active forward references must be in the actual audit denominator.
     for key, row in records.items():
         if row["retired"]:
@@ -2106,7 +2138,14 @@ def audit_claim_operation(store, sources, model, management):
         "full_sources": full_sources, "denominator": keys, "replacements": management["replacements"],
         "candidate_sha256": management["candidate_sha256"], "unresolved": management["unresolved"]}
     packet['required_questions'] = management['required_questions']
-    instructions = (REPO_ROOT / 'backend/pipeline/prompts/claim_management_audit_v2.md').read_text().strip()
+    packet['before_sources'] = before_sources
+    contract = management['audit_contract']
+    instruction_path = Path(contract['instructions']['path'])
+    if hashlib.sha256(instruction_path.read_bytes()).hexdigest() != contract['instructions']['file_sha256']:
+        raise ValueError('independent frozen audit instructions drift')
+    if management['response_schema'] != contract['response_schema']:
+        raise ValueError('independent frozen audit schema drift')
+    instructions = instruction_path.read_text().strip()
     prompt = instructions + '\n' + json.dumps(packet, ensure_ascii=False, sort_keys=True)
     schema = management["response_schema"]
     response = model.judge(prompt, schema)

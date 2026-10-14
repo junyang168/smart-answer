@@ -61,6 +61,9 @@ def authority_case(tmp_path):
             self.calls=[]
         @contextmanager
         def connect(self):yield self
+        def claim_management_qualification(self,cid):
+            # These fixtures exercise untouched historical review authorities.
+            return None
         def execute(self,sql,params):
             self.calls.append(('SQL',params))
             if 'object_versions' in sql:return Result(self.current if params[1]==3 else self.previous)
@@ -80,6 +83,18 @@ def test_exact_coordinate_step_consumes_real_predecessor_without_new_approval(au
     assert result['authority_kind']=='exact_sql_applied_locator_postimage'
     assert result['model_calls']==result['master_data_mutations']==0
     assert len(s.calls)==6  # point queries and two exact ChangeSets, never list_records
+
+
+@pytest.mark.parametrize('qualification', [
+    {'ready':False,'reason':'formal_review_findings'},
+    {'ready':True,'revision':2,'content_sha256':'a'*64},
+])
+def test_v2_current_failure_or_stale_proof_cannot_fall_back_to_historical_pass(authority_case,qualification):
+    store,_,_=authority_case
+    store.claim_management_qualification=lambda cid:qualification
+    with pytest.raises(ValueError,match='exact independent qualification'):
+        current_claim_authority(store,'CL-test',store.row)
+    assert store.calls == []
 
 
 @pytest.mark.parametrize('mutation',[

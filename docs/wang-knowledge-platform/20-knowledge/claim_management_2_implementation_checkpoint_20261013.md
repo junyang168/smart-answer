@@ -38,3 +38,15 @@
 - 完成代码审阅与全路径验收，再更新 draft PR 的交付说明及 issue 关闭关系。
 
 文档检查仅有已知的无关 `docs/notes-to-sermon-agent/functional_spec.md:120` 缺失附录锚点。前端 type-check 因现有安装缺 `react-quill-new` 在 EmailSender／FellowshipManager 失败；本次没有前端改动。另一批显式启用的旧保存输入测试仍有依赖基线上同样存在的失败，未将这些结果列为通过，也未修改历史材料掩盖它们。
+
+## 后续来源影响实施与收敛
+
+第 9.2 节的来源影响 Review 已接入现有 Claim operation、共同 transaction 和独立审计路径。完整新旧原件与实际 SourceDocument ChangeSet 必须匹配；分母包含没有旧审核的 owner。无影响结论与资格分开，有完整旧内容审计且必要当前依赖有效才写 source_revalidated 事件；缺审核者明确列入 pending_content_review_keys，不改变 Claim payload 或 revision。其他段落新增限定、审阅分歧、重复段落不能猜对应等反例已加入隔离测试。
+
+实际 Fable 工程审阅指出旧 schema／prompt 复用、跨批归属、依赖 finding／片段绑定和重复 baseline 计算问题。实现保存当轮实际 audit instructions／schema 与代码绑定，只给本单元原目标登记来源复核，未决依赖和失效当前片段不能隐藏在 unaffected 结论中。旧依据与审计实际 pins 不同则不授予复用资格；损坏的已绑定原件仍停止，不吞掉篡改错误。原答暂存于 `/var/folders/s0/899st79150z63778jn0381pr0000gn/T/claim-435-source-code-review-hyeke9cp/`。
+
+负责人提醒不要随 review 堆机制后，本轮合并为一份 source_transition 交接，影响 Review 和明确关联它的后续维护共用；没有另设 source_history。旧 baseline 在 action 中只计算／保存一次，每份不同的旧审核在该维护中只验证一次。各 unit 从同一原目标派生必要范围，不再复制整份 action 原始对象与所有单元目标。沿用既有 pipeline_runs、review_events、ChangeSet 和运行器，没有新增数据库、状态机或审核框架。
+
+扩大后的相关测试为 **413 passed、43 skipped**，包括只读启用的七组真实旧失败材料、Claim operations、共同 SQL transaction、旧 Claim authority、独立来源坐标与 source reconciliation。旧 authority 测试替身补齐新的 store 查询接口，并新增当前 v2 失败／陈旧证明不得回退历史通过的反例。测试仅使用临时 PostgreSQL 和合成内容模型回复，旧失败材料逐字节保持不变。
+
+这仍是实施检查点：有据澄清与暂停恢复、跨 action 未决对账、所有下游消费及结构补偿等上节剩余事项尚未完整验收。未推送这轮改动、未合并、未启用正式内容操作或部署。

@@ -19,16 +19,146 @@ LINK_SCHEMA='wang_owner_sql_link_correction_v2'
 
 
 def claim_management_review_packet(materials, candidate):
-    from backend.pipeline.claim_management import audit_keys, Request, operation_questions
-    return {**materials, 'candidate': candidate.model_dump(mode='json'), 'candidate_sha256': candidate.digest,
+    from backend.pipeline.claim_management import audit_keys, Request, operation_questions, model_packet
+    return {**model_packet(materials), 'candidate': candidate.model_dump(mode='json'), 'candidate_sha256': candidate.digest,
             'denominator': audit_keys(Request.model_validate(materials['unit_request']), materials['before'], candidate),
             'required_questions': operation_questions(materials['original_goal'], candidate)}
+
+
+def claim_source_transition_context(store, request, before):
+    """Consume one committed source transition, never authorize source writes."""
+    from backend.pipeline import claim_management as cm
+    source_context = request.source_transition
+    if not source_context:
+        return None
+    transition = cm.SourceTransition.model_validate_json(content.verify_file(source_context).read_text())
+    payloads = {key: state['payload'] for key, state in before.items()}
+    expected = {key for key, state in before.items() if key.startswith('claims/') and not state['retired']
+                and cm.own_source_ids(state['payload'], payloads) & set(transition.before_sources)}
+    if cm.is_source_impact(request) and set(request.target_keys) != expected:
+        raise ValueError('source impact must account for the complete source/indirect owner population')
+    if not cm.is_source_impact(request):
+        predecessor = store.get_cvp_group('CMA-' + sha256_json(request.predecessor_action_id))
+        if (not predecessor or predecessor['request'].get('source_transition') != source_context.model_dump(mode='json')
+                or not set(request.target_keys) <= set(predecessor['original_goal']['target_keys'])):
+            raise ValueError('source history does not belong to the explicitly linked source Review')
+    histories = {}
+    for sid, change_set_id in transition.source_change_set_ids.items():
+        history = store.get_change_history(change_set_id)
+        operations = [op for op in (history or {}).get('operations', [])
+                      if op['collection'] == 'source_documents' and op['object_id'] == sid]
+        state = before.get(content.key('source_documents', sid))
+        if (not history or history['status'] != 'applied' or len(operations) != 1 or not state
+                or operations[0]['operation'] != 'update'
+                or any(operations[0]['before'].get(field) != operations[0]['after'].get(field)
+                       for field in ('source_id', 'source_type', 'transcript_id'))
+                or operations[0]['before'].get('source_file_sha256') != transition.before_sources[sid].file_sha256
+                or operations[0]['after'].get('source_file_sha256') != request.source_bindings[sid].file_sha256
+                or [operations[0]['after_revision'], operations[0]['after_sha256']]
+                   != [state['revision'], state['content_sha256']]):
+            raise ValueError('source impact is not the exact committed/current source version transition')
+        histories[sid] = {'change_set_id': change_set_id, 'fingerprint_sha256': history['fingerprint_sha256'],
+                          'source_operation': operations[0]}
+    claim_keys = [key for key in cm.audit_keys(request, before) if key.startswith('claims/')]
+    return {'schema_version': 'wang_claim_source_transition_v2', 'histories': histories,
+            'population': sorted(expected), 'baselines': claim_source_baselines(store, request, before, claim_keys, transition)
+                if cm.is_source_impact(request) else {}}
+
+
+def claim_source_baselines(store, request, before, claim_keys, transition):
+    """Authenticate direct prior content proof and exact mechanical transitions.
+
+    Missing proof is recorded as missing; it never becomes an approval because
+    the source impact reviewer calls an item unaffected. No ancestry replay.
+    """
+    from backend.pipeline import claim_management as cm
+    from backend.pipeline.source_reconciliation_runner import body, read
+    allowed_doc_fields = {'source_sha256','source_body_sha256','source_file_sha256','source_text_sha256',
+        'anchor_binding_sha256','editorial_structure_sha256','editorial_topology_sha256','revision'}
+    operations = {}
+    for cid in set(transition.source_change_set_ids.values()):
+        for op in store.get_change_history(cid)['operations']:
+            operations[content.key(op['collection'], op['object_id'])] = op
+    # Find each Claim's latest authority, then load/authenticate each distinct
+    # review once. A batch review can cover many Claims; its full sources and
+    # provider reply must not be reread and revalidated for every owner.
+    claim_ids = [key.split('/', 1)[1] for key in claim_keys]
+    with store.connect() as conn:
+        rows = conn.execute("""SELECT requested.claim_id, latest.run_id
+            FROM unnest(%s::text[]) AS requested(claim_id)
+            CROSS JOIN LATERAL (
+                SELECT run_id FROM wang_knowledge.pipeline_runs
+                WHERE metadata->>'kind'='claim_management_round'
+                  AND metadata->'claim_ids' ? requested.claim_id
+                  AND ((metadata->'materials'->'request'->>'operation'<>'Review' OR metadata->'materials'->'request'->>'source_transition' IS NULL)
+                       OR metadata->'materials'->'original_goal'->'target_keys' ? ('claims/' || requested.claim_id))
+                  AND (metadata->>'checkpoint' IN ('applied','audited')
+                       OR metadata->'blocked_current_claim_ids' ? requested.claim_id)
+                ORDER BY started_at DESC,run_id DESC LIMIT 1
+            ) latest""", (claim_ids,)).fetchall()
+        latest = dict(rows)
+        distinct_ids = sorted(set(latest.values()))
+        metadata = dict(conn.execute("""SELECT run_id,metadata FROM wang_knowledge.pipeline_runs
+            WHERE run_id=ANY(%s::text[])""", (distinct_ids,)).fetchall()) if distinct_ids else {}
+    validated = {}
+    result = {}
+    for key in claim_keys:
+        result[key] = None
+        rid = latest.get(key.split('/', 1)[1])
+        if rid is None:
+            continue
+        value = metadata[rid]
+        if value.get('outcome') != 'completed' or value.get('pending_review_findings') or key.split('/',1)[1] in value.get('blocked_current_claim_ids', []):
+            continue
+        try:
+            if rid not in validated:
+                receipt = value['stage_results']['audit']; check_binding(receipt)
+                saved = body(read(Path(receipt['path'])))
+                check_binding(saved['audit'])
+                report = json.loads(Path(saved['audit']['path']).read_text())
+                material = value['materials']
+                candidate = cm.Candidate.model_validate(value['candidate'])
+                passed, _, _ = validate_claim_audit(report, material, candidate, historical=True)
+                validated[rid] = (receipt, report, material, candidate) if passed else None
+            if validated[rid] is None:
+                continue
+            receipt, report, material, candidate = validated[rid]
+            old_pins = {content.key(r['collection'], r['object_id']): r['pin'] for r in value['audited_pins']}
+            unit = cm.Request.model_validate(material['unit_request']).model_copy(update={'target_keys': [key], 'permissions': []})
+            current = {k: v for k, v in before.items() if k in cm.audit_keys(unit, before)}
+            old_graph = {k: {'payload': v['payload'], 'retired': v['retired']} for k, v in report['packet']['actual_records'].items()}
+            if set(current) != set(cm.audit_keys(unit, old_graph)) or not set(current) <= set(old_pins):
+                continue
+            valid = True
+            for dep, state in current.items():
+                actual = [state['revision'], state['content_sha256'], state['retired']]
+                if actual == old_pins[dep]:
+                    continue
+                op = operations.get(dep)
+                if (not op or op['operation'] != 'update' or old_pins[dep] != [op['before_revision'],op['before_sha256'],False]
+                        or actual != [op['after_revision'],op['after_sha256'],False]):
+                    valid = False; break
+                changed = {f for f in set(op['before']) | set(op['after']) if op['before'].get(f) != op['after'].get(f)}
+                permitted = allowed_doc_fields if dep.startswith('source_documents/') else {'source_sha256','revision'} if dep.startswith('source_fragments/') else {'revision'}
+                if changed - permitted:
+                    valid = False; break
+            if valid:
+                previous = value.get('source_revalidations', {}).get(key)
+                if material['policy'].get('review_purpose') == 'source_impact' and not previous:
+                    continue
+                result[key] = {'run_id': rid, 'audit': receipt,
+                    'content_audit': previous['content_audit'] if previous else receipt,
+                    'question_scope': previous['question_scope'] if previous else cm.operation_questions(material['original_goal'], candidate),
+                    'current_pins': pin_rows(pins({content.split_key(k): v for k, v in current.items()}))}
+        except (KeyError, ValueError, RuntimeError):
+            continue
+    return result
 
 
 def validate_claim_candidate_origin(root, materials, policy, sources, candidate):
     from backend.pipeline import claim_management as cm
     if 'gpt' in materials['roles']:
-        raw = validate_claim_stage(root, 'gpt', policy, materials)
+        raw = validate_claim_stage(root, 'gpt', policy, cm.model_packet(materials))
         expected, receipt = cm.normalize_candidate(raw['response'], sources)
     else:
         expected = cm.existing_candidate(materials['before'], replacements=materials['replacements'])
@@ -119,11 +249,14 @@ def validate_claim_management_package(package):
     # source, operation, field or creation authority by partitioning a batch.
     narrowed = unit_request.model_dump(mode='json')
     original = request.model_dump(mode='json')
-    if (any(narrowed[k] != original[k] for k in original if k not in {'target_keys', 'permissions'})
+    if (any(narrowed[k] != original[k] for k in original if k not in {'target_keys', 'permissions', 'source_bindings', 'creation_permissions'})
             or not set(unit_request.target_keys) <= set(request.target_keys)
-            or any(p not in request.permissions for p in unit_request.permissions)):
+            or any(p not in request.permissions for p in unit_request.permissions)
+            or any(p not in request.creation_permissions for p in unit_request.creation_permissions)
+            or any(bound != request.source_bindings.get(sid) for sid, bound in unit_request.source_bindings.items())):
         raise ValueError('unit expands original Claim authority')
-    policy, sources = cm.load_authority(request, source_documents=cm.source_documents(materials['before']))
+    policy, sources = cm.load_authority(request, source_documents=cm.source_documents(materials['before']),
+                                       selected_source_ids=unit_request.source_bindings)
     if policy.model_dump(mode='json') != materials['policy'] or sources != materials['sources']:
         raise ValueError('Claim policy/complete physical own source drift')
     candidate = cm.Candidate.model_validate(body(read(root / 'candidate.json')))
@@ -133,26 +266,35 @@ def validate_claim_management_package(package):
     packet = claim_management_review_packet(materials, candidate)
     raw = validate_claim_stage(root, 'opus', policy, packet)
     review = cm.Review.model_validate(raw['response'])
-    if not cm.validate_review(candidate, review, packet['denominator'], packet['required_questions'],
-                              materials['unresolved'], sources) or candidate.findings:
+    passed = cm.validate_review(candidate, review, packet['denominator'], packet['required_questions'],
+                                materials['unresolved'], sources)
+    if cm.is_source_impact(request):
+        passed = cm.validate_source_impacts(review, packet['denominator'], sources,
+            request=cm.Request.model_validate(materials['unit_request']), records=materials['before'],
+            unresolved=materials['unresolved'])
+        if writes:
+            raise ValueError('source impact Review cannot authorize a content write')
+    if not passed or candidate.findings:
         raise ValueError('Claim package lacks passing complete independent Opus review')
     expected = claim_management_package_body(app['run_id'], writes)
     if {k: v for k, v in package.items() if k != 'source_repair_application'} != expected:
         raise ValueError('Claim package exceeds exact reviewed complete postimages')
-    if app['pending_consumers'] != claim_pending_consumers(materials['before'], writes):
+    if app['pending_consumers'] != claim_pending_consumers(materials.get('transaction_before', materials['before']), writes):
         raise ValueError('Claim package omitted or invented a pending historical consumer')
     return {content.split_key(k): v for k, v in writes.items()}
 
 
-def validate_claim_audit(report, materials, candidate):
+def validate_claim_audit(report, materials, candidate, *, historical=False):
     """Consume independent HTTP raw, exact SQL pins and physical own sources."""
     from backend.pipeline import claim_management as cm
     from hashlib import sha256
     if (report.get('schema_version') != cm.VERSION or report.get('model') != cm.MODELS['gemini'][0]
             or report.get('layer') != 3 or report.get('round_id') != materials['round_id']
             or report.get('candidate_sha256') != candidate.digest
-            or report.get('source_bindings') != materials['request']['source_bindings']):
+            or report.get('source_bindings') != materials['unit_request']['source_bindings']):
         raise ValueError('independent Claim audit identity drift')
+    if not historical:
+        cm.require_current_implementation(materials['audit_contract'])
     bindings = report['bindings']
     if set(bindings) != {'intent', 'provider', 'response'}:
         raise ValueError('independent Claim audit has no complete original HTTP response')
@@ -178,11 +320,12 @@ def validate_claim_audit(report, materials, candidate):
             or intent['request_sha256'] != sha256(wire).hexdigest()):
         raise ValueError('independent complete request bytes/configuration drift')
     packet = report['packet']
-    if (packet['original_goal'] != materials['original_goal'] or packet['unresolved'] != materials['unresolved']
+    if (packet['original_goal'] != cm.goal_packet(materials['original_goal']) or packet['unresolved'] != materials['unresolved']
             or packet['replacements'] != candidate.replacements or packet['candidate_sha256'] != candidate.digest
-            or report['schema'] != cm.Review.model_json_schema()):
+            or report['schema'] != materials['audit_contract']['response_schema']):
         raise ValueError('independent audit omitted original task or prior findings')
-    instructions = (Path(__file__).parent / 'prompts/claim_management_audit_v2.md').read_text().strip()
+    instructions = content.verify_file(cm.source.FileBinding.model_validate(
+        materials['audit_contract']['instructions'])).read_text().strip()
     if report['prompt'] != instructions + '\n' + json.dumps(packet, ensure_ascii=False, sort_keys=True):
         raise ValueError('independent raw prompt differs from exact instructions and complete actual material')
     states = {k: {'payload': r['payload'], 'retired': r['retired']} for k, r in packet['actual_records'].items()}
@@ -196,14 +339,27 @@ def validate_claim_audit(report, materials, candidate):
                    'pin': [v['revision'], v['sha'], v['retired']]} for k, v in sorted(packet['actual_records'].items())]
     if actual_pins != report['read_pins']:
         raise ValueError('independent audit actual current SQL readset drift')
-    _, sources = cm.load_authority(cm.Request.model_validate(materials['request']), source_documents=cm.source_documents(materials['before']))
+    _, sources = cm.load_authority(cm.Request.model_validate(materials['request']), source_documents=cm.source_documents(materials['before']),
+        archived_sources=materials.get('source_archives') if historical else None,
+        selected_source_ids=materials['unit_request']['source_bindings'])
     full_sources = {sid: {'paragraphs': paragraphs} for sid, paragraphs in packet['full_sources'].items()}
     if ({sid: {k: {'text': p['text']} for k, p in v['paragraphs'].items()} for sid, v in sources.items()}
             != packet['full_sources']):
         raise ValueError('independent audit full physical own source projection differs')
+    expected_before = {sid: {k: {'text': p['text']} for k, p in v['before']['paragraphs'].items()}
+                       for sid, v in sources.items() if v.get('before')}
+    if packet.get('before_sources', {}) != expected_before:
+        raise ValueError('independent source impact omitted/changed the complete old physical source')
+    for sid in full_sources:
+        full_sources[sid]['body_sha256'] = sources[sid]['body_sha256']
+    for sid, paragraphs in expected_before.items():
+        full_sources[sid]['before'] = {'paragraphs': paragraphs}
     review = cm.Review.model_validate(response)
     approved = cm.validate_review(candidate, review, denominator, cm.operation_questions(materials['original_goal'], candidate),
                                    materials['unresolved'], full_sources)
+    if cm.is_source_impact(materials['request']):
+        approved = cm.validate_source_impacts(review, denominator, full_sources, request=request, records=states,
+            unresolved=materials['unresolved'])
     if approved:
         cm.goal_satisfied(materials['original_goal'], states, candidate.replacements)
     return approved, review, actual_pins
@@ -215,9 +371,11 @@ def validate_claim_stage_receipt(receipt):
     check_binding(receipt['materials'])
     root = Path(receipt['materials']['path']).parent
     materials = body(read(root / 'materials.json'))
+    cm.require_current_implementation(materials['audit_contract'])
     if receipt['round_id'] != materials['round_id']:
         raise ValueError('Claim stage receipt belongs to another round')
-    policy, sources = cm.load_authority(cm.Request.model_validate(materials['request']), source_documents=cm.source_documents(materials['before']))
+    policy, sources = cm.load_authority(cm.Request.model_validate(materials['request']), source_documents=cm.source_documents(materials['before']),
+                                       selected_source_ids=materials['unit_request']['source_bindings'])
     if sources != materials['sources'] or policy.model_dump(mode='json') != materials['policy']:
         raise ValueError('Claim stage source/policy drift')
     check_binding(receipt['candidate'])
@@ -234,6 +392,10 @@ def validate_claim_stage_receipt(receipt):
         review = cm.Review.model_validate(raw['response'])
         passed = cm.validate_review(candidate, review, packet['denominator'], packet['required_questions'],
                                      materials['unresolved'], sources)
+        if cm.is_source_impact(materials['request']):
+            passed = cm.validate_source_impacts(review, packet['denominator'], sources,
+            request=cm.Request.model_validate(materials['unit_request']), records=materials['before'],
+            unresolved=materials['unresolved'])
         return materials, candidate, review, (passed and not candidate.findings)
     if stage == 'audit':
         check_binding(receipt['audit'])
@@ -278,6 +440,10 @@ def execute_claim_management(store, request, *, root, ports):
             return store.finish_claim_management_action(parent_id)
         if parent['result'].get('reason') in {'human_required','no_progress','disagreement','permission_required','budget_exhausted'}:
             return parent['result']
+        try:
+            cm.require_current_implementation(parent['audit_contract'])
+        except ValueError as exc:
+            return store.pause_claim_management_action(parent_id, reason='engineering_required', detail=str(exc))
         initialize_subscription_runtime(ports)
         try:
             for unit_id, targets in parent['original_goal']['units'].items():
@@ -294,29 +460,46 @@ def execute_claim_management(store, request, *, root, ports):
                         ordinal = prior['round_number'] + 1 if prior else 0
                         keys = {content.split_key(k) for k in targets}
                         keys.update(content.split_key(k) for k in parent['created_keys'])
-                        keys.update(('source_documents', sid) for sid in request.source_bindings)
+                        if request.operation == 'Create':
+                            keys.update(('source_documents', sid) for sid in request.source_bindings)
+                        if len(parent['original_goal']['units']) == 1:
+                            keys.update((p.collection,p.object_id) for p in request.permissions)
                         # Root authority is fixed; only permissions reachable
                         # from this unit are presented as writable.
                         records = store.read_affected_context(sorted(keys))
-                        before = {content.key(*k): cm.model_state(v) for k, v in records.items()}
+                        for sid in {p.source_id for p in request.creation_permissions}:
+                            if ('source_documents',sid) not in records:
+                                records['source_documents',sid] = store.get_record_state('source_documents',sid)
+                        transaction_before = {content.key(*k): cm.model_state(v) for k, v in records.items()}
+                        before = transaction_before
                         unit_request = request.model_copy(deep=True, update={'target_keys': targets, 'permissions': []})
-                        unit_keys = set(cm.audit_keys(unit_request, before)) | {content.key('source_documents', sid) for sid in request.source_bindings}
+                        unit_keys = set(cm.audit_keys(unit_request, before))
                         unit_request.permissions = [p for p in request.permissions if p.key in unit_keys]
+                        if len(parent['original_goal']['units']) == 1:
+                            unit_request.permissions = list(request.permissions)
+                            unit_keys.update(cm.audit_keys(unit_request, before))
                         if prior:
                             unit_keys.update(k for k in cm.audit_keys(unit_request, before, cm.Candidate.model_validate(prior['candidate'])))
-                        unit_goal = deepcopy(parent['original_goal'])
-                        unit_goal['target_keys'] = list(targets)
-                        original_unit_keys = set(cm.audit_keys(unit_request, parent['original_goal']['original_objects'])) | {
-                            content.key('source_documents', sid) for sid in request.source_bindings}
-                        unit_goal['original_objects'] = {k: v for k, v in unit_goal['original_objects'].items()
-                                                          if k in original_unit_keys}
+                        if request.operation == 'Create':
+                            unit_keys.update(k for k in before if content.split_key(k)[0] in cm.CLAIM_COLLECTIONS)
+                        source_ids = {content.split_key(k)[1] for k in unit_keys if k.startswith('source_documents/')}
+                        source_ids.update(p.source_id for p in request.creation_permissions)
+                        unit_keys.update(content.key('source_documents',sid) for sid in source_ids)
+                        unit_keys = {k for k in unit_keys if not k.startswith('source_documents/') or content.split_key(k)[1] in source_ids}
+                        before = {k: v for k, v in before.items() if k in unit_keys}
+                        unit_request.source_bindings = {sid: bound for sid, bound in request.source_bindings.items() if sid in source_ids}
+                        unit_request.creation_permissions = [p for p in request.creation_permissions if p.source_id in source_ids]
+                        _, unit_sources = cm.load_authority(request, source_documents=cm.source_documents(before), selected_source_ids=source_ids)
+                        unit_goal = cm.unit_goal(parent['original_goal'], unit_request)
                         roles = cm.required_roles(request, ordinal)
                         rid = 'CMR-' + sha256_json({'action': parent_id, 'unit': unit_id, 'round': ordinal})
                         materials = {'schema_version': cm.VERSION, 'round_id': rid, 'unit_id': unit_id,
                             'round_number': ordinal, 'request': request.model_dump(mode='json'),
                             'unit_request': unit_request.model_dump(mode='json'), 'policy': policy.model_dump(mode='json'),
-                            'sources': sources, 'before': before, 'original_goal': unit_goal,
-                            'action_original_goal': parent['original_goal'], 'roles': roles,
+                            'audit_contract': parent['audit_contract'],
+                            'sources': unit_sources, 'source_archives': {sid: bound for sid, bound in parent['source_archives'].items() if sid in source_ids},
+                            'before': before, 'transaction_before': transaction_before, 'original_goal': unit_goal,
+                            'roles': roles,
                             'program_owned_fields': {'source_fragments': sorted(cm.FRAGMENT_HASH_FIELDS),
                                 'review_provenance': sorted(cm.source.PROVENANCE), 'reader_visible_text_changes': False},
                             'created_keys': parent['created_keys'], 'replacements': parent.get('replacements', {}),
@@ -331,11 +514,12 @@ def execute_claim_management(store, request, *, root, ports):
                     else:
                         rid = prior['run_id']
                         materials = prior['materials']
-                        records = {content.split_key(k): v for k, v in materials['before'].items()}
+                        records = {content.split_key(k): v for k, v in materials.get('transaction_before', materials['before']).items()}
                     round_root = root / rid
                     write(round_root / 'materials.json', materials)
                     def guard():
-                        cm.load_authority(request, source_documents=cm.source_documents(materials['before']))
+                        cm.load_authority(request, source_documents=cm.source_documents(materials['before']),
+                                          selected_source_ids=materials['unit_request']['source_bindings'])
                         with store.connect() as conn, conn.cursor() as cursor:
                             store._assert_transaction_read_pins(cursor, pins(records))
                     transport = SimpleNamespace(before_model_call=getattr(ports, 'before_model_call', lambda stage: None),
@@ -353,10 +537,10 @@ def execute_claim_management(store, request, *, root, ports):
                         write(path, receipt)
                         return store.record_claim_management_stage(rid, binding(path))
                     if prior['checkpoint'] == 'prepared':
-                        raw_candidate = (call('gpt', materials)['response'] if 'gpt' in materials['roles'] else
+                        raw_candidate = (call('gpt', cm.model_packet(materials))['response'] if 'gpt' in materials['roles'] else
                             cm.existing_candidate(materials['before'], replacements=materials['replacements']).model_dump(mode='json'))
-                        candidate, normalization = cm.normalize_candidate(raw_candidate, sources)
-                        cm.validate_candidate(cm.Request.model_validate(materials['unit_request']), materials['before'], candidate, sources,
+                        candidate, normalization = cm.normalize_candidate(raw_candidate, materials['sources'])
+                        cm.validate_candidate(cm.Request.model_validate(materials['unit_request']), materials['before'], candidate, materials['sources'],
                             created_keys=materials['created_keys'], original_replacements=materials['replacements'])
                         write(round_root / 'candidate.json', candidate.model_dump(mode='json'))
                         write(round_root / 'candidate-normalization.json', normalization)
@@ -369,13 +553,13 @@ def execute_claim_management(store, request, *, root, ports):
                             if prior['outcome'] == 'revision_required' and request.operation != 'Review':
                                 continue
                             break
-                        _, writes = cm.validate_candidate(cm.Request.model_validate(materials['unit_request']), materials['before'], candidate, sources,
+                        _, writes = cm.validate_candidate(cm.Request.model_validate(materials['unit_request']), materials['before'], candidate, materials['sources'],
                             created_keys=materials['created_keys'], original_replacements=materials['replacements'])
                         package = claim_management_package_body(rid, writes)
                         package['source_repair_application'] = {'schema_version': cm.VERSION, 'run_id': rid,
                             'materials': binding(round_root / 'materials.json'), 'candidate': binding(round_root / 'candidate.json'),
                             'opus_raw': binding(round_root / 'opus.raw.json'),
-                            'pending_consumers': claim_pending_consumers(materials['before'], writes)}
+                            'pending_consumers': claim_pending_consumers(materials['transaction_before'], writes)}
                         write(round_root / 'package.json', package)
                         backup_path = round_root / 'backup.json'
                         if backup_path.exists():
@@ -386,7 +570,7 @@ def execute_claim_management(store, request, *, root, ports):
                         guard()
                         commit_package(store, rid, package=package, approval=binding(round_root / 'opus.raw.json'),
                             authorization=request.authorization.model_dump(), backup=backup,
-                            sources=[b.model_dump() for b in request.source_bindings.values()], read_pins=pins(records),
+                            sources=[b for b in materials['unit_request']['source_bindings'].values()], read_pins=pins(records),
                             reason='Claim ' + request.operation + ' independently reviewed current candidate', actor='claim-management-v2',
                             source_kind=cm.VERSION, pending_cvp_claim_ids=prior['claim_ids'])
                         prior = store.get_cvp_group(rid)
@@ -400,13 +584,21 @@ def execute_claim_management(store, request, *, root, ports):
                         actual = store.read_affected_context(sorted(roots))
                         states = {content.key(*k): v for k, v in actual.items()}
                         denominator = cm.audit_keys(cm.Request.model_validate(materials['unit_request']), states, candidate)
-                        cm.require_full_sources(cm.Request.model_validate(materials['unit_request']), states, candidate, qualification=True)
-                        audit_input = {'schema_version': cm.VERSION, 'round_id': rid, 'original_goal': materials['original_goal'],
+                        cm.require_full_sources(cm.Request.model_validate(materials['unit_request']), states, candidate,
+                                                qualification=not cm.is_source_impact(request))
+                        audit_input = {'schema_version': cm.VERSION, 'round_id': rid, 'original_goal': cm.goal_packet(materials['original_goal']),
                             'denominator': denominator, 'read_pins': pin_rows(pins({content.split_key(k): states[k] for k in denominator})),
-                            'source_bindings': materials['request']['source_bindings'], 'replacements': candidate.replacements,
+                            'source_bindings': materials['unit_request']['source_bindings'], 'replacements': candidate.replacements,
                             'candidate_sha256': candidate.digest, 'unresolved': materials['unresolved'],
                             'required_questions': cm.operation_questions(materials['original_goal'], candidate),
-                            'response_schema': cm.Review.model_json_schema(), 'budget': materials['policy']['budget']}
+                            'response_schema': materials['audit_contract']['response_schema'],
+                            'audit_contract': materials['audit_contract'], 'budget': materials['policy']['budget']}
+                        if request.source_transition:
+                            transition = cm.SourceTransition.model_validate_json(content.verify_file(request.source_transition).read_text())
+                            selected = set(materials['unit_request']['source_bindings'])
+                            audit_input['source_transition'] = transition.model_copy(update={
+                                'before_sources': {sid: b for sid, b in transition.before_sources.items() if sid in selected},
+                                'source_change_set_ids': {sid: cid for sid, cid in transition.source_change_set_ids.items() if sid in selected}}).model_dump(mode='json')
                         input_path = round_root / 'audit-input.json'
                         audit_path = round_root / 'independent-audit/audit.json'
                         write(input_path, audit_input)
@@ -421,6 +613,9 @@ def execute_claim_management(store, request, *, root, ports):
                         if prior['outcome'] == 'revision_required':
                             continue
                     break
+            outcome = store.get_cvp_group(parent_id)['result']
+            if outcome.get('status') == 'paused':
+                return outcome
             return store.finish_claim_management_action(parent_id)
         except (ValueError, RuntimeError) as exc:
             text = str(exc)

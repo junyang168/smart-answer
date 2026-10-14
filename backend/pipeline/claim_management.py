@@ -9,12 +9,15 @@ from copy import deepcopy
 from typing import Literal
 import json
 import hashlib
+from pathlib import Path
+from collections import Counter
+from difflib import SequenceMatcher
 
 from pydantic import Field, model_validator
 
 from backend.pipeline import source_reconciliation as source
 from backend.api.canonical_repository.postgres_store import (
-    KNOWLEDGE_COLLECTIONS, sha256_json,
+    KNOWLEDGE_COLLECTIONS, sha256_json, canonical_json,
 )
 
 VERSION = "wang_claim_management_v2"
@@ -64,6 +67,8 @@ class Policy(source.Contract):
     budget: Budget
     models: dict[str, dict[str, str]]
     clarification_per_problem: Literal[1] = 1
+    review_purpose: Literal['content', 'source_impact'] = 'content'
+    source_impact_batch_size: int | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def exact_roles(self):
@@ -72,6 +77,8 @@ class Policy(source.Contract):
         for role, (model, backend) in MODELS.items():
             if self.models[role] != {"model_id": model, "backend": backend, "effort": "high"}:
                 raise ValueError("Claim policy must bind the exact model/backend/effort")
+        if self.source_impact_batch_size and self.review_purpose != 'source_impact':
+            raise ValueError('source impact batching belongs to its explicitly bound Review policy')
         return self
 
 
@@ -100,6 +107,7 @@ class Request(source.Contract):
     creation_permissions: list[CreationPermission] = Field(default_factory=list)
     confirm_current: bool = False
     predecessor_action_id: str | None = None
+    source_transition: source.FileBinding | None = None
 
     @model_validator(mode="after")
     def bounded_scope(self):
@@ -127,13 +135,23 @@ class Request(source.Contract):
             raise ValueError("Read/Review cannot acquire content write permission")
         if self.operation == "Create" and not self.creation_permissions:
             raise ValueError("Create requires explicit source-scoped creation permission")
+        if self.source_transition and (self.operation == 'Read'
+                or self.operation != 'Review' and not self.predecessor_action_id):
+            raise ValueError('source transition maintenance must link its predecessor Review')
         return self
+
+
+def is_source_impact(request):
+    if isinstance(request, Request):
+        return request.operation == 'Review' and bool(request.source_transition)
+    return request['operation'] == 'Review' and bool(request.get('source_transition'))
 
 
 class Citation(source.Contract):
     source_id: str
     paragraph_key: str
     exact_quote: str = Field(min_length=1)
+    source_epoch: Literal['current', 'before'] = 'current'
 
 
 class Finding(source.Contract):
@@ -187,11 +205,61 @@ class Review(source.Contract):
     findings: list[Finding]
     prior_findings: list[FindingResolution]
     answered_questions: list[str]
+    source_impacts: list['SourceImpact'] = Field(default_factory=list)
+
+
+class SourceTransition(source.Contract):
+    schema_version: Literal['wang_claim_source_transition_v2'] = 'wang_claim_source_transition_v2'
+    before_sources: dict[str, source.FileBinding]
+    source_change_set_ids: dict[str, str]
+
+    @model_validator(mode='after')
+    def complete(self):
+        if not self.before_sources or set(self.before_sources) != set(self.source_change_set_ids):
+            raise ValueError('source transition needs exact old files and committed source versions')
+        return self
+
+
+class SourceImpact(source.Contract):
+    record_key: str
+    conclusion: Literal['unaffected', 'maintenance', 'source_uncertain']
+    reason: str = Field(min_length=1)
+    citations: list[Citation] = Field(min_length=1)
+    operation: Operation | None = None
+
+
+IMPACT_QUESTIONS = frozenset({'source_delta', 'context_impact', 'basis_preservation',
+                              'locator_mapping', 'coverage_new_teaching'})
+Review.model_rebuild()
+
+
+def audit_contract(root):
+    """Freeze actual audit instructions/schema and the implementation version."""
+    from backend.pipeline.source_reconciliation_runner import archive_source_version, binding
+    pipeline = Path(__file__).parent
+    repository = pipeline.parents[1]
+    prompt = pipeline / 'prompts/claim_management_audit_v2.md'
+    files = [Path(__file__), pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py',
+        pipeline/'source_reconciliation_runner.py', pipeline/'source_reconciliation_runtime.py',
+        repository/'backend/api/canonical_repository/postgres_store.py', repository/'scripts/audit-library.py',
+        *[pipeline/'prompts'/('claim_management_'+role+'_v2.md') for role in ('proposal','review','audit')]]
+    return {'instructions': archive_source_version(source.FileBinding.model_validate(binding(prompt)), Path(root)/'audit-contract'),
+        'response_schema': Review.model_json_schema(),
+        'implementation': {str(path.relative_to(repository)): hashlib.sha256(path.read_bytes()).hexdigest() for path in files}}
+
+
+def require_current_implementation(contract):
+    repository = Path(__file__).parents[2]
+    if any(hashlib.sha256((repository/path).read_bytes()).hexdigest() != digest
+           for path, digest in contract['implementation'].items()):
+        raise ValueError('Claim implementation changed during its bounded action; explicit recovery is required')
 
 
 def validate_citations(citations, sources):
     for citation in citations:
         snapshot = sources.get(citation.source_id)
+        if citation.source_epoch == 'before':
+            snapshot = (snapshot or {}).get('before')
         paragraph = (snapshot or {}).get("paragraphs", {}).get(citation.paragraph_key)
         if not paragraph or citation.exact_quote not in paragraph["text"]:
             raise ValueError("citation is not an exact quote from the complete own source")
@@ -430,9 +498,11 @@ def unresolved_after(action_id, previous, review):
     return result
 
 
-def load_authority(request: Request, *, source_documents=None):
+def load_authority(request: Request, *, source_documents=None, archived_sources=None, selected_source_ids=None):
     """Bind a new action to an actual direction and policy, never old v1 flags."""
     policy = Policy.model_validate_json(source.verify_file(request.policy).read_text())
+    if (policy.review_purpose == 'source_impact') != is_source_impact(request):
+        raise ValueError('source impact requires its explicitly bound Review policy and transition')
     authority = json.loads(source.verify_file(request.authorization).read_text())
     expected = request.model_dump(mode="json", exclude={"authorization", "policy"})
     if (authority.get("schema_version") != VERSION
@@ -442,14 +512,104 @@ def load_authority(request: Request, *, source_documents=None):
             or authority.get("request") != expected
             or authority.get("policy") != request.policy.model_dump()):
         raise ValueError("Claim action lacks its exact new policy and original authority")
-    sources = {sid: source.source_snapshot(binding, source=(source_documents or {}).get(sid))
-               for sid, binding in request.source_bindings.items()}
+    sources = {}
+    selected = set(request.source_bindings) if selected_source_ids is None else set(selected_source_ids)
+    if not selected <= set(request.source_bindings):
+        raise ValueError('unit cannot expand the authorized full own source scope')
+    for sid, binding in request.source_bindings.items():
+        if sid not in selected:
+            continue
+        observed = source.FileBinding.model_validate((archived_sources or {}).get(sid, binding))
+        if observed.file_sha256 != binding.file_sha256:
+            raise ValueError('archived source differs from the actual original source bytes')
+        sources[sid] = source.source_snapshot(observed, source=(source_documents or {}).get(sid))
+        sources[sid]['file'] = binding.model_dump(mode='json')
     for sid, snapshot in sources.items():
         document = (source_documents or {}).get(sid, {})
         declared = document.get('source_file_sha256')
         if declared and declared != snapshot['file']['file_sha256']:
             raise ValueError('registered source physical version drift; new source version/action required')
+    source_context = request.source_transition
+    if source_context:
+        transition = SourceTransition.model_validate_json(source.verify_file(source_context).read_text())
+        if not set(transition.before_sources) <= set(request.source_bindings):
+            raise ValueError('source transition omits a complete current own source')
+        for sid, bound in transition.before_sources.items():
+            if sid not in sources:
+                continue
+            previous = source.source_snapshot(bound, source=(source_documents or {}).get(sid))
+            if previous['file']['file_sha256'] == sources[sid]['file']['file_sha256']:
+                raise ValueError('source impact requires an actual source version transition')
+            sources[sid]['before'] = previous
+            sources[sid]['delta'] = source_delta(previous, sources[sid])
     return policy, sources
+
+
+def source_delta(before, current):
+    """Complete paragraph accounting, never a semantic impact decision.
+
+    Only a unique exact paragraph can receive an automatic old/new identity
+    match. Duplicate text, replacements and splits remain explicit groups.
+    """
+    old, new = before['paragraphs'], current['paragraphs']
+    old_keys, new_keys = list(old), list(new)
+    def identity(row):
+        return canonical_json({k: v for k, v in row.items() if k != 'index'})
+    left, right = [identity(old[k]) for k in old_keys], [identity(new[k]) for k in new_keys]
+    lc, rc = Counter(left), Counter(right)
+    positions = {value: i for i, value in enumerate(right) if rc[value] == 1}
+    mapping = {old_keys[i]: new_keys[positions[value]] for i, value in enumerate(left)
+               if lc[value] == rc[value] == 1 and value in positions}
+    groups = []
+    for kind, a, b, c, d in SequenceMatcher(None, left, right, autojunk=False).get_opcodes():
+        old_group, new_group = old_keys[a:b], new_keys[c:d]
+        if kind == 'equal':
+            ambiguous = [k for k in old_group if k not in mapping]
+            if not ambiguous:
+                continue
+            kind = 'ambiguous'
+        groups.append({'kind': kind, 'before': old_group, 'current': new_group})
+    return {'schema_version': 'wang_claim_source_delta_v2', 'before_file': before['file'],
+            'current_file': current['file'], 'before_body_sha256': before['body_sha256'],
+            'current_body_sha256': current['body_sha256'], 'unique_exact_mapping': mapping,
+            'change_groups': groups, 'semantic_approval': False}
+
+
+def validate_source_impacts(review, keys, sources, *, request, records, unresolved):
+    items = {item.record_key: item for item in review.source_impacts}
+    if len(items) != len(review.source_impacts) or set(items) != {k for k in keys if k.startswith('claims/')}:
+        raise ValueError('source impact Review must account for every current Claim exactly once')
+    findings = {f.target_key for f in review.findings}
+    findings.update(unresolved[r.finding_id]['target_key'] for r in review.prior_findings
+                    if r.disposition != 'resolved')
+    for item in items.values():
+        validate_citations(item.citations, sources)
+        if item.conclusion == 'unaffected' and (item.operation or item.record_key in findings):
+            raise ValueError('unaffected source impact cannot hide a maintenance finding')
+        if item.conclusion == 'unaffected':
+            own = request.model_copy(update={'target_keys': [item.record_key], 'permissions': []})
+            closure = set(audit_keys(own, records))
+            if closure & findings:
+                raise ValueError('unaffected source impact cannot hide an unresolved dependency finding')
+            for key in closure:
+                if not key.startswith('source_fragments/') or records[key]['retired']:
+                    continue
+                fragment = records[key]['payload']
+                snapshot = sources.get(fragment.get('source_id'), {})
+                paragraph = snapshot.get('paragraphs', {}).get(str(fragment.get('paragraph_key')), {})
+                excerpt = fragment.get('verbatim_excerpt')
+                if (not excerpt or excerpt not in paragraph.get('text', '')
+                        or fragment.get('source_sha256') != snapshot.get('body_sha256')):
+                    raise ValueError('unaffected source impact lacks an exact current fragment/source binding')
+        if item.conclusion != 'unaffected' and item.record_key not in findings:
+            raise ValueError('source maintenance/uncertainty requires a concrete finding')
+        if item.conclusion == 'maintenance' and item.operation not in {'Update','Retire','Restore','Split','Merge'}:
+            raise ValueError('source impact needs an explicit ordinary maintenance operation')
+        if item.conclusion == 'source_uncertain' and not any(f.target_key == item.record_key
+                and f.category == 'source_uncertain' and f.human_question for f in review.findings):
+            raise ValueError('source uncertainty needs its exact human question')
+    return (all(v.approved and not v.problems for v in review.verdicts)
+            and not any(f.category == 'engineering' for f in review.findings))
 
 
 def audit_keys(request, before, candidate=None):
@@ -514,9 +674,23 @@ def original_goal(request, before):
         "operation": request.operation, "target_keys": list(request.target_keys),
         "source_bindings": {k: v.model_dump() for k, v in request.source_bindings.items()},
         "original_objects": {k: model_state(before[k]) for k in sorted(original_keys)},
-        "required_questions": sorted(QUESTIONS[request.operation]),
+        "required_questions": sorted(IMPACT_QUESTIONS if is_source_impact(request) else QUESTIONS[request.operation]),
         "units": {"CMU-" + sha256_json(keys)[:20]: keys for keys in partition_targets(request, before)},
     }
+
+
+def unit_goal(goal, request):
+    """Derive one unit's obligations from the action's single saved goal."""
+    result = {k: deepcopy(v) for k, v in goal.items() if k not in {'units','original_objects','source_bindings'}}
+    result['target_keys'] = list(request.target_keys)
+    result['source_bindings'] = {sid: bound.model_dump(mode='json') for sid, bound in request.source_bindings.items()}
+    keys = set(audit_keys(request, goal['original_objects'])) | {
+        source.key('source_documents', sid) for sid in request.source_bindings}
+    result['original_objects'] = {k: deepcopy(v) for k, v in goal['original_objects'].items() if k in keys}
+    if result.get('source_transition_context'):
+        context = result['source_transition_context']
+        context['histories'] = {sid: h for sid, h in context['histories'].items() if sid in request.source_bindings}
+    return result
 
 
 def model_state(state):
@@ -531,6 +705,15 @@ def source_documents(before):
 
 def partition_targets(request, before):
     """Group only coordinated writes; sharing a source/read pin is not a join."""
+    if is_source_impact(request):
+        policy = Policy.model_validate_json(source.verify_file(request.policy).read_text())
+        payloads = {k: v['payload'] for k, v in before.items()}
+        groups = {}
+        for key in request.target_keys:
+            groups.setdefault(tuple(sorted(own_source_ids(payloads[key], payloads))), []).append(key)
+        size = policy.source_impact_batch_size
+        return [keys[i:i + (size or len(keys))] for keys in groups.values()
+                for i in range(0, len(keys), size or len(keys))]
     if request.operation in {"Create", "Split", "Merge"}:
         return [list(request.target_keys)]
     targets = set(request.target_keys)
@@ -553,6 +736,12 @@ def partition_targets(request, before):
             join(source.key("claims", cid) for cid in payload.get("produced_claim_ids", []))
         elif permission.collection in {"claim_relations", "claim_relation_constraints", "knowledge_relations"}:
             join(source.key("claims", payload[k]) for k in ("from_id", "to_id", "source_id", "target_id", "from_claim_id", "to_claim_id") if payload.get(k))
+    # New shared Evidence/fragment/relationship writes can coordinate owners
+    # which were disjoint in the old graph. The original source-scoped create
+    # grants already authorize that scope; group these targets before calling.
+    payloads = {k: v['payload'] for k, v in before.items()}
+    for grant in request.creation_permissions:
+        join(k for k in targets if grant.source_id in own_source_ids(payloads[k], payloads))
     groups = {}
     for key in sorted(targets):
         groups.setdefault(root(key), []).append(key)
@@ -566,11 +755,28 @@ def existing_candidate(before, *, replacements=None):
                      replacements=replacements or {})
 
 
+def goal_packet(goal):
+    """Unit semantic obligations, without unrelated objects or proof opinions."""
+    packet = deepcopy(goal)
+    packet.pop('units', None)
+    return packet
+
+
+def model_packet(materials):
+    packet = {k: deepcopy(v) for k, v in materials.items()
+              if k not in {'transaction_before', 'source_archives', 'audit_contract'}}
+    packet['original_goal'] = goal_packet(materials['original_goal'])
+    packet['action_obligations'] = {'operation': materials['request']['operation'],
+        'target_keys': list(materials['request']['target_keys']),
+        'required_questions': list(materials['original_goal']['required_questions'])}
+    return packet
+
+
 def required_roles(request, round_number):
     if request.operation == "Read":
         return []
     roles = ["opus"]
-    if request.operation != "Review" or request.confirm_current:
+    if request.operation != "Review" or request.confirm_current or request.source_transition:
         roles.append("gemini")
     if request.operation not in {"Review", "Read"} and (request.operation != "Update" or round_number):
         roles.insert(0, "gpt")
@@ -603,6 +809,8 @@ def failure_reason(findings):
 
 
 def operation_questions(goal, candidate):
+    if set(goal['required_questions']) == IMPACT_QUESTIONS:
+        return sorted(IMPACT_QUESTIONS)
     questions = set(goal['required_questions']) | QUESTIONS[candidate.operation or goal['operation']]
     for disposition in candidate.dispositions:
         operation = {'create': 'Create', 'retire': 'Retire', 'restore': 'Restore', 'update': 'Update'}.get(disposition.action)

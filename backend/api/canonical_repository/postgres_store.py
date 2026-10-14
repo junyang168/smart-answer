@@ -3256,9 +3256,14 @@ class PostgresKnowledgeStore:
                 or not goal.get("units") or not set(request.target_keys) <= set(goal.get("original_objects", {}))):
             raise ValueError("Claim original goal does not match its authorized target denominator")
         run_id = "CMA-" + sha256_json(request.action_id)
+        from backend.pipeline.source_reconciliation_runner import archive_source_version
+        source_archives = {sid: archive_source_version(bound, Path(root).resolve() / 'source-versions')
+                           for sid, bound in request.source_bindings.items()}
+        from backend.pipeline.claim_management import audit_contract
         identity = {"kind": "claim_management_action", "schema_version": VERSION,
                     "action_id": request.action_id, "request": request.model_dump(mode="json"),
-                    "policy": policy.model_dump(mode="json"), "execution_root": str(Path(root).resolve())}
+                    "policy": policy.model_dump(mode="json"), "execution_root": str(Path(root).resolve()),
+                    "source_archives": source_archives, "audit_contract": audit_contract(root)}
         with self.connect() as conn, conn.cursor() as cursor:
             cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
             cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE", (run_id,))
@@ -3267,8 +3272,20 @@ class PostgresKnowledgeStore:
                 if any(row[0].get(k) != v for k, v in identity.items()):
                     raise ChangeSetConflict("Claim action authority/root/policy changed; budget cannot reset")
                 return {**row[0], "run_id": run_id}
-            self._assert_transaction_read_pins(cursor, read_pins)
+            observed = self._assert_transaction_read_pins(cursor, read_pins)
+            from backend.pipeline import claim_management as cm
+            before = {cm.source.key(*key): cm.model_state(state) for key, state in observed.items()}
+            expected_goal = cm.original_goal(request, before)
+            if goal != expected_goal:
+                raise ChangeSetConflict('Claim original goal/scope/proof differs from actual current SQL and source history')
+            source_baselines = {}
+            if request.source_transition:
+                from backend.pipeline.cvp_sql_actions import claim_source_transition_context
+                context = claim_source_transition_context(self, request, before)
+                source_baselines = context.pop('baselines')
+                goal = {**expected_goal, 'source_transition_context': context}
             value = {**identity, "original_goal": goal, "latest_rounds": {},
+                     "source_baselines": source_baselines,
                      "call_reservations": {}, "findings": {}, "created_keys": [],
                      "revision_rounds": {},
                      "claim_ids": [key.split("/", 1)[1] for key in request.target_keys],
@@ -3310,15 +3327,13 @@ class PostgresKnowledgeStore:
             if unit_id not in parent["original_goal"].get("units", {}):
                 raise ChangeSetConflict("Claim round cannot invent a new original unit")
             if frozen.get('schema_version') == VERSION:
-                from backend.pipeline.claim_management import audit_keys, source, source_documents
+                from backend.pipeline.claim_management import unit_goal
                 unit_request = Request.model_validate(frozen['unit_request'])
                 original = parent['original_goal']
-                expected_goal = {**original, 'target_keys': original['units'][unit_id]}
-                original_keys = set(audit_keys(unit_request, original['original_objects'])) | {
-                    source.key('source_documents', sid) for sid in parent['request']['source_bindings']}
-                expected_goal['original_objects'] = {k: v for k, v in original['original_objects'].items() if k in original_keys}
+                expected_goal = unit_goal(original, unit_request)
                 if (frozen['request'] != parent['request'] or frozen['policy'] != parent['policy']
-                        or frozen['action_original_goal'] != original or frozen['original_goal'] != expected_goal
+                        or frozen['audit_contract'] != parent['audit_contract']
+                        or frozen['original_goal'] != expected_goal
                         or unit_request.target_keys != original['units'][unit_id]
                         or frozen['created_keys'] != parent['created_keys']
                         or frozen['replacements'] != parent.get('replacements', {})):
@@ -3427,6 +3442,41 @@ class PostgresKnowledgeStore:
                     parent['created_keys'] = sorted(set(parent['created_keys']) | {
                         d.record_key for d in candidate.dispositions if d.action == 'create'})
                     parent.setdefault('replacements', {}).update(candidate.replacements)
+                    if cm.is_source_impact(materials['request']):
+                        opus_receipt = body(read(Path(stages['opus']['path'])))
+                        opus_raw = body(read(Path(opus_receipt['materials']['path']).parent / 'opus.raw.json'))
+                        first = cm.Review.model_validate(opus_raw['response'])
+                        if {i.record_key: (i.conclusion,i.operation) for i in first.source_impacts} != {
+                                i.record_key: (i.conclusion,i.operation) for i in review.source_impacts}:
+                            passed = False
+                            value['source_impact_disagreement'] = True
+                            value['independent_audit_complete'] = False
+                        if passed:
+                            value['source_impacts'] = [i.model_dump(mode='json') for i in review.source_impacts]
+                            value['source_revalidations'] = {}
+                            baselines = parent['source_baselines']
+                            for impact in review.source_impacts:
+                                baseline = baselines.get(impact.record_key)
+                                if (impact.record_key not in materials['original_goal']['target_keys']
+                                        or impact.conclusion != 'unaffected' or not baseline):
+                                    continue
+                                for bound in (baseline['audit'],baseline['content_audit']):
+                                    check_binding(bound)
+                                audit_pins = decoded_pins(report['read_pins'])
+                                if any(audit_pins.get(key) != pin for key, pin in decoded_pins(baseline['current_pins']).items()):
+                                    value.setdefault('missing_source_baselines', {})[impact.record_key] = 'baseline_basis_changed'
+                                    continue
+                                proof = {**baseline, 'impact_run_id': round_id, 'impact_audit': receipt_binding,
+                                    'source_bindings': {sid: bound for sid, bound in materials['request']['source_bindings'].items()
+                                        if ('source_documents',sid) in decoded_pins(baseline['current_pins'])}}
+                                value['source_revalidations'][impact.record_key] = proof
+                                state = materials['before'][impact.record_key]
+                                event_id = 'CMRV-' + sha256_json({'round': round_id, 'claim': impact.record_key})
+                                cursor.execute("""INSERT INTO wang_knowledge.review_events
+                                    (review_event_id,collection,object_id,object_revision,reviewer_kind,reviewer_id,
+                                     decision,reason,artifact) VALUES (%s,'claims',%s,%s,'system','claim-management-v2',
+                                     'source_revalidated',%s,%s::jsonb)""", (event_id, impact.record_key.split('/',1)[1],
+                                        state['revision'], impact.reason, canonical_json(proof)))
                 unresolved = cm.unresolved_after(parent['action_id'], materials['unresolved'], review)
                 for finding in candidate.findings:
                     unresolved[finding.identity(parent['action_id'])] = finding.model_dump(mode='json')
@@ -3435,8 +3485,9 @@ class PostgresKnowledgeStore:
                 value['findings'] = unresolved
                 parent.setdefault('finding_occurrences', {})[round_id + ':' + stage] = {
                     'receipt': receipt_binding, 'findings': unresolved}
-                report_only = materials['request']['operation'] == 'Review' and not materials['request']['confirm_current']
-                if materials['request']['operation'] == 'Review' and unresolved:
+                source_impact = cm.is_source_impact(materials['request'])
+                report_only = materials['request']['operation'] == 'Review' and not materials['request']['confirm_current'] and not source_impact
+                if materials['request']['operation'] == 'Review' and unresolved and not source_impact:
                     # A formal read-only Review still protects current use.
                     # Register its exact finding and affected run obligations
                     # atomically; preserve the actual content and old reports.
@@ -3460,7 +3511,7 @@ class PostgresKnowledgeStore:
                     value['outcome'] = 'reported'
                     value['blocked_current_claim_ids'] = value['claim_ids'] if unresolved else []
                 elif not passed:
-                    reason = cm.failure_reason(unresolved)
+                    reason = 'disagreement' if value.get('source_impact_disagreement') else cm.failure_reason(unresolved)
                     value['outcome'] = reason
                     parent['result'] = {'status': 'paused' if reason != 'revision_required' else 'running', 'reason': reason,
                                         'unit_id': value['unit_id'], 'round_id': round_id}
@@ -3488,7 +3539,7 @@ class PostgresKnowledgeStore:
 
     def finish_claim_management_action(self, action_run_id):
         """Program-only final coverage/currentness check; no extra model audit."""
-        from backend.pipeline.claim_management import goal_satisfied
+        from backend.pipeline.claim_management import goal_satisfied, is_source_impact
         from backend.pipeline.cvp_sql_flow import decoded_pins
         with self.connect() as conn, conn.cursor() as cursor:
             cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
@@ -3499,8 +3550,11 @@ class PostgresKnowledgeStore:
             units = value['original_goal']['units']
             if set(value['latest_rounds']) != set(units):
                 raise ChangeSetConflict('whole Claim action still has an unreviewed original unit')
-            report_only = value['request']['operation'] == 'Review' and not value['request']['confirm_current']
+            source_impact = is_source_impact(value['request'])
+            report_only = value['request']['operation'] == 'Review' and not value['request']['confirm_current'] and not source_impact
             observed = {}
+            source_impacts = {}
+            source_revalidations = set()
             for unit, rid in value['latest_rounds'].items():
                 child = cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE", (rid,)).fetchone()[0]
                 if child.get('outcome') != ('reported' if report_only else 'completed'):
@@ -3512,12 +3566,23 @@ class PostgresKnowledgeStore:
                     self._assert_claim_management_scope(cursor, decoded_pins(child['audited_pins']), records=current)
                     observed.update({col + '/' + oid: {**state, 'retired': state['retired_at'] is not None}
                                      for (col, oid), state in current.items()})
+                if source_impact:
+                    owned = set(child['materials']['original_goal']['target_keys'])
+                    source_impacts.update({item['record_key']: item for item in child.get('source_impacts', [])
+                                           if item['record_key'] in owned})
+                    source_revalidations.update(set(child.get('source_revalidations', {})) & owned)
             if not report_only:
-                if value['findings']:
+                if value['findings'] and not source_impact:
                     raise ChangeSetConflict('whole Claim action retains unresolved stable findings')
                 goal_satisfied(value['original_goal'], observed, value.get('replacements', {}))
-            value['result'] = {'status': 'completed', 'qualification_confirmed': not report_only,
+            value['result'] = {'status': 'completed', 'qualification_confirmed': not report_only and not source_impact,
                                'original_target_keys': value['original_goal']['target_keys']}
+            if source_impact:
+                value['result']['source_impact_reviewed'] = True
+                value['result']['pending_maintenance'] = bool(value['findings'])
+                value['result']['pending_content_review_keys'] = sorted(key for key, item in source_impacts.items()
+                    if item['conclusion'] == 'unaffected' and key not in source_revalidations)
+                value['result']['source_revalidated_keys'] = sorted(source_revalidations)
             cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,status='succeeded',finished_at=now(),heartbeat_at=now() WHERE run_id=%s",
                            (canonical_json(value), action_run_id))
         return value['result']
@@ -3560,6 +3625,7 @@ class PostgresKnowledgeStore:
         reads necessary current pins, not an ancestor chain or whole Registry.
         """
         from backend.pipeline.cvp_sql_flow import check_binding, decoded_pins
+        from backend.pipeline.claim_management import is_source_impact
         with self.connect() as conn, conn.cursor() as cursor:
             rows = cursor.execute("""SELECT run_id,metadata FROM wang_knowledge.pipeline_runs
                 WHERE metadata->>'kind'='claim_management_round' AND metadata->'claim_ids' ? %s
@@ -3577,6 +3643,26 @@ class PostgresKnowledgeStore:
                                            (claim_id,)).fetchone()
                     if found and state == (found['revision'], found['content_sha256']):
                         return {'ready': False, 'reason': 'formal_review_findings', 'run_id': rid}
+                revalidation = value.get('source_revalidations', {}).get('claims/' + claim_id)
+                if is_source_impact(value['materials']['request']):
+                    if 'claims/' + claim_id not in value['materials']['original_goal']['target_keys']:
+                        continue
+                    if not revalidation:
+                        return {'ready': False, 'reason': 'source_impact_requires_maintenance_or_content_review', 'run_id': rid}
+                    try:
+                        for bound in [*revalidation['source_bindings'].values(), revalidation['impact_audit'],revalidation['content_audit']]:
+                            check_binding(bound)
+                        records = self._assert_transaction_read_pins(cursor, decoded_pins(revalidation['current_pins']))
+                        self._assert_claim_management_scope(cursor, decoded_pins(revalidation['current_pins']), records=records)
+                    except (ValueError, ChangeSetConflict):
+                        return {'ready': False, 'reason': 'source_revalidation_drift', 'run_id': rid}
+                    state = records.get(('claims', claim_id))
+                    if not state or state['retired_at'] or state['payload'].get('review_status') in {
+                            'human_hold','human_review_required','withheld_unreviewed','rejected','superseded'}:
+                        return {'ready': False, 'reason': 'source_revalidation_held', 'run_id': rid}
+                    return {'ready': True, 'run_id': rid, 'revision': state['revision'],
+                        'content_sha256': state['content_sha256'], 'audit': revalidation['impact_audit'],
+                        'content_audit': revalidation['content_audit'], 'question_scope': revalidation['question_scope']}
                 if value.get('outcome') != 'completed' or not value.get('independent_audit_complete'):
                     continue
                 try:
@@ -7877,7 +7963,8 @@ class PostgresKnowledgeStore:
             writes = validate_claim_management_package(retirement_package)
             if {(o.collection,o.object_id) for o in plan.operations} != set(writes):
                 raise ChangeSetConflict('Claim pending consumers lack the exact reviewed write set')
-            before = body(read(Path(app['materials']['path'])))['before']
+            material = body(read(Path(app['materials']['path'])))
+            before = material.get('transaction_before', material['before'])
             pending = set(app['pending_consumers'])
             retired_ids = {o.object_id for o in plan.operations if o.operation == 'retire'}
             checked = []
