@@ -180,3 +180,13 @@ E006／OBS004 的冠词疑点依然待人工核对，与 CL008 中的 OBS009 问
 CL002 当前资格 run 为 `CMR-d93e05b0280c834516452f4ff84cfd1e2dd422d5d80f552f11459341d3da184f`，CL003 为 `CMR-e2dd4d1c087d4c8df55f523f5c5047b85eecf79e292d6a72d294fcd5a314ac1f`，均为 audited／completed、`opus_and_program_readback`，明确 `independent_audit_complete=false`。两条实际结果保存于 `claim-management-435/son-of-man-revalidate-two-sequential-20261014-v1/CL002/single-update-result.json` 及对应 CL003 目录。
 
 执行后再次读取本组当前状态：CL002–CL008 七条未连接 CVP 的 Claim 均 ready；CL006 为 revision 2，其余为 revision 1；CL001 仍因已连接 CVP 而未处理。汇总保存为同一运行根目录的 `group-status-after-revalidation.json`。E006／OBS004／OBS009 的旧冠词人工核对问题及原回答仍保留，未以本次通过结果冒称解决。本组目标 Claim 的当前资格确认完成，不代表所有来源人工问题或整体 #435 完成；未合并或部署。
+
+## 两条不同来源的并行 Update（2026-10-14）
+
+负责人要求并行处理两条。上一组七条未连接 CVP 的 Claim 已全部完成当前资格确认，因此从其他「人子」材料选择尚无 2.0 当前资格、未连接 CVP 的 `DK-07e99f606211a0a4a17a-P04-CL003`（2021《多2–3靠恩典活》，耶稣使用人子称号时带定冠词）与 `DK-fa35f8b5f08e-P02-CL004`（2012《马太福音释经（三）》第一讲，但以理书七章人子的神性）。本次冻结实现为 `200df2b`，没有修改实现或 prompt。
+
+启动前读取完整上下文，审核分母／transaction pins 分别为 36／36 与 42／42；两个目标均不在另一个 worker 的读范围内。父 controller 持有既有 host maintenance／registry 锁，两个独立子进程并行调用原 Update runner，各自原始输入、权限、预算、预留、模型 raw 和执行根分开；SQL 仍沿共同短事务锁提交。两个 Opus 请求预留均出现且回答尚未返回的阶段已实测，没有用两次顺序调用冒充并行。
+
+两条均为 audited／completed、当前资格 ready，分别保持原 revision 1／3，内容写集为空，没有内容 ChangeSet。Opus 各调用一次，实际请求为 124,422／119,265 bytes；完成重入无新调用。没有 GPT、Gemini 或全库备份，也没有改写来源原稿。汇总保存于 `claim-management-435/son-of-man-two-parallel-20261014-v1/parallel-result.json`，原计划、两个 worker 日志与单条结果保留在同一目录。
+
+2021 目标的 Opus 无 findings。2012 目标有两项 context_findings：E019 的摘要「不是普通人」可能弱化原文「不是人」；ER011 把定冠词观察的 supports 目标指到 E019，而其实际论证作用可能对应 E018／E021。独立审阅说明这两项不改变 CL004 的神性主张及正确逐字依据，因此目标可以完成；它们仍是未解决的上下文异议，未交 GPT 回应或修订，不作为已经证实的错误或强制修改命令。没有因目标通过就抹掉异议，也没有宣称周边 cleanup 全部完成。旧冠词人工问题继续保留；整体 #435 尚未完成，未合并或部署。
