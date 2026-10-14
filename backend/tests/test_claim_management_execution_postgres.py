@@ -648,3 +648,37 @@ def test_explicit_schema_recovery_carries_budget_history_and_prevents_fork(actio
     write(failed, {'provider_raw':{'last_message':'partial','stdout':'','stderr':'ERROR: '+json.dumps({
         'status':400,'error':{'code':'invalid_json_schema','param':'text.format.schema'}})}}, immutable=False)
     with pytest.raises(ValueError,match='proven pre-generation'):cm.continuation_budget(previous,next_request,reduced)
+
+
+def test_reviewed_consumer_pin_recovery_reuses_model_results_and_plan(action,monkeypatch):
+    store, _, _, _, tmp_path, _ = action
+    seed_claims(store,['C','D'])
+    request,root=operation_request(action,'Update',['C'])
+    request.policy=cm.source.FileBinding.model_validate(binding(cm.DEFAULT_POLICY))
+    auth_path=Path(request.authorization.path);auth=json.loads(auth_path.read_text())
+    auth['policy']=request.policy.model_dump(mode='json');auth_path.write_text(json.dumps(auth))
+    request.authorization=cm.source.FileBinding.model_validate(binding(auth_path))
+    affected=store._affected_cvp_context
+    def extra_consumer(conn,keys):
+        records=affected(conn,keys)
+        records['claims','D']=store.get_record_state('claims','D')
+        return records
+    monkeypatch.setattr(store,'_affected_cvp_context',extra_consumer)
+    ports=SyntheticPorts(store,tmp_path,opus=lambda p:rejected(p) if p['round_number']==0 else passing(p),proposal=corrected)
+    result=execute_claim_management(store,request,root=root,ports=ports)
+    assert result['detail']=='transaction omitted a current affected consumer',result
+    parent=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id));rid=next(iter(parent['latest_rounds'].values()))
+    round_before=store.get_cvp_group(rid);assert round_before['checkpoint']=='reviewed'
+    from backend.pipeline.claim_transaction_readset_recovery import extend_reviewed_readset,VERSION
+    direction=tmp_path/'pin-recovery-direction.json';direction.write_text(json.dumps({'schema_version':VERSION,
+        'run_id':rid,'reviewed_sha256':round_before['reviewed_sha256'],'authorized_by':'owner',
+        'authorization_quote':'continue existing reviewed transaction','human_content_approval':False}))
+    digest=extend_reviewed_readset(store,rid,authorization=binding(direction))
+    round_after=store.get_cvp_group(rid)
+    assert round_after['reviewed']['plan']==round_before['reviewed']['plan']
+    assert round_after['candidate']==round_before['candidate']
+    assert round_after['stage_results']==round_before['stage_results']
+    assert extend_reviewed_readset(store,rid,authorization=binding(direction))==digest
+    assert execute_claim_management(store,request,root=root,ports=ports)['status']=='completed'
+    assert ports.calls==['opus','gpt','opus']
+    assert store.claim_management_qualification('C')['ready']
