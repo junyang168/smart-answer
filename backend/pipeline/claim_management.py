@@ -963,6 +963,58 @@ def failure_reason(findings):
     return "revision_required"
 
 
+def unaccepted_initial_review(previous, key, slot, proof):
+    """Authenticate a returned initial review without accepting its judgement."""
+    from backend.pipeline.source_reconciliation_runner import read, body, binding, validate_bound_call
+    from backend.pipeline.source_reconciliation_runtime import claim_management_model_adapter
+    from backend.pipeline.viewpoint_semantic_contract import semantic_prompt
+    from backend.api.canonical_repository.viewpoint_resolution import StructuredJsonReviewerAdapter
+    from backend.pipeline.cvp_sql_actions import claim_management_review_packet, validate_claim_candidate_origin
+    if set(proof) != {'raw','role_prompt'} or slot['role'] != 'opus' or slot['state'] != 'started':
+        raise ValueError('unaccepted review proof requires one returned initial Opus call')
+    root = Path(previous['execution_root']) / slot['round_id']
+    if proof['raw'] != binding(root/'opus.raw.json'):
+        raise ValueError('unaccepted review raw belongs to a different original call')
+    raw_path = source.verify_file(source.FileBinding.model_validate(proof['raw']))
+    prompt_path = source.verify_file(source.FileBinding.model_validate(proof['role_prompt']))
+    contract = previous['audit_contract']
+    if proof['role_prompt']['file_sha256'] != contract['implementation']['backend/pipeline/prompts/claim_management_review_v2.md']:
+        raise ValueError('unaccepted review prompt differs from its frozen implementation')
+    materials = body(read(root/'materials.json'))
+    policy = Policy.model_validate(previous['policy'])
+    if (materials['request'] != previous['request'] or materials['policy'] != previous['policy']
+            or materials['audit_contract'] != contract or materials['round_id'] != slot['round_id']
+            or materials['round_number'] != 0 or materials['roles'] != ['opus']
+            or key != slot['round_id'] + ':opus'):
+        raise ValueError('unaccepted review is not the unchanged initial Opus-only Update')
+    intent = body(read(root/'opus.reservation.json'))
+    if intent != slot['intent'] or sha256_json(intent) != slot['intent_sha256']:
+        raise ValueError('unaccepted review original reservation drift')
+    candidate = Candidate.model_validate(body(read(root/'candidate.json')))
+    validate_claim_candidate_origin(root, materials, policy, materials['sources'], candidate)
+    base = claim_management_model_adapter('opus', policy)
+    adapter = StructuredJsonReviewerAdapter(client=base._client, prompt=semantic_prompt(prompt_path.read_text()),
+        response_model=Review, schema_name='claim_management_review_v2', compact_payload=True,
+        shared_text_payload=True, shared_record_payload=True)
+    adapter.max_request_bytes = policy.budget.max_request_bytes
+    packet = claim_management_review_packet(materials, candidate)
+    raw = validate_bound_call(root, 'opus', packet, adapter)
+    review = Review.model_validate(raw['response'])
+    try:
+        validate_review(candidate, review, packet['denominator'], packet['required_questions'], materials['unresolved'],
+            materials['sources'], request=Request.model_validate(materials['unit_request']), records=materials['before'])
+    except ValueError as exc:
+        rejection = str(exc)
+        allowed = ('review denominator omitted/repeated', 'review did not cover', 'review must reconcile',
+            'review repeats a stable finding', 'rejected objects require concrete', 'finding contradicts an approved object')
+        if not rejection.startswith(allowed):
+            raise ValueError('unaccepted review is not a proved response contract failure') from exc
+    else:
+        raise ValueError('a valid review must use its ordinary recorded stage, not engineering continuation')
+    return {'raw':proof['raw'], 'role_prompt':proof['role_prompt'], 'rejection':rejection,
+        'review':review.model_dump(mode='json'), 'review_not_accepted':True, 'generation_consumed':True}
+
+
 def continuation_budget(previous, request, policy):
     """One explicitly authorized successor carries history and unspent budget.
 
@@ -986,12 +1038,23 @@ def continuation_budget(previous, request, policy):
         raise ValueError('continuation cannot discard original write obligations')
     spent = {role:0 for role in MODELS}
     failures = {}
+    unaccepted = {}
+    prior_findings = {**deepcopy(previous.get('context_findings', {})), **deepcopy(previous['findings'])}
+    authority = json.loads(source.verify_file(request.authorization).read_text())
+    recovery = authority.get('unaccepted_review_recovery', {})
     root = Path(previous['execution_root'])
     for key, slot in previous['call_reservations'].items():
         if slot['state'] in {'planned','cancelled'}:
             continue
         if slot['state'] == 'completed':
             spent[slot['role']] += 1
+            continue
+        if key in recovery:
+            value = unaccepted_initial_review(previous, key, slot, recovery[key])
+            unaccepted[key] = value
+            spent[slot['role']] += 1
+            for finding in Review.model_validate(value['review']).findings:
+                prior_findings[finding.identity(old.action_id)] = finding.model_dump(mode='json')
             continue
         failure_path = root / slot['round_id'] / (slot['role'] + '.failure.json')
         if slot['role'] != 'gpt' or not failure_path.is_file() or (failure_path.parent / 'gpt.raw.json').exists():
@@ -1007,6 +1070,8 @@ def continuation_budget(previous, request, policy):
                        or e.get('error',{}).get('param') != 'text.format.schema' for e in errors)):
             raise ValueError('not a proven pre-generation Claim schema rejection')
         failures[key] = {'path':str(failure_path), 'file_sha256':hashlib.sha256(failure_path.read_bytes()).hexdigest()}
+    if set(recovery) != set(unaccepted):
+        raise ValueError('unaccepted recovery contains an unbound or already recorded call')
     remaining = {role:original.budget.limit(role)-spent[role] for role in MODELS}
     if (policy.models != original.models or policy.independent_audit != original.independent_audit
             or policy.review_purpose != original.review_purpose
@@ -1018,7 +1083,7 @@ def continuation_budget(previous, request, policy):
     if not policy.budget.gpt_calls or not policy.budget.opus_calls:
         raise ValueError('original remaining budget cannot fund correction and review')
     return {'predecessor_action_id':old.action_id, 'original_goal':deepcopy(previous['original_goal']),
-        'prior_findings':deepcopy(previous['findings']), 'prior_call_reservations':deepcopy(previous['call_reservations']),
+        'prior_findings':prior_findings, 'unaccepted_reviews':unaccepted, 'prior_call_reservations':deepcopy(previous['call_reservations']),
         'pre_generation_schema_rejections':failures, 'spent_generations':spent, 'remaining_generations':remaining}
 
 

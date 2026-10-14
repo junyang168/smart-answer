@@ -739,3 +739,60 @@ def test_revision_reconciles_context_findings_and_does_not_report_resolved_conte
         assert bool(parent.get('context_findings'))==(resolution=='persistent')
         assert not parent['findings']
     assert ports.calls==['opus','gpt','opus']
+
+
+def test_unaccepted_initial_review_continuation_consumes_budget_and_keeps_raw_issues(action):
+    store,_,_,_,tmp_path,_=action
+    seed_claims(store,['C'])
+    request,root=operation_request(action,'Update',['C'])
+    request.policy=cm.source.FileBinding.model_validate(binding(cm.DEFAULT_POLICY))
+    auth_path=Path(request.authorization.path);auth=json.loads(auth_path.read_text())
+    auth['policy']=request.policy.model_dump(mode='json');auth_path.write_text(json.dumps(auth))
+    request.authorization=cm.source.FileBinding.model_validate(binding(auth_path))
+    def invalid(packet):
+        report=rejected(packet)
+        for v in report['verdicts']:
+            if v['record_key'].startswith('source_documents/'):
+                v.update(approved=False,problems=['missing matching finding'])
+        return report
+    ports=SyntheticPorts(store,tmp_path,opus=invalid)
+    first=execute_claim_management(store,request,root=root,ports=ports)
+    assert first['reason']=='engineering_required' and 'concrete' in first['detail']
+    previous=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id))
+    rid=next(iter(previous['latest_rounds'].values()));round_root=root/rid
+    assert previous['call_reservations'][rid+':opus']['state']=='started'
+    assert not previous['findings']
+    frozen_prompt=tmp_path/'frozen-review.md'
+    frozen_prompt.write_bytes((Path(cm.__file__).parent/'prompts/claim_management_review_v2.md').read_bytes())
+    successor,next_root=operation_request(action,'Update',['C'])
+    successor.predecessor_action_id=request.action_id
+    reduced=cm.Policy.model_validate(previous['policy']);reduced.budget.opus_calls=1
+    policy_file=tmp_path/'remaining-invalid-review-policy.json';policy_file.write_text(reduced.model_dump_json())
+    successor.policy=cm.source.FileBinding.model_validate(binding(policy_file))
+    direction=Path(successor.authorization.path);authority=json.loads(direction.read_text())
+    authority.update(request=successor.model_dump(mode='json',exclude={'authorization','policy'}),
+        policy=successor.policy.model_dump(mode='json'),unaccepted_review_recovery={rid+':opus':{
+            'raw':binding(round_root/'opus.raw.json'),'role_prompt':binding(frozen_prompt)}})
+    direction.write_text(json.dumps(authority));successor.authorization=cm.source.FileBinding.model_validate(binding(direction))
+    proof=cm.continuation_budget(previous,successor,reduced)
+    assert proof['spent_generations']=={'gpt':0,'opus':1,'gemini':0}
+    assert proof['remaining_generations']['opus']==1
+    assert len(proof['prior_findings'])==1
+    assert proof['unaccepted_reviews'][rid+':opus']['review_not_accepted']
+    increased=reduced.model_copy(deep=True);increased.budget.opus_calls=2
+    with pytest.raises(ValueError,match='reset or increase'):cm.continuation_budget(previous,successor,increased)
+    def propose(packet):
+        assert packet['continuation']['unaccepted_reviews'][rid+':opus']['review']['verdicts']
+        assert {f['target_key'] for f in packet['unresolved'].values()}=={'claims/C'}
+        return corrected(packet)
+    resumed=SyntheticPorts(store,tmp_path,proposal=propose)
+    result=execute_claim_management(store,successor,root=next_root,ports=resumed)
+    assert result['status']=='completed',result
+    assert resumed.calls==['gpt','opus']
+    assert execute_claim_management(store,successor,root=next_root,ports=resumed)==result
+    assert resumed.calls==['gpt','opus']
+    assert execute_claim_management(store,request,root=root,ports=ports)['reason']=='continued_in_linked_action'
+    assert store.get_cvp_group(previous['run_id'])['call_reservations'][rid+':opus']==previous['call_reservations'][rid+':opus']
+    # Changing an archived role prompt cannot authenticate the old answer.
+    frozen_prompt.write_text('changed role instruction')
+    with pytest.raises(ValueError):cm.continuation_budget(previous,successor,reduced)

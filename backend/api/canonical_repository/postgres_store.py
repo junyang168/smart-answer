@@ -3309,7 +3309,7 @@ class PostgresKnowledgeStore:
                 if prior.get('continued_by'):
                     raise ChangeSetConflict('original Claim action already has a continuation; no budget fork')
                 value['continuation'] = continuation
-                value['findings'] = prior['findings']
+                value['findings'] = continuation['prior_findings']
                 prior['continued_by'] = run_id
                 for slot in prior['call_reservations'].values():
                     if slot['state'] == 'planned':
