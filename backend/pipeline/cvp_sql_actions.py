@@ -432,6 +432,7 @@ def execute_claim_management(store, request, *, root, ports):
     from backend.pipeline import claim_management as cm
     from backend.pipeline.source_reconciliation_runner import exclusive, Stop
     request = cm.Request.model_validate(request)
+    read_context = store.read_affected_context if cm.is_source_impact(request) or request.operation == 'Create' else store.read_claim_context
     root = Path(root).resolve()
     if request.operation == 'Read':
         return {'status': 'completed', 'operation': 'Read', 'records': {
@@ -446,7 +447,7 @@ def execute_claim_management(store, request, *, root, ports):
             keys = {content.split_key(k) for k in request.target_keys}
             keys.update((p.collection, p.object_id) for p in request.permissions)
             keys.update(('source_documents', sid) for sid in request.source_bindings)
-            records = store.read_affected_context(sorted(keys))
+            records = read_context(sorted(keys))
             before = {content.key(*k): cm.model_state(v) for k, v in records.items()}
             goal = cm.original_goal(request, before)
             parent = store.prepare_claim_management_action(request, goal=goal, read_pins=pins(records), root=root)
@@ -468,7 +469,7 @@ def execute_claim_management(store, request, *, root, ports):
                     prior = store.get_cvp_group(prior_id) if prior_id else None
                     if prior and prior.get('outcome') in {'completed','reported'}:
                         break
-                    if prior and prior.get('outcome') in {'human_required','engineering_required'}:
+                    if prior and prior.get('outcome') in {'human_required','engineering_required','permission_required'}:
                         return store.pause_claim_management_action(parent_id, reason=prior['outcome'], detail='Original finding requires its stated resolution')
                     new_round = prior is None or prior.get('outcome') == 'revision_required'
                     if new_round:
@@ -481,7 +482,7 @@ def execute_claim_management(store, request, *, root, ports):
                             keys.update((p.collection,p.object_id) for p in request.permissions)
                         # Root authority is fixed; only permissions reachable
                         # from this unit are presented as writable.
-                        records = store.read_affected_context(sorted(keys))
+                        records = read_context(sorted(keys))
                         for sid in {p.source_id for p in request.creation_permissions}:
                             if ('source_documents',sid) not in records:
                                 records['source_documents',sid] = store.get_record_state('source_documents',sid)
@@ -591,7 +592,7 @@ def execute_claim_management(store, request, *, root, ports):
                         candidate = cm.Candidate.model_validate(prior['candidate'])
                         roots = {content.split_key(k) for k in materials['before']}
                         roots.update(content.split_key(r.key) for r in candidate.records)
-                        actual = store.read_affected_context(sorted(roots))
+                        actual = read_context(sorted(roots))
                         states = {content.key(*k): v for k, v in actual.items()}
                         denominator = cm.audit_keys(cm.Request.model_validate(materials['unit_request']), states, candidate)
                         cm.require_full_sources(cm.Request.model_validate(materials['unit_request']), states, candidate,

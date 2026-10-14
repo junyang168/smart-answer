@@ -3495,7 +3495,24 @@ class PostgresKnowledgeStore:
                                      decision,reason,artifact) VALUES (%s,'claims',%s,%s,'system','claim-management-v2',
                                      'source_revalidated',%s,%s::jsonb)""", (event_id, impact.record_key.split('/',1)[1],
                                         state['revision'], impact.reason, canonical_json(proof)))
-                unresolved = cm.unresolved_after(parent['action_id'], materials['unresolved'], review)
+                unit_request = cm.Request.model_validate(materials['unit_request'])
+                unresolved = cm.unresolved_after(parent['action_id'], materials['unresolved'], review,
+                    request=unit_request, candidate=candidate)
+                context_findings = {f.identity(parent['action_id']): f.model_dump(mode='json') for f in review.findings
+                    if not cm.finding_blocks(f.model_dump(mode='json'), unit_request, candidate)}
+                if context_findings:
+                    value['context_findings'] = context_findings
+                    parent.setdefault('context_findings', {}).update(context_findings)
+                    # A directly rejected readonly Claim cannot keep a green
+                    # qualification at this exact version, even though it does
+                    # not block the independent target. No content is changed.
+                    rejected_claims = {v.record_key.split('/',1)[1] for v in review.verdicts
+                        if v.record_key.startswith('claims/') and (not v.approved or v.problems)
+                        and any(f['target_key'] == v.record_key for f in context_findings.values())}
+                    if rejected_claims:
+                        self._assert_transaction_read_pins(cursor, pins({('claims',cid):materials['before']['claims/'+cid]
+                            for cid in rejected_claims}))
+                        value['blocked_current_claim_ids'] = sorted(set(value.get('blocked_current_claim_ids',[])) | rejected_claims)
                 for finding in candidate.findings:
                     unresolved[finding.identity(parent['action_id'])] = finding.model_dump(mode='json')
                 parent['findings'] = {k: v for k, v in parent['findings'].items() if k not in materials['unresolved']}
@@ -3511,11 +3528,18 @@ class PostgresKnowledgeStore:
                     # atomically; preserve the actual content and old reports.
                     self._assert_transaction_read_pins(cursor, pins({cm.source.split_key(k): v
                         for k, v in materials['before'].items()}))
-                    value['blocked_current_claim_ids'] = value['claim_ids']
+                    blocked = set(value.get('blocked_current_claim_ids', []))
+                    for finding in unresolved.values():
+                        affected = finding.get('affected_target_keys')
+                        blocked.update(value['claim_ids'] if affected is None else
+                            [key.split('/',1)[1] for key in affected if key.startswith('claims/')])
+                        if finding['target_key'].startswith('claims/'):
+                            blocked.add(finding['target_key'].split('/',1)[1])
+                    value['blocked_current_claim_ids'] = sorted(blocked)
                     affected = cursor.execute("""SELECT run_id,metadata FROM wang_knowledge.pipeline_runs
                         WHERE stage='cvp_group' AND run_id<>%s AND metadata->>'checkpoint'='audited'
                           AND metadata->'claim_ids' ?| %s ORDER BY run_id FOR UPDATE""",
-                        (round_id, value['claim_ids'])).fetchall()
+                        (round_id, value['blocked_current_claim_ids'])).fetchall()
                     value['affected_run_ids'] = [run for run, _ in affected]
                     for run, consumer in affected:
                         consumer.update(independent_audit_complete=False, revisit_required=True)
@@ -3527,12 +3551,19 @@ class PostgresKnowledgeStore:
                     current_pins = pins({cm.source.split_key(k): v for k, v in materials['before'].items()})
                     self._assert_transaction_read_pins(cursor, current_pins)
                     value['outcome'] = 'reported'
-                    value['blocked_current_claim_ids'] = value['claim_ids'] if unresolved else []
+                    value.setdefault('blocked_current_claim_ids', [])
                 elif not passed:
                     reason = 'disagreement' if value.get('source_impact_disagreement') else cm.failure_reason(unresolved)
+                    if reason == 'revision_required' and materials['request']['operation'] != 'Review':
+                        writable = {p.key for p in unit_request.permissions}
+                        writable.update(parent['created_keys'])
+                        if any(f['target_key'] not in writable for f in unresolved.values()):
+                            reason = 'permission_required'
                     value['outcome'] = reason
                     parent['result'] = {'status': 'paused' if reason != 'revision_required' else 'running', 'reason': reason,
                                         'unit_id': value['unit_id'], 'round_id': round_id}
+                    if reason == 'permission_required':
+                        parent['result']['required_write_keys'] = sorted({f['target_key'] for f in unresolved.values()} - writable)
                 elif stage in {'audit','readback'}:
                     value.update(outcome='completed', checkpoint='audited')
                     created = [d.record_key for d in candidate.dispositions if d.action == 'create']
@@ -3597,6 +3628,8 @@ class PostgresKnowledgeStore:
                 goal_satisfied(value['original_goal'], observed, value.get('replacements', {}))
             value['result'] = {'status': 'completed', 'qualification_confirmed': not report_only and not source_impact,
                                'original_target_keys': value['original_goal']['target_keys']}
+            if value.get('context_findings'):
+                value['result']['context_findings'] = value['context_findings']
             if not Policy.model_validate(value['policy']).independent_audit_required:
                 value['result']['validation_kind'] = 'opus_and_program_readback'
                 value['result']['independent_audit_complete'] = False
@@ -3628,18 +3661,14 @@ class PostgresKnowledgeStore:
 
     def _assert_claim_management_scope(self, cursor, read_pins, *, records=None):
         """New shared owners/relations must not hide behind unchanged row pins."""
-        from backend.pipeline.claim_management import CLAIM_COLLECTIONS, domain_dependencies
+        from backend.pipeline.claim_management import CLAIM_COLLECTIONS
         if records is None:
             records = self._assert_transaction_read_pins(cursor, read_pins)
         payloads = {col + '/' + oid: state['payload'] for (col, oid), state in records.items()}
-        ids = sorted(oid for col, oid in read_pins if col in CLAIM_COLLECTIONS)
-        for col, oid, payload in self._reference_consumers(cursor, ids, sorted(CLAIM_COLLECTIONS)):
-            key = col + '/' + oid
-            refs = domain_dependencies(col, payload, payloads)
-            if col == 'evidence_steps':
-                refs.update('claims/' + cid for cid in payload.get('produced_claim_ids', []))
-            if key not in payloads and refs & set(payloads):
-                raise ChangeSetConflict('Claim audit omitted a current shared owner or relation: ' + key)
+        keys = {key for key in read_pins if key[0] in CLAIM_COLLECTIONS}
+        for col, oid in self._claim_reference_consumers(cursor, keys):
+            if col + '/' + oid not in payloads:
+                raise ChangeSetConflict('Claim audit omitted a current shared owner or relation: ' + col + '/' + oid)
 
     def claim_management_qualification(self, claim_id):
         """Exact current v2 qualification, or None for untouched legacy content.
@@ -5376,14 +5405,13 @@ class PostgresKnowledgeStore:
         if not ids or not collections:return []
         # Equality jsonpath predicates use the existing payload GIN index. The
         # validators still check actual named fields; no fuzzy text matching.
-        # One indexed jsonpath disjunction is equivalent to the previous OR
-        # of predicates, without hundreds of separate planner branches for a
-        # real source's fragments. Keep exact JSON equality and the caller's
-        # named-business-reference filter; this is not a text search.
-        predicate = "$.** ? (" + " || ".join("@ == " + json.dumps(oid) for oid in ids) + ")"
+        # Keep each path small. One enormous recursive OR becomes very slow
+        # on real payloads; ANY retains the same exact JSON equality without
+        # embedding every ID in every recursive predicate evaluation.
+        predicates = ["$.** ? (@ == " + json.dumps(oid) + ")" for oid in ids]
         cursor.execute("SELECT collection,object_id,payload FROM wang_knowledge.objects "
-                       "WHERE retired_at IS NULL AND collection=ANY(%s) AND payload @? %s::jsonpath "
-                       "ORDER BY collection,object_id", (list(collections),predicate))
+                       "WHERE retired_at IS NULL AND collection=ANY(%s) AND payload @? ANY(%s::jsonpath[]) "
+                       "ORDER BY collection,object_id", (list(collections),predicates))
         return cursor.fetchall()
 
     def read_affected_context(self, keys):
@@ -5395,6 +5423,82 @@ class PostgresKnowledgeStore:
         """
         with self.connect() as conn:
             return self._affected_cvp_context(conn,keys)
+
+    @staticmethod
+    def _claim_reference_consumers(cursor, current):
+        from backend.pipeline.claim_management import RELATION_COLLECTIONS
+        ids = sorted(oid for _, oid in current)
+        cursor.execute('''SELECT edge_collection,edge_id FROM wang_knowledge.edges
+            WHERE retired_at IS NULL AND edge_collection=ANY(%s)
+            AND (from_id=ANY(%s) OR to_id=ANY(%s))''', (sorted(RELATION_COLLECTIONS),ids,ids))
+        consumers = set(cursor.fetchall())
+        needles = set()
+        for col, oid in current:
+            if col == 'claims':
+                needles.update((c,canonical_json({field:[oid]})) for c,field in
+                    [('evidence_steps','produced_claim_ids'),('questions','answer_claim_ids')])
+            if col in {'evidence_steps','position_nodes'}:
+                field = 'evidence_step_ids' if col == 'evidence_steps' else 'opposed_position_ids'
+                needles.add(('claims',canonical_json({field:[oid]})))
+            if col == 'source_fragments':
+                for owner in ('claims','evidence_steps','observations','questions','position_nodes'):
+                    needles.add((owner,canonical_json({'source_fragment_ids':[oid]})))
+                    needles.add((owner,canonical_json({'source_fragment_id':oid})))
+        if needles:
+            ordered = sorted(needles)
+            cursor.execute('''SELECT DISTINCT o.collection,o.object_id
+                FROM unnest(%s::text[],%s::jsonb[]) AS n(collection,body)
+                JOIN wang_knowledge.objects o ON o.collection=n.collection AND o.payload @> n.body
+                WHERE o.retired_at IS NULL''',
+                ([c for c,_ in ordered],[body for _,body in ordered]))
+            consumers.update(cursor.fetchall())
+        return consumers
+
+    def read_claim_context(self, keys):
+        """Fixed point of Claim dependencies, using existing edges and payload GIN.
+
+        Forward-loaded evidence has incoming relations too. Source documents
+        are version pins, not an instruction to read every Claim in the source.
+        """
+        import time
+        from types import SimpleNamespace
+        from backend.pipeline.claim_management import CLAIM_COLLECTIONS, audit_keys
+        scope = SimpleNamespace(target_keys=[col+'/'+oid for col,oid in keys if col in CLAIM_COLLECTIONS], permissions=[])
+        roots = {}
+        for col, oid in keys:
+            roots.setdefault(col, {})[oid] = {'id': oid}
+        scanned = set()
+        started = time.monotonic()
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute('SET LOCAL statement_timeout=5000')
+            while True:
+                records = self._existing_cvp_context(conn, roots)
+                # CVP transaction context can contain other members. They
+                # remain pins, not roots for another Claim content expansion.
+                denominator = audit_keys(scope, {col+'/'+oid:state for (col,oid),state in records.items()})
+                current = {tuple(key.split('/',1)) for key in denominator if key.split('/',1)[0] in CLAIM_COLLECTIONS} - scanned
+                if not current:
+                    return records
+                scanned.update(current)
+                consumers = self._claim_reference_consumers(cursor, current)
+                # Transaction consumers remain read pins/pending obligations;
+                # they are not added to the Claim content audit denominator.
+                # Keep the general reader's named-reference semantics for the
+                # smaller downstream collections, not the Claim corpus.
+                downstream = set(SEMANTIC_REFERENCE_COLLECTIONS) - CLAIM_COLLECTIONS
+                downstream.add('product_dependencies')
+                ids = sorted(oid for _,oid in current)
+                for col,oid,payload in self._reference_consumers(cursor,ids,sorted(downstream)):
+                    if self._record_reference_ids(payload) & set(ids):
+                        consumers.add((col,oid))
+                for col, oid in consumers:
+                    roots.setdefault(col,{})[oid] = {'id':oid}
+                # Keep forward records as roots, so reverse scanning never
+                # drops a dependency discovered in the preceding iteration.
+                for (col,oid), state in records.items():
+                    roots.setdefault(col,{})[oid] = state['payload']
+                if time.monotonic() - started > 5:
+                    raise ValueError('Claim dependency closure exceeds existing readset budget')
 
     def _affected_cvp_context(self,conn,keys):
         import time

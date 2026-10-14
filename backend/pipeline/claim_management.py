@@ -178,6 +178,22 @@ class Finding(source.Contract):
     reason: str = Field(min_length=1)
     acceptance_condition: str = Field(min_length=1)
     human_question: str | None = None
+    affected_target_keys: list[str] | None = None
+    impact_reason: str | None = None
+
+    @model_validator(mode='after')
+    def actionable_source_question(self):
+        if self.category == 'source_uncertain' and not (self.human_question or '').strip():
+            raise ValueError('source_uncertain requires a concrete human question')
+        return self
+
+    @model_serializer(mode='wrap')
+    def historical_shape(self, handler):
+        result = handler(self)
+        for name in ('affected_target_keys', 'impact_reason'):
+            if result[name] is None:
+                result.pop(name)
+        return result
 
     def identity(self, action_id: str) -> str:
         # Version and explanation remain occurrence data. A correction cannot
@@ -206,6 +222,41 @@ class Candidate(source.Contract):
     @property
     def digest(self) -> str:
         return sha256_json(self.model_dump(mode="json"))
+
+
+class JsonCandidateRow(source.Contract):
+    collection: str
+    object_id: str
+    payload_json: str
+
+
+class JsonCandidate(source.Contract):
+    """Closed provider schema; arbitrary record fields travel as lossless JSON."""
+    records: list[JsonCandidateRow]
+    dispositions: list[ObjectDisposition]
+    replacements_json: str
+    findings: list[Finding]
+    operation: Operation | None = None
+
+
+def decode_candidate(raw):
+    if 'replacements_json' not in raw:
+        return raw
+    wire = JsonCandidate.model_validate(raw)
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('duplicate Candidate JSON field: ' + key)
+            result[key] = value
+        return result
+    def decode(value):
+        return json.loads(value, object_pairs_hook=unique)
+    return {'records': [{'collection': r.collection, 'object_id': r.object_id,
+                         'payload': decode(r.payload_json)} for r in wire.records],
+            'dispositions': [d.model_dump(mode='json') for d in wire.dispositions],
+            'replacements': decode(wire.replacements_json),
+            'findings': [f.model_dump(mode='json') for f in wire.findings], 'operation': wire.operation}
 
 
 class FindingResolution(source.Contract):
@@ -488,6 +539,7 @@ def validate_review(candidate, review, expected_keys, questions, unresolved, sou
         if finding.target_key not in expected_keys:
             raise ValueError("review finding outside its declared denominator")
         validate_citations(finding.citations, sources)
+        finding_blocks(finding.model_dump(mode='json'), request, candidate)
     for resolution in review.prior_findings:
         validate_citations(resolution.citations, sources)
     rejected = {v.record_key for v in review.verdicts if not v.approved or v.problems}
@@ -498,18 +550,39 @@ def validate_review(candidate, review, expected_keys, questions, unresolved, sou
         raise ValueError("rejected objects require concrete current or persistent findings")
     if request is not None and is_source_impact(request):
         return validate_source_impacts(review, expected_keys, sources, request=request, records=records, unresolved=unresolved)
-    return (all(v.approved and not v.problems for v in review.verdicts)
-            and not review.findings
+    blocking = [f for f in review.findings if finding_blocks(f.model_dump(mode='json'), request, candidate)]
+    context_rejections = {f.target_key for f in review.findings if f not in blocking}
+    return (all(v.approved and not v.problems or v.record_key in context_rejections for v in review.verdicts)
+            and not blocking
             and all(r.disposition == "resolved" for r in review.prior_findings))
 
 
-def unresolved_after(action_id, previous, review):
+def finding_blocks(finding, request=None, candidate=None):
+    """Reviewer explains target impact; absence preserves conservative old reviews."""
+    affected = finding.get('affected_target_keys')
+    if request is None or is_source_impact(request) or affected is None:
+        return True
+    targets = set(request.target_keys)
+    if candidate:
+        targets.update(d.record_key for d in candidate.dispositions if d.action == 'create' and d.record_key.startswith('claims/'))
+    if len(affected) != len(set(affected)) or not set(affected) <= targets or not (finding.get('impact_reason') or '').strip():
+        raise ValueError('finding requires exact authorized target impact and explanation')
+    written = {d.record_key for d in candidate.dispositions if d.action != 'retain'} if candidate else set()
+    if not affected and finding['target_key'] in targets | written:
+        raise ValueError('target or actual write finding cannot be dismissed as readonly context')
+    if finding['target_key'] in targets and finding['target_key'] not in affected:
+        raise ValueError('finding on a target must include that target in its impact')
+    return bool(affected)
+
+
+def unresolved_after(action_id, previous, review, *, request=None, candidate=None):
     result = deepcopy(previous)
     for resolution in review.prior_findings:
         if resolution.disposition == "resolved":
             result.pop(resolution.finding_id, None)
     for finding in review.findings:
-        result[finding.identity(action_id)] = finding.model_dump(mode="json")
+        if finding_blocks(finding.model_dump(mode='json'), request, candidate):
+            result[finding.identity(action_id)] = finding.model_dump(mode="json")
     return result
 
 
@@ -855,7 +928,7 @@ def normalize_candidate(raw, sources):
     The original GPT response stays immutable. This projection changes only
     three derived hash fields of explicitly proposed own-source fragments.
     """
-    original = Candidate.model_validate(raw)
+    original = Candidate.model_validate(decode_candidate(raw))
     result = original.model_copy(deep=True)
     changes = []
     for row in result.records:

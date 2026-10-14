@@ -8,6 +8,8 @@ program_owned_fields 声明的来源、段落及引文 SHA 由程序据完整原
 
 新问题写入 findings：目标、component、类别、逐字 citations、实质影响、acceptance_condition。不要只有笼统拒绝；每个拒绝必须有可修复的具体 finding。对 unresolved 的每个 finding_id 恰好给一次 prior_findings 处置，resolved 必须从当前原文/实际修正证明，仍有同一问题标 persistent，已结案又出现标 reopened，不用改措辞重新消耗预算。
 
+普通内容审核的每个 finding 必须填写 affected_target_keys 和 impact_reason：前者只列本轮 unit_request.target_keys 或本轮新建 Claim 中实际受该问题影响的目标，后者说明问题怎样改变其主张、归属、承重证据或本次修改。只读上下文有问题，但不影响本轮目标及实际写入时，列表为空并说明为何不影响；仍拒绝那个有问题的上下文对象，不能为让任务通过而隐瞒。共享 owner、同篇来源、图上相连或另一 Claim 的独立论据，不自动构成当前目标的阻断理由。目标自身或本轮实际写入对象的问题不得标成无影响。原文疑点只阻断实际依赖该疑点的目标；不要求当前目标替整篇来源解决所有问题。修关系应改错的关系，不为迁就关系给正确 Claim 添加原本没有的独立命题。
+
 特别检查原文本身是否错字、漏文、身份或归属不明、无法据原文裁定的矛盾。须标 source_uncertain，给出准确段落和引文、明确 human_question；在人工处理前拒绝其受影响内容。不要擅自校正原文或把自身常识当作教授立场。缺资料、schema 错误、权限不足是工程/权限问题，不交给人作神学裁决。
 
 一次候选通过仅表示本轮 Opus 审阅通过。不得宣布动作完成、独立 Gemini 审计通过或人工批准。被拒后允许在同一 action 剩余预算内多轮实际修正；你仍只判断眼前精确候选。澄清时 candidate 不变，只评估自身原先 finding 与新引用证据；持续异议保留拒绝，不追加预算。

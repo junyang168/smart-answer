@@ -92,7 +92,7 @@ def model_adapter(stage: str, *, live: bool = False, deferred: bool = False, iss
 
 def claim_management_model_adapter(role, policy, *, live=False):
     """The new content contract shares the existing subscription transport."""
-    from backend.pipeline.claim_management import Candidate, Review, MODELS
+    from backend.pipeline.claim_management import JsonCandidate, Review, MODELS
     if role not in {"gpt", "opus"}:
         raise ValueError("independent Gemini audit uses audit-library's own transport")
     model, _ = MODELS[role]
@@ -102,8 +102,10 @@ def claim_management_model_adapter(role, policy, *, live=False):
     client.max_output_tokens = policy.budget.max_output_tokens
     prompt = semantic_prompt((PROMPTS / ("claim_management_proposal_v2.md" if role == "gpt"
                                           else "claim_management_review_v2.md")).read_text())
+    if role == 'gpt':
+        prompt += '\n输出采用无损 JSON 协议：records 每条 payload_json 为完整后像的 JSON 字符串；replacements_json 为完整 replacements 字典的 JSON 字符串（无替换时为 {}）。程序解析后仍执行完整 Candidate 权限、来源与处置验证，不删字段。'
     adapter = StructuredJsonReviewerAdapter(client=client, prompt=prompt,
-        response_model=Candidate if role == "gpt" else Review,
+        response_model=JsonCandidate if role == "gpt" else Review,
         schema_name="claim_management_candidate_v2" if role == "gpt" else "claim_management_review_v2",
         compact_payload=True, shared_text_payload=True, shared_record_payload=True)
     adapter.max_request_bytes = policy.budget.max_request_bytes

@@ -517,3 +517,77 @@ def test_structural_operations_commit_once_preserve_history_and_original_goal(ac
     child = store.get_cvp_group(next(iter(parent['latest_rounds'].values())))
     history = store.get_change_history(child['change_set_ids'][0])
     assert len({(v['collection'],v['object_id']) for v in history['operations']}) == len(history['operations'])
+
+
+@pytest.mark.parametrize('operation',['Update','Review'])
+def test_readonly_source_doubt_is_recorded_without_blocking_independent_target(action,operation):
+    store, _, _, _, tmp_path, _ = action
+    seed_claims(store, ['C','D'])
+    store.apply_plan(store.plan_package({'package_id':'context-relation', 'claim_relations':[{
+        'claim_relation_id':'R', 'from_id':'C', 'to_id':'D', 'relation_type':'supports', 'reason':'synthetic context'}]}))
+    prior_request, prior_root = operation_request(action, 'Update', ['D'])
+    assert execute_claim_management(store,prior_request,root=prior_root,ports=SyntheticPorts(store,tmp_path))['status']=='completed'
+    assert store.claim_management_qualification('D')['ready']
+    request, root = operation_request(action, operation, ['C'])
+    def opus(packet):
+        result = passing(packet)
+        for v in result['verdicts']:
+            if v['record_key']=='claims/D':v.update(approved=False,problems=['source unclear'])
+        result['findings']=[{'target_key':'claims/D','component':'statement','category':'source_uncertain',
+            'citations':[{'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}],
+            'reason':'independent readonly claim uncertainty','acceptance_condition':'check source',
+            'human_question':'check recording for D','affected_target_keys':[],
+            'impact_reason':'D is readonly context; C has an independent clear statement'}]
+        return result
+    ports = SyntheticPorts(store,tmp_path,opus=opus,gemini=opus)
+    result=execute_claim_management(store,request,root=root,ports=ports)
+    assert result['status']=='completed',result
+    assert result['context_findings']
+    assert ports.calls==(['opus','gemini'] if operation=='Update' else ['opus'])
+    assert store.claim_management_qualification('C')['ready'] if operation=='Update' else store.claim_management_qualification('C') is None
+    assert store.claim_management_qualification('D')['reason']=='formal_review_findings'
+    assert execute_claim_management(store,request,root=root,ports=ports)==result
+
+
+def test_blocking_readonly_problem_stops_before_unauthorized_gpt_revision(action):
+    store, _, _, _, tmp_path, _ = action
+    seed_claims(store,['C','D'])
+    store.apply_plan(store.plan_package({'package_id':'context-relation', 'claim_relations':[{
+        'claim_relation_id':'R', 'from_id':'C', 'to_id':'D', 'relation_type':'supports', 'reason':'synthetic context'}]}))
+    request,root=operation_request(action,'Update',['C'])
+    def opus(packet):
+        result=passing(packet)
+        for v in result['verdicts']:
+            if v['record_key']=='claims/D':v.update(approved=False,problems=['dependency mapping'])
+        result['findings']=[{'target_key':'claims/D','component':'statement','category':'mapping',
+            'citations':[{'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}],
+            'reason':'must change readonly record','acceptance_condition':'fix D', 'human_question':None,
+            'affected_target_keys':['claims/C'],'impact_reason':'mapping misrepresents C'}]
+        return result
+    ports=SyntheticPorts(store,tmp_path,opus=opus)
+    result=execute_claim_management(store,request,root=root,ports=ports)
+    assert result['reason']=='permission_required',result
+    assert result['required_write_keys']==['claims/D']
+    assert ports.calls==['opus']
+    assert execute_claim_management(store,request,root=root,ports=ports)==result
+    assert ports.calls==['opus']
+
+
+def test_claim_reader_includes_incoming_relation_to_forward_loaded_evidence(action):
+    store, _, _, _, _, _ = action
+    store.apply_plan(store.plan_package({'package_id':'incoming-evidence',
+        'claims':[{'claim_id':'C','statement':'甲是假设。','claim_type':'exegesis',
+                   'occurrences':[{'source_id':'S','anchors':[]}], 'evidence_step_ids':['E']}],
+        'evidence_steps':[{'evidence_step_id':'E','statement':'甲是假设。','produced_claim_ids':['C']}],
+        'observations':[{'observation_id':'O','statement':'甲是假设。'}],
+        'knowledge_relations':[{'relation_id':'R','from_id':'O','to_id':'E','relation_type':'supports','reason':'synthetic premise'}]}))
+    records=store.read_claim_context([('claims','C')])
+    assert {('claims','C'),('evidence_steps','E'),('observations','O'),('knowledge_relations','R')} <= set(records)
+    # No recursive JSON wildcard search on the Claim read path.
+    original=store._reference_consumers
+    def downstream_only(cursor,ids,collections):
+        assert not set(collections) & cm.CLAIM_COLLECTIONS
+        return original(cursor,ids,collections)
+    store._reference_consumers=downstream_only
+    try: assert store.read_claim_context([('claims','C')])==records
+    finally: store._reference_consumers=original

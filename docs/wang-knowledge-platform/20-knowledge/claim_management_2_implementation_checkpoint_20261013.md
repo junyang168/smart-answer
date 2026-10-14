@@ -94,3 +94,15 @@ Audit 收据委托独立结果校验时，只读取一次实际来源；原先�
 旧 policy 未声明开关时保留原语义和序列化形状，已完成的两条 Argon 任务及其 raw、调用预算和独立审计记录不改写。此修改没有启动新模型或内容写入。
 
 相关回归为 **451 passed、43 skipped**。新增临时 PostgreSQL 用例覆盖关闭 Gemini 后的 Create、Update、Retire、Restore、Split、Merge，Gemini port 一旦调用即令测试失败；验证不预留 Gemini、真实 SQL 后像回读、当前资格明确标为 Opus／程序依据，以及完成重入不增加模型调用。旧独立终审、零预算拒绝和真实旧失败材料仍通过；文档检查仅有已知的无关 notes-to-sermon 锚点错误。
+
+## 三条并行试运行后的错误修正（2026-10-14）
+
+`son-of-man-three-opus-only-v1` 并行运行 CL004、CL005、CL008。三个 Opus 回答均认可目标 statement，但其他记录有 findings。CL004、CL005 进入修订后，Codex 接口以 HTTP 400 拒绝输出 Schema：开放的 `replacements` 字典没有固定 properties；开放 Row payload 同样不适合该严格 Schema。CL008 因只读 OBS009 的原文疑点暂停。三条均未完成，原内容均未改变；Gemini 调用和全库备份为零。旧 raw、调用预留、预算及暂停记录保持原样，没有自动重发。
+
+本次修正复用现有 JSON records 传输做法：GPT 的 `payload_json` 和 `replacements_json` 无损解码到原 Candidate，再执行原权限、来源、处置、SHA 归一化和完整后像检查；重复 JSON 字段拒绝。通过实际 adapter 请求路径验证输出 Schema 的每个 object 都封闭且列全 properties／required，不以替身直接绕过传输 Schema。
+
+普通 findings 增加目标影响清单和具体解释。当前任务无关的只读问题进入现有运行结果；目标或实际写项问题不能豁免。直接被拒的只读 Claim 在精确当前版本上保留正式异议，另一目标可独立完成；Review 报告模式同样保存异议。真正依赖原文疑点时仍转人工，缺少具体人工问题则作为契约错误拒绝。必要修复对象未授权时，在 GPT 调用前报告 `permission_required` 和具体对象，不为迁就错关系改写正确 Claim。
+
+资料包确有漏载：原目标 132 项，三条本轮包各只有 117 项。Claim 读取与提交／完成范围核验改用已有关系索引及精确字段查询，补全前向依赖的入向关系和共享 owners；下游消费者仍进入事务 pins。CVP 带入的其他成员不成为当前内容闭包的新根。Create 和来源影响 Review 保留原来的来源覆盖读取要求。通用反向查询中的大型递归 OR 改为等价的小 JSON equality 路径数组，保留原 named-reference 过滤，不改内容语义。
+
+实库只读验证三条当前分母都为 132 项，与原目标相比无缺项，分别约 2.69、2.74、2.64 秒；旧 CL002、CL003 当前资格仍有效。没有重跑真实内容模型，也没有内容写入。相关回归为 **457 passed、43 skipped**，覆盖完整 Schema 传输、无损未知字段、重复 JSON 拒绝、独立只读问题、真实阻断、权限不足不调用 GPT、Review 报告异议保留、入向依赖闭包及旧失败材料。文档检查仍只有已知的无关 notes-to-sermon 附录锚点错误。整体 #435 尚未完成；这次三条旧 action 的显式恢复未执行，不把代码回归通过说成它们 Update 完成。

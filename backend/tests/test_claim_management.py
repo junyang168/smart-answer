@@ -288,3 +288,64 @@ def test_mechanical_provenance_cannot_manufacture_revision_progress(case):
     altered = original.model_copy(deep=True)
     altered.records[0].payload["review_note"] = "changed mechanical metadata"
     assert m.candidate_state(before, original) == m.candidate_state(before, altered)
+
+
+def test_candidate_transport_schema_is_closed_and_roundtrips_full_payload(case):
+    import json
+    from backend.pipeline.source_reconciliation_runtime import claim_management_model_adapter
+    _, before, candidate, sources = case
+    adapter = claim_management_model_adapter('gpt', policy())
+    payload = deepcopy(before['claims/C']['payload'])
+    payload['extension'] = {'nested': [{'literal': '引文\\n', 'null': None}], '未知欄位': 42}
+    wire = {'records': [{'collection': 'claims', 'object_id': 'C', 'payload_json': json.dumps(payload)}],
+            'dispositions': [d.model_dump(mode='json') for d in candidate.dispositions],
+            'replacements_json': '{}', 'findings': [], 'operation': 'Update'}
+    def provider(**request):
+        schema = request['json_schema']['schema']
+        def closed(node):
+            if isinstance(node, dict):
+                if node.get('type') == 'object':
+                    assert 'properties' in node, node
+                    assert node['additionalProperties'] is False
+                    assert set(node['required']) == set(node['properties'])
+                for value in node.values(): closed(value)
+            elif isinstance(node, list):
+                for value in node: closed(value)
+        closed(schema)
+        return wire
+    adapter._client.generate_json = provider
+    parsed, _ = m.normalize_candidate(adapter.generate({'before': before}), sources)
+    assert parsed.records[0].payload == payload
+    assert parsed.replacements == {}
+    for field, bad in [('replacements_json', '{"x":[],"x":[]}')]:
+        with pytest.raises(ValueError, match='duplicate Candidate'):
+            m.normalize_candidate({**wire, field: bad}, sources)
+    wire['records'][0]['payload_json'] = '{"claim_id":"C","claim_id":"D"}'
+    with pytest.raises(ValueError, match='duplicate Candidate'):
+        m.normalize_candidate(wire, sources)
+
+
+def test_readonly_finding_requires_reviewers_explicit_target_impact(case):
+    request, before, candidate, sources = case
+    def review(affected):
+        finding = m.Finding(target_key='evidence_steps/E', component='statement', category='source_uncertain',
+            citations=[citation()], reason='context wording is uncertain', acceptance_condition='check source',
+            human_question='which meaning?', affected_target_keys=affected,
+            impact_reason='target uses an independent clear part' if affected == [] else 'target depends on this wording')
+        return m.Review(proposal_sha256=candidate.digest,
+            verdicts=[c.Verdict(record_key=k, approved=k!='evidence_steps/E', problems=[] if k!='evidence_steps/E' else ['uncertain'],
+                reason='specific judgment') for k in before], findings=[finding], prior_findings=[], answered_questions=['own_source'])
+    contextual = review([])
+    assert m.validate_review(candidate, contextual, before, ['own_source'], {}, sources, request=request)
+    assert m.unresolved_after('A', {}, contextual, request=request, candidate=candidate) == {}
+    for affected in (None, ['claims/C']):
+        blocking = review(affected)
+        assert not m.validate_review(candidate, blocking, before, ['own_source'], {}, sources, request=request)
+        assert m.failure_reason(m.unresolved_after('A', {}, blocking, request=request, candidate=candidate)) == 'human_required'
+    finding = contextual.findings[0]
+    finding.target_key = 'claims/C'
+    with pytest.raises(ValueError, match='cannot be dismissed'):
+        m.validate_review(candidate, contextual, before, ['own_source'], {}, sources, request=request)
+    finding.target_key = 'evidence_steps/E'; finding.impact_reason = None
+    with pytest.raises(ValueError, match='impact and explanation'):
+        m.validate_review(candidate, contextual, before, ['own_source'], {}, sources, request=request)
