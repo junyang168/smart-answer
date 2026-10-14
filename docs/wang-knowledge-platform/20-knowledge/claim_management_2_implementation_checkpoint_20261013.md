@@ -170,3 +170,13 @@ CL006 已实际完成，revision 为 2、当前资格 ready，内容 SHA 为 `52
 后续把首次提议者疑点直接纳入现有 unresolved／prior_findings 协议，复用已有稳定 ID，不新增结果字段或审核角色。独立审核可以据原文 resolved 否决疑点、persistent 保留并界定目标影响、或判为目标 blocker；不得遗漏，也不能用一句「有问题」自动代替人工出口。Opus 与启用时的独立审计读取相同义务，已登记的同一问题不重复新增 ID；当前问题状态只由审阅结论维护。反例及完整 SQL／独立审计用例证明，首次 GPT source_uncertain 也能在完整来源下被独立审核否决，而不自动卡入人工；漏回应仍拒绝。完整回归 **476 passed、43 skipped**。
 
 E006／OBS004 的冠词疑点依然待人工核对，与 CL008 中的 OBS009 问题属于同一段讲道的冠词核实线索，未冒称已解决。这里完成的是 CL006 Update，不是所有人工问题或整组 cleanup；整体 #435 仍未完成，未合并或部署。
+
+## CL002、CL003 当前资格逐条重新确认（2026-10-14）
+
+负责人要求再处理两条。核对本组后，未连接 CVP 的 CL004–CL008 当前资格均为 ready，CL002／CL003 的原审阅因共享关系与证据修正而不再适用于全部当前 pins；已连接 CVP 的 CL001 排除。因此按顺序执行 CL002，再执行 CL003，使用当前 Opus-only policy 和冻结实现 `aeb829a`。这是获授权的新当前版本 Update，不重写旧 Argon action、原答或历史资格。
+
+两条均完成，Opus 各实际调用一次，findings 为零，程序事务／readback 与原目标核对通过。完整审核分母各 132 项，实际请求各 242,735 bytes。内容写集为空，没有内容 ChangeSet，Claim 仍为 revision 1；完成状态重入结果一致，未增加调用。没有 GPT、Gemini 或全库备份。本次没有修改实现代码或 prompt，也没有因某条遇到问题添加特殊规则。
+
+CL002 当前资格 run 为 `CMR-d93e05b0280c834516452f4ff84cfd1e2dd422d5d80f552f11459341d3da184f`，CL003 为 `CMR-e2dd4d1c087d4c8df55f523f5c5047b85eecf79e292d6a72d294fcd5a314ac1f`，均为 audited／completed、`opus_and_program_readback`，明确 `independent_audit_complete=false`。两条实际结果保存于 `claim-management-435/son-of-man-revalidate-two-sequential-20261014-v1/CL002/single-update-result.json` 及对应 CL003 目录。
+
+执行后再次读取本组当前状态：CL002–CL008 七条未连接 CVP 的 Claim 均 ready；CL006 为 revision 2，其余为 revision 1；CL001 仍因已连接 CVP 而未处理。汇总保存为同一运行根目录的 `group-status-after-revalidation.json`。E006／OBS004／OBS009 的旧冠词人工核对问题及原回答仍保留，未以本次通过结果冒称解决。本组目标 Claim 的当前资格确认完成，不代表所有来源人工问题或整体 #435 完成；未合并或部署。
