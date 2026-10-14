@@ -3451,7 +3451,7 @@ class PostgresKnowledgeStore:
                         materials['before'], cm.existing_candidate(materials['before'], replacements=materials['replacements']))):
                     raise ChangeSetConflict('Claim correction made no semantic progress or repeats a previous candidate')
                 prior.append(fingerprint)
-                parent['revision_rounds'][round_id] = bool(value['round_number'] or parent.get('continuation'))
+                parent['revision_rounds'][round_id] = bool(value['round_number'] or parent.get('continuation') and 'gpt' in materials['roles'])
                 value['candidate'] = candidate.model_dump(mode='json')
                 value['claim_ids'] = [k.split('/',1)[1] for k in cm.audit_keys(
                     cm.Request.model_validate(materials['unit_request']), materials['before'], candidate) if k.startswith('claims/')]
@@ -5493,6 +5493,7 @@ class PostgresKnowledgeStore:
         from types import SimpleNamespace
         from backend.pipeline.claim_management import CLAIM_COLLECTIONS, audit_keys
         scope = SimpleNamespace(target_keys=[col+'/'+oid for col,oid in keys if col in CLAIM_COLLECTIONS], permissions=[])
+        consumer_roots = [tuple(key.split('/',1)) for key in scope.target_keys]
         roots = {}
         for col, oid in keys:
             roots.setdefault(col, {})[oid] = {'id': oid}
@@ -5507,7 +5508,16 @@ class PostgresKnowledgeStore:
                 denominator = audit_keys(scope, {col+'/'+oid:state for (col,oid),state in records.items()})
                 current = {tuple(key.split('/',1)) for key in denominator if key.split('/',1)[0] in CLAIM_COLLECTIONS} - scanned
                 if not current:
-                    return records
+                    affected = self._affected_cvp_context(conn, consumer_roots)
+                    if any(key in records and (records[key]['revision'],records[key]['content_sha256'],records[key].get('retired')) !=
+                            (state['revision'],state['content_sha256'],state.get('retired')) for key,state in affected.items()):
+                        raise ChangeSetConflict('Claim readset changed while closing transaction consumers')
+                    records.update(affected)
+                    complete = audit_keys(scope,{col+'/'+oid:state for (col,oid),state in records.items()})
+                    if not {tuple(key.split('/',1)) for key in complete if key.split('/',1)[0] in CLAIM_COLLECTIONS} - scanned:
+                        return records
+                    for (col,oid),state in records.items():roots.setdefault(col,{})[oid]=state['payload']
+                    continue
                 scanned.update(current)
                 consumers = self._claim_reference_consumers(cursor, current)
                 # Transaction consumers remain read pins/pending obligations;

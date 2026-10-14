@@ -512,6 +512,7 @@ def execute_claim_management(store, request, *, root, ports):
                         roles = cm.required_roles(request, ordinal, policy)
                         rid = 'CMR-' + sha256_json({'action': parent_id, 'unit': unit_id, 'round': ordinal})
                         materials = {'schema_version': cm.VERSION, 'round_id': rid, 'unit_id': unit_id,
+                            'packet_profile':'claim_single_record_table_v1',
                             'round_number': ordinal, 'request': request.model_dump(mode='json'),
                             'unit_request': unit_request.model_dump(mode='json'), 'policy': policy.model_dump(mode='json'),
                             'audit_contract': parent['audit_contract'],

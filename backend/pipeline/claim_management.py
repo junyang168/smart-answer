@@ -72,12 +72,15 @@ class Policy(source.Contract):
     review_purpose: Literal['content', 'source_impact'] = 'content'
     source_impact_batch_size: int | None = Field(default=None, gt=0)
     independent_audit: bool | None = None
+    initial_candidate: Literal['existing'] | None = None
 
     @model_serializer(mode='wrap')
     def serialize_policy(self, handler):
         value = handler(self)
         if self.independent_audit is None:
             value.pop('independent_audit', None)
+        if self.initial_candidate is None:
+            value.pop('initial_candidate', None)
         return value
 
     @property
@@ -885,6 +888,29 @@ def model_packet(materials):
     packet['action_obligations'] = {'operation': materials['request']['operation'],
         'target_keys': list(materials['request']['target_keys']),
         'required_questions': list(materials['original_goal']['required_questions'])}
+    if materials.get('packet_profile') == 'claim_single_record_table_v1':
+        before = packet['before']
+        def references(goal):
+            goal['original_objects'] = {key:({'__claim_record_ref__':key} if before.get(key)==state else state)
+                for key,state in goal['original_objects'].items()}
+        references(packet['original_goal'])
+        if packet.get('continuation'):
+            references(packet['continuation']['original_goal'])
+            packet['continuation']['prior_call_reservations'] = {key:{k:slot[k] for k in ('role','state','round_id')}
+                for key,slot in packet['continuation']['prior_call_reservations'].items()}
+        packet['record_reference_contract'] = (
+            'Each {"__claim_record_ref__": key} in an original_objects table denotes exactly packet.before[key], '
+            'including its complete payload and version. Expand it when comparing original obligations; '
+            'do not substitute candidate postimages. Source text and every current record are complete. '
+            'Retain dispositions and mechanical fragment verdicts may use concise reasons; do not repeat whole source paragraphs. '
+            'Findings and actual modifications still require concrete exact citations and full explanations.')
+        # Verify the projection carries every original record unchanged.
+        for projected, original in [(packet['original_goal'],materials['original_goal'])] + (
+                [(packet['continuation']['original_goal'],materials['continuation']['original_goal'])] if packet.get('continuation') else []):
+            restored = {key:(before[state['__claim_record_ref__']] if set(state)=={'__claim_record_ref__'} else state)
+                for key,state in projected['original_objects'].items()}
+            if restored != original['original_objects']:
+                raise ValueError('Claim record-table projection changed original facts')
     return packet
 
 
@@ -896,7 +922,8 @@ def required_roles(request, round_number, policy=None):
             and (request.operation != "Review" or request.confirm_current or request.source_transition)):
         roles.append("gemini")
     if request.operation not in {"Review", "Read"} and (request.operation != "Update" or round_number
-            or request.predecessor_action_id and not request.source_transition):
+            or request.predecessor_action_id and not request.source_transition
+            and (policy is None or policy.initial_candidate != 'existing')):
         roles.insert(0, "gpt")
     return roles
 

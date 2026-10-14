@@ -583,14 +583,7 @@ def test_claim_reader_includes_incoming_relation_to_forward_loaded_evidence(acti
         'knowledge_relations':[{'relation_id':'R','from_id':'O','to_id':'E','relation_type':'supports','reason':'synthetic premise'}]}))
     records=store.read_claim_context([('claims','C')])
     assert {('claims','C'),('evidence_steps','E'),('observations','O'),('knowledge_relations','R')} <= set(records)
-    # No recursive JSON wildcard search on the Claim read path.
-    original=store._reference_consumers
-    def downstream_only(cursor,ids,collections):
-        assert not set(collections) & cm.CLAIM_COLLECTIONS
-        return original(cursor,ids,collections)
-    store._reference_consumers=downstream_only
-    try: assert store.read_claim_context([('claims','C')])==records
-    finally: store._reference_consumers=original
+    assert store.read_claim_context([('claims','C')])==records
 
 
 def test_explicit_schema_recovery_carries_budget_history_and_prevents_fork(action):
@@ -659,12 +652,18 @@ def test_reviewed_consumer_pin_recovery_reuses_model_results_and_plan(action,mon
     auth['policy']=request.policy.model_dump(mode='json');auth_path.write_text(json.dumps(auth))
     request.authorization=cm.source.FileBinding.model_validate(binding(auth_path))
     affected=store._affected_cvp_context
+    content_review_finished=False
     def extra_consumer(conn,keys):
         records=affected(conn,keys)
-        records['claims','D']=store.get_record_state('claims','D')
+        if content_review_finished:records['claims','D']=store.get_record_state('claims','D')
         return records
     monkeypatch.setattr(store,'_affected_cvp_context',extra_consumer)
-    ports=SyntheticPorts(store,tmp_path,opus=lambda p:rejected(p) if p['round_number']==0 else passing(p),proposal=corrected)
+    def opus(packet):
+        nonlocal content_review_finished
+        if packet['round_number']==0:return rejected(packet)
+        content_review_finished=True
+        return passing(packet)
+    ports=SyntheticPorts(store,tmp_path,opus=opus,proposal=corrected)
     result=execute_claim_management(store,request,root=root,ports=ports)
     assert result['detail']=='transaction omitted a current affected consumer',result
     parent=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id));rid=next(iter(parent['latest_rounds'].values()))

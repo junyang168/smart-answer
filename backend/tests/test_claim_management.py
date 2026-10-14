@@ -368,3 +368,22 @@ def test_persistent_unrelated_prior_finding_is_disclosed_not_falsely_resolved(ca
     resolution.affected_target_keys=['claims/C']
     assert not m.validate_review(candidate,review,before,['own_source'],unresolved,sources,request=request)
     assert m.unresolved_after('continued',unresolved,review,request=request,candidate=candidate)
+
+
+def test_single_record_table_packet_preserves_current_and_original_facts(case):
+    request,before,_,sources=case
+    goal={'operation':'Update','target_keys':request.target_keys,'required_questions':['own_source'],'original_objects':deepcopy(before)}
+    older=deepcopy(goal);older['original_objects']['claims/C']['payload']['statement']='原来旧的假设。'
+    materials={'packet_profile':'claim_single_record_table_v1','before':before,'request':request.model_dump(mode='json'),
+        'original_goal':goal,'sources':sources,'continuation':{'original_goal':older,'prior_call_reservations':{
+            'old:opus':{'role':'opus','round_id':'old','state':'completed','intent':{'large_execution_proof':'not a content fact'}}}}}
+    packet=m.model_packet(materials)
+    assert packet['sources']==sources and packet['before']==before
+    assert packet['original_goal']['original_objects']['claims/C']=={'__claim_record_ref__':'claims/C'}
+    assert packet['continuation']['original_goal']['original_objects']['claims/C']==older['original_objects']['claims/C']
+    assert packet['continuation']['prior_call_reservations']['old:opus']=={'role':'opus','round_id':'old','state':'completed'}
+    assert materials['original_goal']['original_objects']==before
+    reduced=policy();reduced.initial_candidate='existing';request.predecessor_action_id='old'
+    assert m.required_roles(request,0,reduced)==['opus','gemini']
+    assert m.required_roles(request,1,reduced)==['gpt','opus','gemini']
+    assert m.required_roles(request,0,policy())==['gpt','opus','gemini']
