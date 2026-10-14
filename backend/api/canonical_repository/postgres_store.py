@@ -5493,16 +5493,21 @@ class PostgresKnowledgeStore:
     @staticmethod
     def _reference_consumers(cursor, ids, collections):
         if not ids or not collections:return []
-        # Equality jsonpath predicates use the existing payload GIN index. The
-        # validators still check actual named fields; no fuzzy text matching.
-        # Keep each path small. One enormous recursive OR becomes very slow
-        # on real payloads; ANY retains the same exact JSON equality without
-        # embedding every ID in every recursive predicate evaluation.
-        predicates = ["$.** ? (@ == " + json.dumps(oid) + ")" for oid in ids]
-        cursor.execute("SELECT collection,object_id,payload FROM wang_knowledge.objects "
-                       "WHERE retired_at IS NULL AND collection=ANY(%s) AND payload @? ANY(%s::jsonpath[]) "
-                       "ORDER BY collection,object_id", (list(collections),predicates))
-        return cursor.fetchall()
+        # Named reference values live under object fields. The final .* makes
+        # equality indexable with jsonb_ops; bare recursive equality and ANY
+        # can force repeated scans of every payload. Small OR batches retain
+        # exact equality and the existing readset/time limits.
+        ids = sorted(set(ids))
+        found = {}
+        for offset in range(0, len(ids), 8):
+            predicates = ["$.**.* ? (@ == " + json.dumps(oid) + ")" for oid in ids[offset:offset+8]]
+            clauses = " OR ".join(["payload @? %s::jsonpath"] * len(predicates))
+            cursor.execute("SELECT collection,object_id,payload FROM wang_knowledge.objects "
+                           "WHERE retired_at IS NULL AND collection=ANY(%s) AND (" + clauses + ") "
+                           "ORDER BY collection,object_id", (list(collections), *predicates))
+            for row in cursor.fetchall():
+                found[row[0], row[1]] = row
+        return [found[key] for key in sorted(found)]
 
     def read_affected_context(self, keys):
         """Complete current consumers for a source/Claim/link action.
