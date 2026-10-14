@@ -125,7 +125,8 @@ def claim_source_baselines(store, request, before, claim_keys, transition):
             receipt, report, material, candidate = validated[rid]
             old_pins = {content.key(r['collection'], r['object_id']): r['pin'] for r in value['audited_pins']}
             unit = cm.Request.model_validate(material['unit_request']).model_copy(update={'target_keys': [key], 'permissions': []})
-            current = {k: v for k, v in before.items() if k in cm.audit_keys(unit, before)}
+            required = set(cm.audit_keys(unit, before))
+            current = {k: v for k, v in before.items() if k in required}
             old_graph = {k: {'payload': v['payload'], 'retired': v['retired']} for k, v in report['packet']['actual_records'].items()}
             if set(current) != set(cm.audit_keys(unit, old_graph)) or not set(current) <= set(old_pins):
                 continue
@@ -267,13 +268,7 @@ def validate_claim_management_package(package):
     raw = validate_claim_stage(root, 'opus', policy, packet)
     review = cm.Review.model_validate(raw['response'])
     passed = cm.validate_review(candidate, review, packet['denominator'], packet['required_questions'],
-                                materials['unresolved'], sources)
-    if cm.is_source_impact(request):
-        passed = cm.validate_source_impacts(review, packet['denominator'], sources,
-            request=cm.Request.model_validate(materials['unit_request']), records=materials['before'],
-            unresolved=materials['unresolved'])
-        if writes:
-            raise ValueError('source impact Review cannot authorize a content write')
+                                materials['unresolved'], sources, request=unit_request, records=materials['before'])
     if not passed or candidate.findings:
         raise ValueError('Claim package lacks passing complete independent Opus review')
     expected = claim_management_package_body(app['run_id'], writes)
@@ -339,9 +334,13 @@ def validate_claim_audit(report, materials, candidate, *, historical=False):
                    'pin': [v['revision'], v['sha'], v['retired']]} for k, v in sorted(packet['actual_records'].items())]
     if actual_pins != report['read_pins']:
         raise ValueError('independent audit actual current SQL readset drift')
-    _, sources = cm.load_authority(cm.Request.model_validate(materials['request']), source_documents=cm.source_documents(materials['before']),
+    policy, sources = cm.load_authority(cm.Request.model_validate(materials['request']), source_documents=cm.source_documents(materials['before']),
         archived_sources=materials.get('source_archives') if historical else None,
         selected_source_ids=materials['unit_request']['source_bindings'])
+    if policy.model_dump(mode='json') != materials['policy'] or sources != materials['sources']:
+        raise ValueError('Claim stage source/policy drift')
+    cm.validate_candidate(request, materials['before'], candidate, sources,
+                          created_keys=materials['created_keys'], original_replacements=materials['replacements'])
     full_sources = {sid: {'paragraphs': paragraphs} for sid, paragraphs in packet['full_sources'].items()}
     if ({sid: {k: {'text': p['text']} for k, p in v['paragraphs'].items()} for sid, v in sources.items()}
             != packet['full_sources']):
@@ -356,10 +355,7 @@ def validate_claim_audit(report, materials, candidate, *, historical=False):
         full_sources[sid]['before'] = {'paragraphs': paragraphs}
     review = cm.Review.model_validate(response)
     approved = cm.validate_review(candidate, review, denominator, cm.operation_questions(materials['original_goal'], candidate),
-                                   materials['unresolved'], full_sources)
-    if cm.is_source_impact(materials['request']):
-        approved = cm.validate_source_impacts(review, denominator, full_sources, request=request, records=states,
-            unresolved=materials['unresolved'])
+                                   materials['unresolved'], full_sources, request=request, records=states)
     if approved:
         cm.goal_satisfied(materials['original_goal'], states, candidate.replacements)
     return approved, review, actual_pins
@@ -371,18 +367,23 @@ def validate_claim_stage_receipt(receipt):
     check_binding(receipt['materials'])
     root = Path(receipt['materials']['path']).parent
     materials = body(read(root / 'materials.json'))
-    cm.require_current_implementation(materials['audit_contract'])
     if receipt['round_id'] != materials['round_id']:
         raise ValueError('Claim stage receipt belongs to another round')
+    check_binding(receipt['candidate'])
+    candidate = cm.Candidate.model_validate(body(read(root / 'candidate.json')))
+    stage = receipt['stage']
+    if stage == 'audit':
+        check_binding(receipt['audit'])
+        report = json.loads(Path(receipt['audit']['path']).read_text())
+        passed, review, _ = validate_claim_audit(report, materials, candidate)
+        return materials, candidate, review, passed
+    cm.require_current_implementation(materials['audit_contract'])
     policy, sources = cm.load_authority(cm.Request.model_validate(materials['request']), source_documents=cm.source_documents(materials['before']),
                                        selected_source_ids=materials['unit_request']['source_bindings'])
     if sources != materials['sources'] or policy.model_dump(mode='json') != materials['policy']:
         raise ValueError('Claim stage source/policy drift')
-    check_binding(receipt['candidate'])
-    candidate = cm.Candidate.model_validate(body(read(root / 'candidate.json')))
     cm.validate_candidate(cm.Request.model_validate(materials['unit_request']), materials['before'], candidate, sources,
                           created_keys=materials['created_keys'], original_replacements=materials['replacements'])
-    stage = receipt['stage']
     if stage == 'candidate':
         validate_claim_candidate_origin(root, materials, policy, sources, candidate)
         return materials, candidate, None, None
@@ -391,17 +392,9 @@ def validate_claim_stage_receipt(receipt):
         raw = validate_claim_stage(root, 'opus', policy, packet)
         review = cm.Review.model_validate(raw['response'])
         passed = cm.validate_review(candidate, review, packet['denominator'], packet['required_questions'],
-                                     materials['unresolved'], sources)
-        if cm.is_source_impact(materials['request']):
-            passed = cm.validate_source_impacts(review, packet['denominator'], sources,
-            request=cm.Request.model_validate(materials['unit_request']), records=materials['before'],
-            unresolved=materials['unresolved'])
+                                     materials['unresolved'], sources,
+                                     request=cm.Request.model_validate(materials['unit_request']), records=materials['before'])
         return materials, candidate, review, (passed and not candidate.findings)
-    if stage == 'audit':
-        check_binding(receipt['audit'])
-        report = json.loads(Path(receipt['audit']['path']).read_text())
-        passed, review, _ = validate_claim_audit(report, materials, candidate)
-        return materials, candidate, review, passed
     raise ValueError('unknown Claim content stage')
 
 
@@ -412,7 +405,6 @@ def execute_claim_management(store, request, *, root, ports):
     Update starts with the actual existing candidate, then revises if needed.
     Every applied round is retained even when its independent audit rejects.
     """
-    from copy import deepcopy
     from types import SimpleNamespace
     from backend.pipeline import claim_management as cm
     from backend.pipeline.source_reconciliation_runner import exclusive, Stop

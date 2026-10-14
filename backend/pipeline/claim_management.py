@@ -325,14 +325,6 @@ def own_source_ids(payload, records):
     return resolve(payload, set())
 
 
-def semantic_fingerprint(candidate: Candidate) -> str:
-    return sha256_json({
-        "records": [{"key": r.key, "payload": source._semantic(r.payload)} for r in sorted(candidate.records, key=lambda r: r.key)],
-        "dispositions": sorted((d.record_key, d.action) for d in candidate.dispositions),
-        "replacements": candidate.replacements,
-    })
-
-
 def validate_candidate(request: Request, before, candidate: Candidate, sources, *, created_keys=(), original_replacements=None):
     """Validate a complete candidate, never infer semantic or write approval."""
     proposed = source.index(candidate.records)
@@ -450,7 +442,7 @@ def validate_candidate(request: Request, before, candidate: Candidate, sources, 
     return post, writes
 
 
-def validate_review(candidate, review, expected_keys, questions, unresolved, sources):
+def validate_review(candidate, review, expected_keys, questions, unresolved, sources, *, request=None, records=None):
     if review.proposal_sha256 != candidate.digest:
         raise ValueError("review belongs to a different complete candidate")
     keys = [v.record_key for v in review.verdicts]
@@ -473,19 +465,11 @@ def validate_review(candidate, review, expected_keys, questions, unresolved, sou
                      if r.disposition != "resolved")
     if rejected - explained:
         raise ValueError("rejected objects require concrete current or persistent findings")
+    if request is not None and is_source_impact(request):
+        return validate_source_impacts(review, expected_keys, sources, request=request, records=records, unresolved=unresolved)
     return (all(v.approved and not v.problems for v in review.verdicts)
             and not review.findings
             and all(r.disposition == "resolved" for r in review.prior_findings))
-
-
-def reserve_round_budget(policy, calls, *, revisions, proposal_required):
-    """Preflight the whole round under one action, not only the next call."""
-    if revisions > policy.budget.max_revisions:
-        raise ValueError("Claim action revision budget exhausted")
-    required = {"gpt": int(proposal_required), "opus": 1, "gemini": 1}
-    if any(calls.get(role, 0) + count > policy.budget.limit(role) for role, count in required.items()):
-        raise ValueError("Claim action cannot fund a complete round including independent audit")
-    return required
 
 
 def unresolved_after(action_id, previous, review):

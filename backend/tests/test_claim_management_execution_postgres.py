@@ -90,7 +90,7 @@ class SyntheticPorts:
         AUDIT.write_audit_immutable(root / 'independent-audit/audit.json', report)
 
 
-def test_create_complete_commit_readback_independent_audit_and_no_replay(action):
+def test_create_complete_commit_readback_independent_audit_and_no_replay(action,monkeypatch):
     store, request, parent, _, tmp_path, _ = action
     ports = SyntheticPorts(store, tmp_path)
     result = execute_claim_management(store, request, root=tmp_path / 'original-root', ports=ports)
@@ -103,6 +103,25 @@ def test_create_complete_commit_readback_independent_audit_and_no_replay(action)
         assert conn.execute("SELECT count(*) FROM wang_knowledge.change_sets WHERE source_kind=%s", (cm.VERSION,)).fetchone() == (1,)
     assert execute_claim_management(store, request, root=tmp_path / 'original-root', ports=ports) == result
     assert ports.calls == ['gpt', 'opus', 'gemini']
+    # Consuming a saved audit validates physical sources once, through the
+    # same path that rejects forged packet snapshots.
+    from backend.pipeline.cvp_sql_actions import validate_claim_stage_receipt, validate_claim_audit
+    from backend.pipeline.source_reconciliation_runner import read, body
+    saved = store.get_cvp_group(next(iter(store.get_cvp_group(parent['run_id'])['latest_rounds'].values())))
+    receipt = body(read(Path(saved['stage_results']['audit']['path'])))
+    load = cm.load_authority
+    reads = []
+    def measured_load(*args,**kwargs):
+        reads.append(set(kwargs['selected_source_ids']))
+        return load(*args,**kwargs)
+    monkeypatch.setattr(cm,'load_authority',measured_load)
+    assert validate_claim_stage_receipt(receipt)[3] is True
+    assert reads == [{'S'}]
+    altered = deepcopy(saved['materials'])
+    altered['sources']['S']['paragraphs']['S0001']['text'] = 'forged source packet'
+    report = json.loads(Path(receipt['audit']['path']).read_text())
+    with pytest.raises(ValueError,match='source/policy drift'):
+        validate_claim_audit(report,altered,cm.Candidate.model_validate(saved['candidate']))
 
 
 def test_gpt_unknown_call_pauses_without_resending(action):
@@ -116,6 +135,32 @@ def test_gpt_unknown_call_pauses_without_resending(action):
     recovered = execute_claim_management(store, request, root=tmp_path / 'original-root', ports=ports)
     assert recovered['reason'] == 'call_uncertain'
     assert ports.calls == ['gpt']
+
+
+def test_zero_revision_budget_stops_before_proposal_and_preserves_existing_claim(action):
+    store, original, _, _, root, _ = action
+    seed_claims(store,['C'])
+    before = store.get_record_state('claims','C')
+    request, output = operation_request(action,'Update',['C'])
+    policy = cm.Policy.model_validate_json(Path(original.policy.path).read_text())
+    policy.budget.max_revisions = 0
+    policy_file = root/'zero-revision-policy.json'
+    policy_file.write_text(policy.model_dump_json())
+    request.policy = cm.source.FileBinding.model_validate(binding(policy_file))
+    direction_file = Path(request.authorization.path)
+    direction = json.loads(direction_file.read_text())
+    direction['policy'] = request.policy.model_dump(mode='json')
+    direction_file.write_text(json.dumps(direction))
+    request.authorization = cm.source.FileBinding.model_validate(binding(direction_file))
+    ports = SyntheticPorts(store,root,opus=rejected)
+    result = execute_claim_management(store,request,root=output,ports=ports)
+    assert result['status']=='paused' and result['reason']=='budget_exhausted',result
+    assert execute_claim_management(store,request,root=output,ports=ports)==result
+    assert ports.calls == ['opus']
+    assert store.get_record_state('claims','C') == before
+    parent = store.get_cvp_group('CMA-' + cm.sha256_json(request.action_id))
+    assert len(parent['latest_rounds']) == 1
+    assert sum(slot['state']=='started' for slot in parent['call_reservations'].values()) == 0
 
 
 def operation_request(action, operation, targets, *, confirm_current=False):

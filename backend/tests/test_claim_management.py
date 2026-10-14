@@ -200,15 +200,6 @@ def test_same_problem_identity_survives_reason_and_candidate_changes():
     assert revised.identity("one-action") == finding.identity("one-action")
 
 
-def test_round_budget_includes_independent_audit_before_any_call():
-    p = policy()
-    with pytest.raises(ValueError, match="complete round"):
-        m.reserve_round_budget(p, {"gpt": 1, "opus": 1, "gemini": 8}, revisions=1, proposal_required=True)
-    with pytest.raises(ValueError, match="revision budget"):
-        m.reserve_round_budget(p, {}, revisions=4, proposal_required=True)
-    assert m.reserve_round_budget(p, {}, revisions=0, proposal_required=False) == {"gpt": 0, "opus": 1, "gemini": 1}
-
-
 def reviewed(candidate, keys, questions, prior=None, **extra):
     return m.Review(proposal_sha256=candidate.digest, verdicts=[
         c.Verdict(record_key=k, approved=True, problems=[], reason="完整原文审核") for k in keys],
@@ -244,4 +235,4 @@ def test_mechanical_provenance_cannot_manufacture_revision_progress(case):
     original = change(candidate, "claims/C", "update", before["claims/C"]["payload"])
     altered = original.model_copy(deep=True)
     altered.records[0].payload["review_note"] = "changed mechanical metadata"
-    assert m.semantic_fingerprint(original) == m.semantic_fingerprint(altered)
+    assert m.candidate_state(before, original) == m.candidate_state(before, altered)
