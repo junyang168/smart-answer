@@ -3522,6 +3522,7 @@ class PostgresKnowledgeStore:
                                      'source_revalidated',%s,%s::jsonb)""", (event_id, impact.record_key.split('/',1)[1],
                                         state['revision'], impact.reason, canonical_json(proof)))
                 unit_request = cm.Request.model_validate(materials['unit_request'])
+                pending = cm.review_findings(parent['action_id'], materials['unresolved'], candidate)
                 unresolved = cm.unresolved_after(parent['action_id'], materials['unresolved'], review,
                     request=unit_request, candidate=candidate)
                 context_findings = cm.context_findings_after(parent['action_id'], materials['unresolved'], review,
@@ -3530,7 +3531,7 @@ class PostgresKnowledgeStore:
                 # preserve historical rounds but do not retain resolved context
                 # or a context issue promoted to a target blocker as still current.
                 parent['context_findings'] = {k: v for k, v in parent.get('context_findings', {}).items()
-                    if k not in materials['unresolved']}
+                    if k not in pending}
                 if context_findings:
                     value['context_findings'] = context_findings
                     parent['context_findings'].update(context_findings)
@@ -3544,7 +3545,7 @@ class PostgresKnowledgeStore:
                         self._assert_transaction_read_pins(cursor, pins({('claims',cid):materials['before']['claims/'+cid]
                             for cid in rejected_claims}))
                         value['blocked_current_claim_ids'] = sorted(set(value.get('blocked_current_claim_ids',[])) | rejected_claims)
-                parent['findings'] = {k: v for k, v in parent['findings'].items() if k not in materials['unresolved']}
+                parent['findings'] = {k: v for k, v in parent['findings'].items() if k not in pending}
                 parent['findings'].update(unresolved)
                 value['findings'] = unresolved
                 parent.setdefault('finding_occurrences', {})[round_id + ':' + stage] = {

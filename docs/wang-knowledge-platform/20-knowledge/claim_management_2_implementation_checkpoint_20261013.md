@@ -154,3 +154,19 @@ CL007 Opus 没有 findings，普通事务／readback／原目标完成检查通�
 临时 PostgreSQL 三种出口验证：resolved 后完成结果不再显示该上下文问题；persistent 且不影响目标时，目标可以完成，但上下文问题继续显示；同一问题转为影响实际目标时，不再显示为无关 context，并在无修复权限时返回 permission_required、指明所需对象，未提交新候选。另有反例拒绝重复稳定问题、新／旧问题双重登记，以及 finding 与无问题通过 verdict 自相矛盾。相关回归为 **468 passed、43 skipped**，含共同 transaction、恢复、来源影响与保存旧失败材料；文档检查仍仅有既有 notes-to-sermon 附录锚点错误。
 
 CL006 的原不完整回答仍保留，状态未改成通过，也未自动重发。真实模型回答违反契约后需要保留原答并沿合法接续处理，这项工程恢复仍与内容修正分开；prompt 自检不能保证模型永不犯错，本次不声称已真实恢复 CL006。整体 #435 尚未完成，未合并或部署。
+
+## CL006 接续、异议回应及提议者疑点的边界（2026-10-14）
+
+负责人要求继续，强调 Opus 只是提出异议。proposal prompt 现明确允许 GPT 据完整自身原文否决异议、引用原话说明 retain，不把 finding 或 acceptance_condition 当修改命令；语境概括不要求原文每个词逐字连用，也不准以外部史实给当前来源新增独立结论。Opus 仍须独立判断回应，不以 GPT 或负责人的意见代替内容审核。
+
+CL006 原回答的工程接续以 `18e1d6b` 开始。原 Opus raw、请求、预留及冻结 role prompt 经过共同传输校验，原回答确属已返回但缺少对象对应 finding 的程序契约错误。那次生成计入已用一次 Opus，不把 started 标记解释成未调用；旧模型结论没有追认为通过。关联 action 继承旧目标、全部原答和已声明的问题，只使用原余量的一次 GPT／一次 Opus。临时 PostgreSQL 覆盖剩余预算限制、旧入口禁止重发、原回答与 prompt 篡改拒绝、接续完成重入零调用；该阶段相关回归 **469 passed、43 skipped**。
+
+本次 GPT 实际没有否决措辞异议，而是提出将 CL006 statement 中「猶太學者」改成「精通希伯來文的學者」，其余 payload 保留；Opus 审阅认可这份候选。GPT 同时重复报告 E006 的冠词原文疑点，且提议者的 affected_target_keys 错填了 Observation ID；独立 Opus 将该疑点判为 persistent、目标影响为空，并补齐 OBS004 的独立问题条目。程序却因 Candidate.findings 非空直接标 human_required，随后又把提议者疑点追加为 blocker，覆盖独立判断。这是程序／角色边界错误，不是教授原文被修改或 Opus 判 CL006 须人工。
+
+`c111cf4` 修正此边界：提议者报告疑点不自动等于内容拒绝；独立审阅必须明确覆盖其稳定问题，并据原文决定影响。既有 returned-review 工程恢复只重新校验未写入的同一候选与真实原答，完整归档旧 parent／round／材料／收据，核原 transaction pins 未变、模型输入完全相同、role prompt 相同、全部调用确已返回，重新冻结当前程序实现后沿原提交与读回路径完成。不新增模型调用、不改模型 raw、不生成新语义判断或人工批准；真实目标拒绝仍阻止恢复。相关回归 **474 passed、43 skipped**。
+
+CL006 已实际完成，revision 为 2、当前资格 ready，内容 SHA 为 `52e59a4b91b41c214990836fcc18a776477d8a3c500cf642b9ae4e1342c6b72a`，ChangeSet 为 `KCS-9bc233a11aaca1b93a12`。唯一内容写入为 CL006 statement；讲道原文件和其他内容记录未改。恢复没有追加 GPT、Opus 或 Gemini，也没有全库备份；已有一次 GPT、一次 Opus 接续调用及最初不完整 Opus 回答均保留。最终记录为对应 CL006 的 `continuation-20261014-v1/continuation-result-after-review-recovery.json`，旧 paused 结果独立保留。CL007 复查仍为 ready、revision 1；已连接 CVP 的 CL001 未处理。
+
+后续把首次提议者疑点直接纳入现有 unresolved／prior_findings 协议，复用已有稳定 ID，不新增结果字段或审核角色。独立审核可以据原文 resolved 否决疑点、persistent 保留并界定目标影响、或判为目标 blocker；不得遗漏，也不能用一句「有问题」自动代替人工出口。Opus 与启用时的独立审计读取相同义务，已登记的同一问题不重复新增 ID；当前问题状态只由审阅结论维护。反例及完整 SQL／独立审计用例证明，首次 GPT source_uncertain 也能在完整来源下被独立审核否决，而不自动卡入人工；漏回应仍拒绝。完整回归 **476 passed、43 skipped**。
+
+E006／OBS004 的冠词疑点依然待人工核对，与 CL008 中的 OBS009 问题属于同一段讲道的冠词核实线索，未冒称已解决。这里完成的是 CL006 Update，不是所有人工问题或整组 cleanup；整体 #435 仍未完成，未合并或部署。

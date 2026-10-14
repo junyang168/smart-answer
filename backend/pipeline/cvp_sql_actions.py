@@ -19,8 +19,9 @@ LINK_SCHEMA='wang_owner_sql_link_correction_v2'
 
 
 def claim_management_review_packet(materials, candidate):
-    from backend.pipeline.claim_management import audit_keys, Request, operation_questions, model_packet
-    return {**model_packet(materials), 'candidate': candidate.model_dump(mode='json'), 'candidate_sha256': candidate.digest,
+    from backend.pipeline.claim_management import audit_keys, Request, operation_questions, model_packet, review_findings
+    return {**model_packet(materials), 'unresolved': review_findings(materials['request']['action_id'], materials['unresolved'], candidate),
+            'candidate': candidate.model_dump(mode='json'), 'candidate_sha256': candidate.digest,
             'denominator': audit_keys(Request.model_validate(materials['unit_request']), materials['before'], candidate),
             'required_questions': operation_questions(materials['original_goal'], candidate)}
 
@@ -316,7 +317,7 @@ def validate_claim_audit(report, materials, candidate, *, historical=False):
             or intent['request_sha256'] != sha256(wire).hexdigest()):
         raise ValueError('independent complete request bytes/configuration drift')
     packet = report['packet']
-    if (packet['original_goal'] != cm.goal_packet(materials['original_goal']) or packet['unresolved'] != materials['unresolved']
+    if (packet['original_goal'] != cm.goal_packet(materials['original_goal']) or packet['unresolved'] != cm.review_findings(materials['request']['action_id'], materials['unresolved'], candidate)
             or packet['replacements'] != candidate.replacements or packet['candidate_sha256'] != candidate.digest
             or report['schema'] != materials['audit_contract']['response_schema']):
         raise ValueError('independent audit omitted original task or prior findings')
@@ -619,7 +620,7 @@ def execute_claim_management(store, request, *, root, ports):
                             'model': policy.models['gemini']['model_id'],
                             'denominator': denominator, 'read_pins': pin_rows(pins({content.split_key(k): states[k] for k in denominator})),
                             'source_bindings': materials['unit_request']['source_bindings'], 'replacements': candidate.replacements,
-                            'candidate_sha256': candidate.digest, 'unresolved': materials['unresolved'],
+                            'candidate_sha256': candidate.digest, 'unresolved': cm.review_findings(request.action_id, materials['unresolved'], candidate),
                             'required_questions': cm.operation_questions(materials['original_goal'], candidate),
                             'response_schema': materials['audit_contract']['response_schema'],
                             'audit_contract': materials['audit_contract'], 'budget': materials['policy']['budget']}

@@ -537,7 +537,22 @@ def validate_candidate(request: Request, before, candidate: Candidate, sources, 
     return post, writes
 
 
+def review_findings(action_id, previous, candidate):
+    """Queue proposer doubts for independent resolution, retaining stable IDs."""
+    result = deepcopy(previous)
+    if not candidate.findings:
+        return result
+    identities = {Finding.model_validate(f).identity('review') for f in result.values()}
+    for finding in candidate.findings:
+        identity = finding.identity('review')
+        if identity not in identities:
+            result[finding.identity(action_id)] = finding.model_dump(mode='json')
+            identities.add(identity)
+    return result
+
+
 def validate_review(candidate, review, expected_keys, questions, unresolved, sources, *, request=None, records=None):
+    unresolved = review_findings(request.action_id if request else 'proposal', unresolved, candidate)
     if review.proposal_sha256 != candidate.digest:
         raise ValueError("review belongs to a different complete candidate")
     keys = [v.record_key for v in review.verdicts]
@@ -617,6 +632,7 @@ def resolution_finding(resolution, unresolved):
 
 
 def context_findings_after(action_id, previous, review, *, request, candidate):
+    previous = review_findings(action_id, previous, candidate)
     result = {f.identity(action_id): f.model_dump(mode='json') for f in review.findings
         if not finding_blocks(f.model_dump(mode='json'), request, candidate)}
     result.update({r.finding_id: resolution_finding(r, previous) for r in review.prior_findings
@@ -625,6 +641,8 @@ def context_findings_after(action_id, previous, review, *, request, candidate):
 
 
 def unresolved_after(action_id, previous, review, *, request=None, candidate=None):
+    if candidate:
+        previous = review_findings(action_id, previous, candidate)
     result = deepcopy(previous)
     for resolution in review.prior_findings:
         if resolution.disposition == "resolved":

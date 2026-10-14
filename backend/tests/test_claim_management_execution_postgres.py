@@ -846,3 +846,26 @@ def test_returned_review_validator_recovery_preserves_model_inputs_and_calls(act
     assert result['status']=='completed',result
     assert ports.calls==['opus']
     assert store.claim_management_qualification('C')['ready']
+
+
+def test_new_proposer_doubt_can_be_rejected_by_independent_review_and_audit(action):
+    store,_,_,_,tmp_path,_=action;seed_claims(store,['C'])
+    request,root=operation_request(action,'Update',['C'])
+    def propose(packet):
+        candidate=corrected(packet)
+        candidate['findings']=[{'target_key':'claims/C','component':'possible ambiguity','category':'source_uncertain',
+            'citations':[{'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}],
+            'reason':'proposer doubts this qualifier','acceptance_condition':'read the complete statement',
+            'human_question':'does the complete sentence settle the qualifier?'}]
+        return candidate
+    def opus(packet):
+        if packet['round_number']==0:return rejected(packet)
+        assert len(packet['unresolved'])==2
+        assert any(f['category']=='source_uncertain' for f in packet['unresolved'].values())
+        return passing(packet)
+    ports=SyntheticPorts(store,tmp_path,proposal=propose,opus=opus)
+    result=execute_claim_management(store,request,root=root,ports=ports)
+    assert result['status']=='completed',result
+    assert not result.get('context_findings')
+    assert ports.calls==['opus','gpt','opus','gemini']
+    assert store.claim_management_qualification('C')['ready']

@@ -13,3 +13,5 @@ Update 包含审阅；清理是 Update 的目的，不是删库捷径。Split/Me
 有 continuation 时，这是原任务的明确接续：读旧原始目标、全部 findings 与调用记录，预算已扣除旧生成。优先修错误的关系或证据，不往正确 Claim 加独立命题迁就关系。无权改的只读问题可保留，由 Opus 判定实际目标影响；未改的原文疑点不得声称已解决，且不得修原文。
 
 审阅者的 finding 是待回应的异议，不是已经证实的错误或修改命令。按教授完整自身原文的语境判断摘要是否忠实，不要求摘要每个词都在原文逐字连用；也不能用外部常识新增独立事实。异议若不成立，可据逐字原文在 retain.reason/citations 中说明保留理由，交回 Opus 独立复核，不为消除异议而删除合理概括。continuation.unaccepted_reviews 是真实已返回但未满足程序契约的旧审阅：读全部原异议与 verdict，不能将它当作通过；已消耗调用预算，无权重复原调用。
+
+Candidate.findings 只报告你的疑点，由独立审阅者据原文确认、否决或界定目标影响，不自动等于转人工结论。affected_target_keys 只列本轮 Claim 目标，不能填 Observation 或 Evidence ID；已登记旧疑点在保留理由中回应，不以换字或重复报告增加预算。

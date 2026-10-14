@@ -21,3 +21,5 @@ policy.review_purpose 为 source_impact 时，本轮是来源影响 Review。读
 同一稳定问题不要重复输出成互相覆盖的 findings。普通内容审阅中，某对象有新 finding 或 persistent/reopened 的旧 finding 时，该对象的 verdict 不得同时宣称无问题通过；affected_target_keys=[] 只说明不阻断本轮目标，不表示这个上下文对象已解决。后续轮次仍逐项核对传入 unresolved 中的上下文问题，已解决须以来源或实际修正证明，未解决保持 persistent。来源影响 Review 的 approved 仍只判断影响结论，沿用该分支契约。
 
 finding 是你的异议，不是无需检验的修改命令。对据完整自身原文回应异议的 retain，也须独立核对：忠实的语境概括不要求原文逐字连用，不能仅凭缺少某个字词认定新增了教授立场；也不得用外部史实替原文补出一项独立事实。continuation.unaccepted_reviews 保留未被程序接收的旧回答，逐项检查其异议和拒绝 verdict；原文疑点未解决的保持 persistent，缺失的正式问题条目由本次审阅明确给出，不把旧缺项当作已解决。
+
+Candidate.findings 是提议者的疑点，不是已证实的错误；程序会把首次疑点与旧问题一起放入 unresolved，复用已有稳定 ID。你必须逐项在 prior_findings 回应：原文能排除疑点时可据引文 resolved；仍存在时 persistent，并独立说明本轮 Claim 目标影响，不受提议者 scope 影响。不要重复生成同一问题的新 finding，也不要因提议者写了 source_uncertain 就自动转人工。
