@@ -3524,11 +3524,8 @@ class PostgresKnowledgeStore:
                 unit_request = cm.Request.model_validate(materials['unit_request'])
                 unresolved = cm.unresolved_after(parent['action_id'], materials['unresolved'], review,
                     request=unit_request, candidate=candidate)
-                context_findings = {f.identity(parent['action_id']): f.model_dump(mode='json') for f in review.findings
-                    if not cm.finding_blocks(f.model_dump(mode='json'), unit_request, candidate)}
-                context_findings.update({r.finding_id: cm.resolution_finding(r, materials['unresolved'])
-                    for r in review.prior_findings if r.disposition != 'resolved'
-                    and not cm.finding_blocks(cm.resolution_finding(r, materials['unresolved']), unit_request, candidate)})
+                context_findings = cm.context_findings_after(parent['action_id'], materials['unresolved'], review,
+                    request=unit_request, candidate=candidate)
                 # Every prior issue in this unit is explicitly reconciled;
                 # preserve historical rounds but do not retain resolved context
                 # or a context issue promoted to a target blocker as still current.
@@ -3547,8 +3544,6 @@ class PostgresKnowledgeStore:
                         self._assert_transaction_read_pins(cursor, pins({('claims',cid):materials['before']['claims/'+cid]
                             for cid in rejected_claims}))
                         value['blocked_current_claim_ids'] = sorted(set(value.get('blocked_current_claim_ids',[])) | rejected_claims)
-                for finding in candidate.findings:
-                    unresolved[finding.identity(parent['action_id'])] = finding.model_dump(mode='json')
                 parent['findings'] = {k: v for k, v in parent['findings'].items() if k not in materials['unresolved']}
                 parent['findings'].update(unresolved)
                 value['findings'] = unresolved

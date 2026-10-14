@@ -319,7 +319,7 @@ def audit_contract(root):
     pipeline = Path(__file__).parent
     repository = pipeline.parents[1]
     prompt = pipeline / 'prompts/claim_management_audit_v2.md'
-    files = [Path(__file__), pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py',
+    files = [Path(__file__), pipeline/'claim_review_recovery.py', pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py',
         pipeline/'source_reconciliation_runner.py', pipeline/'source_reconciliation_runtime.py',
         repository/'backend/api/canonical_repository/postgres_store.py', repository/'scripts/audit-library.py',
         *[pipeline/'prompts'/('claim_management_'+role+'_v2.md') for role in ('proposal','review','audit')]]
@@ -548,6 +548,12 @@ def validate_review(candidate, review, expected_keys, questions, unresolved, sou
     resolved = [r.finding_id for r in review.prior_findings]
     if len(resolved) != len(set(resolved)) or set(resolved) != set(unresolved):
         raise ValueError("review must reconcile every prior stable finding")
+    covered_proposer_issues = {f.identity('review') for f in review.findings}
+    covered_proposer_issues.update(Finding.model_validate(unresolved[r.finding_id]).identity('review')
+        for r in review.prior_findings)
+    omitted = [f.target_key for f in candidate.findings if f.identity('review') not in covered_proposer_issues]
+    if omitted:
+        raise ValueError('review omitted a proposer-reported issue: ' + ', '.join(sorted(set(omitted))))
     identities = [f.identity('review') for f in review.findings]
     prior_identities = {Finding.model_validate(f).identity('review') for f in unresolved.values()}
     if len(identities) != len(set(identities)) or set(identities) & prior_identities:
@@ -608,6 +614,14 @@ def resolution_finding(resolution, unresolved):
     if resolution.affected_target_keys is not None:
         finding.update(affected_target_keys=resolution.affected_target_keys, impact_reason=resolution.impact_reason)
     return finding
+
+
+def context_findings_after(action_id, previous, review, *, request, candidate):
+    result = {f.identity(action_id): f.model_dump(mode='json') for f in review.findings
+        if not finding_blocks(f.model_dump(mode='json'), request, candidate)}
+    result.update({r.finding_id: resolution_finding(r, previous) for r in review.prior_findings
+        if r.disposition != 'resolved' and not finding_blocks(resolution_finding(r, previous), request, candidate)})
+    return result
 
 
 def unresolved_after(action_id, previous, review, *, request=None, candidate=None):

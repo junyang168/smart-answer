@@ -796,3 +796,53 @@ def test_unaccepted_initial_review_continuation_consumes_budget_and_keeps_raw_is
     # Changing an archived role prompt cannot authenticate the old answer.
     frozen_prompt.write_text('changed role instruction')
     with pytest.raises(ValueError):cm.continuation_budget(previous,successor,reduced)
+
+
+@pytest.mark.parametrize('approved',[True,False])
+def test_returned_review_validator_recovery_preserves_model_inputs_and_calls(action,monkeypatch,approved):
+    from backend.pipeline import cvp_sql_actions as actions
+    from backend.pipeline.claim_review_recovery import recover_returned_review,VERSION
+    store,_,_,_,tmp_path,_=action
+    seed_claims(store,['C'])
+    request,root=operation_request(action,'Update',['C'])
+    policy=cm.Policy.model_validate_json(cm.DEFAULT_POLICY.read_text())
+    policy.budget.max_revisions=0;policy.budget.gpt_calls=0;policy.budget.opus_calls=1
+    policy_path=tmp_path/'single-review-policy.json';policy_path.write_text(policy.model_dump_json())
+    request.policy=cm.source.FileBinding.model_validate(binding(policy_path))
+    auth_path=Path(request.authorization.path);auth=json.loads(auth_path.read_text());auth['policy']=request.policy.model_dump(mode='json')
+    auth_path.write_text(json.dumps(auth));request.authorization=cm.source.FileBinding.model_validate(binding(auth_path))
+    actual=actions.validate_claim_stage_receipt
+    def old_validator(receipt):
+        materials,candidate,review,passed=actual(receipt)
+        return materials,candidate,review,False if receipt['stage']=='opus' else passed
+    monkeypatch.setattr(actions,'validate_claim_stage_receipt',old_validator)
+    ports=SyntheticPorts(store,tmp_path,opus=passing if approved else lambda p:rejected(p,category='source_uncertain'))
+    first=execute_claim_management(store,request,root=root,ports=ports)
+    assert first['status']=='paused'
+    parent=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id));rid=next(iter(parent['latest_rounds'].values()))
+    before=store.get_cvp_group(rid);slots=deepcopy(parent['call_reservations'])
+    assert before['checkpoint']=='prepared' and not before['opus_approved']
+    assert ports.calls==['opus']
+    monkeypatch.setattr(actions,'validate_claim_stage_receipt',actual)
+    direction=tmp_path/'returned-review-recovery.json';direction.write_text(json.dumps({'schema_version':VERSION,
+        'round_id':rid,'authorized_by':'owner','authorization_quote':'continue after the tested validator fix',
+        'human_content_approval':False,'prior_metadata_sha256':cm.sha256_json({k:v for k,v in before.items() if k not in {'run_id','status','error'}})}))
+    if not approved:
+        with pytest.raises(ValueError,match='still rejects'):
+            recover_returned_review(store,rid,authorization=binding(direction))
+        assert store.get_cvp_group(rid)==before
+        assert store.get_cvp_group(parent['run_id'])['call_reservations']==slots
+        assert ports.calls==['opus']
+        return
+    path=recover_returned_review(store,rid,authorization=binding(direction))
+    after=store.get_cvp_group(rid)
+    assert cm.model_packet(before['materials'])==cm.model_packet(after['materials'])
+    assert after['candidate']==before['candidate']
+    assert after['opus_approved'] and not after.get('outcome')
+    assert after['engineering_review_recoveries'][0]['original_round']=={k:v for k,v in before.items() if k not in {'run_id','status','error'}}
+    assert store.get_cvp_group(parent['run_id'])['call_reservations']==slots
+    assert recover_returned_review(store,rid,authorization=binding(direction))==path
+    result=execute_claim_management(store,request,root=root,ports=ports)
+    assert result['status']=='completed',result
+    assert ports.calls==['opus']
+    assert store.claim_management_qualification('C')['ready']

@@ -269,7 +269,7 @@ def validate_claim_management_package(package):
     review = cm.Review.model_validate(raw['response'])
     passed = cm.validate_review(candidate, review, packet['denominator'], packet['required_questions'],
                                 materials['unresolved'], sources, request=unit_request, records=materials['before'])
-    if not passed or candidate.findings:
+    if not passed:
         raise ValueError('Claim package lacks passing complete independent Opus review')
     expected = claim_management_package_body(app['run_id'], writes)
     if {k: v for k, v in package.items() if k != 'source_repair_application'} != expected:
@@ -395,7 +395,7 @@ def validate_claim_stage_receipt(receipt):
         passed = cm.validate_review(candidate, review, packet['denominator'], packet['required_questions'],
                                      materials['unresolved'], sources,
                                      request=cm.Request.model_validate(materials['unit_request']), records=materials['before'])
-        return materials, candidate, review, (passed and not candidate.findings)
+        return materials, candidate, review, passed
     if stage == 'readback':
         if policy.independent_audit_required:
             raise ValueError('program readback cannot replace a required independent audit')
@@ -417,7 +417,7 @@ def validate_claim_stage_receipt(receipt):
             raise ValueError('program readback omitted or changed its current scope')
         if passed and not cm.is_source_impact(materials['request']):
             cm.goal_satisfied(materials['original_goal'], states, candidate.replacements)
-        return materials, candidate, review, (passed and not candidate.findings)
+        return materials, candidate, review, passed
     raise ValueError('unknown Claim content stage')
 
 
@@ -537,7 +537,7 @@ def execute_claim_management(store, request, *, root, ports):
                         rid = prior['run_id']
                         materials = prior['materials']
                         records = {content.split_key(k): v for k, v in materials.get('transaction_before', materials['before']).items()}
-                    round_root = root / rid
+                    round_root = Path(prior.get('recovery_root', root / rid))
                     write(round_root / 'materials.json', materials)
                     def guard():
                         cm.load_authority(request, source_documents=cm.source_documents(materials['before']),

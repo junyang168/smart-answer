@@ -427,3 +427,22 @@ def test_explicit_context_findings_cannot_duplicate_or_approve_the_rejected_obje
         error='finding contradicts an approved object'
     with pytest.raises(ValueError,match=error):
         m.validate_review(candidate,review,before,['own_source'],unresolved,sources,request=request)
+
+
+@pytest.mark.parametrize('scope',['context','blocking','omitted'])
+def test_proposer_issue_needs_independent_review_instead_of_automatic_blocking(case,scope):
+    request,before,candidate,sources=case
+    f=m.Finding(target_key='evidence_steps/E',component='statement',category='source_uncertain',
+        reason='proposer flags uncertainty',citations=[citation()],acceptance_condition='check source',human_question='which clause?',
+        affected_target_keys=['source_fragments/F'],impact_reason='provisional reporter scope is not reviewer authority')
+    candidate.findings=[f]
+    review=m.Review(proposal_sha256=candidate.digest,answered_questions=['own_source'],prior_findings=[],
+        findings=[] if scope=='omitted' else [f.model_copy(update={'affected_target_keys':[] if scope=='context' else ['claims/C'],
+            'impact_reason':'independent clause' if scope=='context' else 'supports C'})],
+        verdicts=[c.Verdict(record_key=k,approved=k!='evidence_steps/E' or scope=='omitted',
+            problems=['uncertain'] if k=='evidence_steps/E' and scope!='omitted' else [],reason='independent judgment') for k in before])
+    if scope=='omitted':
+        with pytest.raises(ValueError,match='proposer-reported issue'):
+            m.validate_review(candidate,review,before,['own_source'],{},sources,request=request)
+    else:
+        assert m.validate_review(candidate,review,before,['own_source'],{},sources,request=request)==(scope=='context')
