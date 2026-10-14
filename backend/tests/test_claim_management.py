@@ -401,3 +401,29 @@ def test_one_finding_cannot_explain_another_rejected_object_by_prose(case):
         m.validate_review(candidate,review,before,m.QUESTIONS['Update'],{},sources,request=request)
     review.findings.append(findings[0].model_copy(update={'target_key':'source_fragments/F'}))
     assert not m.validate_review(candidate,review,before,m.QUESTIONS['Update'],{},sources,request=request)
+
+
+@pytest.mark.parametrize('kind',['duplicate','contradictory','repeated_prior'])
+def test_explicit_context_findings_cannot_duplicate_or_approve_the_rejected_object(case,kind):
+    request,before,candidate,sources=case
+    f=m.Finding(target_key='evidence_steps/E',component='statement',category='evidence',
+        reason='independent issue',citations=[citation()],acceptance_condition='clarify independent clause',
+        affected_target_keys=[],impact_reason='C does not use this independent clause')
+    review=m.Review(proposal_sha256=candidate.digest,answered_questions=['own_source'],prior_findings=[],
+        findings=[f],verdicts=[c.Verdict(record_key=k,approved=k!='evidence_steps/E',
+            problems=[] if k!='evidence_steps/E' else ['independent issue'],reason='specific review') for k in before])
+    unresolved={}
+    if kind=='repeated_prior':
+        fid=f.identity('original');unresolved={fid:f.model_dump(mode='json')}
+        review.prior_findings=[m.FindingResolution(finding_id=fid,disposition='persistent',
+            reason='same issue still exists',citations=[citation()],affected_target_keys=[],impact_reason='independent issue')]
+        error='repeats a stable finding'
+    elif kind=='duplicate':
+        review.findings.append(f.model_copy(update={'reason':'same issue reworded','affected_target_keys':['claims/C']}))
+        error='repeats a stable finding'
+    else:
+        for v in review.verdicts:
+            if v.record_key=='evidence_steps/E':v.approved=True;v.problems=[]
+        error='finding contradicts an approved object'
+    with pytest.raises(ValueError,match=error):
+        m.validate_review(candidate,review,before,['own_source'],unresolved,sources,request=request)

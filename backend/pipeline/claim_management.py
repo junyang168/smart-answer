@@ -548,6 +548,10 @@ def validate_review(candidate, review, expected_keys, questions, unresolved, sou
     resolved = [r.finding_id for r in review.prior_findings]
     if len(resolved) != len(set(resolved)) or set(resolved) != set(unresolved):
         raise ValueError("review must reconcile every prior stable finding")
+    identities = [f.identity('review') for f in review.findings]
+    prior_identities = {Finding.model_validate(f).identity('review') for f in unresolved.values()}
+    if len(identities) != len(set(identities)) or set(identities) & prior_identities:
+        raise ValueError('review repeats a stable finding; reconcile existing issues in prior_findings')
     for finding in review.findings:
         if finding.target_key not in expected_keys:
             raise ValueError("review finding outside its declared denominator")
@@ -565,6 +569,12 @@ def validate_review(candidate, review, expected_keys, questions, unresolved, sou
         raise ValueError("rejected objects require concrete current or persistent findings: " + ", ".join(sorted(rejected - explained)))
     if request is not None and is_source_impact(request):
         return validate_source_impacts(review, expected_keys, sources, request=request, records=records, unresolved=unresolved)
+    approved = {v.record_key for v in review.verdicts if v.approved and not v.problems}
+    explicit_issues = {f.target_key for f in review.findings if f.affected_target_keys is not None}
+    explicit_issues.update(unresolved[r.finding_id]['target_key'] for r in review.prior_findings
+        if r.disposition != 'resolved' and resolution_finding(r, unresolved).get('affected_target_keys') is not None)
+    if explicit_issues & approved:
+        raise ValueError('finding contradicts an approved object: ' + ', '.join(sorted(explicit_issues & approved)))
     blocking = [f for f in review.findings if finding_blocks(f.model_dump(mode='json'), request, candidate)]
     context_rejections = {f.target_key for f in review.findings if f not in blocking}
     persistent = [r for r in review.prior_findings if r.disposition != 'resolved']

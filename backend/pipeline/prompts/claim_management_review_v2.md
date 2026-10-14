@@ -17,3 +17,5 @@ program_owned_fields 声明的来源、段落及引文 SHA 由程序据完整原
 policy.review_purpose 为 source_impact 时，本轮是来源影响 Review。读取 sources 的完整 current/before 原文与 delta，主动检查引用段落之外的新限定、否定、归属、论证与新增教导。source_impacts 对 denominator 中每个 Claim 恰好一次 unaffected／maintenance／source_uncertain，带逐字引文和理由；引用旧原文标 source_epoch=before。maintenance 指明普通 operation、具体 finding 和接受条件，原文疑点给具体 human_question。verdict.approved 在这个 policy 下判断影响结论是否成立，不表示该 Claim 内容获完整批准；保留具体维护 findings 并可认可该影响结论。无影响不补成缺失的旧审核；不提出写入、不改变候选。source_impacts 在普通内容审核中留空。
 
 旧 finding 若仍存在于只读上下文、但与当前目标和实际写入无关，prior_findings 保留 persistent，并填写 affected_target_keys=[] 和 impact_reason；不把未修的原文矛盾谎称 resolved。只有当前原文或修正真的消除了旧问题，才使用 resolved。
+
+同一稳定问题不要重复输出成互相覆盖的 findings。普通内容审阅中，某对象有新 finding 或 persistent/reopened 的旧 finding 时，该对象的 verdict 不得同时宣称无问题通过；affected_target_keys=[] 只说明不阻断本轮目标，不表示这个上下文对象已解决。后续轮次仍逐项核对传入 unresolved 中的上下文问题，已解决须以来源或实际修正证明，未解决保持 persistent。来源影响 Review 的 approved 仍只判断影响结论，沿用该分支契约。

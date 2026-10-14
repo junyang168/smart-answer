@@ -687,3 +687,55 @@ def test_reviewed_consumer_pin_recovery_reuses_model_results_and_plan(action,mon
     assert execute_claim_management(store,request,root=root,ports=ports)['status']=='completed'
     assert ports.calls==['opus','gpt','opus']
     assert store.claim_management_qualification('C')['ready']
+
+
+@pytest.mark.parametrize('resolution',['resolved','persistent','promoted'])
+def test_revision_reconciles_context_findings_and_does_not_report_resolved_context(action,resolution):
+    store,_,_,_,tmp_path,_=action
+    seed_claims(store,['C'])
+    store.apply_plan(store.plan_package({'package_id':'context-round',
+        'claims':[{**store.get_record_state('claims','C')['payload'],'evidence_step_ids':['E']}],
+        'evidence_steps':[{'evidence_step_id':'E','statement':'甲是假设。','produced_claim_ids':['C']}],
+        'observations':[{'observation_id':'O','statement':'甲是假设。'}],
+        'knowledge_relations':[{'relation_id':'R','from_id':'O','to_id':'E','relation_type':'supports','reason':'synthetic context'}]}))
+    request,root=operation_request(action,'Update',['C'])
+    request.policy=cm.source.FileBinding.model_validate(binding(cm.DEFAULT_POLICY))
+    auth_path=Path(request.authorization.path);auth=json.loads(auth_path.read_text())
+    auth['policy']=request.policy.model_dump(mode='json');auth_path.write_text(json.dumps(auth))
+    request.authorization=cm.source.FileBinding.model_validate(binding(auth_path))
+    seen=[]
+    def opus(packet):
+        if packet['round_number']:
+            seen.extend(f['target_key'] for f in packet['unresolved'].values())
+            assert set(seen)=={'claims/C','observations/O'}
+            report=passing(packet)
+            if resolution!='resolved':
+                fid=next(k for k,v in packet['unresolved'].items() if v['target_key']=='observations/O')
+                for r in report['prior_findings']:
+                    if r['finding_id']==fid:r.update(disposition='persistent',
+                        affected_target_keys=[] if resolution=='persistent' else ['claims/C'],
+                        impact_reason='still independent' if resolution=='persistent' else 'now affects this proposed write')
+                for v in report['verdicts']:
+                    if v['record_key']=='observations/O':v.update(approved=False,problems=['issue persists'])
+            return report
+        report=rejected(packet)
+        context=deepcopy(report['findings'][0]);context.update(target_key='observations/O',
+            affected_target_keys=[],impact_reason='this independent clause does not affect C')
+        report['findings'].append(context)
+        for v in report['verdicts']:
+            if v['record_key']=='observations/O':v.update(approved=False,problems=['independent issue'])
+        return report
+    ports=SyntheticPorts(store,tmp_path,opus=opus,proposal=corrected)
+    result=execute_claim_management(store,request,root=root,ports=ports)
+    parent=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id))
+    if resolution=='promoted':
+        assert result['reason']=='permission_required',result
+        assert result['required_write_keys']==['observations/O']
+        assert any(f['target_key']=='observations/O' for f in parent['findings'].values())
+        assert not parent.get('context_findings')
+    else:
+        assert result['status']=='completed',result
+        assert bool(result.get('context_findings'))==(resolution=='persistent')
+        assert bool(parent.get('context_findings'))==(resolution=='persistent')
+        assert not parent['findings']
+    assert ports.calls==['opus','gpt','opus']

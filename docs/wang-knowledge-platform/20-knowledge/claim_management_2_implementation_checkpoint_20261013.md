@@ -142,3 +142,15 @@ CL007 Opus 没有 findings，普通事务／readback／原目标完成检查通�
 这是通用「对象 verdict 与正式 finding 的逐项对应」问题：不按 CL006／OBS004 特判，不让自然语言提及充当另一对象的结构化问题，也不放宽来源疑点处理。审阅 prompt 现在明确要求每个 rejected record_key 有相同 target_key 的 finding 或该对象的 persistent／reopened prior_finding；同一问题涉及多个对象须逐个登记，affected_target_keys 仍只表示本轮 Claim 目标影响范围。错误信息列出缺项 ID，新增反例验证 prose 跨对象提及不能满足契约，补齐逐项 finding 也仍保持内容拒绝。相关回归 **462 passed、43 skipped**。
 
 此修改仅验证新 prompt 契约与现有严格校验，未重新调用 CL006 模型，也未人工复制其 finding 冒充新原答；CL006 仍未完成。两条的内容审核材料分别为 21 项与 35 项，对应 Opus packet 文件约 70,603 bytes／89,953 bytes，没有强制把整篇其他 Claim 带入当前审核分母。旧冠词疑点仍待人工核对；整体 #435 未完成，未合并或部署。
+
+## 审阅问题登记与多轮状态的同类漏洞检查（2026-10-14）
+
+负责人要求检查 CL006 以外的类似漏洞。本次检查共同 Review 校验、问题登记、多轮输入与完成输出，未调用真实模型或修改正式内容。反例确认三类缺陷：同一稳定 finding 重复输出可覆盖登记；显式有问题的对象可同时给出无问题通过 verdict；上一轮只读 context_findings 没有进入下一轮 unresolved，已解决的问题可能继续留在 parent 最终输出，反之上下文问题是否已转成目标阻断也未要求重新判断。
+
+修复继续使用原 finding identity 和 SQL metadata：新 findings 内不准重复同一稳定问题，也不能把已经进入 prior_findings 的旧问题另写一条 new finding；普通内容审阅中，显式 scope 的新问题或 persistent／reopened 旧问题不得与该对象的无问题通过 verdict 同时出现。旧记录缺 scope 字段时保留原保守阻断语义；来源影响 Review 的 approved 判断影响结论，仍沿用它的专属契约，不误套内容通过语义。
+
+后续轮次的 unresolved 合并当前 unit 可见的 blockers 与 context_findings，要求原审核角色逐项说明 resolved／persistent／reopened。问题真正解决或转成 blocker 时，只清除 parent 当前上下文清单中的对应条目，旧轮次、raw 与历史问题收据保留；其他 unit 的上下文问题不删除。没有新增状态表、框架、审核角色、模型预算或按 Claim ID 的特殊逻辑。
+
+临时 PostgreSQL 三种出口验证：resolved 后完成结果不再显示该上下文问题；persistent 且不影响目标时，目标可以完成，但上下文问题继续显示；同一问题转为影响实际目标时，不再显示为无关 context，并在无修复权限时返回 permission_required、指明所需对象，未提交新候选。另有反例拒绝重复稳定问题、新／旧问题双重登记，以及 finding 与无问题通过 verdict 自相矛盾。相关回归为 **468 passed、43 skipped**，含共同 transaction、恢复、来源影响与保存旧失败材料；文档检查仍仅有既有 notes-to-sermon 附录锚点错误。
+
+CL006 的原不完整回答仍保留，状态未改成通过，也未自动重发。真实模型回答违反契约后需要保留原答并沿合法接续处理，这项工程恢复仍与内容修正分开；prompt 自检不能保证模型永不犯错，本次不声称已真实恢复 CL006。整体 #435 尚未完成，未合并或部署。

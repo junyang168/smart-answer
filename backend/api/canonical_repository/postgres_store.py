@@ -3529,9 +3529,14 @@ class PostgresKnowledgeStore:
                 context_findings.update({r.finding_id: cm.resolution_finding(r, materials['unresolved'])
                     for r in review.prior_findings if r.disposition != 'resolved'
                     and not cm.finding_blocks(cm.resolution_finding(r, materials['unresolved']), unit_request, candidate)})
+                # Every prior issue in this unit is explicitly reconciled;
+                # preserve historical rounds but do not retain resolved context
+                # or a context issue promoted to a target blocker as still current.
+                parent['context_findings'] = {k: v for k, v in parent.get('context_findings', {}).items()
+                    if k not in materials['unresolved']}
                 if context_findings:
                     value['context_findings'] = context_findings
-                    parent.setdefault('context_findings', {}).update(context_findings)
+                    parent['context_findings'].update(context_findings)
                     # A directly rejected readonly Claim cannot keep a green
                     # qualification at this exact version, even though it does
                     # not block the independent target. No content is changed.

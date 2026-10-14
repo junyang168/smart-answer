@@ -522,7 +522,8 @@ def execute_claim_management(store, request, *, root, ports):
                             'program_owned_fields': {'source_fragments': sorted(cm.FRAGMENT_HASH_FIELDS),
                                 'review_provenance': sorted(cm.source.PROVENANCE), 'reader_visible_text_changes': False},
                             'created_keys': parent['created_keys'], 'replacements': parent.get('replacements', {}),
-                            'unresolved': {k: v for k, v in parent['findings'].items() if v['target_key'] in unit_keys},
+                            'unresolved': {k: v for k, v in {**parent.get('context_findings', {}), **parent['findings']}.items()
+                                if v['target_key'] in unit_keys},
                             'previous_candidate': prior.get('candidate') if prior else None,
                             'claim_ids': [k.split('/',1)[1] for k in unit_keys if k.startswith('claims/')],
                             'writable_record_shapes': {col: cm.KNOWLEDGE_COLLECTIONS[col][0].model_json_schema()
