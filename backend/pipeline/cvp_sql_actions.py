@@ -388,6 +388,8 @@ def validate_claim_stage_receipt(receipt):
                           created_keys=materials['created_keys'], original_replacements=materials['replacements'])
     if stage == 'candidate':
         validate_claim_candidate_origin(root, materials, policy, sources, candidate)
+        if policy.all_findings_to_gpt and 'gpt' in materials['roles']:
+            cm.validate_proposer_resolutions(candidate, materials['unresolved'], sources)
         return materials, candidate, None, None
     if stage == 'opus':
         packet = claim_management_review_packet(materials, candidate)
@@ -454,6 +456,8 @@ def execute_claim_management(store, request, *, root, ports):
             parent = store.prepare_claim_management_action(request, goal=goal, read_pins=pins(records), root=root)
         policy, sources = cm.load_authority(request, source_documents=cm.source_documents(parent['original_goal']['original_objects']))
         if parent.get('continued_by'):
+            if parent['result'].get('status') == 'completed':
+                return {'status':'completed', 'historical_result':parent['result'], 'context_follow_up':parent['continued_by']}
             return {'status':'paused', 'reason':'continued_in_linked_action', 'run_id':parent['continued_by']}
         if parent['result'].get('status') == 'completed':
             return store.finish_claim_management_action(parent_id)
@@ -574,7 +578,7 @@ def execute_claim_management(store, request, *, root, ports):
                         call('opus', packet)
                         prior = record('opus')
                         if prior.get('outcome'):
-                            if prior['outcome'] == 'revision_required' and request.operation != 'Review':
+                            if prior['outcome'] == 'revision_required' and (request.operation != 'Review' or policy.all_findings_to_gpt):
                                 continue
                             break
                         _, writes = cm.validate_candidate(cm.Request.model_validate(materials['unit_request']), materials['before'], candidate, materials['sources'],

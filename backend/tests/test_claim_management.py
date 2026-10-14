@@ -453,3 +453,15 @@ def test_proposer_issue_needs_independent_review_instead_of_automatic_blocking(c
         assert m.validate_review(candidate,review,before,['own_source'],{},sources,request=request)==(scope!='blocking')
         assert bool(m.unresolved_after(request.action_id,{},review,request=request,candidate=candidate))==(scope=='blocking')
         assert bool(m.context_findings_after(request.action_id,{},review,request=request,candidate=candidate))==(scope=='context')
+
+
+def test_gpt_adjudication_requires_every_objection_and_exact_source_quote(case):
+    _,_,candidate,sources=case
+    pending={'first':{},'context':{}}
+    candidate.finding_resolutions=[m.FindingResolution(finding_id='first',disposition='resolved',reason='rejected',citations=[citation()])]
+    with pytest.raises(ValueError,match='every audit finding'):m.validate_proposer_resolutions(candidate,pending,sources)
+    candidate.finding_resolutions.append(m.FindingResolution(finding_id='context',disposition='persistent',reason='source unclear',citations=[citation()]))
+    m.validate_proposer_resolutions(candidate,pending,sources)
+    assert m.adjudication_outcome({'new':{'category':'source_uncertain'}},candidate)=='revision_required'
+    assert m.adjudication_outcome({'context':{'category':'source_uncertain'}},candidate)=='human_required'
+    assert m.adjudication_outcome({'first':{'category':'source_uncertain'}},candidate)=='disagreement'

@@ -3249,6 +3249,7 @@ class PostgresKnowledgeStore:
 
     def prepare_claim_management_action(self, request, *, goal, read_pins, root):
         """Keep new Claim authority and its original goal in the run table."""
+        from backend.pipeline.cvp_sql_flow import decoded_pins
         from backend.pipeline.claim_management import Request, load_authority, source_documents, VERSION
         request = Request.model_validate(request)
         policy, _ = load_authority(request, source_documents=source_documents(goal.get('original_objects', {})))
@@ -3302,7 +3303,11 @@ class PostgresKnowledgeStore:
                 prior_rounds = sorted({slot['round_id'] for slot in prior['call_reservations'].values()})
                 for (child,) in cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=ANY(%s)',
                         (prior_rounds,)).fetchall():
-                    if child.get('change_set_ids') or child.get('checkpoint') in {'reviewed','applied','audited'}:
+                    if continuation['completed_context_cleanup']:
+                        if child.get('outcome') != 'completed' or child.get('change_set_ids'):
+                            raise ChangeSetConflict('context follow-up cannot replay a content write or an incomplete round')
+                        self._assert_transaction_read_pins(cursor, decoded_pins(child['audited_pins']))
+                    elif child.get('change_set_ids') or child.get('checkpoint') in {'reviewed','applied','audited'}:
                         raise ChangeSetConflict('engineering input continuation cannot replay a committed or reviewed write')
                 if any(before[key] != prior['original_goal']['original_objects'][key] for key in request.target_keys):
                     raise ChangeSetConflict('original target changed before its explicit engineering continuation')
@@ -3316,6 +3321,43 @@ class PostgresKnowledgeStore:
                         slot.update(state='cancelled', transferred_to=run_id)
                 cursor.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb WHERE run_id=%s',
                     (canonical_json(prior), previous_id))
+            authority = json.loads(cm.source.verify_file(request.authorization).read_text())
+            context_actions = authority.get('context_review_actions', {})
+            if context_actions:
+                if (request.predecessor_action_id or request.operation != 'Update'
+                        or not policy.all_findings_to_gpt or policy.initial_candidate != 'proposal'
+                        or set(request.target_keys) & {p.key for p in request.permissions}):
+                    raise ChangeSetConflict('saved context maintenance requires a new explicitly bound GPT-first scope with readonly Claims')
+                imported = {}
+                for action_id, finding_ids in context_actions.items():
+                    previous_id = 'CMA-' + sha256_json(action_id)
+                    row = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE',
+                        (previous_id,)).fetchone()
+                    prior = row[0] if row else None
+                    if (not prior or prior.get('kind') != 'claim_management_action'
+                            or prior['result']['status'] != 'completed' or prior.get('context_maintained_by')
+                            or not finding_ids or len(finding_ids) != len(set(finding_ids))
+                            or prior['request']['source_bindings'] != request.model_dump(mode='json')['source_bindings']):
+                        raise ChangeSetConflict('saved context maintenance has stale/unbound or already assigned audit history')
+                    latest = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=ANY(%s)',
+                        (list(prior['latest_rounds'].values()),)).fetchall()
+                    for fid in finding_ids:
+                        finding = prior.get('context_findings', {}).get(fid)
+                        if not finding or finding['target_key'] not in {p.key for p in request.permissions}:
+                            raise ChangeSetConflict('saved context maintenance omitted its exact authorized finding target')
+                        key = finding['target_key']
+                        audited = [child['materials']['before'][key] for (child,) in latest
+                            if key in child['materials']['before']]
+                        if not audited or any(before.get(key) != state for state in audited):
+                            raise ChangeSetConflict('saved context object changed since its bound audit')
+                        imported[fid] = finding
+                    prior['context_maintained_by'] = run_id
+                    cursor.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb WHERE run_id=%s',
+                        (canonical_json(prior), previous_id))
+                if {p.key for p in request.permissions} != {f['target_key'] for f in imported.values()}:
+                    raise ChangeSetConflict('saved context maintenance cannot grant unrelated writes')
+                value['findings'] = imported
+                value['context_review_actions'] = context_actions
             cursor.execute("""INSERT INTO wang_knowledge.pipeline_runs
                               (run_id,subject_kind,subject_id,stage,trigger,status,metadata)
                               VALUES (%s,'batch',%s,'cvp_group','cli','running',%s::jsonb)""",
@@ -3449,15 +3491,21 @@ class PostgresKnowledgeStore:
                 prior = parent.setdefault('candidate_fingerprints', {}).setdefault(value['unit_id'], [])
                 if value['round_number'] and (fingerprint in prior or fingerprint == cm.candidate_state(
                         materials['before'], cm.existing_candidate(materials['before'], replacements=materials['replacements']))):
-                    raise ChangeSetConflict('Claim correction made no semantic progress or repeats a previous candidate')
+                    # A cited adjudication can reject an objection without editing.
+                    # Allow this once per stable issue, within the same budget.
+                    decisions = candidate.finding_resolutions or []
+                    judged = parent.setdefault('clarified_finding_ids', [])
+                    ids = [r.finding_id for r in decisions]
+                    if (not cm.Policy.model_validate(materials['policy']).all_findings_to_gpt
+                            or not ids or set(ids) & set(judged)):
+                        raise ChangeSetConflict('Claim correction made no semantic progress or repeats a previous candidate')
+                    judged.extend(ids)
                 prior.append(fingerprint)
                 parent['revision_rounds'][round_id] = bool(value['round_number'] or parent.get('continuation') and 'gpt' in materials['roles'])
                 value['candidate'] = candidate.model_dump(mode='json')
                 value['claim_ids'] = [k.split('/',1)[1] for k in cm.audit_keys(
                     cm.Request.model_validate(materials['unit_request']), materials['before'], candidate) if k.startswith('claims/')]
             else:
-                if stage == 'opus':
-                    value['opus_approved'] = passed
                 if stage in {'audit','readback'}:
                     report = (json.loads(Path(receipt['audit']['path']).read_text()) if stage == 'audit'
                               else body(read(Path(receipt['materials']['path']).parent / 'readback.json')))
@@ -3527,6 +3575,15 @@ class PostgresKnowledgeStore:
                     request=unit_request, candidate=candidate)
                 context_findings = cm.context_findings_after(parent['action_id'], materials['unresolved'], review,
                     request=unit_request, candidate=candidate)
+                qualification_findings = dict(context_findings)
+                adjudicating = cm.Policy.model_validate(materials['policy']).all_findings_to_gpt and not cm.is_source_impact(materials['request'])
+                if adjudicating:
+                    unresolved.update(context_findings)
+                    context_findings = {}
+                    if unresolved:
+                        passed = False
+                if stage == 'opus':
+                    value['opus_approved'] = passed
                 # Every prior issue in this unit is explicitly reconciled;
                 # preserve historical rounds but do not retain resolved context
                 # or a context issue promoted to a target blocker as still current.
@@ -3535,12 +3592,13 @@ class PostgresKnowledgeStore:
                 if context_findings:
                     value['context_findings'] = context_findings
                     parent['context_findings'].update(context_findings)
+                if qualification_findings:
                     # A directly rejected readonly Claim cannot keep a green
                     # qualification at this exact version, even though it does
                     # not block the independent target. No content is changed.
                     rejected_claims = {v.record_key.split('/',1)[1] for v in review.verdicts
                         if v.record_key.startswith('claims/') and (not v.approved or v.problems)
-                        and any(f['target_key'] == v.record_key for f in context_findings.values())}
+                        and any(f['target_key'] == v.record_key for f in qualification_findings.values())}
                     if rejected_claims:
                         self._assert_transaction_read_pins(cursor, pins({('claims',cid):materials['before']['claims/'+cid]
                             for cid in rejected_claims}))
@@ -3577,14 +3635,16 @@ class PostgresKnowledgeStore:
                         cursor.execute("""UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,
                             status='running',finished_at=NULL,heartbeat_at=now() WHERE run_id=%s""",
                             (canonical_json(consumer), run))
-                if report_only:
+                if report_only and not (adjudicating and unresolved):
                     current_pins = pins({cm.source.split_key(k): v for k, v in materials['before'].items()})
                     self._assert_transaction_read_pins(cursor, current_pins)
                     value['outcome'] = 'reported'
                     value.setdefault('blocked_current_claim_ids', [])
                 elif not passed:
-                    reason = 'disagreement' if value.get('source_impact_disagreement') else cm.failure_reason(unresolved)
-                    if reason == 'revision_required' and materials['request']['operation'] != 'Review':
+                    reason = ('disagreement' if value.get('source_impact_disagreement') else
+                        cm.adjudication_outcome(unresolved, candidate) if adjudicating else cm.failure_reason(unresolved))
+                    if (reason == 'revision_required' and materials['request']['operation'] != 'Review'
+                            and not (adjudicating and set(unresolved) - {r.finding_id for r in candidate.finding_resolutions or []})):
                         writable = {p.key for p in unit_request.permissions}
                         writable.update(parent['created_keys'])
                         if any(f['target_key'] not in writable for f in unresolved.values()):

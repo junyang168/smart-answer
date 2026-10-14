@@ -231,7 +231,7 @@ def test_opus_only_completes_with_real_program_readback_and_no_gemini(action,ope
     if operation=='Restore':
         store.apply_plan(store.plan_retirement([('claims','C')],reason='synthetic retirement',package_id='before-restore'))
     request,root=operation_request(action,operation,[] if operation=='Create' else targets)
-    request.policy=cm.source.FileBinding.model_validate(binding(cm.DEFAULT_POLICY))
+    request.policy=cm.source.FileBinding.model_validate(binding(Path(cm.__file__).parent / 'policies/wang_claim_management_opus_only_v1.json'))
     direction_path=Path(request.authorization.path)
     direction=json.loads(direction_path.read_text());direction['policy']=request.policy.model_dump(mode='json')
     direction_path.write_text(json.dumps(direction));request.authorization=cm.source.FileBinding.model_validate(binding(direction_path))
@@ -596,7 +596,7 @@ def test_explicit_schema_recovery_carries_budget_history_and_prevents_fork(actio
     store, _, _, _, tmp_path, _ = action
     seed_claims(store,['C'])
     request,root=operation_request(action,'Update',['C'])
-    request.policy=cm.source.FileBinding.model_validate(binding(cm.DEFAULT_POLICY))
+    request.policy=cm.source.FileBinding.model_validate(binding(Path(cm.__file__).parent / 'policies/wang_claim_management_opus_only_v1.json'))
     direction_path=Path(request.authorization.path);direction=json.loads(direction_path.read_text())
     direction['policy']=request.policy.model_dump(mode='json');direction_path.write_text(json.dumps(direction))
     request.authorization=cm.source.FileBinding.model_validate(binding(direction_path))
@@ -653,7 +653,7 @@ def test_reviewed_consumer_pin_recovery_reuses_model_results_and_plan(action,mon
     store, _, _, _, tmp_path, _ = action
     seed_claims(store,['C','D'])
     request,root=operation_request(action,'Update',['C'])
-    request.policy=cm.source.FileBinding.model_validate(binding(cm.DEFAULT_POLICY))
+    request.policy=cm.source.FileBinding.model_validate(binding(Path(cm.__file__).parent / 'policies/wang_claim_management_opus_only_v1.json'))
     auth_path=Path(request.authorization.path);auth=json.loads(auth_path.read_text())
     auth['policy']=request.policy.model_dump(mode='json');auth_path.write_text(json.dumps(auth))
     request.authorization=cm.source.FileBinding.model_validate(binding(auth_path))
@@ -699,7 +699,7 @@ def test_revision_reconciles_context_findings_and_does_not_report_resolved_conte
         'observations':[{'observation_id':'O','statement':'甲是假设。'}],
         'knowledge_relations':[{'relation_id':'R','from_id':'O','to_id':'E','relation_type':'supports','reason':'synthetic context'}]}))
     request,root=operation_request(action,'Update',['C'])
-    request.policy=cm.source.FileBinding.model_validate(binding(cm.DEFAULT_POLICY))
+    request.policy=cm.source.FileBinding.model_validate(binding(Path(cm.__file__).parent / 'policies/wang_claim_management_opus_only_v1.json'))
     auth_path=Path(request.authorization.path);auth=json.loads(auth_path.read_text())
     auth['policy']=request.policy.model_dump(mode='json');auth_path.write_text(json.dumps(auth))
     request.authorization=cm.source.FileBinding.model_validate(binding(auth_path))
@@ -745,7 +745,7 @@ def test_unaccepted_initial_review_continuation_consumes_budget_and_keeps_raw_is
     store,_,_,_,tmp_path,_=action
     seed_claims(store,['C'])
     request,root=operation_request(action,'Update',['C'])
-    request.policy=cm.source.FileBinding.model_validate(binding(cm.DEFAULT_POLICY))
+    request.policy=cm.source.FileBinding.model_validate(binding(Path(cm.__file__).parent / 'policies/wang_claim_management_opus_only_v1.json'))
     auth_path=Path(request.authorization.path);auth=json.loads(auth_path.read_text())
     auth['policy']=request.policy.model_dump(mode='json');auth_path.write_text(json.dumps(auth))
     request.authorization=cm.source.FileBinding.model_validate(binding(auth_path))
@@ -805,7 +805,7 @@ def test_returned_review_validator_recovery_preserves_model_inputs_and_calls(act
     store,_,_,_,tmp_path,_=action
     seed_claims(store,['C'])
     request,root=operation_request(action,'Update',['C'])
-    policy=cm.Policy.model_validate_json(cm.DEFAULT_POLICY.read_text())
+    policy=cm.Policy.model_validate_json((Path(cm.__file__).parent / 'policies/wang_claim_management_opus_only_v1.json').read_text())
     policy.budget.max_revisions=0;policy.budget.gpt_calls=0;policy.budget.opus_calls=1
     policy_path=tmp_path/'single-review-policy.json';policy_path.write_text(policy.model_dump_json())
     request.policy=cm.source.FileBinding.model_validate(binding(policy_path))
@@ -869,3 +869,108 @@ def test_new_proposer_doubt_can_be_rejected_by_independent_review_and_audit(acti
     assert not result.get('context_findings')
     assert ports.calls==['opus','gpt','opus','gemini']
     assert store.claim_management_qualification('C')['ready']
+
+
+@pytest.mark.parametrize('operation',['Update','Review'])
+@pytest.mark.parametrize('category',['content','source_uncertain'])
+@pytest.mark.parametrize('disposition',['resolved','persistent'])
+def test_all_objections_reach_gpt_before_escalation_including_readonly_context(action,operation,category,disposition):
+    store,_,_,_,tmp_path,_=action
+    seed_claims(store,['C'])
+    store.apply_plan(store.plan_package({'package_id':'all-objections-context',
+        'claims':[{**store.get_record_state('claims','C')['payload'],'evidence_step_ids':['E']}],
+        'evidence_steps':[{'evidence_step_id':'E','statement':'甲是假设。','produced_claim_ids':['C']}],
+        'observations':[{'observation_id':'O','statement':'甲是假设。'}],
+        'knowledge_relations':[{'relation_id':'R','from_id':'O','to_id':'E','relation_type':'supports','reason':'context'}]}))
+    request,root=operation_request(action,operation,['C'])
+    request.policy=cm.source.FileBinding.model_validate(binding(cm.DEFAULT_POLICY))
+    auth_path=Path(request.authorization.path);auth=json.loads(auth_path.read_text())
+    auth['policy']=request.policy.model_dump(mode='json');auth_path.write_text(json.dumps(auth))
+    request.authorization=cm.source.FileBinding.model_validate(binding(auth_path))
+    before=store.get_record_state('claims','C')
+    def opus(packet):
+        if packet['round_number']:
+            report=passing(packet)
+            if disposition=='persistent':
+                for r in report['prior_findings']:r['disposition']='persistent'
+                for v in report['verdicts']:
+                    if v['record_key']=='observations/O':v.update(approved=False,problems=['unresolved'])
+            return report
+        report=rejected(packet,category=category)
+        finding=report['findings'][0];finding.update(target_key='observations/O',affected_target_keys=[],impact_reason='independent context')
+        for v in report['verdicts']:
+            v.update(approved=v['record_key']!='observations/O',problems=['context'] if v['record_key']=='observations/O' else [])
+        return report
+    def propose(packet):
+        assert len(packet['unresolved'])==1
+        assert next(iter(packet['unresolved'].values()))['target_key']=='observations/O'
+        result=cm.existing_candidate(packet['before']);result.operation=operation
+        result.finding_resolutions=[cm.FindingResolution(finding_id=fid,disposition=disposition,
+            reason='evidence based rejection' if disposition=='resolved' else 'needs source clarification',
+            citations=[cm.Citation(source_id='S',paragraph_key='S0001',exact_quote='甲是假设，不是断言。')]) for fid in packet['unresolved']]
+        return result.model_dump(mode='json')
+    ports=SyntheticPorts(store,tmp_path,opus=opus,proposal=propose)
+    result=execute_claim_management(store,request,root=root,ports=ports)
+    assert ports.calls==['opus','gpt','opus'],result
+    assert store.get_record_state('claims','C')==before
+    if disposition=='resolved':assert result['status']=='completed',result
+    else:assert result['reason']==('human_required' if category=='source_uncertain' else 'budget_exhausted' if operation=='Review' else 'permission_required'),result
+    assert execute_claim_management(store,request,root=root,ports=ports)==result
+    assert ports.calls==['opus','gpt','opus']
+
+
+@pytest.mark.parametrize('continuation',['remaining_budget','new_context_scope'])
+def test_saved_context_follow_up_preserves_claim_and_history_and_cannot_fork(action,continuation):
+    store,_,_,_,tmp_path,_=action
+    seed_claims(store,['C'])
+    store.apply_plan(store.plan_package({'package_id':'saved-context',
+        'claims':[{**store.get_record_state('claims','C')['payload'],'evidence_step_ids':['E']}],
+        'evidence_steps':[{'evidence_step_id':'E','statement':'甲是假设。','produced_claim_ids':['C']}],
+        'observations':[{'observation_id':'O','statement':'甲是假设。'}],
+        'knowledge_relations':[{'relation_id':'R','from_id':'O','to_id':'E','relation_type':'supports','reason':'context'}]}))
+    request,root=operation_request(action,'Update',['C'])
+    request.policy=cm.source.FileBinding.model_validate(binding(Path(cm.__file__).parent/'policies/wang_claim_management_opus_only_v1.json'))
+    def authorize(request,extra=None):
+        auth_path=Path(request.authorization.path)
+        auth={'schema_version':cm.VERSION,'authorized_by':'owner','human_content_approval':False,
+            'authorization_quote':'Synthetic isolated test authority',
+            'request':request.model_dump(mode='json',exclude={'authorization','policy'}),
+            'policy':request.policy.model_dump(mode='json'),**(extra or {})}
+        auth_path.write_text(json.dumps(auth));request.authorization=cm.source.FileBinding.model_validate(binding(auth_path))
+    authorize(request)
+    def context(packet):
+        report=rejected(packet);report['findings'][0].update(target_key='observations/O',affected_target_keys=[],impact_reason='context only')
+        for v in report['verdicts']:v.update(approved=v['record_key']!='observations/O',problems=['context'] if v['record_key']=='observations/O' else [])
+        return report
+    result=execute_claim_management(store,request,root=root,ports=SyntheticPorts(store,tmp_path,opus=context))
+    assert result['status']=='completed'
+    old_id='CMA-'+cm.sha256_json(request.action_id);old=store.get_cvp_group(old_id)
+    before=store.get_record_state('claims','C')
+    successor,new_root=operation_request(action,'Update',['C'])
+    successor.permissions=[cm.source.Permission(collection='observations',object_id='O',fields=['statement'])]
+    policy=cm.Policy.model_validate_json(cm.DEFAULT_POLICY.read_text())
+    policy.budget.gpt_calls=1;policy.budget.opus_calls=1
+    extra={}
+    if continuation=='remaining_budget':successor.predecessor_action_id=request.action_id
+    else:
+        policy.initial_candidate='proposal';policy.budget.max_revisions=0
+        extra={'context_review_actions':{request.action_id:list(old['context_findings'])}}
+    policy_path=tmp_path/'context-policy.json';policy_path.write_text(policy.model_dump_json())
+    successor.policy=cm.source.FileBinding.model_validate(binding(policy_path));authorize(successor,extra)
+    def propose(packet):
+        assert packet['unresolved']==old['context_findings']
+        result=cm.existing_candidate(packet['before']);result.operation='Update'
+        result.finding_resolutions=[cm.FindingResolution(finding_id=fid,disposition='resolved',reason='source supports retention',citations=[cm.Citation(source_id='S',paragraph_key='S0001',exact_quote='甲是假设，不是断言。')]) for fid in packet['unresolved']]
+        return result.model_dump(mode='json')
+    ports=SyntheticPorts(store,tmp_path,proposal=propose)
+    result=execute_claim_management(store,successor,root=new_root,ports=ports)
+    assert result['status']=='completed',result
+    assert ports.calls==['gpt','opus']
+    assert store.get_record_state('claims','C')==before
+    historical=store.get_cvp_group(old_id)
+    assert historical['result']==old['result'] and historical['context_findings']==old['context_findings']
+    assert execute_claim_management(store,successor,root=new_root,ports=ports)==result
+    fork=successor.model_copy(deep=True);fork.action_id+='-fork';fork.authorization=cm.source.FileBinding(path=str(tmp_path/'fork-authority.json'),file_sha256='a'*64)
+    authorize(fork,extra)
+    with pytest.raises(Exception,match='continuation|already assigned'):
+        execute_claim_management(store,fork,root=tmp_path/'fork',ports=ports)

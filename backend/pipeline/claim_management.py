@@ -21,7 +21,7 @@ from backend.api.canonical_repository.postgres_store import (
 )
 
 VERSION = "wang_claim_management_v2"
-DEFAULT_POLICY = Path(__file__).parent / 'policies/wang_claim_management_opus_only_v1.json'
+DEFAULT_POLICY = Path(__file__).parent / 'policies/wang_claim_management_opus_only_v2.json'
 Operation = Literal["Read", "Create", "Review", "Update", "Retire", "Restore", "Split", "Merge"]
 Role = Literal["gpt", "opus", "gemini"]
 Disposition = Literal["retain", "update", "create", "retire", "restore"]
@@ -72,7 +72,8 @@ class Policy(source.Contract):
     review_purpose: Literal['content', 'source_impact'] = 'content'
     source_impact_batch_size: int | None = Field(default=None, gt=0)
     independent_audit: bool | None = None
-    initial_candidate: Literal['existing'] | None = None
+    initial_candidate: Literal['existing','proposal'] | None = None
+    all_findings_to_gpt: bool | None = None
 
     @model_serializer(mode='wrap')
     def serialize_policy(self, handler):
@@ -81,6 +82,8 @@ class Policy(source.Contract):
             value.pop('independent_audit', None)
         if self.initial_candidate is None:
             value.pop('initial_candidate', None)
+        if self.all_findings_to_gpt is None:
+            value.pop('all_findings_to_gpt', None)
         return value
 
     @property
@@ -221,6 +224,14 @@ class Candidate(source.Contract):
     replacements: dict[str, list[str]] = Field(default_factory=dict)
     findings: list[Finding] = Field(default_factory=list)
     operation: Operation | None = None
+    finding_resolutions: list['FindingResolution'] | None = None
+
+    @model_serializer(mode='wrap')
+    def historical_candidate(self, handler):
+        value = handler(self)
+        if self.finding_resolutions is None:
+            value.pop('finding_resolutions', None)
+        return value
 
     @property
     def digest(self) -> str:
@@ -245,7 +256,7 @@ class JsonCandidate(source.Contract):
 def decode_candidate(raw):
     if 'replacements_json' not in raw:
         return raw
-    wire = JsonCandidate.model_validate(raw)
+    wire = (AdjudicatingJsonCandidate if 'finding_resolutions' in raw else JsonCandidate).model_validate(raw)
     def unique(pairs):
         result = {}
         for key, value in pairs:
@@ -259,7 +270,9 @@ def decode_candidate(raw):
                          'payload': decode(r.payload_json)} for r in wire.records],
             'dispositions': [d.model_dump(mode='json') for d in wire.dispositions],
             'replacements': decode(wire.replacements_json),
-            'findings': [f.model_dump(mode='json') for f in wire.findings], 'operation': wire.operation}
+            'findings': [f.model_dump(mode='json') for f in wire.findings], 'operation': wire.operation,
+            **({'finding_resolutions':[r.model_dump(mode='json') for r in wire.finding_resolutions]}
+               if isinstance(wire, AdjudicatingJsonCandidate) else {})}
 
 
 class FindingResolution(source.Contract):
@@ -278,6 +291,12 @@ class FindingResolution(source.Contract):
                 result.pop(name)
         return result
 
+
+class AdjudicatingJsonCandidate(JsonCandidate):
+    finding_resolutions: list[FindingResolution]
+
+
+Candidate.model_rebuild()
 
 class Review(source.Contract):
     proposal_sha256: str
@@ -537,6 +556,15 @@ def validate_candidate(request: Request, before, candidate: Candidate, sources, 
     return post, writes
 
 
+def validate_proposer_resolutions(candidate, previous, sources):
+    resolutions = candidate.finding_resolutions or []
+    keys = [r.finding_id for r in resolutions]
+    if len(keys) != len(set(keys)) or set(keys) != set(previous):
+        raise ValueError('GPT must adjudicate every audit finding exactly once')
+    for resolution in resolutions:
+        validate_citations(resolution.citations, sources)
+
+
 def review_findings(action_id, previous, candidate):
     """Queue proposer doubts for independent resolution, retaining stable IDs."""
     result = deepcopy(previous)
@@ -621,7 +649,9 @@ def finding_blocks(finding, request=None, candidate=None):
         raise ValueError('target or actual write finding cannot be dismissed as readonly context')
     if finding['target_key'] in targets and finding['target_key'] not in affected:
         raise ValueError('finding on a target must include that target in its impact')
-    return bool(affected)
+    # Explicitly authorized maintenance objects are part of this Update's
+    # obligations even when the proposer keeps them unchanged.
+    return bool(affected) or finding['target_key'] in {p.key for p in request.permissions}
 
 
 def resolution_finding(resolution, unresolved):
@@ -957,16 +987,18 @@ def model_packet(materials):
 
 
 def required_roles(request, round_number, policy=None):
-    if request.operation == "Read":
+    if request.operation == 'Read':
         return []
-    roles = ["opus"]
+    roles = ['opus']
     if ((policy is None or policy.independent_audit_required)
-            and (request.operation != "Review" or request.confirm_current or request.source_transition)):
-        roles.append("gemini")
-    if request.operation not in {"Review", "Read"} and (request.operation != "Update" or round_number
+            and (request.operation != 'Review' or request.confirm_current or request.source_transition)):
+        roles.append('gemini')
+    adjudicating = bool(policy and policy.all_findings_to_gpt and request.operation == 'Review' and round_number)
+    proposal = bool(policy and policy.initial_candidate == 'proposal' and request.operation == 'Update')
+    if adjudicating or proposal or request.operation not in {'Review','Read'} and (request.operation != 'Update' or round_number
             or request.predecessor_action_id and not request.source_transition
             and (policy is None or policy.initial_candidate != 'existing')):
-        roles.insert(0, "gpt")
+        roles.insert(0,'gpt')
     return roles
 
 
@@ -985,6 +1017,17 @@ def candidate_state(before, candidate):
         records[d.record_key] = {"payload": semantic(d.record_key, payload),
                                   "retired": d.action == "retire"}
     return sha256_json({"records": records, "replacements": candidate.replacements})
+
+
+def adjudication_outcome(findings, candidate):
+    """New objections go to GPT before permission/source escalation."""
+    decisions = {r.finding_id: r for r in candidate.finding_resolutions or []}
+    if set(findings) - set(decisions):
+        return 'revision_required'
+    if any(r.disposition == 'resolved' for r in decisions.values()
+           if r.finding_id in findings):
+        return 'disagreement'
+    return failure_reason(findings)
 
 
 def failure_reason(findings):
@@ -1058,15 +1101,20 @@ def continuation_budget(previous, request, policy):
     from backend.pipeline.source_reconciliation_runner import read, body
     old = Request.model_validate(previous['request'])
     original = Policy.model_validate(previous['policy'])
-    if (previous.get('kind') != 'claim_management_action' or previous['result']['status'] != 'paused'
+    if (previous.get('kind') != 'claim_management_action' or previous['result']['status'] not in {'paused','completed'}
             or old.operation != 'Update' or request.operation != 'Update'
             or old.target_keys != request.target_keys or old.source_bindings != request.source_bindings
             or old.creation_permissions or request.creation_permissions
             or previous.get('created_keys') or previous.get('replacements')):
         raise ValueError('engineering continuation must retain original Update targets and source without structural writes')
+    completed_cleanup = previous['result']['status'] == 'completed'
     old_permissions = {p.key:set(p.fields) for p in old.permissions}
     permissions = {p.key:set(p.fields) for p in request.permissions}
-    if any(not fields <= permissions.get(key,set()) for key,fields in old_permissions.items()):
+    if completed_cleanup and (not previous.get('context_findings') or previous.get('findings')
+            or not permissions or not set(permissions) <= {f['target_key'] for f in previous['context_findings'].values()}
+            or set(permissions) & set(request.target_keys)):
+        raise ValueError('completed follow-up must address only its saved context issues without rewriting the completed Claims')
+    if not completed_cleanup and any(not fields <= permissions.get(key,set()) for key,fields in old_permissions.items()):
         raise ValueError('continuation cannot discard original write obligations')
     spent = {role:0 for role in MODELS}
     failures = {}
@@ -1114,7 +1162,7 @@ def continuation_budget(previous, request, policy):
         raise ValueError('continuation cannot reset or increase original Claim budget or change review policy')
     if not policy.budget.gpt_calls or not policy.budget.opus_calls:
         raise ValueError('original remaining budget cannot fund correction and review')
-    return {'predecessor_action_id':old.action_id, 'original_goal':deepcopy(previous['original_goal']),
+    return {'predecessor_action_id':old.action_id, 'completed_context_cleanup':completed_cleanup, 'original_goal':deepcopy(previous['original_goal']),
         'prior_findings':prior_findings, 'unaccepted_reviews':unaccepted, 'prior_call_reservations':deepcopy(previous['call_reservations']),
         'pre_generation_schema_rejections':failures, 'spent_generations':spent, 'remaining_generations':remaining}
 
