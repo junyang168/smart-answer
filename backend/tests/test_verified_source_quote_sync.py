@@ -18,8 +18,8 @@ def sample():
     doc={'source_id':'S','transcript_id':'alias','source_body_sha256':current['body_sha256'],'source_file_sha256':current['file']['file_sha256']}
     fragment={'fragment_id':'F','source_id':'S','paragraph_key':'S0001','verbatim_excerpt':'旧说法。',
         'source_sha256':before['body_sha256'],'source_segment_index':10,'paragraph_text_sha256':sha(before['paragraphs']['S0001']['text']),
-        'verbatim_excerpt_sha256':sha('旧说法。'),'review_status':'candidate','revision':1}
-    claim={'claim_id':'C','claim_type':'exegesis','statement':'判断不变。','scripture_refs':['章号未核实'],'review_status':'candidate','revision':1,
+        'verbatim_excerpt_sha256':sha('旧说法。'),'review_status':'ai_reviewed','revision':1}
+    claim={'claim_id':'C','claim_type':'exegesis','statement':'判断不变。','scripture_refs':['章号未核实'],'review_status':'ai_reviewed','revision':1,
         'occurrences':[{'source_id':'alias','anchors':[{'paragraph_key':'S0001','evidence_id':'E','proposed_highlight':{'text':'旧说法。','status':'proposed'}}]}]}
     return verification,before,current,doc,[fragment],[claim]
 
@@ -73,7 +73,15 @@ def verified_transition(postgres_store, tmp_path):
     store.apply_plan(store.plan_package({'package_id':'before-source','source_documents':[doc]}))
     args=list(sample());fragment=args[4][0];fragment.update(source_sha256=before['body_sha256'],
         source_segment_index=before['paragraphs']['S0001']['index'])
-    store.apply_plan(store.plan_package({'package_id':'before-quotes','source_fragments':[fragment],'claims':args[5]}))
+    seed=deepcopy(args[5]);seed[0]['review_status']='candidate'
+    store.apply_plan(store.plan_package({'package_id':'before-quotes','source_fragments':[fragment],'claims':seed}))
+    # Synthetic preexisting extraction status, without manufacturing a review event.
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    payload=store.get_record_state('claims','C')['payload'];payload['review_status']='ai_reviewed'
+    with store.connect() as conn:
+        for table in ('objects','object_versions'):
+            conn.execute(f"UPDATE wang_knowledge.{table} SET payload=%s::jsonb,content_sha256=%s WHERE collection='claims' AND object_id='C'",
+                         (json.dumps(payload),record_content_sha(payload)))
     current.write_text(raw.replace('旧说法','新说法'))
     after=cm.source.source_snapshot(binding(current))
     verification=args[0]|{'before_source':binding(original),'proposed_current_source':binding(current)}
@@ -137,3 +145,21 @@ def test_late_transaction_failure_rolls_back_both_quote_copies(verified_transiti
     assert not (root/'complete.json').exists()
     monkeypatch.setattr(store,'_invalidate_dependencies',original)
     assert q.synchronize(store,verification,transition,root=root)['updated_fragments']==1
+
+
+def test_store_authority_recomputes_exact_copy_and_rejects_semantic_or_provenance_edits(verified_transition,monkeypatch):
+    store,verification,transition,root,_=verified_transition
+    plan_package=store.plan_package;captured=[]
+    def observe(package,*args,**kwargs):
+        captured.append(deepcopy(package));return plan_package(package,*args,**kwargs)
+    monkeypatch.setattr(store,'plan_package',observe)
+    q.synchronize(store,verification,transition,root=root)
+    package=captured[0];q.validate_package(package)
+    for collection,field,value in [('claims','statement','新增判断'),('claims','review_status','ai_approved'),
+                                   ('source_fragments','verbatim_excerpt','未经确认的话')]:
+        bad=deepcopy(package);bad[collection][0][field]=value
+        with pytest.raises(ValueError,match='exceeds exact'):
+            q.validate_package(bad)
+    assert store.get_record_state('claims','C')['payload']['review_status']=='ai_reviewed'
+    with store.connect() as conn:
+        assert conn.execute('SELECT count(*) FROM wang_knowledge.review_events').fetchone()==(0,)

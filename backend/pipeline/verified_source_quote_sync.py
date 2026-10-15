@@ -108,6 +108,35 @@ def load_verified_transition(store, verification_binding, transition_binding):
     return verification,state,cm.source.source_snapshot(old_binding,source=doc),cm.source.source_snapshot(new_binding,source=doc)
 
 
+def validate_package(package):
+    """Store boundary: recompute exact copies; old AI status grants no new review."""
+    import json
+    from backend.pipeline.source_reconciliation_runner import binding,body,read
+    app=package['source_repair_application']
+    def load(bound):
+        return cm.source.verify_file(cm.source.FileBinding.model_validate(bound))
+    if set(app)!={'schema_version','verification','source_transition','source_document','before_records','linked_claim_ids'} or app['schema_version']!=VERSION:
+        raise ValueError('quote sync authority fields drift')
+    v=json.loads(load(app['verification']).read_text())
+    transition=cm.SourceTransition.model_validate_json(load(app['source_transition']).read_text())
+    doc=body(read(load(app['source_document'])))
+    originals=body(read(load(app['before_records'])))
+    prior=transition.before_sources[v['source_id']]
+    current=binding(Path(doc['source_path']))
+    if prior.model_dump()!=v['before_source'] or current['file_sha256']!=v['proposed_current_source']['file_sha256']:
+        raise ValueError('quote sync human source authority drift')
+    raw=load(prior.model_dump()).read_bytes()
+    if raw.count(v['before'].encode())!=1 or raw.replace(v['before'].encode(),v['after'].encode())!=load(current).read_bytes():
+        raise ValueError('quote sync source exceeds human verified edit')
+    rows=lambda col:[p for key,p in originals.items() if key.startswith(col+'/')]
+    compiled=compile_sync(v,cm.source.source_snapshot(prior,source=doc),cm.source.source_snapshot(current,source=doc),
+        doc,rows('source_fragments'),rows('claims'),linked_claim_ids=app['linked_claim_ids'])
+    identity={'verification':app['verification'],'source_transition':app['source_transition']}
+    expected={'package_id':'SOURCE-QUOTE-SYNC-'+cm.sha256_json(identity)[:24],'source_repair_application':app}
+    for row in compiled['records']:expected.setdefault(row['collection'],[]).append(row['payload'])
+    if package!=expected:raise ValueError('quote sync package exceeds exact human verified quotation copies')
+
+
 def synchronize(store, verification_binding, transition_binding, *, root):
     """Apply only compiled quotation/binding postimages in the common SQL store.
 
@@ -149,9 +178,13 @@ def synchronize(store, verification_binding, transition_binding, *, root):
         originals.update({'claims/'+p['claim_id']:p for p in claims})
         package={'package_id':'SOURCE-QUOTE-SYNC-'+cm.sha256_json(identity)[:24]}
         for row in compiled['records']:package.setdefault(row['collection'],[]).append(row['payload'])
+        write(root/'before-records.json',originals);write(root/'source-document.json',doc)
+        package['source_repair_application']={'schema_version':VERSION,'verification':verification_binding,
+            'source_transition':transition_binding,'source_document':binding(root/'source-document.json'),
+            'before_records':binding(root/'before-records.json'),'linked_claim_ids':sorted(linked)}
         plan=store.plan_package(package,source_kind=VERSION)
-        write(root/'compiled.json',compiled);write(root/'before-records.json',originals);write(root/'plan.json',plan.as_dict())
-        write(intent_path,{'inputs':identity,'artifacts':{name:binding(root/name) for name in ('compiled.json','before-records.json','plan.json')}})
+        write(root/'compiled.json',compiled);write(root/'plan.json',plan.as_dict())
+        write(intent_path,{'inputs':identity,'artifacts':{name:binding(root/name) for name in ('compiled.json','before-records.json','source-document.json','plan.json')}})
     expected={(r['collection'],r['object_id']) for r in compiled['records']}
     if {(o.collection,o.object_id) for o in plan.operations}!=expected:
         raise ValueError('quote sync plan changed its exact compiled write set')
