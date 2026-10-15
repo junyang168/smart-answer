@@ -309,3 +309,17 @@ OBS009 的复核曾暴露程序边界错误：把「未影响 Claim 目标」与
 最终相关回归为 **537 passed、43 skipped**，使用 backend/.venv 与隔离 PostgreSQL；其中新增专项 22 项，包括真实依赖变化拒绝、缺审核不升级、证明／原模型回复损坏、正式新异议、事务回滚及零调用恢复。文档检查仍仅报另一项目既有缺失锚点。
 
 额外执行前端 tsc --noEmit：现有 worktree 安装缺少 package.json 已声明的 react-quill-new，导致 EmailSender／FellowshipManager 四条类型错误；本分支未改变前端依赖清单或这些组件，本次不修改该安装或前端代码。
+
+## 2026-10-15 2021 CL003 使用修正后原文重新完成 Update
+
+负责人同意第二步：以修正后完整原文执行 2021 CL003 的普通 Update，Opus 审阅、异议交 GPT、必要时复核及程序回读；CL004 章号疑点继续待人工，Gemini 保持禁用。在干净实现 `f847bab` 上建立新 action，绑定 SourceDocument 第 2 版及原件 SHA `0270efb9f495b3888f15553260d8b7d10974029f991e340c719e2453bddc4431`，不复用旧来源资格或重开旧预算。材料包括完整 59 段、13,258 字原文和 36 个关联对象，Opus packet 为 110,613 bytes；仅授权 CL003、E006、E006 的片段和 CR001 四个对象维护，CL004 及其证据保持只读，全部 Claim 均未连接 CVP。
+
+Opus 首轮认可 CL003，另指出 CL004、E007／E008／E009、OBS002／OBS005 六个对象的同一章号疑点，明确 affected_target_keys 为空。GPT 对全部六条逐项判定 persistent，确认需要人工、但均不进入 CL003 的冠词判断或 E006 证据链；未提出任何写入。第二轮 Opus 同意该范围判断，保留六条疑点。程序仍将已判定无关的 context_findings 全部并入当前阻断，造成 human_required 暂停；不是 CL003 自身或其证据被拒，也没有内容提交。
+
+修正通用的完成判定并复用原有 review recovery：所有新异议仍先交 GPT；只有 GPT 和 Opus 均确认无关、且不涉及目标／实际写集／明确维护对象的旧问题，才保留为 context_findings。目标问题、新问题、遗漏判定、范围分歧、授权对象和真实写入的异议继续阻断，不能改成 resolved 或授予旁观 Claim 资格。恢复入口同时核对这一条件，不能借工程恢复跳过 GPT。没有新建状态库、模型、prompt 或特殊的 CL003 放行规则。相关回归为 **547 passed、43 skipped**，新增 10 个判定／恢复案例，并更新既有 Update／Review 的八个范围测试；包括零调用恢复以及未经 GPT 判定时恢复拒绝。
+
+在干净实现 `ac9babc` 上，以现有 `recover_returned_review` 接续 `CMR-530dca619269963efff65c0f92ddcdf55d3454966782d5d93459066f839d16d2`。完整模型输入、候选、原始回复、旧暂停事实和原调用记录保存，程序重新验证同一回答，随后走原 no-content-write 与真实 SQL 回读。当前 CL003 ready，保持 revision 1、SHA `9ed4a40b1e12a2bf2bc1a7ab5af82fa94346422c65c0951c2b4ca46b0cca1106`；没有内容 ChangeSet。六条章号异议原样作为 context_findings 保留，CL004 返回 formal_review_findings，继续不可用，未冒充人工核实。
+
+独立新连接核验全部 36 个关联对象与批前完全相同；全库 259,870 个业务对象的版本／SHA／审核与可见性指纹、347,893 条 object_versions 和 2,611 个 ChangeSets 均未改变。物理原件不变；原 action 完成重入、恢复重入及调用账本核对均通过。两条 2012 CL003／CL004 的前步资格仍有效。本次实际 Opus 两次、GPT 一次、Gemini 零次；工程接续额外模型调用与全库备份均为零。
+
+运行根为 `claim-management-435/2021-cl003-current-source-update-20261015-v1/`。初次 `single-update-result.json` 保留暂停事实，`final-completion.json` 指向 `completion-scope-recovery/verified-result.json` 的最终完成结果及六条待人工上下文；原始输入、回复、工程恢复方向与前后 SQL 记录均保存。核验脚本一次 str／Path 参数错误发生于操作已完成之后，已保存初稿并零调用重入完成全部核验；未重开模型请求。文档检查仍仅报另一项目既有缺失锚点。#435／PR #437 仍未整体完成、未合并或部署。
