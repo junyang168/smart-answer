@@ -224,3 +224,11 @@ OBS009 的复核曾暴露程序边界错误：把「未影响 Claim 目标」与
 2012 CL003：首次 Opus 提出两条异议，均交 GPT。GPT 将「不是在强调自己只是一个人」改为「不是在强调自己的人性」，限定的是称号的解释作用，并不新增教授否认耶稣人性的命题；另补三个 E016／S0006、media_time=1080 的逐字高亮锚点，保留原有论据。第二轮 Opus 全项通过，事务提交和新连接回读通过，实际仅修改 CL003，revision 3 → 4，SHA `ee1b8a65f84542ef8c87763a56171760471049467427ad451ab5a30eed40bc05`，当前 ready，无未决 findings。重复执行不新增调用。
 
 本批合计 GPT 两次、Opus 四次（含最初漏项原答）；Gemini 零次，全库备份零次。最终结果明确为一条完成、一条必要人工，未称两条全部清理完成。批后另记录共享上下文资格：2021 CL003 仍 ready；此前 2012 CL004 的旧资格因 owner CL003 更新而不再适用当前 pins，本轮对该只读 owner 未提出异议，但未把旁观审阅冒充它的新目标资格。后续若使用该 Claim，需按当前版本明确复验。状态保存于 `post-batch-current-qualifications.json`。
+
+## 2026-10-14 2021 年稿称号用语的人工录音核实
+
+负责人重新听录音，确认 S0015 的句子是转录错误，应为「耶穌從來沒有說『Son of Man』，而是用『那個人子』」。按该准确答复只替换原文件 `script[18].text` 中的一处字串；完整 JSON 对比证明其他字段、段落、时间和两处「但以理書第九章」均未改。此项人工确认只解决称号用语转录，不代表章号确认、Claim 内容批准或整个操作完成。
+
+已原子替换网站转录文件，并通过共同 SQL ChangeSet `KCS-5833281b37b21dd5f470` 登记同一 SourceDocument 第 2 版及正确的文件／spoken body／text／anchor binding hashes；新连接回读验证一致。完整旧原件和人工答复保存在 `claim-management-435/human-source-correction-20261014-2021-v1/`，其中 `source-transition.json` 绑定旧文件 SHA 与已提交的来源版本，`paragraph-delta.json` 保存完整段落对应及唯一变化 S0015。旧文件 SHA 为 `bfd36e4fd2804756c5f7b83dcea38b0cb0b7d43176ed7c5b96e7de53c276aef3`，新文件 SHA 为 `0270efb9f495b3888f15553260d8b7d10974029f991e340c719e2453bddc4431`。
+
+影响清单已保存：来源共有 485 个 SourceFragments、96 个自身 Claims；直接仍携带旧错误句子的片段为 P04-E007-01 与 P04-OBS002-01。它们继续保留旧版本事实，尚待来源引用维护；没有把旧审核重标为对新来源的批准。来源当前版本校验使旧文件绑定不能冒充当前资格。此次未修改 Claim／Evidence／Observation／CVP 内容，没有模型调用和全库备份；`source_correction_applied=true` 与 `claim_maintenance_complete=false` 分开记录。章号疑点仍待负责人核实，不能宣称 2021 CL004 已清理完成。
