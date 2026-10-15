@@ -913,8 +913,11 @@ def test_all_objections_reach_gpt_before_escalation_including_readonly_context(a
     result=execute_claim_management(store,request,root=root,ports=ports)
     assert ports.calls==['opus','gpt','opus'],result
     assert store.get_record_state('claims','C')==before
-    if disposition=='resolved':assert result['status']=='completed',result
-    else:assert result['reason']==('human_required' if category=='source_uncertain' else 'budget_exhausted' if operation=='Review' else 'permission_required'),result
+    assert result['status']=='completed',result
+    assert bool(result.get('context_findings'))==(disposition=='persistent')
+    parent=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id))
+    assert not parent['findings']
+    assert bool(parent.get('context_findings'))==(disposition=='persistent')
     assert execute_claim_management(store,request,root=root,ports=ports)==result
     assert ports.calls==['opus','gpt','opus']
 

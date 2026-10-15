@@ -565,6 +565,15 @@ def validate_proposer_resolutions(candidate, previous, sources):
         validate_citations(resolution.citations, sources)
 
 
+def pending_context_adjudications(previous, candidate, context, *, request):
+    """All context objections need GPT; agreed unrelated holds stay in the report."""
+    decisions = {r.finding_id: r for r in candidate.finding_resolutions or []}
+    return {fid: finding for fid, finding in context.items()
+        if fid not in decisions or fid not in previous
+        or decisions[fid].disposition == 'resolved'
+        or finding_blocks(resolution_finding(decisions[fid], previous), request, candidate)}
+
+
 def review_findings(action_id, previous, candidate):
     """Queue proposer doubts for independent resolution, retaining stable IDs."""
     result = deepcopy(previous)

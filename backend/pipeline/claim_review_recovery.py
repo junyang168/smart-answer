@@ -98,7 +98,10 @@ def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
         request=cm.Request.model_validate(materials['unit_request'])
         unresolved=cm.unresolved_after(parent['action_id'],materials['unresolved'],review,request=request,candidate=candidate)
         context=cm.context_findings_after(parent['action_id'],materials['unresolved'],review,request=request,candidate=candidate)
-        if unresolved:raise ValueError('validator recovery retains a real target blocker')
+        if cm.Policy.model_validate(materials['policy']).all_findings_to_gpt:
+            pending=cm.review_findings(parent['action_id'],materials['unresolved'],candidate)
+            unresolved.update(cm.pending_context_adjudications(pending,candidate,context,request=request))
+        if unresolved:raise ValueError('validator recovery retains a real target blocker or unadjudicated objection')
         obsolete=set(materials['unresolved'])|{f.identity(parent['action_id']) for f in candidate.findings}
         parent['findings']={k:v for k,v in parent['findings'].items() if k not in obsolete}
         parent['context_findings']={k:v for k,v in parent.get('context_findings',{}).items() if k not in obsolete}

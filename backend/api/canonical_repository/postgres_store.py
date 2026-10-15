@@ -3587,8 +3587,10 @@ class PostgresKnowledgeStore:
                 qualification_findings = dict(context_findings)
                 adjudicating = cm.Policy.model_validate(materials['policy']).all_findings_to_gpt and not cm.is_source_impact(materials['request'])
                 if adjudicating:
-                    unresolved.update(context_findings)
-                    context_findings = {}
+                    pending_context = cm.pending_context_adjudications(pending, candidate, context_findings,
+                        request=unit_request)
+                    unresolved.update(pending_context)
+                    context_findings = {k: v for k, v in context_findings.items() if k not in pending_context}
                     if unresolved:
                         passed = False
                 if stage == 'opus':
