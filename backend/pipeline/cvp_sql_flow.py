@@ -483,6 +483,10 @@ def commit_package(store, run_id, *, package, approval, authorization, backup, s
         evidence['claim_management_scope'] = {'consumer_roots': [list(k) for k in sorted({
             (key.split('/',1)[0], key.split('/',1)[1]) for key in material['unit_request']['target_keys']} |
             {(p['collection'],p['object_id']) for p in material['unit_request']['permissions']})]}
+        from backend.pipeline.claim_joint_update import CONTRACT
+        if material['original_goal'].get('joint_update_contract') == CONTRACT:
+            evidence['claim_management_scope'].update(joint_update_contract=CONTRACT,
+                audit_record_keys=sorted(material['before']))
         evidence['pending_cvp_management_record_keys'] = application['pending_consumers']
     previous_pending=(store.get_cvp_group(run_id) or {}).get('reviewed',{}).get('evidence',{}).get('pending_cvp_management_record_keys',[])
     # Pending is a durable obligation, not a request to mutate every row.
@@ -962,6 +966,7 @@ def main(argv=None):
     parser.add_argument('--pause-after-group',type=int,help='Narrow this invocation for acceptance; never changes the immutable execution boundary')
     parser.add_argument('--integrate-batch-candidates',action='store_true',
                         help='Explicit new-group identity integration; never upgrades saved legacy answers')
+    parser.add_argument('--claim-update-preflight', action='store_true', help='Read-only dependency grouping for the exact authorized Claim Update batch')
     parser.add_argument('--action',choices=('claim-management','group','independent-revisit','audit-run','source-pending-check','source-impact-complete','source','source-write-slice','relation-retire','claim-retire','owner-link','link-target','link-retarget','link-retire','link-replace','link-representation','cvp-merge'),default='group')
     parser.add_argument('--claim-first',action='store_true',
                         help='Finish only the original bounded Claim/Evidence action; keep all CVPs pending and stop before CVP/group execution')
@@ -1022,10 +1027,14 @@ def main(argv=None):
         from backend.pipeline.claim_management import Request
         from backend.pipeline.source_reconciliation_runtime import ProductionPorts
         request = Request.model_validate(read_source_manifest(args.manifest))
-        if request.operation != 'Read' and (not args.execute or args.dry_run):
+        if not args.claim_update_preflight and request.operation != 'Read' and (not args.execute or args.dry_run):
             raise ValueError('Claim review/write calls require explicit --execute and new bound authority')
         load_dotenv(PROJECT / '.env')
         store = PostgresKnowledgeStore(args.database_url)
+        if args.claim_update_preflight:
+            from backend.pipeline.claim_joint_update import preflight
+            print(canonical_json(preflight(store, request)))
+            return 0
         ports = ProductionPorts()
         ports.store = store
         print(canonical_json(execute_claim_management(store, request, root=args.output_root, ports=ports)))

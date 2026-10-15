@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from typing import Literal
+from pydantic.json_schema import SkipJsonSchema
 import json
 import hashlib
 from pathlib import Path
@@ -75,9 +76,15 @@ class Policy(source.Contract):
     initial_candidate: Literal['existing','proposal'] | None = None
     all_findings_to_gpt: bool | None = None
 
+    joint_update_contract: Literal['wang_claim_joint_update_v1'] | None = None
+    joint_update_max_targets: int | None = Field(default=None, gt=0, strict=True)
+
     @model_serializer(mode='wrap')
     def serialize_policy(self, handler):
         value = handler(self)
+        for name in ('joint_update_contract', 'joint_update_max_targets'):
+            if value[name] is None:
+                value.pop(name)
         if self.independent_audit is None:
             value.pop('independent_audit', None)
         if self.initial_candidate is None:
@@ -185,6 +192,7 @@ class Finding(source.Contract):
     acceptance_condition: str = Field(min_length=1)
     human_question: str | None = None
     affected_target_keys: list[str] | None = None
+    affected_write_keys: SkipJsonSchema[list[str] | None] = None
     impact_reason: str | None = None
 
     @model_validator(mode='after')
@@ -196,7 +204,7 @@ class Finding(source.Contract):
     @model_serializer(mode='wrap')
     def historical_shape(self, handler):
         result = handler(self)
-        for name in ('affected_target_keys', 'impact_reason'):
+        for name in ('affected_target_keys', 'affected_write_keys', 'impact_reason'):
             if result[name] is None:
                 result.pop(name)
         return result
@@ -281,12 +289,13 @@ class FindingResolution(source.Contract):
     reason: str = Field(min_length=1)
     citations: list[Citation] = Field(min_length=1)
     affected_target_keys: list[str] | None = None
+    affected_write_keys: SkipJsonSchema[list[str] | None] = None
     impact_reason: str | None = None
 
     @model_serializer(mode='wrap')
     def historical_shape(self, handler):
         result = handler(self)
-        for name in ('affected_target_keys', 'impact_reason'):
+        for name in ('affected_target_keys', 'affected_write_keys', 'impact_reason'):
             if result[name] is None:
                 result.pop(name)
         return result
@@ -305,6 +314,28 @@ class Review(source.Contract):
     prior_findings: list[FindingResolution]
     answered_questions: list[str]
     source_impacts: list['SourceImpact'] = Field(default_factory=list)
+
+
+class JointFinding(Finding):
+    affected_target_keys: list[str]
+    affected_write_keys: list[str]
+    impact_reason: str = Field(min_length=1)
+
+
+class JointFindingResolution(FindingResolution):
+    affected_target_keys: list[str]
+    affected_write_keys: list[str]
+    impact_reason: str = Field(min_length=1)
+
+
+class JointJsonCandidate(AdjudicatingJsonCandidate):
+    findings: list[JointFinding]
+    finding_resolutions: list[JointFindingResolution]
+
+
+class JointReview(Review):
+    findings: list[JointFinding]
+    prior_findings: list[JointFindingResolution]
 
 
 class SourceTransition(source.Contract):
@@ -330,20 +361,22 @@ class SourceImpact(source.Contract):
 IMPACT_QUESTIONS = frozenset({'source_delta', 'context_impact', 'basis_preservation',
                               'locator_mapping', 'coverage_new_teaching'})
 Review.model_rebuild()
+JointReview.model_rebuild()
 
 
-def audit_contract(root):
+def audit_contract(root, policy=None):
     """Freeze actual audit instructions/schema and the implementation version."""
     from backend.pipeline.source_reconciliation_runner import archive_source_version, binding
     pipeline = Path(__file__).parent
     repository = pipeline.parents[1]
-    prompt = pipeline / 'prompts/claim_management_audit_v2.md'
-    files = [Path(__file__), pipeline/'claim_review_recovery.py', pipeline/'claim_qualification_reuse.py', pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py',
+    joint = policy is not None and policy.joint_update_contract is not None
+    prompt = pipeline / ('prompts/claim_management_audit_joint_v1.md' if joint else 'prompts/claim_management_audit_v2.md')
+    files = [Path(__file__), pipeline/'claim_joint_update.py', pipeline/'prompts/claim_management_joint_update_v1.md', pipeline/'prompts/claim_management_audit_joint_v1.md', pipeline/'claim_review_recovery.py', pipeline/'claim_qualification_reuse.py', pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py',
         pipeline/'source_reconciliation_runner.py', pipeline/'source_reconciliation_runtime.py',
         repository/'backend/api/canonical_repository/postgres_store.py', repository/'scripts/audit-library.py',
         *[pipeline/'prompts'/('claim_management_'+role+'_v2.md') for role in ('proposal','review','audit')]]
     return {'instructions': archive_source_version(source.FileBinding.model_validate(binding(prompt)), Path(root)/'audit-contract'),
-        'response_schema': Review.model_json_schema(),
+        'response_schema': (JointReview if joint else Review).model_json_schema(),
         'implementation': {str(path.relative_to(repository)): hashlib.sha256(path.read_bytes()).hexdigest() for path in files}}
 
 
@@ -441,6 +474,10 @@ def own_source_ids(payload, records):
 
 def validate_candidate(request: Request, before, candidate: Candidate, sources, *, created_keys=(), original_replacements=None):
     """Validate a complete candidate, never infer semantic or write approval."""
+    from backend.pipeline.claim_joint_update import enabled, validate_candidate_scope
+    joint = enabled(request)
+    if joint:
+        validate_candidate_scope(request, before, candidate)
     proposed = source.index(candidate.records)
     current_operation = candidate.operation or request.operation
     internal_revision = current_operation == "Update" and request.operation in {"Create", "Restore", "Split", "Merge"}
@@ -528,6 +565,8 @@ def validate_candidate(request: Request, before, candidate: Candidate, sources, 
                     raise ValueError("Update cannot change the original Claim source identity; use Split")
         writes[key] = {"action": disposition.action, "payload": deepcopy(payload)}
     for finding in candidate.findings:
+        if joint:
+            finding_blocks(finding.model_dump(mode='json'), request, candidate)
         if finding.target_key not in required:
             raise ValueError("finding outside the complete current input")
         validate_citations(finding.citations, sources)
@@ -556,13 +595,18 @@ def validate_candidate(request: Request, before, candidate: Candidate, sources, 
     return post, writes
 
 
-def validate_proposer_resolutions(candidate, previous, sources):
+def validate_proposer_resolutions(candidate, previous, sources, *, request=None):
     resolutions = candidate.finding_resolutions or []
     keys = [r.finding_id for r in resolutions]
     if len(keys) != len(set(keys)) or set(keys) != set(previous):
         raise ValueError('GPT must adjudicate every audit finding exactly once')
     for resolution in resolutions:
         validate_citations(resolution.citations, sources)
+        if request is not None:
+            from backend.pipeline.claim_joint_update import enabled
+            if enabled(request) and resolution.disposition != 'resolved':
+                finding_blocks({**previous[resolution.finding_id], 'affected_target_keys': resolution.affected_target_keys,
+                    'affected_write_keys': resolution.affected_write_keys, 'impact_reason': resolution.impact_reason}, request, candidate)
 
 
 def pending_context_adjudications(previous, candidate, context, *, request):
@@ -592,6 +636,10 @@ def validate_review(candidate, review, expected_keys, questions, unresolved, sou
     unresolved = review_findings(request.action_id if request else 'proposal', unresolved, candidate)
     if review.proposal_sha256 != candidate.digest:
         raise ValueError("review belongs to a different complete candidate")
+    if request is not None:
+        from backend.pipeline.claim_joint_update import enabled, required_keys
+        if enabled(request) and not (set(request.target_keys) | set(required_keys(request))) <= set(expected_keys):
+            raise ValueError('joint review omitted original targets or required maintenance denominator')
     keys = [v.record_key for v in review.verdicts]
     if len(keys) != len(set(keys)) or set(keys) != set(expected_keys):
         raise ValueError("review denominator omitted/repeated an object")
@@ -625,6 +673,10 @@ def validate_review(candidate, review, expected_keys, questions, unresolved, sou
                      if r.disposition != "resolved")
     if rejected - explained:
         raise ValueError("rejected objects require concrete current or persistent findings: " + ", ".join(sorted(rejected - explained)))
+    if request is not None:
+        from backend.pipeline.claim_joint_update import enabled, validate_scope_agreement
+        if enabled(request):
+            validate_scope_agreement(candidate, review, unresolved, request)
     if request is not None and is_source_impact(request):
         return validate_source_impacts(review, expected_keys, sources, request=request, records=records, unresolved=unresolved)
     approved = {v.record_key for v in review.verdicts if v.approved and not v.problems}
@@ -645,6 +697,9 @@ def validate_review(candidate, review, expected_keys, questions, unresolved, sou
 
 def finding_blocks(finding, request=None, candidate=None):
     """Reviewer explains target impact; absence preserves conservative old reviews."""
+    from backend.pipeline.claim_joint_update import enabled, finding_blocks as joint_blocks
+    if request is not None and enabled(request):
+        return joint_blocks(finding, request, candidate)
     affected = finding.get('affected_target_keys')
     if request is None or is_source_impact(request) or affected is None:
         return True
@@ -667,6 +722,8 @@ def resolution_finding(resolution, unresolved):
     finding = deepcopy(unresolved[resolution.finding_id])
     if resolution.affected_target_keys is not None:
         finding.update(affected_target_keys=resolution.affected_target_keys, impact_reason=resolution.impact_reason)
+    if resolution.affected_write_keys is not None:
+        finding['affected_write_keys'] = resolution.affected_write_keys
     return finding
 
 
@@ -701,6 +758,8 @@ def unresolved_after(action_id, previous, review, *, request=None, candidate=Non
 def load_authority(request: Request, *, source_documents=None, archived_sources=None, selected_source_ids=None):
     """Bind a new action to an actual direction and policy, never old v1 flags."""
     policy = Policy.model_validate_json(source.verify_file(request.policy).read_text())
+    if policy.joint_update_contract and request.operation != 'Update':
+        raise ValueError('joint Update policy belongs only to ordinary Update')
     if (policy.review_purpose == 'source_impact') != is_source_impact(request):
         raise ValueError('source impact requires its explicitly bound Review policy and transition')
     authority = json.loads(source.verify_file(request.authorization).read_text())
@@ -821,12 +880,25 @@ def audit_keys(request, before, candidate=None):
     remain transaction read pins and pending consumers, not Claim audit proofs.
     """
     roots = set(request.target_keys)
+    from backend.pipeline.claim_joint_update import enabled, required_keys
+    if enabled(request):
+        roots.update(k for k in required_keys(request, strict=False) if k in before)
     records = {k: v["payload"] for k, v in before.items()}
+    original_records = dict(records)
     if candidate:
         records.update(source.index(candidate.records))
         roots.update(d.record_key for d in candidate.dispositions if d.action != "retain")
     else:
-        roots.update(p.key for p in request.permissions)
+        roots.update(p.key for p in request.permissions if not enabled(request) or p.key in before)
+    if candidate and enabled(request):
+        # Traverse both graphs independently, then require dispositions for the
+        # union. In particular removing an owner/endpoint must not erase it.
+        roots.update(audit_keys(request, before))
+        for key, old in original_records.items():
+            if key in records and records[key] != old:
+                roots.update(domain_dependencies(source.split_key(key)[0], old, original_records))
+                if key.startswith('evidence_steps/'):
+                    roots.update(source.key('claims', cid) for cid in old.get('produced_claim_ids', []))
     owners = set()
     for key in roots:
         if key.startswith("evidence_steps/"):
@@ -872,13 +944,18 @@ def audit_keys(request, before, candidate=None):
 
 def original_goal(request, before):
     original_keys = set(audit_keys(request, before)) | {source.key('source_documents', sid) for sid in request.source_bindings}
-    return {
+    result = {
         "operation": request.operation, "target_keys": list(request.target_keys),
         "source_bindings": {k: v.model_dump() for k, v in request.source_bindings.items()},
         "original_objects": {k: model_state(before[k]) for k in sorted(original_keys)},
         "required_questions": sorted(IMPACT_QUESTIONS if is_source_impact(request) else QUESTIONS[request.operation]),
         "units": {"CMU-" + sha256_json(keys)[:20]: keys for keys in partition_targets(request, before)},
     }
+
+    from backend.pipeline.claim_joint_update import enabled, required_keys, CONTRACT
+    if enabled(request):
+        result.update(joint_update_contract=CONTRACT, required_maintenance_keys=required_keys(request, strict=False))
+    return result
 
 
 def unit_goal(goal, request):
@@ -917,6 +994,9 @@ def partition_targets(request, before):
         return [keys[i:i + (size or len(keys))] for keys in groups.values()
                 for i in range(0, len(keys), size or len(keys))]
     if request.operation in {"Create", "Split", "Merge"}:
+        return [list(request.target_keys)]
+    from backend.pipeline.claim_joint_update import enabled
+    if request.operation == 'Update' and enabled(request):
         return [list(request.target_keys)]
     targets = set(request.target_keys)
     parent = {k: k for k in targets}
@@ -1150,6 +1230,14 @@ def continuation_budget(previous, request, policy):
     from backend.pipeline.source_reconciliation_runner import read, body
     old = Request.model_validate(previous['request'])
     original = Policy.model_validate(previous['policy'])
+    from backend.pipeline.claim_joint_update import CONTRACT, enabled, required_keys
+    if previous['original_goal'].get('joint_update_contract') == CONTRACT and (
+            not enabled(request, policy)
+            or required_keys(request) != previous['original_goal']['required_maintenance_keys']
+            or request.permissions != old.permissions
+            or policy.joint_update_max_targets != original.joint_update_max_targets
+            or len(previous['original_goal']['units']) != 1):
+        raise ValueError('joint Update continuation must retain one complete original unit, required maintenance and authority')
     if (previous.get('kind') != 'claim_management_action' or previous['result']['status'] not in {'paused','completed'}
             or old.operation != 'Update' or request.operation != 'Update'
             or old.target_keys != request.target_keys or old.source_bindings != request.source_bindings

@@ -2152,6 +2152,8 @@ def audit_claim_operation(store, sources, model, management):
         **management["original_goal"], "original_objects": original}, "actual_records": records,
         "full_sources": full_sources, "denominator": keys, "replacements": management["replacements"],
         "candidate_sha256": management["candidate_sha256"], "unresolved": management["unresolved"]}
+    if management['original_goal'].get('joint_update_contract') == 'wang_claim_joint_update_v1':
+        packet['joint_update_writes'] = management['joint_update_writes']
     packet['required_questions'] = management['required_questions']
     packet['before_sources'] = before_sources
     contract = management['audit_contract']

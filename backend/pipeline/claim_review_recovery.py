@@ -53,13 +53,17 @@ def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
             slot=parent['call_reservations'][round_id+':opus']
             if intent!=slot.get('intent') or sha256_json(intent)!=slot.get('intent_sha256'):
                 raise ValueError('unrecorded result differs from its original started call intent')
-        current_contract=cm.audit_contract(old_root/'recovery-contract')
+        current_contract=cm.audit_contract(old_root/'recovery-contract', cm.Policy.model_validate(value['materials']['policy']))
         # Role instructions must be identical: this is a program validator fix,
         # not permission to reinterpret an old answer under a different prompt.
         for role in ('proposal','review'):
             key='backend/pipeline/prompts/claim_management_'+role+'_v2.md'
             if current_contract['implementation'][key]!=value['materials']['audit_contract']['implementation'][key]:
                 raise ValueError('review recovery cannot change the model instructions')
+        if value['materials']['original_goal'].get('joint_update_contract'):
+            key='backend/pipeline/prompts/claim_management_joint_update_v1.md'
+            if current_contract['implementation'][key] != value['materials']['audit_contract']['implementation'][key]:
+                raise ValueError('joint review recovery cannot change the model instructions')
         root=old_root/('engineering-recovery-'+sha256_json({'authorization':authorization,'contract':current_contract})[:20])
         root.mkdir(parents=True,exist_ok=True)
         for name in ['candidate.json','candidate-normalization.json']+[

@@ -261,6 +261,13 @@ def validate_claim_management_package(package):
                                        selected_source_ids=unit_request.source_bindings)
     if policy.model_dump(mode='json') != materials['policy'] or sources != materials['sources']:
         raise ValueError('Claim policy/complete physical own source drift')
+    from backend.pipeline.claim_joint_update import enabled, admission_error
+    if enabled(request, policy):
+        if unit_request.model_dump(mode='json') != original:
+            raise ValueError('joint Update package cannot narrow its complete original unit')
+        if refusal := admission_error(request, policy, materials['before'], {**materials['original_goal'],
+                'units': {materials['unit_id']: request.target_keys}}):
+            raise ValueError('joint Update package admission: ' + refusal)
     candidate = cm.Candidate.model_validate(body(read(root / 'candidate.json')))
     _, writes = cm.validate_candidate(unit_request, materials['before'], candidate, sources,
         created_keys=materials['created_keys'], original_replacements=materials['replacements'])
@@ -330,6 +337,9 @@ def validate_claim_audit(report, materials, candidate, *, historical=False):
     if packet.get('required_questions') != cm.operation_questions(materials['original_goal'], candidate):
         raise ValueError('independent audit changed required operation questions')
     denominator = cm.audit_keys(request, states, candidate)
+    from backend.pipeline.claim_joint_update import enabled
+    if enabled(request) and packet.get('joint_update_writes') != sorted(d.record_key for d in candidate.dispositions if d.action != 'retain'):
+        raise ValueError('joint independent audit omitted actual write impact scope')
     if set(denominator) != set(packet['denominator']) or set(packet['actual_records']) != set(denominator):
         raise ValueError('independent Claim audit incomplete current dependency denominator')
     actual_pins = [{'collection': content.split_key(k)[0], 'object_id': content.split_key(k)[1],
@@ -389,7 +399,7 @@ def validate_claim_stage_receipt(receipt):
     if stage == 'candidate':
         validate_claim_candidate_origin(root, materials, policy, sources, candidate)
         if policy.all_findings_to_gpt and 'gpt' in materials['roles']:
-            cm.validate_proposer_resolutions(candidate, materials['unresolved'], sources)
+            cm.validate_proposer_resolutions(candidate, materials['unresolved'], sources, request=cm.Request.model_validate(materials['unit_request']))
         return materials, candidate, None, None
     if stage == 'opus':
         packet = claim_management_review_packet(materials, candidate)
@@ -433,6 +443,7 @@ def execute_claim_management(store, request, *, root, ports):
     """
     from types import SimpleNamespace
     from backend.pipeline import claim_management as cm
+    from backend.pipeline.claim_joint_update import enabled
     from backend.pipeline.source_reconciliation_runner import exclusive, Stop
     request = cm.Request.model_validate(request)
     read_context = store.read_affected_context if cm.is_source_impact(request) or request.operation == 'Create' else store.read_claim_context
@@ -448,12 +459,15 @@ def execute_claim_management(store, request, *, root, ports):
                 raise ValueError('Claim recovery cannot reset original input/root/budget')
         else:
             keys = {content.split_key(k) for k in request.target_keys}
-            keys.update((p.collection, p.object_id) for p in request.permissions)
+            if not enabled(request):
+                keys.update((p.collection, p.object_id) for p in request.permissions)
             keys.update(('source_documents', sid) for sid in request.source_bindings)
             records = read_context(sorted(keys))
             before = {content.key(*k): cm.model_state(v) for k, v in records.items()}
             goal = cm.original_goal(request, before)
             parent = store.prepare_claim_management_action(request, goal=goal, read_pins=pins(records), root=root)
+        if parent.get('admission_refusal'):
+            return parent['result']
         policy, sources = cm.load_authority(request, source_documents=cm.source_documents(parent['original_goal']['original_objects']))
         if parent.get('continued_by'):
             if parent['result'].get('status') == 'completed':
@@ -495,6 +509,12 @@ def execute_claim_management(store, request, *, root, ports):
                                 records['source_documents',sid] = store.get_record_state('source_documents',sid)
                         transaction_before = {content.key(*k): cm.model_state(v) for k, v in records.items()}
                         before = transaction_before
+                        if enabled(request):
+                            frozen = set(parent['original_goal']['original_objects'])
+                            natural = request.model_copy(deep=True, update={'permissions': []})
+                            current_scope = set(cm.audit_keys(natural, before))
+                            if current_scope - frozen:
+                                raise ValueError('joint Update dependency scope expanded outside frozen original objects')
                         unit_request = request.model_copy(deep=True, update={'target_keys': targets, 'permissions': []})
                         unit_keys = set(cm.audit_keys(unit_request, before))
                         unit_request.permissions = [p for p in request.permissions if p.key in unit_keys]
@@ -549,7 +569,14 @@ def execute_claim_management(store, request, *, root, ports):
                         cm.load_authority(request, source_documents=cm.source_documents(materials['before']),
                                           selected_source_ids=materials['unit_request']['source_bindings'])
                         with store.connect() as conn, conn.cursor() as cursor:
-                            store._assert_transaction_read_pins(cursor, pins(records))
+                            observed = store._assert_transaction_read_pins(cursor, pins(records))
+                            if enabled(request):
+                                # Keep every transaction pin. Only actual
+                                # content roots expand the semantic audit.
+                                audited = {content.split_key(k) for k in materials['before']}
+                                scope_pins = {k: v for k, v in pins(records).items() if k in audited}
+                                store._assert_claim_management_scope(cursor, scope_pins,
+                                    records={k: v for k, v in observed.items() if k in audited})
                     before_call = getattr(ports, 'before_claim_model_call', getattr(ports, 'before_model_call', lambda stage: None))
                     transport = SimpleNamespace(before_model_call=before_call,
                         model_call_reserved=lambda role, intent: store.begin_claim_management_call(
@@ -629,6 +656,8 @@ def execute_claim_management(store, request, *, root, ports):
                             'required_questions': cm.operation_questions(materials['original_goal'], candidate),
                             'response_schema': materials['audit_contract']['response_schema'],
                             'audit_contract': materials['audit_contract'], 'budget': materials['policy']['budget']}
+                        if enabled(request):
+                            audit_input['joint_update_writes'] = sorted(d.record_key for d in candidate.dispositions if d.action != 'retain')
                         if request.source_transition:
                             transition = cm.SourceTransition.model_validate_json(content.verify_file(request.source_transition).read_text())
                             selected = set(materials['unit_request']['source_bindings'])

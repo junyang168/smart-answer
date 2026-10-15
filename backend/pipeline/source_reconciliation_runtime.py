@@ -92,7 +92,7 @@ def model_adapter(stage: str, *, live: bool = False, deferred: bool = False, iss
 
 def claim_management_model_adapter(role, policy, *, live=False):
     """The new content contract shares the existing subscription transport."""
-    from backend.pipeline.claim_management import JsonCandidate, AdjudicatingJsonCandidate, Review, MODELS
+    from backend.pipeline.claim_management import JsonCandidate, AdjudicatingJsonCandidate, Review, JointJsonCandidate, JointReview, MODELS
     if role not in {"gpt", "opus"}:
         raise ValueError("independent Gemini audit uses audit-library's own transport")
     model, _ = MODELS[role]
@@ -106,9 +106,16 @@ def claim_management_model_adapter(role, policy, *, live=False):
         prompt += '\n输出采用无损 JSON 协议：records 每条 payload_json 为完整后像的 JSON 字符串；replacements_json 为完整 replacements 字典的 JSON 字符串（无替换时为 {}）。程序解析后仍执行完整 Candidate 权限、来源与处置验证，不删字段。'
     if role == 'gpt' and policy.all_findings_to_gpt:
         prompt += '\n所有审计异议必须逐项判定：finding_resolutions 对 unresolved 的每个 finding_id 恰好一次，带完整原文逐字引文。resolved 表示通过实际修正或有据否决解决，未改内容须在 reason 中明确反驳依据；persistent 表示认可问题仍未解决，不把 Opus 的验收条件当修改命令。不能跳过无关上下文异议。只写 request 授权字段；缺权限仍须给出判定及所需修正，不能擅自写。Review 操作只作判断，operation 保持 Review、所有 dispositions 保留 retain。'
+    joint = policy.joint_update_contract is not None
+    if joint:
+        prompt += '\n' + semantic_prompt((PROMPTS / 'claim_management_joint_update_v1.md').read_text())
+    response_model = (AdjudicatingJsonCandidate if policy.all_findings_to_gpt else JsonCandidate) if role == 'gpt' else Review
+    schema_name = 'claim_management_candidate_v2' if role == 'gpt' else 'claim_management_review_v2'
+    if joint:
+        response_model = JointJsonCandidate if role == 'gpt' else JointReview
+        schema_name = 'claim_management_joint_candidate_v1' if role == 'gpt' else 'claim_management_joint_review_v1'
     adapter = StructuredJsonReviewerAdapter(client=client, prompt=prompt,
-        response_model=(AdjudicatingJsonCandidate if policy.all_findings_to_gpt else JsonCandidate) if role == "gpt" else Review,
-        schema_name="claim_management_candidate_v2" if role == "gpt" else "claim_management_review_v2",
+        response_model=response_model, schema_name=schema_name,
         compact_payload=True, shared_text_payload=True, shared_record_payload=True)
     adapter.max_request_bytes = policy.budget.max_request_bytes
     return adapter

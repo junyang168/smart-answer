@@ -3264,7 +3264,7 @@ class PostgresKnowledgeStore:
         identity = {"kind": "claim_management_action", "schema_version": VERSION,
                     "action_id": request.action_id, "request": request.model_dump(mode="json"),
                     "policy": policy.model_dump(mode="json"), "execution_root": str(Path(root).resolve()),
-                    "source_archives": source_archives, "audit_contract": audit_contract(root)}
+                    "source_archives": source_archives, "audit_contract": audit_contract(root, policy)}
         with self.connect() as conn, conn.cursor() as cursor:
             cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
             cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE", (run_id,))
@@ -3285,13 +3285,15 @@ class PostgresKnowledgeStore:
                 context = claim_source_transition_context(self, request, before)
                 source_baselines = context.pop('baselines')
                 goal = {**expected_goal, 'source_transition_context': context}
+            from backend.pipeline.claim_joint_update import admission_error
+            refusal = admission_error(request, policy, before, goal)
             value = {**identity, "original_goal": goal, "latest_rounds": {},
                      "source_baselines": source_baselines,
                      "call_reservations": {}, "findings": {}, "created_keys": [],
                      "revision_rounds": {},
                      "claim_ids": [key.split("/", 1)[1] for key in request.target_keys],
                      "result": {"status": "prepared"}}
-            if request.predecessor_action_id and not request.source_transition:
+            if request.predecessor_action_id and not request.source_transition and not refusal:
                 previous_id = 'CMA-' + sha256_json(request.predecessor_action_id)
                 prior = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE',
                     (previous_id,)).fetchone()
@@ -3326,9 +3328,12 @@ class PostgresKnowledgeStore:
                         slot.update(state='cancelled', transferred_to=run_id)
                 cursor.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb WHERE run_id=%s',
                     (canonical_json(prior), previous_id))
+            if refusal:
+                value['admission_refusal'] = refusal
+                value['result'] = {'status': 'paused', 'reason': 'engineering_required', 'detail': refusal}
             authority = json.loads(cm.source.verify_file(request.authorization).read_text())
             context_actions = authority.get('context_review_actions', {})
-            if context_actions:
+            if context_actions and not refusal:
                 if (request.predecessor_action_id or request.operation != 'Update'
                         or not policy.all_findings_to_gpt or policy.initial_candidate != 'proposal'
                         or set(request.target_keys) & {p.key for p in request.permissions}):
@@ -3384,6 +3389,8 @@ class PostgresKnowledgeStore:
             if not row or row[0].get("kind") != "claim_management_action":
                 raise ChangeSetConflict("round has no versioned original Claim action")
             parent = row[0]
+            if parent.get('admission_refusal'):
+                raise ChangeSetConflict('Claim admission refused: ' + parent['admission_refusal'])
             policy = Policy.model_validate(parent["policy"])
             request = parent["request"]
             needed = set(required_roles(Request.model_validate(request), round_number, policy))
@@ -3399,11 +3406,19 @@ class PostgresKnowledgeStore:
                 return round_id
             if unit_id not in parent["original_goal"].get("units", {}):
                 raise ChangeSetConflict("Claim round cannot invent a new original unit")
+            if parent['original_goal'].get('joint_update_contract') and frozen.get('schema_version') != VERSION:
+                raise ChangeSetConflict('joint Update round requires its complete versioned materials')
             if frozen.get('schema_version') == VERSION:
                 from backend.pipeline.claim_management import unit_goal
                 unit_request = Request.model_validate(frozen['unit_request'])
                 original = parent['original_goal']
                 expected_goal = unit_goal(original, unit_request)
+                from backend.pipeline.claim_joint_update import CONTRACT as JOINT_CONTRACT
+                if original.get('joint_update_contract') == JOINT_CONTRACT and (
+                        unit_request.model_dump(mode='json') != parent['request']
+                        or len(original['units']) != 1
+                        or set(frozen['before']) != set(original['original_objects'])):
+                    raise ChangeSetConflict('joint Update cannot change frozen targets, authority or dependency closure')
                 if (frozen['request'] != parent['request'] or frozen['policy'] != parent['policy']
                         or frozen['audit_contract'] != parent['audit_contract']
                         or frozen['original_goal'] != expected_goal
@@ -3413,7 +3428,8 @@ class PostgresKnowledgeStore:
                     raise ChangeSetConflict('Claim round cannot prune original goals/history or widen authority')
                 if parent.get('continuation', {}).get('human_source_verification') and (
                         frozen.get('continuation') != parent['continuation']
-                        or frozen.get('previous_candidate') != parent['continuation']['previous_candidates'].get(unit_id)):
+                        or not parent['continuation'].get('previous_candidates', {}).get(unit_id)
+                        or frozen.get('previous_candidate') != parent['continuation']['previous_candidates'][unit_id]):
                     raise ChangeSetConflict('human source follow-up omitted its evidence or saved candidate')
             previous_id = parent["latest_rounds"].get(unit_id)
             if previous_id:
@@ -3658,7 +3674,10 @@ class PostgresKnowledgeStore:
                             and not (adjudicating and set(unresolved) - {r.finding_id for r in candidate.finding_resolutions or []})):
                         writable = {p.key for p in unit_request.permissions}
                         writable.update(parent['created_keys'])
-                        if any(f['target_key'] not in writable for f in unresolved.values()):
+                        from backend.pipeline.claim_joint_update import enabled
+                        if any(f['target_key'] not in writable and not (enabled(unit_request)
+                                and f.get('affected_write_keys') and set(f['affected_write_keys']) <= writable)
+                                for f in unresolved.values()):
                             reason = 'permission_required'
                     value['outcome'] = reason
                     parent['result'] = {'status': 'paused' if reason != 'revision_required' else 'running', 'reason': reason,
@@ -3720,6 +3739,9 @@ class PostgresKnowledgeStore:
                     self._assert_claim_management_scope(cursor, applicable, records=current)
                     observed.update({col + '/' + oid: {**state, 'retired': state['retired_at'] is not None}
                                      for (col, oid), state in current.items()})
+                if not report_only:
+                    from backend.pipeline.claim_joint_update import verify_completion
+                    verify_completion(value['original_goal'], child, observed)
                 if source_impact:
                     owned = set(child['materials']['original_goal']['target_keys'])
                     source_impacts.update({item['record_key']: item for item in child.get('source_impacts', [])
@@ -7366,6 +7388,11 @@ class PostgresKnowledgeStore:
                     if plan.source_kind == 'wang_claim_management_v2':
                         scope = sql_group['reviewed']['evidence'].get('claim_management_scope')
                     if scope:
+                        if scope.get('joint_update_contract') == 'wang_claim_joint_update_v1':
+                            audited = {tuple(k.split('/', 1)) for k in scope['audit_record_keys']}
+                            scope_pins = {k: v for k, v in transaction_context.read_pins.items() if k in audited}
+                            self._assert_claim_management_scope(cursor, scope_pins,
+                                records={k: v for k, v in transaction_before.items() if k in audited})
                         affected=self._affected_cvp_context(conn,[tuple(k) for k in scope['consumer_roots']])
                         if not set(affected)<=set(transaction_context.read_pins):
                             raise ChangeSetConflict('transaction omitted a current affected consumer')
