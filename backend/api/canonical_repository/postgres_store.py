@@ -3712,8 +3712,10 @@ class PostgresKnowledgeStore:
                     if (not child.get('independent_audit_complete') if independent else
                             not child.get('program_readback_complete') or child.get('revisit_required')):
                         raise ChangeSetConflict('Claim action has an invalidated ' + ('independent audit' if independent else 'program readback'))
-                    current = self._assert_transaction_read_pins(cursor, decoded_pins(child['audited_pins']))
-                    self._assert_claim_management_scope(cursor, decoded_pins(child['audited_pins']), records=current)
+                    from backend.pipeline.claim_qualification_reuse import current_pins
+                    applicable = current_pins(self, cursor, child)
+                    current = self._assert_transaction_read_pins(cursor, applicable)
+                    self._assert_claim_management_scope(cursor, applicable, records=current)
                     observed.update({col + '/' + oid: {**state, 'retired': state['retired_at'] is not None}
                                      for (col, oid), state in current.items()})
                 if source_impact:
@@ -3740,7 +3742,18 @@ class PostgresKnowledgeStore:
                 value['result']['source_revalidated_keys'] = sorted(source_revalidations)
             cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,status='succeeded',finished_at=now(),heartbeat_at=now() WHERE run_id=%s",
                            (canonical_json(value), action_run_id))
+            from backend.pipeline.claim_qualification_reuse import after_completion
+            for rid in value['latest_rounds'].values():
+                child = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s', (rid,)).fetchone()[0]
+                after_completion(self, cursor, rid, child)
         return value['result']
+
+    def revalidate_claim_management_context(self, original_round_id, peer_round_id):
+        """Explicit historical admission; never a new model approval or content write."""
+        from backend.pipeline.claim_qualification_reuse import admit
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
+            return admit(self, cursor, original_round_id, peer_round_id)
 
     def pause_claim_management_action(self, action_run_id, *, reason, detail):
         """Pause without deleting authority, unknown calls or applied facts."""
@@ -3830,8 +3843,10 @@ class PostgresKnowledgeStore:
                         check_binding(bound)
                     proof = value['stage_results']['audit' if independent else 'readback']
                     check_binding(proof)
-                    records = self._assert_transaction_read_pins(cursor, decoded_pins(value['audited_pins']))
-                    self._assert_claim_management_scope(cursor, decoded_pins(value['audited_pins']), records=records)
+                    from backend.pipeline.claim_qualification_reuse import current_pins
+                    applicable = current_pins(self, cursor, value)
+                    records = self._assert_transaction_read_pins(cursor, applicable)
+                    self._assert_claim_management_scope(cursor, applicable, records=records)
                 except (ValueError, ChangeSetConflict):
                     continue
                 state = records.get(('claims', claim_id))

@@ -338,7 +338,7 @@ def audit_contract(root):
     pipeline = Path(__file__).parent
     repository = pipeline.parents[1]
     prompt = pipeline / 'prompts/claim_management_audit_v2.md'
-    files = [Path(__file__), pipeline/'claim_review_recovery.py', pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py',
+    files = [Path(__file__), pipeline/'claim_review_recovery.py', pipeline/'claim_qualification_reuse.py', pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py',
         pipeline/'source_reconciliation_runner.py', pipeline/'source_reconciliation_runtime.py',
         repository/'backend/api/canonical_repository/postgres_store.py', repository/'scripts/audit-library.py',
         *[pipeline/'prompts'/('claim_management_'+role+'_v2.md') for role in ('proposal','review','audit')]]
