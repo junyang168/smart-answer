@@ -262,3 +262,15 @@ OBS009 的复核曾暴露程序边界错误：把「未影响 Claim 目标」与
 在干净实现 `2ce3874` 上执行，GPT 确认问句归属为 professor／interpretive_question，保留 unanswered 与空 answer_claim_ids，避免把 CL008 当作未经证明的答案；同时保留之前已提出的 Claim 转述身份及 ER010 证据作用修正。Opus 全项复核通过，提交 `KCS-60a0bc18c9d95f63018e`，实际写集恰为 CL008、ER010、Q002 三个对象。CL008 revision 1 → 2，SHA `8e2b062f84432e4bec9149427b9f4d5b43fa0c106d5344263da2507dfed45727`；无未决，当前 ready。共同事务回读、零新增调用重入和批后独立新连接核验通过；来源原文及其他对象保持。
 
 本次新增 GPT／Opus 各一次，Gemini 与全库备份均为零。旧 action 的 human_required 结果、原异议和调用记录原样保留，并关联唯一后续任务。运行材料在上一节批次的 `2020/human-source-follow-up-20261015-v1/`；`human-response-completion.json` 明确记录本批 2019 CL011 与 2020 CL008 均为当前 ready，没有覆盖先前一条待人工的历史报告。#435／PR #437 仍未整体完成、未合并或部署。
+
+## 2026-10-15 第二批两条并行 Update
+
+负责人明确要求「再处理两条，并行」。在干净实现 `5d3d899` 上，以现有父进程 maintenance／registry 锁和两个子进程执行原 Update runner；目标为 2019-10-23《太13章1-53 耶穌為何用比喻？》的 `DK-30ef4b792f1f-P05-CL013`，以及 2012《馬太福音釋經（三）》第一讲的 `DK-fa35f8b5f08e-P02-CL004`。前者尚未完成当前资格确认，后者因同组 CL003 已修改而旧资格不再适用；没有借旧相同输入重开审核预算。两条均未连接 CVP，完整范围为 6／42 个对象且不相交，各自读取完整自身来源。其他候选超出现有限额或牵涉已连接 CVP 的 owners 时未作为本批目标，未放宽限制、删减上下文或修改实现／prompt／policy。
+
+2019 CL013「末日審判時，執行審判者是人子。」首轮 Opus 无异议，经 no-content-write 回读与完成核实成为 ready。所有对象保持原样，无内容 ChangeSet；Claim 保持 revision 2、SHA `ce743ce39d3b9cb8883f6b7d8628683fe1ae06afdfa5951c1861258b8500ae3e`。
+
+2012 CL004：Opus 提出一项锚点归属异议——「所以耶穌啊，就明講：『我讓你知道，我，我是神，我在地上有赦罪權柄。』」是将但以理人子身分用于马太九章叙事的结论端，属于 CL003 的实际判断，并非 CL004 的新增支持理由。GPT 据完整 S0007 接受异议，只移除该处 CL004 occurrence 锚点，保留其他八个锚点，尤其直接明说但以理人子就是神的两处引文；statement、attribution、scripture_refs、CL003、E021 和原片段均未改。第二轮 Opus 通过，提交 `KCS-6fbeda29f66d0d05f728`。真实历史写集仅 CL004 一行，程序逐字段核实只改变 occurrences／revision，九个锚点恰移除末尾一个；revision 3 → 4、SHA `3ad08848022fc5bbabd15edcdc4d59cad462525c665fc46ceed514c819b49457`。两条目标的独立新连接回读、零新增调用重入及当前资格核实均通过，无未决 findings。
+
+批后检查仍暴露原有资格绑定范围问题：只读 CL003 没有新内容异议，正文和证据也未改，但它的旧审阅 pins 包含 CL004 第 3 版，因此 CL004 升第 4 版后，CL003 返回 current_program_readback_required。逐项对比旧审阅的全部 pins，唯一差异就是 CL004 revision／SHA；不能将这解释为 CL003 原文或内容出错，也不能把此次只读旁观审阅冒充其新目标资格。本批没有再为 CL003 开模型或静默补资格；该依赖资格问题仍待修正，两个指定目标完成不代表整个相关组全部当前可用。
+
+运行根为 `claim-management-435/son-of-man-two-parallel-20261015-v2/`，保存两条结果、共同汇总、`post-batch-readback.json` 和 `shared-owner-qualification-drift.json`。实际调用 GPT 一次、Opus 三次，Gemini 和全库备份均为零；来源原稿、CVP 与连接未写入。#435／PR #437 仍未整体完成、未合并或部署。
