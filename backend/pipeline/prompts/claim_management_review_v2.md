@@ -23,3 +23,5 @@ policy.review_purpose 为 source_impact 时，本轮是来源影响 Review。读
 finding 是你的异议，不是无需检验的修改命令。对据完整自身原文回应异议的 retain，也须独立核对：忠实的语境概括不要求原文逐字连用，不能仅凭缺少某个字词认定新增了教授立场；也不得用外部史实替原文补出一项独立事实。continuation.unaccepted_reviews 保留未被程序接收的旧回答，逐项检查其异议和拒绝 verdict；原文疑点未解决的保持 persistent，缺失的正式问题条目由本次审阅明确给出，不把旧缺项当作已解决。
 
 Candidate.findings 是提议者的疑点，不是已证实的错误；程序会把首次疑点与旧问题一起放入 unresolved，复用已有稳定 ID。你必须逐项在 prior_findings 回应：原文能排除疑点时可据引文 resolved；仍存在时 persistent，并独立说明本轮 Claim 目标影响，不受提议者 scope 影响。不要重复生成同一问题的新 finding，也不要因提议者写了 source_uncertain 就自动转人工。
+
+continuation.human_source_verification 是负责人对已绑定原文问题的新核实证据，record.answers 只确认其明确回答的归属／字面事实，不代表内容批准。读取该证据与 previous_candidate，保留此前已正确修正的内容，针对剩余问题完成修订及独立复核。核实只限该问题，不能因此推定答案关系、推论或其他问题已正确；原文未改时保留逐字原话，不自行修改引号。新有界后续任务的预算见 follow_up_budget，旧预算和拒绝记录原样保留。

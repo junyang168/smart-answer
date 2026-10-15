@@ -529,7 +529,8 @@ def execute_claim_management(store, request, *, root, ports):
                             'created_keys': parent['created_keys'], 'replacements': parent.get('replacements', {}),
                             'unresolved': {k: v for k, v in {**parent.get('context_findings', {}), **parent['findings']}.items()
                                 if v['target_key'] in unit_keys},
-                            'previous_candidate': prior.get('candidate') if prior else None,
+                            'previous_candidate': (prior.get('candidate') if prior else
+                                parent.get('continuation', {}).get('previous_candidates', {}).get(unit_id)),
                             'claim_ids': [k.split('/',1)[1] for k in unit_keys if k.startswith('claims/')],
                             'writable_record_shapes': {col: cm.KNOWLEDGE_COLLECTIONS[col][0].model_json_schema()
                                 for col in sorted({p.collection for p in unit_request.permissions} | {p.collection for p in request.creation_permissions})}}

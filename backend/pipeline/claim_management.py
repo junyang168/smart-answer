@@ -703,6 +703,8 @@ def load_authority(request: Request, *, source_documents=None, archived_sources=
             or authority.get("request") != expected
             or authority.get("policy") != request.policy.model_dump()):
         raise ValueError("Claim action lacks its exact new policy and original authority")
+    if authority.get('human_source_verification'):
+        source.verify_file(source.FileBinding.model_validate(authority['human_source_verification']))
     sources = {}
     selected = set(request.source_bindings) if selected_source_ids is None else set(selected_source_ids)
     if not selected <= set(request.source_bindings):
@@ -1090,9 +1092,47 @@ def unaccepted_initial_review(previous, key, slot, proof):
         'review':review.model_dump(mode='json'), 'review_not_accepted':True, 'generation_consumed':True}
 
 
+def human_source_follow_up(previous, request, authority, prior_findings):
+    """New human source evidence authorizes one bounded, linked follow-up.
+
+    This does not replenish the predecessor's ledger or approve any candidate.
+    """
+    bound = authority.get('human_source_verification')
+    if not bound:
+        return None
+    verification = json.loads(source.verify_file(source.FileBinding.model_validate(bound)).read_text())
+    old = Request.model_validate(previous['request'])
+    used = set(previous.get('continuation', {}).get('human_verified_finding_ids', []))
+    answers = verification.get('answers', [])
+    ids = [answer.get('finding_id') for answer in answers]
+    if (verification.get('schema_version') != 'wang_claim_human_source_verification_v1'
+            or verification.get('verified_by') != 'user'
+            or verification.get('human_content_approval') is not False
+            or verification.get('predecessor_action_id') != old.action_id
+            or verification.get('source_bindings') != old.model_dump(mode='json')['source_bindings']
+            or not verification.get('user_confirmation')
+            or previous['result'].get('reason') != 'human_required'
+            or request.permissions != old.permissions
+            or not ids or len(set(ids)) != len(ids) or set(ids) & used):
+        raise ValueError('human source follow-up must bind new source evidence to the paused original scope')
+    for answer in answers:
+        finding = prior_findings.get(answer['finding_id'])
+        if (not finding or finding['category'] != 'source_uncertain'
+                or answer.get('question') != finding.get('human_question')
+                or not answer.get('answer')
+                or answer.get('citation') not in finding['citations']):
+            raise ValueError('human source answer does not bind an unresolved source question')
+    for binding in old.source_bindings.values():
+        source.verify_file(binding)
+    return {'artifact':bound, 'record':verification, 'finding_ids':ids,
+            'human_verified_finding_ids':sorted(used | set(ids))}
+
+
 def continuation_budget(previous, request, policy):
     """One explicitly authorized successor carries history and unspent budget.
 
+    A bound human source answer can instead authorize one new proposal/review
+    pair in a linked action; the predecessor's spent budget remains unchanged.
     A proven HTTP 400 schema rejection generated nothing. Its failed attempt
     remains in the predecessor ledger and is never represented as a completion.
     Unknown calls, completed writes and changed source versions cannot use this
@@ -1121,6 +1161,7 @@ def continuation_budget(previous, request, policy):
     unaccepted = {}
     prior_findings = {**deepcopy(previous.get('context_findings', {})), **deepcopy(previous['findings'])}
     authority = json.loads(source.verify_file(request.authorization).read_text())
+    human_follow_up = human_source_follow_up(previous, request, authority, prior_findings)
     recovery = authority.get('unaccepted_review_recovery', {})
     root = Path(previous['execution_root'])
     for key, slot in previous['call_reservations'].items():
@@ -1155,16 +1196,25 @@ def continuation_budget(previous, request, policy):
     remaining = {role:original.budget.limit(role)-spent[role] for role in MODELS}
     if (policy.models != original.models or policy.independent_audit != original.independent_audit
             or policy.review_purpose != original.review_purpose
-            or any(policy.budget.limit(role) > remaining[role] for role in MODELS)
-            or policy.budget.max_revisions > original.budget.max_revisions - sum(previous['revision_rounds'].values())
+            or (not human_follow_up and any(policy.budget.limit(role) > remaining[role] for role in MODELS))
+            or (not human_follow_up and policy.budget.max_revisions > original.budget.max_revisions - sum(previous['revision_rounds'].values()))
             or policy.budget.max_request_bytes > original.budget.max_request_bytes
             or policy.budget.max_output_tokens > original.budget.max_output_tokens):
         raise ValueError('continuation cannot reset or increase original Claim budget or change review policy')
+    if human_follow_up and (policy.initial_candidate != 'proposal'
+            or policy.all_findings_to_gpt != original.all_findings_to_gpt
+            or policy.budget.gpt_calls != 1 or policy.budget.opus_calls != 1
+            or policy.budget.gemini_calls != int(policy.independent_audit_required)
+            or policy.budget.max_revisions != 1):
+        raise ValueError('human source follow-up permits exactly one bounded proposal and review')
     if not policy.budget.gpt_calls or not policy.budget.opus_calls:
         raise ValueError('original remaining budget cannot fund correction and review')
     return {'predecessor_action_id':old.action_id, 'completed_context_cleanup':completed_cleanup, 'original_goal':deepcopy(previous['original_goal']),
         'prior_findings':prior_findings, 'unaccepted_reviews':unaccepted, 'prior_call_reservations':deepcopy(previous['call_reservations']),
-        'pre_generation_schema_rejections':failures, 'spent_generations':spent, 'remaining_generations':remaining}
+        'pre_generation_schema_rejections':failures, 'spent_generations':spent, 'remaining_generations':remaining,
+        **({'human_source_verification':human_follow_up,
+            'human_verified_finding_ids':human_follow_up['human_verified_finding_ids'],
+            'budget_basis':'new_human_source_evidence_follow_up', 'follow_up_budget':policy.budget.model_dump()} if human_follow_up else {})}
 
 
 def operation_questions(goal, candidate):
