@@ -370,3 +370,22 @@ Opus 首轮认可 CL003，另指出 CL004、E007／E008／E009、OBS002／OBS005
 最终相关后端回归使用 backend/.venv、临时 socket-only PostgreSQL 和原保存失败材料，结果 **596 passed、43 skipped**；涵盖联合测试、既有 operations、多轮／人工／局部来源、资格复用、共同 SQL 事务与恢复等 21 个测试文件。保存材料只读；合成回复不构成正式内容批准。JUnit 结果保存于 `/tmp/claim435-joint-update-final-20261015.xml`，可重现测试为 `backend/tests/test_claim_joint_update.py` 及本记录前述相关回归集合，原失败材料仍使用 WKP435_SAVED_FAILURE_ROOT 的既有目录。
 
 git diff --check 通过。文档检查仍仅报另一项目既有 `docs/notes-to-sermon-agent/functional_spec.md:120` 缺失锚点。前端 tsc 已重跑，仍为既有安装缺失 react-quill-new 及 EmailSender/FellowshipManager 的四项关联错误；本次未改前端或依赖。正式多目标样本和余下内容／人工事项仍未执行；#435／PR #437 保持未整体完成和 draft。
+
+
+## 2026-10-15 首个真实双目标联合 Update 与常规容量 2
+
+负责人同意按两条未连接 CVP、共享既有 Evidence 的样本继续真实验收，并要求避免逐案堆补丁。选择《9章—权柄深化》的 `DK-e66e67653378-P01-CL001`（人子在地上的赦罪权柄）与 `DK-e66e67653378-P01-CL002`（医治神迹证实这权柄）。CL001 原已 ready，CL002 原无当前 2.0 资格；前者参与复核以验证共享维护不会丢掉已完成项，而不是声称两条都是新处理。两条共有 E007、E010、E011，完整必要闭包为 105 个对象，涉及的 Claim 均未连接 CVP。其余 9 条 Claim 保持只读，3 个共享 E 明确列为 required_maintenance_keys；字段权限、来源和 budget 在首次 prepared 固定。
+
+静态核对发现 preflight 提前调用 load_authority 时没有 SQL SourceDocument 的 source_type，Markdown 笔记会按默认 JSON 路径解析。隔离反例先稳定复现 JSONDecodeError，然后以通用修复 `204bec6` 改为在同一依赖读取完成后传入实际 SourceDocument 元数据；仍核物理 SHA、来源声明和完整 pins，不用扩展名猜类型、不降级文件校验。新增完整 Markdown／物理来源漂移反例；联合、既有执行与来源影响三个文件的相关验证为 **109 passed**。另一个候选源的闭包超过现有 readset 限额，保持拒绝，没有放宽限额或裁材料来运行它。
+
+在干净实现 `204bec6` 上，精确验收策略容量 2、max_revisions=1、GPT 调用上限 2、Opus 上限 2、Gemini 0；没有提高单次材料／输出预算或重开旧 action。preflight 零模型、零内容写入，全部许可与必做项归入同一组。运行 action 为 `435-joint-update-real-two-20261015-v1`，只有一个单元和 round：`CMR-f8a2fcc2018008d02cc143ba125d0c3d4e106bd1fd59075912767b6cc705967a`。
+
+Opus 实际调用一次，精确请求为 257,067 bytes，105 个对象逐项通过，findings 与 prior_findings 均为空。候选全部 retain；没有为测试制造修改。原 no-content-write 与新连接程序回读完成，checkpoint=audited、outcome=completed，两个目标均 ready，明确为 opus_and_program_readback、independent_audit_complete=false。CL001 保持 revision 3／SHA `ee7588d220a422a8a15625cdd67593bad20b471af27a77d8e592ec80fdaa0705`；CL002 保持 revision 3／SHA `8708f21b53f06899571245737889350eb78afa9db842a2fb5af6dd8891974694`。全部 105 个业务对象、原稿和 meta.json 字节不变；9 条只读 Claim 没有获得旁观资格，没有内容 ChangeSet、GPT、Gemini 或整库备份。完成重入和独立新进程核验没有新调用。此次实测证明真实双目标共同 retain／资格完成，不冒称实际共享 E 修改、晚项回滚或提交回复丢失也已在正式库实跑；那些路径有隔离反例。
+
+外围执行脚本在正式操作前曾把 str 交给只接受 Path 的 binding；此时尚无 action 或模型调用，改用现有通用 binding 后继续。联合动作完成后，汇总脚本把 list 直接交给只接受 dict 的 artifact writer，报告写入失败；已保存真实完成结果和原脚本，补 dict 外层后同一 action 零调用重入补齐。独立只读核验最初误用了带 FOR UPDATE 的 pins helper，被数据库拒绝并 rollback；改用同一组明确 keys 的普通 SELECT，在 READ ONLY 事务核完 105 项。上述脚本修正均未改回答、候选、原预算或业务数据，没有重发模型或重建运行根。
+
+全部授权、材料、原文存档、原始回答、调用 intent、回读、初稿与修复脚本保存于 `claim-management-435/joint-update-real-two-20261015-v1/`。`joint-update-result.json` 记录完整完成结果，`post-batch-qualifications.json` 汇总当前资格，`independent-current-verification.json` 为独立新连接核实；后者绑定结果 SHA 并明确 additional_model_calls=0、verifier_content_writes=0。
+
+有界真实验收后新增常规 `wang_claim_management_joint_update_v2.json`，容量为 2，模型／预算／Opus-only 与验收一致；旧联合 v1 容量 1、原单条／其他 operations 默认 policy 及旧回答保持原样。新任务显式选用 v2 并提供原目标、字段权限和必做清单；传递冲突形成三目标组时，调用前 engineering_required，不能强拆或静默扩大权限。常规容量配置提交为 `45acd7e`。本轮没有继续跑其他正式 Claim 或自动执行整批。
+
+最终相关回归 **599 passed、43 skipped**，其中联合专项 **52 项**；使用 backend/.venv、临时 PostgreSQL 与只读原失败材料，覆盖笔记来源类型和普通容量 2 的成功／容量 3 零调用拒绝。JUnit 位于 `/tmp/claim435-joint-real-regression-20261015.xml`。git diff --check 通过；文档检查仍仅有另一项目既有缺失锚点，前端 tsc 重跑仍为 react-quill-new 缺失引起的既有四项错误。PR #437 保持 draft，未合并、未部署；其余批次和人工事项未声明完成。

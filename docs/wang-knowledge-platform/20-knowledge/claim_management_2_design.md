@@ -2,13 +2,15 @@
 
 > **读者**：流程负责人、Solution architect、Developer。
 > **类型**：规范。
-> **状态**：当前规范；普通联合 Update 已接入现有执行路径并完成隔离验证，正式多目标执行尚未启用。
-> **与代码对齐**：2026-10-15，核对到 `cf65707` 的普通联合 Update 准入、依赖预检、必做维护、写入影响、共同事务及完成核实。默认容量仍为 1；隔离合成验证不替代有界真实模型验收。其余 operations 与既有事实保留原契约，实际结果见实施检查点。
+> **状态**：当前规范；普通双目标联合 Update 已完成有界真实审阅与回读验收；常规联合策略容量为 2，旧策略保持原契约。
+> **与代码对齐**：2026-10-15，核对到 `45acd7e` 的普通联合 Update 准入、来源类型预检、必做维护、写入影响、共同事务及完成核实。常规联合 v2 policy 容量为 2；旧策略及未声明容量的缺省值仍为 1。真实样本验证共同 retain／程序回读，实际修改、晚项回滚和丢失回复路径另有隔离反例；实际结果见实施检查点。
 > **权威范围**：#435 的 operations、完整生命周期、审核与多轮出口、当前可用资格和 Claim 域交接；不授予模型调用、正式内容修改或旧预算重开权限。
 
 Claim Management 的目标是让新建和既有 Claim 都忠于教授的完整自身来源，保留证据、论证和限定，并通过同一套管理流程持续审阅和更新。Create 从 GPT 候选开始；既有 Claim 直接作为候选进入 Review。Verify 是审阅中的核实，Cleanup 是 Update 的用途。
 
 当前新 action 暂停 Gemini 终审，默认采用 [Opus-only policy](../../../backend/pipeline/policies/wang_claim_management_opus_only_v2.json)：`independent_audit=false`、Gemini 调用预算为 0。Opus 内容审阅、版本／来源校验、事务、真实写集、回读和原始目标核实保留；结果明确为 `opus_and_program_readback`，不标成独立终审通过。本文的 Gemini 分支只适用于明确启用独立终审的 policy；既有已绑定任务和完成记录不改变。
+
+普通双目标联合 Update 显式选择 [joint Update v2 policy](../../../backend/pipeline/policies/wang_claim_management_joint_update_v2.json)，容量为 2，仍采用 Opus＋程序回读。单条及其他 operations 的默认 policy、旧联合 v1 policy 和已绑定任务保持原样；缺省容量仍为 1。选用联合 policy 不代替具体目标、字段权限和必做清单的精确授权。
 
 Review 就是审阅，作为独立业务 operation 保留。Update 内含审阅、必要修正与独立审计，不需要另发 Review 请求。Create、Retire、Restore、Split、Merge 同样内含审核；这些操作共用现有执行机制。Read 只读取，不触发模型或内容事务。
 
@@ -104,7 +106,7 @@ main 的 `PostgresKnowledgeStore.apply_plan()` 已使用 PostgreSQL transaction 
 | preflight 与准备共用 read_claim_context，保留完整 pins；按选中目标间的 W／R 冲突取传递分组 | 共读来源本身不合组；只在授权目标内分组，每个许可及必做项明确归属，不自动加入其他 owner |
 | 联合 action 固定一个单元，原授权的 required_maintenance_keys 进入 original_goal | 全部目标、必做项和新旧共享影响闭包共同审阅、共同提交；漏处置、漏审阅或当前回读不成立都不能完成 |
 | 新 policy 的模型 schema 和 prompt 要求 affected_write_keys；旧输出 schema 与缺省序列化保持原样 | 只读 owner 因实际写入失去支持时阻断该写入；双方确认无关的已判定异议继续保留 context |
-| 共同 ChangeSet、晚项回滚、已提交回复丢失恢复、零重复模型调用及双方当前资格已有隔离反例 | 合成模型回复只验证契约和路由；正式多目标执行仍须另有精确授权的有界真实验收 |
+| 共同 ChangeSet、晚项回滚、已提交回复丢失恢复、零重复模型调用及双方当前资格已有隔离反例 | 合成模型回复只验证契约和路由；有界真实共同 retain／回读已验收，不声称真实内容修改、晚项回滚或失败后恢复也已实跑 |
 
 普通联合 Update 的每组建立一个 action、一个单元；独立组建立不同 action。已有多单元任务按原保存事实读取，新版不增加多单元调度、创建、部分提交后重组或预算迁移。预检输出是分组与权限归属建议，不改写授权、不准备 action、不执行模型或内容写入。受控批次据该结果绑定各 action，并在批后重新读取当前资格；既有完成事实与当前是否可用分别报告。实施结果见[实施检查点](./claim_management_2_implementation_checkpoint_20261013.md)。
 
@@ -433,7 +435,9 @@ Claim-ready 是下游使用当前合格 Claim 的共同派生判断；至少要�
 
 容量由版本化 policy 的正整数 `joint_update_max_targets` 声明，缺省为 1。所有新建普通多目标 Update 必须选择支持该联合契约的版本化 policy；缺省／旧策略只允许原单目标范围。准备入口必须检查该值、目标／单元完整映射和创建许可，在任何模型调用或业务写入前拒绝未启用或超范围请求并记录 engineering_required；不能只靠操作纪律。限制针对新建普通多目标 Update，不倒改已绑定的旧完成事实、原单条／context_review_actions 接续、Merge／Split 或来源影响 Review。旧 schema、序列化和原回答 SHA 保持原契约，不能在消费时补新字段改变摘要。
 
-首个样本为两条 Claim 共享既有 E。隔离测试可使用明确的容量 2 测试策略；之后的有界实际验收须另有精确两目标、预算和容量 2 验收策略的授权，普通任务策略仍保持容量 1。完成对应验收后才启用普通任务的相应容量；不以“验收未通过”禁止受控验收本身，也不借验收策略运行整批。两条不是永久业务上限。更多目标仍使用同一单元契约，但必须在支持容量和材料／输出资源界限内，不自动放大 policy，不为超限包删来源或拆强依赖。预算使用原 action 的逐轮角色预留，不新增“整批首轮预算预测”；多个 action 各守原许可、原预算及已声明的批次资源上限，不复制旧 action 的剩余额度。
+当前常规 [joint Update v2 policy](../../../backend/pipeline/policies/wang_claim_management_joint_update_v2.json) 声明容量 2；旧联合 v1 policy、单条／其他 operations 的默认配置和未声明容量的缺省值仍为 1，已绑定 policy 不原地改写。每次实际操作仍绑定准确目标、来源、预算及 required_maintenance_keys，完整依赖预检通过才建立一个联合 action。这个容量不授权整批自动执行，也不保证任意两条都可处理：三项传递冲突或资料／输出超限时，相关组准确暂停，不能删来源、拆强依赖或隐藏 owner 来凑两条。
+
+隔离测试和有界真实验收使用各自精确绑定的策略；更高容量仍须在完整材料和资源限制内对应验证后才加入普通配置。两条不是永久业务上限。预算使用原 action 的逐轮角色预留，不新增“整批首轮预算预测”；多个 action 各守原许可、原预算及已声明的批次资源上限，不复制旧 action 的剩余额度。
 
 ### 11.4 计划变化、失败恢复与批后核实
 
@@ -473,7 +477,7 @@ Claim-ready 是下游使用当前合格 Claim 的共同派生判断；至少要�
 | 许可与维护归属 | 授权中的 required_maintenance_keys 原样进入 original_goal；每轮处置、Opus 分母／通过与最终回读均完整；漏项、不可达或必需修改却无字段许可时不假完成，targets 本身不授写权限 |
 | 权限与只读 owner | 未列目标／被排除／CVP-linked owner 不自动获写权限或资格；共享修改需要范围外维护则停止该组；不靠删材料绕过 |
 | 写入影响与人工 | 只读 C 因 E 修改失支持，即使 affected_target_keys 为空也须 affected_write_keys 指向 E 并阻断；C 的独立章号疑点两类影响为空可保留 context；缺字段／范围分歧不放行 |
-| 容量与预算 | 缺省容量 1、旧 policy 新建多目标均零调用拒绝；明确隔离／两目标验收策略可合法运行，普通策略未验收不放开；创建许可／超容量拒绝，不影响旧绑定、单条接续与其他 operations，原回答 SHA 不变 |
+| 容量与预算 | 缺省容量 1、旧 policy 新建多目标均零调用拒绝；明确隔离／有界验收策略可合法运行，普通联合 v2 仅开放已验收的容量 2；创建许可／超容量拒绝，不影响旧绑定、单条接续与其他 operations，原回答 SHA 不变 |
 | 计划漂移 | 新增或移除 owner／关系、共享片段变化及计划外跨 action 影响均有反例；冻结范围外的实际义务缺口阻止提交，不静默重组或迁移旧回答 |
 | 批后资格 | 后提交使先完成项真实失效时，汇总当前为未完成并保留历史；适用的机械复用与真正内容失效分别核实，不增加整批模型终审 |
 | 审阅误读 | 一次有据澄清只回原角色；仍有分歧先暂停，有来源支持的实际修正方向才能恢复；未改内容不重新提交，消解一项不等于全部通过 |
