@@ -274,3 +274,22 @@ OBS009 的复核曾暴露程序边界错误：把「未影响 Claim 目标」与
 批后检查仍暴露原有资格绑定范围问题：只读 CL003 没有新内容异议，正文和证据也未改，但它的旧审阅 pins 包含 CL004 第 3 版，因此 CL004 升第 4 版后，CL003 返回 current_program_readback_required。逐项对比旧审阅的全部 pins，唯一差异就是 CL004 revision／SHA；不能将这解释为 CL003 原文或内容出错，也不能把此次只读旁观审阅冒充其新目标资格。本批没有再为 CL003 开模型或静默补资格；该依赖资格问题仍待修正，两个指定目标完成不代表整个相关组全部当前可用。
 
 运行根为 `claim-management-435/son-of-man-two-parallel-20261015-v2/`，保存两条结果、共同汇总、`post-batch-readback.json` 和 `shared-owner-qualification-drift.json`。实际调用 GPT 一次、Opus 三次，Gemini 和全库备份均为零；来源原稿、CVP 与连接未写入。#435／PR #437 仍未整体完成、未合并或部署。
+
+## 2026-10-15 六条笔记来源的人子 Claim 批次
+
+负责人要求「再处理 6 张」，按六条既有 Claim Update 执行。在干净实现 `2ad6d49` 上，沿用同一 controller 持有 maintenance／registry 锁、每次两个子进程并行的方式，六条均未连接 CVP，也没有既有人工待核问题。核对各 Project 的 meta.json 与原件：来源依据为教授笔记扫描页记录或 sermon_note metadata，没有以文件夹名称判断母本身份。完整自身笔记原文进入每次审阅。
+
+| 来源 | 目标 Claim | 原始判断 |
+| --- | --- | --- |
+| 8章—权柄的显明 | `DK-1c98d4a95cd5-P10-CL001` | 人子称号的定冠词与特指 |
+| 同上 | `DK-1c98d4a95cd5-P10-CL002` | 约翰福音 5:27 的冠词语法与神性语境 |
+| 同上 | `DK-1c98d4a95cd5-P10-CL003` | 人子称呼的使用及转引／例外 |
+| 16章—灵、魂、体的整体性 | `DK-2bd0c0df7ecd-P05-CL013` | 约翰福音 6:27、永生食物与人子 |
+| 13章—天国的比喻 | `DK-c9084afc125c-P11-CL019` | 稗子比喻中的人子、撒种与审判 |
+| 9章—权柄深化 | `DK-e66e67653378-P01-CL001` | 人子在地上的赦罪权柄 |
+
+各条完整关联范围为 13／18／16／20／10／105 个对象，跨 worker 的交集仅为只读 SourceDocument，没有共同内容写入对象；既有限额保持。首对模型请求均已 started 且尚未返回的重叠状态保存于 `first-pair-call-overlap.json`，其余任务沿相同两 worker 队列推进。
+
+六次 Opus 首轮审阅均无 findings，六条经 no-content-write、真实 SQL 回读及原目标完成核实后全部当前 ready。每条完成重入验证调用账本不增加；批后用独立新连接对 180 个去重关联对象逐字段及 revision／SHA 核验，所有业务对象与批前完全一致，四份来源及 metadata 字节不变，没有内容 ChangeSet，也未制造新 Claim revision。各自原 revision 保持为 2／2／2／3／2／3。没有因被审阅而给只读旁观 Claims 生成目标资格。
+
+实际调用 Opus 六次，GPT 零次（无异议需要判定），Gemini 零次，全库备份零次。实现、prompt、policy 和来源原稿未改；结果明确为 opus_and_program_readback，不标成独立 Gemini 终审。运行根为 `claim-management-435/son-of-man-six-20261015-v1/`，保存六个单条结果、`batch-result.json` 及 `post-batch-verification.json`。此次六个目标全部完成，不包含前节 CL003 的资格依赖范围问题或旧人工待核条目；这些既有未完成项继续保留。#435／PR #437 未整体完成、未合并或部署。
