@@ -293,3 +293,19 @@ OBS009 的复核曾暴露程序边界错误：把「未影响 Claim 目标」与
 六次 Opus 首轮审阅均无 findings，六条经 no-content-write、真实 SQL 回读及原目标完成核实后全部当前 ready。每条完成重入验证调用账本不增加；批后用独立新连接对 180 个去重关联对象逐字段及 revision／SHA 核验，所有业务对象与批前完全一致，四份来源及 metadata 字节不变，没有内容 ChangeSet，也未制造新 Claim revision。各自原 revision 保持为 2／2／2／3／2／3。没有因被审阅而给只读旁观 Claims 生成目标资格。
 
 实际调用 Opus 六次，GPT 零次（无异议需要判定），Gemini 零次，全库备份零次。实现、prompt、policy 和来源原稿未改；结果明确为 opus_and_program_readback，不标成独立 Gemini 终审。运行根为 `claim-management-435/son-of-man-six-20261015-v1/`，保存六个单条结果、`batch-result.json` 及 `post-batch-verification.json`。此次六个目标全部完成，不包含前节 CL003 的资格依赖范围问题或旧人工待核条目；这些既有未完成项继续保留。#435／PR #437 未整体完成、未合并或部署。
+
+## 2026-10-15 关联锚点清理后的原审核适用性核实
+
+负责人同意先修正资格失效范围，明确指示「好，你先做第一步」。实现 `claim_qualification_reuse`，接入既有 Update 完成事务、当前资格查询及 action 完成核实。仅保留已经完成完整目标 Update 的 Opus＋程序回读资格：新关联 Update 必须覆盖原审阅范围、无未决且程序回读通过，原目标与原写集、来源文件、Evidence、关系及其他依赖精确不变，唯一差异只能是只读关联 Claim 部分锚点的删除。没有原完整目标审核的旁观 Claim 不获得资格。正文、证据、来源、关系、人工 hold、正式新异议、锚点替换／重排／删光都不能借此通过。
+
+适用性证明使用现有 review_events 和原 round metadata，不增加业务状态库或审核模型；原 Opus 回复、旧 audited_pins、原 readback 和历史失效标记保持。证明直接绑定原审核、新关联审核、当前完整依赖及系统事件；每次消费核实文件与当前依赖，后续真实漂移仍失效。新关联 Update 完成时自动尝试登记；证明写入和 completion 在同一短事务内，晚期失败会整体回滚本次完成与证明，已在先前事务提交的内容仍准确保留。恢复只消费已保存审阅，不重复模型调用。
+
+在干净实现 `39c4ad6` 上核实真实历史案例：原 2012 CL003 审阅 `CMR-3f8c820ddfd8623bc7f87fcf2e5238ab3a4ac44729e8adc86a8997370ab7749e` 的 42 个 pins 中，唯一变化为只读 CL004 第 3 → 4 版。关联完整审阅 `CMR-a52a3bb80189673dc373362cb69c8b17a6d35c76b64b23e44875a399f97f7e97` 证明 CL004 只删去此前误绑的末尾锚点，其他八处及完整语义不变。登记一条 system 事件 `CMCTX-616f8bcc489cf3c511e0078f539c174e` 后，CL003 原资格恢复，仍引用原完整目标审阅；不是此次只读旁观审阅产生新资格。CL003 保持 revision 4、SHA `ee1b8a65f84542ef8c87763a56171760471049467427ad451ab5a30eed40bc05`；CL004 同样保持 revision 4 和原 SHA，二者当前 ready。
+
+新连接回读验证全库业务对象版本／SHA／审核与可见性指纹、object_versions 和 ChangeSet 数量、物理来源及模型调用账本均未变。原 action 完成核实通过，重复登记返回相同证明，额外事件为零。2021 CL003 因物理原文确实变化仍返回 current_program_readback_required；2021 CL004 章号问题仍待人工，没有被此规则放行。没有模型调用、全库备份或 CVP／连接修改。
+
+执行材料在 `claim-management-435/qualification-context-reuse-20261015-v1/`，保存意图、前后指纹、证明、原 action 完成结果和 `verified-result.json`。资格证明提交后，核验脚本因误读 round 顶层 action_id 而中断；改用 materials.request.action_id 重入同一入口，成功完成核验，没有重复事件或调用。初次和恢复脚本及准确原因均保存，不把核验脚本中断归因于业务审核失败。#435／PR #437 仍为未完成的 draft，未合并或部署。
+
+最终相关回归为 **537 passed、43 skipped**，使用 backend/.venv 与隔离 PostgreSQL；其中新增专项 22 项，包括真实依赖变化拒绝、缺审核不升级、证明／原模型回复损坏、正式新异议、事务回滚及零调用恢复。文档检查仍仅报另一项目既有缺失锚点。
+
+额外执行前端 tsc --noEmit：现有 worktree 安装缺少 package.json 已声明的 react-quill-new，导致 EmailSender／FellowshipManager 四条类型错误；本分支未改变前端依赖清单或这些组件，本次不修改该安装或前端代码。
