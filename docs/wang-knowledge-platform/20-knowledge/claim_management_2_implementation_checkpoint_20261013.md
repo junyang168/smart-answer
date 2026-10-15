@@ -341,3 +341,17 @@ Opus 首轮认可 CL003，另指出 CL004、E007／E008／E009、OBS002／OBS005
 简化方向的本轮评估：优先考虑将初次验收限定为“一单元、多个目标、仅既有对象”，复用原预算预留、资格和完成检查；不扩展常驻调度或状态库。没有采纳取消跨 action 影响预检的建议：写前 pins 可保护正确性，却不能避免重复审阅和资格互相失效，仍可使用既有有界批次材料预检而不建立全局活动索引。也没有直接采纳“已有 validator 必然覆盖所有新增 owner／关系”的断言，仍需反例验证。
 
 上述为审阅及静态核对记录，尚未修改规范来实施这些建议，也未改应用代码或重跑模型。完整报告与独立 triage 在 `claim-management-435/joint-update-design-review-20261015-v1/` 的 `review.json`、`codex-triage.json`；报告 SHA 为 `1bf006a41a7ad902612ea461d8f5b6b215729fbbc15f9bc87f14a3e3299cb214`。多目标联合 Update 继续待修订与隔离验收，不能据此次评审用于正式批次。
+
+## 2026-10-15 与 Fable 共同定稿普通联合 Update 设计
+
+负责人要求「那你跟 fable 一起 finalize design」，并指出前次提示对 overengineering 强调过多。本次两个审阅提示均明确同等避免 underengineering 和 overengineering：删除机制不能损失必要保证，新增机制必须对应支持范围内的具体反例，不以规则多少决定好坏。仅修改规范和本记录，没有应用代码或正式 Claim 操作。
+
+修订将普通联合 Update 收敛为一个 action、一个执行单元；独立组是既有受控批次中的不同 action。本轮不加入多单元排序、部分提交重组或创建许可；需要创建与更新原子成立时暂停并保存义务，不拆事务或丢目标。完整 read pins 保留，W／R 和 W／W 冲突在本批已授权目标中传递合组，不自动吸入旁观 Claim；仅 R／R 共读可以独立。所有写许可和必做项须有明确归属；容量不足如实暂停，不声称串行或忽略同伴 Claim 行就消除了资格依赖。
+
+必要的补齐集中为两项：required_maintenance_keys 由精确授权绑定到 original_goal，每轮处置、Opus 分母／逐项通过与最终回读都不能漏项；affected_write_keys 在新版联合契约中将只读 owner 因共享修改失支持的问题绑定到实际写项，避免误归为无关 context，同时保留真正无关的旧人工问题。策略的 joint_update_max_targets 缺省 1；隔离测试及明确授权的两目标实际验收使用容量 2 策略，普通任务不因测试自动启用。旧 schema、raw、单条接续、历史资格和其他 operations 保持其原契约。
+
+第一轮平衡复核实际使用 claude-fable-5-1、effort medium。Fable 确认 F1、F2、F4–F7 已闭合，撤回其前次关于忽略 Claim-row pins 的修法和改变权限后候选静默丢失的反例；认可新增写入影响字段比 owner 一律阻断更准确。它认为设计可进入实现／隔离验收，只留下低等级 R1：必做清单的绑定和机械完成核实不够明确。按上述清单契约补齐，并明确 W 不包含无写许可的目标、预检与准备共用依赖读取路径、合法验收策略不被普通容量门循环阻止。
+
+第二轮只复核这些差异和精确全文，实际模型仍为 claude-fable-5-1。结果为 ready_for_implementation_and_isolated_validation、R1_status=resolved、remaining=[]，分别确认两种工程极端均未出现。其非阻断建议保留为实施核对：旧任务不能被新必做清单门误伤；只读 owner 不能成为隐藏目标。关于验收事实的消费，区分隔离合成结果与真实有界审核：前者不给生产资格，后者保留其真实内容审核事实，但都不能自动提高普通任务的执行容量，不增加另一套批准或审核。
+
+最终规范 SHA 为 `271c448fb173cb9bc9e91b612b8189d2e59cf7f3e89fb82a4df3992b89bd4c24`；最终差异审阅绑定同一 SHA。全部 prompts、完整材料、两次 intent、provider raw、模型身份、报告和 `finalization-complete.json` 保存于 `claim-management-435/joint-update-design-finalization-20261015-v1/`。设计定稿不等于代码已实现、隔离测试已通过或生产可启用；下一阶段仍须补实现及第 11.6 节验收。此次没有运行后端测试或正式样本，文档检查仍仅报另一项目既有缺失锚点；#435／PR #437 未整体完成、未合并或部署。
