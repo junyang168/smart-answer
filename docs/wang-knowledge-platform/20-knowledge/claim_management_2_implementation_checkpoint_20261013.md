@@ -389,3 +389,12 @@ Opus 实际调用一次，精确请求为 257,067 bytes，105 个对象逐项通
 有界真实验收后新增常规 `wang_claim_management_joint_update_v2.json`，容量为 2，模型／预算／Opus-only 与验收一致；旧联合 v1 容量 1、原单条／其他 operations 默认 policy 及旧回答保持原样。新任务显式选用 v2 并提供原目标、字段权限和必做清单；传递冲突形成三目标组时，调用前 engineering_required，不能强拆或静默扩大权限。常规容量配置提交为 `45acd7e`。本轮没有继续跑其他正式 Claim 或自动执行整批。
 
 最终相关回归 **599 passed、43 skipped**，其中联合专项 **52 项**；使用 backend/.venv、临时 PostgreSQL 与只读原失败材料，覆盖笔记来源类型和普通容量 2 的成功／容量 3 零调用拒绝。JUnit 位于 `/tmp/claim435-joint-real-regression-20261015.xml`。git diff --check 通过；文档检查仍仅有另一项目既有缺失锚点，前端 tsc 重跑仍为 react-quill-new 缺失引起的既有四项错误。PR #437 保持 draft，未合并、未部署；其余批次和人工事项未声明完成。
+
+
+## 2026-10-15 第二组真实双目标联合 Update
+
+按用户「再来一组」，在干净提交 `969ea52` 上使用常规 `wang_claim_management_joint_update_v2.json`，处理《9章—权柄深化》的 `DK-e66e67653378-P01-CL003`（人子宣告赦罪权柄的神学份量）与 `DK-e66e67653378-P01-CL004`（医治瘫子显明神的大能）。两条此前均无当前 2.0 资格、未连接 CVP，也无人工暂停；它们位于相同的 105 对象依赖闭包，各自直接证据分别为 E009、E011，并非两条直接引用同一个 E。两项直接证据明确列为 required_maintenance_keys，95 项对象获字段维护许可；其他 9 条 Claim 与原稿只读。另一个候选来源的闭包超过既有 readset 限额，未放宽限额或裁剪材料。
+
+预检零调用、零业务写入，全部许可与必做项归属同一个执行单元。原 action `435-joint-update-next-two-20261015-v1` 的 round 为 `CMR-dca7e9ffbced9c71f7183139a6e29e2e85b70b7505be1a3782d952412b7053ce`。Opus 实际一次调用，请求 257,027 bytes；没有遗留 finding 或 context finding，全部 retain。程序回读后 checkpoint=audited、outcome=completed，两目标均 ready，资格为 opus_and_program_readback；Gemini 继续关闭，independent_audit_complete=false。CL003 保持 revision 3／SHA `8f20ee65e0455eb2a5765b1495c97b190f84418c30556b6779feff8a178486fb`，CL004 保持 revision 2／SHA `7f25d5c7296fb7c5213f94ebf38d6aaa79fc74b5fd3cbe9c2d63257fcbf4390f`。
+
+独立新连接在 READ ONLY 事务中核实全部 105 项与操作前一致，物理原稿和 meta.json 字节不变，无内容 ChangeSet。上一组 CL001、CL002 的当前资格仍有效，其余 7 条只读 Claim 没有获得旁观资格。原 action 完成重入零新调用；GPT、Gemini 与整库备份均为零。本次没有工程故障或应用代码修改，未重复运行既有完整后端回归。精确授权、预检、材料、调用 intent、原始回复、结果和独立核验保存于 `claim-management-435/joint-update-next-two-20261015-v1/`；最终记录为 `joint-update-result.json`、`post-batch-qualifications.json`、`independent-current-verification.json`。这里只确认第二组完成，不将真实 retain 验收称为正式库修改路径验收，也未执行整批、合并或部署。
