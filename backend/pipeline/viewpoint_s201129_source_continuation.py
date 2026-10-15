@@ -133,10 +133,32 @@ def recompletion_seed(path, seeds):
 
 def canonical_runtime():
     from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
-    from backend.pipeline.codex_subscription_preflight import verify_runtime
-    saved = read_artifact(repair.BASE/'s201129-owner-local-reextraction-20261005-v2/runtime-proof.json')
+    from backend.pipeline.codex_subscription_preflight import verify_runtime, consume_saved_runtime
+    saved_path = repair.BASE/'s201129-owner-local-reextraction-20261005-v2/runtime-proof.json'
+    saved = read_artifact(saved_path)
     executable = saved['identity']['cli']['path']
     client = CodexSubscriptionClient(model='gpt-6.1-sol',reasoning_effort='high',executable=executable)
+    renewal_path = os.environ.get('WKP_CODEX_RUNTIME_RENEWAL')
+    if renewal_path:
+        # Explicit owner-authorized renewal consumes an already verified proof.
+        # Startup itself cannot infer under a new login or retry a diagnostic.
+        from backend.pipeline.cvp_sql_flow import binding, check_binding
+        renewal = read_artifact(Path(renewal_path))
+        if (renewal.get('schema_version') != 'codex_runtime_renewal.v1'
+                or renewal.get('authorized_by') != 'owner'
+                or not renewal.get('owner_direction', '').strip()
+                or renewal.get('previous_runtime') != binding(saved_path)):
+            raise ValueError('invalid explicit Codex runtime renewal authority')
+        proof = renewal['current_runtime']
+        identity = proof['identity']
+        if (identity['cli']['path'] != executable
+                or any(identity[k] != saved['identity'][k] for k in ('model','backend','reasoning_effort'))
+                or renewal['current_proof']['path'] != proof['proof_path']):
+            raise ValueError('runtime renewal cannot substitute executable/model/backend/effort')
+        check_binding(renewal['current_proof'])
+        result = consume_saved_runtime(client, proof)
+        os.environ['CODEX_EXECUTABLE'] = executable
+        return result
     client._verify_chatgpt_login()
     auth = Path(client.environment.get('CODEX_HOME',str(Path.home()/'.codex')))/'auth.json'
     actual = {'cli':client.cli_identity,'model':client.model,'backend':client.backend,
