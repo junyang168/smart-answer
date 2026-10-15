@@ -605,3 +605,26 @@ def test_preflight_uses_registered_source_type_for_complete_notes_manuscript(act
     manuscript.write_text(manuscript.read_text() + '\n新增限定。\n')
     with pytest.raises(ValueError):
         joint.preflight(store, request)
+
+
+@pytest.mark.parametrize('target_count', [2, 3])
+def test_ordinary_joint_policy_enables_two_and_stops_larger_groups_before_calls(shared, target_count):
+    store, request, root, tmp = shared
+    if target_count == 3:
+        request.target_keys.append('claims/C')
+        request.permissions.append(cm.source.Permission(collection='claims', object_id='C', fields=['statement']))
+    policy_path = Path(cm.__file__).parent / 'policies/wang_claim_management_joint_update_v2.json'
+    policy = cm.Policy.model_validate_json(policy_path.read_text())
+    assert policy.joint_update_contract == joint.CONTRACT and policy.joint_update_max_targets == 2
+    assert not policy.independent_audit_required and policy.budget.gemini_calls == 0
+    request.policy = cm.source.FileBinding.model_validate(binding(policy_path))
+    authorize(request, {'required_maintenance_keys': ['evidence_steps/E']})
+    ports = SyntheticPorts(store, tmp, opus=joint_pass)
+    result = execute_claim_management(store, request, root=root, ports=ports)
+    if target_count == 2:
+        assert result['status'] == 'completed', result
+        assert ports.calls == ['opus']
+        assert store.claim_management_qualification('A')['ready'] and store.claim_management_qualification('B')['ready']
+    else:
+        assert result['reason'] == 'engineering_required', result
+        assert ports.calls == [] and parent(store, request)['admission_refusal']
