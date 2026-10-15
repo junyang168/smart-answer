@@ -232,3 +232,13 @@ OBS009 的复核曾暴露程序边界错误：把「未影响 Claim 目标」与
 已原子替换网站转录文件，并通过共同 SQL ChangeSet `KCS-5833281b37b21dd5f470` 登记同一 SourceDocument 第 2 版及正确的文件／spoken body／text／anchor binding hashes；新连接回读验证一致。完整旧原件和人工答复保存在 `claim-management-435/human-source-correction-20261014-2021-v1/`，其中 `source-transition.json` 绑定旧文件 SHA 与已提交的来源版本，`paragraph-delta.json` 保存完整段落对应及唯一变化 S0015。旧文件 SHA 为 `bfd36e4fd2804756c5f7b83dcea38b0cb0b7d43176ed7c5b96e7de53c276aef3`，新文件 SHA 为 `0270efb9f495b3888f15553260d8b7d10974029f991e340c719e2453bddc4431`。
 
 影响清单已保存：来源共有 485 个 SourceFragments、96 个自身 Claims；直接仍携带旧错误句子的片段为 P04-E007-01 与 P04-OBS002-01。它们继续保留旧版本事实，尚待来源引用维护；没有把旧审核重标为对新来源的批准。来源当前版本校验使旧文件绑定不能冒充当前资格。此次未修改 Claim／Evidence／Observation／CVP 内容，没有模型调用和全库备份；`source_correction_applied=true` 与 `claim_maintenance_complete=false` 分开记录。章号疑点仍待负责人核实，不能宣称 2021 CL004 已清理完成。
+
+## 2026-10-14 人工确认转录后的自动引用同步
+
+实现 `verified_source_quote_sync`，由保存的人工逐字确认与已提交 SourceTransition 驱动引用维护。入口重新核对来源登记历史、原文件与当前文件的唯一字串差异，再确定性复制原话及派生 hashes；不是新 Claim operation，也不作语义判定或授予审核资格。Canonical package 入口重新计算允许的完整后像，拒绝附带正文、审核状态或其他字段变化；不能借保留旧 `ai_*` 状态冒充新审核。命令入口持有既有 maintenance／registry 锁，通过共同 SQL store 事务提交、回读，保存原始意图以恢复提交后响应丢失；完成后重入只验证当前版本，不再写入。
+
+在 `3a8f22e` 上实际运行，提交 `KCS-c50ca410671368b4934b`：485 个 SourceFragments 更新来源版本绑定，其中 P04-E007-01、P04-OBS002-01 两处逐字引用替换为人工确认的句子；2021 CL004 只同步同一处 occurrence 高亮，revision 1 → 2。实际历史写集恰为这 486 个对象，未新增 review events；Claim statement、scripture_refs、审核状态及所有其他字段保持，CVP／连接未写入。没有模型调用或全库备份。
+
+独立回读及禁止 `apply_plan` 的真实重入验证通过，重复写入为零。CL004 没有当前资格，章号「但以理书第九章」仍待人工核实，不能把引用同步完成说成 Claim Update 完成。运行与回读材料保存在前述人工核实根下 `automatic-quote-sync-v1/complete.json`、`readback-and-replay.json`；语义修订仍走原 GPT／Opus 流程。
+
+回归为 504 passed、43 skipped，使用 production Python 与隔离 PostgreSQL。新增测试包含精确复制、无关来源变化拒绝、旧 `ai_*` 状态的入口校验、语义／provenance 夹带拒绝、事务晚期失败回滚、已提交响应丢失恢复和零写入重入。文档检查仍只有另一项目既有缺失锚点。#435／PR #437 未完成、未合并或部署。
