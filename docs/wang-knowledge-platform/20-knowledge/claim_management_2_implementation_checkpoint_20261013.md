@@ -355,3 +355,18 @@ Opus 首轮认可 CL003，另指出 CL004、E007／E008／E009、OBS002／OBS005
 第二轮只复核这些差异和精确全文，实际模型仍为 claude-fable-5-1。结果为 ready_for_implementation_and_isolated_validation、R1_status=resolved、remaining=[]，分别确认两种工程极端均未出现。其非阻断建议保留为实施核对：旧任务不能被新必做清单门误伤；只读 owner 不能成为隐藏目标。关于验收事实的消费，区分隔离合成结果与真实有界审核：前者不给生产资格，后者保留其真实内容审核事实，但都不能自动提高普通任务的执行容量，不增加另一套批准或审核。
 
 最终规范 SHA 为 `271c448fb173cb9bc9e91b612b8189d2e59cf7f3e89fb82a4df3992b89bd4c24`；最终差异审阅绑定同一 SHA。全部 prompts、完整材料、两次 intent、provider raw、模型身份、报告和 `finalization-complete.json` 保存于 `claim-management-435/joint-update-design-finalization-20261015-v1/`。设计定稿不等于代码已实现、隔离测试已通过或生产可启用；下一阶段仍须补实现及第 11.6 节验收。此次没有运行后端测试或正式样本，文档检查仍仅报另一项目既有缺失锚点；#435／PR #437 未整体完成、未合并或部署。
+
+
+## 2026-10-15 普通联合 Update 实现与隔离验收
+
+按用户“开始实现”的指示，在既有 #435 worktree 实现，代码提交为 `cf65707`。本次未调用 Fable 或真实内容模型，未操作正式 Claims、部署或合并。原默认 Opus-only policy 不变；新增联合 policy 的声明容量仍为 1，隔离测试用各自精确绑定的容量 2／3 策略。
+
+新增 `claim_joint_update.py` 只承接版本化契约检查、只读预检和当前资格汇总，执行、调用账本、事务、history、影响登记与恢复仍使用原 runner/store。预检调用相同 read_claim_context，完整 W／R 冲突在授权目标内传递合组，来源共读不合组；许可和必做项逐组归属，必做共享只读项也只指定一个负责组。普通新建多目标请求无支持策略、超容量、创建许可、缺必做清单、不可达对象或隐藏 Claim 目标时，原 action 保存 engineering_required，零模型调用与零业务写入。准入拒绝与可恢复的调用前工程暂停分开。
+
+每组一个 action、一个固定单元。required_maintenance_keys 原样绑定 original_goal；每轮处置、Opus 分母／逐项判断和完成时当前回读均覆盖它。新模型 schema／prompt 的 affected_write_keys 只接受实际候选写项；共享 E 对只读 C 的支持损害阻断 E，双方判定无关的原有疑点保留 context。影响范围按集合比较，清单顺序不同不误报分歧。事务完整 pins 保留；顺带读取的 CVP peer 不因此成为内容根，必要旧、新 owners／关系仍不能漏审。
+
+联合专项共 **49 项**，覆盖两目标全 retain／只写 E／只改一条 Claim、共同后像与逐项目标资格、创建及容量拒绝、必做清单／处置／分母／回读缺项、只读问题的 GPT 判定、写入影响缺失／越界／分歧、目标不授写权限、三目标容量、共享片段分组、同源 30 条独立项、晚项失败全部 rollback、提交回复丢失后零重复调用恢复、新 owner／关系／片段漂移、批后资格失效、未提交联合人工接续和缺旧候选拒绝、旧绑定多目标兼容及完成入口复核物理源文。可选 Gemini 分支只用合成独立审计器验证，没有启用默认 Gemini。旧 JsonCandidate／AdjudicatingJsonCandidate／Review 的 schema 分别对照实现前 SHA 验证完全一致，旧回答不补字段、不重算摘要。
+
+最终相关后端回归使用 backend/.venv、临时 socket-only PostgreSQL 和原保存失败材料，结果 **596 passed、43 skipped**；涵盖联合测试、既有 operations、多轮／人工／局部来源、资格复用、共同 SQL 事务与恢复等 21 个测试文件。保存材料只读；合成回复不构成正式内容批准。JUnit 结果保存于 `/tmp/claim435-joint-update-final-20261015.xml`，可重现测试为 `backend/tests/test_claim_joint_update.py` 及本记录前述相关回归集合，原失败材料仍使用 WKP435_SAVED_FAILURE_ROOT 的既有目录。
+
+git diff --check 通过。文档检查仍仅报另一项目既有 `docs/notes-to-sermon-agent/functional_spec.md:120` 缺失锚点。前端 tsc 已重跑，仍为既有安装缺失 react-quill-new 及 EmailSender/FellowshipManager 的四项关联错误；本次未改前端或依赖。正式多目标样本和余下内容／人工事项仍未执行；#435／PR #437 保持未整体完成和 draft。
