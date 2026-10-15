@@ -398,3 +398,20 @@ Opus 实际调用一次，精确请求为 257,067 bytes，105 个对象逐项通
 预检零调用、零业务写入，全部许可与必做项归属同一个执行单元。原 action `435-joint-update-next-two-20261015-v1` 的 round 为 `CMR-dca7e9ffbced9c71f7183139a6e29e2e85b70b7505be1a3782d952412b7053ce`。Opus 实际一次调用，请求 257,027 bytes；没有遗留 finding 或 context finding，全部 retain。程序回读后 checkpoint=audited、outcome=completed，两目标均 ready，资格为 opus_and_program_readback；Gemini 继续关闭，independent_audit_complete=false。CL003 保持 revision 3／SHA `8f20ee65e0455eb2a5765b1495c97b190f84418c30556b6779feff8a178486fb`，CL004 保持 revision 2／SHA `7f25d5c7296fb7c5213f94ebf38d6aaa79fc74b5fd3cbe9c2d63257fcbf4390f`。
 
 独立新连接在 READ ONLY 事务中核实全部 105 项与操作前一致，物理原稿和 meta.json 字节不变，无内容 ChangeSet。上一组 CL001、CL002 的当前资格仍有效，其余 7 条只读 Claim 没有获得旁观资格。原 action 完成重入零新调用；GPT、Gemini 与整库备份均为零。本次没有工程故障或应用代码修改，未重复运行既有完整后端回归。精确授权、预检、材料、调用 intent、原始回复、结果和独立核验保存于 `claim-management-435/joint-update-next-two-20261015-v1/`；最终记录为 `joint-update-result.json`、`post-batch-qualifications.json`、`independent-current-verification.json`。这里只确认第二组完成，不将真实 retain 验收称为正式库修改路径验收，也未执行整批、合并或部署。
+
+
+## 2026-10-15 第三组双目标联合 Update 与实际关系修订
+
+按用户同意继续处理下一组的指示，选择《8章—权柄的显明》的 `DK-1c98d4a95cd5-P10-CL005`（耶稣自称但以理书的特定人子）和 `DK-1c98d4a95cd5-P10-CL006`（象征文体语境中的神性含义）。两条原无当前资格、未连接 CVP；完整共同闭包为 194 项，全部 Claim 均无 CVP 连接或保护 hold。E009、E010 为明确必做项，174 项对象有字段维护许可，其他 19 条 Claim 保持只读。其他候选的读取曾超出现有限额，未放宽限额或裁剪材料；所选组通过原预算下的完整预检。没有把未处理对象预先称为已证实需要修改。
+
+原 action `435-joint-update-daniel-two-20261015-v1` 准备后，启动校验发现本地 Codex 客户端内容与登录凭据均不同于旧运行证明。此时没有 round、模型调用或业务写入。核验了 194 项 SQL 状态及物理来源仍与批前一致，并准确保存为 engineering_required，未伪装为内容人工问题或调用不明。负责人随后明确授权「授权当前登录及一次启动验证」。保留旧证明，使用现有 durable diagnostic intent 完成且仅完成一次 GPT 启动验证。
+
+运行修复提交 `494ca1f` 只增加显式运行证明续用：读取 `WKP_CODEX_RUNTIME_RENEWAL` 所指的负责人授权记录，核对原证明绑定、固定 executable 路径／模型／backend／effort，消费当前客户端和登录身份完全匹配的已成功证明，启动本身零新调用。未提供续用记录时沿用原拒绝规则；再次漂移、证明损坏或缺失均拒绝，不自动切换身份、发诊断或重试。运行校验测试 32 项通过，其中新增 10 项反例；订阅抽取、既有 SQL 仲裁恢复、联合 Update 与执行回归共 137 项通过，合计 **169 passed**。全部测试使用 backend/.venv，PostgreSQL 测试使用临时实例。原 Claim 材料／策略／预算和 action 根没有重建，原内容审计实现绑定保持相同；修复提交后在干净工作树接续。
+
+Opus 首轮检查 194 项，针对 ER027 提出一项 mapping 异议：OBS026 的「赦罪还是使瘫子行走哪样容易」问题承载可验证性论证，并不直接支持 E013 中「只有神能赦罪」的前提。该异议完整交给 GPT；GPT 接受，进一步区分 E015 的验证论证与 E016 的称号／权柄结论，只将 ER027 的 supports 改为 contextualizes，并将理由改为赦罪与医治比较的对话背景。原 OBS026 → E013 端点、目标 Claim、E009／E010 及所有证据正文保持。GPT 同时核实 E013 的只读 owner CL007 仍有原直接证据，修改没有使其失去支持；实际写入影响明确绑定 ER027。
+
+Opus 第二轮完整复核通过，原单元的最终 round 为 `CMR-eb1ece5778cef38149b079814b5859f8ed3becadc6606825cafa2f2e03ae7b5b`。一次事务提交 `KCS-a5f20f97be8464d7b58d`，实际业务写集恰为 ER027 一行，revision 1 → 2，只变 relation_type、reason 和 revision；两个目标均保持 revision 2 并取得当前 ready 资格，findings／context_findings 均为空。结果为 opus_and_program_readback，independent_audit_complete=false。实际内容调用 GPT 一次、Opus 两次，另有上述单独获准的 GPT 启动验证一次；Gemini、全库备份均为零。
+
+独立新连接核实完整 194 项、原稿和 meta.json：除 ER027 外全部 193 项原样，SQL ChangeSet 的唯一 operation、object_versions 前后 payload／revision／SHA 与通过候选一致，edges 投影的端点、类型、版本和 payload 与当前对象一致。19 条只读 Claim 未写入或获得旁观资格；同来源先前已完成的 CL001、CL002、CL003 仍为当前 ready。原 action 完成重入和所有独立核验均零新调用／业务写入。本次证明两目标共同完成及一条真实关联关系修改，不冒称实际共享 Evidence 修改、两条 Claim 同时改写或全批完成。
+
+运行根为 `claim-management-435/joint-update-daniel-two-20261015-v1/`，保存原授权／预检／输入、启动暂停事实、续用授权与精确运行证明、各轮材料／raw／intent、`joint-update-result.json`、`post-batch-qualifications.json`、`independent-current-verification.json` 和 `prior-completed-qualifications.json`。本轮未改 prompt、普通联合 policy、原稿或 CVP；未调用 Fable、合并或部署。文档检查仍仅有另一项目既有缺失锚点；git diff --check 通过，#435／PR #437 仍未整体完成。
