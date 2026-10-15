@@ -582,3 +582,26 @@ def test_direct_joint_completion_rechecks_physical_sources(shared):
         store.finish_claim_management_action(saved['run_id'])
     assert parent(store, request)['result']['status'] == 'completed'  # historical fact
     assert not store.claim_management_qualification('A')['ready']
+
+
+def test_preflight_uses_registered_source_type_for_complete_notes_manuscript(action):
+    store, _, _, _, tmp, _ = action
+    manuscript = tmp / 'professor-notes.md'
+    manuscript.write_text('# 赦罪的权柄\n\n人子在地上有赦罪的权柄。\n\n医治是可见的凭据。\n')
+    store.apply_plan(store.plan_package({'package_id': 'joint-notes-preflight',
+        'source_documents': [{'source_id': 'N', 'source_type': 'notes_manuscript', 'title': 'professor notes',
+            'source_path': str(manuscript), 'source_file_sha256': binding(manuscript)['file_sha256']}],
+        'claims': [{'claim_id': cid, 'statement': '人子有赦罪的权柄。', 'claim_type': 'exegesis',
+            'occurrences': [{'source_id': 'N', 'anchors': []}], 'evidence_step_ids': ['NE']} for cid in ['NA', 'NB']],
+        'evidence_steps': [{'evidence_step_id': 'NE', 'statement': '人子有赦罪的权柄。', 'produced_claim_ids': ['NA', 'NB']}]}))
+    request, root = operation_request(action, 'Update', ['NA', 'NB'])
+    request.source_bindings = {'N': cm.source.FileBinding.model_validate(binding(manuscript))}
+    bind(request, tmp, required=['evidence_steps/NE'])
+    report = joint.preflight(store, request)
+    assert len(report['groups']) == 1 and report['groups'][0]['status'] == 'prepared_scope_only'
+    assert report['model_calls'] == report['content_writes'] == 0
+    assert any(p['collection'] == 'source_documents' and p['object_id'] == 'N' for p in report['read_pins'])
+    # A correct parser must still reject physical source version drift.
+    manuscript.write_text(manuscript.read_text() + '\n新增限定。\n')
+    with pytest.raises(ValueError):
+        joint.preflight(store, request)

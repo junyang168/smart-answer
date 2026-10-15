@@ -167,11 +167,10 @@ def preflight(store, request):
     from backend.pipeline import claim_management as cm
     from backend.pipeline.cvp_sql_flow import pins, pin_rows
     request = cm.Request.model_validate(request)
-    policy, _ = cm.load_authority(request)
     if request.operation != 'Update':
         raise ValueError('joint Update preflight requires an Update batch')
     authority = json.loads(cm.source.verify_file(request.authorization).read_text())
-    required = required_keys(request) if enabled(request, policy) else authority.get('required_maintenance_keys', [])
+    required = required_keys(request) if enabled(request) else authority.get('required_maintenance_keys', [])
     if not isinstance(required, list) or any(not isinstance(k, str) for k in required) or len(set(required)) != len(required):
         raise ValueError('invalid required maintenance list')
     targets = request.target_keys
@@ -186,6 +185,8 @@ def preflight(store, request):
             if k in states and cm.model_state(states[k]) != cm.model_state(state):
                 raise ValueError('joint Update preflight dependency drift')
             states[k] = state
+    before = {cm.source.key(*k): cm.model_state(v) for k, v in states.items()}
+    policy, _ = cm.load_authority(request, source_documents=cm.source_documents(before))
     allowed = {p.key for p in request.permissions}
     writes = {key: allowed & closures[key] for key in targets}
     parent = {k: k for k in targets}
