@@ -249,3 +249,15 @@ def test_source_impact_qualification_also_checks_new_human_evidence(action):
     _, entries = facts(request, root); save(store, entries)
     qualification = store.claim_management_qualification('C')
     assert qualification['ready'] is False and qualification['reason'] == 'human_source_decisions_changed'
+
+
+@pytest.mark.parametrize('role', ['gpt', 'opus'])
+def test_compact_runtime_prompt_preserves_human_evidence_rules(role):
+    from backend.pipeline.source_reconciliation_runtime import claim_management_model_adapter
+    policy = cm.Policy.model_validate_json((cm.DEFAULT_POLICY.parent/'wang_claim_management_joint_update_v3.json').read_text())
+    adapter = claim_management_model_adapter(role, policy)
+    assert 'human_source_decisions' in adapter._base_prompt
+    assert 'applicability=current' in adapter._base_prompt
+    assert 'needs_reconfirmation' in adapter._base_prompt
+    assert '保持教授逐字原话不变' in adapter._base_prompt
+    assert '不为已回答的同一事实重复要求人工' in adapter._base_prompt

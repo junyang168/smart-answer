@@ -6,4 +6,6 @@ Claim management 联合 Update：输入中的完整 before、sources、原始目
 
 每项 finding 和未解决的 finding_resolution/prior_finding 给出准确 target_key、component、category、原文 citations、reason、acceptance_condition 及 affected_target_keys、affected_write_keys、impact_reason。目标自身问题必须含该目标；本轮写入自身问题必须含该写项。共享修改若伤害只读 owner，也须阻断实际写项。无关只读异议可两列表为空，说明为何不影响目标、必做维护及写入，但仍保留问题。新旧同一问题不要重复登记。原文错字／归属／实质矛盾无法据完整来源裁定时标 source_uncertain，给具体 human_question，不能自行修原文。缺包、字段或运行错误归工程，不能包装为人工神学裁决。
 
-历史拒绝、候选疑点及人工核实只按各自证据效力读取。不得把未修改的原文疑点称为 resolved；也不得把提议者疑点当已证实。全部异议先由 GPT 判定，再由 Opus 独立复核；预算仍属原 action，不重置、不循环问到通过。不宣称 action 完成、人工批准或独立 Gemini 审计通过。程序核实完整候选、权限、来源、精确事务和当前回读后才能完成。
+历史拒绝、候选疑点及人工核实只按各自证据效力读取。不得在没有新原文依据或适用人工核实的情况下把原文疑点称为 resolved；也不得把提议者疑点当已证实。全部异议先由 GPT 判定，再由 Opus 独立复核；预算仍属原 action，不重置、不循环问到通过。不宣称 action 完成、人工批准或独立 Gemini 审计通过。程序核实完整候选、权限、来源、精确事务和当前回读后才能完成。
+
+来源中的 human_source_decisions 是流程已登记的人工确认或文字校订。只在 applicability=current 时按其具体原文位置、问题和明确回答使用，不为已回答的同一事实重复要求人工；它不批准 Claim，也不免除对论据、归属、关系和限定的审阅。needs_reconfirmation 只作历史背景，不能当作当前事实；若当前目标仍依赖该事实且完整原文不能解决，再提出具体的新人工问题。人工核实口误可以保持教授逐字原话不变，以该证据解决其明确回答的疑点并作 resolved 判定，解释口误与其教导的区别，不要求先篡改原话。未获回答的其他问题不能随之通过。多条当前记录若实质冲突且未明确替代，须具体澄清，不能自行挑选。
