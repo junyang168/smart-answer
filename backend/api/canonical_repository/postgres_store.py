@@ -3302,7 +3302,7 @@ class PostgresKnowledgeStore:
                 prior = prior[0]
                 from backend.pipeline.claim_management import continuation_budget
                 continuation = continuation_budget(prior, request, policy)
-                if continuation.get('human_source_verification') and before != prior['original_goal']['original_objects']:
+                if (continuation.get('human_source_verification') or continuation.get('owner_call_extension')) and before != prior['original_goal']['original_objects']:
                     raise ChangeSetConflict('human source follow-up current objects drifted from the question scope')
                 prior_rounds = sorted({slot['round_id'] for slot in prior['call_reservations'].values()})
                 for (child,) in cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=ANY(%s)',
@@ -3310,6 +3310,11 @@ class PostgresKnowledgeStore:
                     if (continuation.get('human_source_verification')
                             and child['materials']['round_id'] in prior['latest_rounds'].values()):
                         continuation.setdefault('previous_candidates', {})[child['unit_id']] = child['candidate']
+                    if continuation.get('owner_call_extension') and child['materials']['round_id'] in prior['latest_rounds'].values():
+                        candidate = child.get('candidate') or child['materials'].get('previous_candidate')
+                        if not candidate:
+                            raise ChangeSetConflict('owner call extension requires its saved preceding candidate')
+                        continuation.setdefault('previous_candidates', {})[child['unit_id']] = candidate
                     if continuation['completed_context_cleanup']:
                         if child.get('outcome') != 'completed' or child.get('change_set_ids'):
                             raise ChangeSetConflict('context follow-up cannot replay a content write or an incomplete round')
@@ -3426,7 +3431,7 @@ class PostgresKnowledgeStore:
                         or frozen['created_keys'] != parent['created_keys']
                         or frozen['replacements'] != parent.get('replacements', {})):
                     raise ChangeSetConflict('Claim round cannot prune original goals/history or widen authority')
-                if parent.get('continuation', {}).get('human_source_verification') and (
+                if (parent.get('continuation', {}).get('human_source_verification') or parent.get('continuation', {}).get('owner_call_extension')) and (
                         frozen.get('continuation') != parent['continuation']
                         or not parent['continuation'].get('previous_candidates', {}).get(unit_id)
                         or frozen.get('previous_candidate') != parent['continuation']['previous_candidates'][unit_id]):

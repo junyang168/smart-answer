@@ -1308,8 +1308,9 @@ def continuation_budget(previous, request, policy):
     pair in a linked action; the predecessor's spent budget remains unchanged.
     A proven HTTP 400 schema rejection generated nothing. Its failed attempt
     remains in the predecessor ledger and is never represented as a completion.
-    Unknown calls, completed writes and changed source versions cannot use this
-    engineering-input continuation.
+    Unknown calls require a separately bound explicit owner call extension;
+    they cannot use the ordinary engineering-input continuation. Completed
+    writes and changed source versions remain excluded.
     """
     from backend.pipeline.source_reconciliation_runner import read, body
     old = Request.model_validate(previous['request'])
@@ -1343,6 +1344,19 @@ def continuation_budget(previous, request, policy):
     prior_findings = {**deepcopy(previous.get('context_findings', {})), **deepcopy(previous['findings'])}
     authority = json.loads(source.verify_file(request.authorization).read_text())
     human_follow_up = human_source_follow_up(previous, request, authority, prior_findings)
+    extension = authority.get('owner_call_extension')
+    unknown = {}
+    if extension is not None:
+        if (not isinstance(extension,dict) or set(extension) != {'predecessor_action_id','prior_metadata_sha256','budget','authorization_quote'}
+                or extension['predecessor_action_id'] != old.action_id
+                or extension['prior_metadata_sha256'] != sha256_json(previous)
+                or extension['budget'] != policy.budget.model_dump(mode='json')
+                or not (extension['authorization_quote'] or '').strip()
+                or authority.get('authorized_by') != 'owner' or authority.get('human_content_approval') is not False
+                or previous['result'].get('reason') != 'call_uncertain' or completed_cleanup or human_follow_up
+                or request.permissions != old.permissions or policy.initial_candidate != 'proposal'
+                or policy.all_findings_to_gpt != original.all_findings_to_gpt):
+            raise ValueError('owner call extension requires exact paused action, authority and explicit new budget')
     recovery = authority.get('unaccepted_review_recovery', {})
     proposal_recovery = authority.get('unaccepted_proposal_recovery', {})
     if not isinstance(proposal_recovery,dict):
@@ -1370,6 +1384,18 @@ def continuation_budget(previous, request, policy):
                 finding = Finding.model_validate(finding)
                 prior_findings[finding.identity(old.action_id)] = finding.model_dump(mode='json')
             continue
+        if extension is not None:
+            from backend.pipeline.cvp_sql_flow import binding
+            stage = root / slot['round_id']
+            intent = stage / (slot['role'] + '.reservation.json')
+            if (slot['state'] != 'started' or slot['role'] != 'gpt'
+                    or not intent.is_file() or body(read(intent)) != slot.get('intent')
+                    or sha256_json(slot['intent']) != slot.get('intent_sha256')
+                    or (stage/'gpt.raw.json').exists() or (stage/'gpt.transport/exit.json').exists()):
+                raise ValueError('owner extension must preserve an exact unknown GPT call, not discard a returned result')
+            unknown[key] = {'reservation':binding(intent),'intent_sha256':slot['intent_sha256'],'state':'started'}
+            spent[slot['role']] += 1
+            continue
         failure_path = root / slot['round_id'] / (slot['role'] + '.failure.json')
         if slot['role'] != 'gpt' or not failure_path.is_file() or (failure_path.parent / 'gpt.raw.json').exists():
             raise ValueError('uncertain original call cannot be repeated in a continuation')
@@ -1389,10 +1415,12 @@ def continuation_budget(previous, request, policy):
     if set(proposal_recovery) != set(unaccepted_proposals):
         raise ValueError('unaccepted proposal recovery contains an unbound or already recorded call')
     remaining = {role:original.budget.limit(role)-spent[role] for role in MODELS}
+    if extension is not None and not unknown:
+        raise ValueError('owner unknown-call extension requires an actual unknown generation')
     if (policy.models != original.models or policy.independent_audit != original.independent_audit
             or policy.review_purpose != original.review_purpose
-            or (not human_follow_up and any(policy.budget.limit(role) > remaining[role] for role in MODELS))
-            or (not human_follow_up and policy.budget.max_revisions > original.budget.max_revisions - sum(previous['revision_rounds'].values()))
+            or (not human_follow_up and extension is None and any(policy.budget.limit(role) > remaining[role] for role in MODELS))
+            or (not human_follow_up and extension is None and policy.budget.max_revisions > original.budget.max_revisions - sum(previous['revision_rounds'].values()))
             or policy.budget.max_request_bytes > original.budget.max_request_bytes
             or policy.budget.max_output_tokens > original.budget.max_output_tokens):
         raise ValueError('continuation cannot reset or increase original Claim budget or change review policy')
@@ -1408,6 +1436,8 @@ def continuation_budget(previous, request, policy):
         'prior_findings':prior_findings, 'unaccepted_reviews':unaccepted, 'prior_call_reservations':deepcopy(previous['call_reservations']),
         'pre_generation_schema_rejections':failures, 'spent_generations':spent, 'remaining_generations':remaining,
         **({'unaccepted_proposals':unaccepted_proposals} if unaccepted_proposals else {}),
+        **({'owner_call_extension':deepcopy(extension),'preserved_unknown_calls':unknown,
+            'budget_basis':'explicit_owner_call_extension','follow_up_budget':policy.budget.model_dump(mode='json')} if extension is not None else {}),
         **({'human_source_verification':human_follow_up,
             'human_verified_finding_ids':human_follow_up['human_verified_finding_ids'],
             'budget_basis':'new_human_source_evidence_follow_up', 'follow_up_budget':policy.budget.model_dump()} if human_follow_up else {})}

@@ -666,3 +666,11 @@ action 为 `435-joint-update-divinity-summary-two-20261015-v1`，唯一 round �
 本轮相关回归 328 passed、18 按既有失败类别 skipped；其中资格复用 62 passed。文档检查仍仅报另一项目既有缺失锚点，前端类型检查仍仅报 EmailSender／FellowshipManager 的既有 react-quill-new 缺失及 theme 类型错误；本轮没有修改前端或依赖。git diff --check 通过。
 
 在干净提交 `6d37b5f` 上持维护／registry 锁，正式调用同一 `revalidate_claim_management_context` 入口，按预期返回“新或变化异议缺少原目标影响证明”。拒绝前后核对完整 262 项业务记录、原 source／meta、双方 round／parent 及调用账本、原目标 review_events 全部精确保持；全部 90 条清单资格与此前独立核实一致，基线 32 条仍有效，新十二条仍为八条。没有模型调用、业务写入或资格事件，后台 worker 锁无持有者。正式拒绝及零副作用证明见上述证据根 `admission-verification.json`／`admission-verifier.py`；不能将代码完成说成两条 Claim 恢复完成。
+
+## 2026-10-16：负责人追加 2021 丢失答复项的模型调用权限
+
+负责人选定先处理 2021 `DK-07e99f606211a0a4a17a-P04-CL008`，随后明确指示「允许你调用多次」，并澄清要精简的是输出。按此新权限扩展现有关联接续入口，授权绑定原暂停 metadata 和明确新预算；保留旧未知 GPT 的 started／intent、全部已消耗调用、初审和二十一项异议，不把未知答复改成失败或未调用。不接受已返回 raw／退出记录被丢弃，不重复 Opus 初审，不扩大原目标、字段或来源权限；完整当前范围须等于原冻结范围，唯一后继由现有事务防分叉。
+
+本次新接续选择既有 compact v3，仅新 GPT／Opus 输出按 Changes／FindingsReview 解释，旧答复和 old policy 不变。先限定新接续最多 GPT 三次、Opus 三次、两轮追加修订，Gemini 零；保存新授权与旧已消耗事实，不能声称旧预算被恢复。真实发送前预检含全部 666 项与 21 项待判定异议，共用无损 stage adapter 的实际请求 458,738 bytes，在原 500,000 上限内；没有删原文或关联材料。输出无需枚举全部 retain，实际大小待返回记录。
+
+15 项追加权限隔离验收及相关回归合计 343 passed、18 按既有类别 skipped。覆盖原未知调用保持、carry 原候选与 findings、精简输出真实 SQL 完成与零重复调用、不能分叉，以及缺授权／metadata、预算、原 intent、已返回结果、来源／目标／scope 漂移拒绝。文档与前端检查仍仅见既有另一项目锚点、react-quill-new／theme 错误，git diff --check 通过。本节只记恢复准备，不声明新模型已返回、内容已提交或目标已完成。
