@@ -113,6 +113,11 @@ def claim_management_model_adapter(role, policy, *, live=False):
     if joint:
         response_model = JointJsonCandidate if role == 'gpt' else JointReview
         schema_name = 'claim_management_joint_candidate_v1' if role == 'gpt' else 'claim_management_joint_review_v1'
+    if policy.model_output_contract:
+        from backend.pipeline.claim_model_output import Changes, FindingsReview
+        response_model = Changes if role == 'gpt' else FindingsReview
+        schema_name = 'claim_changes_v1' if role == 'gpt' else 'claim_findings_review_v1'
+        prompt = semantic_prompt((PROMPTS / 'claim_management_compact_v1.md').read_text()) + ('\n你是提议者，输出 Changes。' if role == 'gpt' else '\n你是独立 Opus 审阅者，输出 FindingsReview。')
     adapter = StructuredJsonReviewerAdapter(client=client, prompt=prompt,
         response_model=response_model, schema_name=schema_name,
         compact_payload=True, shared_text_payload=True, shared_record_payload=True)

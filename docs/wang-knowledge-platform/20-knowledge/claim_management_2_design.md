@@ -3,14 +3,14 @@
 > **读者**：流程负责人、Solution architect、Developer。
 > **类型**：规范。
 > **状态**：当前规范；普通双目标联合 Update 已完成有界真实审阅与回读验收；常规联合策略容量为 2，旧策略保持原契约。
-> **与代码对齐**：2026-10-15，普通联合 Update 核对到 `45acd7e`；第 10.1 节通用上下文资格保留核对到 `66e04e8`。常规联合 v2 policy 容量为 2；旧策略及未声明容量的缺省值仍为 1。真实样本已验证共同 retain、共同修改 Claim／Evidence／关系及程序回读；晚项回滚和丢失回复路径由隔离反例验证。实际结果见实施检查点。
+> **与代码对齐**：2026-10-16，模型输出简化已核对到当前实现与隔离测试（未做新协议真实模型验收）；普通联合 Update 核对到 `45acd7e`；第 10.1 节通用上下文资格保留核对到 `66e04e8`。常规联合 v2 policy 容量为 2；旧策略及未声明容量的缺省值仍为 1。真实样本已验证共同 retain、共同修改 Claim／Evidence／关系及程序回读；晚项回滚和丢失回复路径由隔离反例验证。实际结果见实施检查点。
 > **权威范围**：#435 的 operations、完整生命周期、审核与多轮出口、当前可用资格和 Claim 域交接；不授予模型调用、正式内容修改或旧预算重开权限。
 
 Claim Management 的目标是让新建和既有 Claim 都忠于教授的完整自身来源，保留证据、论证和限定，并通过同一套管理流程持续审阅和更新。Create 从 GPT 候选开始；既有 Claim 直接作为候选进入 Review。Verify 是审阅中的核实，Cleanup 是 Update 的用途。
 
 当前新 action 暂停 Gemini 终审，默认采用 [Opus-only policy](../../../backend/pipeline/policies/wang_claim_management_opus_only_v2.json)：`independent_audit=false`、Gemini 调用预算为 0。Opus 内容审阅、版本／来源校验、事务、真实写集、回读和原始目标核实保留；结果明确为 `opus_and_program_readback`，不标成独立终审通过。本文的 Gemini 分支只适用于明确启用独立终审的 policy；既有已绑定任务和完成记录不改变。
 
-普通双目标联合 Update 显式选择 [joint Update v2 policy](../../../backend/pipeline/policies/wang_claim_management_joint_update_v2.json)，容量为 2，仍采用 Opus＋程序回读。单条及其他 operations 的默认 policy、旧联合 v1 policy 和已绑定任务保持原样；缺省容量仍为 1。选用联合 policy 不代替具体目标、字段权限和必做清单的精确授权。
+普通双目标联合 Update 新任务可显式选择 [joint Update v3 policy](../../../backend/pipeline/policies/wang_claim_management_joint_update_v3.json)，容量为 2，采用简化输出契约与 Opus＋程序回读。[v2 policy](../../../backend/pipeline/policies/wang_claim_management_joint_update_v2.json) 保留原模型输出契约，不升级已绑定任务。单条及其他 operations 的默认 policy、旧联合 v1 policy 和已绑定任务保持原样；缺省容量仍为 1。选用联合 policy 不代替具体目标、字段权限和必做清单的精确授权。
 
 Review 就是审阅，作为独立业务 operation 保留。Update 内含审阅、必要修正与独立审计，不需要另发 Review 请求。Create、Retire、Restore、Split、Merge 同样内含审核；这些操作共用现有执行机制。Read 只读取，不触发模型或内容事务。
 
@@ -248,7 +248,17 @@ Opus 读取候选及 delta，以来源判断，不沿用 GPT 自评或旧批准�
 
 ### 7.2 findings 与 Opus 指令
 
-一份回答返回各项 verdict、旧问题解决／持续／重开和全部新发现。finding 带精确版本、typed 类别、来源引用、疑点、已查语境、接受条件或具体人工问题；程序核分母、逐字引文和版本，原答不改写。
+完整存档包含各对象结论、旧问题解决／持续／重开和全部新发现；不要求模型逐项抄写程序已知的身份或机械结果。finding 带精确版本、typed 类别、来源引用、疑点、已查语境、接受条件或具体人工问题；程序核分母、逐字引文和版本，原答不改写。
+
+新联合 Update 的 `claim_changes_v1` 输出契约区分模型决定与程序展开：
+
+| 项目 | 模型输出 | 程序职责 |
+| --- | --- | --- |
+| GPT 修订 | 仅实际修改的对象、改动字段、理由及引文；新疑点与所有旧异议的逐项判定 | 从精确冻结 before 保留未列对象／字段，合成完整候选；校验全部权限、来源、依赖、共享影响与完整后像 |
+| Opus 审阅 | 明确完成整个范围／全部问题并批准无异议对象的声明；全部新异议和每条旧异议的处置 | 将明确声明与异议展开为完整逐对象结论，绑定实际候选 SHA 和全部检查项；有异议对象保持拒绝 |
+| 身份及来源机械字段 | 修改项的 record_key，以及判断所需的来源位置和逐字引文 | 记录内部 ID、未变字段、派生 SHA、固定 Update 身份、逐对象 retain 清单由程序负责，不让模型重复计算或抄写 |
+
+完整输入与审阅范围保持：原文、所有候选／只读对象、共享 owners、必做维护及上下文仍提供。省略修改项只代表“不改”，不代表“审核通过”；Opus 必须显式作出完整审阅及无异议记录的批准声明，不能缺省、抽样或只看 delta。任何新／持续异议仍经过原有影响与阻断判定；所有传入异议仍须 GPT 逐项回应。该契约只用于既有对象的联合 Update；Create、来源影响 Review、Retire、Restore、Split／Merge 和旧绑定契约保持原样，不能通过改变旧 schema 或解释旧 raw 消除失败。
 
 完整审阅范围与当前任务的阻断范围分开。普通内容 finding 用 `affected_target_keys` 明确哪些本轮目标／新建 Claim 受影响，并用 `impact_reason` 说明主张、归属、承重证据或实际修改如何受影响。
 

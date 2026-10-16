@@ -20,10 +20,11 @@ LINK_SCHEMA='wang_owner_sql_link_correction_v2'
 
 def claim_management_review_packet(materials, candidate):
     from backend.pipeline.claim_management import audit_keys, Request, operation_questions, model_packet, review_findings
-    return {**model_packet(materials), 'unresolved': review_findings(materials['request']['action_id'], materials['unresolved'], candidate),
+    from backend.pipeline.claim_model_output import review_packet
+    return review_packet({**model_packet(materials), 'unresolved': review_findings(materials['request']['action_id'], materials['unresolved'], candidate),
             'candidate': candidate.model_dump(mode='json'), 'candidate_sha256': candidate.digest,
             'denominator': audit_keys(Request.model_validate(materials['unit_request']), materials['before'], candidate),
-            'required_questions': operation_questions(materials['original_goal'], candidate)}
+            'required_questions': operation_questions(materials['original_goal'], candidate)})
 
 
 def claim_source_transition_context(store, request, before):
@@ -161,7 +162,8 @@ def validate_claim_candidate_origin(root, materials, policy, sources, candidate)
     from backend.pipeline import claim_management as cm
     if 'gpt' in materials['roles']:
         raw = validate_claim_stage(root, 'gpt', policy, cm.model_packet(materials))
-        expected, receipt = cm.normalize_candidate(raw['response'], sources)
+        from backend.pipeline.claim_model_output import candidate as expand_candidate
+        expected, receipt = expand_candidate(raw['response'], materials)
     else:
         expected = cm.existing_candidate(materials['before'], replacements=materials['replacements'])
         _, receipt = cm.normalize_candidate(expected.model_dump(mode='json'), sources)
@@ -274,7 +276,8 @@ def validate_claim_management_package(package):
     validate_claim_candidate_origin(root, materials, policy, sources, candidate)
     packet = claim_management_review_packet(materials, candidate)
     raw = validate_claim_stage(root, 'opus', policy, packet)
-    review = cm.Review.model_validate(raw['response'])
+    from backend.pipeline.claim_model_output import review as expand_review
+    review = expand_review(raw['response'], materials, candidate)
     passed = cm.validate_review(candidate, review, packet['denominator'], packet['required_questions'],
                                 materials['unresolved'], sources, request=unit_request, records=materials['before'])
     if not passed:
@@ -404,7 +407,8 @@ def validate_claim_stage_receipt(receipt):
     if stage == 'opus':
         packet = claim_management_review_packet(materials, candidate)
         raw = validate_claim_stage(root, 'opus', policy, packet)
-        review = cm.Review.model_validate(raw['response'])
+        from backend.pipeline.claim_model_output import review as expand_review
+        review = expand_review(raw['response'], materials, candidate)
         passed = cm.validate_review(candidate, review, packet['denominator'], packet['required_questions'],
                                      materials['unresolved'], sources,
                                      request=cm.Request.model_validate(materials['unit_request']), records=materials['before'])
@@ -414,7 +418,8 @@ def validate_claim_stage_receipt(receipt):
             raise ValueError('program readback cannot replace a required independent audit')
         packet = claim_management_review_packet(materials, candidate)
         raw = validate_claim_stage(root, 'opus', policy, packet)
-        review = cm.Review.model_validate(raw['response'])
+        from backend.pipeline.claim_model_output import review as expand_review
+        review = expand_review(raw['response'], materials, candidate)
         passed = cm.validate_review(candidate, review, packet['denominator'], packet['required_questions'],
             materials['unresolved'], sources, request=cm.Request.model_validate(materials['unit_request']), records=materials['before'])
         check_binding(receipt['readback'])
@@ -595,7 +600,9 @@ def execute_claim_management(store, request, *, root, ports):
                     if prior['checkpoint'] == 'prepared':
                         raw_candidate = (call('gpt', cm.model_packet(materials))['response'] if 'gpt' in materials['roles'] else
                             cm.existing_candidate(materials['before'], replacements=materials['replacements']).model_dump(mode='json'))
-                        candidate, normalization = cm.normalize_candidate(raw_candidate, materials['sources'])
+                        from backend.pipeline.claim_model_output import candidate as expand_candidate
+                        candidate, normalization = (expand_candidate(raw_candidate, materials) if 'gpt' in materials['roles']
+                            else cm.normalize_candidate(raw_candidate, materials['sources']))
                         cm.validate_candidate(cm.Request.model_validate(materials['unit_request']), materials['before'], candidate, materials['sources'],
                             created_keys=materials['created_keys'], original_replacements=materials['replacements'])
                         write(round_root / 'candidate.json', candidate.model_dump(mode='json'))

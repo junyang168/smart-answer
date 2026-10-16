@@ -147,7 +147,10 @@ def evidence(value):
     opus=value['stage_results']['opus'];check_binding(opus)
     approval=value['reviewed']['evidence']['approval'];check_binding(approval)
     raw=body(read(Path(approval['path'])))['response']
-    return bound,raw
+    from backend.pipeline.claim_model_output import review
+    from backend.pipeline.claim_management import Candidate
+    decoded = review(raw, value['materials'], Candidate.model_validate(value['candidate']))
+    return bound,decoded.model_dump(mode='json')
 
 
 def current_pins(store,cursor,value):

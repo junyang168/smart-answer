@@ -76,13 +76,15 @@ class Policy(source.Contract):
     initial_candidate: Literal['existing','proposal'] | None = None
     all_findings_to_gpt: bool | None = None
 
+    model_output_contract: Literal['claim_changes_v1'] | None = None
+
     joint_update_contract: Literal['wang_claim_joint_update_v1'] | None = None
     joint_update_max_targets: int | None = Field(default=None, gt=0, strict=True)
 
     @model_serializer(mode='wrap')
     def serialize_policy(self, handler):
         value = handler(self)
-        for name in ('joint_update_contract', 'joint_update_max_targets'):
+        for name in ('joint_update_contract', 'joint_update_max_targets', 'model_output_contract'):
             if value[name] is None:
                 value.pop(name)
         if self.independent_audit is None:
@@ -108,6 +110,8 @@ class Policy(source.Contract):
                 raise ValueError("Claim policy must bind the exact model/backend/effort")
         if self.source_impact_batch_size and self.review_purpose != 'source_impact':
             raise ValueError('source impact batching belongs to its explicitly bound Review policy')
+        if self.model_output_contract and (self.joint_update_contract is None or not self.all_findings_to_gpt or self.review_purpose != 'content'):
+            raise ValueError('compact model decisions require the joint content Update contract')
         return self
 
 
@@ -373,7 +377,7 @@ def audit_contract(root, policy=None):
     prompt = pipeline / ('prompts/claim_management_audit_joint_v1.md' if joint else 'prompts/claim_management_audit_v2.md')
     files = [Path(__file__), pipeline/'claim_joint_update.py', pipeline/'prompts/claim_management_joint_update_v1.md', pipeline/'prompts/claim_management_audit_joint_v1.md', pipeline/'claim_review_recovery.py', pipeline/'claim_qualification_reuse.py', pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py',
         pipeline/'source_reconciliation_runner.py', pipeline/'source_reconciliation_runtime.py',
-        pipeline/'subscription_process.py', pipeline/'codex_subscription_client.py', pipeline/'claude_subscription_client.py',
+        pipeline/'claim_model_output.py', pipeline/'prompts/claim_management_compact_v1.md', pipeline/'subscription_process.py', pipeline/'codex_subscription_client.py', pipeline/'claude_subscription_client.py',
         repository/'backend/api/canonical_repository/postgres_store.py', repository/'scripts/audit-library.py',
         *[pipeline/'prompts'/('claim_management_'+role+'_v2.md') for role in ('proposal','review','audit')]]
     return {'instructions': archive_source_version(source.FileBinding.model_validate(binding(prompt)), Path(root)/'audit-contract'),

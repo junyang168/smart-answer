@@ -147,7 +147,8 @@ def verify_completion(goal, child, observed):
     receipt = body(read(Path(child['stage_results']['opus']['path'])))
     check_binding(receipt['candidate'])
     raw = body(read(Path(receipt['materials']['path']).parent / 'opus.raw.json'))
-    review = cm.Review.model_validate(raw['response'])
+    from backend.pipeline.claim_model_output import review as expand_review
+    review = expand_review(raw['response'], child['materials'], candidate)
     if review.proposal_sha256 != candidate.digest:
         raise ValueError('joint Update completion candidate/review binding drift')
     approved = {v.record_key for v in review.verdicts if v.approved and not v.problems}
