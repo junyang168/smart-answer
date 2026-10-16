@@ -5588,13 +5588,19 @@ class PostgresKnowledgeStore:
                     needles.add((owner,canonical_json({'source_fragment_ids':[oid]})))
                     needles.add((owner,canonical_json({'source_fragment_id':oid})))
         if needles:
-            ordered = sorted(needles)
-            cursor.execute('''SELECT DISTINCT o.collection,o.object_id
-                FROM unnest(%s::text[],%s::jsonb[]) AS n(collection,body)
-                JOIN wang_knowledge.objects o ON o.collection=n.collection AND o.payload @> n.body
-                WHERE o.retired_at IS NULL''',
-                ([c for c,_ in ordered],[body for _,body in ordered]))
-            consumers.update(cursor.fetchall())
+            # A large dynamic join can scan every active payload instead of
+            # using GIN. Keep the same containment predicates, grouped by
+            # known collection and bounded like _reference_consumers above.
+            by_collection = {}
+            for collection, body in sorted(needles):
+                by_collection.setdefault(collection, []).append(body)
+            for collection, bodies in by_collection.items():
+                for offset in range(0, len(bodies), 8):
+                    cursor.execute('''SELECT collection,object_id FROM wang_knowledge.objects
+                        WHERE collection=%s AND retired_at IS NULL
+                          AND payload @> ANY(%s::jsonb[])''',
+                        (collection, bodies[offset:offset+8]))
+                    consumers.update(cursor.fetchall())
         return consumers
 
     def read_claim_context(self, keys):
