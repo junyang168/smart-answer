@@ -3460,14 +3460,17 @@ class PostgresKnowledgeStore:
                     raise ChangeSetConflict('Claim round cannot prune original goals/history or widen authority')
                 if (parent.get('continuation', {}).get('human_source_verification') or parent.get('continuation', {}).get('owner_call_extension')) and (
                         frozen.get('continuation') != parent['continuation']
-                        or not parent['continuation'].get('previous_candidates', {}).get(unit_id)
-                        or frozen.get('previous_candidate') != parent['continuation']['previous_candidates'][unit_id]):
+                        or (round_number == 0 and (
+                            not parent['continuation'].get('previous_candidates', {}).get(unit_id)
+                            or frozen.get('previous_candidate') != parent['continuation']['previous_candidates'][unit_id]))):
                     raise ChangeSetConflict('human source follow-up omitted its evidence or saved candidate')
             previous_id = parent["latest_rounds"].get(unit_id)
             if previous_id:
                 previous = cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE", (previous_id,)).fetchone()[0]
                 if round_number != previous["round_number"] + 1 or previous.get("outcome") != "revision_required":
                     raise ChangeSetConflict("new round requires the exact prior revision-required outcome")
+                if parent.get('continuation', {}).get('owner_call_extension') and frozen.get('previous_candidate') != previous.get('candidate'):
+                    raise ChangeSetConflict('owner follow-up revision must retain its immediate preceding candidate')
             elif round_number != 0:
                 raise ChangeSetConflict("first Claim round must have ordinal zero")
             used_revisions = sum(bool(v) for v in parent["revision_rounds"].values())

@@ -232,3 +232,34 @@ def test_explicit_follow_up_refuses_unbound_history_and_current_scope(owner_revi
     with pytest.raises((ValueError,ChangeSetConflict)):
         execute_claim_management(store,successor,root=root,ports=SyntheticPorts(store,root))
     assert store.get_cvp_group(parent['run_id'])==parent
+
+
+@pytest.mark.parametrize('tamper',[False,True])
+def test_owner_follow_up_revision_uses_immediate_candidate(owner_review_follow_up,monkeypatch,tamper):
+    store,old,parent,successor,root,policy,extension,path,basis=owner_review_follow_up
+    policy.budget.max_revisions=2;extension['budget']=policy.budget.model_dump(mode='json')
+    authorize(successor,policy,path,extension)
+    def decisions(packet):
+        values=[decision(fid) for fid in packet['unresolved']]
+        for item in values:item['affected_target_keys']=[]
+        return values
+    def propose(packet):return {'changes':[],'findings':[],'finding_resolutions':decisions(packet)}
+    def review(packet):
+        findings=[]
+        if not packet['round_number']:
+            finding=deepcopy(next(iter(packet['unresolved'].values())))
+            finding.update(target_key='claims/C',component='new follow-up context',affected_target_keys=[],affected_write_keys=[],impact_reason='new unrelated context reviewed')
+            findings=[finding]
+        return {'complete_review':True,'findings':findings,'prior_findings':decisions(packet)}
+    ports=SyntheticPorts(store,root,proposal=propose,opus=review)
+    prepare=store.prepare_claim_management_round
+    def guarded(*args,**kwargs):
+        if kwargs['round_number'] and tamper:kwargs['materials']['previous_candidate']={}
+        return prepare(*args,**kwargs)
+    monkeypatch.setattr(store,'prepare_claim_management_round',guarded)
+    result=execute_claim_management(store,successor,root=root,ports=ports)
+    if tamper:
+        assert result['reason']=='engineering_required' and ports.calls==['gpt','opus']
+    else:
+        assert result['status']=='completed',result
+        assert ports.calls==['gpt','opus','gpt','opus']
