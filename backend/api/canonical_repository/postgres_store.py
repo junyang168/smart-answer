@@ -3302,8 +3302,10 @@ class PostgresKnowledgeStore:
                 prior = prior[0]
                 from backend.pipeline.claim_management import continuation_budget
                 continuation = continuation_budget(prior, request, policy)
-                if (continuation.get('human_source_verification') or continuation.get('owner_call_extension')) and before != prior['original_goal']['original_objects']:
+                if continuation.get('human_source_verification') and before != prior['original_goal']['original_objects']:
                     raise ChangeSetConflict('human source follow-up current objects drifted from the question scope')
+                if continuation.get('owner_call_extension') and goal['original_objects'] != prior['original_goal']['original_objects']:
+                    raise ChangeSetConflict('owner call extension original content scope drifted')
                 prior_rounds = sorted({slot['round_id'] for slot in prior['call_reservations'].values()})
                 for (child,) in cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=ANY(%s)',
                         (prior_rounds,)).fetchall():
@@ -3311,6 +3313,8 @@ class PostgresKnowledgeStore:
                             and child['materials']['round_id'] in prior['latest_rounds'].values()):
                         continuation.setdefault('previous_candidates', {})[child['unit_id']] = child['candidate']
                     if continuation.get('owner_call_extension') and child['materials']['round_id'] in prior['latest_rounds'].values():
+                        if before != child['materials'].get('transaction_before',child['materials']['before']):
+                            raise ChangeSetConflict('owner call extension full transaction scope drifted')
                         candidate = child.get('candidate') or child['materials'].get('previous_candidate')
                         if not candidate:
                             raise ChangeSetConflict('owner call extension requires its saved preceding candidate')

@@ -20,8 +20,21 @@ def authorize(request,policy,path,extension=None):
 
 
 @pytest.fixture
-def lost_update(action):
+def lost_update(action,monkeypatch):
     store=action[0];seed_claims(store,['C'])
+    # Transaction consumers are protected but are outside the Claim model's
+    # content denominator. The real 2021 input has both scopes.
+    from backend.api.canonical_repository.postgres_store import record_content_sha
+    payload={'viewpoint_id':'TRANSACTION-ONLY','revision':1}
+    with store.connect() as conn:
+        conn.execute("INSERT INTO wang_knowledge.objects (collection,object_id,revision,content_sha256,payload) VALUES ('canonical_viewpoints','TRANSACTION-ONLY',1,%s,%s::jsonb)",
+            (record_content_sha(payload),json.dumps(payload)))
+    read_context=store.read_claim_context
+    def complete_context(*args,**kwargs):
+        records=read_context(*args,**kwargs)
+        records['canonical_viewpoints','TRANSACTION-ONLY']=store.get_record_state('canonical_viewpoints','TRANSACTION-ONLY')
+        return records
+    monkeypatch.setattr(store,'read_claim_context',complete_context)
     request,root=operation_request(action,'Update',['C'])
     policy=cm.Policy.model_validate_json((Path(cm.__file__).parent/'policies/wang_claim_management_joint_update_v2.json').read_text())
     authorize(request,policy,root.with_suffix('.policy.json'))
@@ -104,7 +117,7 @@ def test_extension_never_infers_owner_permission_or_discards_results(lost_update
     assert store.get_cvp_group(old['run_id'])==old
 
 
-@pytest.mark.parametrize('change',['source','target','new_scope'])
+@pytest.mark.parametrize('change',['source','target','new_scope','transaction_consumer'])
 def test_owner_extension_cannot_silently_cross_changed_sources_or_scope(lost_update,change):
     store,request,root,old,successor,next_root,policy,extension,path=lost_update
     if change=='source':
@@ -112,10 +125,13 @@ def test_owner_extension_cannot_silently_cross_changed_sources_or_scope(lost_upd
     elif change=='target':
         payload=deepcopy(store.get_record_state('claims','C')['payload']);payload['statement']='changed while paused'
         store.apply_plan(store.plan_package({'package_id':'target-drift','claims':[payload]}))
-    else:
+    elif change=='new_scope':
         seed_claims(store,['D'])
         store.apply_plan(store.plan_package({'package_id':'scope-drift','claim_relations':[
             {'claim_relation_id':'NEW','from_id':'D','to_id':'C','relation_type':'supports'}]}))
+    else:
+        with store.connect() as conn:
+            conn.execute("UPDATE wang_knowledge.objects SET revision=2 WHERE collection='canonical_viewpoints' AND object_id='TRANSACTION-ONLY'")
     from backend.api.canonical_repository.postgres_store import ChangeSetConflict
     with pytest.raises((ValueError,ChangeSetConflict)):
         execute_claim_management(store,successor,root=next_root,ports=SyntheticPorts(store,next_root))
