@@ -260,7 +260,7 @@ def validate_claim_management_package(package):
             or any(bound != request.source_bindings.get(sid) for sid, bound in unit_request.source_bindings.items())):
         raise ValueError('unit expands original Claim authority')
     policy, sources = cm.load_authority(request, source_documents=cm.source_documents(materials['before']),
-                                       selected_source_ids=unit_request.source_bindings)
+                                       selected_source_ids=unit_request.source_bindings, human_source_decisions=materials.get('human_source_decisions'))
     if policy.model_dump(mode='json') != materials['policy'] or sources != materials['sources']:
         raise ValueError('Claim policy/complete physical own source drift')
     from backend.pipeline.claim_joint_update import enabled, admission_error
@@ -351,7 +351,7 @@ def validate_claim_audit(report, materials, candidate, *, historical=False):
         raise ValueError('independent audit actual current SQL readset drift')
     policy, sources = cm.load_authority(cm.Request.model_validate(materials['request']), source_documents=cm.source_documents(materials['before']),
         archived_sources=materials.get('source_archives') if historical else None,
-        selected_source_ids=materials['unit_request']['source_bindings'])
+        selected_source_ids=materials['unit_request']['source_bindings'], human_source_decisions=materials.get('human_source_decisions'))
     if policy.model_dump(mode='json') != materials['policy'] or sources != materials['sources']:
         raise ValueError('Claim stage source/policy drift')
     cm.validate_candidate(request, materials['before'], candidate, sources,
@@ -362,6 +362,10 @@ def validate_claim_audit(report, materials, candidate, *, historical=False):
         raise ValueError('independent audit full physical own source projection differs')
     expected_before = {sid: {k: {'text': p['text']} for k, p in v['before']['paragraphs'].items()}
                        for sid, v in sources.items() if v.get('before')}
+    if 'human_source_decisions' in materials:
+        expected_human = {sid: v.get('human_source_decisions', []) for sid, v in sources.items()}
+        if packet.get('human_source_decisions') != expected_human:
+            raise ValueError('independent audit omitted or changed human source facts')
     if packet.get('before_sources', {}) != expected_before:
         raise ValueError('independent source impact omitted/changed the complete old physical source')
     for sid in full_sources:
@@ -394,7 +398,7 @@ def validate_claim_stage_receipt(receipt):
         return materials, candidate, review, passed
     cm.require_current_implementation(materials['audit_contract'])
     policy, sources = cm.load_authority(cm.Request.model_validate(materials['request']), source_documents=cm.source_documents(materials['before']),
-                                       selected_source_ids=materials['unit_request']['source_bindings'])
+                                       selected_source_ids=materials['unit_request']['source_bindings'], human_source_decisions=materials.get('human_source_decisions'))
     if sources != materials['sources'] or policy.model_dump(mode='json') != materials['policy']:
         raise ValueError('Claim stage source/policy drift')
     cm.validate_candidate(cm.Request.model_validate(materials['unit_request']), materials['before'], candidate, sources,
@@ -473,7 +477,8 @@ def execute_claim_management(store, request, *, root, ports):
             parent = store.prepare_claim_management_action(request, goal=goal, read_pins=pins(records), root=root)
         if parent.get('admission_refusal'):
             return parent['result']
-        policy, sources = cm.load_authority(request, source_documents=cm.source_documents(parent['original_goal']['original_objects']))
+        policy, sources = cm.load_authority(request, source_documents=cm.source_documents(parent['original_goal']['original_objects']),
+            human_source_decisions=parent.get('human_source_decisions'))
         if parent.get('continued_by'):
             if parent['result'].get('status') == 'completed':
                 return {'status':'completed', 'historical_result':parent['result'], 'context_follow_up':parent['continued_by']}
@@ -537,7 +542,9 @@ def execute_claim_management(store, request, *, root, ports):
                         before = {k: v for k, v in before.items() if k in unit_keys}
                         unit_request.source_bindings = {sid: bound for sid, bound in request.source_bindings.items() if sid in source_ids}
                         unit_request.creation_permissions = [p for p in request.creation_permissions if p.source_id in source_ids]
-                        _, unit_sources = cm.load_authority(request, source_documents=cm.source_documents(before), selected_source_ids=source_ids)
+                        unit_decisions = [d for d in parent.get('human_source_decisions', []) if d['source_id'] in source_ids]
+                        _, unit_sources = cm.load_authority(request, source_documents=cm.source_documents(before), selected_source_ids=source_ids,
+                            human_source_decisions=unit_decisions if 'human_source_decisions' in parent else None)
                         unit_goal = cm.unit_goal(parent['original_goal'], unit_request)
                         roles = cm.required_roles(request, ordinal, policy)
                         rid = 'CMR-' + sha256_json({'action': parent_id, 'unit': unit_id, 'round': ordinal})
@@ -559,6 +566,8 @@ def execute_claim_management(store, request, *, root, ports):
                             'claim_ids': [k.split('/',1)[1] for k in unit_keys if k.startswith('claims/')],
                             'writable_record_shapes': {col: cm.KNOWLEDGE_COLLECTIONS[col][0].model_json_schema()
                                 for col in sorted({p.collection for p in unit_request.permissions} | {p.collection for p in request.creation_permissions})}}
+                        if 'human_source_decisions' in parent:
+                            materials['human_source_decisions'] = unit_decisions
                         if parent.get('continuation'):
                             materials['continuation'] = parent['continuation']
                         if policy.legacy_ai_supersession_restore:
@@ -579,8 +588,11 @@ def execute_claim_management(store, request, *, root, ports):
                     write(round_root / 'materials.json', materials)
                     def guard():
                         cm.load_authority(request, source_documents=cm.source_documents(materials['before']),
-                                          selected_source_ids=materials['unit_request']['source_bindings'])
+                                          selected_source_ids=materials['unit_request']['source_bindings'], human_source_decisions=materials.get('human_source_decisions'))
                         with store.connect() as conn, conn.cursor() as cursor:
+                            if 'human_source_decisions' in materials:
+                                from backend.pipeline.claim_human_source import assert_current
+                                assert_current(cursor, materials['unit_request']['source_bindings'], materials['human_source_decisions'])
                             observed = store._assert_transaction_read_pins(cursor, pins(records))
                             if enabled(request):
                                 # Keep every transaction pin. Only actual
@@ -670,6 +682,8 @@ def execute_claim_management(store, request, *, root, ports):
                             'required_questions': cm.operation_questions(materials['original_goal'], candidate),
                             'response_schema': materials['audit_contract']['response_schema'],
                             'audit_contract': materials['audit_contract'], 'budget': materials['policy']['budget']}
+                        if 'human_source_decisions' in materials:
+                            audit_input['human_source_decisions'] = materials['human_source_decisions']
                         if enabled(request):
                             audit_input['joint_update_writes'] = sorted(d.record_key for d in candidate.dispositions if d.action != 'retain')
                         if request.source_transition:

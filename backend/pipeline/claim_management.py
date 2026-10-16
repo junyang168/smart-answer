@@ -376,7 +376,7 @@ def audit_contract(root, policy=None):
     repository = pipeline.parents[1]
     joint = policy is not None and policy.joint_update_contract is not None
     prompt = pipeline / ('prompts/claim_management_audit_joint_v1.md' if joint else 'prompts/claim_management_audit_v2.md')
-    files = [Path(__file__), pipeline/'claim_joint_update.py', pipeline/'prompts/claim_management_joint_update_v1.md', pipeline/'prompts/claim_management_audit_joint_v1.md', pipeline/'claim_review_recovery.py', pipeline/'claim_qualification_reuse.py', pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py',
+    files = [Path(__file__), pipeline/'claim_joint_update.py', pipeline/'prompts/claim_management_joint_update_v1.md', pipeline/'prompts/claim_management_audit_joint_v1.md', pipeline/'claim_review_recovery.py', pipeline/'claim_qualification_reuse.py', pipeline/'claim_human_source.py', pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py',
         pipeline/'source_reconciliation_runner.py', pipeline/'source_reconciliation_runtime.py',
         pipeline/'claim_model_output.py', pipeline/'prompts/claim_management_compact_v1.md', pipeline/'subscription_process.py', pipeline/'codex_subscription_client.py', pipeline/'claude_subscription_client.py',
         repository/'backend/api/canonical_repository/postgres_store.py', repository/'backend/api/canonical_repository/knowledge_models.py', repository/'scripts/audit-library.py',
@@ -777,7 +777,7 @@ def unresolved_after(action_id, previous, review, *, request=None, candidate=Non
     return result
 
 
-def load_authority(request: Request, *, source_documents=None, archived_sources=None, selected_source_ids=None):
+def load_authority(request: Request, *, source_documents=None, archived_sources=None, selected_source_ids=None, human_source_decisions=None):
     """Bind a new action to an actual direction and policy, never old v1 flags."""
     policy = Policy.model_validate_json(source.verify_file(request.policy).read_text())
     if policy.joint_update_contract and request.operation != 'Update':
@@ -858,6 +858,9 @@ def load_authority(request: Request, *, source_documents=None, archived_sources=
                 sources[sid]['human_source_verification'] = {
                     'artifact': bound.model_dump(mode='json'), 'record': record,
                     'source_text_unchanged': True, 'content_review_still_required': True}
+    if human_source_decisions is not None:
+        from backend.pipeline.claim_human_source import project
+        project(sources, human_source_decisions)
     return policy, sources
 
 
@@ -1101,7 +1104,7 @@ def goal_packet(goal):
 
 def model_packet(materials):
     packet = {k: deepcopy(v) for k, v in materials.items()
-              if k not in {'transaction_before', 'source_archives', 'audit_contract', 'candidate_identity_recovery'}}
+              if k not in {'transaction_before', 'source_archives', 'audit_contract', 'candidate_identity_recovery', 'human_source_decisions'}}
     packet['original_goal'] = goal_packet(materials['original_goal'])
     packet['action_obligations'] = {'operation': materials['request']['operation'],
         'target_keys': list(materials['request']['target_keys']),

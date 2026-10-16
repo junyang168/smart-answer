@@ -2156,6 +2156,11 @@ def audit_claim_operation(store, sources, model, management):
         packet['joint_update_writes'] = management['joint_update_writes']
     packet['required_questions'] = management['required_questions']
     packet['before_sources'] = before_sources
+    if 'human_source_decisions' in management:
+        from backend.pipeline.claim_human_source import project
+        human_sources = {sid: {'paragraphs': paragraphs, 'file': management['source_bindings'][sid]} for sid, paragraphs in full_sources.items()}
+        project(human_sources, management['human_source_decisions'])
+        packet['human_source_decisions'] = {sid: row.get('human_source_decisions', []) for sid, row in human_sources.items()}
     contract = management['audit_contract']
     instruction_path = Path(contract['instructions']['path'])
     if hashlib.sha256(instruction_path.read_bytes()).hexdigest() != contract['instructions']['file_sha256']:

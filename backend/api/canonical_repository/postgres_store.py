@@ -3450,6 +3450,16 @@ class PostgresKnowledgeStore:
                     raise ChangeSetConflict('saved context maintenance cannot grant unrelated writes or unregistered Claim targets')
                 value['findings'] = imported
                 value['context_review_actions'] = context_actions
+            from backend.pipeline import claim_human_source as human
+            if authority.get('human_source_verification') and not refusal:
+                _, sources = cm.load_authority(request, source_documents=cm.source_documents(before))
+                entries = human.confirmation_entries(authority['human_source_verification'],
+                    request.model_dump(mode='json')['source_bindings'], sources)
+                human.register(cursor, entries, origin=run_id)
+                active_ids = {d['decision_id'] for d in human.snapshot(cursor, request.source_bindings)}
+                if any(d['decision_id'] not in active_ids for d in entries):
+                    raise ChangeSetConflict('new action explicitly supplied a replaced human source decision')
+            value['human_source_decisions'] = human.snapshot(cursor, request.source_bindings)
             cursor.execute("""INSERT INTO wang_knowledge.pipeline_runs
                               (run_id,subject_kind,subject_id,stage,trigger,status,metadata)
                               VALUES (%s,'batch',%s,'cvp_group','cli','running',%s::jsonb)""",
@@ -3491,6 +3501,12 @@ class PostgresKnowledgeStore:
             if parent['original_goal'].get('joint_update_contract') and frozen.get('schema_version') != VERSION:
                 raise ChangeSetConflict('joint Update round requires its complete versioned materials')
             if frozen.get('schema_version') == VERSION:
+                if 'human_source_decisions' in parent:
+                    from backend.pipeline.claim_human_source import assert_current
+                    expected_decisions = [d for d in parent['human_source_decisions'] if d['source_id'] in frozen['unit_request']['source_bindings']]
+                    if frozen.get('human_source_decisions') != expected_decisions:
+                        raise ChangeSetConflict('Claim round omitted its frozen human source decisions')
+                    assert_current(cursor, frozen['unit_request']['source_bindings'], expected_decisions)
                 from backend.pipeline.claim_management import unit_goal
                 unit_request = Request.model_validate(frozen['unit_request'])
                 original = parent['original_goal']
@@ -3818,6 +3834,9 @@ class PostgresKnowledgeStore:
                             not child.get('program_readback_complete') or child.get('revisit_required')):
                         raise ChangeSetConflict('Claim action has an invalidated ' + ('independent audit' if independent else 'program readback'))
                     from backend.pipeline.claim_qualification_reuse import current_pins
+                    if 'human_source_decisions' in child['materials']:
+                        from backend.pipeline.claim_human_source import assert_current
+                        assert_current(cursor, child['materials']['unit_request']['source_bindings'], child['materials']['human_source_decisions'])
                     applicable = current_pins(self, cursor, child)
                     current = self._assert_transaction_read_pins(cursor, applicable)
                     self._assert_claim_management_scope(cursor, applicable, records=current)
@@ -3952,6 +3971,12 @@ class PostgresKnowledgeStore:
                     proof = value['stage_results']['audit' if independent else 'readback']
                     check_binding(proof)
                     from backend.pipeline.claim_qualification_reuse import current_pins
+                    if 'human_source_decisions' in value['materials']:
+                        from backend.pipeline.claim_human_source import assert_current
+                        try:
+                            assert_current(cursor, value['materials']['unit_request']['source_bindings'], value['materials']['human_source_decisions'])
+                        except ChangeSetConflict:
+                            return {'ready': False, 'reason': 'human_source_decisions_changed', 'run_id': rid}
                     applicable = current_pins(self, cursor, value)
                     records = self._assert_transaction_read_pins(cursor, applicable)
                     self._assert_claim_management_scope(cursor, applicable, records=records)
@@ -7450,6 +7475,10 @@ class PostgresKnowledgeStore:
                     if not plan.operations:
                         if sql_group.get('no_content_write_reviewed_sha256')==transaction_context.reviewed_sha256:
                             return {'status':'already_applied','change_set_id':None,'summary':plan.as_dict()['summary']}
+                        human_scope = sql_group.get('reviewed', {}).get('evidence', {}).get('claim_management_scope', {})
+                        if 'human_source_decisions' in human_scope:
+                            from backend.pipeline.claim_human_source import assert_current
+                            assert_current(cursor, human_scope['source_ids'], human_scope['human_source_decisions'])
                         if sql_group['checkpoint']!='reviewed':
                             raise ChangeSetConflict('no-content completion requires exact reviewed state')
                         self._assert_transaction_read_pins(cursor,transaction_context.read_pins)
@@ -7498,6 +7527,9 @@ class PostgresKnowledgeStore:
                     if plan.source_kind == 'wang_claim_management_v2':
                         scope = sql_group['reviewed']['evidence'].get('claim_management_scope')
                     if scope:
+                        if 'human_source_decisions' in scope:
+                            from backend.pipeline.claim_human_source import assert_current
+                            assert_current(cursor, scope['source_ids'], scope['human_source_decisions'])
                         if scope.get('joint_update_contract') == 'wang_claim_joint_update_v1':
                             audited = {tuple(k.split('/', 1)) for k in scope['audit_record_keys']}
                             scope_pins = {k: v for k, v in transaction_context.read_pins.items() if k in audited}

@@ -137,6 +137,24 @@ def validate_package(package):
     if package!=expected:raise ValueError('quote sync package exceeds exact human verified quotation copies')
 
 
+def persist_verified_correction(store, verification_binding, transition_binding):
+    """Register an already committed human correction, without replaying copies."""
+    verification,state,before,current=load_verified_transition(store,verification_binding,transition_binding)
+    # The source correction is already committed and independently checked by
+    # load_verified_transition; persist the human fact even if quote sync pauses.
+    from backend.pipeline import claim_human_source as human
+    from backend.api.canonical_repository.postgres_store import POSTGRES_APPLY_ADVISORY_LOCK_KEY
+    if (verification.get('schema_version') != 'wang_human_source_transcription_correction_v1'
+            or verification.get('verified_by') != 'user' or verification.get('claim_content_approval') is not False):
+        raise ValueError('source correction is not a human fact')
+    with store.connect() as conn, conn.cursor() as cursor:
+        cursor.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))', (POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
+        store._assert_transaction_read_pins(cursor, {('source_documents',verification['source_id']):(state['revision'],state['content_sha256'],False)})
+        human.register(cursor, [human.correction_entry(verification_binding,verification,current)],
+            origin=transition_binding['file_sha256'])
+    return verification,state,before,current
+
+
 def synchronize(store, verification_binding, transition_binding, *, root):
     """Apply only compiled quotation/binding postimages in the common SQL store.
 
@@ -146,7 +164,7 @@ def synchronize(store, verification_binding, transition_binding, *, root):
     from pathlib import Path
     from backend.pipeline.source_reconciliation_runner import binding,body,read,write
     from backend.pipeline.cvp_sql_flow import pin_rows,decoded_pins
-    verification,state,before,current=load_verified_transition(store,verification_binding,transition_binding)
+    verification,state,before,current=persist_verified_correction(store,verification_binding,transition_binding)
     root=Path(root);root.mkdir(parents=True,exist_ok=True);receipt=root/'complete.json'
     identity={'verification':verification_binding,'source_transition':transition_binding}
     if receipt.exists():
