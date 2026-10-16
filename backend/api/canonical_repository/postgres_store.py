@@ -3383,9 +3383,8 @@ class PostgresKnowledgeStore:
             context_actions = authority.get('context_review_actions', {})
             if context_actions and not refusal:
                 if (request.predecessor_action_id or request.operation != 'Update'
-                        or not policy.all_findings_to_gpt or policy.initial_candidate != 'proposal'
-                        or set(request.target_keys) & {p.key for p in request.permissions}):
-                    raise ChangeSetConflict('saved context maintenance requires a new explicitly bound GPT-first scope with readonly Claims')
+                        or not policy.all_findings_to_gpt or policy.initial_candidate != 'proposal'):
+                    raise ChangeSetConflict('saved context maintenance requires a new explicitly bound GPT-first scope')
                 imported = {}
                 for action_id, finding_ids in context_actions.items():
                     previous_id = 'CMA-' + sha256_json(action_id)
@@ -3412,8 +3411,13 @@ class PostgresKnowledgeStore:
                     prior['context_maintained_by'] = run_id
                     cursor.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb WHERE run_id=%s',
                         (canonical_json(prior), previous_id))
-                if {p.key for p in request.permissions} != {f['target_key'] for f in imported.values()}:
-                    raise ChangeSetConflict('saved context maintenance cannot grant unrelated writes')
+                finding_targets = {f['target_key'] for f in imported.values()}
+                writable = {p.key for p in request.permissions}
+                from backend.pipeline.claim_joint_update import enabled, required_keys
+                required = set(required_keys(request)) if enabled(request, policy) else set()
+                if (writable != finding_targets | required
+                        or (set(request.target_keys) & writable) - finding_targets):
+                    raise ChangeSetConflict('saved context maintenance cannot grant unrelated writes or unregistered Claim targets')
                 value['findings'] = imported
                 value['context_review_actions'] = context_actions
             cursor.execute("""INSERT INTO wang_knowledge.pipeline_runs
