@@ -698,3 +698,11 @@ action 为 `435-joint-update-divinity-summary-two-20261015-v1`，唯一 round �
 独立新进程核实完整 761 项事务对象、471 项内容分母、两个 ChangeSet operation 的前后 payload、实际 SQL、全部原 source／meta、旧未知调用与原轮、两份新 raw 及调用预算，随后直接 SQL 核实两项 object_versions 和 ER038 的 edges 投影。全部 90 条清单的当前资格核对完成：基线 32 条无损失，固定十二条当前有效九条；其余仍为 2016 `DK-5317618c7962-P05-CL014`、第十章 `DK-74fcb58a05aa-P01-CL002`／`P01-CL003`，未启动它们的模型任务。验证期间新增模型调用和业务写入均为零。
 
 证据根为原 2021 根内 `owner-authorized-extension-20261016-v1/`：新 owner-direction／policy／request、零调用 admission、完整 transaction-before、actual packet／transport、`output-size-comparison.json`、`question-answer-commit-recovery/`、`final-verification.json`、`independent-version-edge-verification.json` 及 verifier。旧 2021 中断调查、未知调用和已失败提交均保持为历史事实。#435／PR #437 仍为未整体完成的 draft，未合并或部署。
+
+## 2026-10-16 剩余三条的负责人授权接续准备
+
+负责人要求「现在解决那三个问题」，沿用「允许你调用多次」的授权，范围为原 12 条中尚未当前合格的第十章 P01-CL002／CL003 与 2016 P05-CL014。没有另开周边清理任务。共同接续入口新增两种明确绑定：预算耗尽仍有末轮异议时保留未提交候选；历史已完成但共享输入变化时，以当前完整 SQL 后像审阅，不重放旧写入。均保持原目标、来源、字段权限、旧调用账本和唯一后继，并绑定当前事务对象 SHA；相关同来源审核 metadata 也须精确绑定才可导入异议，不导入资格。
+
+第十章完整 262 对象、五项历史／后续异议的 GPT 请求实测 425,497 bytes；2016 完整 484 对象、两项末轮新异议为 492,719 bytes，均在原 500,000 bytes 限额内，使用共同 stage adapter 的无损编码验证，没有删原文或缩减输入。此处仅记录零调用预检，不声称模型已返回或三条已完成。
+
+隔离 SQL 与共同流程回归 343 passed、35 skipped；针对性子集 98 passed（包含在前述测试内，不重复相加）。文档检查仍仅有独立 notes-to-sermon 项目的既有缺失锚点。正式执行与最终当前资格另记实际结果。

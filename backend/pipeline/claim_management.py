@@ -1318,7 +1318,8 @@ def continuation_budget(previous, request, policy):
     remains in the predecessor ledger and is never represented as a completion.
     Unknown calls require a separately bound explicit owner call extension;
     they cannot use the ordinary engineering-input continuation. Completed
-    writes and changed source versions remain excluded.
+    writes cannot be replayed. An explicitly bound qualification refresh instead
+    reviews the current SQL candidate while retaining the original history.
     """
     from backend.pipeline.source_reconciliation_runner import read, body
     old = Request.model_validate(previous['request'])
@@ -1337,7 +1338,11 @@ def continuation_budget(previous, request, policy):
             or old.creation_permissions or request.creation_permissions
             or previous.get('created_keys') or previous.get('replacements')):
         raise ValueError('engineering continuation must retain original Update targets and source without structural writes')
-    completed_cleanup = previous['result']['status'] == 'completed'
+    authority = json.loads(source.verify_file(request.authorization).read_text())
+    extension = authority.get('owner_call_extension')
+    extension_basis = extension.get('basis', 'unknown_call') if isinstance(extension, dict) else None
+    qualification_refresh = extension_basis == 'qualification_refresh'
+    completed_cleanup = previous['result']['status'] == 'completed' and not qualification_refresh
     old_permissions = {p.key:set(p.fields) for p in old.permissions}
     permissions = {p.key:set(p.fields) for p in request.permissions}
     if completed_cleanup and (not previous.get('context_findings') or previous.get('findings')
@@ -1350,18 +1355,22 @@ def continuation_budget(previous, request, policy):
     failures = {}
     unaccepted = {}
     prior_findings = {**deepcopy(previous.get('context_findings', {})), **deepcopy(previous['findings'])}
-    authority = json.loads(source.verify_file(request.authorization).read_text())
     human_follow_up = human_source_follow_up(previous, request, authority, prior_findings)
-    extension = authority.get('owner_call_extension')
     unknown = {}
     if extension is not None:
-        if (not isinstance(extension,dict) or set(extension) != {'predecessor_action_id','prior_metadata_sha256','budget','authorization_quote'}
+        extension_keys = {'predecessor_action_id','prior_metadata_sha256','budget','authorization_quote'}
+        if extension_basis != 'unknown_call':
+            extension_keys |= {'basis','current_objects_sha256','related_action_metadata_sha256'}
+        valid_basis = (extension_basis == 'unknown_call' and previous['result'].get('reason') == 'call_uncertain'
+            or extension_basis == 'remaining_findings' and previous['result'].get('reason') == 'budget_exhausted' and bool(previous['findings'])
+            or qualification_refresh and previous['result']['status'] == 'completed' and bool(previous.get('context_findings')))
+        if (not isinstance(extension,dict) or set(extension) != extension_keys or not valid_basis
                 or extension['predecessor_action_id'] != old.action_id
                 or extension['prior_metadata_sha256'] != sha256_json(previous)
                 or extension['budget'] != policy.budget.model_dump(mode='json')
                 or not (extension['authorization_quote'] or '').strip()
                 or authority.get('authorized_by') != 'owner' or authority.get('human_content_approval') is not False
-                or previous['result'].get('reason') != 'call_uncertain' or completed_cleanup or human_follow_up
+                or completed_cleanup or human_follow_up
                 or request.permissions != old.permissions or policy.initial_candidate != 'proposal'
                 or policy.all_findings_to_gpt != original.all_findings_to_gpt):
             raise ValueError('owner call extension requires exact paused action, authority and explicit new budget')
@@ -1393,6 +1402,8 @@ def continuation_budget(previous, request, policy):
                 prior_findings[finding.identity(old.action_id)] = finding.model_dump(mode='json')
             continue
         if extension is not None:
+            if extension_basis != 'unknown_call':
+                raise ValueError('remaining-findings/qualification follow-up cannot discard an uncertain call')
             from backend.pipeline.cvp_sql_flow import binding
             stage = root / slot['round_id']
             intent = stage / (slot['role'] + '.reservation.json')
@@ -1423,7 +1434,7 @@ def continuation_budget(previous, request, policy):
     if set(proposal_recovery) != set(unaccepted_proposals):
         raise ValueError('unaccepted proposal recovery contains an unbound or already recorded call')
     remaining = {role:original.budget.limit(role)-spent[role] for role in MODELS}
-    if extension is not None and not unknown:
+    if extension_basis == 'unknown_call' and not unknown:
         raise ValueError('owner unknown-call extension requires an actual unknown generation')
     if (policy.models != original.models or policy.independent_audit != original.independent_audit
             or policy.review_purpose != original.review_purpose
@@ -1440,7 +1451,7 @@ def continuation_budget(previous, request, policy):
         raise ValueError('human source follow-up permits exactly one bounded proposal and review')
     if not policy.budget.gpt_calls or not policy.budget.opus_calls:
         raise ValueError('original remaining budget cannot fund correction and review')
-    return {'predecessor_action_id':old.action_id, 'completed_context_cleanup':completed_cleanup, 'original_goal':deepcopy(previous['original_goal']),
+    return {'predecessor_action_id':old.action_id, 'completed_context_cleanup':completed_cleanup, 'qualification_refresh':qualification_refresh, 'original_goal':deepcopy(previous['original_goal']),
         'prior_findings':prior_findings, 'unaccepted_reviews':unaccepted, 'prior_call_reservations':deepcopy(previous['call_reservations']),
         'pre_generation_schema_rejections':failures, 'spent_generations':spent, 'remaining_generations':remaining,
         **({'unaccepted_proposals':unaccepted_proposals} if unaccepted_proposals else {}),

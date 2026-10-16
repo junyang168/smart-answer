@@ -3304,7 +3304,24 @@ class PostgresKnowledgeStore:
                 continuation = continuation_budget(prior, request, policy)
                 if continuation.get('human_source_verification') and before != prior['original_goal']['original_objects']:
                     raise ChangeSetConflict('human source follow-up current objects drifted from the question scope')
-                if continuation.get('owner_call_extension') and goal['original_objects'] != prior['original_goal']['original_objects']:
+                refresh = continuation.get('qualification_refresh', False)
+                extension = continuation.get('owner_call_extension')
+                if extension and extension.get('basis', 'unknown_call') != 'unknown_call':
+                    if extension['current_objects_sha256'] != sha256_json(before):
+                        raise ChangeSetConflict('owner follow-up current transaction scope differs from its explicit binding')
+                    related = extension['related_action_metadata_sha256']
+                    if not isinstance(related, dict) or (related and not refresh):
+                        raise ChangeSetConflict('related review history is only valid for qualification refresh')
+                    for related_id, digest in related.items():
+                        peer = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR SHARE', (related_id,)).fetchone()
+                        peer = peer[0] if peer else None
+                        if (not peer or sha256_json(peer) != digest or peer.get('kind') != 'claim_management_action'
+                                or peer['result']['status'] != 'completed'
+                                or peer['request']['source_bindings'] != prior['request']['source_bindings']):
+                            raise ChangeSetConflict('related review history changed or belongs to another source')
+                        continuation['prior_findings'].update(peer.get('context_findings', {}))
+                        continuation['prior_findings'].update(peer.get('findings', {}))
+                if extension and not refresh and goal['original_objects'] != prior['original_goal']['original_objects']:
                     raise ChangeSetConflict('owner call extension original content scope drifted')
                 prior_rounds = sorted({slot['round_id'] for slot in prior['call_reservations'].values()})
                 for (child,) in cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=ANY(%s)',
@@ -3312,6 +3329,12 @@ class PostgresKnowledgeStore:
                     if (continuation.get('human_source_verification')
                             and child['materials']['round_id'] in prior['latest_rounds'].values()):
                         continuation.setdefault('previous_candidates', {})[child['unit_id']] = child['candidate']
+                    if refresh:
+                        if child['materials']['round_id'] in prior['latest_rounds'].values():
+                            if child['outcome'] != 'completed':
+                                raise ChangeSetConflict('qualification refresh requires a completed predecessor')
+                            continuation.setdefault('previous_candidates', {})[child['unit_id']] = cm.existing_candidate(goal['original_objects']).model_dump(mode='json')
+                        continue
                     if continuation.get('owner_call_extension') and child['materials']['round_id'] in prior['latest_rounds'].values():
                         if before != child['materials'].get('transaction_before',child['materials']['before']):
                             raise ChangeSetConflict('owner call extension full transaction scope drifted')
