@@ -3391,15 +3391,21 @@ class PostgresKnowledgeStore:
                     row = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE',
                         (previous_id,)).fetchone()
                     prior = row[0] if row else None
+                    scope_repair = bool(prior and prior['result'].get('reason') == 'permission_required'
+                        and prior['result']['status'] == 'paused'
+                        and prior['request']['target_keys'] == request.target_keys
+                        and not prior['request']['permissions'] and not prior['request']['creation_permissions']
+                        and set(finding_ids) == set(prior.get('context_findings', {})) | set(prior.get('findings', {})))
                     if (not prior or prior.get('kind') != 'claim_management_action'
-                            or prior['result']['status'] != 'completed' or prior.get('context_maintained_by')
+                            or (prior['result']['status'] != 'completed' and not scope_repair) or prior.get('context_maintained_by')
                             or not finding_ids or len(finding_ids) != len(set(finding_ids))
                             or prior['request']['source_bindings'] != request.model_dump(mode='json')['source_bindings']):
                         raise ChangeSetConflict('saved context maintenance has stale/unbound or already assigned audit history')
                     latest = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=ANY(%s)',
                         (list(prior['latest_rounds'].values()),)).fetchall()
                     for fid in finding_ids:
-                        finding = prior.get('context_findings', {}).get(fid)
+                        finding = {**prior.get('context_findings', {}),
+                            **(prior.get('findings', {}) if scope_repair else {})}.get(fid)
                         if not finding or finding['target_key'] not in {p.key for p in request.permissions}:
                             raise ChangeSetConflict('saved context maintenance omitted its exact authorized finding target')
                         key = finding['target_key']
