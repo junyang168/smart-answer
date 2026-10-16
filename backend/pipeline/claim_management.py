@@ -76,6 +76,7 @@ class Policy(source.Contract):
     initial_candidate: Literal['existing','proposal'] | None = None
     all_findings_to_gpt: bool | None = None
 
+    claim_scope_contract: Literal['claim_direct_neighbours_v1'] | None = None
     model_output_contract: Literal['claim_changes_v1'] | None = None
     legacy_ai_supersession_restore: Literal[True] | None = None
 
@@ -85,7 +86,7 @@ class Policy(source.Contract):
     @model_serializer(mode='wrap')
     def serialize_policy(self, handler):
         value = handler(self)
-        for name in ('joint_update_contract', 'joint_update_max_targets', 'model_output_contract', 'legacy_ai_supersession_restore'):
+        for name in ('joint_update_contract', 'joint_update_max_targets', 'model_output_contract', 'legacy_ai_supersession_restore', 'claim_scope_contract'):
             if value[name] is None:
                 value.pop(name)
         if self.independent_audit is None:
@@ -376,7 +377,7 @@ def audit_contract(root, policy=None):
     repository = pipeline.parents[1]
     joint = policy is not None and policy.joint_update_contract is not None
     prompt = pipeline / ('prompts/claim_management_audit_joint_v1.md' if joint else 'prompts/claim_management_audit_v2.md')
-    files = [Path(__file__), pipeline/'claim_joint_update.py', pipeline/'prompts/claim_management_joint_update_v1.md', pipeline/'prompts/claim_management_audit_joint_v1.md', pipeline/'claim_review_recovery.py', pipeline/'claim_qualification_reuse.py', pipeline/'claim_human_source.py', pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py',
+    files = [Path(__file__), pipeline/'claim_joint_update.py', pipeline/'prompts/claim_management_joint_update_v1.md', pipeline/'prompts/claim_management_audit_joint_v1.md', pipeline/'claim_review_recovery.py', pipeline/'claim_qualification_reuse.py', pipeline/'claim_human_source.py', pipeline/'claim_direct_scope.py', pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py',
         pipeline/'source_reconciliation_runner.py', pipeline/'source_reconciliation_runtime.py',
         pipeline/'claim_model_output.py', pipeline/'prompts/claim_management_compact_v1.md', pipeline/'subscription_process.py', pipeline/'codex_subscription_client.py', pipeline/'claude_subscription_client.py',
         repository/'backend/api/canonical_repository/postgres_store.py', repository/'backend/api/canonical_repository/knowledge_models.py', repository/'scripts/audit-library.py',
@@ -932,6 +933,13 @@ def validate_source_impacts(review, keys, sources, *, request, records, unresolv
 
 
 def audit_keys(request, before, candidate=None):
+    from backend.pipeline.claim_direct_scope import enabled, scope
+    if enabled(request):
+        return scope(request, before, candidate)['record_keys']
+    return legacy_audit_keys(request, before, candidate)
+
+
+def legacy_audit_keys(request, before, candidate=None):
     """Claim evidence denominator, without turning CVP context into approval.
 
     A shared Evidence write expands to every owner. Unchanged CVP memberships
@@ -951,7 +959,7 @@ def audit_keys(request, before, candidate=None):
     if candidate and enabled(request):
         # Traverse both graphs independently, then require dispositions for the
         # union. In particular removing an owner/endpoint must not erase it.
-        roots.update(audit_keys(request, before))
+        roots.update(legacy_audit_keys(request, before))
         for key, old in original_records.items():
             if key in records and records[key] != old:
                 roots.update(domain_dependencies(source.split_key(key)[0], old, original_records))
@@ -1106,6 +1114,10 @@ def model_packet(materials):
     packet = {k: deepcopy(v) for k, v in materials.items()
               if k not in {'transaction_before', 'source_archives', 'audit_contract', 'candidate_identity_recovery', 'human_source_decisions'}}
     packet['original_goal'] = goal_packet(materials['original_goal'])
+    from backend.pipeline.claim_direct_scope import enabled, scope
+    request = Request.model_validate(materials.get('unit_request', materials['request']))
+    if enabled(request):
+        packet['claim_scope'] = scope(request, materials['before'])
     packet['action_obligations'] = {'operation': materials['request']['operation'],
         'target_keys': list(materials['request']['target_keys']),
         'required_questions': list(materials['original_goal']['required_questions'])}
@@ -1526,8 +1538,10 @@ def require_full_sources(request, before, candidate=None, *, qualification=False
     records = {k: v['payload'] for k, v in before.items()}
     if candidate:
         records.update(source.index(candidate.records))
+    from backend.pipeline.claim_direct_scope import enabled, scope
+    neighbours = set(scope(request, before, candidate)['neighbour_claim_keys']) if enabled(request) else set()
     for key in audit_keys(request, before, candidate):
-        if not key.startswith('claims/'):
+        if not key.startswith('claims/') or key in neighbours:
             continue
         own = own_source_ids(records[key], records)
         if not own or not own <= set(request.source_bindings):

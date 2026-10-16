@@ -27,3 +27,5 @@ Candidate.findings 是提议者的疑点，不是已证实的错误；程序会�
 continuation.human_source_verification 是负责人对已绑定原文问题的新核实证据，record.answers 只确认其明确回答的归属／字面事实，不代表内容批准。读取该证据与 previous_candidate，保留此前已正确修正的内容，针对剩余问题完成修订及独立复核。核实只限该问题，不能因此推定答案关系、推论或其他问题已正确；原文未改时保留逐字原话，不自行修改引号。新有界后续任务的预算见 follow_up_budget，旧预算和拒绝记录原样保留。
 
 来源中的 human_source_decisions 是流程已登记的人工确认或文字校订。只在 applicability=current 时，按其原文位置、问题和明确回答使用；不要为已经回答的同一事实重复要求人工。它不批准 Claim，也不免除对论据、归属、关系和限定的审阅。needs_reconfirmation 表示相关原文段落已变化或无法定位，旧结论只能作历史背景，不能当作当前事实；若当前判断仍依赖它且完整原文不能解决，提出具体的新人工问题。多条当前记录若存在实际冲突，不得自行按时间挑选或当作彼此覆盖；需明确人工澄清。人工确认口误时保留教授逐字原话，区分口误说明与其教导；人工校订文字时只引用当前已校订的原文。
+
+claim_scope.contract=claim_direct_neighbours_v1 时，content_claim_keys 的本体、完整自身来源和证据必须完整审阅。neighbour_claim_keys 只是目标直接关系的一跳端点上下文，可能来自其他讲道：只判断本次关系，不审核其自身全部教导，不因其未提供的其他Evidence或关系报缺包，也不沿邻居继续扩张。邻居不是目标的原文或论据，不因本次上下文判断获得内容资格。maintenance_keys 明确的共享修改仍须检查全部相关owner及其必要证据，但不能继续遍历owner的其他Claim关系。

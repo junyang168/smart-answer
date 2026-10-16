@@ -197,7 +197,13 @@ def reviewed_context_change(cursor,old,peer,original,fresh,current,protected,rev
             raise ValueError('qualification context history SHA drift')
         before[cm.source.key(col,oid)]=payload
     targets={k for k in protected if k.startswith('claims/')}
-    basis=argument_basis(targets,before)|argument_basis(targets,after)
+    from backend.pipeline.claim_direct_scope import enabled as direct_scope_enabled
+    if direct_scope_enabled(old['materials']['unit_request']):
+        # Neighbour rows and incident relations are pinned context, not a
+        # request to reconstruct their unavailable evidence or other edges.
+        basis=set(before)
+    else:
+        basis=argument_basis(targets,before)|argument_basis(targets,after)
     if any(original[tuple(key.split('/',1))]!=fresh[tuple(key.split('/',1))] for key in basis):
         raise ValueError('original Claim argument basis changed')
     dispositions={d['record_key']:d['action'] for d in peer['candidate']['dispositions']}
@@ -298,7 +304,7 @@ def admit(store,cursor,original_id,peer_id):
     original=decoded_pins(old['audited_pins']);fresh=decoded_pins(peer['audited_pins'])
     if not set(original)<=set(fresh):raise ValueError('peer review omitted original dependency scope')
     current=store._assert_transaction_read_pins(cursor,fresh)
-    store._assert_claim_management_scope(cursor,fresh,records=current)
+    store._assert_claim_management_scope(cursor,fresh,records=current,request=peer['materials']['unit_request'])
     protected=protected_keys(old);retained={d['record_key'] for d in peer['candidate']['dispositions'] if d['action']=='retain'}
     if not {k for k in protected if k.startswith('claims/')}<=retained:raise ValueError('original target changed in peer operation')
     verdicts={v['record_key'] for v in review['verdicts'] if v['approved'] and not v['problems']}
@@ -318,7 +324,7 @@ def admit(store,cursor,original_id,peer_id):
     if not legacy or has_objections:
         changes,basis,objections=reviewed_context_change(cursor,old,peer,original,fresh,current,protected,review,old_review)
     if not changes:raise ValueError('qualification has no context drift to revalidate')
-    store._assert_claim_management_scope(cursor,updated,records={key:current[key] for key in updated})
+    store._assert_claim_management_scope(cursor,updated,records={key:current[key] for key in updated},request=old['materials']['unit_request'])
     for key in protected:
         if key.startswith('claims/') and cursor.execute("""SELECT 1 FROM wang_knowledge.pipeline_runs
             WHERE metadata->'blocked_current_claim_ids' ? %s AND started_at>

@@ -61,7 +61,7 @@ def admission_error(request, policy, before, goal):
         from backend.pipeline import claim_management as cm
         # Required keys must not seed their own reachability proof.
         from types import SimpleNamespace
-        natural = SimpleNamespace(target_keys=request.target_keys, permissions=[])
+        natural = request.model_copy(deep=True, update={'permissions': []})
         reachable = set(cm.audit_keys(natural, before))
         permissions = {p.key for p in request.permissions}
         if (permissions | set(required)) - reachable:
@@ -180,7 +180,7 @@ def preflight(store, request):
         records = store.read_claim_context([cm.source.split_key(key), *[('source_documents', sid) for sid in request.source_bindings]])
         reads[key] = {cm.source.key(*k) for k in records}
         from types import SimpleNamespace
-        closures[key] = set(cm.audit_keys(SimpleNamespace(target_keys=[key], permissions=[]),
+        closures[key] = set(cm.audit_keys(request.model_copy(deep=True, update={'target_keys': [key], 'permissions': []}),
             {cm.source.key(*k): cm.model_state(v) for k, v in records.items()}))
         for k, state in records.items():
             if k in states and cm.model_state(states[k]) != cm.model_state(state):

@@ -2119,9 +2119,12 @@ def audit_claim_operation(store, sources, model, management):
             paragraphs = [r for r in previous.segments if not _is_editorial_row(r)]
             before_sources[sid] = {f'S{i:04d}': {'text': live_text(str(r.get('text') or ''))}
                                    for i, r in enumerate(paragraphs, 1)}
+    # Direct neighbours are relation-endpoint context, not new Claim reviews.
+    neighbour_claims = set(management.get('claim_scope', {}).get('neighbour_claim_keys', []))
+    maintenance_keys = set(management.get('claim_scope', {}).get('maintenance_keys', []))
     # Exact active forward references must be in the actual audit denominator.
     for key, row in records.items():
-        if row["retired"]:
+        if row["retired"] or key in neighbour_claims:
             continue
         payload = row["payload"]
         refs = []
@@ -2142,7 +2145,8 @@ def audit_claim_operation(store, sources, model, management):
                 else:
                     raise ValueError('independent Claim source alias is missing or ambiguous')
         if key.startswith("evidence_steps/"):
-            refs += ["claims/" + v for v in payload.get("produced_claim_ids", [])]
+            if not management.get("claim_scope") or key in maintenance_keys:
+                refs += ["claims/" + v for v in payload.get("produced_claim_ids", [])]
             refs += ["source_fragments/" + v for v in _step_fragment_ids(payload)]
         if key.startswith("source_fragments/"):
             refs += ["source_documents/" + payload["source_id"]]
@@ -2152,6 +2156,8 @@ def audit_claim_operation(store, sources, model, management):
         **management["original_goal"], "original_objects": original}, "actual_records": records,
         "full_sources": full_sources, "denominator": keys, "replacements": management["replacements"],
         "candidate_sha256": management["candidate_sha256"], "unresolved": management["unresolved"]}
+    if 'claim_scope' in management:
+        packet['claim_scope'] = management['claim_scope']
     if management['original_goal'].get('joint_update_contract') == 'wang_claim_joint_update_v1':
         packet['joint_update_writes'] = management['joint_update_writes']
     packet['required_questions'] = management['required_questions']

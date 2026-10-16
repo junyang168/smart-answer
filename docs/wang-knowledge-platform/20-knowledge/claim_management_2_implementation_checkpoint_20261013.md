@@ -836,3 +836,18 @@ Restore 单元完成 GPT一次、Opus一次、共同事务及程序回读，7项
 独立 `verify.py` 核对原答及 stage receipt、共同读回、两个完整读集共1449个唯一对象、全部源文件及实际空写集；原49条当前资格均保持，两漏项新增当前资格，合并清单现为51条当前合格、24条CVP排除、18条退役或被替代。93条 Claim 的 revision／SHA 均与本次之前一致。证据根 `claim-management-435/son-of-man-english-two-20261016-v1/` 保存请求、精确授权、policy、原稿绑定、raw、意图、transport、当前资格、`verification.json`、`topic-inventory-after.json` 及 `work-list.json`；原25个周边对象仍待处理，不因本次通过而改判。无整库备份、合并或部署。
 
 **另有未解决代码问题：** 在负责人追问2016材料为何过大后，逐项拆解确认 `claim_management.audit_keys` 将每个已读对象的反向引用和关系两端继续递归加入，结果遍历整片连通图。目标自身及其正向直接引用闭包49项（Claim1、Evidence4、反方Position1、SourceFragment43），不能据此直接宣称优化后的正确分母就是49；当前实际654项包含Claim30、Evidence94、SourceFragment281、两类关系133、Observation68、Question40、Position7、SourceDocument1。未压缩结构化对象约592 KB，完整来源约44 KB；增大到827 KB主要来自结构化材料与封装，不能归因为教授原稿很长。此前把654项一概称为“必要对象”不准确，提高输入限额只让当前旧规则得以执行，不是范围问题的解决。公共取包规则仍须区分目标论据、必要关系／共享修改影响、完整自身原文与仅供事务保护的读取，不能因未修改对象相连就无限向外扩展；本次没有修改该规则或为此重审已通过目标。#435／PR#437仍为未完成draft。
+
+
+## 2026-10-16 Claim 一跳范围离线试验，尚未切换默认流程
+
+按负责人“Claim 之间只取 direct neighbours”的要求，新增显式 `claim_direct_neighbours_v1` 策略。目标自身 Evidence、非 Claim 上游支持、反方 Position、片段与讲道全文保留；直接邻居只作为完整 Claim 记录和一跳关系上下文，不继续读取它的 Evidence／其他 Claim 关系。共享 Evidence 明确维护时，前后所有 owners 进入修改影响检查，但其其他 Claim 关系不递归展开。模型、程序审计、提交时范围复验、回读及当前资格使用同一版本化范围描述。新策略支持普通 Update 和内容 Review；旧策略与其他操作不改解释。
+
+首次较广测试暴露两类问题：新范围遗漏了支撑目标 Evidence 的 Observation，已补齐非 Claim 上游支持；默认切换后，原有邻居更新资格复用依赖“新审阅覆盖原范围”的条件不再总成立。因此撤回默认切换，保留显式试验策略。当前范围不同会拒绝资格复用，保持失效；未用扩大材料、伪造邻居完整批准或自动循环审阅来掩盖这个缺口。默认启用前还须完成该复用边界验收。这次不是默认流程全面上线。
+
+最终较广隔离回归302 passed；另外新增“不同邻居范围不能静默恢复旧目标资格”的独立反例1 passed，两者测试不重复。覆盖跨讲道直接邻居、一跳停止、目标完整证据链、非 Claim 上游支持、目标证据跨讲道拒绝、共享 owner 受损回滚、审阅期间新增目标／证据支持关系拒绝提交、邻居新增第二跳不使目标失效、有内容写入的晚项回滚及丢失提交回复恢复、全部异议仍交 GPT 处理。所有模型为合成返回，不称真实内容审阅。旧契约资格复用回归继续通过。
+
+使用两条已完成英文称号目标的原始保存材料进行离线重建：2016 从654项／原实际请求827125 bytes减至71项／新请求编码163333 bytes；2021 从36项／131351 bytes减至11项／102247 bytes。2016保留目标与一个直接邻居、Evidence4、Position1、Observation3、非 Claim关系6、Question6、SourceFragment47、讲道1及一跳Claim关系1。Question片段是目标直接问答语境，并非邻居论据。原完整 source payload 逐对象相等，所有带入记录原样保持。初版只计62项遗漏Observation支持，不能当最终结果；`verified/` 才是补齐后的最终包。旧请求字节从实际 reservation 读取，新请求为当前 adapter 离线编码测量，未发送。
+
+证据根 `claim-management-435/direct-neighbour-scope-20261016-v1/` 保存两版测量脚本、原始离线结果及 `verified/summary.json`、两个精确 packet 与 measurement；`verify-current.py`／`verified/current-records.json` 独立读取真实数据库确认93条登记 Claim revision／SHA均不变，51条当前资格全部保留。此次没有新 action 登记、模型调用、业务内容写入或已完成目标重审。SQL事务读取仍保留原完整范围（2016共1413项）；本次只证明模型审阅范围缩小，不称数据库读取优化已完成。
+
+设计第5.4节列明新范围规则、版本边界与默认启用前待办。文档检查只有另一个 notes-to-sermon 项目的既有附录锚点失败，git diff --check通过。#435／PR#437继续为未完成draft；25个旧周边对象仍待处理，无合并或部署。

@@ -21,10 +21,15 @@ LINK_SCHEMA='wang_owner_sql_link_correction_v2'
 def claim_management_review_packet(materials, candidate):
     from backend.pipeline.claim_management import audit_keys, Request, operation_questions, model_packet, review_findings
     from backend.pipeline.claim_model_output import review_packet
-    return review_packet({**model_packet(materials), 'unresolved': review_findings(materials['request']['action_id'], materials['unresolved'], candidate),
+    packet = review_packet({**model_packet(materials), 'unresolved': review_findings(materials['request']['action_id'], materials['unresolved'], candidate),
             'candidate': candidate.model_dump(mode='json'), 'candidate_sha256': candidate.digest,
             'denominator': audit_keys(Request.model_validate(materials['unit_request']), materials['before'], candidate),
             'required_questions': operation_questions(materials['original_goal'], candidate)})
+    from backend.pipeline import claim_direct_scope as direct
+    request = Request.model_validate(materials['unit_request'])
+    if direct.enabled(request):
+        packet['claim_scope'] = direct.scope(request, materials['before'], candidate)
+    return packet
 
 
 def claim_source_transition_context(store, request, before):
@@ -362,6 +367,10 @@ def validate_claim_audit(report, materials, candidate, *, historical=False):
         raise ValueError('independent audit full physical own source projection differs')
     expected_before = {sid: {k: {'text': p['text']} for k, p in v['before']['paragraphs'].items()}
                        for sid, v in sources.items() if v.get('before')}
+    from backend.pipeline.claim_direct_scope import enabled as direct_scope_enabled, scope as direct_scope
+    scope_request = cm.Request.model_validate(materials['unit_request'])
+    if direct_scope_enabled(scope_request) and packet.get('claim_scope') != direct_scope(scope_request, materials['before'], candidate):
+        raise ValueError('independent audit direct-neighbour scope drift')
     if 'human_source_decisions' in materials:
         expected_human = {sid: v.get('human_source_decisions', []) for sid, v in sources.items()}
         if packet.get('human_source_decisions') != expected_human:
@@ -536,6 +545,9 @@ def execute_claim_management(store, request, *, root, ports):
                         if request.operation == 'Create':
                             unit_keys.update(k for k in before if content.split_key(k)[0] in cm.CLAIM_COLLECTIONS)
                         source_ids = {content.split_key(k)[1] for k in unit_keys if k.startswith('source_documents/')}
+                        from backend.pipeline.claim_direct_scope import enabled as direct_scope_enabled, scope as direct_scope
+                        if direct_scope_enabled(request):
+                            source_ids = set(direct_scope(unit_request, before)['source_ids'])
                         source_ids.update(p.source_id for p in request.creation_permissions)
                         unit_keys.update(content.key('source_documents',sid) for sid in source_ids)
                         unit_keys = {k for k in unit_keys if not k.startswith('source_documents/') or content.split_key(k)[1] in source_ids}
@@ -594,13 +606,14 @@ def execute_claim_management(store, request, *, root, ports):
                                 from backend.pipeline.claim_human_source import assert_current
                                 assert_current(cursor, materials['unit_request']['source_bindings'], materials['human_source_decisions'])
                             observed = store._assert_transaction_read_pins(cursor, pins(records))
-                            if enabled(request):
+                            from backend.pipeline.claim_direct_scope import enabled as direct_scope_enabled
+                            if enabled(request) or direct_scope_enabled(request):
                                 # Keep every transaction pin. Only actual
                                 # content roots expand the semantic audit.
                                 audited = {content.split_key(k) for k in materials['before']}
                                 scope_pins = {k: v for k, v in pins(records).items() if k in audited}
                                 store._assert_claim_management_scope(cursor, scope_pins,
-                                    records={k: v for k, v in observed.items() if k in audited})
+                                    records={k: v for k, v in observed.items() if k in audited}, request=materials['unit_request'])
                     before_call = getattr(ports, 'before_claim_model_call', getattr(ports, 'before_model_call', lambda stage: None))
                     transport = SimpleNamespace(before_model_call=before_call,
                         model_call_reserved=lambda role, intent: store.begin_claim_management_call(
@@ -682,6 +695,9 @@ def execute_claim_management(store, request, *, root, ports):
                             'required_questions': cm.operation_questions(materials['original_goal'], candidate),
                             'response_schema': materials['audit_contract']['response_schema'],
                             'audit_contract': materials['audit_contract'], 'budget': materials['policy']['budget']}
+                        from backend.pipeline.claim_direct_scope import enabled as direct_scope_enabled, scope as direct_scope
+                        if direct_scope_enabled(request):
+                            audit_input['claim_scope'] = direct_scope(cm.Request.model_validate(materials['unit_request']), materials['before'], candidate)
                         if 'human_source_decisions' in materials:
                             audit_input['human_source_decisions'] = materials['human_source_decisions']
                         if enabled(request):

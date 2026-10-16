@@ -486,6 +486,10 @@ def commit_package(store, run_id, *, package, approval, authorization, backup, s
         if 'human_source_decisions' in material:
             evidence['claim_management_scope'].update(source_ids=sorted(material['unit_request']['source_bindings']),
                 human_source_decisions=material['human_source_decisions'])
+        from backend.pipeline.claim_direct_scope import enabled as direct_scope_enabled
+        if direct_scope_enabled(material['unit_request']):
+            evidence['claim_management_scope'].update(claim_scope_request=material['unit_request'],
+                audit_record_keys=sorted(material['before']))
         from backend.pipeline.claim_joint_update import CONTRACT
         if material['original_goal'].get('joint_update_contract') == CONTRACT:
             evidence['claim_management_scope'].update(joint_update_contract=CONTRACT,

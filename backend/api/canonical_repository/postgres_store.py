@@ -3839,7 +3839,7 @@ class PostgresKnowledgeStore:
                         assert_current(cursor, child['materials']['unit_request']['source_bindings'], child['materials']['human_source_decisions'])
                     applicable = current_pins(self, cursor, child)
                     current = self._assert_transaction_read_pins(cursor, applicable)
-                    self._assert_claim_management_scope(cursor, applicable, records=current)
+                    self._assert_claim_management_scope(cursor, applicable, records=current, request=child['materials']['unit_request'])
                     observed.update({col + '/' + oid: {**state, 'retired': state['retired_at'] is not None}
                                      for (col, oid), state in current.items()})
                 if not report_only:
@@ -3898,11 +3898,17 @@ class PostgresKnowledgeStore:
                          (canonical_json(value), action_run_id))
         return value['result']
 
-    def _assert_claim_management_scope(self, cursor, read_pins, *, records=None):
+    def _assert_claim_management_scope(self, cursor, read_pins, *, records=None, request=None):
         """New shared owners/relations must not hide behind unchanged row pins."""
         from backend.pipeline.claim_management import CLAIM_COLLECTIONS
         if records is None:
             records = self._assert_transaction_read_pins(cursor, read_pins)
+        if request is not None:
+            from backend.pipeline.claim_direct_scope import enabled, assert_current
+            from backend.pipeline.claim_management import Request
+            request = Request.model_validate(request)
+            if enabled(request):
+                return assert_current(self, cursor, request, records)
         payloads = {col + '/' + oid: state['payload'] for (col, oid), state in records.items()}
         keys = {key for key in read_pins if key[0] in CLAIM_COLLECTIONS}
         for col, oid in self._claim_reference_consumers(cursor, keys):
@@ -3957,7 +3963,7 @@ class PostgresKnowledgeStore:
                         for bound in [*revalidation['source_bindings'].values(), revalidation['impact_audit'],revalidation['content_audit']]:
                             check_binding(bound)
                         records = self._assert_transaction_read_pins(cursor, decoded_pins(revalidation['current_pins']))
-                        self._assert_claim_management_scope(cursor, decoded_pins(revalidation['current_pins']), records=records)
+                        self._assert_claim_management_scope(cursor, decoded_pins(revalidation['current_pins']), records=records, request=value['materials']['unit_request'])
                     except (ValueError, ChangeSetConflict):
                         return {'ready': False, 'reason': 'source_revalidation_drift', 'run_id': rid}
                     state = records.get(('claims', claim_id))
@@ -3985,7 +3991,7 @@ class PostgresKnowledgeStore:
                             return {'ready': False, 'reason': 'human_source_decisions_changed', 'run_id': rid}
                     applicable = current_pins(self, cursor, value)
                     records = self._assert_transaction_read_pins(cursor, applicable)
-                    self._assert_claim_management_scope(cursor, applicable, records=records)
+                    self._assert_claim_management_scope(cursor, applicable, records=records, request=value['materials']['unit_request'])
                 except (ValueError, ChangeSetConflict):
                     continue
                 state = records.get(('claims', claim_id))
@@ -7536,11 +7542,11 @@ class PostgresKnowledgeStore:
                         if 'human_source_decisions' in scope:
                             from backend.pipeline.claim_human_source import assert_current
                             assert_current(cursor, scope['source_ids'], scope['human_source_decisions'])
-                        if scope.get('joint_update_contract') == 'wang_claim_joint_update_v1':
+                        if scope.get('joint_update_contract') == 'wang_claim_joint_update_v1' or scope.get('claim_scope_request'):
                             audited = {tuple(k.split('/', 1)) for k in scope['audit_record_keys']}
                             scope_pins = {k: v for k, v in transaction_context.read_pins.items() if k in audited}
                             self._assert_claim_management_scope(cursor, scope_pins,
-                                records={k: v for k, v in transaction_before.items() if k in audited})
+                                records={k: v for k, v in transaction_before.items() if k in audited}, request=scope.get('claim_scope_request'))
                         affected=self._affected_cvp_context(conn,[tuple(k) for k in scope['consumer_roots']])
                         if not set(affected)<=set(transaction_context.read_pins):
                             raise ChangeSetConflict('transaction omitted a current affected consumer')
