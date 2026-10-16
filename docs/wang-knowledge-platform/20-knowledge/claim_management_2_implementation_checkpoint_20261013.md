@@ -797,3 +797,14 @@ Restore 单元完成 GPT一次、Opus一次、共同事务及程序回读，7项
 在实现冻结于f6f6a918时，独立verifier复验精确raw／候选／Opus／readback绑定、完整262对象、9处历史前后像及两项实际恢复。四个本轮目标均当前合格；原失败动作结果与调用保留。全部90条检查发现原第十章两个联合单元共4条旧资格失效：关联内容与依赖范围确已变化，不能只因正文不改就强行沿用。原先其他资格保持。精确报告在 `chapter10-restore-and-cleanup/verification.json`，其中4条损失明确记录，不声称此刻固定12条全部当前。
 
 准备对这4条作两个明确的只读联合Update，保持每组原目标分母，实际当前闭包为242对象、来源仍完整，两个Opus请求无损预检均309,651 bytes，不再修改内容。另补强Restore退出的机械反例：原logical supersession必须明确restore，retain不能因SQL原来active而冒充完成；最终current回读必须确实无superseded／superseded_by／hold。实际已完成的Restore符合更严格条件，保留f6f6a918下已验证的历史证据，不重写raw、材料或重复模型。
+
+
+## 2026-10-16 本轮逐项清理最终验收完成
+
+第十章原四目标的两个只读联合Update并行完成，各用一次Opus、零GPT、零内容写入；明确审阅当前完整242对象及全部来源，均无新／持续异议，程序回读通过。原两组旧Claim的statement、来源及版本保持；当前资格从新正式目标审阅取得，不强行沿用结构变更前的旧结论。
+
+最终独立检查：固定12条全部当前合格；另外登记的5条全部当前合格；原5个周边对象的7项异议全部解决，并恢复2项原有原则、维护2项Evidence归属。实际第十章9处后像、原理恢复状态及完整262对象再次核对无漂移；90条登记Claim中49条当前合格，未丢失此前任何当前资格。49是这份原登记清单的当前资格数，不表示另外41条都属于本轮待办。本轮新增维护的4个第十章目标另有明确当前审阅资格。
+
+最终证据在 `remaining-follow-up-items-20261016-v1/final-verification.json`、`final-work-list.json`；本轮待办清空。`verification-code-archive.json`保存实际运行脚本的逐字节相同永久副本，原报告绑定不改写。`execution-summary.json`统计全部10个实际动作（含保留失败）共GPT7、Opus11、Gemini0；所有返回原答保留，历史started槽不伪造为完成或清零。没有整库备份、来源正文修改、CVP内容修改、合并或部署。
+
+最后退出条件／执行／联合操作回归128 passed（含恢复专项15例）；较广回归281 passed、35 category-specific saved-failure例跳过，不与前数重复相加。文档检查仍仅有另一个notes-to-sermon项目的既有缺失附录锚点。最终结果包含当前资格与操作完成的核实，不只凭单轮审阅通过。
