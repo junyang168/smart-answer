@@ -466,3 +466,22 @@ action 为 `435-joint-update-divinity-summary-two-20261015-v1`，唯一 round �
 本次没有应用代码、prompt、policy、前端或依赖变更，未重复上一轮已通过的后端回归。文档检查仍仅有另一项目既有缺失锚点，git diff --check 通过。只确认本组与实际核验的当前资格，不宣称整批完成；PR #437 继续 draft，未合并、部署或调用 Fable。
 
 补充只读核对本篇 P10 全部十条（包括此次依赖闭包外的 CL001、CL002、CL003），除尚未处理的 CL004 外，九条均当前 ready；没有新模型调用或内容写入。完整资格保存为同根 `lecture-current-qualifications.json`，脚本为 `lecture-qualification-check.py`。这里只报告该篇十条，不将它当作整个「人子」批次的剩余数量。
+
+
+## 2026-10-15 第六／七组双目标并行执行
+
+用户同意下一步两组、每组两条，随后询问「这两组并行跑吗」。在干净提交 `c8f0a66` 上，先只读筛选尚未完成且未连接 CVP 的人子 Claims。部分候选在完整依赖读取时超过现有 5 秒预算，保留拒绝与只读诊断，没有裁剪依赖、扩大上限或调用模型来绕过。最终四条均无当前资格、无保护 hold，两个范围没有读写交叉：第一组来自《2016 NYSC 專題：馬太福音釋經（五）3》，目标 `DK-f35be4755f9b-P01-CL001`、`DK-f35be4755f9b-P01-CL015`；第二组为《16 章 - 彌賽亞，捨己》的 `DK-72483dc200ad-P04-CL015` 与《S 211205 多2-3靠恩典活》的 `DK-07e99f606211a0a4a17a-P04-CL006`。第二组跨两份来源，完整自身来源分别绑定，不把同主题当作共同论证。
+
+两组各自使用普通联合 v2、容量 2、原调用预算与必做 Evidence 清单；仍是两个独立 action，每个 action 的两条目标共同审阅与完成。预检也保留每组内部自然独立范围的分析，没有人为添加关系来制造共享依赖。协调进程持有既有 maintenance 与 registry 锁，核对两组精确预检 pins 及计划写集与对方读取范围的交集为空后，启动两个子进程；子进程核 parent PID、脚本绑定和实现提交，继续使用既有 runner、调用账本和短 SQL 事务，没有增加调度器或修改应用代码。
+
+第一组 action 为 `435-joint-update-two-groups-20261015-v1-2016`，唯一 round 为 `CMR-4fa9dc6488137020223f4ac209beb6f80ddd4468b2b252abe29f9750e9471135`。完整范围 14 项，Opus 首轮请求 109,209 bytes，14 项 verdict 全通过，无 findings；两目标全部 retain、revision 3，分别保持 SHA `6a1dea4d7b4eec731d1328d9d205daffc079a83cafe3b8e5f185951bc21e58fb` 与 `a58720162f7a2cca5f351a6a907c20030f485a283107e5cd6383fdfba7370a69`。
+
+第二组 action 为 `435-joint-update-two-groups-20261015-v1-coming-title`，唯一 round 为 `CMR-640c43be939fc396fab5d27672008467878b6575492adab2ff1827d080502054`。完整范围 20 项，Opus 首轮请求 151,216 bytes，20 项 verdict 全通过，无 findings。两目标全部 retain；DK-72483dc200ad-P04-CL015 保持 revision 3／SHA `6d1ad02a82a71d796fa4481b4329f37f696df070276f4e20aa18c65b9b7f890f`，DK-07e99f606211a0a4a17a-P04-CL006 保持 revision 1／SHA `302a1195d6516beb42cde22d7d42c2786cce987d01b45bf2d796affd214df2fa`。
+
+两个 action 均 checkpoint=audited、outcome=completed，四目标当前 ready，明确为 opus_and_program_readback、independent_audit_complete=false。合计 Opus 两次，GPT／Gemini／新增启动诊断／整库备份均为零；没有内容 ChangeSet 或业务写入。保存的调用 reservation 与 provider completion 时间区间重叠，确认两组实际并行，不是仅将顺序结果称作并行。
+
+两次原 action 完成重入与各自独立新进程回读通过，核实全部 34 项 SQL payload／revision／SHA、三份物理来源及 metadata 保持，未升级旁观资格，未增加模型调用。另行只读核对上一篇 P10 十条：原有九条均仍 ready，CL004 仍未处理；这些旧目标不在本次写集。此次新范围没有已取得资格的旁观 Claim，不将其称为再次验证新内容变化后的自动资格保留。
+
+证据根为 `claim-management-435/joint-update-two-groups-20261015-v1/`：`parallel-plan.json`、`parallel-admission.json`、`parallel-result.json`、`independent-parallel-verification.json`，两组子目录各保存原授权／预检／输入／raw／intent、`joint-update-result.json`、`independent-current-verification.json` 和脚本；`lecture-current-qualifications.json` 记录旧篇资格，selection-diagnostics 保留本次候选读取结果。第一组结果文件 SHA 为 `39aa498a6f9d6bba2ec1562164b8bfcce609a6f9b4c15b0b9b266c28f911e0ed`；第二组结果与独立核验的精确文件绑定见汇总独立核验文件。
+
+本次未改代码／prompt／policy／前端／依赖，未重复既有已通过的回归；文档检查仍仅有另一项目既有缺失锚点，git diff --check 通过。没有调用 Fable、合并、部署或宣称整个「人子」批次完成。
