@@ -54,7 +54,20 @@ def object_json(text):
 def candidate(raw, materials):
     """Program expands implicit retains; normal permission/source checks follow."""
     if not enabled(materials):
-        return cm.normalize_candidate(raw, materials['sources'])
+        recovery = materials.get('candidate_identity_recovery')
+        if not recovery:
+            return cm.normalize_candidate(raw, materials['sources'])
+        corrected, mappings = retained_candidate_projection(raw, materials['before'], materials['sources'])
+        if recovery != {'rule':'retained_fragment_exact_citation_v1',
+                'raw_response_sha256':cm.sha256_json(raw), 'before_sha256':cm.sha256_json(materials['before']),
+                'corrections':mappings}:
+            raise ValueError('candidate identity recovery proof drift')
+        result, receipt = cm.normalize_candidate(corrected.model_dump(mode='json'), materials['sources'])
+        receipt['raw_candidate_sha256'] = cm.Candidate.model_validate(cm.decode_candidate(raw)).digest
+        receipt['identity_recovery'] = recovery
+        return result, receipt
+    if materials.get('candidate_identity_recovery'):
+        raise ValueError('legacy identity recovery cannot upgrade the model output contract')
     wire = Changes.model_validate(raw)
     request = cm.Request.model_validate(materials['unit_request'])
     if request.operation != 'Update' or request.creation_permissions or materials['replacements']:
@@ -125,3 +138,79 @@ def review_packet(packet):
         'complete_review=true explicitly approves all records without reported/persistent findings. '
         'The program binds the candidate hash and question coverage; do not echo hashes, verdict lists or question names.')
     return packet
+
+
+def retained_fragment_identity(raw, before):
+    """Repair only a retained fragment key uniquely identified by its citation.
+
+    No text matching heuristics, suffix guessing, new dispositions or semantic
+    edits. The same complete source/paragraph/excerpt must identify ONE frozen
+    fragment globally, and the substitution must restore exact-once coverage.
+    """
+    original = cm.Candidate.model_validate(cm.decode_candidate(raw))
+    keys = [d.record_key for d in original.dispositions]
+    if len(keys) != len(set(keys)):
+        raise ValueError('identity repair refuses duplicate dispositions')
+    required = set(before) | set(cm.source.index(original.records))
+    missing, extra = required - set(keys), set(keys) - required
+    if not missing or len(missing) != len(extra):
+        raise ValueError('identity repair requires an exact missing/extra substitution')
+    corrected = original.model_copy(deep=True)
+    mappings = []
+    used = set()
+    for disposition in corrected.dispositions:
+        key = disposition.record_key
+        if key not in extra:
+            continue
+        if not key.startswith('source_fragments/') or disposition.action != 'retain' or len(disposition.citations) != 1:
+            raise ValueError('identity repair supports only single-citation retained source fragments')
+        citation = disposition.citations[0]
+        if citation.source_epoch != 'current':
+            raise ValueError('identity repair requires a current-source citation')
+        matches = [k for k,v in before.items() if k.startswith('source_fragments/') and not v['retired']
+            and v['payload'].get('source_id') == citation.source_id
+            and str(v['payload'].get('paragraph_key')) == citation.paragraph_key
+            and v['payload'].get('verbatim_excerpt') == citation.exact_quote]
+        if len(matches) != 1 or matches[0] not in missing or matches[0] in used:
+            raise ValueError('identity repair requires a unique frozen source/paragraph/excerpt match')
+        # The erroneous key must not also name a record, finding, relation or
+        # another semantic decision in the reply.
+        other = original.model_dump(mode='json')
+        other['dispositions'] = [d for d in other['dispositions'] if d['record_key'] != key]
+        if key in json.dumps(other, ensure_ascii=False):
+            raise ValueError('identity repair cannot change semantic references')
+        target = matches[0]; used.add(target)
+        mappings.append({'before':key, 'after':target, 'citation':citation.model_dump(mode='json')})
+        disposition.record_key = target
+    if used != missing or {d.record_key for d in corrected.dispositions} != required:
+        raise ValueError('identity repair did not restore the complete exact-once denominator')
+    return corrected, mappings
+
+
+def retained_candidate_projection(raw, before, sources):
+    """Restore copied annotations only; source wording and decisions stay fixed."""
+    result, corrections = retained_fragment_identity(raw, before)
+    from opencc import OpenCC
+    simplified, traditional = OpenCC('t2s'), OpenCC('s2t')
+    for disposition in result.dispositions:
+        for index, citation in enumerate(disposition.citations):
+            try:
+                cm.validate_citations([citation], sources)
+                continue
+            except ValueError:
+                if disposition.action != 'retain' or citation.source_epoch != 'current':
+                    raise
+            text = sources.get(citation.source_id, {}).get('paragraphs', {}).get(citation.paragraph_key, {}).get('text', '')
+            quote = citation.exact_quote
+            simp, trad = simplified.convert(quote), traditional.convert(quote)
+            matches = [text[i:i+len(quote)] for i in range(len(text)-len(quote)+1)
+                if simplified.convert(text[i:i+len(quote)]) == simp
+                and traditional.convert(text[i:i+len(quote)]) == trad]
+            if len(matches) != 1:
+                raise ValueError('retained quote is not a unique bidirectional script-only source match')
+            exact = matches[0]
+            corrections.append({'record_key':disposition.record_key, 'field':f'citations[{index}].exact_quote',
+                'before':quote, 'after':exact, 'rule':'exact_unique_bidirectional_script_v1'})
+            citation.exact_quote = exact
+            cm.validate_citations([citation], sources)
+    return result, corrections

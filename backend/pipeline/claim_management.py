@@ -1051,7 +1051,7 @@ def goal_packet(goal):
 
 def model_packet(materials):
     packet = {k: deepcopy(v) for k, v in materials.items()
-              if k not in {'transaction_before', 'source_archives', 'audit_contract'}}
+              if k not in {'transaction_before', 'source_archives', 'audit_contract', 'candidate_identity_recovery'}}
     packet['original_goal'] = goal_packet(materials['original_goal'])
     packet['action_obligations'] = {'operation': materials['request']['operation'],
         'target_keys': list(materials['request']['target_keys']),

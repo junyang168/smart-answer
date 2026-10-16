@@ -6,6 +6,7 @@ No new call, semantic answer or content approval is generated here.
 from copy import deepcopy
 from pathlib import Path
 import json
+import os
 
 from backend.pipeline import claim_management as cm
 from backend.pipeline.cvp_sql_actions import validate_claim_stage_receipt
@@ -121,3 +122,100 @@ def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
             cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,status='running',finished_at=NULL,heartbeat_at=now() WHERE run_id=%s",
                 (canonical_json(metadata),rid))
     return str(root)
+
+
+CANDIDATE_IDENTITY_VERSION = 'wang_claim_candidate_identity_recovery_v1'
+
+
+def recover_returned_candidate(store, round_id, *, authorization):
+    """Bind one proved mechanical correction; reuse the SAME spent GPT answer.
+
+    Keeps the original request, prompt, packet, source and call slots. Only the
+    program interpretation of a uniquely cited retain key changes. The pending
+    independent review must still approve the complete corrected candidate.
+    """
+    from backend.pipeline.claim_model_output import retained_candidate_projection, candidate as expand_candidate
+    from backend.pipeline.cvp_sql_actions import validate_claim_stage
+    check_binding(authorization)
+    direction = json.loads(Path(authorization['path']).read_text())
+    if (direction.get('schema_version') != CANDIDATE_IDENTITY_VERSION or direction.get('round_id') != round_id
+            or direction.get('authorized_by') != 'owner' or not direction.get('authorization_quote')
+            or direction.get('human_content_approval') is not False):
+        raise ValueError('exact candidate identity recovery direction required')
+    with store.connect() as conn, conn.cursor() as cursor:
+        cursor.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))', (POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
+        value = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE', (round_id,)).fetchone()[0]
+        history = value.get('engineering_candidate_recoveries', [])
+        if history and history[-1]['authorization'] == authorization:
+            cm.require_current_implementation(history[-1]['current_contract'])
+            return history[-1]['recovery_root']
+        parent = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE', (value['parent_run_id'],)).fetchone()[0]
+        if (sha256_json(value) != direction.get('prior_metadata_sha256')
+                or sha256_json(parent) != direction.get('prior_parent_sha256')
+                or value.get('kind') != 'claim_management_round' or value['checkpoint'] != 'prepared'
+                or value.get('stage_results') or value.get('candidate') or value.get('change_set_ids')
+                or parent.get('continued_by') or len(parent['latest_rounds']) != 1
+                or parent['latest_rounds'].get(value['unit_id']) != round_id
+                or parent['result'].get('reason') != 'engineering_required'):
+            raise ValueError('identity recovery requires the exact unaccepted, uncommitted latest proposal')
+        slot = parent['call_reservations'].get(round_id + ':gpt', {})
+        if slot.get('state') != 'started' or parent['call_reservations'].get(round_id + ':opus', {}).get('state') != 'planned':
+            raise ValueError('identity recovery needs a returned original proposal and its unused independent review')
+        material = value['materials']; policy = cm.Policy.model_validate(material['policy'])
+        if policy.model_output_contract or material['request']['operation'] != 'Update':
+            raise ValueError('identity recovery is for a legacy existing Update, not a new output contract')
+        old_root = Path(value.get('recovery_root', Path(parent['execution_root']) / round_id))
+        intent = body(read(old_root / 'gpt.reservation.json'))
+        if intent != slot.get('intent') or sha256_json(intent) != slot.get('intent_sha256'):
+            raise ValueError('original GPT reservation drift')
+        cm.load_authority(cm.Request.model_validate(material['request']),
+            source_documents=cm.source_documents(material['before']), selected_source_ids=material['unit_request']['source_bindings'])
+        store._assert_transaction_read_pins(cursor, pins({cm.source.split_key(k):v for k,v in material['transaction_before'].items()}))
+        raw = validate_claim_stage(old_root, 'gpt', policy, cm.model_packet(material))
+        if direction.get('original_raw') != binding(old_root / 'gpt.raw.json'):
+            raise ValueError('identity recovery direction must bind the exact returned raw')
+        corrected, mappings = retained_candidate_projection(raw['response'], material['before'], material['sources'])
+        current = cm.audit_contract(old_root / 'recovery-contract', policy)
+        for path in ['backend/pipeline/prompts/claim_management_'+role+'_v2.md' for role in ('proposal','review')] + [
+                'backend/pipeline/prompts/claim_management_joint_update_v1.md']:
+            if material['audit_contract']['implementation'].get(path) != current['implementation'][path]:
+                raise ValueError('identity recovery cannot change original model instructions')
+        root = old_root / ('engineering-candidate-' + sha256_json({'authorization':authorization,'contract':current})[:20])
+        root.mkdir(parents=True, exist_ok=True)
+        for name in ['gpt.raw.json', 'gpt.reservation.json', 'gpt.packet.json']:
+            target = root / name
+            payload = (old_root / name).read_bytes()
+            if target.exists() and target.read_bytes() != payload:
+                raise ValueError('identity recovery cannot overwrite original evidence')
+            if not target.exists():
+                with target.open('xb') as stream:
+                    stream.write(payload); stream.flush()
+                    os.fsync(stream.fileno())
+        material = deepcopy(material)
+        material['audit_contract'] = current
+        material['candidate_identity_recovery'] = {'rule':'retained_fragment_exact_citation_v1',
+            'raw_response_sha256':sha256_json(raw['response']), 'before_sha256':sha256_json(material['before']),
+            'corrections':mappings}
+        if cm.model_packet(material) != cm.model_packet(value['materials']):
+            raise ValueError('identity recovery changed the original complete GPT input')
+        candidate, normalization = expand_candidate(raw['response'], material)
+        cm.validate_candidate(cm.Request.model_validate(material['unit_request']), material['before'], candidate,
+            material['sources'], created_keys=material['created_keys'], original_replacements=material['replacements'])
+        if policy.all_findings_to_gpt:
+            cm.validate_proposer_resolutions(candidate, material['unresolved'], material['sources'],
+                request=cm.Request.model_validate(material['unit_request']))
+        write(root / 'materials.json', material)
+        write(root / 'candidate.json', candidate.model_dump(mode='json'))
+        write(root / 'candidate-normalization.json', normalization)
+        record = {'authorization':authorization, 'original_round':deepcopy(value), 'original_parent':deepcopy(parent),
+            'original_raw':binding(old_root / 'gpt.raw.json'), 'current_contract':current,
+            'recovery_root':str(root), 'identity_corrections':mappings, 'model_inputs_unchanged':True,
+            'model_calls':0, 'call_reservations_unchanged':True, 'human_content_approval':False}
+        write(root / 'engineering-recovery.json', record)
+        value.update(materials=material, recovery_root=str(root), outcome=None,
+                     engineering_candidate_recoveries=history + [record])
+        parent.update(audit_contract=current, result={'status':'running'})
+        for rid, metadata in [(round_id,value),(value['parent_run_id'],parent)]:
+            cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,status='running',finished_at=NULL,heartbeat_at=now() WHERE run_id=%s",
+                (canonical_json(metadata),rid))
+        return str(root)
