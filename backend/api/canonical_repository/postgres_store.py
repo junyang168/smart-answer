@@ -3415,6 +3415,7 @@ class PostgresKnowledgeStore:
                         and set(finding_ids) == set(prior.get('context_findings', {})) | set(prior.get('findings', {})))
                     if (not prior or prior.get('kind') != 'claim_management_action'
                             or (prior['result']['status'] != 'completed' and not scope_repair and not restore_repair) or prior.get('context_maintained_by')
+                            or any(fid in prior.get('context_maintenance_assignments', {}) for fid in finding_ids)
                             or not finding_ids or len(finding_ids) != len(set(finding_ids))
                             or prior['request']['source_bindings'] != request.model_dump(mode='json')['source_bindings']):
                         raise ChangeSetConflict('saved context maintenance has stale/unbound or already assigned audit history')
@@ -3433,7 +3434,16 @@ class PostgresKnowledgeStore:
                         if not audited or any(before.get(key) != state for state in audited):
                             raise ChangeSetConflict('saved context object changed since its bound audit')
                         imported[fid] = finding
-                    prior['context_maintained_by'] = run_id
+                    assignments = {**prior.get('context_maintenance_assignments', {}),
+                                   **{fid: run_id for fid in finding_ids}}
+                    prior['context_maintenance_assignments'] = assignments
+                    available = set(prior.get('context_findings', {}))
+                    if scope_repair or restore_repair:
+                        available.update(prior.get('findings', {}))
+                    if available <= set(assignments):
+                        # Legacy aggregate means every saved issue has an owner,
+                        # not that one partial action resolved the whole review.
+                        prior['context_maintained_by'] = run_id
                     cursor.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb WHERE run_id=%s',
                         (canonical_json(prior), previous_id))
                 finding_targets = {f['target_key'] for f in imported.values()}

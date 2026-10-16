@@ -92,3 +92,74 @@ def test_readonly_permission_refusal_can_handoff_all_findings_to_new_exact_scope
         assert store.claim_management_qualification('C')['ready']
         prior=store.get_cvp_group(parent['run_id']);assert prior['call_reservations']==parent['call_reservations']
         assert prior['result']==parent['result']
+
+
+@pytest.fixture
+def two_context_findings(action):
+    from backend.tests.test_claim_management_execution_postgres import seed_claims
+    store,_,_,_,root,_=action;seed_claims(store,['A','C','D'])
+    store.apply_plan(store.plan_package({'package_id':'two-neighbours','claim_relations':[
+        {'claim_relation_id':'R'+cid,'from_id':'A','to_id':cid,'relation_type':'supports'} for cid in ['C','D']]}))
+    old,output=operation_request(action,'Update',['A'])
+    policy=cm.Policy.model_validate_json((cm.DEFAULT_POLICY.parent/'wang_claim_management_joint_update_v4.json').read_text())
+    authorize(old,policy,root/'partial-old-policy.json')
+    path=Path(old.authorization.path);value=json.loads(path.read_text());value['required_maintenance_keys']=[]
+    path.write_text(json.dumps(value));old.authorization=cm.source.FileBinding.model_validate(binding(path))
+    def resolution(fid):
+        return dict(decision(fid),disposition='persistent',affected_target_keys=[],affected_write_keys=[],impact_reason='independent readonly context')
+    def opus(packet):
+        if packet['unresolved']:
+            return {'complete_review':True,'findings':[],'prior_findings':[resolution(fid) for fid in packet['unresolved']]}
+        return {'complete_review':True,'prior_findings':[],'findings':[
+            {'target_key':'claims/'+cid,'component':'statement','category':'content','reason':'synthetic wording problem',
+             'acceptance_condition':'correct wording','human_question':None,'citations':decision('unused')['citations'],
+             'affected_target_keys':[],'affected_write_keys':[],'impact_reason':'independent readonly context'} for cid in ['C','D']]}
+    def proposal(packet):
+        return {'changes':[],'findings':[],'finding_resolutions':[resolution(fid) for fid in packet['unresolved']]}
+    result=execute_claim_management(store,old,root=output,ports=SyntheticPorts(store,root,opus=opus,proposal=proposal))
+    assert result['status']=='completed',result
+    parent=store.get_cvp_group('CMA-'+cm.sha256_json(old.action_id))
+    return action,old,parent
+
+
+def context_request(setup,cid):
+    action,old,parent=setup;root=action[4]
+    request,output=operation_request(action,'Update',[cid])
+    policy=cm.Policy.model_validate_json((cm.DEFAULT_POLICY.parent/'wang_claim_management_joint_update_v4.json').read_text());policy.initial_candidate='proposal'
+    authorize(request,policy,output.with_suffix('.policy.json'))
+    selected={fid:f for fid,f in parent['context_findings'].items() if f['target_key']=='claims/'+cid}
+    path=Path(request.authorization.path);value=json.loads(path.read_text())
+    value.update(required_maintenance_keys=[],context_review_actions={old.action_id:list(selected)})
+    path.write_text(json.dumps(value));request.authorization=cm.source.FileBinding.model_validate(binding(path))
+    return request,output,selected
+
+
+@pytest.mark.parametrize('reject_second',[False,True])
+def test_partial_context_handoff_preserves_remaining_issues_and_rejects_double_assignment(two_context_findings,reject_second):
+    from backend.api.canonical_repository.postgres_store import ChangeSetConflict
+    action,old,parent=two_context_findings;store=action[0]
+    assigned={}
+    for cid in ['C','C' if reject_second else 'D']:
+        request,output,selected=context_request(two_context_findings,cid)
+        def resolutions(packet):return [dict(decision(fid),disposition='resolved') for fid in packet['unresolved']]
+        def proposal(packet):
+            assert packet['unresolved']==selected
+            return {'changes':[{'record_key':'claims/'+cid,'fields_json':json.dumps({'statement':'甲是假设，不是断言。'}),
+                'reason':'synthetic correction','citations':decision('unused')['citations']}],
+                'findings':[],'finding_resolutions':resolutions(packet)}
+        ports=SyntheticPorts(store,action[4],proposal=proposal,
+            opus=lambda packet:{'complete_review':True,'findings':[],'prior_findings':resolutions(packet)})
+        if assigned and reject_second:
+            before=store.get_cvp_group(parent['run_id'])
+            with pytest.raises(ChangeSetConflict):execute_claim_management(store,request,root=output,ports=ports)
+            assert ports.calls==[] and store.get_cvp_group(parent['run_id'])==before
+            return
+        result=execute_claim_management(store,request,root=output,ports=ports)
+        assert result['status']=='completed',result
+        assigned.update({fid:'CMA-'+cm.sha256_json(request.action_id) for fid in selected})
+        current=store.get_cvp_group(parent['run_id'])
+        assert current['context_maintenance_assignments']==assigned
+        assert current['context_findings']==parent['context_findings']
+        assert current['call_reservations']==parent['call_reservations']
+        if len(assigned)<len(parent['context_findings']):assert not current.get('context_maintained_by')
+        else:assert current['context_maintained_by']=='CMA-'+cm.sha256_json(request.action_id)
