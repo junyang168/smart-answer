@@ -3323,6 +3323,8 @@ class PostgresKnowledgeStore:
                         continuation['prior_findings'].update(peer.get('findings', {}))
                 if extension and not refresh and goal['original_objects'] != prior['original_goal']['original_objects']:
                     raise ChangeSetConflict('owner call extension original content scope drifted')
+                target_baseline = {key:(value['revision'],value['content_sha256'],value['retired'])
+                    for key,value in prior['original_goal']['original_objects'].items() if key in request.target_keys}
                 prior_rounds = sorted({slot['round_id'] for slot in prior['call_reservations'].values()})
                 for (child,) in cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=ANY(%s)',
                         (prior_rounds,)).fetchall():
@@ -3331,6 +3333,13 @@ class PostgresKnowledgeStore:
                         continuation.setdefault('previous_candidates', {})[child['unit_id']] = child['candidate']
                     if refresh:
                         if child['materials']['round_id'] in prior['latest_rounds'].values():
+                            if child['outcome'] == 'completed':
+                                if not child.get('program_readback_complete') or not child.get('opus_approved'):
+                                    raise ChangeSetConflict('qualification refresh requires the completed target readback')
+                                audited = decoded_pins(child['audited_pins'])
+                                if any(cm.source.split_key(key) not in audited for key in request.target_keys):
+                                    raise ChangeSetConflict('qualification refresh completed readback omitted a target')
+                                target_baseline = {key:audited[cm.source.split_key(key)] for key in request.target_keys}
                             if child['outcome'] != 'completed':
                                 if (not continuation.get('read_only_refresh') or child['outcome'] != 'disagreement'
                                         or child.get('change_set_ids')
@@ -3355,7 +3364,7 @@ class PostgresKnowledgeStore:
                         self._assert_transaction_read_pins(cursor, decoded_pins(child['audited_pins']))
                     elif child.get('change_set_ids') or child.get('checkpoint') in {'reviewed','applied','audited'}:
                         raise ChangeSetConflict('engineering input continuation cannot replay a committed or reviewed write')
-                if any(before[key] != prior['original_goal']['original_objects'][key] for key in request.target_keys):
+                if any((before[key]['revision'],before[key]['content_sha256'],before[key]['retired']) != target_baseline[key] for key in request.target_keys):
                     raise ChangeSetConflict('original target changed before its explicit engineering continuation')
                 if prior.get('continued_by'):
                     raise ChangeSetConflict('original Claim action already has a continuation; no budget fork')

@@ -733,3 +733,9 @@ action 为 `435-joint-update-divinity-summary-two-20261015-v1`，唯一 round �
 本次三目标所有保存的关联尝试合计实际调用 GPT 4、Opus 4、Gemini 0，历史调用未清零，没有整库备份。最终第十章 GPT 精简 JSON 为 10,931 bytes，Opus 为 9,705 bytes；2016 GPT 为 6,523 bytes，Opus 为 2,457 bytes。以上均为实际响应，不估计丢失答复的大小。
 
 最终只读 verifier 重验精确 raw／packet／候选来源、全部当前来源、完整 postimage、实际写入历史、各项异议处置、Opus 结论、完成／回读状态及全 90 条当前资格，没有新模型调用或业务写入。证据：`remaining-twelve-20261015-v1/remaining-three-owner-follow-up-20261016-v1/final-verification.json` 及相邻 `final-verifier.py`，各关联执行根保留原意图、答复及失败事实。当前相关回归 268 passed、35 skipped，另已完成资格／恢复回归 126 passed；相关子集不重复相加。文档检查仍仅有 notes-to-sermon 独立项目的既有缺失锚点。未扩展到原十二条外的待处理 Claim，未合并或部署。
+
+## 2026-10-16 逐项清理：已修改目标的资格刷新
+
+负责人授权逐项解决代码分支、五个周边对象及另五条登记事项。首先修正 completed Update 的资格刷新基线：此前无条件比较 original_goal 的目标前像，会误拒上次已经合法修改并回读的目标。现在从该次最新 completed 轮的 audited_pins 取目标提交后版本，要求已通过 Opus／程序回读且包含全部原目标。新动作仍须绑定当前完整事务 SHA、同一来源与原目标，后来再改目标仍拒绝；未提交分歧的只读收束保持原输入约束，不使用未提交候选作基线。
+
+新增隔离 SQL 反例覆盖实际修改目标后刷新成功、后来再改目标、缺目标 pin、未完成回读。新四例与既有 owner 接续共 38 passed，模型为显式合成回复，不冒充正式内容审核；原十二条数据未修改。
