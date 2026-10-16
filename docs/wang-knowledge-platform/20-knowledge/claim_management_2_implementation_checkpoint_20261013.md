@@ -883,3 +883,5 @@ Restore 单元完成 GPT一次、Opus一次、共同事务及程序回读，7项
 程序还在原调用预留上独立保存 returned_rejected 答复标记、原 raw 绑定及拒收原因。原消耗与其余预留不动，不增预算、不批准候选；普通重启返回原暂停。只有通过原输入、意图、wire 与 raw 完整绑定核验的返回才可登记。程序运行中断不当作格式拒收，保存的有效结果仍可正常恢复；原精确工程恢复路径继续使用，失败历史保留。
 
 本轮17个相关测试文件在 backend/.venv 与临时 PostgreSQL 上 **443 passed、35 skipped**；35项是未配置原目录的分类保存失败测试，不声称已执行。定向19项测试含正常共同提交／回读、只读保护、错误目标／关系／邻居／写项 ID、空许可、请求引用编码、未决身份、拒收重复启动零调用、raw篡改拒绝及有效答复中断后正常接续；计数与主回归重叠。文档检查只有另一项目既有缺失附录锚点，git diff --check通过。本轮 bug 验证没有新内容模型调用或业务写入；真实拒收登记与当前数据核验另留运行材料。
+
+本段调用数勘误：随后逐一核对两项 action 的原 raw 和 SQL 调用账本，wording 实际也执行了 Opus 一次，并独立保留两项 source_uncertain；不是只有 GPT 一次。故两项原自动维护合计为 GPT 2次、Opus 2次，共4次，均未写入内容。以上「三次」及 wording 仅 GPT 的表述有误，以此精确账本核对为准。修复提交077db3cf后，method 的原返回已核实并登记 returned_rejected，未改变原预留或预算。逐对象回读确认两项业务写集均为空、全部51项既有当前资格保留、没有新增资格损失；原20项保存异议中6项已认领、14项仍未认领，未隐藏剩余项。材料位于 `claim-management-435/automatic-open-items-20261016-v1/` 的 verification.json、bugfix-returned-rejection-record.json、bugfix-scoped-output-offline.json；这些工程核验不宣称异议已解决。
