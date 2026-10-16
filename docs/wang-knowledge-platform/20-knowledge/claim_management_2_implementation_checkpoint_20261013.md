@@ -756,3 +756,12 @@ action 为 `435-joint-update-divinity-summary-two-20261015-v1`，唯一 round �
 人工答复、六个保存来源疑点及完整来源 SHA 已存于 `remaining-follow-up-items-20261016-v1/2021-human-confirmed-chapter-slip/human-verification.json`。原逐字稿不改；CL004、E007／008／009、OBS002／005 作为新明确 Update 及必要维护范围，交 GPT 提议、Opus 独立审阅。新目标操作将来源绑定的人工事实放入两模型共同来源包，提交时使用相同 load_authority 重验；不把人工核实当内容批准，不复用旧操作预算。
 
 第十章五对象首轮没有业务提交：请求权限遗漏 EvolvingKnowledgeRecord 的 extra 字段 occurrences，另有 superseded 的一般原则需要合法处理。GPT 和 Opus 都保留异议，未越权修改。该失败保留，不作为完成。
+
+
+## 2026-10-16 口误及两条正式目标审阅完成
+
+2021 CL004 的新 Update 完成 GPT 一次、Opus 一次及共同事务／程序回读。实际只改 CL004、E007／E008／E009、OBS002／OBS005 的 scripture_refs 为但以理书7:13–14；六个原疑点均 resolved。独立 verifier 核对完整36对象及逐项历史前后像，只有引用和版本号变化，原稿及逐字引文未改、原操作调用和结果未改；重核90条登记 Claim，没有既有资格丢失。证据在该执行根 `verification.json`。
+
+第8章 P10-CL004 与2023 P05-CL013 分别作为明确目标沿用现有只读 Update 流程，顺序运行 Opus 完整审阅及程序回读，两条均当前合格，零内容写入；不另建旁观资格晋升或复用注册系统。执行根为 `chapter8-explicit-target`、`2023-explicit-target`，同属本次 follow-up 根。
+
+两条旧 AI 抽查标记的资格边界已有7项隔离 SQL 测试通过：新完整目标审阅可替代严格匹配的旧 AI pass＋human_spot_check 标记；真人事件、来源待核、旧复审未通过、错版本、错 Claim、普通 hold 都不得因此获得资格。保留原对象／状态／事件，编辑受保护内容仍被拒绝；不改变历史 CVP 资格。本段不声称两条实际审阅已完成。

@@ -8,6 +8,34 @@ from copy import deepcopy
 from pathlib import Path
 
 
+def legacy_spot_check_replaced(cursor, claim_id, state, value):
+    """A fresh complete target review can replace an old AI sampling request.
+
+    This grants no historical/human approval and never releases write holds.
+    The caller must first verify the new review's current source and row pins.
+    """
+    if (state['payload'].get('review_status') != 'human_review_required'
+            or 'claims/' + claim_id not in value['materials']['original_goal']['target_keys']
+            or value['materials']['request']['operation'] != 'Update'
+            or value.get('outcome') != 'completed' or not value.get('opus_approved')
+            or not value.get('program_readback_complete')):
+        return False
+    events = cursor.execute("""SELECT object_revision,reviewer_kind,decision,artifact
+        FROM wang_knowledge.review_events WHERE collection='claims' AND object_id=%s
+        ORDER BY created_at DESC,review_event_id DESC""", (claim_id,)).fetchall()
+    if not events or any(kind == 'human' for _,kind,_,_ in events):
+        return False
+    revision,kind,decision,artifact = events[0]
+    resolution = (artifact or {}).get('resolution', {})
+    return (revision == state['revision'] and kind == 'ai' and decision == 'human_review_required'
+        and resolution.get('schema_version') == 'wang_legacy_ai_review_reconciliation_v1'
+        and resolution.get('claim_id') == claim_id
+        and resolution.get('approval_status') == 'not_human_approved'
+        and resolution.get('independent_review_decision') == 'pass'
+        and resolution.get('adjudication_status') == 'human_spot_check'
+        and resolution.get('target_review_status') == 'human_review_required')
+
+
 def anchor_pruning(before, after):
     if {k:v for k,v in before.items() if k not in {'revision','occurrences'}} != {k:v for k,v in after.items() if k not in {'revision','occurrences'}}:
         return False

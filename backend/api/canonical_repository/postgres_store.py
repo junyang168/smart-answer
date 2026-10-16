@@ -3928,14 +3928,19 @@ class PostgresKnowledgeStore:
                 except (ValueError, ChangeSetConflict):
                     continue
                 state = records.get(('claims', claim_id))
+                from backend.pipeline.claim_qualification_reuse import legacy_spot_check_replaced
+                replaced_spot_check = bool(state and legacy_spot_check_replaced(cursor, claim_id, state, value))
                 if not state or state['retired_at'] is not None or state['payload'].get('review_status') in {
-                        'human_hold','human_review_required','withheld_unreviewed','rejected','superseded'}:
+                        'human_hold','withheld_unreviewed','rejected','superseded'} or (
+                        state['payload'].get('review_status') == 'human_review_required' and not replaced_spot_check):
                     continue
                 result = {'ready': True, 'run_id': rid, 'revision': state['revision'],
                         'content_sha256': state['content_sha256'], 'audit': proof,
                         'question_scope': value['materials']['original_goal']['required_questions']}
                 if not independent:
                     result.update(validation_kind='opus_and_program_readback', independent_audit_complete=False)
+                if replaced_spot_check:
+                    result['legacy_ai_spot_check_replaced_by_current_review'] = True
                 return result
         reason = ('current_program_readback_required' if any(
             not Policy.model_validate(v['materials']['policy']).independent_audit_required for _,v in rows)
