@@ -1325,10 +1325,13 @@ def continuation_budget(previous, request, policy):
     old = Request.model_validate(previous['request'])
     original = Policy.model_validate(previous['policy'])
     from backend.pipeline.claim_joint_update import CONTRACT, enabled, required_keys
+    authority = json.loads(source.verify_file(request.authorization).read_text())
+    extension = authority.get('owner_call_extension')
+    read_only_refresh = bool(isinstance(extension,dict) and extension.get('basis') == 'qualification_refresh' and not request.permissions)
     if previous['original_goal'].get('joint_update_contract') == CONTRACT and (
             not enabled(request, policy)
             or required_keys(request) != previous['original_goal']['required_maintenance_keys']
-            or request.permissions != old.permissions
+            or (request.permissions != old.permissions and not read_only_refresh)
             or policy.joint_update_max_targets != original.joint_update_max_targets
             or len(previous['original_goal']['units']) != 1):
         raise ValueError('joint Update continuation must retain one complete original unit, required maintenance and authority')
@@ -1338,8 +1341,6 @@ def continuation_budget(previous, request, policy):
             or old.creation_permissions or request.creation_permissions
             or previous.get('created_keys') or previous.get('replacements')):
         raise ValueError('engineering continuation must retain original Update targets and source without structural writes')
-    authority = json.loads(source.verify_file(request.authorization).read_text())
-    extension = authority.get('owner_call_extension')
     extension_basis = extension.get('basis', 'unknown_call') if isinstance(extension, dict) else None
     qualification_refresh = extension_basis == 'qualification_refresh'
     completed_cleanup = previous['result']['status'] == 'completed' and not qualification_refresh
@@ -1349,7 +1350,7 @@ def continuation_budget(previous, request, policy):
             or not permissions or not set(permissions) <= {f['target_key'] for f in previous['context_findings'].values()}
             or set(permissions) & set(request.target_keys)):
         raise ValueError('completed follow-up must address only its saved context issues without rewriting the completed Claims')
-    if not completed_cleanup and any(not fields <= permissions.get(key,set()) for key,fields in old_permissions.items()):
+    if not completed_cleanup and not read_only_refresh and any(not fields <= permissions.get(key,set()) for key,fields in old_permissions.items()):
         raise ValueError('continuation cannot discard original write obligations')
     spent = {role:0 for role in MODELS}
     failures = {}
@@ -1363,7 +1364,10 @@ def continuation_budget(previous, request, policy):
             extension_keys |= {'basis','current_objects_sha256','related_action_metadata_sha256'}
         valid_basis = (extension_basis == 'unknown_call' and previous['result'].get('reason') == 'call_uncertain'
             or extension_basis == 'remaining_findings' and previous['result'].get('reason') == 'budget_exhausted' and bool(previous['findings'])
-            or qualification_refresh and previous['result']['status'] == 'completed' and bool(previous.get('context_findings')))
+            or qualification_refresh and previous['result']['status'] == 'completed' and bool(previous.get('context_findings'))
+            or read_only_refresh and previous['result'].get('reason') == 'disagreement'
+                and bool(previous['findings'])
+                and all(f.get('affected_target_keys') == [] and f['target_key'] not in set(old.target_keys) | set(previous['original_goal'].get('required_maintenance_keys',[])) for f in previous['findings'].values()))
         if (not isinstance(extension,dict) or set(extension) != extension_keys or not valid_basis
                 or extension['predecessor_action_id'] != old.action_id
                 or extension['prior_metadata_sha256'] != sha256_json(previous)
@@ -1371,7 +1375,7 @@ def continuation_budget(previous, request, policy):
                 or not (extension['authorization_quote'] or '').strip()
                 or authority.get('authorized_by') != 'owner' or authority.get('human_content_approval') is not False
                 or completed_cleanup or human_follow_up
-                or request.permissions != old.permissions or policy.initial_candidate != 'proposal'
+                or (request.permissions != old.permissions and not read_only_refresh) or policy.initial_candidate != 'proposal'
                 or policy.all_findings_to_gpt != original.all_findings_to_gpt):
             raise ValueError('owner call extension requires exact paused action, authority and explicit new budget')
     recovery = authority.get('unaccepted_review_recovery', {})
@@ -1451,7 +1455,7 @@ def continuation_budget(previous, request, policy):
         raise ValueError('human source follow-up permits exactly one bounded proposal and review')
     if not policy.budget.gpt_calls or not policy.budget.opus_calls:
         raise ValueError('original remaining budget cannot fund correction and review')
-    return {'predecessor_action_id':old.action_id, 'completed_context_cleanup':completed_cleanup, 'qualification_refresh':qualification_refresh, 'original_goal':deepcopy(previous['original_goal']),
+    return {'predecessor_action_id':old.action_id, 'completed_context_cleanup':completed_cleanup, 'qualification_refresh':qualification_refresh, 'read_only_refresh':read_only_refresh, 'original_goal':deepcopy(previous['original_goal']),
         'prior_findings':prior_findings, 'unaccepted_reviews':unaccepted, 'prior_call_reservations':deepcopy(previous['call_reservations']),
         'pre_generation_schema_rejections':failures, 'spent_generations':spent, 'remaining_generations':remaining,
         **({'unaccepted_proposals':unaccepted_proposals} if unaccepted_proposals else {}),

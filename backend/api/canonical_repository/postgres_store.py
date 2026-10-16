@@ -3332,7 +3332,14 @@ class PostgresKnowledgeStore:
                     if refresh:
                         if child['materials']['round_id'] in prior['latest_rounds'].values():
                             if child['outcome'] != 'completed':
-                                raise ChangeSetConflict('qualification refresh requires a completed predecessor')
+                                if (not continuation.get('read_only_refresh') or child['outcome'] != 'disagreement'
+                                        or child.get('change_set_ids')
+                                        or before != child['materials'].get('transaction_before',child['materials']['before'])):
+                                    raise ChangeSetConflict('read-only refresh cannot replay a rejected write or cross current-input drift')
+                                # A finding resolved only in a rejected, uncommitted
+                                # candidate is still open against current SQL.
+                                candidate_findings = cm.review_findings(prior['action_id'], child['materials']['unresolved'], cm.Candidate.model_validate(child['candidate']))
+                                continuation['prior_findings'] = {**candidate_findings, **continuation['prior_findings']}
                             continuation.setdefault('previous_candidates', {})[child['unit_id']] = cm.existing_candidate(goal['original_objects']).model_dump(mode='json')
                         continue
                     if continuation.get('owner_call_extension') and child['materials']['round_id'] in prior['latest_rounds'].values():
@@ -3460,9 +3467,8 @@ class PostgresKnowledgeStore:
                     raise ChangeSetConflict('Claim round cannot prune original goals/history or widen authority')
                 if (parent.get('continuation', {}).get('human_source_verification') or parent.get('continuation', {}).get('owner_call_extension')) and (
                         frozen.get('continuation') != parent['continuation']
-                        or (round_number == 0 and (
-                            not parent['continuation'].get('previous_candidates', {}).get(unit_id)
-                            or frozen.get('previous_candidate') != parent['continuation']['previous_candidates'][unit_id]))):
+                        or not parent['continuation'].get('previous_candidates', {}).get(unit_id)
+                        or (round_number == 0 and frozen.get('previous_candidate') != parent['continuation']['previous_candidates'][unit_id])):
                     raise ChangeSetConflict('human source follow-up omitted its evidence or saved candidate')
             previous_id = parent["latest_rounds"].get(unit_id)
             if previous_id:

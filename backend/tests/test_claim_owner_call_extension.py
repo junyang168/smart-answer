@@ -263,3 +263,49 @@ def test_owner_follow_up_revision_uses_immediate_candidate(owner_review_follow_u
     else:
         assert result['status']=='completed',result
         assert ports.calls==['gpt','opus','gpt','opus']
+
+
+@pytest.mark.parametrize('target_blocker',[False,True])
+def test_readonly_refresh_abandons_only_uncommitted_optional_repairs(owner_review_follow_up,target_blocker):
+    store,old,parent,successor,root,policy,extension,path,basis=owner_review_follow_up
+    # A real two-round proposer/reviewer disagreement about an optional write.
+    policy.budget.max_revisions=2;extension['budget']=policy.budget.model_dump(mode='json');authorize(successor,policy,path,extension)
+    def decisions(packet,disposition='resolved',writes=()):
+        return [dict(decision(fid),disposition=disposition,affected_target_keys=[],affected_write_keys=list(writes)) for fid in packet['unresolved']]
+    def propose(packet):
+        changes=[]
+        if packet['round_number']:
+            changes=[{'record_key':'evidence_steps/E','fields_json':json.dumps({'statement':'proposed optional repair'}),'reason':'synthetic proposal','citations':decision('unused')['citations']}]
+        return {'changes':changes,'findings':[],'finding_resolutions':decisions(packet)}
+    def review(packet):
+        if not packet['round_number']:
+            finding=deepcopy(next(iter(packet['unresolved'].values())));finding.update(target_key='evidence_steps/E',component='optional proposed repair',affected_target_keys=[],affected_write_keys=[],impact_reason='independent optional issue')
+            other=deepcopy(finding);other['component']='second optional repair'
+            return {'complete_review':True,'findings':[finding,other],'prior_findings':decisions(packet)}
+        values=decisions(packet,'persistent',['evidence_steps/E']);values[0]['disposition']='resolved'
+        return {'complete_review':True,'findings':[],'prior_findings':values}
+    ports=SyntheticPorts(store,root,proposal=propose,opus=review);before=store.get_record_state('evidence_steps','E')
+    assert execute_claim_management(store,successor,root=root,ports=ports)['reason']=='disagreement'
+    assert store.get_record_state('evidence_steps','E')==before
+    prior=store.get_cvp_group('CMA-'+cm.sha256_json(successor.action_id));metadata={k:v for k,v in prior.items() if k not in {'run_id','status','error'}}
+    if target_blocker:
+        for finding in metadata['findings'].values():finding['affected_target_keys']=['claims/A']
+    readonly,next_root=operation_request((store,successor,None,None,root.parent,None),'Update',['A','B']);readonly.predecessor_action_id=successor.action_id;readonly.permissions=[]
+    new=policy.model_copy(deep=True);new.budget.gpt_calls=1;new.budget.opus_calls=1;new.budget.max_revisions=1
+    records=store.read_claim_context([cm.source.split_key(k) for k in readonly.target_keys]);actual={cm.source.key(*k):cm.model_state(v) for k,v in records.items()}
+    ext={'predecessor_action_id':successor.action_id,'prior_metadata_sha256':cm.sha256_json(metadata),'budget':new.budget.model_dump(mode='json'),
+        'authorization_quote':'finish the original Claims; leave optional repairs uncommitted','basis':'qualification_refresh','current_objects_sha256':cm.sha256_json(actual),'related_action_metadata_sha256':{}}
+    authorize(readonly,new,next_root.with_suffix('.policy.json'),ext)
+    if target_blocker:
+        with pytest.raises(ValueError):cm.continuation_budget(metadata,readonly,new)
+        return
+    def no_write(packet):
+        assert not packet['request']['permissions'] and not packet['previous_candidate']['records']
+        assert len(packet['unresolved'])==2, 'also restore issues resolved only in the rejected uncommitted candidate'
+        return {'changes':[],'findings':[],'finding_resolutions':decisions(packet,'persistent')}
+    final=SyntheticPorts(store,next_root,proposal=no_write,opus=lambda p:{'complete_review':True,'findings':[],'prior_findings':decisions(p,'persistent')})
+    result=execute_claim_management(store,readonly,root=next_root,ports=final)
+    assert result['status']=='completed',result
+    assert final.calls==['gpt','opus'] and store.get_record_state('evidence_steps','E')==before
+    assert all(store.claim_management_qualification(cid)['ready'] for cid in ['A','B'])
+    assert store.get_cvp_group(prior['run_id'])['call_reservations']==prior['call_reservations']
