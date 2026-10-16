@@ -44,10 +44,9 @@ def maintenance_lock():
     import fcntl
     with (recovery / "recovery.lock").open("r+") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        try:
-            yield
-        finally:
-            fcntl.flock(lock, fcntl.LOCK_UN)
+        # Closing releases the lock after the final inherited descriptor closes.
+        # A batch worker can keep it across coordinator death without a gap.
+        yield lock
 
 
 def model_adapter(stage: str, *, live: bool = False, deferred: bool = False, issue: bool = False, scope: bool = False,

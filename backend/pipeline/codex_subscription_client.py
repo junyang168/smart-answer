@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -193,13 +194,17 @@ class CodexSubscriptionClient:
         ]
         prompt = "".join(prompt_parts)
 
-        with tempfile.TemporaryDirectory(prefix="codex-subscription-extraction-") as temp_dir:
+        durable = getattr(self, "call_artifacts", None)
+        context = nullcontext(str(durable)) if durable else tempfile.TemporaryDirectory(prefix="codex-subscription-extraction-")
+        with context as temp_dir:
             root = Path(temp_dir)
+            root.mkdir(parents=True, exist_ok=True)
             schema_path = root / "response-schema.json"
             output_path = root / "response.json"
-            schema_path.write_text(
-                json.dumps(schema, ensure_ascii=False, sort_keys=True), encoding="utf-8"
-            )
+            schema_text = json.dumps(schema, ensure_ascii=False, sort_keys=True)
+            if schema_path.exists() and schema_path.read_text() != schema_text:
+                raise CodexSubscriptionError("saved subscription schema drift")
+            schema_path.write_text(schema_text, encoding="utf-8")
             command = [
                 self.executable,
                 "exec",
@@ -229,16 +234,22 @@ class CodexSubscriptionClient:
                 command.extend(["--image", str(resolved)])
             command.append("-")
             try:
-                completed = subprocess.run(
-                    command,
-                    input=prompt,
-                    capture_output=True,
-                    text=True,
-                    cwd=root,
-                    env=self.environment,
-                    timeout=effective_timeout,
-                    check=False,
-                )
+                if durable:
+                    from backend.pipeline.subscription_process import run
+                    completed = run(command, input=prompt, env=self.environment,
+                                    timeout=effective_timeout, directory=root, cwd=root,
+                                    replay_only=getattr(self, "replay_only", False))
+                else:
+                    completed = subprocess.run(
+                        command,
+                        input=prompt,
+                        capture_output=True,
+                        text=True,
+                        cwd=root,
+                        env=self.environment,
+                        timeout=effective_timeout,
+                        check=False,
+                    )
             except (OSError, subprocess.TimeoutExpired) as exc:
                 raise CodexSubscriptionError(
                     f"Codex subscription transport failed: {type(exc).__name__}: {exc}"

@@ -763,7 +763,7 @@ def exclusive_cvp_run_lock(freeze: Mapping[str, Any]):
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise CvpProductionBlocked(["another CVP identity run holds the global lock"]) from exc
-        yield
+        yield handle
     finally:
         handle.close()
 

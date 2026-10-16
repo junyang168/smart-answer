@@ -431,22 +431,37 @@ class Runner:
                 raise Stop("cached model reservation missing", status="proof_failure", waiting_for="system")
             bound_model_response(adapter, packet, raw['response'], raw_path)
             return raw
-        if reservation.exists():
+        replay = reservation.exists()
+        artifacts = self.root / (stage + '.transport')
+        if replay:
+            if body(read(reservation)) != request:
+                raise Stop("reserved model request drift", status="proof_failure", waiting_for="system")
+            if not (artifacts / 'exit.json').is_file():
+                raise Stop("reserved call has no verified reply; do not repeat", status="call_uncertain", waiting_for="system")
+        else:
+            preflight = getattr(self.ports, "before_model_call", None)
+            if preflight:
+                preflight(stage)
+            # Persist intent before side effects. Interrupted calls stay spent.
+            write(reservation, request)
+            reserved = getattr(self.ports, "model_call_reserved", None)
+            if reserved:
+                reserved(stage, request)
+        client = adapter._client
+        if adapter.backend in {'codex_subscription', 'claude_subscription'}:
+            client.call_artifacts = artifacts
+            client.replay_only = replay
+        elif replay:
             raise Stop("reserved call has no verified reply; do not repeat", status="call_uncertain", waiting_for="system")
-        preflight = getattr(self.ports, "before_model_call", None)
-        if preflight:
-            preflight(stage)
-        # Persist the reservation before any side effect. Errors do not reset it.
-        write(reservation, request)
-        reserved = getattr(self.ports, "model_call_reserved", None)
-        if reserved:
-            reserved(stage, request)
-        self.state(stage, next_action="await the single subscription response")
+        self.state(stage, next_action="read saved subscription response" if replay else "await the single subscription response")
         try:
             response = dict(adapter.generate(packet))
         except Exception as exc:
-            write(self.root / (stage + ".failure.json"), {"error": str(exc), "automatic_retry": False,
-                "provider_raw": getattr(adapter._client, "last_raw_response", None)})
+            failure = self.root / (stage + ".failure.json")
+            if not failure.exists():
+                write(failure, {"error": str(exc), "automatic_retry": False,
+                    "provider_raw": getattr(adapter._client, "last_raw_response", None),
+                    "transport_directory": str(artifacts)})
             raise Stop("subscription call failed; original reservation retained", status="model_failed", waiting_for="owner") from exc
         provider_raw = getattr(adapter._client, "last_raw_response", None)
         executable = getattr(adapter._client, "executable", None)
