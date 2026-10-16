@@ -3945,6 +3945,12 @@ class PostgresKnowledgeStore:
                 if is_source_impact(value['materials']['request']):
                     if 'claims/' + claim_id not in value['materials']['original_goal']['target_keys']:
                         continue
+                    if 'human_source_decisions' in value['materials']:
+                        from backend.pipeline.claim_human_source import assert_current
+                        try:
+                            assert_current(cursor, value['materials']['unit_request']['source_bindings'], value['materials']['human_source_decisions'])
+                        except ChangeSetConflict:
+                            return {'ready': False, 'reason': 'human_source_decisions_changed', 'run_id': rid}
                     if not revalidation:
                         return {'ready': False, 'reason': 'source_impact_requires_maintenance_or_content_review', 'run_id': rid}
                     try:

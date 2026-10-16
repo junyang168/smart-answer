@@ -235,3 +235,17 @@ def test_verified_literal_correction_is_automatically_saved_and_reused(verified_
     assert sources['S']['human_source_decisions'][0]['applicability'] == 'current'
     assert synchronize(store, bound, transition, root=root) == result
     assert current(store) == entries
+
+
+def test_source_impact_qualification_also_checks_new_human_evidence(action):
+    from backend.tests.test_claim_management_source_impact import source_request, impact_result
+    store, original, _, _, root, _ = action
+    assert execute_claim_management(store, original, root=root/'original-root',
+        ports=SyntheticPorts(store, root))['status'] == 'completed'
+    request, output = source_request(action, targets=['C'])
+    result = execute_claim_management(store, request, root=output,
+        ports=SyntheticPorts(store, root, opus=impact_result, gemini=impact_result))
+    assert result['status'] == 'completed' and store.claim_management_qualification('C')['ready']
+    _, entries = facts(request, root); save(store, entries)
+    qualification = store.claim_management_qualification('C')
+    assert qualification['ready'] is False and qualification['reason'] == 'human_source_decisions_changed'
