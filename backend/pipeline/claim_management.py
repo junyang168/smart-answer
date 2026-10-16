@@ -22,7 +22,7 @@ from backend.api.canonical_repository.postgres_store import (
 )
 
 VERSION = "wang_claim_management_v2"
-DEFAULT_POLICY = Path(__file__).parent / 'policies/wang_claim_management_opus_only_v2.json'
+DEFAULT_POLICY = Path(__file__).parent / 'policies/wang_claim_management_opus_only_v3.json'
 Operation = Literal["Read", "Create", "Review", "Update", "Retire", "Restore", "Split", "Merge"]
 Role = Literal["gpt", "opus", "gemini"]
 Disposition = Literal["retain", "update", "create", "retire", "restore"]

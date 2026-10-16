@@ -11,6 +11,13 @@ from backend.tests.test_claim_management_postgres import action,postgres_store,_
 from backend.tests.test_claim_management_execution_postgres import SyntheticPorts,operation_request,passing,rejected
 
 
+@pytest.fixture(autouse=True)
+def legacy_review_policy(monkeypatch):
+    # These tests assert v1/v2/v3 proof compatibility. One-hop defaults and
+    # old-to-new transitions are exercised in test_claim_direct_scope_reuse.
+    monkeypatch.setattr(cm,'DEFAULT_POLICY',cm.DEFAULT_POLICY.parent/'wang_claim_management_opus_only_v2.json')
+
+
 def request_for(action,cid,fields):
     request,root=operation_request(action,'Update',[cid]);request.permissions[0].fields=fields
     request.policy=cm.source.FileBinding.model_validate(binding(cm.DEFAULT_POLICY))

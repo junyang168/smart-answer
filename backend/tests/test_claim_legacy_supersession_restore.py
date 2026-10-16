@@ -78,7 +78,8 @@ def test_restore_legacy_ai_supersession_needs_explicit_capability_and_preserves_
 
 
 @pytest.mark.parametrize('fault',[None,'changed_scope','unrelated_target','late_failure'])
-def test_failed_update_can_handoff_unchanged_scope_to_atomic_restore_and_maintenance(action,fault,monkeypatch):
+@pytest.mark.parametrize('direct_scope',[False,True])
+def test_failed_update_can_handoff_unchanged_scope_to_atomic_restore_and_maintenance(action,fault,monkeypatch,direct_scope):
     from backend.tests.test_claim_management_execution_postgres import rejected
     from backend.api.canonical_repository.postgres_store import record_content_sha,ChangeSetConflict
     store,_,_,_,root,_=action
@@ -93,7 +94,8 @@ def test_failed_update_can_handoff_unchanged_scope_to_atomic_restore_and_mainten
             conn.execute(f"UPDATE wang_knowledge.{table} SET payload=%s::jsonb,content_sha256=%s WHERE collection='claims' AND object_id='C'",(json.dumps(payload),record_content_sha(payload)))
         conn.execute("UPDATE wang_knowledge.objects SET review_status='superseded' WHERE collection='claims' AND object_id='C'")
     old,oldroot=operation_request(action,'Update',['A'])
-    policy=cm.Policy.model_validate_json(cm.DEFAULT_POLICY.read_text());policy.independent_audit=False;policy.budget.gemini_calls=0;policy.initial_candidate='proposal';policy.all_findings_to_gpt=True
+    policy_file=cm.DEFAULT_POLICY.parent/('wang_claim_management_opus_only_v3.json' if direct_scope else 'wang_claim_management_opus_only_v2.json')
+    policy=cm.Policy.model_validate_json(policy_file.read_text());policy.independent_audit=False;policy.budget.gemini_calls=0;policy.initial_candidate='proposal';policy.all_findings_to_gpt=True
     pp=root/'old-failed-policy.json';pp.write_text(policy.model_dump_json());old.policy=cm.source.FileBinding.model_validate(binding(pp));authorize(old)
     def initial(packet):
         return {} if packet['round_number'] else cm.existing_candidate(packet['before']).model_dump(mode='json')
@@ -101,8 +103,11 @@ def test_failed_update_can_handoff_unchanged_scope_to_atomic_restore_and_mainten
     assert result['reason']=='engineering_required',result
     prior=store.get_cvp_group('CMA-'+cm.sha256_json(old.action_id));assert prior['findings']
     if fault=='changed_scope':
-        changed=deepcopy(store.get_record_state('claims','B')['payload']);changed['statement']='changed later'
-        store.apply_plan(store.plan_package({'package_id':'subsequent-change','claims':[changed]}))
+        # B is a legacy transitive consumer, not part of the new one-hop
+        # review. E is target evidence in both contracts. Drift a pinned row.
+        collection,oid=('evidence_steps','E') if direct_scope else ('claims','B')
+        changed=deepcopy(store.get_record_state(collection,oid)['payload']);changed['statement']='changed later'
+        store.apply_plan(store.plan_package({'package_id':'subsequent-change',collection:[changed]}))
     request,newroot=operation_request(action,'Restore',['A','C']+(['B'] if fault=='unrelated_target' else []));request.allowed_operations=['Restore','Update']
     next(p for p in request.permissions if p.object_id=='C').fields.append('superseded_by')
     request.permissions.append(cm.source.Permission(collection='evidence_steps',object_id='E',fields=['statement']))

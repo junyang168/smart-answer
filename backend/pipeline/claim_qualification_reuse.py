@@ -59,7 +59,7 @@ def protected_keys(value):
         d['record_key'] for d in value['candidate']['dispositions'] if d['action']!='retain'}
 
 
-def argument_basis(targets, payloads):
+def argument_basis(targets, payloads, *, leaf_claims=()):
     """Own references and upstream premises, not downstream consumers.
 
     Every incident edge is protected. Only incoming edges expand the premises;
@@ -101,6 +101,11 @@ def argument_basis(targets, payloads):
         if key not in payloads:raise ValueError('qualification argument basis missing record')
         basis.add(key)
         col=key.split('/',1)[0]
+        if key in leaf_claims:
+            # A direct neighbour contributes its declared Claim, never its
+            # private evidence or a second Claim frontier.
+            basis.update(incident.get(key,set()))
+            continue
         if col not in cm.RELATION_COLLECTIONS:
             pending.update(cm.domain_dependencies(col,payloads[key],payloads)-basis)
             pending.update(owners.get(key,set())-basis)
@@ -197,13 +202,13 @@ def reviewed_context_change(cursor,old,peer,original,fresh,current,protected,rev
             raise ValueError('qualification context history SHA drift')
         before[cm.source.key(col,oid)]=payload
     targets={k for k in protected if k.startswith('claims/')}
-    from backend.pipeline.claim_direct_scope import enabled as direct_scope_enabled
-    if direct_scope_enabled(old['materials']['unit_request']):
-        # Neighbour rows and incident relations are pinned context, not a
-        # request to reconstruct their unavailable evidence or other edges.
-        basis=set(before)
-    else:
-        basis=argument_basis(targets,before)|argument_basis(targets,after)
+    from backend.pipeline import claim_direct_scope as direct
+    bounded = direct.enabled(peer['materials']['unit_request'])
+    leaves = set()
+    if direct.enabled(old['materials']['unit_request']):
+        request = cm.Request.model_validate(old['materials']['unit_request'])
+        leaves = set(direct.scope(request, {k:{'payload':v} for k,v in before.items()})['neighbour_claim_keys'])
+    basis=argument_basis(targets,before,leaf_claims=leaves)|argument_basis(targets,after,leaf_claims=leaves)
     if any(original[tuple(key.split('/',1))]!=fresh[tuple(key.split('/',1))] for key in basis):
         raise ValueError('original Claim argument basis changed')
     dispositions={d['record_key']:d['action'] for d in peer['candidate']['dispositions']}
@@ -212,9 +217,11 @@ def reviewed_context_change(cursor,old,peer,original,fresh,current,protected,rev
     objections=scoped_objections(old,peer,old_review,review,basis,protected,
         {cm.source.key(*key) for key in changes})
     exceptions={p['record_key'] for p in objections}
-    if not scope<=verdicts|exceptions or not scope<=set(dispositions):
+    retained_protected = protected & set(peer['materials']['before']) if bounded else protected
+    reviewed_scope = {cm.source.key(*key) for key in changes} | retained_protected if bounded else scope
+    if not reviewed_scope<=verdicts|exceptions or not reviewed_scope<=set(dispositions):
         raise ValueError('current review omitted original content scope')
-    if not protected<=set(dispositions) or any(dispositions[key]!='retain' for key in protected):
+    if not retained_protected<=set(dispositions) or any(dispositions[key]!='retain' for key in retained_protected):
         raise ValueError('original protected objects were not retained')
     if any(dispositions[key]!='retain' for key in basis if key in dispositions):
         raise ValueError('original argument basis was not retained')
@@ -263,9 +270,9 @@ def current_pins(store,cursor,value):
             or core['original_approval']!=value['reviewed']['evidence']['approval']
             or set(decoded_pins(core['current_pins']))!=set(decoded_pins(value['audited_pins']))):
         raise ValueError('qualification reuse original proof drift')
-    if core['schema_version'] not in {'wang_claim_review_context_reuse_v1','wang_claim_review_context_reuse_v2','wang_claim_review_context_reuse_v3'}:
+    if core['schema_version'] not in {'wang_claim_review_context_reuse_v1','wang_claim_review_context_reuse_v2','wang_claim_review_context_reuse_v3','wang_claim_review_context_reuse_v4'}:
         raise ValueError('unknown qualification reuse proof')
-    if core['schema_version'] in {'wang_claim_review_context_reuse_v2','wang_claim_review_context_reuse_v3'}:
+    if core['schema_version'] in {'wang_claim_review_context_reuse_v2','wang_claim_review_context_reuse_v3','wang_claim_review_context_reuse_v4'}:
         original=decoded_pins(value['audited_pins']);current=decoded_pins(core['current_pins'])
         basis=set(core['unchanged_argument_basis'])
         protected=protected_keys(value)
@@ -282,6 +289,25 @@ def current_pins(store,cursor,value):
     check_binding(core['peer_review'])
     if peer['reviewed']['evidence']['approval']!=core['peer_approval']:raise ValueError('peer approval identity drift')
     check_binding(core['peer_approval'])
+    if core['schema_version']=='wang_claim_review_context_reuse_v4':
+        from backend.pipeline.claim_direct_scope import enabled
+        if not enabled(peer['materials']['unit_request']):
+            raise ValueError('direct scope reuse contract drift')
+        original=decoded_pins(value['audited_pins']);fresh=decoded_pins(peer['audited_pins'])
+        updated=decoded_pins(core['current_pins'])
+        missing=set(original)-set(fresh)
+        changed={k for k in original if original[k]!=updated[k]}
+        if (core['unchanged_original_only_keys']!=sorted('/'.join(k) for k in missing)
+                or any(updated[k]!=original[k] for k in missing)
+                or not changed<=set(fresh) or any(updated[k]!=fresh[k] for k in changed)):
+            raise ValueError('direct scope reuse coverage drift')
+        for bound in peer['materials']['unit_request']['source_bindings'].values():
+            check_binding(bound)
+        peer_current=store._assert_transaction_read_pins(cursor,fresh)
+        store._assert_claim_management_scope(cursor,fresh,records=peer_current,request=peer['materials']['unit_request'])
+        if 'human_source_decisions' in peer['materials']:
+            from backend.pipeline.claim_human_source import assert_current
+            assert_current(cursor,peer['materials']['unit_request']['source_bindings'],peer['materials']['human_source_decisions'])
     for key,eid in reuse['event_ids'].items():
         event=cursor.execute('SELECT artifact,decision FROM wang_knowledge.review_events WHERE review_event_id=%s',(eid,)).fetchone()
         if not event or event[0]!=core or event[1]!='review_context_revalidated':raise ValueError('qualification reuse event drift')
@@ -302,13 +328,26 @@ def admit(store,cursor,original_id,peer_id):
     if not required<=set(peer['materials']['original_goal']['required_questions']) or not required<=set(review['answered_questions']):
         raise ValueError('peer review capabilities cannot support reuse')
     original=decoded_pins(old['audited_pins']);fresh=decoded_pins(peer['audited_pins'])
-    if not set(original)<=set(fresh):raise ValueError('peer review omitted original dependency scope')
-    current=store._assert_transaction_read_pins(cursor,fresh)
-    store._assert_claim_management_scope(cursor,fresh,records=current,request=peer['materials']['unit_request'])
+    from backend.pipeline.claim_direct_scope import enabled as direct_scope_enabled
+    bounded=direct_scope_enabled(peer['materials']['unit_request'])
+    if not bounded and not set(original)<=set(fresh):raise ValueError('peer review omitted original dependency scope')
+    # Original-only evidence is still covered by the original full review:
+    # verify it is exactly unchanged, instead of sending it to the peer model.
+    current=store._assert_transaction_read_pins(cursor,{**original,**fresh} if bounded else fresh)
+    store._assert_claim_management_scope(cursor,fresh,records={k:current[k] for k in fresh},request=peer['materials']['unit_request'])
+    if bounded:
+        for value in (old,peer):
+            if 'human_source_decisions' in value['materials']:
+                from backend.pipeline.claim_human_source import assert_current
+                assert_current(cursor,value['materials']['unit_request']['source_bindings'],value['materials']['human_source_decisions'])
+    peer_pins=fresh
+    if bounded:
+        fresh={k:peer_pins.get(k,pin) for k,pin in original.items()}
     protected=protected_keys(old);retained={d['record_key'] for d in peer['candidate']['dispositions'] if d['action']=='retain'}
-    if not {k for k in protected if k.startswith('claims/')}<=retained:raise ValueError('original target changed in peer operation')
+    peer_protected = protected & set(peer['materials']['before']) if bounded else protected
+    if not {k for k in peer_protected if k.startswith('claims/')}<=retained:raise ValueError('original target changed in peer operation')
     verdicts={v['record_key'] for v in review['verdicts'] if v['approved'] and not v['problems']}
-    if not {k for k in protected if k.startswith('claims/')}<=verdicts:raise ValueError('peer did not inspect retained target')
+    if not {k for k in peer_protected if k.startswith('claims/')}<=verdicts:raise ValueError('peer did not inspect retained target')
     updated={key:fresh[key] for key in original};changes=[];legacy=True
     for key,pin in original.items():
         if pin==fresh[key]:continue
@@ -343,6 +382,16 @@ def admit(store,cursor,original_id,peer_id):
         core.pop('changed_readonly_claims')
     if objections:
         core.update(schema_version='wang_claim_review_context_reuse_v3',retained_context_objections=objections)
+    if bounded:
+        if basis is None:
+            basis=sorted('/'.join(k) for k in original if original[k]==updated[k])
+        core.update(schema_version='wang_claim_review_context_reuse_v4',
+            unchanged_argument_basis=basis,protected_original_writes=sorted(protected-set(basis)),
+            changed_context_keys=changes,
+            unchanged_original_only_keys=sorted('/'.join(k) for k in set(original)-set(peer_pins)),
+            basis=('unchanged original proof plus peer-reviewed anchor pruning' if legacy and not has_objections else
+                   'unchanged original argument and writes plus peer-reviewed context changes'))
+        core.pop('changed_readonly_claims',None)
     events={key:'CMCTX-'+sha256_json({'proof':core,'target':key})[:32] for key in protected if key.startswith('claims/')}
     proof={**core,'event_ids':events}
     if old.get('reviewed_context_reuse')==proof:return proof

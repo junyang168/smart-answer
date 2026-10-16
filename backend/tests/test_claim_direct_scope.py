@@ -252,12 +252,12 @@ def test_direct_scope_keeps_all_objections_in_existing_gpt_resolution_flow(actio
         action,operation,category,disposition)
 
 
-def test_different_peer_scope_never_silently_revalidates_old_target(related, monkeypatch):
+def test_different_peer_scope_revalidates_only_with_unchanged_original_evidence(related, monkeypatch):
     from backend.tests.test_claim_qualification_reuse import qualify_original, prune_peer
     monkeypatch.setattr(cm,'DEFAULT_POLICY',cm.DEFAULT_POLICY.parent/'wang_claim_management_opus_only_v3.json')
     store=related[0]
     qualify_original(related)
     _,ports=prune_peer(related)
     assert store.claim_management_qualification('D')['ready']
-    assert not store.claim_management_qualification('C')['ready']
+    assert store.claim_management_qualification('C')['ready']
     assert ports.calls==['opus','gpt','opus']
