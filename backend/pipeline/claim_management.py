@@ -816,6 +816,35 @@ def load_authority(request: Request, *, source_documents=None, archived_sources=
                 raise ValueError('source impact requires an actual source version transition')
             sources[sid]['before'] = previous
             sources[sid]['delta'] = source_delta(previous, sources[sid])
+    # A context finding can become a new explicit target after a human has
+    # clarified the source. Keep that evidence in the same frozen source packet
+    # for proposal, review and commit validation; it never edits the transcript
+    # or substitutes for independent content review. Linked continuations retain
+    # their existing, separately validated evidence contract.
+    if authority.get('human_source_verification') and not request.predecessor_action_id:
+        bound = source.FileBinding.model_validate(authority['human_source_verification'])
+        record = json.loads(source.verify_file(bound).read_text())
+        answers = record.get('answers', [])
+        ids = [a.get('finding_id') for a in answers]
+        if (record.get('schema_version') != 'wang_claim_human_source_verification_v1'
+                or record.get('verified_by') != 'user' or record.get('human_content_approval') is not False
+                or record.get('source_bindings') != request.model_dump(mode='json')['source_bindings']
+                or not record.get('user_confirmation') or not answers
+                or any(not i for i in ids) or len(set(ids)) != len(ids)):
+            raise ValueError('new target source clarification requires bound human facts, not content approval')
+        for answer in answers:
+            citation = Citation.model_validate(answer.get('citation'))
+            if (not answer.get('question') or not answer.get('answer')
+                    or citation.source_id not in request.source_bindings):
+                raise ValueError('human clarification omitted its source question or answer')
+            if citation.source_id in sources:
+                validate_citations([citation], sources)
+        for sid in sources:
+            relevant = [a for a in answers if a['citation']['source_id'] == sid]
+            if relevant:
+                sources[sid]['human_source_verification'] = {
+                    'artifact': bound.model_dump(mode='json'), 'record': record,
+                    'source_text_unchanged': True, 'content_review_still_required': True}
     return policy, sources
 
 

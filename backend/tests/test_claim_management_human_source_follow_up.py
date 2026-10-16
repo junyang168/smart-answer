@@ -104,3 +104,51 @@ def test_human_follow_up_rejects_unbound_answers_and_budget_reset(human_pending,
     policy=cm.Policy.model_validate_json(Path(request.policy.path).read_text())
     if bad=='double_budget':policy.budget.opus_calls=2
     with pytest.raises(ValueError):cm.continuation_budget(parent,request,policy)
+
+
+@pytest.mark.parametrize('fault', [None, 'source', 'quote', 'approval', 'changed_file'])
+def test_new_explicit_target_receives_bound_human_source_facts(action, fault):
+    store,_,_,_,root,_=action;seed_claims(store,['C'])
+    request,output=operation_request(action,'Update',['C'])
+    policy=cm.Policy.model_validate_json(Path(request.policy.path).read_text())
+    policy.initial_candidate='proposal'
+    policy.independent_audit=False
+    policy.budget.gemini_calls=0
+    policy_file=root/'clarified-policy.json';policy_file.write_text(policy.model_dump_json())
+    request.policy=cm.source.FileBinding.model_validate(binding(policy_file))
+    record={'schema_version':'wang_claim_human_source_verification_v1','verified_by':'user',
+        'human_content_approval':False,'source_bindings':request.model_dump(mode='json')['source_bindings'],
+        'user_confirmation':'核听确认是口误，保留原话并注明',
+        'answers':[{'finding_id':'saved-source-question','question':'Is this a slip?',
+            'answer':'The user confirmed the slip; do not rewrite the source.',
+            'citation':{'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}}]}
+    if fault=='source':record['source_bindings']['S']['file_sha256']='b'*64
+    if fault=='quote':record['answers'][0]['citation']['exact_quote']='不存在的原话'
+    if fault=='approval':record['human_content_approval']=True
+    file=root/'explicit-target-human-facts.json';file.write_text(json.dumps(record))
+    authorize(request,{'human_source_verification':binding(file)})
+    if fault=='changed_file':file.write_text('{}')
+    original=store.get_record_state('claims','C')
+    def check(packet):
+        evidence=packet['sources']['S']['human_source_verification']
+        assert evidence['record']==record
+        assert evidence['source_text_unchanged'] and evidence['content_review_still_required']
+        assert packet['sources']['S']['paragraphs']['S0001']['text']=='甲是假设，不是断言。'
+    def propose(packet):
+        check(packet)
+        candidate=cm.existing_candidate(packet['before']);candidate.operation='Update'
+        return candidate.model_dump(mode='json')
+    def opus(packet):
+        check(packet)
+        return passing(packet)
+    ports=SyntheticPorts(store,root,proposal=propose,opus=opus)
+    if fault:
+        with pytest.raises((ValueError,RuntimeError)):
+            execute_claim_management(store,request,root=output,ports=ports)
+        assert ports.calls==[]
+    else:
+        result=execute_claim_management(store,request,root=output,ports=ports)
+        assert result['status']=='completed',result
+        assert ports.calls==['gpt','opus']
+        assert store.claim_management_qualification('C')['ready']
+    assert store.get_record_state('claims','C')==original
