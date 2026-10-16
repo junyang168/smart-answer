@@ -664,3 +664,5 @@ action 为 `435-joint-update-divinity-summary-two-20261015-v1`，唯一 round �
 调查脚本与逐项结果保存在 `remaining-twelve-20261015-v1/chapter10-scoped-reuse-verification-20261016-v1/`。本次修复的是安全复用接点，不声称已解决这些内容影响问题；2021 未知答复和 2016 预算耗尽也保持原事实。
 
 本轮相关回归 328 passed、18 按既有失败类别 skipped；其中资格复用 62 passed。文档检查仍仅报另一项目既有缺失锚点，前端类型检查仍仅报 EmailSender／FellowshipManager 的既有 react-quill-new 缺失及 theme 类型错误；本轮没有修改前端或依赖。git diff --check 通过。
+
+在干净提交 `6d37b5f` 上持维护／registry 锁，正式调用同一 `revalidate_claim_management_context` 入口，按预期返回“新或变化异议缺少原目标影响证明”。拒绝前后核对完整 262 项业务记录、原 source／meta、双方 round／parent 及调用账本、原目标 review_events 全部精确保持；全部 90 条清单资格与此前独立核实一致，基线 32 条仍有效，新十二条仍为八条。没有模型调用、业务写入或资格事件，后台 worker 锁无持有者。正式拒绝及零副作用证明见上述证据根 `admission-verification.json`／`admission-verifier.py`；不能将代码完成说成两条 Claim 恢复完成。
