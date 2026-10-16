@@ -123,7 +123,7 @@ main 的 `PostgresKnowledgeStore.apply_plan()` 已使用 PostgreSQL transaction 
 | Create | 指定来源范围；create 必要 Claim、Evidence 与关系 | 自身来源、归属、非重复判断、限定、论证、绑定与支持资格 | 新对象 Claim-ready；来源覆盖另计 |
 | Update | 指定既有对象；retain 或 update，内含审阅 | 同一来源判断、修改依据、完整后像；共享 owners 与关系两端的支持仍成立 | 当前对象 Claim-ready；正确对象可原样保留 |
 | Retire | retire 对象，保留历史 | 历史前像、退役理由、原教导处置与消费者影响；不要求错误旧 Claim 为真 | 退役合理、影响已登记；不产生旧对象 Claim-ready |
-| Restore | restore 退役对象，形成新生效版本 | 退役原因已消解、当前来源成立、完整内容合格、无重复有效替代 | 当前对象 Claim-ready；不复活旧 pass 或旧消费者 |
+| Restore | restore 退役对象（含明确许可的旧 AI superseded 表示），形成新生效版本 | 退役原因已消解、当前来源成立、完整内容合格、无重复有效替代 | 当前对象 Claim-ready；不复活旧 pass 或旧消费者 |
 | Split | create 多个对象、retire 原对象及映射 | 原始对象与全部最终对象间的判断、限定、位置、Evidence／关系无遗漏、无增加 | 最终对象均就绪，旧对象退役，映射与交接完整 |
 | Merge | create 新对象、retire 全部旧对象及映射 | 同源同判断确属重复，全部有效材料保留，无虚构综合 | 新对象就绪，旧对象退役，映射与交接完整 |
 
@@ -257,6 +257,10 @@ Opus 读取候选及 delta，以来源判断，不沿用 GPT 自评或旧批准�
 | GPT 修订 | 仅实际修改的对象、改动字段、理由及引文；新疑点与所有旧异议的逐项判定 | 从精确冻结 before 保留未列对象／字段，合成完整候选；校验全部权限、来源、依赖、共享影响与完整后像 |
 | Opus 审阅 | 明确完成整个范围／全部问题并批准无异议对象的声明；全部新异议和每条旧异议的处置 | 将明确声明与异议展开为完整逐对象结论，绑定实际候选 SHA 和全部检查项；有异议对象保持拒绝 |
 | 身份及来源机械字段 | 修改项的 record_key，以及判断所需的来源位置和逐字引文 | 记录内部 ID、未变字段、派生 SHA、固定 Update 身份、逐对象 retain 清单由程序负责，不让模型重复计算或抄写 |
+
+旧 AI 合并可能只写 `review_status=superseded` 与 `superseded_by`，没有 SQL 退役标志。明确绑定 `legacy_ai_supersession_restore` 能力的 Restore 可处理此表示：原件必须保留 AI consensus／not_human_approved 的旧决定标识，历史无真人决定；请求列出全部恢复目标及必要维护对象。GPT 明确选择 restore，程序在 Opus 审阅前将该后像的状态归为 candidate、清空 superseded_by；原话与其他来源／审核字段不能借此改写，历史与旧失败不变。旧 contracts 不自动获得此能力，普通 Update 不能清除退役／审核标记。
+
+恢复与原错误合并的出处、owner、关系清理必须共同生效时，可在已有 Restore 单元中列出这些 active Claim 作为明确维护目标，授权 Update；共享写入将它们分为同一个现有事务单元。不增加新 runner 或任意联合结构操作。前一次 Update 因工程错误暂停、全部原范围仍精确不变时，新的明确 Restore 可一次性承接全部保存异议，保留原目标并只增加确实被它们取代的旧 AI Claim；不能借此新增无关目标、丢失异议或改写旧调用。真人决定仍需原有人工处理，能力不能覆盖。
 
 完整输入与审阅范围保持：原文、所有候选／只读对象、共享 owners、必做维护及上下文仍提供。省略修改项只代表“不改”，不代表“审核通过”；Opus 必须显式作出完整审阅及无异议记录的批准声明，不能缺省、抽样或只看 delta。任何新／持续异议仍经过原有影响与阻断判定；所有传入异议仍须 GPT 逐项回应。该契约只用于既有对象的联合 Update；Create、来源影响 Review、Retire、Restore、Split／Merge 和旧绑定契约保持原样，不能静默改变旧 schema 或把旧 raw 套入新输出协议消除失败；可验证机械纠正走第 8.1 节的正式归档恢复。
 

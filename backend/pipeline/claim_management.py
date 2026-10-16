@@ -77,6 +77,7 @@ class Policy(source.Contract):
     all_findings_to_gpt: bool | None = None
 
     model_output_contract: Literal['claim_changes_v1'] | None = None
+    legacy_ai_supersession_restore: Literal[True] | None = None
 
     joint_update_contract: Literal['wang_claim_joint_update_v1'] | None = None
     joint_update_max_targets: int | None = Field(default=None, gt=0, strict=True)
@@ -84,7 +85,7 @@ class Policy(source.Contract):
     @model_serializer(mode='wrap')
     def serialize_policy(self, handler):
         value = handler(self)
-        for name in ('joint_update_contract', 'joint_update_max_targets', 'model_output_contract'):
+        for name in ('joint_update_contract', 'joint_update_max_targets', 'model_output_contract', 'legacy_ai_supersession_restore'):
             if value[name] is None:
                 value.pop(name)
         if self.independent_audit is None:
@@ -543,8 +544,10 @@ def validate_candidate(request: Request, before, candidate: Candidate, sources, 
                     permission = source.Permission(collection=collection, object_id=oid, fields=grants[0].fields)
             if old is None or permission is None:
                 raise ValueError("write to a read-only owner or absent object")
+            legacy_restore = (collection == 'claims' and disposition.action == 'restore'
+                and legacy_restore_enabled(request) and legacy_ai_supersession(old))
             if disposition.action == "restore":
-                if not old["retired"] or payload is None:
+                if (not old["retired"] and not legacy_restore) or payload is None:
                     raise ValueError("Restore requires retired current state and full postimage")
             elif old["retired"]:
                 raise ValueError("retired object requires explicit Restore")
@@ -554,7 +557,10 @@ def validate_candidate(request: Request, before, candidate: Candidate, sources, 
                 payload = deepcopy(old["payload"])
             elif payload is None:
                 raise ValueError("update/restore requires a complete postimage")
-            if any(payload.get(k) != old["payload"].get(k) for k in source.PROVENANCE):
+            allowed_provenance = {'review_status'} if legacy_restore and payload.get('review_status') == 'candidate' else set()
+            if legacy_restore and (payload.get('review_status') != 'candidate' or payload.get('superseded_by')):
+                raise ValueError('legacy Restore must clear supersession without manufacturing approval')
+            if any(payload.get(k) != old["payload"].get(k) for k in source.PROVENANCE - allowed_provenance):
                 raise ValueError("proposed update cannot manufacture review provenance")
             changed = {k for k in set(old["payload"]) | set(payload) if old["payload"].get(k) != payload.get(k)}
             mechanical = MECHANICAL_FIELDS | (FRAGMENT_HASH_FIELDS if collection == 'source_fragments' else set())
@@ -773,6 +779,10 @@ def load_authority(request: Request, *, source_documents=None, archived_sources=
     policy = Policy.model_validate_json(source.verify_file(request.policy).read_text())
     if policy.joint_update_contract and request.operation != 'Update':
         raise ValueError('joint Update policy belongs only to ordinary Update')
+    if policy.legacy_ai_supersession_restore and request.operation != 'Restore':
+        raise ValueError('legacy AI supersession capability belongs only to explicit Restore')
+    if policy.legacy_ai_supersession_restore and (policy.joint_update_contract or policy.model_output_contract):
+        raise ValueError('legacy Restore uses the existing full structural-operation contract')
     if (policy.review_purpose == 'source_impact') != is_source_impact(request):
         raise ValueError('source impact requires its explicitly bound Review policy and transition')
     authority = json.loads(source.verify_file(request.authorization).read_text())
@@ -1551,6 +1561,52 @@ def normalize_candidate(raw, sources):
     return result, {'schema_version': VERSION, 'raw_candidate_sha256': original.digest,
                     'candidate_sha256': result.digest, 'changes': changes,
                     'reader_visible_text_unchanged': True, 'semantic_decisions_unchanged': True}
+
+
+def legacy_ai_supersession(state):
+    payload = state.get('payload', {})
+    decision = payload.get('ai_adjudication') or {}
+    if not isinstance(decision, dict):
+        return False
+    return (payload.get('review_status') == 'superseded' and bool(payload.get('superseded_by'))
+        and decision.get('status') == 'ai_consensus_applied'
+        and decision.get('approval_status') == 'not_human_approved' and bool(decision.get('fingerprint')))
+
+
+def legacy_restore_enabled(request):
+    return request.operation == 'Restore' and bool(Policy.model_validate_json(
+        source.verify_file(request.policy).read_text()).legacy_ai_supersession_restore)
+
+
+def normalize_legacy_restorations(candidate, receipt, materials):
+    """Project an explicit Restore into an unapproved active postimage.
+
+    This does not choose what to restore or edit teaching. Opus sees the final
+    projected candidate; the SQL boundary separately protects human decisions.
+    """
+    if not materials['policy'].get('legacy_ai_supersession_restore'):
+        return candidate, receipt
+    request = Request.model_validate(materials['unit_request'])
+    if request.operation != 'Restore':
+        raise ValueError('legacy restoration projection requires explicit Restore')
+    result = candidate.model_copy(deep=True)
+    projected = []
+    for row in result.records:
+        old = materials['before'].get(row.key)
+        disposition = next((d for d in result.dispositions if d.record_key == row.key), None)
+        if row.collection != 'claims' or not old or not disposition or disposition.action != 'restore' or not legacy_ai_supersession(old):
+            continue
+        if (row.key not in request.target_keys or row.payload.get('review_status') not in {'superseded', 'candidate'}
+                or any(row.payload.get(k) != old['payload'].get(k) for k in source.PROVENANCE - {'review_status'})):
+            raise ValueError('legacy Restore must preserve raw provenance and name every restored Claim target')
+        row.payload['review_status'] = 'candidate'
+        row.payload['superseded_by'] = None
+        projected.append(row.key)
+    if projected:
+        receipt = {**receipt, 'candidate_sha256': result.digest,
+            'legacy_ai_supersession_restorations': sorted(projected),
+            'restoration_status': 'candidate_not_human_approved'}
+    return result, receipt
 
 
 def goal_satisfied(goal, current, replacements):

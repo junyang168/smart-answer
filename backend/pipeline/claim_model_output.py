@@ -56,7 +56,8 @@ def candidate(raw, materials):
     if not enabled(materials):
         recovery = materials.get('candidate_identity_recovery')
         if not recovery:
-            return cm.normalize_candidate(raw, materials['sources'])
+            result, receipt = cm.normalize_candidate(raw, materials['sources'])
+            return cm.normalize_legacy_restorations(result, receipt, materials)
         corrected, mappings = retained_candidate_projection(raw, materials['before'], materials['sources'])
         if recovery != {'rule':'retained_fragment_exact_citation_v1',
                 'raw_response_sha256':cm.sha256_json(raw), 'before_sha256':cm.sha256_json(materials['before']),

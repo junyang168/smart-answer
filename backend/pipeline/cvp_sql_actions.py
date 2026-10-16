@@ -561,6 +561,13 @@ def execute_claim_management(store, request, *, root, ports):
                                 for col in sorted({p.collection for p in unit_request.permissions} | {p.collection for p in request.creation_permissions})}}
                         if parent.get('continuation'):
                             materials['continuation'] = parent['continuation']
+                        if policy.legacy_ai_supersession_restore:
+                            materials['program_owned_fields']['legacy_ai_supersession_restore'] = (
+                                'Explicit Restore may restore an old AI-superseded Claim even when its SQL retired flag is false. '
+                                'For each selected restore, preserve raw review provenance; the program projects review_status=candidate '
+                                'and superseded_by=null before Opus review. This is not human approval. '
+                                'Review retirement_cause_resolved and not_duplicate against the full current source. '
+                                'All named active targets and permitted Evidence/relations may be maintained in the same transaction.')
                         rid = store.prepare_claim_management_round(parent_id, unit_id=unit_id, round_number=ordinal,
                                                                   materials=materials, roles=roles)
                         prior = store.get_cvp_group(rid)

@@ -3276,6 +3276,14 @@ class PostgresKnowledgeStore:
             observed = self._assert_transaction_read_pins(cursor, read_pins)
             from backend.pipeline import claim_management as cm
             before = {cm.source.key(*key): cm.model_state(state) for key, state in observed.items()}
+            if policy.legacy_ai_supersession_restore:
+                legacy_targets = [k for k in request.target_keys if cm.legacy_ai_supersession(before[k])]
+                if not legacy_targets:
+                    raise ChangeSetConflict('legacy Restore has no exact AI supersession to restore')
+                for key in legacy_targets:
+                    if cursor.execute("SELECT 1 FROM wang_knowledge.review_events WHERE collection='claims' AND object_id=%s AND reviewer_kind='human' LIMIT 1",
+                            (key.split('/',1)[1],)).fetchone():
+                        raise ChangeSetConflict('legacy Restore cannot override a human decision')
             expected_goal = cm.original_goal(request, before)
             if goal != expected_goal:
                 raise ChangeSetConflict('Claim original goal/scope/proof differs from actual current SQL and source history')
@@ -3382,7 +3390,7 @@ class PostgresKnowledgeStore:
             authority = json.loads(cm.source.verify_file(request.authorization).read_text())
             context_actions = authority.get('context_review_actions', {})
             if context_actions and not refusal:
-                if (request.predecessor_action_id or request.operation != 'Update'
+                if (request.predecessor_action_id or (request.operation != 'Update' and not policy.legacy_ai_supersession_restore)
                         or not policy.all_findings_to_gpt or policy.initial_candidate != 'proposal'):
                     raise ChangeSetConflict('saved context maintenance requires a new explicitly bound GPT-first scope')
                 imported = {}
@@ -3396,16 +3404,27 @@ class PostgresKnowledgeStore:
                         and prior['request']['target_keys'] == request.target_keys
                         and not prior['request']['permissions'] and not prior['request']['creation_permissions']
                         and set(finding_ids) == set(prior.get('context_findings', {})) | set(prior.get('findings', {})))
+                    restoring = set(request.target_keys) - set((prior or {}).get('request', {}).get('target_keys', []))
+                    restore_repair = bool(prior and policy.legacy_ai_supersession_restore
+                        and prior['result'].get('status') == 'paused'
+                        and prior['result'].get('reason') == 'engineering_required'
+                        and prior['request']['operation'] == 'Update'
+                        and set(prior['request']['target_keys']) < set(request.target_keys)
+                        and all(cm.legacy_ai_supersession(before[k])
+                            and 'claims/' + before[k]['payload']['superseded_by'] in prior['request']['target_keys'] for k in restoring)
+                        and set(finding_ids) == set(prior.get('context_findings', {})) | set(prior.get('findings', {})))
                     if (not prior or prior.get('kind') != 'claim_management_action'
-                            or (prior['result']['status'] != 'completed' and not scope_repair) or prior.get('context_maintained_by')
+                            or (prior['result']['status'] != 'completed' and not scope_repair and not restore_repair) or prior.get('context_maintained_by')
                             or not finding_ids or len(finding_ids) != len(set(finding_ids))
                             or prior['request']['source_bindings'] != request.model_dump(mode='json')['source_bindings']):
                         raise ChangeSetConflict('saved context maintenance has stale/unbound or already assigned audit history')
                     latest = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=ANY(%s)',
                         (list(prior['latest_rounds'].values()),)).fetchall()
+                    if restore_repair and any(any(before.get(k) != v for k,v in child['materials']['before'].items()) for (child,) in latest):
+                        raise ChangeSetConflict('legacy Restore handoff lost its complete unchanged failed scope')
                     for fid in finding_ids:
                         finding = {**prior.get('context_findings', {}),
-                            **(prior.get('findings', {}) if scope_repair else {})}.get(fid)
+                            **(prior.get('findings', {}) if scope_repair or restore_repair else {})}.get(fid)
                         if not finding or finding['target_key'] not in {p.key for p in request.permissions}:
                             raise ChangeSetConflict('saved context maintenance omitted its exact authorized finding target')
                         key = finding['target_key']
@@ -3421,8 +3440,13 @@ class PostgresKnowledgeStore:
                 writable = {p.key for p in request.permissions}
                 from backend.pipeline.claim_joint_update import enabled, required_keys
                 required = set(required_keys(request)) if enabled(request, policy) else set()
-                if (writable != finding_targets | required
-                        or (set(request.target_keys) & writable) - finding_targets):
+                restoring = {k for k in request.target_keys if policy.legacy_ai_supersession_restore and cm.legacy_ai_supersession(before[k])}
+                if policy.legacy_ai_supersession_restore:
+                    required = set(authority.get('required_maintenance_keys', []))
+                    if any(k.startswith('claims/') for k in required):
+                        raise ChangeSetConflict('legacy Restore cannot hide additional Claim targets')
+                if (writable != finding_targets | required | restoring
+                        or (set(request.target_keys) & writable) - finding_targets - restoring):
                     raise ChangeSetConflict('saved context maintenance cannot grant unrelated writes or unregistered Claim targets')
                 value['findings'] = imported
                 value['context_review_actions'] = context_actions
@@ -5896,6 +5920,9 @@ class PostgresKnowledgeStore:
                 and int((existing.get(key) or {}).get("revision") or 0)
                 == object_revision
             }
+            human_review_ids = {row[0] for row in conn.execute(
+                "SELECT DISTINCT object_id FROM wang_knowledge.review_events WHERE collection='claims' AND object_id=ANY(%s) AND reviewer_kind='human'",
+                (sorted(incoming_owner),)).fetchall()} if any(v['action'] == 'restore' for v in (claim_writes or {}).values()) else set()
             if transactional:
                 existing.update(self._existing_cvp_context(conn,normalized,retiring_keys))
             elif any(
@@ -5920,9 +5947,21 @@ class PostgresKnowledgeStore:
                 else None
             )
         revival_keys = {k for k, v in (claim_writes or {}).items() if v['action'] == 'restore'}
+        logical_revivals = set()
         for key in revival_keys:
+            if key in existing and not existing[key].get('retired'):
+                from backend.pipeline import claim_management as cm
+                if source_kind == cm.VERSION and key[0] == 'claims' and cm.legacy_ai_supersession(existing[key]):
+                    if key[1] in human_review_ids:
+                        raise ChangeSetConflict('legacy Restore cannot override a human decision')
+                    # The new exact GPT/Opus Restore review is the authority;
+                    # this does not label the old event history as AI or human.
+                    existing_review_authorities[key] = 'ai'
+                    logical_revivals.add(key)
+                    continue
             if key not in existing or not existing[key].get('retired'):
                 raise ChangeSetConflict('Restore lost its exact retired current preimage')
+        revival_keys -= logical_revivals
         arrival = build_change_set_plan(
             package,
             {key: ({**row, 'retired': False, 'retired_at': None} if key in revival_keys else row)
