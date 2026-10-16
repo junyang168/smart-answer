@@ -3586,6 +3586,62 @@ class PostgresKnowledgeStore:
             cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now() WHERE run_id=%s",
                            (canonical_json(value), action_run_id))
 
+    def record_claim_management_returned_rejection(self, round_id, *, role, detail):
+        """Record an authenticated returned answer that was NOT accepted.
+
+        This changes call accounting only: no stage approval, finding resolution,
+        new budget, content write, or retry. Unknown/forged replies stay started.
+        """
+        from backend.pipeline import claim_management as cm
+        from backend.pipeline.cvp_sql_actions import claim_management_review_packet, validate_claim_stage
+        from backend.pipeline.source_reconciliation_runner import read, body, binding
+        if role not in {'gpt', 'opus'} or not detail:
+            raise ValueError('returned rejection requires its exact content role and failure detail')
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))', (POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
+            row = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE', (round_id,)).fetchone()
+            if not row or row[0].get('kind') != 'claim_management_round':
+                raise ChangeSetConflict('returned rejection requires its original round')
+            value = row[0]
+            parent = cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE',
+                (value['parent_run_id'],)).fetchone()[0]
+            slot = parent['call_reservations'].get(round_id + ':' + role)
+            stage = 'candidate' if role == 'gpt' else 'opus'
+            if (not slot or slot['state'] != 'started'
+                    or stage in value.get('stage_results', {}) or value.get('change_set_ids')
+                    or round_id not in parent['latest_rounds'].values()):
+                raise ChangeSetConflict('returned rejection cannot relabel an accepted, committed or superseded result')
+            root = Path(value.get('recovery_root', Path(parent['execution_root']) / round_id))
+            materials = body(read(root / 'materials.json'))
+            if materials != value['materials']:
+                raise ChangeSetConflict('returned rejection materials drift')
+            packet = cm.model_packet(materials) if role == 'gpt' else claim_management_review_packet(
+                materials, cm.Candidate.model_validate(body(read(root / 'candidate.json'))))
+            # Authenticate the complete original wire and raw WITHOUT accepting
+            # its schema/semantic decisions or requiring a new implementation.
+            validate_claim_stage(root, role, cm.Policy.model_validate(materials['policy']), packet)
+            if (body(read(root / (role + '.reservation.json'))) != slot.get('intent')
+                    or sha256_json(slot['intent']) != slot.get('intent_sha256')):
+                raise ChangeSetConflict('returned rejection original call intent drift')
+            rejection = {'response_state': 'returned_rejected', 'raw': binding(root / (role + '.raw.json')), 'detail': detail,
+                         'accepted': False, 'automatic_retry': False}
+            if slot.get('rejection'):
+                if slot['rejection'] != rejection:
+                    raise ChangeSetConflict('returned rejection already recorded differently')
+                return rejection
+            # Keep the original spent reservation and remaining role slots.
+            # Reply acceptance is separate from call intent; existing exact
+            # recovery can consume this same raw without inventing a new call.
+            slot['rejection'] = rejection
+            value['outcome'] = 'engineering_required'
+            value.setdefault('returned_rejections', {})[role] = rejection
+            parent['result'] = {'status': 'paused', 'reason': 'engineering_required', 'detail': detail,
+                                'returned_rejected_call': round_id + ':' + role}
+            for rid, metadata in [(round_id, value), (value['parent_run_id'], parent)]:
+                cursor.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,heartbeat_at=now() WHERE run_id=%s',
+                    (canonical_json(metadata), rid))
+            return rejection
+
     def record_claim_management_stage(self, round_id, receipt_binding):
         """Append an authenticated result; applied and completed are distinct.
 

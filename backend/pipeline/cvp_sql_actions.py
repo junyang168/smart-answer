@@ -494,6 +494,8 @@ def execute_claim_management(store, request, *, root, ports):
             return {'status':'paused', 'reason':'continued_in_linked_action', 'run_id':parent['continued_by']}
         if parent['result'].get('status') == 'completed':
             return store.finish_claim_management_action(parent_id)
+        if parent['result'].get('returned_rejected_call'):
+            return parent['result']
         if parent['result'].get('reason') in {'human_required','no_progress','disagreement','permission_required','budget_exhausted'}:
             return parent['result']
         try:
@@ -735,6 +737,23 @@ def execute_claim_management(store, request, *, root, ports):
                       'no_progress' if 'semantic progress' in text else
                       'budget_exhausted' if 'budget' in text or 'complete next round' in text else
                       'source_drift' if 'source' in text and 'drift' in text else 'engineering_required')
+            # Preserve known returned failures as distinct from unknown calls.
+            # Authentication failure must never clear a started reservation.
+            parent = store.get_cvp_group(parent_id)
+            # Runtime/transport interruption is not a schema rejection. A valid
+            # saved reply must still be resumable without another model call.
+            for slot in parent['call_reservations'].values() if isinstance(exc, ValueError) and not isinstance(exc, Stop) else []:
+                if slot['state'] != 'started' or slot['role'] not in {'gpt', 'opus'}:
+                    continue
+                child = store.get_cvp_group(slot['round_id'])
+                stage_root = Path(child.get('recovery_root', root / slot['round_id']))
+                if (stage_root / (slot['role'] + '.raw.json')).is_file():
+                    try:
+                        store.record_claim_management_returned_rejection(slot['round_id'], role=slot['role'], detail=text)
+                    except (ValueError, RuntimeError) as recording_error:
+                        text += '; returned-answer authentication failed: ' + str(recording_error)
+                    else:
+                        return store.get_cvp_group(parent_id)['result']
             return store.pause_claim_management_action(parent_id, reason=reason, detail=text)
 
 

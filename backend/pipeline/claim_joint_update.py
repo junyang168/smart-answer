@@ -100,9 +100,10 @@ def finding_blocks(finding, request, candidate):
     writes = {d.record_key for d in candidate.dispositions if d.action != 'retain'} if candidate else set()
     affected = finding.get('affected_target_keys')
     affected_writes = finding.get('affected_write_keys')
-    for values, allowed in ((affected, targets), (affected_writes, writes)):
+    for name, values, allowed in (('affected_target_keys', affected, targets), ('affected_write_keys', affected_writes, writes)):
         if not isinstance(values, list) or len(values) != len(set(values)) or not set(values) <= allowed:
-            raise ValueError('joint finding requires exact target impact and affected_write_keys from actual candidate writes')
+            raise ValueError('joint finding requires exact target impact and affected_write_keys from actual candidate writes: '
+                             + name + ' must contain unique keys from ' + repr(sorted(allowed)))
     if not (finding.get('impact_reason') or '').strip():
         raise ValueError('joint finding requires impact_reason')
     key = finding['target_key']

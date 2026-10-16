@@ -77,7 +77,7 @@ class Policy(source.Contract):
     all_findings_to_gpt: bool | None = None
 
     claim_scope_contract: Literal['claim_direct_neighbours_v1'] | None = None
-    model_output_contract: Literal['claim_changes_v1'] | None = None
+    model_output_contract: Literal['claim_changes_v1', 'claim_changes_v2'] | None = None
     legacy_ai_supersession_restore: Literal[True] | None = None
 
     joint_update_contract: Literal['wang_claim_joint_update_v1'] | None = None
@@ -379,7 +379,7 @@ def audit_contract(root, policy=None):
     prompt = pipeline / ('prompts/claim_management_audit_joint_v1.md' if joint else 'prompts/claim_management_audit_v2.md')
     files = [Path(__file__), pipeline/'claim_joint_update.py', pipeline/'prompts/claim_management_joint_update_v1.md', pipeline/'prompts/claim_management_audit_joint_v1.md', pipeline/'claim_review_recovery.py', pipeline/'claim_qualification_reuse.py', pipeline/'claim_human_source.py', pipeline/'claim_direct_scope.py', pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py',
         pipeline/'source_reconciliation_runner.py', pipeline/'source_reconciliation_runtime.py',
-        pipeline/'claim_model_output.py', pipeline/'prompts/claim_management_compact_v1.md', pipeline/'subscription_process.py', pipeline/'codex_subscription_client.py', pipeline/'claude_subscription_client.py',
+        pipeline/'claim_model_output.py', pipeline/'prompts/claim_management_compact_v1.md', pipeline/'prompts/claim_management_compact_v2.md', pipeline/'subscription_process.py', pipeline/'codex_subscription_client.py', pipeline/'claude_subscription_client.py',
         repository/'backend/api/canonical_repository/postgres_store.py', repository/'backend/api/canonical_repository/knowledge_models.py', repository/'scripts/audit-library.py',
         *[pipeline/'prompts'/('claim_management_'+role+'_v2.md') for role in ('proposal','review','audit')]]
     return {'instructions': archive_source_version(source.FileBinding.model_validate(binding(prompt)), Path(root)/'audit-contract'),

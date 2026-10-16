@@ -4,14 +4,15 @@ No inferred edits or editorial decisions: omitted fields remain byte-for-byte
 unchanged. Independent review explicitly approves all unchallenged records.
 Historical policies keep their original schemas and interpretation.
 """
-from copy import deepcopy
+from copy import copy, deepcopy
 import json
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, create_model
 from backend.pipeline import claim_management as cm
 
 CONTRACT = 'claim_changes_v1'
+SCOPED_CONTRACT = 'claim_changes_v2'
 
 
 class Change(cm.source.Contract):
@@ -34,7 +35,65 @@ class FindingsReview(cm.source.Contract):
 
 
 def enabled(materials):
-    return materials['policy'].get('model_output_contract') == CONTRACT
+    return materials['policy'].get('model_output_contract') in {CONTRACT, SCOPED_CONTRACT}
+
+
+def scoped_adapter(adapter, packet):
+    """Constrain identifiers before generation; keep all semantic checks after it.
+
+    v1 saved requests keep their exact schema. v2 uses the SAME output shape,
+    with enum domains compiled only from the frozen unit and actual candidate.
+    No response is filtered, corrected, or accepted by this function.
+    """
+    if packet.get('policy', {}).get('model_output_contract') != SCOPED_CONTRACT:
+        return adapter
+    request = packet['unit_request']
+    if request == {'__claim_request_ref__': 'request'}:
+        request = packet['request']
+    before = set(packet['before'])
+    targets = set(request['target_keys'])
+    writable = {cm.source.key(p['collection'], p['object_id']) for p in request['permissions']} & before
+    reviewing = 'candidate' in packet
+    writes = ({d['record_key'] for d in packet['candidate']['dispositions'] if d['action'] != 'retain'}
+              if reviewing else writable)
+    denominator = set(packet['denominator']) if reviewing else before
+
+    def key_type(keys):
+        return Literal[tuple(sorted(keys))] if keys else str
+
+    def key_list(keys, description):
+        return (list[key_type(keys)], Field(description=description, **({'max_length': 0} if not keys else {})))
+
+    impact = {
+        'affected_target_keys': key_list(targets, 'Only affected Claim keys from unit_request.target_keys. Never Evidence, Observation, relation, or readonly neighbour keys.'),
+        'affected_write_keys': key_list(writes, 'Only affected actual non-retain candidate writes; for a proposal only authorized writes are possible. An unchanged authorized record is not an actual write.'),
+    }
+    finding = create_model('ScopedFinding', __base__=cm.JointFinding,
+        target_key=(key_type(denominator), Field(description='The exact object with the objection; distinct from affected Claim targets.')), **impact)
+    pending = set(packet.get('unresolved', {}))
+    resolution = create_model('ScopedFindingResolution', __base__=cm.JointFindingResolution,
+        finding_id=(key_type(pending), ...), **impact)
+    if reviewing:
+        model = create_model('ScopedFindingsReview', __base__=FindingsReview,
+            findings=(list[finding], ...),
+            prior_findings=(list[resolution], Field(**({'max_length': 0} if not pending else {}))))
+    else:
+        change = create_model('ScopedChange', __base__=Change, record_key=(key_type(writable), ...))
+        model = create_model('ScopedChanges', __base__=Changes,
+            changes=(list[change], Field(**({'max_length': 0} if not writable else {}))),
+            findings=(list[finding], ...),
+            finding_resolutions=(list[resolution], Field(**({'max_length': 0} if not pending else {}))))
+    schema_sha = cm.sha256_json(model.model_json_schema())
+    if getattr(adapter, '_claim_scope_schema_sha256', None) == schema_sha:
+        return adapter
+    result = copy(adapter)
+    result._response_model = model
+    result._claim_scope_schema_sha256 = schema_sha
+    result._claim_scope_base_config_sha256 = getattr(adapter, '_claim_scope_base_config_sha256', adapter.generation_config_sha256)
+    result.generation_config_sha256 = cm.sha256_json({
+        'base_config_sha256': result._claim_scope_base_config_sha256,
+        'response_scope': SCOPED_CONTRACT, 'response_schema_sha256': schema_sha})
+    return result
 
 
 def object_json(text):
@@ -97,7 +156,7 @@ def candidate(raw, materials):
     expanded = cm.Candidate(records=rows, dispositions=list(dispositions.values()),
         operation='Update', findings=wire.findings, finding_resolutions=wire.finding_resolutions)
     result, receipt = cm.normalize_candidate(expanded.model_dump(mode='json'), materials['sources'])
-    receipt.update(output_contract=CONTRACT, model_response_sha256=cm.sha256_json(raw),
+    receipt.update(output_contract=materials['policy']['model_output_contract'], model_response_sha256=cm.sha256_json(raw),
                    frozen_before_sha256=cm.sha256_json(before), changed_keys=sorted(seen))
     return result, receipt
 
@@ -133,7 +192,7 @@ def review_packet(packet):
     packet = deepcopy(packet)
     packet['candidate']['dispositions'] = [d for d in packet['candidate']['dispositions'] if d['action'] != 'retain']
     packet.pop('candidate_sha256')
-    packet['model_output_contract'] = CONTRACT
+    packet['model_output_contract'] = packet['policy']['model_output_contract']
     packet['candidate_projection'] = ('Every before record not explicitly changed remains identical. '
         'candidate.records are complete postimages for actual changes. Review the ENTIRE denominator and all sources. '
         'complete_review=true explicitly approves all records without reported/persistent findings. '

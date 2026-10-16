@@ -10,7 +10,7 @@ Claim Management 的目标是让新建和既有 Claim 都忠于教授的完整�
 
 当前新 action 暂停 Gemini 终审，默认采用 [Opus-only policy](../../../backend/pipeline/policies/wang_claim_management_opus_only_v2.json)：`independent_audit=false`、Gemini 调用预算为 0。Opus 内容审阅、版本／来源校验、事务、真实写集、回读和原始目标核实保留；结果明确为 `opus_and_program_readback`，不标成独立终审通过。本文的 Gemini 分支只适用于明确启用独立终审的 policy；既有已绑定任务和完成记录不改变。
 
-普通双目标联合 Update 新任务可显式选择 [joint Update v3 policy](../../../backend/pipeline/policies/wang_claim_management_joint_update_v3.json)，容量为 2，采用简化输出契约与 Opus＋程序回读。[v2 policy](../../../backend/pipeline/policies/wang_claim_management_joint_update_v2.json) 保留原模型输出契约，不升级已绑定任务。单条及其他 operations 的默认 policy、旧联合 v1 policy 和已绑定任务保持原样；缺省容量仍为 1。选用联合 policy 不代替具体目标、字段权限和必做清单的精确授权。
+普通双目标联合 Update 新任务可显式选择 [joint Update v5 policy](../../../backend/pipeline/policies/wang_claim_management_joint_update_v5.json)，容量为 2，采用简化输出、Claim 一跳上下文与 Opus＋程序回读；输出中的 ID 由本次冻结范围约束。既有 v1–v4 policy 及已绑定任务保持原模型输入／输出契约，不升级历史答复。单条及其他 operations 的默认 policy 保持原样；缺省容量仍为 1。选用联合 policy 不代替具体目标、字段权限和必做清单的精确授权。
 
 Review 就是审阅，作为独立业务 operation 保留。Update 内含审阅、必要修正与独立审计，不需要另发 Review 请求。Create、Retire、Restore、Split、Merge 同样内含审核；这些操作共用现有执行机制。Read 只读取，不触发模型或内容事务。
 
@@ -168,6 +168,8 @@ Update 可在获准范围内联合修正 Claim 表述／归属／类型／经文
 finding 身份按原 action、目标判断／成分、问题类别与来源依据固定，各轮版本另绑；不按模型理由文字或当轮 SHA 改名。Split／Merge 的映射承接旧问题和预算，无法确定对应时暂停核实。每个候选／回应有独立请求身份，累计仍归原 action。
 
 从旧审阅接手部分保存异议时，按 finding ID 逐项绑定新的维护 action；未选中的异议继续留在原清单。事务内拒绝同一异议被另一新 action 重复认领，并校验对应对象仍为原审核版本。只有全部保存异议都有明确归属时才写整次审阅的汇总接手标记；认领不是解决，暂停／待人工项必须继续显示。旧的整次接手记录保持原解释，不自动拆分或重新开放预算。
+
+新精简输出契约 `claim_changes_v2` 在发出模型请求前，根据冻结单元生成 ID 枚举：异议对象来自完整审阅范围，受影响目标只能是本单元 Claim，受影响写项在复核时只能是候选实际写项；提议阶段仍须在候选展开后验证实际写集。必做维护对象、只读邻居与备用字段权限不会自动成为 Claim 目标或实际写项。原始答复不做删 ID、猜范围或自动补批准；完整语义、引文、权限及影响一致性校验继续执行。
 
 历史跨来源 Claim 可 Review：分别展开每份完整自身来源，逐来源判断，不拼成某一份的论证。已有审核按第 10 节判断是否仍有效；需要修改为单来源记录时，按原许可 Split 并保留映射，没有权限则报告待迁移。来源别名由来源管理确认，不由 Claim 模型自行合并。
 
@@ -347,6 +349,8 @@ GPT 对每个未决 finding 返回恰好一个有原文引用的 `finding_resolu
 长任务通过 `backend.pipeline.claim_management_batch --detach` 独立运行，manifest 只绑定已有 request 与原 action root，不授予新权限或预算。控制器与子任务共同持有执行锁；同批最多两个 action 并行，读写相交则串行。一组暂停或异常后，其余无冲突工作仍可推进；批次结束重新查询所有目标的当前资格，不以历史完成数替代。
 
 共用调用层在发出调用前保存精确输入意图，CLI 输出直接写入持久文件，退出码、错误类别与输出哈希单独落盘。完整成功退出记录且输入／可执行文件／输出均一致时，可以恢复同一次返回，不能再生成；缺退出记录、失败退出或输出漂移继续视为不确定或失败，不重发。状态查询核对实际执行锁，旧 `running` 或旧 PID 不证明仍在运行。恢复命令使用同一 manifest、action root 与原调用账本。
+
+答复已返回但未通过程序校验时，核实其完整原始输入／预留／输出绑定后，独立登记 `returned_rejected` 答复状态、原 raw 与拒收原因。原调用预留及其消耗保持；该记录不是审核通过，也不新增内容结论或预算。未知、被篡改的答复不能获得此状态。普通重复启动直接返回原暂停；有效答复遇到程序运行中断不因此标成格式拒收，仍可从同一保存结果恢复。程序修复后的重新接纳只能走现有精确恢复路径，不改写原失败和原答。
 
 已返回的旧 Update 提案若仅有保留说明的机械抄写错误，可在同一 action、同一 round 下正式恢复：原答、输入、prompt、policy 和调用账本保持，逐项保存纠正与原失败状态。保留的 SourceFragment 错 ID 只接受完整自身来源、段落、逐字引文在整个冻结范围内唯一匹配，并恢复完整恰好一次的处置；不猜相似后缀，不纠正实际写入或其他语义引用。保留说明引文的繁简抄写只接受长度相同、繁转简和简转繁均一致、且在指定当前原文段落中唯一定位的原句；不接受增删词、标点改写、同形歧义或异议／修改依据的自动改写。
 

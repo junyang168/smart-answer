@@ -190,6 +190,8 @@ def stage_adapter(adapter, packet, path, *, saved=None):
     from backend.pipeline.viewpoint_resolution_runtime import response_adapter
     from backend.pipeline.source_paragraph_impact import scoped_adapter
     adapter = scoped_adapter(adapter, packet)
+    from backend.pipeline.claim_model_output import scoped_adapter as claim_scoped_adapter
+    adapter = claim_scoped_adapter(adapter, packet)
     path = Path(path)
     selected = response_adapter(adapter, saved)
     if saved is not None:
