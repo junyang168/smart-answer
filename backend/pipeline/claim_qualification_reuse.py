@@ -84,7 +84,68 @@ def argument_basis(targets, payloads):
     return basis
 
 
-def reviewed_context_change(cursor,old,peer,original,fresh,current,protected,review):
+def scoped_objections(old,peer,old_review,review,basis,protected,changed):
+    """Preserve exact prior context judgments, never infer a new target impact.
+
+    A peer's empty impact list speaks only about that peer's targets. For a
+    new objection it cannot establish safety for a different original target.
+    Compare content and the actual resolution literally, without fuzzy issue
+    matching or treating an unchanged object as an unchanged objection.
+    """
+    from backend.pipeline import claim_management as cm
+
+    def active(value,decoded):
+        result=[]
+        for finding in decoded['findings']:
+            result.append((finding,None))
+        for resolution in decoded['prior_findings']:
+            if resolution['disposition']=='resolved':continue
+            prior=value['materials']['unresolved'].get(resolution['finding_id'])
+            if prior is None:raise ValueError('context objection has no saved prior finding')
+            result.append((cm.resolution_finding(cm.FindingResolution.model_validate(resolution),
+                value['materials']['unresolved']),resolution))
+        return result
+
+    def signature(finding,resolution):
+        content={k:v for k,v in finding.items() if k not in {
+            'affected_target_keys','affected_write_keys','impact_reason'}}
+        # A changed adjudication or new supporting location is not silently
+        # declared equivalent merely because it has the same issue identity.
+        decision=({k:resolution[k] for k in ('disposition','reason','citations')}
+                  if resolution else None)
+        return cm.sha256_json({'finding':content,'resolution':decision})
+
+    prior={signature(f,r):(f,r) for f,r in active(old,old_review)}
+    peer_targets=set(peer['materials']['original_goal']['target_keys'])
+    targets=set(old['materials']['original_goal']['target_keys'])
+    allowed={};proof=[]
+    for finding,resolution in active(peer,review):
+        key=finding['target_key']
+        if (finding.get('affected_target_keys')!=[] or finding.get('affected_write_keys')!=[]
+                or not (finding.get('impact_reason') or '').strip()
+                or key in protected|changed
+                or resolution and resolution['disposition']=='reopened'):
+            raise ValueError('context objection affects protected or changed scope')
+        sig=signature(finding,resolution)
+        previous=prior.get(sig)
+        if previous is not None:
+            original,_=previous
+            if (original.get('affected_target_keys')!=[] or original.get('affected_write_keys')!=[]
+                    or not (original.get('impact_reason') or '').strip()):
+                raise ValueError('original objection lacks explicit context judgment')
+            kind='unchanged_original_context'
+        else:
+            if key in basis or not targets<=peer_targets:
+                raise ValueError('new or changed objection lacks original target impact proof')
+            kind='new_context_outside_original_basis'
+        allowed[key]=True
+        proof.append({'record_key':key,'signature':sig,'basis':kind})
+    rejected={v['record_key'] for v in review['verdicts'] if not v['approved'] or v['problems']}
+    if not rejected<=set(allowed):raise ValueError('unexplained current review rejection')
+    return sorted(proof,key=lambda p:(p['record_key'],p['signature']))
+
+
+def reviewed_context_change(cursor,old,peer,original,fresh,current,protected,review,old_review):
     """Exact unchanged basis, exact scope, complete current content judgment."""
     from backend.pipeline import claim_management as cm
     from backend.api.canonical_repository.postgres_store import record_content_sha
@@ -114,13 +175,16 @@ def reviewed_context_change(cursor,old,peer,original,fresh,current,protected,rev
     dispositions={d['record_key']:d['action'] for d in peer['candidate']['dispositions']}
     verdicts={v['record_key'] for v in review['verdicts'] if v['approved'] and not v['problems']}
     scope={cm.source.key(*key) for key in original if key[0] in cm.CLAIM_COLLECTIONS}
-    if not scope<=verdicts or not scope<=set(dispositions):
+    objections=scoped_objections(old,peer,old_review,review,basis,protected,
+        {cm.source.key(*key) for key in changes})
+    exceptions={p['record_key'] for p in objections}
+    if not scope<=verdicts|exceptions or not scope<=set(dispositions):
         raise ValueError('current review omitted original content scope')
     if not protected<=set(dispositions) or any(dispositions[key]!='retain' for key in protected):
         raise ValueError('original protected objects were not retained')
     if any(dispositions[key]!='retain' for key in basis if key in dispositions):
         raise ValueError('original argument basis was not retained')
-    return sorted(cm.source.key(*key) for key in changes),sorted(basis)
+    return sorted(cm.source.key(*key) for key in changes),sorted(basis),objections
 
 
 def complete(value):
@@ -165,9 +229,9 @@ def current_pins(store,cursor,value):
             or core['original_approval']!=value['reviewed']['evidence']['approval']
             or set(decoded_pins(core['current_pins']))!=set(decoded_pins(value['audited_pins']))):
         raise ValueError('qualification reuse original proof drift')
-    if core['schema_version'] not in {'wang_claim_review_context_reuse_v1','wang_claim_review_context_reuse_v2'}:
+    if core['schema_version'] not in {'wang_claim_review_context_reuse_v1','wang_claim_review_context_reuse_v2','wang_claim_review_context_reuse_v3'}:
         raise ValueError('unknown qualification reuse proof')
-    if core['schema_version']=='wang_claim_review_context_reuse_v2':
+    if core['schema_version'] in {'wang_claim_review_context_reuse_v2','wang_claim_review_context_reuse_v3'}:
         original=decoded_pins(value['audited_pins']);current=decoded_pins(core['current_pins'])
         basis=set(core['unchanged_argument_basis'])
         protected=protected_keys(value)
@@ -197,10 +261,9 @@ def admit(store,cursor,original_id,peer_id):
     from backend.pipeline.cvp_sql_flow import decoded_pins,pin_rows
     from backend.api.canonical_repository.postgres_store import record_content_sha,sha256_json,canonical_json
     old=round_value(cursor,original_id);peer=round_value(cursor,peer_id)
-    original_review,_=evidence(old);peer_review,review=evidence(peer)
-    if (review['findings'] or any(r['disposition']!='resolved' for r in review['prior_findings'])
-            or any(not v['approved'] or v['problems'] for v in review['verdicts'])):
-        raise ValueError('peer review retains objections')
+    original_review,old_review=evidence(old);peer_review,review=evidence(peer)
+    has_objections=bool(review['findings'] or any(r['disposition']!='resolved' for r in review['prior_findings'])
+        or any(not v['approved'] or v['problems'] for v in review['verdicts']))
     required=set(old['materials']['original_goal']['required_questions'])
     if not required<=set(peer['materials']['original_goal']['required_questions']) or not required<=set(review['answered_questions']):
         raise ValueError('peer review capabilities cannot support reuse')
@@ -223,9 +286,9 @@ def admit(store,cursor,original_id,peer_id):
         if not row or row[1]!=pin[1] or record_content_sha(row[0])!=pin[1] or not anchor_pruning(row[0],current[key]['payload']):
             legacy=False;break
         changes.append(skey)
-    basis=None
-    if not legacy:
-        changes,basis=reviewed_context_change(cursor,old,peer,original,fresh,current,protected,review)
+    basis=None;objections=[]
+    if not legacy or has_objections:
+        changes,basis,objections=reviewed_context_change(cursor,old,peer,original,fresh,current,protected,review,old_review)
     if not changes:raise ValueError('qualification has no context drift to revalidate')
     store._assert_claim_management_scope(cursor,updated,records={key:current[key] for key in updated})
     for key in protected:
@@ -244,6 +307,8 @@ def admit(store,cursor,original_id,peer_id):
             changed_context_keys=changes,
             basis='unchanged original target argument and writes; full current scoped content review')
         core.pop('changed_readonly_claims')
+    if objections:
+        core.update(schema_version='wang_claim_review_context_reuse_v3',retained_context_objections=objections)
     events={key:'CMCTX-'+sha256_json({'proof':core,'target':key})[:32] for key in protected if key.startswith('claims/')}
     proof={**core,'event_ids':events}
     if old.get('reviewed_context_reuse')==proof:return proof

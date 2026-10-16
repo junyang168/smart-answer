@@ -652,3 +652,15 @@ action 为 `435-joint-update-divinity-summary-two-20261015-v1`，唯一 round �
 再次核对全部 90 条清单：基线 32 条当前资格全部保持；新十二条当前有效数由七增至八。剩余四条为 2021 `DK-07e99f606211a0a4a17a-P04-CL008`（答复未知）、2016 `DK-5317618c7962-P05-CL014`（修订预算耗尽）、第十章 `DK-74fcb58a05aa-P01-CL002`／`P01-CL003`（历史通过、当前关联数据资格待确认）。两条缺 target 登记及三条原 unresolved／held 仍单列。此次没有启动新内容组、重发 2021 或把任何未完成项算完成。
 
 证据均在 `claim-management-435/remaining-twelve-20261015-v1/known-proposal-recovery-v1/2019-judgment/`：`retained-annotation-recovery-before-20261016.json`、精确 direction、admission、`retained-annotation-recovery-exact-delta-20261016.json`、`retained-annotation-recovery-final-verification-20261016.json` 及其 verifier。原 round 的 `engineering-candidate-8fc98646eb132a13a8f6/` 保存原 GPT 三文件、当前材料、normalization、恢复证明、唯一 Opus 调用及完整 readback。最终程序核实不冒充独立内容审计；#435／PR #437 仍未整体完成、未合并或部署。
+
+## 2026-10-16：资格复用按异议影响核实，未放行第十章两条
+
+负责人同意修正整包无异议的复用前提，要求保留原有周边异议、核实新异议是否影响原目标。共用 `claim_qualification_reuse` 入口现在逐项核实完整审阅结论：原目标、原实际写项及前后论据仍精确不变；原完整审核已明确判为不阻断的异议，只有问题内容、引文、处置状态与理由精确保持才可沿用。新或变化的异议还须在原论据之外，且新审阅的正式目标明确包含全部原目标并给出无影响说明。对另一组目标的空列表不当作对原目标的结论，不用模糊文字／对象 ID 推定异议等价。
+
+现有短事务与 review_events 保存有异议复用的 v3 附加证明，原 v1／v2 证明保持有效；完整 pins、来源、历史、目标及原写集不减，实际拒绝与 findings 不变，无原审核的旁观对象不升级。隔离 PostgreSQL 验证了保留原异议但恢复旧目标、零调用完成重入、拒绝对象仍无资格，以及证明／事件／原稿／关联审核漂移后重新失效。新增异议、扩大问题／引文／处置、影响原目标／写入、变化对象、缺影响字段和 reopened 均有拒绝反例。
+
+真实保存材料零调用核实完整 262 项：原审核与当前唯一版本差异仍为 `P02-E010` 增加 `P02-OBS011-01` 片段，原两目标、原四写项、论据及 source／meta 均保持。逐项核对未能证明三项异议对原目标无影响：CL007 是后续新增，CL005／CR010 本次问题与处置描述并非原记录的精确延续，三者也进入现有保守论据集合。后续审阅的影响说明只针对 P02-CL012／P03-CL003，不覆盖原 P01-CL002／P01-CL003；不能把这些语义判断用机械签名替代，亦不因同属一个对象或同一段原文而认定没有扩大。因此两条仍待确认，未强制恢复、未重新审阅，新增十二条当前资格仍为八条。
+
+调查脚本与逐项结果保存在 `remaining-twelve-20261015-v1/chapter10-scoped-reuse-verification-20261016-v1/`。本次修复的是安全复用接点，不声称已解决这些内容影响问题；2021 未知答复和 2016 预算耗尽也保持原事实。
+
+本轮相关回归 328 passed、18 按既有失败类别 skipped；其中资格复用 62 passed。文档检查仍仅报另一项目既有缺失锚点，前端类型检查仍仅报 EmailSender／FellowshipManager 的既有 react-quill-new 缺失及 theme 类型错误；本轮没有修改前端或依赖。git diff --check 通过。

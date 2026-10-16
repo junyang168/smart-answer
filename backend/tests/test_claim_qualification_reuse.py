@@ -30,16 +30,29 @@ def related(action):
     return action
 
 
-def qualify_original(related):
+def qualify_original(related,*,opus=None):
     action=related;store=action[0];request,root=request_for(action,'C',['statement'])
-    ports=SyntheticPorts(store,root);assert execute_claim_management(store,request,root=root,ports=ports)['status']=='completed'
+    def proposal(packet):
+        result=cm.existing_candidate(packet['before'])
+        result.finding_resolutions=[context_resolution(fid,f) for fid,f in packet['unresolved'].items()]
+        return result.model_dump(mode='json')
+    ports=SyntheticPorts(store,root,opus=opus,proposal=proposal if opus else None)
+    result=execute_claim_management(store,request,root=root,ports=ports)
+    assert result['status']=='completed',result
     parent=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id));rid=next(iter(parent['latest_rounds'].values()))
     return request,root,rid,deepcopy(store.get_cvp_group(rid))
 
 
-def prune_peer(related,*,semantic=False,expected_status="completed"):
+def prune_peer(related,*,semantic=False,expected_status="completed",context=None):
     action=related;store=action[0];request,root=request_for(action,'D',['occurrences','statement'])
-    def opus(packet):return rejected(packet,key='claims/D') if not packet['round_number'] else passing(packet)
+    def opus(packet):
+        if packet['round_number']:return context(packet) if context else passing(packet)
+        result=rejected(packet,key='claims/D')
+        if context:
+            extra=context(packet);result['findings']+=extra['findings']
+            for verdict in result['verdicts']:
+                if verdict['record_key']=='claims/P':verdict.update(approved=False,problems=['occurrence mismatch'])
+        return result
     def proposal(packet):
         result=cm.existing_candidate(packet['before']);post=deepcopy(packet['before']['claims/D']['payload']);post['occurrences'][0]['anchors'].pop()
         if semantic:post['statement']='另一个判断。'
@@ -47,6 +60,10 @@ def prune_peer(related,*,semantic=False,expected_status="completed"):
         for d in result.dispositions:
             if d.record_key=='claims/D':d.action='update';d.reason='remove peer-only locator';d.citations=[cm.Citation(source_id='S',paragraph_key='S0001',exact_quote='甲是假设，不是断言。')]
         result.finding_resolutions=[cm.FindingResolution(finding_id=fid,disposition='resolved',reason='pruned wrong peer locator',citations=[cm.Citation.model_validate(f['citations'][0])]) for fid,f in packet['unresolved'].items()]
+        if context:
+            result.finding_resolutions=[context_resolution(r.finding_id,packet['unresolved'][r.finding_id])
+                if packet['unresolved'][r.finding_id]['target_key']=='claims/P' else r
+                for r in result.finding_resolutions]
         return result.model_dump(mode='json')
     ports=SyntheticPorts(store,root,proposal=proposal,opus=opus)
     result=execute_claim_management(store,request,root=root,ports=ports);assert result['status']==expected_status,result
@@ -356,3 +373,104 @@ def test_successive_context_updates_keep_one_direct_proof_not_a_history_chain(do
     calls=list(ports.calls)
     assert store.claim_management_qualification('C')['ready']
     assert ports.calls==calls
+
+
+def context_resolution(fid,finding):
+    return cm.FindingResolution(finding_id=fid,disposition='persistent',reason='synthetic unchanged context judgment',
+        citations=finding['citations'],affected_target_keys=[],affected_write_keys=[],
+        impact_reason='synthetic explicit judgment for this operation')
+
+
+def context_objection(packet):
+    result=passing(packet)
+    result['findings']=[{'target_key':'claims/P','component':'occurrences','category':'mapping',
+        'reason':'synthetic unrelated occurrence mismatch','acceptance_condition':'correct the unrelated occurrence',
+        'citations':[{'source_id':'S','paragraph_key':'S0001','exact_quote':'甲是假设，不是断言。'}],
+        'affected_target_keys':[],'affected_write_keys':[],'impact_reason':'synthetic explicit judgment for this operation'}]
+    prior={fid:f for fid,f in packet['unresolved'].items() if f['target_key']=='claims/P'}
+    if prior:
+        result['findings']=[]
+        result['prior_findings']=[context_resolution(r['finding_id'],prior[r['finding_id']]).model_dump(mode='json')
+            if r['finding_id'] in prior else r for r in result['prior_findings']]
+    next(v for v in result['verdicts'] if v['record_key']=='claims/P').update(approved=False,problems=['occurrence mismatch'])
+    return result
+
+
+@pytest.mark.parametrize('drift',[None,'event_removed','peer_review','proof','source'])
+def test_exact_prior_context_objection_preserves_qualification_without_erasing_rejection(downstream,drift):
+    store=downstream[0]
+    store.apply_plan(store.plan_package({'package_id':'readonly-context','claims':[
+        {'claim_id':'P','claim_type':'exegesis','statement':'甲是假设。','occurrences':[{'source_id':'S','anchors':[]}]}],
+        'claim_relations':[{'claim_relation_id':'DP','from_id':'D','to_id':'P','relation_type':'supports'}]}))
+    request,root,rid,old=qualify_original(downstream,opus=context_objection)
+    peer,ports=prune_peer(downstream,semantic=True,context=context_objection)
+    current=store.get_cvp_group(rid);proof=current['reviewed_context_reuse']
+    assert proof['schema_version']=='wang_claim_review_context_reuse_v3'
+    assert proof['retained_context_objections'][0]['record_key']=='claims/P'
+    assert proof['retained_context_objections'][0]['basis']=='unchanged_original_context'
+    assert current['context_findings']==old['context_findings']
+    assert current['audited_pins']==old['audited_pins']
+    assert store.claim_management_qualification('C')['ready']
+    assert not store.claim_management_qualification('P')['ready']
+    calls=list(ports.calls)
+    assert store.revalidate_claim_management_context(rid,peer)==proof
+    assert execute_claim_management(store,request,root=root,ports=ports)['status']=='completed'
+    assert ports.calls==calls
+    if drift=='source':
+        p=Path(request.source_bindings['S'].path);p.write_text(p.read_text()+' ')
+    elif drift:
+        with store.connect() as conn:
+            if drift=='event_removed':conn.execute("DELETE FROM wang_knowledge.review_events WHERE decision='review_context_revalidated'")
+            elif drift=='peer_review':conn.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=jsonb_set(metadata,'{revisit_required}','true') WHERE run_id=%s",(peer,))
+            else:
+                value=store.get_cvp_group(rid);value.pop('run_id')
+                value['reviewed_context_reuse']['retained_context_objections'][0]['signature']='0'*64
+                conn.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb WHERE run_id=%s',(json.dumps(value),rid))
+    if drift:assert not store.claim_management_qualification('C')['ready']
+
+
+def objection_fixture():
+    finding=context_objection({'candidate_sha256':'0'*64,'denominator':['claims/P'],'unresolved':{},
+        'original_goal':{'required_questions':[]}})['findings'][0]
+    value={'materials':{'original_goal':{'target_keys':['claims/C']},'unresolved':{}}}
+    review={'findings':[finding],'prior_findings':[],
+        'verdicts':[{'record_key':'claims/P','approved':False,'problems':['mismatch']}]}
+    return value,review
+
+
+@pytest.mark.parametrize('change',['new','reason','component','citation','acceptance','target_impact',
+    'write_impact','missing_impact','missing_write_impact','missing_explanation','changed_object',
+    'protected_object','unexplained_rejection','peer_scope_only','reopened'])
+def test_scoped_reuse_rejects_new_expanded_or_unproven_objections(change):
+    from backend.pipeline.claim_qualification_reuse import scoped_objections
+    old,previous=objection_fixture();peer=deepcopy(old);review=deepcopy(previous)
+    finding=review['findings'][0];protected={'claims/C'};changed=set();basis={'claims/C','claims/P'}
+    if change=='new':previous['findings']=[]
+    elif change=='reason':finding['reason']='a broader problem'
+    elif change=='component':finding['component']='statement'
+    elif change=='citation':finding['citations'][0]['exact_quote']='甲是假设'
+    elif change=='acceptance':finding['acceptance_condition']='replace the whole argument'
+    elif change=='target_impact':finding['affected_target_keys']=['claims/C']
+    elif change=='write_impact':finding['affected_write_keys']=['evidence_steps/E']
+    elif change=='missing_impact':finding.pop('affected_target_keys')
+    elif change=='missing_write_impact':finding.pop('affected_write_keys')
+    elif change=='missing_explanation':finding['impact_reason']=' '
+    elif change=='changed_object':changed.add('claims/P')
+    elif change=='protected_object':protected.add('claims/P')
+    elif change=='unexplained_rejection':review['verdicts'].append({'record_key':'claims/X','approved':False,'problems':['unknown']})
+    elif change=='peer_scope_only':
+        previous['findings']=[];basis={'claims/C'};peer['materials']['original_goal']['target_keys']=['claims/D']
+    elif change=='reopened':
+        peer['materials']['unresolved']={'F':finding};review['findings']=[]
+        review['prior_findings']=[{'finding_id':'F','disposition':'reopened','reason':'new concern',
+            'citations':finding['citations'],'affected_target_keys':[],'affected_write_keys':[],
+            'impact_reason':'does not affect peer'}]
+    with pytest.raises(ValueError):scoped_objections(old,peer,previous,review,basis,protected,changed)
+
+
+def test_new_context_objection_requires_explicit_review_of_original_targets_and_is_outside_basis():
+    from backend.pipeline.claim_qualification_reuse import scoped_objections
+    old,review=objection_fixture();peer=deepcopy(old);previous=deepcopy(review);previous['findings']=[]
+    peer['materials']['original_goal']['target_keys']=['claims/C','claims/D']
+    proof=scoped_objections(old,peer,previous,review,{'claims/C'},{'claims/C'},set())
+    assert proof[0]['basis']=='new_context_outside_original_basis'
