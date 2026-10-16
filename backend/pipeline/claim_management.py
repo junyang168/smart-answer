@@ -378,7 +378,7 @@ def audit_contract(root, policy=None):
     files = [Path(__file__), pipeline/'claim_joint_update.py', pipeline/'prompts/claim_management_joint_update_v1.md', pipeline/'prompts/claim_management_audit_joint_v1.md', pipeline/'claim_review_recovery.py', pipeline/'claim_qualification_reuse.py', pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py',
         pipeline/'source_reconciliation_runner.py', pipeline/'source_reconciliation_runtime.py',
         pipeline/'claim_model_output.py', pipeline/'prompts/claim_management_compact_v1.md', pipeline/'subscription_process.py', pipeline/'codex_subscription_client.py', pipeline/'claude_subscription_client.py',
-        repository/'backend/api/canonical_repository/postgres_store.py', repository/'scripts/audit-library.py',
+        repository/'backend/api/canonical_repository/postgres_store.py', repository/'backend/api/canonical_repository/knowledge_models.py', repository/'scripts/audit-library.py',
         *[pipeline/'prompts'/('claim_management_'+role+'_v2.md') for role in ('proposal','review','audit')]]
     return {'instructions': archive_source_version(source.FileBinding.model_validate(binding(prompt)), Path(root)/'audit-contract'),
         'response_schema': (JointReview if joint else Review).model_json_schema(),
@@ -597,6 +597,14 @@ def validate_candidate(request: Request, before, candidate: Candidate, sources, 
                 raise ValueError("Merge cannot synthesize across sources")
     elif candidate.replacements and candidate.replacements != original_replacements:
         raise ValueError("replacement mapping requires an authorized structural operation")
+    from backend.api.canonical_repository.knowledge_models import knowledge_relation_endpoints
+    for key,write in writes.items():
+        if not key.startswith('knowledge_relations/') or write['action']=='retire':continue
+        relation=write['payload']
+        for field,allowed in zip(('from_id','to_id'),knowledge_relation_endpoints(relation['relation_type'])):
+            owners={source.split_key(k)[0] for k in post if source.split_key(k)[1]==relation[field]}
+            if len(owners)!=1 or not owners<=allowed:
+                raise ValueError(f'knowledge relation {key} {field} has incompatible endpoint collection')
     return post, writes
 
 

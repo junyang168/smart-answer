@@ -30,8 +30,11 @@ def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
         value=cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE',(round_id,)).fetchone()[0]
         history=value.get('engineering_review_recoveries',[])
         if history and history[-1]['authorization']==authorization:return history[-1]['recovery_root']
-        if (value.get('kind')!='claim_management_round' or value['checkpoint']!='prepared' or value.get('change_set_ids')
-                or value.get('opus_approved') or set(value.get('stage_results',{}))!=({'candidate'} if unrecorded else {'candidate','opus'})
+        checkpoint=value.get('checkpoint')
+        if (value.get('kind')!='claim_management_round' or checkpoint not in ({'prepared'} if unrecorded else {'prepared','reviewed'}) or value.get('change_set_ids')
+                or (value.get('opus_approved') and checkpoint!='reviewed')
+                or (checkpoint=='reviewed' and not value.get('opus_approved'))
+                or set(value.get('stage_results',{}))!=({'candidate'} if unrecorded else {'candidate','opus'})
                 or sha256_json(value)!=direction.get('prior_metadata_sha256')):
             raise ValueError('recovery requires the exact uncommitted, returned candidate and review')
         parent=cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE',
@@ -65,6 +68,10 @@ def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
             key='backend/pipeline/prompts/claim_management_joint_update_v1.md'
             if current_contract['implementation'][key] != value['materials']['audit_contract']['implementation'][key]:
                 raise ValueError('joint review recovery cannot change the model instructions')
+        if value['materials']['policy'].get('model_output_contract'):
+            key='backend/pipeline/prompts/claim_management_compact_v1.md'
+            if current_contract['implementation'][key]!=value['materials']['audit_contract']['implementation'][key]:
+                raise ValueError('compact review recovery cannot change the model instructions')
         root=old_root/('engineering-recovery-'+sha256_json({'authorization':authorization,'contract':current_contract})[:20])
         root.mkdir(parents=True,exist_ok=True)
         for name in ['candidate.json','candidate-normalization.json']+[
@@ -116,7 +123,9 @@ def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
             'recovery_root':str(root),'current_contract':current_contract,'model_inputs_unchanged':True,'model_calls':0,
             'candidate_unchanged':True,'human_content_approval':False}
         write(root/'engineering-recovery.json',record)
-        value.update(materials=materials,stage_results=receipts,opus_approved=True,outcome=None,findings=unresolved,
+        if checkpoint=='reviewed':
+            value.pop('reviewed',None);value.pop('reviewed_sha256',None)
+        value.update(materials=materials,stage_results=receipts,checkpoint='prepared',opus_approved=True,outcome=None,findings=unresolved,
             context_findings=context,recovery_root=str(root),engineering_review_recoveries=history+[record])
         for rid,metadata in [(round_id,value),(value['parent_run_id'],parent)]:
             cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,status='running',finished_at=NULL,heartbeat_at=now() WHERE run_id=%s",

@@ -676,3 +676,13 @@ action 为 `435-joint-update-divinity-summary-two-20261015-v1`，唯一 round �
 15 项追加权限隔离验收及相关回归合计 343 passed、18 按既有类别 skipped。覆盖原未知调用保持、carry 原候选与 findings、精简输出真实 SQL 完成与零重复调用、不能分叉，以及缺授权／metadata、预算、原 intent、已返回结果、来源／目标／scope 漂移拒绝。文档与前端检查仍仅见既有另一项目锚点、react-quill-new／theme 错误，git diff --check 通过。本节只记恢复准备，不声明新模型已返回、内容已提交或目标已完成。
 
 实际登记前，原接续被程序拒绝，尚无新 action、模型调用或业务写入：原 goal 保存的是 471 项内容审阅范围，完整 transaction_before 为 666 项；新增恢复检查错误地直接比较两者。本轮改为分别核对新旧内容范围与最新原轮完整事务范围，保留所有非内容消费者保护。隔离夹具加入事务专用对象，16 项新验收含该对象真实漂移拒绝。前段“输入含 666 项”的说法在此更正：666 为完整事务依赖，471 为模型内容审阅分母，原文、必要内容和 21 项异议未删减；实际请求字节数仍是 458,738。原预检与拒绝记录保留，不覆盖旧报告。
+
+## 2026-10-16：2021 新答复已持久化，问答端点提交校验修复准备
+
+按新授权正式登记唯一关联 action `435-2021-ransom-owner-authorized-20261016-v1`，原未知调用及已有 Opus 原答保持，旧 planned Opus 明确取消并登记转移。实际末轮完整 transaction_before 为 761 项，原目标自然读取为 666 项，模型内容分母为 471 项；三者逐项核对原版本而不是互相当作同一分母。原恢复前检查只按目标自然读取，遗漏维护权限作为种子时已冻结的额外 95 项事务消费者；补按正常 runner 的相同种子读取，全部原样，未删材料、未扩写权限或重开旧预算。
+
+新 GPT 从修订阶段真实运行，未重跑 Opus 初审。实际请求 458,738 bytes，输出文件 25,820 bytes（紧凑 JSON 21,967 bytes），只含两项修改、21 项异议处置、零新 finding；程序还原完整 471 项处置和真实写集，相同候选展开 JSON 为 107,145 bytes。该比较是同一新答复的展开结果，不声称知道丢失答复的大小。所有 stdout／stderr、成功退出、原答和 exact input 保存。Opus 随后确认两项修改与21项判定，没有新异议；一项 resolved，二十项不影响目标及实际写入的周边异议保持 persistent、问题对象仍拒绝。
+
+提交被数据库端点校验拒绝，单次事务回滚，无业务写入：候选将 `P05-ER038` 的 answers 指向 `P05-Q016`，并把 Q016 的提问者标为 quoted_source。共享知识模型原已规定 Question 与 answers 保存问答，但 SQL 将所有 KnowledgeRelation 的目标硬限为 EvidenceStep。修正为候选与 SQL 共用端点规则：只有 answers 可额外指向 Question，原 EvidenceStep 目标及来源类别保留，supports／refutes／contextualizes 仍拒绝 Question；非法类型在独立审阅前拦下。Knowledge models 的实现也加入 audit contract。
+
+原已保存且通过的候选／审阅可从 reviewed 且尚无提交的 checkpoint 作程序修复恢复：完整 pins、原答、角色 prompt（含 compact）、来源和调用结果均核实，派生 proof 保留原 metadata；回到 prepared 重建程序审阅登记，不改候选或判定、不生成新答复。已提交或实际版本漂移仍拒绝。新增真实失败形状的隔离恢复与相关回归共 447 passed、18 按既有类别 skipped，含三种普通边指向 Question 的前置及 SQL 拒绝、已提交恢复拒绝。此节记录恢复准备，不宣称实际提交已完成。

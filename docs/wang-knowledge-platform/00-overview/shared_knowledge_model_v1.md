@@ -62,6 +62,8 @@
 
 问答的对话形式保存在 `Question` 与 `answers` 关系中；教授回答里形成的主张和证据仍进入共享知识。这样既能出版问答集，也能在释经、专题和智能问答中复用同一证据。
 
+`KnowledgeRelation.answers` 可由 EvidenceStep／Observation 指向 Question；既有 EvidenceStep→EvidenceStep 的问答表达保留。`supports`、`refutes`、`contextualizes` 等证据关系不能因此指向 Question。候选与数据库使用同一端点类型规则，不能等到提交时才发现类型不符。
+
 ## 五、来源资格与归属门槛
 
 每个证据步骤都要经过五项判断：谁在说话、说话者是否认同这句话、这句话在对话中扮演什么角色、能否回到原始录音，以及当前片段是否足以支持所归属的主张。

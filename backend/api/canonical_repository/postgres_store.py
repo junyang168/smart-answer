@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
 from .knowledge_importer import KnowledgePackageImporter
-from .knowledge_models import KNOWLEDGE_COLLECTIONS
+from .knowledge_models import KNOWLEDGE_COLLECTIONS, knowledge_relation_endpoints
 from .reviewed_candidate_contract import (
     ConsensusApplicationError,
     validate_store_package_authorization,
@@ -8136,7 +8136,7 @@ class PostgresKnowledgeStore:
             for object_id, owners in current_owner_sets.items()
         }
         final_owners = {**current_owners, **arriving_owners}
-        for collection, edge_id, from_id, to_id, _ in incoming_edges:
+        for collection, edge_id, from_id, to_id, relation_type in incoming_edges:
             missing = {from_id, to_id} - set(final_owners)
             if missing:
                 raise ChangeSetConflict(
@@ -8144,6 +8144,8 @@ class PostgresKnowledgeStore:
                     + ", ".join(sorted(missing))
                 )
             allowed_from, allowed_to = EDGE_ENDPOINT_COLLECTIONS[collection]
+            if collection == 'knowledge_relations':
+                allowed_from, allowed_to = knowledge_relation_endpoints(relation_type)
             if final_owners[from_id] not in allowed_from:
                 raise ChangeSetConflict(
                     f"Edge {collection}/{edge_id} from endpoint {from_id} belongs to "
