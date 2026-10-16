@@ -638,3 +638,17 @@ action 为 `435-joint-update-divinity-summary-two-20261015-v1`，唯一 round �
 隔离恢复验收覆盖从失败 proposal 原身份接续、旧 GPT raw／调用预留不变、仅一次原未消耗 Opus、共同回读、双方目标资格及旁观对象只读；unknown、raw／来源／metadata 漂移和已消耗复核拒绝。23 项新反例与相关回归合计 307 passed、18 按原失败类别 skipped。先前只测唯一 ID 纠正没有检查原答复全部保留说明引文；真实材料预检补出上述两处抄写错误，并增加了对应正反例，未放宽正式逐字引文校验。文档检查仍只有另一项目既有锚点错误，git diff --check 通过。
 
 本节只记录恢复准备，不宣称 Opus 已返回或 2019 已完成。实际复核及最终资格另记；2021 结果未知及其他未完成项不因此通过，也未启动新组或增加 GPT 次数。
+
+## 2026-10-16：2019 原身份恢复完成并确认当前资格
+
+实现提交 `de6f0d6` 后，在维护／CVP 锁内按原目标和原 round 正式登记机械纠正恢复。精确方向、原父／轮 metadata、原始 GPT raw、三处注释差异及全部保存材料分别归档。程序恢复阶段零模型调用、零业务对象修改，调用预留逐项保持；旧 GPT 完整输入与原 raw 字节不变，仍使用原 policy／prompt／输出 schema。没有为旧任务启用简化 v3。
+
+通过独立后台批次接续原 action，GPT 仅从复制的原 raw 恢复，不创建 transport、不预留或发送新 GPT。原未消耗的一次 Opus 复核实际请求 416,274 bytes，未超原 500,000 上限；永久 stdout／stderr、成功退出记录和 `opus.raw.json` 均保存。Opus 通过当前目标及必要维护的完整候选；两条来源字面疑点仍标 persistent，并独立确认不影响目标 `DK-709eb5c6539814ec29b1-P06-CL015`、必做 `P06-E012` 或本轮写入。问题对象继续被拒绝，没有伪称疑点解决。
+
+运行器完成 no-content-write 核实、程序回读、原目标及当前资格校验，round 为 audited，结果 `completed`、`qualification_confirmed=true`、`validation_kind=opus_and_program_readback`，`independent_audit_complete=false`。目标 Claim 仍为 revision 1，原正文及内容 SHA 未改。
+
+停止后台 worker 后，另一新进程持同一维护／CVP 锁直接读取 SQL，独立逐项验证 858 个完整上下文对象、原 source／metadata、GPT raw 字节及输入、精确三处派生注释差异、原调用预留与谱系、Opus receipt 和程序回读。所有业务对象保持，实际写集与 ChangeSet 均为空，旁观 Claim 未提升；本次新增 GPT 0、Opus 1，原谱系合计 GPT 2／Opus 2，Gemini 0，未增加角色上限或修订次数。
+
+再次核对全部 90 条清单：基线 32 条当前资格全部保持；新十二条当前有效数由七增至八。剩余四条为 2021 `DK-07e99f606211a0a4a17a-P04-CL008`（答复未知）、2016 `DK-5317618c7962-P05-CL014`（修订预算耗尽）、第十章 `DK-74fcb58a05aa-P01-CL002`／`P01-CL003`（历史通过、当前关联数据资格待确认）。两条缺 target 登记及三条原 unresolved／held 仍单列。此次没有启动新内容组、重发 2021 或把任何未完成项算完成。
+
+证据均在 `claim-management-435/remaining-twelve-20261015-v1/known-proposal-recovery-v1/2019-judgment/`：`retained-annotation-recovery-before-20261016.json`、精确 direction、admission、`retained-annotation-recovery-exact-delta-20261016.json`、`retained-annotation-recovery-final-verification-20261016.json` 及其 verifier。原 round 的 `engineering-candidate-8fc98646eb132a13a8f6/` 保存原 GPT 三文件、当前材料、normalization、恢复证明、唯一 Opus 调用及完整 readback。最终程序核实不冒充独立内容审计；#435／PR #437 仍未整体完成、未合并或部署。
