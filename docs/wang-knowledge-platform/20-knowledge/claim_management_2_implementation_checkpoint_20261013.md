@@ -542,3 +542,43 @@ action 为 `435-joint-update-divinity-summary-two-20261015-v1`，唯一 round �
 证据根为 `claim-management-435/son-of-man-reconciliation-20261015-v1/`：`inventory-reconciliation.json` 保存 90 条逐条审阅／资格依据，`review-evidence-snapshot.json` 保存审阅与状态快照，`independent-reconciliation-verification.json` 为独立核验，`registered-work-list.json` 保存六类清单及精确后续用途，各脚本与逐条记录同根保留。inventory 文件 SHA 为 `ec204c6418dfe2b5a634d661603cb9d5ea2e4d2b81199c7aa35f6fc71c29cc6e`；登记清单 SHA 为 `c9a9c8fea4b93c0b43468e655ac6f8a78697fa93b4b0fdf5a5382bb6056aadca`。
 
 本次基线 `9b31072`，未改应用代码／prompt／policy／依赖，未重复既有后端回归或前端检查。文档检查仍仅有另一项目既有缺失锚点；git diff --check 通过。没有调用 Fable、合并、部署或声称整个批次清理完成。
+
+
+## 2026-10-15 对象编号索引补齐与反向依赖查询提速
+
+负责人要求解决按 object_id 查找的性能问题。进一步核对修正了先前仅归因为“没带 collection”的解释：通用关系只有全局对象编号时必须跨类别查找，不能加猜测的类别而漏对象、历史来源或身份冲突。仓库既有迁移 005 已设计独立 object_id 唯一索引，但实库的两个索引均未建立。当前数据无跨类别重复 ID、缺少来源身份或重复当前来源身份，满足应用条件；没有证据追认该迁移最初为何未完成。
+
+《10章》DK-74fcb58a05aa-P01-CL002 的零调用测量为 7 轮／80 次 SQL、5.3806 秒触发原时限；按 object_id 的单条查找仍走 (collection,object_id) 主键却访问 4,241 个缓存页，带类别的同条对照只访问 4 页。此对照不构成把所有无类型引用改成已知类别的依据。
+
+先补充既有迁移的临时 PostgreSQL 验证：已填数据上应用、重复执行、完整读取／内容不变、ID／来源身份冲突时整体回滚、迁移后拒绝跨类别 ID 重用。相关测试 198 passed。在干净测试提交 e9f968c 上，持原维护／registry 锁，原样应用迁移 005，耗时 0.6323 秒；两个唯一索引 valid／ready。只为 DDL 设置 2 秒锁等待、30 秒语句时限，运行器读取时限保持。object_id 查找实际改走 objects_object_id_global_unique_idx，单条对照为 0.026 ms；迁移前后 90 条 Claim 和业务／历史／工作流数量完全一致。没有业务修改或全库备份。
+
+仅补索引后，《10章》样本 2.3080 秒完整读出 262 项，十二条十过两停。剩余瓶颈是反向引用动态 unnest 连接选择全表扫描。实库 924 条精确包含条件的原查询约 2.0369 秒；按已知类别分组、每批八条作相同 JSON containment 查询约 0.1875 秒（含样本 EXPLAIN），结果集合恰为相同 53 项。保存原条件、计划与集合对照，不关闭 planner、不放大预算、不删依赖。
+
+实现提交 9456b21 只把 _claim_reference_consumers 的大动态连接改为按类别、八条一批的 payload @> ANY 查询，使用已有 GIN 与类别索引；edges、字段匹配、retired 过滤、去重和闭包保持，与既有小批读取方式一致。无新缓存、引用推断系统、runner 或模型。新增反例覆盖跨批边界、五类 owners、单／多片段字段、反向 Evidence、问题／Position 关联，以及错误字段／类别／JSON 类型和退役项排除。
+
+最终相关 27 文件回归 778 passed、43 skipped，使用 backend/.venv、临时 PostgreSQL 和只读原失败材料，JUnit 为 /tmp/claim435-index-final-regression-20261015.xml。首版新 fixture 漏建 edge 的父对象，三例被 FK 拒绝；补齐前置数据后完成上述回归。未改迁移、prompt／policy、依赖、前端或原审阅。
+
+提交后的十二条真实完整读取均在原时限内完成。下表是此次顺序测量，不是并发吞吐或冷缓存 SLO 承诺：
+
+| Claim ID | 对象数 | 秒 |
+| --- | ---: | ---: |
+| `DK-07e99f606211a0a4a17a-P04-CL008` | 666 | 1.0303 |
+| `DK-5317618c7962-P05-CL014` | 484 | 0.9171 |
+| `DK-557caff2c0fb-P02-CL003` | 45 | 0.0864 |
+| `DK-5f9ef2b37e23-P04-CL013` | 495 | 0.5844 |
+| `DK-709eb5c6539814ec29b1-P06-CL015` | 858 | 1.3834 |
+| `DK-74fcb58a05aa-P01-CL002` | 262 | 0.5263 |
+| `DK-74fcb58a05aa-P01-CL003` | 262 | 0.3734 |
+| `DK-74fcb58a05aa-P02-CL012` | 262 | 0.3758 |
+| `DK-74fcb58a05aa-P03-CL003` | 262 | 0.3860 |
+| `DK-a1cb091aba54-P02-CL006` | 426 | 0.7778 |
+| `DK-a1cb091aba54-P04-CL001` | 426 | 0.7278 |
+| `DK-f35be4755f9b-P04-CL004` | 1413 | 2.0502 |
+
+先前十条成功读取的全量状态 SHA 逐一相同；另两条首次完整读取 858／1,413 项。旧 194 对象闭包与第五组保存后像完全一致。独立新进程核实上述范围共 4,838 个唯一对象的 payload／revision／SHA，以及批次 90 条 Claim，全部保持。没有内容模型、业务写入或资格变化，读取通过不代表十二条内容审阅完成。
+
+外围验证首次把全库 pipeline_runs 数量固定为本任务账本；其他 extraction 工作流新增 6 个运行，导致十二条读取完成后报错。原输出保留，未重跑十二条来制造通过。新进程复用十二份保存材料与 SQL 逐项对照，并独立核实本时段无 Claim action／round 新建或推进；业务对象、版本、ChangeSets、review_events 数量仍保持。无关运行变化如实保存，不当成本任务写入。
+
+证据根为 claim-management-435/object-id-index-recovery-20261015-v1/：原迁移／授权／实现、before／after、migration-result、索引计划、补索引前后读取测量、924 条条件的新旧查询与结果集合、第一次十过两停的 readback-result、十二份完整 readsets、最终 readback-result-final.json 及全部脚本均保留。
+
+文档检查仍仅有另一项目既有缺失锚点；git diff --check 通过。数据库索引已补齐，当前工作树运行器已使用修复；应用代码随 PR #437，未合并或部署服务。未宣称整个批次完成。
