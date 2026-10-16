@@ -415,3 +415,20 @@ Opus 第二轮完整复核通过，原单元的最终 round 为 `CMR-eb1ece5778c
 独立新连接核实完整 194 项、原稿和 meta.json：除 ER027 外全部 193 项原样，SQL ChangeSet 的唯一 operation、object_versions 前后 payload／revision／SHA 与通过候选一致，edges 投影的端点、类型、版本和 payload 与当前对象一致。19 条只读 Claim 未写入或获得旁观资格；同来源先前已完成的 CL001、CL002、CL003 仍为当前 ready。原 action 完成重入和所有独立核验均零新调用／业务写入。本次证明两目标共同完成及一条真实关联关系修改，不冒称实际共享 Evidence 修改、两条 Claim 同时改写或全批完成。
 
 运行根为 `claim-management-435/joint-update-daniel-two-20261015-v1/`，保存原授权／预检／输入、启动暂停事实、续用授权与精确运行证明、各轮材料／raw／intent、`joint-update-result.json`、`post-batch-qualifications.json`、`independent-current-verification.json` 和 `prior-completed-qualifications.json`。本轮未改 prompt、普通联合 policy、原稿或 CVP；未调用 Fable、合并或部署。文档检查仍仅有另一项目既有缺失锚点；git diff --check 通过，#435／PR #437 仍未整体完成。
+
+
+## 2026-10-15 第四组双目标修订完成与既有资格失效
+
+按用户同意继续处理同篇 CL007／CL010 的指示，在干净提交 `5333523` 上执行《8章—权柄的显明》联合 Update，并保存 CL005／CL006 当前 ready 的基线。两个目标原无当前资格、均未连接 CVP。完整共同范围仍为 194 项，174 项对象有字段维护许可，19 条其他 Claim 只读；E013、E014、E015、E016、E019 为明确必做项。复用上一轮获准且成功的精确 Codex 运行证明，新增启动诊断为零。
+
+首次依赖读取超过既有 5 秒限额，当时尚无 action、模型调用或业务写入。随后只读测量保留原限额，完整读取 194 项用时 4.1628 秒，主要耗时是首次 reverse-consumer 查询；完整预检及正式读取随后通过。没有修改代码、提高限额、删除依赖或把这次测量称为冷启动性能修复；耗时接近现有上限的情况保留为实际限制。测量脚本与报告保留，原运行根不作预算重置。
+
+Opus 首轮提出 6 项异议，涉及 CL007 的医治验证表述、CL010 的摘要／anchor 论证角色、E019、ER030、ER037 和 Q002 的答案映射。GPT 接受并同步提出 10 项真实更新：两条目标 Claim、E014／E015／E019、CR005／ER030／ER032／ER037、Q002。修订将医治所带来的可见结果与赦罪权柄宣告区分，保留宣告与神性判断的原推论次序；医治另述为并列事件，关系与角色随之校正。E014 的 quoted/context_only 资格保持。Q002 改为 partially_answered，明确所列 Claims 尚未承载 S0109 对「哪一样容易」的直接回答，不扩写目标来补齐，也不新增 Claim。
+
+Opus 第二轮完整复核通过，6 项均解决，无 finding 或 context finding。原 action 为 `435-joint-update-forgiveness-proof-two-20261015-v1`，最终 round 为 `CMR-8d725187e7086621a9e8c9ce025faa5b34be007c6fdb0f3ad1c86d3fb88fd9ac`。共同事务提交 `KCS-92362c019bb44999e8bb`，实际写集恰为上述 10 项。CL007、CL010 均 revision 2 → 3、当前 ready，分别为 SHA `b7aa7a5907055f3fc0fd575258b87cf150f36a3f19579e067702f5f7c7ee43e0`、`5093ab2814f350439eb5ac21a908376a7af72bf921733ccafe7ffe15f3f51f21`。实际请求大小分别为 Opus 首轮 430,995、GPT 427,026、Opus 复核 471,142 bytes，均在原 500,000 上限内。实际调用 GPT 一次、Opus 两次，Gemini、额外启动诊断与整库备份均为零。
+
+独立新连接核验完整 194 项，10 个 ChangeSet operations 与通过候选、object_versions 前后 payload／revision／SHA 逐一一致，字段改变均在原授权内；其余 184 项、全部只读 Claim、原稿和 meta.json 字节保持。原 action 完成重入与独立核验零新调用、零额外业务写入。结果为 opus_and_program_readback，independent_audit_complete=false。应用代码／prompt／policy 未改，本次未重复运行既有后端回归；文档检查仍仅报另一项目既有缺失锚点，git diff --check 通过。
+
+**本次交叉影响检查未通过，不能称相关四条全部当前可用。** CL005、CL006 仍保留上一节的真实历史 completed 记录，但当前均返回 current_program_readback_required。它们的 Claim、直接证据 E009／E010 和原写项 ER027 全部不变，物理来源也没变；旧资格绑定的完整 194 项中，正好上述 10 项 revision／SHA 改变。新的 Opus 逐项通过也包含这两条只读 Claim，但现有设计不允许把旁观审阅直接当作它们的新目标资格。现有 reviewed-context reuse 仅接受关联 Claim 的纯锚点删除，本次包含 Claim 含义、证据、关系和问题的真实更新，不能沿用这一证明规则，也不能删除旧 pins 或把 ready 改成 true。
+
+该结果暴露的是已完成目标之间的资格依赖与批次维护边界：当前两目标 action 完成不等于此前目标的资格仍有效。这里没有新内容人工问题，未改写旧审核、扩大资格复用规则或另开模型任务来掩盖失效；通用资格维护仍待解决。运行根为 `claim-management-435/joint-update-forgiveness-proof-two-20261015-v1/`，保存预检、读取测量、原材料／raw／intent、`joint-update-result.json`、`post-batch-qualifications.json`、`prior-pair-baseline.json`、`independent-current-verification.json` 以及逐项旧／新 pins 对照 `qualification-dependency-drift.json`。#435／PR #437 继续 draft，未整体完成、合并或部署。
