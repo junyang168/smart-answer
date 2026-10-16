@@ -788,3 +788,12 @@ action 为 `435-joint-update-divinity-summary-two-20261015-v1`，唯一 round �
 
 
 第十章恢复能力的更广回归281 passed、35 skipped；补充多轮场景确认第二轮可保留已投影的 candidate 状态并继续真实内容修正，而不能伪造人工批准或靠相同候选绕过 no_progress。恢复专项共10 passed。正式运行仍采用原有双模型调用预算（各2、最多1次修订），不增加循环次数，不启用 Gemini，不做整库备份。
+
+
+## 2026-10-16 第十章九对象原子修正完成，既有四目标等待当前复核
+
+Restore 单元完成 GPT一次、Opus一次、共同事务及程序回读，7项保存异议全部resolved，无新异议；9对象实际修改：CL005／CL007只拆除S0040错误出处及对应Evidence引用，CL012／CL013保留原statement并恢复旧身份，E019／E020只归各自原一般原则，CR006改为CL013 applies CL012，CR007为CL014 applies CL012，CR010为CL018 applies CL012。四条Claim正文均未改，来源未改，没有新增Claim、人工批准或CVP修改。
+
+在实现冻结于f6f6a918时，独立verifier复验精确raw／候选／Opus／readback绑定、完整262对象、9处历史前后像及两项实际恢复。四个本轮目标均当前合格；原失败动作结果与调用保留。全部90条检查发现原第十章两个联合单元共4条旧资格失效：关联内容与依赖范围确已变化，不能只因正文不改就强行沿用。原先其他资格保持。精确报告在 `chapter10-restore-and-cleanup/verification.json`，其中4条损失明确记录，不声称此刻固定12条全部当前。
+
+准备对这4条作两个明确的只读联合Update，保持每组原目标分母，实际当前闭包为242对象、来源仍完整，两个Opus请求无损预检均309,651 bytes，不再修改内容。另补强Restore退出的机械反例：原logical supersession必须明确restore，retain不能因SQL原来active而冒充完成；最终current回读必须确实无superseded／superseded_by／hold。实际已完成的Restore符合更严格条件，保留f6f6a918下已验证的历史证据，不重写raw、材料或重复模型。

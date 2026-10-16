@@ -582,6 +582,9 @@ def validate_candidate(request: Request, before, candidate: Candidate, sources, 
             raise ValueError("finding outside the complete current input")
         validate_citations(finding.citations, sources)
     targets = set(request.target_keys)
+    if legacy_restore_enabled(request) and any(
+            legacy_ai_supersession(before[k]) and dispositions[k].action != 'restore' for k in targets):
+        raise ValueError('legacy Restore must explicitly restore every original superseded target')
     retired_claims = {k for k, v in writes.items() if k.startswith("claims/") and v["action"] == "retire"}
     new_claims = {k for k, v in writes.items() if k.startswith("claims/") and v["action"] == "create"}
     if current_operation == 'Create' and not new_claims:
@@ -1626,4 +1629,10 @@ def goal_satisfied(goal, current, replacements):
         raise ValueError("original retirement obligation is unfinished")
     elif operation in {"Update", "Restore", "Review"} and any(not current.get(k) or current[k]["retired"] for k in targets):
         raise ValueError("original active Claim obligation is unfinished")
+    if operation == 'Restore':
+        for key in targets:
+            if legacy_ai_supersession(goal['original_objects'][key]):
+                payload = current[key]['payload']
+                if payload.get('review_status') in HELD | {'superseded'} or payload.get('superseded_by'):
+                    raise ValueError('original legacy supersession is not actually restored')
     return True

@@ -11,7 +11,7 @@ from backend.tests.test_claim_management_execution_postgres import seed_claims,o
 from backend.tests.test_claim_management_human_source_follow_up import authorize
 
 
-@pytest.mark.parametrize('fault',[None,'second_round','no_capability','not_ai','human','raw_approval'])
+@pytest.mark.parametrize('fault',[None,'second_round','retain_target','no_capability','not_ai','human','raw_approval'])
 def test_restore_legacy_ai_supersession_needs_explicit_capability_and_preserves_teaching(action,fault):
     store,_,_,_,root,_=action;seed_claims(store,['C','A'])
     old=store.get_record_state('claims','C')['payload'];old=deepcopy(old)
@@ -31,6 +31,9 @@ def test_restore_legacy_ai_supersession_needs_explicit_capability_and_preserves_
     if fault!='no_capability':policy.legacy_ai_supersession_restore=True
     pp=root/'restore-legacy-policy.json';pp.write_text(policy.model_dump_json());request.policy=cm.source.FileBinding.model_validate(binding(pp));authorize(request)
     def propose(packet):
+        if fault=='retain_target':
+            candidate=cm.existing_candidate(packet['before']);candidate.operation='Restore'
+            return candidate.model_dump(mode='json')
         if fault=='second_round' and packet['round_number']:
             candidate=cm.Candidate.model_validate(packet['previous_candidate'])
             assert candidate.records[0].payload['review_status']=='candidate'
@@ -135,3 +138,14 @@ def test_failed_update_can_handoff_unchanged_scope_to_atomic_restore_and_mainten
         parent=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id));assert len(parent['latest_rounds'])==1
         assert ports.calls==['gpt','opus'] and all(store.claim_management_qualification(cid)['ready'] for cid in ['A','C'])
         oldnow=store.get_cvp_group(prior['run_id']);assert oldnow['call_reservations']==prior['call_reservations'] and oldnow['result']==prior['result']
+
+
+@pytest.mark.parametrize('status,pointer',[('superseded','A'),('candidate','A'),('human_review_required',None),('candidate',None)])
+def test_restore_completion_checks_logical_retirement_not_only_sql_active(status,pointer):
+    old={'retired':False,'payload':{'review_status':'superseded','superseded_by':'A',
+        'ai_adjudication':{'status':'ai_consensus_applied','approval_status':'not_human_approved','fingerprint':'old'}}}
+    goal={'operation':'Restore','target_keys':['claims/C'],'original_objects':{'claims/C':old}}
+    actual={'claims/C':{'retired':False,'payload':{'review_status':status,'superseded_by':pointer}}}
+    if status=='candidate' and pointer is None:assert cm.goal_satisfied(goal,actual,{})
+    else:
+        with pytest.raises(ValueError,match='not actually restored'):cm.goal_satisfied(goal,actual,{})
