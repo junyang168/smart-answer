@@ -473,3 +473,29 @@ def test_written_dependency_blocks_even_when_no_claim_target_depends_on_question
     finding={'target_key':'evidence_steps/E','affected_target_keys':[],
         'impact_reason':'source question on written evidence, not the unchanged Claim'}
     assert m.finding_blocks(finding,request,candidate)
+
+
+@pytest.mark.parametrize('profile', ['claim_single_record_table_v1', 'claim_single_record_table_v2'])
+@pytest.mark.parametrize('difference', [None, 'target_keys', 'permissions', 'source_bindings', 'authorization', 'policy'])
+def test_request_reference_preserves_exact_unit_authority_and_historical_packet(case, profile, difference):
+    request,before,_,sources=case
+    full=request.model_dump(mode='json');full['permissions'].append({**deepcopy(full['permissions'][0]),'object_id':'D'});unit=deepcopy(full)
+    if difference == 'target_keys': unit[difference]=['claims/OTHER']
+    elif difference == 'permissions': unit[difference][0]['fields']=['statement']
+    elif difference == 'source_bindings': unit[difference]['S']['file_sha256']='b'*64
+    elif difference in {'authorization','policy'}: unit[difference]['file_sha256']='b'*64
+    goal={'operation':'Update','target_keys':request.target_keys,'required_questions':['own_source'],'original_objects':deepcopy(before)}
+    materials={'packet_profile':profile,'request':full,'unit_request':unit,'before':before,'sources':sources,'original_goal':goal}
+    frozen=deepcopy(materials);packet=m.model_packet(materials)
+    alias=packet['unit_request']=={'__claim_request_ref__':'request'}
+    assert alias == (profile.endswith('_v2') and difference is None)
+    for name,expected in [('request',full),('unit_request',unit)]:
+        restored=deepcopy(packet['request'] if name=='unit_request' and alias else packet[name])
+        for grant in restored['permissions']:
+            if isinstance(grant['fields'],dict):
+                grant['fields']=packet['permission_fields'][grant['fields']['__claim_fields_ref__']]
+        assert restored==expected and m.sha256_json(restored)==m.sha256_json(expected)
+    assert packet['before']==before and packet['sources']==sources
+    if profile.endswith('_v1'):
+        assert 'permission_fields' not in packet and packet['request']==full and packet['unit_request']==unit
+    assert materials==frozen

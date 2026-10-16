@@ -1051,7 +1051,7 @@ def model_packet(materials):
     packet['action_obligations'] = {'operation': materials['request']['operation'],
         'target_keys': list(materials['request']['target_keys']),
         'required_questions': list(materials['original_goal']['required_questions'])}
-    if materials.get('packet_profile') == 'claim_single_record_table_v1':
+    if materials.get('packet_profile') in {'claim_single_record_table_v1', 'claim_single_record_table_v2'}:
         before = packet['before']
         def references(goal):
             goal['original_objects'] = {key:({'__claim_record_ref__':key} if before.get(key)==state else state)
@@ -1074,6 +1074,31 @@ def model_packet(materials):
                 for key,state in projected['original_objects'].items()}
             if restored != original['original_objects']:
                 raise ValueError('Claim record-table projection changed original facts')
+        if materials['packet_profile'] == 'claim_single_record_table_v2':
+            requests = [packet['request']]
+            if packet['unit_request'] == packet['request']:
+                packet['unit_request'] = {'__claim_request_ref__': 'request'}
+            else:
+                requests.append(packet['unit_request'])
+            counts = Counter(tuple(grant['fields']) for request in requests for grant in request['permissions'])
+            shared = {fields: 'pf' + str(i) for i,fields in enumerate(sorted(fields for fields,n in counts.items() if n > 1))}
+            packet['permission_fields'] = {ref:list(fields) for fields,ref in shared.items()}
+            for request in requests:
+                for grant in request['permissions']:
+                    fields = tuple(grant['fields'])
+                    if fields in shared:
+                        grant['fields'] = {'__claim_fields_ref__':shared[fields]}
+            packet['record_reference_contract'] += (
+                ' Each {"__claim_request_ref__":"request"} denotes the complete packet.request. '
+                ' In permissions, {"__claim_fields_ref__":id} denotes exactly packet.permission_fields[id]. '
+                'Every target, object, field, source, policy and authorization binding remains authoritative.')
+            for name in ('request','unit_request'):
+                restored = deepcopy(packet['request'] if packet[name] == {'__claim_request_ref__':'request'} else packet[name])
+                for grant in restored['permissions']:
+                    if isinstance(grant['fields'],dict):
+                        grant['fields'] = packet['permission_fields'][grant['fields']['__claim_fields_ref__']]
+                if restored != materials[name]:
+                    raise ValueError('Claim request reference changed authority')
     return packet
 
 
