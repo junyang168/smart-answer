@@ -686,3 +686,15 @@ action 为 `435-joint-update-divinity-summary-two-20261015-v1`，唯一 round �
 提交被数据库端点校验拒绝，单次事务回滚，无业务写入：候选将 `P05-ER038` 的 answers 指向 `P05-Q016`，并把 Q016 的提问者标为 quoted_source。共享知识模型原已规定 Question 与 answers 保存问答，但 SQL 将所有 KnowledgeRelation 的目标硬限为 EvidenceStep。修正为候选与 SQL 共用端点规则：只有 answers 可额外指向 Question，原 EvidenceStep 目标及来源类别保留，supports／refutes／contextualizes 仍拒绝 Question；非法类型在独立审阅前拦下。Knowledge models 的实现也加入 audit contract。
 
 原已保存且通过的候选／审阅可从 reviewed 且尚无提交的 checkpoint 作程序修复恢复：完整 pins、原答、角色 prompt（含 compact）、来源和调用结果均核实，派生 proof 保留原 metadata；回到 prepared 重建程序审阅登记，不改候选或判定、不生成新答复。已提交或实际版本漂移仍拒绝。新增真实失败形状的隔离恢复与相关回归共 447 passed、18 按既有类别 skipped，含三种普通边指向 Question 的前置及 SQL 拒绝、已提交恢复拒绝。此节记录恢复准备，不宣称实际提交已完成。
+
+## 2026-10-16：2021 丢失答复项完成，固定十二条九条当前有效
+
+在干净提交 `4ad7366` 上，以原 round `CMR-e92bd758150eaf45cbc291c75d12d65d8f31f730747ab550238ad7a3da879b61` 正式登记程序修复恢复。原模型输入、25,820 bytes 的 GPT 答复、Opus 答复、候选及两份调用预留精确保持；使用现有已授权 runtime renewal，零新启动诊断。缓存恢复只阻止实际生成，不阻止验证既有答复所需的 adapter 构造。共同运行器消费两份保存 raw，重建审核登记并提交两个已获审阅的改动，恢复期间新增 GPT／Opus 均为零。
+
+目标 `DK-07e99f606211a0a4a17a-P04-CL008` 已 audited／completed，当前 qualification ready=true、revision 1、SHA `15621871ccf52efb7ba1fcdff23b3378562ac2b2373c40ea419dd543dfd70767`，正文与直接证据不改。结果为 `opus_and_program_readback`、`independent_audit_complete=false`。本次新授权下实际调用 GPT 一次、Opus 一次、Gemini 零；原丢失 GPT 的 started 事实仍保留，没有声称找回旧答复。
+
+实际写集只有 `knowledge_relations/DK-07e99f606211a0a4a17a-P05-ER038` 的 to_id／reason 与 `questions/DK-07e99f606211a0a4a17a-P05-Q016` 的 questioner，各正常产生新版本。所有 Claim 保持原样，二十项已由双方判为不影响该目标及这两个写项的周边异议继续保存，问题对象仍被拒绝，不算修好。相同后台 manifest 再运行只刷新当前完成状态，没有新调用。
+
+独立新进程核实完整 761 项事务对象、471 项内容分母、两个 ChangeSet operation 的前后 payload、实际 SQL、全部原 source／meta、旧未知调用与原轮、两份新 raw 及调用预算，随后直接 SQL 核实两项 object_versions 和 ER038 的 edges 投影。全部 90 条清单的当前资格核对完成：基线 32 条无损失，固定十二条当前有效九条；其余仍为 2016 `DK-5317618c7962-P05-CL014`、第十章 `DK-74fcb58a05aa-P01-CL002`／`P01-CL003`，未启动它们的模型任务。验证期间新增模型调用和业务写入均为零。
+
+证据根为原 2021 根内 `owner-authorized-extension-20261016-v1/`：新 owner-direction／policy／request、零调用 admission、完整 transaction-before、actual packet／transport、`output-size-comparison.json`、`question-answer-commit-recovery/`、`final-verification.json`、`independent-version-edge-verification.json` 及 verifier。旧 2021 中断调查、未知调用和已失败提交均保持为历史事实。#435／PR #437 仍为未整体完成的 draft，未合并或部署。
