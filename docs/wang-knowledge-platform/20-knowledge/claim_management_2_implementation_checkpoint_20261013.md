@@ -485,3 +485,60 @@ action 为 `435-joint-update-divinity-summary-two-20261015-v1`，唯一 round �
 证据根为 `claim-management-435/joint-update-two-groups-20261015-v1/`：`parallel-plan.json`、`parallel-admission.json`、`parallel-result.json`、`independent-parallel-verification.json`，两组子目录各保存原授权／预检／输入／raw／intent、`joint-update-result.json`、`independent-current-verification.json` 和脚本；`lecture-current-qualifications.json` 记录旧篇资格，selection-diagnostics 保留本次候选读取结果。第一组结果文件 SHA 为 `39aa498a6f9d6bba2ec1562164b8bfcce609a6f9b4c15b0b9b266c28f911e0ed`；第二组结果与独立核验的精确文件绑定见汇总独立核验文件。
 
 本次未改代码／prompt／policy／前端／依赖，未重复既有已通过的回归；文档检查仍仅有另一项目既有缺失锚点，git diff --check 通过。没有调用 Fable、合并、部署或宣称整个「人子」批次完成。
+
+
+## 2026-10-15 人子批次逐条对账与剩余清单更正
+
+负责人指出《8章》CL004 已经处理，要求将剩余逐条登记清楚。此前以“没有直接目标完成记录／当前 qualification 为 None”推断“没有处理”不成立：它可能已在其他目标的完整审阅中逐项通过。前两次记录中将该 CL004 称作尚未处理的结论在此更正；旧记录保留，不能继续据其安排重复审阅。另有 011WSR01 的 P05-CL013 也属于同一情况。
+
+本次只登记与核账，没有运行内容模型、修改业务数据或改变数据库资格。清单覆盖当前 statement 含“人子”的记录（含历史退役项），并补入 #435 已明确处理的四条关联目标，避免因修订后的 statement 不再出现关键词而丢掉已处理项。共核对 90 个唯一 Claim ID：24 项已有 CVP 连接、17 项退役／被取代，按互斥的排除理由另列；当前有效且未连接 CVP 的执行范围为 49 条。后续数量以这份固定清单及逐条新结果对账，不重新用关键词或最后一次 action 目标推算进度。
+
+| 当前登记 | 数量 | 含义 |
+| --- | ---: | --- |
+| 已完成，当前资格有效 | 32 | 通过现有权威资格查询核实，不重跑 |
+| 已审通过，缺目标完成登记 | 2 | 原始通过结论及当前完整版本／来源／依赖已核实；不计入首次审阅队列 |
+| 未找到本次清理的有效审阅记录 | 12 | 新内容审阅队列；不否认它们可能有更早的抽取审核 |
+| 未决问题或旧人工标记 | 3 | 一条本次章号问题、两条历史人工抽查标记，沿原记录处理 |
+| 合计 | 49 | 与当前执行范围逐条闭合 |
+
+因此，“14 条未启动”应更正为 12 条未找到本次有效审阅记录、2 条已审通过缺登记；此外还有上述 3 条未决／旧人工标记。不能把缺登记当成内容未审，也不能把清单中的“已审通过”直接当作数据库 ready。两条正式资格的登记接点仍是程序待办，本次没有修改原操作目标、升级旁观资格或重写历史审阅。
+
+### 两条已审通过的登记缺口
+
+| 完整 Claim ID | 来源 | 已保存依据 |
+| --- | --- | --- |
+| `DK-1c98d4a95cd5-P10-CL004` | 8章—权柄的显明 | `CMR-29255402509a1e01ca8da6ee5802cfc26664770a393911cc03e938c450836d73`；Opus 明确通过，194 项当前 pins 及完整 consumers 核实 |
+| `DK-4eca17ff4e50fa50aa01-P05-CL013` | 011WSR01 | `CMR-e2dd4d1c087d4c8df55f523f5c5047b85eecf79e292d6a72d294fcd5a314ac1f`；Opus 明确通过，132 项当前 pins 及完整 consumers 核实 |
+
+### 十二条新审阅队列
+
+| 完整 Claim ID | 来源 |
+| --- | --- |
+| `DK-07e99f606211a0a4a17a-P04-CL008` | S 211205 多2-3靠恩典活 |
+| `DK-5317618c7962-P05-CL014` | 2016 NYSC 專題：馬太福音釋經（五）4 |
+| `DK-557caff2c0fb-P02-CL003` | 2012 NYSC 專題：馬太福音釋經（三）4 |
+| `DK-5f9ef2b37e23-P04-CL013` | 11章 施洗約翰的困惑、天國的進展與耶穌的神性宣告 |
+| `DK-709eb5c6539814ec29b1-P06-CL015` | 191013 |
+| `DK-74fcb58a05aa-P01-CL002` | 10章 - 差遣、逼迫与赏赐 |
+| `DK-74fcb58a05aa-P01-CL003` | 10章 - 差遣、逼迫与赏赐 |
+| `DK-74fcb58a05aa-P02-CL012` | 10章 - 差遣、逼迫与赏赐 |
+| `DK-74fcb58a05aa-P03-CL003` | 10章 - 差遣、逼迫与赏赐 |
+| `DK-a1cb091aba54-P02-CL006` | 12章 - 安息日的主，國度臨到，人的心被顯明 |
+| `DK-a1cb091aba54-P04-CL001` | 12章 - 安息日的主，國度臨到，人的心被顯明 |
+| `DK-f35be4755f9b-P04-CL004` | 2016 NYSC 專題：馬太福音釋經（五）3 |
+
+这些条目此前的只读预检、读取超时或 CVP 关联上下文不算内容审阅失败。具体读写权限和材料预算在真实执行前重新按固定目标核对，本次未继续跑这些模型任务。
+
+### 三条未决或旧人工标记
+
+| 完整 Claim ID | 已核实情况 |
+| --- | --- |
+| `DK-07e99f606211a0a4a17a-P04-CL004` | 2021 稿「但以理书第九章」章号仍未核实；负责人已纠正的 Son of Man 转录用语不再作为新问题，不能将两者合并。 |
+| `DK-90777c7a0794-P01-CL003` | 旧迁移保留 human_spot_check／human_review_required 标记；没有本次 #435 模型审阅记录，不预判需要新的人工内容裁决。 |
+| `DK-defb58f4bb75-P04-CL008` | 旧迁移保留 human_spot_check／human_review_required 标记；没有本次 #435 模型审阅记录，不预判需要新的人工内容裁决。 |
+
+新进程独立复核全部 90 条 Claim 当前 payload／revision／SHA、CVP 连接数量及 49 条执行范围的权威资格，核实汇总计数、唯一身份和互斥分类；两条登记缺口另核当前完整事务 pins、消费者与物理来源。全部一致，原审阅 artifact seal／文件 SHA 无错误。模型调用、业务写入、正式资格变化和全库备份均为零。
+
+证据根为 `claim-management-435/son-of-man-reconciliation-20261015-v1/`：`inventory-reconciliation.json` 保存 90 条逐条审阅／资格依据，`review-evidence-snapshot.json` 保存审阅与状态快照，`independent-reconciliation-verification.json` 为独立核验，`registered-work-list.json` 保存六类清单及精确后续用途，各脚本与逐条记录同根保留。inventory 文件 SHA 为 `ec204c6418dfe2b5a634d661603cb9d5ea2e4d2b81199c7aa35f6fc71c29cc6e`；登记清单 SHA 为 `c9a9c8fea4b93c0b43468e655ac6f8a78697fa93b4b0fdf5a5382bb6056aadca`。
+
+本次基线 `9b31072`，未改应用代码／prompt／policy／依赖，未重复既有后端回归或前端检查。文档检查仍仅有另一项目既有缺失锚点；git diff --check 通过。没有调用 Fable、合并、部署或声称整个批次清理完成。
