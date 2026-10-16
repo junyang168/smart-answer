@@ -432,3 +432,22 @@ Opus 第二轮完整复核通过，6 项均解决，无 finding 或 context find
 **本次交叉影响检查未通过，不能称相关四条全部当前可用。** CL005、CL006 仍保留上一节的真实历史 completed 记录，但当前均返回 current_program_readback_required。它们的 Claim、直接证据 E009／E010 和原写项 ER027 全部不变，物理来源也没变；旧资格绑定的完整 194 项中，正好上述 10 项 revision／SHA 改变。新的 Opus 逐项通过也包含这两条只读 Claim，但现有设计不允许把旁观审阅直接当作它们的新目标资格。现有 reviewed-context reuse 仅接受关联 Claim 的纯锚点删除，本次包含 Claim 含义、证据、关系和问题的真实更新，不能沿用这一证明规则，也不能删除旧 pins 或把 ready 改成 true。
 
 该结果暴露的是已完成目标之间的资格依赖与批次维护边界：当前两目标 action 完成不等于此前目标的资格仍有效。这里没有新内容人工问题，未改写旧审核、扩大资格复用规则或另开模型任务来掩盖失效；通用资格维护仍待解决。运行根为 `claim-management-435/joint-update-forgiveness-proof-two-20261015-v1/`，保存预检、读取测量、原材料／raw／intent、`joint-update-result.json`、`post-batch-qualifications.json`、`prior-pair-baseline.json`、`independent-current-verification.json` 以及逐项旧／新 pins 对照 `qualification-dependency-drift.json`。#435／PR #437 继续 draft，未整体完成、合并或部署。
+
+
+## 2026-10-15 通用上下文资格保留与零调用恢复
+
+按用户要求解决反复审阅而非重开模型任务，在实现提交 `66e04e8` 中扩展既有 qualification reuse。原纯锚点删除 v1 证明保持不变；新增 `wang_claim_review_context_reuse_v2`，仍使用既有 review_events、pipeline_runs、完成事务与资格查询，不增加 runner、模型输出字段、审阅角色或状态系统。设计第 10.1 节同步更新。
+
+完整读取范围及事务 pins 保持不变。实现从保存范围内推导目标的论据基础：自身 Evidence／Position／来源片段、反向 Evidence ownership、递归上游前提及所有关联关系记录；未知方向保守扩展，缺失或不明确的端点拒绝。下游 Claim 的独立前提不反向变成旧目标的论据。对比旧／现图的基础并集，目标、原实际写项、论据基础与来源必须全部保持。漂移的旧版本通过 object_versions 批量读取并核实 payload SHA；缺历史或损坏拒绝。范围扩张、retire、hold、未解决异议及真实论据变化均不复用。
+
+新的同行 Update 必须完成当前完整范围的 Opus 逐项审阅与程序回读，并覆盖原问题能力及实际回答的问题；不是凭一个 approved 或旁观 Claim verdict 恢复资格。现有审阅合同已要求完整逐对象内容结论，因此没有增加重复的 qualification_impacts 模型字段。证明保留原资格、原审阅、原 pins 摘要、当前完整 pins、未变基础和上下文差异，并绑定此次已完成审阅。当前资格只消费直接最新证明，不递归串联历史证明；事件历史保留。共同旧 round 去重处理，返回全部实际保留目标。没有旧资格的旁观 Claim 不获资格。
+
+资格专项最终 **41 passed**，原 22 项保留并新增 19 项。新增反例覆盖上下游边界、证据／来源／关系／目标变化、反向 owner、未知方向、缺失 verdict／问题／历史、损坏历史、范围扩张、hold、peer raw 与证明失效、事务晚项失败／恢复及连续上下文变化。相关 23 文件回归使用 backend/.venv、临时 PostgreSQL 与只读原失败材料，结果 **669 passed、43 skipped**，JUnit 为 `/tmp/claim435-context-reuse-final-20261015.xml`。首次驱动将保存材料目录误设高一级，发生 fixture FileNotFound 并中止；修正目录且预检存在后完成上述回归，没有生产写入或模型调用。最后的返回值去重收敛后，41 项专项再次通过。
+
+干净提交后，在原维护锁与 registry 锁内调用既有 `revalidate_claim_management_context`，将第三组旧 round `CMR-eb1ece5778cef38149b079814b5859f8ed3becadc6606825cafa2f2e03ae7b5b` 与第四组已完成 round `CMR-8d725187e7086621a9e8c9ce025faa5b34be007c6fdb0f3ad1c86d3fb88fd9ac` 登记适用性证明。完整 pins 仍为 194 项，其中未变论据基础 43 项，已审阅上下文差异 10 项。只新增 CL005／CL006 的两条系统 review_events 和附加证明；两条保持原 round、revision 2 与原审阅资格。CL007／CL010 保持第四组 round、revision 3 及当前资格。四条全部 current ready，仍为 opus_and_program_readback、independent_audit_complete=false。
+
+本次新增模型调用、业务对象写入、整库备份、启动诊断及旁观资格均为零。全部 194 项业务数据、来源／meta、旧 raw／原审核 pins、第四组 ChangeSet 与版本历史保持。两次原 action 完成重入均成功；重复登记不增加事件。先前诊断只在显式 rollback 的事务内验证，正式登记在干净提交后执行，没有借诊断偷偷提交事件。
+
+恢复证据保存于原第四组运行根的 `qualification-context-reuse-v2-20261015-v1/`：`direction.json`、`before.json`、`proof.json`、`verified-result.json`、`recovery.py`。proof 文件 SHA 为 `872ad4d31abacc6bbd20fe9b91d90eb78bd8450c17b63fbfb36f3b23e1d02fea`；verified-result SHA 为 `7284669ee578862acd688500e346e9390164080782d462b20735b057988b14f5`。新进程使用普通 SELECT 独立核实 194 项当前版本／SHA、四条资格的原 round、两条系统事件、历史与调用账本，结果保存为 `independent-current-verification.json`，脚本为 `independent-verification.py`；核验新增模型调用、业务写入与事件均为零。前节资格失效记录及 qualification-dependency-drift.json 保留为当时事实，此节记录恢复后的当前结果。
+
+论据真正变化或出现未解决异议仍进入正常维护，不将上下文复用当成新内容批准。本轮未继续整批、未调用 Fable、未合并或部署。git diff --check 通过；文档检查仍仅有另一项目既有缺失锚点。本次没有前端或依赖变更，未重复前端检查。#435／PR #437 保持 draft，剩余批次和人工事项未声明完成。
