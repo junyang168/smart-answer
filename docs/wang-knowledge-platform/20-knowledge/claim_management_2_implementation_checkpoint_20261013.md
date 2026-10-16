@@ -885,3 +885,13 @@ Restore 单元完成 GPT一次、Opus一次、共同事务及程序回读，7项
 本轮17个相关测试文件在 backend/.venv 与临时 PostgreSQL 上 **443 passed、35 skipped**；35项是未配置原目录的分类保存失败测试，不声称已执行。定向19项测试含正常共同提交／回读、只读保护、错误目标／关系／邻居／写项 ID、空许可、请求引用编码、未决身份、拒收重复启动零调用、raw篡改拒绝及有效答复中断后正常接续；计数与主回归重叠。文档检查只有另一项目既有缺失附录锚点，git diff --check通过。本轮 bug 验证没有新内容模型调用或业务写入；真实拒收登记与当前数据核验另留运行材料。
 
 本段调用数勘误：随后逐一核对两项 action 的原 raw 和 SQL 调用账本，wording 实际也执行了 Opus 一次，并独立保留两项 source_uncertain；不是只有 GPT 一次。故两项原自动维护合计为 GPT 2次、Opus 2次，共4次，均未写入内容。以上「三次」及 wording 仅 GPT 的表述有误，以此精确账本核对为准。修复提交077db3cf后，method 的原返回已核实并登记 returned_rejected，未改变原预留或预算。逐对象回读确认两项业务写集均为空、全部51项既有当前资格保留、没有新增资格损失；原20项保存异议中6项已认领、14项仍未认领，未隐藏剩余项。材料位于 `claim-management-435/automatic-open-items-20261016-v1/` 的 verification.json、bugfix-returned-rejection-record.json、bugfix-scoped-output-offline.json；这些工程核验不宣称异议已解决。
+
+## 2026-10-16 两项独立关系维护实际完成
+
+修复后通过正常 joint v5 入口执行 `435-auto-independent-relations-20261016-v1`，目标为同篇 P06-CL005 与 P05-CL007，仅允许 CR004 的关系类型／理由和 ER040 的端点／类型／理由，不授予 Claim 或原文写权限。原待人工的 P06-CL008 只作为一跳关系端点，未重开它的暂停 action 或旧预算。
+
+实际先审既有候选，Opus 指出两项 mapping，GPT 唯一修订同时修正两项，Opus 完整复核后通过，共 Opus 2次、GPT 1次、Gemini 0次，未循环修订。模型范围33条记录，原事务范围666条记录不删；首轮 Opus 请求138555 bytes，GPT修订147745 bytes。单个事务只改两条关系：P06-CR004 从 refutes 改 supports；P05-ER040 从 E044→E045 改为 E045→E044，并使理由与方向一致。CR004 新理由明确保留 CL008 的编辑推论及待人工状态，不借关系修正确认 S0029 的说话者。
+
+首次当前资格汇总发现 P04-CL008 的旧广范围证明因关系变化失效。该目标不在新单元的33条记录中，未由新单元的只读邻居自动保留分支接纳；随后调用现有显式上下文复用入口，逐字段验证旧主张、论据、原写项及原范围未变、两项变化已被本次当前完整审阅覆盖，登记 v4 证明，模型调用为0。未修改原答、旧内容、人工决定或旧完成记录，未重新审阅同一 Claim。
+
+最终独立回读比较666条记录、核对实际 ChangeSet 两条操作及准确字段／版本、原文文件和两端当前资格；原51项有效资格全部保留，无新增损失。Claim 和 CVP 后像未变，wording／method 的原人工疑点和暂停仍保留。准确材料见 `claim-management-435/automatic-open-items-20261016-v1/relations/verification.json`、`old-qualification-reuse-check.json` 与两轮原模型／事务／回读证明；完成只指本次两条关系维护，不代表其余人子异议均已解决。
