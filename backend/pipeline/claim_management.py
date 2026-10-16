@@ -1206,6 +1206,60 @@ def unaccepted_initial_review(previous, key, slot, proof):
         'review':review.model_dump(mode='json'), 'review_not_accepted':True, 'generation_consumed':True}
 
 
+
+def unaccepted_initial_proposal(previous, key, slot, proof):
+    """Account for one returned, uncommitted proposal with invalid coverage.
+
+    This authenticates a spent generation, never accepts a partial candidate.
+    The existing continuation retains the scope and only the unspent budget.
+    """
+    from backend.pipeline.source_reconciliation_runner import read, body, binding, validate_bound_call
+    from backend.pipeline.source_reconciliation_runtime import claim_management_model_adapter
+    if (set(proof) != {'raw','role_prompt'} or slot['role'] != 'gpt' or slot['state'] != 'started'
+            or previous['result'].get('reason') != 'engineering_required'
+            or previous['request']['operation'] != 'Update' or len(previous['latest_rounds']) != 1
+            or slot['round_id'] not in previous['latest_rounds'].values()):
+        raise ValueError('unaccepted proposal requires one returned initial Update generation')
+    root = Path(previous['execution_root']) / slot['round_id']
+    if proof['raw'] != binding(root/'gpt.raw.json'):
+        raise ValueError('unaccepted proposal raw belongs to another call')
+    source.verify_file(source.FileBinding.model_validate(proof['role_prompt']))
+    prompt_key = 'backend/pipeline/prompts/claim_management_proposal_v2.md'
+    expected_prompt = previous['audit_contract']['implementation'][prompt_key]
+    if (proof['role_prompt']['file_sha256'] != expected_prompt
+            or hashlib.sha256((Path(__file__).parents[2]/prompt_key).read_bytes()).hexdigest() != expected_prompt):
+        raise ValueError('unaccepted proposal prompt differs from its frozen instructions')
+    materials = body(read(root/'materials.json'))
+    if (materials['request'] != previous['request'] or materials['policy'] != previous['policy']
+            or materials['audit_contract'] != previous['audit_contract'] or materials['round_number'] != 0
+            or materials['round_id'] != slot['round_id'] or 'gpt' not in materials['roles']
+            or key != slot['round_id'] + ':gpt' or (root/'candidate-result.json').exists()
+            or any(k != key and v['state'] not in {'planned','cancelled'} for k,v in previous['call_reservations'].items())):
+        raise ValueError('unaccepted proposal is not an unchanged uncommitted initial candidate')
+    intent = body(read(root/'gpt.reservation.json'))
+    if intent != slot['intent'] or sha256_json(intent) != slot['intent_sha256']:
+        raise ValueError('unaccepted proposal reservation drift')
+    policy = Policy.model_validate(previous['policy'])
+    raw = validate_bound_call(root,'gpt',model_packet(materials),claim_management_model_adapter('gpt',policy))
+    candidate, _ = normalize_candidate(raw['response'],materials['sources'])
+    try:
+        validate_candidate(Request.model_validate(materials['unit_request']),materials['before'],candidate,materials['sources'],
+            created_keys=materials['created_keys'],original_replacements=materials['replacements'])
+    except ValueError as exc:
+        rejection = str(exc)
+        if rejection not in {'candidate omitted/added a current dependency disposition','candidate repeats an object disposition'}:
+            raise ValueError('unaccepted proposal is not a proved exact-once coverage failure') from exc
+    else:
+        raise ValueError('valid candidate must use its ordinary recorded stage')
+    for finding in candidate.findings:
+        if finding.target_key not in materials['before']:
+            raise ValueError('unaccepted proposal finding is outside its frozen scope')
+        validate_citations(finding.citations,materials['sources'])
+    return {'raw':proof['raw'],'role_prompt':proof['role_prompt'],'rejection':rejection,
+        'candidate_sha256':candidate.digest,'findings':[f.model_dump(mode='json') for f in candidate.findings],
+        'proposal_not_accepted':True,'generation_consumed':True}
+
+
 def human_source_follow_up(previous, request, authority, prior_findings):
     """New human source evidence authorizes one bounded, linked follow-up.
 
@@ -1285,6 +1339,10 @@ def continuation_budget(previous, request, policy):
     authority = json.loads(source.verify_file(request.authorization).read_text())
     human_follow_up = human_source_follow_up(previous, request, authority, prior_findings)
     recovery = authority.get('unaccepted_review_recovery', {})
+    proposal_recovery = authority.get('unaccepted_proposal_recovery', {})
+    if not isinstance(proposal_recovery,dict):
+        raise ValueError('unaccepted proposal recovery must bind exact returned calls')
+    unaccepted_proposals = {}
     root = Path(previous['execution_root'])
     for key, slot in previous['call_reservations'].items():
         if slot['state'] in {'planned','cancelled'}:
@@ -1297,6 +1355,14 @@ def continuation_budget(previous, request, policy):
             unaccepted[key] = value
             spent[slot['role']] += 1
             for finding in Review.model_validate(value['review']).findings:
+                prior_findings[finding.identity(old.action_id)] = finding.model_dump(mode='json')
+            continue
+        if key in proposal_recovery:
+            value = unaccepted_initial_proposal(previous,key,slot,proposal_recovery[key])
+            unaccepted_proposals[key] = value
+            spent[slot['role']] += 1
+            for finding in value['findings']:
+                finding = Finding.model_validate(finding)
                 prior_findings[finding.identity(old.action_id)] = finding.model_dump(mode='json')
             continue
         failure_path = root / slot['round_id'] / (slot['role'] + '.failure.json')
@@ -1315,6 +1381,8 @@ def continuation_budget(previous, request, policy):
         failures[key] = {'path':str(failure_path), 'file_sha256':hashlib.sha256(failure_path.read_bytes()).hexdigest()}
     if set(recovery) != set(unaccepted):
         raise ValueError('unaccepted recovery contains an unbound or already recorded call')
+    if set(proposal_recovery) != set(unaccepted_proposals):
+        raise ValueError('unaccepted proposal recovery contains an unbound or already recorded call')
     remaining = {role:original.budget.limit(role)-spent[role] for role in MODELS}
     if (policy.models != original.models or policy.independent_audit != original.independent_audit
             or policy.review_purpose != original.review_purpose
@@ -1334,6 +1402,7 @@ def continuation_budget(previous, request, policy):
     return {'predecessor_action_id':old.action_id, 'completed_context_cleanup':completed_cleanup, 'original_goal':deepcopy(previous['original_goal']),
         'prior_findings':prior_findings, 'unaccepted_reviews':unaccepted, 'prior_call_reservations':deepcopy(previous['call_reservations']),
         'pre_generation_schema_rejections':failures, 'spent_generations':spent, 'remaining_generations':remaining,
+        **({'unaccepted_proposals':unaccepted_proposals} if unaccepted_proposals else {}),
         **({'human_source_verification':human_follow_up,
             'human_verified_finding_ids':human_follow_up['human_verified_finding_ids'],
             'budget_basis':'new_human_source_evidence_follow_up', 'follow_up_budget':policy.budget.model_dump()} if human_follow_up else {})}

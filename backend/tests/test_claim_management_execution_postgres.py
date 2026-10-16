@@ -1035,3 +1035,113 @@ def test_unrecorded_negative_review_recovery_records_human_outcome_without_calls
     current=store.get_cvp_group(rid)
     assert not current['opus_approved'] and not current['change_set_ids']
     assert store.get_cvp_group(parent['run_id'])['call_reservations'][rid+':opus']['state']=='completed'
+
+
+@pytest.mark.parametrize('coverage',['missing','extra','duplicate','finding_scope','finding_quote'])
+@pytest.mark.parametrize('joint',[False,True])
+def test_known_rejected_proposal_uses_remaining_budget_and_existing_candidate(action,coverage,joint):
+    store,_,_,_,tmp_path,_=action
+    seed_claims(store,['C'])
+    request,root=operation_request(action,'Update',['C'])
+    original_policy=cm.Policy.model_validate_json(cm.DEFAULT_POLICY.read_text())
+    original_policy.initial_candidate='proposal'
+    if joint:
+        from backend.pipeline.claim_joint_update import CONTRACT
+        original_policy.joint_update_contract=CONTRACT;original_policy.joint_update_max_targets=2
+    policy_path=tmp_path/'proposal-first-policy.json';policy_path.write_text(original_policy.model_dump_json())
+    request.policy=cm.source.FileBinding.model_validate(binding(policy_path))
+    def authorize(req,extra=None):
+        path=Path(req.authorization.path);auth=json.loads(path.read_text())
+        auth.update(request=req.model_dump(mode='json',exclude={'authorization','policy'}),policy=req.policy.model_dump(mode='json'),required_maintenance_keys=[],**(extra or {}))
+        path.write_text(json.dumps(auth));req.authorization=cm.source.FileBinding.model_validate(binding(path))
+    authorize(request)
+    def invalid(packet):
+        result=cm.existing_candidate(packet['before'])
+        if coverage=='missing':result.dispositions.pop()
+        elif coverage=='extra':result.dispositions.append(cm.ObjectDisposition(record_key='claims/NOT-BOUND',action='retain',reason='wrong key'))
+        else:result.dispositions.append(result.dispositions[0].model_copy(deep=True))
+        result.findings=[cm.Finding(target_key='claims/OUTSIDE' if coverage=='finding_scope' else 'claims/C',
+            component='candidate coverage',category='engineering',affected_target_keys=['claims/C'],affected_write_keys=[],impact_reason='coverage prevents review',reason='synthetic incomplete candidate',acceptance_condition='complete before coverage',
+            citations=[cm.Citation(source_id='S',paragraph_key='S0001',exact_quote='not in source' if coverage=='finding_quote' else '甲是假设，不是断言。')])]
+        return result.model_dump(mode='json')
+    ports=SyntheticPorts(store,tmp_path,proposal=invalid)
+    first=execute_claim_management(store,request,root=root,ports=ports)
+    assert first['reason']=='engineering_required' and ports.calls==['gpt']
+    previous=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id));rid=next(iter(previous['latest_rounds'].values()));round_root=root/rid
+    slots=deepcopy(previous['call_reservations']);states={key:store.get_record_state(*key.split('/',1)) for key in previous['original_goal']['original_objects']}
+    raw_bytes=(round_root/'gpt.raw.json').read_bytes()
+    prompt=tmp_path/'frozen-proposal.md';prompt.write_bytes((Path(cm.__file__).parent/'prompts/claim_management_proposal_v2.md').read_bytes())
+    successor,next_root=operation_request(action,'Update',['C']);successor.predecessor_action_id=request.action_id
+    successor.permissions=request.permissions
+    reduced=original_policy.model_copy(deep=True);reduced.budget.gpt_calls-=1;reduced.initial_candidate='existing'
+    next_policy=tmp_path/'remaining-proposal-policy.json';next_policy.write_text(reduced.model_dump_json());successor.policy=cm.source.FileBinding.model_validate(binding(next_policy))
+    proof={rid+':gpt':{'raw':binding(round_root/'gpt.raw.json'),'role_prompt':binding(prompt)}}
+    authorize(successor,{'unaccepted_proposal_recovery':proof})
+    if coverage in {'finding_scope','finding_quote'}:
+        with pytest.raises(ValueError,match='outside|exact quote'):
+            cm.continuation_budget(previous,successor,reduced)
+        assert store.get_cvp_group(previous['run_id'])['call_reservations']==slots
+        return
+    budget=cm.continuation_budget(previous,successor,reduced)
+    assert len(budget['prior_findings'])==1
+    assert budget['spent_generations']=={'gpt':1,'opus':0,'gemini':0}
+    assert budget['remaining_generations']['gpt']==1 and budget['unaccepted_proposals'][rid+':gpt']['proposal_not_accepted']
+    increased=reduced.model_copy(deep=True);increased.budget.gpt_calls+=1
+    with pytest.raises(ValueError,match='reset or increase'):cm.continuation_budget(previous,successor,increased)
+    for bad in ['missing_raw','prompt','recorded','foreign_key']:
+        bad_previous=deepcopy(previous);bad_proof=deepcopy(proof[rid+':gpt']);bad_slot=deepcopy(slots[rid+':gpt'])
+        key=rid+':gpt'
+        if bad=='missing_raw':bad_proof['raw']={'path':str(tmp_path/'absent.raw.json'),'file_sha256':'0'*64}
+        elif bad=='prompt':bad_proof['role_prompt']['file_sha256']='0'*64
+        elif bad=='recorded':bad_slot['state']='completed'
+        else:key='foreign:gpt'
+        with pytest.raises((ValueError,FileNotFoundError)):
+            cm.unaccepted_initial_proposal(bad_previous,key,bad_slot,bad_proof)
+    def approved(packet):
+        result=passing(packet)
+        if joint:
+            for resolution in result['prior_findings']:resolution.update(affected_target_keys=[],affected_write_keys=[],impact_reason='coverage is complete')
+        return result
+    next_ports=SyntheticPorts(store,tmp_path,opus=approved)
+    result=execute_claim_management(store,successor,root=next_root,ports=next_ports)
+    assert result['status']=='completed' and next_ports.calls==['opus']
+    assert store.claim_management_qualification('C')['ready']
+    transferred=store.get_cvp_group(previous['run_id'])['call_reservations']
+    assert transferred[rid+':gpt']==slots[rid+':gpt']
+    assert transferred[rid+':opus']['state']=='cancelled' and transferred[rid+':opus']['transferred_to']
+    assert (round_root/'gpt.raw.json').read_bytes()==raw_bytes
+    assert {key:store.get_record_state(*key.split('/',1)) for key in states}==states
+
+
+@pytest.mark.parametrize('failure',['interruption','unauthorized_write'])
+def test_proposal_recovery_cannot_replace_valid_or_semantically_rejected_reply(action,monkeypatch,failure):
+    store,_,_,_,tmp_path,_=action
+    seed_claims(store,['C']);request,root=operation_request(action,'Update',['C'])
+    policy=cm.Policy.model_validate_json(cm.DEFAULT_POLICY.read_text());policy.initial_candidate='proposal'
+    policy_path=tmp_path/'valid-proposal-policy.json';policy_path.write_text(policy.model_dump_json());request.policy=cm.source.FileBinding.model_validate(binding(policy_path))
+    auth_path=Path(request.authorization.path);auth=json.loads(auth_path.read_text());auth.update(request=request.model_dump(mode='json',exclude={'authorization','policy'}),policy=request.policy.model_dump(mode='json'))
+    auth_path.write_text(json.dumps(auth));request.authorization=cm.source.FileBinding.model_validate(binding(auth_path))
+    def proposal(packet):
+        result=cm.existing_candidate(packet['before'])
+        if failure=='unauthorized_write':
+            key=next(k for k in packet['before'] if k.startswith('source_documents/'))
+            payload=deepcopy(packet['before'][key]['payload']);payload['title']='unauthorized source title'
+            result.records=[cm.source.Row(collection='source_documents',object_id=key.split('/',1)[1],payload=payload)]
+            d=next(d for d in result.dispositions if d.record_key==key);d.action='update';d.citations=[cm.Citation(source_id='S',paragraph_key='S0001',exact_quote='甲是假设，不是断言。')]
+        return result.model_dump(mode='json')
+    validate=cm.validate_candidate
+    if failure=='interruption':
+        def interrupt(*a,**kw):raise RuntimeError('synthetic interruption after returned proposal')
+        monkeypatch.setattr(cm,'validate_candidate',interrupt)
+    ports=SyntheticPorts(store,tmp_path,proposal=proposal)
+    assert execute_claim_management(store,request,root=root,ports=ports)['reason']=='engineering_required'
+    monkeypatch.setattr(cm,'validate_candidate',validate)
+    previous=store.get_cvp_group('CMA-'+cm.sha256_json(request.action_id));rid=next(iter(previous['latest_rounds'].values()));slot=previous['call_reservations'][rid+':gpt']
+    prompt=tmp_path/'proposal-prompt.md';prompt.write_bytes((Path(cm.__file__).parent/'prompts/claim_management_proposal_v2.md').read_bytes())
+    proof={'raw':binding(root/rid/'gpt.raw.json'),'role_prompt':binding(prompt)}
+    with pytest.raises(ValueError,match='valid candidate|not a proved exact-once'):
+        cm.unaccepted_initial_proposal(previous,rid+':gpt',slot,proof)
+    if failure=='interruption':
+        assert execute_claim_management(store,request,root=root,ports=ports)['status']=='completed'
+        assert ports.calls==['gpt','opus']
+    else:assert ports.calls==['gpt']
