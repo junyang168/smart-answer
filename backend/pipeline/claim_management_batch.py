@@ -48,7 +48,7 @@ def selection(pending, active, footprints, capacity):
     return selected
 
 
-def load(manifest, root):
+def load(manifest, root, *, store=None):
     from backend.pipeline import claim_management as cm
     plan = json.loads(Path(manifest).read_text())
     if set(plan) != {'jobs', 'max_workers'} or plan['max_workers'] not in (1, 2) or not plan['jobs']:
@@ -66,7 +66,16 @@ def load(manifest, root):
         if request.operation != 'Update' or len(request.target_keys) > 2 or targets & set(request.target_keys):
             raise ValueError('batch requires disjoint Update targets, maximum two per action')
         # Authenticate original authorization/policy without changing either.
-        cm.load_authority(request)
+        if store is None:
+            from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+            store = PostgresKnowledgeStore()
+        documents = {}
+        for sid in request.source_bindings:
+            state = store.get_record_state('source_documents', sid)
+            if state is None or state['retired']:
+                raise ValueError('batch source metadata is missing or retired: ' + sid)
+            documents[sid] = state['payload']
+        cm.load_authority(request, source_documents=documents)
         jobs[request.action_id] = (request, action_root.resolve())
         roots.add(str(action_root.resolve())); targets.update(request.target_keys)
     write(Path(root) / 'plan.json', {'manifest': binding(manifest), 'jobs': plan['jobs'],
