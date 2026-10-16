@@ -821,3 +821,18 @@ Restore 单元完成 GPT一次、Opus一次、共同事务及程序回读，7项
 `register-and-verify.py`、`before.json`、`after.json`、`zero-model-source-packet.json` 和 `verification.json` 保存精确证据。全部90条登记 Claim 的资格前后完全一致（49条当前 ready，不能据此称其余41条是本批待办）；相关来源与对象、原已完成 action 均不变。模型调用0、Claim／CVP业务写入0、整库备份0；登记只新增2条人工事实。固定12条及额外5条的既有完成结果不变。
 
 隔离 PostgreSQL 相关完整回归为275 passed、35 skipped；随后新增来源影响分支的新人工证据反例及对应回归为82 passed，计数不相加。测试涵盖重启后自动带入、原人工文件移走后复用、启用独立终审时同证据传递、分段失效、明确替代与旧重入、审阅期间人工输入变化后拒绝有／无内容写入、新契约资格变化及已校订文字自动登记。合成模型只验契约，不称真实新模型审阅。文档检查仍只有 notes-to-sermon 独立项目的既有缺失锚点；无前端修改、合并或部署。
+
+
+## 2026-10-16 两条英文称号漏项补审完成，审阅范围过宽另记未解决
+
+对既有90条清单补查英文 `Son of Man`，发现3条此前未纳入清单的记录：`DK-f35be4755f9b-P04-CL003`、`DK-07e99f606211a0a4a17a-P04-CL007` 为有效未连接 CVP 的漏审目标；`DK-f0eac41a4244-CL001` 已退役。合并清单为93条，这是已执行检索与历史目标集合，不作为所有语义相关 Claim 的穷尽性证明。其他已保存异议核对发现25个对象仍与异议保存时同版本，不能把原12条及额外5条完成写成全部相关材料无异议。
+
+负责人明确要求“先做第一”，本次只补审上述两个有效目标，未开展25个周边对象的清理。启动前发现精简输出 adapter 会替换普通角色提示词，先前新增的人工记录适用规则未出现在实际 compact prompt。`179770db` 为精简提示词补齐 current／needs_reconfirmation、同一已核事实不重复询问、人工确认口误可以保留原话并解决特定疑点的规则；实际 GPT／Opus adapter 提示词反例及人工持久流程共13项测试通过。此时没有内容模型调用，不改变已绑定旧任务。
+
+使用两个固定单目标 action、max_workers=1 的既有 batch runner，初始候选为当前已有 Claim；各目标只授权自身七项内容字段，其他 Claim、Evidence、原稿与 CVP 均只读。policy 保留最多一轮修订、GPT／Opus各2次、Gemini0、精简输出上限不变；本次新任务的输入限额在调用前明确绑定为1 MB，未变更全局500 KB策略。未调用新启动诊断，消费已授权 runtime renewal 的零调用复用证明。此前材料预检失败发生在模型与 action 登记之前，失败清单及日志保留，不视为模型审阅轮次。
+
+实际顺序执行：2016 `435-english-title-2016-20261016-v1`，审阅分母654项、完整事务读取1413项、实际 Opus request 827125 bytes；2021 `435-english-title-2021-20261016-v1`，审阅及事务范围36项、实际 request 131351 bytes，来源包自动带入两项已登记人工事实。两次 Opus 首审均 complete_review=true、无 findings／prior_findings；各仅调用Opus1次，GPT／Gemini均0，没有修订、澄清、二轮审核或内容 ChangeSet。两目标保持原 revision3／1、正文及所有业务数据，完成程序回读与当前资格登记。
+
+独立 `verify.py` 核对原答及 stage receipt、共同读回、两个完整读集共1449个唯一对象、全部源文件及实际空写集；原49条当前资格均保持，两漏项新增当前资格，合并清单现为51条当前合格、24条CVP排除、18条退役或被替代。93条 Claim 的 revision／SHA 均与本次之前一致。证据根 `claim-management-435/son-of-man-english-two-20261016-v1/` 保存请求、精确授权、policy、原稿绑定、raw、意图、transport、当前资格、`verification.json`、`topic-inventory-after.json` 及 `work-list.json`；原25个周边对象仍待处理，不因本次通过而改判。无整库备份、合并或部署。
+
+**另有未解决代码问题：** 在负责人追问2016材料为何过大后，逐项拆解确认 `claim_management.audit_keys` 将每个已读对象的反向引用和关系两端继续递归加入，结果遍历整片连通图。目标自身及其正向直接引用闭包49项（Claim1、Evidence4、反方Position1、SourceFragment43），不能据此直接宣称优化后的正确分母就是49；当前实际654项包含Claim30、Evidence94、SourceFragment281、两类关系133、Observation68、Question40、Position7、SourceDocument1。未压缩结构化对象约592 KB，完整来源约44 KB；增大到827 KB主要来自结构化材料与封装，不能归因为教授原稿很长。此前把654项一概称为“必要对象”不准确，提高输入限额只让当前旧规则得以执行，不是范围问题的解决。公共取包规则仍须区分目标论据、必要关系／共享修改影响、完整自身原文与仅供事务保护的读取，不能因未修改对象相连就无限向外扩展；本次没有修改该规则或为此重审已通过目标。#435／PR#437仍为未完成draft。
