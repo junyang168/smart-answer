@@ -451,3 +451,18 @@ Opus 第二轮完整复核通过，6 项均解决，无 finding 或 context find
 恢复证据保存于原第四组运行根的 `qualification-context-reuse-v2-20261015-v1/`：`direction.json`、`before.json`、`proof.json`、`verified-result.json`、`recovery.py`。proof 文件 SHA 为 `872ad4d31abacc6bbd20fe9b91d90eb78bd8450c17b63fbfb36f3b23e1d02fea`；verified-result SHA 为 `7284669ee578862acd688500e346e9390164080782d462b20735b057988b14f5`。新进程使用普通 SELECT 独立核实 194 项当前版本／SHA、四条资格的原 round、两条系统事件、历史与调用账本，结果保存为 `independent-current-verification.json`，脚本为 `independent-verification.py`；核验新增模型调用、业务写入与事件均为零。前节资格失效记录及 qualification-dependency-drift.json 保留为当时事实，此节记录恢复后的当前结果。
 
 论据真正变化或出现未解决异议仍进入正常维护，不将上下文复用当成新内容批准。本轮未继续整批、未调用 Fable、未合并或部署。git diff --check 通过；文档检查仍仅有另一项目既有缺失锚点。本次没有前端或依赖变更，未重复前端检查。#435／PR #437 保持 draft，剩余批次和人工事项未声明完成。
+
+
+## 2026-10-15 第五组双目标审阅与正常完成时自动保留资格
+
+用户授权「好，先跑一组」后，在干净提交 `511f959` 上选择《8章—权柄的显明》`DK-1c98d4a95cd5-P10-CL008`（人子称号强调神性的总结）与 `DK-1c98d4a95cd5-P10-CL009`（但以理书背景下的神性论证）。两条此前无当前资格、未连接 CVP。完整闭包 194 项，174 项对象获字段维护许可，19 条其他 Claim 只读；直接 Evidence E017、E018 列为 required_maintenance_keys。零调用预检确认同属一个执行单元，使用既有普通联合 v2 policy 与原预算；消费已获准且成功的精确运行证明，没有新启动诊断。
+
+action 为 `435-joint-update-divinity-summary-two-20261015-v1`，唯一 round 为 `CMR-29255402509a1e01ca8da6ee5802cfc26664770a393911cc03e938c450836d73`。Opus 首轮请求 431,295 bytes，逐项审阅全部 194 项，没有 findings 或 prior_findings，全部 retain。共同程序回读与完成核实通过，checkpoint=audited、outcome=completed，两目标均当前 ready，保留 revision 2；CL008 SHA 为 `76a13c3063f83a09ef455c06778b8ed646c18e1e89a931ec1e6e37d1711ca03f`，CL009 SHA 为 `cf0c1b992b1a35ac5e52243b94eb79e018f8bb6ae4192e19f4793825fb59bad8`。结果仍为 opus_and_program_readback、independent_audit_complete=false。调用 Opus 一次，GPT／Gemini／整库备份均为零；全部业务对象和物理来源／meta 保持，没有内容 ChangeSet。
+
+正常完成事务自动为 CL005、CL006 更新直接 v2 适用性证明，peer 绑定此次 round，原资格 round／revision／audit 不变。它们的旧原始 pins 与当前仍有第四组留下的 10 项上下文差异，43 项论据基础保持；此次完整审阅满足复用条件。自动生成系统事件 `CMCTX-16e56911bfd68e2e61d07dd458ceab93`、`CMCTX-ca5fc3d31b9c04be37e926014011bd0e`。没有调用手动 revalidate 接点，没有重审旧目标或递归引用第四组的适用性证明。CL007、CL010 也仍当前 ready。该样本验证 retain 完成路径会自动消费现有上下文差异；本组没有制造新内容变化，不冒称再次覆盖了真实修改后的全部保留情形。
+
+独立新进程核实当前 SQL 全部 194 项与批前完全相同、原文与 meta 字节保持、两目标资格与原 round 绑定、四条范围内旧资格仍有效，未获资格的 15 条旁观 Claim 没有升级。完成重入与独立核实均零新调用或业务写入。证据根为 `claim-management-435/joint-update-divinity-summary-two-20261015-v1/`，保存授权／预检、before／after、原始材料／raw／intent、`joint-update-result.json`、`post-batch-qualifications.json`、`independent-current-verification.json` 与各执行脚本。结果文件 SHA 为 `bd7cbd8af15f98234c882d3e2001bd7978c7ad55185953c48726db528c46b9d1`。初次外围只读摘要脚本误读 artifact envelope 的 result 字段；立即改用既有 body/read helper，未进入 runner 或改变任何运行事实。
+
+本次没有应用代码、prompt、policy、前端或依赖变更，未重复上一轮已通过的后端回归。文档检查仍仅有另一项目既有缺失锚点，git diff --check 通过。只确认本组与实际核验的当前资格，不宣称整批完成；PR #437 继续 draft，未合并、部署或调用 Fable。
+
+补充只读核对本篇 P10 全部十条（包括此次依赖闭包外的 CL001、CL002、CL003），除尚未处理的 CL004 外，九条均当前 ready；没有新模型调用或内容写入。完整资格保存为同根 `lecture-current-qualifications.json`，脚本为 `lecture-qualification-check.py`。这里只报告该篇十条，不将它当作整个「人子」批次的剩余数量。
