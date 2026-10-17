@@ -247,7 +247,8 @@ def evidence(value):
     from backend.pipeline.cvp_sql_flow import check_binding
     from backend.pipeline.source_reconciliation_runner import read,body
     if not complete(value):raise ValueError('reuse requires an existing completed target review and fresh peer review')
-    for bound in value['materials']['request']['source_bindings'].values():check_binding(bound)
+    from backend.pipeline.source_editorial_transition import verify_current_source_binding
+    for bound in value['materials']['request']['source_bindings'].values():verify_current_source_binding(bound)
     bound=value['stage_results']['readback'];check_binding(bound)
     opus=value['stage_results']['opus'];check_binding(opus)
     approval=value['reviewed']['evidence']['approval'];check_binding(approval)
@@ -301,8 +302,9 @@ def current_pins(store,cursor,value):
                 or any(updated[k]!=original[k] for k in missing)
                 or not changed<=set(fresh) or any(updated[k]!=fresh[k] for k in changed)):
             raise ValueError('direct scope reuse coverage drift')
+        from backend.pipeline.source_editorial_transition import verify_current_source_binding
         for bound in peer['materials']['unit_request']['source_bindings'].values():
-            check_binding(bound)
+            verify_current_source_binding(bound)
         peer_current=store._assert_transaction_read_pins(cursor,fresh)
         store._assert_claim_management_scope(cursor,fresh,records=peer_current,request=peer['materials']['unit_request'])
         if 'human_source_decisions' in peer['materials']:

@@ -487,7 +487,8 @@ def test_write_back_subtitle_generation_uses_the_subscription_client(
     seen: dict[str, Any] = {}
 
     class FakeSubscriptionClient:
-        pass
+        def _verify_chatgpt_login(self) -> None:
+            pass
 
     client = FakeSubscriptionClient()
     monkeypatch.setattr(runner, "CodexSubscriptionClient", FakeSubscriptionClient)
@@ -1858,3 +1859,149 @@ def test_low_level_script_review_writer_rejects_blind_write(tmp_path: Path) -> N
             "script_review",
             _rows(),
         )
+
+
+def _generation_call(source_path: Path, output_dir: Path, writer: Any) -> tuple[str, Path]:
+    return runner.run_one(
+        source_path, output_dir=output_dir, client=object(), prompt="unused",
+        reasoning_effort="medium", force=False, write_back_subtitles=True,
+        subtitle_actor_id="editor@example.org", subtitle_writer=writer,
+        subtitle_authorizer=lambda _actor: True, subtitles_only=True,
+    )
+
+
+def test_subtitle_writer_retry_reuses_frozen_generation_without_model_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_path = _source(tmp_path)
+    out = tmp_path / "out"
+    calls = []
+    monkeypatch.setattr(runner, "generate_subtitles", lambda *args, **kwargs: calls.append(args) or _insertions())
+    with pytest.raises(RuntimeError, match="write failed"):
+        _generation_call(source_path, out, _SavingWriter(source_path, save_error=True))
+    plan = json.loads(next((out / "subtitle-generations").rglob("generation.json")).read_text())
+    assert plan["status"] == "validated"
+    assert plan["binding"]["source_sha256"] == hashlib.sha256(source_path.read_bytes()).hexdigest()
+    assert plan["insertions"] == _insertions()
+    assert _generation_call(source_path, out, _SavingWriter(source_path))[0] == "created"
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("mutation", ["source", "prompt", "model", "effort", "scope", "answer"])
+def test_subtitle_generation_replay_refuses_changed_binding_or_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str,
+) -> None:
+    source_path = _source(tmp_path)
+    out = tmp_path / "out"
+    monkeypatch.setattr(runner, "generate_subtitles", lambda *args, **kwargs: _insertions())
+    with pytest.raises(RuntimeError, match="write failed"):
+        _generation_call(source_path, out, _SavingWriter(source_path, save_error=True))
+    plan_path = next((out / "subtitle-generations").rglob("generation.json"))
+    before = plan_path.read_bytes()
+    if mutation == "source":
+        rows = json.loads(source_path.read_text())
+        rows[0]["text"] += "改動。"
+        source_path.write_text(json.dumps(rows, ensure_ascii=False))
+    elif mutation == "prompt":
+        prompt = tmp_path / "prompt.md"
+        prompt.write_text("different subtitle prompt")
+        monkeypatch.setattr(runner, "SUBTITLE_PROMPT_PATH", prompt)
+    elif mutation == "model":
+        monkeypatch.setenv("SUBTITLE_MODEL", "different-model")
+    elif mutation == "effort":
+        monkeypatch.setenv("SUBTITLE_REASONING_EFFORT", "high")
+    else:
+        plan = json.loads(before)
+        if mutation == "scope":
+            plan["binding"]["scope_end"] = 1
+        else:
+            plan["insertions"][0]["text"] = "## 被換掉的標題"
+        plan_path.write_text(json.dumps(plan, ensure_ascii=False))
+        before = plan_path.read_bytes()
+    monkeypatch.setattr(runner, "generate_subtitles", lambda *args, **kwargs: pytest.fail("replay cannot regenerate"))
+    with pytest.raises(SubtitlePersistenceError, match="cache"):
+        _generation_call(source_path, out, _SavingWriter(source_path))
+    assert plan_path.read_bytes() == before
+
+
+def test_interrupted_subtitle_dispatch_is_recorded_unknown_and_not_repeated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_path = _source(tmp_path)
+    out = tmp_path / "out"
+    def interrupted(*args: Any, **kwargs: Any) -> Any:
+        raise KeyboardInterrupt("process interrupted after dispatch")
+    monkeypatch.setattr(runner, "generate_subtitles", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        _generation_call(source_path, out, _SavingWriter(source_path))
+    plan_path = next((out / "subtitle-generations").rglob("generation.json"))
+    assert json.loads(plan_path.read_text())["status"] == "dispatch_unknown"
+    monkeypatch.setattr(runner, "generate_subtitles", lambda *args, **kwargs: pytest.fail("unknown dispatch cannot resend"))
+    with pytest.raises(SubtitlePersistenceError, match="dispatch_unknown.*redispatch refused"):
+        _generation_call(source_path, out, _SavingWriter(source_path))
+    assert json.loads(source_path.read_text()) == _rows()
+
+
+def test_failed_subtitle_generation_is_recorded_and_requires_reconciliation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_path = _source(tmp_path)
+    out = tmp_path / "out"
+    def failure(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("upstream request failed")
+    monkeypatch.setattr(runner, "generate_subtitles", failure)
+    with pytest.raises(RuntimeError, match="upstream"):
+        _generation_call(source_path, out, _SavingWriter(source_path))
+    plan_path = next((out / "subtitle-generations").rglob("generation.json"))
+    assert json.loads(plan_path.read_text())["status"] == "failed"
+    monkeypatch.setattr(runner, "generate_subtitles", lambda *args, **kwargs: pytest.fail("failed dispatch cannot resend"))
+    with pytest.raises(SubtitlePersistenceError, match="failed.*redispatch refused"):
+        _generation_call(source_path, out, _SavingWriter(source_path))
+
+
+def test_local_subtitle_cli_preflight_failure_does_not_reserve_generation_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_path = _source(tmp_path)
+    original = source_path.read_bytes()
+    client = runner.CodexSubscriptionClient.__new__(runner.CodexSubscriptionClient)
+    client.model = 'fake-model'
+    client.reasoning_effort = 'high'
+    def unavailable() -> None:
+        raise FileNotFoundError('configured Codex executable is unavailable')
+    monkeypatch.setattr(client, '_verify_chatgpt_login', unavailable)
+    monkeypatch.setattr(runner, 'generate_subtitles', lambda *args, **kwargs: pytest.fail('local failure must precede provider dispatch'))
+    out = tmp_path / 'out'
+    with pytest.raises(FileNotFoundError, match='executable is unavailable'):
+        runner._bound_subtitle_generation(
+            paragraphs=_rows(), source_id=source_path.stem, source_path=source_path,
+            source_sha256=hashlib.sha256(original).hexdigest(), output_dir=out,
+            actor_id='editor', scope_end=len(_rows()), client=client,
+        )
+    assert not list(out.rglob('generation.json'))
+    assert not list(out.rglob('application.json'))
+    assert source_path.read_bytes() == original
+
+
+def test_saved_subtitle_answer_replays_without_cli_or_login_verification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_path = _source(tmp_path)
+    client = runner.CodexSubscriptionClient.__new__(runner.CodexSubscriptionClient)
+    client.model = 'fake-model'
+    client.reasoning_effort = 'high'
+    checks = []
+    monkeypatch.setattr(client, '_verify_chatgpt_login', lambda: checks.append(True))
+    calls = []
+    monkeypatch.setattr(runner, 'generate_subtitles', lambda *args, **kwargs: calls.append(True) or _insertions())
+    options = dict(
+        paragraphs=_rows(), source_id=source_path.stem, source_path=source_path,
+        source_sha256=hashlib.sha256(source_path.read_bytes()).hexdigest(),
+        output_dir=tmp_path / 'out', actor_id='editor', scope_end=len(_rows()), client=client,
+    )
+    assert runner._bound_subtitle_generation(**options) == _insertions()
+    monkeypatch.setattr(client, '_verify_chatgpt_login', lambda: pytest.fail('validated replay must not require local runtime'))
+    monkeypatch.setattr(runner, 'generate_subtitles', lambda *args, **kwargs: pytest.fail('validated replay must not dispatch'))
+    assert runner._bound_subtitle_generation(**options) == _insertions()
+    assert checks == [True]
+    assert calls == [True]

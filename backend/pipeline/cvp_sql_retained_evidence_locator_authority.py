@@ -57,7 +57,8 @@ def physical(source):
     from backend.pipeline.cvp_sql_flow import check_binding
     from backend.pipeline.knowledge_source import markdown_source_document
     from backend.pipeline.source_contract_cleanup import build_projection
-    b={'path':source['source_path'],'file_sha256':source['source_file_sha256']};check_binding(b)
+    from backend.pipeline.source_editorial_transition import verify_current_source_binding
+    b=verify_current_source_binding({'path':source['source_path'],'file_sha256':source['source_file_sha256']})
     if source['source_type']=='notes_manuscript':payload=markdown_source_document(source)[0]
     else:
         require(source['source_type']=='sermon_transcript','unknown source type')

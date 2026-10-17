@@ -103,7 +103,8 @@ def coordinate_authority(store, cid, row):
     require(source['source_type'] in {'notes_manuscript','sermon_transcript'}
             and Path(source['source_path']).is_absolute(), 'unsupported source')
     source_binding = {'path':source['source_path'],'file_sha256':source['source_file_sha256']}
-    check_binding(source_binding)
+    from backend.pipeline.source_editorial_transition import verify_current_source_binding
+    source_binding = verify_current_source_binding(source_binding)
     if source['source_type']=='notes_manuscript':
         script,_,_ = markdown_source_document(source)
     else:

@@ -124,7 +124,8 @@ def resume_reviewed_action(store, run_id):
     saved = store.get_cvp_group(run_id)
     if saved['checkpoint'] != 'reviewed': return None
     evidence = saved['reviewed']['evidence']
-    for source in evidence['sources']: check_binding(source)
+    from backend.pipeline.source_editorial_transition import verify_current_source_binding
+    for source in evidence['sources']: verify_current_source_binding(source)
     if saved['reviewed']['plan']['source_kind'] != 'wang_claim_management_v2':
         check_binding(evidence['backup']['dump'])
     for proof in evidence['approval'].values():
@@ -338,7 +339,8 @@ def reviewed_cvp_package(root, materials, store, *, require_resolved=False):
     packet = materials["packet"]
     models = adapters({"cvp_policy":materials["policy"]})
     check_binding(materials["policy"]); check_binding(materials["semantic_contract"])
-    for source in materials["sources"]:check_binding(source)
+    from backend.pipeline.source_editorial_transition import verify_current_source_binding
+    for source in materials["sources"]:verify_current_source_binding(source)
     from backend.pipeline.claim_issue_management import IssuesDetected,review_findings
     def identity_source_loader(source_ids):
         from backend.pipeline.viewpoint_evidence_source_context import load_context_source
@@ -452,7 +454,8 @@ def commit_package(store, run_id, *, package, approval, authorization, backup, s
                    read_pins, reason, actor, source_kind="cvp_batch_resolution", viewpoint_ids=(), disposition=None, action=None,
                    pending_cvp_claim_ids=(), pending_cvp_management_record_keys=None):
     """The shared normal/source/link execution boundary after content approval."""
-    for source in sources:check_binding(source)
+    from backend.pipeline.source_editorial_transition import verify_current_source_binding
+    for source in sources:verify_current_source_binding(source)
     if source_kind != 'wang_claim_management_v2':
         if not backup.get('restore_catalog_nonempty') or not backup.get('dump'):
             raise ValueError('fresh backup lacks verified restore-list proof')

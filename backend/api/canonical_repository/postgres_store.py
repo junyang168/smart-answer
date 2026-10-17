@@ -3989,6 +3989,7 @@ class PostgresKnowledgeStore:
         """
         from backend.pipeline.cvp_sql_flow import check_binding, decoded_pins
         from backend.pipeline.claim_management import is_source_impact, Policy
+        from backend.pipeline.source_editorial_transition import verify_current_source_binding
         with self.connect() as conn, conn.cursor() as cursor:
             rows = cursor.execute("""SELECT run_id,metadata FROM wang_knowledge.pipeline_runs
                 WHERE metadata->>'kind'='claim_management_round' AND metadata->'claim_ids' ? %s
@@ -4026,11 +4027,13 @@ class PostgresKnowledgeStore:
                     if not revalidation:
                         return {'ready': False, 'reason': 'source_impact_requires_maintenance_or_content_review', 'run_id': rid}
                     try:
-                        for bound in [*revalidation['source_bindings'].values(), revalidation['impact_audit'],revalidation['content_audit']]:
+                        for bound in revalidation['source_bindings'].values():
+                            verify_current_source_binding(bound)
+                        for bound in [revalidation['impact_audit'], revalidation['content_audit']]:
                             check_binding(bound)
                         records = self._assert_transaction_read_pins(cursor, decoded_pins(revalidation['current_pins']))
                         self._assert_claim_management_scope(cursor, decoded_pins(revalidation['current_pins']), records=records, request=value['materials']['unit_request'])
-                    except (ValueError, ChangeSetConflict):
+                    except (ValueError, OSError, KeyError, ChangeSetConflict):
                         return {'ready': False, 'reason': 'source_revalidation_drift', 'run_id': rid}
                     state = records.get(('claims', claim_id))
                     if not state or state['retired_at'] or state['payload'].get('review_status') in {
@@ -4045,7 +4048,7 @@ class PostgresKnowledgeStore:
                     continue
                 try:
                     for bound in value['materials']['request']['source_bindings'].values():
-                        check_binding(bound)
+                        verify_current_source_binding(bound)
                     proof = value['stage_results']['audit' if independent else 'readback']
                     check_binding(proof)
                     from backend.pipeline.claim_qualification_reuse import current_pins
@@ -4058,7 +4061,7 @@ class PostgresKnowledgeStore:
                     applicable = current_pins(self, cursor, value)
                     records = self._assert_transaction_read_pins(cursor, applicable)
                     self._assert_claim_management_scope(cursor, applicable, records=records, request=value['materials']['unit_request'])
-                except (ValueError, ChangeSetConflict):
+                except (ValueError, OSError, KeyError, ChangeSetConflict):
                     continue
                 state = records.get(('claims', claim_id))
                 from backend.pipeline.claim_qualification_reuse import legacy_spot_check_replaced
@@ -4624,6 +4627,15 @@ class PostgresKnowledgeStore:
         for source in sources:
             physical=file_sha256(Path(source['path']))
             if physical==source['file_sha256']:continue
+            from backend.pipeline.source_editorial_transition import verify_current_source_binding
+            try:
+                current_binding = verify_current_source_binding(source)
+            except (ValueError, OSError, KeyError):
+                pass  # An actual body transition still requires the existing SQL authority below.
+            else:
+                if current_binding['file_sha256'] == physical:
+                    continue
+                raise ChangeSetConflict('source changed while proving editorial-only transition')
             matches=[(oid,r) for (collection,oid),r in audited_current.items()
                      if collection=='source_documents' and r['retired_at'] is None
                      and r['payload'].get('source_path')==source['path']]

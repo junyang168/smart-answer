@@ -22,7 +22,14 @@ def load_context_source(source):
     raw = path.read_bytes()
     file_sha = hashlib.sha256(raw).hexdigest()
     if file_sha != source.get("source_file_sha256"):
-        raise ValueError("registered context source physical SHA drift")
+        from backend.pipeline.source_editorial_transition import verify_current_source_binding
+        try:
+            verified = verify_current_source_binding({"path": str(path),
+                "file_sha256": source.get("source_file_sha256")})
+        except (ValueError, OSError, KeyError) as exc:
+            raise ValueError("registered context source physical SHA drift") from exc
+        if verified["file_sha256"] != file_sha:
+            raise ValueError("registered context source changed during editorial proof")
     if source.get("source_type") == "notes_manuscript":
         payload, loaded_raw, _ = markdown_source_document(source)
         if loaded_raw != raw:
@@ -80,5 +87,20 @@ def attach_source_context(claim, source, loaded=None):
 
 def verify_source_context(evidence, source, loaded=None):
     actual = compile_source_context(evidence, source, loaded)
-    if actual != evidence.source_context:
-        raise ValueError("packet context differs from registered physical paragraph")
+    saved = evidence.source_context
+    if actual == saved:
+        return
+    if actual is not None and saved is not None:
+        # A saved paragraph packet remains exactly the reviewed packet. Only
+        # its historical physical provenance may traverse subtitle insertion;
+        # no paragraph, excerpt, source identity or offset may be substituted.
+        from backend.pipeline.source_editorial_transition import verify_current_source_binding
+        old = saved.model_dump(mode="json")
+        new = actual.model_dump(mode="json")
+        if {k:v for k,v in old.items() if k != 'source_file_sha256'} == {
+                k:v for k,v in new.items() if k != 'source_file_sha256'}:
+            bound = verify_current_source_binding({"path": saved.source_path,
+                "file_sha256": saved.source_file_sha256})
+            if bound["file_sha256"] == actual.source_file_sha256:
+                return
+    raise ValueError("packet context differs from registered physical paragraph")
