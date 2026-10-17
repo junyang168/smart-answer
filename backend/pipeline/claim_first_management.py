@@ -71,7 +71,7 @@ def project(frozen, original):
 
 def final_packet(root, frozen, original, correction):
     from backend.pipeline.source_reconciliation_runner import read, body
-    from backend.pipeline.cvp_sql_flow import binding
+    from backend.pipeline.cvp_sql_commit import binding
     root = __import__('pathlib').Path(root)
     if (root/'final_review.reservation.json').exists() or (root/'final_review.raw.json').exists():
         prior = body(read(root/'final_review.packet.json'))
@@ -102,7 +102,7 @@ def final_packet(root, frozen, original, correction):
 
 
 def validate_claim_audit_report(audit, claim_ids, *, store=None, saved=None, root=None):
-    from backend.pipeline.cvp_sql_flow import validate_transaction_audit
+    from backend.pipeline.cvp_sql_commit import validate_transaction_audit
     accounting = None
     validation = audit
     if store is not None:
@@ -126,8 +126,8 @@ def finish_claim_audit(store, run_id, root):
     from pathlib import Path
     import os
     import subprocess
-    from backend.pipeline.cvp_sql_flow import (binding, pins, pin_rows, decoded_pins,
-        validate_transaction_audit, write_immutable, PROJECT)
+    from backend.pipeline.cvp_sql_commit import binding, pins, pin_rows, decoded_pins, validate_transaction_audit, PROJECT
+    from backend.pipeline.viewpoint_resolution_runtime import write_immutable
     from backend.pipeline.source_reconciliation_runner import read, body
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact
     from backend.pipeline.viewpoint_content_blocked_fallback import verify_saved_full_audit
@@ -219,7 +219,7 @@ def coverage_context(store, saved, group):
     cannot be cleared merely by creating replacement coverage.
     """
     from pathlib import Path
-    from backend.pipeline.cvp_sql_flow import check_binding, decoded_pins, binding
+    from backend.pipeline.cvp_sql_commit import check_binding, decoded_pins, binding
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact
     from backend.pipeline.source_reconciliation_runner import body, read
     marker = saved.get('claim_layer_audit')
@@ -266,7 +266,7 @@ def coverage_context(store, saved, group):
                 'All incomplete coverage and retained CVP impacts still require normal management/full audits. '
                 'No source/Claim retry, new member, endpoint or CVP-core permission is granted.'}
     from backend.pipeline.viewpoint_validation_context import read_current_objects
-    from backend.pipeline.cvp_sql_flow import pins
+    from backend.pipeline.cvp_sql_commit import pins
     from backend.api.canonical_repository.postgres_store import record_content_sha
     expected = decoded_pins(receipt['read_pins'])
     current = read_current_objects(store, expected)
@@ -382,7 +382,7 @@ def coverage_context(store, saved, group):
             or packet.get('proposal_sha256') != application.get('proposal_sha256')
             or sorted(observed) != sorted(pending)):
         raise ValueError('source-only final review lost exact pending CVP verdict binding')
-    from backend.pipeline.cvp_sql_flow import binding
+    from backend.pipeline.cvp_sql_commit import binding
     return {'schema_version': REPROPOSAL_VERSION,
         'management_action_id': evidence['action']['action_id'],
         'prior_reviewed_sha256': saved['reviewed_sha256'],

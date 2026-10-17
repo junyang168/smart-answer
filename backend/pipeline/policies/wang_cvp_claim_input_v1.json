@@ -1,0 +1,7 @@
+{
+  "schema_version": "wang_cvp_claim_input_v1",
+  "policy_id": "wang-cvp-claim-wording-v1",
+  "position_fields": ["statement", "conditions", "limitations", "qualifications", "modality", "polarity", "population_scope"],
+  "context_fields": ["claim_type", "attribution", "corpus_scope", "scripture_refs", "opposed_position_ids", "opposes", "promotion_rationale", "topic_terms", "cross_lecture", "lectures", "recurrence"],
+  "mechanical_fields": ["claim_id", "schema_version", "revision", "review_status", "visibility", "maturity", "evidence_step_ids", "context_evidence_step_ids", "eligible_evidence_step_ids", "withheld_evidence_step_ids", "topic_ids", "extraction_fingerprints", "occurrences", "created_at", "updated_at", "ai_adjudication", "ai_route_override", "group_id", "metrics", "promoted_from_observation_id", "review_note", "reviewed_at", "reviewed_by", "source_reconciliation_review_sha256", "superseded_by"]
+}

@@ -8,7 +8,7 @@ from pathlib import Path
 from backend.api.canonical_repository.postgres_store import sha256_json, record_content_sha
 from backend.pipeline import source_reconciliation as c
 from backend.pipeline.source_reconciliation_runner import read, body
-from backend.pipeline.cvp_sql_flow import check_binding
+from backend.pipeline.cvp_sql_commit import check_binding
 
 VERSION = 'wang_joint_reviewed_dependency_handoff_v1'
 
@@ -112,7 +112,7 @@ def context(value, store=None, *, cursor=None):
     fields = ('operation','collection','object_id','before_revision','after_revision','before_sha256','after_sha256')
     if actual != [tuple(op[k] for k in fields) for op in ops]:
         raise ValueError('dependency handoff actual complete write set drift')
-    from backend.pipeline.cvp_sql_flow import decoded_pins
+    from backend.pipeline.cvp_sql_commit import decoded_pins
     pins = decoded_pins(materials['sql_scope']['read_pins'])
     written = set()
     for op in ops:

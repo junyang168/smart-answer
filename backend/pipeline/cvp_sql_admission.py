@@ -16,7 +16,7 @@ import time
 from dotenv import load_dotenv
 
 from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore, sha256_json, record_content_sha
-from backend.pipeline.cvp_sql_flow import binding, check_binding, PROJECT
+from backend.pipeline.cvp_sql_commit import binding, check_binding, PROJECT
 from backend.pipeline.viewpoint_cvp_campaign_runner import validate_schedule, validate_completed_seed
 from backend.pipeline.viewpoint_resolution_runtime import write_immutable
 

@@ -152,7 +152,7 @@ def request_limit(adapter, path, *, saved=None):
     else:
         limit,budget=effective_request_limit(adapter,path)
     if budget is not None:
-        from backend.pipeline.cvp_sql_flow import check_binding
+        from backend.pipeline.cvp_sql_commit import check_binding
         check_binding(budget['authorization'])
         auth=read_artifact(Path(budget['authorization']['path']))
         binding_path=next((p/'request-limit-binding.json' for p in Path(path).resolve().parents

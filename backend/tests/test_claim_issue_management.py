@@ -411,7 +411,7 @@ def test_joint_issue_review_uses_same_sql_commit_and_saved_answers(postgres_stor
     postgres_store.register_claim_issue(run,issue.model_dump(mode='json'))
     scoped=m.manifest_for_issues(postgres_store,run,[issue],policy,tmp_path/'scoped')
     ports=IssuePorts(issue)
-    monkeypatch.setattr('backend.pipeline.cvp_sql_flow.verified_group_backup',lambda *args:{'dump':report,'restore_catalog_nonempty':True})
+    monkeypatch.setattr('backend.pipeline.cvp_sql_commit.verified_group_backup',lambda *args:{'dump':report,'restore_catalog_nonempty':True})
     before=deepcopy(postgres_store.get_record_state('claims','CL-test'))
     result=execute_source_action(postgres_store,run,scoped.model_dump(),root=tmp_path/'action',ports=ports)
     assert result['status']=='no_content_write' and result['change_set_id'] is None
@@ -448,7 +448,7 @@ def test_joint_change_late_failure_rolls_back_and_exact_saved_review_resumes(pos
     postgres_store.register_claim_issue(run,issue.model_dump(mode='json'))
     scoped=m.manifest_for_issues(postgres_store,run,[issue],policy,tmp_path/'scoped')
     ports=IssuePorts(issue,change=True)
-    monkeypatch.setattr('backend.pipeline.cvp_sql_flow.verified_group_backup',lambda *args:{'dump':report,'restore_catalog_nonempty':True})
+    monkeypatch.setattr('backend.pipeline.cvp_sql_commit.verified_group_backup',lambda *args:{'dump':report,'restore_catalog_nonempty':True})
     before=deepcopy(postgres_store.get_record_state('claims','CL-test'))
     original=postgres_store._assert_transaction_edges_and_reviews
     def fail(*args):raise ValueError('last joint transaction validator')

@@ -16,7 +16,7 @@ ACTIVE = ContextVar('review_claim_id_format_repair', default=None)
 
 def enable(store, authorization, output_root, campaign):
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact, write_immutable
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     check_binding(authorization)
     direction = read_artifact(Path(authorization['path']))
     if (direction.get('schema_version') != SCHEMA
@@ -96,7 +96,7 @@ def validate_format_response(response, expected):
 def repair(adapter, request, raw, cache, *, persist=True):
     from backend.pipeline import viewpoint_resolution_runtime as rt
     from backend.api.canonical_repository.viewpoint_response_binding import bind_response
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     direction = ACTIVE.get()
     if direction is None or str(Path(cache).resolve()) != direction['original_raw']['path']:
         return raw, None

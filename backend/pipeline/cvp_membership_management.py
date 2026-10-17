@@ -65,7 +65,7 @@ def model_adapter(stage):
 
 
 def policy_binding():
-    from backend.pipeline.cvp_sql_flow import binding
+    from backend.pipeline.cvp_sql_commit import binding
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact
     policy = read_artifact(POLICY)
     expected = {'schema_version': VERSION, 'human_content_approval': False,
@@ -81,7 +81,8 @@ def policy_binding():
 
 def prepare_material(store, frozen, handoff):
     """Indexed exact current original readset; no future-group admission."""
-    from backend.pipeline.cvp_sql_flow import current_claim_authority, decoded_pins
+    from backend.pipeline.cvp_sql_commit import decoded_pins
+    from backend.pipeline.cvp_sql_claim_authority import current_claim_authority
     from backend.pipeline.viewpoint_evidence_source_context import attach_source_context, load_context_source
     from backend.api.canonical_repository.viewpoint_resolution import compile_review_claim
     from backend.api.canonical_repository.knowledge_models import ClaimRecord, EvidenceStepRecord, SourceFragmentRecord
@@ -199,7 +200,7 @@ def complete_input_repair_material(store,frozen,handoff,old,root):
     ONE independent review, zero further correction/retry.
     """
     from backend.pipeline.source_reconciliation_runner import read,body
-    from backend.pipeline.cvp_sql_flow import binding
+    from backend.pipeline.cvp_sql_commit import binding
     if old.get('full_own_sources'):
         raise ValueError('complete source semantic disagreement is not an input-repair trigger')
     first=saved_raw(root,'proposal',old)
@@ -229,7 +230,7 @@ def complete_input_repair_material(store,frozen,handoff,old,root):
 
 def validate_complete_input_repair(material):
     from backend.pipeline.source_reconciliation_runner import read,body
-    from backend.pipeline.cvp_sql_flow import check_binding, binding
+    from backend.pipeline.cvp_sql_commit import check_binding, binding
     receipt=material['complete_input_repair'];check_binding(receipt['original_material'])
     old=body(read(Path(receipt['original_material']['path'])));root=Path(receipt['original_material']['path']).parent
     if (old.get('full_own_sources') or expanded_legacy_material(material)!=old
@@ -390,7 +391,7 @@ def saved_raw(root, stage, packet):
 
 def validate_package(package):
     from backend.pipeline.source_reconciliation_runner import read,body
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     app=package['source_repair_application']; root=Path(app['run_root']); material=body(read(root/'materials.json'))
     if app['schema_version']!=PACKAGE_SCHEMA or not root.is_absolute() or sha256_json(material)!=app['materials_sha256']:
         raise ValueError('membership authority/material drift')
@@ -417,7 +418,7 @@ def validate_package(package):
 def execute(stages, frozen, handoff):
     """New bounded management domain; original correction is never replayed."""
     from backend.pipeline.source_reconciliation_runner import Runner,read,write,body,Stop
-    from backend.pipeline.cvp_sql_flow import binding,check_binding,decoded_pins
+    from backend.pipeline.cvp_sql_commit import binding, check_binding, decoded_pins
     from backend.pipeline.source_reconciliation_runtime import ProductionPorts
     store=stages.store
     stable={'kind':VERSION,'targets':[(t['viewpoint_id'],t['viewpoint_revision_id']) for t in handoff['targets']]}
@@ -474,7 +475,7 @@ def execute(stages, frozen, handoff):
 def resolved_proposal(root, frozen, proposal, correction, *, receipt=None):
     """Explicit domain resolution, not a new model verdict or silent retain."""
     from backend.pipeline.source_reconciliation_runner import read,body
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     handoff=retirement_handoff(frozen,proposal,correction)
     if handoff is None:raise ValueError('membership resolution has no exact original retirement handoff')
     receipt=receipt or body(read(Path(root)/'membership-resolution.json'))

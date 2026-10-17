@@ -113,14 +113,14 @@ def test_accepted_postimage_is_not_a_broad_audit_waiver(fault,monkeypatch):
     if fault=='no_commit':d.pop('applied_change_set_id')
     if fault=='run':authority['run_id']='foreign';seal(authority)
     seal(d)
-    from backend.pipeline import cvp_sql_flow
+    from backend.pipeline import cvp_sql_commit as cvp_sql_flow
     monkeypatch.setattr(cvp_sql_flow,'check_binding',lambda _:None)
     monkeypatch.setattr(h,'read_artifact',lambda _:authority)
     with pytest.raises(ValueError):h.verify_item(item,d,{})
 
 
 def test_append_binding_preserves_original_and_requires_all_flags(tmp_path,monkeypatch):
-    from backend.pipeline import cvp_sql_flow
+    from backend.pipeline import cvp_sql_commit as cvp_sql_flow
     from backend.pipeline.viewpoint_resolution_runtime import write_immutable,read_artifact
     monkeypatch.setattr(cvp_sql_flow,'check_binding',lambda b:None)
     a=tmp_path/'a.json';b=tmp_path/'b.json'
@@ -136,7 +136,7 @@ def test_append_binding_preserves_original_and_requires_all_flags(tmp_path,monke
 
 
 def test_invalid_append_cannot_publish_new_binding(tmp_path,monkeypatch):
-    from backend.pipeline import cvp_sql_flow
+    from backend.pipeline import cvp_sql_commit as cvp_sql_flow
     from backend.pipeline.viewpoint_resolution_runtime import write_immutable
     monkeypatch.setattr(cvp_sql_flow,'check_binding',lambda b:None)
     a=tmp_path/'a.json';b=tmp_path/'b.json'

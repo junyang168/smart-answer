@@ -10,7 +10,7 @@ import importlib.util
 import sys
 from threading import Event
 from backend.api.canonical_repository.postgres_store import sha256_json
-from backend.pipeline.cvp_sql_flow import binding, check_binding, pin_rows, pins
+from backend.pipeline.cvp_sql_commit import binding, check_binding, pin_rows, pins
 from backend.pipeline.viewpoint_resolution_runtime import read_artifact, write_immutable
 
 SCHEMA = 'wang_independent_revisit_direction_v1'

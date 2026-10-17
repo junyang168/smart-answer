@@ -38,8 +38,9 @@ def component_role_findings(links, claims, evidence_steps, fragments, *, claim_s
             ranges = []
             invalid = False
             for link in (left, right):
-                loc = link.get("component_locator") or {}
-                spans = loc.get("canonical_spans") or []
+                field_loc = link.get("component_position_locator")
+                loc = field_loc or link.get("component_locator") or {}
+                spans = loc.get("spans" if field_loc else "canonical_spans") or []
                 statement = claim.get("statement") or ""
                 if (link.get("review_status") not in APPROVED
                         or link.get("pinned_claim_revision") != claim.get("revision", 1)
@@ -47,21 +48,30 @@ def component_role_findings(links, claims, evidence_steps, fragments, *, claim_s
                         or not spans or not link.get("evidence_bindings")):
                     invalid = True
                 current = []
-                text = []
-                for span in spans:
-                    start, end = span.get("start_char"), span.get("end_char")
-                    exact = span.get("exact_text")
-                    if (type(start) is not int or type(end) is not int
-                            or not 0 <= start < end <= len(statement)
-                            or statement[start:end] != exact):
+                if field_loc:
+                    from .viewpoint_component_positions import validated_field_spans
+                    try:
+                        if link.get('schema_version') != 'wang_viewpoint_claim_link_v2':
+                            raise ValueError('field locator requires explicit v2')
+                        current = [(p,a,b) for p,a,b,_ in validated_field_spans(field_loc, claim, claim_sha=claim_sha)]
+                    except ValueError:
                         invalid = True
-                        continue
-                    current.append((start, end))
-                    text.append(exact)
-                if "".join(text) != loc.get("statement_component"):
-                    invalid = True
-                if any(a < d and c < b for (a, b), (c, d) in combinations(current, 2)):
-                    invalid = True
+                else:
+                    text = []
+                    for span in spans:
+                        start, end = span.get("start_char"), span.get("end_char")
+                        exact = span.get("exact_text")
+                        if (type(start) is not int or type(end) is not int
+                                or not 0 <= start < end <= len(statement)
+                                or statement[start:end] != exact):
+                            invalid = True
+                            continue
+                        current.append((('statement',),start,end))
+                        text.append(exact)
+                    if "".join(text) != loc.get("statement_component"):
+                        invalid = True
+                    if any(p == q and a < d and c < b for (p,a,b),(q,c,d) in combinations(current,2)):
+                        invalid = True
                 ranges.append(current)
                 for binding in link.get("evidence_bindings") or []:
                     eid, fid = binding.get("evidence_step_id"), binding.get("source_fragment_id")
@@ -78,7 +88,7 @@ def component_role_findings(links, claims, evidence_steps, fragments, *, claim_s
                 invalid = True
             if invalid:
                 findings.append(prefix + " require approved current pins, exact spans and eligible bound evidence")
-            elif any(a < d and c < b for a, b in ranges[0] for c, d in ranges[1]):
+            elif any(p == q and a < d and c < b for p,a,b in ranges[0] for q,c,d in ranges[1]):
                 findings.append(prefix + " overlap")
     return findings
 

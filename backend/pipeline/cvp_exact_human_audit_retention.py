@@ -92,7 +92,7 @@ def verify_item(item, d, audit):
         raise ValueError('human retention current target drift')
     if d.get('exact_finding_only') and old['audit_finding']!=item['audit_finding']:
         raise ValueError('human retention outside exact authorized finding')
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     # A human-approved new postimage is an existing current link after commit.
     # Derive retention from that same explicit decision, not a fresh model pass.
     if d.get('accepted_postimage_authority'):
@@ -144,7 +144,7 @@ def direction_bindings(root):
 
 
 def check_explicit_bindings(root, explicit):
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     if len({b['path'] for b in explicit})!=len(explicit):
         raise ValueError('duplicate explicit human retention direction')
     for b in direction_bindings(root):
@@ -158,7 +158,7 @@ def persist_bindings(root, explicit):
     check_explicit_bindings(root,explicit)
     # First registration must be as strict as an append. Validate the complete
     # input set before persisting even a single leaf.
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     for b in explicit:
         check_binding(b);validate_direction(read_artifact(b['path']))
     path=Path(root)/NAME
@@ -173,7 +173,7 @@ def persist_bindings(root, explicit):
 
 
 def human_items(audit, packet, root, store):
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     accepted=set();used=[]
     for b in direction_bindings(root):
         check_binding(b);d=read_artifact(b['path']);validate_direction(d)
@@ -258,7 +258,7 @@ def complete(audit_path, root, store, run_id, output):
 
 
 def verify(audit, body):
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     from backend.pipeline.viewpoint_audit_owner_resolution import audit_semantic_sha
     from backend.pipeline.viewpoint_reused_source_resolution import verify as verify_source
     if (body.get('schema_version') != RESOLUTION or body.get('artifact_sha256') != sha256_json({k:v for k,v in body.items() if k!='artifact_sha256'})
@@ -286,7 +286,7 @@ def verify(audit, body):
 
 
 def verify_human_entry(audit,items,h):
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     check_binding(h['direction'])
     ident=verify_item(items[h['item_id']],read_artifact(h['direction']['path']),audit)
     for proof in h.get('legacy_claim_context_authority',[]):

@@ -40,7 +40,7 @@ def seal(d):d['artifact_sha256']=sha256_json({k:v for k,v in d.items() if k!='ar
 def test_dependency_audit_reuses_existing_safety_fallback_without_gemini_retry(tmp_path,monkeypatch,outcome):
     from backend.pipeline import claim_dependency_handoff as handoff,claim_first_management as first
     from backend.pipeline import viewpoint_content_blocked_fallback as fallback
-    from backend.pipeline import cvp_sql_flow as flow
+    from backend.pipeline import cvp_sql_commit as flow
     root=tmp_path/'dependency-claim-audit';root.mkdir()
     state={'revision':3,'content_sha256':'a'*64,'retired':False}
     proof={'path':'existing-approved-material','sha256':'b'*64}

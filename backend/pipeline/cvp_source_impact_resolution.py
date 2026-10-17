@@ -37,7 +37,7 @@ def closed_statement_context(value):
     """Classify an existing SQL completion; its authority is verified below."""
     proof=value.get('completion',{}).get('retained_impacts_resolution')
     if not proof:return None
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     check_binding(proof);old=read_artifact(proof['path'])
     if old.get('schema_version')==SLICE_IMPACTS:
         return {'schema_version':CLOSED_STATEMENT,'source_reviewed_sha256':old['source_reviewed_sha256'],
@@ -53,7 +53,7 @@ def audited_claim_transition(cursor,cid,old_pin):
     Not an ancestor search or permission to infer a new Claim judgement from
     a CVP audit. The complete old/current payloads are bound by actual SQL.
     """
-    from backend.pipeline.cvp_sql_flow import check_binding,decoded_pins
+    from backend.pipeline.cvp_sql_commit import check_binding, decoded_pins
     from backend.pipeline.claim_first_management import validate_claim_audit_report
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     row=cursor.execute("SELECT payload,revision,content_sha256,retired_at IS NOT NULL FROM wang_knowledge.objects WHERE collection='claims' AND object_id=%s",(cid,)).fetchone()
@@ -126,7 +126,7 @@ def completed_source_facts(value,*,store=None,cursor=None):
     if cursor is None:
         if store is None:return None
         with store.connect() as conn,conn.cursor() as cur:return completed_source_facts(value,cursor=cur)
-    from backend.pipeline.cvp_sql_flow import check_binding,decoded_pins,pin_rows
+    from backend.pipeline.cvp_sql_commit import check_binding, decoded_pins, pin_rows
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     saved=cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s AND stage='cvp_group'",(value['run_id'],)).fetchone()
     if (not saved or saved[0].get('reviewed_sha256')!=value['reviewed_sha256']
@@ -199,7 +199,7 @@ def completed_source_facts(value,*,store=None,cursor=None):
 
 
 def completed_statement_facts(value,old,prior,handoff,cursor):
-    from backend.pipeline.cvp_sql_flow import check_binding,pin_rows
+    from backend.pipeline.cvp_sql_commit import check_binding, pin_rows
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     if (handoff['claim_ids']!=value['claim_ids']
             or value['reviewed']['evidence'].get('pending_cvp_claim_ids')!=value['claim_ids']):
@@ -247,7 +247,7 @@ def completed_statement_facts(value,old,prior,handoff,cursor):
 
 def closed_statement_saved_resolution(store,value,audit_path):
     """Reuse the existing generic disjoint-rejection verifier, not a new call."""
-    from backend.pipeline.cvp_sql_flow import binding
+    from backend.pipeline.cvp_sql_commit import binding
     from backend.pipeline.claim_source_write_slice import calculate_saved_impact_decisions,verify_saved_statement_impact_resolution
     facts=completed_source_facts(value,store=store)
     if not facts or facts['source_handoff'].get('schema_version')!=CLOSED_STATEMENT:return None
@@ -270,7 +270,7 @@ def statement_slice_context(store,value):
     lookup over the group's explicit commits, not a second action or ancestry.
     """
     from copy import deepcopy
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     from backend.pipeline.claim_source_write_slice import validate_package
     marker=value.get('claim_layer_audit',{});proof=marker.get('receipt')
     if not proof or marker.get('status')!='claim_layer_audited_cvp_pending':
@@ -311,7 +311,7 @@ def statement_slice_context(store,value):
 
 def current_receipt_pins(store,old_pins,commits):
     """Only exact human withdrawal of unused candidate context may bridge pins."""
-    from backend.pipeline.cvp_sql_flow import decoded_pins,pin_rows
+    from backend.pipeline.cvp_sql_commit import decoded_pins, pin_rows
     result=decoded_pins(old_pins)
     for item in commits['items']:
         if item['kind']!='exact_human_logical_retirement':continue
@@ -343,7 +343,7 @@ def current_receipt_pins(store,old_pins,commits):
 
 def build_statement_impact_resolution(store,value,output):
     """Close an actually audited statement slice; never delete candidate context."""
-    from backend.pipeline.cvp_sql_flow import binding,check_binding,decoded_pins,validate_transaction_audit,pins,pin_rows
+    from backend.pipeline.cvp_sql_commit import binding, check_binding, decoded_pins, validate_transaction_audit, pins, pin_rows
     from backend.pipeline import claim_source_write_slice as slice_flow
     from backend.pipeline.claim_first_management import validate_claim_audit_report
     from backend.pipeline.viewpoint_content_blocked_fallback import verify_saved_full_audit
@@ -439,7 +439,7 @@ def build_statement_impact_resolution(store,value,output):
 
 def validate_statement_impact_completion(value,path,audit_binding,cursor,*,semantic_resolution=None):
     """Recheck exact current/committed authority in the completion transaction."""
-    from backend.pipeline.cvp_sql_flow import check_binding,decoded_pins,binding
+    from backend.pipeline.cvp_sql_commit import check_binding, decoded_pins, binding
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     from backend.pipeline.claim_relation_retirement import validate_package as retirement_package
     from backend.pipeline.cvp_link_target_selection import _approved
@@ -661,7 +661,7 @@ def verify_pending_commits(store, value):
     One indexed current-generation lookup, one named committed review per
     eligible item. No ancestor search, models, business writes or audit waiver.
     """
-    from backend.pipeline.cvp_sql_flow import check_binding,pins,pin_rows,decoded_pins
+    from backend.pipeline.cvp_sql_commit import check_binding, pins, pin_rows, decoded_pins
     pending=value['reviewed']['evidence'].get('pending_cvp_management_record_keys',[])
     if not pending or len(pending)!=len(set(pending)):
         raise ValueError('pending commit accounting missing/duplicate population')
@@ -753,7 +753,7 @@ def audit_record_keys(pending, facts):
 
 def validate_pre_model_startup_recovery(audit_dir, expected, *, corrected_record_keys=()):
     """Consume a sealed constructor failure, never an unknown model intent."""
-    from backend.pipeline.cvp_sql_flow import binding,check_binding
+    from backend.pipeline.cvp_sql_commit import binding, check_binding
     receipt=read_artifact(audit_dir/'source-domain-startup-recovery.json')
     if (receipt.get('schema_version')!='wang_source_audit_constructor_recovery_v1'
             or receipt.get('artifact_sha256')!=sha256_json({k:v for k,v in receipt.items() if k!='artifact_sha256'})
@@ -958,7 +958,7 @@ def read_source_pending_item(cursor,key,source,handoff):
 def prepare_question_slice(store,value,*,cursor=None):
     """Exact source-first authority plus nonconsumption, never a semantic pass."""
     from copy import deepcopy
-    from backend.pipeline.cvp_sql_flow import check_binding,decoded_pins,pin_rows
+    from backend.pipeline.cvp_sql_commit import check_binding, decoded_pins, pin_rows
     from backend.pipeline.claim_first_management import coverage_context
     handoff=context(value,store,cursor=cursor);pending=value['reviewed']['evidence'].get('pending_cvp_management_record_keys',[])
     policy_claim=handoff.get('source_slice_mode')=='policy_claim_source_revision'
@@ -1017,7 +1017,7 @@ def read_paragraph_cvp_context(cursor,key,source,handoff):
     this exact generation/permission/postimage proof.
     """
     from backend.pipeline.source_paragraph_impact import CVP_PENDING_COLUMNS,CVP_PENDING_PROBLEM
-    from backend.pipeline.cvp_sql_flow import check_binding,decoded_pins
+    from backend.pipeline.cvp_sql_commit import check_binding, decoded_pins
     from backend.pipeline.source_reconciliation_runner import read,body
     package=source['evidence']['package']['payload']
     frozen=package['source_epoch_binding_material']['frozen']
@@ -1078,7 +1078,7 @@ def applied_review(store,value,sha,*,cursor=None):
 
 
 def prepare(store,value):
-    from backend.pipeline.cvp_sql_flow import check_binding,decoded_pins
+    from backend.pipeline.cvp_sql_commit import check_binding, decoded_pins
     from backend.pipeline.source_reconciliation_runner import body,read
     from backend.pipeline.claim_evidence_binding import coverage_context
     from backend.pipeline.source_consumer_scope import declared_group_keys
@@ -1152,7 +1152,7 @@ def prepare(store,value):
 
 
 def build(store,run_id,audit_path,output,*,semantic_resolution=None):
-    from backend.pipeline.cvp_sql_flow import binding,validate_transaction_audit
+    from backend.pipeline.cvp_sql_commit import binding, validate_transaction_audit
     from backend.pipeline.viewpoint_cvp_campaign_runner import validate_audit
     from backend.pipeline.viewpoint_content_blocked_fallback import verify_saved_full_audit
     value=store.get_cvp_group(run_id);facts=prepare(store,value)
@@ -1176,7 +1176,7 @@ def build(store,run_id,audit_path,output,*,semantic_resolution=None):
 
 
 def validate_for_completion(value,path,audit_binding,cursor,*,semantic_resolution=None):
-    from backend.pipeline.cvp_sql_flow import check_binding,decoded_pins,binding
+    from backend.pipeline.cvp_sql_commit import check_binding, decoded_pins, binding
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     body=read_artifact(path)
     if (body.get('schema_version')!=VERSION or body.get('artifact_sha256')!=sha256_json({k:v for k,v in body.items() if k!='artifact_sha256'})

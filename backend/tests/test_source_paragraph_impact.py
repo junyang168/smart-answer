@@ -531,7 +531,7 @@ def test_prior_source_issue_requires_its_own_new_source_review(executable, mutat
     # supplies no physical diagnostic report, and is never provider approval.
     frozen['source_paragraph_execution']['prior_source_issues'][0]['issue']['reports'][0]['report'] = {}
     from unittest.mock import patch
-    with patch('backend.pipeline.cvp_sql_flow.check_binding'):
+    with patch('backend.pipeline.cvp_sql_commit.check_binding'):
         proposal = p.compose_proposal(frozen, semantic.model_dump())
         packet = p.review_packet(frozen, proposal)
     keys=[d['record_key'] for d in packet['proposal']['dispositions']]

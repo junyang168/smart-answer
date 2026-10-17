@@ -48,7 +48,7 @@ def policy_source_projection(frozen, original, direction):
     This is not a second correction or a disposition rewrite. Shared Evidence
     owners and unresolved source consumers remain visible in the final packet.
     """
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact
     from backend.api.canonical_repository.postgres_store import record_content_sha
     context = frozen['claim_issue_context']
@@ -144,7 +144,7 @@ def evidence_binding_projection(frozen, original, direction):
     unresolved unrelated consumers stay in the packet and completion ledger.
     No model row, reason or verdict is rewritten.
     """
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact
     from backend.api.canonical_repository.postgres_store import record_content_sha
     context = frozen['claim_issue_context']
@@ -215,7 +215,7 @@ def owner_statement_projection(frozen, original, direction):
     every unrelated unresolved finding remain in its disclosed parent response.
     """
     from backend.pipeline.claim_owner_revision import validate_direction, validate_joint
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact
     from backend.api.canonical_repository.postgres_store import record_content_sha
     from backend.api.canonical_repository.viewpoint_foundation import semantic_record_sha
@@ -375,7 +375,7 @@ def projection(frozen, original, direction):
 
 def prepare(direction):
     from backend.pipeline.source_reconciliation_runner import read,body,validate_raw,effective_proposal
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     if direction.get('artifact_sha256') != sha256_json({k:v for k,v in direction.items() if k!='artifact_sha256'}):
         raise ValueError('source slice direction seal drift')
     if direction.get('authorized_by')!='owner' or not direction.get('authorization_quote'):
@@ -452,7 +452,7 @@ def package(direction,raw):
     if not c.validate_review(packet,raw['response']):raise ValueError('source slice independent postimage rejected')
     result=c.compile_package(scoped,proposal,raw,frozen_sha256=sha256_json(scoped))
     from backend.pipeline.cvp_sql_actions import SOURCE_SCHEMA
-    from backend.pipeline.cvp_sql_flow import binding
+    from backend.pipeline.cvp_sql_commit import binding
     result['source_repair_application']={'schema_version':SOURCE_SCHEMA,'run_id':direction['run_id'],
         'run_root':str(root),'materials':binding(root/'scoped-materials.json'),
         'materials_sha256':sha256_json(original),'terminal_stage':'final_review',
@@ -493,7 +493,7 @@ def pending_locator_audit_view(store, saved, root, audit):
     CVP/group validation still sees the original findings and pending rows.
     """
     from backend.api.canonical_repository.postgres_store import record_content_sha
-    from backend.pipeline.cvp_sql_flow import pin_rows, pins
+    from backend.pipeline.cvp_sql_commit import pin_rows, pins
     app = saved['reviewed']['evidence']['package']['payload'].get('source_repair_application', {})
     direction = app.get('source_write_slice', {})
     if not direction.get('defer_owned_links'):
@@ -600,8 +600,7 @@ def pending_locator_audit_view(store, saved, root, audit):
 
 
 def execute(store,authorization,*,ports):
-    from backend.pipeline.cvp_sql_flow import (check_binding,decoded_pins,commit_package,
-                                             verified_group_backup,binding)
+    from backend.pipeline.cvp_sql_commit import check_binding, decoded_pins, commit_package, verified_group_backup, binding
     from backend.pipeline.source_reconciliation_runner import read,Runner,write
     from backend.pipeline.cvp_sql_actions import SOURCE_SCHEMA,initialize_subscription_runtime
     check_binding(authorization);direction=read(Path(authorization['path']))
@@ -662,7 +661,7 @@ def impact_audit_scope(store, saved):
     never infer the population from only the changed links or the empty list.
     """
     from backend.pipeline.cvp_source_impact_resolution import applied_review
-    from backend.pipeline.cvp_sql_flow import pins, pin_rows
+    from backend.pipeline.cvp_sql_commit import pins, pin_rows
     from backend.api.canonical_repository.postgres_store import record_content_sha
     evidence=saved.get('reviewed',{}).get('evidence',{})
     app=evidence.get('package',{}).get('payload',{}).get('source_repair_application',{})
@@ -711,7 +710,7 @@ def impact_audit_scope(store, saved):
     pending=evidence.get('pending_cvp_management_record_keys',[])
     if len(pending)!=len(set(pending)):raise ValueError('slice audit duplicate pending obligations')
     cvp_keys=[];source_keys=[]
-    from backend.pipeline.cvp_sql_flow import NORMAL_COLLECTIONS
+    from backend.pipeline.cvp_sql_commit import NORMAL_COLLECTIONS
     for key in pending:
         col,oid=c.split_key(key)
         if col not in NORMAL_COLLECTIONS and col not in {'evidence_steps','knowledge_relations'}:
@@ -747,7 +746,7 @@ def finish_impact_audit(store, saved):
     """Full current independent audit only; pending management stays pending."""
     import os
     import subprocess
-    from backend.pipeline.cvp_sql_flow import binding,check_binding,decoded_pins,PROJECT,validate_transaction_audit
+    from backend.pipeline.cvp_sql_commit import binding, check_binding, decoded_pins, PROJECT, validate_transaction_audit
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact,write_immutable
     from backend.pipeline.viewpoint_content_blocked_fallback import verify_saved_full_audit
     from backend.pipeline.source_reconciliation_runner import body,read
@@ -854,7 +853,7 @@ def calculate_saved_impact_decisions(store,saved,audit_path):
     Sequential source management remains pending. Do not replay the old
     finding, mutate either raw report, or turn this receipt into group approval.
     """
-    from backend.pipeline.cvp_sql_flow import binding,decoded_pins
+    from backend.pipeline.cvp_sql_commit import binding, decoded_pins
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact
     from backend.pipeline.viewpoint_audit_source_adjudication import build_packet
     from backend.pipeline.viewpoint_adjudication_history import target_identity,validated_history
@@ -909,7 +908,7 @@ def calculate_saved_impact_decisions(store,saved,audit_path):
 
 
 def saved_impact_decisions(store,saved,audit_path,audit_root):
-    from backend.pipeline.cvp_sql_flow import binding,decoded_pins
+    from backend.pipeline.cvp_sql_commit import binding, decoded_pins
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact,write_immutable
     result=calculate_saved_impact_decisions(store,saved,audit_path)
     receipt=read_artifact(audit_root/'impact-audit-receipt.json')
@@ -922,7 +921,7 @@ def saved_impact_decisions(store,saved,audit_path,audit_root):
 
 def verify_saved_statement_impact_resolution(audit,resolution):
     """Authenticate a disjoint unchanged rejection, not a new adjudication."""
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     from backend.pipeline.viewpoint_adjudication_history import validated_history,target_identity
     from backend.pipeline.viewpoint_audit_source_adjudication import disputes
     from backend.api.canonical_repository.postgres_store import record_content_sha

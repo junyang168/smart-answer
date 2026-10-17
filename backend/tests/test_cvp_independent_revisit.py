@@ -77,7 +77,8 @@ def test_once_content_filter_preserved_no_supplement(tmp_path):
 def test_oversized_unique_source_refuses_before_intent(tmp_path):
     r,judge=model(tmp_path)
     with patch.object(r.urllib.request,'urlopen') as call:
-        with pytest.raises(ValueError,match='600000'):judge.judge('x'*600001,{})
+        assert judge.max_request_bytes==600000
+        with pytest.raises(ValueError,match='exceeds its complete-input budget'):judge.judge('x'*600001,{})
         call.assert_not_called()
     assert not list(tmp_path.iterdir())
 

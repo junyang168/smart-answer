@@ -1308,6 +1308,73 @@ def _audit_retired_evidence(store: Store) -> list[dict[str, Any]]:
     return findings
 
 
+def _field_component_spans(locator, claim):
+    """Independent v2 raw-Claim reader; never imports pipeline/model helpers."""
+    expected_sha = hashlib.sha256(json.dumps({k:v for k,v in claim.items() if k != 'revision'},
+        ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode('utf-8')).hexdigest()
+    if (not isinstance(locator,dict) or set(locator) != {'input_sha256','claim_sha256','spans'}
+            or any(not isinstance(locator.get(k),str) or not re.fullmatch(r'[0-9a-f]{64}',locator[k])
+                   for k in ('input_sha256','claim_sha256'))
+            or locator['claim_sha256'] != expected_sha or not isinstance(locator.get('spans'),list)
+            or not locator['spans']):
+        raise ValueError('field locator input/Claim SHA or spans invalid')
+    result = []
+    for span in locator['spans']:
+        if not isinstance(span,dict) or set(span) != {'path','start_char','end_char','exact_text'}:
+            raise ValueError('field span shape invalid')
+        path = span['path']
+        if not isinstance(path,list) or not path:
+            raise ValueError('field path is empty')
+        text = claim
+        for part in path:
+            if isinstance(text,dict) and type(part) is str and part in text:
+                text = text[part]
+            elif isinstance(text,list) and type(part) is int and 0 <= part < len(text):
+                text = text[part]
+            else:
+                raise ValueError('field path does not resolve in raw Claim')
+        a,b,exact = span['start_char'],span['end_char'],span['exact_text']
+        if (not isinstance(text,str) or type(a) is not int or type(b) is not int
+                or not 0 <= a < b <= len(text) or not isinstance(exact,str) or text[a:b] != exact):
+            raise ValueError('field span does not match raw Unicode positions')
+        if any(tuple(path)==p and a<d and c<b for p,c,d,_ in result):
+            raise ValueError('field spans overlap/repeat within one path')
+        result.append((tuple(path),a,b,exact))
+    return result
+
+
+def _certified_historical_withdrawal(store, row):
+    """Independently verify a V2 withdrawal against direct SQL history."""
+    link = row['payload']
+    if (link.get('schema_version') != 'wang_viewpoint_claim_link_v2'
+            or link.get('effective_state') not in {'retired', 'invalidated'}):
+        return False
+    decision = next((r['payload'] for r in store.collection('viewpoint_identity_decisions')
+                     if r['object_id'] == link.get('decision_id')), {})
+    if (decision.get('policy_version') != 'wang_cvp_management_v2'
+            or decision.get('approval_basis') != 'dual_model_consensus'
+            or decision.get('review_status') != 'system_approved'
+            or decision.get('decision') != 'match_existing'
+            or set(decision.get('reviewer_model_ids') or []) != {'gpt-6.1-sol', 'claude-opus-5-5'}
+            or len(set(decision.get('semantic_call_artifact_sha256s') or [])) != 2
+            or decision.get('resolved_viewpoint_id') != link.get('viewpoint_id')
+            or {'claim_id':link.get('claim_id'),'link_type':link.get('link_type')}
+                not in (decision.get('claim_link_decisions') or [])):
+        raise ValueError('historical withdrawal lacks its explicit approved CVP2 decision')
+    if not callable(getattr(store, '_query', None)) or type(row.get('revision')) is not int:
+        raise ValueError('historical withdrawal needs direct SQL history and an exact current revision')
+    originals = store._query("SELECT json_build_object('payload',payload)::text FROM wang_knowledge.object_versions "
+        "WHERE collection='viewpoint_claim_links' AND object_id=" + SqlGroupStore.literal(row['object_id'])
+        + " AND revision<" + str(int(row['revision']))
+        + " AND payload->>'effective_state'='active' ORDER BY revision DESC LIMIT 1")
+    excluded = {'schema_version','revision','effective_state','decision_id'}
+    if (len(originals) != 1 or
+            {k:v for k,v in originals[0]['payload'].items() if k not in excluded}
+            != {k:v for k,v in link.items() if k not in excluded}):
+        raise ValueError('historical withdrawal changed or lost its original SQL source binding')
+    return True
+
+
 def _audit_component_locators(store: Store) -> list[dict[str, Any]]:
     """`equivalent_component` 說它等價的是主張裡的哪一段，那一段真的長那樣嗎。
 
@@ -1329,11 +1396,30 @@ def _audit_component_locators(store: Store) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     for row in store.collection("viewpoint_claim_links"):
         payload = row["payload"]
-        if payload.get("link_type") not in MEMBER_LINK_TYPES:
+        try:
+            if _certified_historical_withdrawal(store, row):
+                continue
+        except ValueError as exc:
+            findings.append({'object_id':row['object_id'], 'claim_id':payload.get('claim_id'),
+                             'verdict':'invalid_historical_withdrawal', 'detail':str(exc)})
+            continue
+        if payload.get("link_type") not in MEMBER_LINK_TYPES and payload.get('component_position_locator') is None:
             continue
         locator = payload.get("component_locator") or {}
         component = str(locator.get("statement_component") or "").strip()
         claim = claims.get(str(payload.get("claim_id") or ""))
+        field_locator = payload.get('component_position_locator')
+        if field_locator is not None:
+            try:
+                if (payload.get('schema_version') != 'wang_viewpoint_claim_link_v2'
+                        or payload.get('component_locator') or payload.get('link_type') == 'equivalent_full'
+                        or claim is None):
+                    raise ValueError('field locator requires v2 component and existing Claim')
+                _field_component_spans(field_locator,claim)
+            except ValueError as exc:
+                findings.append({'object_id':row['object_id'], 'claim_id':payload.get('claim_id'),
+                                 'verdict':'invalid_field_component_locator', 'detail':str(exc)})
+            continue
         # Whole-Claim equivalence intentionally has no component locator.
         # Missing Claims and every actual component still require validation.
         if payload.get("link_type") == "equivalent_full" and claim is not None and not locator:
@@ -1397,6 +1483,43 @@ def _audit_component_locators(store: Store) -> list[dict[str, Any]]:
                 "spans_joined": "".join(pieces)[:80],
             })
     findings.extend(_audit_component_roles(store))
+    findings.extend(_audit_field_component_ownership(store))
+    return findings
+
+
+def _audit_field_component_ownership(store):
+    """V2-aware coverage identity; a packet SHA cannot hide duplicate fields."""
+    claims = {r['object_id']:r['payload'] for r in store.collection('claims')}
+    groups = defaultdict(list)
+    for row in store.collection('viewpoint_claim_links'):
+        link = row['payload'];claim = claims.get(link.get('claim_id'))
+        if not claim or link.get('effective_state') != 'active' or link.get('link_type') not in MEMBER_LINK_TYPES:
+            continue
+        field_loc = link.get('component_position_locator')
+        try:
+            if field_loc is not None:
+                if link.get('schema_version') != 'wang_viewpoint_claim_link_v2':continue
+                spans = _field_component_spans(field_loc,claim)
+            else:
+                spans = []
+                text = claim.get('statement') or ''
+                for span in (link.get('component_locator') or {}).get('canonical_spans') or []:
+                    a,b,t = span.get('start_char'),span.get('end_char'),span.get('exact_text')
+                    if type(a) is not int or type(b) is not int or not 0<=a<b<=len(text) or text[a:b]!=t:
+                        raise ValueError('invalid legacy span')
+                    spans.append((('statement',),a,b,t))
+            if not spans:continue
+            spans = sorted(spans,key=lambda row:(json.dumps(row[0],ensure_ascii=False),row[1],row[2],row[3]))
+            signature = json.dumps(spans,ensure_ascii=False,sort_keys=True,separators=(',',':'))
+            groups[(link.get('claim_id'),link.get('pinned_claim_revision'),signature)].append((link,field_loc is not None))
+        except ValueError:
+            continue  # The independent locator audit reports invalid bounds.
+    findings = []
+    for (cid,_,_), group in groups.items():
+        if len(group)>1 and any(is_v2 for _,is_v2 in group):
+            findings.append({'object_id':group[0][0].get('viewpoint_claim_link_id'),'claim_id':cid,
+                'verdict':'duplicate_field_component_coverage',
+                'link_ids':sorted(link.get('viewpoint_claim_link_id') for link,_ in group)})
     return findings
 
 
@@ -1425,23 +1548,32 @@ def _audit_component_roles(store):
                 ).encode('utf-8')).hexdigest()
                 ranges = []
                 for link in (left, right):
-                    loc = link.get('component_locator') or {}
-                    spans = loc.get('canonical_spans') or []
+                    field_loc = link.get('component_position_locator')
+                    loc = field_loc or link.get('component_locator') or {}
+                    spans = loc.get('spans' if field_loc else 'canonical_spans') or []
                     error |= (not claim or link.get('pinned_claim_revision') != claim.get('revision', 1)
                               or loc.get('claim_sha256') != expected_sha or not spans
                               or link.get('review_status') not in {'approved', 'system_approved', 'human_approved'}
                               or not link.get('evidence_bindings'))
                     current, pieces = [], []
-                    text = claim.get('statement') or ''
-                    for span in spans:
-                        a, b = span.get('start_char'), span.get('end_char')
-                        if (type(a) is not int or type(b) is not int or not 0 <= a < b <= len(text)
-                                or text[a:b] != span.get('exact_text')):
+                    if field_loc:
+                        try:
+                            if link.get('schema_version') != 'wang_viewpoint_claim_link_v2':
+                                raise ValueError('field locator requires v2')
+                            current = [(p,a,b) for p,a,b,_ in _field_component_spans(field_loc,claim)]
+                        except ValueError:
                             error = True
-                        else:
-                            current.append((a, b)); pieces.append(span['exact_text'])
-                    error |= ''.join(pieces) != loc.get('statement_component')
-                    error |= any(a < d and c < b for j, (a, b) in enumerate(current) for c, d in current[j+1:])
+                    else:
+                        text = claim.get('statement') or ''
+                        for span in spans:
+                            a,b = span.get('start_char'),span.get('end_char')
+                            if (type(a) is not int or type(b) is not int or not 0 <= a < b <= len(text)
+                                    or text[a:b] != span.get('exact_text')):
+                                error = True
+                            else:
+                                current.append((('statement',),a,b)); pieces.append(span['exact_text'])
+                        error |= ''.join(pieces) != loc.get('statement_component')
+                        error |= any(p==q and a<d and c<b for j,(p,a,b) in enumerate(current) for q,c,d in current[j+1:])
                     ranges.append(current)
                     for bound in link.get('evidence_bindings') or []:
                         eid, fid = bound.get('evidence_step_id'), bound.get('source_fragment_id')
@@ -1454,7 +1586,7 @@ def _audit_component_roles(store):
                                   or not str(fragment.get('verbatim_excerpt') or '').strip()
                                   or fid not in ([step.get('source_fragment_id')] + (step.get('source_fragment_ids') or [])))
                 error |= left.get('validated_against_viewpoint_revision_id') != right.get('validated_against_viewpoint_revision_id')
-                error |= any(a < d and c < b for a, b in ranges[0] for c, d in ranges[1])
+                error |= any(p==q and a<d and c<b for p,a,b in ranges[0] for q,c,d in ranges[1])
                 if error:
                     findings.append({'object_id': left.get('viewpoint_claim_link_id'), 'claim_id': cid,
                                      'viewpoint_id': vid, 'verdict': 'invalid_conclusion_reason_components'})
@@ -2374,6 +2506,17 @@ def audit_viewpoints(
             claim = claims.get(claim_id) or {}
             locator = link.get("component_locator") or {}
             component = str(locator.get("statement_component") or "").strip()
+            field_locator = link.get('component_position_locator')
+            if field_locator is not None:
+                try:
+                    if (link.get('schema_version') != 'wang_viewpoint_claim_link_v2'
+                            or link.get('component_locator') or link.get('link_type') == 'equivalent_full'):
+                        raise ValueError('field locator requires explicit v2 component')
+                    field_spans = _field_component_spans(field_locator,claim)
+                    component = ''.join(part[3] for part in field_spans)
+                except ValueError as exc:
+                    return {'viewpoint_id':viewpoint_id, 'verdict':'blocked', 'issue':'other',
+                            'reason':'Invalid raw Claim field locator: '+str(exc)}
             fragment_ids = [
                 str(b.get("source_fragment_id"))
                 for b in link.get("evidence_bindings") or []
@@ -2385,16 +2528,18 @@ def audit_viewpoints(
             paragraphs, _ = _whole_sources_for_claim(fragment_ids, fragments, sources)
             source_block = "\n".join(f"    【原文】{p}" for p in paragraphs) or "    （沒有可讀的原文段落）"
             component_details = (
-                f"    連接 ID：{link.get('viewpoint_claim_link_id')}；Claim 版本：{link.get('pinned_claim_revision')}\n"
-                f"    精確區間：{json.dumps(locator.get('canonical_spans') or [], ensure_ascii=False)}\n"
+                ("    本連結只歸入所列欄位區間；完整 Claim 僅作語境，不宣稱整條等價。\n" if field_locator is not None else '')
+                + f"    連接 ID：{link.get('viewpoint_claim_link_id')}；Claim 版本：{link.get('pinned_claim_revision')}\n"
+                f"    精確區間：{json.dumps(field_locator.get('spans') if field_locator is not None else locator.get('canonical_spans') or [], ensure_ascii=False)}\n"
                 f"    自身證據綁定：{json.dumps(link.get('evidence_bindings') or [], ensure_ascii=False)}\n"
-            ) if semantic_contract_version in {COMPONENT_SEMANTICS, RELATION_SEMANTICS, SCOPED_RELATION_SEMANTICS} else ''
+            ) if field_locator is not None or semantic_contract_version in {COMPONENT_SEMANTICS, RELATION_SEMANTICS, SCOPED_RELATION_SEMANTICS} else ''
             blocks.append(
                 f"- 主張 [{claim_id}]（連結類型 {link.get('link_type')}）\n"
                 f"{component_details}"
                 f"    被歸入的成分：{component or '（未記錄）'}\n"
                 f"    主張全文：{str(claim.get('statement') or '（庫裡找不到這條主張）').strip()}\n"
-                f"{source_block}"
+                + (f"    Claim 欄位語境：{json.dumps(claim, ensure_ascii=False)}\n" if field_locator is not None else '')
+                + f"{source_block}"
             )
         target_version = semantic_contract_version
         if target_version == SCOPED_RELATION_SEMANTICS:

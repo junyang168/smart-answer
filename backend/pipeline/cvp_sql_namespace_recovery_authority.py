@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from backend.api.canonical_repository.postgres_store import record_content_sha,normalize_package,sha256_json
 from backend.pipeline.cvp_sql_retained_evidence_locator_authority import require,exact_operation
-from backend.pipeline.cvp_sql_flow import binding
+from backend.pipeline.cvp_sql_commit import binding
 
 def recovery_graph(store,cid,previous,history,source):
     require(history['source_kind']=='wkp353_relation_id_incident_recovery' and history['status']=='applied',

@@ -18,7 +18,7 @@ import time
 import traceback
 
 from backend.pipeline.source_reconciliation_runner import binding, body, read, write
-from backend.pipeline.cvp_sql_flow import check_binding
+from backend.pipeline.cvp_sql_commit import check_binding
 
 MODULE = 'backend.pipeline.claim_management_batch'
 

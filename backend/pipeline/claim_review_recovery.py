@@ -10,7 +10,7 @@ import os
 
 from backend.pipeline import claim_management as cm
 from backend.pipeline.cvp_sql_actions import validate_claim_stage_receipt
-from backend.pipeline.cvp_sql_flow import binding,check_binding,pins
+from backend.pipeline.cvp_sql_commit import binding, check_binding, pins
 from backend.pipeline.source_reconciliation_runner import body,read,write
 from backend.api.canonical_repository.postgres_store import POSTGRES_APPLY_ADVISORY_LOCK_KEY,canonical_json,sha256_json
 

@@ -28,7 +28,7 @@ def program_contract():
 
 
 def packet(root,frozen,*,authorization=None):
-    from backend.pipeline.cvp_sql_flow import check_binding,binding
+    from backend.pipeline.cvp_sql_commit import check_binding, binding
     from backend.pipeline import source_reconciliation as c
     root=Path(root);authorization=authorization or read_artifact(root/NAME)['authorization'];check_binding(authorization)
     d=read_artifact(authorization['path'])
@@ -125,7 +125,7 @@ def adapter(original,packet):
 
 
 def enable(store,authorization,output_root):
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     check_binding(authorization);d=read_artifact(authorization['path']);root=Path(d['action_root'])
     group=store.get_cvp_group(d['run_id']);action=store.get_cvp_action(d['run_id'],d['action_id'])
     if (not group or not action or group['campaign_sha256']!=d['campaign_sha256']

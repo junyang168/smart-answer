@@ -377,7 +377,7 @@ def audit_contract(root, policy=None):
     repository = pipeline.parents[1]
     joint = policy is not None and policy.joint_update_contract is not None
     prompt = pipeline / ('prompts/claim_management_audit_joint_v1.md' if joint else 'prompts/claim_management_audit_v2.md')
-    files = [Path(__file__), pipeline/'claim_joint_update.py', pipeline/'prompts/claim_management_joint_update_v1.md', pipeline/'prompts/claim_management_audit_joint_v1.md', pipeline/'claim_review_recovery.py', pipeline/'claim_qualification_reuse.py', pipeline/'claim_human_source.py', pipeline/'claim_direct_scope.py', pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py',
+    files = [Path(__file__), pipeline/'claim_joint_update.py', pipeline/'prompts/claim_management_joint_update_v1.md', pipeline/'prompts/claim_management_audit_joint_v1.md', pipeline/'claim_review_recovery.py', pipeline/'claim_qualification_reuse.py', pipeline/'claim_human_source.py', pipeline/'claim_direct_scope.py', pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py', pipeline/'cvp_sql_commit.py', pipeline/'cvp_sql_claim_authority.py',
         pipeline/'source_reconciliation_runner.py', pipeline/'source_reconciliation_runtime.py',
         pipeline/'claim_model_output.py', pipeline/'prompts/claim_management_compact_v1.md', pipeline/'prompts/claim_management_compact_v2.md', pipeline/'subscription_process.py', pipeline/'codex_subscription_client.py', pipeline/'claude_subscription_client.py',
         repository/'backend/api/canonical_repository/postgres_store.py', repository/'backend/api/canonical_repository/knowledge_models.py', repository/'scripts/audit-library.py',
@@ -1465,7 +1465,7 @@ def continuation_budget(previous, request, policy):
         if extension is not None:
             if extension_basis != 'unknown_call':
                 raise ValueError('remaining-findings/qualification follow-up cannot discard an uncertain call')
-            from backend.pipeline.cvp_sql_flow import binding
+            from backend.pipeline.cvp_sql_commit import binding
             stage = root / slot['round_id']
             intent = stage / (slot['role'] + '.reservation.json')
             if (slot['state'] != 'started' or slot['role'] != 'gpt'
