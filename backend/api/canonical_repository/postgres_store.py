@@ -5722,6 +5722,83 @@ class PostgresKnowledgeStore:
                 raise ValueError('SQL origin proof read budget exceeded')
         return result
 
+    def verify_current_read_pins(self, read_pins):
+        """Public readonly guard; callers do not reach into transaction internals."""
+        with self.connect() as conn, conn.cursor() as cursor:
+            self._assert_transaction_read_pins(cursor,read_pins)
+
+    def read_current_records(self, keys):
+        """Read exactly named current rows, without traversing members/history."""
+        wanted=sorted(set(keys))
+        wanted_set=set(wanted)
+        if not wanted:return {}
+        if any(col not in KNOWLEDGE_COLLECTIONS or not oid for col,oid in wanted):
+            raise ValueError('unknown current record collection or identity')
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute('SET LOCAL statement_timeout=5000')
+            cursor.execute('''SELECT o.collection,o.object_id,o.revision,o.content_sha256,o.payload,o.retired_at
+                FROM wang_knowledge.objects o JOIN unnest(%s::text[],%s::text[])
+                AS wanted(collection,object_id) ON o.collection=wanted.collection AND o.object_id=wanted.object_id''',
+                ([col for col,oid in wanted],[oid for col,oid in wanted]))
+            rows=cursor.fetchall()
+        result={};size=0
+        for col,oid,revision,sha,payload,retired in rows:
+            if ((col,oid) not in wanted_set or record_content_sha(payload)!=sha
+                    or payload.get(KNOWLEDGE_COLLECTIONS[col][1])!=oid):
+                raise ChangeSetConflict('current material record identity or SHA drift')
+            size+=len(canonical_json(payload).encode('utf-8'))
+            if size>64*1024**2:raise ValueError('current material read exceeds mechanical capacity')
+            result[col,oid]={'revision':revision,'content_sha256':sha,'payload':payload,
+                             'retired':retired is not None}
+        return result
+
+    def read_cvp_links(self, *, viewpoint_ids=(), claim_ids=()):
+        """Indexed current memberships only; does not expand members' evidence."""
+        if not viewpoint_ids and not claim_ids:return {}
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute('SET LOCAL statement_timeout=5000')
+            cursor.execute('''SELECT DISTINCT o.object_id,o.revision,o.content_sha256,o.payload
+                FROM wang_knowledge.edges e JOIN wang_knowledge.objects o
+                ON o.collection=e.edge_collection AND o.object_id=e.edge_id
+                WHERE e.edge_collection='viewpoint_claim_links' AND e.retired_at IS NULL
+                AND o.retired_at IS NULL AND (e.from_id=ANY(%s) OR e.to_id=ANY(%s))
+                ORDER BY o.object_id''',(list(viewpoint_ids),list(claim_ids)))
+            rows=cursor.fetchall()
+        result={};size=0
+        for oid,revision,sha,payload in rows:
+            if payload.get('viewpoint_claim_link_id')!=oid or record_content_sha(payload)!=sha:
+                raise ChangeSetConflict('current membership identity or SHA drift')
+            size+=len(canonical_json(payload).encode('utf-8'))
+            if size>64*1024**2:raise ValueError('current membership read exceeds mechanical capacity')
+            result['viewpoint_claim_links',oid]={'revision':revision,'content_sha256':sha,
+                                               'payload':payload,'retired':False}
+        return result
+
+    def read_cvp_heads(self):
+        """Current active index cut only: one query, no members or historical chains."""
+        with self.connect() as conn:
+            rows=conn.execute("""SELECT v.object_id,v.payload,v.revision,v.content_sha256,
+                                       r.object_id,r.payload,r.revision,r.content_sha256,r.retired_at
+                                FROM wang_knowledge.objects v
+                                LEFT JOIN wang_knowledge.objects r
+                                  ON r.collection='viewpoint_revisions'
+                                 AND r.object_id=v.payload->>'current_revision_id'
+                                WHERE v.collection='canonical_viewpoints' AND v.retired_at IS NULL
+                                  AND v.payload->>'identity_status'='active'
+                                ORDER BY v.object_id""").fetchall()
+        result=[]
+        for vid,view,vrev,vsha,rid,head,rrev,rsha,retired in rows:
+            if (head is None or retired is not None or view.get('viewpoint_id')!=vid
+                    or view.get('current_revision_id')!=rid or head.get('viewpoint_id')!=vid
+                    or head.get('viewpoint_revision_id')!=rid
+                    or record_content_sha(view)!=vsha or record_content_sha(head)!=rsha):
+                raise ChangeSetConflict('active CVP index head is missing, foreign or physically inconsistent')
+            result.append({'viewpoint_id':vid,'viewpoint_revision_id':rid,
+                'head_sha256':sha256_json({'viewpoint':[vrev,vsha],'revision':[rrev,rsha]}),
+                'core_proposition':head['core_proposition'],'scope':head['scope'],
+                'proposition_signature':head['proposition_signature']})
+        return result
+
     def read_cvp_context(self, claim_ids: Sequence[str], *, viewpoint_ids: Sequence[str] = ()):
         """Current group graph for all flow branches, without history snapshots."""
         with self.connect() as conn, conn.cursor() as cursor:

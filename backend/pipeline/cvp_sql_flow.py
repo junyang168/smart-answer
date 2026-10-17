@@ -984,7 +984,7 @@ def main(argv=None):
     parser.add_argument('--integrate-batch-candidates',action='store_true',
                         help='Explicit new-group identity integration; never upgrades saved legacy answers')
     parser.add_argument('--claim-update-preflight', action='store_true', help='Read-only dependency grouping for the exact authorized Claim Update batch')
-    parser.add_argument('--action',choices=('claim-management','group','independent-revisit','audit-run','source-pending-check','source-impact-complete','source','source-write-slice','relation-retire','claim-retire','owner-link','link-target','link-retarget','link-retire','link-replace','link-representation','cvp-merge'),default='group')
+    parser.add_argument('--action',choices=('recall-preflight','claim-management','group','independent-revisit','audit-run','source-pending-check','source-impact-complete','source','source-write-slice','relation-retire','claim-retire','owner-link','link-target','link-retarget','link-retire','link-replace','link-representation','cvp-merge'),default='group')
     parser.add_argument('--claim-first',action='store_true',
                         help='Finish only the original bounded Claim/Evidence action; keep all CVPs pending and stop before CVP/group execution')
     parser.add_argument('--candidate-viewpoint-id',action='append',default=[],
@@ -1055,6 +1055,18 @@ def main(argv=None):
         ports = ProductionPorts()
         ports.store = store
         print(canonical_json(execute_claim_management(store, request, root=args.output_root, ports=ports)))
+        return 0
+    if args.action=='recall-preflight':
+        if not args.manifest or args.execute or args.sql_campaign or args.run_id or args.claim_first:
+            raise ValueError('recall-preflight requires --manifest and never permits --execute')
+        from backend.pipeline.cvp_recall_preparation import prepare_recall
+        load_dotenv(PROJECT/'.env')
+        store=PostgresKnowledgeStore(args.database_url)
+        result=prepare_recall(store,read_artifact(args.manifest))
+        write_immutable(args.output_root/'recall-preflight.json',result)
+        stage_event('recall_preflight',status=result['status'],groups=len(result['groups']),
+                    active_cvps=len(result['heads']),model_calls=0,semantic_writes=0,
+                    artifact_path=str(args.output_root/'recall-preflight.json'))
         return 0
     if not args.sql_campaign:
         raise ValueError('existing SQL campaign actions still require --sql-campaign')
