@@ -449,6 +449,25 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
             payload.setdefault('created_from_candidate_id', _id(request, 'candidate', ref, bundle['group_key']))
             payload.setdefault('identity_status', 'active')
         elif col == 'viewpoint_revisions':
+            if is_new:
+                owners = [vid for (kind, vid), value in states.items()
+                          if kind == 'canonical_viewpoints' and value.get('current_revision_id') == oid]
+                if len(owners) != 1:
+                    raise ValueError('new revision needs exactly one current head owner')
+                owner = owners[0]
+                if payload.get('viewpoint_id', owner) != owner:
+                    raise ValueError('new revision owner contradicts the selected current head')
+                old_view = original.get(('canonical_viewpoints', owner))
+                if old_view:
+                    old_revision = original.get(('viewpoint_revisions', old_view['payload']['current_revision_id']))
+                    if old_revision is None:
+                        raise ValueError('revision delta requires the complete old current revision')
+                    inherited = {field: deepcopy(old_revision['payload'][field])
+                                 for field in FIELDS['viewpoint_revisions'] - {'viewpoint_id'}
+                                 if field in old_revision['payload']}
+                    inherited.update(payload)
+                    payload = states[key] = inherited
+                payload['viewpoint_id'] = owner
             existing_view = original.get(('canonical_viewpoints', payload.get('viewpoint_id')))
             if is_new and existing_view:
                 payload['supersedes_revision_id'] = existing_view['payload']['current_revision_id']
@@ -458,6 +477,7 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
             payload['approved_by'] = VERSION
             payload['approved_at'] = 'pending_exact_review'
         elif col == 'viewpoint_claim_links':
+            payload['schema_version'] = 'wang_viewpoint_claim_link_v2'
             cid = payload.get('claim_id')
             if not is_new and cid != original[key]['payload']['claim_id']:
                 raise ValueError('existing link source Claim identity cannot be rewritten')
@@ -471,6 +491,7 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
                        for field in ('claim_id', 'viewpoint_id', 'link_type')):
                     raise ValueError('withdrawal preserves the historical relationship; create an explicit replacement')
                 payload.pop('component_ref', None)
+                payload['schema_version'] = 'wang_viewpoint_claim_link_v2'
                 payload['decision_id'] = decision_ids[ref]
                 states[key] = KNOWLEDGE_COLLECTIONS[col][0].model_validate(payload).model_dump(mode='json')
                 continue
@@ -913,7 +934,9 @@ def _rebase_context(request, old_bundle, new_bundle, previous):
     if not old_audits <= new_audits:
         raise ValueError('rebase cannot discard independent audit finding history')
     same_input = old_bundle['claim_input'] == new_bundle['claim_input']
-    if same_input and any(new_records.get(key) != row for key, row in old_records.items()):
+    if same_input and any(new_records.get(key) != row for key, row in old_records.items()
+                          if key[0] not in {'evidence_steps', 'source_fragments', 'source_documents',
+                                            'citations', 'claim_relations'}):
         raise ValueError('context-only rebase cannot conceal changed semantic dependency records')
     new_context = prepare_domain(request, new_bundle)
     for ref, value in previous['references'].items():
@@ -929,19 +952,18 @@ def _rebase_context(request, old_bundle, new_bundle, previous):
 
 
 def prepare_rebase_frame(request, old_bundle, new_bundle, previous, *, prior_findings=()):
-    """Carry changed wording to GPT without inventing a replacement component plan.
+    """Carry qualified upstream changes without inventing semantic revisions.
 
-    This sealed transport is never an approved candidate. Actual model positions
-    and complete old-component mappings are mandatory before compilation.
+    This sealed transport is never an approved candidate. Changed wording
+    requires actual model positions and complete old-component mappings;
+    support-only changes retain the old plan and still require a new review.
     """
     request, context, same_input = _rebase_context(request, old_bundle, new_bundle, previous)
-    if same_input:
-        raise ValueError("unchanged wording uses rebind_candidate, not a pending rebase frame")
     carried = list(prior_findings)
     return seal({**{k: deepcopy(v) for k, v in previous.items() if k != "artifact_sha256"},
         "schema_version": VERSION + "_rebase_frame",
         "request_sha256": context["request_sha256"], "material_sha256": new_bundle["artifact_sha256"],
-        "candidate_valid_for_commit": False, "requires_explicit_component_plan": True,
+        "candidate_valid_for_commit": False, "requires_explicit_component_plan": not same_input,
         "old_bundle": deepcopy(old_bundle), "previous_candidate": deepcopy(previous),
         "carried_prior_findings": carried})
 

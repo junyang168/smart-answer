@@ -634,3 +634,25 @@ def test_retire_identity_can_withdraw_its_relationship_to_readonly_endpoint():
     assert {row['ref'] for row in candidate['writes']} == {'v1', 'l1', 'q1'}
     assert 'v2' not in candidate['review_sets']['objects']
     assert cvp.validate_review(req, expanded, candidate, passing(candidate))['approved']
+
+
+def test_support_only_rebase_frame_keeps_plan_and_findings_without_fictitious_mapping():
+    req, old = request(), materials()
+    candidate = cvp.compile_candidate(req, old, proposal())
+    approval = cvp.validate_review(req, old, candidate, passing(candidate))
+    new = deepcopy(old)
+    new.pop('artifact_sha256')
+    new['records'][1]['payload']['statement'] = '完整語境的支持論證。'
+    new['records'][1]['revision'] = 2
+    new['records'][1]['content_sha256'] = semantic_record_sha(new['records'][1]['payload'])
+    new = seal(new)
+    finding = {'finding_id': 'old-source', 'target_refs': ['k1'], 'category': 'source', 'reason': '核對原證據。'}
+    frame = cvp.prepare_rebase_frame(req, old, new, candidate, prior_findings=[finding])
+    assert frame['requires_explicit_component_plan'] is False
+    current = cvp.compile_candidate(req, new, {}, previous=frame)
+    assert current['component_plan'] == candidate['component_plan']
+    assert current['prior_findings'] == [finding]
+    assert current['rebase_history'][-1]['wording_changed'] is False
+    assert current['artifact_sha256'] != candidate['artifact_sha256']
+    with pytest.raises(ValueError, match='exact passing'):
+        cvp.finalize_package(req, new, current, approval, provenance())

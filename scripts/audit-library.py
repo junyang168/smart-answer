@@ -1343,6 +1343,38 @@ def _field_component_spans(locator, claim):
     return result
 
 
+def _certified_historical_withdrawal(store, row):
+    """Independently verify a V2 withdrawal against direct SQL history."""
+    link = row['payload']
+    if (link.get('schema_version') != 'wang_viewpoint_claim_link_v2'
+            or link.get('effective_state') not in {'retired', 'invalidated'}):
+        return False
+    decision = next((r['payload'] for r in store.collection('viewpoint_identity_decisions')
+                     if r['object_id'] == link.get('decision_id')), {})
+    if (decision.get('policy_version') != 'wang_cvp_management_v2'
+            or decision.get('approval_basis') != 'dual_model_consensus'
+            or decision.get('review_status') != 'system_approved'
+            or decision.get('decision') != 'match_existing'
+            or set(decision.get('reviewer_model_ids') or []) != {'gpt-6.1-sol', 'claude-opus-5-5'}
+            or len(set(decision.get('semantic_call_artifact_sha256s') or [])) != 2
+            or decision.get('resolved_viewpoint_id') != link.get('viewpoint_id')
+            or {'claim_id':link.get('claim_id'),'link_type':link.get('link_type')}
+                not in (decision.get('claim_link_decisions') or [])):
+        raise ValueError('historical withdrawal lacks its explicit approved CVP2 decision')
+    if not callable(getattr(store, '_query', None)) or type(row.get('revision')) is not int:
+        raise ValueError('historical withdrawal needs direct SQL history and an exact current revision')
+    originals = store._query("SELECT json_build_object('payload',payload)::text FROM wang_knowledge.object_versions "
+        "WHERE collection='viewpoint_claim_links' AND object_id=" + SqlGroupStore.literal(row['object_id'])
+        + " AND revision<" + str(int(row['revision']))
+        + " AND payload->>'effective_state'='active' ORDER BY revision DESC LIMIT 1")
+    excluded = {'schema_version','revision','effective_state','decision_id'}
+    if (len(originals) != 1 or
+            {k:v for k,v in originals[0]['payload'].items() if k not in excluded}
+            != {k:v for k,v in link.items() if k not in excluded}):
+        raise ValueError('historical withdrawal changed or lost its original SQL source binding')
+    return True
+
+
 def _audit_component_locators(store: Store) -> list[dict[str, Any]]:
     """`equivalent_component` 說它等價的是主張裡的哪一段，那一段真的長那樣嗎。
 
@@ -1364,6 +1396,13 @@ def _audit_component_locators(store: Store) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     for row in store.collection("viewpoint_claim_links"):
         payload = row["payload"]
+        try:
+            if _certified_historical_withdrawal(store, row):
+                continue
+        except ValueError as exc:
+            findings.append({'object_id':row['object_id'], 'claim_id':payload.get('claim_id'),
+                             'verdict':'invalid_historical_withdrawal', 'detail':str(exc)})
+            continue
         if payload.get("link_type") not in MEMBER_LINK_TYPES and payload.get('component_position_locator') is None:
             continue
         locator = payload.get("component_locator") or {}

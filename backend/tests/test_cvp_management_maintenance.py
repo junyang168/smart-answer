@@ -70,7 +70,7 @@ def _behavior(view, link, mode):
         revision = {key: deepcopy(view[key]) for key in ['core_proposition', 'proposition_signature', 'scope']}
         revision['viewpoint_id'] = target
         if mode == 'scope':
-            revision['core_proposition'] = '教授在此以人子稱號表達神性。'
+            revision = {'scope': {'scripture_scope': ['太9:6']}}
         changes = [_change(target, {'current_revision_id': 'nr1'}), _change('nr1', revision)]
         if mode == 'merge':
             changes.extend([_change(vref, {'identity_status': 'merged', 'redirect_to_viewpoint_id': 'nv1'}),
@@ -107,6 +107,10 @@ def test_new_revision_scope_maintenance_commits_successor_and_program_member_rep
     assert current['viewpoint_revision_id'] != view['viewpoint_revision_id']
     revision = store.get_record('viewpoint_revisions', current['viewpoint_revision_id'])
     assert revision['supersedes_revision_id'] == view['viewpoint_revision_id']
+    assert revision['core_proposition'] == view['core_proposition']
+    assert revision['proposition_signature'] == view['proposition_signature']
+    assert revision['scope']['scripture_scope'] == ['太9:6']
+    assert revision['revision_number'] == revision['revision'] == 1
     assert store.get_record_state('viewpoint_revisions', view['viewpoint_revision_id']) == old_revision
     assert store.get_record('viewpoint_claim_links', link['viewpoint_claim_link_id'])['validated_against_viewpoint_revision_id'] == current['viewpoint_revision_id']
     assert source.read_bytes() == before_source and store.get_record_state('claims', 'C1') == before_claim
@@ -149,3 +153,68 @@ def test_merge_retains_old_identity_history_and_moves_existing_member_id(setup):
     current_link = store.get_record('viewpoint_claim_links', link['viewpoint_claim_link_id'])
     assert current_link['viewpoint_id'] == current[0]['viewpoint_id']
     assert current_link['viewpoint_claim_link_id'] == link['viewpoint_claim_link_id']
+
+
+def test_withdrawal_after_qualified_claim_change_preserves_historical_bindings(setup, monkeypatch):
+    store, initial, root, clients, _, view, link, index_root = _initial(setup)
+    from backend.api.canonical_repository.postgres_store import canonical_json, record_content_sha
+    changed = deepcopy(store.get_record('claims', 'C1'))
+    changed.update(statement='在此語境中，人子是神。', revision=2)
+    audit = root / 'qualified-claim-v2.json'
+    write_immutable(audit, {'fixture': 'independently reviewed substantive upstream change'})
+    binding = {'path': str(audit), 'file_sha256': hashlib.sha256(audit.read_bytes()).hexdigest()}
+    qualification = {'kind': 'claim_management_round', 'checkpoint': 'audited', 'outcome': 'completed',
+        'program_readback_complete': True, 'revisit_required': False, 'stage_results': {'readback': binding},
+        'audited_pins': [{'collection': 'claims', 'object_id': 'C1', 'pin': [2, record_content_sha(changed), False]}]}
+    with store.connect() as conn:
+        conn.execute("UPDATE wang_knowledge.objects SET revision=2,content_sha256=%s,payload=%s::jsonb WHERE collection='claims' AND object_id='C1'", (record_content_sha(changed), canonical_json(changed)))
+        conn.execute("INSERT INTO wang_knowledge.pipeline_runs(run_id,subject_kind,subject_id,stage,trigger,status,metadata) VALUES('qualified-new-claim','batch','C1','cvp_group','cli','succeeded',%s::jsonb)", (canonical_json(qualification),))
+    monkeypatch.setattr(store, 'claim_management_qualification', lambda cid: {'ready': True,
+        'run_id': 'qualified-new-claim', 'revision': 2, 'content_sha256': record_content_sha(changed),
+        'audit': binding, 'validation_kind': 'opus_and_program_readback', 'independent_audit_complete': False})
+    permissions = [
+        {'collection': 'canonical_viewpoints', 'object_id': view['viewpoint_id'], 'fields': ['identity_status']},
+        {'collection': 'viewpoint_claim_links', 'object_id': link['viewpoint_claim_link_id'], 'fields': ['effective_state']}]
+    request = _request(initial, root, name='withdraw-stale-claim', index_root=index_root,
+        view_id=view['viewpoint_id'], permissions=permissions, creation_slots={})
+    clients['gpt'].behavior = _behavior(view, link, 'retire')
+    result = runner.run(store, request, root=root.parent / 'withdraw-stale', execute=True, clients=clients)
+    assert result['status'] == 'completed', _detail(store, request['action_id'])
+    withdrawn = store.get_record('viewpoint_claim_links', link['viewpoint_claim_link_id'])
+    assert withdrawn['effective_state'] == 'retired'
+    for field in ('pinned_claim_revision', 'component_locator', 'component_position_locator', 'evidence_bindings', 'claim_id', 'viewpoint_id', 'link_type'):
+        assert withdrawn.get(field) == link.get(field)
+    assert store.get_record('claims', 'C1') == changed
+    assert withdrawn['schema_version'] == 'wang_viewpoint_claim_link_v2'
+    import importlib.util
+    import pytest
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location('withdrawal_independent_audit',
+        Path(__file__).parents[2] / 'scripts/audit-library.py')
+    audit_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(audit_module)
+    audit_store = audit_module.Store(store.database_url)
+    assert audit_module._audit_component_locators(audit_store) == []
+    row = next(r for r in audit_store.collection('viewpoint_claim_links') if r['object_id'] == link['viewpoint_claim_link_id'])
+    from types import SimpleNamespace
+    archive = SimpleNamespace(collection=audit_store.collection)
+    with pytest.raises(ValueError, match='direct SQL history'):
+        audit_module._certified_historical_withdrawal(archive, row)
+    tampered = deepcopy(row)
+    tampered['payload']['pinned_claim_revision'] = 2
+    import pytest
+    with pytest.raises(ValueError, match='source binding'):
+        audit_module._certified_historical_withdrawal(audit_store, tampered)
+
+    from backend.api.canonical_repository.viewpoint_foundation import validate_foundation_change_set, ViewpointFoundationValidationError
+    with store.connect() as conn:
+        existing = {(col, oid): {'payload': payload, 'retired_at': retired}
+                    for col, oid, payload, retired in conn.execute(
+                        'SELECT collection,object_id,payload,retired_at FROM wang_knowledge.objects').fetchall()}
+    for field, value, expected in [('pinned_claim_revision', 2, 'historical source binding'),
+                                   ('effective_state', 'active', 'pinned Claim revision mismatch'),
+                                   ('schema_version', 'wang_viewpoint_claim_link_v1', 'pinned Claim revision mismatch')]:
+        forged = deepcopy(withdrawn)
+        forged[field] = value
+        with pytest.raises(ViewpointFoundationValidationError, match=expected):
+            validate_foundation_change_set({'viewpoint_claim_links': {link['viewpoint_claim_link_id']: forged}}, existing)

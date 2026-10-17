@@ -34,6 +34,7 @@ candidate语义字段形状（changes每项ref+fields_json，fields_json为JSON�
 proposition_signature={subject,predicate,object,polarity:affirmed|denied,modality,
  temporal_scope:[],conditions:[],population_scope:[]}；scope={scripture_scope:[],audience_scope:[],historical_scope:[]}；editorial_aliases可选。
 scope是命题真实适用限定，不是出现经文清单。命题/signature/scope须一致。
+维护已有head的新nr槽只输出实际变化字段；程序从原current CVR继承未变core/signature/scope/aliases，并从head指针推导owner。勿回抄原字段。新身份仍须完整新命题。新/变更head的summary须本轮给出并同轮审核。
 新viewpoint_claim_links槽nlN：viewpoint_id、claim_id用各自短引用；link_type选
  equivalent_full|equivalent_component|supports|extends|qualifies|applies|tension_evidence|superseding_evidence；
 可给effective_state=active。通过component_dispositions精确连接对应k成分、target_ref及link_ref；

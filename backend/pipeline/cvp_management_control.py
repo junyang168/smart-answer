@@ -5,6 +5,8 @@ its original call budget. All physical authority is read before SQL admission.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from backend.api.canonical_repository import cvp_management as domain
 from backend.api.canonical_repository import cvp_management_store as persistence
 from backend.api.canonical_repository.cvp_recall import seal
@@ -17,7 +19,7 @@ def _bound(value):
     return read_artifact(value['path'])
 
 
-def run(store,manifest,*,execute=False):
+def _run(store,manifest,*,execute=False):
     if manifest.get('schema_version')!=domain.VERSION+'_control':
         raise ValueError('explicit CVP2 control manifest required')
     operation=manifest.get('operation')
@@ -62,6 +64,10 @@ def run(store,manifest,*,execute=False):
         if admission!={'schema_version':domain.VERSION+'_audit_direction','authorized_by':'owner',
                       'action_id':parent['action_id'],'observation':audit}:
             raise ValueError('independent audit intake lacks exact scope/reader authority')
+        prior=[r for r in parent.get('quality_findings',[]) if r['observation']['audit_id']==audit['audit_id']]
+        if prior:
+            if len(prior)!=1 or prior[0]['observation']!=audit:raise ValueError('original independent audit cannot change')
+            return prior[0]
         current=store.read_current_records([(p['collection'],p['object_id']) for p in audit['cohort_pins']])
         result=domain.register_quality_findings(audit,current)
         if execute:persistence.register_independent_audit(store,parent_id,observation=audit,current_records=current)
@@ -83,3 +89,13 @@ def run(store,manifest,*,execute=False):
     registrations=persistence.current_quality_findings(store,registration_keys)
     store.verify_current_read_pins({key:(row['revision'],row['content_sha256'],False) for key,row in current.items()})
     return domain.assess_usage_admission(keys,current,registrations,purpose=manifest['purpose'],scope_admission=scope)
+
+
+def run(store,manifest,*,execute=False):
+    if not execute:return _run(store,manifest,execute=False)
+    parent=store.get_cvp_group(manifest.get('parent_run_id'))
+    if not parent or parent.get('kind')!='cvp_management_action' or not parent.get('execution_root'):
+        raise ValueError('control mutation requires the original stable CVP2 task root')
+    from backend.pipeline.source_reconciliation_runner import exclusive
+    with exclusive(Path(parent['execution_root'])):
+        return _run(store,manifest,execute=True)

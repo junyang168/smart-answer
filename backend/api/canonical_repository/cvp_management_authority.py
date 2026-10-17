@@ -18,7 +18,7 @@ def validate_evidence(evidence):
     verify(evidence['approval'],VERSION+'_review')
     proposal=evidence['proposal_raw'];review=evidence['review_raw']
     if (proposal.get('result')!='candidate' or review.get('result')!='review' or
-            not proposal.get('candidate') or not review.get('review') or
+            proposal.get('candidate') is None or review.get('review') is None or
             proposal.get('context_requests') or proposal.get('member_requests') or
             review.get('context_requests') or review.get('member_requests')):
         raise ValueError('context requests are not candidate approval')

@@ -62,6 +62,7 @@ def test_registered_independent_objection_blocks_only_current_use_and_preserves_
     with store.connect() as conn:
         conn.execute("UPDATE wang_knowledge.objects SET revision=revision+1 WHERE collection=%s AND object_id=%s",target.split('/',1))
     assert control.run(store,usage)['status']=='blocked'
+    assert control.run(store,manifest,execute=True)==registration
 
 
 def test_audit_intake_rejects_forged_report_unsupported_reader_and_stale_cohort(setup):

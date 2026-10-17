@@ -170,6 +170,8 @@ def progress(store,parent_id,*,group_key,status,detail=None,step_id=None):
 def complete_step(store,step_id,*,readback,read_pins):
     """Current program readback is completion, not an independent model audit."""
     with store.connect() as conn,conn.cursor() as cursor:
+        from .postgres_store import POSTGRES_APPLY_ADVISORY_LOCK_KEY
+        cursor.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))',(POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
         step=_load(cursor,step_id)
         if step.get('kind')!='cvp_management_round' or step.get('checkpoint') not in {'applied','audited'}:
             raise ChangeSetConflict('CVP2 completion has no applied candidate')
@@ -257,7 +259,10 @@ def register_human_constraint(store,parent_id,step_id,*,decision):
             existing_constraints=[c for c in parent['human_constraints'] if c['group_key']==step['group_key']])
         existing=[c for c in parent['human_constraints'] if c['constraint_id']==constraint['constraint_id']]
         if existing and existing!=[constraint]:raise ChangeSetConflict('human decision identity cannot change')
-        if not existing:parent['human_constraints'].append(constraint)
+        if not existing:
+            if parent.get('result',{}).get('status')=='completed':
+                raise ChangeSetConflict('completed task cannot accept a new constraint; use scoped maintenance')
+            parent['human_constraints'].append(constraint)
         parent['units'][step['group_key']].update(status='running',human_constraint_id=constraint['constraint_id'])
         _save(cursor,parent_id,parent)
     return constraint
@@ -265,9 +270,15 @@ def register_human_constraint(store,parent_id,step_id,*,decision):
 
 def register_independent_audit(store,parent_id,*,observation,current_records):
     from .cvp_management import register_quality_findings
-    registration=register_quality_findings(observation,current_records)
     with store.connect() as conn,conn.cursor() as cursor:
+        from .postgres_store import POSTGRES_APPLY_ADVISORY_LOCK_KEY
+        cursor.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))',(POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
         parent=_load(cursor,parent_id)
+        previous=[r for r in parent.get('quality_findings',[]) if r['observation']['audit_id']==observation['audit_id']]
+        if previous:
+            if len(previous)!=1 or previous[0]['observation']!=observation:raise ChangeSetConflict('original independent audit cannot change')
+            return previous[0]
+        registration=register_quality_findings(observation,current_records)
         store._assert_transaction_read_pins(cursor,{key:(row['revision'],row['content_sha256'],False)
             for key,row in current_records.items()})
         previous=[r for r in parent.get('quality_findings',[]) if r['observation']['audit_id']==observation['audit_id']]

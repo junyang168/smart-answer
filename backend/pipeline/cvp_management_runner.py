@@ -199,7 +199,9 @@ def _rebase_previous(request,old_bundle,new_bundle,previous,*,prior_findings):
     if previous.get('schema_version')==domain.VERSION+'_rebase_frame':
         return domain.prepare_rebase_frame(request,previous['old_bundle'],new_bundle,
             previous['previous_candidate'],prior_findings=prior_findings)
-    if old_bundle['claim_input']!=new_bundle['claim_input']:
+    current={(r['collection'],r['object_id']):r for r in new_bundle['records']}
+    changed=any(current.get((r['collection'],r['object_id']))!=r for r in old_bundle['records'])
+    if old_bundle['claim_input']!=new_bundle['claim_input'] or changed:
         return domain.prepare_rebase_frame(request,old_bundle,new_bundle,previous,prior_findings=prior_findings)
     return domain.rebind_candidate(request,old_bundle,new_bundle,previous,prior_findings=prior_findings)
 
@@ -436,7 +438,7 @@ def run(store,request,*,root,execute=False,clients=None):
                         path=Path(oldstep['materials']['step_root'])/'candidate.json'
                         if path.exists():
                             saved=read_artifact(path);verify(saved,domain.VERSION+'_candidate')
-                            seen.add(_semantic(saved))
+                            seen.add((oldstep['materials']['bundle']['artifact_sha256'],_semantic(saved)))
                     has_approval=(oldroot/'approval.json').exists()
                     if same and not has_approval:
                         # A returned proposal is not the next round's previous
@@ -479,7 +481,7 @@ def run(store,request,*,root,execute=False,clients=None):
                         bundle=persistence.bind_task_constraints(store,parent_id,newbundle);ordinal+=1;revision=False;continue
                     candidate=domain.compile_candidate(request,bundle,response['candidate'],previous=previous,prior_findings=prior_findings)
                     digest=_semantic(candidate)
-                    if revision and digest in seen:raise ValueError('no semantic progress or oscillation; root cause investigation required')
+                    if revision and (bundle['artifact_sha256'],digest) in seen:raise ValueError('no semantic progress or oscillation; root cause investigation required')
                     write_immutable(step_root/'candidate.json',candidate)
                     # Freeze before the FIRST Opus call, even a rejection or
                     # unknown return. Later plans require explicit lineage.
@@ -495,7 +497,7 @@ def run(store,request,*,root,execute=False,clients=None):
                     approval=domain.validate_review(request,bundle,candidate,review['review'],prior_findings=prior_findings)
                     write_immutable(step_root/'approval.json',approval)
                     if not approval['approved']:
-                        previous=candidate;prior_findings=_all_findings(candidate,approval);seen.add(digest)
+                        previous=candidate;prior_findings=_all_findings(candidate,approval);seen.add((bundle['artifact_sha256'],digest))
                         ordinal+=1;revision=True;continue
                     evidence={'round_id':step_id,'request':request.model_dump(mode='json'),'bundle':bundle,
                         'candidate':candidate,'approval':approval,'proposal_raw':raw,'review_raw':raw_review,

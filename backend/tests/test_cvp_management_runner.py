@@ -488,3 +488,71 @@ def test_changed_qualified_claim_reenters_same_task_with_explicit_new_positions_
     assert link['pinned_claim_revision']==2
     assert candidate['component_plan']['input_sha256']==completed['materials']['bundle']['claim_input']['artifact_sha256']
     assert store.get_record_state('claims','C1')['payload']==changed
+
+
+def test_changed_upstream_evidence_same_claim_reenters_same_task_and_reviews_current_empty_delta(setup,monkeypatch):
+    store,request,root,clients,_=setup
+    write=runner.write_immutable;interrupted=[]
+    def crash_after_rejected_review(path,value,**kwargs):
+        write(path,value,**kwargs)
+        if Path(path).name=='approval.json' and not value['approved'] and not interrupted:
+            interrupted.append(True);raise RuntimeError('interrupted with actual rejected review')
+    monkeypatch.setattr(runner,'write_immutable',crash_after_rejected_review)
+    def reject(packet):
+        if packet.get('schema_version','').endswith('_review_packet'):
+            review=passing(packet['candidate']);ref=review['component_reviews'][0]['ref']
+            review['component_reviews'][0].update(decision='revise',finding_refs=['f1'])
+            review['findings']=[{'slot':'f1','target_refs':[ref],'category':'source','reason':'需核對支持此判斷的完整證據。'}]
+            return envelope('review',review=review)
+    clients['opus'].behavior=reject
+    runner.run(store,request,root=root,execute=True,clients=clients)
+    original=parent(store);oldstep=store.get_cvp_group(original['units']['g1']['steps'][0])
+    oldroot=Path(oldstep['materials']['step_root']);oldcandidate=(oldroot/'candidate.json').read_bytes()
+    oldapproval=(oldroot/'approval.json').read_bytes();claim_before=store.get_record_state('claims','C1')
+    from backend.api.canonical_repository.postgres_store import canonical_json,record_content_sha
+    evidence=deepcopy(store.get_record_state('evidence_steps','E1')['payload'])
+    evidence.update(statement='教授在完整語境內明說人子是神。',revision=2)
+    audit=root/'evidence-upstream-readback.json';write_immutable(audit,{'fixture':'Claim audited again against updated evidence'})
+    audit_binding={'path':str(audit),'file_sha256':hashlib.sha256(audit.read_bytes()).hexdigest()}
+    qualified={'ready':True,'run_id':'claim-round-evidence-new','revision':claim_before['revision'],
+        'content_sha256':claim_before['content_sha256'],'audit':audit_binding,
+        'validation_kind':'opus_and_program_readback','independent_audit_complete':False}
+    qrun={'kind':'claim_management_round','checkpoint':'audited','outcome':'completed',
+        'program_readback_complete':True,'revisit_required':False,'stage_results':{'readback':audit_binding},
+        'audited_pins':[{'collection':'claims','object_id':'C1','pin':[claim_before['revision'],claim_before['content_sha256'],False]}]}
+    with store.connect() as conn:
+        conn.execute("UPDATE wang_knowledge.objects SET revision=2,content_sha256=%s,payload=%s::jsonb WHERE collection='evidence_steps' AND object_id='E1'",
+            (record_content_sha(evidence),canonical_json(evidence)))
+        conn.execute('''INSERT INTO wang_knowledge.pipeline_runs(run_id,subject_kind,subject_id,stage,trigger,status,metadata)
+            VALUES('claim-round-evidence-new','batch','C1','cvp_group','cli','succeeded',%s::jsonb)''',(canonical_json(qrun),))
+    monkeypatch.setattr(store,'claim_management_qualification',lambda cid:deepcopy(qualified))
+    monkeypatch.setattr(runner,'write_immutable',write);seen=[]
+    def retain_after_current_evidence(packet):
+        if not packet.get('schema_version','').endswith('_proposal_packet'):return
+        assert packet['previous']['requires_explicit_component_plan'] is False
+        assert packet['previous']['component_plan']==json.loads(oldcandidate)['component_plan']
+        assert packet['material']['evidence'][0]['content']['statement']==evidence['statement']
+        seen.append(packet);return envelope('candidate',candidate={})
+    def review_current_afterimage(packet):
+        if not packet.get('schema_version','').endswith('_review_packet'):return
+        assert packet['material']['evidence'][0]['content']['statement']==evidence['statement']
+        review=passing(packet['candidate']);review['prior_findings']=[{'ref':ref,'disposition':'resolved',
+            'reason':'已依當前完整證據重新核對判斷，保留原有成分。'} for ref in packet['candidate']['review_sets']['prior_findings']]
+        return envelope('review',review=review)
+    clients['gpt'].behavior=retain_after_current_evidence;clients['opus'].behavior=review_current_afterimage
+    result=runner.run(store,request,root=root,execute=True,clients=clients)
+    assert result['status']=='completed',parent(store)['units']['g1'].get('detail')
+    action=parent(store);assert action['run_id']==original['run_id'] and len(action['call_reservations'])==4
+    assert len(clients['gpt'].requests)==len(clients['opus'].requests)==2 and len(seen)==1
+    assert (oldroot/'candidate.json').read_bytes()==oldcandidate and (oldroot/'approval.json').read_bytes()==oldapproval
+    completed=store.get_cvp_group(action['units']['g1']['completed_step'])
+    candidate=runner.read_artifact(Path(completed['materials']['step_root'])/'candidate.json')
+    assert candidate['component_plan']==json.loads(oldcandidate)['component_plan']
+    assert candidate['rebase_history'][-1]['wording_changed'] is False and candidate['prior_findings']
+    assert store.get_record_state('claims','C1')==claim_before
+    assert store.get_record_state('evidence_steps','E1')['payload']==evidence
+    # The old rejection and new approval remain bound to different complete
+    # materials despite identical Claim wording and semantic candidate writes.
+    approval=runner.read_artifact(Path(completed['materials']['step_root'])/'approval.json')
+    assert approval['approved'] is True and approval['candidate_sha256']!=json.loads(oldapproval)['candidate_sha256']
+    assert completed['materials']['bundle']['artifact_sha256']!=oldstep['materials']['bundle']['artifact_sha256']

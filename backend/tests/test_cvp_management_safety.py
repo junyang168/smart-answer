@@ -46,7 +46,7 @@ def test_human_supersession_preview_and_persistence_preserve_original_protection
     req,bundle,candidate,args=disputed()
     dispute=domain.build_content_dispute(req,bundle,**args)
     parent={'kind':'cvp_management_action','request':req.model_dump(mode='json'),
-        'action_id':req.action_id,'human_constraints':[],
+        'action_id':req.action_id,'execution_root':str(tmp_path/'original-action'),'human_constraints':[],
         'units':{bundle['group_key']:{'status':'human_required','steps':['step']}}}
     step={'kind':'cvp_management_round','parent_run_id':'parent','group_key':bundle['group_key'],
           'content_dispute':dispute,'checkpoint':'prepared'}

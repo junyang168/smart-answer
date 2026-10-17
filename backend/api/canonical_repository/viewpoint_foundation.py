@@ -1069,6 +1069,27 @@ def validate_foundation_change_set(
     legacy_component_ids: dict[str, str] = {}
     field_component_ids: set[str] = set()
     for link_id, link in links.items():
+        # V2 withdrawal records retain their original source assertions. They
+        # assert no current coverage; do not reinterpret old coordinates against
+        # a newly qualified Claim. All historical fields must remain exact.
+        old_link = (existing.get(("viewpoint_claim_links", link_id)) or {}).get("payload")
+        withdrawal_decision = decisions.get(str(link.get("decision_id")), {})
+        mutable_withdrawal = {"schema_version", "revision", "effective_state", "decision_id"}
+        historical_withdrawal = bool(
+            old_link and link.get("schema_version") == "wang_viewpoint_claim_link_v2"
+            and link.get("effective_state") in {"retired", "invalidated"}
+            and {k:v for k,v in old_link.items() if k not in mutable_withdrawal}
+                == {k:v for k,v in link.items() if k not in mutable_withdrawal}
+            and withdrawal_decision.get("policy_version") == "wang_cvp_management_v2"
+            and withdrawal_decision.get("approval_basis") == "dual_model_consensus"
+            and withdrawal_decision.get("review_status") == "system_approved"
+            and withdrawal_decision.get("decision") == "match_existing"
+            and withdrawal_decision.get("resolved_viewpoint_id") == link.get("viewpoint_id"))
+        if (link.get("schema_version") == "wang_viewpoint_claim_link_v2"
+                and link.get("effective_state") in {"retired", "invalidated"}
+                and withdrawal_decision.get("policy_version") == "wang_cvp_management_v2"
+                and not historical_withdrawal):
+            findings.append(f"{link_id}: CVP2 withdrawal changed or lost its historical source binding")
         claim_id = str(link["claim_id"])
         viewpoint_id = str(link["viewpoint_id"])
         revision_id = str(link["validated_against_viewpoint_revision_id"])
@@ -1087,7 +1108,7 @@ def validate_foundation_change_set(
             findings.append(f"{link_id}: active link is not validated against current revision")
         if not claim:
             findings.append(f"{link_id}: missing claim {claim_id}")
-        elif int(claim.get("revision", 1)) != int(link["pinned_claim_revision"]):
+        elif not historical_withdrawal and int(claim.get("revision", 1)) != int(link["pinned_claim_revision"]):
             findings.append(f"{link_id}: pinned Claim revision mismatch")
         if str(link["decision_id"]) not in decisions:
             findings.append(f"{link_id}: missing decision {link['decision_id']}")
@@ -1107,6 +1128,8 @@ def validate_foundation_change_set(
                 "approved",
             }:
                 findings.append(f"{link_id}: active link depends on an unapproved decision")
+        if historical_withdrawal:
+            continue
         component = link.get("component_locator")
         field_component = link.get("component_position_locator")
         field_spans = None
