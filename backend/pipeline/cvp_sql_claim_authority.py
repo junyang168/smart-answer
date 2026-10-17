@@ -104,7 +104,9 @@ def coordinate_authority(store, cid, row):
             and Path(source['source_path']).is_absolute(), 'unsupported source')
     source_binding = {'path':source['source_path'],'file_sha256':source['source_file_sha256']}
     from backend.pipeline.source_editorial_transition import verify_current_source_binding
-    source_binding = verify_current_source_binding(source_binding)
+    # Keep historical review provenance stable; the verifier separately
+    # proves the live file differs only by inserted editorial headings.
+    verify_current_source_binding(source_binding)
     if source['source_type']=='notes_manuscript':
         script,_,_ = markdown_source_document(source)
     else:

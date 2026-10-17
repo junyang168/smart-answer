@@ -2005,3 +2005,138 @@ def test_saved_subtitle_answer_replays_without_cli_or_login_verification(
     assert runner._bound_subtitle_generation(**options) == _insertions()
     assert checks == [True]
     assert calls == [True]
+
+
+def test_duplicate_spoken_index_requires_and_obeys_exact_body_ordinal() -> None:
+    rows = [{'index': 5, 'text': '第一個同號段落。'},
+            {'index': 5, 'type': 'comment', 'text': '同號編輯註。'},
+            {'index': 5, 'text': '第二個同號段落。'},
+            {'index': 9, 'text': '結論。'}]
+    after = apply_insertions(rows, [
+        {'after_index': 'START', 'text': '## 開始', 'level': 1},
+        {'after_index': '5', 'after_body_ordinal': 2, 'text': '## 下一論證', 'level': 1},
+    ], source_sha256='a'*64, user_id='editor')
+    verify_saved_result(rows, after, expected_insertions=2)
+    assert [r for r in after if r.get('type') != 'subtitle'] == rows
+    second = next(i for i, r in enumerate(after) if r.get('text') == '第二個同號段落。')
+    assert after[second + 1]['text'] == '## 下一論證'
+    with pytest.raises(SubtitlePersistenceError, match='explicit after_body_ordinal'):
+        apply_insertions(rows, [{'after_index': '5', 'text': '## 不明位置', 'level': 1}],
+                         source_sha256='a'*64, user_id='editor')
+    for ordinal in [0, 4, True, '2', 3]:
+        with pytest.raises(SubtitlePersistenceError, match='after_body_ordinal'):
+            apply_insertions(rows, [{'after_index': '5', 'after_body_ordinal': ordinal,
+                                    'text': '## 錯誤位置', 'level': 1}],
+                             source_sha256='a'*64, user_id='editor')
+
+
+def test_duplicate_spoken_indexes_use_cached_unique_generation_coordinates_and_preserve_original_ids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_path = _source(tmp_path)
+    rows = [{'index': 5, 'text': '第一段。'}, {'index': 5, 'text': '第二段。'},
+            {'index': 9, 'text': '第三段。'}]
+    source_path.write_text(json.dumps(rows, ensure_ascii=False))
+    seen = []
+    def generate(paragraphs: list[dict[str, Any]], **kwargs: Any) -> list[dict[str, Any]]:
+        seen.append(paragraphs)
+        assert [r['index'] for r in paragraphs] == [f'body-ordinal-{i:06d}' for i in range(1, 4)]
+        return [{'after_index': 'START', 'text': '## 開始', 'level': 1},
+                {'after_index': 'body-ordinal-000002', 'text': '## 下一論證', 'level': 1}]
+    monkeypatch.setattr(runner, 'generate_subtitles', generate)
+    out = tmp_path / 'out'
+    with pytest.raises(RuntimeError, match='write failed'):
+        _generation_call(source_path, out, _SavingWriter(source_path, save_error=True))
+    assert _generation_call(source_path, out, _SavingWriter(source_path))[0] == 'created'
+    assert len(seen) == 1
+    after = json.loads(source_path.read_bytes())
+    assert [r for r in after if r.get('type') != 'subtitle'] == rows
+    second = next(i for i, r in enumerate(after) if r.get('text') == '第二段。')
+    assert after[second + 1]['text'] == '## 下一論證'
+    audit = json.loads(next(out.rglob('application.json')).read_bytes())
+    assert audit['insertions'][1]['after_index'] == '5'
+    assert audit['insertions'][1]['after_body_ordinal'] == 2
+    plan = json.loads(next(out.rglob('generation.json')).read_bytes())
+    assert plan['insertions'][1]['after_index'] == 'body-ordinal-000002'
+
+
+def test_subtitles_only_preserves_unattested_inline_visual_without_extraction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_path = _source(tmp_path)
+    rows = _rows()
+    rows[0]['text'] += '<svg xmlns="http://www.w3.org/2000/svg"><text x="1" y="2">人子</text></svg>'
+    source_path.write_text(json.dumps(rows, ensure_ascii=False))
+    from backend.pipeline.source_projection import project_script
+    original_visual = project_script(rows).visual_content_sha256
+    monkeypatch.setattr(runner, 'generate_subtitles', lambda *args, **kwargs: _insertions())
+    monkeypatch.setattr(runner, '_run', lambda **kwargs: pytest.fail('subtitle-only must not extract evidence'))
+    assert _generation_call(source_path, tmp_path / 'out', _SavingWriter(source_path))[0] == 'created'
+    after = json.loads(source_path.read_bytes())
+    verify_saved_result(rows, after, expected_insertions=2)
+    assert project_script(after).visual_content_sha256 == original_visual
+    with pytest.raises(Exception, match='unattested|attest'):
+        runner.run_one(source_path, output_dir=tmp_path/'extract', client=object(),
+                       prompt='prompt', reasoning_effort='medium', force=False)
+
+
+def test_untitled_prefix_disambiguates_index_repeated_in_later_titled_body(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_path = _source(tmp_path)
+    rows = [{'index': 5, 'text': '開頭第一段。'}, {'index': 7, 'text': '開頭第二段。'},
+            {'index': 'subtitle-old', 'type': 'subtitle', 'text': '## 後半'},
+            {'index': 5, 'text': '後半同號段落。'}]
+    source_path.write_text(json.dumps(rows, ensure_ascii=False))
+    def generate(paragraphs: list[dict[str, Any]], **kwargs: Any) -> list[dict[str, Any]]:
+        assert [r['index'] for r in paragraphs] == ['body-ordinal-000001', 'body-ordinal-000002']
+        return [{'after_index': 'START', 'text': '## 開頭', 'level': 1},
+                {'after_index': 'body-ordinal-000001', 'text': '### 推論', 'level': 2}]
+    monkeypatch.setattr(runner, 'generate_subtitles', generate)
+    assert _generation_call(source_path, tmp_path/'out', _SavingWriter(source_path))[0] == 'created'
+    after = json.loads(source_path.read_bytes())
+    verify_saved_result(rows, after, expected_insertions=2)
+    assert after[2]['text'] == '### 推論'
+    assert after[-1] == rows[-1]
+
+
+def test_subtitles_only_blank_prefix_before_existing_heading_skips_without_touching_failed_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_path = _source(tmp_path)
+    rows = [{'index': 1, 'text': ' \n\t'},
+            {'index': 'subtitle-old', 'type': 'subtitle', 'text': '## 已有標題'},
+            {'index': 2, 'text': '真正的教導。'}]
+    source_path.write_text(json.dumps(rows, ensure_ascii=False))
+    original = source_path.read_bytes()
+    out = tmp_path / 'out'
+    cached = out / 'subtitle-generations' / runner._slug(source_path.stem) / 'generation.json'
+    cached.parent.mkdir(parents=True)
+    cached.write_text('{"status":"failed","error":"429 rate limit"}')
+    cache_before = cached.read_bytes()
+    monkeypatch.setattr(runner, 'generate_subtitles', lambda *args, **kwargs: pytest.fail('blank prefix must not call model'))
+    monkeypatch.setattr(runner, '_run', lambda **kwargs: pytest.fail('subtitle-only must not extract'))
+    assert _generation_call(source_path, out, lambda *args, **kwargs: pytest.fail('blank prefix must not call writer')) == ('skipped', source_path)
+    assert source_path.read_bytes() == original
+    assert cached.read_bytes() == cache_before
+    assert not list(out.rglob('application.json'))
+    # Extraction keeps its existing requirement; no source coordinates changed.
+    with pytest.raises(SubtitlePersistenceError, match='untitled leading section'):
+        runner.run_one(source_path, output_dir=out/'extract', client=object(),
+                       prompt='prompt', reasoning_effort='medium', force=False)
+
+
+def test_subtitles_only_meaningful_prefix_before_existing_heading_still_generates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_path = _source(tmp_path)
+    rows = [{'index': 1, 'text': '真正的開頭教導。'},
+            {'index': 'subtitle-old', 'type': 'subtitle', 'text': '## 已有標題'},
+            {'index': 2, 'text': '後半教導。'}]
+    source_path.write_text(json.dumps(rows, ensure_ascii=False))
+    calls = []
+    monkeypatch.setattr(runner, 'generate_subtitles', lambda *args, **kwargs: calls.append(args) or [
+        {'after_index': 'START', 'text': '## 開頭教導', 'level': 1}])
+    assert _generation_call(source_path, tmp_path/'out', _SavingWriter(source_path))[0] == 'created'
+    assert len(calls) == 1
+    verify_saved_result(rows, json.loads(source_path.read_bytes()), expected_insertions=1)

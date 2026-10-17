@@ -100,14 +100,14 @@ def apply_insertions(
 
     original = [dict(row) for row in rows]
     source_indexes = [str(row.get("index")) for row in body_rows(original)]
-    if len(source_indexes) != len(set(source_indexes)):
-        raise SubtitlePersistenceError("sermon paragraph indexes are not unique")
-
+    positions: dict[str, list[int]] = {}
+    for body_ordinal, index in enumerate(source_indexes, start=1):
+        positions.setdefault(index, []).append(body_ordinal)
     known = set(source_indexes)
     physical_indexes = {str(row.get("index")) for row in original}
-    grouped: dict[str, list[dict[str, Any]]] = {}
+    grouped: dict[int, list[dict[str, Any]]] = {}
     accepted: list[dict[str, Any]] = []
-    seen_boundaries: set[tuple[str, int]] = set()
+    seen_boundaries: set[tuple[int, int]] = set()
     for ordinal, insertion in enumerate(insertions, start=1):
         raw_after = insertion.get("after_index")
         after = "" if raw_after is None else str(raw_after).strip()
@@ -116,11 +116,25 @@ def apply_insertions(
             raise SubtitlePersistenceError(
                 f"generated subtitle after_index {after!r} does not name a sermon paragraph"
             )
+        explicit_ordinal = insertion.get("after_body_ordinal")
+        if after == "START":
+            if explicit_ordinal is not None:
+                raise SubtitlePersistenceError("START cannot carry after_body_ordinal")
+            body_position = 0
+        elif explicit_ordinal is not None:
+            if (type(explicit_ordinal) is not int or not 1 <= explicit_ordinal <= len(source_indexes)
+                    or source_indexes[explicit_ordinal - 1] != after):
+                raise SubtitlePersistenceError("after_body_ordinal does not match the original sermon index")
+            body_position = explicit_ordinal
+        else:
+            if len(positions[after]) != 1:
+                raise SubtitlePersistenceError("duplicate sermon index requires explicit after_body_ordinal")
+            body_position = positions[after][0]
         try:
             level = int(insertion.get("level"))
         except (TypeError, ValueError) as exc:
             raise SubtitlePersistenceError("generated subtitle level is not an integer") from exc
-        boundary = (after, level)
+        boundary = (body_position, level)
         if boundary in seen_boundaries:
             raise SubtitlePersistenceError(
                 f"duplicate generated subtitle boundary {boundary!r}"
@@ -139,15 +153,15 @@ def apply_insertions(
                 "user_id": user_id,
             }
         )
-        grouped.setdefault(after, []).append(accepted[-1])
+        grouped.setdefault(body_position, []).append(accepted[-1])
 
-    result: list[dict[str, Any]] = [dict(row) for row in grouped.get("START", [])]
+    result: list[dict[str, Any]] = [dict(row) for row in grouped.get(0, [])]
+    body_position = 0
     for row in original:
         result.append(row)
         if not is_editorial_row(row):
-            result.extend(
-                dict(heading) for heading in grouped.get(str(row.get("index")), [])
-            )
+            body_position += 1
+            result.extend(dict(heading) for heading in grouped.get(body_position, []))
 
     if body_rows(result) != body_rows(original):
         raise SubtitleBodyMutationError("subtitle insertion changed existing sermon body rows")

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -21,6 +22,25 @@ def _sha(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
                                      separators=(",", ":")).encode()).hexdigest()
 
+
+
+def _heading_scope(projection):
+    """Ignore only blank leading rows when headings already cover real text.
+
+    The rows stay in the source and retain all coordinates. This is scheduling
+    metadata, not permission to strip whitespace or rewrite a transcript.
+    """
+    prefix = leading_untitled_body_end(projection.headings, len(projection.body_rows))
+    blank_prefix = (prefix is not None and bool(projection.headings)
+                    and all(not str(row.get("text") or "").strip()
+                            for row in projection.body_rows[:prefix]))
+    effective_prefix = None if blank_prefix else prefix
+    result = {"scope_end": effective_prefix, "can_generate": effective_prefix is not None,
+              "status": "headingless" if not projection.headings else
+              "untitled_prefix" if effective_prefix is not None else "has_headings"}
+    if blank_prefix:
+        result["ignored_blank_prefix"] = prefix
+    return result
 
 def _build_source_heading_inventory(store: Any, *, query: str = "人子",
                                    claim_ids: Sequence[str] | None = None,
@@ -287,4 +307,158 @@ def build_source_heading_inventory(store: Any, *, query: str = "人子",
     result["ready_for_generation"] = not result["blocking_issues"]
     result["inventory_sha256"] = _sha({key: value for key, value in result.items()
                                         if key != "inventory_sha256"})
+    return result
+
+
+def _all_registered_source_states(store):
+    """Read source registration once, without per-source database connections."""
+    if not hasattr(store, "connect"):
+        return {row["source_id"]: store.get_record_state("source_documents", row["source_id"])
+                for row in store.list_records("source_documents")}
+    with store.connect() as conn, conn.cursor() as cursor:
+        cursor.execute("BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        cursor.execute("SELECT object_id,payload,revision,content_sha256 FROM wang_knowledge.objects "
+                       "WHERE collection='source_documents' AND retired_at IS NULL ORDER BY object_id")
+        return {ident: {"payload": dict(payload), "revision": int(revision),
+                        "content_sha256": str(digest), "retired": False}
+                for ident, payload, revision, digest in cursor.fetchall()}
+
+
+def build_transcript_heading_inventory(store: Any, data_root: Path, *, query: str = "人子") -> dict[str, Any]:
+    """Plan ALL authoritative transcript files, including unregistered sermons.
+
+    Published wins over reviewed by exact transcript filename. SQL membership
+    supplies priority, never the corpus denominator. An unregistered descriptor
+    is file metadata for subtitle proof only; this function creates no SQL
+    source, Claim qualification, or semantic source authority.
+    """
+    data_root = Path(data_root).resolve()
+    priority_inventory = build_source_heading_inventory(store, query=query, include_other_sources=False)
+    priority_paths = {str(Path(row["path"]).resolve()) for row in priority_inventory["sources"]
+                      if row.get("path") and row["priority"]}
+    priority_transcripts = {str(row["source"].get("transcript_id"))
+                           for row in priority_inventory["sources"]
+                           if row.get("source", {}).get("transcript_id") and row["priority"]}
+    registered = _all_registered_source_states(store)
+    by_transcript: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+    by_path: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+    for sid, state in registered.items():
+        doc = state["payload"]
+        if doc.get("source_type") != "sermon_transcript":
+            continue
+        if doc.get("transcript_id"):
+            by_transcript.setdefault(str(doc["transcript_id"]), []).append((sid, state))
+        if doc.get("source_path"):
+            by_path.setdefault(str(Path(doc["source_path"]).resolve()), []).append((sid, state))
+
+    authoritative: dict[str, Path] = {}
+    for stage in ["script_published", "script_review"]:
+        for path in sorted((data_root / stage).glob("*.json")):
+            authoritative.setdefault(path.stem, path)
+    sources = []
+    issues = []
+    seen_physical: dict[str, str] = {}
+    for transcript_id, path in sorted(authoritative.items()):
+        physical = str(path.resolve())
+        entry: dict[str, Any] = {"transcript_id": transcript_id, "path": str(path),
+            "source_path": str(path), "priority": physical in priority_paths or transcript_id in priority_transcripts,
+            "source_id": "transcript-file:" + transcript_id, "source_pin": None,
+            "claim_ids": [], "metadata_origin": "authoritative_transcript_file"}
+        try:
+            if physical in seen_physical:
+                raise ValueError("duplicate_physical_path:" + seen_physical[physical])
+            seen_physical[physical] = transcript_id
+            candidates = {sid: state for sid, state in by_transcript.get(transcript_id, [])}
+            candidates.update({sid: state for sid, state in by_path.get(physical, [])})
+            if len(candidates) > 1:
+                entry["candidate_source_ids"] = sorted(candidates)
+                raise ValueError("ambiguous_registered_transcript_source")
+            raw = path.read_bytes()
+            parsed = json.loads(raw)
+            rows = parsed if isinstance(parsed, list) else parsed["script"]
+            if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+                raise ValueError("invalid_transcript_script_rows")
+            indexes = [str(row.get("index")) for row in rows]
+            duplicate_indexes = sorted(index for index, count in Counter(indexes).items() if count > 1)
+            entry["duplicate_existing_row_indexes"] = duplicate_indexes
+            entry["duplicate_physical_indexes"] = duplicate_indexes
+            entry["insertion_locator_mode"] = "physical_position" if duplicate_indexes else "original_index"
+            projection = project_script(rows)
+            body_indexes = [str(row.get("index")) for row in projection.body_rows]
+            entry["duplicate_body_indexes"] = sorted(index for index, count in Counter(body_indexes).items() if count > 1)
+            digest = hashlib.sha256(raw).hexdigest()
+            entry.update(current_file_sha256=digest, source_file_sha256=digest,
+                source_body_sha256=projection.body_sha256,
+                source_visual_sha256=projection.visual_content_sha256,
+                visual_block_count=len(projection.visual_blocks),
+                editorial_structure_sha256=projection.editorial_structure_sha256,
+                body_paragraphs=len(projection.body_rows), heading_count=len(projection.headings),
+                source_type="sermon_transcript", existing_row_indexes=indexes)
+            if projection.body_rows:
+                entry.update(_heading_scope(projection))
+            if candidates:
+                sid, state = next(iter(candidates.items()))
+                source = state["payload"]
+                entry.update(source_id=sid, source=source,
+                    source_pin={key: state[key] for key in ("revision", "content_sha256")},
+                    metadata_origin="registered_source_document")
+                if state.get("retired") or record_content_sha(source) != state["content_sha256"]:
+                    raise ValueError("registered_source_content_sha_mismatch")
+                if str(Path(str(source.get("source_path") or "")).resolve()) != physical:
+                    raise ValueError("registered_path_is_not_authoritative")
+                if not source.get("source_body_sha256") or source["source_body_sha256"] != projection.body_sha256:
+                    raise ValueError("registered_source_body_sha_mismatch")
+                if (source.get("source_visual_sha256") is not None and
+                        str(source["source_visual_sha256"]) != str(projection.visual_content_sha256 or "")):
+                    raise ValueError("registered_source_visual_sha_mismatch")
+                if not source.get("source_file_sha256"):
+                    raise ValueError("missing_registered_source_file_sha")
+                if source["source_file_sha256"] != digest:
+                    from backend.pipeline.source_editorial_transition import verify_current_source_binding
+                    current = verify_current_source_binding({"path": str(path),
+                        "file_sha256": source["source_file_sha256"]})
+                    if current["file_sha256"] != digest:
+                        raise ValueError("source_changed_during_editorial_verification")
+                    entry["editorial_transition_verified"] = True
+            else:
+                entry["source"] = {"source_id": entry["source_id"], "source_type": "sermon_transcript",
+                    "transcript_id": transcript_id, "source_path": str(path),
+                    "source_file_sha256": digest, "source_body_sha256": projection.body_sha256,
+                    "source_visual_sha256": projection.visual_content_sha256,
+                    "locator_space": "spoken_body_v1", "metadata_origin": "authoritative_transcript_file",
+                    "authority_disclosure": "File metadata for editorial subtitle proof only; not a registered knowledge source or Claim authority."}
+            if not projection.body_rows:
+                entry.update(status="empty", reason="no_source_body", can_generate=False)
+            else:
+                entry.update(_heading_scope(projection))
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            if entry.get("status") == "has_headings":
+                entry.update(can_generate=False, registration_discrepancy=f"{type(exc).__name__}: {exc}")
+                issues.append({"key": "transcripts/" + transcript_id,
+                               "reason": entry["registration_discrepancy"], "generation_blocking": False})
+            else:
+                entry.update(status="unavailable", can_generate=False,
+                             reason=f"{type(exc).__name__}: {exc}")
+                issues.append({"key": "transcripts/" + transcript_id,
+                               "reason": entry["reason"], "generation_blocking": True})
+        if entry.get("status") == "empty":
+            issues.append({"key": "transcripts/" + transcript_id, "reason": entry["reason"],
+                           "generation_blocking": True})
+        sources.append(entry)
+    sources.sort(key=lambda row: (not row["priority"], row["transcript_id"]))
+    result = {"schema_version": "wang_all_transcript_heading_inventory_v1", "query": query,
+        "inventory_mode": "all_transcripts",
+        "data_root": str(data_root), "sources": sources,
+        "generation_plan": [row for row in sources if row.get("can_generate")],
+        "total_authoritative_transcripts": len(sources),
+        "registered_transcripts": sum(row["source_pin"] is not None for row in sources),
+        "unregistered_transcripts": sum(row["source_pin"] is None for row in sources),
+        "priority_inventory_sha256": priority_inventory["inventory_sha256"],
+        "priority_discovery_issues": priority_inventory["blocking_issues"],
+        "issues": issues,
+        "generation_blocking_issues": [issue for issue in issues if issue["generation_blocking"]],
+        "blocking_issues": [issue for issue in issues if issue["generation_blocking"]],
+        "ready_for_generation": not any(issue["generation_blocking"] for issue in issues),
+        "routing_disclosure": "All published-first authoritative transcript files are inventoried. Literal Claim matches only set priority; unregistered file descriptors confer no knowledge-source or Claim authority."}
+    result["inventory_sha256"] = _sha(result)
     return result

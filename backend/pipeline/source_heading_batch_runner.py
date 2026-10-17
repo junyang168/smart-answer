@@ -20,7 +20,9 @@ from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 from backend.pipeline.sermon_subtitle_persistence import (
     apply_insertions, payload_with_rows, transcript_rows,
 )
-from backend.pipeline.source_heading_inventory import build_source_heading_inventory
+from backend.pipeline.source_heading_inventory import (
+    build_source_heading_inventory, build_transcript_heading_inventory,
+)
 from backend.pipeline.subtitle_generation import PROMPT_PATH
 from backend.pipeline.viewpoint_resolution_runtime import read_artifact, write_immutable
 
@@ -28,17 +30,22 @@ from backend.pipeline.viewpoint_resolution_runtime import read_artifact, write_i
 SCHEMA = 'wang_source_heading_batch_v1'
 
 
-def batch_manifest(inventory, *, actor_id, model, effort, priority_only=False, limit=None):
+def batch_manifest(inventory, *, actor_id, model, effort, priority_only=False, limit=None,
+                   worker_count=1):
     if inventory.get('blocking_issues'):
         raise ValueError('heading inventory has unresolved current input integrity errors')
     if limit is not None and limit < 1:
         raise ValueError('source limit must be positive')
+    if type(worker_count) is not int or worker_count < 1:
+        raise ValueError('worker count must be positive')
     sources = [r for r in inventory['generation_plan'] if not priority_only or r['priority']]
     if limit is not None:
         sources = sources[:limit]
     result = {
         'schema_version': SCHEMA, 'actor_id': actor_id,
         'query': inventory['query'], 'priority_only': priority_only, 'limit': limit,
+        'inventory_mode': inventory.get('inventory_mode', 'claim_sources'),
+        'worker_count': worker_count,
         'model': model, 'effort': effort,
         'prompt_sha256': hashlib.sha256(PROMPT_PATH.read_bytes()).hexdigest(),
         'sources': sources,
@@ -61,7 +68,48 @@ def validate_manifest(manifest):
         raise ValueError('heading batch contains duplicate sources or physical paths')
 
 
-def apply_batch(store, manifest, *, output_dir, client, manager, execute=None):
+def assigned_sources(manifest, *, worker_count=1, worker_index=0):
+    """Disjoint source ownership within one frozen metadata batch."""
+    if (type(worker_count) is not int or worker_count < 1
+            or type(worker_index) is not int or not 0 <= worker_index < worker_count
+            or manifest.get('worker_count', 1) != worker_count):
+        raise ValueError('worker assignment differs from frozen batch')
+    return [row for position, row in enumerate(manifest['sources'])
+            if position % worker_count == worker_index]
+
+
+def _assert_registration(store, row):
+    """Unregistered file metadata never creates a knowledge source record."""
+    sid, source, expected = row['source_id'], row['source'], row['source_pin']
+    if expected is not None:
+        state = store.get_record_state('source_documents', sid)
+        if (not state or state['retired'] or state['revision'] != expected['revision']
+                or state['content_sha256'] != expected['content_sha256']
+                or record_content_sha(state['payload']) != expected['content_sha256']
+                or state['payload'] != source):
+            raise ValueError('registered source changed after heading inventory: ' + sid)
+        return
+    if (row.get('metadata_origin') != 'authoritative_transcript_file'
+            or source.get('metadata_origin') != 'authoritative_transcript_file'
+            or sid != 'transcript-file:' + source['transcript_id']
+            or str(Path(source['source_path']).resolve()) != str(Path(row['path']).resolve())):
+        raise ValueError('unregistered source lacks frozen file metadata identity')
+    if hasattr(store, 'connect'):
+        with store.connect() as conn:
+            matches = conn.execute("""SELECT object_id FROM wang_knowledge.objects
+                WHERE collection='source_documents' AND retired_at IS NULL
+                AND (payload->>'source_path'=%s OR payload->>'transcript_id'=%s)""",
+                (row['path'], source['transcript_id'])).fetchall()
+    else:
+        matches = [s for s in store.list_records('source_documents')
+                   if s.get('source_path') == row['path']
+                   or s.get('transcript_id') == source['transcript_id']]
+    if matches:
+        raise ValueError('source registration appeared after heading inventory: ' + sid)
+
+
+def apply_batch(store, manifest, *, output_dir, client, manager, execute=None,
+                worker_count=1, worker_index=0):
     """Run one frozen source at a time; a failure never becomes completion."""
     from backend.pipeline.detailed_knowledge_extraction_runner import run_one
     from backend.pipeline.source_editorial_transition import (
@@ -79,18 +127,16 @@ def apply_batch(store, manifest, *, output_dir, client, manager, execute=None):
     execute = execute or run_one
     output_dir = Path(output_dir)
     write_immutable(output_dir / 'manifest.json', manifest)
+    selected = assigned_sources(manifest, worker_count=worker_count, worker_index=worker_index)
+    progress_dir = (output_dir if worker_count == 1 else
+                    output_dir / 'workers' / f'{worker_index:03d}-of-{worker_count:03d}')
+    progress = {'planned_count': len(selected), 'worker_count': worker_count,
+                'worker_index': worker_index}
     results = []
-    for row in manifest['sources']:
+    for row in selected:
         sid, source = row['source_id'], row['source']
         path = Path(row['path'])
-        state = store.get_record_state('source_documents', sid)
-        expected = row['source_pin']
-        if (not state or state['retired']
-                or state['revision'] != expected['revision']
-                or state['content_sha256'] != expected['content_sha256']
-                or record_content_sha(state['payload']) != expected['content_sha256']
-                or state['payload'] != source):
-            raise ValueError('registered source changed after heading inventory: ' + sid)
+        _assert_registration(store, row)
         if manager.authoritative_transcript_path(source['transcript_id']).resolve() != path.resolve():
             raise ValueError('heading source is no longer the authoritative transcript: ' + sid)
         verify_current_source_binding({'path': str(path), 'file_sha256': row['current_file_sha256']})
@@ -128,8 +174,10 @@ def apply_batch(store, manifest, *, output_dir, client, manager, execute=None):
                 {'path': str(path), 'file_sha256': row['current_file_sha256']})
             saved_payload = json.loads(path.read_bytes())
             projection = project_script(transcript_rows(saved_payload, stage=path.parent.name))
-            if (not projection.body_rows or leading_untitled_body_end(
-                    projection.headings, len(projection.body_rows)) is not None):
+            untitled = leading_untitled_body_end(projection.headings, len(projection.body_rows))
+            meaningful_untitled = untitled is not None and any(
+                str(row.get('text') or '').strip() for row in projection.body_rows[:untitled])
+            if not projection.body_rows or not projection.headings or meaningful_untitled:
                 raise ValueError('subtitle application did not produce a titled source')
             result = {'source_id': sid, 'status': 'completed', 'application': status,
                       'current_source': current}
@@ -137,17 +185,19 @@ def apply_batch(store, manifest, *, output_dir, client, manager, execute=None):
             result = {'source_id': sid, 'status': 'incomplete',
                       'error': type(exc).__name__ + ': ' + str(exc)}
             results.append(result)
-            _save_results(output_dir, manifest, results)
+            _save_results(progress_dir, manifest, results, **progress)
             raise
         results.append(result)
-        _save_results(output_dir, manifest, results)
+        _save_results(progress_dir, manifest, results, **progress)
         print(json.dumps(result, ensure_ascii=False), flush=True)
-    return _save_results(output_dir, manifest, results)
+    return _save_results(progress_dir, manifest, results, **progress)
 
 
-def _save_results(output_dir, manifest, results):
+def _save_results(output_dir, manifest, results, *, planned_count=None, worker_count=1,
+                  worker_index=0):
     result = {'schema_version': SCHEMA, 'manifest_sha256': manifest['manifest_sha256'],
-              'planned': len(manifest['sources']), 'results': results,
+              'planned': len(manifest['sources']) if planned_count is None else planned_count,
+              'worker_count': worker_count, 'worker_index': worker_index, 'results': results,
               'completed': sum(r['status'] == 'completed' for r in results)}
     # Progress is a cache. The immutable source/application proofs authorize
     # replay, never this replaceable summary.
@@ -164,6 +214,10 @@ def main():
     parser.add_argument('--output-dir', type=Path, required=True)
     parser.add_argument('--query', default='人子')
     parser.add_argument('--priority-only', action='store_true')
+    parser.add_argument('--all-transcripts', action='store_true',
+                        help='Include every authoritative transcript, even without Claims')
+    parser.add_argument('--worker-count', type=int, default=1)
+    parser.add_argument('--worker-index', type=int, default=0)
     parser.add_argument('--limit', type=int)
     parser.add_argument('--actor-id')
     parser.add_argument('--model', default='gpt-6.1-sol')
@@ -178,17 +232,23 @@ def main():
         manifest = read_artifact(saved)
         validate_manifest(manifest)
         if (manifest['query'], manifest['priority_only'], manifest['limit'],
-                manifest['actor_id'], manifest['model'], manifest['effort']) != (
+                manifest['actor_id'], manifest['model'], manifest['effort'],
+                manifest.get('inventory_mode', 'claim_sources'), manifest.get('worker_count', 1)) != (
                 args.query, args.priority_only, args.limit,
-                args.actor_id, args.model, args.effort):
+                args.actor_id, args.model, args.effort,
+                'all_transcripts' if args.all_transcripts else 'claim_sources', args.worker_count):
             raise ValueError('resume options differ from frozen batch')
     else:
-        inventory = build_source_heading_inventory(store, query=args.query,
-            include_other_sources=not args.priority_only)
+        if args.all_transcripts:
+            from backend.api.config import DATA_BASE_PATH
+            inventory = build_transcript_heading_inventory(store, DATA_BASE_PATH, query=args.query)
+        else:
+            inventory = build_source_heading_inventory(store, query=args.query,
+                include_other_sources=not args.priority_only)
         write_immutable(args.output_dir / 'inventory.json', inventory)
         manifest = batch_manifest(inventory, actor_id=args.actor_id,
             model=args.model, effort=args.effort,
-            priority_only=args.priority_only, limit=args.limit)
+            priority_only=args.priority_only, limit=args.limit, worker_count=args.worker_count)
         write_immutable(saved, manifest)
     print(json.dumps({'planned': len(manifest['sources']), 'apply': args.apply,
                       'manifest_sha256': manifest['manifest_sha256']}, ensure_ascii=False), flush=True)
@@ -199,7 +259,8 @@ def main():
         client = CodexSubscriptionClient(model=args.model, reasoning_effort=args.effort,
                                          executable=args.codex_executable)
         apply_batch(store, manifest, output_dir=args.output_dir,
-                    client=client, manager=sermonManager)
+                    client=client, manager=sermonManager,
+                    worker_count=args.worker_count, worker_index=args.worker_index)
 
 
 if __name__ == '__main__':

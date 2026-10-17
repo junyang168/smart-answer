@@ -272,3 +272,88 @@ def test_batch_manifest_refuses_inventory_with_blocking_current_input_issues(sam
         batch.batch_manifest(inventory, actor_id='editor', model='fake-model', effort='high',
                              priority_only=True, limit=1)
     assert sample.manager.calls == 0
+
+
+def unregistered_manifest(sample):
+    """Freeze a filesystem transcript that has never entered knowledge SQL."""
+    manifest = copy.deepcopy(sample.manifest)
+    manifest['sources'] = [r for r in manifest['sources'] if r['source_id'] == 'source-B']
+    manifest['sources'][0]['source_pin'] = None
+    manifest['sources'][0]['source_id'] = 'transcript-file:source-B'
+    manifest['sources'][0]['source']['source_id'] = 'transcript-file:source-B'
+    manifest['sources'][0]['metadata_origin'] = 'authoritative_transcript_file'
+    manifest['sources'][0]['source']['metadata_origin'] = 'authoritative_transcript_file'
+    sample.store.records.pop(('source_documents', 'source-B'))
+    return seal(manifest)
+
+
+def test_unregistered_transcript_gets_only_headings_and_no_sql_records(sample):
+    sample.manifest = unregistered_manifest(sample)
+    before = copy.deepcopy(sample.store.records)
+    result = apply(sample, execute=executor)
+    assert result['completed'] == 1
+    assert sample.store.records == before
+    assert ('source_documents', 'source-B') not in sample.store.records
+    after = json.loads(sample.paths['source-B'].read_bytes())
+    assert after['script'][0]['type'] == 'subtitle'
+    assert sample.manager.calls == 1
+    replay = apply(sample, execute=executor)
+    assert replay['completed'] == 1
+    assert replay['results'][0]['application'] == 'skipped'
+    assert sample.manager.calls == 1
+    assert sample.store.records == before
+
+
+@pytest.mark.parametrize('registration_id', ['transcript-file:source-B', 'new-source-id'])
+def test_unregistered_transcript_refuses_registration_appearing_after_freeze(sample, registration_id):
+    sample.manifest = unregistered_manifest(sample)
+    source = copy.deepcopy(sample.manifest['sources'][0]['source'])
+    source['source_id'] = registration_id
+    sample.store.records['source_documents', registration_id] = state(source)
+    before = sample.paths['source-B'].read_bytes()
+    with pytest.raises(ValueError, match='registration|source.*changed'):
+        apply(sample, execute=executor)
+    assert sample.manager.calls == 0
+    assert sample.paths['source-B'].read_bytes() == before
+
+
+def test_three_worker_assignments_are_disjoint_exact_frozen_manifest_cover(sample):
+    inventory = copy.deepcopy(sample.inventory)
+    template = inventory['generation_plan'][0]
+    inventory['generation_plan'] = [dict(template, source_id=f'S{i}', path=f'/synthetic/script_published/S{i}.json') for i in range(11)]
+    manifest = batch.batch_manifest(inventory, actor_id='editor', model='fake-model', effort='high', worker_count=3)
+    assert manifest['worker_count'] == 3
+    shards = [batch.assigned_sources(manifest, worker_count=3, worker_index=i) for i in range(3)]
+    ids = [{row['source_id'] for row in shard} for shard in shards]
+    assert sorted(map(len, shards)) == [3, 4, 4]
+    assert set.union(*ids) == {row['source_id'] for row in manifest['sources']}
+    assert not (ids[0] & ids[1] or ids[1] & ids[2] or ids[0] & ids[2])
+    assert [r['source_id'] for r in shards[0]] == ['S0', 'S3', 'S6', 'S9']
+    with pytest.raises(ValueError, match='worker'):
+        batch.assigned_sources(manifest, worker_count=2, worker_index=0)
+    with pytest.raises(ValueError, match='worker'):
+        batch.assigned_sources(manifest, worker_count=3, worker_index=3)
+    changed = copy.deepcopy(manifest)
+    changed['worker_count'] = 2
+    with pytest.raises(ValueError, match='manifest changed'):
+        batch.validate_manifest(changed)
+
+
+def test_three_worker_apply_keeps_progress_separate_and_never_rewrites_completed_sources(sample):
+    sample.manifest = batch.batch_manifest(sample.inventory, actor_id='editor', model='fake-model',
+                                           effort='high', worker_count=3)
+    before_sql = copy.deepcopy(sample.store.records)
+    summaries = [apply(sample, execute=executor, worker_count=3, worker_index=i) for i in range(3)]
+    assert sum(s['planned'] for s in summaries) == 2
+    assert sum(s['completed'] for s in summaries) == 2
+    assert sample.manager.calls == 2
+    paths = [sample.out / 'workers' / f'{i:03d}-of-003' / 'results.json' for i in range(3)]
+    assert all(p.is_file() for p in paths)
+    assert [json.loads(p.read_bytes())['worker_index'] for p in paths] == [0, 1, 2]
+    all_ids = [r['source_id'] for s in summaries for r in s['results']]
+    assert len(all_ids) == len(set(all_ids)) == 2
+    for i in range(3):
+        replay = apply(sample, execute=executor, worker_count=3, worker_index=i)
+        assert all(r['application'] == 'skipped' for r in replay['results'])
+    assert sample.manager.calls == 2
+    assert sample.store.records == before_sql

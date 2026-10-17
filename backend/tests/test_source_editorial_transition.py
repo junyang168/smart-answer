@@ -195,3 +195,38 @@ def test_saved_cvp_resume_accepts_only_source_metadata_without_model_or_packet_r
     assert flow.resume_reviewed_action(store, 'saved-cvp') == 'applied existing reviewed plan'
     assert store.retained == store.applied == 1
     assert document == original
+
+
+@pytest.mark.parametrize('duplicate_kind', ['body_body', 'comment_body'])
+@pytest.mark.parametrize('fault', [None, 'change_first', 'change_second', 'reorder', 'duplicate_heading', 'colliding_heading'])
+def test_repeated_original_ids_preserved_exactly_without_renumbering(sample, duplicate_kind, fault):
+    original, after, path, source, root = sample
+    original['script'][1]['index'] = original['script'][0]['index']
+    if duplicate_kind == 'comment_body':
+        original['script'][0]['type'] = 'comment'
+    after.clear()
+    after.update(copy.deepcopy(original))
+    after['script'].insert(0, {'index':'subtitle-new', 'type':'subtitle', 'text':'## 新標題'})
+    source['source_body_sha256'] = project_script(original['script']).body_sha256
+    path.write_bytes(encode(original))
+    source['source_file_sha256'] = transition.file_binding(path)['file_sha256']
+    if fault == 'change_first':
+        after['script'][1]['text'] += '篡改'
+    elif fault == 'change_second':
+        after['script'][2]['text'] += '篡改'
+    elif fault == 'reorder':
+        after['script'][1:] = reversed(after['script'][1:])
+    elif fault == 'duplicate_heading':
+        after['script'].append(copy.deepcopy(after['script'][0]))
+    elif fault == 'colliding_heading':
+        after['script'][0]['index'] = original['script'][0]['index']
+    if fault:
+        with pytest.raises((ValueError, RuntimeError)):
+            publish(sample)
+    else:
+        old_binding = transition.file_binding(path)
+        publish(sample)
+        path.write_bytes(encode(after))
+        assert transition.verify_current_source_binding(old_binding, root=root) == transition.file_binding(path)
+        assert [row for row in json.loads(path.read_bytes())['script']
+                if row.get('type') != 'subtitle'] == original['script']

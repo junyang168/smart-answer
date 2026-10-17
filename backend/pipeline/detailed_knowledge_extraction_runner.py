@@ -995,6 +995,7 @@ def _persist_generated_subtitles(
         )
     source_sha256 = hashlib.sha256(raw).hexdigest()
     segments = list(project_script(source.get("script")).body_rows)
+    all_indexes = [str(row.get("index")) for row in segments]
     if scope_end is not None:
         if scope_end <= 0 or scope_end > len(segments):
             raise SubtitlePersistenceError(
@@ -1005,9 +1006,12 @@ def _persist_generated_subtitles(
         {"index": segment.get("index"), "text": segment.get("text")}
         for segment in segments
     ]
+    original_indexes = [str(row.get("index")) for row in paragraphs]
+    positional_anchors = any(all_indexes.count(index) > 1 for index in original_indexes)
+    if positional_anchors:
+        paragraphs = [{**row, "index": f"body-ordinal-{position:06d}"}
+                      for position, row in enumerate(paragraphs, start=1)]
     indexes = [str(row.get("index")) for row in paragraphs]
-    if len(indexes) != len(set(indexes)):
-        raise SubtitlePersistenceError("sermon paragraph indexes are not unique")
 
     print(json.dumps({
         "phase": "subtitle_generation", "source": source_id,
@@ -1056,6 +1060,19 @@ def _persist_generated_subtitles(
             raise SubtitlePersistenceError(
                 f"{source_id}: subtitle plan opens an empty section after the generation scope"
             )
+
+    if positional_anchors:
+        # The model/cache address unique body coordinates; only the writer gets
+        # the original index plus its precise ordinal. Existing source IDs remain.
+        ordinal_by_index = {index: position for position, index in enumerate(indexes, start=1)}
+        insertions = [
+            dict(row) if str(row["after_index"]).upper() == "START" else {
+                **row,
+                "after_index": original_indexes[ordinal_by_index[str(row["after_index"])] - 1],
+                "after_body_ordinal": ordinal_by_index[str(row["after_index"])],
+            }
+            for row in insertions
+        ]
 
     audit_dir = (
         output_dir / "subtitle-applications" / _slug(source_id)
@@ -2582,9 +2599,10 @@ def run_one(
         )
     section_settings = sections or SectionSettings()
     projection = project_script(transcript.get("script"))
-    _assert_inline_source_readable(
-        transcript_id, projection, visual_source_attestations
-    )
+    if not subtitles_only:
+        _assert_inline_source_readable(
+            transcript_id, projection, visual_source_attestations
+        )
     leading_untitled_end = leading_untitled_body_end(
         projection.headings,
         len(projection.body_rows),
@@ -2602,6 +2620,16 @@ def run_one(
         raise SubtitlePersistenceError(
             "subtitle-only mode requires --write-back-generated-subtitles"
         )
+    if (
+        subtitles_only
+        and leading_untitled_end is not None
+        and projection.headings
+        and all(not str(row.get("text") or "").strip()
+                for row in projection.body_rows[:leading_untitled_end])
+    ):
+        # Blank physical rows carry coordinates but no teaching to title. Keep
+        # those rows and any prior dispatch record byte-for-byte unchanged.
+        return "skipped", transcript_path
     subtitles_persisted = False
     if leading_untitled_end is not None and not write_back_subtitles:
         raise SubtitlePersistenceError(

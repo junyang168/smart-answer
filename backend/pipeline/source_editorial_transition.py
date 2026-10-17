@@ -37,9 +37,12 @@ def _rows(payload):
     rows = payload.get('script') if isinstance(payload, dict) else payload
     if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
         raise ValueError('editorial proof requires transcript JSON rows')
-    indexes = [str(row.get('index')) for row in rows]
-    if any(row.get('index') is None for row in rows) or len(indexes) != len(set(indexes)):
-        raise ValueError('editorial proof requires unique physical row indexes')
+    # Existing editor IDs are provenance, not guaranteed unique. Never
+    # renumber them to add metadata: insertion_facts proves the full original
+    # sequence exactly, while verify_saved_result checks only NEW IDs for
+    # uniqueness and preserves all repeated original IDs and fields.
+    if any(row.get('index') is None for row in rows):
+        raise ValueError('editorial proof requires existing physical row indexes')
     return rows
 
 
@@ -79,11 +82,13 @@ def build_proof(*, source, before, after, authorization):
     """Build a sealed proof from frozen before/after file bindings.
 
     ``before`` may point to an immutable saved copy; ``source_path`` always
-    remains the registered logical source. The caller owns admission and save.
+    remains the logical source. ``source`` is an explicitly frozen descriptor,
+    either registered or file-only; this function never registers a source or
+    grants Claim/CVP authority. The caller owns admission and save.
     """
     if (source.get('source_type') != 'sermon_transcript'
             or source.get('locator_space') != 'spoken_body_v1'):
-        raise ValueError('editorial transition requires a registered body-coordinate transcript')
+        raise ValueError('editorial transition requires an explicit body-coordinate transcript descriptor')
     if not authorization or before['file_sha256'] != source.get('source_file_sha256'):
         raise ValueError('editorial transition lacks exact registered before generation/authority')
     facts = insertion_facts(_read(before), _read(after))

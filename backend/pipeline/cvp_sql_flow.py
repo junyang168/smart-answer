@@ -340,7 +340,7 @@ def reviewed_cvp_package(root, materials, store, *, require_resolved=False):
     models = adapters({"cvp_policy":materials["policy"]})
     check_binding(materials["policy"]); check_binding(materials["semantic_contract"])
     from backend.pipeline.source_editorial_transition import verify_current_source_binding
-    for source in materials["sources"]:verify_current_source_binding(source)
+    current_material_sources = [verify_current_source_binding(source) for source in materials["sources"]]
     from backend.pipeline.claim_issue_management import IssuesDetected,review_findings
     def identity_source_loader(source_ids):
         from backend.pipeline.viewpoint_evidence_source_context import load_context_source
@@ -352,10 +352,12 @@ def reviewed_cvp_package(root, materials, store, *, require_resolved=False):
             if not source:
                 raise ValueError('integration own source missing or retired')
             path,physical_sha,projection=load_context_source(source)
-            if {'path':str(path),'file_sha256':physical_sha} not in materials['sources']:
+            if {'path':str(path),'file_sha256':physical_sha} not in current_material_sources:
                 raise ValueError('integration source is outside prepared physical source bindings')
             result.append({'source_id':sid,'source_type':source['source_type'],
-                'source_path':str(path),'source_file_sha256':physical_sha,
+                # Paragraph-only model input keeps registered provenance; live
+                # physical bindings stay in current_material_sources outside it.
+                'source_path':str(path),'source_file_sha256':source['source_file_sha256'],
                 'source_body_sha256':projection.body_sha256,
                 'paragraph_texts':[r['text'] for r in projection.spoken_rows]})
         return result

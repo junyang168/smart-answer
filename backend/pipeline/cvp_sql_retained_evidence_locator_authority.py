@@ -58,7 +58,9 @@ def physical(source):
     from backend.pipeline.knowledge_source import markdown_source_document
     from backend.pipeline.source_contract_cleanup import build_projection
     from backend.pipeline.source_editorial_transition import verify_current_source_binding
-    b=verify_current_source_binding({'path':source['source_path'],'file_sha256':source['source_file_sha256']})
+    b={'path':source['source_path'],'file_sha256':source['source_file_sha256']}
+    # These bindings describe original review provenance, not the live file.
+    verify_current_source_binding(b)
     if source['source_type']=='notes_manuscript':payload=markdown_source_document(source)[0]
     else:
         require(source['source_type']=='sermon_transcript','unknown source type')

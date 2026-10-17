@@ -2,6 +2,10 @@
 
 This adds no EvidenceStep/Claim/Registry records or citation authority. It
 retains the original quote and resolves its context from the registered source.
+The paragraph artifact retains its registered physical-generation SHA, resolved
+through an exact subtitle-only proof when necessary. The loader separately
+returns the actual live file SHA for I/O/provenance gates. Editorial headings
+therefore cannot change the paragraph-only model packet or its cache identity.
 """
 from __future__ import annotations
 
@@ -54,7 +58,7 @@ def compile_source_context(evidence, source, loaded=None):
     key = str(evidence.paragraph_key or "")
     if not re.fullmatch(r"S[0-9]{4,}", key):
         raise ValueError("source context requires an exact body paragraph key")
-    path, file_sha, projection = loaded or load_context_source(source)
+    path, _live_file_sha, projection = loaded or load_context_source(source)
     index = int(key[1:]) - 1
     if not 0 <= index < len(projection.spoken_rows):
         raise ValueError("context paragraph is outside registered source")
@@ -68,7 +72,7 @@ def compile_source_context(evidence, source, loaded=None):
     # the entire paragraph and all original evidence/fragment identities.
     start = text.index(quote)
     return EvidenceSourceContext(source_id=evidence.source_id, source_path=str(path),
-        source_file_sha256=file_sha, source_body_sha256=projection.body_sha256,
+        source_file_sha256=source["source_file_sha256"], source_body_sha256=projection.body_sha256,
         paragraph_key=key, paragraph_text=text,
         paragraph_text_sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
         excerpt_start_char=start, excerpt_end_char=start + len(quote))
@@ -86,6 +90,8 @@ def attach_source_context(claim, source, loaded=None):
 
 
 def verify_source_context(evidence, source, loaded=None):
+    # Keep live physical provenance outside the stable paragraph artifact.
+    loaded = loaded or (None if evidence.source_modality == "visual" else load_context_source(source))
     actual = compile_source_context(evidence, source, loaded)
     saved = evidence.source_context
     if actual == saved:
@@ -101,6 +107,6 @@ def verify_source_context(evidence, source, loaded=None):
                 k:v for k,v in new.items() if k != 'source_file_sha256'}:
             bound = verify_current_source_binding({"path": saved.source_path,
                 "file_sha256": saved.source_file_sha256})
-            if bound["file_sha256"] == actual.source_file_sha256:
+            if loaded is not None and bound["file_sha256"] == loaded[1]:
                 return
     raise ValueError("packet context differs from registered physical paragraph")

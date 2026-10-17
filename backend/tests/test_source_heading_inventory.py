@@ -272,3 +272,117 @@ def test_ambiguous_registry_transcript_alias_is_not_guessed(tmp_path):
     assert result["ready_for_generation"] is False
     assert result["sources"][0]["candidate_source_ids"] == ["A", "B"]
     assert len(result["blocking_issues"]) == 1
+
+
+def test_all_transcripts_includes_unregistered_and_uses_published_first(tmp_path):
+    from backend.pipeline.source_heading_inventory import build_transcript_heading_inventory
+    store = Store()
+    source(store, tmp_path, "priority")
+    source(store, tmp_path, "already", headings=True)
+    # Source SQL membership is deliberately absent for these authoritative files.
+    for stage, ident, text in [("script_published", "new", "已發布。"),
+                               ("script_review", "new", "舊審校。"),
+                               ("script_review", "review-only", "審校。")]:
+        path = tmp_path / stage / (ident + ".json")
+        path.parent.mkdir(exist_ok=True)
+        rows = [{"index": "p1", "text": text}]
+        path.write_text(json.dumps(rows if stage == "script_review" else {"script": rows}, ensure_ascii=False))
+    store.add("claims", "C", {"claim_id": "C", "statement": "人子",
+        "occurrences": [{"source_id": "priority"}]})
+    before = deepcopy(store.rows)
+    result = build_transcript_heading_inventory(store, tmp_path)
+    assert result["total_authoritative_transcripts"] == 4
+    assert result["registered_transcripts"] == 2
+    assert result["unregistered_transcripts"] == 2
+    assert [row["transcript_id"] for row in result["generation_plan"]] == ["priority", "new", "review-only"]
+    new = next(row for row in result["sources"] if row["transcript_id"] == "new")
+    assert new["path"] == str(tmp_path / "script_published" / "new.json")
+    assert new["source_pin"] is None
+    assert new["source_id"] == "transcript-file:new"
+    assert new["source"]["metadata_origin"] == "authoritative_transcript_file"
+    assert new["source"]["locator_space"] == "spoken_body_v1"
+    assert new["existing_row_indexes"] == ["p1"]
+    assert result["ready_for_generation"]
+    assert store.rows == before
+    assert result == build_transcript_heading_inventory(store, tmp_path)
+
+
+def test_all_transcripts_rejects_registration_drift_and_discloses_duplicate_rows(tmp_path):
+    from backend.pipeline.source_heading_inventory import build_transcript_heading_inventory
+    store = Store()
+    path = source(store, tmp_path, "stale")
+    path.write_text(path.read_text().replace("原話", "變更"))
+    bad = tmp_path / "script_review" / "duplicate.json"
+    bad.parent.mkdir()
+    bad.write_text(json.dumps([{"index": "p1", "text": "一"}, {"index": "p1", "text": "二"}]))
+    result = build_transcript_heading_inventory(store, tmp_path)
+    assert not result["ready_for_generation"]
+    assert [row["transcript_id"] for row in result["generation_plan"]] == ["duplicate"]
+    assert result["generation_plan"][0]["duplicate_existing_row_indexes"] == ["p1"]
+    assert result["generation_plan"][0]["insertion_locator_mode"] == "physical_position"
+    assert len(result["blocking_issues"]) == 1
+    assert "registered_source_body_sha_mismatch" in next(
+        row["reason"] for row in result["sources"] if row["transcript_id"] == "stale")
+
+
+def test_all_transcripts_detects_multiple_registered_candidates(tmp_path):
+    from backend.pipeline.source_heading_inventory import build_transcript_heading_inventory
+    store = Store()
+    path = source(store, tmp_path, "T")
+    doc = deepcopy(store.rows["source_documents", "T"]["payload"])
+    doc["source_id"] = "other"
+    store.add("source_documents", "other", doc)
+    result = build_transcript_heading_inventory(store, tmp_path)
+    assert not result["ready_for_generation"]
+    assert result["sources"][0]["candidate_source_ids"] == ["T", "other"]
+    assert "ambiguous_registered_transcript_source" in result["sources"][0]["reason"]
+
+
+def test_fully_titled_registration_path_discrepancy_does_not_block_other_files(tmp_path):
+    from backend.pipeline.source_heading_inventory import build_transcript_heading_inventory
+    store = Store()
+    reviewed = source(store, tmp_path, "titled", stage="script_review", headings=True)
+    published = tmp_path / "script_published" / reviewed.name
+    published.parent.mkdir()
+    published.write_bytes(reviewed.read_bytes())
+    path = tmp_path / "script_published" / "new.json"
+    path.write_text(json.dumps({"script": [{"index": 1, "text": "原文"}]}))
+    result = build_transcript_heading_inventory(store, tmp_path)
+    assert result["inventory_mode"] == "all_transcripts"
+    assert result["ready_for_generation"]
+    assert result["generation_blocking_issues"] == []
+    assert len(result["issues"]) == 1
+    assert result["issues"][0]["generation_blocking"] is False
+    titled = next(row for row in result["sources"] if row["transcript_id"] == "titled")
+    assert titled["status"] == "has_headings"
+    assert "registered_path_is_not_authoritative" in titled["registration_discrepancy"]
+    assert [row["transcript_id"] for row in result["generation_plan"]] == ["new"]
+
+
+def test_all_transcripts_blank_prefix_is_metadata_only_noop(tmp_path):
+    from backend.pipeline.source_heading_inventory import build_transcript_heading_inventory
+    store = Store()
+    path = tmp_path / "script_published" / "titled.json"
+    path.parent.mkdir()
+    rows = [{"index": "blank", "text": " \n\t　"},
+            {"index": "subtitle-1", "type": "subtitle", "text": "## 主題"},
+            {"index": "body", "text": "教授原話。"}]
+    path.write_text(json.dumps({"script": rows}, ensure_ascii=False))
+    raw_before = path.read_bytes()
+    result = build_transcript_heading_inventory(store, tmp_path)
+    assert result["ready_for_generation"]
+    assert result["generation_plan"] == []
+    row = result["sources"][0]
+    assert row["status"] == "has_headings"
+    assert row["ignored_blank_prefix"] == 1
+    assert row["scope_end"] is None
+    assert row["body_paragraphs"] == 2
+    assert row["existing_row_indexes"] == ["blank", "subtitle-1", "body"]
+    assert row["source_body_sha256"] == project_script(rows).body_sha256
+    assert path.read_bytes() == raw_before
+    # Real text, even one character, still requires a heading.
+    rows[0]["text"] = "啊"
+    path.write_text(json.dumps({"script": rows}, ensure_ascii=False))
+    second = build_transcript_heading_inventory(store, tmp_path)
+    assert second["sources"][0]["status"] == "untitled_prefix"
+    assert len(second["generation_plan"]) == 1
