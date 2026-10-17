@@ -895,3 +895,13 @@ Restore 单元完成 GPT一次、Opus一次、共同事务及程序回读，7项
 首次当前资格汇总发现 P04-CL008 的旧广范围证明因关系变化失效。该目标不在新单元的33条记录中，未由新单元的只读邻居自动保留分支接纳；随后调用现有显式上下文复用入口，逐字段验证旧主张、论据、原写项及原范围未变、两项变化已被本次当前完整审阅覆盖，登记 v4 证明，模型调用为0。未修改原答、旧内容、人工决定或旧完成记录，未重新审阅同一 Claim。
 
 最终独立回读比较666条记录、核对实际 ChangeSet 两条操作及准确字段／版本、原文文件和两端当前资格；原51项有效资格全部保留，无新增损失。Claim 和 CVP 后像未变，wording／method 的原人工疑点和暂停仍保留。准确材料见 `claim-management-435/automatic-open-items-20261016-v1/relations/verification.json`、`old-qualification-reuse-check.json` 与两轮原模型／事务／回读证明；完成只指本次两条关系维护，不代表其余人子异议均已解决。
+
+## 2026-10-16 CVP 接收已替代的旧 AI 抽查标记
+
+负责人指出旧 AI 人工抽查应被忽略。复查确认 Claim Management 已有精确规则，DK-90777c7a0794-P01-CL003 与 DK-defb58f4bb75-P04-CL008 的当前资格均明确返回 legacy_ai_spot_check_replaced_by_current_review=true；CVP current_claim_authority 却在读取该资格前按 human_review_required 一律拒收。此前「49条可接收、2条需交接」是这个真实入口缺口，不是两条内容需要重新人工审核。
+
+共同入口现先保护真实 hold／退役，再验证当前 revision 与内容 SHA 的资格；对原 human_review_required 状态仅消费资格服务明确给出的替代标记。不扩大旧抽查识别规则，不清除原状态和历史，不给任何真实人工决定、来源疑点、过期或失败证明放行，也不回退历史 pass。变更只有一个入口的判断顺序及精确标记检查，无 Claim ID 例外。
+
+相关 CVP 资格／历史准入／SQL 执行边界及 Claim 旧抽查测试 **122 passed、45 skipped**；跳过项未宣称执行。反例覆盖7种真实数据库的旧抽查／人工／来源疑点条件及资格缺失、过期、失败、无替代标记、字符串伪标记和真实 hold／退役，旧只读审核／写入保护保持。实际零模型复查，51条当前 Claim 全部通过共同资格入口；两条另走完整 prepare_group 的证据、来源和当前 Registry 取包路径，分别耗时0.722、0.681秒，原 Claim 状态及后像逐字段不变。其语义 packet JSON 分别535278、536221 bytes，这不是实际模型请求字节数，未执行请求上限／实际分组 dry-run 或任何内容生成。模型调用、数据库写入及备份均为0。
+
+只读材料位于 `claim-management-435/cvp-qualification-bridge-20261016-v1/verification.json`；旧拒收检查 `cvp-entry-readonly-20261016-v1.json` 保留不改。文档检查仍仅有另一项目的既有附录锚点失败，git diff --check通过。此验证只证明资格交接和这两条取包，不代表 CVP 已生成或整批已完成。

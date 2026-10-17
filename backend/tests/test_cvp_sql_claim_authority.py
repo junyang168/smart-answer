@@ -149,6 +149,33 @@ def test_real_hold_never_uses_coordinate_history(authority_case):
     assert not s.calls
 
 
+@pytest.mark.parametrize('fault', [None, 'no_proof', 'not_ready', 'stale_revision', 'stale_sha', 'missing_marker',
+                                 'false_marker', 'string_marker', 'human_hold', 'withheld', 'rejected', 'superseded', 'retired'])
+def test_legacy_sampling_requires_exact_current_qualification_and_explicit_replacement(authority_case, fault):
+    s, _, _ = authority_case
+    s.row['payload']['review_status'] = 'human_review_required'
+    q = {'ready': True, 'revision': s.row['revision'], 'content_sha256': s.row['content_sha256'],
+         'legacy_ai_spot_check_replaced_by_current_review': True, 'audit': {'file_sha256': 'a'*64}}
+    if fault == 'no_proof': q = None
+    elif fault == 'not_ready': q['ready'] = False
+    elif fault == 'stale_revision': q['revision'] -= 1
+    elif fault == 'stale_sha': q['content_sha256'] = 'b'*64
+    elif fault == 'missing_marker': q.pop('legacy_ai_spot_check_replaced_by_current_review')
+    elif fault == 'false_marker': q['legacy_ai_spot_check_replaced_by_current_review'] = False
+    elif fault == 'string_marker': q['legacy_ai_spot_check_replaced_by_current_review'] = 'true'
+    elif fault == 'retired': s.row['retired'] = True
+    elif fault in {'human_hold', 'rejected', 'superseded'}: s.row['payload']['review_status'] = fault
+    elif fault == 'withheld': s.row['payload']['review_status'] = 'withheld_unreviewed'
+    s.claim_management_qualification = lambda cid: q
+    before = deepcopy(s.row)
+    if fault is None:
+        result = current_claim_authority(s, 'CL-test', s.row)
+        assert result['qualification'] == q
+    else:
+        with pytest.raises(ValueError): current_claim_authority(s, 'CL-test', s.row)
+    assert s.row == before and not s.calls
+
+
 def test_sermon_json_locator_step_uses_actual_body_projection(authority_case,tmp_path):
     s,path,source_path=authority_case
     source=json.loads(path.read_text())['source']

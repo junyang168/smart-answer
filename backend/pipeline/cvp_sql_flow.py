@@ -156,7 +156,7 @@ def decoded_pins(rows):
 def current_claim_authority(store, cid, row):
     """Consume an actual revision-bound SQL review, not an inherited pass bit."""
     claim = row["payload"]
-    if row.get("retired") or claim.get("review_status") in {"human_hold","human_review_required","withheld_unreviewed","rejected","superseded"}:
+    if row.get("retired") or claim.get("review_status") in {"human_hold","withheld_unreviewed","rejected","superseded"}:
         raise ValueError("current Claim held or not reviewed: " + cid)
     qualification = store.claim_management_qualification(cid)
     if qualification is not None:
@@ -164,9 +164,14 @@ def current_claim_authority(store, cid, row):
                 or [qualification.get('revision'), qualification.get('content_sha256')]
                    != [row['revision'], row['content_sha256']]):
             raise ValueError('current Claim requires exact independent qualification: ' + cid)
+        if (claim.get('review_status') == 'human_review_required'
+                and qualification.get('legacy_ai_spot_check_replaced_by_current_review') is not True):
+            raise ValueError('current Claim held or not reviewed: ' + cid)
         return {'claim_id': cid, 'revision': row['revision'], 'content_sha256': row['content_sha256'],
                 'qualification': qualification, 'reviewer_kind': 'ai',
                 'decision': 'independent_current_qualified', 'review_artifact_sha256': qualification['audit']['file_sha256']}
+    if claim.get('review_status') == 'human_review_required':
+        raise ValueError('current Claim held or not reviewed: ' + cid)
     with store.connect() as conn:
         events = conn.execute("""SELECT review_event_id,reviewer_kind,decision,artifact
                                  FROM wang_knowledge.review_events

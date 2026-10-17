@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from backend.pipeline import claim_management as cm
 from backend.pipeline.cvp_sql_actions import execute_claim_management
-from backend.pipeline.cvp_sql_flow import binding
+from backend.pipeline.cvp_sql_flow import binding, current_claim_authority
 from backend.tests.test_claim_management_postgres import action,postgres_store,_temporary_postgres
 from backend.tests.test_claim_management_execution_postgres import seed_claims,operation_request,SyntheticPorts
 from backend.tests.test_claim_management_human_source_follow_up import authorize
@@ -36,6 +36,12 @@ def test_only_fresh_explicit_review_replaces_exact_legacy_ai_sampling_marker(act
     assert bool(qualification and qualification.get('ready')) == (fault is None)
     if fault is None:
         assert qualification['legacy_ai_spot_check_replaced_by_current_review']
+        authority = current_claim_authority(store, 'C', store.get_record_state('claims', 'C'))
+        assert authority['qualification'] == qualification
+        assert authority['decision'] == 'independent_current_qualified'
+    else:
+        with pytest.raises(ValueError):
+            current_claim_authority(store, 'C', store.get_record_state('claims', 'C'))
     assert store.get_record_state('claims','C')==before
     # Read-only review does not grant permission to edit the held payload.
     candidate=cm.existing_candidate({'claims/C':cm.model_state(before)})

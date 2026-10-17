@@ -366,6 +366,8 @@ GPT 对每个未决 finding 返回恰好一个有原文引用的 `finding_resolu
 
 旧 AI 迁移产生的 `human_spot_check` 不是内容异议。只有当前版本对应的 AI 迁移事件明确记录独立复审 pass、抽查待办且不含人工批准，并且历史没有真人决定时，新的明确目标完整 Update 审阅及当前回读才可建立 2.0 资格。保留原状态和事件，在资格结果披露旧 AI 抽查已被本次审阅取代；不授予历史资格或写入豁免。来源疑点、实质分歧、真人决定、错版本及普通 human hold 均不适用。
 
+CVP 的共同当前资格入口须消费这项精确证明：先保护真实 hold／退役，再核当前版本的 Claim Management 资格；原状态为 human_review_required 时，仅接受明确的 legacy_ai_spot_check_replaced_by_current_review=true。没有资格、资格不通过／过期或缺少替代证明仍拒绝，不能退回旧 pass。此处不清除原状态或 review event，也不增加一次模型审核。
+
 ## 9 人工核实与来源修订
 
 ### 9.1 人工核实的返回
