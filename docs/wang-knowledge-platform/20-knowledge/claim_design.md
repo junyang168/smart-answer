@@ -48,7 +48,7 @@
 erDiagram
     SOURCE_FRAGMENT }o--|| SOURCE_DOCUMENT : "锚定到"
     SOURCE_FRAGMENT ||--o{ CLAIM_OCCURRENCE : "锚定"
-    CLAIM ||--o{ CLAIM_OCCURRENCE : "在各篇的出现"
+    CLAIM ||--o{ CLAIM_OCCURRENCE : "在本篇的出现"
     CLAIM ||--o{ EVIDENCE_STEP : "推论步骤"
     CLAIM ||--o{ CLAIM_RELATION : "与别的主张相连"
     CLAIM_RELATION }o--|| POSITION_NODE : "或指向反方立场"
@@ -69,13 +69,15 @@ erDiagram
 | **反方立场** | 教授引用、质疑或驳斥的**别人的**观点。必须独立成节点，不能混进他自己的主张 | `position_nodes` |
 | **观点连接** | 把这条 Claim 挂到某个跨讲道观点上 | `viewpoint_claim_links` |
 
-**为什么「出现」是 Claim 的一部分，而不是另一张表**：同一个判断在不同讲道里讲过，仍然是同一条 Claim；每次讲到就多一个 occurrence。这样「他讲过几次、在哪几篇」是这条记录自己就能回答的问题。
+**为什么「出现」是 Claim 的一部分，而不是另一张表**：同一个判断在同一篇里反复讲到，每次讲到就多一个 occurrence。不同讲道里的同一看法分别记录为 Claim，由观点层关联。历史跨来源记录保留其实际形态，迁移须明确授权及替代映射，不因规范澄清自动改动存量。
 
 ## 3. Claim 怎样产生
 
 本节保留原 extraction 流程；已有 Claim／Evidence 的 Management 2.0 多轮修订与独立终审目标见 [主控设计](./claim_cvp_management_2_design.md)。目标尚未启用，不追认旧审核、不重开旧预算；Claim 清理与 CVP 生成／维护是两个管理域。
 
 这是 [Solution Architecture D4](../00-overview/solution_architecture.md#d4最小化人工提议--复核--仲裁--转人工)「提议 → 复核 → 仲裁 → 转人工」在 Claim 这一层的落地。
+
+本节下图及字段快照描述旧抽取与治理形态，不表示 Claim Management 2.0 已启用。新获准 action 的 operations、既有 Claim 入口、多轮修正、独立终审及当前可用资格以 [Claim Management 2.0 operations 与生命周期设计](./claim_management_2_design.md) 为目标契约。Review 是审阅，Verify 是其中的核实，Cleanup 属于 Update；旧一轮回答和预算保持原样。
 
 ```mermaid
 flowchart TD
@@ -171,6 +173,8 @@ flowchart TD
 | 问答 | 答案的每一节列出所依据的 `claim_ids`；直接回答只能用回答类，背景说明才可以用上下文类 |
 
 三者都**只读**已批准的部分，且都要能顺着 `occurrences[].anchors` 回到教授原话。
+
+新的 [Claim Management 2.0 operations 与生命周期设计](./claim_management_2_design.md#10-审核有效性与下游交接) 启用后，当前使用还须核验审核对精确内容、来源、依赖和用途仍然有效；`review_status` 记录结论，`maturity` 记录治理／出版阶段，均不单独代替这项核验。原审核保留真实身份与范围，新流程上线本身不使其失效。
 
 ## 8. 不变量
 

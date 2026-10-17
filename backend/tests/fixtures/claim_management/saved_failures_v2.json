@@ -1,0 +1,127 @@
+{
+  "schema_version": "claim_management_saved_failure_tests.v2",
+  "production_approval": false,
+  "cases": [
+    {
+      "category": "shared_owners_and_permission",
+      "root": "execution/CVPG-4c6083d8d5036f316dd620945c37974f4d6b3daf128752776490dec2b2f21cd4/claim-issues/90279628408c1c38f142b72f7e53419bc216fbf8d0594f6989d686b3a2fae951/action/CVPA-aee8d874759e1887d164d7e9ec7836c3ec2f559fcfa9cbf4499bd71853f8468c",
+      "stage": "initial_review",
+      "rejected_keys": [
+        "claims/DK-78f4b0b8eb95-P03-CL002",
+        "claims/DK-78f4b0b8eb95-P03-CL008",
+        "claim_relations/DK-78f4b0b8eb95-P03-CR005",
+        "evidence_steps/DK-78f4b0b8eb95-P03-E004",
+        "knowledge_relations/DK-78f4b0b8eb95-P03-ER003"
+      ],
+      "bindings": {
+        "scoped-materials.json": "4e9cbd7dba8a0fd1342db7dc3ebddebe713f85541961df2545b8b10dcefd62d7",
+        "initial_review.raw.json": "83f8409bbe90630b02f862562656f460222a72af3a0bda2667846544578c46f6",
+        "initial_review.packet.json": "72a9ed1fcc0734e56afa6f5d1e5ff7c3ac788e4290d9f38448be4cbe7c3df98f",
+        "initial_review.reservation.json": "59957db922a248c5f1156a6bdd29bf91610dc4913f69a0368adcbf1cb41e09bc"
+      }
+    },
+    {
+      "category": "claim_omission",
+      "root": "execution/CVPG-521c60c1fdc0b9fb1fe5e9704781ee845fbe9edc587efbcfd6e2d8acd4f65bad/claim-issues/e42884673494cf441996c92efab947c61dbd7090fa8e812dd6ec6765e5095000/action/CVPA-47abb6ef1c83c1205fae32fc647db99eba25aed41c574ddd20fe8fca68f21fd4",
+      "stage": "initial_review",
+      "rejected_keys": [
+        "claims/DK-ba93f16fc6c6-P05-CL005",
+        "questions/DK-ba93f16fc6c6-P05-Q004",
+        "viewpoint_claim_links/VCL-21db8d38089d44e1f39c",
+        "canonical_viewpoints/CV-53113a3fcef88a50b242",
+        "viewpoint_revisions/CVR-9784766b2fdddea33dbb"
+      ],
+      "bindings": {
+        "scoped-materials.json": "f0f2f3cf9b78f36ab479d1066ea8202d130e4f551869b42b2e58a89a4ed93886",
+        "initial_review.raw.json": "b178d277cb13d5cb80f826787884ae1992e5ec1b90d1b631358ba7a1457369ce",
+        "initial_review.packet.json": "74e5b550dbec96e28b10aa52aa2aa430062d23fb3bd8e5618ebe994203cd93de",
+        "initial_review.reservation.json": "f445c881adfe8b26fef6d1a6f87fbd75eca3e75986098ca7b79698c0ed63b50c"
+      }
+    },
+    {
+      "category": "source_uncertainty",
+      "root": "execution/CVPG-54aa85ab845ff2d1539132d522bf23971678e6de928bc8353d88533caa310f8d/claim-issues/613fef97e1784d45c2ae569091b4f722a2ed8d757108332f4d87e6037b699643/action/CVPA-027cac6eace2b63734fac335dd0e46f32cdc229424d9ae2a7ec57347f40e4851",
+      "stage": "initial_review",
+      "rejected_keys": [
+        "claims/DK-f1e2d4fa6bd5-P05-CL011",
+        "knowledge_relations/DK-f1e2d4fa6bd5-P05-ER030"
+      ],
+      "bindings": {
+        "scoped-materials.json": "05fb6db998225d58d6a1a6f99a8c0c498cefafcdf45c3e57b13f681e856f50b6",
+        "initial_review.raw.json": "cfece5bdc460b137ab535b09b2eda8339a5894597346bd05837cfa0c0db57852",
+        "initial_review.packet.json": "e364b66c02de1156ee5fe5be13aab34313c1bd54592124d370120e5780310076",
+        "initial_review.reservation.json": "efefa826a5c8e5b1282f306372b0af2509e6996970b0f89af8904b73f9eef696"
+      }
+    },
+    {
+      "category": "empty_candidate_and_opposed_position",
+      "root": "execution/CVPG-5baf4616c077c3c118f2f36dc6254f84351ecca3d2c98d7114bf16e13e7def8f/claim-issues/eaececc27b862e2a2f0b72790ba47eb3b546aa44b759ac0533a62dd8c0dcb2e6/action/CVPA-7125653d81ab8fc2b1957ce9cd1d97bd73ee370054298c7226833f6925709269",
+      "stage": "initial_review",
+      "rejected_keys": [
+        "claims/DK-78f4b0b8eb95-P03-CL006",
+        "evidence_steps/DK-78f4b0b8eb95-P03-E015",
+        "viewpoint_claim_links/VCL-e4b3b7d872601e310bd8",
+        "viewpoint_claim_links/VCL-fe748b83e26578e254be"
+      ],
+      "bindings": {
+        "scoped-materials.json": "356268a633ecfa41c284031cf7887815712aa555886c923689e15746b1a6da2f",
+        "initial_review.raw.json": "73b3eb6d9d440d6ba6bee572387aaf0490e8e9a3a8c59e0c537a6ff92644022f",
+        "initial_review.packet.json": "8b6917f82c0bfa1f62feeab39d2ff92cae7ba07cfbaf5b6180f391b48eda1d5f",
+        "initial_review.reservation.json": "977f27928a67aab23ebb2436480db9830ffc3a03b57b8d2f76b71c425a7540f7"
+      }
+    },
+    {
+      "category": "complete_source_and_evidence_scope",
+      "root": "execution/CVPG-b0324087577d73360f4077b8d65438c7d777d27fda381f70913a8e1a367b0913/claim-issues/b602c0de91e6eacfd1721a94d69b282d1d071dc4deab3d2a155f42c8602ddfe2/action/CVPA-3960a4e429aa7ab1fb9fb7b726929810f2a5e1a92a9a2192467eace33a656afd",
+      "stage": "initial_review",
+      "rejected_keys": [
+        "claims/DK-07c73c44dc11-P04-CL007",
+        "claims/DK-72483dc200ad-CL002",
+        "evidence_steps/DK-07c73c44dc11-P04-E024",
+        "evidence_steps/EV-MEDIA-4a718adefcb5",
+        "knowledge_routes/ROUTE-78a6d9404481",
+        "viewpoint_claim_links/VCL-5587014298b1e0772c03",
+        "source_fragments/FR-CI-002711f8509e-S0017-01",
+        "source_fragments/FR-CI-002711f8509e-S0010-01"
+      ],
+      "bindings": {
+        "scoped-materials.json": "d80d3bef2b639d8e4ee8b0788be9614e43156d3a7ebafd938226c7ea8d0dd5d0",
+        "initial_review.raw.json": "1559b225a5b8ad5429938a3a0b00aa8b8958068510e577d638626b61a965b6c1",
+        "initial_review.packet.json": "3d1851566008f356a7957e91ca05879d9f2f49de416a272cb96fb39870994863",
+        "initial_review.reservation.json": "7a60d78ffc7da79856e5b34245668f07629a254ed034527f822ebd1348d44395"
+      }
+    },
+    {
+      "category": "mechanical_hash_and_context_only",
+      "root": "execution/CVPG-f8f205c0e5f4b9f9cecd6c9a114c36d7a62c51e49d8885e9fdbf69c20115a086/claim-issues/02b8bfb6df97c6c08a49b71e6414d7f2673ab8ff3e5701bcf8984cfc12abc71e/action/CVPA-4b297183c26ed40bea6a45197f7ed45acd15238aba4ffd583dd095a1ebc3f0ca",
+      "stage": "final_review",
+      "rejected_keys": [
+        "claims/DK-07c73c44dc11-P01-CL007",
+        "evidence_steps/DK-07c73c44dc11-P01-E023",
+        "source_fragments/FR-CI-1f36dbbe834d2a98-S0003-01"
+      ],
+      "bindings": {
+        "scoped-materials.json": "4367703fe73118ed5341256ba5253a62989fcae85b91466d102673522347aacf",
+        "final_review.raw.json": "ed92d1d77482c02226f9dd5f7f8cd56e7f4c329bb8e8e7bd52b015c4f49f1f40",
+        "final_review.packet.json": "1cefc52e28b2c8f3134d3ad6e828f11fb3c3d837cd7cf2b88dc2511039edd511",
+        "final_review.reservation.json": "420e49d736ae722d855a53122265d0ce575f06631548447b99564632094fac40"
+      }
+    },
+    {
+      "category": "mechanical_hash_and_context_only",
+      "root": "execution/CVPG-f8f205c0e5f4b9f9cecd6c9a114c36d7a62c51e49d8885e9fdbf69c20115a086/claim-issues/02b8bfb6df97c6c08a49b71e6414d7f2673ab8ff3e5701bcf8984cfc12abc71e/action/CVPA-4b297183c26ed40bea6a45197f7ed45acd15238aba4ffd583dd095a1ebc3f0ca",
+      "stage": "initial_review",
+      "rejected_keys": [
+        "claims/DK-07c73c44dc11-P01-CL007",
+        "evidence_steps/DK-07c73c44dc11-P01-E023",
+        "source_fragments/FR-CI-1f36dbbe834d2a98-S0003-01"
+      ],
+      "bindings": {
+        "scoped-materials.json": "4367703fe73118ed5341256ba5253a62989fcae85b91466d102673522347aacf",
+        "initial_review.raw.json": "d44dae5c02166e1e269cc982efdab379d00fcd57cef85fbf50ea64e60b99873d",
+        "initial_review.packet.json": "737e3ab9167dd320db64c8ceb4641d006b58f3990a12c3d231dfd347ce636fa8",
+        "initial_review.reservation.json": "6fbe5f5fb509893c68541529cc43717e05d4992ccd416a1102eabcb59bf10d44"
+      }
+    }
+  ]
+}

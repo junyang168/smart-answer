@@ -1,4 +1,4 @@
-"""Owner-authorized #357 snapshots on Jun SSD, preserving old proof paths."""
+"""#357 SSD snapshots and reading of the already saved #435 archive."""
 from __future__ import annotations
 import argparse
 import fcntl
@@ -28,6 +28,15 @@ SCOPE='357-owner-backup-scope.json'
 def foreign_ticket(value):
     # Hashes may contain 358; only a delimited ticket token denotes #358.
     return re.search(r'(?:^|[-/])358(?:[-/]|$)', str(value)) is not None
+
+
+def backup_ticket(label):
+    tickets = [ticket for ticket in ('357', '435') if re.search(r'(?:^|-)'+ticket+r'(?:-|$)', label)]
+    return tickets[0] if len(tickets) == 1 and not foreign_ticket(label) else None
+
+
+def archive_destination(ticket):
+    return DEST if ticket == '357' else DEST.parent / '435'
 
 
 def authorize_backup(path, proof):
@@ -81,7 +90,7 @@ def eligible(path):
     p=Path(path).absolute()
     return (p.name==NAME and p.parent.parent==LOCAL and p.parent.name.startswith('registry-backup-')
         and not foreign_ticket(p.parent.name)
-        and (re.search(r'(?:^|-)357(?:-|$)',p.parent.name) is not None or explicit_scope(p)))
+        and (backup_ticket(p.parent.name) is not None or explicit_scope(p)))
 
 
 def create_backup(label, database_url):
@@ -124,9 +133,10 @@ def logical_binding_path(path):
     r=json.loads(receipt.read_text())
     if r.get('artifact_sha256')!=sha256_json({k:v for k,v in r.items() if k!='artifact_sha256'}):
         raise ValueError('backup archive receipt SHA drift')
-    expected=DEST/p.parent.name/NAME
+    ticket = backup_ticket(p.parent.name) or '357'
+    expected=archive_destination(ticket)/p.parent.name/NAME
     if (r.get('original_path')!=str(p) or r.get('archive_path')!=str(expected)
-            or r.get('volume_uuid')!=UUID or r.get('task')!='#357'
+            or r.get('volume_uuid')!=UUID or r.get('task')!='#'+ticket
             or r.get('status')!='copied_sha_and_restore_catalog_verified'
             or p.resolve()!=expected or not expected.is_file()):
         raise ValueError('backup archive exact path/identity drift or disk missing')
@@ -144,7 +154,8 @@ def catalog(path):
 
 def migrate_one(p):
     p=Path(p).absolute()
-    if not eligible(p) or p.parent.is_symlink() or p.is_symlink() or not p.is_file():raise ValueError('outside exact #357 regular backup scope')
+    if (not eligible(p) or backup_ticket(p.parent.name) == '435'
+            or p.parent.is_symlink() or p.is_symlink() or not p.is_file()):raise ValueError('outside exact #357 regular backup scope')
     verify_volume()
     before=p.stat();sha=digest(p)
     target=DEST/p.parent.name/NAME
@@ -185,7 +196,7 @@ def migrate_one(p):
 
 
 def inventory():
-    paths=[p for p in LOCAL.glob('registry-backup-*/'+NAME) if eligible(p) and p.is_file() and not p.is_symlink()]
+    paths=[p for p in LOCAL.glob('registry-backup-*/'+NAME) if eligible(p) and backup_ticket(p.parent.name) != '435' and p.is_file() and not p.is_symlink()]
     paths.sort(key=lambda p:(p.stat().st_mtime_ns,str(p)),reverse=True)
     return paths[2:],paths[:2]
 

@@ -125,7 +125,8 @@ def resume_reviewed_action(store, run_id):
     if saved['checkpoint'] != 'reviewed': return None
     evidence = saved['reviewed']['evidence']
     for source in evidence['sources']: check_binding(source)
-    check_binding(evidence['backup']['dump'])
+    if saved['reviewed']['plan']['source_kind'] != 'wang_claim_management_v2':
+        check_binding(evidence['backup']['dump'])
     for proof in evidence['approval'].values():
         if isinstance(proof,dict) and {'path','file_sha256'} <= proof.keys(): check_binding(proof)
     plan = plan_from_document(saved['reviewed']['plan'])
@@ -155,8 +156,22 @@ def decoded_pins(rows):
 def current_claim_authority(store, cid, row):
     """Consume an actual revision-bound SQL review, not an inherited pass bit."""
     claim = row["payload"]
-    if row.get("retired") or claim.get("review_status") in {"human_hold","human_review_required","withheld_unreviewed","rejected","superseded"}:
+    if row.get("retired") or claim.get("review_status") in {"human_hold","withheld_unreviewed","rejected","superseded"}:
         raise ValueError("current Claim held or not reviewed: " + cid)
+    qualification = store.claim_management_qualification(cid)
+    if qualification is not None:
+        if (not qualification['ready']
+                or [qualification.get('revision'), qualification.get('content_sha256')]
+                   != [row['revision'], row['content_sha256']]):
+            raise ValueError('current Claim requires exact independent qualification: ' + cid)
+        if (claim.get('review_status') == 'human_review_required'
+                and qualification.get('legacy_ai_spot_check_replaced_by_current_review') is not True):
+            raise ValueError('current Claim held or not reviewed: ' + cid)
+        return {'claim_id': cid, 'revision': row['revision'], 'content_sha256': row['content_sha256'],
+                'qualification': qualification, 'reviewer_kind': 'ai',
+                'decision': 'independent_current_qualified', 'review_artifact_sha256': qualification['audit']['file_sha256']}
+    if claim.get('review_status') == 'human_review_required':
+        raise ValueError('current Claim held or not reviewed: ' + cid)
     with store.connect() as conn:
         events = conn.execute("""SELECT review_event_id,reviewer_kind,decision,artifact
                                  FROM wang_knowledge.review_events
@@ -438,9 +453,10 @@ def commit_package(store, run_id, *, package, approval, authorization, backup, s
                    pending_cvp_claim_ids=(), pending_cvp_management_record_keys=None):
     """The shared normal/source/link execution boundary after content approval."""
     for source in sources:check_binding(source)
-    if not backup.get('restore_catalog_nonempty') or not backup.get('dump'):
-        raise ValueError('fresh backup lacks verified restore-list proof')
-    check_binding(backup['dump'])
+    if source_kind != 'wang_claim_management_v2':
+        if not backup.get('restore_catalog_nonempty') or not backup.get('dump'):
+            raise ValueError('fresh backup lacks verified restore-list proof')
+        check_binding(backup['dump'])
     from backend.api.canonical_repository.reviewed_candidate_contract import validate_store_package_authorization
     validate_store_package_authorization(package)
     plan = store.plan_package(package,source_kind=source_kind,transactional=True)
@@ -465,6 +481,25 @@ def commit_package(store, run_id, *, package, approval, authorization, backup, s
                 "viewpoint_ids":list(viewpoint_ids),"disposition":disposition}
     evidence['execution']={'reason':reason,'actor':actor,'approval':approval,'authorization':authorization,'backup':backup}
     evidence['pending_cvp_claim_ids']=list(pending_cvp_claim_ids)
+    application = package.get('source_repair_application') or {}
+    if application.get('schema_version') == 'wang_claim_management_v2':
+        from backend.pipeline.source_reconciliation_runner import body, read
+        material = body(read(Path(application['materials']['path'])))
+        evidence['claim_management_scope'] = {'consumer_roots': [list(k) for k in sorted({
+            (key.split('/',1)[0], key.split('/',1)[1]) for key in material['unit_request']['target_keys']} |
+            {(p['collection'],p['object_id']) for p in material['unit_request']['permissions']})]}
+        if 'human_source_decisions' in material:
+            evidence['claim_management_scope'].update(source_ids=sorted(material['unit_request']['source_bindings']),
+                human_source_decisions=material['human_source_decisions'])
+        from backend.pipeline.claim_direct_scope import enabled as direct_scope_enabled
+        if direct_scope_enabled(material['unit_request']):
+            evidence['claim_management_scope'].update(claim_scope_request=material['unit_request'],
+                audit_record_keys=sorted(material['before']))
+        from backend.pipeline.claim_joint_update import CONTRACT
+        if material['original_goal'].get('joint_update_contract') == CONTRACT:
+            evidence['claim_management_scope'].update(joint_update_contract=CONTRACT,
+                audit_record_keys=sorted(material['before']))
+        evidence['pending_cvp_management_record_keys'] = application['pending_consumers']
     previous_pending=(store.get_cvp_group(run_id) or {}).get('reviewed',{}).get('evidence',{}).get('pending_cvp_management_record_keys',[])
     # Pending is a durable obligation, not a request to mutate every row.
     # Even an explicit empty list must not erase an earlier obligation.
@@ -934,7 +969,7 @@ def revalidate_applied_run(store, definition, run_id, *, root):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--sql-campaign",required=True)
+    parser.add_argument("--sql-campaign")
     parser.add_argument("--database-url")
     parser.add_argument("--output-root",type=Path,required=True)
     parser.add_argument("--dry-run",action="store_true")
@@ -943,7 +978,8 @@ def main(argv=None):
     parser.add_argument('--pause-after-group',type=int,help='Narrow this invocation for acceptance; never changes the immutable execution boundary')
     parser.add_argument('--integrate-batch-candidates',action='store_true',
                         help='Explicit new-group identity integration; never upgrades saved legacy answers')
-    parser.add_argument('--action',choices=('group','independent-revisit','audit-run','source-pending-check','source-impact-complete','source','source-write-slice','relation-retire','claim-retire','owner-link','link-target','link-retarget','link-retire','link-replace','link-representation','cvp-merge'),default='group')
+    parser.add_argument('--claim-update-preflight', action='store_true', help='Read-only dependency grouping for the exact authorized Claim Update batch')
+    parser.add_argument('--action',choices=('claim-management','group','independent-revisit','audit-run','source-pending-check','source-impact-complete','source','source-write-slice','relation-retire','claim-retire','owner-link','link-target','link-retarget','link-retire','link-replace','link-representation','cvp-merge'),default='group')
     parser.add_argument('--claim-first',action='store_true',
                         help='Finish only the original bounded Claim/Evidence action; keep all CVPs pending and stop before CVP/group execution')
     parser.add_argument('--candidate-viewpoint-id',action='append',default=[],
@@ -996,6 +1032,27 @@ def main(argv=None):
     parser.add_argument('--review-claim-id-format-repair',type=Path,
                         help='Owner-bound one fixed-parent ID-only transport repair; no semantic re-review')
     args = parser.parse_args(argv)
+    if args.action == 'claim-management':
+        if not args.manifest or args.sql_campaign or args.run_id or args.claim_first:
+            raise ValueError('new Claim action requires its own explicit v2 request; no old campaign upgrade')
+        from backend.pipeline.cvp_sql_actions import execute_claim_management, read_source_manifest
+        from backend.pipeline.claim_management import Request
+        from backend.pipeline.source_reconciliation_runtime import ProductionPorts
+        request = Request.model_validate(read_source_manifest(args.manifest))
+        if not args.claim_update_preflight and request.operation != 'Read' and (not args.execute or args.dry_run):
+            raise ValueError('Claim review/write calls require explicit --execute and new bound authority')
+        load_dotenv(PROJECT / '.env')
+        store = PostgresKnowledgeStore(args.database_url)
+        if args.claim_update_preflight:
+            from backend.pipeline.claim_joint_update import preflight
+            print(canonical_json(preflight(store, request)))
+            return 0
+        ports = ProductionPorts()
+        ports.store = store
+        print(canonical_json(execute_claim_management(store, request, root=args.output_root, ports=ports)))
+        return 0
+    if not args.sql_campaign:
+        raise ValueError('existing SQL campaign actions still require --sql-campaign')
     from backend.pipeline.cvp_model_retry_once import NAME as RETRY_NAME
     if (args.output_root/RETRY_NAME).exists() and not args.owner_model_retry_authorization:
         raise ValueError('owner retry requires original explicit authorization')

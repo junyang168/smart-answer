@@ -61,6 +61,9 @@ def authority_case(tmp_path):
             self.calls=[]
         @contextmanager
         def connect(self):yield self
+        def claim_management_qualification(self,cid):
+            # These fixtures exercise untouched historical review authorities.
+            return None
         def execute(self,sql,params):
             self.calls.append(('SQL',params))
             if 'object_versions' in sql:return Result(self.current if params[1]==3 else self.previous)
@@ -80,6 +83,18 @@ def test_exact_coordinate_step_consumes_real_predecessor_without_new_approval(au
     assert result['authority_kind']=='exact_sql_applied_locator_postimage'
     assert result['model_calls']==result['master_data_mutations']==0
     assert len(s.calls)==6  # point queries and two exact ChangeSets, never list_records
+
+
+@pytest.mark.parametrize('qualification', [
+    {'ready':False,'reason':'formal_review_findings'},
+    {'ready':True,'revision':2,'content_sha256':'a'*64},
+])
+def test_v2_current_failure_or_stale_proof_cannot_fall_back_to_historical_pass(authority_case,qualification):
+    store,_,_=authority_case
+    store.claim_management_qualification=lambda cid:qualification
+    with pytest.raises(ValueError,match='exact independent qualification'):
+        current_claim_authority(store,'CL-test',store.row)
+    assert store.calls == []
 
 
 @pytest.mark.parametrize('mutation',[
@@ -132,6 +147,33 @@ def test_real_hold_never_uses_coordinate_history(authority_case):
     s,_,_=authority_case;s.row['payload']['review_status']='human_hold'
     with pytest.raises(ValueError,match='held'):current_claim_authority(s,'CL-test',s.row)
     assert not s.calls
+
+
+@pytest.mark.parametrize('fault', [None, 'no_proof', 'not_ready', 'stale_revision', 'stale_sha', 'missing_marker',
+                                 'false_marker', 'string_marker', 'human_hold', 'withheld', 'rejected', 'superseded', 'retired'])
+def test_legacy_sampling_requires_exact_current_qualification_and_explicit_replacement(authority_case, fault):
+    s, _, _ = authority_case
+    s.row['payload']['review_status'] = 'human_review_required'
+    q = {'ready': True, 'revision': s.row['revision'], 'content_sha256': s.row['content_sha256'],
+         'legacy_ai_spot_check_replaced_by_current_review': True, 'audit': {'file_sha256': 'a'*64}}
+    if fault == 'no_proof': q = None
+    elif fault == 'not_ready': q['ready'] = False
+    elif fault == 'stale_revision': q['revision'] -= 1
+    elif fault == 'stale_sha': q['content_sha256'] = 'b'*64
+    elif fault == 'missing_marker': q.pop('legacy_ai_spot_check_replaced_by_current_review')
+    elif fault == 'false_marker': q['legacy_ai_spot_check_replaced_by_current_review'] = False
+    elif fault == 'string_marker': q['legacy_ai_spot_check_replaced_by_current_review'] = 'true'
+    elif fault == 'retired': s.row['retired'] = True
+    elif fault in {'human_hold', 'rejected', 'superseded'}: s.row['payload']['review_status'] = fault
+    elif fault == 'withheld': s.row['payload']['review_status'] = 'withheld_unreviewed'
+    s.claim_management_qualification = lambda cid: q
+    before = deepcopy(s.row)
+    if fault is None:
+        result = current_claim_authority(s, 'CL-test', s.row)
+        assert result['qualification'] == q
+    else:
+        with pytest.raises(ValueError): current_claim_authority(s, 'CL-test', s.row)
+    assert s.row == before and not s.calls
 
 
 def test_sermon_json_locator_step_uses_actual_body_projection(authority_case,tmp_path):

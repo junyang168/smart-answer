@@ -196,6 +196,12 @@ def evidence_fragment_ids(value: Mapping[str, Any] | EvidenceStepRecord) -> list
     return sorted({str(item) for item in [singular, *plural] if item})
 
 
+def knowledge_relation_endpoints(relation_type: str) -> tuple[set[str], set[str]]:
+    """Answers can address a Question; ordinary evidence edges cannot."""
+    return ({'evidence_steps', 'observations'},
+            {'evidence_steps', 'questions'} if relation_type == 'answers' else {'evidence_steps'})
+
+
 class KnowledgeRelationRecord(EvolvingKnowledgeRecord):
     relation_id: str
     from_id: str = Field(validation_alias=AliasChoices("from_id", "source_id"))

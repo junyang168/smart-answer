@@ -190,6 +190,8 @@ def stage_adapter(adapter, packet, path, *, saved=None):
     from backend.pipeline.viewpoint_resolution_runtime import response_adapter
     from backend.pipeline.source_paragraph_impact import scoped_adapter
     adapter = scoped_adapter(adapter, packet)
+    from backend.pipeline.claim_model_output import scoped_adapter as claim_scoped_adapter
+    adapter = claim_scoped_adapter(adapter, packet)
     path = Path(path)
     selected = response_adapter(adapter, saved)
     if saved is not None:
@@ -392,10 +394,20 @@ class Runner:
         if stage=='proposal_schema_recovery' and schema_stage(self.root,packet)!=stage:
             raise Stop('schema recovery lacks fixed-parent rejection proof')
         adapter=schema_adapter(adapter,packet,stage)
+        expected = ("claude-opus-5-5", "claude_subscription") if "review" in stage else ("gpt-6.1-sol", "codex_subscription")
+        return self.call_bound(stage, packet, adapter, expected=expected)
+
+    def call_bound(self, stage: str, packet: dict, adapter, *, expected) -> dict:
+        """One existing immutable intent/raw boundary for versioned contracts.
+
+        Callers validate their stage and authority before selecting an adapter.
+        This method owns encoding, request identity, once reservation and raw;
+        no business contract gets an alternative model transport or retry.
+        """
+        packet = json.loads(canonical_json(packet))
         from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
         raw_path = self.root / (stage + '.raw.json')
         adapter = stage_adapter(adapter, packet, raw_path, saved=read(raw_path) if raw_path.exists() else None)
-        expected = ("claude-opus-5-5", "claude_subscription") if "review" in stage else ("gpt-6.1-sol", "codex_subscription")
         if (adapter.model_id, adapter.backend) != expected:
             raise Stop("model/backend differs from frozen subscription policy", status="proof_failure", waiting_for="system")
         proof = adapter.request_encoding_proof(packet)
@@ -421,19 +433,37 @@ class Runner:
                 raise Stop("cached model reservation missing", status="proof_failure", waiting_for="system")
             bound_model_response(adapter, packet, raw['response'], raw_path)
             return raw
-        if reservation.exists():
+        replay = reservation.exists()
+        artifacts = self.root / (stage + '.transport')
+        if replay:
+            if body(read(reservation)) != request:
+                raise Stop("reserved model request drift", status="proof_failure", waiting_for="system")
+            if not (artifacts / 'exit.json').is_file():
+                raise Stop("reserved call has no verified reply; do not repeat", status="call_uncertain", waiting_for="system")
+        else:
+            preflight = getattr(self.ports, "before_model_call", None)
+            if preflight:
+                preflight(stage)
+            # Persist intent before side effects. Interrupted calls stay spent.
+            write(reservation, request)
+            reserved = getattr(self.ports, "model_call_reserved", None)
+            if reserved:
+                reserved(stage, request)
+        client = adapter._client
+        if adapter.backend in {'codex_subscription', 'claude_subscription'}:
+            client.call_artifacts = artifacts
+            client.replay_only = replay
+        elif replay:
             raise Stop("reserved call has no verified reply; do not repeat", status="call_uncertain", waiting_for="system")
-        preflight = getattr(self.ports, "before_model_call", None)
-        if preflight:
-            preflight(stage)
-        # Persist the reservation before any side effect. Errors do not reset it.
-        write(reservation, request)
-        self.state(stage, next_action="await the single subscription response")
+        self.state(stage, next_action="read saved subscription response" if replay else "await the single subscription response")
         try:
             response = dict(adapter.generate(packet))
         except Exception as exc:
-            write(self.root / (stage + ".failure.json"), {"error": str(exc), "automatic_retry": False,
-                "provider_raw": getattr(adapter._client, "last_raw_response", None)})
+            failure = self.root / (stage + ".failure.json")
+            if not failure.exists():
+                write(failure, {"error": str(exc), "automatic_retry": False,
+                    "provider_raw": getattr(adapter._client, "last_raw_response", None),
+                    "transport_directory": str(artifacts)})
             raise Stop("subscription call failed; original reservation retained", status="model_failed", waiting_for="owner") from exc
         provider_raw = getattr(adapter._client, "last_raw_response", None)
         executable = getattr(adapter._client, "executable", None)
@@ -1034,6 +1064,12 @@ def validate_raw(root: Path, stage: str, packet: dict) -> dict:
     if stage=='proposal_schema_recovery' and schema_stage(root,packet)!=stage:
         raise ValueError('schema recovery original rejection proof differs')
     adapter=schema_adapter(adapter,packet,stage)
+    return validate_bound_call(root, stage, packet, adapter)
+
+
+def validate_bound_call(root, stage, packet, adapter):
+    """Authenticate the common saved wire/intent/raw boundary, without a call."""
+    packet = json.loads(canonical_json(packet))
     raw = read(root / (stage + ".raw.json"))
     from backend.pipeline.viewpoint_resolution_runtime import response_adapter, bound_model_response
     adapter = stage_adapter(adapter, packet, root / (stage + '.raw.json'), saved=raw)
