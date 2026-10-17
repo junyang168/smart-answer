@@ -143,3 +143,34 @@ def test_independent_semantic_audit_receives_exact_field_boundary_not_whole_clai
     assert '"path": ["qualifications", 0]' in captured[0]
     assert '被歸入的成分：同文' in captured[0]
     assert '不宣稱整條等價' in captured[0] and 'Claim 欄位語境' in captured[0]
+
+
+@pytest.mark.parametrize('scenario,allowed',[
+    ('different_fields',True),('disjoint_same_field',True),('same_field_overlap',False),
+    ('mixed_contract_disjoint',True),('mixed_contract_overlap',False),('different_claim_sha',False),
+    ('full_claim',False),('equivalent_component',False),
+])
+def test_sql_edge_ownership_distinguishes_v2_field_paths_and_preserves_support_only_gate(scenario,allowed):
+    from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+    links,claims,_,_=graph();claim=claims['C'];claim['qualifications']=['完整限定。']
+    left,right=deepcopy(links[0]),deepcopy(links[1])
+    for row in (left,right):
+        row['link_type']='supports';row.pop('component_locator')
+        row['schema_version']='wang_viewpoint_claim_link_v2'
+    left['component_position_locator']=locator(claim,['statement'],'結論成立')
+    right['component_position_locator']=locator(claim,['qualifications',0])
+    if scenario in {'disjoint_same_field','same_field_overlap'}:
+        span={'path':['statement'],'start_char':5,'end_char':10,'exact_text':claim['statement'][5:10]}
+        right['component_position_locator']={**locator(claim,['statement']),'spans':[span]}
+        if scenario=='same_field_overlap':right['component_position_locator']=deepcopy(left['component_position_locator'])
+    if scenario.startswith('mixed_contract'):
+        left.pop('component_position_locator');left['schema_version']='wang_viewpoint_claim_link_v1'
+        left['component_locator']={'claim_sha256':semantic_record_sha(claim),'statement_component':claim['statement'][:4],
+            'canonical_spans':[{'start_char':0,'end_char':4,'exact_text':claim['statement'][:4]}]}
+        start,end=(5,10) if scenario.endswith('disjoint') else (0,4)
+        right['component_position_locator']={**locator(claim,['statement']),
+            'spans':[{'path':['statement'],'start_char':start,'end_char':end,'exact_text':claim['statement'][start:end]}]}
+    if scenario=='different_claim_sha':right['component_position_locator']['claim_sha256']='b'*64
+    if scenario=='full_claim':right.pop('component_position_locator')
+    if scenario=='equivalent_component':right['link_type']='equivalent_component'
+    assert PostgresKnowledgeStore._disjoint_support_components(left,right) is allowed

@@ -8571,18 +8571,27 @@ class PostgresKnowledgeStore:
         except (ValueError, TypeError):
             return False
         if any(x.link_type != "supports" or x.effective_state != "active"
-               or not x.component_locator or not x.evidence_bindings for x in (a, b)):
+               or not (x.component_locator or x.component_position_locator)
+               or not x.evidence_bindings for x in (a,b)):
             return False
-        if (a.viewpoint_id, a.claim_id, a.pinned_claim_revision,
-            a.validated_against_viewpoint_revision_id) != (
-            b.viewpoint_id, b.claim_id, b.pinned_claim_revision,
+        if (a.viewpoint_id,a.claim_id,a.pinned_claim_revision,
+            a.validated_against_viewpoint_revision_id)!=(
+            b.viewpoint_id,b.claim_id,b.pinned_claim_revision,
             b.validated_against_viewpoint_revision_id):
             return False
-        ac, bc = a.component_locator, b.component_locator
-        if ac.claim_sha256 != bc.claim_sha256 or not re.fullmatch(r"[0-9a-f]{64}", ac.claim_sha256):
-            return False
-        return all(x.end_char <= y.start_char or y.end_char <= x.start_char
-                   for x in ac.canonical_spans for y in bc.canonical_spans)
+        def positions(link):
+            if link.component_position_locator:
+                locator=link.component_position_locator
+                return locator.claim_sha256,[(tuple(span.path),span.start_char,span.end_char) for span in locator.spans]
+            locator=link.component_locator
+            return locator.claim_sha256,[(('statement',),span.start_char,span.end_char) for span in locator.canonical_spans]
+        ac,aspans=positions(a);bc,bspans=positions(b)
+        if ac!=bc or not re.fullmatch(r"[0-9a-f]{64}",ac):return False
+        # Raw text/Claim SHA and role approval are verified by foundation and
+        # the transaction. Here disjointness is path-aware, so two different
+        # limitation fields do not collide merely because both begin at zero.
+        return all(path!=other or end<=begin or stop<=start
+                   for path,start,end in aspans for other,begin,stop in bspans)
 
     @staticmethod
     def _assert_no_uncoordinated_semantic_references(
