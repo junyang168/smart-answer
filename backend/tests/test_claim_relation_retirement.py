@@ -67,7 +67,7 @@ def test_real_sql_exact_retirement_rollback_and_cached_no_replay(postgres_store,
     m['read_pins']=pin_rows(pins({(row['collection'],row['object_id']):s.get_record_state(row['collection'],row['object_id']) for row in m['records']}))
     auth=tmp_path/'direction.json';write(auth,{k:v for k,v in direction(m).items() if k!='artifact_sha256'})
     monkeypatch.setattr(r,'prepare_material',lambda *a:m)
-    import backend.pipeline.cvp_sql_flow as flow
+    import backend.pipeline.cvp_sql_commit as flow
     dump=tmp_path/'dump';dump.write_bytes(b'test backup')
     monkeypatch.setattr(flow,'verified_group_backup',lambda *a:{'restore_catalog_nonempty':True,'dump':binding(dump)})
     before=[s.get_record_state(x['collection'],x['object_id']) for x in m['records']]

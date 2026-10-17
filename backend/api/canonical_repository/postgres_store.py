@@ -3249,7 +3249,7 @@ class PostgresKnowledgeStore:
 
     def prepare_claim_management_action(self, request, *, goal, read_pins, root):
         """Keep new Claim authority and its original goal in the run table."""
-        from backend.pipeline.cvp_sql_flow import decoded_pins
+        from backend.pipeline.cvp_sql_commit import decoded_pins
         from backend.pipeline.claim_management import Request, load_authority, source_documents, VERSION
         request = Request.model_validate(request)
         policy, _ = load_authority(request, source_documents=source_documents(goal.get('original_objects', {})))
@@ -3651,7 +3651,7 @@ class PostgresKnowledgeStore:
         from backend.pipeline import claim_management as cm
         from backend.pipeline.cvp_sql_actions import validate_claim_stage_receipt
         from backend.pipeline.source_reconciliation_runner import read, body
-        from backend.pipeline.cvp_sql_flow import check_binding, decoded_pins, pins
+        from backend.pipeline.cvp_sql_commit import check_binding, decoded_pins, pins
         check_binding(receipt_binding)
         receipt = body(read(Path(receipt_binding['path'])))
         materials, candidate, review, passed = validate_claim_stage_receipt(receipt)
@@ -3875,7 +3875,7 @@ class PostgresKnowledgeStore:
     def finish_claim_management_action(self, action_run_id):
         """Program-only final coverage/currentness check; no extra model audit."""
         from backend.pipeline.claim_management import goal_satisfied, is_source_impact, Policy
-        from backend.pipeline.cvp_sql_flow import decoded_pins
+        from backend.pipeline.cvp_sql_commit import decoded_pins
         with self.connect() as conn, conn.cursor() as cursor:
             cursor.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
             row = cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE", (action_run_id,)).fetchone()
@@ -3987,7 +3987,7 @@ class PostgresKnowledgeStore:
         Human/AI review_status and maturity are not rewritten. This predicate
         reads necessary current pins, not an ancestor chain or whole Registry.
         """
-        from backend.pipeline.cvp_sql_flow import check_binding, decoded_pins
+        from backend.pipeline.cvp_sql_commit import check_binding, decoded_pins
         from backend.pipeline.claim_management import is_source_impact, Policy
         from backend.pipeline.source_editorial_transition import verify_current_source_binding
         with self.connect() as conn, conn.cursor() as cursor:
@@ -4039,9 +4039,12 @@ class PostgresKnowledgeStore:
                     if not state or state['retired_at'] or state['payload'].get('review_status') in {
                             'human_hold','human_review_required','withheld_unreviewed','rejected','superseded'}:
                         return {'ready': False, 'reason': 'source_revalidation_held', 'run_id': rid}
-                    return {'ready': True, 'run_id': rid, 'revision': state['revision'],
+                    qualification={'ready': True, 'run_id': rid, 'revision': state['revision'],
                         'content_sha256': state['content_sha256'], 'audit': revalidation['impact_audit'],
                         'content_audit': revalidation['content_audit'], 'question_scope': revalidation['question_scope']}
+                    if not Policy.model_validate(value['materials']['policy']).independent_audit_required:
+                        qualification.update(validation_kind='opus_and_program_readback',independent_audit_complete=False)
+                    return qualification
                 independent = Policy.model_validate(value['materials']['policy']).independent_audit_required
                 complete = value.get('independent_audit_complete') if independent else value.get('program_readback_complete')
                 if value.get('outcome') != 'completed' or not complete or value.get('revisit_required'):
@@ -4350,7 +4353,7 @@ class PostgresKnowledgeStore:
             raise ChangeSetConflict('scope amendment action identity drift')
         with self.connect() as conn:
             conn.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))',(POSTGRES_APPLY_ADVISORY_LOCK_KEY,))
-            from backend.pipeline.cvp_sql_flow import decoded_pins
+            from backend.pipeline.cvp_sql_commit import decoded_pins
             old=self.get_cvp_action(run_id,direction['old_action_id'])
             with conn.cursor() as cursor:
                 self._assert_transaction_read_pins(cursor,decoded_pins(old['materials']['sql_scope']['read_pins']))
@@ -4430,7 +4433,7 @@ class PostgresKnowledgeStore:
             from backend.pipeline.claim_issue_rescope import SCHEMA
             from backend.pipeline.claim_complete_input_repair import SCHEMA as REPAIR_SCHEMA
             from backend.pipeline.claim_evidence_completion import SCHEMA as COMPLETION_SCHEMA
-            from backend.pipeline.cvp_sql_flow import check_binding
+            from backend.pipeline.cvp_sql_commit import check_binding
             from backend.pipeline.viewpoint_resolution_runtime import read_artifact
             auth=amendment['authorization'];check_binding(auth);direction=read_artifact(auth['path'])
             expected='CVPA-'+sha256_json({'kind':'claim_issue_scope_amendment_once','parent':action_id})
@@ -4747,7 +4750,7 @@ class PostgresKnowledgeStore:
             views=sorted(set(declared_views)|{r[0] for r in cursor.fetchall()})
             from backend.pipeline.cvp_merge_management import current_viewpoint_ids
             views=current_viewpoint_ids(cursor,views)
-            from backend.pipeline.cvp_sql_flow import validate_transaction_audit
+            from backend.pipeline.cvp_sql_commit import validate_transaction_audit
             validate_transaction_audit(audit,value['claim_ids'],views)
             validate_audit(audit,value["claim_ids"],views,owner_resolution_path=owner_resolution_path)
             independent_pins={(r['collection'],r['object_id']):tuple(r['pin']) for r in audit['meta']['registry_read_scope'].get('read_pins',[])}
@@ -4816,6 +4819,9 @@ class PostgresKnowledgeStore:
                                (canonical_json(issue),issue_run))
 
     def review_cvp_group(self, run_id: str, *, plan: ChangeSetPlan, evidence: Mapping[str, Any]) -> str:
+        if plan.source_kind=='wang_cvp_management_v2':
+            from .cvp_management_store import review_step
+            return review_step(self,run_id,plan=plan,evidence=evidence)
         required = {"package", "approval", "authorization", "backup", "sources", "read_pins"}
         if plan.source_kind == 'wang_claim_management_v2':
             required.remove('backup')
@@ -5727,6 +5733,24 @@ class PostgresKnowledgeStore:
         with self.connect() as conn, conn.cursor() as cursor:
             self._assert_transaction_read_pins(cursor,read_pins)
 
+    def read_package_cvp_context(self, package, *, retiring=()):
+        """Public current dependency closure for the common commit boundary."""
+        with self.connect() as conn:
+            return self._existing_cvp_context(conn,normalize_package(package),retiring)
+
+    def read_current_dependency_context(self,keys):
+        """Structural SQL dependencies for pinned readonly material as well as writes.
+
+        Loading an untouched member's Evidence here does not add it to a model
+        packet or grant a mutation. The original material pins remain exact.
+        """
+        roots={}
+        for col,oid in set(keys):
+            if col not in KNOWLEDGE_COLLECTIONS:raise ValueError('unknown dependency collection')
+            roots.setdefault(col,{})[oid]={'id':oid}
+        with self.connect() as conn:
+            return self._existing_cvp_context(conn,roots)
+
     def read_current_records(self, keys):
         """Read exactly named current rows, without traversing members/history."""
         wanted=sorted(set(keys))
@@ -5773,6 +5797,18 @@ class PostgresKnowledgeStore:
             result['viewpoint_claim_links',oid]={'revision':revision,'content_sha256':sha,
                                                'payload':payload,'retired':False}
         return result
+
+    def read_cvp_relations(self, *, viewpoint_ids=()):
+        """Only current relation edges incident to the explicit maintenance heads."""
+        if not viewpoint_ids:return {}
+        with self.connect() as conn,conn.cursor() as cursor:
+            cursor.execute('SET LOCAL statement_timeout=5000')
+            rows=cursor.execute("""SELECT DISTINCT o.object_id FROM wang_knowledge.edges e
+                JOIN wang_knowledge.objects o ON o.collection=e.edge_collection AND o.object_id=e.edge_id
+                WHERE e.edge_collection='viewpoint_relations' AND e.retired_at IS NULL
+                AND o.retired_at IS NULL AND (e.from_id=ANY(%s) OR e.to_id=ANY(%s))""",
+                (list(viewpoint_ids),list(viewpoint_ids))).fetchall()
+        return self.read_current_records([('viewpoint_relations',r[0]) for r in rows])
 
     def read_cvp_heads(self):
         """Current active index cut only: one query, no members or historical chains."""
@@ -5996,6 +6032,13 @@ class PostgresKnowledgeStore:
         """
 
         claim_writes = None
+        if source_kind=='wang_cvp_management_v2' or package.get('cvp_management_application') is not None:
+            if source_kind!='wang_cvp_management_v2' or not transactional:
+                raise ValueError('CVP2 requires its explicit shared SQL transaction')
+            app=package.get('cvp_management_application') or {}
+            if app.get('schema_version')!='wang_cvp_management_v2' or not app.get('round_id'):
+                raise ValueError('CVP2 package lacks its current exact application')
+            if retiring_keys:raise ValueError('CVP2 logical retirement cannot silently retire SQL rows')
         if (package.get('source_repair_application') or {}).get('schema_version') == 'wang_claim_management_v2':
             if not transactional or source_kind != 'wang_claim_management_v2':
                 raise ValueError('new Claim operations require their explicit shared SQL transaction')
@@ -7543,6 +7586,8 @@ class PostgresKnowledgeStore:
     ) -> dict[str, Any]:
         if plan.source_kind == 'wang_claim_relation_retirement_v1' and transaction_context is None:
             raise ValueError('relation retirement cannot bypass common SQL transaction')
+        if plan.source_kind=='wang_cvp_management_v2' and transaction_context is None:
+            raise ValueError('CVP2 cannot bypass the shared SQL transaction')
         if plan.source_kind in {'wang_claim_management_v2','wang_cvp_merge_management_v1','wang_source_sql_reconciliation_v2','wang_owner_sql_link_correction_v2','wang_cvp_sql_link_retarget_v1','wang_cvp_owner_sql_link_retirement_v1','wang_cvp_deferred_authorized_link_management_v1','wang_cvp_sql_link_replacement_v1','wang_cvp_sql_link_representation_v1'} and transaction_context is None:
             raise ValueError('SQL v2 actions cannot bypass the shared transaction boundary')
         if transaction_context is not None:
@@ -7648,6 +7693,9 @@ class PostgresKnowledgeStore:
                             assert_current(cursor, human_scope['source_ids'], human_scope['human_source_decisions'])
                         if sql_group['checkpoint']!='reviewed':
                             raise ChangeSetConflict('no-content completion requires exact reviewed state')
+                        if plan.source_kind=='wang_cvp_management_v2':
+                            from .cvp_management_authority import validate_sql_review
+                            validate_sql_review(self,cursor,sql_group,sql_group['reviewed']['evidence'],plan)
                         self._assert_transaction_read_pins(cursor,transaction_context.read_pins)
                         if plan.review_events:raise ChangeSetConflict('empty business plan cannot write review events')
                         sql_group.update(checkpoint='applied',no_content_write_reviewed_sha256=transaction_context.reviewed_sha256)
@@ -7668,6 +7716,9 @@ class PostgresKnowledgeStore:
                         return {"status":"already_applied","change_set_id":plan.change_set_id,"summary":committed[5]}
                     if sql_group['checkpoint']!='reviewed' or sql_group['reviewed_sha256']!=transaction_context.reviewed_sha256:
                         raise ChangeSetConflict('new write requires the current exact reviewed action')
+                    if plan.source_kind=='wang_cvp_management_v2':
+                        from .cvp_management_authority import validate_sql_review
+                        validate_sql_review(self,cursor,sql_group,sql_group['reviewed']['evidence'],plan)
                     transaction_before = self._assert_transaction_read_pins(cursor, transaction_context.read_pins)
                     normalized = {}
                     retiring = {(op.collection,op.object_id) for op in plan.operations if op.operation == "retire"}

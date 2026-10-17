@@ -166,3 +166,41 @@ def merge_recall(plan: Mapping[str, Any], replies: Sequence[Mapping[str, Any]], 
                  'claim_candidates': [{'claim_id': cid, 'viewpoint_ids': sorted(vids)}
                                       for cid, vids in candidates.items()],
                  'identity_decided': False})
+
+
+def changed_index_cards(previous: Mapping[str, Any] | None, current: Mapping[str, Any]) -> dict:
+    """Compare complete cards, including reviewed summary and exact current head."""
+    verify(current, INDEX_VERSION)
+    old = {}
+    if previous is not None:
+        verify(previous, INDEX_VERSION)
+        old = {c['viewpoint_id']: c for c in previous['cards']}
+        if len(old) != len(previous['cards']):
+            raise ValueError('duplicate previous CVP card')
+    new = {c['viewpoint_id']: c for c in current['cards']}
+    if len(new) != len(current['cards']):
+        raise ValueError('duplicate current CVP card')
+    return {'changed': sorted(k for k in new if old.get(k) != new[k]),
+            'unchanged': sorted(k for k in new if old.get(k) == new[k]),
+            'retired': sorted(set(old) - set(new))}
+
+
+def combine_recall_candidates(plan, model_candidates, *, existing_links=()):
+    """Bind authenticated model selections and active links to the full plan."""
+    verify(plan, RECALL_VERSION)
+    claims = list(plan['claim_refs'].values())
+    views = set(plan['viewpoint_refs'].values())
+    if set(model_candidates) != set(claims):
+        raise ValueError('incremental recall has incomplete Claim coverage')
+    candidates = {cid:set(values) for cid,values in model_candidates.items()}
+    if any(not values <= views for values in candidates.values()):
+        raise ValueError('incremental recall retains a stale or foreign CVP')
+    for link in existing_links:
+        if link.get('effective_state') != 'active' or link.get('claim_id') not in candidates:
+            continue
+        if link.get('viewpoint_id') not in views:
+            raise ValueError('active existing link has no current active CVP card')
+        candidates[link['claim_id']].add(link['viewpoint_id'])
+    return seal({'schema_version':RECALL_VERSION, 'plan_sha256':plan['artifact_sha256'],
+                 'claim_candidates':[{'claim_id':cid,'viewpoint_ids':sorted(candidates[cid])} for cid in claims],
+                 'identity_decided':False})

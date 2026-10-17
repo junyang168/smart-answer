@@ -6,7 +6,8 @@ authority validator as production. This does not admit, migrate or call models.
 """
 from collections import Counter
 from backend.api.canonical_repository.postgres_store import record_content_sha
-from backend.pipeline.cvp_sql_flow import current_claim_authority, decoded_pins
+from backend.pipeline.cvp_sql_commit import decoded_pins
+from backend.pipeline.cvp_sql_claim_authority import current_claim_authority
 
 def inventory(store, campaign_sha):
     definition=store.get_cvp_campaign(campaign_sha)

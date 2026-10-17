@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator, model_serializer
 
 
 def _knowledge_sha256_json(value: Any) -> str:
@@ -708,9 +708,38 @@ class ViewpointClaimEvidenceBinding(BaseModel):
     source_fragment_id: str = Field(min_length=1)
 
 
+class ViewpointFieldSpan(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    path: list[str | int] = Field(min_length=1)
+    start_char: int = Field(ge=0,strict=True)
+    end_char: int = Field(gt=0,strict=True)
+    exact_text: str = Field(min_length=1)
+
+    @model_validator(mode='before')
+    @classmethod
+    def raw_path_types(cls,value):
+        if (not isinstance(value,dict) or not isinstance(value.get('path'),list)
+                or any(type(p) not in {str,int} for p in value['path'])):
+            raise ValueError('field paths require exact string/integer keys, never coerced booleans')
+        return value
+
+    @model_validator(mode='after')
+    def valid_span(self):
+        if self.end_char-self.start_char!=len(self.exact_text):
+            raise ValueError('field span length does not match raw Unicode positions')
+        return self
+
+
+class ViewpointFieldLocator(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    input_sha256: str = Field(min_length=1)
+    claim_sha256: str = Field(min_length=1)
+    spans: list[ViewpointFieldSpan] = Field(min_length=1)
+
+
 class ViewpointClaimLinkRecord(StrictViewpointRecord):
     viewpoint_claim_link_id: str
-    schema_version: Literal["wang_viewpoint_claim_link_v1"] = "wang_viewpoint_claim_link_v1"
+    schema_version: Literal["wang_viewpoint_claim_link_v1","wang_viewpoint_claim_link_v2"] = "wang_viewpoint_claim_link_v1"
     viewpoint_id: str
     validated_against_viewpoint_revision_id: str
     claim_id: str
@@ -726,6 +755,7 @@ class ViewpointClaimLinkRecord(StrictViewpointRecord):
         "superseding_evidence",
     ]
     component_locator: Optional[ViewpointComponentLocator] = None
+    component_position_locator: Optional[ViewpointFieldLocator] = None
     supporting_relation_ids: list[str] = Field(default_factory=list)
     evidence_bindings: list[ViewpointClaimEvidenceBinding] = Field(default_factory=list)
     occurrence_refs: list[str] = Field(default_factory=list)
@@ -734,6 +764,10 @@ class ViewpointClaimLinkRecord(StrictViewpointRecord):
 
     @model_validator(mode="after")
     def validate_component(self) -> "ViewpointClaimLinkRecord":
+        if self.schema_version=='wang_viewpoint_claim_link_v1' and self.component_position_locator is not None:
+            raise ValueError('field-position locator requires the explicit v2 link contract')
+        if self.component_locator is not None and self.component_position_locator is not None:
+            raise ValueError('link cannot mix statement and multi-field locator spaces')
         if self.supporting_relation_ids != sorted(set(self.supporting_relation_ids)):
             raise ValueError("supporting_relation_ids must be sorted and unique")
         if self.occurrence_refs != sorted(set(self.occurrence_refs)):
@@ -744,9 +778,9 @@ class ViewpointClaimLinkRecord(StrictViewpointRecord):
         ]
         if bindings != sorted(set(bindings)):
             raise ValueError("evidence_bindings must be sorted and unique")
-        if self.link_type == "equivalent_component" and not self.component_locator:
+        if self.link_type == "equivalent_component" and not (self.component_locator or self.component_position_locator):
             raise ValueError("equivalent_component requires component_locator")
-        if self.link_type == "equivalent_full" and self.component_locator is not None:
+        if self.link_type == "equivalent_full" and (self.component_locator is not None or self.component_position_locator is not None):
             raise ValueError("equivalent_full spans the whole Claim and has no locator")
         if self.effective_state == "active" and self.review_status not in {
             "system_approved",
@@ -755,6 +789,12 @@ class ViewpointClaimLinkRecord(StrictViewpointRecord):
         }:
             raise ValueError("active Claim link requires an approved review status")
         return self
+
+    @model_serializer(mode='wrap')
+    def preserve_v1_shape(self,handler):
+        value=handler(self)
+        if self.component_position_locator is None:value.pop('component_position_locator',None)
+        return value
 
 
 class PropositionUnitStatementSpan(BaseModel):

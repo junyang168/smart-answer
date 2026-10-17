@@ -1,0 +1,530 @@
+"""CVP2 orchestration on the existing call, SQL and completion boundaries.
+
+Models consume prepared material only. SQL and business rules live in their
+owners; this module sequences units and preserves original task/budget facts.
+"""
+from __future__ import annotations
+
+from copy import deepcopy, copy
+from pathlib import Path
+
+from backend.api.canonical_repository import cvp_management as domain
+from backend.api.canonical_repository import cvp_management_store as persistence
+from backend.api.canonical_repository.cvp_management_authority import validate_evidence
+from backend.api.canonical_repository.cvp_recall import seal,verify,recall_plan,combine_recall_candidates
+from backend.api.canonical_repository.postgres_store import record_content_sha
+from backend.api.canonical_repository.viewpoint_foundation import sha256_json
+from backend.pipeline.cvp_materials import prepare_materials,expand_source
+from backend.pipeline.cvp_recall import maintain_reviewed_index,load_reviewed_index,refresh_recall,subset_recall,recall_adapter
+from backend.pipeline.cvp_recall_preparation import prepare_recall
+from backend.pipeline.cvp_management_models import adapter,validate_response
+from backend.pipeline.cvp_sql_commit import binding,check_binding,pins,decoded_pins,commit_package,resume_reviewed_action
+from backend.pipeline.source_reconciliation_runner import exclusive
+from backend.pipeline.viewpoint_resolution_runtime import (
+    call_model,model_request_identity,read_artifact,read_saved_model_response,write_immutable,stable_decided_at,
+)
+
+
+class InputChanged(ValueError):pass
+
+
+def validate_authorization(request):
+    """Concrete scoped direction; a design document is not execution authority."""
+    check_binding(request.authorization.model_dump())
+    direction=read_artifact(request.authorization.path)
+    expected={'schema_version':'wang_cvp_management_authorization_v1','authorized_by':'owner',
+        'action_id':request.action_id,'input_sha256':request.input['artifact_sha256'],
+        'mode':request.mode,'maintenance_viewpoint_ids':request.maintenance_viewpoint_ids,
+        'permissions':[p.model_dump(mode='json') for p in request.permissions],
+        'creation_slots':request.creation_slots,'budget':request.budget.model_dump(mode='json')}
+    if direction!=expected:raise ValueError('CVP2 authorization differs from exact operation/scope/budget')
+
+
+def _guard(store,bundle):
+    store.verify_current_read_pins({(r['collection'],r['object_id']):
+        (r['revision'],r['content_sha256'],r['retired']) for r in bundle['records']})
+    authorities={q['claim_id']:q['qualification'] for q in bundle.get('claim_authority',[])}
+    for q in bundle['claim_input']['claims']:
+        qualification=store.claim_management_qualification(q['claim_id'])
+        if (not qualification or qualification.get('ready') is not True
+                or qualification!=authorities.get(q['claim_id'])):
+            raise InputChanged('superseded_input: current Claim qualification is no longer valid')
+    from backend.pipeline.source_editorial_transition import verify_current_source_binding
+    for source in bundle['sources']:
+        verify_current_source_binding({'path':source['path'],'file_sha256':source['file_sha256']})
+
+
+def _transport(store,parent_id,root,request,*,invoke=call_model):
+    """Use the common once-call runtime with the existing SQL reservation form."""
+    def call(model,payload,cache):
+        cache=Path(cache).resolve();key=str(cache.relative_to(root))
+        size=model.request_bytes(payload)
+        if size>request.budget.max_request_bytes:raise ValueError('indivisible complete material exceeds request budget')
+        role='gpt' if model.backend=='codex_subscription' else 'opus'
+        intent={**model_request_identity(model,payload),'request_bytes':size,'cache_path':str(cache)}
+        pending=store.get_cvp_group(parent_id)['call_reservations']
+        if any(slot['state']=='started' and oldkey!=key for oldkey,slot in pending.items()):
+            raise ValueError('unknown original model dispatch; reconcile its exact answer before any new call')
+        persistence.reserve_call(store,parent_id,key=key,role=role,intent=intent)
+        raw,count,seconds=invoke(model,payload,cache,before_dispatch=lambda:
+            persistence.begin_call(store,parent_id,key=key,intent=intent))
+        # Reauthenticate the real leaf, not a synthetic provider pass supplied
+        # by a caller. Test transports write through the same common runtime.
+        if read_saved_model_response(model,payload,cache)!=raw:raise ValueError('actual CVP2 raw response drift')
+        artifact=read_artifact(cache)
+        persistence.returned_call(store,parent_id,key=key,raw=raw,artifact_sha256=artifact['artifact_sha256'])
+        return raw,count,seconds
+    return call
+
+
+
+def _reconcile_saved_dispatches(store,parent_id,unit,request,proposer,reviewer):
+    """A cached answer from an interrupted ledger update must authenticate first.
+
+    Existence alone cannot let changed inputs evade a started old Opus call.
+    Reconstruct its exact original packet and adapter; never dispatch here.
+    """
+    parent=store.get_cvp_group(parent_id)
+    for step_id in unit['steps']:
+        step=store.get_cvp_group(step_id);materials=step['materials']
+        directory=Path(materials['step_root']);bundle=materials['bundle']
+        for role,client,filename in [('proposal',proposer,'proposal.json'),('review',reviewer,'review.json')]:
+            path=directory/filename
+            matching=[(key,slot) for key,slot in parent['call_reservations'].items()
+                      if slot['state']=='started' and slot['intent']['cache_path']==str(path)]
+            if not matching:continue
+            if not path.exists():raise ValueError('unknown original unit call; resume its exact dispatch only')
+            if role=='proposal':
+                packet=domain.proposal_packet(request,bundle,previous=materials['previous'],
+                                               prior_findings=materials['prior_findings'])
+            else:
+                candidate=read_artifact(directory/'candidate.json')
+                packet=domain.review_packet(request,bundle,candidate,prior_findings=materials['prior_findings'])
+            model=adapter(role,request,bundle,packet,client=client)
+            identity=model_request_identity(model,packet)
+            key,slot=matching[0]
+            if any(slot['intent'].get(k)!=v for k,v in identity.items()):
+                raise ValueError('unknown original unit call identity changed')
+            raw=read_saved_model_response(model,packet,path)
+            artifact=read_artifact(path)
+            persistence.returned_call(store,parent_id,key=key,raw=raw,artifact_sha256=artifact['artifact_sha256'])
+
+
+def _semantic(candidate):
+    def content(row):return {k:v for k,v in row.items() if k not in {'reason','provenance','revision'}}
+    return sha256_json({'components':candidate['component_plan']['components'],
+        'dispositions':[content(r) for r in candidate['component_dispositions']],
+        'members':[content(r) for r in candidate.get('member_dispositions',[])],
+        'writes':[{k:content(v) if k=='payload' else v for k,v in r.items()} for r in candidate['writes']],
+        'summaries':candidate['summaries']})
+
+
+def _all_findings(previous,approval):
+    rows=[*(previous.get('prior_findings',[]) if previous else []),
+          *(previous.get('findings',[]) if previous else []),*approval.get('findings',[])]
+    return list({r['finding_id']:r for r in rows}.values())
+
+
+def _expand(store,request,preflight,group_key,recall,bundle,response):
+    if response['member_requests']:
+        reverse={ref:cid for cid,ref in bundle['references']['claims'].items()}
+        members=set(bundle['member_support_ids'])
+        for item in response['member_requests']:
+            if item['member_ref'] not in reverse:raise ValueError('unknown member support reference')
+            cid=reverse[item['member_ref']]
+            if cid in members:raise ValueError('member support request is repeated')
+            members.add(cid)
+        expanded=prepare_materials(store,preflight,group_key,recall,member_support_ids=members,
+                                   maintenance_viewpoint_ids=request.maintenance_viewpoint_ids,
+                                   maintenance_record_keys=[(p.collection,p.object_id) for p in request.permissions])
+        # Retain source expansions already provided; source refs may be
+        # renumbered only with a new fully bound material version.
+        old_by_id={sid:next(s for s in bundle['material']['sources'] if s['source_ref']==ref)
+                   for sid,ref in bundle['references']['source_documents'].items()}
+        for sid,ref in expanded['references']['source_documents'].items():
+            if sid in old_by_id:
+                old=old_by_id[sid];new=next(s for s in expanded['material']['sources'] if s['source_ref']==ref)
+                if old['expansion_level']:
+                    new.update(sections=deepcopy(old['sections']),expansion_level=old['expansion_level'])
+        expanded=seal({k:v for k,v in expanded.items() if k!='artifact_sha256'})
+    else:expanded=bundle
+    # Requests reference the pre-expansion packet, so source-ref remapping
+    # after loading a member is resolved by canonical source identity.
+    for item in response['context_requests']:
+        sid=next(sid for sid,ref in bundle['references']['source_documents'].items() if ref==item['source_ref'])
+        mapped={**item,'source_ref':expanded['references']['source_documents'][sid]}
+        expanded=expand_source(expanded,mapped)
+    return expanded
+
+
+def _readback(store,evidence):
+    package=validate_evidence(evidence)
+    context=store.read_package_cvp_context(package)
+    context.update(store.read_current_dependency_context(
+        [(r['collection'],r['object_id']) for r in evidence['bundle']['records']]))
+    keys={(col,row[domain.KNOWLEDGE_COLLECTIONS[col][1]]) for col,rows in package.items()
+          if col in domain.KNOWLEDGE_COLLECTIONS for row in rows}
+    context.update(store.read_current_records(keys))
+    vids=set(evidence['bundle'].get('candidate_viewpoint_ids',[]))
+    vids.update(row['viewpoint_id'] for col in ('canonical_viewpoints','viewpoint_revisions','viewpoint_claim_links')
+                for row in package.get(col,[]))
+    targets=[c['claim_id'] for c in evidence['bundle']['claim_input']['claims']]
+    links=store.read_cvp_links(viewpoint_ids=vids,claim_ids=targets)
+    expected={(r['collection'],r['object_id']):r['payload'] for r in evidence['candidate']['records']}
+    for col,rows in package.items():
+        if col in domain.KNOWLEDGE_COLLECTIONS:
+            expected.update({(col,row[domain.KNOWLEDGE_COLLECTIONS[col][1]]):row for row in rows})
+    active_expected={oid for (col,oid),p in expected.items() if col=='viewpoint_claim_links' and p.get('effective_state')=='active'}
+    active_actual={oid for (col,oid),r in links.items() if r['payload'].get('effective_state')=='active'}
+    if active_actual!=active_expected:raise ValueError('current owned/member links have unresolved impacts')
+    context.update(links)
+    # Reverse consumers are observed after the one actual write, including
+    # store-generated invalidations. No model is invoked by this program audit.
+    affected=store.read_affected_context(sorted(keys)) if keys else {}
+    context.update(affected)
+    readback=seal({'schema_version':domain.VERSION+'_readback',
+        'candidate_sha256':evidence['candidate']['artifact_sha256'],
+        'approval_sha256':evidence['approval']['artifact_sha256'],
+        'actual_records':[{'collection':col,'object_id':oid,'payload':row['payload']}
+                          for (col,oid),row in sorted(context.items())],
+        'downstream_invalidations':[{'collection':col,'object_id':oid,'status':row['payload'].get('status')}
+            for (col,oid),row in sorted(context.items())
+            if col=='product_dependencies' and row['payload'].get('status')!='current'],
+        'pending_impacts':[],'independent_audit':'not_performed'})
+    return readback,pins(context)
+
+
+
+def _rebase_previous(request,old_bundle,new_bundle,previous,*,prior_findings):
+    if previous.get('schema_version')==domain.VERSION+'_rebase_frame':
+        return domain.prepare_rebase_frame(request,previous['old_bundle'],new_bundle,
+            previous['previous_candidate'],prior_findings=prior_findings)
+    if old_bundle['claim_input']!=new_bundle['claim_input']:
+        return domain.prepare_rebase_frame(request,old_bundle,new_bundle,previous,prior_findings=prior_findings)
+    return domain.rebind_candidate(request,old_bundle,new_bundle,previous,prior_findings=prior_findings)
+
+
+def _same_material_inputs(current,saved):
+    """Previously requested member/source expansion may add read-only material."""
+    old={(r['collection'],r['object_id']):r for r in saved['records']}
+    if any(old.get((r['collection'],r['object_id']))!=r for r in current['records']):return False
+    return all(current.get(k)==saved.get(k) for k in (
+        'claim_input','claim_authority','member_claim_authority','human_constraints','quality_findings','maintenance_viewpoint_ids'))
+
+
+def _completed_summary_proofs(store,step):
+    """Restore direct approved metadata after a restart, without another review."""
+    root=Path(step['materials']['step_root'])/'summary-proofs'
+    existing=sorted(root.glob('summary-*.json')) if root.exists() else []
+    if existing:return [read_artifact(p) for p in existing]
+    evidence=step['reviewed']['evidence']['cvp_management']
+    snapshots={(r['collection'],r['object_id']):r['payload'] for r in step['completion']['actual_records']}
+    heads=[]
+    for summary in evidence['candidate']['summaries']:
+        ref=evidence['candidate']['references'][summary['ref']]
+        vid=ref['object_id'];view=snapshots['canonical_viewpoints',vid]
+        if view['identity_status']!='active':continue
+        rid=view['current_revision_id'];revision=snapshots['viewpoint_revisions',rid]
+        heads.append({'viewpoint_id':vid,'viewpoint_revision_id':rid,
+            'head_sha256':sha256_json({'viewpoint':[view['revision'],record_content_sha(view)],
+                'revision':[revision['revision'],record_content_sha(revision)]}),
+            **{k:revision[k] for k in ('core_proposition','scope','proposition_signature')}})
+    from backend.pipeline.cvp_management_index import write_committed_summary_proofs
+    return write_committed_summary_proofs(evidence,Path(step['materials']['step_root'])/'proposal.json',
+        Path(step['materials']['step_root'])/'review.json',heads,root)
+
+
+
+def _group_preflight(current,group,plan):
+    return seal({k:v for k,v in current.items() if k!='artifact_sha256'}|
+                {'groups':[group],'recall_plans':[{'group_key':group['group_key'],'plan':plan}]})
+
+
+def _capacity_plan(store,request,current,group,recall,index,proposer,parent_id):
+    from backend.api.canonical_repository.cvp_management_capacity import RequestProbe,plan_work_units
+    from backend.api.canonical_repository.cvp_claim_input import compile_input
+    ids=group['claim_ids'];raw=store.read_current_records([('claims',cid) for cid in ids])
+    cards={c['claim_id']:{'claim_id':c['claim_id'],**c['content']} for c in compile_input(
+        [raw['claims',cid]['payload'] for cid in ids],current['claim_input_policy'])['claims']}
+    candidates={r['claim_id']:r['viewpoint_ids'] for r in recall['claim_candidates']}
+    shared=[('canonical_viewpoints',vid) for vid in request.maintenance_viewpoint_ids]
+    shared.extend((p.collection,p.object_id) for p in request.permissions)
+    def probe(selected):
+        child={**group,'claim_ids':list(selected),'original_group_key':group['group_key'],
+            'group_key':group['group_key']+':capacity:'+sha256_json({
+                'parent_group_key':group['group_key'],'claim_ids':list(selected)})[:20]}
+        plan=recall_plan(index,[cards[cid] for cid in selected],max_request_bytes=request.budget.max_request_bytes,
+            measure=lambda p:recall_adapter(proposer,p,max_request_bytes=request.budget.max_request_bytes).request_bytes(p))
+        result=combine_recall_candidates(plan,{cid:set(candidates[cid]) for cid in selected})
+        prepared=_group_preflight(current,child,plan)
+        material=prepare_materials(store,prepared,child['group_key'],result,
+            maintenance_viewpoint_ids=request.maintenance_viewpoint_ids,
+            maintenance_record_keys=[(p.collection,p.object_id) for p in request.permissions])
+        material=persistence.bind_task_constraints(store,parent_id,material)
+        packet=domain.proposal_packet(request,material)
+        return [RequestProbe('proposal',adapter('proposal',request,material,packet,client=proposer),packet)]
+    return plan_work_units(ids,parent_group_key=group['group_key'],candidates_by_claim=candidates,
+        mutable_dependencies_by_claim={cid:shared for cid in ids},
+        max_request_bytes=request.budget.max_request_bytes,probe=probe)
+
+
+def run(store,request,*,root,execute=False,clients=None):
+    request=domain.Request.model_validate(request);root=Path(root).resolve()
+    validate_authorization(request)
+    saved=store.get_cvp_group('CVPM-'+sha256_json(request.action_id)) if execute else None
+    if saved:
+        if saved.get('request')!=request.model_dump(mode='json') or saved.get('execution_root')!=str(root):
+            from backend.api.canonical_repository.postgres_store import ChangeSetConflict
+            raise ChangeSetConflict('CVP2 original root/request/policy cannot reset')
+        if saved.get('result',{}).get('status')=='completed':return saved['result']
+    preflight=prepare_recall(store,request.input,allow_unqualified=True,defer_index=execute)
+    if not execute:return {'status':'preflight','preflight':preflight,'model_calls':0,'semantic_writes':0}
+    with exclusive(root):
+        parent=persistence.prepare_action(store,request,root=str(root),preflight=preflight)
+        parent_id=parent['run_id'];call=_transport(store,parent_id,root,request)
+        if parent['result'].get('status')=='completed':return parent['result']
+        from backend.pipeline.viewpoint_resolution_runtime import subscription_client
+        proposer=clients['gpt'] if clients else subscription_client('codex','gpt-6.1-sol','high')
+        reviewer=clients['opus'] if clients else subscription_client('claude','claude-opus-5-5','high')
+        proposer=copy(proposer);reviewer=copy(reviewer)
+        proposer.max_output_tokens=reviewer.max_output_tokens=request.budget.max_output_tokens
+        previous_index_root=request.input.get('index_root')
+        approved_cards=[]
+        position=0
+        while True:
+            parent=store.get_cvp_group(parent_id)
+            groups=parent.get('work_groups',parent['groups'])
+            if position>=len(groups):break
+            group=groups[position];position+=1
+            key=group['group_key'];unit=parent['units'][key]
+            if unit.get('capacity_status')=='resource_hold':
+                persistence.progress(store,parent_id,group_key=key,status='resource_hold',
+                    detail='indivisible complete Claim dependency cluster exceeds original request budget')
+                continue
+            if unit['status']=='completed':
+                completed=store.get_cvp_group(unit['completed_step'])
+                approved_cards.extend(_completed_summary_proofs(store,completed))
+                previous_index_root=completed['materials'].get('index_root',previous_index_root)
+                continue
+            try:
+                blocked=[b for b in preflight.get('admission',{}).get('blocked_claims',[]) if b['claim_id'] in group['claim_ids']]
+                if blocked:
+                    persistence.progress(store,parent_id,group_key=key,status='needs_upstream',detail=blocked)
+                    continue
+                # Recover an approved/applying unit before any proposal or
+                # stale-input preparation. Committed identity always wins.
+                latest=store.get_cvp_group(unit['steps'][-1]) if unit['steps'] else None
+                if latest and latest['checkpoint'] in {'reviewed','applied','audited'}:
+                    if latest['checkpoint']=='reviewed':resume_reviewed_action(store,latest['run_id'])
+                    evidence=store.get_cvp_group(latest['run_id'])['reviewed']['evidence']['cvp_management']
+                    readback,rpins=_readback(store,evidence)
+                    persistence.complete_step(store,latest['run_id'],readback=readback,read_pins=rpins)
+                    persistence.progress(store,parent_id,group_key=key,status='completed',step_id=latest['run_id'])
+                    completed=store.get_cvp_group(latest['run_id'])
+                    approved_cards.extend(_completed_summary_proofs(store,completed))
+                    previous_index_root=completed['materials'].get('index_root',previous_index_root)
+                    continue
+                _reconcile_saved_dispatches(store,parent_id,unit,request,proposer,reviewer)
+                parent=store.get_cvp_group(parent_id)
+                # An unresolved semantic dispatch owns its original step even
+                # when a Claim/head changes. Never acquire a new generation to
+                # evade an unknown Opus/proposal response.
+                unit_prefix=str(root/('unit-'+sha256_json(key)[:16]))+'/'
+                if any(slot['state']=='started' and slot['intent']['cache_path'].startswith(unit_prefix)
+                       and not Path(slot['intent']['cache_path']).exists()
+                       for slot in parent['call_reservations'].values()):
+                    raise ValueError('unknown original unit call; resume its exact dispatch only')
+                heads=store.read_cvp_heads();index_root=root/('index-'+sha256_json(heads)[:24])
+                remaining=request.budget.max_calls-len(parent['call_reservations'])
+                # A changed head cannot bypass an unknown original index call.
+                for slot in parent['call_reservations'].values():
+                    if slot['state']=='started' and '/index-' in slot['intent']['cache_path'] and not Path(slot['intent']['cache_path']).exists():
+                        raise ValueError('unknown original index call; no new input/root retry')
+                live={h['viewpoint_id']:h for h in heads}
+                approved_by_view={}
+                for proof in approved_cards:
+                    h=proof['heads'][0]
+                    if live.get(h['viewpoint_id'])==h:approved_by_view[h['viewpoint_id']]=proof
+                if (index_root/'index.json').exists():
+                    index=load_reviewed_index(heads,proposer=proposer,reviewer=reviewer,output_dir=index_root)
+                else:
+                    index,_=maintain_reviewed_index(heads,previous_output_dir=previous_index_root,
+                        proposer=proposer,reviewer=reviewer,output_dir=index_root,
+                        max_request_bytes=request.budget.max_request_bytes,max_calls=max(0,remaining),
+                        invoke=call,approved_card_proofs=list(approved_by_view.values()))
+                current=prepare_recall(store,request.input,index=index,allow_unqualified=True)
+                generation=sha256_json({'group':group,'authority':[q for q in current['claim_authority']
+                    if q['claim_id'] in group['claim_ids']], 'index_sha256':index['artifact_sha256'],
+                    'existing_links':[link for link in current['existing_links'] if link.get('claim_id') in group['claim_ids']]})[:24]
+                unit_root=root/('unit-'+sha256_json(key)[:16])/generation
+                if group.get('original_group_key'):
+                    from backend.api.canonical_repository.cvp_claim_input import compile_input
+                    raw=store.read_current_records([('claims',cid) for cid in group['claim_ids']])
+                    child_cards=[{'claim_id':c['claim_id'],**c['content']} for c in compile_input(
+                        [raw['claims',cid]['payload'] for cid in group['claim_ids']],current['claim_input_policy'])['claims']]
+                    child_plan=recall_plan(index,child_cards,max_request_bytes=request.budget.max_request_bytes,
+                        measure=lambda p:recall_adapter(proposer,p,max_request_bytes=request.budget.max_request_bytes).request_bytes(p))
+                    current=_group_preflight(current,group,child_plan)
+                group_plan=next(p['plan'] for p in current['recall_plans'] if p['group_key']==key)
+                cards=[{'claim_id':group_plan['claim_refs'][c['claim_ref']],
+                        **{k:v for k,v in c.items() if k!='claim_ref'}} for c in
+                    (group_plan['shards'][0]['claims'] if group_plan['shards'] else [])]
+                if not cards:
+                    raw=store.read_current_records([('claims',cid) for cid in group['claim_ids']])
+                    from backend.api.canonical_repository.cvp_claim_input import compile_input
+                    cards=[{'claim_id':c['claim_id'],**c['content']} for c in compile_input(
+                        [raw['claims',cid]['payload'] for cid in group['claim_ids']],current['claim_input_policy'])['claims']]
+                recall_root=unit_root/'recall'
+                previous_recall=Path(latest['materials']['recall_root']) if latest else None
+                if (recall_root/'recall-authentication.json').exists():
+                    from backend.pipeline.cvp_recall import _authenticate_recall_root
+                    authenticated,_=_authenticate_recall_root(recall_root,client=proposer,previous_index=index)
+                    if authenticated['claims']!=cards or authenticated['plan']!=group_plan:
+                        raise ValueError('saved group recall differs from current complete bindings')
+                    # Ignore unrelated groups' links; they cannot change this
+                    # group's frozen recall action or acquire another call.
+                    relevant=lambda rows:[l for l in rows if l.get('claim_id') in group['claim_ids']]
+                    if relevant(authenticated['existing_links'])!=relevant(current['existing_links']):
+                        raise ValueError('saved group recall current active links changed')
+                    recall=read_artifact(recall_root/'recall-result.json')
+                    metrics={'current_plan':authenticated['plan'],'model_calls':0}
+                else:
+                    if previous_recall is None and group.get('original_group_key'):
+                        capacity=parent['units'][group['original_group_key']]['capacity']
+                        origin_root=Path(capacity['plan']['origin_recall_root'])
+                        origin=read_artifact(origin_root/'recall-authentication.json')
+                        seed=unit_root/'capacity-origin'
+                        subset_recall(origin['index'],cards,origin_output_dir=origin_root,
+                            output_dir=seed,client=proposer,existing_links=current['existing_links'])
+                        previous_recall=seed
+                    recall,metrics=refresh_recall(index,cards,previous_output_dir=previous_recall,
+                        client=proposer,output_dir=recall_root,max_request_bytes=group_plan['max_request_bytes'],
+                        max_calls=max(0,request.budget.max_calls-len(store.get_cvp_group(parent_id)['call_reservations'])),
+                        existing_links=current['existing_links'],invoke=call)
+                current=seal({k:v for k,v in current.items() if k!='artifact_sha256'}|{'recall_plans':[
+                    {'group_key':p['group_key'],'plan':metrics['current_plan'] if p['group_key']==key else p['plan']}
+                    for p in current['recall_plans']]})
+                bundle=prepare_materials(store,current,key,recall,maintenance_viewpoint_ids=request.maintenance_viewpoint_ids,
+                                   maintenance_record_keys=[(p.collection,p.object_id) for p in request.permissions])
+                bundle=persistence.bind_task_constraints(store,parent_id,bundle)
+                # Control facts version semantic material while the original
+                # authenticated recall remains reusable. They never reset calls.
+                controls={k:bundle[k] for k in ('human_constraints','quality_findings') if bundle.get(k)}
+                if controls:
+                    generation=sha256_json({'base_generation':generation,'controls':controls})[:24]
+                    unit_root=root/('unit-'+sha256_json(key)[:16])/generation
+                if not latest and not group.get('original_group_key'):
+                    initial_packet=domain.proposal_packet(request,bundle)
+                    initial_adapter=adapter('proposal',request,bundle,initial_packet,client=proposer)
+                    if initial_adapter.request_bytes(initial_packet)>request.budget.max_request_bytes:
+                        plan=_capacity_plan(store,request,current,group,recall,index,proposer,parent_id)
+                        plan=seal({k:v for k,v in plan.items() if k!='artifact_sha256'}|{'origin_recall_root':str(recall_root)})
+                        persistence.register_work_units(store,parent_id,group_key=key,plan=plan,
+                            recall=recall,index_root=str(index_root))
+                        position-=1
+                        continue
+                previous=None;prior_findings=[];ordinal=0;revision=False;seen=set()
+                if latest:
+                    oldroot=Path(latest['materials']['step_root'])
+                    oldbundle=latest['materials']['bundle']
+                    same=_same_material_inputs(bundle,oldbundle)
+                    if same:
+                        _guard(store,oldbundle)
+                        bundle=oldbundle
+                    for oldstep_id in unit['steps']:
+                        oldstep=store.get_cvp_group(oldstep_id)
+                        path=Path(oldstep['materials']['step_root'])/'candidate.json'
+                        if path.exists():
+                            saved=read_artifact(path);verify(saved,domain.VERSION+'_candidate')
+                            seen.add(_semantic(saved))
+                    has_approval=(oldroot/'approval.json').exists()
+                    if same and not has_approval:
+                        # A returned proposal is not the next round's previous
+                        # candidate. Replay the original prepared materials and
+                        # let its exact cached proposal/review complete.
+                        previous=latest['materials']['previous']
+                        prior_findings=latest['materials']['prior_findings']
+                        ordinal=latest['ordinal'];revision=latest['revision']
+                    else:
+                        if (oldroot/'candidate.json').exists():
+                            previous=read_artifact(oldroot/'candidate.json')
+                            prior_findings=list(previous['prior_findings'])
+                            if has_approval:prior_findings=_all_findings(previous,read_artifact(oldroot/'approval.json'))
+                            if not same:
+                                previous=_rebase_previous(request,oldbundle,bundle,previous,prior_findings=prior_findings)
+                        elif latest['materials']['previous'] is not None:
+                            previous=latest['materials']['previous']
+                            prior_findings=latest['materials']['prior_findings']
+                            if not same:
+                                previous=_rebase_previous(request,oldbundle,bundle,previous,prior_findings=prior_findings)
+                        ordinal=latest['ordinal']+1 if latest['generation']==generation else 0
+                        revision=has_approval and not read_artifact(oldroot/'approval.json')['approved']
+                while True:
+                    step_root=unit_root/f'step-{ordinal:04d}'
+                    materials={'bundle':bundle,'previous':previous,'prior_findings':prior_findings,
+                               'step_root':str(step_root),'recall_root':str(recall_root),'index_root':str(index_root)}
+                    if latest and latest['generation']==generation and latest['ordinal']==ordinal:
+                        if latest['materials'].get('index_root') is None:
+                            materials.pop('index_root')
+                    step_id=persistence.prepare_step(store,parent_id,group_key=key,generation=generation,
+                        ordinal=ordinal,materials=materials,revision=revision)
+                    write_immutable(step_root/'materials.json',materials)
+                    _guard(store,bundle)
+                    packet=domain.proposal_packet(request,bundle,previous=previous,prior_findings=prior_findings)
+                    pa=adapter('proposal',request,bundle,packet,client=proposer)
+                    raw,_,_=call(pa,packet,step_root/'proposal.json');response=validate_response('proposal',raw)
+                    if response['result']=='context_insufficient':
+                        newbundle=_expand(store,request,current,key,recall,bundle,response)
+                        if previous:previous=_rebase_previous(request,bundle,newbundle,previous,prior_findings=prior_findings)
+                        bundle=persistence.bind_task_constraints(store,parent_id,newbundle);ordinal+=1;revision=False;continue
+                    candidate=domain.compile_candidate(request,bundle,response['candidate'],previous=previous,prior_findings=prior_findings)
+                    digest=_semantic(candidate)
+                    if revision and digest in seen:raise ValueError('no semantic progress or oscillation; root cause investigation required')
+                    write_immutable(step_root/'candidate.json',candidate)
+                    # Freeze before the FIRST Opus call, even a rejection or
+                    # unknown return. Later plans require explicit lineage.
+                    write_immutable(step_root/'review-plan.json',candidate['component_plan'])
+                    _guard(store,bundle)
+                    packet=domain.review_packet(request,bundle,candidate,prior_findings=prior_findings)
+                    ra=adapter('review',request,bundle,packet,client=reviewer)
+                    raw_review,_,_=call(ra,packet,step_root/'review.json');review=validate_response('review',raw_review)
+                    if review['result']=='context_insufficient':
+                        newbundle=_expand(store,request,current,key,recall,bundle,review)
+                        previous=domain.rebind_candidate(request,bundle,newbundle,candidate,prior_findings=prior_findings)
+                        bundle=persistence.bind_task_constraints(store,parent_id,newbundle);ordinal+=1;revision=False;continue
+                    approval=domain.validate_review(request,bundle,candidate,review['review'],prior_findings=prior_findings)
+                    write_immutable(step_root/'approval.json',approval)
+                    if not approval['approved']:
+                        previous=candidate;prior_findings=_all_findings(candidate,approval);seen.add(digest)
+                        ordinal+=1;revision=True;continue
+                    evidence={'round_id':step_id,'request':request.model_dump(mode='json'),'bundle':bundle,
+                        'candidate':candidate,'approval':approval,'proposal_raw':raw,'review_raw':raw_review,
+                        'previous':previous,'prior_findings':prior_findings,
+                        'call_keys':{'gpt':str((step_root/'proposal.json').relative_to(root)),
+                                     'opus':str((step_root/'review.json').relative_to(root))},
+                        'provenance':{'proposal_model':pa.model_id,'review_model':ra.model_id,
+                            'proposal_artifact_sha256':read_artifact(step_root/'proposal.json')['artifact_sha256'],
+                            'review_artifact_sha256':read_artifact(step_root/'review.json')['artifact_sha256'],
+                            'created_at':stable_decided_at(step_root)}}
+                    package=validate_evidence(evidence);_guard(store,bundle)
+                    commit_package(store,step_id,package=package,approval=binding(step_root/'review.json'),
+                        authorization=request.authorization.model_dump(),backup={},sources=bundle['sources'],
+                        read_pins={(r['collection'],r['object_id']):(r['revision'],r['content_sha256'],False) for r in bundle['records']},
+                        reason='CVP2 exact final Opus candidate',actor=domain.VERSION,source_kind=domain.VERSION,
+                        management_evidence=evidence)
+                    readback,rpins=_readback(store,evidence)
+                    persistence.complete_step(store,step_id,readback=readback,read_pins=rpins)
+                    persistence.progress(store,parent_id,group_key=key,status='completed',step_id=step_id)
+                    from backend.pipeline.cvp_management_index import write_committed_summary_proofs
+                    approved_cards.extend(write_committed_summary_proofs(evidence,step_root/'proposal.json',
+                        step_root/'review.json',store.read_cvp_heads(),step_root/'summary-proofs'))
+                    previous_index_root=index_root
+                    break
+            except (ValueError,RuntimeError,OSError) as exc:
+                text=str(exc)
+                status=('needs_upstream' if text.startswith('needs_upstream:') else
+                    'superseded_input' if isinstance(exc,InputChanged) or 'superseded_input' in text else
+                    'resource_hold' if any(s in text.lower() for s in ('budget','capacity','exceeds','unknown','uncertain','progress','oscillation'))
+                    else 'engineering_required')
+                persistence.progress(store,parent_id,group_key=key,status=status,detail=text)
+        return store.get_cvp_group(parent_id)['result']

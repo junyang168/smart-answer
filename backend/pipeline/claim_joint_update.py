@@ -143,7 +143,7 @@ def verify_completion(goal, child, observed):
         raise ValueError('joint Update completion omitted required maintenance list')
     candidate = cm.Candidate.model_validate(child['candidate'])
     dispositions = {d.record_key: d for d in candidate.dispositions}
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     check_binding(child['stage_results']['opus'])
     receipt = body(read(Path(child['stage_results']['opus']['path'])))
     check_binding(receipt['candidate'])
@@ -167,7 +167,7 @@ def preflight(store, request):
     assignment. It never rewrites authorizations or prepares/runs an action.
     """
     from backend.pipeline import claim_management as cm
-    from backend.pipeline.cvp_sql_flow import pins, pin_rows
+    from backend.pipeline.cvp_sql_commit import pins, pin_rows
     request = cm.Request.model_validate(request)
     if request.operation != 'Update':
         raise ValueError('joint Update preflight requires an Update batch')

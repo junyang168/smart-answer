@@ -61,6 +61,10 @@ class MaterialStore(Store):
         return {k:deepcopy(v) for k,v in self.records.items() if k[0]=='viewpoint_claim_links' and
                 (v['payload']['viewpoint_id'] in viewpoint_ids or v['payload']['claim_id'] in claim_ids)}
 
+    def read_cvp_relations(self,*,viewpoint_ids=()):
+        return {k:deepcopy(v) for k,v in self.records.items() if k[0]=='viewpoint_relations' and
+                {v['payload']['source_viewpoint_id'],v['payload']['target_viewpoint_id']} & set(viewpoint_ids)}
+
     def verify_current_read_pins(self,pins):
         self.verified.append(pins)
         for key,pin in pins.items():
@@ -140,7 +144,7 @@ def test_typed_source_expansion_is_adjacent_then_full_and_preserves_bound_origin
 @pytest.mark.parametrize('kind',['foreign_source','foreign_section','skip_full','missing_reason','extra'])
 def test_context_expansion_rejects_unsupported_or_ambiguous_request(kind):
     store=MaterialStore();bundle=material(store)
-    request={'source_ref':'s1','section_ref':'p2','extent':'adjacent','reason':'具体依据'}
+    request={'source_ref':bundle['material']['sources'][0]['source_ref'],'section_ref':'p2','extent':'adjacent','reason':'具体依据'}
     if kind=='foreign_source':request['source_ref']='s999'
     if kind=='foreign_section':request['section_ref']='p999'
     if kind=='skip_full':request['extent']='full'
@@ -177,6 +181,161 @@ def test_recall_cannot_drop_existing_active_connection():
 
 def test_material_expansion_rejects_changed_physical_source():
     store=MaterialStore();bundle=material(store)
-    request={'source_ref':'s1','section_ref':'p2','extent':'adjacent','reason':'具体依据'}
+    request={'source_ref':bundle['material']['sources'][0]['source_ref'],'section_ref':'p2','extent':'adjacent','reason':'具体依据'}
     def changed(doc):return Path(doc['source_path']),'b'*64,store.projection
     with pytest.raises(ValueError,match='source changed'):expand_source(bundle,request,source_loader=changed)
+
+
+def maintenance_graph(store):
+    """One-hop relation endpoint has its own unrelated member and relation."""
+    for vid in ('V2','V3'):
+        store.records['canonical_viewpoints',vid]=store.state({'viewpoint_id':vid,'identity_status':'active','current_revision_id':'R'+vid[1:]})
+        store.records['viewpoint_revisions','R'+vid[1:]]=store.state({'viewpoint_revision_id':'R'+vid[1:],
+            'viewpoint_id':vid,'core_proposition':'只读对端完整判断','scope':{},'proposition_signature':{}})
+    store.records['viewpoint_relations','Q1']=store.state({'viewpoint_relation_id':'Q1',
+        'source_viewpoint_id':'V1','target_viewpoint_id':'V2','effective_state':'active',
+        'reason':'原先批准的限定关系','supporting_claim_ids':['C1'],
+        'supporting_claim_relation_ids':['A1'],'review_provenance':{'basis_identity_decision_ids':['D1']}})
+    store.records['viewpoint_relations','Q2']=store.state({'viewpoint_relation_id':'Q2',
+        'source_viewpoint_id':'V2','target_viewpoint_id':'V3','effective_state':'active','reason':'无关邻居关系'})
+    store.records['claim_relations','A1']=store.state({'claim_relation_id':'A1','from_id':'C1','to_id':'C2',
+        'relation_type':'supports','reason':'原论证路线'})
+    store.records['viewpoint_claim_links','L-unrelated']=store.state({'viewpoint_claim_link_id':'L-unrelated',
+        'claim_id':'C-unrelated','viewpoint_id':'V2','effective_state':'active','link_type':'equivalent_full'})
+    store.records['claims','C-unrelated']=store.state({'claim_id':'C-unrelated','statement':'不得递归加载'})
+    store.records['viewpoint_identity_decisions','D1']=store.state({'decision_id':'D1',
+        'reason':'原始独立身份审核理由，不得被新组窄表述推翻'})
+    row=store.records['viewpoint_revisions','R1']['payload']
+    row['provenance']={'basis_identity_decision_ids':['D1']}
+    store.records['viewpoint_revisions','R1']=store.state(row)
+    link=store.records['viewpoint_claim_links','L1']['payload'];link['decision_id']='D1'
+    store.records['viewpoint_claim_links','L1']=store.state(link)
+    rev=store.records['viewpoint_revisions','R1'];view=store.records['canonical_viewpoints','V1']
+    store.heads[0]['head_sha256']=sha256_json({'viewpoint':[view['revision'],view['content_sha256']],
+        'revision':[rev['revision'],rev['content_sha256']]})
+
+
+def test_maintenance_reads_relations_original_reasons_and_direct_support_without_recursive_endpoint_members():
+    store=MaterialStore(25);maintenance_graph(store)
+    bundle=material(store,maintenance_viewpoint_ids=['V1'])
+    packet=bundle['material'];keys={(r['collection'],r['object_id']) for r in bundle['records']}
+    assert len(packet['claims'])==26 and len(packet['links'])==25
+    assert len(packet['evidence'])==26 and len(packet['sources'])==26
+    assert [r['content']['viewpoint_relation_id'] for r in packet['relations']]==['Q1']
+    assert packet['identity_decisions'][0]['content']['reason'].startswith('原始独立')
+    assert packet['claim_relations'][0]['content']['reason']=='原论证路线'
+    assert ('canonical_viewpoints','V2') in keys and ('viewpoint_revisions','R2') in keys
+    assert ('viewpoint_claim_links','L-unrelated') not in keys and ('claims','C-unrelated') not in keys
+    assert ('viewpoint_relations','Q2') not in keys and ('canonical_viewpoints','V3') not in keys
+    assert bundle['candidate_viewpoint_ids']==['V1']
+    assert next(v for v in packet['viewpoints'] if v['cvp_ref']==bundle['references']['canonical_viewpoints']['V2'])['context_only'] is True
+    assert packet['maintenance_scope']['context_grants_write_permission'] is False
+
+
+def test_explicit_withdrawn_link_and_hold_are_material_not_silent_permission():
+    store=MaterialStore();link=store.records['viewpoint_claim_links','L1']['payload']
+    store.records['viewpoint_claim_links','L-old']=store.state({**link,'viewpoint_claim_link_id':'L-old',
+        'effective_state':'invalidated','human_retained':True,'review_note':'人工保留的历史连接理由'})
+    bundle=material(store,maintenance_viewpoint_ids=['V1'],maintenance_record_keys=[('viewpoint_claim_links','L-old')])
+    ref=bundle['references']['viewpoint_claim_links']['L-old']
+    assert next(o for o in bundle['material']['maintenance_objects'] if o['ref']==ref)['content']['effective_state']=='invalidated'
+    protection=next(p for p in bundle['material']['protections'] if p['ref']==ref)
+    assert protection['read_only_protection'] and protection['flags']=={'human_retained':True}
+    assert protection['review_note']=='人工保留的历史连接理由'
+    assert ('viewpoint_claim_links','L-old') in store.verified[-1]
+    with pytest.raises(ValueError,match='need a viewpoint scope'):
+        material(store,maintenance_record_keys=[('viewpoint_claim_links','L-old')])
+
+
+def test_maintenance_may_name_known_head_even_when_recall_did_not_select_it():
+    store=MaterialStore();preflight,recall=prepared(store)
+    recall=seal({k:v for k,v in recall.items() if k not in {'artifact_sha256','claim_candidates'}}|
+                {'claim_candidates':[{'claim_id':'C0','viewpoint_ids':[]}]})
+    bundle=prepare_materials(store,preflight,'g',recall,maintenance_viewpoint_ids=['V1'],source_loader=store.load_source)
+    assert bundle['candidate_viewpoint_ids']==['V1'] and len(bundle['material']['links'])==2
+
+
+def test_short_refs_and_target_component_input_stay_exact_when_support_expands():
+    import re
+    store=MaterialStore();base=material(store)
+    expanded=material(store,member_support_ids=['C1'])
+    assert base['claim_input']==expanded['claim_input']
+    for collection,refs in base['references'].items():
+        assert all(expanded['references'][collection][oid]==ref for oid,ref in refs.items())
+    assert all(re.fullmatch(r'[a-z][1-9][0-9]*',ref) for refs in expanded['references'].values() for ref in refs.values())
+    source_ref=base['material']['sources'][0]['source_ref']
+    context=expand_source(base,{'source_ref':source_ref,'section_ref':'p2','extent':'adjacent','reason':'原上下文'},source_loader=store.load_source)
+    assert context['material']['sources'][0]['source_ref']==expanded['references']['source_documents']['S0']
+    assert base['claim_authority']==[{'claim_id':'C0','qualification':prepared(store)[0]['claim_authority'][0]['qualification']}]
+    assert expanded['claim_authority']==base['claim_authority']
+
+
+def test_maintenance_dependency_drift_and_missing_original_reason_fail_closed():
+    store=MaterialStore();maintenance_graph(store);preflight,recall=prepared(store)
+    store.records.pop(('viewpoint_identity_decisions','D1'))
+    with pytest.raises(ValueError,match='missing a current dependency'):
+        prepare_materials(store,preflight,'g',recall,maintenance_viewpoint_ids=['V1'],source_loader=store.load_source)
+
+
+def test_real_domain_rebase_keeps_previous_plan_when_new_member_support_is_read():
+    from backend.api.canonical_repository import cvp_management as domain
+    from test_cvp_management import request
+    store=MaterialStore()
+    for key,row in list(store.records.items()):
+        if key[0]=='viewpoint_claim_links':
+            store.records[key]=store.state({**row['payload'],'pinned_claim_revision':2,
+                'validated_against_viewpoint_revision_id':'R1'})
+    preflight,recall=prepared(store)
+    before=prepare_materials(store,preflight,'g',recall,source_loader=store.load_source)
+    req=request(input=preflight)
+    candidate=domain.compile_candidate(req,before,{'component_dispositions':[
+        {'component_ref':'k1','disposition':'unresolved','reason':'需要精确成员来源'}]})
+    after=prepare_materials(store,preflight,'g',recall,member_support_ids=['C1'],source_loader=store.load_source)
+    rebound=domain.rebind_candidate(req,before,after,candidate)
+    assert rebound['component_plan']==candidate['component_plan']
+    assert rebound['component_dispositions']==candidate['component_dispositions']
+    assert rebound['references'].items()>=candidate['references'].items()
+    assert rebound['rebase_history'][-1]['wording_changed'] is False
+
+
+def test_merge_materials_hold_complete_members_of_both_explicit_views_and_all_relations():
+    store=MaterialStore(25);maintenance_graph(store)
+    view=store.records['canonical_viewpoints','V2'];rev=store.records['viewpoint_revisions','R2']
+    store.heads.append({'viewpoint_id':'V2','viewpoint_revision_id':'R2',
+        'head_sha256':sha256_json({'viewpoint':[view['revision'],view['content_sha256']],
+            'revision':[rev['revision'],rev['content_sha256']]}),
+        **{k:rev['payload'][k] for k in ('core_proposition','scope','proposition_signature')}})
+    bundle=material(store,maintenance_viewpoint_ids=['V1','V2'],
+        maintenance_record_keys=[('viewpoint_relations','Q1')])
+    assert bundle['candidate_viewpoint_ids']==['V1','V2']
+    assert len(bundle['material']['links'])==26  # All V1 and merge-target V2 members.
+    assert len(bundle['material']['relations'])==2
+    assert any(row['content']['viewpoint_relation_id']=='Q1' for row in bundle['material']['relations'])
+    assert len(bundle['material']['maintenance_objects'])==1
+    assert 'C-unrelated' in bundle['references']['claims']
+    assert next(v for v in bundle['material']['viewpoints'] if v['cvp_ref']==bundle['references']['canonical_viewpoints']['V3'])['context_only']
+
+
+def test_member_qualification_is_opaque_complete_and_does_not_block_readonly_members():
+    store=MaterialStore(members=3)
+    store.quals['C1']={'ready':False,'reason':'needs upstream review','run_id':'historical-round'}
+    store.quals['C2']={'ready':True,'run_id':'member-round','opaque':{'preserved':True}}
+    preflight,recall=prepared(store)
+    bundle=prepare_materials(store,preflight,'g',recall,source_loader=store.load_source)
+    members={q['claim_id']:q['qualification'] for q in bundle['member_claim_authority']}
+    assert members=={'C1':store.quals['C1'],'C2':store.quals['C2'],'C3':None}
+    assert bundle['claim_authority']==preflight['claim_authority']
+    assert bundle['material']['claims']
+    bundle['member_claim_authority'][1]['qualification']['opaque']['preserved']=False
+    assert store.quals['C2']['opaque']['preserved'] is True
+
+
+def test_relationship_only_support_claim_keeps_its_opaque_qualification():
+    store=MaterialStore(members=2);maintenance_graph(store)
+    del store.records['viewpoint_claim_links','L2']
+    store.quals['C2']={'ready':False,'reason':'relationship support not reviewed'}
+    bundle=material(store,maintenance_viewpoint_ids=['V1'])
+    authorities={r['claim_id']:r['qualification'] for r in bundle['member_claim_authority']}
+    assert authorities['C2']==store.quals['C2']
+    assert 'C2' in bundle['relationship_support_claim_ids']
+    assert 'C2' not in bundle['member_support_ids']

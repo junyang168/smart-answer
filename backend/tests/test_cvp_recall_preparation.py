@@ -140,3 +140,115 @@ def test_cli_preflight_needs_no_old_campaign_and_rejects_execute(tmp_path,monkey
     assert flow.main(args)==0
     assert read_artifact(tmp_path/'out/recall-preflight.json')['status']=='index_required'
     with pytest.raises(ValueError,match='never permits'):flow.main([*args,'--execute'])
+
+
+class AdmissionStore(Store):
+    def verify_current_read_pins(self,pins):
+        self.verified.append(deepcopy(pins))
+        for (collection,cid),pin in pins.items():
+            assert collection=='claims'
+            row=self.rows[cid]
+            assert pin==(row['revision'],row['content_sha256'],bool(row.get('retired')))
+
+
+def test_authenticated_injected_index_prepares_without_rewriting_request_or_loading_root():
+    store=Store(1);req=manifest(store);before=deepcopy(req)
+    def forbidden(*args,**kwargs):raise AssertionError('injected index must not be loaded again')
+    result=prepare_recall(store,req,index=index(),load_index=forbidden)
+    assert result['status']=='prepared' and result['request_sha256']==req['artifact_sha256']
+    assert result['index_sha256']==index()['artifact_sha256']
+    assert len(result['recall_plans'])==1 and req==before
+    assert 'admission' not in result  # strict legacy output remains unchanged
+
+
+@pytest.mark.parametrize('kind,expected,reason', [
+    ('missing','needs_upstream','claim_missing'),
+    ('retired','needs_upstream','claim_retired'),
+    ('qualification_missing','needs_upstream','qualification_missing'),
+    ('qualification_stale','superseded_input','qualification_stale'),
+    ('hold','needs_upstream','claim_hold'),
+    ('unknown_field','needs_upstream','claim_input_contract'),
+    ('malformed_qualification','needs_upstream','qualification_invalid_shape'),
+])
+def test_allow_unqualified_retains_full_cohort_and_plans_only_independent_ready_groups(kind,expected,reason):
+    store=AdmissionStore(21)
+    if kind=='missing':store.rows.pop('C0')
+    elif kind=='retired':store.rows['C0']['retired']=True
+    elif kind=='qualification_missing':store.quals.pop('C0')
+    elif kind=='qualification_stale':store.quals['C0']['revision']=1
+    elif kind=='malformed_qualification':store.quals['C0']=['qualification unavailable']
+    else:
+        store.rows['C0']['payload'].update({'review_status':'human_hold'} if kind=='hold' else {'new_semantic_field':'未知限定'})
+        store.rows['C0']['content_sha256']=record_content_sha(store.rows['C0']['payload'])
+        store.quals['C0']['content_sha256']=store.rows['C0']['content_sha256']
+    req=manifest(store)
+    # The frozen topic denominator includes a now-missing Claim as well.
+    req=seal({k:v for k,v in req.items() if k!='artifact_sha256'} | {
+        'claim_ids':['C'+str(i) for i in range(21)],
+        'grouping':{'scope_label':'人子','groups':[
+            {'group_key':'g0','claim_ids':['C'+str(i) for i in range(20)],'rationale':'原完整组'},
+            {'group_key':'g1','claim_ids':['C20'],'rationale':'独立组'}]}})
+    before=deepcopy(req)
+    result=prepare_recall(store,req,index=index(),allow_unqualified=True)
+    assert result['status']=='prepared' and result['request_sha256']==req['artifact_sha256'] and req==before
+    assert [g['claim_ids'] for g in result['groups']]==[req['claim_ids'][:20],['C20']]
+    assert [p['group_key'] for p in result['recall_plans']]==['g1']
+    assert len(result['claim_authority'])==20
+    admission=result['admission']
+    assert admission['ready_group_keys']==['g1'] and admission['blocked_group_keys']==['g0']
+    assert set(admission['claim_pins'])==set(req['claim_ids'])
+    blocked=admission['blocked_claims']
+    assert len(blocked)==1 and blocked[0]['claim_id']=='C0'
+    assert blocked[0]['kind']==expected and blocked[0]['reason_code']==reason
+    assert blocked[0]['qualification']==store.quals.get('C0')
+    assert admission['groups'][0]=={'group_key':'g0','status':'blocked','blocked_claim_ids':['C0']}
+    if kind=='missing':assert blocked[0]['state_pin'] is None and admission['claim_pins']['C0'] is None
+    else:
+        assert blocked[0]['state_pin']==admission['claim_pins']['C0']
+        assert admission['claim_pins']['C0']['retired']==(kind=='retired')
+    assert result['model_calls']==result['semantic_writes']==0
+
+
+def test_index_required_unqualified_admission_can_resume_with_authenticated_index():
+    store=AdmissionStore(21);store.quals.pop('C0');req=manifest(store)
+    missing=prepare_recall(store,req,allow_unqualified=True)
+    assert missing['status']=='index_required' and missing['recall_plans']==[]
+    prepared=prepare_recall(store,req,allow_unqualified=True,index=index())
+    assert prepared['status']=='prepared'
+    assert prepared['admission']==missing['admission']
+    assert prepared['request_sha256']==missing['request_sha256']==req['artifact_sha256']
+
+
+@pytest.mark.parametrize('bad_index',[index(0),{},index(2)])
+def test_injected_missing_or_stale_index_fails_closed_even_when_claims_are_blocked(bad_index):
+    store=AdmissionStore(1);store.quals.pop('C0')
+    with pytest.raises(ValueError):prepare_recall(store,manifest(store),index=bad_index,allow_unqualified=True)
+
+
+def test_all_blocked_groups_have_no_recall_plan_or_call_budget_consumption():
+    store=AdmissionStore(2);store.quals.clear();req=manifest(store,recall_max_calls=0)
+    result=prepare_recall(store,req,index=index(),allow_unqualified=True)
+    assert result['status']=='prepared' and result['recall_plans']==[]
+    assert result['admission']['ready_group_keys']==[]
+    assert result['admission']['blocked_group_keys']==['g0']
+    assert result['claim_authority']==[]
+
+
+def test_unqualified_mode_does_not_swallow_sql_record_corruption_source_errors_or_head_drift():
+    store=AdmissionStore(1);store.rows['C0']['payload']['statement']='corrupt unhashed edit'
+    with pytest.raises(ValueError,match='inconsistent recall Claim'):
+        prepare_recall(store,manifest(store),index=index(),allow_unqualified=True)
+    store=AdmissionStore(1)
+    def source_error(cid):raise ValueError('source qualification SQL failure')
+    store.claim_management_qualification=source_error
+    with pytest.raises(ValueError,match='source qualification SQL failure'):
+        prepare_recall(store,manifest(store),index=index(),allow_unqualified=True)
+    store=AdmissionStore(1);store.quals.clear()
+    calls=0
+    def head_drift():
+        nonlocal calls
+        calls+=1
+        return heads() if calls==1 else []
+    store.read_cvp_heads=head_drift
+    with pytest.raises(ValueError,match='changed'):
+        prepare_recall(store,manifest(store),index=index(),allow_unqualified=True)

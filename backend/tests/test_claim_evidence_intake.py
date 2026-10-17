@@ -136,7 +136,7 @@ def test_real_common_sql_atomic_intake_cache_and_pending_completion(postgres_sto
     postgres_store.register_claim_issue(run,issue.model_dump(mode='json'))
     scoped=m.manifest_for_issues(postgres_store,run,[issue],intake_policy(tmp_path),tmp_path/'scoped')
     ports=IntakePorts(issue)
-    monkeypatch.setattr('backend.pipeline.cvp_sql_flow.verified_group_backup',lambda *args:{'dump':report,'restore_catalog_nonempty':True})
+    monkeypatch.setattr('backend.pipeline.cvp_sql_commit.verified_group_backup',lambda *args:{'dump':report,'restore_catalog_nonempty':True})
     old=deepcopy(postgres_store.get_record_state('claims','CL-test'))
     boundary=postgres_store._assert_transaction_edges_and_reviews
     if late_failure:
@@ -191,7 +191,7 @@ def test_complete_claim_audit_handoff_and_real_sql_completion_boundary(postgres_
     postgres_store.register_claim_issue(run,issue.model_dump(mode='json'))
     scoped=m.manifest_for_issues(postgres_store,run,[issue],intake_policy(tmp_path),tmp_path/'scoped')
     ports=IntakePorts(issue)
-    monkeypatch.setattr('backend.pipeline.cvp_sql_flow.verified_group_backup',lambda *args:{'dump':report,'restore_catalog_nonempty':True})
+    monkeypatch.setattr('backend.pipeline.cvp_sql_commit.verified_group_backup',lambda *args:{'dump':report,'restore_catalog_nonempty':True})
     execute_source_action(postgres_store,run,scoped.model_dump(),root=tmp_path/'action',ports=ports)
     saved=postgres_store.get_cvp_group(run)
     authority=intake.committed_context(saved,postgres_store)

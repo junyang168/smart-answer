@@ -36,7 +36,7 @@ def relation_only_result(review, outcome, cid):
 
 def authority(store, item, audit, row):
     from backend.pipeline.cvp_sql_claim_authority import coordinate_authority
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     from backend.pipeline.corpus_ai_review_runner import _normalize_claim_layer, _review_artifact_sha256
     from backend.pipeline.corpus_ai_review import validate_review_response, apply_risk_routing
     from backend.pipeline.corpus_ai_adjudication_runner import _transcript_segments, _adjudication_artifact_sha256
@@ -139,7 +139,7 @@ def authority(store, item, audit, row):
 
 
 def verify(proof):
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     require(proof.get('schema_version')=='wang_retained_closed_relation_only_claim_v1'
         and proof.get('artifact_sha256')==sha256_json({k:v for k,v in proof.items() if k!='artifact_sha256'})
         and proof.get('master_data_mutations')==proof.get('new_model_calls')==0, 'receipt drift')

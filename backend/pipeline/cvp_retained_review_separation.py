@@ -37,7 +37,7 @@ def validate_policy(policy):
 
 def policy_for(root):
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     path = next((p/NAME for p in Path(root).resolve().parents if (p/NAME).exists()), None)
     if path is None: return None
     binding = read_artifact(path); check_binding(binding['policy'])
@@ -102,7 +102,7 @@ def validate_human_direction(direction):
 
 def persist_human_bindings(root, explicit, *, campaign, store, limit):
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact,write_immutable
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     old=human_bindings(root)
     if len({b['path'] for b in explicit})!=len(explicit) or any(b not in explicit for b in old):
         raise ValueError('every original exact retained content direction must remain explicit')
@@ -125,7 +125,7 @@ def persist_human_bindings(root, explicit, *, campaign, store, limit):
 
 def merge_human_directions(bindings):
     """One-level exact disjoint decisions; never merge different review rounds."""
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact
     values=[];seen=set()
     identity=('schema_version','campaign_sha256','group_id','decision',
@@ -149,7 +149,7 @@ def merge_human_directions(bindings):
 
 def human_binding_for(root):
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact
-    from backend.pipeline.cvp_sql_flow import check_binding,binding
+    from backend.pipeline.cvp_sql_commit import check_binding, binding
     root=Path(root).resolve()
     parent=next((p for p in root.parents
                  if (p/HUMAN_NAME).exists() or (p/HUMAN_ADDITIONS).exists()),None)
@@ -169,7 +169,7 @@ def human_binding_for(root):
 
 def generation_artifacts(paths):
     """Bound leaf artifacts only; no directory search or recursive history proof."""
-    from backend.pipeline.cvp_sql_flow import binding
+    from backend.pipeline.cvp_sql_commit import binding
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact
     result = []
     for path in paths:
@@ -186,7 +186,7 @@ def generation_artifacts(paths):
 
 
 def prior_review_context(decision, policy, claim_id):
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact
     leaves = {r['artifact_sha256']:r for r in policy.get('generation_artifacts',[])}
     shas = decision['semantic_call_artifact_sha256s']
@@ -307,7 +307,7 @@ def passed_null_locator_retention(root, store, materials, report, source_loader)
     bodies; requiring a prior rejection to preserve it is a compiler defect.
     No reviewer prose is interpreted and no proposal/verdict is rewritten.
     """
-    from backend.pipeline.cvp_sql_flow import binding, decoded_pins
+    from backend.pipeline.cvp_sql_commit import binding, decoded_pins
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact, write_immutable
     from backend.pipeline.cvp_link_target_selection import _approved
     root = Path(root)
@@ -390,7 +390,7 @@ def passed_null_locator_retention(root, store, materials, report, source_loader)
 
 
 def build_boundary(root, store, *, original, revised, review, packet, source_loader, reconsideration):
-    from backend.pipeline.cvp_sql_flow import binding, check_binding
+    from backend.pipeline.cvp_sql_commit import binding, check_binding
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact, write_immutable
     from backend.pipeline.cvp_link_target_selection import _approved
     from backend.api.canonical_repository.viewpoint_batch_resolution import CanonicalViewpointProposalResponse
@@ -475,7 +475,7 @@ def pending_maintenance(root, receipt, final_review):
     second proposal/review. New-content refusals stay in the normal workflow.
     """
     from backend.pipeline.viewpoint_resolution_runtime import write_immutable
-    from backend.pipeline.cvp_sql_flow import binding
+    from backend.pipeline.cvp_sql_commit import binding
     keys={(p['claim_id'],p['component_index']):p['link_id'] for p in receipt['prior_current_approvals']}
     items=[{'link_id':keys[r['claim_id'],r['component_index']],'final_finding':deepcopy(r)}
            for r in final_review['change_reviews']
@@ -496,7 +496,7 @@ def write_scope_authority(root, store, materials, report, *, human_binding=None)
     from this human disposition. This admits new model-passed writes only;
     group completion and every other pending impact still require resolution.
     """
-    from backend.pipeline.cvp_sql_flow import binding,check_binding,decoded_pins
+    from backend.pipeline.cvp_sql_commit import binding, check_binding, decoded_pins
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact,write_immutable
     from backend.api.canonical_repository.viewpoint_batch_changeset import (
         RETAINED_WRITE_SCOPE_VERSION,retained_write_components)

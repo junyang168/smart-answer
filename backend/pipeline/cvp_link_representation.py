@@ -40,7 +40,7 @@ def committed_generation_facts(store,value,*,cursor=None):
     actual approved before/after operations may bridge them. No ancestry search,
     implicit reapproval, model calls, or pending-list mutation.
     """
-    from backend.pipeline.cvp_sql_flow import check_binding,decoded_pins,pin_rows
+    from backend.pipeline.cvp_sql_commit import check_binding, decoded_pins, pin_rows
     from backend.pipeline.cvp_source_impact_resolution import applied_review,read_policy_slice_item
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     if generation_handoff(value) is None:return None
@@ -227,7 +227,7 @@ def representation_action_id(d):
 
 def generation_direction(store,run_id):
     """Program bound policy direction, never human afterimage approval."""
-    from backend.pipeline.cvp_sql_flow import binding,check_binding
+    from backend.pipeline.cvp_sql_commit import binding, check_binding
     from backend.pipeline.claim_first_management import validate_claim_audit_report
     from backend.pipeline.claim_source_write_slice import prepare
     from backend.pipeline.viewpoint_content_blocked_fallback import verify_saved_full_audit
@@ -273,7 +273,7 @@ def generation_direction(store,run_id):
     return result
 
 def validate_generation_direction(d,m):
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     from backend.pipeline.claim_source_write_slice import validate_package as source_validate
     if d.get('artifact_sha256')!=sha256_json({k:v for k,v in d.items() if k!='artifact_sha256'}):
         raise ValueError('link generation direction seal drift')
@@ -317,7 +317,7 @@ def validate_generation_direction(d,m):
         raise ValueError('link generation incomplete/stale/foreign/held scope')
 
 def prepare_generation_material(store,group,authorization):
-    from backend.pipeline.cvp_sql_flow import pins,pin_rows
+    from backend.pipeline.cvp_sql_commit import pins, pin_rows
     from backend.pipeline.cvp_sql_actions import supports_identity_dependencies
     from backend.pipeline.cvp_link_target_selection import _approved
     from backend.pipeline.viewpoint_evidence_source_context import load_context_source
@@ -399,7 +399,7 @@ def validate_direction(d,m):
         raise ValueError('representation direction seal drift')
 
 def prepare_material(store,run_id,authorization):
-    from backend.pipeline.cvp_sql_flow import check_binding,pins,pin_rows
+    from backend.pipeline.cvp_sql_commit import check_binding, pins, pin_rows
     from backend.pipeline.cvp_sql_actions import supports_identity_dependencies
     from backend.pipeline.viewpoint_adjudication_history import validated_history
     from backend.pipeline.viewpoint_evidence_source_context import load_context_source
@@ -503,7 +503,7 @@ def compile_package(m,p,r,root):
       'source_repair_application':{'schema_version':SCHEMA,'run_root':str(Path(root).resolve()),'materials_sha256':sha256_json(m)}}
 
 def validate_package(package):
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     app=package['source_repair_application'];root=Path(app['run_root']);m=body(read(root/'materials.json'))
     if app['schema_version']!=SCHEMA or not root.is_absolute() or app['materials_sha256']!=sha256_json(m):raise ValueError('representation authority drift')
     check_binding(m['authorization']);validate_direction(read_artifact(m['authorization']['path']),m)
@@ -557,7 +557,7 @@ def human_saved(root,m,d):
 
 def human_package(m,authorization,root):
     from backend.pipeline.cvp_link_retarget import fresh_identity_records
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     check_binding(authorization);d=read_artifact(authorization['path']);p,r,c=human_saved(root,m,d)
     link=postimage(m,p['response']);states=content.index(m['records']+m['provenance_templates'])
     seed=sha256_json({'contract':HUMAN,'materials':sha256_json(m),'disposition':d['artifact_sha256']})
@@ -577,7 +577,7 @@ def human_package(m,authorization,root):
 
 def execute_human(store,run_id,*,authorization,disposition,root,ports):
     """Same registered action/root, zero new calls, common commit/readback/audit."""
-    from backend.pipeline.cvp_sql_flow import check_binding,decoded_pins,commit_package,verified_group_backup
+    from backend.pipeline.cvp_sql_commit import check_binding, decoded_pins, commit_package, verified_group_backup
     from backend.pipeline.cvp_sql_actions import resume_bound_action
     check_binding(authorization);check_binding(disposition);d=read_artifact(authorization['path'])
     if d.get('schema_version')==GENERATION:raise ValueError('generation requires normal independent model review')
@@ -611,7 +611,7 @@ def execute_human(store,run_id,*,authorization,disposition,root,ports):
         source_kind=SCHEMA,viewpoint_ids=e['viewpoint_ids'],disposition=e.get('disposition'),action=previous)
 
 def execute(store,run_id,*,authorization,root,ports):
-    from backend.pipeline.cvp_sql_flow import binding,check_binding,decoded_pins,commit_package,verified_group_backup
+    from backend.pipeline.cvp_sql_commit import binding, check_binding, decoded_pins, commit_package, verified_group_backup
     from backend.pipeline.cvp_sql_actions import initialize_subscription_runtime,resume_bound_action
     check_binding(authorization);d=read_artifact(authorization['path'])
     aid=representation_action_id(d)

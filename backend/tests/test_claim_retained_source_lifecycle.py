@@ -69,7 +69,7 @@ def test_review_correction_strict_final_and_shared_sql(postgres_store,issue_setu
     postgres_store.register_claim_issue(run,issue.model_dump(mode='json'))
     scoped=m.manifest_for_issues(postgres_store,run,[issue],policy,tmp_path/'scoped')
     ports=PendingPorts(issue,resolve)
-    monkeypatch.setattr('backend.pipeline.cvp_sql_flow.verified_group_backup',lambda *a:{'dump':report,'restore_catalog_nonempty':True})
+    monkeypatch.setattr('backend.pipeline.cvp_sql_commit.verified_group_backup',lambda *a:{'dump':report,'restore_catalog_nonempty':True})
     before={k:postgres_store.get_record_state(*c.split_key(k)) for k in states}
     for _ in range(2):
         if not resolve:
@@ -96,7 +96,7 @@ def test_no_write_transaction_late_failure_and_cached_resume(postgres_store,issu
     postgres_store.register_claim_issue(run,issue.model_dump(mode='json'))
     scoped=m.manifest_for_issues(postgres_store,run,[issue],policy,tmp_path/'scoped')
     ports=PendingPorts(issue,True)
-    monkeypatch.setattr('backend.pipeline.cvp_sql_flow.verified_group_backup',lambda *a:{'dump':report,'restore_catalog_nonempty':True})
+    monkeypatch.setattr('backend.pipeline.cvp_sql_commit.verified_group_backup',lambda *a:{'dump':report,'restore_catalog_nonempty':True})
     verify=WriteTrackingCursor.verify_no_content_write
     def fail(*a):raise ValueError('late zero-write verification failure')
     monkeypatch.setattr(WriteTrackingCursor,'verify_no_content_write',fail)

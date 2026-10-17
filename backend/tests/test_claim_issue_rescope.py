@@ -142,7 +142,7 @@ def test_amendment_single_sql_commit_saved_answers_rollback_and_original_budget_
         with pytest.raises(ValueError,match='new consumer'):
             a.amendment_records(store,direction,old['materials'])
     ports=EligibilityPorts(issue)
-    monkeypatch.setattr('backend.pipeline.cvp_sql_flow.verified_group_backup',lambda *args:{'dump':report,'restore_catalog_nonempty':True})
+    monkeypatch.setattr('backend.pipeline.cvp_sql_commit.verified_group_backup',lambda *args:{'dump':report,'restore_catalog_nonempty':True})
     original=store._assert_transaction_edges_and_reviews
     def fail(*args):raise ValueError('late amendment rollback')
     monkeypatch.setattr(store,'_assert_transaction_edges_and_reviews',fail)

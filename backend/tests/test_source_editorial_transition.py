@@ -167,7 +167,7 @@ def test_completion_uses_metadata_proof_without_sql_epoch_transition(sample, mon
 
 def test_saved_cvp_resume_accepts_only_source_metadata_without_model_or_packet_rewrite(sample, monkeypatch):
     from types import SimpleNamespace
-    from backend.pipeline import cvp_sql_flow as flow
+    from backend.pipeline import cvp_sql_commit as flow
     _, after, path, _, root = sample
     old = transition.file_binding(path)
     proof = publish(sample)

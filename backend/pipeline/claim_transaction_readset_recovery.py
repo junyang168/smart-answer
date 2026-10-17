@@ -9,7 +9,7 @@ import json
 from backend.api.canonical_repository.postgres_store import canonical_json, sha256_json, POSTGRES_APPLY_ADVISORY_LOCK_KEY
 from backend.pipeline import claim_management as cm
 from backend.pipeline.cvp_sql_actions import validate_claim_management_package
-from backend.pipeline.cvp_sql_flow import check_binding, decoded_pins, pins, pin_rows
+from backend.pipeline.cvp_sql_commit import check_binding, decoded_pins, pins, pin_rows
 from backend.pipeline.source_reconciliation_runner import write
 
 VERSION = 'wang_claim_transaction_readset_recovery_v1'

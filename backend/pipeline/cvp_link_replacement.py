@@ -152,7 +152,7 @@ def validate_direction(d, m):
 
 
 def prepare_material(store, run_id, authorization):
-    from backend.pipeline.cvp_sql_flow import check_binding, pins, pin_rows
+    from backend.pipeline.cvp_sql_commit import check_binding, pins, pin_rows
     from backend.pipeline.cvp_link_target_selection import _approved
     from backend.pipeline.viewpoint_adjudication_history import validated_history
     check_binding(authorization); d = read_artifact(authorization['path'])
@@ -342,7 +342,7 @@ def compile_package(m, proposal, review, root):
 
 
 def validate_package(package):
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     app = package['source_repair_application']; root = Path(app['run_root'])
     if app['schema_version'] != SCHEMA or not root.is_absolute(): raise ValueError('replacement authority missing')
     m = body(read(root / 'materials.json'))
@@ -356,7 +356,7 @@ def validate_package(package):
 
 
 def execute(store, run_id, *, authorization, root, ports):
-    from backend.pipeline.cvp_sql_flow import check_binding, binding, decoded_pins, commit_package, verified_group_backup
+    from backend.pipeline.cvp_sql_commit import check_binding, binding, decoded_pins, commit_package, verified_group_backup
     from backend.pipeline.cvp_sql_actions import initialize_subscription_runtime, resume_bound_action
     check_binding(authorization); d = read_artifact(authorization['path'])
     identity = {'contract': SCHEMA, 'withdrawals': d['withdrawal_links'], 'replacement': d['replacement_link_id']}

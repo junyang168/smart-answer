@@ -19,7 +19,7 @@ def eligible(packet):
 
 def select(root, packet, *, persist=False):
     from backend.pipeline.source_reconciliation_runner import read,body,write
-    from backend.pipeline.cvp_sql_flow import binding
+    from backend.pipeline.cvp_sql_commit import binding
     root=Path(root)
     if (root/'proposal.raw.json').exists() or not (root/'proposal.reservation.json').exists():return 'proposal'
     # This source management schema is the exact defective open-record transport.

@@ -49,7 +49,7 @@ def candidate_projection(frozen,initial_packet,initial_raw,corrected,*,pending_k
 
 def prepare_material(store,run_id):
     from backend.pipeline.cvp_retained_impact_resolution import claim_authority,protected_link_ids
-    from backend.pipeline.cvp_sql_flow import binding,decoded_pins,pins,pin_rows,check_binding
+    from backend.pipeline.cvp_sql_commit import binding, decoded_pins, pins, pin_rows, check_binding
     from backend.pipeline.source_review_input_repair import check_packet
     from backend.pipeline.source_reconciliation_runner import initial_review_base,build_proposal_packet
     value=store.get_cvp_group(run_id);evidence=value['reviewed']['evidence']
@@ -149,7 +149,7 @@ def compile_package(material,raw,root):
 
 
 def validate_package(package):
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     app=package['source_repair_application'];root=Path(app['run_root'])
     material=body(read(root/'materials.json'))
     if (app.get('schema_version')!=VERSION or sha256_json(material)!=app['materials_sha256']
@@ -186,7 +186,7 @@ def validate_package(package):
 
 def execute(store,run_id,*,root,ports):
     from backend.pipeline.cvp_retained_impact_resolution import claim_authority
-    from backend.pipeline.cvp_sql_flow import binding,decoded_pins,commit_package,verified_group_backup
+    from backend.pipeline.cvp_sql_commit import binding, decoded_pins, commit_package, verified_group_backup
     from backend.pipeline.cvp_sql_actions import resume_bound_action
     from backend.pipeline.source_reconciliation_runner import Runner,write
     saved=store.get_cvp_group(run_id);context,_=claim_authority(saved)
@@ -229,7 +229,7 @@ def resolved_pending_operations(value,store=None,cursor=None):
         from backend.pipeline.claim_owner_revision import managed_operations
         return managed_operations(value,store=store,cursor=cursor)
     if not approval.get('pending_link_material'):return {}
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     check_binding(approval['pending_link_material']);check_binding(approval['pending_link_review'])
     material=body(read(Path(approval['pending_link_material']['path'])))
     package=evidence['package']['payload'];validate_package(package)
@@ -277,7 +277,7 @@ def guard_repeated_semantic_repair(value,packet,report):
         raise ValueError('semantic repair guard missing reviewed SQL authority')
     approval=value['reviewed']['evidence']['approval']
     if not approval.get('pending_link_material'):return
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     check_binding(approval['pending_link_material'])
     material=body(read(Path(approval['pending_link_material']['path'])))
     targets={k.split('/',1)[1] for k in material['target_record_keys']}

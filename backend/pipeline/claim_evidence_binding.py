@@ -82,7 +82,7 @@ def finish_claim_audit(store,run_id):
     """Audit all shared owners, not a replacement for group/CVP completion."""
     import os,subprocess
     from pathlib import Path
-    from backend.pipeline.cvp_sql_flow import PROJECT,check_binding,binding
+    from backend.pipeline.cvp_sql_commit import PROJECT, check_binding, binding
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact,write_immutable
     from backend.pipeline.claim_first_management import validate_claim_audit_report
     from backend.pipeline.viewpoint_content_blocked_fallback import verify_saved_full_audit
@@ -126,7 +126,7 @@ def coverage_context(store,saved,group):
     This authenticates source approval; it grants no CVP content approval.
     """
     from pathlib import Path
-    from backend.pipeline.cvp_sql_flow import binding,check_binding,decoded_pins
+    from backend.pipeline.cvp_sql_commit import binding, check_binding, decoded_pins
     from backend.pipeline.cvp_sql_actions import validate_source_package
     from backend.pipeline.source_reconciliation_runner import read,body
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact

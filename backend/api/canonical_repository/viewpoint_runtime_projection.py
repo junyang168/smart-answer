@@ -412,6 +412,18 @@ class ViewpointRuntimeCompiler:
             stale = [item.viewpoint_claim_link_id for item in links if item.validated_against_viewpoint_revision_id != viewpoint.current_revision_id]
             if stale:
                 raise ViewpointRuntimeProjectionError([f"{viewpoint.viewpoint_id}: stale Claim links {', '.join(stale)}"])
+            for item in links:
+                field_locator = getattr(item, 'component_position_locator', None)
+                if field_locator is not None:
+                    from .viewpoint_component_positions import validated_field_spans
+                    claim = claims.get(item.claim_id)
+                    if claim is None:
+                        raise ViewpointRuntimeProjectionError([f"{item.viewpoint_claim_link_id}: missing field-locator Claim"])
+                    try:
+                        validated_field_spans(field_locator.model_dump(mode='json'), claim.model_dump(mode='json'),
+                                              claim_sha=semantic_record_sha)
+                    except ValueError as exc:
+                        raise ViewpointRuntimeProjectionError([f"{item.viewpoint_claim_link_id}: {exc}"]) from exc
             members = [item for item in links if item.link_type in MEMBERSHIP_TYPES]
             related = [item for item in links if item.link_type not in MEMBERSHIP_TYPES]
             relations = sorted([
@@ -575,7 +587,14 @@ class ViewpointRuntimeCompiler:
             "quality_report_id": quality.quality_report_id if quality else None,
             "eligibility": eligibility, "blocker_codes": sorted(set(blockers)),
             "viewpoints": [{"snapshot": item.model_dump(mode="json"),
-                "revision": _dump(self.index["viewpoint_revisions"][item.viewpoint_revision_id])} for item in selected],
+                "revision": _dump(self.index["viewpoint_revisions"][item.viewpoint_revision_id]),
+                # V2 field membership cannot be reconstructed from a link ID
+                # plus whole Claim. Carry its explicit boundary to consumers;
+                # preserve the exact pre-existing v1 projection shape.
+                **({'claim_links': [_dump(link) for link in links if link.viewpoint_id == item.viewpoint_id]}
+                   if any(link.viewpoint_id == item.viewpoint_id and
+                          getattr(link, 'component_position_locator', None) is not None for link in links) else {})
+            } for item in selected],
             "argument_routes": [{
                 "snapshot": snapshot.model_dump(mode="json"),
                 "route": _dump(self.index["argument_routes"][snapshot.argument_route_id]),

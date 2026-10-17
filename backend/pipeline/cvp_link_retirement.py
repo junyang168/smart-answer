@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from backend.api.canonical_repository.postgres_store import canonical_json, sha256_json
-from backend.pipeline.cvp_sql_flow import binding, check_binding, pins, pin_rows, decoded_pins
+from backend.pipeline.cvp_sql_commit import binding, check_binding, pins, pin_rows, decoded_pins
 from backend.pipeline.source_reconciliation_runner import read, body, write
 from backend.pipeline.viewpoint_resolution_runtime import read_artifact
 
@@ -101,7 +101,7 @@ def validate_package(package):
 
 def execute(store, run_id, *, authorization, root, ports):
     from backend.pipeline.cvp_sql_actions import resume_bound_action
-    from backend.pipeline.cvp_sql_flow import commit_package, verified_group_backup
+    from backend.pipeline.cvp_sql_commit import commit_package, verified_group_backup
     check_binding(authorization); direction = read_artifact(authorization['path'])
     action_id = 'CVPA-' + sha256_json({'kind': SCHEMA, 'link_id': direction['link_id'],
                                      'before_link_sha256': direction['before_link_sha256']})

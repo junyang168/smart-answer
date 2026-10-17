@@ -10,7 +10,7 @@ import json
 import time
 
 from backend.api.canonical_repository.postgres_store import canonical_json,sha256_json
-from backend.pipeline.cvp_sql_flow import binding,check_binding,pins,pin_rows,decoded_pins,commit_package,resume_reviewed_action
+from backend.pipeline.cvp_sql_commit import binding, check_binding, pins, pin_rows, decoded_pins, commit_package, resume_reviewed_action
 from backend.pipeline import source_reconciliation as content
 from backend.pipeline.source_reconciliation_runner import Runner as ModelStages,body,read,write,validate_reviewed_records
 
@@ -1034,7 +1034,7 @@ def execute_source_action(store,run_id,manifest,*,root,ports,claim_first=False):
         package['source_repair_application']['knowledge_relation_withdrawals']=completion['withdraw_relation_ids']
     if template_proof:package['source_repair_application']['identity_template_read_pins']=template_proof
     validate_source_package(package)
-    from backend.pipeline.cvp_sql_flow import verified_group_backup
+    from backend.pipeline.cvp_sql_commit import verified_group_backup
     backup=verified_group_backup(root,package,ports) if issue_context or manifest.get('viewpoint_scope_repair') or manifest.get('anchor_qualification') or manifest.get('evidence_binding_repair') else ports.backup(root)
     original=store.get_cvp_group(run_id).get('reviewed',{}).get('evidence',{})
     approval={**(original.get('approval',{}) if joint_owner_claim else {}),
@@ -1127,7 +1127,8 @@ def validated_sufficient_deferred(root):
 
 
 def execute_coverage_action(store,run_id,definition,group,*,root,ports,investigation_root=None):
-    from backend.pipeline.cvp_sql_flow import prepare_group,reviewed_cvp_package,NORMAL_COLLECTIONS
+    from backend.pipeline.cvp_sql_commit import NORMAL_COLLECTIONS
+    from backend.pipeline.cvp_sql_flow import prepare_group, reviewed_cvp_package
     saved=store.get_cvp_group(run_id);old=saved['reviewed']['evidence']
     from backend.pipeline.claim_evidence_binding import coverage_context as evidence_coverage_context
     sequential=evidence_coverage_context(store,saved,group) if investigation_root is None else None
@@ -1180,7 +1181,7 @@ def execute_coverage_action(store,run_id,definition,group,*,root,ports,investiga
     if any(link['claim_id'] not in ids for link in package.get('viewpoint_claim_links',[])):
         raise ValueError('required coverage added a foreign Claim')
     views=sorted(set(old['viewpoint_ids'])|{l['viewpoint_id'] for l in package.get('viewpoint_claim_links',[])})
-    from backend.pipeline.cvp_sql_flow import verified_group_backup
+    from backend.pipeline.cvp_sql_commit import verified_group_backup
     return commit_package(store,run_id,package=package,approval=approval,authorization=old['authorization'],
         backup=verified_group_backup(root,package,ports),
         sources=materials['sources'],read_pins=decoded_pins(materials['read_pins']),

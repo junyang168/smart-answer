@@ -22,7 +22,7 @@ PROOF = 'owner-identity-validation.json'
 
 def authorize(*, root, campaign, run_id, keys, keep, owner_quote):
     """Compile the human direction from exact saved inputs, without approving content."""
-    from backend.pipeline.cvp_sql_flow import binding
+    from backend.pipeline.cvp_sql_commit import binding
     packet = read_artifact(root/'batch-packet.json')
     raw = read_artifact(root/'raw-proposal.json')
     proposal, _ = canonicalize_proposal(raw['response'])
@@ -48,7 +48,7 @@ def candidate_claims(proposal, keys):
 
 
 def validate_direction(direction, proposal, consolidation, packet, root):
-    from backend.pipeline.cvp_sql_flow import binding, check_binding
+    from backend.pipeline.cvp_sql_commit import binding, check_binding
     if (direction.get('schema_version') != SCHEMA or direction.get('authorized_by') != 'owner'
             or not direction.get('owner_quote') or direction.get('batch_id') != packet['batch_id']
             or direction.get('decision') != 'authorize_same_identity_revision'):
@@ -200,7 +200,7 @@ def revise(*, proposal, consolidation, packet, root, proposer, call):
     normalized, _ = anchor_proposal_spans(normalized, claim_statements={c['claim_id']:c['statement'] for c in packet['claims']})
     revised = CanonicalViewpointProposalResponse.model_validate(normalized)
     validate_bounded_proposal(original, revised.model_dump(mode='json'), keys, keep)
-    from backend.pipeline.cvp_sql_flow import binding
+    from backend.pipeline.cvp_sql_commit import binding
     write_immutable(root / PROOF, {'schema_version':SCHEMA, 'authorization':binding(root / NAME),
         'original_proposal':binding(root/'raw-proposal.json'),
         'original_consolidation':binding(root/'raw-consolidation.json'),

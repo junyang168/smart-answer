@@ -28,7 +28,7 @@ _authorized_limit = ContextVar('cvp_authorized_request_limit', default=None)
 @contextmanager
 def authorized_request_limit(root, campaign, authorization=None):
     """Execution budget only: never changes a model request or its cache identity."""
-    from backend.pipeline.cvp_sql_flow import binding, check_binding
+    from backend.pipeline.cvp_sql_commit import binding, check_binding
     root = Path(root).resolve()
     saved = root/'request-limit-binding.json'
     if authorization is None:
@@ -78,7 +78,7 @@ def effective_request_limit(adapter, cache):
     root, budget = scope
     if not Path(cache).resolve().is_relative_to(root):
         raise ValueError('model request outside authorized SQL execution root')
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     check_binding(budget['authorization'])
     if 'temporary_run_id' in budget:
         check_binding(budget['supersedes_authorization'])
@@ -364,7 +364,7 @@ def read_saved_model_response(adapter: Any, payload: dict[str, Any], cache: Path
 
 
 def call_model(
-    adapter: Any, payload: dict[str, Any], cache: Path
+    adapter: Any, payload: dict[str, Any], cache: Path, *, before_dispatch=None
 ) -> tuple[dict[str, Any], int, float]:
     from backend.pipeline.viewpoint_validation_context import finish_validation_phase, historical_context
     cache = Path(cache)
@@ -494,6 +494,8 @@ def call_model(
         body = {'schema_version': 'wang_model_request_encoding_proof_v1', **encoding_proof}
         write_immutable(encoding_path, body | {'artifact_sha256': sha256_json(body)})
     try:
+        if reused is None and before_dispatch is not None:
+            before_dispatch()
         raw = dict(reused[0] if reused is not None else adapter.generate(payload))
     except BaseException as exc:
         body = {'schema_version': 'wang_model_call_failure_v1', 'invocation_sha256': intent['artifact_sha256'],

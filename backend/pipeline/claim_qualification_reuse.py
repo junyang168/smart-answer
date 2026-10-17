@@ -244,7 +244,7 @@ def round_value(cursor,rid):
 
 
 def evidence(value):
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     from backend.pipeline.source_reconciliation_runner import read,body
     if not complete(value):raise ValueError('reuse requires an existing completed target review and fresh peer review')
     from backend.pipeline.source_editorial_transition import verify_current_source_binding
@@ -261,7 +261,7 @@ def evidence(value):
 
 def current_pins(store,cursor,value):
     """Cheap direct proof consumption, with no historical reconstruction."""
-    from backend.pipeline.cvp_sql_flow import decoded_pins,check_binding
+    from backend.pipeline.cvp_sql_commit import decoded_pins, check_binding
     from backend.api.canonical_repository.postgres_store import sha256_json
     reuse=value.get('reviewed_context_reuse')
     if not reuse:return decoded_pins(value['audited_pins'])
@@ -320,7 +320,7 @@ def current_pins(store,cursor,value):
 
 def admit(store,cursor,original_id,peer_id):
     """One bounded admission. Caller holds the common transaction lock."""
-    from backend.pipeline.cvp_sql_flow import decoded_pins,pin_rows
+    from backend.pipeline.cvp_sql_commit import decoded_pins, pin_rows
     from backend.api.canonical_repository.postgres_store import record_content_sha,sha256_json,canonical_json
     old=round_value(cursor,original_id);peer=round_value(cursor,peer_id)
     original_review,old_review=evidence(old);peer_review,review=evidence(peer)

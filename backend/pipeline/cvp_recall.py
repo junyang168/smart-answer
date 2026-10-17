@@ -12,7 +12,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from backend.api.canonical_repository.cvp_recall import (
-    RECALL_VERSION, build_index, merge_recall, recall_plan, seal,
+    INDEX_VERSION, RECALL_VERSION, build_index, changed_index_cards,
+    combine_recall_candidates, merge_recall, recall_plan, seal, verify,
 )
 from backend.api.canonical_repository.viewpoint_resolution import StructuredJsonReviewerAdapter
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
@@ -101,6 +102,11 @@ def run_recall(index, claims, *, client, output_dir, max_request_bytes,
         check_current()
     result = merge_recall(plan, replies, existing_links=existing_links)
     write_immutable(root/'recall-result.json', result)
+    leaf=_recall_leaf(index,claims,plan,root)
+    digest=sha256_json(leaf)
+    _save_recall_authentication(root,index,claims,plan,result,
+        {digest:leaf} if index['cards'] else {},
+        {c['viewpoint_id']:digest for c in index['cards']},existing_links)
     return result, {'model_calls': calls, 'seconds': seconds, 'shards': len(plan['shards'])}
 
 
@@ -206,7 +212,14 @@ def build_reviewed_index(heads, *, proposer, reviewer, output_dir, max_request_b
 
 def load_reviewed_index(heads, *, proposer, reviewer, output_dir):
     """Authenticate exact saved proposal/review inputs; never trusts index.json alone."""
+    validate_clients(proposer,reviewer)
     root = Path(output_dir)
+    saved = read_artifact(root/'index.json')
+    if 'summary_proofs' in saved:
+        from backend.api.canonical_repository.cvp_recall import assert_current_index
+        assert_current_index(saved, heads)
+        _authenticate_summary_index(saved, proposer=proposer, reviewer=reviewer)
+        return saved
     plan = read_artifact(root/'index-plan.json')
     from backend.api.canonical_repository.cvp_recall import verify
     verify(plan,'wang_cvp_index_preparation_v1')
@@ -219,3 +232,319 @@ def load_reviewed_index(heads, *, proposer, reviewer, output_dir):
     return build_reviewed_index(heads,proposer=proposer,reviewer=reviewer,output_dir=root,
         max_request_bytes=plan['max_request_bytes'],max_calls=2*len(heads),
         batch_size=plan['batch_size'],invoke=replay,persist=False)[0]
+
+
+def _summary_packet(heads):
+    return {'viewpoints':[{'cvp_ref':f'v{i}', **{k:h[k] for k in (
+        'core_proposition','scope','proposition_signature')}} for i,h in enumerate(heads,1)]}
+
+
+def _authenticate_summary_index(index, *, proposer, reviewer):
+    """Direct leaf verification only: no previous index or historical replay chain."""
+    verify(index, INDEX_VERSION)
+    cards={c['viewpoint_id']:c for c in index['cards']}
+    assignments=index['card_summary_proofs']
+    proofs=index['summary_proofs']
+    if (len(cards)!=len(index['cards']) or set(assignments)!=set(cards)
+            or set(proofs)!=set(assignments.values())):
+        raise ValueError('summary proof coverage differs from current cards')
+    for digest,proof in proofs.items():
+        if sha256_json(proof)!=digest:raise ValueError('summary direct proof changed')
+        if proof.get('schema_version') == 'wang_cvp_committed_summary_proof_v1':
+            from backend.pipeline.cvp_management_index import authenticate_committed_summary_proof
+            authenticated = authenticate_committed_summary_proof(proof, proposer=proposer, reviewer=reviewer)
+            covered = {vid for vid, assigned in assignments.items() if assigned == digest}
+            if covered != {card['viewpoint_id'] for card in authenticated}:
+                raise ValueError('committed summary proof coverage differs from current cards')
+            for card in authenticated:
+                if cards[card['viewpoint_id']] != card:
+                    raise ValueError('saved CVP index derivation differs from committed summary approval')
+            continue
+        heads=proof['heads'];packet=_summary_packet(heads)
+        refs={f'v{i}':h for i,h in enumerate(heads,1)}
+        proof_ids={h['viewpoint_id'] for h in heads}
+        if (len(proof_ids)!=len(heads) or not {vid for vid,p in assignments.items() if p==digest} <= proof_ids):
+            raise ValueError('summary proof names a foreign or duplicate head')
+        prop,review=_summary_adapters(proposer,reviewer,packet,proof['max_request_bytes'])
+        raw=read_saved_model_response(prop,packet,Path(proof['proposal_cache']))
+        raw=prop._response_model.model_validate(raw).model_dump(mode='json')
+        values=_exact_rows(raw['summaries'],'cvp_ref',refs)
+        verdict=read_saved_model_response(review,{**packet,'summaries':raw['summaries']},Path(proof['review_cache']))
+        verdict=review._response_model.model_validate(verdict).model_dump(mode='json')
+        decisions=_exact_rows(verdict['verdicts'],'cvp_ref',refs)
+        if any(v['decision']!='approve' for v in decisions.values()):
+            raise ValueError('CVP index summary review rejected')
+        for ref,head in refs.items():
+            vid=head['viewpoint_id']
+            if assignments.get(vid)!=digest:continue
+            if cards[vid]!={**head,'summary':values[ref]['summary']}:
+                raise ValueError('saved CVP index derivation differs from direct reviewed summary')
+    return index
+
+
+def _summary_leaves(root, *, proposer, reviewer):
+    root=Path(root);index=read_artifact(root/'index.json')
+    verify(index,INDEX_VERSION)
+    if 'summary_proofs' in index:
+        _authenticate_summary_index(index,proposer=proposer,reviewer=reviewer)
+        return index,index['summary_proofs'],index['card_summary_proofs']
+    plan=read_artifact(root/'index-plan.json')
+    verify(plan,'wang_cvp_index_preparation_v1')
+    if load_reviewed_index(plan['heads'],proposer=proposer,reviewer=reviewer,output_dir=root)!=index:
+        raise ValueError('saved CVP summary derivation differs')
+    offset=0;proofs={};assignments={}
+    for i,length in enumerate(plan['batch_lengths']):
+        batch=plan['heads'][offset:offset+length];offset+=length
+        proof={'heads':batch,'max_request_bytes':plan['max_request_bytes'],
+               'proposal_cache':str((root/f'summary-{i:04d}.json').resolve()),
+               'review_cache':str((root/f'summary-review-{i:04d}.json').resolve())}
+        digest=sha256_json(proof);proofs[digest]=proof
+        assignments.update({h['viewpoint_id']:digest for h in batch})
+    if offset!=len(plan['heads']):raise ValueError('summary proof batch coverage differs')
+    return index,proofs,assignments
+
+
+def maintain_reviewed_index(heads, *, previous_output_dir=None, proposer, reviewer,
+                            output_dir, max_request_bytes, max_calls, batch_size=20,
+                            check_current=None, invoke=call_model, approved_card_proofs=()):
+    """Review only new/changed heads and flatten unchanged direct raw proofs."""
+    validate_clients(proposer,reviewer)
+    if (type(max_calls) is not int or max_calls<0 or type(max_request_bytes) is not int
+            or max_request_bytes<1 or type(batch_size) is not int or not 1<=batch_size<=20):
+        raise ValueError('invalid explicit index capacity or call budget')
+    rows=sorted(heads,key=lambda h:h['viewpoint_id'])
+    if len({h['viewpoint_id'] for h in rows})!=len(rows):raise ValueError('duplicate index head')
+    previous=None;proofs={};assignments={}
+    if previous_output_dir is not None:
+        previous,proofs,assignments=_summary_leaves(previous_output_dir,proposer=proposer,reviewer=reviewer)
+    old={c['viewpoint_id']:{k:v for k,v in c.items() if k!='summary'} for c in previous['cards']} if previous else {}
+    changed=[h for h in rows if old.get(h['viewpoint_id'])!=h]
+    reused=[h for h in rows if old.get(h['viewpoint_id'])==h]
+    retired=sorted(set(old)-{h['viewpoint_id'] for h in rows})
+    approved_updates = {}
+    approved_proofs = {}
+    approved_assignments = {}
+    for proof in approved_card_proofs:
+        from backend.pipeline.cvp_management_index import authenticate_committed_summary_proof
+        cards = authenticate_committed_summary_proof(proof, proposer=proposer, reviewer=reviewer)
+        digest = sha256_json(proof)
+        for card in cards:
+            vid = card['viewpoint_id']
+            head = {k: v for k, v in card.items() if k != 'summary'}
+            if vid not in {h['viewpoint_id'] for h in rows} or next(h for h in rows if h['viewpoint_id'] == vid) != head:
+                raise ValueError('approved metadata proof is stale or foreign to current index heads')
+            if vid in approved_updates:
+                raise ValueError('duplicate approved metadata proof for current head')
+            approved_updates[vid] = card
+            approved_assignments[vid] = digest
+        approved_proofs[digest] = proof
+    plan=seal({'schema_version':'wang_cvp_index_maintenance_v1','heads':rows,
+               'previous_index_sha256':previous['artifact_sha256'] if previous else None,
+               'changed_viewpoint_ids':[h['viewpoint_id'] for h in changed],
+               'retired_viewpoint_ids':retired,'max_request_bytes':max_request_bytes,'batch_size':batch_size,
+               **({'approved_card_proof_sha256s': sorted(approved_proofs)} if approved_proofs else {})})
+    root=Path(output_dir)
+    write_immutable(root/'index-maintenance.json',plan)
+    if check_current is not None:check_current()
+    if (root/'index.json').exists():
+        completed=load_reviewed_index(rows,proposer=proposer,reviewer=reviewer,output_dir=root)
+        if check_current is not None:check_current()
+        return completed,{'model_calls':0,'seconds':0.0,'changed_viewpoint_ids':[h['viewpoint_id'] for h in changed],
+                          'reused_cards':len(rows),'retired_viewpoint_ids':retired,'current_plan':plan}
+    updates=dict(approved_updates);metrics={'model_calls':0,'seconds':0.0}
+    proofs={**proofs,**approved_proofs};assignments={**assignments,**approved_assignments}
+    needs_summary=[h for h in changed if h['viewpoint_id'] not in approved_updates]
+    if needs_summary:
+        new,metrics=build_reviewed_index(needs_summary,proposer=proposer,reviewer=reviewer,
+            output_dir=root/'changes',max_request_bytes=max_request_bytes,max_calls=max_calls,
+            batch_size=batch_size,check_current=check_current,invoke=invoke)
+        _,newproofs,newassignments=_summary_leaves(root/'changes',proposer=proposer,reviewer=reviewer)
+        proofs={**proofs,**newproofs};assignments={**assignments,**newassignments}
+        updates.update({c['viewpoint_id']:c for c in new['cards']})
+    oldcards={c['viewpoint_id']:c for c in previous['cards']} if previous else {}
+    summaries=[updates.get(h['viewpoint_id'],oldcards.get(h['viewpoint_id'])) for h in rows]
+    index=build_index(rows,summaries)
+    assignments={h['viewpoint_id']:assignments[h['viewpoint_id']] for h in rows}
+    proofs={k:proofs[k] for k in set(assignments.values())}
+    index=seal({k:v for k,v in index.items() if k!='artifact_sha256'} |
+               {'summary_proofs':proofs,'card_summary_proofs':assignments})
+    _authenticate_summary_index(index,proposer=proposer,reviewer=reviewer)
+    if check_current is not None:check_current()
+    write_immutable(root/'index.json',index)
+    return index,{**metrics,'changed_viewpoint_ids':[h['viewpoint_id'] for h in changed],
+                  'reused_cards':len(reused),'retired_viewpoint_ids':retired,'current_plan':plan}
+
+
+RECALL_AUTH_VERSION='wang_cvp_recall_authentication_v1'
+
+
+def _recall_leaf(index,claims,plan,root):
+    return {'index':index,'claims':list(claims),'plan':plan,
+            'raw_paths':[str((Path(root)/f'recall-{i:04d}.json').resolve())
+                         for i in range(len(plan['shards']))]}
+
+
+def _save_recall_authentication(root,index,claims,plan,result,proofs,assignments,existing_links):
+    document=seal({'schema_version':RECALL_AUTH_VERSION,'index':index,'claims':list(claims),
+        'plan':plan,'result_sha256':result['artifact_sha256'],'proofs':proofs,
+        'card_recall_proofs':assignments,'existing_links':list(existing_links)})
+    write_immutable(Path(root)/'recall-authentication.json',document)
+    return document
+
+
+def _read_recall_leaf(leaf,client):
+    index,claims,plan=leaf['index'],leaf['claims'],leaf['plan']
+    verify(index,INDEX_VERSION);verify(plan,RECALL_VERSION)
+    expected=recall_plan(index,claims,max_request_bytes=plan['max_request_bytes'],
+        measure=lambda p:recall_adapter(client,p,max_request_bytes=plan['max_request_bytes']).request_bytes(p))
+    if expected!=plan or len(leaf['raw_paths'])!=len(plan['shards']):
+        raise ValueError('saved recall plan differs from its direct raw proof')
+    replies=[]
+    for payload,path in zip(plan['shards'],leaf['raw_paths'],strict=True):
+        adapter=recall_adapter(client,payload,max_request_bytes=plan['max_request_bytes'])
+        raw=read_saved_model_response(adapter,payload,Path(path))
+        replies.append(adapter._response_model.model_validate(raw).model_dump(mode='json'))
+    result=merge_recall(plan,replies)
+    return {r['claim_id']:set(r['viewpoint_ids']) for r in result['claim_candidates']}
+
+
+def _authenticate_recall_root(root,*,client,previous_index=None,claims=None,existing_links=()):
+    root=Path(root)
+    plan=read_artifact(root/'recall-plan.json');verify(plan,RECALL_VERSION)
+    saved=read_artifact(root/'recall-result.json');verify(saved,RECALL_VERSION)
+    proof_path=root/'recall-authentication.json'
+    if not proof_path.exists():
+        # Legacy completed stages can be authenticated directly when their full
+        # original inputs and links are supplied. No historical model fallback.
+        if previous_index is None or claims is None:
+            raise ValueError('legacy recall requires its exact original index and Claim inputs')
+        leaf=_recall_leaf(previous_index,claims,plan,root)
+        model_candidates=_read_recall_leaf(leaf,client)
+        if combine_recall_candidates(plan,model_candidates,existing_links=existing_links)!=saved:
+            raise ValueError('saved recall result differs from authenticated provider answers')
+        digest=sha256_json(leaf)
+        auth={'index':previous_index,'claims':list(claims),'plan':plan,
+              'proofs':{digest:leaf} if previous_index['cards'] else {},
+              'card_recall_proofs':{c['viewpoint_id']:digest for c in previous_index['cards']}}
+        return auth,model_candidates
+    auth=read_artifact(proof_path);verify(auth,RECALL_AUTH_VERSION)
+    if auth['plan']!=plan or auth['result_sha256']!=saved['artifact_sha256']:
+        raise ValueError('saved recall output binding changed')
+    index=auth['index'];verify(index,INDEX_VERSION)
+    full=recall_plan(index,auth['claims'],max_request_bytes=plan['max_request_bytes'],
+        measure=lambda p:recall_adapter(client,p,max_request_bytes=plan['max_request_bytes']).request_bytes(p))
+    if full!=plan:raise ValueError('saved recall current full plan changed')
+    if previous_index is not None and previous_index!=index:
+        raise ValueError('previous recall belongs to another index')
+    cards={c['viewpoint_id']:c for c in index['cards']}
+    assignments,proofs=auth['card_recall_proofs'],auth['proofs']
+    if (set(assignments)!=set(cards) or set(proofs)!=set(assignments.values())
+            or len(cards)!=len(index['cards'])):
+        raise ValueError('saved recall has incomplete card proof coverage')
+    candidates={cid:set() for cid in plan['claim_refs'].values()}
+    for digest,leaf in proofs.items():
+        original={c['claim_id']:c for c in leaf['claims']}
+        if (sha256_json(leaf)!=digest or len(original)!=len(leaf['claims'])
+                or any(original.get(c['claim_id'])!=c for c in auth['claims'])):
+            raise ValueError('saved recall direct proof or Claim binding changed')
+        selections=_read_recall_leaf(leaf,client)
+        leafcards={c['viewpoint_id']:c for c in leaf['index']['cards']}
+        assigned={vid for vid,p in assignments.items() if p==digest}
+        if any(leafcards.get(vid)!=cards[vid] for vid in assigned):
+            raise ValueError('saved recall proof belongs to a stale card')
+        for cid in candidates:
+            candidates[cid].update(selections[cid]&assigned)
+    if combine_recall_candidates(plan,candidates,existing_links=auth['existing_links'])!=saved:
+        raise ValueError('saved recall result differs from authenticated provider answers')
+    return auth,candidates
+
+
+def refresh_recall(index,claims,*,previous_index=None,previous_output_dir=None,client,
+                   output_dir,max_request_bytes,max_calls,existing_links=(),
+                   check_current=None,invoke=call_model):
+    """Replace changed-card candidates; retain only authenticated unchanged ones.
+
+    Every result binds the complete current index and complete Claim group. A
+    changed Claim projection requires full recall; changed CVP cards alone only
+    recall those cards. Direct proofs are flattened, never recursive root links.
+    """
+    validate_clients(client)
+    if type(max_calls) is not int or max_calls<0:raise ValueError('explicit nonnegative recall call budget required')
+    plan=recall_plan(index,claims,max_request_bytes=max_request_bytes,
+        measure=lambda p:recall_adapter(client,p,max_request_bytes=max_request_bytes).request_bytes(p))
+    prior=None;old_candidates={cid:set() for cid in plan['claim_refs'].values()}
+    if previous_output_dir is not None:
+        prior,old_candidates=_authenticate_recall_root(previous_output_dir,client=client,
+            previous_index=previous_index,claims=claims,existing_links=existing_links)
+    diff=changed_index_cards(prior['index'] if prior else None,index)
+    if prior and prior['claims']!=list(claims):
+        diff={'changed':[c['viewpoint_id'] for c in index['cards']], 'unchanged':[],
+              'retired':diff['retired']}
+    changed=set(diff['changed']);unchanged=set(diff['unchanged'])
+    delta=seal({'schema_version':INDEX_VERSION,'cards':[c for c in index['cards'] if c['viewpoint_id'] in changed]})
+    delta_plan=recall_plan(delta,claims,max_request_bytes=max_request_bytes,
+        measure=lambda p:recall_adapter(client,p,max_request_bytes=max_request_bytes).request_bytes(p))
+    root=Path(output_dir)
+    completed=(root/'recall-result.json').exists() and (root/'recall-authentication.json').exists()
+    if not completed and len(delta_plan['shards'])>max_calls:
+        raise ValueError('complete incremental recall exceeds configured operation call budget')
+    refresh=seal({'schema_version':'wang_cvp_recall_refresh_v1','current_plan_sha256':plan['artifact_sha256'],
+        'previous_plan_sha256':prior['plan']['artifact_sha256'] if prior else None,
+        'changed_viewpoint_ids':sorted(changed),'retired_viewpoint_ids':diff['retired'],
+        'delta_plan_sha256':delta_plan['artifact_sha256']})
+    write_immutable(root/'recall-refresh.json',refresh)
+    write_immutable(root/'recall-plan.json',plan)
+    if check_current is not None:check_current()
+    if completed:
+        saved,_=_authenticate_recall_root(root,client=client,previous_index=index)
+        if saved['claims']!=list(claims) or saved['existing_links']!=list(existing_links):
+            raise ValueError('completed recall action inputs changed')
+        if check_current is not None:check_current()
+        return read_artifact(root/'recall-result.json'),{'model_calls':0,'seconds':0.0,'shards':0,
+            'current_plan':plan,'changed_viewpoint_ids':sorted(changed),
+            'retired_viewpoint_ids':diff['retired'],'reused_cards':len(index['cards'])}
+    proofs={};assignments={};metrics={'model_calls':0,'seconds':0.0,'shards':0}
+    candidates={cid:set(old_candidates.get(cid,set()))&unchanged for cid in plan['claim_refs'].values()}
+    if prior:
+        assignments={vid:prior['card_recall_proofs'][vid] for vid in unchanged}
+        proofs={key:prior['proofs'][key] for key in set(assignments.values())}
+    if changed:
+        result,metrics=run_recall(delta,claims,client=client,output_dir=root/'changes',
+            max_request_bytes=max_request_bytes,max_calls=max_calls,check_current=check_current,invoke=invoke)
+        for row in result['claim_candidates']:candidates[row['claim_id']].update(row['viewpoint_ids'])
+        leaf=_recall_leaf(delta,claims,delta_plan,root/'changes');digest=sha256_json(leaf)
+        proofs[digest]=leaf;assignments.update({vid:digest for vid in changed})
+    if check_current is not None:check_current()
+    result=combine_recall_candidates(plan,candidates,existing_links=existing_links)
+    write_immutable(root/'recall-result.json',result)
+    _save_recall_authentication(root,index,claims,plan,result,proofs,assignments,existing_links)
+    return result,{**metrics,'current_plan':plan,'changed_viewpoint_ids':sorted(changed),
+                   'retired_viewpoint_ids':diff['retired'],'reused_cards':len(unchanged)}
+
+
+def subset_recall(index,claims,*,origin_output_dir,output_dir,client,existing_links=()):
+    """Project authenticated complete-group answers to exact unchanged Claims.
+
+    Raw leaves remain at their original paths and retain their complete payload
+    bindings. This is programmatic capacity subdivision, never a new recall.
+    """
+    validate_clients(client)
+    origin,candidates=_authenticate_recall_root(origin_output_dir,client=client)
+    original={c['claim_id']:c for c in origin['claims']}
+    selected=list(claims)
+    if (not selected or len({c['claim_id'] for c in selected})!=len(selected)
+            or any(original.get(c['claim_id'])!=c for c in selected)):
+        raise ValueError('recall subset requires exact original Claim projections')
+    if origin['index']!=index:raise ValueError('recall subset requires its original full index')
+    limit=origin['plan']['max_request_bytes']
+    plan=recall_plan(index,selected,max_request_bytes=limit,
+        measure=lambda p:recall_adapter(client,p,max_request_bytes=limit).request_bytes(p))
+    result=combine_recall_candidates(plan,{c['claim_id']:candidates[c['claim_id']] for c in selected},
+                                     existing_links=existing_links)
+    root=Path(output_dir)
+    write_immutable(root/'recall-plan.json',plan)
+    write_immutable(root/'recall-result.json',result)
+    _save_recall_authentication(root,index,selected,plan,result,origin['proofs'],
+                               origin['card_recall_proofs'],existing_links)
+    _authenticate_recall_root(root,client=client,previous_index=index)
+    return result,{'current_plan':plan,'model_calls':0,'seconds':0.0}

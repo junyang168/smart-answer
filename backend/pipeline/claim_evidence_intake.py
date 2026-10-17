@@ -155,7 +155,7 @@ def committed_context(value, store=None, *, cursor=None):
     """Authenticate exact applied intake; does NOT approve the full CVP audit."""
     from pathlib import Path
     from backend.pipeline.source_reconciliation_runner import body, read
-    from backend.pipeline.cvp_sql_flow import check_binding, decoded_pins
+    from backend.pipeline.cvp_sql_commit import check_binding, decoded_pins
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore, record_content_sha
     e = value.get('reviewed', {}).get('evidence', {})
     package = e.get('package', {}).get('payload', {})
@@ -233,7 +233,7 @@ def committed_context(value, store=None, *, cursor=None):
 def validate_completion(value,cursor):
     """The new Evidence must actually occur in the complete Claim audit pins."""
     from pathlib import Path
-    from backend.pipeline.cvp_sql_flow import check_binding, decoded_pins
+    from backend.pipeline.cvp_sql_commit import check_binding, decoded_pins
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact
     from backend.pipeline.claim_first_management import VERSION as CLAIM_AUDIT_VERSION, validate_claim_audit_report
     from backend.pipeline.viewpoint_content_blocked_fallback import verify_saved_full_audit, KEY

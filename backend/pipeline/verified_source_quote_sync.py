@@ -163,7 +163,7 @@ def synchronize(store, verification_binding, transition_binding, *, root):
     """
     from pathlib import Path
     from backend.pipeline.source_reconciliation_runner import binding,body,read,write
-    from backend.pipeline.cvp_sql_flow import pin_rows,decoded_pins
+    from backend.pipeline.cvp_sql_commit import pin_rows, decoded_pins
     verification,state,before,current=persist_verified_correction(store,verification_binding,transition_binding)
     root=Path(root);root.mkdir(parents=True,exist_ok=True);receipt=root/'complete.json'
     identity={'verification':verification_binding,'source_transition':transition_binding}
@@ -176,7 +176,7 @@ def synchronize(store, verification_binding, transition_binding, *, root):
             store._assert_transaction_read_pins(cursor,decoded_pins(result['current_pins']))
         return result
     from backend.api.canonical_repository.postgres_store import record_content_sha
-    from backend.pipeline.cvp_sql_flow import plan_from_document
+    from backend.pipeline.cvp_sql_commit import plan_from_document
     doc=state['payload'];sid=doc['source_id'];aliases={sid,doc.get('transcript_id'),doc.get('canonical_source_id')}-{None,''}
     intent_path=root/'intent.json'
     if intent_path.exists():

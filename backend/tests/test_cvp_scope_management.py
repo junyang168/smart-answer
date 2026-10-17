@@ -385,7 +385,7 @@ def test_scope_action_shared_transaction_rollbacks_and_no_model_replay(scoped,tm
             a.generate=generate
             return a
     backup=put(tmp_path/'synthetic-backup.dump',{'not':'a production dump'})
-    monkeypatch.setattr('backend.pipeline.cvp_sql_flow.verified_group_backup',lambda *a:{'dump':backup,'restore_catalog_nonempty':True})
+    monkeypatch.setattr('backend.pipeline.cvp_sql_commit.verified_group_backup',lambda *a:{'dump':backup,'restore_catalog_nonempty':True})
     original=postgres_store._assert_transaction_edges_and_reviews
     before=postgres_store.get_record('canonical_viewpoints','CV-test')
     if late_failure:

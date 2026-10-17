@@ -151,7 +151,7 @@ def complete_packet(packet, sources, receipt):
 def repair_packet(root, *, original, review_packet, correction_packet,
                   sources, reconsideration, proposal, review):
     """Called only AFTER normal runtime authenticates the original three leaves."""
-    from backend.pipeline.cvp_sql_flow import check_binding, binding
+    from backend.pipeline.cvp_sql_commit import check_binding, binding
     root = Path(root)
     if not (root / BINDING).exists():
         return None
@@ -216,7 +216,7 @@ def repair_packet(root, *, original, review_packet, correction_packet,
 
 
 def enable(store, authorization, execution, campaign):
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     check_binding(authorization)
     d = read_artifact(authorization['path'])
     run = store.get_cvp_group(d['run_id'])
@@ -227,7 +227,7 @@ def enable(store, authorization, execution, campaign):
             or (run['change_set_ids'] and not (expected / BINDING).exists())):
         raise ValueError('correction source repair SQL parent/root/prewrite drift')
     if not run['change_set_ids']:
-        from backend.pipeline.cvp_sql_flow import decoded_pins
+        from backend.pipeline.cvp_sql_commit import decoded_pins
         with store.connect() as conn, conn.cursor() as cursor:
             store._assert_transaction_read_pins(cursor, decoded_pins(run['materials']['read_pins']))
     write_immutable(expected / BINDING, {'authorization': authorization})

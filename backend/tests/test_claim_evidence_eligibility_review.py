@@ -179,7 +179,7 @@ def test_eligibility_review_sql_late_rollback_then_saved_resume_no_model_replay(
     postgres_store.register_claim_issue(run,issue.model_dump(mode='json'))
     scoped=m.manifest_for_issues(postgres_store,run,[issue],policy,tmp_path/'scope')
     ports=EligibilityPorts(issue)
-    monkeypatch.setattr('backend.pipeline.cvp_sql_flow.verified_group_backup',lambda *args:{'dump':report,'restore_catalog_nonempty':True})
+    monkeypatch.setattr('backend.pipeline.cvp_sql_commit.verified_group_backup',lambda *args:{'dump':report,'restore_catalog_nonempty':True})
     before=deepcopy(postgres_store.get_record_state('evidence_steps','E-test'))
     original=postgres_store._assert_transaction_edges_and_reviews
     def fail(*args):raise ValueError('late eligibility transaction failure')
