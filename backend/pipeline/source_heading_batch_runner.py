@@ -109,8 +109,12 @@ def _assert_registration(store, row):
 
 
 def apply_batch(store, manifest, *, output_dir, client, manager, execute=None,
-                worker_count=1, worker_index=0):
-    """Run one frozen source at a time; a failure never becomes completion."""
+                worker_count=1, worker_index=0, continue_on_error=False):
+    """Run a frozen source action once; optionally continue independent sources.
+
+    Continue mode changes only scheduling. Existing failed/unknown dispatches
+    retain the same source action directory and cannot obtain a model retry.
+    """
     from backend.pipeline.detailed_knowledge_extraction_runner import run_one
     from backend.pipeline.source_editorial_transition import (
         publish_transition, verify_current_source_binding,
@@ -136,32 +140,32 @@ def apply_batch(store, manifest, *, output_dir, client, manager, execute=None,
     for row in selected:
         sid, source = row['source_id'], row['source']
         path = Path(row['path'])
-        _assert_registration(store, row)
-        if manager.authoritative_transcript_path(source['transcript_id']).resolve() != path.resolve():
-            raise ValueError('heading source is no longer the authoritative transcript: ' + sid)
-        verify_current_source_binding({'path': str(path), 'file_sha256': row['current_file_sha256']})
-
-        def save_with_proof(actor_id, transcript_id, *, expected_source_sha256, insertions):
-            # Save proof before CAS: a lost save reply can be reconciled against
-            # the exact planned bytes, without altering source or review history.
-            before_raw = path.read_bytes()
-            if hashlib.sha256(before_raw).hexdigest() != expected_source_sha256:
-                raise ValueError('source changed before heading application')
-            before = json.loads(before_raw)
-            stage = path.parent.name
-            rows = transcript_rows(before, stage=stage)
-            updated = apply_insertions(rows, insertions,
-                source_sha256=expected_source_sha256, user_id=actor_id)
-            after = payload_with_rows(before, updated, stage=stage)
-            after_raw = json.dumps(after, ensure_ascii=False, indent=4).encode('UTF-8')
-            publish_transition(source={**source, 'source_file_sha256': expected_source_sha256},
-                before_raw=before_raw, after_raw=after_raw,
-                authorization='User authorized source headings for #436; actor=' + actor_id)
-            return manager.persist_generated_subtitles(actor_id, transcript_id,
-                expected_source_sha256=expected_source_sha256, insertions=insertions)
-
-        source_output = output_dir / 'sources' / hashlib.sha256(sid.encode()).hexdigest()[:24]
         try:
+            _assert_registration(store, row)
+            if manager.authoritative_transcript_path(source['transcript_id']).resolve() != path.resolve():
+                raise ValueError('heading source is no longer the authoritative transcript: ' + sid)
+            verify_current_source_binding({'path': str(path), 'file_sha256': row['current_file_sha256']})
+
+            def save_with_proof(actor_id, transcript_id, *, expected_source_sha256, insertions):
+                # Save proof before CAS: a lost save reply can be reconciled against
+                # the exact planned bytes, without altering source or review history.
+                before_raw = path.read_bytes()
+                if hashlib.sha256(before_raw).hexdigest() != expected_source_sha256:
+                    raise ValueError('source changed before heading application')
+                before = json.loads(before_raw)
+                stage = path.parent.name
+                rows = transcript_rows(before, stage=stage)
+                updated = apply_insertions(rows, insertions,
+                    source_sha256=expected_source_sha256, user_id=actor_id)
+                after = payload_with_rows(before, updated, stage=stage)
+                after_raw = json.dumps(after, ensure_ascii=False, indent=4).encode('UTF-8')
+                publish_transition(source={**source, 'source_file_sha256': expected_source_sha256},
+                    before_raw=before_raw, after_raw=after_raw,
+                    authorization='User authorized source headings for #436; actor=' + actor_id)
+                return manager.persist_generated_subtitles(actor_id, transcript_id,
+                    expected_source_sha256=expected_source_sha256, insertions=insertions)
+
+            source_output = output_dir / 'sources' / hashlib.sha256(sid.encode()).hexdigest()[:24]
             status, saved = execute(path, output_dir=source_output, client=client,
                 prompt='', reasoning_effort=client.reasoning_effort, force=False,
                 write_back_subtitles=True, subtitle_actor_id=actor,
@@ -184,9 +188,10 @@ def apply_batch(store, manifest, *, output_dir, client, manager, execute=None,
         except Exception as exc:
             result = {'source_id': sid, 'status': 'incomplete',
                       'error': type(exc).__name__ + ': ' + str(exc)}
-            results.append(result)
-            _save_results(progress_dir, manifest, results, **progress)
-            raise
+            if not continue_on_error:
+                results.append(result)
+                _save_results(progress_dir, manifest, results, **progress)
+                raise
         results.append(result)
         _save_results(progress_dir, manifest, results, **progress)
         print(json.dumps(result, ensure_ascii=False), flush=True)
@@ -224,6 +229,8 @@ def main():
     parser.add_argument('--effort', default='high')
     parser.add_argument('--codex-executable', help='Explicit local subscription CLI; no model fallback')
     parser.add_argument('--apply', action='store_true')
+    parser.add_argument('--continue-on-error', action='store_true',
+                        help='Record incomplete sources and continue; never retries failed dispatches')
     args = parser.parse_args()
     load_dotenv()
     store = PostgresKnowledgeStore()
@@ -260,7 +267,8 @@ def main():
                                          executable=args.codex_executable)
         apply_batch(store, manifest, output_dir=args.output_dir,
                     client=client, manager=sermonManager,
-                    worker_count=args.worker_count, worker_index=args.worker_index)
+                    worker_count=args.worker_count, worker_index=args.worker_index,
+                    continue_on_error=args.continue_on_error)
 
 
 if __name__ == '__main__':

@@ -357,3 +357,59 @@ def test_three_worker_apply_keeps_progress_separate_and_never_rewrites_completed
         assert all(r['application'] == 'skipped' for r in replay['results'])
     assert sample.manager.calls == 2
     assert sample.store.records == before_sql
+
+
+def test_continue_mode_records_source_preflight_failure_and_processes_independent_source(sample):
+    sample.store.records['source_documents', 'source-B']['retired'] = True
+    before = sample.paths['source-B'].read_bytes()
+    result = apply(sample, execute=executor, continue_on_error=True)
+    assert result['planned'] == 2 and result['completed'] == 1
+    assert [r['status'] for r in result['results']] == ['incomplete', 'completed']
+    assert 'registered source changed' in result['results'][0]['error']
+    assert sample.paths['source-B'].read_bytes() == before
+    assert sample.manager.calls == 1
+    saved = json.loads((sample.out/'results.json').read_bytes())
+    assert saved == result
+
+
+@pytest.mark.parametrize('dispatch_status', ['failed', 'dispatch_unknown'])
+def test_continue_mode_never_redispatches_failed_or_unknown_cache_but_completes_other_source(
+    sample, monkeypatch, dispatch_status,
+):
+    calls = []
+    def failure(*args, **kwargs):
+        calls.append(args)
+        if dispatch_status == 'dispatch_unknown':
+            raise KeyboardInterrupt('unknown provider outcome')
+        raise RuntimeError('terminal provider failure')
+    monkeypatch.setattr(extraction, 'generate_subtitles', failure)
+    with pytest.raises((KeyboardInterrupt, RuntimeError)):
+        apply(sample)
+    original_cache = next(sample.out.rglob('generation.json'))
+    original_bytes = original_cache.read_bytes()
+    assert json.loads(original_bytes)['status'] == dispatch_status
+    assert len(calls) == 1
+    def success(*args, **kwargs):
+        calls.append(args)
+        return [{'after_index':'START', 'text':'## 講道主題', 'level':1}]
+    monkeypatch.setattr(extraction, 'generate_subtitles', success)
+    result = apply(sample, continue_on_error=True)
+    assert result['completed'] == 1
+    assert [r['status'] for r in result['results']] == ['incomplete', 'completed']
+    assert 'automatic redispatch refused' in result['results'][0]['error']
+    assert len(calls) == 2  # failed source once, independent source once
+    assert original_cache.read_bytes() == original_bytes
+    assert sample.manager.calls == 1
+    # Another scan still grants neither a retry nor a duplicate successful call.
+    again = apply(sample, continue_on_error=True)
+    assert again['completed'] == 1
+    assert len(calls) == 2
+    assert original_cache.read_bytes() == original_bytes
+    assert sample.manager.calls == 1
+
+
+def test_continue_mode_does_not_override_manifest_or_model_guards(sample):
+    sample.client.model = 'changed'
+    with pytest.raises(ValueError, match='client differs'):
+        apply(sample, execute=executor, continue_on_error=True)
+    assert sample.manager.calls == 0
