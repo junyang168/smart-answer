@@ -45,6 +45,25 @@ def change(ref, **fields):
     return {'ref': ref, 'fields_json': json.dumps(fields, ensure_ascii=False)}
 
 
+def test_relation_support_refs_are_normalized_after_resolution():
+    refs = {'c1': {'collection': 'claims', 'object_id': 'Z'},
+            'c2': {'collection': 'claims', 'object_id': 'A'},
+            'r1': {'collection': 'claim_relations', 'object_id': 'R2'},
+            'r2': {'collection': 'claim_relations', 'object_id': 'R1'},
+            'v1': {'collection': 'canonical_viewpoints', 'object_id': 'VZ'},
+            'v2': {'collection': 'canonical_viewpoints', 'object_id': 'VA'}}
+    fields = cvp._resolve_fields({
+        'supporting_claim_ids': ['c1', 'c2', 'c1'],
+        'supporting_claim_relation_ids': ['r1', 'r2', 'r1'],
+        'source_viewpoint_id': 'v1', 'target_viewpoint_id': 'v2',
+        'relation_type': 'tensions_with',
+    }, refs)
+    assert fields == {'supporting_claim_ids': ['A', 'Z'],
+                      'supporting_claim_relation_ids': ['R1', 'R2'],
+                      'source_viewpoint_id': 'VA', 'target_viewpoint_id': 'VZ',
+                      'relation_type': 'tensions_with'}
+
+
 def proposal():
     return {'component_dispositions': [{'component_ref': 'k1', 'disposition': 'connected',
                 'target_ref': 'nv1', 'link_ref': 'nl1', 'reason': '同一判斷。'}],

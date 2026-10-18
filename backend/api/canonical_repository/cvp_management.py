@@ -319,7 +319,14 @@ def _resolve_fields(fields, refs):
         if any(v not in refs or refs[v]['collection'] != col for v in values):
             raise ValueError('identity fields must select typed program short references')
         converted = [refs[v]['object_id'] for v in values]
+        if field in {'supporting_claim_ids', 'supporting_claim_relation_ids'}:
+            converted = sorted(set(converted))
         result[field] = converted if isinstance(result[field], list) else converted[0]
+    if (result.get('relation_type') == 'tensions_with'
+            and 'source_viewpoint_id' in result and 'target_viewpoint_id' in result
+            and result['source_viewpoint_id'] > result['target_viewpoint_id']):
+        result['source_viewpoint_id'], result['target_viewpoint_id'] = (
+            result['target_viewpoint_id'], result['source_viewpoint_id'])
     return result
 
 
