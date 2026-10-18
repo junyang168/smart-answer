@@ -19,7 +19,8 @@ def materials(*, qualifier=False):
               'position_fields': ['statement', 'qualifications'], 'context_fields': ['claim_type'],
               'mechanical_fields': ['claim_id', 'revision', 'evidence_step_ids']}
     records = [('claims', 'C1', claim),
-               ('evidence_steps', 'E1', {'evidence_step_id': 'E1', 'source_fragment_id': 'F1'}),
+               ('evidence_steps', 'E1', {'evidence_step_id': 'E1', 'source_fragment_id': 'F1',
+                                        'support_eligibility': 'eligible_candidate'}),
                ('source_fragments', 'F1', {'fragment_id': 'F1', 'source_id': 'S1'})]
     return seal({'schema_version': cvp.MATERIAL_VERSION, 'group_key': 'group-1', 'material': {'claims': [claim]},
         'claim_input': compile_input([claim], policy, claim_refs={'C1': 'c1'}),
@@ -87,6 +88,25 @@ def test_compact_creation_full_candidate_review_and_package_are_typed_and_pure()
     assert cvp.revalidate_candidate(req, bundle, candidate, raw) == candidate
     assert cvp.proposal_packet(req, bundle)['context']['creation_slots']
     assert cvp.review_packet(req, bundle, candidate)['candidate'] == candidate
+
+
+def test_new_link_binds_only_evidence_eligible_to_support_claim():
+    bundle=materials();claim=bundle['records'][0]['payload']
+    claim['evidence_step_ids'].append('E2')
+    bundle['records'][0]['content_sha256']=semantic_record_sha(claim)
+    context={'evidence_step_id':'E2','source_fragment_id':'F2',
+             'support_eligibility':'context_only'}
+    fragment={'fragment_id':'F2','source_id':'S1'}
+    for collection,oid,payload in [('evidence_steps','E2',context),
+                                   ('source_fragments','F2',fragment)]:
+        bundle['records'].append({'collection':collection,'object_id':oid,
+            'payload':payload,'revision':1,'content_sha256':semantic_record_sha(payload),
+            'retired':False})
+        bundle['references'][collection][oid]='e2' if oid=='E2' else 'f2'
+    bundle=seal({k:v for k,v in bundle.items() if k!='artifact_sha256'})
+    candidate=cvp.compile_candidate(request(),bundle,proposal())
+    link=next(row['payload'] for row in candidate['writes'] if row['ref']=='nl1')
+    assert link['evidence_bindings']==[{'evidence_step_id':'E1','source_fragment_id':'F1'}]
 
 
 def test_empty_delta_retains_previous_candidate_without_copying_records():

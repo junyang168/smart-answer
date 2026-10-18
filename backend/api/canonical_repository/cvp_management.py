@@ -638,7 +638,11 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
             for eid in claim['payload'].get('evidence_step_ids', []):
                 if ('evidence_steps', eid) not in original:
                     raise ValueError('link Claim evidence is missing from material')
-                for fid in evidence_fragment_ids(original['evidence_steps', eid]['payload']):
+                step = original['evidence_steps', eid]['payload']
+                if step.get('support_eligibility') not in {
+                        'eligible', 'eligible_candidate', 'eligible_with_label'}:
+                    continue
+                for fid in evidence_fragment_ids(step):
                     if ('source_fragments', fid) not in original:
                         raise ValueError('link evidence fragment is missing')
                     evidence.append({'evidence_step_id': eid, 'source_fragment_id': fid})
