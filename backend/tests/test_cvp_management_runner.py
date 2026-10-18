@@ -161,6 +161,32 @@ def test_reviewed_old_action_cannot_be_superseded(setup):
     assert store.get_cvp_group(original['run_id'])['result']['status']=='running'
 
 
+def test_exact_pre_dispatch_failure_can_be_superseded_without_erasing_call(setup):
+    from backend.api.canonical_repository import cvp_management_store as persistence
+    from backend.api.canonical_repository.postgres_store import ChangeSetConflict
+    store,request,root,_,_=setup
+    admission=preflight.prepare_recall(store,request['input'],allow_unqualified=True,defer_index=True)
+    original=persistence.prepare_action(store,request,root=str(root),preflight=admission)
+    intent={'cache_path':str(root/'recall.json'),'request_bytes':100,'model_id':'gpt-6.1-sol'}
+    persistence.reserve_call(store,original['run_id'],key='recall.json',role='gpt',intent=intent)
+    persistence.begin_call(store,original['run_id'],key='recall.json',intent=intent)
+    successor=deepcopy(request);successor['action_id']='test-cvp2-after-nonlaunch'
+    with pytest.raises(ChangeSetConflict,match='unwritten exact original group'):
+        persistence.prepare_action(store,successor,root=str(root/'replacement'),preflight=admission,
+            supersede_unwritten_run=original['run_id'])
+    proof={'schema_version':'wang_cvp2_pre_dispatch_nonlaunch_v1','run_id':original['run_id'],
+           'call_key':'recall.json','intent_sha256':persistence.sha256_json(intent)}
+    with pytest.raises(ChangeSetConflict,match='exact started call'):
+        persistence.prepare_action(store,successor,root=str(root/'replacement'),preflight=admission,
+            supersede_unwritten_run=original['run_id'],nonlaunch={**proof,'intent_sha256':'0'*64})
+    new=persistence.prepare_action(store,successor,root=str(root/'replacement'),preflight=admission,
+        supersede_unwritten_run=original['run_id'],nonlaunch=proof)
+    old=store.get_cvp_group(original['run_id'])
+    assert old['result']['successor_run_id']==new['run_id']
+    assert old['call_reservations']['recall.json']['state']=='failed_before_dispatch'
+    assert old['call_reservations']['recall.json']['nonlaunch']==proof
+
+
 def test_undispatched_call_plan_repair_retains_old_identity_and_blocks_started_call(setup):
     from backend.api.canonical_repository import cvp_management_store as persistence
     from backend.api.canonical_repository.postgres_store import ChangeSetConflict
