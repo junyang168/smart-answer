@@ -86,7 +86,7 @@ class MemberRequest(domain.Contract):
 
 class Response(domain.Contract):
     result:Literal['candidate','review','context_insufficient']
-    candidate:domain.Candidate|None=None
+    candidate:domain.IncrementalCandidate|None=None
     review:domain.Review|None=None
     context_requests:list[ContextRequest]
     member_requests:list[MemberRequest]
@@ -138,6 +138,7 @@ class CandidateChanges(domain.Contract):
     changes:list[domain.Change]=Field(default_factory=list)
     discard_refs:list[str]=Field(default_factory=list)
     findings:list[domain.Finding]=Field(default_factory=list)
+    summaries:list[domain.Summary500]=Field(default_factory=list)
     member_dispositions:list[domain.MemberDisposition]=Field(default_factory=list)
 
 
@@ -174,8 +175,8 @@ def adapter(role,request,bundle,packet,*,client=None):
     if expected!=packet:raise ValueError('CVP model packet differs from exact domain packet')
     if role=='correction' and packet.get('previous') is None:
         raise ValueError('correction requires its bound previous candidate')
-    without_summaries=domain.statement_recall(request)
-    response=(StatementProposalResponse if without_summaries else ProposalResponse) if proposal else ReviewResponse
+    incremental_summaries=domain.statement_recall(request)
+    response=(StatementProposalResponse if incremental_summaries else ProposalResponse) if proposal else ReviewResponse
     provider,model,backend=('codex','gpt-6.1-sol','codex_subscription') if proposal else ('claude','claude-opus-5-5','claude_subscription')
     client=client or subscription_client(provider,model,'high')
     if tuple(getattr(client,k,None) for k in ('backend','model','reasoning_effort'))!=(backend,model,'high'):
@@ -184,11 +185,15 @@ def adapter(role,request,bundle,packet,*,client=None):
     client.max_output_tokens=request.budget.max_output_tokens
     task=(PROPOSAL_PROMPT[PROPOSAL_PROMPT.index('candidate语义字段形状'):] if proposal
           else REVIEW_PROMPT[len(SHAPES):])
-    if without_summaries:
-        task=task.replace('新/变更head的summary须本轮给出并同轮审核。','')
-        task='\n'.join(line for line in task.splitlines() if not line.startswith(
-            ('summary单独放','逐项审核每段summary')))
-        task=task.replace('previous.writes或previous.summaries','previous.changes')
+    if incremental_summaries:
+        task=task.replace('每个新观点必须有少于150 Unicode字符的编辑摘要，含问题语境/核心判断/承重限定',
+            '每个新观点必须有最多500个Unicode字符的完整编辑摘要，含问题语境、核心判断、论据、适用范围和承重限定')
+        if proposal:
+            from backend.pipeline.cvp_contextual_summary import SUMMARY_CONTENT_RULES
+            task+='\n'+SUMMARY_CONTENT_RULES+'\n'
+        task+='\n新增连接到已有CVP时，基于本轮新旧全部成员及相关原文小节重新评估其summary。逐一核对旧成员承重的解释性结论、范围、条件、否定与不确定语气；新增Claim只能补充有依据的新信息，不能让最近的材料挤掉旧成员的必要限定。若改写旧summary，原有且仍有来源支持的承重信息必须保留；要删改时先核对旧成员依据，不能只凭新Claim未提到就删掉。按观点整体组织摘要，不按新旧Claim的输入顺序或篇幅分配权重，也不只复述最新Claim。旧summary充分时不要抄写；缺失或过期时须写出完整summary；需要充实时只输出该CVP一份完整新summary。新建CVP必须输出summary。previous.summary_material_pending所列CVP必须在本轮解决缺材料或缺摘要，不能送审。summary不能暗中改变statement的真值条件、对象、否定或必要限定。不要写“教授说／认为／指出／强调”等无关引介语，除非必须区分他人观点。\n'
+        if not proposal:
+            task+='逐一对照旧与新增成员及旧summary，审核连接目标的完整summary（即使文本未改）是否保留旧成员的承重结论和限定、纳入新增成员真正补充的内容，并忠于整体观点；若摘要偏向最新Claim而遗漏旧成员，或无依据删掉旧summary中仍有来源支持的承重信息，提出具体finding。也要检查范围、不确定语气，以及是否把同一观点过细拆分。\n'
     task=task.replace('context.creation_slots','operation.creation_slots').replace('request.permissions','operation.permissions')
     task=task.replace('previous.writes','previous.changes')
     task+='\nfindings只记录尚未解决的具体问题或异议；正常的身份比较、支持理由和通过说明不放入findings。没有问题就返回空数组。\n'
@@ -206,7 +211,7 @@ def adapter(role,request,bundle,packet,*,client=None):
     from backend.pipeline.cvp_model_packet import project
     result.generation_config_sha256=sha256_json({'base_config_sha256':result.generation_config_sha256,
         'protocol':'cvp_simple_model_v1','model_input_sha256':sha256_json(project(packet)),
-        'without_summaries':without_summaries,
+        'without_summaries':incremental_summaries,
         'role':role,'response_schema_sha256':sha256_json(response.model_json_schema()),
         'max_output_tokens':request.budget.max_output_tokens})
     result.max_request_bytes=request.budget.max_request_bytes

@@ -22,7 +22,7 @@ COLLECTIONS = {'canonical_viewpoints', 'viewpoint_revisions', 'viewpoint_claim_l
 PREFIXES = {'canonical_viewpoints': 'v', 'viewpoint_revisions': 'r',
             'viewpoint_claim_links': 'l', 'viewpoint_relations': 'q'}
 FIELDS = {
-    'canonical_viewpoints': {'current_revision_id', 'identity_status', 'redirect_to_viewpoint_id', 'summary'},
+    'canonical_viewpoints': {'current_revision_id', 'identity_status', 'redirect_to_viewpoint_id', 'summary', 'summary_basis'},
     'viewpoint_revisions': {'viewpoint_id', 'core_proposition', 'proposition_signature', 'scope', 'editorial_aliases'},
     'viewpoint_claim_links': {'viewpoint_id', 'claim_id', 'link_type', 'effective_state', 'component_ref',
                              'validated_against_viewpoint_revision_id', 'pinned_claim_revision', 'evidence_bindings',
@@ -31,7 +31,7 @@ FIELDS = {
                            'supporting_claim_ids', 'supporting_claim_relation_ids', 'temporal_assertion', 'effective_state',
                            'validated_source_viewpoint_revision_id', 'validated_target_viewpoint_revision_id'},
 }
-PROGRAM_ONLY_FIELDS = {'summary', 'pinned_claim_revision', 'evidence_bindings',
+PROGRAM_ONLY_FIELDS = {'summary', 'summary_basis', 'pinned_claim_revision', 'evidence_bindings',
                        'component_locator', 'component_position_locator', 'validated_against_viewpoint_revision_id',
                        'validated_source_viewpoint_revision_id', 'validated_target_viewpoint_revision_id'}
 REF_FIELDS = {'current_revision_id': 'viewpoint_revisions', 'viewpoint_id': 'canonical_viewpoints',
@@ -131,6 +131,11 @@ class Summary(Contract):
     summary: str = Field(min_length=1, max_length=149)
 
 
+class Summary500(Contract):
+    ref: str
+    summary: str = Field(min_length=1, max_length=500)
+
+
 class Finding(Contract):
     slot: str = Field(min_length=1)
     target_refs: list[str] = Field(min_length=1)
@@ -153,6 +158,10 @@ class Candidate(Contract):
     findings: list[Finding] = Field(default_factory=list)
     summaries: list[Summary] = Field(default_factory=list)
     member_dispositions: list[MemberDisposition] = Field(default_factory=list)
+
+
+class IncrementalCandidate(Candidate):
+    summaries: list[Summary500] = Field(default_factory=list)
 
 
 class Verdict(Contract):
@@ -325,6 +334,54 @@ def _members(records, vids):
             and row['payload'].get('viewpoint_id') in vids}
 
 
+def summary_basis_for_records(payloads, viewpoint_id, *, human_source_decisions=()):
+    """Bind a summary to the complete current members and their source chain.
+
+    ``payloads`` is a mapping from (collection, object_id) to record payload.
+    The CVR projection omits approval provenance, which is added only after
+    review; the approved review is bound separately to the exact candidate.
+    """
+    view = payloads['canonical_viewpoints', viewpoint_id]
+    revision_id = view['current_revision_id']
+    revision = payloads['viewpoint_revisions', revision_id]
+    if revision['viewpoint_id'] != viewpoint_id:
+        raise ValueError('summary basis has a foreign current revision')
+    pins = [('viewpoint_revisions', revision_id, sha256_json({
+        field: revision.get(field) for field in
+        ('viewpoint_id', 'core_proposition', 'proposition_signature', 'scope', 'editorial_aliases')}))]
+    links = sorted((oid, row) for (col, oid), row in payloads.items()
+                   if col == 'viewpoint_claim_links' and row.get('viewpoint_id') == viewpoint_id
+                   and row.get('effective_state') == 'active')
+    dependencies = {}
+    source_ids = set()
+    for link_id, link in links:
+        if link['validated_against_viewpoint_revision_id'] != revision_id:
+            raise ValueError('summary basis contains a stale member pin')
+        pins.append(('viewpoint_claim_links', link_id, semantic_record_sha(link)))
+        claim_id = link['claim_id']
+        claim = payloads['claims', claim_id]
+        if link['pinned_claim_revision'] != claim['revision']:
+            raise ValueError('summary basis contains a stale Claim pin')
+        dependencies['claims', claim_id] = claim
+        for evidence_id in claim.get('evidence_step_ids', []):
+            evidence = payloads['evidence_steps', evidence_id]
+            dependencies['evidence_steps', evidence_id] = evidence
+            for fragment_id in evidence_fragment_ids(evidence):
+                fragment = payloads['source_fragments', fragment_id]
+                dependencies['source_fragments', fragment_id] = fragment
+                source_id = fragment['source_id']
+                source_ids.add(source_id)
+                dependencies['source_documents', source_id] = payloads['source_documents', source_id]
+    pins.extend((col, oid, semantic_record_sha(row)) for (col, oid), row in sorted(dependencies.items()))
+    return {'schema_version': 'wang_cvp_summary_basis_v1',
+            'viewpoint_revision_id': revision_id,
+            'member_link_ids': [oid for oid, _ in links],
+            'dependency_sha256': sha256_json(pins),
+            'human_source_sha256': sha256_json(sorted(
+                (row for row in human_source_decisions if row['source_id'] in source_ids),
+                key=sha256_json))}
+
+
 def _maintenance_scope(col, payload, records):
     if col == 'canonical_viewpoints':
         return {payload['viewpoint_id']}
@@ -343,7 +400,8 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
             raise ValueError('pending rebase frame differs from its exact saved dependencies')
         return rebind_candidate(request, previous['old_bundle'], bundle, previous['previous_candidate'],
             replacement_raw=raw, prior_findings=prior_findings or previous['carried_prior_findings'])
-    raw = raw if isinstance(raw, Candidate) else Candidate.model_validate(raw)
+    raw_type = IncrementalCandidate if statement_recall(request) else Candidate
+    raw = raw if isinstance(raw, raw_type) else raw_type.model_validate(raw)
     context = prepare_domain(request, bundle)
     original = _records(bundle)
     refs = context['references']
@@ -410,6 +468,31 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
     # Populate only touched/new objects; unchanged old records retain exact bytes.
     keyrefs = {(value['collection'], value['object_id']): ref for ref, value in refs.items()}
     touched = set(changes) | (prior_write_refs - discarded)
+    if statement_recall(request) and previous:
+        live_member_targets = set()
+        for (col, oid), state in states.items():
+            if col != 'viewpoint_claim_links':
+                continue
+            old = original.get((col, oid))
+            if old is None or _member_meaning(old['payload']) != _member_meaning(state):
+                live_member_targets.add(state['viewpoint_id'])
+                if old is not None:
+                    live_member_targets.add(old['payload']['viewpoint_id'])
+        # A correction can abandon target A for B. Its incidental summary
+        # write must disappear with the abandoned uncommitted connection.
+        for row in previous['writes']:
+            key = row['collection'], row['object_id']
+            if (row['collection'] != 'canonical_viewpoints' or key not in original
+                    or row['ref'] not in touched or row['ref'] in changes
+                    or row['object_id'] in live_member_targets
+                    or (request.mode == 'maintain' and row['object_id'] in request.maintenance_viewpoint_ids
+                        and 'summary' in permission.get(key, set()))):
+                continue
+            old = original[key]['payload']
+            if {k: v for k, v in row['payload'].items() if k not in {'summary', 'summary_basis', 'revision'}} == {
+                    k: v for k, v in old.items() if k not in {'summary', 'summary_basis', 'revision'}}:
+                touched.remove(row['ref'])
+                states[key] = deepcopy(old)
     for key, row in original.items():
         col, oid = key
         if col not in {'viewpoint_claim_links', 'viewpoint_relations'} or states[key].get('effective_state') != 'active':
@@ -570,11 +653,16 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
             payload['review_provenance'] = {'review_artifact_sha256': context['material_sha256'],
                                           'basis_identity_decision_ids': [decision_ids[ref]]}
         if not is_new:
-            changed_program_fields = {field for field in PROGRAM_ONLY_FIELDS - {'summary'}
+            changed_program_fields = {field for field in PROGRAM_ONLY_FIELDS - {'summary', 'summary_basis'}
                                       if payload.get(field) != original[key]['payload'].get(field)}
             if not changed_program_fields <= permission.get(key, set()):
                 raise ValueError('derived pin/evidence/locator update lacks exact program-only field permission')
-        states[key] = KNOWLEDGE_COLLECTIONS[col][0].model_validate(payload).model_dump(mode='json')
+        typed_payload = KNOWLEDGE_COLLECTIONS[col][0].model_validate(payload).model_dump(mode='json')
+        if col == 'canonical_viewpoints' and not statement_recall(request):
+            for field in ('summary', 'summary_basis'):
+                if field not in payload:
+                    typed_payload.pop(field, None)
+        states[key] = typed_payload
     writes = []
     for ref in sorted(touched):
         col, oid = refs[ref]['collection'], refs[ref]['object_id']
@@ -619,14 +707,91 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
     prior_refs = {f'pf{i}': row for i, row in enumerate(sorted(incoming.values(), key=lambda row: row['finding_id']), 1)}
     summaries = {row['ref']: row for row in previous.get('summaries', [])
                  if row['ref'] not in discarded} if previous else {}
+    if len({row.ref for row in raw.summaries}) != len(raw.summaries):
+        raise ValueError('duplicate summary target')
+    new_active_targets = {row['payload']['viewpoint_id'] for row in writes
+        if row['collection'] == 'viewpoint_claim_links' and row['before_revision'] is None
+        and row['payload'].get('effective_state') == 'active'}
+    changed_member_targets = set(new_active_targets)
+    for row in writes:
+        if row['collection'] != 'viewpoint_claim_links' or row['before_revision'] is None:
+            continue
+        old = original[row['collection'], row['object_id']]['payload']
+        changed_member_targets.add(old['viewpoint_id'])
+        changed_member_targets.add(row['payload']['viewpoint_id'])
+    created_ids = {row['object_id'] for row in writes
+                   if row['collection'] == 'canonical_viewpoints' and row['before_revision'] is None}
+    changed_head_ids = {oid for (col, oid), state in states.items()
+        if col == 'canonical_viewpoints' and (col, oid) in original
+        and state.get('current_revision_id') != original[col, oid]['payload'].get('current_revision_id')}
+    affected_ids = changed_member_targets | created_ids | changed_head_ids
+    # A correction that withdraws a proposed link also withdraws its incidental
+    # summary edit. A separately authorized maintenance edit remains in scope.
+    if statement_recall(request):
+        summaries = {ref: row for ref, row in summaries.items() if
+            refs[ref]['object_id'] in affected_ids or
+            ('summary' in permission.get(('canonical_viewpoints', refs[ref]['object_id']), set())
+             and refs[ref]['object_id'] in request.maintenance_viewpoint_ids)}
     for row in raw.summaries:
         if row.ref not in refs or refs[row.ref]['collection'] != 'canonical_viewpoints':
             raise ValueError('summary target is not a supplied viewpoint')
         key = (refs[row.ref]['collection'], refs[row.ref]['object_id'])
-        if key in original and (request.mode != 'maintain' or key[1] not in request.maintenance_viewpoint_ids
-                or 'summary' not in permission.get(key, set()) or _held(original[key]['payload'])):
+        auto_enrichment = statement_recall(request) and key[1] in changed_member_targets
+        explicit_maintenance = (request.mode == 'maintain' and key[1] in request.maintenance_viewpoint_ids
+                                and 'summary' in permission.get(key, set()))
+        if key in original and (not (auto_enrichment or explicit_maintenance)
+                                or _held(original[key]['payload'])):
             raise ValueError('existing summary needs exact metadata maintenance permission')
+        if not statement_recall(request) and len(row.summary) > 149:
+            raise ValueError('historical summary exceeds 149 Unicode characters')
         summaries[row.ref] = row.model_dump(mode='json')
+    summary_material_pending = []
+    if statement_recall(request):
+        # New links grant only their actual target a bounded summary/basis edit;
+        # they do not grant identity, scope, old-member or relation maintenance.
+        loaded_claim_ids = {next((oid for oid, short in bundle['references'].get('claims', {}).items()
+            if short == claim['claim_ref']), None) for claim in bundle['material'].get('claims', [])
+            if claim.get('support_loaded')}
+        for vid in sorted(affected_ids | {refs[ref]['object_id'] for ref in summaries}):
+            key = 'canonical_viewpoints', vid
+            state = states[key]
+            if state['identity_status'] != 'active':
+                continue
+            if key in original and _held(original[key]['payload']):
+                raise ValueError('summary enrichment crosses a protected viewpoint')
+            ref = keyrefs[key]
+            proposed = summaries.get(ref)
+            summary = proposed['summary'] if proposed else state.get('summary')
+            old_member_ids = {row['payload']['claim_id'] for (col, _), row in original.items()
+                if col == 'viewpoint_claim_links' and row['payload'].get('viewpoint_id') == vid
+                and row['payload'].get('effective_state') == 'active'}
+            if not summary or not old_member_ids <= loaded_claim_ids:
+                summary_material_pending.append(ref)
+                continue
+            state['summary'] = summary
+            try:
+                state['summary_basis'] = summary_basis_for_records(states, vid,
+                    human_source_decisions=bundle.get('human_source_decisions',[]))
+            except KeyError:
+                summary_material_pending.append(ref)
+                continue
+            if key in original:
+                state['revision'] = original[key]['revision'] + 1
+            states[key] = KNOWLEDGE_COLLECTIONS['canonical_viewpoints'][0].model_validate(state).model_dump(mode='json')
+            existing_write = next((write for write in writes if (write['collection'], write['object_id']) == key), None)
+            if key in original and semantic_record_sha(states[key]) == original[key]['content_sha256']:
+                if existing_write:
+                    writes.remove(existing_write)
+                states[key] = deepcopy(original[key]['payload'])
+            elif existing_write:
+                existing_write['payload'] = states[key]
+            else:
+                writes.append({'ref': ref, 'collection': key[0], 'object_id': vid,
+                    'before_revision': original[key]['revision'] if key in original else None,
+                    'before_sha256': original[key]['content_sha256'] if key in original else None,
+                    'payload': states[key]})
+            object_refs.add(ref)
+        writes.sort(key=lambda row: row['ref'])
     created_views = {row['ref'] for row in writes if row['collection'] == 'canonical_viewpoints' and row['before_revision'] is None}
     changed_heads = {ref for ref, value in refs.items() if value['collection'] == 'canonical_viewpoints'
         and (value['collection'], value['object_id']) in original
@@ -651,6 +816,7 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
         'review_sets': {'components': sorted(parts), 'objects': sorted(object_refs), 'prior_findings': sorted(prior_refs)},
         'prior_findings': list(incoming.values()), 'prior_finding_refs': prior_refs,
         'findings': findings, 'summaries': list(summaries.values()),
+        **({'summary_material_pending': sorted(summary_material_pending)} if statement_recall(request) else {}),
         'member_dispositions': list(member_dispositions.values()),
         'rebase_history': deepcopy(previous.get('rebase_history', [])) if previous else [],
         'new_viewpoint_refs': sorted(created_views), 'independent_audit': 'not_performed'})
@@ -746,6 +912,8 @@ def _validate_afterimage(request, original, states, dispositions, parts, refs):
 def validate_review(request, bundle, candidate, raw, *, prior_findings=()):
     request = _request(request)
     verify(candidate, VERSION + '_candidate')
+    if candidate.get('summary_material_pending'):
+        raise ValueError('summary material or text is incomplete; complete proposal follow-up before review')
     context = prepare_domain(request, bundle)
     if (candidate['request_sha256'], candidate['material_sha256']) != (context['request_sha256'], bundle['artifact_sha256']):
         raise ValueError('review candidate request/material binding differs')
@@ -918,13 +1086,42 @@ def finalize_package(request, bundle, candidate, approval, provenance):
         for collection, row in [('viewpoint_identity_candidates', identity_candidate),
                                 ('viewpoint_identity_decisions', identity_decision), (col, payload)]:
             typed = KNOWLEDGE_COLLECTIONS[collection][0].model_validate(row).model_dump(mode='json')
+            if collection == 'canonical_viewpoints' and not statement_recall(request):
+                for field in ('summary', 'summary_basis'):
+                    if field not in row:
+                        typed.pop(field, None)
             package.setdefault(collection, []).append(typed)
     # No caller-controlled row or content can bypass this final typed pass.
     for col, rows in package.items():
         if col in KNOWLEDGE_COLLECTIONS:
             for row in rows:
                 KNOWLEDGE_COLLECTIONS[col][0].model_validate(row)
+    validate_summary_afterimage(request, bundle, candidate, package)
     return package
+
+
+def validate_summary_afterimage(request, bundle, candidate, package):
+    """Recompute each affected persisted summary basis from the exact afterimage."""
+    request = _request(request)
+    if not statement_recall(request):
+        return
+    if candidate.get('summary_material_pending'):
+        raise ValueError('incomplete summary candidate cannot be submitted')
+    if package.get('metadata', {}).get('candidate_sha256') != candidate['artifact_sha256']:
+        raise ValueError('summary package is not bound to its reviewed candidate')
+    payloads = {(row['collection'], row['object_id']): row['payload'] for row in candidate['records']}
+    for col in COLLECTIONS:
+        id_field = KNOWLEDGE_COLLECTIONS[col][1]
+        for row in package.get(col, []):
+            payloads[col, row[id_field]] = row
+    for row in package.get('canonical_viewpoints', []):
+        if row['identity_status'] != 'active':
+            continue
+        if not row.get('summary') or len(row['summary']) > 500:
+            raise ValueError('persisted viewpoint needs a bounded complete summary')
+        if row.get('summary_basis') != summary_basis_for_records(payloads, row['viewpoint_id'],
+                human_source_decisions=bundle.get('human_source_decisions',[])):
+            raise ValueError('persisted summary basis differs from current post-write members and source')
 
 
 def revalidate_candidate(request, bundle, candidate, raw, *, previous=None, prior_findings=()):
@@ -997,7 +1194,7 @@ def rebind_candidate(request, old_bundle, new_bundle, previous, *, prior_finding
     new mappings, rather than programmatic component deletion.
     """
     request, new_context, same_input = _rebase_context(request, old_bundle, new_bundle, previous)
-    parsed = Candidate.model_validate(replacement_raw or {})
+    parsed = (IncrementalCandidate if statement_recall(request) else Candidate).model_validate(replacement_raw or {})
     if not same_input and (parsed.components is None or not parsed.component_mappings):
         raise ValueError('new Claim wording requires explicit replacement plan and all old mappings')
     rebound = deepcopy(previous)

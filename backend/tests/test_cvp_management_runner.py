@@ -31,7 +31,11 @@ class Provider(Client):
             if response is not None:return response
         if p.get('schema_version','').endswith('_proposal_packet'):
             value=proposal()
-            if 'Summary' not in request['json_schema']['schema'].get('$defs',{}):value.pop('summaries')
+            definitions=request['json_schema']['schema'].get('$defs',{})
+            if not {'Summary','Summary500'} & set(definitions):value.pop('summaries')
+            for ref in (p.get('previous') or {}).get('summary_material_pending',[]):
+                if not any(s['ref']==ref for s in value.get('summaries',[])):
+                    value.setdefault('summaries',[]).append({'ref':ref,'summary':'原有與新增成員的完整解釋。'})
             cref=p['input']['claims'][0]['claim_ref']
             for row in value['changes']:
                 fields=json.loads(row['fields_json'])
@@ -130,6 +134,45 @@ def test_success_chain_commits_actual_reviewed_postimage_and_replays_without_cal
     assert runner.run(store,request,root=root,execute=True,clients=clients)==result
     assert len(clients['gpt'].requests)==len(clients['opus'].requests)==1
     assert len(parent(store)['call_reservations'])==2
+
+
+def test_existing_viewpoint_connection_rebinds_unchanged_summary_atomically(setup):
+    from backend.api.canonical_repository.cvp_recall import STATEMENT_SCOPE_PROFILE
+    store,request,root,clients,_=setup
+    request['input']=seal({k:v for k,v in request['input'].items() if k!='artifact_sha256'} |
+                          {'recall_profile':STATEMENT_SCOPE_PROFILE})
+    auth=Path(request['authorization']['path']);direction=json.loads(auth.read_text())
+    direction['input_sha256']=request['input']['artifact_sha256'];auth.write_text(json.dumps(direction))
+    request['authorization']['file_sha256']=hashlib.sha256(auth.read_bytes()).hexdigest()
+    assert runner.run(store,request,root=root,execute=True,clients=clients)['status']=='completed'
+    original=store.get_record_state('canonical_viewpoints',store.read_cvp_heads()[0]['viewpoint_id'])['payload']
+    second=add_second_claim(store,request)
+    second['action_id']='test-cvp2-enrich'
+    second['input']=seal({**{k:v for k,v in second['input'].items() if k!='artifact_sha256'},
+        'claim_ids':['C2'],'grouping':{'scope_label':'人子','groups':[
+            {'group_key':'g1','claim_ids':['C2'],'rationale':'增量連接'}]}})
+    direction=json.loads(auth.read_text())
+    direction.update(action_id=second['action_id'],input_sha256=second['input']['artifact_sha256'])
+    auth.write_text(json.dumps(direction));second['authorization']['file_sha256']=hashlib.sha256(auth.read_bytes()).hexdigest()
+    def connect(packet):
+        if not packet.get('schema_version','').endswith('_proposal_packet'):return None
+        cvp=packet['material']['viewpoints'][0]['cvp_ref']
+        claim=packet['input']['claims'][0]['claim_ref']
+        value=proposal()
+        value['changes']=[{'ref':'nl1','fields_json':json.dumps(
+            {'viewpoint_id':cvp,'claim_id':claim,'link_type':'equivalent_full'})}]
+        value['component_dispositions'][0]['target_ref']=cvp
+        value['summaries']=[]
+        return envelope('candidate',candidate=value)
+    clients['gpt'].behavior=connect
+    result=runner.run(store,second,root=root.parent/'enrich',execute=True,clients=clients)
+    assert result['status']=='completed',store.get_cvp_group('CVPM-'+runner.sha256_json(second['action_id']))['units']['g1'].get('detail')
+    vid=store.read_cvp_heads()[0]['viewpoint_id']
+    current=store.get_record_state('canonical_viewpoints',vid)['payload']
+    assert current['summary']==original['summary']
+    assert current['summary_basis']['member_link_ids']==sorted(
+        oid for (col,oid) in store.read_cvp_links(viewpoint_ids=[vid]) if col=='viewpoint_claim_links')
+    assert len(current['summary_basis']['member_link_ids'])==2
 
 
 def authorize(request,**budget):
@@ -333,9 +376,17 @@ def test_capacity_children_complete_independently_reuse_recall_and_current_appro
     assert len(action['work_groups'])==2 and action['units']['g1']['status']=='completed'
     assert {tuple(g['claim_ids']) for g in action['work_groups']}=={('C1',),('C2',)}
     assert all(action['units'][g['group_key']]['status']=='completed' for g in action['work_groups'])
-    # Two proposals + one new-card recall; committed summaries are the already
-    # reviewed full afterimage, and require no separate summary model calls.
-    assert len(clients['gpt'].requests)==3 and len(clients['opus'].requests)==2
+    # The second unit recalls the first CVP. Its initial create proposal must
+    # read that CVP's member source and receive one propose follow-up before
+    # Opus may compare the new viewpoint against it.
+    assert len(clients['gpt'].requests)==4 and len(clients['opus'].requests)==2
+    second=next(g for g in action['work_groups'] if g['claim_ids']==['C2'])
+    steps=action['units'][second['group_key']]['steps']
+    assert len(steps)==2
+    final_bundle=store.get_cvp_group(steps[-1])['materials']['bundle']
+    assert final_bundle['member_support_ids']==['C1']
+    assert any(row['claim_ref']==final_bundle['references']['claims']['C1'] and row['support_loaded']
+               for row in final_bundle['material']['claims'])
     assert len(store.read_cvp_heads())==2
     assert len(store.read_cvp_links(claim_ids=['C1','C2']))==2
     snapshot={r:len(c.requests) for r,c in clients.items()}

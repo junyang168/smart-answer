@@ -5,8 +5,9 @@ import pytest
 
 from backend.api.canonical_repository.cvp_recall import build_index, merge_recall, seal
 from backend.api.canonical_repository.postgres_store import record_content_sha
+from backend.api.canonical_repository.cvp_management import summary_basis_for_records
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
-from backend.pipeline.cvp_materials import expand_source, prepare_materials
+from backend.pipeline.cvp_materials import action_member_requests, expand_source, prepare_materials
 from backend.pipeline.cvp_recall_preparation import prepare_recall
 from backend.pipeline.source_projection import project_script
 from test_cvp_recall_preparation import Store, manifest
@@ -93,6 +94,38 @@ def material(store,**kwargs):
     return prepare_materials(store,preflight,'g',recall,source_loader=store.load_source,**kwargs)
 
 
+def test_persisted_summary_is_context_only_while_its_member_basis_is_current():
+    store=MaterialStore(members=1)
+    for cid in ('C0','C1'):
+        row=store.records['claims',cid]
+        row['payload']['revision']=row['revision']
+        row['content_sha256']=record_content_sha(row['payload'])
+        if cid=='C0':store.quals[cid]['content_sha256']=row['content_sha256']
+    link=store.records['viewpoint_claim_links','L1']
+    link['payload'].update(validated_against_viewpoint_revision_id='R1',pinned_claim_revision=2)
+    link['content_sha256']=record_content_sha(link['payload'])
+    view=store.records['canonical_viewpoints','V1']
+    payloads={key:row['payload'] for key,row in store.records.items()}
+    view['payload'].update(summary='原有成員的解釋與限定。',
+                           summary_basis=summary_basis_for_records(payloads,'V1'))
+    view['content_sha256']=record_content_sha(view['payload'])
+    store.heads[0]['head_sha256']=sha256_json({'viewpoint':[2,view['content_sha256']],
+        'revision':[2,store.records['viewpoint_revisions','R1']['content_sha256']]})
+    current=material(store)
+    assert current['material']['viewpoints'][0]['contextual_summary']['text']=='原有成員的解釋與限定。'
+    assert current['material']['viewpoints'][0]['summary_status']=='current'
+    assert next(c for c in current['material']['claims'] if c['claim_ref']==current['references']['claims']['C1'])['support_loaded'] is False
+    store.human_source_decisions=[{'source_id':'S1','decision_id':'changed-fact'}]
+    fact_stale=material(store)
+    assert fact_stale['material']['viewpoints'][0]['summary_status']=='stale'
+    store.human_source_decisions=[]
+    store.records['source_fragments','F1']['payload']['verbatim_excerpt']='另一段原話'
+    store.records['source_fragments','F1']['content_sha256']=record_content_sha(store.records['source_fragments','F1']['payload'])
+    stale=material(store)
+    assert stale['material']['viewpoints'][0]['summary_status']=='stale'
+    assert 'contextual_summary' not in stale['material']['viewpoints'][0]
+
+
 def test_candidate_members_have_complete_wording_and_roles_without_their_evidence():
     store=MaterialStore(members=25);bundle=material(store)
     packet=bundle['material']
@@ -107,6 +140,69 @@ def test_candidate_members_have_complete_wording_and_roles_without_their_evidenc
     assert source['headings_are_metadata'] is True and source['expansion_level']==0
     assert [(s['start'],s['end']) for s in source['sections']]==[(2,4)]
     assert [p['paragraph_key'] for p in source['sections'][0]['paragraphs']]==['S0003','S0004']
+
+
+@pytest.mark.parametrize('action',['connect','create','summary'])
+def test_preliminary_action_loads_all_active_members_before_review(action):
+    store=MaterialStore(members=3);preflight,recall=prepared(store)
+    bundle=prepare_materials(store,preflight,'g',recall,source_loader=store.load_source)
+    cvp_ref=bundle['references']['canonical_viewpoints']['V1']
+    component=bundle['claim_input']['claims'][0]['claim_ref']
+    candidate={'material_sha256':bundle['artifact_sha256'],
+        'new_viewpoint_refs':['nv1'] if action=='create' else [],
+        'component_plan':{'components':[{'component_ref':'k1','claim_ref':component}]},
+        'component_dispositions':([{'component_ref':'k1','disposition':'connected',
+            'target_ref':'nv1' if action=='create' else cvp_ref}]
+            if action!='summary' else []),
+        'writes':[],'summaries':[{'ref':cvp_ref,'summary':'增量摘要'}] if action=='summary' else []}
+    requests=action_member_requests(bundle,recall,candidate)
+    assert {row['member_ref'] for row in requests}=={
+        bundle['references']['claims'][f'C{i}'] for i in range(1,4)}
+    assert all(row['reason'] for row in requests)
+    loaded=prepare_materials(store,preflight,'g',recall,member_support_ids=[f'C{i}' for i in range(1,4)],
+                             source_loader=store.load_source)
+    candidate['material_sha256']=loaded['artifact_sha256']
+    assert action_member_requests(loaded,recall,candidate)==[]
+    assert len(loaded['material']['evidence'])==4
+    assert len(loaded['material']['sources'])==4
+
+
+def test_preliminary_creation_with_empty_recall_needs_no_member_follow_up():
+    store=MaterialStore();preflight,recall=prepared(store)
+    empty=seal({**{k:v for k,v in recall.items() if k not in {'artifact_sha256','claim_candidates'}},
+                'claim_candidates':[{'claim_id':'C0','viewpoint_ids':[]}]})
+    bundle=prepare_materials(store,preflight,'g',empty,source_loader=store.load_source)
+    candidate={'material_sha256':bundle['artifact_sha256'],'new_viewpoint_refs':['nv1'],
+        'component_plan':{'components':[{'component_ref':'k1','claim_ref':bundle['claim_input']['claims'][0]['claim_ref']}]},
+        'component_dispositions':[{'component_ref':'k1','disposition':'connected','target_ref':'nv1'}],
+        'writes':[],'summaries':[]}
+    assert action_member_requests(bundle,empty,candidate)==[]
+
+
+def test_preliminary_creation_checks_every_recalled_viewpoint_member():
+    store=MaterialStore(members=2)
+    view=store.state({'viewpoint_id':'V2','identity_status':'active','current_revision_id':'R2'})
+    revision=store.state({'viewpoint_revision_id':'R2','viewpoint_id':'V2',
+                          'core_proposition':'另一完整判断','scope':{},'proposition_signature':{}})
+    store.records['canonical_viewpoints','V2']=view
+    store.records['viewpoint_revisions','R2']=revision
+    store.records['viewpoint_claim_links','L2']=store.state({'viewpoint_claim_link_id':'L2',
+        'claim_id':'C2','viewpoint_id':'V2','link_type':'member','effective_state':'active'})
+    store.heads.append({'viewpoint_id':'V2','viewpoint_revision_id':'R2',
+        'head_sha256':sha256_json({'viewpoint':[view['revision'],view['content_sha256']],
+                                  'revision':[revision['revision'],revision['content_sha256']]}),
+        **{k:revision['payload'][k] for k in ('core_proposition','scope','proposition_signature')}})
+    preflight,recall=prepared(store)
+    both=seal({**{k:v for k,v in recall.items() if k not in {'artifact_sha256','claim_candidates'}},
+        'claim_candidates':[{'claim_id':'C0','viewpoint_ids':['V1','V2']}]})
+    bundle=prepare_materials(store,preflight,'g',both,source_loader=store.load_source)
+    candidate={'material_sha256':bundle['artifact_sha256'],'new_viewpoint_refs':['nv1'],
+        'component_plan':{'components':[{'component_ref':'k1',
+            'claim_ref':bundle['claim_input']['claims'][0]['claim_ref']}]},
+        'component_dispositions':[{'component_ref':'k1','disposition':'connected','target_ref':'nv1'}],
+        'writes':[],'summaries':[]}
+    assert {row['member_ref'] for row in action_member_requests(bundle,both,candidate)}=={
+        bundle['references']['claims']['C1'],bundle['references']['claims']['C2']}
 
 
 def test_explicit_member_support_loads_only_that_members_own_support():

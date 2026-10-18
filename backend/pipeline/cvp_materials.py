@@ -70,6 +70,58 @@ def _protection(payload):
             'flags':flags,**{key:payload[key] for key in ('review_note','reviewed_by','reviewed_at') if key in payload}}
 
 
+def _current_stored_summaries(store, records, viewpoint_ids, source_loader):
+    """Verify persisted context against current member/source records.
+
+    The extra rows are pinned in the durable material but do not mark member
+    support as model-visible. A stale or legacy unbound summary is not used as
+    context for identity decisions.
+    """
+    from backend.api.canonical_repository.cvp_management import summary_basis_for_records
+    with_text={vid for vid in viewpoint_ids if records['canonical_viewpoints',vid]['payload'].get('summary')}
+    interested={vid for vid in with_text if records['canonical_viewpoints',vid]['payload'].get('summary_basis')}
+    if not interested:return {},{vid:'stale' for vid in with_text},[]
+    links=[r['payload'] for (col,_),r in records.items() if col=='viewpoint_claim_links'
+           and r['payload'].get('viewpoint_id') in interested
+           and r['payload'].get('effective_state')=='active']
+    claims={row['claim_id'] for row in links}
+    def complete(keys):
+        missing=set(keys)-records.keys()
+        if not missing:return
+        found=store.read_current_records(missing)
+        if set(found)!=missing or any(row.get('retired') for row in found.values()):
+            raise ValueError('stored summary has missing current dependencies')
+        records.update(found)
+    complete(('claims',cid) for cid in claims)
+    evidence={eid for cid in claims for eid in records['claims',cid]['payload'].get('evidence_step_ids',[])}
+    complete(('evidence_steps',eid) for eid in evidence)
+    fragments={fid for eid in evidence for fid in evidence_fragment_ids(records['evidence_steps',eid]['payload'])}
+    complete(('source_fragments',fid) for fid in fragments)
+    complete(('source_documents',records['source_fragments',fid]['payload']['source_id']) for fid in fragments)
+    payloads={key:row['payload'] for key,row in records.items()}
+    valid={};status={vid:'stale' for vid in with_text-interested};physical={}
+    for vid in interested:
+        view=records['canonical_viewpoints',vid]['payload']
+        source_ids={records['source_fragments',fid]['payload']['source_id']
+            for link in links if link['viewpoint_id']==vid
+            for eid in records['claims',link['claim_id']]['payload'].get('evidence_step_ids',[])
+            for fid in evidence_fragment_ids(records['evidence_steps',eid]['payload'])}
+        try:expected=summary_basis_for_records(payloads,vid,
+            human_source_decisions=store.read_human_source_decisions(sorted(source_ids)))
+        except (KeyError,ValueError):expected=None
+        if expected is not None and view.get('summary_basis')==expected:
+            try:
+                for sid in sorted(source_ids):
+                    loaded=source_loader(records['source_documents',sid]['payload'])
+                    physical[sid]={'source_id':sid,'path':str(loaded[0]),'file_sha256':loaded[1]}
+            except (OSError,ValueError,KeyError):
+                status[vid]='stale'
+                continue
+            valid[vid]=view['summary'];status[vid]='current'
+        else:status[vid]='stale'
+    return valid,status,[physical[sid] for sid in sorted(physical)]
+
+
 def prepare_materials(store,preflight,group_key,recall,*,member_support_ids=(),
                       maintenance_viewpoint_ids=(),maintenance_record_keys=(),summary_root=None,source_loader=load_context_source):
     """Prepare exact read dependencies, not authorization to change any object.
@@ -242,14 +294,24 @@ def prepare_materials(store,preflight,group_key,recall,*,member_support_ids=(),
         'fragments':[{'fragment_ref':refs['source_fragments'][fid],'content':records['source_fragments',fid]['payload']} for fid in sorted(fragment_ids)],
         'citations':[{'citation_ref':refs['citations'][cid],'content':records['citations',cid]['payload']} for cid in sorted(citation_ids-{None,''})],
         'sources':sources}
+    stored_summaries,summary_status,summary_sources=_current_stored_summaries(store,records,vids,source_loader)
+    physical_by_source={row['source_id']:row for row in [*physical,*summary_sources]}
+    physical=[physical_by_source[sid] for sid in sorted(physical_by_source)]
+    human_source_decisions=store.read_human_source_decisions([row['source_id'] for row in physical])
+    for item in material['viewpoints']:
+        vid=item['viewpoint']['viewpoint_id']
+        item['summary_status']=summary_status.get(vid,'missing')
+        if vid in stored_summaries:
+            item['contextual_summary']={'text':stored_summaries[vid],'attribution':'editorial_synthesis'}
     summary_bindings=[]
     if summary_root:
         from backend.pipeline.cvp_contextual_summary import load_current_cards
         summaries,summary_bindings=load_current_cards(store,summary_root,vids)
         for item in material['viewpoints']:
             vid=item['viewpoint']['viewpoint_id']
-            if vid in summaries:
+            if vid in summaries and vid not in stored_summaries:
                 item['contextual_summary']={'text':summaries[vid],'attribution':'editorial_synthesis'}
+                item['summary_status']='current'
     pins={(col,oid):(r['revision'],r['content_sha256'],False) for (col,oid),r in records.items()}
     store.verify_current_read_pins(pins)
     return seal({'schema_version':VERSION,'preflight_sha256':preflight['artifact_sha256'],
@@ -314,3 +376,44 @@ def validate_material_requests(bundle,response):
             raise ValueError('member support request must select an unloaded candidate member')
     for item in response['context_requests']:
         _source_request(bundle['material'].get('sources',[]),item)
+
+
+def action_member_requests(bundle,recall,candidate):
+    """Return missing current-member support required by a preliminary action.
+
+    A proposed connection needs the target's complete active members. A new
+    viewpoint needs every recalled alternative for each Claim it would own.
+    The refs are read-only comparison material; this grants no write authority.
+    """
+    verify(bundle,VERSION)
+    verify(recall,RECALL_VERSION)
+    if candidate.get('material_sha256')!=bundle['artifact_sha256']:
+        raise ValueError('preliminary action belongs to different common material')
+    references=bundle['references']['canonical_viewpoints']
+    existing={ref:vid for vid,ref in references.items() if vid in bundle['candidate_viewpoint_ids']}
+    new=set(candidate['new_viewpoint_refs'])
+    target_claims={ref:cid for cid,ref in bundle['references']['claims'].items()}
+    component_claims={part['component_ref']:target_claims[part['claim_ref']]
+                      for part in candidate['component_plan']['components']}
+    recalled={row['claim_id']:set(row['viewpoint_ids']) for row in recall['claim_candidates']}
+    required=set()
+    for row in candidate['component_dispositions']:
+        if row['disposition']!='connected':continue
+        ref=row['target_ref']
+        if ref in existing:
+            required.add(existing[ref])
+        elif ref in new:
+            required.update(recalled[component_claims[row['component_ref']]])
+    # An explicit summary or definition edit also needs the old members, even
+    # when no component gained a connection in this particular proposal.
+    required.update(existing[row['ref']] for row in candidate.get('summaries',[])
+                    if row['ref'] in existing)
+    required.update(existing[row['ref']] for row in candidate['writes']
+                    if row['ref'] in existing)
+    active={row['claim_ref'] for row in bundle['material']['links']
+            if row['cvp_ref'] in {references[vid] for vid in required}
+            and row['content'].get('effective_state')=='active'}
+    unloaded={row['claim_ref'] for row in bundle['material']['claims']
+              if not row['target'] and not row['support_loaded']}
+    return [{'member_ref':ref,'reason':'核对拟连接或新建观点与已有成员的完整依据'}
+            for ref in sorted(active & unloaded)]

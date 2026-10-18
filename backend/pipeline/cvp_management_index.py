@@ -78,13 +78,18 @@ def _approved_cards(evidence, package, heads, *, only_current_subset=False):
         if view['identity_status'] != 'active':
             continue
         revision, rrev = rows['viewpoint_revisions', view['current_revision_id']]
-        expected = {'viewpoint_id': vid, 'viewpoint_revision_id': view['current_revision_id'],
-            'head_sha256': sha256_json({'viewpoint': [vrev, semantic_record_sha(view)],
+        # The generic SQL importer materializes optional null fields in old
+        # packages. Direct historical proofs used the pre-import payload;
+        # accept exactly those two deterministic representations.
+        normalized = domain.KNOWLEDGE_COLLECTIONS['canonical_viewpoints'][0].model_validate(view).model_dump(mode='json')
+        variants = [{'viewpoint_id': vid, 'viewpoint_revision_id': view['current_revision_id'],
+            'head_sha256': sha256_json({'viewpoint': [vrev, semantic_record_sha(payload)],
                                        'revision': [rrev, semantic_record_sha(revision)]}),
             **{field: revision[field] for field in ('core_proposition', 'scope', 'proposition_signature')}}
-        if live.get(vid) != expected:
+            for payload in (view, normalized)]
+        if live.get(vid) not in variants:
             raise ValueError('committed summary is bound to a stale or different current head')
-        cards.append({**expected, 'summary': summary['summary']})
+        cards.append({**live[vid], 'summary': summary['summary']})
     return cards
 
 

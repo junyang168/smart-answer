@@ -8,6 +8,17 @@ from .viewpoint_foundation import sha256_json
 VERSION=domain.VERSION
 
 
+def _stored_package_records(package):
+    """Use the same typed postimage that the generic ChangeSet importer stores.
+
+    Historical packages may omit newly optional CVP summary fields; the
+    importer materializes those defaults without changing the approved input.
+    """
+    return {(col,row[domain.KNOWLEDGE_COLLECTIONS[col][1]]):
+            domain.KNOWLEDGE_COLLECTIONS[col][0].model_validate(row).model_dump(mode='json')
+            for col,rows in package.items() if col in domain.KNOWLEDGE_COLLECTIONS for row in rows}
+
+
 def validate_evidence(evidence):
     required={'request','bundle','candidate','approval','proposal_raw','review_raw','previous',
               'prior_findings','provenance','call_keys','round_id'}
@@ -62,6 +73,7 @@ def validate_sql_review(store,cursor,step,evidence,plan):
         if proof['bundle'].get(field,[])!=facts:
             raise ValueError('CVP2 approval omitted a current task constraint/finding')
     package=validate_evidence(proof)
+    domain.validate_summary_afterimage(proof['request'],proof['bundle'],proof['candidate'],package)
     if (package!=evidence['package']['payload'] or sha256_json(package)!=plan.source_sha256 or
             evidence['package']['sha256']!=plan.source_sha256):
         raise ValueError('CVP2 reviewed package is not the complete approved afterimage')
@@ -87,8 +99,7 @@ def validate_sql_review(store,cursor,step,evidence,plan):
     # Equality with a recompiled package prevents model-derived postimages from
     # changing after review. Store plan validation still owns exact DML/history.
     from .postgres_store import record_content_sha,stored_operation_payload
-    expected={(col,row[domain.KNOWLEDGE_COLLECTIONS[col][1]]):row
-              for col,rows in package.items() if col in domain.KNOWLEDGE_COLLECTIONS for row in rows}
+    expected=_stored_package_records(package)
     operations={(op.collection,op.object_id):op for op in plan.operations}
     required=set()
     for key,payload in expected.items():
@@ -141,8 +152,7 @@ def validate_readback(evidence,readback,observed):
             readback['approval_sha256']!=evidence['approval']['artifact_sha256'] or
             readback.get('pending_impacts') or readback['independent_audit']!='not_performed'):
         raise ValueError('CVP2 readback lacks complete current impact closure')
-    expected={(col,row[domain.KNOWLEDGE_COLLECTIONS[col][1]]):row
-              for col,rows in package.items() if col in domain.KNOWLEDGE_COLLECTIONS for row in rows}
+    expected=_stored_package_records(package)
     from .postgres_store import record_content_sha
     for key,payload in expected.items():
         row=observed.get(key)
@@ -299,8 +309,8 @@ def validate_parent_current(store,cursor,parent):
             if key[0] in domain.COLLECTIONS:expected.setdefault(key,row['payload'])
             if key[0]=='claims' and key[1] in group['claim_ids']:
                 target_pins[key]=(row['revision'],row['content_sha256'],False)
-        expected.update({(col,row[domain.KNOWLEDGE_COLLECTIONS[col][1]]):row
-                         for col,rows in package.items() if col in domain.COLLECTIONS for row in rows})
+        expected.update({key:row for key,row in _stored_package_records(package).items()
+                         if key[0] in domain.COLLECTIONS})
         validate_claim_authority(cursor,proof['bundle'],package=package)
     if {oid for col,oid in target_pins}!=set(parent['request']['input']['claim_ids']):
         raise ValueError('CVP2 parent original Claim denominator is incomplete')

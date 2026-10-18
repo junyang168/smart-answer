@@ -343,12 +343,13 @@ def register_work_units(store,parent_id,*,group_key,plan,recall,index_root):
         group=next(g for g in parent['groups'] if g['group_key']==group_key)
         candidates={r['claim_id']:r['viewpoint_ids'] for r in recall['claim_candidates']}
         if list(candidates)!=group['claim_ids']:raise ChangeSetConflict('subdivision recall lost the original Claim denominator')
-        # Before any proposal, create has only local new slots. Maintenance is
-        # conservatively one cluster where the authorized shared write scope is
-        # not yet resolved by a candidate; no shared approved afterimage splits.
+        # Before proposal, each recalled CVP is a possible connection and
+        # summary target. Splitting Claims that share it would allow two
+        # independent postimages for the same viewpoint in one group.
         shared=[['canonical_viewpoints',vid] for vid in parent['request']['maintenance_viewpoint_ids']]
         shared.extend([p['collection'],p['object_id']] for p in parent['request']['permissions'])
-        dependencies={cid:shared for cid in group['claim_ids']}
+        dependencies={cid:[*shared,*(["canonical_viewpoints",vid] for vid in candidates[cid])]
+                      for cid in group['claim_ids']}
         validate_work_units(plan,claim_ids=group['claim_ids'],parent_group_key=group_key,
             candidates_by_claim=candidates,mutable_dependencies_by_claim=dependencies,
             max_request_bytes=parent['request']['budget']['max_request_bytes'])

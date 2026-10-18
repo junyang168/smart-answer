@@ -16,18 +16,20 @@ def current_request():
     return req.model_copy(update={'input':{**req.input,'recall_profile':STATEMENT_SCOPE_PROFILE}})
 
 
-def test_current_flow_compiles_and_reviews_without_summary():
+def test_current_flow_requires_summary_before_review():
     req,b=current_request(),materials();raw=proposal();raw.pop('summaries')
     candidate=domain.compile_candidate(req,b,raw)
     assert candidate['summaries']==[]
-    assert domain.validate_review(req,b,candidate,passing(candidate))['approved']
+    assert candidate['summary_material_pending']==['nv1']
+    with pytest.raises(ValueError,match='summary material'):
+        domain.validate_review(req,b,candidate,passing(candidate))
     packet=domain.proposal_packet(req,b)
     a=adapter('proposal',req,b,packet,client=Client())
     schema=a._response_model.model_json_schema()
     assert 'review' not in schema['properties']
-    assert 'Summary' not in schema.get('$defs',{})
-    assert 'summaries' not in schema['$defs']['CandidateChanges']['properties']
-    assert '双审核' not in a._prompt and '备份' not in a._prompt and '150' not in a._prompt
+    assert 'Summary500' in schema.get('$defs',{})
+    assert 'summaries' in schema['$defs']['CandidateChanges']['properties']
+    assert '双审核' not in a._prompt and '备份' not in a._prompt and '500' in a._prompt
     ra=adapter('review',req,b,domain.review_packet(req,b,candidate),client=review_client())
     assert 'candidate' not in ra._response_model.model_json_schema()['properties']
     assert 'fields_json' not in ra._prompt

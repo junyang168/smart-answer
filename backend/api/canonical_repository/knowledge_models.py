@@ -590,6 +590,10 @@ class CanonicalViewpointRecord(StrictViewpointRecord):
     identity_status: Literal["active", "redirected", "split", "merged", "retired"] = "active"
     created_from_candidate_id: str
     redirect_to_viewpoint_id: Optional[str] = None
+    # Editorial context is versioned with the viewpoint identity. The basis is
+    # program owned and identifies the reviewed post-commit member population.
+    summary: Optional[str] = None
+    summary_basis: Optional[dict[str, Any]] = None
 
     @model_validator(mode="after")
     def validate_redirect(self) -> "CanonicalViewpointRecord":

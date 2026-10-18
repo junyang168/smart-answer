@@ -470,7 +470,14 @@ def _authenticate_recall_root(root,*,client,previous_index=None,claims=None,exis
         selections=_read_recall_leaf(leaf,client)
         leafcards={c['viewpoint_id']:c for c in leaf['index']['cards']}
         assigned={vid for vid,p in assignments.items() if p==digest}
-        if any(leafcards.get(vid)!=cards[vid] for vid in assigned):
+        profile=index.get('input_profile')
+        def same_recall_input(old,current):
+            if old is None:return False
+            if profile == STATEMENT_SCOPE_PROFILE and leaf['index'].get('input_profile')==profile:
+                return (old['core_proposition'],old.get('scope',{}).get('scripture_scope',[])) == (
+                    current['core_proposition'],current.get('scope',{}).get('scripture_scope',[]))
+            return old==current
+        if any(not same_recall_input(leafcards.get(vid),cards[vid]) for vid in assigned):
             raise ValueError('saved recall proof belongs to a stale card')
         for cid in candidates:
             candidates[cid].update(selections[cid]&assigned)

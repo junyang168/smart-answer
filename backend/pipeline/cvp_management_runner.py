@@ -16,7 +16,7 @@ from backend.api.canonical_repository.cvp_recall import (
 )
 from backend.api.canonical_repository.postgres_store import record_content_sha
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
-from backend.pipeline.cvp_materials import prepare_materials,expand_source
+from backend.pipeline.cvp_materials import prepare_materials,expand_source,action_member_requests
 from backend.pipeline.cvp_recall import maintain_reviewed_index,load_reviewed_index,refresh_recall,subset_recall,recall_adapter
 from backend.pipeline.cvp_recall_preparation import prepare_recall
 from backend.pipeline.cvp_management_models import adapter,validate_response
@@ -318,8 +318,12 @@ def _capacity_plan(store,request,current,group,recall,index,proposer,parent_id):
         material=persistence.bind_task_constraints(store,parent_id,material)
         packet=domain.proposal_packet(request,material)
         return [RequestProbe('proposal',adapter('proposal',request,material,packet,client=proposer),packet)]
+    # A recalled viewpoint may become the target of a new connection and one
+    # shared summary afterimage. Keep those Claims together before proposing.
+    dependencies={cid:[*shared,*(('canonical_viewpoints',vid) for vid in candidates[cid])]
+                  for cid in ids}
     return plan_work_units(ids,parent_group_key=group['group_key'],candidates_by_claim=candidates,
-        mutable_dependencies_by_claim={cid:shared for cid in ids},
+        mutable_dependencies_by_claim=dependencies,
         max_request_bytes=request.budget.max_request_bytes,probe=probe)
 
 
@@ -539,6 +543,25 @@ def run(store,request,*,root,execute=False,clients=None):
                         if previous:previous=_rebase_previous(request,bundle,newbundle,previous,prior_findings=prior_findings)
                         bundle=persistence.bind_task_constraints(store,parent_id,newbundle);ordinal+=1;revision=False;continue
                     candidate=domain.compile_candidate(request,bundle,response['candidate'],previous=previous,prior_findings=prior_findings)
+                    missing=action_member_requests(bundle,recall,candidate)
+                    if missing:
+                        # This is still the propose stage. The preliminary
+                        # afterimage is kept for the next call, but cannot be
+                        # sent to Opus until its comparison material is whole.
+                        write_immutable(step_root/'candidate.json',candidate)
+                        newbundle=_expand(store,request,current,key,recall,bundle,
+                            {'member_requests':missing,'context_requests':[]})
+                        previous=domain.rebind_candidate(request,bundle,newbundle,candidate,
+                            prior_findings=prior_findings)
+                        bundle=persistence.bind_task_constraints(store,parent_id,newbundle)
+                        ordinal+=1;revision=False;continue
+                    if candidate.get('summary_material_pending'):
+                        # All source support is present, but the preliminary
+                        # proposal has not supplied a reviewable summary yet.
+                        # Keep this in the original propose budget.
+                        write_immutable(step_root/'candidate.json',candidate)
+                        previous=candidate
+                        ordinal+=1;revision=False;continue
                     digest=_semantic(candidate)
                     if revision and (bundle['artifact_sha256'],digest) in seen:raise ValueError('no semantic progress or oscillation; root cause investigation required')
                     write_immutable(step_root/'candidate.json',candidate)

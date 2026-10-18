@@ -222,7 +222,7 @@ def merge_recall(plan: Mapping[str, Any], replies: Sequence[Mapping[str, Any]], 
 
 
 def changed_index_cards(previous: Mapping[str, Any] | None, current: Mapping[str, Any]) -> dict:
-    """Compare complete cards, including reviewed summary and exact current head."""
+    """Compare the fields actually shown to recall, while preserving head pins."""
     verify(current, INDEX_VERSION)
     old = {}
     if previous is not None:
@@ -235,8 +235,15 @@ def changed_index_cards(previous: Mapping[str, Any] | None, current: Mapping[str
         raise ValueError('duplicate current CVP card')
     if previous is not None and previous.get('input_profile') != current.get('input_profile'):
         return {'changed': sorted(new), 'unchanged': [], 'retired': sorted(set(old)-set(new))}
-    return {'changed': sorted(k for k in new if old.get(k) != new[k]),
-            'unchanged': sorted(k for k in new if old.get(k) == new[k]),
+    profile=current.get('input_profile')
+    def same(a,b):
+        if a is None:return False
+        if profile == STATEMENT_SCOPE_PROFILE:
+            return (a.get('core_proposition'),a.get('scope',{}).get('scripture_scope',[])) == (
+                b.get('core_proposition'),b.get('scope',{}).get('scripture_scope',[]))
+        return a==b
+    return {'changed': sorted(k for k in new if not same(old.get(k),new[k])),
+            'unchanged': sorted(k for k in new if same(old.get(k),new[k])),
             'retired': sorted(set(old) - set(new))}
 
 

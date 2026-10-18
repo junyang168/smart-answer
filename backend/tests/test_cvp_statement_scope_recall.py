@@ -64,3 +64,20 @@ def test_statement_scope_incremental_recall_replay_and_changed_scope(tmp_path):
     replay,metrics=refresh_recall(current,claims(2),client=client,output_dir=tmp_path/'changed',
         previous_output_dir=tmp_path/'same',max_request_bytes=100000,max_calls=0)
     assert replay==refreshed and metrics['model_calls']==0
+
+
+def test_summary_or_membership_revision_does_not_recall_unchanged_statement(tmp_path):
+    client=Client();hs=heads(2);initial=build_statement_index(hs)
+    first,_=refresh_recall(initial,claims(2),client=client,output_dir=tmp_path/'first',
+        max_request_bytes=100000,max_calls=1)
+    updated=deepcopy(hs)
+    updated[0]['head_sha256']='a'*64
+    current=build_statement_index(updated)
+    second,metrics=refresh_recall(current,claims(2),client=client,
+        output_dir=tmp_path/'updated',previous_output_dir=tmp_path/'first',
+        max_request_bytes=100000,max_calls=0)
+    assert metrics['model_calls']==0
+    assert metrics['changed_viewpoint_ids']==[]
+    assert second['claim_candidates']==first['claim_candidates']
+    authenticated,_=_authenticate_recall_root(tmp_path/'updated',client=client,previous_index=current)
+    assert authenticated['index']==current

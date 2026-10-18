@@ -10,7 +10,7 @@ BOOKKEEPING={'artifact_sha256','content_sha256','file_sha256','request_sha256',
     'created_at','approved_at','approved_by','run_id','audit','decision_id',
     'created_from_candidate_id','target_bindings','independent_audit',
     'reviewer_id','reviewer_kind','reviewer_model_ids','approval_basis','policy_version',
-    'identity_candidate_id','reviewed_by','reviewed_at'}
+    'identity_candidate_id','reviewed_by','reviewed_at','summary_basis'}
 
 
 def project(packet):

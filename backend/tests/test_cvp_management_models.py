@@ -55,6 +55,21 @@ def test_adapter_exact_role_packet_schema_identity_and_semantic_field_shapes():
         models.adapter('review',req,b,domain.review_packet(req,b,domain.compile_candidate(req,b,proposal())),client=client)
 
 
+def test_incremental_summary_prompt_checks_all_old_and_new_members():
+    from backend.api.canonical_repository.cvp_recall import STATEMENT_SCOPE_PROFILE
+    req=request(input=seal({'schema_version':'wang_cvp_recall_preflight_v1',
+                            'recall_profile':STATEMENT_SCOPE_PROFILE}))
+    bundle=materials()
+    proposer=models.adapter('proposal',req,bundle,domain.proposal_packet(req,bundle),client=Client())
+    assert '最近的材料挤掉旧成员的必要限定' in proposer._prompt
+    assert '不能只凭新Claim未提到就删掉' in proposer._prompt
+    assert '所以就是说' in proposer._prompt
+    candidate=domain.compile_candidate(req,bundle,proposal())
+    reviewer=models.adapter('review',req,bundle,domain.review_packet(req,bundle,candidate),client=review_client())
+    assert '若摘要偏向最新Claim而遗漏旧成员' in reviewer._prompt
+    assert '无依据删掉旧summary中仍有来源支持的承重信息' in reviewer._prompt
+
+
 @pytest.mark.parametrize('bad', ['claim','text','component','creation','target','summary','member'])
 def test_scoped_proposal_schema_rejects_foreign_component_object_and_creation_refs(bad):
     req,b=request(),materials();a=models.adapter('proposal',req,b,domain.proposal_packet(req,b),client=Client())
