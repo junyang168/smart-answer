@@ -444,15 +444,25 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
         states.update({(row['collection'], row['object_id']): deepcopy(row['payload'])
                        for row in previous['writes'] if row['ref'] not in discarded})
     changes = {}
+    link_evidence_choices = {}
     permission = {(p.collection, p.object_id): set(p.fields) for p in request.permissions}
     for change in raw.changes:
         if change.ref not in refs or change.ref in changes:
             raise ValueError('foreign or repeated compact change reference')
         col, oid = refs[change.ref]['collection'], refs[change.ref]['object_id']
+        key = col, oid
         fields = _json_fields(change.fields_json)
+        evidence_refs = fields.pop('evidence_step_refs', None)
+        if evidence_refs is not None:
+            if (col != 'viewpoint_claim_links' or key in original
+                    or not isinstance(evidence_refs, list) or not evidence_refs
+                    or any(not isinstance(ref, str) or ref not in refs
+                           or refs[ref]['collection'] != 'evidence_steps' for ref in evidence_refs)
+                    or len(set(evidence_refs)) != len(evidence_refs)):
+                raise ValueError('new link evidence selection requires unique supplied evidence short references')
+            link_evidence_choices[change.ref] = [refs[ref]['object_id'] for ref in evidence_refs]
         if col not in COLLECTIONS or set(fields) & PROGRAM_ONLY_FIELDS or not set(fields) <= FIELDS[col]:
             raise ValueError('compact change attempts a mechanical or forbidden field')
-        key = col, oid
         if key in original:
             if (_held(original[key]['payload']) or request.mode != 'maintain'
                     or not set(fields) <= permission.get(key, set())
@@ -641,8 +651,25 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
             payload['pinned_claim_revision'] = claim['revision']
             payload['decision_id'] = decision_ids[ref]
             payload.setdefault('effective_state', 'active')
+            selected_evidence = link_evidence_choices.get(ref)
+            if selected_evidence is None and previous and is_new:
+                # A correction that changes only the link role must retain the
+                # previous precise selection instead of widening it again.
+                selected_evidence = sorted({row['evidence_step_id']
+                    for row in payload.get('evidence_bindings', [])}) or None
+            if selected_evidence is not None:
+                if not set(selected_evidence) <= set(claim['payload'].get('evidence_step_ids', [])):
+                    raise ValueError('link evidence selection is foreign to its source Claim')
+                if any(('evidence_steps', eid) not in original for eid in selected_evidence):
+                    raise ValueError('link evidence selection is missing from material')
+                if any(original['evidence_steps', eid]['payload'].get('support_eligibility') not in
+                       {'eligible', 'eligible_candidate', 'eligible_with_label'}
+                       for eid in selected_evidence):
+                    raise ValueError('link evidence selection includes ineligible support')
             evidence = []
             for eid in claim['payload'].get('evidence_step_ids', []):
+                if selected_evidence is not None and eid not in selected_evidence:
+                    continue
                 if ('evidence_steps', eid) not in original:
                     raise ValueError('link Claim evidence is missing from material')
                 step = original['evidence_steps', eid]['payload']

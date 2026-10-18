@@ -126,6 +126,38 @@ def test_new_link_binds_only_evidence_eligible_to_support_claim():
     candidate=cvp.compile_candidate(request(),bundle,proposal())
     link=next(row['payload'] for row in candidate['writes'] if row['ref']=='nl1')
     assert link['evidence_bindings']==[{'evidence_step_id':'E1','source_fragment_id':'F1'}]
+    with pytest.raises(ValueError,match='ineligible support'):
+        cvp.compile_candidate(request(),bundle,{'changes':[change('nl1',evidence_step_refs=['e2'])]},
+                              previous=candidate)
+
+
+def test_new_link_evidence_can_be_selected_and_preserved_across_corrections():
+    bundle=materials();claim=bundle['records'][0]['payload']
+    claim['evidence_step_ids'].append('E2')
+    bundle['records'][0]['content_sha256']=semantic_record_sha(claim)
+    evidence={'evidence_step_id':'E2','source_fragment_id':'F2',
+              'support_eligibility':'eligible_candidate'}
+    fragment={'fragment_id':'F2','source_id':'S1'}
+    for collection,oid,payload in [('evidence_steps','E2',evidence),
+                                   ('source_fragments','F2',fragment)]:
+        bundle['records'].append({'collection':collection,'object_id':oid,
+            'payload':payload,'revision':1,'content_sha256':semantic_record_sha(payload),
+            'retired':False})
+        bundle['references'][collection][oid]='e2' if oid=='E2' else 'f2'
+    bundle=seal({k:v for k,v in bundle.items() if k!='artifact_sha256'})
+    req=request()
+    raw=proposal()
+    raw['changes'][-1]=change('nl1',viewpoint_id='nv1',claim_id='c1',
+                              link_type='equivalent_full',evidence_step_refs=['e1'])
+    first=cvp.compile_candidate(req,bundle,raw)
+    link=lambda candidate:next(row['payload'] for row in candidate['writes'] if row['ref']=='nl1')
+    assert link(first)['evidence_bindings']==[{'evidence_step_id':'E1','source_fragment_id':'F1'}]
+    second=cvp.compile_candidate(req,bundle,{'changes':[change('nl1',evidence_step_refs=['e2'])]},previous=first)
+    assert link(second)['evidence_bindings']==[{'evidence_step_id':'E2','source_fragment_id':'F2'}]
+    third=cvp.compile_candidate(req,bundle,{'changes':[change('nl1',link_type='equivalent_component')]},previous=second)
+    assert link(third)['evidence_bindings']==link(second)['evidence_bindings']
+    with pytest.raises(ValueError,match='unique supplied evidence short references'):
+        cvp.compile_candidate(req,bundle,{'changes':[change('nl1',evidence_step_refs=['e1','e1'])]},previous=third)
 
 
 def test_empty_delta_retains_previous_candidate_without_copying_records():

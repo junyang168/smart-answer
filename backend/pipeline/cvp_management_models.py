@@ -39,12 +39,14 @@ scope是命题真实适用限定，不是出现经文清单。命题/signature/s
  equivalent_full|equivalent_component|supports|extends|qualifies|applies|tension_evidence|superseding_evidence；
 可给effective_state=active。通过component_dispositions精确连接对应k成分、target_ref及link_ref；
 component_ref如需出现在fields_json也必须是相同k引用。全文等价用equivalent_full，局部用equivalent_component；理由/限定不冒充成员。
+每个新连接可在fields_json给evidence_step_refs:[e短引用,...]，只选当前Claim材料中直接支持该连接成分的合格证据；
+拆分同一Claim连接不同成分时须分别选择，不能把整条Claim的证据都绑定到每个连接。修订时也可只改这个选择。
 新viewpoint_relations槽nqN：source_viewpoint_id、target_viewpoint_id选短引用；
 relation_type=generalizes|specializes|entails|extends|qualifies|applies|tensions_with|supersedes；
 reason写具体作用，supporting_claim_ids及supporting_claim_relation_ids只用给定短引用；
 只有supersedes可给temporal_assertion且必须有明确后期修正证据。不可由措辞相似推断合并。
 已有对象只修改request.permissions明确允许的字段；创建只用context.creation_slots。
-程序补齐record IDs、revision、current pins、decision IDs、evidence bindings、locators、provenance、审核状态及时间；不要输出这些机械字段。
+程序补齐record IDs、revision、current pins、decision IDs、evidence bindings、locators、provenance、审核状态及时间；除evidence_step_refs短引用选择外，不要输出这些机械字段。
 summary单独放summaries:[{ref,summary}]，每个新观点必须有少于150 Unicode字符的编辑摘要，含问题语境/核心判断/承重限定，不冒充教授原话。
 components可null表示保留/默认全Claim；显式计划每项claim_ref及spans:[{text_ref,start_char,end_char}]，
 Unicode区间须完整覆盖全部输入位置且不重叠。k1,k2依components顺序由程序分配，不复制statement。
