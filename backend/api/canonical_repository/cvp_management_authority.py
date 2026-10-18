@@ -156,6 +156,9 @@ def validate_readback(evidence,readback,observed):
 
 def validate_claim_authority(cursor,bundle,*,package=None):
     """Read SQL qualification facts only; physical artifacts were bound before SQL."""
+    from backend.pipeline.claim_human_source import assert_current
+    assert_current(cursor,[s['source_id'] for s in bundle.get('sources',[])],
+                   bundle.get('human_source_decisions',[]))
     target_ids={r['claim_id'] for r in bundle['claim_input']['claims']}
     authorities={r['claim_id']:r['qualification'] for r in bundle.get('claim_authority',[])}
     if set(authorities)!=target_ids:raise ValueError('CVP2 omitted current Claim qualification authority')

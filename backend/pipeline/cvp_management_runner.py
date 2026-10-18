@@ -41,6 +41,9 @@ def validate_authorization(request):
 
 
 def _guard(store,bundle):
+    if store.read_human_source_decisions(
+            [s['source_id'] for s in bundle['sources']])!=bundle.get('human_source_decisions',[]):
+        raise InputChanged('superseded_input: human source decisions changed')
     store.verify_current_read_pins({(r['collection'],r['object_id']):
         (r['revision'],r['content_sha256'],r['retired']) for r in bundle['records']})
     authorities={q['claim_id']:q['qualification'] for q in bundle.get('claim_authority',[])}
@@ -248,6 +251,10 @@ def _same_material_inputs(current,saved):
     """Previously requested member/source expansion may add read-only material."""
     old={(r['collection'],r['object_id']):r for r in saved['records']}
     if any(old.get((r['collection'],r['object_id']))!=r for r in current['records']):return False
+    source_ids={s['source_id'] for s in current['sources']}
+    if ('human_source_decisions' in current or 'human_source_decisions' in saved):
+        if current.get('human_source_decisions')!=[d for d in saved.get('human_source_decisions',[])
+                                                  if d['source_id'] in source_ids]:return False
     return all(current.get(k)==saved.get(k) for k in (
         'claim_input','claim_authority','member_claim_authority','human_constraints','quality_findings','maintenance_viewpoint_ids'))
 

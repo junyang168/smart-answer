@@ -5776,6 +5776,12 @@ class PostgresKnowledgeStore:
                              'retired':retired is not None}
         return result
 
+    def read_human_source_decisions(self, source_ids):
+        """Read active durable source facts without admitting any workflow."""
+        from backend.pipeline.claim_human_source import snapshot
+        with self.connect() as conn, conn.cursor() as cursor:
+            return snapshot(cursor, source_ids)
+
     def read_cvp_links(self, *, viewpoint_ids=(), claim_ids=()):
         """Indexed current memberships only; does not expand members' evidence."""
         if not viewpoint_ids and not claim_ids:return {}

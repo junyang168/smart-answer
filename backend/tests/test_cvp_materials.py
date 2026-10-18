@@ -53,6 +53,9 @@ class MaterialStore(Store):
     @staticmethod
     def state(payload):return {'revision':2,'content_sha256':record_content_sha(payload),'payload':payload,'retired':False}
 
+    def read_human_source_decisions(self,source_ids):
+        return deepcopy([d for d in getattr(self,'human_source_decisions',[]) if d['source_id'] in source_ids])
+
     def read_current_records(self,keys):
         keys=set(keys);self.reads.append(keys)
         return {k:deepcopy(self.records[k]) for k in keys if k in self.records}

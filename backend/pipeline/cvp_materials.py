@@ -195,10 +195,20 @@ def prepare_materials(store,preflight,group_key,recall,*,member_support_ids=(),
     all_refs=[ref for values in refs.values() for ref in values.values()]
     if len(all_refs)!=len(set(all_refs)):raise ValueError('program short reference hash collision')
     sources=[];physical=[]
+    from backend.pipeline import claim_human_source
+    human_source_decisions=store.read_human_source_decisions(source_ids)
     for sid in source_ids:
         doc=records['source_documents',sid]['payload'];loaded=source_loader(doc)
         own=[records['source_fragments',fid]['payload'] for fid in fragment_ids if records['source_fragments',fid]['payload']['source_id']==sid]
-        sources.append(_source_packet(refs['source_documents'][sid],doc,loaded,own))
+        packet=_source_packet(refs['source_documents'][sid],doc,loaded,own)
+        # Applicability is checked against complete spoken paragraphs, never
+        # a quoted fragment or the currently selected section window.
+        snapshot={sid:{'file':{'file_sha256':loaded[1]},
+            'paragraphs':{f'S{i:04d}':row for i,row in enumerate(loaded[2].spoken_rows,1)}}}
+        claim_human_source.project(snapshot,human_source_decisions)
+        packet['human_source_decisions']=snapshot[sid].get('human_source_decisions',[])
+        packet['human_source_decisions_are_metadata']=True
+        sources.append(packet)
         physical.append({'source_id':sid,'path':str(loaded[0]),'file_sha256':loaded[1]})
     wording=compile_input([records['claims',cid]['payload'] for cid in all_claims],preflight['claim_input_policy'])
     target_input=compile_input([records['claims',cid]['payload'] for cid in ids],preflight['claim_input_policy'],
@@ -237,7 +247,7 @@ def prepare_materials(store,preflight,group_key,recall,*,member_support_ids=(),
     return seal({'schema_version':VERSION,'preflight_sha256':preflight['artifact_sha256'],
         'recall_sha256':recall['artifact_sha256'],'group_key':group_key,'material':material,
         'references':refs,'records':[{'collection':col,'object_id':oid,**row} for (col,oid),row in sorted(records.items())],
-        'sources':physical,'claim_input':target_input,'claim_authority':[{'claim_id':cid,'qualification':deepcopy(authority[cid])} for cid in ids],
+        'sources':physical,'human_source_decisions':human_source_decisions,'claim_input':target_input,'claim_authority':[{'claim_id':cid,'qualification':deepcopy(authority[cid])} for cid in ids],
         'member_claim_authority':[{'claim_id':cid,'qualification':member_authority[cid]}
                                   for cid in all_claims if cid not in ids],
         'member_support_ids':sorted((support_ids & members)-set(ids)),
