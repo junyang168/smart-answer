@@ -565,6 +565,13 @@ def run(store,request,*,root,execute=False,clients=None):
                     digest=_semantic(candidate)
                     if revision and (bundle['artifact_sha256'],digest) in seen:raise ValueError('no semantic progress or oscillation; root cause investigation required')
                     write_immutable(step_root/'candidate.json',candidate)
+                    if candidate['findings']:
+                        # A proposal's own unresolved finding cannot receive a
+                        # passing review verdict. Resolve it in the next proposal
+                        # before asking Opus to review a complete afterimage.
+                        seen.add((bundle['artifact_sha256'],digest))
+                        previous=candidate;prior_findings=_all_findings(candidate,{'findings':[]})
+                        ordinal+=1;revision=True;continue
                     # Freeze before the FIRST Opus call, even a rejection or
                     # unknown return. Later plans require explicit lineage.
                     write_immutable(step_root/'review-plan.json',candidate['component_plan'])

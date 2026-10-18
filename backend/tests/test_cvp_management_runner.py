@@ -270,6 +270,37 @@ def test_material_expansion_is_same_action_step_without_semantic_revision_charge
     assert step['materials']['bundle']['material']['sources'][0]['expansion_level']==1
 
 
+def test_proposal_finding_returns_to_proposer_before_first_review(setup):
+    store,request,root,clients,_=setup;proposals=[]
+    def propose_with_first_finding(packet):
+        if not packet.get('schema_version','').endswith('_proposal_packet'):return
+        value=proposal();cref=packet['input']['claims'][0]['claim_ref']
+        for row in value['changes']:
+            fields=json.loads(row['fields_json'])
+            if fields.get('claim_id')=='c1':fields['claim_id']=cref
+            if 'core_proposition' in fields and proposals:
+                fields['core_proposition']='此處的人子是神。'
+            row['fields_json']=json.dumps(fields,ensure_ascii=False)
+        if not proposals:
+            value['findings']=[{'slot':'f1','target_refs':['nv1'],
+                'category':'wording','reason':'先釐清觀點的適用語境。'}]
+        proposals.append(True)
+        return envelope('candidate',candidate=value)
+    def review_resolved(packet):
+        if not packet.get('schema_version','').endswith('_review_packet'):return
+        candidate=packet['candidate'];value=passing(candidate)
+        assert not candidate['findings']
+        value['prior_findings']=[{'ref':ref,'disposition':'resolved',
+            'reason':'已核對修訂後的適用語境。'} for ref in candidate['review_sets']['prior_findings']]
+        return envelope('review',review=value)
+    clients['gpt'].behavior=propose_with_first_finding
+    clients['opus'].behavior=review_resolved
+    result=runner.run(store,request,root=root,execute=True,clients=clients)
+    assert result['status']=='completed',parent(store)['units']['g1'].get('detail')
+    assert len(clients['gpt'].requests)==2 and len(clients['opus'].requests)==1
+    assert len(parent(store)['revision_rounds'])==1
+
+
 def test_more_than_two_bounded_revisions_with_real_sql_and_original_call_budget(setup):
     store,request,root,clients,_=setup;proposal_count=[];review_count=[]
     def revise(packet):
