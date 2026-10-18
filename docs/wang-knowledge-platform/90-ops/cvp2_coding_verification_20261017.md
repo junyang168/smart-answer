@@ -26,6 +26,8 @@
 
 - [16. 2026-10-18：单个摘要补回解释范围](#16-2026-10-18单个摘要补回解释范围)
 
+- [17. 2026-10-18：第十章母本暂缓与试跑范围缩减](#17-2026-10-18第十章母本暂缓与试跑范围缩减)
+
 ## 1. 编码交付
 
 共同 SQL CLI 已接入 `cvp-management` 和 `cvp-management-control`。完整 action 使用原 `pipeline_runs`、call intent／raw cache、累计调用及修订预算，支持索引维护／增量 recall、共同小节材料、程序生成成分与完整候选、有界多轮 Opus、顺序子任务、精确维护权限、共同提交与当前影响回读。新流程不调用额外模型终审或常规全库备份。
@@ -215,3 +217,21 @@
 使用当前完整材料重新生成该 CVP 的摘要，保存为 `staging/cvp-management-436/matt10-scope-summary-20261018-v2/summaries.json`。GPT 生成、Opus 审核各一次即通过；程序重新验证摘要与原始生成／审核结果及当前材料一致。新版补回「也就是耶穌再來時，以色列人還沒有全部歸主」，保留字义、使命内容及另一读法的可能性。旧摘要和旧审核记录未覆盖；没有修改 Claim／CVP 命题或写入业务 SQL。此操作为负责人新授权的单摘要修订，不重置此前 CVP 候选试验预算。
 
 7 项上下文摘要测试通过；文档检查仅保留既知的另一项目缺失锚点。
+
+
+## 17. 2026-10-18：第十章母本暂缓与试跑范围缩减
+
+负责人指示：「这下明白了，要记录下来，建议这次排除这些 claims，以后专门处理」。本次从人子 CVP 试跑中排除母本《10章－差遣、逼迫与赏赐》（`notes_manuscript:使命與誠實`）的 Claims；保留为后续专项，不修改业务记录、审核状态或历史产物。
+
+已查证的原因：9 月 28 日实际用于角色分类的 partition preview（`claim-passage-role-409/current-eligible-preview-20260928.json`，SHA `fc0e8c12b815bf50b385b92c15d0a24af2d760b3f23bc0ed1c243d7454bb1bb0`）完整登记了该来源的 71 条 Claim，其中 65 条为 `blocked / review_status_candidate`，6 条为 `excluded / superseded_claim`，进入 partitions 的数量为 0。因此它们没有进入后续释经角色分类、马太分组及 156 组／973 条 Claim 的 CVP campaign；不是 partition 分配静默丢失。SQL 当前及历史 CVP 连接记录均未找到该来源的连接。此处的 candidate 是当时状态，不代表后来取得资格的 Claim 当前仍不合格。
+
+范围决定保存于 `staging/cvp-management-436/scope-exclusion-matt10-notes-20261018-v1/scope-amendment.json`，绑定原 51 条试验 manifest、完整 71 条历史处置清单和缩减后的分组。本次具体移除以下四条，剩余 47 条：
+
+- `DK-74fcb58a05aa-P01-CL002`
+- `DK-74fcb58a05aa-P01-CL003`
+- `DK-74fcb58a05aa-P02-CL012`
+- `DK-74fcb58a05aa-P03-CL003`
+
+原五条试跑保留历史但停止继续 review／apply；其最后一次 propose follow-up 返回两个新 CVP 和三条已有 CVP 连接建议，程序编译通过，尚未审核，未写入数据库，不能按缩减后的范围直接复用。该组讲道来源的 `DK-defb58f4bb75-P04-CL008` 未被排除。未来继续试跑须使用范围决定中的 `remaining_groups` 重新准备并核对当前资格，不改写旧请求或复用旧范围授权。
+
+后续专项范围：查明该母本当时 candidate 状态的原因及后续资格恢复情况，再明确纳入合格 Claims 的分组／CVP 处理；6 条 superseded 记录不能自动重新启用。本次仅登记待处理范围，不启动专项生成。无模型调用、无业务 SQL 写入。
