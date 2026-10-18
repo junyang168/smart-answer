@@ -39,6 +39,21 @@ def required_keys(request, *, strict=True):
     return list(keys)
 
 
+def finding_permission_extension(previous, old, request):
+    """A linked action may authorize a known readonly finding, not widen reads."""
+    if previous.get('result', {}).get('status') != 'paused' or previous['result'].get('reason') not in {'permission_required', 'budget_exhausted'}:
+        return False
+    prior = {p.key: p for p in old.permissions}
+    current = {p.key: p for p in request.permissions}
+    added = set(current) - set(prior)
+    findings = {f['target_key'] for f in previous.get('findings', {}).values()
+                if f['category'] != 'source_uncertain'}
+    frozen = previous['original_goal']['original_objects']
+    return bool(added and added <= findings and added <= set(frozen)
+        and all(current.get(key) == value for key, value in prior.items())
+        and all(not key.startswith('claims/') and not frozen[key]['retired'] for key in added))
+
+
 def admission_error(request, policy, before, goal):
     """For new actions only. The caller persists the refusal before any call."""
     if request.operation != 'Update':

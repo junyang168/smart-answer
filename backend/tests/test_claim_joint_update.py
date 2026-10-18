@@ -628,3 +628,78 @@ def test_ordinary_joint_policy_enables_two_and_stops_larger_groups_before_calls(
     else:
         assert result['reason'] == 'engineering_required', result
         assert ports.calls == [] and parent(store, request)['admission_refusal']
+
+
+@pytest.fixture
+def readonly_finding(shared):
+    store, request, root, tmp = shared
+    store.apply_plan(store.plan_package({'package_id': 'readonly-finding',
+        'observations': [{'observation_id': oid, 'statement': '甲是假设。'} for oid in ['O', 'OTHER']],
+        'knowledge_relations': [{'relation_id': oid, 'from_id': obs, 'to_id': 'E',
+            'relation_type': 'supports', 'reason': 'synthetic context'} for oid, obs in [('R', 'O'), ('R2', 'OTHER')]]}))
+    policy = bind(request, tmp, required=['evidence_steps/E'], initial='proposal')
+    policy.budget.max_revisions = 0
+    path = tmp/'readonly-policy.json'; path.write_text(policy.model_dump_json())
+    request.policy = cm.source.FileBinding.model_validate(binding(path))
+    authorize(request, {'required_maintenance_keys': ['evidence_steps/E']})
+    def proposal(packet):
+        candidate = cm.existing_candidate(packet['before'])
+        candidate.findings = [cm.Finding(target_key='observations/O', component='statement', category='mapping',
+            reason='readonly observation needs source-supported correction', acceptance_condition='correct O',
+            citations=[cm.Citation(source_id='S', paragraph_key='S0001', exact_quote='甲是假设，不是断言。')],
+            affected_target_keys=['claims/A'], affected_write_keys=[], impact_reason='A depends on O')]
+        return candidate.model_dump(mode='json')
+    def opus(packet):
+        result = joint_pass(packet)
+        for item in result['prior_findings']:
+            item.update(disposition='persistent', affected_target_keys=['claims/A'], affected_write_keys=[])
+        for verdict in result['verdicts']:
+            if verdict['record_key'] == 'observations/O':
+                verdict.update(approved=False, problems=['readonly correction needs authority'])
+        return result
+    ports = SyntheticPorts(store, tmp, proposal=proposal, opus=opus)
+    result = execute_claim_management(store, request, root=root, ports=ports)
+    assert result['reason'] == 'budget_exhausted', result
+    assert ports.calls == ['gpt', 'opus']
+    previous = parent(store, request)
+    successor = request.model_copy(deep=True)
+    successor.action_id += '-permission-follow-up'
+    successor.predecessor_action_id = request.action_id
+    successor.permissions.append(cm.source.Permission(collection='observations', object_id='O', fields=['statement']))
+    successor.authorization = cm.source.FileBinding(path=str(tmp/'permission-follow-up.json'), file_sha256='a'*64)
+    reduced = policy.model_copy(deep=True)
+    reduced.budget.gpt_calls = reduced.budget.opus_calls = 1
+    path = tmp/'remaining-permission-policy.json'; path.write_text(reduced.model_dump_json())
+    successor.policy = cm.source.FileBinding.model_validate(binding(path))
+    authorize(successor, {'required_maintenance_keys': ['evidence_steps/E']})
+    return store, request, previous, successor, reduced, tmp
+
+
+def test_joint_readonly_finding_permission_uses_only_original_remaining_budget(readonly_finding):
+    store, original, previous, successor, policy, tmp = readonly_finding
+    proof = cm.continuation_budget(previous, successor, policy)
+    assert proof['remaining_generations'] == {'gpt': 1, 'opus': 1, 'gemini': 0}
+    calls = deepcopy(previous['call_reservations'])
+    ports = SyntheticPorts(store, tmp, proposal=lambda packet: update(packet, keys=['observations/O']), opus=joint_pass)
+    result = execute_claim_management(store, successor, root=tmp/'permission-follow-up', ports=ports)
+    assert result['status'] == 'completed', result
+    assert ports.calls == ['gpt', 'opus']
+    assert store.get_record_state('observations', 'O')['payload']['statement'] == '甲是假设，不是断言。'
+    assert parent(store, original)['call_reservations'] == calls
+    assert store.claim_management_qualification('A')['ready'] and store.claim_management_qualification('B')['ready']
+
+
+@pytest.mark.parametrize('fault', ['unreported_object', 'drop_old_grant', 'hidden_claim', 'increase_budget'])
+def test_joint_readonly_finding_permission_cannot_expand_unrelated_authority(readonly_finding, fault):
+    _, _, previous, successor, policy, _ = readonly_finding
+    if fault == 'unreported_object':
+        successor.permissions.append(cm.source.Permission(collection='observations', object_id='OTHER', fields=['statement']))
+    elif fault == 'drop_old_grant':
+        successor.permissions = [p for p in successor.permissions if p.key != 'evidence_steps/E']
+    elif fault == 'hidden_claim':
+        successor.permissions.append(cm.source.Permission(collection='claims', object_id='C', fields=['statement']))
+    else:
+        policy.budget.gpt_calls += 1
+    authorize(successor, {'required_maintenance_keys': ['evidence_steps/E']})
+    with pytest.raises(ValueError, match='authority|reset or increase'):
+        cm.continuation_budget(previous, successor, policy)
