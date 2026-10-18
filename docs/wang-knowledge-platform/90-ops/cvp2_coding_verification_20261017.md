@@ -65,3 +65,17 @@
 修复后联合回归 **505 passed**，覆盖 CVP management、recall、材料、projection、foundation 和来源小标题。新增测试包含临时 PostgreSQL 的索引／召回缓存恢复、被否决候选撤回后的完整第二轮复核及零 CVP 写入、部分撤回拒绝、质量异议版本再核验。前端 `tsc --noEmit`、`git diff --check` 通过；文档检查仍仅有第 2 节记录的既有无关锚点问题。
 
 `81b9ae1b` 的保存数据只读复验为 `staging/cvp-management-436/coding-readonly-20261017-v8/verification.json`，SHA `732703b9ae19366cd762f31039ae07e84b026703509a6f885b68817ede704a1c`。51 条 Claim 投影、两条现存资格及 preflight 复验通过；161,975 条语义 pins 与 21,305 条任务记录前后一致，模型调用／语义写入／任务写入均为零。此次审查确认的问题均已修复；第 4 节的真实模型验收范围仍未执行。
+
+## 6. 2026-10-18：人子摘要实际生成与来源扩展
+
+负责人先要求生成全部人子相关摘要，随后指出短摘要只是重复 statement，要求加入 Claim 的所有信息和原文小节，将上限放宽至 500 字。两次实验的原材料、回答和审核分别保存，后一次不改写前一次事实。
+
+第一批包含 31 个 active CVP：head 内容匹配“人子／son of man”，或其 active 连接的 Claim 内容匹配；范围包含相关语境观点，不只标题含“人子”的观点。仅用 statement／scope／signature 的短摘要经 4 次真实调用全部批准，长度 25–104 字符，但负责人认为信息增益不足。证据位于 `staging/cvp-management-436/son-of-man-summaries-20261018-v1/`。更早的单条尝试在过期 CLI 路径检查处失败，未启动模型；原失败记录保留。后续使用当前应用内 CLI，登录和版本预检通过，不更换模型。
+
+新实现 `974ef41f` 为同一 31 个 CVP 加入 71 条已连接 Claim 的完整记录、Evidence、反对立场、引用和 28 份来源中的相关小节；未发现完全缺少来源片段的 Claim。材料保留暂缓／不合格证据、来源限制与人工事实，不改写教授正文。程序按真实请求大小分成 7 批（5、4、5、5、5、5、2），共 16 次真实订阅调用（GPT 8、Opus 8）。最后一批的登山变像摘要因加入原文没有的告诫被拒绝，修正后复核通过；原拒绝保留。
+
+全部 31 条新摘要通过末轮 Opus 审阅，长度 116–319 字符，上限为 500。结果位于 `staging/cvp-management-436/son-of-man-context-summaries-20261018-v1/summaries.json`，artifact SHA 为 `ce0ef2b686abd48f14794a2d226f13b738dececb81ac580bd70597a1cc0587f2`；同目录 `summaries.html` 提供 statement／summary 对照。生成没有 Claim、CVP 或 pipeline SQL 写入，也没有运行两条 Claim 的 CVP 生成／连接试验。新上下文摘要不自动进入旧短索引召回契约。
+
+相关回归 62 passed；文档检查仍仅有其他项目既有缺失锚点。此次证明带来源摘要可以生成和审阅，不证明主题路由、几千个 CVP 的召回质量或正式全流程生产已验收。
+
+随后以禁止新调用的 replay transport 认证全部 16 份原始回答，逐批及最终重新核对当前材料；结果逐字复现，原 raw 文件未变，新模型调用为 0。证据为同目录 `replay-verification.json`。
