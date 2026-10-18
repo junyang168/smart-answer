@@ -3,7 +3,7 @@
 > **讀者**：Developer。
 > **類型**：說明。
 > **狀態**：當前；完整代码入口已实现，真实模型质量及扩大生产准入另行验收。
-> **與代碼對齊**：2026-10-17（核对到 `5e9412d1`）。
+> **與代碼對齊**：2026-10-17（核对到 `81b9ae1b`）。
 > **權威範圍**：CVP 2.0 的请求、执行、恢复与质量状态接口；业务规则以[主控设计](./claim_cvp_management_2_design.md)第 8、9 节及 [Canonical Viewpoint 设计](./canonical_viewpoint_design.md)为准。
 
 ## 1. 三个入口
@@ -45,6 +45,8 @@
 授权文件必须精确等于 `cvp_management_runner.validate_authorization` 构造的 `wang_cvp_management_authorization_v1`：负责人身份、同一 action、内层输入 SHA、模式、维护 ID、逐对象字段权限、创建槽位和预算全部绑定。设计文档不充作执行授权。创建槽位只允许 CVP、CVR、连接和观点关系，程序生成真实 ID。
 
 已有对象变更需要 `maintain` 和精确字段权限。旧 CVR 不覆盖，改 scope／表述建立新 CVR 并移动 head。成员及关系的版本重绑是程序派生的实际写入，须另有对应 pin 字段权限并进入完整 Opus 复核；模型不能抄写 SHA、provenance 或机械字段。Claim、Evidence、教授原文及人工保护不能借此改写。
+
+修订可用 `discard_refs` 撤回上一候选中尚未提交的对象改动或摘要：新槽位从候选移除，已有对象恢复输入原像，不要求模型抄回旧内容。撤回后仍须保留成分与旧异议，修正全部依赖并接受完整复核；这不是删除已提交对象的入口。
 
 ```bash
 backend/.venv/bin/python -m backend.pipeline.cvp_sql_flow \
