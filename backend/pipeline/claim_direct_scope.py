@@ -125,6 +125,10 @@ def scope(request, before, candidate=None):
     relations = {k for k in core if k.split('/', 1)[0] in cm.RELATION_COLLECTIONS}
     endpoints = set(); questions = set()
     for rows in [old, payloads]:
+        # Explicitly maintained edges must keep both endpoints even when a
+        # reversal makes one endpoint cease to be an upstream premise.
+        for key in relations & rows.keys():
+            endpoints.update(deps(key, rows))
         for key, p in rows.items():
             if key.split('/', 1)[0] in cm.RELATION_COLLECTIONS:
                 endpoint_ids = {p.get(f) for f in ('from_id','to_id','source_id','target_id','from_claim_id','to_claim_id')}

@@ -31,12 +31,14 @@ def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
         history=value.get('engineering_review_recoveries',[])
         if history and history[-1]['authorization']==authorization:return history[-1]['recovery_root']
         checkpoint=value.get('checkpoint')
-        if (value.get('kind')!='claim_management_round' or checkpoint not in ({'prepared'} if unrecorded else {'prepared','reviewed'}) or value.get('change_set_ids')
-                or (value.get('opus_approved') and checkpoint!='reviewed')
-                or (checkpoint=='reviewed' and not value.get('opus_approved'))
+        applied=bool(checkpoint=='applied' and direction.get('resume_applied_readback') is True and not unrecorded)
+        if (value.get('kind')!='claim_management_round' or checkpoint not in ({'prepared'} if unrecorded else {'prepared','reviewed'}|({'applied'} if applied else set()))
+                or bool(value.get('change_set_ids')) != applied
+                or (value.get('opus_approved') and checkpoint not in {'reviewed','applied'})
+                or (checkpoint in {'reviewed','applied'} and not value.get('opus_approved'))
                 or set(value.get('stage_results',{}))!=({'candidate'} if unrecorded else {'candidate','opus'})
                 or sha256_json(value)!=direction.get('prior_metadata_sha256')):
-            raise ValueError('recovery requires the exact uncommitted, returned candidate and review')
+            raise ValueError('recovery requires the exact returned candidate/review and authorized commit checkpoint')
         parent=cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE',
             (value['parent_run_id'],)).fetchone()[0]
         if parent.get('continued_by') or len(parent['latest_rounds'])!=1 or parent['latest_rounds'][value['unit_id']]!=round_id:
@@ -48,8 +50,38 @@ def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
                 continue
             if role not in {'gpt','opus'} or slot.get('state')!='completed' or slot.get('result')!=value['stage_results']['candidate' if role=='gpt' else 'opus']:
                 raise ValueError('review recovery cannot repeat an unknown or unrecorded call')
-        store._assert_transaction_read_pins(cursor,pins({cm.source.split_key(k):v
-            for k,v in value['materials']['transaction_before'].items()}))
+        if applied:
+            # Resume only program readback of the exact committed postimages.
+            # The original transaction already checked its broader readset;
+            # every model fact must still equal its reviewed postimage now.
+            reviewed=value['reviewed'];plan=reviewed['plan']
+            if (sha256_json(reviewed)!=value['reviewed_sha256']
+                    or value['materials']['request']['operation']!='Update'
+                    or value['change_set_ids']!=[plan['change_set_id']]
+                    or any(op['operation']!='update' for op in plan['operations'])):
+                raise ValueError('applied recovery requires the unchanged ordinary Update plan')
+            committed=cursor.execute('SELECT status,fingerprint_sha256 FROM wang_knowledge.change_sets WHERE change_set_id=%s',
+                (plan['change_set_id'],)).fetchone()
+            if committed!=('applied',plan['fingerprint_sha256']):
+                raise ValueError('applied recovery commit is not authenticated')
+            expected=deepcopy(value['materials']['before'])
+            for op in plan['operations']:
+                key=cm.source.key(op['collection'],op['object_id'])
+                if key not in expected:raise ValueError('applied write was outside reviewed model scope')
+                payload={**op['payload'],'revision':op['after_revision']}
+                expected[key]={'payload':payload,'revision':op['after_revision'],
+                    'content_sha256':op['after_sha256'],'retired':False}
+            unit=cm.Request.model_validate(value['materials']['unit_request'])
+            candidate=cm.Candidate.model_validate(value['candidate'])
+            if not set(cm.audit_keys(unit,expected,candidate))<=set(expected):
+                raise ValueError('applied recovery would introduce unreviewed content')
+            store._assert_transaction_read_pins(cursor,pins({cm.source.split_key(k):v for k,v in expected.items()}))
+            if 'human_source_decisions' in value['materials']:
+                from backend.pipeline.claim_human_source import assert_current
+                assert_current(cursor,unit.source_bindings,value['materials']['human_source_decisions'])
+        else:
+            store._assert_transaction_read_pins(cursor,pins({cm.source.split_key(k):v
+                for k,v in value['materials']['transaction_before'].items()}))
         original=deepcopy(value);original_parent=deepcopy(parent)
         old_root=Path(value['stage_results']['candidate']['path']).parent
         if unrecorded:
@@ -125,7 +157,7 @@ def recover_returned_review(store,round_id,*,authorization,unrecorded=False):
         write(root/'engineering-recovery.json',record)
         if checkpoint=='reviewed':
             value.pop('reviewed',None);value.pop('reviewed_sha256',None)
-        value.update(materials=materials,stage_results=receipts,checkpoint='prepared',opus_approved=True,outcome=None,findings=unresolved,
+        value.update(materials=materials,stage_results=receipts,checkpoint='applied' if applied else 'prepared',opus_approved=True,outcome=None,findings=unresolved,
             context_findings=context,recovery_root=str(root),engineering_review_recoveries=history+[record])
         for rid,metadata in [(round_id,value),(value['parent_run_id'],parent)]:
             cursor.execute("UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb,status='running',finished_at=NULL,heartbeat_at=now() WHERE run_id=%s",
