@@ -30,6 +30,34 @@ def project(packet):
     # Keep member references discoverable, but let each summarized CVP speak
     # for itself. Targets, requested evidence and maintenance remain complete.
     material=result['material']
+    # The source binding and durable packet retain timing/index metadata.
+    # Semantic review needs the exact paragraph text and its section/paragraph
+    # locators, not the transport coordinates repeated on every source row.
+    for source in material.get('sources',[]):
+        for section in source.get('sections',[]):
+            for paragraph in section.get('paragraphs',[]):
+                row=paragraph.get('row')
+                if isinstance(row,dict) and 'text' in row:
+                    paragraph['row']={'text':row['text']}
+    # A fragment's excerpt, source and paragraph identify the exact words in
+    # the source sections above. Its timestamps, ingest index and lifecycle
+    # fields are repeated transport metadata. Evidence and existing links also
+    # carry their own short ref outside content; retain their semantic fields.
+    redundant={
+        'fragments':{'schema_version','review_status','visibility','fragment_id',
+            'anchor_state','source_segment_index','source_url','media_time',
+            'media_end_time','citation_id'},
+        'evidence':{'schema_version','review_status','visibility',
+            'evidence_step_id','citation_ids'},
+        'links':{'schema_version','review_status','visibility',
+            'viewpoint_claim_link_id','validated_against_viewpoint_revision_id',
+            'occurrence_refs'},
+    }
+    for collection,fields in redundant.items():
+        for item in material.get(collection,[]):
+            if isinstance(item.get('content'),dict):
+                for field in fields:
+                    item['content'].pop(field,None)
     summarized={v['cvp_ref'] for v in material.get('viewpoints',[]) if v.get('contextual_summary')}
     links=material.get('links',[])
     hidden_claims=set()
@@ -42,14 +70,15 @@ def project(packet):
             claim['content_available_on_request']=True
     def afterimage(value):
         if value is None:return None
-        # The durable records contain the full afterimage; writes supplies edit
-        # targets. Do not repeat their payloads or hidden readonly members.
+        # The durable candidate keeps every unchanged source, Claim and CVP
+        # record for SQL replay. The reviewer already has those in material;
+        # send only actual changed afterimages alongside the semantic plan.
         view={k:deepcopy(v) for k,v in value.items() if k not in
-              {'references','writes','request_sha256','material_sha256','request_scope_sha256','artifact_sha256'}}
+              {'references','records','writes','request_sha256','material_sha256','request_scope_sha256','artifact_sha256'}}
         view['changes']=[{'ref':row['ref'],'collection':row['collection']} for row in value.get('writes',[])]
+        view['records']=[{'ref':row['ref'],'collection':row['collection'],'payload':deepcopy(row['payload'])}
+            for row in value.get('writes',[])]
         view=clean(view)
-        view['records']=[r for r in view.get('records',[]) if not (r['collection']=='claims'
-            and ids.get(r.get('object_id'),r.get('object_id')) in hidden_claims)]
         return view
     if 'request' in packet:
         request=packet['request']

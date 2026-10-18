@@ -54,7 +54,10 @@ def test_wire_keeps_content_and_new_feedback_without_mutating_durable_packet():
     assert wire['prior_findings']==[newest]
     assert wire['operation']['creation_slots']
     assert all(set(s)=={'ref','collection'} for s in wire['operation']['creation_slots'])
-    for original,projected in zip(candidate['records'],wire['previous']['records'],strict=True):
+    assert len(wire['previous']['records'])==len(candidate['writes'])
+    for original,projected in zip(candidate['writes'],wire['previous']['records'],strict=True):
+        assert projected['ref']==original['ref']
+        assert projected['collection']==original['collection']
         if 'core_proposition' in original['payload']:
             for field in ('core_proposition','scope','proposition_signature'):
                 assert projected['payload'][field]==original['payload'][field]
@@ -93,3 +96,44 @@ def test_summary_hides_only_unloaded_members_and_keeps_request_refs():
     packet['material']['claims'][-1]['support_loaded']=False
     packet['material']['viewpoints'][0].pop('contextual_summary')
     assert project(packet)['material']['claims'][-1]['content']=={'statement':'成员表述'}
+
+
+def test_wire_keeps_source_text_and_locators_without_transport_coordinates():
+    packet=domain.proposal_packet(current_request(),materials())
+    paragraph={'paragraph_key':'S0004','row':{'text':'人子就到了。','index':4,
+        'start_time':12.5,'end_time':14.0}}
+    packet['material']['sources']=[{'source_ref':'s1','sections':[{'section_ref':'p1',
+        'title':'人子來到','paragraphs':[paragraph]}]}]
+    before=deepcopy(packet)
+    wire=project(packet)
+    assert wire['material']['sources'][0]['sections'][0]['paragraphs']==[
+        {'paragraph_key':'S0004','row':{'text':'人子就到了。'}}]
+    assert packet==before
+
+
+def test_wire_keeps_fragment_evidence_and_link_semantics_without_transport_fields():
+    packet=domain.proposal_packet(current_request(),materials())
+    packet['material']['fragments']=[{'fragment_ref':'f1','content':{
+        'fragment_id':'f1','source_id':'s1','paragraph_key':'S0004',
+        'verbatim_excerpt':'人子就到了。','media_time':12.5,
+        'source_segment_index':4,'schema_version':1,'review_status':'candidate'}}]
+    packet['material']['evidence']=[{'evidence_ref':'e1','content':{
+        'evidence_step_id':'e1','statement':'人子就到了。',
+        'source_fragment_ids':['f1'],'stance':'asserted','review_status':'candidate'}}]
+    packet['material']['links']=[{'link_ref':'l1','claim_ref':'c1','cvp_ref':'v1',
+        'content':{'viewpoint_claim_link_id':'l1','claim_id':'c1',
+            'viewpoint_id':'v1','link_type':'qualifies',
+            'component_locator':{'statement_component':'人子就到了。'},
+            'evidence_bindings':[{'evidence_step_id':'e1','source_fragment_id':'f1'}],
+            'occurrence_refs':['OCC-1'],'review_status':'system_approved'}}]
+    before=deepcopy(packet)
+    wire=project(packet)['material']
+    assert packet==before
+    assert wire['fragments']==[{'fragment_ref':'f1','content':{
+        'source_id':'s1','paragraph_key':'S0004','verbatim_excerpt':'人子就到了。'}}]
+    assert wire['evidence']==[{'evidence_ref':'e1','content':{
+        'statement':'人子就到了。','source_fragment_ids':['f1'],'stance':'asserted'}}]
+    assert wire['links']==[{'link_ref':'l1','claim_ref':'c1','cvp_ref':'v1',
+        'content':{'claim_id':'c1','viewpoint_id':'v1','link_type':'qualifies',
+            'component_locator':{'statement_component':'人子就到了。'},
+            'evidence_bindings':[{'evidence_step_id':'e1','source_fragment_id':'f1'}]}}]
