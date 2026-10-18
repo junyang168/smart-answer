@@ -935,3 +935,17 @@ Restore 单元完成 GPT一次、Opus一次、共同事务及程序回读，7项
 最终检查 **58** 条去重 Claim 当前资格有效，其中原人子专题的 **51** 条通过实际 `current_claim_authority` 入口。额外七条为相关上下文维护／检查对象，不扩大专题分母。资格刷新共 13 个小组，内容写入为零；已有效者复用，不重跑整批。四份既有来源的物理／标题元数据另以正文和口语哈希完全一致为前提更新登记，未编辑这些来源的正文。当前人工事实七条已导出为平面快照；191013 的两项旧问题保持未决，不在本次五项来源确认范围内。
 
 真实调用合计 GPT **11**、Opus **24**，Gemini **0**；没有未定调用、整库备份、CVP 内容写入或 CVP 模型调用。原 51 条的入口通过不表示全部 CVP packet、实际 wire 大小或生成流程已经验证。最新证据：`/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/staging/claim-management-435/human-confirmed-maintenance-20261017-v1/final-verification-after-context.json`；人工事实快照为同目录 `human-source-facts-current.json`。
+
+### 2026-10-18：自身证据覆盖与经文论据资格
+
+#436 的独立 CVP 审阅发现两项先前 Claim 审阅遗漏：`DK-c9084afc125c-P11-CL019` 的完整角色对应在原文 S0164，但自己的 E029／E030 片段未覆盖；`DK-f35be4755f9b-P01-CL001` 的经文 E002 被一律标为 context_only。旧 Opus 审阅及程序回读的通过，只证明当时契约的检查结果，不能作为绑定充分或 CVP 连接成立的证明。
+
+`a14d8242` 在新显式 joint Update v6 policy 增加自身绑定索引和同一 Opus 回答内的逐 Claim 简短充分性判断。程序核对实际自身 owner、片段／来源及支持资格，语义充分性由独立 Opus 判断；不加审核轮次或资格库，不升级旧材料／原答。`548f95d3` 将原文忠实与绑定充分的区分、圣经证据的立论用途同步到共用 prompts。quoted／quoted_source 是引文归属，不等于背景；教授实际采用经文立论时，经文本身可作为合格承重证据，不要求教授额外复述独立断言。
+
+真实修复由三次 GPT 提议和三次 Opus 审阅完成：稗子 Claim 保持原文，扩充 E030 自身连续片段并补全其摘要；太16:28 Claim 明确区分教授的上下文说明与经文原句，E002 据实际论证用途恢复 eligible_candidate，同时保留 quoted_source／quoted。原51条的结构盘点发现另外两条含同类背景标签：`DK-1c98d4a95cd5-P10-CL007` 的可2:10–11、`DK-557caff2c0fb-P02-CL003` 的约拿神迹经文。GPT 与 Opus 据完整自身原文核实这些引述确属论据，修正四项 Evidence 资格，Claim 本体和引文归属保持。
+
+合计更新 **8** 条记录：1 Claim、6 Evidence、1 SourceFragment。没有来源文件、CVP 或人工批准写入。旧联合证明因包含本次变动而使七条关联 Claim 资格失效，依现有零写权限流程分四组刷新，新增 Opus 4 次、GPT 0 次；全部候选 retain、业务 operation 为空。首次刷新启动被未提交文档的环境检查拦下，零 action／intent／模型／业务写入，提交后以原四份请求及原根恢复，失败日志保存。没有重置预算或重发已启动调用。
+
+最终独立新进程核对当前 SQL、8项提交后像、22条来源片段逐字／哈希、三份内容审阅及四份空写刷新，原 **51** 条当前资格及实际 SQL CVP 入口全部通过。本次新增明确绑定审阅覆盖11条；其余40条只核实既有当前资格，未宣称重新审完其全部语义。实际新增调用合计 **GPT 3／Opus 7／Gemini 0**。规则与事务等11个文件的相关回归 **376 passed**；共用 prompt 更新后的子集另 **88 passed**，有重叠。旧失败档案未配置目录的35项此前跳过，不计通过。前端类型检查仍是既有 react-quill-new 缺失所致4条诊断；文档检查只有已知 notes-to-sermon 附录锚点错误，diff检查通过。
+
+证据根 `claim-management-435/own-evidence-repair-20261018-v1/` 的 `final-verification.json` 是最终当前状态；`verification.json` 保留修复后七条资格尚未刷新的中间结果。`cvp-handoff.json` 保存四条 Claim 与全部自身 Evidence／SourceFragment 的精确版本、归属、资格、独立审阅与读回依据。CVP 原 f2／f4 可据当前材料重新判断，不能把旧拒绝改标通过；原 f1／f3 仍属 CVP 职责。没有重跑 CVP 组、整库备份、合并或部署。
