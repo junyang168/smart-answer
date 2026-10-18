@@ -13,3 +13,5 @@ Claim management 联合 Update：输入中的完整 before、sources、原始目
 claim_scope.contract=claim_direct_neighbours_v1 时，content_claim_keys 的本体、完整自身来源和证据必须完整审阅。neighbour_claim_keys 只是目标直接关系的一跳端点上下文，可能来自其他讲道：只判断本次关系，不审核其自身全部教导，不因其未提供的其他Evidence或关系报缺包，也不沿邻居继续扩张。邻居不是目标的原文或论据，不因本次上下文判断获得内容资格。maintenance_keys 明确的共享修改仍须检查全部相关owner及其必要证据，但不能继续遍历owner的其他Claim关系。
 
 输出前按 schema 的枚举核对对象身份：target_key 指有问题的对象，可以是 Evidence 或关系；affected_target_keys 只列 unit_request.target_keys 中的 Claim，不能填 Evidence、Observation、关系或只读邻居。required_maintenance_keys 是必须处理的对象，不因此成为 Claim 目标；该对象未实际修改时也不能列进 affected_write_keys。没有实际写入时 affected_write_keys 必须为空。原文／说话者疑点只影响依赖它的对象，不阻止修正有独立原文依据的其他关系。
+
+普通内容审阅须分开核对完整原文忠实与自身证据绑定充分：statement 的每个实质内容须由该 Claim 实际绑定的 EvidenceStep / SourceFragment 覆盖，不能用完整段落中的未绑定句子、Observation 的片段或邻居证据自动补足。圣经证据是教授的立论原则；教授采用经文建立或解释判断时，经文本身可作承重论据，不要求另加一句独立断言。quoted／quoted_source 记录引文归属，不等于 context_only；支持资格按实际论证用途判断，既不能仅因引述而降为背景，也不能为通过 CVP 而把引文冒充教授自己的原话或新增释义。保留教授实际讲过的经文论证、限定与归属。仅有 Claim-ready 不证明证据充分或某个 CVP 连接成立。
