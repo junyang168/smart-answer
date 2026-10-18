@@ -63,11 +63,16 @@ def test_incremental_summary_prompt_checks_all_old_and_new_members():
     proposer=models.adapter('proposal',req,bundle,domain.proposal_packet(req,bundle),client=Client())
     assert '最近的材料挤掉旧成员的必要限定' in proposer._prompt
     assert '不能只凭新Claim未提到就删掉' in proposer._prompt
+    assert '具体核对能否用extends／qualifies连接到旧CVP' in proposer._prompt
+    assert '普通新连接所读取的候选旧成员是只读比较材料' in proposer._prompt
+    assert '把仅因该连接产生的summary改动放进discard_refs' in proposer._prompt
     assert '所以就是说' in proposer._prompt
     candidate=domain.compile_candidate(req,bundle,proposal())
     reviewer=models.adapter('review',req,bundle,domain.review_packet(req,bundle,candidate),client=review_client())
     assert '若摘要偏向最新Claim而遗漏旧成员' in reviewer._prompt
     assert '无依据删掉旧summary中仍有来源支持的承重信息' in reviewer._prompt
+    assert '若仅因范围措辞不同或Claim单独成条就新建' in reviewer._prompt
+    assert '只能引用target_refs包含该项ref的finding' in reviewer._prompt
 
 
 @pytest.mark.parametrize('bad', ['claim','text','component','creation','target','summary','member'])
