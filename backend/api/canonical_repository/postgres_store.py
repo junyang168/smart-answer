@@ -3837,7 +3837,8 @@ class PostgresKnowledgeStore:
                     reason = ('disagreement' if value.get('source_impact_disagreement') else
                         cm.adjudication_outcome(unresolved, candidate) if adjudicating else cm.failure_reason(unresolved))
                     if (reason == 'revision_required' and materials['request']['operation'] != 'Review'
-                            and not (adjudicating and set(unresolved) - {r.finding_id for r in candidate.finding_resolutions or []})):
+                            and not (adjudicating and set(unresolved) - {r.finding_id for r in candidate.finding_resolutions or []}
+                                     - cm.proposer_reported_finding_ids(unresolved, candidate))):
                         writable = {p.key for p in unit_request.permissions}
                         writable.update(parent['created_keys'])
                         from backend.pipeline.claim_joint_update import enabled

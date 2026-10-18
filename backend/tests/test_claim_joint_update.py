@@ -703,3 +703,35 @@ def test_joint_readonly_finding_permission_cannot_expand_unrelated_authority(rea
     authorize(successor, {'required_maintenance_keys': ['evidence_steps/E']})
     with pytest.raises(ValueError, match='authority|reset or increase'):
         cm.continuation_budget(previous, successor, policy)
+
+
+def test_known_proposer_permission_gap_pauses_after_one_independent_review(shared):
+    store,request,root,tmp=shared
+    store.apply_plan(store.plan_package({'package_id':'known-permission-edge','claim_relations':[
+        {'claim_relation_id':'R','from_id':'A','to_id':'B','relation_type':'supports','reason':'synthetic bad reason'}]}))
+    request.permissions=[]
+    bind(request,tmp,required=[],initial='proposal')
+    def propose(packet):
+        result=cm.existing_candidate(packet['before'])
+        result.finding_resolutions=[]
+        result.findings=[cm.JointFinding(target_key='claim_relations/R',component='reason',category='mapping',
+            reason='synthetic unsupported weight in incoming relation',acceptance_condition='Repair relation reason after exact authorization.',
+            affected_target_keys=request.target_keys,affected_write_keys=[],impact_reason='Relation explanation affects original targets.',
+            citations=[cm.Citation(source_id='S',paragraph_key='S0001',exact_quote='甲是假设，不是断言。')])]
+        return result.model_dump(mode='json')
+    def opus(packet):
+        reply=joint_pass(packet)
+        for v in reply['verdicts']:
+            if v['record_key']=='claim_relations/R':v.update(approved=False,problems=['known reported objection'])
+        for v in reply['prior_findings']:
+            v.update(disposition='persistent',reason='independently confirms the same permission gap',
+                affected_target_keys=request.target_keys,affected_write_keys=[],impact_reason='Relation explanation affects original targets.')
+        return reply
+    ports=SyntheticPorts(store,tmp,proposal=propose,opus=opus)
+    before=store.get_record_state('claim_relations','R')
+    result=execute_claim_management(store,request,root=root,ports=ports)
+    assert result['status']=='paused' and result['reason']=='permission_required',result
+    assert result['required_write_keys']==['claim_relations/R']
+    assert ports.calls==['gpt','opus']
+    assert store.get_record_state('claim_relations','R')==before
+    assert len(parent(store,request)['latest_rounds'])==1

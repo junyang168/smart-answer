@@ -1224,10 +1224,21 @@ def candidate_state(before, candidate):
     return sha256_json({"records": records, "replacements": candidate.replacements})
 
 
+def proposer_reported_finding_ids(findings, candidate):
+    """Already stated by GPT, retained as unresolved by independent review.
+
+    This only avoids asking GPT to restate its own exact objection before a
+    permission pause. It resolves nothing and creates no approval or budget.
+    Match the complete original report, not merely its stable identity.
+    """
+    reports = [f.model_dump(mode='json') for f in candidate.findings]
+    return {fid for fid, finding in findings.items() if finding in reports}
+
+
 def adjudication_outcome(findings, candidate):
     """New objections go to GPT before permission/source escalation."""
     decisions = {r.finding_id: r for r in candidate.finding_resolutions or []}
-    if set(findings) - set(decisions):
+    if set(findings) - set(decisions) - proposer_reported_finding_ids(findings, candidate):
         return 'revision_required'
     if any(r.disposition == 'resolved' for r in decisions.values()
            if r.finding_id in findings):

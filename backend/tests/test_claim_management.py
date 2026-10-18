@@ -523,3 +523,18 @@ def test_explicit_maintenance_questions_reach_models_without_implying_approval(c
         path.write_text(json.dumps({'review_questions':bad}));request.authorization=m.source.FileBinding.model_validate(binding(path))
         with pytest.raises(ValueError,match='review_questions'):
             m.original_goal(request,before)
+
+
+def test_proposer_report_does_not_need_another_restating_call_before_permission_pause():
+    report=m.Finding(target_key='claim_relations/R',component='reason',category='mapping',
+        reason='The relationship overstates the scope.',acceptance_condition='Repair the reason with source authority.',
+        citations=[citation()],affected_target_keys=['claims/C'],impact_reason='Incoming support reason affects C.')
+    candidate=m.Candidate(records=[],dispositions=[],findings=[report],finding_resolutions=[])
+    pending={'original':report.model_dump(mode='json')}
+    assert m.proposer_reported_finding_ids(pending,candidate)=={'original'}
+    # A new/changed review objection must still go to GPT; an identity match
+    # alone is insufficient, even if its location and target are identical.
+    for field,value in [('reason','A materially different objection.'),('acceptance_condition','A different required correction.')]:
+        changed=deepcopy(pending);changed['original'][field]=value
+        assert m.proposer_reported_finding_ids(changed,candidate)==set()
+    assert m.proposer_reported_finding_ids(pending,candidate.model_copy(update={'findings':[]}))==set()
