@@ -11,7 +11,9 @@ from pathlib import Path
 from backend.api.canonical_repository import cvp_management as domain
 from backend.api.canonical_repository import cvp_management_store as persistence
 from backend.api.canonical_repository.cvp_management_authority import validate_evidence
-from backend.api.canonical_repository.cvp_recall import seal,verify,recall_plan,combine_recall_candidates
+from backend.api.canonical_repository.cvp_recall import (
+    seal,verify,recall_plan,combine_recall_candidates,build_statement_index,STATEMENT_SCOPE_PROFILE,
+)
 from backend.api.canonical_repository.postgres_store import record_content_sha
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.pipeline.cvp_materials import prepare_materials,expand_source
@@ -392,7 +394,10 @@ def run(store,request,*,root,execute=False,clients=None):
                 for proof in approved_cards:
                     h=proof['heads'][0]
                     if live.get(h['viewpoint_id'])==h:approved_by_view[h['viewpoint_id']]=proof
-                if (index_root/'index.json').exists():
+                if request.input.get('recall_profile') == STATEMENT_SCOPE_PROFILE:
+                    index=build_statement_index(heads)
+                    write_immutable(index_root/'index.json',index)
+                elif (index_root/'index.json').exists():
                     index=load_reviewed_index(heads,proposer=proposer,reviewer=reviewer,output_dir=index_root)
                 else:
                     index,_=maintain_reviewed_index(heads,previous_output_dir=previous_index_root,

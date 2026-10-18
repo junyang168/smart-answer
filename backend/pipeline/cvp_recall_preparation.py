@@ -6,7 +6,7 @@ from collections.abc import Mapping
 import json
 
 from backend.api.canonical_repository.cvp_recall import (
-    assert_current_index, build_index, recall_plan, seal, verify, work_groups,
+    assert_current_index, build_index, build_statement_index, STATEMENT_SCOPE_PROFILE, recall_plan, seal, verify, work_groups,
 )
 from backend.api.canonical_repository.postgres_store import record_content_sha
 from backend.api.canonical_repository.cvp_claim_input import compile_input, validate_policy
@@ -19,12 +19,15 @@ VERSION='wang_cvp_recall_preflight_v1'
 
 
 def prepare_recall(store, request, *, load_index=load_reviewed_index, index=None, allow_unqualified=False, defer_index=False):
-    """Never calls a model, writes SQL, manufactures a summary or creates grouping."""
+    """Never calls a model, writes SQL, generates a summary or creates grouping."""
     verify(request,VERSION)
     fields={'schema_version','claim_ids','grouping','cvp_policy','claim_input_policy','index_root',
             'recall_request_bytes','recall_max_calls','artifact_sha256'}
-    if set(request)!=fields:
+    if set(request)-{'recall_profile'}!=fields:
         raise ValueError('recall preflight manifest fields differ')
+    profile=request.get('recall_profile')
+    if profile not in (None, STATEMENT_SCOPE_PROFILE):
+        raise ValueError('unknown recall input profile')
     groups=work_groups(request['grouping'],request['claim_ids'])
     limit=request['recall_request_bytes'];cap=request['recall_max_calls']
     if type(limit) is not int or limit<1 or type(cap) is not int or cap<0:
@@ -128,6 +131,13 @@ def prepare_recall(store, request, *, load_index=load_reviewed_index, index=None
             'blocked_claims':blocked,'groups':admitted_groups,
             'ready_group_keys':[g['group_key'] for g in admitted_groups if g['status']=='ready'],
             'blocked_group_keys':[g['group_key'] for g in admitted_groups if g['status']=='blocked']}
+    if profile == STATEMENT_SCOPE_PROFILE:
+        expected_index=build_statement_index(heads)
+        if index is not None and index != expected_index:
+            raise ValueError('statement index differs from exact current heads/profile')
+        index=expected_index
+    elif index is not None and index.get('input_profile') is not None:
+        raise ValueError('index profile differs from bound recall request')
     if index is None and (request['index_root'] is None or defer_index) and heads:
         if store.read_cvp_heads()!=heads:
             raise ValueError('active CVP set or current head changed during preflight')

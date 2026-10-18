@@ -3,7 +3,7 @@
 > **讀者**：Developer。
 > **類型**：說明。
 > **狀態**：當前；完整代码入口已实现，真实模型质量及扩大生产准入另行验收。
-> **與代碼對齊**：2026-10-18（共同材料来源事实核对到 `a17540f5`；来源摘要核对到 `974ef41f`）。
+> **與代碼對齊**：2026-10-18（共同材料来源事实核对到 `a17540f5`；来源摘要核对到 `974ef41f`；statement／经文范围配置核对到本次实现与回归）。
 > **權威範圍**：CVP 2.0 的请求、执行、恢复与质量状态接口；业务规则以[主控设计](./claim_cvp_management_2_design.md)第 8、9 节及 [Canonical Viewpoint 设计](./canonical_viewpoint_design.md)为准。
 
 ## 1. 三个入口
@@ -33,6 +33,7 @@
   "cvp_policy": "/checkout/backend/pipeline/policies/wang_cvp_resolution_policy_v6.json",
   "claim_input_policy": "/checkout/backend/pipeline/policies/wang_cvp_claim_input_v1.json",
   "index_root": null,
+  "recall_profile": "statements_scripture_components_v1",
   "recall_request_bytes": 500000,
   "recall_max_calls": 100
 }
@@ -60,7 +61,9 @@ backend/.venv/bin/python -m backend.pipeline.cvp_sql_flow \
 
 ## 3. 正常执行与容量
 
-索引卡覆盖完整当前 active head cut，含 statement、scope、signature 与少于 150 个 Unicode 码点的已复核 summary。已有索引由直接原始回答证明认证；缺索引时在本任务总预算内初始化。只更新新增／改变 head，退休卡片移出。新 CVP／新 head 的摘要由正常候选及同轮 Opus 一起批准，后续索引复用该证明，不另调摘要模型。
+新任务在内层输入绑定 `recall_profile=statements_scripture_components_v1`，由程序从完整当前 active head cut 构造索引；模型只收到短引用、完整 statement 和已有 `scope.scripture_scope`，不收到 summary、完整 signature 或原文。无需先生成全库摘要。Prompt 接受同一判断、直接补充／限定／不同解释／张力，也接受对应 Claim 中一项明确判断的候选；不要求覆盖整条，不自行补推论，允许空集。索引及 prompt 配置进入请求／缓存绑定。
+
+省略该字段的旧任务继续使用原 statement／scope／signature／已复核短summary索引与原prompt，原回答按原配置认证。不能在恢复时改变输入配置。新配置沿用已有分片、增量、退役移除、原始回答认证与预算机制，配置变化不会复用旧配置的候选判断。新 CVP／新 head 在生成阶段的摘要仍由候选及同轮 Opus 一起批准；它不进入新配置的 recall 输入。
 
 Recall 只返回本组各 Claim 对应的 CVP ID；全部卡片分片，每片保留完整 Claim 组，显式空结果，无 top-K。已有 active 连接并入候选。各工作单元顺序提案、复核、提交；后一个单元开始前对此前新卡批量增量 recall，未变卡片的合法结果复用。
 
@@ -99,7 +102,7 @@ Recall 只返回本组各 Claim 对应的 CVP ID；全部卡片分片，每片�
 
 准备、模型调用及结果保存分别进行；复用已有 store 查询、来源解析、结构化 adapter 和 immutable call cache。每批在调用前检查真实请求字节数；GPT／Opus 读相同完整材料，最多两轮修订且受同一保存计划总调用预算约束。返回记录缺项、多项、超过 500 字符或复核拒绝均不得算完成。每次调用及最终保存核对当前 head、成员集合、依赖版本、来源文件和人工来源事实。
 
-输出 `wang_cvp_contextual_summary_v1` 包含 statement、summary、材料 SHA 与原始生成／复核记录路径。它是来源绑定的编辑摘要，不改 Claim 或 CVP 命题。原有少于 150 字符的 recall 索引及其历史审核仍保留；新摘要不伪装成旧索引卡，也不自动替换尚在讨论的 recall 输入。
+输出 `wang_cvp_contextual_summary_v1` 包含 statement、summary、材料 SHA 与原始生成／复核记录路径。它是来源绑定的编辑摘要，不改 Claim 或 CVP 命题。原有少于 150 字符的 recall 索引及其历史审核仍保留；新摘要不伪装成旧索引卡，也不进入上述 statement／经文范围 recall 输入。
 
 ## 7. 验证边界
 

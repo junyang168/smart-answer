@@ -11,6 +11,7 @@ from .viewpoint_foundation import canonical_json, sha256_json
 
 INDEX_VERSION = 'wang_cvp_recall_index_v1'
 RECALL_VERSION = 'wang_cvp_recall_v1'
+STATEMENT_SCOPE_PROFILE = 'statements_scripture_components_v1'
 
 
 def seal(body: Mapping[str, Any]) -> dict:
@@ -59,6 +60,22 @@ def build_index(heads: Sequence[Mapping[str, Any]], summaries: Sequence[Mapping[
     return seal({'schema_version': INDEX_VERSION, 'cards': cards})
 
 
+def build_statement_index(heads: Sequence[Mapping[str, Any]]) -> dict:
+    """Deterministic current-head index; no generated summary or model approval."""
+    rows = sorted((dict(h) for h in heads), key=lambda h: h['viewpoint_id'])
+    if len({h['viewpoint_id'] for h in rows}) != len(rows):
+        raise ValueError('duplicate current CVP head')
+    for head in rows:
+        if not isinstance(head.get('core_proposition'), str) or not head['core_proposition'].strip():
+            raise ValueError('current CVP statement is missing')
+        scope = head.get('scope', {}).get('scripture_scope', [])
+        if not isinstance(scope, list) or any(not isinstance(v, str) for v in scope):
+            raise ValueError('current CVP scripture scope must be a string list')
+        if 'summary' in head:
+            raise ValueError('current-head index does not accept summary cards')
+    return seal({'schema_version': INDEX_VERSION, 'input_profile': STATEMENT_SCOPE_PROFILE, 'cards': rows})
+
+
 def assert_current_index(index: Mapping[str, Any], heads: Sequence[Mapping[str, Any]]) -> None:
     verify(index, INDEX_VERSION)
     current = {h['viewpoint_id']: dict(h) for h in heads}
@@ -97,11 +114,20 @@ def recall_plan(index: Mapping[str, Any], claims: Sequence[Mapping[str, Any]], *
     measure = measure or (lambda p: len(canonical_json(p).encode('utf-8')))
     cards, claim_refs = claim_cards(claims)
     view_refs = {f'v{i}': c['viewpoint_id'] for i, c in enumerate(index['cards'], 1)}
-    rows = [{'cvp_ref': ref, **{k: c[k] for k in (
-        'core_proposition', 'summary', 'scope', 'proposition_signature')}}
-        for ref, c in zip(view_refs, index['cards'], strict=True)]
+    profile = index.get('input_profile')
+    if profile not in (None, STATEMENT_SCOPE_PROFILE):
+        raise ValueError('unknown recall index input profile')
+    if profile == STATEMENT_SCOPE_PROFILE:
+        rows = [{'cvp_ref': ref, 'core_proposition': c['core_proposition'],
+                 'scripture_scope': c.get('scope', {}).get('scripture_scope', [])}
+                for ref, c in zip(view_refs, index['cards'], strict=True)]
+    else:
+        rows = [{'cvp_ref': ref, **{k: c[k] for k in (
+            'core_proposition', 'summary', 'scope', 'proposition_signature')}}
+            for ref, c in zip(view_refs, index['cards'], strict=True)]
     def payload(values):
-        return {'schema_version': RECALL_VERSION, 'claims': cards, 'viewpoints': values}
+        return {'schema_version': RECALL_VERSION, 'claims': cards, 'viewpoints': values,
+                **({'input_profile': profile} if profile else {})}
     # Actual JSON request size grows with appended complete cards. Search the
     # boundary rather than repeatedly encoding every growing prefix (quadratic
     # in a large Registry). No token estimate replaces the actual encoder.
@@ -207,6 +233,8 @@ def changed_index_cards(previous: Mapping[str, Any] | None, current: Mapping[str
     new = {c['viewpoint_id']: c for c in current['cards']}
     if len(new) != len(current['cards']):
         raise ValueError('duplicate current CVP card')
+    if previous is not None and previous.get('input_profile') != current.get('input_profile'):
+        return {'changed': sorted(new), 'unchanged': [], 'retired': sorted(set(old)-set(new))}
     return {'changed': sorted(k for k in new if old.get(k) != new[k]),
             'unchanged': sorted(k for k in new if old.get(k) == new[k]),
             'retired': sorted(set(old) - set(new))}

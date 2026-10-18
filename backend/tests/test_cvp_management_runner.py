@@ -291,8 +291,19 @@ def add_second_claim(store,request):
 
 
 @pytest.mark.parametrize('interrupt',[False,True])
-def test_capacity_children_complete_independently_reuse_recall_and_current_approved_summary(setup,monkeypatch,interrupt):
+@pytest.mark.parametrize('statement_scope',[False,True])
+def test_capacity_children_complete_independently_reuse_recall_and_current_approved_summary(setup,monkeypatch,interrupt,statement_scope):
     store,request,root,clients,_=setup;request=add_second_claim(store,request)
+    if statement_scope:
+        from backend.api.canonical_repository.cvp_recall import STATEMENT_SCOPE_PROFILE
+        request['input']=seal({k:v for k,v in request['input'].items() if k!='artifact_sha256'} |
+                              {'recall_profile':STATEMENT_SCOPE_PROFILE})
+        path=Path(request['authorization']['path']);direction=json.loads(path.read_text())
+        direction['input_sha256']=request['input']['artifact_sha256'];path.write_text(json.dumps(direction))
+        request['authorization']['file_sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
+        def no_summary_stage(*args,**kwargs):raise AssertionError('statement scope needs no summary model stage')
+        monkeypatch.setattr(runner,'maintain_reviewed_index',no_summary_stage)
+        monkeypatch.setattr(runner,'load_reviewed_index',no_summary_stage)
     original_adapter=runner.adapter
     def measured(role,req,bundle,packet,**kwargs):
         result=original_adapter(role,req,bundle,packet,**kwargs)
