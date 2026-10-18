@@ -16,6 +16,24 @@ def bound(path):
     return {'path':str(path),'file_sha256':hashlib.sha256(path.read_bytes()).hexdigest()}
 
 
+def test_quality_lookup_reads_registrations_once_and_filters_target_pins():
+    class Cursor:
+        def __init__(self):self.calls=0
+        def execute(self,query):
+            self.calls+=1
+            assert "metadata->'quality_findings'" in query
+            return self
+        def fetchall(self):
+            return [('run-1',[{'observation':{'audit_id':'q1'},'findings':[
+                {'target_pins':[{'collection':'claims','object_id':'C1'}]}]},
+                {'observation':{'audit_id':'q2'},'findings':[
+                {'target_pins':[{'collection':'claims','object_id':'C2'}]}]}])]
+    cursor=Cursor()
+    result=persistence._quality_findings(cursor,[('claims','C1'),('claims','C3')])
+    assert [r['observation']['audit_id'] for r in result]==['q1']
+    assert cursor.calls==1
+
+
 def audit_manifest(store,request,root):
     head=store.read_cvp_heads()[0];vid=head['viewpoint_id']
     row=store.get_record_state('canonical_viewpoints',vid)

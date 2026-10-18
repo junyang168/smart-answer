@@ -299,17 +299,20 @@ def current_quality_findings(store,keys):
 def _quality_findings(cursor,keys):
     """Targeted current objections in existing task metadata, not a new ledger."""
     found={}
-    values=sorted(set(keys))
-    for offset in range(0,len(values),8):
-        batch=values[offset:offset+8]
-        predicates=[canonical_json([{'findings':[{'target_pins':[{'collection':col,'object_id':oid}]}]}]) for col,oid in batch]
-        if not predicates:continue
-        query="SELECT run_id,metadata->'quality_findings' FROM wang_knowledge.pipeline_runs WHERE "+' OR '.join(
-            ["metadata->'quality_findings' @> %s::jsonb"]*len(predicates))+" ORDER BY run_id"
-        for run_id,registrations in cursor.execute(query,predicates).fetchall():
-            for registration in registrations or []:
-                key=run_id,registration['observation']['audit_id']
-                found[key]=registration
+    targets=set(keys)
+    if not targets:return []
+    # Quality registrations are rare. Read nonempty registrations once instead
+    # of rescanning the task table for every eight source/material records.
+    query="""SELECT run_id,metadata->'quality_findings' FROM wang_knowledge.pipeline_runs
+        WHERE metadata->'quality_findings' IS NOT NULL
+          AND metadata->'quality_findings' <> '[]'::jsonb ORDER BY run_id"""
+    for run_id,registrations in cursor.execute(query).fetchall():
+        for registration in registrations or []:
+            if not any((pin['collection'],pin['object_id']) in targets
+                       for finding in registration['findings'] for pin in finding['target_pins']):
+                continue
+            key=run_id,registration['observation']['audit_id']
+            found[key]=registration
     return [found[k] for k in sorted(found)]
 
 
