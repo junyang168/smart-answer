@@ -74,7 +74,8 @@ def project(packet):
         # record for SQL replay. The reviewer already has those in material;
         # send only actual changed afterimages alongside the semantic plan.
         view={k:deepcopy(v) for k,v in value.items() if k not in
-              {'references','records','writes','request_sha256','material_sha256','request_scope_sha256','artifact_sha256'}}
+              {'references','records','writes','rebase_history','request_sha256',
+               'material_sha256','request_scope_sha256','artifact_sha256'}}
         view['changes']=[{'ref':row['ref'],'collection':row['collection']} for row in value.get('writes',[])]
         view['records']=[{'ref':row['ref'],'collection':row['collection'],'payload':deepcopy(row['payload'])}
             for row in value.get('writes',[])]

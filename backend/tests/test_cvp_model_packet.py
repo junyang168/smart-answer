@@ -49,6 +49,7 @@ def test_wire_keeps_content_and_new_feedback_without_mutating_durable_packet():
     assert packet==before
     assert 'request' not in wire and 'context' not in wire
     assert 'references' not in wire['previous'] and 'writes' not in wire['previous']
+    assert 'rebase_history' not in wire['previous']
     assert wire['material']['claims'][0]['content']==packet['material']['claims'][0]['content']
     assert wire['input']['text_units']==packet['input']['text_units']
     assert wire['prior_findings']==[newest]
