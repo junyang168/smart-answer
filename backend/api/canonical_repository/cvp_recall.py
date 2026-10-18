@@ -130,6 +130,33 @@ def recall_plan(index: Mapping[str, Any], claims: Sequence[Mapping[str, Any]], *
                  'shards': shards})
 
 
+def statement_recall_plan(heads, claims, *, max_request_bytes, measure):
+    """One complete current head cut, statement only; no summary prerequisite.
+
+    This bounded test path deliberately refuses overflow instead of hiding it
+    behind slicing. Existing merge_recall validates exact returned references.
+    """
+    if type(max_request_bytes) is not int or max_request_bytes < 1:
+        raise ValueError('positive statement recall capacity required')
+    ids=[h['viewpoint_id'] for h in heads]
+    if not ids or len(set(ids))!=len(ids):
+        raise ValueError('statement recall needs nonempty unique current heads')
+    if any(not isinstance(h.get('core_proposition'),str) or not h['core_proposition'].strip() for h in heads):
+        raise ValueError('statement recall needs complete CVP statements')
+    cards,claim_refs=claim_cards(claims)
+    refs={f'v{i}':vid for i,vid in enumerate(ids,1)}
+    payload={'schema_version':RECALL_VERSION,'claims':cards,'viewpoints':[
+        {'cvp_ref':ref,'core_proposition':head['core_proposition']}
+        for ref,head in zip(refs,heads,strict=True)]}
+    size=measure(payload)
+    if size>max_request_bytes:
+        raise ValueError('complete statement recall request exceeds capacity')
+    return seal({'schema_version':RECALL_VERSION,'input_profile':'current_statements_only_v1',
+        'index_sha256':sha256_json(list(heads)),'claims_sha256':sha256_json(list(claims)),
+        'claim_refs':claim_refs,'viewpoint_refs':refs,'max_request_bytes':max_request_bytes,
+        'request_bytes':size,'shards':[payload]})
+
+
 def merge_recall(plan: Mapping[str, Any], replies: Sequence[Mapping[str, Any]], *,
                  existing_links: Sequence[Mapping[str, Any]] = ()) -> dict:
     """Exact coverage and shard-local references; no ranking or top-K cutoff."""
