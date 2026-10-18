@@ -38,7 +38,7 @@ def test_rejected_new_identity_can_be_withdrawn_without_writing_it(setup):
     clients['opus'].behavior = review
     outcome = runner.run(store, request, root=root, execute=True, clients=clients)
     assert outcome['status'] == 'completed', parent(store)['units']['g1'].get('detail')
-    assert len(reviewed) == 2 and not reviewed[-1]['writes']
+    assert len(reviewed) == 2 and not reviewed[-1]['changes']
     assert reviewed[-1]['prior_findings']
     assert reviewed[-1]['component_plan'] == reviewed[0]['component_plan']
     assert store.read_cvp_heads() == []

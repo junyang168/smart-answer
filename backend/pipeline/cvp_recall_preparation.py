@@ -23,8 +23,11 @@ def prepare_recall(store, request, *, load_index=load_reviewed_index, index=None
     verify(request,VERSION)
     fields={'schema_version','claim_ids','grouping','cvp_policy','claim_input_policy','index_root',
             'recall_request_bytes','recall_max_calls','artifact_sha256'}
-    if set(request)-{'recall_profile'}!=fields:
+    if set(request)-{'recall_profile','contextual_summary_root'}!=fields:
         raise ValueError('recall preflight manifest fields differ')
+    summary_root=request.get('contextual_summary_root')
+    if summary_root is not None and (not isinstance(summary_root,str) or not Path(summary_root).is_absolute()):
+        raise ValueError('contextual summary root must be an absolute path')
     profile=request.get('recall_profile')
     if profile not in (None, STATEMENT_SCOPE_PROFILE):
         raise ValueError('unknown recall input profile')

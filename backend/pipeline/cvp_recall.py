@@ -69,16 +69,22 @@ def _adapter(client,prompt,model,name,limit):
     return adapter
 
 
+class RecallRow(StrictResponse):
+    claim_ref:str
+    cvp_refs:list[str]
+
+
+class RecallResponse(StrictResponse):
+    claim_candidates:list[RecallRow]
+
+
 def recall_adapter(client, payload, *, max_request_bytes):
     validate_clients(client)
     refs = tuple(c['claim_ref'] for c in payload['claims'])
     views = tuple(v['cvp_ref'] for v in payload['viewpoints'])
     if not refs or not views:
         raise ValueError('empty recall shard must not invoke a model')
-    row = create_model('CvpRecallRow', __base__=StrictResponse,
-                       claim_ref=(Literal[refs], ...), cvp_refs=(list[Literal[views]], ...))
-    response = create_model('CvpRecallResponse', __base__=StrictResponse,
-                            claim_candidates=(list[row], ...))
+    response = RecallResponse
     profile = payload.get('input_profile')
     if profile not in (None, STATEMENT_SCOPE_PROFILE):
         raise ValueError('unknown recall payload profile')

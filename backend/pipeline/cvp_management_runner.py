@@ -43,6 +43,8 @@ def validate_authorization(request):
 
 
 def _guard(store,bundle):
+    from backend.pipeline.cvp_contextual_summary import guard as summary_guard
+    for binding in bundle.get('summary_bindings',[]):summary_guard(store,binding)
     if store.read_human_source_decisions(
             [s['source_id'] for s in bundle['sources']])!=bundle.get('human_source_decisions',[]):
         raise InputChanged('superseded_input: human source decisions changed')
@@ -144,6 +146,8 @@ def _all_findings(previous,approval):
 
 
 def _expand(store,request,preflight,group_key,recall,bundle,response):
+    from backend.pipeline.cvp_materials import validate_material_requests
+    validate_material_requests(bundle,response)
     if response['member_requests']:
         reverse={ref:cid for cid,ref in bundle['references']['claims'].items()}
         members=set(bundle['member_support_ids'])
@@ -154,7 +158,8 @@ def _expand(store,request,preflight,group_key,recall,bundle,response):
             members.add(cid)
         expanded=prepare_materials(store,preflight,group_key,recall,member_support_ids=members,
                                    maintenance_viewpoint_ids=request.maintenance_viewpoint_ids,
-                                   maintenance_record_keys=[(p.collection,p.object_id) for p in request.permissions])
+                                   maintenance_record_keys=[(p.collection,p.object_id) for p in request.permissions],
+                                   summary_root=request.input.get('contextual_summary_root'))
         # Retain source expansions already provided; source refs may be
         # renumbered only with a new fully bound material version.
         old_by_id={sid:next(s for s in bundle['material']['sources'] if s['source_ref']==ref)
@@ -308,7 +313,8 @@ def _capacity_plan(store,request,current,group,recall,index,proposer,parent_id):
         prepared=_group_preflight(current,child,plan)
         material=prepare_materials(store,prepared,child['group_key'],result,
             maintenance_viewpoint_ids=request.maintenance_viewpoint_ids,
-            maintenance_record_keys=[(p.collection,p.object_id) for p in request.permissions])
+            maintenance_record_keys=[(p.collection,p.object_id) for p in request.permissions],
+                                   summary_root=request.input.get('contextual_summary_root'))
         material=persistence.bind_task_constraints(store,parent_id,material)
         packet=domain.proposal_packet(request,material)
         return [RequestProbe('proposal',adapter('proposal',request,material,packet,client=proposer),packet)]
@@ -352,7 +358,8 @@ def run(store,request,*,root,execute=False,clients=None):
                 continue
             if unit['status']=='completed':
                 completed=store.get_cvp_group(unit['completed_step'])
-                approved_cards.extend(_completed_summary_proofs(store,completed))
+                if not domain.statement_recall(request):
+                    approved_cards.extend(_completed_summary_proofs(store,completed))
                 previous_index_root=completed['materials'].get('index_root',previous_index_root)
                 continue
             try:
@@ -370,7 +377,8 @@ def run(store,request,*,root,execute=False,clients=None):
                     persistence.complete_step(store,latest['run_id'],readback=readback,read_pins=rpins)
                     persistence.progress(store,parent_id,group_key=key,status='completed',step_id=latest['run_id'])
                     completed=store.get_cvp_group(latest['run_id'])
-                    approved_cards.extend(_completed_summary_proofs(store,completed))
+                    if not domain.statement_recall(request):
+                        approved_cards.extend(_completed_summary_proofs(store,completed))
                     previous_index_root=completed['materials'].get('index_root',previous_index_root)
                     continue
                 _reconcile_saved_dispatches(store,parent_id,unit,request,proposer,reviewer)
@@ -457,7 +465,8 @@ def run(store,request,*,root,execute=False,clients=None):
                     {'group_key':p['group_key'],'plan':metrics['current_plan'] if p['group_key']==key else p['plan']}
                     for p in current['recall_plans']]})
                 bundle=prepare_materials(store,current,key,recall,maintenance_viewpoint_ids=request.maintenance_viewpoint_ids,
-                                   maintenance_record_keys=[(p.collection,p.object_id) for p in request.permissions])
+                                   maintenance_record_keys=[(p.collection,p.object_id) for p in request.permissions],
+                                   summary_root=request.input.get('contextual_summary_root'))
                 bundle=persistence.bind_task_constraints(store,parent_id,bundle)
                 # Control facts version semantic material while the original
                 # authenticated recall remains reusable. They never reset calls.
@@ -568,8 +577,9 @@ def run(store,request,*,root,execute=False,clients=None):
                     persistence.complete_step(store,step_id,readback=readback,read_pins=rpins)
                     persistence.progress(store,parent_id,group_key=key,status='completed',step_id=step_id)
                     from backend.pipeline.cvp_management_index import write_committed_summary_proofs
-                    approved_cards.extend(write_committed_summary_proofs(evidence,step_root/'proposal.json',
-                        step_root/'review.json',store.read_cvp_heads(),step_root/'summary-proofs'))
+                    if not domain.statement_recall(request):
+                        approved_cards.extend(write_committed_summary_proofs(evidence,step_root/'proposal.json',
+                            step_root/'review.json',store.read_cvp_heads(),step_root/'summary-proofs'))
                     previous_index_root=index_root
                     break
             except (ValueError,RuntimeError,OSError) as exc:

@@ -33,7 +33,7 @@ def test_new_member_same_source_preserves_required_section_and_prior_expansion(m
     bundle=runner.expand_source(bundle,dict(source_ref=source['source_ref'],section_ref='p2',extent='adjacent',reason='Context'))
     before=deepcopy(bundle)
     response={'context_requests':[],'member_requests':[{'member_ref':bundle['references']['claims']['C1'],'reason':'Need member support'}]}
-    request=SimpleNamespace(maintenance_viewpoint_ids=[],permissions=[])
+    request=SimpleNamespace(maintenance_viewpoint_ids=[],permissions=[],input={})
     result=runner._expand(store,request,preflight,'g',recall,bundle,response)
     assert bundle==before
     assert result['context_requests']==before['context_requests']
@@ -55,7 +55,7 @@ def test_multiple_same_source_locations_share_one_expansion_gradient(monkeypatch
     response={'result':'context_insufficient','candidate':None,'review':None,'member_requests':[],
               'context_requests':[dict(source_ref=source['source_ref'],section_ref=p,extent=extent,reason='Context') for p in ['p2','p4']]}
     validate_response('proposal',response)
-    request=SimpleNamespace(maintenance_viewpoint_ids=[],permissions=[])
+    request=SimpleNamespace(maintenance_viewpoint_ids=[],permissions=[],input={})
     result=runner._expand(store,request,preflight,'g',recall,bundle,response)
     source=result['material']['sources'][0]
     assert [s['section_ref'] for s in source['sections']]==['p1','p2','p3','p4']
@@ -122,7 +122,7 @@ def test_new_member_cannot_rebind_old_expansion_to_changed_source(monkeypatch):
     store.load_source=lambda doc:(load(doc)[0],'b'*64,load(doc)[2])
     response={'context_requests':[],'member_requests':[{'member_ref':bundle['references']['claims']['C1'],'reason':'Support'}]}
     with pytest.raises(runner.InputChanged,match='source changed'):
-        runner._expand(store,SimpleNamespace(maintenance_viewpoint_ids=[],permissions=[]),preflight,'g',recall,bundle,response)
+        runner._expand(store,SimpleNamespace(maintenance_viewpoint_ids=[],permissions=[],input={}),preflight,'g',recall,bundle,response)
 
 
 def test_explicit_relation_scope_keeps_unmaintained_endpoint_readonly():

@@ -47,8 +47,9 @@ def _request(original, root, *, name, index_root, view_id, permissions, creation
 
 
 def _ref(packet, collection, ident):
-    return next(ref for ref, value in packet['context']['references'].items()
-                if value == {'collection': collection, 'object_id': ident})
+    from backend.pipeline.cvp_materials import _short_ref
+    prefixes={'canonical_viewpoints':'v','viewpoint_revisions':'r','viewpoint_claim_links':'l','claims':'c'}
+    return _short_ref(collection,ident,prefixes[collection])
 
 
 def _change(ref, fields):

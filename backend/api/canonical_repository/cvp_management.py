@@ -175,6 +175,11 @@ class Review(Contract):
     novelty_approved: bool
 
 
+def statement_recall(request):
+    from .cvp_recall import STATEMENT_SCOPE_PROFILE
+    return _request(request).input.get('recall_profile')==STATEMENT_SCOPE_PROFILE
+
+
 def _request(value):
     return value if isinstance(value, Request) else Request.model_validate(value)
 
@@ -628,7 +633,7 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
         and states[value['collection'], value['object_id']]['identity_status'] == 'active'
         and states[value['collection'], value['object_id']]['current_revision_id'] !=
             original[value['collection'], value['object_id']]['payload']['current_revision_id']}
-    if not (created_views | changed_heads) <= set(summaries):
+    if not statement_recall(request) and not (created_views | changed_heads) <= set(summaries):
         raise ValueError('new or revised viewpoints require compact summaries in the same review')
     valid_refs = set(parts) | set(refs)
     bindings = {ref: value['object_id'] for ref, value in refs.items()}

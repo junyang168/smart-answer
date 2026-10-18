@@ -1,7 +1,7 @@
 """Prepare the common, version-bound CVP material. No model calls or writes.
 
-Target Claims carry their support; candidate members initially carry wording
-and link roles. Reading member support is explicit. Source expansion changes
+Target Claims carry their support; candidates can carry reviewed summaries.
+The wire projection hides summarized members until their support is requested. Source expansion changes
 the shared material, never the professor's source or its citation authority.
 """
 from __future__ import annotations
@@ -71,7 +71,7 @@ def _protection(payload):
 
 
 def prepare_materials(store,preflight,group_key,recall,*,member_support_ids=(),
-                      maintenance_viewpoint_ids=(),maintenance_record_keys=(),source_loader=load_context_source):
+                      maintenance_viewpoint_ids=(),maintenance_record_keys=(),summary_root=None,source_loader=load_context_source):
     """Prepare exact read dependencies, not authorization to change any object.
 
     Maintenance owns complete active members of explicitly named viewpoints.
@@ -242,10 +242,19 @@ def prepare_materials(store,preflight,group_key,recall,*,member_support_ids=(),
         'fragments':[{'fragment_ref':refs['source_fragments'][fid],'content':records['source_fragments',fid]['payload']} for fid in sorted(fragment_ids)],
         'citations':[{'citation_ref':refs['citations'][cid],'content':records['citations',cid]['payload']} for cid in sorted(citation_ids-{None,''})],
         'sources':sources}
+    summary_bindings=[]
+    if summary_root:
+        from backend.pipeline.cvp_contextual_summary import load_current_cards
+        summaries,summary_bindings=load_current_cards(store,summary_root,vids)
+        for item in material['viewpoints']:
+            vid=item['viewpoint']['viewpoint_id']
+            if vid in summaries:
+                item['contextual_summary']={'text':summaries[vid],'attribution':'editorial_synthesis'}
     pins={(col,oid):(r['revision'],r['content_sha256'],False) for (col,oid),r in records.items()}
     store.verify_current_read_pins(pins)
     return seal({'schema_version':VERSION,'preflight_sha256':preflight['artifact_sha256'],
         'recall_sha256':recall['artifact_sha256'],'group_key':group_key,'material':material,
+        'summary_bindings':summary_bindings,
         'references':refs,'records':[{'collection':col,'object_id':oid,**row} for (col,oid),row in sorted(records.items())],
         'sources':physical,'human_source_decisions':human_source_decisions,'claim_input':target_input,'claim_authority':[{'claim_id':cid,'qualification':deepcopy(authority[cid])} for cid in ids],
         'member_claim_authority':[{'claim_id':cid,'qualification':member_authority[cid]}
@@ -263,14 +272,7 @@ def expand_source(bundle,request,*,source_loader=load_context_source):
             not isinstance(request['reason'],str) or not request['reason'].strip()):
         raise ValueError('context request must identify a source/location and concrete reason')
     result=deepcopy(bundle);materials=result['material']['sources']
-    selected=[s for s in materials if s['source_ref']==request['source_ref']]
-    if len(selected)!=1:raise ValueError('context request has a foreign source')
-    source=selected[0];level=source['expansion_level']
-    expected='adjacent' if level==0 else 'full' if level==1 else None
-    if expected is None or request['extent']!=expected:
-        raise ValueError('source expansion is repeated or skips its bounded gradient')
-    if request['section_ref'] not in {s['section_ref'] for s in source['sections']}:
-        raise ValueError('context request must identify a currently supplied location')
+    source,expected=_source_request(materials,request)
     sid=next(sid for sid,ref in bundle['references']['source_documents'].items() if ref==source['source_ref'])
     doc=next(r['payload'] for r in bundle['records'] if r['collection']=='source_documents' and r['object_id']==sid)
     loaded=source_loader(doc);projection=loaded[2]
@@ -289,3 +291,26 @@ def expand_source(bundle,request,*,source_loader=load_context_source):
     result.setdefault('context_requests',[]).append(request)
     result['previous_material_sha256']=bundle['artifact_sha256']
     return seal({k:v for k,v in result.items() if k!='artifact_sha256'})
+
+
+def _source_request(materials,request):
+    selected=[s for s in materials if s['source_ref']==request['source_ref']]
+    if len(selected)!=1:raise ValueError('context request has a foreign source')
+    source=selected[0];level=source.get('expansion_level',0)
+    expected='adjacent' if level==0 else 'full' if level==1 else None
+    if expected is None or request['extent']!=expected:
+        raise ValueError('source expansion is repeated or skips its bounded gradient')
+    if request['section_ref'] not in {s['section_ref'] for s in source['sections']}:
+        raise ValueError('context request must identify a currently supplied location')
+    return source,expected
+
+
+def validate_material_requests(bundle,response):
+    """Check concrete locations after parsing, independent of model schema."""
+    members={c['claim_ref'] for c in bundle['material']['claims']
+             if not c.get('target',True) and not c.get('support_loaded',False)}
+    for item in response['member_requests']:
+        if item['member_ref'] not in members:
+            raise ValueError('member support request must select an unloaded candidate member')
+    for item in response['context_requests']:
+        _source_request(bundle['material'].get('sources',[]),item)

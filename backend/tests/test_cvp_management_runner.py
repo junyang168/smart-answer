@@ -31,6 +31,7 @@ class Provider(Client):
             if response is not None:return response
         if p.get('schema_version','').endswith('_proposal_packet'):
             value=proposal()
+            if 'Summary' not in request['json_schema']['schema'].get('$defs',{}):value.pop('summaries')
             cref=p['input']['claims'][0]['claim_ref']
             for row in value['changes']:
                 fields=json.loads(row['fields_json'])
@@ -304,6 +305,9 @@ def test_capacity_children_complete_independently_reuse_recall_and_current_appro
         def no_summary_stage(*args,**kwargs):raise AssertionError('statement scope needs no summary model stage')
         monkeypatch.setattr(runner,'maintain_reviewed_index',no_summary_stage)
         monkeypatch.setattr(runner,'load_reviewed_index',no_summary_stage)
+        monkeypatch.setattr(runner,'_completed_summary_proofs',no_summary_stage)
+        from backend.pipeline import cvp_management_index
+        monkeypatch.setattr(cvp_management_index,'write_committed_summary_proofs',no_summary_stage)
     original_adapter=runner.adapter
     def measured(role,req,bundle,packet,**kwargs):
         result=original_adapter(role,req,bundle,packet,**kwargs)
@@ -541,7 +545,7 @@ def test_changed_upstream_evidence_same_claim_reenters_same_task_and_reviews_cur
     def retain_after_current_evidence(packet):
         if not packet.get('schema_version','').endswith('_proposal_packet'):return
         assert packet['previous']['requires_explicit_component_plan'] is False
-        assert packet['previous']['component_plan']==json.loads(oldcandidate)['component_plan']
+        assert packet['previous']['component_plan']['components']==json.loads(oldcandidate)['component_plan']['components']
         assert packet['material']['evidence'][0]['content']['statement']==evidence['statement']
         seen.append(packet);return envelope('candidate',candidate={})
     def review_current_afterimage(packet):

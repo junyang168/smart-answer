@@ -151,13 +151,11 @@ def test_tampered_index_cannot_replace_authenticated_provider_answers(tmp_path):
     assert len(p.requests)==len(r.requests)==1
 
 
-def test_response_schema_can_only_select_given_short_references():
-    c=Client();data={'claims':[{'claim_ref':'c1','statement':'原文'}],
-                     'viewpoints':[{'cvp_ref':'v1','core_proposition':'命题','summary':'摘要',
-                                    'scope':{},'proposition_signature':{}}]}
-    a=recall_adapter(c,data,max_request_bytes=10000)
-    with pytest.raises(ValueError):a._response_model.model_validate(
-        {'claim_candidates':[{'claim_ref':'c1','cvp_refs':['foreign']}]})
+def test_recall_schema_is_fixed_and_program_rejects_foreign_references(tmp_path):
+    c=Client(lambda p:{'claim_candidates':[{'claim_ref':'c1','cvp_refs':['foreign']}]})
+    with pytest.raises(ValueError,match='CVP reference'):
+        run_recall(index(),claims(1),client=c,output_dir=tmp_path,max_request_bytes=100000,max_calls=5)
+    assert len(c.requests)==1
 
 
 def test_recall_and_summary_review_cannot_substitute_other_roles(tmp_path):

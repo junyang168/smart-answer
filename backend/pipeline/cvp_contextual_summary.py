@@ -168,3 +168,54 @@ def run(bundles, *, proposer, reviewer, root, check_current, max_calls=24,
                  'semantic_writes':0,'summary_max_characters':500})
     write_immutable(root/'summaries.json',result)
     return result
+
+
+def load_current_cards(store, root, viewpoint_ids):
+    """Reuse reviewed contextual summaries; no generation or semantic writes."""
+    from backend.api.canonical_repository.cvp_recall import verify
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+    from backend.api.canonical_repository.viewpoint_foundation import sha256_json
+    from backend.api.canonical_repository.postgres_store import ChangeSetConflict
+    root=Path(root)
+    result=read_artifact(root/'summaries.json');verify(result,VERSION)
+    plan=read_artifact(root/'plan.json');verify(plan,VERSION+'_plan')
+    bundles={b['artifact_sha256']:b for b in plan['bundles']}
+    cards={};bindings=[]
+    for card in result['cards']:
+        vid=card['viewpoint_id']
+        if vid not in viewpoint_ids:continue
+        if vid in cards:raise ValueError('duplicate contextual summary')
+        bundle=bundles[card['material_sha256']];verify(bundle,VERSION+'_material')
+        head=bundle['material']['head']
+        if head['viewpoint_id']!=vid or head['core_proposition']!=card['statement']:
+            raise ValueError('contextual summary identity differs')
+        summary=card['summary']
+        if not isinstance(summary,str) or not summary.strip() or len(summary)>500:
+            raise ValueError('invalid contextual summary length')
+        # Check the saved proposal/review and their exact material batch.
+        proposal=read_artifact(Path(card['proposal_path']))
+        review=read_artifact(Path(card['review_path']))
+        for raw in (proposal,review):
+            if raw['response_sha256']!=sha256_json(raw['response']):
+                raise ValueError('contextual summary response changed')
+        offset=0;batch=None
+        for length in plan['batch_lengths']:
+            group=plan['bundles'][offset:offset+length];offset+=length
+            if bundle in group:batch=group;break
+        if batch is None:raise ValueError('contextual summary batch missing')
+        ref='v'+str(batch.index(bundle)+1)
+        rows=proposal['response']['summaries']
+        if [r for r in rows if r['cvp_ref']==ref]!=[{'cvp_ref':ref,'summary':summary}]:
+            raise ValueError('contextual summary differs from proposal')
+        payload={'viewpoints':[{'cvp_ref':f'v{i}',**b['material']} for i,b in enumerate(batch,1)],
+                 'summaries':rows}
+        verdicts=[r for r in review['response']['verdicts'] if r['cvp_ref']==ref]
+        if (review['request_payload_sha256']!=sha256_json(payload) or len(verdicts)!=1
+                or verdicts[0]['decision']!='approve'):
+            raise ValueError('contextual summary lacks matching approval')
+        try:guard(store,bundle)
+        except (ValueError,ChangeSetConflict):
+            # A once-valid summary is optional context, never a stale authority.
+            continue
+        cards[vid]=summary;bindings.append(bundle)
+    return cards,bindings

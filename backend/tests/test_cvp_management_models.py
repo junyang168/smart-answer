@@ -12,7 +12,9 @@ from test_cvp_recall_stages import Client,review_client
 
 
 def envelope(result,*,candidate=None,review=None,contexts=(),members=()):
-    return {'result':result,'candidate':candidate,'review':review,
+    return {'result':result,**({'review':review} if result=='review' else {'candidate':candidate}),
+            **({'review':review} if review is not None and result!='review' else {}),
+            **({'candidate':candidate} if candidate is not None and result=='review' else {}),
             'context_requests':list(contexts),'member_requests':list(members)}
 
 
@@ -64,7 +66,7 @@ def test_scoped_proposal_schema_rejects_foreign_component_object_and_creation_re
     elif bad=='target':raw['component_dispositions'][0]['target_ref']='e1'
     elif bad=='summary':raw['summaries'][0]['ref']='nr1'
     else:raw['member_dispositions']=[{'member_ref':'l99','disposition':'retained','reason':'原因'}]
-    with pytest.raises(ValueError):a._response_model.model_validate(envelope('candidate',candidate=raw))
+    with pytest.raises(ValueError):domain.compile_candidate(req,b,raw)
 
 
 def test_component_plan_can_split_within_exact_unicode_upper_bound():
@@ -75,12 +77,6 @@ def test_component_plan_can_split_within_exact_unicode_upper_bound():
     # actual selected positions and exact component denominator.
     with pytest.raises(ValueError,match='foreign component'):
         domain.compile_candidate(req,b,raw)
-    for upper in [1,5,10,107,512,1024]:
-        from pydantic import TypeAdapter
-        t=TypeAdapter(models._bounded_components(upper))
-        assert t.validate_python('k'+str(upper))=='k'+str(upper)
-        for bad in ['k0','k01','k'+str(upper+1)]:
-            with pytest.raises(ValueError):t.validate_python(bad)
 
 
 def test_context_requests_select_only_current_source_section_gradient_and_unloaded_member():
@@ -88,12 +84,13 @@ def test_context_requests_select_only_current_source_section_gradient_and_unload
     valid=envelope('context_insufficient',contexts=[{'source_ref':'s1','section_ref':'p1','extent':'adjacent','reason':'需讀前後承接'}],
                    members=[{'member_ref':'c2','reason':'需讀本成員自身證據'}])
     assert a._response_model.model_validate(valid).result=='context_insufficient'
+    from backend.pipeline.cvp_materials import validate_material_requests
     for changes in [dict(source_ref='s2'),dict(section_ref='p2'),dict(extent='full'),dict(source_ref='s3',section_ref='p3')]:
         bad=deepcopy(valid);bad['context_requests'][0].update(changes)
-        with pytest.raises(ValueError):a._response_model.model_validate(bad)
+        with pytest.raises(ValueError):validate_material_requests(b,bad)
     for member in ['c1','c3','foreign']:
         bad=deepcopy(valid);bad['member_requests'][0]['member_ref']=member
-        with pytest.raises(ValueError):a._response_model.model_validate(bad)
+        with pytest.raises(ValueError):validate_material_requests(b,bad)
     full=envelope('context_insufficient',contexts=[{'source_ref':'s2','section_ref':'p2','extent':'full','reason':'仍缺完整論證'}])
     assert a._response_model.model_validate(full).context_requests[0].extent=='full'
 
@@ -118,12 +115,12 @@ def test_review_finite_component_object_prior_refs_and_local_findings():
     assert models.validate_response('review',envelope('review',review=raw))['review']['novelty_approved']
     for field in ['component_reviews','object_reviews']:
         bad=deepcopy(raw);bad[field][0]['ref']='foreign'
-        with pytest.raises(ValueError):a._response_model.model_validate(envelope('review',review=bad))
+        with pytest.raises(ValueError):domain.validate_review(req,b,candidate,bad)
     bad=deepcopy(raw);bad['prior_findings']=[{'ref':'pf999','disposition':'resolved','reason':'消解'}]
-    with pytest.raises(ValueError):a._response_model.model_validate(envelope('review',review=bad))
+    with pytest.raises(ValueError):domain.validate_review(req,b,candidate,bad)
     bad=deepcopy(raw);bad['component_reviews'][0].update(decision='revise',finding_refs=['f99'])
-    with pytest.raises(ValueError,match='local finding'):
-        models.validate_response('review',envelope('review',review=bad))
+    with pytest.raises(ValueError,match='finding'):
+        domain.validate_review(req,b,candidate,bad)
     with pytest.raises(ValueError):a._response_model.model_validate(envelope('candidate',candidate=proposal()))
     with pytest.raises(ValueError,match='another semantic role'):
         models.validate_response('proposal',envelope('review',review=raw))
@@ -135,7 +132,8 @@ def test_shared_runtime_payload_cache_schema_and_output_limit_identity(tmp_path)
     a=models.adapter('proposal',req,b,packet,client=c)
     raw,count,_=call_model(a,packet,tmp_path/'proposal.json')
     assert count==1 and models.validate_response('proposal',raw)['candidate']['changes']
-    assert json.loads(c.requests[0]['user_prompt'])==packet
+    from backend.pipeline.cvp_model_packet import project
+    assert json.loads(c.requests[0]['user_prompt'])==project(packet)
     assert read_saved_model_response(a,packet,tmp_path/'proposal.json')==raw
     bigger=req.model_copy(update={'budget':req.budget.model_copy(update={'max_output_tokens':32000})})
     other=models.adapter('proposal',bigger,b,domain.proposal_packet(bigger,b),client=c)
@@ -169,10 +167,10 @@ def test_correction_can_discard_only_previous_uncommitted_writes():
     assert after['component_plan']==first['component_plan']
     for bad in [raw, {'discard_refs':['c1']}, {'discard_refs':['nv99']}]:
         with pytest.raises(ValueError):
-            initial._response_model.model_validate(envelope('candidate',candidate=bad))
+            domain.compile_candidate(req,b,bad)
     for ref in ['c1','nv99']:
         with pytest.raises(ValueError):
-            correction._response_model.model_validate(envelope('candidate',candidate={'discard_refs':[ref]}))
+            domain.compile_candidate(req,b,{'discard_refs':[ref]},previous=first)
 
 
 def test_pending_wording_rebase_schema_requires_explicit_positions_and_all_old_mappings():
@@ -189,7 +187,7 @@ def test_pending_wording_rebase_schema_requires_explicit_positions_and_all_old_m
     for raw in ({}, {'components':[],'component_mappings':[]},
                 {'components':[{'claim_ref':'c1','spans':[{'text_ref':'t1','start_char':0,'end_char':1}]}],
                  'component_mappings':[]}):
-        with pytest.raises(ValueError):adapter._response_model.model_validate(envelope('candidate',candidate=raw))
+        with pytest.raises(ValueError):domain.compile_candidate(req,new,raw,previous=frame)
     raw={'components':[{'claim_ref':'c1','spans':[{'text_ref':'t1','start_char':0,'end_char':len(claim['statement'])}]}],
          'component_mappings':[{'old_ref':'k1','new_refs':['k1']}]}
     assert adapter._response_model.model_validate(envelope('candidate',candidate=raw)).candidate.components
@@ -211,6 +209,6 @@ def test_empty_domains_use_empty_arrays_without_impossible_child_schemas():
     model.model_validate(good)
     for field in ('component_mappings','discard_refs','member_dispositions'):
         bad=deepcopy(good);bad['candidate'][field]=['not-allowed']
-        with pytest.raises(ValueError):model.model_validate(bad)
+        with pytest.raises(ValueError):domain.compile_candidate(req,b,bad['candidate'])
     bad=deepcopy(good);bad['member_requests']=['not-allowed']
     with pytest.raises(ValueError):model.model_validate(bad)

@@ -22,6 +22,8 @@
 
 - [14. 2026-10-18：propose 输出错误的 schema 对照与修复](#14-2026-10-18propose-输出错误的-schema-对照与修复)
 
+- [15. 2026-10-18：静态协议与候选上下文摘要](#15-2026-10-18静态协议与候选上下文摘要)
+
 ## 1. 编码交付
 
 共同 SQL CLI 已接入 `cvp-management` 和 `cvp-management-control`。完整 action 使用原 `pipeline_runs`、call intent／raw cache、累计调用及修订预算，支持索引维护／增量 recall、共同小节材料、程序生成成分与完整候选、有界多轮 Opus、顺序子任务、精确维护权限、共同提交与当前影响回读。新流程不调用额外模型终审或常规全库备份。
@@ -187,3 +189,18 @@
 诊断和修复后的有界候选试验均位于第13节同一试验根目录。schema-only-diagnostic为原schema，schema-empty-domain-diagnostic为单变量对照；schema-repair-proposal保存绑定原失败意图的修复manifest及真实5条Claim的调用，原材料／prompt哈希相等，仅schema配置身份改变。修复试验最多1次调用，不批准SQL或语义写入。
 
 修复后的真实propose成功，耗时127.237秒，返回candidate；最终JSON为7,858 bytes（5,398字符），5项成分处置、11项对象变化、4项finding及3段summary，程序compile_candidate通过。编译候选SHA为 `db931b40f3079aeb334399b8fd46cb80225da3582e9f9b50dc908cf88eaec000`。CLI尾部报告tokens used 53,975，但没有输入／推理／可见输出分项，不能将该数宣称为输出token。最终代码生成的wire schema与此成功调用逐字结构相等，回答离线校验通过；后续仅恢复member_requests原必填性并补跑21项模型测试通过。Opus review尚未执行，候选不等于批准，数据库写入0。
+
+
+## 15. 2026-10-18：静态协议与候选上下文摘要
+
+本次移除 recall／propose／review 的逐批引用 enum 与成分正则，采用分阶段静态响应结构；非法引用、位置、材料请求及审核集合仍由原业务层校验。模型输入去掉内部账务字段、重复 Claim 输入与重复写入 payload，保存材料继续包含完整恢复与版本依据。当前 statement recall 不再要求旧式短摘要生成及提交后摘要证明；历史摘要流程保留。
+
+候选输入支持已审核、最多 500 字的上下文摘要。通过显式 `contextual_summary_root` 复用既有结果，核对原始生成／审核、当前 head、成员、来源与依赖；不生成新摘要、不改 Claim／CVP。摘要有效时默认省去对应未请求成员的表述，保留成员引用供按需加载；目标 Claim、已请求成员及维护所需成员仍完整。缺失或过期摘要回退到成员表述。propose／review 使用相同共同材料。
+
+验证：309 项相关回归测试通过；前端 `tsc --noEmit` 通过。文档检查仅保留 CONVENTIONS 已记录的另一项目缺失锚点。31 份已保存人子摘要全部通过当前依赖检查。
+
+此前 `simple-protocol-verification` 的真实 propose 成功返回，响应 6,352 bytes；review 返回后因 candidate 的正面比较被误放进未决 findings、与 pass 冲突而被程序拒绝。已明确 prompt：findings 仅记录未决问题，正常比较理由不放进去；没有把该轮记为批准。
+
+本轮 `summary-first-verification` 沿用原 5 条 Claim 与 4 个召回候选，候选中 2 个具有效摘要，省去 3 条未请求成员表述。propose 实际请求 75,877 bytes，目标 Claim 内容和原文小节未改变。该子试验承接原 9 次总 allowance 的最后 2 次调用，仅做候选和审核；没有提交 SQL 或部署。
+
+实际返回 `context_insufficient`：模型需要进一步核对“以色列城邑使命”与“复活后普世宣教”的范围。首个请求误用了 link_ref，被材料校验拒绝；明确提示 member_ref 必须取 `material.claims[].claim_ref` 后，最后一次调用在 `summary-first-reference-verification` 返回合法成员请求，程序校验通过，耗时 34.678 秒，请求 75,935 bytes。最终提示词的 26 项模型／投影测试通过。原总预算 9 次已用完，未生成本轮候选或执行本轮 review；不能将合法补材料请求计为 CVP 质量批准。

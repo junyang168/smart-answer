@@ -61,3 +61,47 @@ def test_overlength_and_insufficient_capacity_fail_without_truncation(tmp_path,m
     packet={'viewpoints':[{'cvp_ref':'v1'}]}
     a,_=summary.adapters(p,r,packet,500000)
     with pytest.raises(ValidationError):a._response_model.model_validate({'summaries':[{'cvp_ref':'v1','summary':'字'*501}]})
+
+
+def test_reviewed_cards_are_reused_and_stale_cards_are_not(tmp_path,monkeypatch):
+    store,bundle=fixture_bundle(monkeypatch)
+    result=summary.run([bundle],proposer=Client(),reviewer=review_client(),root=tmp_path,
+                       check_current=lambda bs:None,max_calls=2)
+    cards,bindings=summary.load_current_cards(store,tmp_path,{'V1'})
+    assert cards=={'V1':result['cards'][0]['summary']}
+    assert bindings==[bundle]
+    store.heads[0]['core_proposition']='changed'
+    assert summary.load_current_cards(store,tmp_path,{'V1'})==({},[])
+
+
+def test_summary_cannot_be_swapped_after_review(tmp_path,monkeypatch):
+    store,bundle=fixture_bundle(monkeypatch)
+    result=summary.run([bundle],proposer=Client(),reviewer=review_client(),root=tmp_path,
+                       check_current=lambda bs:None,max_calls=2)
+    result['cards'][0]['summary']='不同摘要'
+    result=seal({k:v for k,v in result.items() if k!='artifact_sha256'})
+    (tmp_path/'summaries.json').write_text(json.dumps(result))
+    with pytest.raises(ValueError,match='differs from proposal'):
+        summary.load_current_cards(store,tmp_path,{'V1'})
+
+
+def test_material_builder_uses_summary_and_keeps_full_maintenance(tmp_path,monkeypatch):
+    from test_cvp_materials import material
+    from backend.pipeline.cvp_model_packet import project
+    store,bundle=fixture_bundle(monkeypatch)
+    summary.run([bundle],proposer=Client(),reviewer=review_client(),root=tmp_path,
+                check_current=lambda bs:None,max_calls=2)
+    common=material(store,summary_root=tmp_path)
+    assert common['material']['viewpoints'][0]['contextual_summary']['text']
+    assert common['summary_bindings']==[bundle]
+    # Projection alone needs only packet material; durable records still contain
+    # every member, and a requested member becomes visible again.
+    packet={'schema_version':'test','material':common['material'],
+        'input':common['claim_input'],'instructions':[], 'candidate':{'records':common['records']}}
+    wire=project(packet)
+    assert any(c.get('content_available_on_request') for c in wire['material']['claims'])
+    expanded=material(store,summary_root=tmp_path,member_support_ids=['C1'])
+    c=next(c for c in expanded['material']['claims'] if c['claim_ref']==expanded['references']['claims']['C1'])
+    assert c['support_loaded'] and c['content']
+    maintained=material(store,summary_root=tmp_path,maintenance_viewpoint_ids=['V1'])
+    assert all(c['support_loaded'] for c in maintained['material']['claims'])
