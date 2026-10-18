@@ -76,6 +76,7 @@ class Policy(source.Contract):
     initial_candidate: Literal['existing','proposal'] | None = None
     all_findings_to_gpt: bool | None = None
 
+    evidence_review_contract: Literal['claim_own_evidence_v1'] | None = None
     claim_scope_contract: Literal['claim_direct_neighbours_v1'] | None = None
     model_output_contract: Literal['claim_changes_v1', 'claim_changes_v2'] | None = None
     legacy_ai_supersession_restore: Literal[True] | None = None
@@ -86,7 +87,7 @@ class Policy(source.Contract):
     @model_serializer(mode='wrap')
     def serialize_policy(self, handler):
         value = handler(self)
-        for name in ('joint_update_contract', 'joint_update_max_targets', 'model_output_contract', 'legacy_ai_supersession_restore', 'claim_scope_contract'):
+        for name in ('evidence_review_contract', 'joint_update_contract', 'joint_update_max_targets', 'model_output_contract', 'legacy_ai_supersession_restore', 'claim_scope_contract'):
             if value[name] is None:
                 value.pop(name)
         if self.independent_audit is None:
@@ -114,6 +115,8 @@ class Policy(source.Contract):
             raise ValueError('source impact batching belongs to its explicitly bound Review policy')
         if self.model_output_contract and (self.joint_update_contract is None or not self.all_findings_to_gpt or self.review_purpose != 'content'):
             raise ValueError('compact model decisions require the joint content Update contract')
+        if self.evidence_review_contract and (self.model_output_contract != 'claim_changes_v2' or self.independent_audit_required or self.claim_scope_contract != 'claim_direct_neighbours_v1'):
+            raise ValueError('own Evidence review requires scoped compact Opus and program readback')
         return self
 
 
@@ -379,7 +382,7 @@ def audit_contract(root, policy=None):
     prompt = pipeline / ('prompts/claim_management_audit_joint_v1.md' if joint else 'prompts/claim_management_audit_v2.md')
     files = [Path(__file__), pipeline/'claim_joint_update.py', pipeline/'prompts/claim_management_joint_update_v1.md', pipeline/'prompts/claim_management_audit_joint_v1.md', pipeline/'claim_review_recovery.py', pipeline/'claim_qualification_reuse.py', pipeline/'claim_human_source.py', pipeline/'claim_direct_scope.py', pipeline/'cvp_sql_actions.py', pipeline/'cvp_sql_flow.py', pipeline/'cvp_sql_commit.py', pipeline/'cvp_sql_claim_authority.py',
         pipeline/'source_reconciliation_runner.py', pipeline/'source_reconciliation_runtime.py',
-        pipeline/'claim_model_output.py', pipeline/'prompts/claim_management_compact_v1.md', pipeline/'prompts/claim_management_compact_v2.md', pipeline/'subscription_process.py', pipeline/'codex_subscription_client.py', pipeline/'claude_subscription_client.py',
+        pipeline/'claim_evidence_review.py', pipeline/'prompts/claim_own_evidence_v1.md', pipeline/'claim_model_output.py', pipeline/'prompts/claim_management_compact_v1.md', pipeline/'prompts/claim_management_compact_v2.md', pipeline/'subscription_process.py', pipeline/'codex_subscription_client.py', pipeline/'claude_subscription_client.py',
         repository/'backend/api/canonical_repository/postgres_store.py', repository/'backend/api/canonical_repository/knowledge_models.py', repository/'scripts/audit-library.py',
         *[pipeline/'prompts'/('claim_management_'+role+'_v2.md') for role in ('proposal','review','audit')]]
     return {'instructions': archive_source_version(source.FileBinding.model_validate(binding(prompt)), Path(root)/'audit-contract'),
@@ -1018,6 +1021,9 @@ def original_goal(request, before):
         "units": {"CMU-" + sha256_json(keys)[:20]: keys for keys in partition_targets(request, before)},
     }
 
+    from backend.pipeline.claim_evidence_review import enabled as evidence_enabled, QUESTIONS as evidence_questions
+    if evidence_enabled(request):
+        result['required_questions'] = sorted(set(result['required_questions']) | evidence_questions)
     from backend.pipeline.claim_joint_update import enabled, required_keys, CONTRACT
     if enabled(request):
         result.update(joint_update_contract=CONTRACT, required_maintenance_keys=required_keys(request, strict=False))
@@ -1169,7 +1175,8 @@ def model_packet(materials):
                         grant['fields'] = packet['permission_fields'][grant['fields']['__claim_fields_ref__']]
                 if restored != materials[name]:
                     raise ValueError('Claim request reference changed authority')
-    return packet
+    from backend.pipeline.claim_evidence_review import add_packet
+    return add_packet(packet)
 
 
 def required_roles(request, round_number, policy=None):
