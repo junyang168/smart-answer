@@ -1381,14 +1381,15 @@ def continuation_budget(previous, request, policy):
     from backend.pipeline.source_reconciliation_runner import read, body
     old = Request.model_validate(previous['request'])
     original = Policy.model_validate(previous['policy'])
-    from backend.pipeline.claim_joint_update import CONTRACT, enabled, required_keys
+    from backend.pipeline.claim_joint_update import CONTRACT, enabled, required_keys, finding_permission_extension
     authority = json.loads(source.verify_file(request.authorization).read_text())
     extension = authority.get('owner_call_extension')
     read_only_refresh = bool(isinstance(extension,dict) and extension.get('basis') == 'qualification_refresh' and not request.permissions)
     if previous['original_goal'].get('joint_update_contract') == CONTRACT and (
             not enabled(request, policy)
             or required_keys(request) != previous['original_goal']['required_maintenance_keys']
-            or (request.permissions != old.permissions and not read_only_refresh)
+            or (request.permissions != old.permissions and not read_only_refresh
+                and not finding_permission_extension(previous, old, request))
             or policy.joint_update_max_targets != original.joint_update_max_targets
             or len(previous['original_goal']['units']) != 1):
         raise ValueError('joint Update continuation must retain one complete original unit, required maintenance and authority')

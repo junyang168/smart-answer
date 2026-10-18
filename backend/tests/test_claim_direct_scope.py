@@ -261,3 +261,138 @@ def test_different_peer_scope_revalidates_only_with_unchanged_original_evidence(
     assert store.claim_management_qualification('D')['ready']
     assert store.claim_management_qualification('C')['ready']
     assert ports.calls==['opus','gpt','opus']
+
+
+@pytest.fixture
+def shared_position(chain):
+    store, request, output, root = chain
+    claims = []
+    for cid in ['A', 'C']:
+        claim = deepcopy(store.get_record_state('claims', cid)['payload'])
+        claim['opposed_position_ids'] = ['P']
+        claims.append(claim)
+    store.apply_plan(store.plan_package({'package_id': 'shared-position',
+        'position_nodes': [{'position_id': 'P', 'title': '被反駁的立場'}],
+        'claims': claims + [{'claim_id': 'D', 'statement': 'D', 'claim_type': 'exegesis',
+                            'occurrences': [{'source_id': 'S', 'anchors': []}]}],
+        'claim_relations': [relation('CD', 'C', 'D')]}))
+    request.permissions.append(cm.source.Permission(collection='position_nodes', object_id='P', fields=['title']))
+    bind(request, root, required=['position_nodes/P'])
+    return store, request, output, root
+
+
+def test_shared_position_includes_all_owners_without_their_other_claim_relations(shared_position):
+    store, request, output, root = shared_position
+    def opus(packet):
+        assert {'claims/A', 'claims/C', 'evidence_steps/EC', 'position_nodes/P'} <= set(packet['denominator'])
+        assert 'claims/C' in packet['claim_scope']['content_claim_keys']
+        assert not {'claims/D', 'claim_relations/CD'} & set(packet['before'])
+        return yes(packet)
+    ports = SyntheticPorts(store, root, opus=opus)
+    result = execute_claim_management(store, request, root=output, ports=ports)
+    assert result['status'] == 'completed', result
+    assert ports.calls == ['opus']
+    assert store.claim_management_qualification('A')['ready']
+    assert store.claim_management_qualification('C') is None
+
+
+def test_new_shared_position_owner_during_review_blocks_commit(shared_position):
+    store, request, output, root = shared_position
+    def opus(packet):
+        store.apply_plan(store.plan_package({'package_id': 'new-position-owner',
+            'claims': [{'claim_id': 'NEW', 'statement': 'new owner', 'claim_type': 'exegesis',
+                        'occurrences': [{'source_id': 'S', 'anchors': []}],
+                        'opposed_position_ids': ['P']}]}))
+        return yes(packet)
+    ports = SyntheticPorts(store, root, opus=opus)
+    result = execute_claim_management(store, request, root=output, ports=ports)
+    assert result['status'] == 'paused' and result['reason'] == 'engineering_required', result
+    assert ports.calls == ['opus']
+
+
+@pytest.mark.parametrize('already_reversed', [False, True])
+def test_maintained_evidence_relation_keeps_both_endpoints_after_reversal(chain, already_reversed):
+    store, request, output, root = chain
+    store.apply_plan(store.plan_package({'package_id': 'evidence-relation',
+        'knowledge_relations': [{'relation_id': 'R', 'from_id': 'EA' if already_reversed else 'EB',
+            'to_id': 'EB' if already_reversed else 'EA', 'relation_type': 'supports', 'reason': 'synthetic direction'}]}))
+    request.permissions.append(cm.source.Permission(collection='knowledge_relations', object_id='R', fields=['from_id', 'to_id']))
+    bind(request, root, proposal=not already_reversed, required=['knowledge_relations/R'])
+    if already_reversed:
+        # This is the post-commit projection of an already admitted request,
+        # not admission of a new downstream-only maintenance operation.
+        before = {cm.source.key(*k): cm.model_state(v) for k, v in store.read_claim_context([('claims', 'A')]).items()}
+        assert {'evidence_steps/EA', 'evidence_steps/EB', 'knowledge_relations/R'} <= set(direct.scope(request, before)['record_keys'])
+        return
+    def proposal(packet):
+        assert 'evidence_steps/EB' in packet['before']
+        return {'changes': [{'record_key': 'knowledge_relations/R',
+            'fields_json': json.dumps({'from_id': 'EA', 'to_id': 'EB'}),
+            'reason': 'synthetic direction correction',
+            'citations': [{'source_id': 'S', 'paragraph_key': 'S0001', 'exact_quote': '甲是假设，不是断言。'}]}],
+            'findings': [], 'finding_resolutions': []}
+    ports = SyntheticPorts(store, root, proposal=proposal, opus=yes)
+    result = execute_claim_management(store, request, root=output, ports=ports)
+    assert result['status'] == 'completed', result
+    assert ports.calls == (['opus'] if already_reversed else ['gpt', 'opus'])
+    assert store.claim_management_qualification('A')['ready']
+    before = {cm.source.key(*k): cm.model_state(v) for k, v in store.read_claim_context([('claims', 'A')]).items()}
+    assert {'evidence_steps/EA', 'evidence_steps/EB', 'knowledge_relations/R'} <= set(direct.scope(request, before)['record_keys'])
+
+
+@pytest.mark.parametrize('fault', [None, 'postimage_drift', 'missing_checkpoint_authority'])
+def test_applied_readback_recovery_never_repeats_models_or_apply(chain, monkeypatch, fault):
+    from backend.pipeline.claim_review_recovery import recover_returned_review, VERSION
+    from backend.api.canonical_repository.postgres_store import ChangeSetConflict
+    store, request, output, root = chain
+    bind(request, root, proposal=True)
+    def proposal(packet):
+        return {'changes': [{'record_key': 'claims/A', 'fields_json': json.dumps({'statement': '甲是假设，不是断言。'}),
+            'reason': 'synthetic correction',
+            'citations': [{'source_id': 'S', 'paragraph_key': 'S0001', 'exact_quote': '甲是假设，不是断言。'}]}],
+            'findings': [], 'finding_resolutions': []}
+    ports = SyntheticPorts(store, root, proposal=proposal, opus=yes)
+    record = store.record_claim_management_stage
+    def interrupted(round_id, receipt):
+        if json.loads(Path(receipt['path']).read_text())['stage'] == 'readback':
+            raise ValueError('synthetic readback validator failure after commit')
+        return record(round_id, receipt)
+    monkeypatch.setattr(store, 'record_claim_management_stage', interrupted)
+    result = execute_claim_management(store, request, root=output, ports=ports)
+    assert result['status'] == 'paused', result
+    parent_id = 'CMA-' + cm.sha256_json(request.action_id)
+    parent = store.get_cvp_group(parent_id)
+    rid = next(iter(parent['latest_rounds'].values()))
+    saved = store.get_cvp_group(rid)
+    assert saved['checkpoint'] == 'applied' and saved['change_set_ids']
+    calls = deepcopy(parent['call_reservations'])
+    old_readback = (output/rid/'readback.json').read_bytes()
+    before = store.get_record_state('claims', 'A')
+    if fault == 'postimage_drift':
+        payload = deepcopy(before['payload']); payload['statement'] = 'concurrent edit'
+        store.apply_plan(store.plan_package({'package_id': 'drift-after-commit', 'claims': [payload]}))
+    direction = root/'applied-readback-recovery.json'
+    direction.write_text(json.dumps({'schema_version': VERSION, 'round_id': rid,
+        'authorized_by': 'owner', 'authorization_quote': 'synthetic validator repair and zero-call readback',
+        'human_content_approval': False, 'prior_metadata_sha256': cm.sha256_json({k:v for k,v in saved.items() if k not in {'run_id','status','error'}}),
+        'resume_applied_readback': fault != 'missing_checkpoint_authority'}))
+    if fault:
+        with pytest.raises((ValueError, ChangeSetConflict)):
+            recover_returned_review(store, rid, authorization=binding(direction))
+        assert store.get_cvp_group(rid) == saved
+        return
+    recovered = recover_returned_review(store, rid, authorization=binding(direction))
+    assert store.get_cvp_group(rid)['checkpoint'] == 'applied'
+    monkeypatch.setattr(store, 'record_claim_management_stage', record)
+    def no_apply(*args, **kwargs):
+        raise AssertionError('applied recovery must not call apply_plan')
+    monkeypatch.setattr(store, 'apply_plan', no_apply)
+    result = execute_claim_management(store, request, root=output, ports=ports)
+    assert result['status'] == 'completed', result
+    assert ports.calls == ['gpt', 'opus']
+    assert store.get_cvp_group(parent_id)['call_reservations'] == calls
+    assert store.get_cvp_group(rid)['change_set_ids'] == saved['change_set_ids']
+    assert store.get_record_state('claims', 'A') == before
+    assert (output/rid/'readback.json').read_bytes() == old_readback
+    assert Path(recovered, 'readback.json').is_file()
+    assert store.claim_management_qualification('A')['ready']
