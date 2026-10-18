@@ -31,7 +31,7 @@ def _insert(cursor,run_id,value):
         (run_id,value.get('action_id',value.get('parent_run_id')),canonical_json(value)))
 
 
-def prepare_action(store,request,*,root,preflight):
+def prepare_action(store,request,*,root,preflight,supersede_unwritten_run=None):
     from .cvp_management import Request
     from .cvp_recall import work_groups,verify
     from pathlib import PurePath
@@ -53,15 +53,38 @@ def prepare_action(store,request,*,root,preflight):
         if old:
             if any(old[0].get(k)!=v for k,v in identity.items()):
                 raise ChangeSetConflict('CVP2 original root/request/policy cannot reset')
+            if old[0].get('result',{}).get('status')=='superseded':
+                raise ChangeSetConflict('superseded CVP2 task cannot resume')
             return {**old[0],'run_id':run_id}
-        conflict=cursor.execute('''SELECT run_id FROM wang_knowledge.pipeline_runs
+        conflicts=cursor.execute('''SELECT run_id,metadata FROM wang_knowledge.pipeline_runs
             WHERE metadata->>'kind'='cvp_management_action'
             AND metadata->'request'->'input'->'claim_ids' ?| %s
-            AND metadata->'result'->>'status'<>'completed' LIMIT 1''',(request['input']['claim_ids'],)).fetchone()
-        if conflict:raise ChangeSetConflict('pending CVP2 Claims must resume their original task: '+conflict[0])
+            AND metadata->'result'->>'status' NOT IN ('completed','superseded')
+            FOR UPDATE''',(request['input']['claim_ids'],)).fetchall()
+        if conflicts:
+            if len(conflicts)!=1 or conflicts[0][0]!=supersede_unwritten_run:
+                raise ChangeSetConflict('pending CVP2 Claims must resume their original task: '+conflicts[0][0])
+            old_id,prior=conflicts[0]
+            if (len(groups)!=1 or not any(g['group_key']==groups[0]['group_key'] and
+                    g['claim_ids']==groups[0]['claim_ids'] for g in prior['groups']) or
+                    any(s['state']!='returned' for s in prior['call_reservations'].values()) or
+                    any(u.get('completed_step') or u['status']=='completed' for u in prior['units'].values())):
+                raise ChangeSetConflict('only an unwritten exact original group can replace its oversized task')
+            step_ids=[sid for u in prior['units'].values() for sid in u['steps']]
+            steps=[_load(cursor,sid) for sid in step_ids]
+            if any(s.get('checkpoint')!='prepared' or s.get('change_set_ids') or s.get('reviewed')
+                   for s in steps):
+                raise ChangeSetConflict('reviewed or written CVP2 work cannot be superseded')
         pins={('claims',cid):(p['revision'],p['content_sha256'],p['retired']) if p else None
               for cid,p in preflight['admission']['claim_pins'].items()}
         store._assert_transaction_read_pins(cursor,pins)
+        if conflicts:
+            prior['result']={'status':'superseded','previous_result':prior['result'],
+                'successor_run_id':run_id,'successor_action_id':request['action_id']}
+            _save(cursor,old_id,prior)
+            cursor.execute("UPDATE wang_knowledge.pipeline_runs SET status='cancelled',finished_at=now() WHERE run_id=%s",(old_id,))
+            if step_ids:
+                cursor.execute("UPDATE wang_knowledge.pipeline_runs SET status='cancelled',finished_at=now() WHERE run_id=ANY(%s)",(step_ids,))
         value={**identity,'groups':groups,'work_groups':groups,'units':{g['group_key']:{'status':'pending','steps':[],'claim_ids':g['claim_ids']} for g in groups},
             'call_reservations':{},'revision_rounds':[], 'input_generations':[],
             'initial_admission':preflight['admission'],'human_constraints':[],'quality_findings':[],'independent_audit':{'status':'not_performed'},
@@ -80,11 +103,11 @@ def prepare_step(store,parent_id,*,group_key,generation,ordinal,materials,revisi
         parent=_load(cursor,parent_id)
         if parent.get('kind')!='cvp_management_action' or group_key not in parent['units']:
             raise ChangeSetConflict('foreign CVP2 task/group')
+        if parent['result'].get('status') in {'completed','superseded'}:raise ChangeSetConflict('closed CVP2 task cannot reopen its budget')
         old=cursor.execute('SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s FOR UPDATE',(step_id,)).fetchone()
         if old:
             if any(old[0].get(k)!=v for k,v in identity.items()):raise ChangeSetConflict('original CVP2 step/material changed')
             return step_id
-        if parent['result'].get('status')=='completed':raise ChangeSetConflict('completed CVP2 task cannot reopen its budget')
         unit=parent['units'][group_key]
         if unit.get('status')=='completed':raise ChangeSetConflict('completed unit cannot silently restart')
         current=[_load(cursor,sid,lock=False) for sid in unit['steps']]
@@ -113,7 +136,7 @@ def reserve_call(store,parent_id,*,key,role,intent):
         if old:
             if any(old.get(k)!=v for k,v in identity.items()):raise ChangeSetConflict('CVP2 original call changed')
             return old
-        if parent['result'].get('status')=='completed':raise ChangeSetConflict('completed task cannot acquire calls')
+        if parent['result'].get('status') in {'completed','superseded'}:raise ChangeSetConflict('closed task cannot acquire calls')
         if len(slots)>=parent['request']['budget']['max_calls']:
             raise ChangeSetConflict('CVP2 cumulative model call budget exhausted')
         if intent['request_bytes']>parent['request']['budget']['max_request_bytes']:
@@ -139,11 +162,40 @@ def returned_call(store,parent_id,*,key,raw,artifact_sha256):
         slot.update(state='returned',returned=record);_save(cursor,parent_id,parent)
 
 
+def import_verified_call(store,parent_id,*,key,role,intent,raw,artifact_sha256,trial_root):
+    """Record an already returned trial call, with its origin visible in SQL.
+
+    The caller authenticates the immutable raw response and call intent against
+    the exact packet before invoking this method. This never dispatches a model.
+    """
+    if role not in {'gpt','opus'}:raise ValueError('unknown CVP2 role')
+    with store.connect() as conn,conn.cursor() as cursor:
+        parent=_load(cursor,parent_id)
+        if parent['result'].get('status') in {'completed','superseded'}:
+            raise ChangeSetConflict('closed task cannot import a call')
+        if len(parent['call_reservations'])>=parent['request']['budget']['max_calls'] and key not in parent['call_reservations']:
+            raise ChangeSetConflict('CVP2 cumulative model call budget exhausted')
+        if intent['request_bytes']>parent['request']['budget']['max_request_bytes']:
+            raise ChangeSetConflict('CVP2 actual request exceeds original byte budget')
+        slot={'role':role,'intent':intent,'intent_sha256':sha256_json(intent),
+            'state':'returned','returned':{'response':raw,'response_sha256':sha256_json(raw),
+                'artifact_sha256':artifact_sha256},
+            'origin':{'kind':'verified_trial_import','root':trial_root}}
+        old=parent['call_reservations'].get(key)
+        if old:
+            if old!=slot:raise ChangeSetConflict('imported original call changed')
+            return old
+        parent['call_reservations'][key]=slot;_save(cursor,parent_id,parent)
+        return slot
+
+
 def progress(store,parent_id,*,group_key,status,detail=None,step_id=None):
     statuses={'running','superseded_input','completed','resource_hold','engineering_required','human_required','needs_upstream'}
     if status not in statuses:raise ValueError('typed CVP2 outcome required')
     with store.connect() as conn,conn.cursor() as cursor:
-        parent=_load(cursor,parent_id);unit=parent['units'][group_key]
+        parent=_load(cursor,parent_id)
+        if parent['result'].get('status')=='superseded':raise ChangeSetConflict('superseded CVP2 task cannot progress')
+        unit=parent['units'][group_key]
         if status=='completed':
             step=_load(cursor,step_id,lock=False)
             if (step.get('checkpoint')!='audited' or step.get('parent_run_id')!=parent_id

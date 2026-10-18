@@ -121,6 +121,46 @@ def parent(store):
     return store.get_cvp_group('CVPM-'+runner.sha256_json('test-cvp2'))
 
 
+def test_unwritten_oversized_action_can_yield_one_exact_group_without_erasing_history(setup):
+    from backend.api.canonical_repository import cvp_management_store as persistence
+    from backend.api.canonical_repository.postgres_store import ChangeSetConflict
+    store,request,root,_,_=setup
+    admission=preflight.prepare_recall(store,request['input'],allow_unqualified=True,defer_index=True)
+    original=persistence.prepare_action(store,request,root=str(root),preflight=admission)
+    step_id=persistence.prepare_step(store,original['run_id'],group_key='g1',generation='original',
+        ordinal=0,materials={'original':'retained'},revision=False)
+    successor=deepcopy(request);successor['action_id']='test-cvp2-first-group'
+    with pytest.raises(ChangeSetConflict,match='resume their original task'):
+        persistence.prepare_action(store,successor,root=str(root/'first-group'),preflight=admission)
+    new=persistence.prepare_action(store,successor,root=str(root/'first-group'),preflight=admission,
+        supersede_unwritten_run=original['run_id'])
+    assert new['result']['status']=='running'
+    assert store.get_cvp_group(original['run_id'])['result']['successor_run_id']==new['run_id']
+    assert store.get_cvp_group(step_id)['checkpoint']=='prepared'
+    with pytest.raises(ChangeSetConflict,match='closed CVP2 task'):
+        persistence.prepare_step(store,original['run_id'],group_key='g1',generation='original',
+            ordinal=0,materials={'original':'retained'},revision=False)
+
+
+def test_reviewed_old_action_cannot_be_superseded(setup):
+    from backend.api.canonical_repository import cvp_management_store as persistence
+    from backend.api.canonical_repository.postgres_store import ChangeSetConflict,canonical_json
+    store,request,root,_,_=setup
+    admission=preflight.prepare_recall(store,request['input'],allow_unqualified=True,defer_index=True)
+    original=persistence.prepare_action(store,request,root=str(root),preflight=admission)
+    step_id=persistence.prepare_step(store,original['run_id'],group_key='g1',generation='original',
+        ordinal=0,materials={'original':'retained'},revision=False)
+    saved=store.get_cvp_group(step_id);saved['checkpoint']='reviewed'
+    with store.connect() as conn:
+        conn.execute('UPDATE wang_knowledge.pipeline_runs SET metadata=%s::jsonb WHERE run_id=%s',
+            (canonical_json(saved),step_id))
+    successor=deepcopy(request);successor['action_id']='test-cvp2-first-group'
+    with pytest.raises(ChangeSetConflict,match='reviewed or written'):
+        persistence.prepare_action(store,successor,root=str(root/'first-group'),preflight=admission,
+            supersede_unwritten_run=original['run_id'])
+    assert store.get_cvp_group(original['run_id'])['result']['status']=='running'
+
+
 def test_success_chain_commits_actual_reviewed_postimage_and_replays_without_calls(setup):
     store,request,root,clients,source=setup
     before_source=source.read_bytes();before_claim=store.get_record_state('claims','C1')

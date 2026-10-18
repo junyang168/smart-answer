@@ -54,6 +54,8 @@ def validate_sql_review(store,cursor,step,evidence,plan):
     proof=evidence['cvp_management']
     from .cvp_management_store import _load
     parent=_load(cursor,step['parent_run_id'])
+    if parent['result'].get('status')=='superseded':
+        raise ValueError('superseded CVP2 task cannot review or write')
     if (proof['round_id'] not in parent['units'][step['group_key']]['steps'] or
             proof['request']!=parent['request'] or proof['bundle']!=step['materials']['bundle']):
         raise ValueError('CVP2 review changed original task or prepared material')
