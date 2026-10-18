@@ -10,7 +10,7 @@ Claim Management 的目标是让新建和既有 Claim 都忠于教授的完整�
 
 当前新 action 暂停 Gemini 终审，默认采用 [Opus-only policy](../../../backend/pipeline/policies/wang_claim_management_opus_only_v2.json)：`independent_audit=false`、Gemini 调用预算为 0。Opus 内容审阅、版本／来源校验、事务、真实写集、回读和原始目标核实保留；结果明确为 `opus_and_program_readback`，不标成独立终审通过。本文的 Gemini 分支只适用于明确启用独立终审的 policy；既有已绑定任务和完成记录不改变。
 
-普通双目标联合 Update 新任务可显式选择 [joint Update v5 policy](../../../backend/pipeline/policies/wang_claim_management_joint_update_v5.json)，容量为 2，采用简化输出、Claim 一跳上下文与 Opus＋程序回读；输出中的 ID 由本次冻结范围约束。既有 v1–v4 policy 及已绑定任务保持原模型输入／输出契约，不升级历史答复。单条及其他 operations 的默认 policy 保持原样；缺省容量仍为 1。选用联合 policy 不代替具体目标、字段权限和必做清单的精确授权。
+普通双目标联合 Update 新任务可显式选择 [joint Update v6 policy](../../../backend/pipeline/policies/wang_claim_management_joint_update_v6.json)，容量为 2，采用简化输出、Claim 一跳上下文与 Opus＋程序回读；输出中的 ID 由本次冻结范围约束。既有 v1–v5 policy 及已绑定任务保持原模型输入／输出契约，不升级历史答复。单条及其他 operations 的默认 policy 保持原样；缺省容量仍为 1。选用联合 policy 不代替具体目标、字段权限和必做清单的精确授权。
 
 Review 就是审阅，作为独立业务 operation 保留。Update 内含审阅、必要修正与独立审计，不需要另发 Review 请求。Create、Retire、Restore、Split、Merge 同样内含审核；这些操作共用现有执行机制。Read 只读取，不触发模型或内容事务。
 
@@ -132,6 +132,10 @@ Split／Merge 产生新 ID。跨讲同看法交 CVP，不 Merge 成单一 Claim�
 ### 4.2 权限与提交边界
 
 Update 可在获准范围内联合修正 Claim 表述／归属／类型／经文／限定、occurrences、Evidence 表述／绑定／owner／资格和单篇关系。Evidence 补入不批准扩大 Claim；解绑保存理由；最后一个支持 Evidence 被撤回时，Claim 不可继续就绪。反方改标签不能成为教授立场的支持证据。
+
+完整原文忠实与自身证据绑定充分必须分别审阅。新普通 Update 使用 `claim_own_evidence_v1`：同一份 Opus 回答为每个内容审阅 Claim 给出简短 `binding_assessments`，说明实际自身 Evidence 和逐字片段是否覆盖 statement 的全部实质内容；完整段落中的未绑定句子、Observation 的片段或邻居 Claim 的证据不能自动补足。程序核对分母、自身双向 owner、片段及来源、已有支持资格；充分性本身由独立审阅者判断，不宣称程序做了语义证明。缺失证据覆盖必须给出该 Claim 的具体异议，不能仅凭全段忠实或当前 ready 放行。沿原有提议、审阅、事务和回读执行，不增加审阅轮次或资格库。
+
+圣经证据是教授的立论原则。教授用经文建立或解释判断时，经文本身可作为承重证据；`quoted`／`quoted_source` 记录引文归属，不等于 `context_only`。支持资格须据教授的实际论证用途审定，不要求他额外再复述一句独立断言。只记录引述而尚未建立相应解释时，不能把经文内容冒充教授另作的神学判断，也不能为接入 CVP 提升资格；同样不能为省事把已有经文论证缩成单纯朗读记录。Claim 当前可用不自动证明某个 CVP 连接成立。旧 policy、材料、原答和历史资格保留原契约，不改写为已完成这项新增检查。
 
 程序在准备候选时固定执行单元：必须协调修改才能保持语义及引用一致的写项共同提交，不能丢掉失败写项后提交其余部分。Split／Merge 的新旧对象与映射必属同一单元。只读共享 owners、关系两端和必要来源进入 read pins 与审核范围，不因被读取而进入写集。
 

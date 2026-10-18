@@ -74,7 +74,9 @@ def scoped_adapter(adapter, packet):
     resolution = create_model('ScopedFindingResolution', __base__=cm.JointFindingResolution,
         finding_id=(key_type(pending), ...), **impact)
     if reviewing:
-        model = create_model('ScopedFindingsReview', __base__=FindingsReview,
+        from backend.pipeline.claim_evidence_review import BindingFindingsReview, enabled as binding_enabled
+        base = BindingFindingsReview if binding_enabled(packet['policy']) else FindingsReview
+        model = create_model('ScopedFindingsReview', __base__=base,
             findings=(list[finding], ...),
             prior_findings=(list[resolution], Field(**({'max_length': 0} if not pending else {}))))
     else:
@@ -164,7 +166,11 @@ def candidate(raw, materials):
 def review(raw, materials, proposal):
     if not enabled(materials):
         return cm.Review.model_validate(raw)
-    wire = FindingsReview.model_validate(raw)
+    from backend.pipeline.claim_evidence_review import BindingFindingsReview, enabled as binding_enabled, validate_assessments
+    binding = binding_enabled(materials['policy'])
+    wire = (BindingFindingsReview if binding else FindingsReview).model_validate(raw)
+    if binding:
+        validate_assessments(wire, materials, proposal)
     request = cm.Request.model_validate(materials['unit_request'])
     denominator = cm.audit_keys(request, materials['before'], proposal)
     pending = cm.review_findings(request.action_id, materials['unresolved'], proposal)
@@ -176,10 +182,11 @@ def review(raw, materials, proposal):
             rejected.add(pending[resolution.finding_id]['target_key'])
     if rejected - set(denominator):
         raise ValueError('review finding outside complete frozen scope')
+    assessments = {a.claim_key: a.reason for a in wire.binding_assessments} if binding else {}
     return cm.Review(proposal_sha256=proposal.digest, verdicts=[cm.source.Verdict(
         record_key=key, approved=key not in rejected,
         reason=('Reviewer reported an unresolved issue.' if key in rejected else
-                'Reviewer explicitly approved this unchallenged record in the complete-scope review.'),
+                assessments.get(key, 'Reviewer explicitly approved this unchallenged record in the complete-scope review.')),
         problems=['reported finding'] if key in rejected else []) for key in denominator],
         findings=wire.findings, prior_findings=wire.prior_findings,
         answered_questions=cm.operation_questions(materials['original_goal'], proposal))

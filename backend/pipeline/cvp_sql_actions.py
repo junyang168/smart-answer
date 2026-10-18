@@ -29,7 +29,8 @@ def claim_management_review_packet(materials, candidate):
     request = Request.model_validate(materials['unit_request'])
     if direct.enabled(request):
         packet['claim_scope'] = direct.scope(request, materials['before'], candidate)
-    return packet
+    from backend.pipeline.claim_evidence_review import add_packet
+    return add_packet(packet, candidate)
 
 
 def claim_source_transition_context(store, request, before):
