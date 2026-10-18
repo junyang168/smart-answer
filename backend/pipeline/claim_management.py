@@ -1021,6 +1021,18 @@ def original_goal(request, before):
         "units": {"CMU-" + sha256_json(keys)[:20]: keys for keys in partition_targets(request, before)},
     }
 
+    # A maintenance request needs its actual question, not merely a target
+    # identity and write grants. Authority bytes are frozen independently;
+    # old actions without questions keep their original packet exactly.
+    if Path(request.authorization.path).is_file():
+        authority = json.loads(source.verify_file(request.authorization).read_text())
+        if 'review_questions' in authority:
+            questions = authority['review_questions']
+            if (not isinstance(questions, list) or not questions
+                    or any(not isinstance(q, str) or not q.strip() for q in questions)
+                    or len(questions) != len(set(questions))):
+                raise ValueError('explicit maintenance review_questions require distinct nonempty questions')
+            result['review_questions'] = list(questions)
     from backend.pipeline.claim_evidence_review import enabled as evidence_enabled, QUESTIONS as evidence_questions
     if evidence_enabled(request):
         result['required_questions'] = sorted(set(result['required_questions']) | evidence_questions)

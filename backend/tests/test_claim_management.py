@@ -1,5 +1,6 @@
 """Business contract counterexamples, no provider calls or production objects."""
 from copy import deepcopy
+import json
 
 import pytest
 
@@ -499,3 +500,25 @@ def test_request_reference_preserves_exact_unit_authority_and_historical_packet(
     if profile.endswith('_v1'):
         assert 'permission_fields' not in packet and packet['request']==full and packet['unit_request']==unit
     assert materials==frozen
+
+
+def test_explicit_maintenance_questions_reach_models_without_implying_approval(case, tmp_path):
+    from backend.pipeline.source_reconciliation_runner import binding
+    request,before,candidate,sources=deepcopy(case)
+    for state in before.values():
+        state.update(revision=1,content_sha256=m.sha256_json(state['payload']))
+    path=tmp_path/'owner-direction.json'
+    question='Does the weight word principally follow from the whole own source, or does it overstate a sub-event? Retain if justified.'
+    path.write_text(json.dumps({'review_questions':[question]}))
+    request.authorization=m.source.FileBinding.model_validate(binding(path))
+    goal=m.original_goal(request,before)
+    assert goal['review_questions']==[question]
+    packet=m.model_packet({'request':request.model_dump(mode='json'),'before':before,'sources':sources,'original_goal':goal})
+    assert packet['original_goal']['review_questions']==[question]
+    assert not any('approved' in q for q in goal)
+    path.write_text(json.dumps({}));request.authorization=m.source.FileBinding.model_validate(binding(path))
+    assert 'review_questions' not in m.original_goal(request,before)
+    for bad in [[],[''],['same','same'],'not a list',[None]]:
+        path.write_text(json.dumps({'review_questions':bad}));request.authorization=m.source.FileBinding.model_validate(binding(path))
+        with pytest.raises(ValueError,match='review_questions'):
+            m.original_goal(request,before)
