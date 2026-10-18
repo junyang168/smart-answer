@@ -905,3 +905,11 @@ Restore 单元完成 GPT一次、Opus一次、共同事务及程序回读，7项
 相关 CVP 资格／历史准入／SQL 执行边界及 Claim 旧抽查测试 **122 passed、45 skipped**；跳过项未宣称执行。反例覆盖7种真实数据库的旧抽查／人工／来源疑点条件及资格缺失、过期、失败、无替代标记、字符串伪标记和真实 hold／退役，旧只读审核／写入保护保持。实际零模型复查，51条当前 Claim 全部通过共同资格入口；两条另走完整 prepare_group 的证据、来源和当前 Registry 取包路径，分别耗时0.722、0.681秒，原 Claim 状态及后像逐字段不变。其语义 packet JSON 分别535278、536221 bytes，这不是实际模型请求字节数，未执行请求上限／实际分组 dry-run 或任何内容生成。模型调用、数据库写入及备份均为0。
 
 只读材料位于 `claim-management-435/cvp-qualification-bridge-20261016-v1/verification.json`；旧拒收检查 `cvp-entry-readonly-20261016-v1.json` 保留不改。文档检查仍仅有另一项目的既有附录锚点失败，git diff --check通过。此验证只证明资格交接和这两条取包，不代表 CVP 已生成或整批已完成。
+
+### 2026-10-17：共享反方 Position 的维护范围
+
+人工确认后的来源维护暴露了一个范围遗漏：显式维护 `position_nodes` 时，模型范围未包含所有通过 `opposed_position_ids` 使用该 Position 的 Claim，提交前的现有反向引用检查因而正确拒绝继续；该次拒绝发生在模型调用和业务写入之前。
+
+`claim_direct_scope.scope` 现在对共享 Position 使用既有的共享片段 owner 收集路径，纳入其修改前后全部使用者及各自证据，不把这些使用者的其他 Claim 关系变成新的遍历起点。没有放宽事务检查，也没有增加状态机或模型重试。两项真实隔离 SQL 回归分别验证共享使用者完整进入审核，以及审核期间新增使用者仍阻断提交。与 direct scope、joint Update、qualification reuse 的相关测试共 **141 passed**；原文引文同步、人工事实及人工接续测试另有 **43 passed**。
+
+前端类型检查仍因现有安装缺少 `react-quill-new` 而失败（两个既有组件共四条诊断）；此次未改前端或依赖。来源维护仍在执行，以上测试不表示相关 Claim 已全部结案。

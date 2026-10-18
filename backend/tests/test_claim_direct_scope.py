@@ -261,3 +261,50 @@ def test_different_peer_scope_revalidates_only_with_unchanged_original_evidence(
     assert store.claim_management_qualification('D')['ready']
     assert store.claim_management_qualification('C')['ready']
     assert ports.calls==['opus','gpt','opus']
+
+
+@pytest.fixture
+def shared_position(chain):
+    store, request, output, root = chain
+    claims = []
+    for cid in ['A', 'C']:
+        claim = deepcopy(store.get_record_state('claims', cid)['payload'])
+        claim['opposed_position_ids'] = ['P']
+        claims.append(claim)
+    store.apply_plan(store.plan_package({'package_id': 'shared-position',
+        'position_nodes': [{'position_id': 'P', 'title': '被反駁的立場'}],
+        'claims': claims + [{'claim_id': 'D', 'statement': 'D', 'claim_type': 'exegesis',
+                            'occurrences': [{'source_id': 'S', 'anchors': []}]}],
+        'claim_relations': [relation('CD', 'C', 'D')]}))
+    request.permissions.append(cm.source.Permission(collection='position_nodes', object_id='P', fields=['title']))
+    bind(request, root, required=['position_nodes/P'])
+    return store, request, output, root
+
+
+def test_shared_position_includes_all_owners_without_their_other_claim_relations(shared_position):
+    store, request, output, root = shared_position
+    def opus(packet):
+        assert {'claims/A', 'claims/C', 'evidence_steps/EC', 'position_nodes/P'} <= set(packet['denominator'])
+        assert 'claims/C' in packet['claim_scope']['content_claim_keys']
+        assert not {'claims/D', 'claim_relations/CD'} & set(packet['before'])
+        return yes(packet)
+    ports = SyntheticPorts(store, root, opus=opus)
+    result = execute_claim_management(store, request, root=output, ports=ports)
+    assert result['status'] == 'completed', result
+    assert ports.calls == ['opus']
+    assert store.claim_management_qualification('A')['ready']
+    assert store.claim_management_qualification('C') is None
+
+
+def test_new_shared_position_owner_during_review_blocks_commit(shared_position):
+    store, request, output, root = shared_position
+    def opus(packet):
+        store.apply_plan(store.plan_package({'package_id': 'new-position-owner',
+            'claims': [{'claim_id': 'NEW', 'statement': 'new owner', 'claim_type': 'exegesis',
+                        'occurrences': [{'source_id': 'S', 'anchors': []}],
+                        'opposed_position_ids': ['P']}]}))
+        return yes(packet)
+    ports = SyntheticPorts(store, root, opus=opus)
+    result = execute_claim_management(store, request, root=output, ports=ports)
+    assert result['status'] == 'paused' and result['reason'] == 'engineering_required', result
+    assert ports.calls == ['opus']

@@ -61,7 +61,10 @@ def scope(request, before, candidate=None):
                     and key.split('/', 1)[1] in v.get('evidence_step_ids', []))
             elif col == 'questions':
                 impact_claims.update(named('claims', cid) for cid in p.get('answer_claim_ids', []))
-            elif col == 'source_fragments':
+            elif col in {'source_fragments', 'position_nodes'}:
+                # A shared opposed Position has Claim owners just like a
+                # shared fragment. Include those owners, without promoting
+                # their other Claim relations to new traversal roots.
                 for owner, value in rows.items():
                     if owner.split('/', 1)[0] in cm.CLAIM_COLLECTIONS and key in deps(owner, rows):
                         impact_context.add(owner)
