@@ -79,6 +79,13 @@ def project(packet):
         view['changes']=[{'ref':row['ref'],'collection':row['collection']} for row in value.get('writes',[])]
         view['records']=[{'ref':row['ref'],'collection':row['collection'],'payload':deepcopy(row['payload'])}
             for row in value.get('writes',[])]
+        # The short ref and semantic plan already identify these postimages.
+        # Repeating program-generated lifecycle/validation fields in every
+        # correction record adds bytes without giving the model a decision.
+        for row in view['records']:
+            for field in ('schema_version','review_status','visibility',
+                          'viewpoint_claim_link_id','validated_against_viewpoint_revision_id'):
+                row['payload'].pop(field,None)
         view=clean(view)
         return view
     if 'request' in packet:

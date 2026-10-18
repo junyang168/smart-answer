@@ -59,6 +59,8 @@ def test_wire_keeps_content_and_new_feedback_without_mutating_durable_packet():
     for original,projected in zip(candidate['writes'],wire['previous']['records'],strict=True):
         assert projected['ref']==original['ref']
         assert projected['collection']==original['collection']
+        assert not {'schema_version','review_status','visibility',
+                    'viewpoint_claim_link_id','validated_against_viewpoint_revision_id'} & set(projected['payload'])
         if 'core_proposition' in original['payload']:
             for field in ('core_proposition','scope','proposition_signature'):
                 assert projected['payload'][field]==original['payload'][field]

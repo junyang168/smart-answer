@@ -161,6 +161,25 @@ def test_reviewed_old_action_cannot_be_superseded(setup):
     assert store.get_cvp_group(original['run_id'])['result']['status']=='running'
 
 
+def test_undispatched_call_plan_repair_retains_old_identity_and_blocks_started_call(setup):
+    from backend.api.canonical_repository import cvp_management_store as persistence
+    from backend.api.canonical_repository.postgres_store import ChangeSetConflict
+    store,request,root,_,_=setup
+    admission=preflight.prepare_recall(store,request['input'],allow_unqualified=True,defer_index=True)
+    task=persistence.prepare_action(store,request,root=str(root),preflight=admission)
+    run_id=task['run_id'];old={'cache_path':str(root/'proposal.json'),'request_bytes':100,'model_id':'gpt-6.1-sol'}
+    slot=persistence.reserve_call(store,run_id,key='proposal.json',role='gpt',intent=old)
+    new={**old,'request_bytes':90}
+    updated=persistence.replace_undispatched_call_plan(store,run_id,key='proposal.json',
+        prior_intent_sha256=slot['intent_sha256'],role='gpt',intent=new)
+    assert updated['intent']==new
+    assert updated['pre_dispatch_plans']==[{'intent':old,'intent_sha256':slot['intent_sha256']}]
+    persistence.begin_call(store,run_id,key='proposal.json',intent=new)
+    with pytest.raises(ChangeSetConflict,match='undispatched'):
+        persistence.replace_undispatched_call_plan(store,run_id,key='proposal.json',
+            prior_intent_sha256=updated['intent_sha256'],role='gpt',intent=old)
+
+
 def test_success_chain_commits_actual_reviewed_postimage_and_replays_without_calls(setup):
     store,request,root,clients,source=setup
     before_source=source.read_bytes();before_claim=store.get_record_state('claims','C1')

@@ -9,6 +9,13 @@ from backend.pipeline.cvp_recall_preparation import VERSION, prepare_recall
 from test_cvp_recall import heads, index
 
 POLICY=Path(__file__).resolve().parents[1]/'pipeline/policies/wang_cvp_resolution_policy_v6.json'
+
+
+def test_next_cvp_group_policy_allows_owner_requested_600k_without_changing_frozen_v6():
+    from backend.pipeline.viewpoint_cvp_policy import load_cvp_policy
+    newer=POLICY.with_name('wang_cvp_resolution_policy_v7.json')
+    assert load_cvp_policy(POLICY)['max_request_bytes']==500000
+    assert load_cvp_policy(newer)['max_request_bytes']==600000
 INPUT_POLICY=POLICY.parent/'wang_cvp_claim_input_v1.json'
 
 

@@ -145,6 +145,29 @@ def reserve_call(store,parent_id,*,key,role,intent):
         return slots[key]
 
 
+def replace_undispatched_call_plan(store,parent_id,*,key,prior_intent_sha256,role,intent):
+    """Repair a planned call only after its owner proves no dispatch files exist.
+
+    A started or returned call is immutable. The old plan remains in SQL so a
+    packet-size repair never masquerades as the original reservation.
+    """
+    with store.connect() as conn,conn.cursor() as cursor:
+        parent=_load(cursor,parent_id)
+        if parent['result'].get('status') in {'completed','superseded'}:
+            raise ChangeSetConflict('closed CVP2 task cannot replan calls')
+        slot=parent['call_reservations'].get(key)
+        if (not slot or slot['state']!='planned' or slot['intent_sha256']!=prior_intent_sha256
+                or slot['role']!=role or slot['intent']['cache_path']!=intent['cache_path']):
+            raise ChangeSetConflict('only the exact undispatched CVP2 call can be replanned')
+        if intent['request_bytes']>parent['request']['budget']['max_request_bytes']:
+            raise ChangeSetConflict('CVP2 actual request exceeds original byte budget')
+        slot.setdefault('pre_dispatch_plans',[]).append({
+            'intent':slot['intent'],'intent_sha256':slot['intent_sha256']})
+        slot.update(intent=intent,intent_sha256=sha256_json(intent))
+        _save(cursor,parent_id,parent)
+        return slot
+
+
 def begin_call(store,parent_id,*,key,intent):
     with store.connect() as conn,conn.cursor() as cursor:
         parent=_load(cursor,parent_id);slot=parent['call_reservations'].get(key)

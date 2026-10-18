@@ -24,6 +24,7 @@ from backend.pipeline.cvp_sql_commit import binding,check_binding,pins,decoded_p
 from backend.pipeline.source_reconciliation_runner import exclusive
 from backend.pipeline.viewpoint_resolution_runtime import (
     call_model,model_request_identity,read_artifact,read_saved_model_response,write_immutable,stable_decided_at,
+    response_adapter,
 )
 
 
@@ -65,7 +66,9 @@ def _transport(store,parent_id,root,request,*,invoke=call_model):
     """Use the common once-call runtime with the existing SQL reservation form."""
     def call(model,payload,cache):
         cache=Path(cache).resolve();key=str(cache.relative_to(root))
-        size=model.request_bytes(payload)
+        # The common runtime binds the response schema before dispatch. Count
+        # that actual wire form, including its wrapper, against this task cap.
+        size=response_adapter(model).request_bytes(payload)
         if size>request.budget.max_request_bytes:raise ValueError('indivisible complete material exceeds request budget')
         role='gpt' if model.backend=='codex_subscription' else 'opus'
         intent={**model_request_identity(model,payload),'request_bytes':size,'cache_path':str(cache)}
