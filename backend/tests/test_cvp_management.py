@@ -656,3 +656,132 @@ def test_support_only_rebase_frame_keeps_plan_and_findings_without_fictitious_ma
     assert current['artifact_sha256'] != candidate['artifact_sha256']
     with pytest.raises(ValueError, match='exact passing'):
         cvp.finalize_package(req, new, current, approval, provenance())
+
+
+def test_revision_can_discard_duplicate_new_identity_without_losing_findings():
+    bundle, ids = maintained()
+    req = request(action_id='corrected-maintenance', mode='maintain', maintenance_viewpoint_ids=[ids['canonical_viewpoints']])
+    raw = proposal()
+    raw['member_dispositions'] = maintenance_proposal()['member_dispositions']
+    first = cvp.compile_candidate(req, bundle, raw)
+    finding = {'finding_id': 'duplicate', 'target_refs': ['nv1'], 'category': 'identity',
+               'reason': 'Existing viewpoint already expresses this identity.'}
+    correction = {**maintenance_proposal(), 'discard_refs': ['nv1', 'nr1', 'nl1']}
+    candidate = cvp.compile_candidate(req, bundle, correction, previous=first, prior_findings=[finding])
+    assert candidate['writes'] == []
+    assert candidate['summaries'] == []
+    assert candidate['component_plan'] == first['component_plan']
+    assert candidate['prior_findings'] == [finding]
+    review = passing(candidate)
+    with pytest.raises(ValueError, match='every old finding'):
+        cvp.validate_review(req, bundle, candidate, review)
+    review['prior_findings'] = [{'ref': 'pf1', 'disposition': 'resolved', 'reason': 'Duplicate removed.'}]
+    assert cvp.validate_review(req, bundle, candidate, review)['approved']
+    assert cvp.revalidate_candidate(req, bundle, candidate, correction, previous=first,
+                                    prior_findings=[finding]) == candidate
+    with pytest.raises(ValueError):
+        cvp.compile_candidate(req, bundle, {'discard_refs': ['nv1']}, previous=first)
+    for bad in (['v1'], ['unknown'], ['nv1', 'nv1']):
+        with pytest.raises(ValueError, match='discard requires'):
+            cvp.compile_candidate(req, bundle, {'discard_refs': bad}, previous=first)
+
+
+def test_revision_can_reset_authorized_existing_head_without_copying_old_content():
+    bundle, ids = maintained()
+    req = request(action_id='corrected-maintenance', mode='maintain', maintenance_viewpoint_ids=[ids['canonical_viewpoints']], permissions=[
+        {'collection': 'canonical_viewpoints', 'object_id': ids['canonical_viewpoints'],
+         'fields': ['current_revision_id', 'summary']},
+        {'collection': 'viewpoint_claim_links', 'object_id': ids['viewpoint_claim_links'],
+         'fields': ['validated_against_viewpoint_revision_id']}])
+    raw = maintenance_proposal()
+    raw['changes'] = [change('v1', current_revision_id='nr1'), change('nr1', scope={'scripture_scope': ['但以理書7章']})]
+    raw['summaries'] = [{'ref': 'v1', 'summary': '此處的人子稱號指向神性。'}]
+    first = cvp.compile_candidate(req, bundle, raw)
+    assert {r['ref'] for r in first['writes']} == {'v1', 'nr1', 'l1'}
+    corrected = cvp.compile_candidate(req, bundle, {'discard_refs': ['v1', 'nr1', 'l1']}, previous=first)
+    assert corrected['writes'] == []
+    assert corrected['summaries'] == []
+    assert corrected['records'] == [
+        {'collection': col, 'object_id': oid, 'payload': row['payload']}
+        for (col, oid), row in sorted(cvp._records(bundle).items())]
+    assert cvp.validate_review(req, bundle, corrected, passing(corrected))['approved']
+
+
+def test_revision_can_merge_proposed_identities_with_complete_component_mapping():
+    req = request(creation_slots={'canonical_viewpoints': 2, 'viewpoint_revisions': 2, 'viewpoint_claim_links': 2})
+    bundle = materials(qualifier=True)
+    raw = proposal()
+    raw['components'] = [
+        {'claim_ref': 'c1', 'spans': [{'text_ref': 't1', 'start_char': 0, 'end_char': 5}]},
+        {'claim_ref': 'c1', 'spans': [{'text_ref': 't2', 'start_char': 0, 'end_char': 5}]}]
+    raw['changes'][-1] = change('nl1', viewpoint_id='nv1', claim_id='c1', link_type='equivalent_component')
+    raw['component_dispositions'].append({'component_ref': 'k2', 'disposition': 'connected',
+        'target_ref': 'nv2', 'link_ref': 'nl2', 'reason': 'Second candidate.'})
+    raw['changes'] += [change('nv2', current_revision_id='nr2'),
+        change('nr2', **{**json.loads(proposal()['changes'][1]['fields_json']), 'viewpoint_id': 'nv2'}),
+        change('nl2', viewpoint_id='nv2', claim_id='c1', link_type='equivalent_component')]
+    raw['summaries'].append({'ref': 'nv2', 'summary': '此語境的限定。'})
+    first = cvp.compile_candidate(req, bundle, raw)
+    correction = {'discard_refs': ['nv2', 'nr2', 'nl2'],
+        'components': [{'claim_ref': 'c1', 'spans': [span for part in raw['components'] for span in part['spans']]}],
+        'component_mappings': [{'old_ref': ref, 'new_refs': ['k1']} for ref in ('k1', 'k2')],
+        'component_dispositions': proposal()['component_dispositions'],
+        'changes': [change('nl1', link_type='equivalent_full')]}
+    corrected = cvp.compile_candidate(req, bundle, correction, previous=first)
+    assert {r['ref'] for r in corrected['writes']} == {'nv1', 'nr1', 'nl1'}
+    assert [r['ref'] for r in corrected['summaries']] == ['nv1']
+    assert cvp.validate_review(req, bundle, corrected, passing(corrected))['approved']
+
+
+def test_resolved_quality_finding_can_be_revalidated_after_target_version_changes():
+    bundle, ids = maintained()
+    registration, _, target, _ = quality_registration(bundle)
+
+    def review_and_resolve(bundle, registration):
+        quality = seal({**{k: v for k, v in bundle.items() if k != 'artifact_sha256'},
+                        'quality_findings': [registration]})
+        req = request(action_id='quality', mode='maintain', maintenance_viewpoint_ids=[ids['canonical_viewpoints']])
+        raw = maintenance_proposal()
+        candidate = cvp.compile_candidate(req, quality, raw)
+        review = passing(candidate)
+        review['prior_findings'] = [{'ref': ref, 'disposition': 'resolved', 'reason': 'Current target reviewed.'}
+                                   for ref in candidate['prior_finding_refs']]
+        approval = cvp.validate_review(req, quality, candidate, review)
+        assert approval['approved'] and len(candidate['prior_findings']) == 1
+        evidence = {'request': req.model_dump(mode='json'), 'bundle': quality, 'candidate': candidate,
+            'approval': approval, 'proposal_raw': {'result': 'candidate', 'candidate': raw},
+            'review_raw': {'result': 'review', 'review': review}, 'previous': None, 'prior_findings': [],
+            'provenance': provenance(), 'call_keys': {'gpt': 'g', 'opus': 'o'}, 'round_id': 'R'}
+        current = {(r['collection'], r['object_id']): r for r in bundle['records']}
+        readback = seal({'schema_version': cvp.VERSION + '_readback',
+            'candidate_sha256': candidate['artifact_sha256'], 'approval_sha256': approval['artifact_sha256'],
+            'pending_impacts': [], 'independent_audit': 'not_performed', 'actual_records': bundle['records']})
+        return cvp.resolve_quality_findings(registration, evidence, readback, current), current
+
+    resolved, current = review_and_resolve(bundle, registration)
+    assert cvp.assess_usage_admission([target], current, [resolved])['status'] == 'eligible'
+    changed = deepcopy(bundle)
+    view = next(r for r in changed['records'] if r['collection'] == 'canonical_viewpoints')
+    view['revision'] += 1
+    view['payload']['revision'] += 1
+    view['content_sha256'] = semantic_record_sha(view['payload'])
+    changed = seal({k: v for k, v in changed.items() if k != 'artifact_sha256'})
+    current = {(r['collection'], r['object_id']): r for r in changed['records']}
+    assert cvp.assess_usage_admission([target], current, [resolved])['status'] == 'blocked'
+    revalidated, current = review_and_resolve(changed, resolved)
+    assert revalidated['observation'] == registration['observation']
+    assert revalidated['independent_audit'] == registration['independent_audit']
+    assert revalidated['findings'][0]['resolution']['current_target_pins'][0]['revision'] == 2
+    assert cvp.assess_usage_admission([target], current, [revalidated])['status'] == 'eligible'
+
+
+@pytest.mark.parametrize('discarded', [
+    ['nv1'], ['nr1'], ['nl1'], ['nv1', 'nr1'], ['nv1', 'nl1'], ['nr1', 'nl1'],
+])
+def test_partial_discard_rejects_dangling_new_identity_before_review(discarded):
+    req, bundle = request(), materials()
+    first = cvp.compile_candidate(req, bundle, proposal())
+    correction = {'discard_refs': discarded, 'component_dispositions': [
+        {'component_ref': 'k1', 'disposition': 'background', 'reason': 'Candidate identity withdrawn.'}]}
+    with pytest.raises(ValueError):
+        cvp.compile_candidate(req, bundle, correction, previous=first)

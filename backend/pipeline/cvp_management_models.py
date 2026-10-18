@@ -57,6 +57,8 @@ findings:[{slot:fN,target_refs,category:identity|coverage|wording|link_role|memb
 新发现用当前响应本地fN槽；不要把旧finding ID当新槽。
 '''
 PROPOSAL_PROMPT=SHAPES+'''\n提出最小完整候选。空delta只表示保留previous，不意味着获得审核通过。
+discard_refs只列previous.writes或previous.summaries中的短引用：撤回未提交的新对象／摘要，或将已有对象的拟议改动恢复为输入原像；不删除数据库对象。
+撤回相关新对象须同时调整成分连接及依赖，不能留下悬空引用。原成分计划与全部旧finding仍须保留并接受本轮审核，不回抄原字段。
 逐个处理本批全部Claim成分；核对同批全部新候选彼此及已有观点身份，避免分批新建重复。
 维护时读完整原成员及关系，不能因新材料表达更窄就删除原批准覆盖；不能修改Claim或来源。
 若缺少承重上下文/成员支持，请明确请求材料；不得猜测补足教授未回答的问题。'''
@@ -166,6 +168,7 @@ def _scoped_response(role,request,bundle,packet):
     slots=[s['ref'] for s in context['creation_slots']]
     permitted={(p.collection,p.object_id) for p in request.permissions}
     writable=[ref for ref,v in refs.items() if (v['collection'],v['object_id']) in permitted]+slots
+    discardable=sorted({row['ref'] for name in ('writes','summaries') for row in current.get(name,[])}) if current and _proposal(role) else []
     summary_refs=[r for r in typed('canonical_viewpoints') if r in slots or
         any(p.collection=='canonical_viewpoints' and p.object_id==refs[r]['object_id'] and 'summary' in p.fields
             for p in request.permissions)]
@@ -194,6 +197,7 @@ def _scoped_response(role,request,bundle,packet):
         components=(list[component],Field(min_length=1)) if replacement else (list[component]|None,None),
         component_mappings=(list[mapping],Field(min_length=len(oldparts),max_length=len(oldparts))) if replacement else _list(mapping,oldparts),
         component_dispositions=_list(disposition,units),changes=_list(change,writable),
+        discard_refs=_list(_enum(discardable),discardable),
         findings=(list[finding],Field(default_factory=list)),summaries=_list(summary,summary_refs),
         member_dispositions=_list(member,member_links))
     review_sets=current['review_sets'] if current else {'components':[],'objects':[],'prior_findings':[]}

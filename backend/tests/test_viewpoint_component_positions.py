@@ -116,6 +116,51 @@ def test_projection_preserves_field_locator_and_rejects_stale_field_sha():
         ViewpointRuntimeCompiler(store.records,store.citations).compile_projection(consumer_kind='qa_answer',coverage_snapshot_id='CVS-16')
 
 
+def test_qa_projection_includes_related_field_support_and_its_dependencies():
+    store = _fixture()
+    compile_projection = lambda: ViewpointRuntimeCompiler(store.records, store.citations).compile_projection(
+        consumer_kind='qa_answer', coverage_snapshot_id='CVS-16', viewpoint_ids=['CV-PETER'])
+    before = compile_projection()
+    # Keep this supporting Claim and its evidence outside every membership.
+    source = store.records['source_documents'][0].model_copy(update={'source_id':'SRC-SUPPORT'})
+    fragment = store.records['source_fragments'][0].model_copy(update={
+        'fragment_id':'FR-SUPPORT', 'source_id':source.source_id})
+    evidence = store.records['evidence_steps'][0].model_copy(update={
+        'evidence_step_id':'EV-SUPPORT', 'source_fragment_id':fragment.fragment_id})
+    claim = ClaimRecord.model_validate(store.records['claims'][0].model_dump(mode='json') | {
+        'claim_id':'CL-SUPPORT', 'qualifications':['這是支持理由而不是等價結論'],
+        'evidence_step_ids':[evidence.evidence_step_id]})
+    for collection, value in [('source_documents',source), ('source_fragments',fragment),
+                              ('evidence_steps',evidence), ('claims',claim)]:
+        store.records[collection].append(value)
+    link = ViewpointClaimLinkRecord.model_validate({
+        **store.records['viewpoint_claim_links'][0].model_dump(mode='json'),
+        'viewpoint_claim_link_id':'VCL-SUPPORT', 'claim_id':claim.claim_id,
+        'schema_version':'wang_viewpoint_claim_link_v2', 'link_type':'supports',
+        'component_locator':None,
+        'component_position_locator':locator(claim.model_dump(mode='json'), ['qualifications',0]),
+        'evidence_bindings':[{'evidence_step_id':evidence.evidence_step_id,
+                              'source_fragment_id':fragment.fragment_id}]})
+    store.records['viewpoint_claim_links'].append(link)
+    after = compile_projection()
+    view = after.viewpoints[0]
+    output = next(row for row in view['claim_links'] if row['viewpoint_claim_link_id']=='VCL-SUPPORT')
+    assert output['link_type']=='supports'
+    assert output['component_position_locator']==link.component_position_locator.model_dump(mode='json')
+    assert view['snapshot']['member_link_ids']==before.viewpoints[0]['snapshot']['member_link_ids']
+    assert view['snapshot']['member_count']==before.viewpoints[0]['snapshot']['member_count']
+    assert 'VCL-SUPPORT' in view['snapshot']['related_claim_link_ids']
+    assert after.eligibility==before.eligibility
+    assert {('viewpoint_claim_links','VCL-SUPPORT'), ('claims','CL-SUPPORT'),
+            ('evidence_steps','EV-SUPPORT'), ('source_fragments','FR-SUPPORT'),
+            ('source_documents','SRC-SUPPORT')} <= {
+                (row.collection,row.record_id) for row in after.dependency_manifest}
+    assert any(row['claim_id']=='CL-SUPPORT' for row in after.expanded_claims)
+    assert any(row['evidence_step_id']=='EV-SUPPORT' for row in after.expanded_evidence)
+    assert any(row['fragment_id']=='FR-SUPPORT' for row in after.expanded_fragments)
+    assert any(row['source_id']=='SRC-SUPPORT' for row in after.expanded_sources)
+
+
 def test_independent_duplicate_coverage_keys_include_raw_field_path_and_ignore_packet_sha():
     changes,existing=foundation_graph([['qualifications',0],['qualifications',1]])
     collections={'claims':{'C':existing['claims','C']['payload']},'viewpoint_claim_links':changes['viewpoint_claim_links']}

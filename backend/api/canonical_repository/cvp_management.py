@@ -149,6 +149,7 @@ class Candidate(Contract):
     component_mappings: list[ComponentMapping] = Field(default_factory=list)
     component_dispositions: list[Disposition] = Field(default_factory=list)
     changes: list[Change] = Field(default_factory=list)
+    discard_refs: list[str] = Field(default_factory=list)
     findings: list[Finding] = Field(default_factory=list)
     summaries: list[Summary] = Field(default_factory=list)
     member_dispositions: list[MemberDisposition] = Field(default_factory=list)
@@ -346,6 +347,17 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
         if (previous['request_sha256'], previous['material_sha256']) != (
                 context['request_sha256'], bundle['artifact_sha256']):
             raise ValueError('candidate cannot resume on changed request/material')
+    # Discard only edits in this uncommitted candidate. Existing records come
+    # back from the original material; new slots disappear. Findings and the
+    # frozen component plan remain and the complete afterimage is revalidated.
+    discarded = set(raw.discard_refs)
+    prior_write_refs = {row['ref'] for row in previous['writes']} if previous else set()
+    prior_summary_refs = {row['ref'] for row in previous.get('summaries', [])} if previous else set()
+    if (len(discarded) != len(raw.discard_refs)
+            or not discarded <= prior_write_refs | prior_summary_refs
+            or discarded & {row.ref for row in raw.changes}
+            or discarded & {row.ref for row in raw.summaries}):
+        raise ValueError('discard requires unique previous candidate edits without a conflicting new delta')
     plan = _positions(bundle, raw, previous)
     parts = {row['component_ref']: row for row in plan['components']}
     changed_plan = previous is not None and plan['artifact_sha256'] != previous['component_plan']['artifact_sha256']
@@ -359,7 +371,8 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
         raise ValueError('every component requires exactly one disposition')
     states = {key: deepcopy(row['payload']) for key, row in original.items()}
     if previous:
-        states.update({(row['collection'], row['object_id']): deepcopy(row['payload']) for row in previous['writes']})
+        states.update({(row['collection'], row['object_id']): deepcopy(row['payload'])
+                       for row in previous['writes'] if row['ref'] not in discarded})
     changes = {}
     permission = {(p.collection, p.object_id): set(p.fields) for p in request.permissions}
     for change in raw.changes:
@@ -391,7 +404,7 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
         changes[change.ref] = fields
     # Populate only touched/new objects; unchanged old records retain exact bytes.
     keyrefs = {(value['collection'], value['object_id']): ref for ref, value in refs.items()}
-    touched = set(changes) | ({row['ref'] for row in previous['writes']} if previous else set())
+    touched = set(changes) | (prior_write_refs - discarded)
     for key, row in original.items():
         col, oid = key
         if col not in {'viewpoint_claim_links', 'viewpoint_relations'} or states[key].get('effective_state') != 'active':
@@ -599,7 +612,8 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
                            *_quality_prior_findings(bundle, refs)]
     incoming = {row['finding_id']: deepcopy(row) for row in [*history, *prior_findings, *constraint_findings]}
     prior_refs = {f'pf{i}': row for i, row in enumerate(sorted(incoming.values(), key=lambda row: row['finding_id']), 1)}
-    summaries = {row['ref']: row for row in previous.get('summaries', [])} if previous else {}
+    summaries = {row['ref']: row for row in previous.get('summaries', [])
+                 if row['ref'] not in discarded} if previous else {}
     for row in raw.summaries:
         if row.ref not in refs or refs[row.ref]['collection'] != 'canonical_viewpoints':
             raise ValueError('summary target is not a supplied viewpoint')
@@ -1401,7 +1415,10 @@ def resolve_quality_findings(registration, evidence, readback, current_records):
                    for row in approval['review']['prior_findings']}
     result = deepcopy(registration)
     for finding in result['findings']:
-        if finding['status'] != 'open' or resolutions.get(finding['finding_id']) != 'resolved':
+        # A previously resolved target may have changed again. The compiler
+        # reintroduces that finding for current review; retain the original
+        # audit but refresh the resolution pins after this approved readback.
+        if resolutions.get(finding['finding_id']) != 'resolved':
             continue
         targets = []
         for pin in finding['target_pins']:

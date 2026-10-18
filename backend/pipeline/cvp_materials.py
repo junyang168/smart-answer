@@ -144,7 +144,10 @@ def prepare_materials(store,preflight,group_key,recall,*,member_support_ids=(),
         scope=({oid} if col=='canonical_viewpoints' else {payload['viewpoint_id']}
                if col in {'viewpoint_revisions','viewpoint_claim_links'} else
                {payload['source_viewpoint_id'],payload['target_viewpoint_id']})
-        if not scope<=maintenance:raise ValueError('explicit maintenance object is outside viewpoint authority')
+        # A relation touches both endpoints, but repinning the maintained
+        # endpoint does not authorize or require maintenance of its neighbour.
+        in_scope=bool(scope & maintenance) if col=='viewpoint_relations' else scope<=maintenance
+        if not in_scope:raise ValueError('explicit maintenance object is outside viewpoint authority')
     if maintenance:
         relation_rows=store.read_cvp_relations(viewpoint_ids=sorted(maintenance))
         accept({k:r for k,r in relation_rows.items() if r['payload'].get('effective_state')=='active'})

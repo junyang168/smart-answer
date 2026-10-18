@@ -110,6 +110,19 @@ def _reconcile_saved_dispatches(store,parent_id,unit,request,proposer,reviewer):
             persistence.returned_call(store,parent_id,key=key,raw=raw,artifact_sha256=artifact['artifact_sha256'])
 
 
+def _stage_call_budget(parent,root,request):
+    """A stage's total capacity includes its original reserved/cache calls.
+
+    Stage planners compare their whole call set, whereas the parent ledger
+    counts only new reservations. Replay must not charge the same call twice;
+    the transport still authenticates every leaf and enforces the parent cap.
+    """
+    prefix=str(Path(root).resolve())+'/'
+    slots=parent['call_reservations']
+    own=sum(slot['intent']['cache_path'].startswith(prefix) for slot in slots.values())
+    return max(0,request.budget.max_calls-len(slots))+own
+
+
 def _semantic(candidate):
     def content(row):return {k:v for k,v in row.items() if k not in {'reason','provenance','revision'}}
     return sha256_json({'components':candidate['component_plan']['components'],
@@ -145,15 +158,40 @@ def _expand(store,request,preflight,group_key,recall,bundle,response):
             if sid in old_by_id:
                 old=old_by_id[sid];new=next(s for s in expanded['material']['sources'] if s['source_ref']==ref)
                 if old['expansion_level']:
-                    new.update(sections=deepcopy(old['sections']),expansion_level=old['expansion_level'])
+                    old_binding=next(s for s in bundle['sources'] if s['source_id']==sid)
+                    new_binding=next(s for s in expanded['sources'] if s['source_id']==sid)
+                    if (old_binding!=new_binding or any(old[k]!=new[k] for k in
+                            ('source_body_sha256','editorial_structure_sha256'))):
+                        raise InputChanged('superseded_input: source changed while retaining requested expansion')
+                    # New member support may require another section of this same
+                    # source. Retain both the required sections and prior expansion.
+                    sections={s['section_ref']:deepcopy(s) for s in [*new['sections'],*old['sections']]}
+                    new.update(sections=sorted(sections.values(),key=lambda s:s['start']),
+                               expansion_level=old['expansion_level'])
+        expanded['context_requests']=deepcopy(bundle.get('context_requests',[]))
+        expanded['previous_material_sha256']=bundle['artifact_sha256']
         expanded=seal({k:v for k,v in expanded.items() if k!='artifact_sha256'})
     else:expanded=bundle
     # Requests reference the pre-expansion packet, so source-ref remapping
     # after loading a member is resolved by canonical source identity.
+    by_source={}
     for item in response['context_requests']:
         sid=next(sid for sid,ref in bundle['references']['source_documents'].items() if ref==item['source_ref'])
         mapped={**item,'source_ref':expanded['references']['source_documents'][sid]}
-        expanded=expand_source(expanded,mapped)
+        by_source.setdefault(mapped['source_ref'],[]).append(mapped)
+    for source_ref,requests in by_source.items():
+        # All locations refer to the same pre-response level. Union their
+        # adjacent ranges and consume this source's gradient only once.
+        before=expanded
+        variants=[expand_source(before,item) for item in requests]
+        expanded=variants[0]
+        target=next(s for s in expanded['material']['sources'] if s['source_ref']==source_ref)
+        sections={s['section_ref']:s for version in variants
+                  for source in version['material']['sources'] if source['source_ref']==source_ref
+                  for s in source['sections']}
+        target['sections']=sorted(sections.values(),key=lambda s:s['start'])
+        expanded['context_requests']=[*before.get('context_requests',[]),*requests]
+        expanded=seal({k:v for k,v in expanded.items() if k!='artifact_sha256'})
     return expanded
 
 
@@ -337,7 +375,7 @@ def run(store,request,*,root,execute=False,clients=None):
                        for slot in parent['call_reservations'].values()):
                     raise ValueError('unknown original unit call; resume its exact dispatch only')
                 heads=store.read_cvp_heads();index_root=root/('index-'+sha256_json(heads)[:24])
-                remaining=request.budget.max_calls-len(parent['call_reservations'])
+                remaining=_stage_call_budget(parent,index_root,request)
                 # A changed head cannot bypass an unknown original index call.
                 for slot in parent['call_reservations'].values():
                     if slot['state']=='started' and '/index-' in slot['intent']['cache_path'] and not Path(slot['intent']['cache_path']).exists():
@@ -401,7 +439,7 @@ def run(store,request,*,root,execute=False,clients=None):
                         previous_recall=seed
                     recall,metrics=refresh_recall(index,cards,previous_output_dir=previous_recall,
                         client=proposer,output_dir=recall_root,max_request_bytes=group_plan['max_request_bytes'],
-                        max_calls=max(0,request.budget.max_calls-len(store.get_cvp_group(parent_id)['call_reservations'])),
+                        max_calls=_stage_call_budget(store.get_cvp_group(parent_id),recall_root,request),
                         existing_links=current['existing_links'],invoke=call)
                 current=seal({k:v for k,v in current.items() if k!='artifact_sha256'}|{'recall_plans':[
                     {'group_key':p['group_key'],'plan':metrics['current_plan'] if p['group_key']==key else p['plan']}

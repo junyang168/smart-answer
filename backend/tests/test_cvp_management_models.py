@@ -156,6 +156,25 @@ def test_unknown_management_dispatch_is_never_automatically_repeated(tmp_path):
     assert len(c.requests)==1
 
 
+def test_correction_can_discard_only_previous_uncommitted_writes():
+    req,b=request(),materials()
+    first=domain.compile_candidate(req,b,proposal())
+    initial=models.adapter('proposal',req,b,domain.proposal_packet(req,b),client=Client())
+    correction=models.adapter('proposal',req,b,domain.proposal_packet(req,b,previous=first),client=Client())
+    raw={'discard_refs':['nv1','nr1','nl1'], 'component_dispositions':[
+        {'component_ref':'k1','disposition':'background','reason':'复核确认仅为背景。'}]}
+    parsed=correction._response_model.model_validate(envelope('candidate',candidate=raw))
+    after=domain.compile_candidate(req,b,parsed.candidate,previous=first)
+    assert after['writes']==[]
+    assert after['component_plan']==first['component_plan']
+    for bad in [raw, {'discard_refs':['c1']}, {'discard_refs':['nv99']}]:
+        with pytest.raises(ValueError):
+            initial._response_model.model_validate(envelope('candidate',candidate=bad))
+    for ref in ['c1','nv99']:
+        with pytest.raises(ValueError):
+            correction._response_model.model_validate(envelope('candidate',candidate={'discard_refs':[ref]}))
+
+
 def test_pending_wording_rebase_schema_requires_explicit_positions_and_all_old_mappings():
     from backend.api.canonical_repository.cvp_claim_input import compile_input
     from backend.api.canonical_repository.viewpoint_foundation import semantic_record_sha

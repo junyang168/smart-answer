@@ -502,8 +502,24 @@ class ViewpointRuntimeCompiler:
         ], key=lambda item: (item.revision, item.quality_report_id))
         quality = reports[-1] if reports else None
         link_ids = {value for item in selected for value in item.member_link_ids}
+        # Related V2 field connections carry a semantic boundary just like
+        # memberships. Include their exact role and dependencies without
+        # promoting them to members or changing legacy V1 projections.
+        field_related_ids = {
+            value for item in selected for value in item.related_claim_link_ids
+            if getattr(self.index["viewpoint_claim_links"][value],
+                       "component_position_locator", None) is not None
+        }
         links = [self.index["viewpoint_claim_links"][value] for value in sorted(link_ids)]
         claims = [self.index["claims"][item.claim_id] for item in links if item.claim_id in self.index["claims"]]
+        if field_related_ids:
+            links = [self.index["viewpoint_claim_links"][value]
+                     for value in sorted(link_ids | field_related_ids)]
+            present_claims = {item.claim_id for item in claims}
+            claims.extend(self.index["claims"][value] for value in sorted({
+                self.index["viewpoint_claim_links"][ident].claim_id
+                for ident in field_related_ids
+            } - present_claims))
         step_ids = sorted({value for item in claims for value in item.evidence_step_ids})
         steps = [self.index["evidence_steps"][value] for value in step_ids if value in self.index["evidence_steps"]]
         citation_ids = sorted({value for item in steps for value in item.citation_ids})
