@@ -505,6 +505,7 @@ def test_request_reference_preserves_exact_unit_authority_and_historical_packet(
 def test_explicit_maintenance_questions_reach_models_without_implying_approval(case, tmp_path):
     from backend.pipeline.source_reconciliation_runner import binding
     request,before,candidate,sources=deepcopy(case)
+    before['source_documents/S']={'payload':{'source_id':'S'},'retired':False}
     for state in before.values():
         state.update(revision=1,content_sha256=m.sha256_json(state['payload']))
     path=tmp_path/'owner-direction.json'
