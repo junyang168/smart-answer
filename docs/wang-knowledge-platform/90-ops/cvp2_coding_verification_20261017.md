@@ -20,6 +20,8 @@
 - [12. 2026-10-18：51条分组召回及独立遗漏核查](#12-2026-10-1851条分组召回及独立遗漏核查)
 - [13. 2026-10-18：组成判断召回、正式入口与小组试跑](#13-2026-10-18组成判断召回正式入口与小组试跑)
 
+- [14. 2026-10-18：propose 输出错误的 schema 对照与修复](#14-2026-10-18propose-输出错误的-schema-对照与修复)
+
 ## 1. 编码交付
 
 共同 SQL CLI 已接入 `cvp-management` 和 `cvp-management-control`。完整 action 使用原 `pipeline_runs`、call intent／raw cache、累计调用及修订预算，支持索引维护／增量 recall、共同小节材料、程序生成成分与完整候选、有界多轮 Opus、顺序子任务、精确维护权限、共同提交与当前影响回读。新流程不调用额外模型终审或常规全库备份。
@@ -173,3 +175,15 @@
 随后对现成太10:23组的5条Claim运行仅候选生成／审核试验。正式recall成功（62.671秒），首次propose因服务返回 `max_output_tokens` 失败，未形成候选，review调用0，SQL／语义写入0。运行时共发出2个阶段调用；服务客户端内部有连接重试，不把它们当作已完成的额外阶段。失败意图保留，没有更换目录重发。
 
 离线重建的有效请求与原调用identity完全匹配，实际输入115,239 bytes，小于500,000限制。配置max_output_tokens为64,000，但Codex客户端没有把该参数传给CLI；这不证明服务侧实际上限或耗尽原因。完整失败响应未持久保存，不能恢复候选。证据目录为 `staging/cvp-management-436/statement-scope-matt10-candidate-pilot-20261018-v1/`，包含原意图／失败、重建请求及diagnosis；diagnosis SHA `b838ccf4fb36a1bebe63e052e54bf187ca43a7c860d8adea3af0ef262b9f7f45`。下一步需核查propose输出／传输配置，尚未验证真实多轮review或批准正式写入。
+
+## 14. 2026-10-18：propose 输出错误的 schema 对照与修复
+
+负责人要求继续排查“不正常”的输出错误后，先运行无内容的schema对照诊断。保留原完整输出schema，移除所有Claim／CVP／原文及业务prompt，只要求返回固定的缺语境JSON；同一gpt-6.1-sol／high仍返回max_output_tokens。第二次仅去掉6处minLength=1且maxLength=0的矛盾字符串约束，保留外围maxItems=0，同一固定JSON成功返回，实际214 bytes。两次均保存CLI stdout／stderr和exit receipt，属于无语义内容的传输诊断，不是CVP批准。
+
+问题定位到零长度数组仍携带不可满足的item schema：整体JSON可取空数组，但此表达触发了当前模型／服务的结构化输出失败。对照支持该兼容性根因，不宣称取得服务端解码器内部证据。修复只对空集合使用普通字符串item并保留maxItems=0；合法非空集合仍使用原精确引用类型。真实原请求schema的6处矛盾全部消失，schema从10,125降为7,952 bytes；没有提高输出预算、改变模型／推理等级、删掉语义材料或同时修改prompt。
+
+另将共同runtime接入已有subscription_process持久日志机制，调用专属的client副本保存stdout／stderr／response及exit receipt，避免临时目录删除证据，也避免并发共享日志路径。原unknown意图与失败记录保留，不自动重试。新增空集合拒绝非空值、日志存活、失败不可自动重试及成功零调用回放测试；相关回归334项通过。
+
+诊断和修复后的有界候选试验均位于第13节同一试验根目录。schema-only-diagnostic为原schema，schema-empty-domain-diagnostic为单变量对照；schema-repair-proposal保存绑定原失败意图的修复manifest及真实5条Claim的调用，原材料／prompt哈希相等，仅schema配置身份改变。修复试验最多1次调用，不批准SQL或语义写入。
+
+修复后的真实propose成功，耗时127.237秒，返回candidate；最终JSON为7,858 bytes（5,398字符），5项成分处置、11项对象变化、4项finding及3段summary，程序compile_candidate通过。编译候选SHA为 `db931b40f3079aeb334399b8fd46cb80225da3582e9f9b50dc908cf88eaec000`。CLI尾部报告tokens used 53,975，但没有输入／推理／可见输出分项，不能将该数宣称为输出token。最终代码生成的wire schema与此成功调用逐字结构相等，回答离线校验通过；后续仅恢复member_requests原必填性并补跑21项模型测试通过。Opus review尚未执行，候选不等于批准，数据库写入0。

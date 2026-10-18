@@ -320,3 +320,35 @@ def test_campaign_stop_progress_is_not_blocked_or_completion(tmp_path, group_com
     assert state['status'] == 'paused_at_safe_boundary'
     assert state['current_group_completed'] is group_complete
     assert state['no_inflight_model_or_write']
+
+
+@pytest.mark.parametrize('fail', [False, True])
+def test_subscription_transport_is_durable_and_stage_local(tmp_path, fail):
+    binary=tmp_path/'fake-codex'
+    binary.write_text('#!'+sys.executable+'\n'+'''import sys,pathlib
+sys.stdin.read()
+print('provider trace',file=sys.stderr,flush=True)
+'''+("sys.exit(1)\n" if fail else '''pathlib.Path(sys.argv[sys.argv.index('--output-last-message')+1]).write_text('{"approved":true}')
+'''))
+    binary.chmod(0o755)
+    client=r.CodexSubscriptionClient(model='fake',executable=str(binary))
+    client._authenticated=True
+    class SubscriptionAdapter(Adapter):
+        backend='codex_subscription'
+        def generate(self,payload):
+            return self._client.generate_json('test','test',{'type':'object'})
+    a=SubscriptionAdapter();a._client=client;cache=tmp_path/'answer.json'
+    if fail:
+        with pytest.raises(RuntimeError):r.call_model(a,{},cache)
+    else:
+        assert r.call_model(a,{},cache)[0]=={'approved':True}
+    transport=tmp_path/'answer.transport'
+    assert (transport/'stderr.log').read_text()=='provider trace\n'
+    assert json.loads((transport/'exit.json').read_text())['returncode']==(1 if fail else 0)
+    assert not hasattr(client,'call_artifacts')
+    if fail:
+        before=(transport/'invocation.json').read_bytes()
+        with pytest.raises(ValueError,match='no automatic retry'):r.call_model(a,{},cache)
+        assert (transport/'invocation.json').read_bytes()==before
+    else:
+        assert r.call_model(a,{},cache)[1]==0

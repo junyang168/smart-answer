@@ -194,3 +194,23 @@ def test_pending_wording_rebase_schema_requires_explicit_positions_and_all_old_m
          'component_mappings':[{'old_ref':'k1','new_refs':['k1']}]}
     assert adapter._response_model.model_validate(envelope('candidate',candidate=raw)).candidate.components
     assert '旧候选尚不适用于当前Claim' in adapter._prompt
+
+
+def test_empty_domains_use_empty_arrays_without_impossible_child_schemas():
+    req,b=request(),materials()
+    model=models.adapter('proposal',req,b,domain.proposal_packet(req,b),client=Client())._response_model
+    schema=model.model_json_schema()
+    def check(node):
+        if isinstance(node,dict):
+            assert node.get('minLength',0)<=node.get('maxLength',float('inf'))
+            for child in node.values():check(child)
+        elif isinstance(node,list):
+            for child in node:check(child)
+    check(schema)
+    good=envelope('candidate',candidate=proposal())
+    model.model_validate(good)
+    for field in ('component_mappings','discard_refs','member_dispositions'):
+        bad=deepcopy(good);bad['candidate'][field]=['not-allowed']
+        with pytest.raises(ValueError):model.model_validate(bad)
+    bad=deepcopy(good);bad['member_requests']=['not-allowed']
+    with pytest.raises(ValueError):model.model_validate(bad)

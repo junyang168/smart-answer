@@ -155,7 +155,10 @@ def _bounded_components(maximum):
 
 
 def _list(model,values):
-    return (list[model],Field(default_factory=list,**({} if values else {'max_length':0})))
+    # A zero-length array already excludes every item. Do not expose an
+    # impossible child schema (minLength=1/maxLength=0) to constrained decoding.
+    return (list[model] if values else list[str],
+            Field(default_factory=list,**({} if values else {'max_length':0})))
 
 
 def _scoped_response(role,request,bundle,packet):
@@ -222,7 +225,8 @@ def _scoped_response(role,request,bundle,packet):
     result=create_model('ScopedCvpManagementResponse',__base__=Response,
         result=(modes,...),candidate=(candidate|None,...),review=(review|None,...),
         context_requests=(list[source_type],Field(**({} if source_models else {'max_length':0}))),
-        member_requests=(list[member_request],Field(**({} if members else {'max_length':0}))))
+        member_requests=(list[member_request] if members else list[str],
+                         Field(**({} if members else {'max_length':0}))))
     return result
 
 

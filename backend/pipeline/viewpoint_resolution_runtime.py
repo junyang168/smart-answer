@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import time
+from copy import copy
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
@@ -493,6 +494,15 @@ def call_model(
     if encoding_proof is not None:
         body = {'schema_version': 'wang_model_request_encoding_proof_v1', **encoding_proof}
         write_immutable(encoding_path, body | {'artifact_sha256': sha256_json(body)})
+    if reused is None and isinstance(getattr(adapter, '_client', None),
+                                      (CodexSubscriptionClient, ClaudeSubscriptionClient)):
+        # Retain transport evidence even on timeout/process failure. A local copy
+        # keeps concurrent stages from sharing mutable client artifact paths.
+        adapter = copy(adapter)
+        adapter._client = copy(adapter._client)
+        adapter._client.call_artifacts = cache.with_name(
+            cache.stem + ('.owner-retry-once.transport' if retry else '.transport'))
+        adapter._client.replay_only = False
     try:
         if reused is None and before_dispatch is not None:
             before_dispatch()
