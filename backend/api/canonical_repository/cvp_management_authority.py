@@ -104,7 +104,10 @@ def validate_sql_review(store,cursor,step,evidence,plan):
                 source['materials']['bundle']!=origin['bundle'] or
                 source['materials']['previous']!=origin['previous'] or
                 source['materials']['prior_findings']!=origin['prior_findings'] or
-                origin['proposal_path']!=source['materials']['step_root']+'/proposal.json'):
+                # A completed task may have an authenticated trial proposal
+                # imported at its original path rather than step_root.
+                origin['proposal_path']!=source['materials'].get(
+                    'proposal_path', source['materials']['step_root']+'/proposal.json')):
             raise ValueError('CVP2 expanded review has no exact earlier proposal')
     for field in ('human_constraints','quality_findings'):
         facts=parent.get(field,[])
@@ -134,6 +137,10 @@ def validate_sql_review(store,cursor,step,evidence,plan):
             raise ValueError('CVP2 approval lacks the exact actually returned role response')
         if role=='gpt' and origin is not None and slot['intent']['cache_path']!=origin['proposal_path']:
             raise ValueError('CVP2 expanded review borrowed a different proposal dispatch')
+        if (role=='gpt' and origin is not None and
+                origin['proposal_path']!=source['materials']['step_root']+'/proposal.json' and
+                slot.get('origin',{}).get('kind')!='verified_trial_import'):
+            raise ValueError('CVP2 external proposal lacks verified trial provenance')
         model,backend=(('gpt-6.1-sol','codex_subscription') if role=='gpt' else
                        ('claude-opus-5-5','claude_subscription'))
         if (slot['intent'].get('model_id'),slot['intent'].get('backend'))!=(model,backend):
