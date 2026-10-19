@@ -184,6 +184,8 @@ def _expand(store,request,preflight,group_key,recall,bundle,response):
         expanded['context_requests']=deepcopy(bundle.get('context_requests',[]))
         if bundle['material'].get('screening'):
             expanded['material']['screening']=deepcopy(bundle['material']['screening'])
+        if bundle['material'].get('initial_screening'):
+            expanded['material']['initial_screening']=deepcopy(bundle['material']['initial_screening'])
         expanded['previous_material_sha256']=bundle['artifact_sha256']
         expanded=seal({k:v for k,v in expanded.items() if k!='artifact_sha256'})
     else:expanded=bundle
@@ -502,30 +504,28 @@ def run(store,request,*,root,execute=False,clients=None):
                     {'group_key':p['group_key'],'plan':metrics['current_plan'] if p['group_key']==key else p['plan']}
                     for p in current['recall_plans']]})
                 filtered_path=unit_root/'filtered-recall.json'
-                if latest and filtered_path.exists():
+                if filtered_path.exists():
                     recall=read_artifact(filtered_path)
-                    bundle=prepare_materials(store,current,key,recall,
-                        maintenance_viewpoint_ids=request.maintenance_viewpoint_ids,
-                        maintenance_record_keys=[(p.collection,p.object_id) for p in request.permissions],
-                        summary_root=request.input.get('contextual_summary_root'))
-                elif not latest and request.input.get('recall_profile')==STATEMENT_SCOPE_PROFILE:
-                    from backend.pipeline.cvp_candidate_screening import screen_to_fit
-                    recall,bundle,_=screen_to_fit(store,current,key,recall,request,
-                        proposer=proposer,reviewer=reviewer,
-                        screening_root=unit_root/'screening',call=call)
-                    if not bundle['material'].get('screening'):
-                        # An ordinary fitting group keeps its established
-                        # on-demand member expansion and model-call sequence.
-                        bundle=prepare_materials(store,current,key,recall,
-                            maintenance_viewpoint_ids=request.maintenance_viewpoint_ids,
-                            maintenance_record_keys=[(p.collection,p.object_id) for p in request.permissions],
-                            summary_root=request.input.get('contextual_summary_root'))
-                    write_immutable(filtered_path,recall)
+                    saved_bundle=unit_root/'filtered-bundle.json'
+                    if not saved_bundle.exists():
+                        raise ValueError('screened recall lacks its bound material proof')
+                    bundle=read_artifact(saved_bundle)
                 else:
                     bundle=prepare_materials(store,current,key,recall,maintenance_viewpoint_ids=request.maintenance_viewpoint_ids,
                                        maintenance_record_keys=[(p.collection,p.object_id) for p in request.permissions],
                                        summary_root=request.input.get('contextual_summary_root'))
                 bundle=persistence.bind_task_constraints(store,parent_id,bundle)
+                if not latest and not filtered_path.exists() and request.input.get('recall_profile')==STATEMENT_SCOPE_PROFILE:
+                    initial_packet=domain.proposal_packet(request,bundle)
+                    initial_adapter=adapter('proposal',request,bundle,initial_packet,client=proposer)
+                    if initial_adapter.request_bytes(initial_packet)>request.budget.max_request_bytes:
+                        from backend.pipeline.cvp_candidate_screening import screen_to_fit
+                        recall,bundle,_=screen_to_fit(store,current,key,recall,request,
+                            proposer=proposer,reviewer=reviewer,
+                            screening_root=unit_root/'screening',call=call)
+                        bundle=persistence.bind_task_constraints(store,parent_id,bundle)
+                        write_immutable(unit_root/'filtered-bundle.json',bundle)
+                        write_immutable(filtered_path,recall)
                 # Control facts version semantic material while the original
                 # authenticated recall remains reusable. They never reset calls.
                 controls={k:bundle[k] for k in ('human_constraints','quality_findings') if bundle.get(k)}
@@ -603,7 +603,9 @@ def run(store,request,*,root,execute=False,clients=None):
                         if previous:previous=_rebase_previous(request,bundle,newbundle,previous,prior_findings=prior_findings)
                         bundle=persistence.bind_task_constraints(store,parent_id,newbundle);ordinal+=1;revision=False;continue
                     candidate=domain.compile_candidate(request,bundle,response['candidate'],previous=previous,prior_findings=prior_findings)
-                    missing=action_member_requests(bundle,recall,candidate)
+                    from backend.pipeline import cvp_candidate_screening as screening
+                    detail_recall=screening.effective_recall(recall,bundle,current,key)
+                    missing=action_member_requests(bundle,detail_recall,candidate)
                     if missing:
                         # This is still the propose stage. The preliminary
                         # afterimage is kept for the next call, but cannot be
@@ -611,9 +613,44 @@ def run(store,request,*,root,execute=False,clients=None):
                         write_immutable(step_root/'candidate.json',candidate)
                         newbundle=_expand(store,request,current,key,recall,bundle,
                             {'member_requests':missing,'context_requests':[]})
-                        previous=domain.rebind_candidate(request,bundle,newbundle,candidate,
+                        newbundle=persistence.bind_task_constraints(store,parent_id,newbundle)
+                        rebound=domain.rebind_candidate(request,bundle,newbundle,candidate,
                             prior_findings=prior_findings)
-                        bundle=persistence.bind_task_constraints(store,parent_id,newbundle)
+                        followup=domain.proposal_packet(request,newbundle,previous=rebound,
+                                                        prior_findings=prior_findings)
+                        followup_bytes=adapter('proposal',request,newbundle,followup,client=proposer).request_bytes(followup)
+                        review=domain.review_packet(request,newbundle,rebound,prior_findings=prior_findings)
+                        review_bytes=adapter('review',request,newbundle,review,client=reviewer).request_bytes(review)
+                        if max(followup_bytes,review_bytes)>request.budget.max_request_bytes and request.input.get('recall_profile')==STATEMENT_SCOPE_PROFILE:
+                            target_claims={ref:cid for cid,ref in bundle['references']['claims'].items()}
+                            component_claims={part['component_ref']:target_claims[part['claim_ref']]
+                                              for part in candidate['component_plan']['components']}
+                            applicable={component_claims[row['component_ref']]
+                                        for row in candidate['component_dispositions']
+                                        if row['disposition']=='connected' and row['target_ref'] in candidate['new_viewpoint_refs']}
+                            measured_bundle=[newbundle,rebound]
+                            def measure(narrowed,decisions):
+                                selected_missing=action_member_requests(bundle,narrowed,candidate)
+                                expanded=(_expand(store,request,current,key,recall,bundle,
+                                    {'member_requests':selected_missing,'context_requests':[]})
+                                    if selected_missing else bundle)
+                                expanded=screening.with_screening(expanded,recall,decisions)
+                                expanded=persistence.bind_task_constraints(store,parent_id,expanded)
+                                prior=domain.rebind_candidate(request,bundle,expanded,candidate,
+                                    prior_findings=prior_findings)
+                                packet=domain.proposal_packet(request,expanded,previous=prior,
+                                                               prior_findings=prior_findings)
+                                proposal_size=adapter('proposal',request,expanded,packet,client=proposer).request_bytes(packet)
+                                packet=domain.review_packet(request,expanded,prior,prior_findings=prior_findings)
+                                review_size=adapter('review',request,expanded,packet,client=reviewer).request_bytes(packet)
+                                measured_bundle[:]=[expanded,prior]
+                                return max(proposal_size,review_size)
+                            screening.screen_expansion_to_fit(store,current,key,recall,request,
+                                reviewer=reviewer,screening_root=step_root/'screening',call=call,
+                                measure=measure,applicable_claim_ids=applicable)
+                            newbundle,rebound=measured_bundle
+                        previous=rebound
+                        bundle=newbundle
                         ordinal+=1;revision=False;continue
                     if candidate.get('summary_material_pending'):
                         # All source support is present, but the preliminary

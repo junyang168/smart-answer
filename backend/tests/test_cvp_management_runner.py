@@ -121,6 +121,25 @@ def parent(store):
     return store.get_cvp_group('CVPM-'+runner.sha256_json('test-cvp2'))
 
 
+def test_fitting_initial_proposal_does_not_screen_recalled_cvps(setup, monkeypatch):
+    from backend.api.canonical_repository.cvp_recall import STATEMENT_SCOPE_PROFILE
+    from backend.pipeline import cvp_candidate_screening
+    store, request, root, clients, _ = setup
+    request['input'] = seal({k: v for k, v in request['input'].items() if k != 'artifact_sha256'} |
+                            {'recall_profile': STATEMENT_SCOPE_PROFILE})
+    path = Path(request['authorization']['path'])
+    direction = json.loads(path.read_text())
+    direction['input_sha256'] = request['input']['artifact_sha256']
+    path.write_text(json.dumps(direction))
+    request['authorization']['file_sha256'] = hashlib.sha256(path.read_bytes()).hexdigest()
+    monkeypatch.setattr(cvp_candidate_screening, 'screen_to_fit',
+                        lambda *args, **kwargs: pytest.fail('fitting initial proposal was screened'))
+    result = runner.run(store, request, root=root, execute=True, clients=clients)
+    assert result['status'] == 'completed', parent(store)['units']['g1'].get('detail')
+    assert any(json.loads(row['user_prompt']).get('schema_version', '').endswith('_proposal_packet')
+               for row in clients['gpt'].requests)
+
+
 def test_unwritten_oversized_action_can_yield_one_exact_group_without_erasing_history(setup):
     from backend.api.canonical_repository import cvp_management_store as persistence
     from backend.api.canonical_repository.postgres_store import ChangeSetConflict
