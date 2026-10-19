@@ -32,34 +32,41 @@ def _insert(cursor,run_id,value):
 
 
 def call_limit(parent):
-    """Original cap plus one explicitly recorded continuation, never a reset."""
-    extension=parent.get('call_budget_extension')
+    """Original cap plus recorded continuations, never a reset."""
+    extension=parent.get('call_budget_continuation') or parent.get('call_budget_extension')
     return extension['total_max_calls'] if extension else parent['request']['budget']['max_calls']
 
 
 def extend_call_budget(store,parent_id,*,authorization,total_max_calls):
-    """Admit one bounded continuation on the original unwritten task."""
+    """Admit a small, recorded continuation on the original unwritten task."""
     with store.connect() as conn,conn.cursor() as cursor:
         parent=_load(cursor,parent_id)
         if parent.get('kind')!='cvp_management_action' or parent['result'].get('status') in {'completed','superseded'}:
             raise ChangeSetConflict('call extension requires an open original CVP2 task')
         original=parent['request']['budget']['max_calls']
-        if not original<total_max_calls<=original+4:
-            raise ChangeSetConflict('call extension must be bounded to at most four additional calls')
-        extension={'authorization':authorization,'total_max_calls':total_max_calls,
-                   'original_calls':original}
-        old=parent.get('call_budget_extension')
-        if old:
-            if old!=extension:raise ChangeSetConflict('original CVP2 call extension changed')
-            return old
-        if len(parent['call_reservations'])!=original or any(
+        prior=parent.get('call_budget_extension')
+        later=parent.get('call_budget_continuation')
+        current=call_limit(parent)
+        if total_max_calls==current:
+            old=later or prior
+            if old and old['authorization']==authorization:return old
+            raise ChangeSetConflict('original CVP2 call extension changed')
+        if (not current<total_max_calls<=current+4 or total_max_calls>original+8
+                or later is not None):
+            raise ChangeSetConflict('call continuation exceeds the bounded original task allowance')
+        if len(parent['call_reservations'])!=current or any(
                 slot['state']!='returned' for slot in parent['call_reservations'].values()):
-            raise ChangeSetConflict('call extension requires the exhausted, fully returned original budget')
+            raise ChangeSetConflict('call continuation requires the exhausted, fully returned prior budget')
         if any(unit.get('completed_step') for unit in parent['units'].values()):
             raise ChangeSetConflict('call extension cannot alter a partly committed task')
-        parent['call_budget_extension']=extension
+        extension={'authorization':authorization,'total_max_calls':total_max_calls,
+                   'original_calls':original,'previous_max_calls':current}
+        if prior:
+            parent['call_budget_continuation']=extension
+        else:
+            parent['call_budget_extension']={k:v for k,v in extension.items() if k!='previous_max_calls'}
         _save(cursor,parent_id,parent)
-        return extension
+        return parent.get('call_budget_continuation') or parent['call_budget_extension']
 
 
 def prepare_action(store,request,*,root,preflight,supersede_unwritten_run=None,nonlaunch=None):

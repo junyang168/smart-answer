@@ -206,7 +206,7 @@ def test_undispatched_call_plan_repair_retains_old_identity_and_blocks_started_c
             prior_intent_sha256=updated['intent_sha256'],role='gpt',intent=old)
 
 
-def test_original_task_accepts_only_one_bounded_owner_call_extension(setup,tmp_path):
+def test_original_task_retains_calls_across_bounded_continuations(setup,tmp_path):
     from backend.api.canonical_repository import cvp_management_store as persistence
     from backend.api.canonical_repository.postgres_store import ChangeSetConflict
     from backend.pipeline.cvp_management_control import run as control
@@ -233,13 +233,29 @@ def test_original_task_accepts_only_one_bounded_owner_call_extension(setup,tmp_p
         'authorization':{'path':str(owner),'file_sha256':hashlib.sha256(owner.read_bytes()).hexdigest()}}
     assert control(store,manifest,execute=True)['total_max_calls']==3
     assert control(store,manifest,execute=True)['original_calls']==1
-    with pytest.raises(ChangeSetConflict,match='original CVP2 call extension changed'):
+    with pytest.raises(ChangeSetConflict,match='fully returned'):
         persistence.extend_call_budget(store,run_id,authorization=manifest['authorization'],total_max_calls=4)
     for key in ('new','last'):
         persistence.reserve_call(store,run_id,key=key,role='gpt',intent={**intent,'cache_path':str(root/key)})
     with pytest.raises(ChangeSetConflict,match='budget exhausted'):
         persistence.reserve_call(store,run_id,key='fourth',role='gpt',intent=intent)
     assert len(store.get_cvp_group(run_id)['call_reservations'])==3
+    for key in ('new','last'):
+        fresh={**intent,'cache_path':str(root/key)}
+        persistence.begin_call(store,run_id,key=key,intent=fresh)
+        persistence.returned_call(store,run_id,key=key,raw={'key':key},artifact_sha256='b'*64)
+    next_auth=tmp_path/'continuation.json'
+    write_immutable(next_auth,{'schema_version':domain.VERSION+'_call_budget_extension_v1',
+        'authorized_by':'agent_under_user_task_scope','numerical_cap_selected_by':'agent',
+        'prior_cap_note':'The earlier 14 and 18 call caps were selected by the agent, not specified by the user.',
+        'parent_run_id':run_id,'action_id':request['action_id'],
+        'original_max_calls':1,'total_max_calls':5,'group_key':'g1'})
+    next_manifest={**manifest,'total_max_calls':5,'authorization':{
+        'path':str(next_auth),'file_sha256':hashlib.sha256(next_auth.read_bytes()).hexdigest()}}
+    assert control(store,next_manifest,execute=True)['previous_max_calls']==3
+    assert control(store,next_manifest,execute=True)['total_max_calls']==5
+    with pytest.raises(ChangeSetConflict,match='bounded original task allowance'):
+        persistence.extend_call_budget(store,run_id,authorization=next_manifest['authorization'],total_max_calls=9)
 
 
 def test_promoted_summary_requires_fresh_proposal_and_preserves_identity_guard():

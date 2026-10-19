@@ -1,7 +1,8 @@
 """Explicit human/independent-audit intake around the ordinary CVP2 action.
 
-These operations never dispatch a model, approve an unknown candidate or alter
-its original call budget. All physical authority is read before SQL admission.
+These operations never dispatch a model or approve an unknown candidate.
+Call continuations retain the original task and every spent call. All physical
+authority is read before SQL admission.
 """
 from __future__ import annotations
 
@@ -31,9 +32,14 @@ def _run(store,manifest,*,execute=False):
         direction=_bound(manifest['authorization'])
         total=manifest['total_max_calls']
         expected={'schema_version':domain.VERSION+'_call_budget_extension_v1',
-                  'authorized_by':'owner','parent_run_id':parent_id,
+                  'authorized_by':direction.get('authorized_by'),'parent_run_id':parent_id,
                   'action_id':parent['action_id'],'original_max_calls':parent['request']['budget']['max_calls'],
                   'total_max_calls':total,'group_key':manifest['group_key']}
+        if direction.get('authorized_by') not in {'owner','agent_under_user_task_scope'}:
+            raise ValueError('CVP2 call extension authority is unknown')
+        if direction.get('authorized_by')=='agent_under_user_task_scope':
+            expected['numerical_cap_selected_by']='agent'
+            expected['prior_cap_note']='The earlier 14 and 18 call caps were selected by the agent, not specified by the user.'
         if direction!=expected:raise ValueError('CVP2 call extension lacks exact owner direction')
         if manifest['group_key'] not in parent['units'] or len(parent['units'])!=1:
             raise ValueError('CVP2 call extension must name the one original group')
