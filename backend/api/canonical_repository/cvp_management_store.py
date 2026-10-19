@@ -69,7 +69,7 @@ def extend_call_budget(store,parent_id,*,authorization,total_max_calls):
         return parent.get('call_budget_continuation') or parent['call_budget_extension']
 
 
-def prepare_action(store,request,*,root,preflight,supersede_unwritten_run=None,nonlaunch=None):
+def prepare_action(store,request,*,root,preflight,supersede_unwritten_run=None,nonlaunch=None,interruption=None):
     from .cvp_management import Request
     from .cvp_recall import work_groups,verify
     from pathlib import PurePath
@@ -99,12 +99,14 @@ def prepare_action(store,request,*,root,preflight,supersede_unwritten_run=None,n
             AND metadata->'request'->'input'->'claim_ids' ?| %s
             AND metadata->'result'->>'status' NOT IN ('completed','superseded')
             FOR UPDATE''',(request['input']['claim_ids'],)).fetchall()
-        if nonlaunch and not conflicts:
-            raise ChangeSetConflict('nonlaunch proof has no original pending CVP2 task')
+        if (nonlaunch or interruption) and not conflicts:
+            raise ChangeSetConflict('recovery proof has no original pending CVP2 task')
         if conflicts:
             if len(conflicts)!=1 or conflicts[0][0]!=supersede_unwritten_run:
                 raise ChangeSetConflict('pending CVP2 Claims must resume their original task: '+conflicts[0][0])
             old_id,prior=conflicts[0]
+            if nonlaunch and interruption:
+                raise ChangeSetConflict('only one exact interrupted-call recovery may apply')
             if nonlaunch:
                 key=nonlaunch['call_key'];slot=prior['call_reservations'].get(key)
                 if (nonlaunch.get('run_id')!=old_id or not slot or slot['state']!='started'
@@ -112,9 +114,15 @@ def prepare_action(store,request,*,root,preflight,supersede_unwritten_run=None,n
                         or len([s for s in prior['call_reservations'].values() if s['state']=='started'])!=1):
                     raise ChangeSetConflict('nonlaunch proof differs from exact started call')
                 slot.update(state='failed_before_dispatch',nonlaunch=nonlaunch)
+            if interruption:
+                from backend.pipeline.cvp_management_interrupted import verify as verify_interruption
+                if interruption != verify_interruption(store,old_id):
+                    raise ChangeSetConflict('interrupted-call proof differs from exact local transport')
+                slot=prior['call_reservations'][interruption['call_key']]
+                slot.update(state='abandoned_after_dispatch',interruption=interruption)
             if (len(groups)!=1 or not any(g['group_key']==groups[0]['group_key'] and
                     g['claim_ids']==groups[0]['claim_ids'] for g in prior['groups']) or
-                    any(s['state'] not in {'returned','failed_before_dispatch'} for s in prior['call_reservations'].values()) or
+                    any(s['state'] not in {'returned','failed_before_dispatch','abandoned_after_dispatch'} for s in prior['call_reservations'].values()) or
                     any(u.get('completed_step') or u['status']=='completed' for u in prior['units'].values())):
                 raise ChangeSetConflict('only an unwritten exact original group can replace its oversized task')
             step_ids=[sid for u in prior['units'].values() for sid in u['steps']]

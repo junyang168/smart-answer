@@ -206,6 +206,56 @@ def test_exact_pre_dispatch_failure_can_be_superseded_without_erasing_call(setup
     assert old['call_reservations']['recall.json']['nonlaunch']==proof
 
 
+def test_interrupted_dispatched_call_can_only_be_abandoned_with_exact_unwritten_proof(setup):
+    from backend.api.canonical_repository import cvp_management_store as persistence
+    from backend.api.canonical_repository.postgres_store import ChangeSetConflict
+    from backend.pipeline.cvp_management_interrupted import verify as verify_interruption
+    store, request, root, _, _ = setup
+    admission = preflight.prepare_recall(store, request['input'], allow_unqualified=True, defer_index=True)
+    original = persistence.prepare_action(store, request, root=str(root), preflight=admission)
+    cache = root / 'proposal.json'
+    identity = {'cache_path': str(cache), 'request_bytes': 100,
+                'model_id': 'gpt-6.1-sol', 'backend': 'codex_subscription',
+                'request_payload_sha256': 'a' * 64}
+    persistence.reserve_call(store, original['run_id'], key='proposal.json', role='gpt', intent=identity)
+    persistence.begin_call(store, original['run_id'], key='proposal.json', intent=identity)
+    intent = seal({'schema_version': 'wang_model_call_intent_v1',
+                   'model_id': identity['model_id'], 'backend': identity['backend'],
+                   'request_payload_sha256': identity['request_payload_sha256'],
+                   'cache_path': str(cache), 'automatic_retry': False})
+    failure = seal({'schema_version': 'wang_model_call_failure_v1',
+                    'invocation_sha256': intent['artifact_sha256'],
+                    'error_type': 'KeyboardInterrupt', 'execution_status': 'outcome_unknown',
+                    'automatic_retry': False})
+    write_immutable(root / 'proposal.call-intent.json', intent)
+    write_immutable(root / 'proposal.call-failure.json', failure)
+    transport = root / 'proposal.transport'
+    transport.mkdir(parents=True)
+    (transport / 'stdout.log').write_bytes(b'')
+    write_immutable(transport / 'exit.json', {'error_type': 'KeyboardInterrupt',
+        'returncode': None, 'files': {'stdout.log': hashlib.sha256(b'').hexdigest()}})
+    proof = verify_interruption(store, original['run_id'])
+    write_immutable(cache, seal({'saved': 'answer'}))
+    with pytest.raises(ValueError, match='found an answer'):
+        verify_interruption(store, original['run_id'])
+    cache.unlink()
+    successor = deepcopy(request)
+    successor['action_id'] = 'test-cvp2-after-interruption'
+    with pytest.raises(ChangeSetConflict, match='unwritten exact original group'):
+        persistence.prepare_action(store, successor, root=str(root / 'replacement'),
+            preflight=admission, supersede_unwritten_run=original['run_id'])
+    with pytest.raises(ChangeSetConflict, match='proof differs'):
+        persistence.prepare_action(store, successor, root=str(root / 'replacement'),
+            preflight=admission, supersede_unwritten_run=original['run_id'],
+            interruption={**proof, 'intent_sha256': '0' * 64})
+    new = persistence.prepare_action(store, successor, root=str(root / 'replacement'),
+        preflight=admission, supersede_unwritten_run=original['run_id'], interruption=proof)
+    old = store.get_cvp_group(original['run_id'])
+    assert old['result']['successor_run_id'] == new['run_id']
+    assert old['call_reservations']['proposal.json']['state'] == 'abandoned_after_dispatch'
+    assert old['call_reservations']['proposal.json']['interruption'] == proof
+
+
 def test_undispatched_call_plan_repair_retains_old_identity_and_blocks_started_call(setup):
     from backend.api.canonical_repository import cvp_management_store as persistence
     from backend.api.canonical_repository.postgres_store import ChangeSetConflict
