@@ -205,6 +205,7 @@ def adapter(role,request,bundle,packet,*,client=None):
     task+='\nfindings只记录尚未解决的具体问题或异议；正常的身份比较、支持理由和通过说明不放入findings。没有问题就返回空数组。\n'
     if not proposal:
         task+='candidate.findings中的未决问题不能与同一目标的pass并存；需要修改时提出具体finding。\n'
+        task+='若prior_findings判为persistent或reopened，其原target_refs中的每个审核目标都不能判pass；若其中某个目标本身无需改动，也须用本轮具体finding说明它为何仍受未决问题牵连，并把该目标列入finding.target_refs。只有该旧问题确已解决，才标为resolved。\n'
         task+='每项非pass判定只能引用target_refs包含该项ref的finding；同一个问题若影响多个判定项，在该finding的target_refs列出每一项ref，不能让相关CVP引用只针对其连接的finding。\n'
     mode=('result=candidate时返回candidate。' if proposal else 'result=review时返回review。')
     mode+='候选CVP优先比较完整statement、contextual_summary、范围及限定。summary是编辑归纳，不是教授原话或独立证据。已有成员表述可能省略；需要核对身份、论据或限定时用member_requests加载。待处理Claim及其依据始终完整。修改或合并已有CVP须核对受影响成员。\n'
