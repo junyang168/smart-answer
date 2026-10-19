@@ -130,7 +130,7 @@ def _stage_call_budget(parent,root,request):
     prefix=str(Path(root).resolve())+'/'
     slots=parent['call_reservations']
     own=sum(slot['intent']['cache_path'].startswith(prefix) for slot in slots.values())
-    return max(0,request.budget.max_calls-len(slots))+own
+    return max(0,persistence.call_limit(parent)-len(slots))+own
 
 
 def _semantic(candidate):
@@ -267,6 +267,34 @@ def _same_material_inputs(current,saved):
                                                   if d['source_id'] in source_ids]:return False
     return all(current.get(k)==saved.get(k) for k in (
         'claim_input','claim_authority','member_claim_authority','human_constraints','quality_findings','maintenance_viewpoint_ids'))
+
+
+def _summary_only_preimage_refresh(old_bundle,new_bundle):
+    """A promoted editorial summary invalidates old writes, not CVP identity.
+
+    Restart proposal on the current material within the same task. Never carry
+    an old candidate across a changed CVP preimage or changed Claim wording.
+    """
+    if old_bundle['claim_input']!=new_bundle['claim_input']:return False
+    old={(r['collection'],r['object_id']):r for r in old_bundle['records']}
+    new={(r['collection'],r['object_id']):r for r in new_bundle['records']}
+    support={'evidence_steps','source_fragments','source_documents','citations','claim_relations'}
+    changed=False
+    for key,row in old.items():
+        current=new.get(key)
+        # Prior on-demand member/source expansion is read-only context. The
+        # current proposal can request it again if needed.
+        if key[0] in support:continue
+        if current is None:return False
+        if (row['revision'],row['content_sha256'])==(current['revision'],current['content_sha256']):
+            continue
+        if key[0]!='canonical_viewpoints':return False
+        before={k:v for k,v in row['payload'].items() if k not in {'revision','summary','summary_basis'}}
+        after={k:v for k,v in current['payload'].items() if k not in {'revision','summary','summary_basis'}}
+        if before!=after or not current['payload'].get('summary') or not current['payload'].get('summary_basis'):
+            return False
+        changed=True
+    return changed
 
 
 def _completed_summary_proofs(store,step):
@@ -519,12 +547,18 @@ def run(store,request,*,root,execute=False,clients=None):
                             prior_findings=list(previous['prior_findings'])
                             if has_approval:prior_findings=_all_findings(previous,read_artifact(oldroot/'approval.json'))
                             if not same:
-                                previous=_rebase_previous(request,oldbundle,bundle,previous,prior_findings=prior_findings)
+                                if _summary_only_preimage_refresh(oldbundle,bundle):
+                                    previous=None;prior_findings=[]
+                                else:
+                                    previous=_rebase_previous(request,oldbundle,bundle,previous,prior_findings=prior_findings)
                         elif latest['materials']['previous'] is not None:
                             previous=latest['materials']['previous']
                             prior_findings=latest['materials']['prior_findings']
                             if not same:
-                                previous=_rebase_previous(request,oldbundle,bundle,previous,prior_findings=prior_findings)
+                                if _summary_only_preimage_refresh(oldbundle,bundle):
+                                    previous=None;prior_findings=[]
+                                else:
+                                    previous=_rebase_previous(request,oldbundle,bundle,previous,prior_findings=prior_findings)
                         ordinal=latest['ordinal']+1 if latest['generation']==generation else 0
                         revision=has_approval and not read_artifact(oldroot/'approval.json')['approved']
                 while True:

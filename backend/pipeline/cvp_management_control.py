@@ -23,10 +23,24 @@ def _run(store,manifest,*,execute=False):
     if manifest.get('schema_version')!=domain.VERSION+'_control':
         raise ValueError('explicit CVP2 control manifest required')
     operation=manifest.get('operation')
-    if operation not in {'content_dispute','human_constraint','independent_audit','usage_admission'}:
+    if operation not in {'content_dispute','human_constraint','independent_audit','usage_admission','call_budget_extension'}:
         raise ValueError('unsupported CVP2 control operation')
     parent_id=manifest['parent_run_id'];parent=store.get_cvp_group(parent_id)
     if not parent or parent.get('kind')!='cvp_management_action':raise ValueError('original CVP2 task missing')
+    if operation=='call_budget_extension':
+        direction=_bound(manifest['authorization'])
+        total=manifest['total_max_calls']
+        expected={'schema_version':domain.VERSION+'_call_budget_extension_v1',
+                  'authorized_by':'owner','parent_run_id':parent_id,
+                  'action_id':parent['action_id'],'original_max_calls':parent['request']['budget']['max_calls'],
+                  'total_max_calls':total,'group_key':manifest['group_key']}
+        if direction!=expected:raise ValueError('CVP2 call extension lacks exact owner direction')
+        if manifest['group_key'] not in parent['units'] or len(parent['units'])!=1:
+            raise ValueError('CVP2 call extension must name the one original group')
+        if execute:
+            return persistence.extend_call_budget(store,parent_id,
+                authorization=manifest['authorization'],total_max_calls=total)
+        return expected
     if operation=='content_dispute':
         step_id=manifest['step_id'];step=store.get_cvp_group(step_id)
         if not step or step.get('parent_run_id')!=parent_id:raise ValueError('foreign CVP2 step')

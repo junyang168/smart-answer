@@ -31,6 +31,37 @@ def _insert(cursor,run_id,value):
         (run_id,value.get('action_id',value.get('parent_run_id')),canonical_json(value)))
 
 
+def call_limit(parent):
+    """Original cap plus one explicitly recorded continuation, never a reset."""
+    extension=parent.get('call_budget_extension')
+    return extension['total_max_calls'] if extension else parent['request']['budget']['max_calls']
+
+
+def extend_call_budget(store,parent_id,*,authorization,total_max_calls):
+    """Admit one bounded continuation on the original unwritten task."""
+    with store.connect() as conn,conn.cursor() as cursor:
+        parent=_load(cursor,parent_id)
+        if parent.get('kind')!='cvp_management_action' or parent['result'].get('status') in {'completed','superseded'}:
+            raise ChangeSetConflict('call extension requires an open original CVP2 task')
+        original=parent['request']['budget']['max_calls']
+        if not original<total_max_calls<=original+4:
+            raise ChangeSetConflict('call extension must be bounded to at most four additional calls')
+        extension={'authorization':authorization,'total_max_calls':total_max_calls,
+                   'original_calls':original}
+        old=parent.get('call_budget_extension')
+        if old:
+            if old!=extension:raise ChangeSetConflict('original CVP2 call extension changed')
+            return old
+        if len(parent['call_reservations'])!=original or any(
+                slot['state']!='returned' for slot in parent['call_reservations'].values()):
+            raise ChangeSetConflict('call extension requires the exhausted, fully returned original budget')
+        if any(unit.get('completed_step') for unit in parent['units'].values()):
+            raise ChangeSetConflict('call extension cannot alter a partly committed task')
+        parent['call_budget_extension']=extension
+        _save(cursor,parent_id,parent)
+        return extension
+
+
 def prepare_action(store,request,*,root,preflight,supersede_unwritten_run=None,nonlaunch=None):
     from .cvp_management import Request
     from .cvp_recall import work_groups,verify
@@ -146,7 +177,7 @@ def reserve_call(store,parent_id,*,key,role,intent):
             if any(old.get(k)!=v for k,v in identity.items()):raise ChangeSetConflict('CVP2 original call changed')
             return old
         if parent['result'].get('status') in {'completed','superseded'}:raise ChangeSetConflict('closed task cannot acquire calls')
-        if len(slots)>=parent['request']['budget']['max_calls']:
+        if len(slots)>=call_limit(parent):
             raise ChangeSetConflict('CVP2 cumulative model call budget exhausted')
         if intent['request_bytes']>parent['request']['budget']['max_request_bytes']:
             raise ChangeSetConflict('CVP2 actual request exceeds original byte budget')
@@ -205,7 +236,7 @@ def import_verified_call(store,parent_id,*,key,role,intent,raw,artifact_sha256,t
         parent=_load(cursor,parent_id)
         if parent['result'].get('status') in {'completed','superseded'}:
             raise ChangeSetConflict('closed task cannot import a call')
-        if len(parent['call_reservations'])>=parent['request']['budget']['max_calls'] and key not in parent['call_reservations']:
+        if len(parent['call_reservations'])>=call_limit(parent) and key not in parent['call_reservations']:
             raise ChangeSetConflict('CVP2 cumulative model call budget exhausted')
         if intent['request_bytes']>parent['request']['budget']['max_request_bytes']:
             raise ChangeSetConflict('CVP2 actual request exceeds original byte budget')

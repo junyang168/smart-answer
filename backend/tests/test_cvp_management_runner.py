@@ -206,6 +206,57 @@ def test_undispatched_call_plan_repair_retains_old_identity_and_blocks_started_c
             prior_intent_sha256=updated['intent_sha256'],role='gpt',intent=old)
 
 
+def test_original_task_accepts_only_one_bounded_owner_call_extension(setup,tmp_path):
+    from backend.api.canonical_repository import cvp_management_store as persistence
+    from backend.api.canonical_repository.postgres_store import ChangeSetConflict
+    from backend.pipeline.cvp_management_control import run as control
+    store,request,root,_,_=setup
+    request['budget']['max_calls']=1
+    auth=Path(request['authorization']['path'])
+    direction=json.loads(auth.read_text());direction['budget']=request['budget']
+    auth.unlink();write_immutable(auth,direction)
+    request['authorization']['file_sha256']=hashlib.sha256(auth.read_bytes()).hexdigest()
+    admission=preflight.prepare_recall(store,request['input'],allow_unqualified=True,defer_index=True)
+    task=persistence.prepare_action(store,request,root=str(root),preflight=admission)
+    run_id=task['run_id'];intent={'cache_path':str(root/'old.json'),'request_bytes':100}
+    persistence.reserve_call(store,run_id,key='old',role='gpt',intent=intent)
+    persistence.begin_call(store,run_id,key='old',intent=intent)
+    persistence.returned_call(store,run_id,key='old',raw={'ok':True},artifact_sha256='a'*64)
+    with pytest.raises(ChangeSetConflict,match='budget exhausted'):
+        persistence.reserve_call(store,run_id,key='new',role='gpt',intent=intent)
+    owner=tmp_path/'extension.json'
+    write_immutable(owner,{'schema_version':domain.VERSION+'_call_budget_extension_v1',
+        'authorized_by':'owner','parent_run_id':run_id,'action_id':request['action_id'],
+        'original_max_calls':1,'total_max_calls':3,'group_key':'g1'})
+    manifest={'schema_version':domain.VERSION+'_control','operation':'call_budget_extension',
+        'parent_run_id':run_id,'group_key':'g1','total_max_calls':3,
+        'authorization':{'path':str(owner),'file_sha256':hashlib.sha256(owner.read_bytes()).hexdigest()}}
+    assert control(store,manifest,execute=True)['total_max_calls']==3
+    assert control(store,manifest,execute=True)['original_calls']==1
+    with pytest.raises(ChangeSetConflict,match='original CVP2 call extension changed'):
+        persistence.extend_call_budget(store,run_id,authorization=manifest['authorization'],total_max_calls=4)
+    for key in ('new','last'):
+        persistence.reserve_call(store,run_id,key=key,role='gpt',intent={**intent,'cache_path':str(root/key)})
+    with pytest.raises(ChangeSetConflict,match='budget exhausted'):
+        persistence.reserve_call(store,run_id,key='fourth',role='gpt',intent=intent)
+    assert len(store.get_cvp_group(run_id)['call_reservations'])==3
+
+
+def test_promoted_summary_requires_fresh_proposal_and_preserves_identity_guard():
+    base={'claim_input':{'claims':[{'claim_id':'C1'}]},'records':[
+        {'collection':'canonical_viewpoints','object_id':'V1','revision':1,'content_sha256':'a',
+         'payload':{'viewpoint_id':'V1','revision':1,'core_proposition':'人子是神','summary':None,
+                    'summary_basis':None}}]}
+    current=deepcopy(base);row=current['records'][0]
+    row.update(revision=2,content_sha256='b')
+    row['payload'].update(revision=2,summary='與舊成員一致的完整摘要',summary_basis={'current':True})
+    assert runner._summary_only_preimage_refresh(base,current)
+    changed=deepcopy(current);changed['records'][0]['payload']['core_proposition']='另一個命題'
+    assert not runner._summary_only_preimage_refresh(base,changed)
+    changed=deepcopy(current);changed['claim_input']['claims'][0]['claim_id']='C2'
+    assert not runner._summary_only_preimage_refresh(base,changed)
+
+
 def test_success_chain_commits_actual_reviewed_postimage_and_replays_without_calls(setup):
     store,request,root,clients,source=setup
     before_source=source.read_bytes();before_claim=store.get_record_state('claims','C1')
