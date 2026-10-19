@@ -35,6 +35,7 @@ def test_composed_review_keeps_schema_and_budget_and_includes_scope_judgment(pol
     adapter = claim_management_model_adapter('opus', policy)
     assert '审阅概括的语义力度' in adapter._base_prompt
     assert '不能仅因出现' in adapter._base_prompt
+    assert '关系类型成立不代表 reason 中每项断言成立' in adapter._base_prompt
     assert '圣经证据是教授的立论原则' in adapter._base_prompt
     schema = adapter._response_model.model_json_schema()
     assert ('binding_assessments' in schema['properties']) == bool(policy.evidence_review_contract)
