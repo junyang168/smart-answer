@@ -190,7 +190,7 @@ def adapter(role,request,bundle,packet,*,client=None):
     if incremental_summaries:
         task=task.replace('每个新观点必须有少于150 Unicode字符的编辑摘要，含问题语境/核心判断/承重限定',
             '每个新观点必须有最多500个Unicode字符的完整编辑摘要，含问题语境、核心判断、论据、适用范围和承重限定')
-        task+='\n新建前逐项比较已有CVP：新Claim若保留旧观点的核心判断，却增加会改变真值条件的范围、对象或条件，具体核对能否用extends／qualifies连接到旧CVP，并在同一summary中清楚保留两种来源范围；这不是equivalent成员，也不能暗改旧statement。只有具体证据表明它是需要独立身份的另一判断，才另建CVP。单节结构观察、未应验的背景事实、替代读法的概率，若只是为已有关判断提供理由或限定，也先核对supports／qualifies／background，不能机械一条Claim建一个CVP。若关系依据不足则保留未决，不能为减少CVP而硬连。\n'
+        task+='\n新建前逐项比较已有CVP，依次回答：本Claim自身断言什么（用原文解释其语境和论证作用，不把相邻的独立结论补入Claim）；旧CVP若明确修订表述或范围，能否忠于全部旧成员并承载这项判断；新Claim应以equivalent、supports、extends或qualifies何种作用连接。Claim措辞不等价不等于CVP身份不同，具体核对能否用extends／qualifies连接到旧CVP；仅作依据的Claim也可用supports连接，不必冒充equivalent成员。旧CVP当前经文、听众、措辞、范围及本次修改权限不能单独证明新身份；共享事件或经文名称也不能单独证明同一身份。若复用需要本次无权执行的旧CVP维护，说明所需维护并将成分标为unresolved，不得为绕过权限而新建；仅作supports时也不自动扩大旧scope。只有指出旧CVP经忠实修订仍不能承载的独立真值条件及其原文依据，才另建CVP。若关系依据不足则保留未决，不能为减少CVP而硬连。\n'
         if proposal:
             from backend.pipeline.cvp_contextual_summary import SUMMARY_CONTENT_RULES
             task+='\n'+SUMMARY_CONTENT_RULES+'\n'
@@ -199,7 +199,7 @@ def adapter(role,request,bundle,packet,*,client=None):
         task+='\n新增连接到已有CVP时，基于本轮新旧全部成员及相关原文小节重新评估其summary。逐一核对旧成员承重的解释性结论、范围、条件、否定与不确定语气；新增Claim只能补充有依据的新信息，不能让最近的材料挤掉旧成员的必要限定。若改写旧summary，原有且仍有来源支持的承重信息必须保留；要删改时先核对旧成员依据，不能只凭新Claim未提到就删掉。按观点整体组织摘要，不按新旧Claim的输入顺序或篇幅分配权重，也不只复述最新Claim。旧summary充分时不要抄写；缺失或过期时须写出完整summary；需要充实时只输出该CVP一份完整新summary。新建CVP必须输出summary。previous.summary_material_pending所列CVP必须在本轮解决缺材料或缺摘要，不能送审。summary不能暗中改变statement的真值条件、对象、否定或必要限定。不要写“教授说／认为／指出／强调”等无关引介语，除非必须区分他人观点。\n'
         if not proposal:
             task+='逐一对照旧与新增成员及旧summary，审核连接目标的完整summary（即使文本未改）是否保留旧成员的承重结论和限定、纳入新增成员真正补充的内容，并忠于整体观点；若摘要偏向最新Claim而遗漏旧成员，或无依据删掉旧summary中仍有来源支持的承重信息，提出具体finding。也要检查范围、不确定语气，以及是否把同一观点过细拆分。\n'
-            task+='批准新建的novelty前，对每项新CVP核对已有候选是否能以有依据的extends／qualifies／supports连接承载新信息；若仅因范围措辞不同或Claim单独成条就新建，提出具体finding。不能以关系取代确有独立身份的判断。\n'
+            task+='批准新建的novelty前，逐项说明新Claim自身判断、最相近旧CVP可否经忠实修订承载、以及equivalent／supports／extends／qualifies为何不足；只有新候选具有旧CVP不能承载且有原文依据的独立真值条件才通过。若仅因范围措辞不同、旧scope或本次权限不能修改，或Claim单独成条就新建，提出具体finding。原文中的相邻独立结论不能补入Claim；仅作依据的Claim不必与旧CVP字面等价；仅作supports不自动扩大旧scope。不能以关系取代确有独立身份的判断。\n'
     task=task.replace('context.creation_slots','operation.creation_slots').replace('request.permissions','operation.permissions')
     task=task.replace('previous.writes','previous.changes')
     task+='\nfindings只记录尚未解决的具体问题或异议；正常的身份比较、支持理由和通过说明不放入findings。没有问题就返回空数组。\n'
