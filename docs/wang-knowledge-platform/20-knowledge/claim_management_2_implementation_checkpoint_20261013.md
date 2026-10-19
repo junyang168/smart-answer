@@ -964,3 +964,27 @@ GPT 与 Opus 据 S0001／S0002 同意以「二十四章四至二十八節講到�
 证据根 `claim-management-435/matt24-scope-wording-20261018-v1/`。`repair-proposal-awaiting-call-authorization.json` 保存已审三项候选、CR001 当前记录、待新审的关系说明草案和完整 owner 审阅所需的四项只读依赖。该文件明确不是内容批准；尚需补充一次 GPT 与一次 Opus 的明确授权后才能完成关联范围修正，不以新任务绕过原预算。当前不能宣称 Claim 维护完成或51条全部保持有效；CVP 未改动、原组未重跑。
 
 暂停后的新连接盘点为 **50条当前资格有效、1条待当前程序读回**；待处理者仅本次CL003。`pending-current-qualifications.json` 保存完整结果。执行／来源影响／人工核实相关回归另87项通过；前端类型检查仍为既有react-quill-new缺失诊断。内容尚未提交，追加模型授权尚未收到。
+
+
+## 2026-10-18：太24段落重心修订完成
+
+负责人明确要求“那你将这个 claim 完整处理一下”后，`435-matt24-scope-completion-20261018-v1` 唯一关联此前权限暂停的 `435-matt24-scope-wording-20261018-v1`。原两次 GPT、两次 Opus 的记录及未提交候选保留；本次补充一次 GPT、一次 Opus，Gemini 为零。`a544f8a4` 在既有 owner_call_extension 中支持已登记权限问题的明确接续，保留完整事务快照，新增关系权限后把必要端点证据纳入模型审阅；相关隔离回归 145 项通过。
+
+本次已完成，不能再沿用上文“尚未提交”的历史状态。Opus 无新异议，旧 CR001 异议 resolved；四项写入同一事务并完成程序回读：
+
+| 对象 | 当前 revision | 修改 |
+| --- | --- | --- |
+| `DK-90777c7a0794-P01-CL003` | 5 | 以“再来以前的患难，其中包括圣殿被毁”取代没有充分依据的“主要讲圣殿被毁” |
+| `DK-90777c7a0794-P01-E005` | 2 | 同步摘要，完整保留时间／事件区分 |
+| `FR-Rev_Wang_Friday_Mar_16_2007-90777c7a0794-DK-90777c7a0794-P01-E005-01` | 3 | 绑定 S0001 内连续原文，包含“整个患难”与“其中一段”的限定，逐字核验通过 |
+| `DK-90777c7a0794-P01-CR001` | 2 | supports 类型保留，reason 仅以“末期未到”支持时间／事件边界；毁殿内容由 CL003 自身证据支持 |
+
+最终 Claim：
+
+> 馬太福音二十四章四至二十八節講到耶穌再來以前的患難，其中包括聖殿被毀，而非人子的降臨本身。
+
+CL003 当前内容 SHA 为 `88fea5525ad3ab03a3344b09a7e8f0487a05105256a52faec75e518f218715b0`，`claim_management_qualification.ready=true`，验证方式为 `opus_and_program_readback`。审阅轮次 `CMR-dca57004d472f0425283082bad5c67b00bc16a35adf1a73f60b67672b17c23c3`。没有原文文件或 CVP 内容写入；247 个事务对象中仅上述四项改变，均只增加一个 revision。未把同篇 CL001／CL002 的上下文审阅宣称为它们独立获得当前资格。
+
+完整记录位于 `staging/claim-management-435/matt24-scope-completion-20261018-v1/`：`final-verification.json`、`batch/result.json`、`operation/<round>/readback-result.json`；后续全批资格核对是读取既有资格，不是重审全部 Claim。文档检查仍只有另一项目既有失效锚点。
+
+最终按原登记清单读取资格：51 条当前未连接 CVP 的人子相关 Claim 全部 ready，未就绪为 0；结果保存在同目录 `topic-current-qualifications.json`。这只证明当前已登记范围的资格，未新增全库语义审计或模型调用。
