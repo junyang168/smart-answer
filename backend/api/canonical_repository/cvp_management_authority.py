@@ -22,7 +22,8 @@ def _stored_package_records(package):
 def validate_evidence(evidence):
     required={'request','bundle','candidate','approval','proposal_raw','review_raw','previous',
               'prior_findings','provenance','call_keys','round_id'}
-    if set(evidence)!=required:raise ValueError('complete CVP2 approval evidence required')
+    if set(evidence) not in (required, required | {'proposal_origin'}):
+        raise ValueError('complete CVP2 approval evidence required')
     request=domain.Request.model_validate(evidence['request'])
     verify(evidence['bundle'],domain.MATERIAL_VERSION)
     verify(evidence['candidate'],VERSION+'_candidate')
@@ -33,8 +34,31 @@ def validate_evidence(evidence):
             proposal.get('context_requests') or proposal.get('member_requests') or
             review.get('context_requests') or review.get('member_requests')):
         raise ValueError('context requests are not candidate approval')
-    domain.revalidate_candidate(request,evidence['bundle'],evidence['candidate'],proposal['candidate'],
-        previous=evidence['previous'],prior_findings=evidence['prior_findings'])
+    origin=evidence.get('proposal_origin')
+    if origin is None:
+        domain.revalidate_candidate(request,evidence['bundle'],evidence['candidate'],proposal['candidate'],
+            previous=evidence['previous'],prior_findings=evidence['prior_findings'])
+    else:
+        if (set(origin)!={'step_id','proposal_path','bundle','previous','prior_findings'} or
+                origin['prior_findings']!=evidence['prior_findings']):
+            raise ValueError('expanded review lacks exact original proposal lineage')
+        domain.verify(origin['bundle'],domain.MATERIAL_VERSION)
+        old=origin['bundle'];new=evidence['bundle']
+        current={(row['collection'],row['object_id']):row for row in new['records']}
+        current_sources={row['source_id']:row for row in new['sources']}
+        if (old['claim_input']!=new['claim_input'] or
+                any(current.get((row['collection'],row['object_id']))!=row for row in old['records']) or
+                any(old.get(field)!=new.get(field) for field in
+                    ('human_constraints','quality_findings','maintenance_viewpoint_ids')) or
+                any(current_sources.get(row['source_id'],{}).get('file_sha256')!=row['file_sha256']
+                    for row in old['sources'])):
+            raise ValueError('direct review requires only read-only comparison expansion')
+        original=domain.compile_candidate(request,origin['bundle'],proposal['candidate'],
+            previous=origin['previous'],prior_findings=origin['prior_findings'])
+        rebound=domain.rebind_candidate(request,origin['bundle'],evidence['bundle'],original,
+            prior_findings=evidence['prior_findings'])
+        if rebound!=evidence['candidate'] or evidence['previous']!=rebound:
+            raise ValueError('expanded review changed the original proposal without GPT revision')
     approval=domain.validate_review(request,evidence['bundle'],evidence['candidate'],review['review'],
                                     prior_findings=evidence['prior_findings'])
     if approval!=evidence['approval'] or approval.get('approved') is not True:
@@ -66,6 +90,22 @@ def validate_sql_review(store,cursor,step,evidence,plan):
             proof['prior_findings']!=step['materials']['prior_findings'] or
             evidence['authorization']!=parent['request']['authorization']):
         raise ValueError('CVP2 review changed its frozen lineage or scoped authority')
+    origin=proof.get('proposal_origin')
+    if origin!=step['materials'].get('proposal_origin'):
+        raise ValueError('CVP2 expanded review changed its frozen proposal origin')
+    if origin is not None:
+        if origin['step_id'] not in parent['units'][step['group_key']]['steps']:
+            raise ValueError('CVP2 expanded review borrowed a foreign proposal step')
+        source=_load(cursor,origin['step_id'])
+        if (source['parent_run_id']!=step['parent_run_id'] or
+                source['group_key']!=step['group_key'] or
+                source['generation']!=step['generation'] or
+                source['ordinal']>=step['ordinal'] or
+                source['materials']['bundle']!=origin['bundle'] or
+                source['materials']['previous']!=origin['previous'] or
+                source['materials']['prior_findings']!=origin['prior_findings'] or
+                origin['proposal_path']!=source['materials']['step_root']+'/proposal.json'):
+            raise ValueError('CVP2 expanded review has no exact earlier proposal')
     for field in ('human_constraints','quality_findings'):
         facts=parent.get(field,[])
         if field=='human_constraints':facts=[c for c in facts if c['group_key']==step['group_key']]
@@ -79,8 +119,11 @@ def validate_sql_review(store,cursor,step,evidence,plan):
     if (package!=evidence['package']['payload'] or sha256_json(package)!=plan.source_sha256 or
             evidence['package']['sha256']!=plan.source_sha256):
         raise ValueError('CVP2 reviewed package is not the complete approved afterimage')
-    packets={'gpt':domain.proposal_packet(proof['request'],proof['bundle'],previous=proof['previous'],
-                                        prior_findings=proof['prior_findings']),
+    proposal_material=origin['bundle'] if origin is not None else proof['bundle']
+    proposal_previous=origin['previous'] if origin is not None else proof['previous']
+    proposal_findings=origin['prior_findings'] if origin is not None else proof['prior_findings']
+    packets={'gpt':domain.proposal_packet(proof['request'],proposal_material,previous=proposal_previous,
+                                        prior_findings=proposal_findings),
              'opus':domain.review_packet(proof['request'],proof['bundle'],proof['candidate'],
                                         prior_findings=proof['prior_findings'])}
     for role,name in [('gpt','proposal_raw'),('opus','review_raw')]:
@@ -89,6 +132,8 @@ def validate_sql_review(store,cursor,step,evidence,plan):
                 slot['returned']['response']!=proof[name] or
                 slot['intent']['request_payload_sha256']!=sha256_json(packets[role])):
             raise ValueError('CVP2 approval lacks the exact actually returned role response')
+        if role=='gpt' and origin is not None and slot['intent']['cache_path']!=origin['proposal_path']:
+            raise ValueError('CVP2 expanded review borrowed a different proposal dispatch')
         model,backend=(('gpt-6.1-sol','codex_subscription') if role=='gpt' else
                        ('claude-opus-5-5','claude_subscription'))
         if (slot['intent'].get('model_id'),slot['intent'].get('backend'))!=(model,backend):

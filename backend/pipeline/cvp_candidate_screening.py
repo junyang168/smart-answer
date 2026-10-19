@@ -181,8 +181,9 @@ def screen_expansion_to_fit(store, preflight, group_key, recall, request, *, rev
                             screening_root: Path, call, measure, applicable_claim_ids):
     """Screen detail only after a preliminary action makes expansion too large.
 
-    ``measure`` constructs and measures the actual next proposal and review
-    packets. It keeps the original recall/cards in the bound material; the
+    ``measure`` constructs and measures the actual next model packet (review
+    for a complete candidate, proposal only if content is still missing). It
+    keeps the original recall/cards in the bound material; the
     narrowed recall selects only which read-only member detail to load.
     """
     original = {row['claim_id']: set(row['viewpoint_ids']) for row in recall['claim_candidates']}

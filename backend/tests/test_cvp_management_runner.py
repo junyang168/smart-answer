@@ -386,8 +386,13 @@ def test_existing_viewpoint_connection_rebinds_unchanged_summary_atomically(setu
         value['summaries']=[]
         return envelope('candidate',candidate=value)
     clients['gpt'].behavior=connect
+    def proposals():
+        return [row for row in clients['gpt'].requests if
+                json.loads(row['user_prompt']).get('schema_version','').endswith('_proposal_packet')]
+    before_proposals=len(proposals())
     result=runner.run(store,second,root=root.parent/'enrich',execute=True,clients=clients)
     assert result['status']=='completed',store.get_cvp_group('CVPM-'+runner.sha256_json(second['action_id']))['units']['g1'].get('detail')
+    assert len(proposals())==before_proposals+1
     vid=store.read_cvp_heads()[0]['viewpoint_id']
     current=store.get_record_state('canonical_viewpoints',vid)['payload']
     assert current['summary']==original['summary']
@@ -590,8 +595,10 @@ def add_second_claim(store,request):
 @pytest.mark.parametrize('statement_scope',[False,True])
 def test_capacity_children_complete_independently_reuse_recall_and_current_approved_summary(setup,monkeypatch,interrupt,statement_scope):
     store,request,root,clients,_=setup;request=add_second_claim(store,request)
+    screened=[]
     if statement_scope:
         from backend.api.canonical_repository.cvp_recall import STATEMENT_SCOPE_PROFILE
+        from backend.pipeline import cvp_candidate_screening
         request['input']=seal({k:v for k,v in request['input'].items() if k!='artifact_sha256'} |
                               {'recall_profile':STATEMENT_SCOPE_PROFILE})
         path=Path(request['authorization']['path']);direction=json.loads(path.read_text())
@@ -603,6 +610,10 @@ def test_capacity_children_complete_independently_reuse_recall_and_current_appro
         monkeypatch.setattr(runner,'_completed_summary_proofs',no_summary_stage)
         from backend.pipeline import cvp_management_index
         monkeypatch.setattr(cvp_management_index,'write_committed_summary_proofs',no_summary_stage)
+        def fitting_screen(*args,measure,**kwargs):
+            screened.append(True)
+            measure(args[3],{})
+        monkeypatch.setattr(cvp_candidate_screening,'screen_expansion_to_fit',fitting_screen)
     original_adapter=runner.adapter
     def measured(role,req,bundle,packet,**kwargs):
         result=original_adapter(role,req,bundle,packet,**kwargs)
@@ -610,6 +621,8 @@ def test_capacity_children_complete_independently_reuse_recall_and_current_appro
         # real scoped packet/schema is still used by the common cache runtime.
         if role=='proposal':
             result.request_bytes=lambda payload:600000 if len(payload['input']['claims'])>1 else 100000
+        if role=='review' and statement_scope and bundle['member_support_ids'] and not screened:
+            result.request_bytes=lambda payload:request['budget']['max_request_bytes']+1
         return result
     monkeypatch.setattr(runner,'adapter',measured)
     if interrupt:
@@ -628,13 +641,16 @@ def test_capacity_children_complete_independently_reuse_recall_and_current_appro
     assert len(action['work_groups'])==2 and action['units']['g1']['status']=='completed'
     assert {tuple(g['claim_ids']) for g in action['work_groups']}=={('C1',),('C2',)}
     assert all(action['units'][g['group_key']]['status']=='completed' for g in action['work_groups'])
-    # The second unit recalls the first CVP. Its initial create proposal must
-    # read that CVP's member source and receive one propose follow-up before
-    # Opus may compare the new viewpoint against it.
-    assert len(clients['gpt'].requests)==4 and len(clients['opus'].requests)==2
+    # The second unit recalls the first CVP. Its initial create proposal loads
+    # that CVP's member source, then goes directly to Opus on the rebound
+    # candidate; loading comparison detail does not trigger another GPT call.
+    assert len(clients['gpt'].requests)==3 and len(clients['opus'].requests)==2
+    assert len(screened)==(1 if statement_scope else 0)
     second=next(g for g in action['work_groups'] if g['claim_ids']==['C2'])
     steps=action['units'][second['group_key']]['steps']
     assert len(steps)==2
+    assert store.get_cvp_group(steps[-1])['materials']['proposal_origin']['step_id']==steps[0]
+    assert not (Path(store.get_cvp_group(steps[-1])['materials']['step_root'])/'proposal.json').exists()
     final_bundle=store.get_cvp_group(steps[-1])['materials']['bundle']
     assert final_bundle['member_support_ids']==['C1']
     assert any(row['claim_ref']==final_bundle['references']['claims']['C1'] and row['support_loaded']

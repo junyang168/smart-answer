@@ -25,22 +25,26 @@ def _authenticated_evidence(evidence, proposal_cache, review_cache, *, proposer=
     package = validate_evidence(evidence)
     request = domain.Request.model_validate(evidence['request'])
     bundle = evidence['bundle']
-    packets = [domain.proposal_packet(request, bundle, previous=evidence['previous'],
-                                     prior_findings=evidence['prior_findings']),
+    origin = evidence.get('proposal_origin')
+    proposal_bundle = origin['bundle'] if origin is not None else bundle
+    proposal_previous = origin['previous'] if origin is not None else evidence['previous']
+    proposal_findings = origin['prior_findings'] if origin is not None else evidence['prior_findings']
+    packets = [domain.proposal_packet(request, proposal_bundle, previous=proposal_previous,
+                                     prior_findings=proposal_findings),
                domain.review_packet(request, bundle, evidence['candidate'],
                                     prior_findings=evidence['prior_findings'])]
-    for cache, packet, roles, client, name, key in [
-        (proposal_cache, packets[0], ['proposal', 'correction'], proposer, 'proposal_raw', 'proposal_artifact_sha256'),
-        (review_cache, packets[1], ['review', 'initial_review', 'final_review'], reviewer, 'review_raw', 'review_artifact_sha256')]:
+    for cache, packet, material, roles, client, name, key in [
+        (proposal_cache, packets[0], proposal_bundle, ['proposal', 'correction'], proposer, 'proposal_raw', 'proposal_artifact_sha256'),
+        (review_cache, packets[1], bundle, ['review', 'initial_review', 'final_review'], reviewer, 'review_raw', 'review_artifact_sha256')]:
         cache = Path(cache)
         if not cache.is_absolute():
             raise ValueError('committed summary requires absolute original call cache paths')
         saved = read_artifact(cache)
         choices = []
         for role in roles:
-            if role == 'correction' and evidence['previous'] is None:
+            if role == 'correction' and proposal_previous is None:
                 continue
-            adapter = models.adapter(role, request, bundle, packet, client=client)
+            adapter = models.adapter(role, request, material, packet, client=client)
             expected = model_request_identity(response_adapter(adapter, saved), packet)
             if all(saved.get(field) == value for field, value in expected.items()):
                 choices.append((role, adapter))

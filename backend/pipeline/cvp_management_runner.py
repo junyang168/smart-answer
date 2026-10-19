@@ -542,7 +542,7 @@ def run(store,request,*,root,execute=False,clients=None):
                             recall=recall,index_root=str(index_root))
                         position-=1
                         continue
-                previous=None;prior_findings=[];ordinal=0;revision=False;seen=set()
+                previous=None;prior_findings=[];ordinal=0;revision=False;seen=set();proposal_origin=None
                 if latest:
                     oldroot=Path(latest['materials']['step_root'])
                     oldbundle=latest['materials']['bundle']
@@ -563,6 +563,7 @@ def run(store,request,*,root,execute=False,clients=None):
                         # let its exact cached proposal/review complete.
                         previous=latest['materials']['previous']
                         prior_findings=latest['materials']['prior_findings']
+                        proposal_origin=latest['materials'].get('proposal_origin')
                         ordinal=latest['ordinal'];revision=latest['revision']
                     else:
                         if (oldroot/'candidate.json').exists():
@@ -588,6 +589,8 @@ def run(store,request,*,root,execute=False,clients=None):
                     step_root=unit_root/f'step-{ordinal:04d}'
                     materials={'bundle':bundle,'previous':previous,'prior_findings':prior_findings,
                                'step_root':str(step_root),'recall_root':str(recall_root),'index_root':str(index_root)}
+                    if proposal_origin is not None:
+                        materials['proposal_origin']=proposal_origin
                     if latest and latest['generation']==generation and latest['ordinal']==ordinal:
                         if latest['materials'].get('index_root') is None:
                             materials.pop('index_root')
@@ -595,33 +598,50 @@ def run(store,request,*,root,execute=False,clients=None):
                         ordinal=ordinal,materials=materials,revision=revision)
                     write_immutable(step_root/'materials.json',materials)
                     _guard(store,bundle)
-                    packet=domain.proposal_packet(request,bundle,previous=previous,prior_findings=prior_findings)
-                    pa=adapter('proposal',request,bundle,packet,client=proposer)
-                    raw,_,_=call(pa,packet,step_root/'proposal.json');response=validate_response('proposal',raw)
-                    if response['result']=='context_insufficient':
-                        newbundle=_expand(store,request,current,key,recall,bundle,response)
-                        if previous:previous=_rebase_previous(request,bundle,newbundle,previous,prior_findings=prior_findings)
-                        bundle=persistence.bind_task_constraints(store,parent_id,newbundle);ordinal+=1;revision=False;continue
-                    candidate=domain.compile_candidate(request,bundle,response['candidate'],previous=previous,prior_findings=prior_findings)
+                    if proposal_origin is None:
+                        packet=domain.proposal_packet(request,bundle,previous=previous,prior_findings=prior_findings)
+                        pa=adapter('proposal',request,bundle,packet,client=proposer)
+                        raw,_,_=call(pa,packet,step_root/'proposal.json');response=validate_response('proposal',raw)
+                        if response['result']=='context_insufficient':
+                            newbundle=_expand(store,request,current,key,recall,bundle,response)
+                            if previous:previous=_rebase_previous(request,bundle,newbundle,previous,prior_findings=prior_findings)
+                            bundle=persistence.bind_task_constraints(store,parent_id,newbundle);ordinal+=1;revision=False;continue
+                        candidate=domain.compile_candidate(request,bundle,response['candidate'],previous=previous,prior_findings=prior_findings)
+                        proposal_path=step_root/'proposal.json'
+                    else:
+                        origin=proposal_origin
+                        proposal_path=Path(origin['proposal_path'])
+                        packet=domain.proposal_packet(request,origin['bundle'],previous=origin['previous'],
+                            prior_findings=origin['prior_findings'])
+                        pa=adapter('proposal',request,origin['bundle'],packet,client=proposer)
+                        raw=read_saved_model_response(pa,packet,proposal_path)
+                        candidate=previous
+                        if candidate['material_sha256']!=bundle['artifact_sha256']:
+                            raise ValueError('review-only candidate differs from expanded material')
                     from backend.pipeline import cvp_candidate_screening as screening
                     detail_recall=screening.effective_recall(recall,bundle,current,key)
                     missing=action_member_requests(bundle,detail_recall,candidate)
                     if missing:
-                        # This is still the propose stage. The preliminary
-                        # afterimage is kept for the next call, but cannot be
-                        # sent to Opus until its comparison material is whole.
+                        if proposal_origin is not None:
+                            raise ValueError('review-only candidate unexpectedly lacks member support')
+                        # Complete the action's comparison material before
+                        # Opus reviews the existing proposal's afterimage.
                         write_immutable(step_root/'candidate.json',candidate)
                         newbundle=_expand(store,request,current,key,recall,bundle,
                             {'member_requests':missing,'context_requests':[]})
                         newbundle=persistence.bind_task_constraints(store,parent_id,newbundle)
                         rebound=domain.rebind_candidate(request,bundle,newbundle,candidate,
                             prior_findings=prior_findings)
-                        followup=domain.proposal_packet(request,newbundle,previous=rebound,
-                                                        prior_findings=prior_findings)
-                        followup_bytes=adapter('proposal',request,newbundle,followup,client=proposer).request_bytes(followup)
-                        review=domain.review_packet(request,newbundle,rebound,prior_findings=prior_findings)
-                        review_bytes=adapter('review',request,newbundle,review,client=reviewer).request_bytes(review)
-                        if max(followup_bytes,review_bytes)>request.budget.max_request_bytes and request.input.get('recall_profile')==STATEMENT_SCOPE_PROFILE:
+                        needs_followup=bool(rebound.get('summary_material_pending') or rebound['findings'])
+                        def next_request_bytes(material,prior):
+                            if needs_followup:
+                                packet=domain.proposal_packet(request,material,previous=prior,
+                                    prior_findings=prior_findings)
+                                return adapter('proposal',request,material,packet,client=proposer).request_bytes(packet)
+                            packet=domain.review_packet(request,material,prior,prior_findings=prior_findings)
+                            return adapter('review',request,material,packet,client=reviewer).request_bytes(packet)
+                        next_bytes=next_request_bytes(newbundle,rebound)
+                        if next_bytes>request.budget.max_request_bytes and request.input.get('recall_profile')==STATEMENT_SCOPE_PROFILE:
                             target_claims={ref:cid for cid,ref in bundle['references']['claims'].items()}
                             component_claims={part['component_ref']:target_claims[part['claim_ref']]
                                               for part in candidate['component_plan']['components']}
@@ -638,17 +658,18 @@ def run(store,request,*,root,execute=False,clients=None):
                                 expanded=persistence.bind_task_constraints(store,parent_id,expanded)
                                 prior=domain.rebind_candidate(request,bundle,expanded,candidate,
                                     prior_findings=prior_findings)
-                                packet=domain.proposal_packet(request,expanded,previous=prior,
-                                                               prior_findings=prior_findings)
-                                proposal_size=adapter('proposal',request,expanded,packet,client=proposer).request_bytes(packet)
-                                packet=domain.review_packet(request,expanded,prior,prior_findings=prior_findings)
-                                review_size=adapter('review',request,expanded,packet,client=reviewer).request_bytes(packet)
                                 measured_bundle[:]=[expanded,prior]
-                                return max(proposal_size,review_size)
+                                return next_request_bytes(expanded,prior)
                             screening.screen_expansion_to_fit(store,current,key,recall,request,
                                 reviewer=reviewer,screening_root=step_root/'screening',call=call,
                                 measure=measure,applicable_claim_ids=applicable)
                             newbundle,rebound=measured_bundle
+                        narrowed=screening.effective_recall(recall,newbundle,current,key)
+                        if action_member_requests(newbundle,narrowed,rebound):
+                            raise ValueError('screened review still lacks required member support')
+                        proposal_origin=(None if needs_followup else
+                            {'step_id':step_id,'proposal_path':str(proposal_path),
+                             'bundle':bundle,'previous':previous,'prior_findings':prior_findings})
                         previous=rebound
                         bundle=newbundle
                         ordinal+=1;revision=False;continue
@@ -657,7 +678,7 @@ def run(store,request,*,root,execute=False,clients=None):
                         # proposal has not supplied a reviewable summary yet.
                         # Keep this in the original propose budget.
                         write_immutable(step_root/'candidate.json',candidate)
-                        previous=candidate
+                        previous=candidate;proposal_origin=None
                         ordinal+=1;revision=False;continue
                     digest=_semantic(candidate)
                     if revision and (bundle['artifact_sha256'],digest) in seen:raise ValueError('no semantic progress or oscillation; root cause investigation required')
@@ -667,7 +688,7 @@ def run(store,request,*,root,execute=False,clients=None):
                         # passing review verdict. Resolve it in the next proposal
                         # before asking Opus to review a complete afterimage.
                         seen.add((bundle['artifact_sha256'],digest))
-                        previous=candidate;prior_findings=_all_findings(candidate,{'findings':[]})
+                        previous=candidate;prior_findings=_all_findings(candidate,{'findings':[]});proposal_origin=None
                         ordinal+=1;revision=True;continue
                     # Freeze before the FIRST Opus call, even a rejection or
                     # unknown return. Later plans require explicit lineage.
@@ -679,19 +700,22 @@ def run(store,request,*,root,execute=False,clients=None):
                     if review['result']=='context_insufficient':
                         newbundle=_expand(store,request,current,key,recall,bundle,review)
                         previous=domain.rebind_candidate(request,bundle,newbundle,candidate,prior_findings=prior_findings)
-                        bundle=persistence.bind_task_constraints(store,parent_id,newbundle);ordinal+=1;revision=False;continue
+                        bundle=persistence.bind_task_constraints(store,parent_id,newbundle);proposal_origin=None
+                        ordinal+=1;revision=False;continue
                     approval=domain.validate_review(request,bundle,candidate,review['review'],prior_findings=prior_findings)
                     write_immutable(step_root/'approval.json',approval)
                     if not approval['approved']:
-                        previous=candidate;prior_findings=_all_findings(candidate,approval);seen.add((bundle['artifact_sha256'],digest))
+                        previous=candidate;prior_findings=_all_findings(candidate,approval);proposal_origin=None
+                        seen.add((bundle['artifact_sha256'],digest))
                         ordinal+=1;revision=True;continue
                     evidence={'round_id':step_id,'request':request.model_dump(mode='json'),'bundle':bundle,
                         'candidate':candidate,'approval':approval,'proposal_raw':raw,'review_raw':raw_review,
                         'previous':previous,'prior_findings':prior_findings,
-                        'call_keys':{'gpt':str((step_root/'proposal.json').relative_to(root)),
+                        **({'proposal_origin':proposal_origin} if proposal_origin is not None else {}),
+                        'call_keys':{'gpt':str(proposal_path.relative_to(root)),
                                      'opus':str((step_root/'review.json').relative_to(root))},
                         'provenance':{'proposal_model':pa.model_id,'review_model':ra.model_id,
-                            'proposal_artifact_sha256':read_artifact(step_root/'proposal.json')['artifact_sha256'],
+                            'proposal_artifact_sha256':read_artifact(proposal_path)['artifact_sha256'],
                             'review_artifact_sha256':read_artifact(step_root/'review.json')['artifact_sha256'],
                             'created_at':stable_decided_at(step_root)}}
                     package=validate_evidence(evidence);_guard(store,bundle)
@@ -705,7 +729,7 @@ def run(store,request,*,root,execute=False,clients=None):
                     persistence.progress(store,parent_id,group_key=key,status='completed',step_id=step_id)
                     from backend.pipeline.cvp_management_index import write_committed_summary_proofs
                     if not domain.statement_recall(request):
-                        approved_cards.extend(write_committed_summary_proofs(evidence,step_root/'proposal.json',
+                        approved_cards.extend(write_committed_summary_proofs(evidence,proposal_path,
                             step_root/'review.json',store.read_cvp_heads(),step_root/'summary-proofs'))
                     previous_index_root=index_root
                     break
