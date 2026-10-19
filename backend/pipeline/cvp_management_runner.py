@@ -182,6 +182,8 @@ def _expand(store,request,preflight,group_key,recall,bundle,response):
                     new.update(sections=sorted(sections.values(),key=lambda s:s['start']),
                                expansion_level=old['expansion_level'])
         expanded['context_requests']=deepcopy(bundle.get('context_requests',[]))
+        if bundle['material'].get('screening'):
+            expanded['material']['screening']=deepcopy(bundle['material']['screening'])
         expanded['previous_material_sha256']=bundle['artifact_sha256']
         expanded=seal({k:v for k,v in expanded.items() if k!='artifact_sha256'})
     else:expanded=bundle
@@ -499,9 +501,30 @@ def run(store,request,*,root,execute=False,clients=None):
                 current=seal({k:v for k,v in current.items() if k!='artifact_sha256'}|{'recall_plans':[
                     {'group_key':p['group_key'],'plan':metrics['current_plan'] if p['group_key']==key else p['plan']}
                     for p in current['recall_plans']]})
-                bundle=prepare_materials(store,current,key,recall,maintenance_viewpoint_ids=request.maintenance_viewpoint_ids,
-                                   maintenance_record_keys=[(p.collection,p.object_id) for p in request.permissions],
-                                   summary_root=request.input.get('contextual_summary_root'))
+                filtered_path=unit_root/'filtered-recall.json'
+                if latest and filtered_path.exists():
+                    recall=read_artifact(filtered_path)
+                    bundle=prepare_materials(store,current,key,recall,
+                        maintenance_viewpoint_ids=request.maintenance_viewpoint_ids,
+                        maintenance_record_keys=[(p.collection,p.object_id) for p in request.permissions],
+                        summary_root=request.input.get('contextual_summary_root'))
+                elif not latest and request.input.get('recall_profile')==STATEMENT_SCOPE_PROFILE:
+                    from backend.pipeline.cvp_candidate_screening import screen_to_fit
+                    recall,bundle,_=screen_to_fit(store,current,key,recall,request,
+                        proposer=proposer,reviewer=reviewer,
+                        screening_root=unit_root/'screening',call=call)
+                    if not bundle['material'].get('screening'):
+                        # An ordinary fitting group keeps its established
+                        # on-demand member expansion and model-call sequence.
+                        bundle=prepare_materials(store,current,key,recall,
+                            maintenance_viewpoint_ids=request.maintenance_viewpoint_ids,
+                            maintenance_record_keys=[(p.collection,p.object_id) for p in request.permissions],
+                            summary_root=request.input.get('contextual_summary_root'))
+                    write_immutable(filtered_path,recall)
+                else:
+                    bundle=prepare_materials(store,current,key,recall,maintenance_viewpoint_ids=request.maintenance_viewpoint_ids,
+                                       maintenance_record_keys=[(p.collection,p.object_id) for p in request.permissions],
+                                       summary_root=request.input.get('contextual_summary_root'))
                 bundle=persistence.bind_task_constraints(store,parent_id,bundle)
                 # Control facts version semantic material while the original
                 # authenticated recall remains reusable. They never reset calls.
