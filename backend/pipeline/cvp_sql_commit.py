@@ -113,7 +113,7 @@ def resume_reviewed_action(store, run_id):
     evidence = saved['reviewed']['evidence']
     from backend.pipeline.source_editorial_transition import verify_current_source_binding
     for source in evidence['sources']: verify_current_source_binding(source)
-    if saved['reviewed']['plan']['source_kind'] not in {'wang_claim_management_v2','wang_cvp_management_v2'}:
+    if saved['reviewed']['plan']['source_kind'] not in {'wang_claim_management_v2','wang_cvp_management_v2','wang_cvp_contextual_summary_v1'}:
         check_binding(evidence['backup']['dump'])
     for proof in evidence['approval'].values():
         if isinstance(proof,dict) and {'path','file_sha256'} <= proof.keys(): check_binding(proof)
@@ -147,7 +147,7 @@ def commit_package(store, run_id, *, package, approval, authorization, backup, s
     """The shared normal/source/link execution boundary after content approval."""
     from backend.pipeline.source_editorial_transition import verify_current_source_binding
     for source in sources:verify_current_source_binding(source)
-    if source_kind not in {'wang_claim_management_v2','wang_cvp_management_v2'}:
+    if source_kind not in {'wang_claim_management_v2','wang_cvp_management_v2','wang_cvp_contextual_summary_v1'}:
         if not backup.get('restore_catalog_nonempty') or not backup.get('dump'):
             raise ValueError('fresh backup lacks verified restore-list proof')
         check_binding(backup['dump'])

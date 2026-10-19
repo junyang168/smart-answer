@@ -5,6 +5,8 @@ import pytest
 from pydantic import ValidationError
 from backend.pipeline import cvp_contextual_summary as summary
 from backend.api.canonical_repository.cvp_recall import seal
+from backend.pipeline.cvp_sql_commit import binding
+from backend.pipeline.viewpoint_resolution_runtime import write_immutable
 from test_cvp_materials import MaterialStore
 from test_cvp_recall_stages import Client,review_client
 
@@ -83,6 +85,34 @@ def test_summary_cannot_be_swapped_after_review(tmp_path,monkeypatch):
     (tmp_path/'summaries.json').write_text(json.dumps(result))
     with pytest.raises(ValueError,match='differs from proposal'):
         summary.load_current_cards(store,tmp_path,{'V1'})
+
+
+def test_promotion_accepts_only_the_saved_reviewed_summary(tmp_path, monkeypatch):
+    store,bundle=fixture_bundle(monkeypatch)
+    material=deepcopy(bundle['material'])
+    next(row['content'] for row in material['records'] if row['collection']=='canonical_viewpoints')['revision']=2
+    bundle=seal({**{k:v for k,v in bundle.items() if k!='artifact_sha256'},'material':material})
+    root=tmp_path/'son-of-man-context-summaries-test'
+    card=summary.run([bundle],proposer=Client(),reviewer=review_client(),root=root,
+                     check_current=lambda bs:None,max_calls=2)['cards'][0]
+    authority=tmp_path/'authorization.json'
+    write_immutable(authority,{'schema_version':'wang_cvp_contextual_summary_promotion_authorization_v1',
+        'authorized_by':'owner','scope':'current source-bound Son of Man cards only'})
+    old=next(row['content'] for row in material['records'] if row['collection']=='canonical_viewpoints')
+    basis={'schema_version':'test-summary-basis'}
+    monkeypatch.setattr('backend.api.canonical_repository.cvp_management.summary_basis_for_records',
+                        lambda *args,**kwargs:basis)
+    package={'package_id':'contextual-summary-V1-'+card['material_sha256'][:20],
+        'canonical_viewpoints':[{**old,'revision':old['revision']+1,
+            'summary':card['summary'],'summary_basis':basis}],
+        'contextual_summary_application':{'schema_version':summary.VERSION,
+            'root':str(root),'viewpoint_id':'V1','material_sha256':card['material_sha256'],
+            'authorization':binding(authority)}}
+    summary.validate_promotion_package(store,package)
+    forged=deepcopy(package)
+    forged['canonical_viewpoints'][0]['summary']='different'
+    with pytest.raises(ValueError,match='postimage differs'):
+        summary.validate_promotion_package(store,forged)
 
 
 def test_material_builder_uses_summary_and_keeps_full_maintenance(tmp_path,monkeypatch):

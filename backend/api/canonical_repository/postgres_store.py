@@ -4823,10 +4823,26 @@ class PostgresKnowledgeStore:
             from .cvp_management_store import review_step
             return review_step(self,run_id,plan=plan,evidence=evidence)
         required = {"package", "approval", "authorization", "backup", "sources", "read_pins"}
-        if plan.source_kind == 'wang_claim_management_v2':
+        if plan.source_kind in {'wang_claim_management_v2','wang_cvp_contextual_summary_v1'}:
             required.remove('backup')
         if not required <= set(evidence) or any(not evidence[k] for k in required - {"read_pins"}):
             raise ValueError("CVP reviewed state lacks source/approval/backup authority")
+        if plan.source_kind == 'wang_cvp_contextual_summary_v1':
+            from backend.pipeline.cvp_contextual_summary import validate_promotion_package
+            from backend.pipeline.cvp_sql_commit import binding
+            package = evidence['package']['payload']
+            validate_promotion_package(self, package)
+            if plan.as_dict() != self.plan_package(package,
+                    source_kind='wang_cvp_contextual_summary_v1', transactional=True).as_dict():
+                raise ValueError('contextual summary SQL plan differs from reviewed card')
+            app = package['contextual_summary_application']
+            from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+            card = next(c for c in read_artifact(Path(app['root'])/'summaries.json')['cards']
+                        if c['viewpoint_id'] == app['viewpoint_id'])
+            if (evidence['authorization'] != app['authorization']
+                    or evidence['approval'] != binding(card['review_path'])
+                    or evidence['backup'] != {}):
+                raise ValueError('contextual summary SQL review differs from saved approval')
         review = json.loads(canonical_json({"plan": plan.as_dict(), "evidence": dict(evidence)}))
         digest = sha256_json(review)
         with self.connect() as conn, conn.cursor() as cursor:
@@ -6038,6 +6054,11 @@ class PostgresKnowledgeStore:
         """
 
         claim_writes = None
+        if source_kind == 'wang_cvp_contextual_summary_v1' or package.get('contextual_summary_application') is not None:
+            if source_kind != 'wang_cvp_contextual_summary_v1' or not transactional or retiring_keys:
+                raise ValueError('reviewed contextual summary requires its exact SQL transaction')
+            from backend.pipeline.cvp_contextual_summary import validate_promotion_package
+            validate_promotion_package(self, package)
         if source_kind=='wang_cvp_management_v2' or package.get('cvp_management_application') is not None:
             if source_kind!='wang_cvp_management_v2' or not transactional:
                 raise ValueError('CVP2 requires its explicit shared SQL transaction')
@@ -7594,7 +7615,7 @@ class PostgresKnowledgeStore:
             raise ValueError('relation retirement cannot bypass common SQL transaction')
         if plan.source_kind=='wang_cvp_management_v2' and transaction_context is None:
             raise ValueError('CVP2 cannot bypass the shared SQL transaction')
-        if plan.source_kind in {'wang_claim_management_v2','wang_cvp_merge_management_v1','wang_source_sql_reconciliation_v2','wang_owner_sql_link_correction_v2','wang_cvp_sql_link_retarget_v1','wang_cvp_owner_sql_link_retirement_v1','wang_cvp_deferred_authorized_link_management_v1','wang_cvp_sql_link_replacement_v1','wang_cvp_sql_link_representation_v1'} and transaction_context is None:
+        if plan.source_kind in {'wang_claim_management_v2','wang_cvp_contextual_summary_v1','wang_cvp_merge_management_v1','wang_source_sql_reconciliation_v2','wang_owner_sql_link_correction_v2','wang_cvp_sql_link_retarget_v1','wang_cvp_owner_sql_link_retirement_v1','wang_cvp_deferred_authorized_link_management_v1','wang_cvp_sql_link_replacement_v1','wang_cvp_sql_link_representation_v1'} and transaction_context is None:
             raise ValueError('SQL v2 actions cannot bypass the shared transaction boundary')
         if transaction_context is not None:
             from .transaction_validation import TransactionValidation

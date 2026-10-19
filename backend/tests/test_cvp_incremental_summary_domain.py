@@ -65,7 +65,8 @@ def test_historical_summary_limit_remains_149_characters():
         domain.compile_candidate(request(), materials(), raw)
 
 
-def test_new_link_rebinds_unchanged_existing_summary_without_identity_permission():
+@pytest.mark.parametrize('stored_summary', [True, False])
+def test_new_link_rebinds_unchanged_existing_summary_without_identity_permission(stored_summary):
     bundle, ids = maintained()
     records = deepcopy(bundle['records'])
     source = {'source_id': 'S1', 'source_type': 'sermon_transcript', 'revision': 1,
@@ -82,9 +83,11 @@ def test_new_link_rebinds_unchanged_existing_summary_without_identity_permission
     payloads = {(r['collection'], r['object_id']): r['payload'] for r in records}
     view_record = next(r for r in records if (r['collection'], r['object_id']) ==
                        ('canonical_viewpoints', ids['canonical_viewpoints']))
-    view_record['payload']['summary'] = '人子稱號指向神性。'
-    view_record['payload']['summary_basis'] = domain.summary_basis_for_records(payloads, ids['canonical_viewpoints'])
-    view_record['content_sha256'] = semantic_record_sha(view_record['payload'])
+    summary = '人子稱號指向神性。'
+    if stored_summary:
+        view_record['payload']['summary'] = summary
+        view_record['payload']['summary_basis'] = domain.summary_basis_for_records(payloads, ids['canonical_viewpoints'])
+        view_record['content_sha256'] = semantic_record_sha(view_record['payload'])
     refs = deepcopy(bundle['references'])
     refs['claims']['C2'] = 'c2'
     refs['evidence_steps']['E2'] = 'e2'
@@ -94,7 +97,10 @@ def test_new_link_rebinds_unchanged_existing_summary_without_identity_permission
     target_input = compile_input([claim], policy, claim_refs={'C2': 'c2'})
     complete = seal({**{k: deepcopy(v) for k, v in bundle.items() if k != 'artifact_sha256'},
         'records': records, 'references': refs, 'claim_input': target_input,
-        'material': {'claims': [
+        'material': {'viewpoints': ([] if stored_summary else [{
+            'cvp_ref': 'v1', 'summary_status': 'current',
+            'contextual_summary': {'text': summary, 'attribution': 'editorial_synthesis'}}]),
+            'claims': [
             {'claim_ref': 'c1', 'target': False, 'support_loaded': True},
             {'claim_ref': 'c2', 'target': True, 'support_loaded': True}]}})
     req = request(action_id='incremental-C2', creation_slots={'viewpoint_claim_links': 1})
@@ -105,7 +111,7 @@ def test_new_link_rebinds_unchanged_existing_summary_without_identity_permission
     candidate = domain.compile_candidate(req, complete, raw)
     assert candidate['summary_material_pending'] == []
     view_write = next(row for row in candidate['writes'] if row['collection'] == 'canonical_viewpoints')
-    assert view_write['payload']['summary'] == view_record['payload']['summary']
+    assert view_write['payload']['summary'] == summary
     assert len(view_write['payload']['summary_basis']['member_link_ids']) == 2
     assert 'v1' in candidate['review_sets']['objects']
     approval = domain.validate_review(req, complete, candidate, passing(candidate))

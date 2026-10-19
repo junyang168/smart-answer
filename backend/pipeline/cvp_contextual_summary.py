@@ -224,3 +224,133 @@ def load_current_cards(store, root, viewpoint_ids):
             continue
         cards[vid]=summary;bindings.append(bundle)
     return cards,bindings
+
+
+def persist_reviewed_cards(store, root, *, authorization, viewpoint_ids=None):
+    """Promote current, independently reviewed cards into CVP summary revisions.
+
+    The saved generator/reviewer answers are reused. Each CVP receives its own
+    short ChangeSet transaction and exact source/member read pins; a stale card
+    or a nonempty, different stored summary is never overwritten.
+    """
+    from backend.api.canonical_repository.cvp_management import summary_basis_for_records
+    from backend.api.canonical_repository.knowledge_models import CanonicalViewpointRecord, KNOWLEDGE_COLLECTIONS
+    from backend.api.canonical_repository.viewpoint_foundation import sha256_json
+    from backend.pipeline.cvp_sql_commit import binding, check_binding, commit_package
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+
+    root = Path(root).resolve()
+    check_binding(authorization)
+    result = read_artifact(root/'summaries.json')
+    plan = read_artifact(root/'plan.json')
+    bundles = {bundle['artifact_sha256']: bundle for bundle in plan['bundles']}
+    selected = set(viewpoint_ids) if viewpoint_ids is not None else {
+        card['viewpoint_id'] for card in result['cards']}
+    direction = read_artifact(authorization['path'])
+    if (direction.get('schema_version') != 'wang_cvp_contextual_summary_promotion_authorization_v1'
+            or direction.get('authorized_by') != 'owner'
+            or direction.get('scope') != 'current source-bound Son of Man cards only'
+            or 'son-of-man-context-summaries-' not in str(root)
+            or not selected <= {card['viewpoint_id'] for card in result['cards']}):
+        raise ValueError('reviewed summary promotion lacks scoped owner direction')
+    if not selected <= {card['viewpoint_id'] for card in result['cards']}:
+        raise ValueError('summary promotion requested a foreign viewpoint')
+    current, _ = load_current_cards(store, root, selected)
+    promoted, skipped = [], []
+    for card in result['cards']:
+        vid = card['viewpoint_id']
+        if vid not in selected:
+            continue
+        if current.get(vid) != card['summary']:
+            skipped.append({'viewpoint_id': vid, 'reason': 'stale_material'})
+            continue
+        bundle = bundles[card['material_sha256']]
+        guard(store, bundle)
+        payloads = {(row['collection'], row['content'][KNOWLEDGE_COLLECTIONS[row['collection']][1]]): row['content']
+                    for row in bundle['material']['records'] if row['collection'] in KNOWLEDGE_COLLECTIONS}
+        original = payloads['canonical_viewpoints', vid]
+        basis = summary_basis_for_records(payloads, vid,
+            human_source_decisions=bundle['human_source_decisions'])
+        stored = store.get_record_state('canonical_viewpoints', vid)
+        if stored['payload'] != original:
+            raise ValueError('current CVP differs from reviewed summary material')
+        if original.get('summary'):
+            if (original['summary'], original.get('summary_basis')) == (card['summary'], basis):
+                skipped.append({'viewpoint_id': vid, 'reason': 'already_persisted'})
+                continue
+            if original.get('summary_basis') == basis:
+                raise ValueError('reviewed card conflicts with a current CVP summary')
+        after = CanonicalViewpointRecord.model_validate({**original,
+            'revision': original['revision'] + 1, 'summary': card['summary'],
+            'summary_basis': basis}).model_dump(mode='json')
+        if {key: value for key, value in after.items() if key not in {'revision','summary','summary_basis'}} != {
+                key: value for key, value in original.items() if key not in {'revision','summary','summary_basis'}}:
+            raise ValueError('summary promotion changed CVP identity')
+        claim_ids = sorted({row['content']['claim_id'] for row in bundle['material']['records']
+            if row['collection'] == 'viewpoint_claim_links'
+            and row['content'].get('effective_state') == 'active'})
+        group = {'group_key': 'contextual-summary-'+vid, 'sequence': 1, 'claim_ids': claim_ids}
+        campaign = store.initialize_cvp_campaign({'accepted_grouping_sha256': card['material_sha256'],
+            'groups': [group]})
+        run_id = store.prepare_cvp_group(campaign_sha256=campaign, group_key=group['group_key'],
+            sequence=1, claim_ids=claim_ids, materials={'schema_version': VERSION+'_promotion',
+                'material_sha256': card['material_sha256'], 'summary_sha256': sha256_json(card['summary']),
+                'proposal': binding(card['proposal_path']), 'review': binding(card['review_path'])})
+        package = {'package_id': 'contextual-summary-'+vid+'-'+card['material_sha256'][:20],
+                   'canonical_viewpoints': [after],
+                   'contextual_summary_application': {'schema_version': VERSION,
+                       'root': str(root), 'viewpoint_id': vid,
+                       'material_sha256': card['material_sha256'], 'authorization': authorization}}
+        pins = {(row['collection'], row['object_id']): tuple(row['pin']) for row in bundle['pins']}
+        commit_package(store, run_id, package=package, approval=binding(card['review_path']),
+            authorization=authorization, backup={}, sources=[{'path': row['path'],
+                'file_sha256': row['file_sha256']} for row in bundle['sources']], read_pins=pins,
+            reason='Persist reviewed CVP contextual summary', actor=VERSION,
+            source_kind=VERSION)
+        actual = store.get_record_state('canonical_viewpoints', vid)
+        if actual['payload'] != after or actual['revision'] != after['revision']:
+            raise ValueError('committed contextual summary readback differs')
+        promoted.append(vid)
+    return {'promoted': promoted, 'skipped': skipped}
+
+
+def validate_promotion_package(store, package):
+    """Restrict the backup-free SQL source kind to one saved reviewed card."""
+    from backend.api.canonical_repository.cvp_management import summary_basis_for_records
+    from backend.api.canonical_repository.knowledge_models import KNOWLEDGE_COLLECTIONS
+    from backend.pipeline.cvp_sql_commit import check_binding
+    from backend.pipeline.viewpoint_resolution_runtime import read_artifact
+
+    if set(package) != {'package_id', 'canonical_viewpoints', 'contextual_summary_application'}:
+        raise ValueError('contextual summary package has foreign records')
+    app = package['contextual_summary_application']
+    if app.get('schema_version') != VERSION or len(package['canonical_viewpoints']) != 1:
+        raise ValueError('contextual summary promotion has no exact card')
+    vid = app['viewpoint_id']
+    root = Path(app['root']).resolve()
+    check_binding(app['authorization'])
+    direction = read_artifact(app['authorization']['path'])
+    if (direction.get('schema_version') != 'wang_cvp_contextual_summary_promotion_authorization_v1'
+            or direction.get('authorized_by') != 'owner'
+            or direction.get('scope') != 'current source-bound Son of Man cards only'
+            or 'son-of-man-context-summaries-' not in str(root)):
+        raise ValueError('contextual summary promotion lacks owner scope')
+    result = read_artifact(root/'summaries.json')
+    plan = read_artifact(root/'plan.json')
+    card = next((c for c in result['cards'] if c['viewpoint_id'] == vid), None)
+    if card is None or card['material_sha256'] != app['material_sha256']:
+        raise ValueError('contextual summary card differs from package')
+    if load_current_cards(store, root, {vid})[0].get(vid) != card['summary']:
+        raise ValueError('contextual summary card is stale or unreviewed')
+    bundle = next((b for b in plan['bundles'] if b['artifact_sha256'] == card['material_sha256']), None)
+    if bundle is None:
+        raise ValueError('contextual summary material missing')
+    payloads = {(row['collection'], row['content'][KNOWLEDGE_COLLECTIONS[row['collection']][1]]): row['content']
+                for row in bundle['material']['records'] if row['collection'] in KNOWLEDGE_COLLECTIONS}
+    old = payloads['canonical_viewpoints', vid]
+    after = package['canonical_viewpoints'][0]
+    expected = {**old, 'revision': old['revision'] + 1,
+        'summary': card['summary'], 'summary_basis': summary_basis_for_records(payloads, vid,
+            human_source_decisions=bundle['human_source_decisions'])}
+    if after != expected or package['package_id'] != 'contextual-summary-'+vid+'-'+card['material_sha256'][:20]:
+        raise ValueError('contextual summary postimage differs from reviewed card')

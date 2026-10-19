@@ -799,6 +799,18 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
                 raise ValueError('summary enrichment crosses a protected viewpoint')
             ref = keyrefs[key]
             proposed = summaries.get(ref)
+            if proposed is None and not state.get('summary'):
+                card = next((item for item in bundle['material'].get('viewpoints', [])
+                    if item.get('cvp_ref') == ref and item.get('summary_status') == 'current'), None)
+                card_summary = card.get('contextual_summary') if card else None
+                if card_summary and card_summary.get('attribution') == 'editorial_synthesis':
+                    text = card_summary.get('text')
+                    if isinstance(text, str) and 1 <= len(text) <= 500 and text.strip():
+                        # A source-bound, independently reviewed card is the
+                        # initial summary when the CVP row has none. The final
+                        # Opus review still sees and approves the full afterimage.
+                        proposed = {'ref': ref, 'summary': text}
+                        summaries[ref] = proposed
             summary = proposed['summary'] if proposed else state.get('summary')
             old_member_ids = {row['payload']['claim_id'] for (col, _), row in original.items()
                 if col == 'viewpoint_claim_links' and row['payload'].get('viewpoint_id') == vid

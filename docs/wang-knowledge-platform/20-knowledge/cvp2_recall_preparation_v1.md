@@ -104,9 +104,9 @@ Recall 只返回本组各 Claim 对应的 CVP ID；全部卡片分片，每片�
 
 准备、模型调用及结果保存分别进行；复用已有 store 查询、来源解析、结构化 adapter 和 immutable call cache。每批在调用前检查真实请求字节数；GPT／Opus 读相同完整材料，最多两轮修订且受同一保存计划总调用预算约束。返回记录缺项、多项、超过 500 字符或复核拒绝均不得算完成。每次调用及最终保存核对当前 head、成员集合、依赖版本、来源文件和人工来源事实。
 
-输出 `wang_cvp_contextual_summary_v1` 包含 statement、summary、材料 SHA 与原始生成／复核记录路径。它是来源绑定的编辑摘要，不改 Claim 或 CVP 命题。原有少于 150 字符的 recall 索引及其历史审核仍保留；新摘要不伪装成旧索引卡，也不进入上述 statement／经文范围 recall 输入。
+输出 `wang_cvp_contextual_summary_v1` 包含 statement、summary、材料 SHA 与原始生成／复核记录路径。它是来源绑定的编辑摘要，不改 Claim 或 CVP 命题。已通过 GPT／Opus 审核且成员、来源、人工事实仍为当前版本的摘要，可由 `persist_reviewed_cards` 经现有 ChangeSet 事务写入 `canonical_viewpoints.summary`，同时写入程序计算的 `summary_basis` 并独立回读；过期材料不得写入，当前有效的不同摘要不得被覆盖。旧摘要的成员绑定已失效时，按当前完整材料重新生成并复核后才能替换。原有少于 150 字符的 recall 索引及其历史审核仍保留；新摘要不伪装成旧索引卡，也不进入上述 statement／经文范围 recall 输入。
 
-完整 action 的 `input.contextual_summary_root` 可指定已完成的上下文摘要目录（绝对路径，内含 `plan.json` 与 `summaries.json`）。程序核对保存的生成／审核结果、当前 CVP、成员、依赖、原文及人工事实，将有效摘要加入 propose/review 的共同材料。模型默认不展开这些 CVP 的未请求成员表述，仍能通过成员引用请求依据；待处理 Claim、已请求成员及维护任务的必要全成员材料保留。缺失或过期摘要回退到当前成员表述，不增加模型调用。恢复及每次调用前复核摘要依赖；recall 仍不读取摘要。
+完整 action 的 `input.contextual_summary_root` 可指定已完成的上下文摘要目录（绝对路径，内含 `plan.json` 与 `summaries.json`）。程序核对保存的生成／审核结果、当前 CVP、成员、依赖、原文及人工事实，将有效摘要加入 propose/review 的共同材料。模型默认不展开这些 CVP 的未请求成员表述，仍能通过成员引用请求依据；待处理 Claim、已请求成员及维护任务的必要全成员材料保留。缺失或过期摘要回退到当前成员表述，不增加模型调用。新 Claim 连接到尚未持久化摘要的 CVP 时，有效的已审核上下文摘要成为候选的初始摘要，进入该次完整 Opus 审核及连接／摘要同一事务；模型可提出有依据的更新。恢复及每次调用前复核摘要依赖；recall 仍不读取摘要。
 
 ## 7. 验证边界
 
