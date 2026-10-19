@@ -6,7 +6,7 @@ import pytest
 
 from backend.api.canonical_repository import cvp_management as cvp
 from backend.api.canonical_repository.cvp_claim_input import compile_input
-from backend.api.canonical_repository.cvp_recall import seal
+from backend.api.canonical_repository.cvp_recall import seal, STATEMENT_SCOPE_PROFILE
 from backend.api.canonical_repository.viewpoint_foundation import semantic_record_sha
 
 
@@ -669,6 +669,41 @@ def test_cleaned_upstream_claim_repin_is_derived_without_copying_same_business_f
     with pytest.raises(ValueError, match='source Claim identity is immutable'):
         request(action_id='bad', mode='maintain', permissions=[{
             'collection': 'viewpoint_claim_links', 'object_id': ids['viewpoint_claim_links'], 'fields': ['claim_id']}])
+
+
+def test_metadata_repin_preserves_old_evidence_selection_without_summary_enrichment():
+    bundle, ids = maintained()
+    updated = deepcopy(bundle)
+    updated.pop('artifact_sha256')
+    claim = next(row for row in updated['records'] if row['collection'] == 'claims')
+    claim['payload'].update(revision=3, scripture_refs=['太16:4'], evidence_step_ids=['E1', 'E2'])
+    claim.update(revision=3, content_sha256=semantic_record_sha(claim['payload']))
+    for collection, oid, payload, ref in [
+        ('evidence_steps', 'E2', {'evidence_step_id': 'E2', 'source_fragment_id': 'F2',
+                                  'support_eligibility': 'eligible_candidate'}, 'e2'),
+        ('source_fragments', 'F2', {'fragment_id': 'F2', 'source_id': 'S1'}, 'f2'),
+    ]:
+        updated['records'].append({'collection': collection, 'object_id': oid, 'payload': payload,
+                                   'revision': 1, 'content_sha256': semantic_record_sha(payload), 'retired': False})
+        updated['references'][collection][oid] = ref
+    updated['claim_input']['policy']['mechanical_fields'].append('scripture_refs')
+    updated['claim_input'] = compile_input([claim['payload']], updated['claim_input']['policy'], claim_refs={'C1': 'c1'})
+    updated = seal(updated)
+    req = request(action_id='metadata-repin', mode='maintain',
+        maintenance_viewpoint_ids=[ids['canonical_viewpoints']],
+        permissions=[{'collection': 'viewpoint_claim_links', 'object_id': ids['viewpoint_claim_links'],
+                      'fields': ['pinned_claim_revision', 'component_locator']}],
+        input=seal({'schema_version': 'wang_cvp_recall_preflight_v1',
+                    'recall_profile': STATEMENT_SCOPE_PROFILE}))
+    candidate = cvp.compile_candidate(req, updated, maintenance_proposal())
+    old_link = next(row['payload'] for row in bundle['records']
+                    if row['collection'] == 'viewpoint_claim_links')
+    link = next(row['payload'] for row in candidate['writes']
+                if row['collection'] == 'viewpoint_claim_links')
+    assert link['pinned_claim_revision'] == 3
+    assert link['evidence_bindings'] == old_link['evidence_bindings']
+    assert candidate['summary_material_pending'] == []
+    assert cvp.validate_review(req, updated, candidate, passing(candidate))['approved']
 
 
 def test_retire_identity_can_withdraw_its_relationship_to_readonly_endpoint():

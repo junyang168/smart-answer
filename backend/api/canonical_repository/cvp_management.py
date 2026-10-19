@@ -666,20 +666,34 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
                        {'eligible', 'eligible_candidate', 'eligible_with_label'}
                        for eid in selected_evidence):
                     raise ValueError('link evidence selection includes ineligible support')
-            evidence = []
-            for eid in claim['payload'].get('evidence_step_ids', []):
-                if selected_evidence is not None and eid not in selected_evidence:
-                    continue
-                if ('evidence_steps', eid) not in original:
-                    raise ValueError('link Claim evidence is missing from material')
-                step = original['evidence_steps', eid]['payload']
-                if step.get('support_eligibility') not in {
-                        'eligible', 'eligible_candidate', 'eligible_with_label'}:
-                    continue
-                for fid in evidence_fragment_ids(step):
-                    if ('source_fragments', fid) not in original:
-                        raise ValueError('link evidence fragment is missing')
-                    evidence.append({'evidence_step_id': eid, 'source_fragment_id': fid})
+            if not is_new and selected_evidence is None:
+                # A version-only repin must not silently widen an approved
+                # link to every other eligible evidence step on the Claim.
+                evidence = deepcopy(original[key]['payload'].get('evidence_bindings', []))
+                for binding in evidence:
+                    eid, fid = binding['evidence_step_id'], binding['source_fragment_id']
+                    if (eid not in claim['payload'].get('evidence_step_ids', [])
+                            or ('evidence_steps', eid) not in original
+                            or ('source_fragments', fid) not in original
+                            or fid not in evidence_fragment_ids(original['evidence_steps', eid]['payload'])
+                            or original['evidence_steps', eid]['payload'].get('support_eligibility') not in
+                            {'eligible', 'eligible_candidate', 'eligible_with_label'}):
+                        raise ValueError('existing link evidence no longer qualifies for version-only repin')
+            else:
+                evidence = []
+                for eid in claim['payload'].get('evidence_step_ids', []):
+                    if selected_evidence is not None and eid not in selected_evidence:
+                        continue
+                    if ('evidence_steps', eid) not in original:
+                        raise ValueError('link Claim evidence is missing from material')
+                    step = original['evidence_steps', eid]['payload']
+                    if step.get('support_eligibility') not in {
+                            'eligible', 'eligible_candidate', 'eligible_with_label'}:
+                        continue
+                    for fid in evidence_fragment_ids(step):
+                        if ('source_fragments', fid) not in original:
+                            raise ValueError('link evidence fragment is missing')
+                        evidence.append({'evidence_step_id': eid, 'source_fragment_id': fid})
             payload['evidence_bindings'] = sorted(evidence, key=lambda row: (row['evidence_step_id'], row['source_fragment_id']))
         elif col == 'viewpoint_relations':
             for end in ('source', 'target'):
@@ -755,6 +769,8 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
         if row['collection'] != 'viewpoint_claim_links' or row['before_revision'] is None:
             continue
         old = original[row['collection'], row['object_id']]['payload']
+        if _member_meaning(old) == _member_meaning(row['payload']):
+            continue
         changed_member_targets.add(old['viewpoint_id'])
         changed_member_targets.add(row['payload']['viewpoint_id'])
     created_ids = {row['object_id'] for row in writes
