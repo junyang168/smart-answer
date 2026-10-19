@@ -1430,6 +1430,9 @@ def continuation_budget(previous, request, policy):
             or previous.get('created_keys') or previous.get('replacements')):
         raise ValueError('engineering continuation must retain original Update targets and source without structural writes')
     extension_basis = extension.get('basis', 'unknown_call') if isinstance(extension, dict) else None
+    permission_follow_up = (extension_basis == 'permission_required'
+        and previous['result'].get('reason') == 'permission_required'
+        and finding_permission_extension(previous, old, request))
     qualification_refresh = extension_basis == 'qualification_refresh'
     completed_cleanup = previous['result']['status'] == 'completed' and not qualification_refresh
     old_permissions = {p.key:set(p.fields) for p in old.permissions}
@@ -1451,6 +1454,7 @@ def continuation_budget(previous, request, policy):
         if extension_basis != 'unknown_call':
             extension_keys |= {'basis','current_objects_sha256','related_action_metadata_sha256'}
         valid_basis = (extension_basis == 'unknown_call' and previous['result'].get('reason') == 'call_uncertain'
+            or permission_follow_up
             or extension_basis == 'remaining_findings' and previous['result'].get('reason') == 'budget_exhausted' and bool(previous['findings'])
             or qualification_refresh and previous['result']['status'] == 'completed' and bool(previous.get('context_findings'))
             or read_only_refresh and previous['result'].get('reason') == 'disagreement'
@@ -1463,9 +1467,13 @@ def continuation_budget(previous, request, policy):
                 or not (extension['authorization_quote'] or '').strip()
                 or authority.get('authorized_by') != 'owner' or authority.get('human_content_approval') is not False
                 or completed_cleanup or human_follow_up
-                or (request.permissions != old.permissions and not read_only_refresh) or policy.initial_candidate != 'proposal'
+                or (request.permissions != old.permissions and not read_only_refresh and not permission_follow_up) or policy.initial_candidate != 'proposal'
                 or policy.all_findings_to_gpt != original.all_findings_to_gpt):
             raise ValueError('owner call extension requires exact paused action, authority and explicit new budget')
+        if permission_follow_up and (policy.budget.gpt_calls != 1 or policy.budget.opus_calls != 1
+                or policy.budget.gemini_calls != int(policy.independent_audit_required)
+                or policy.budget.max_revisions != 1):
+            raise ValueError('permission follow-up permits exactly one bounded proposal and review')
     recovery = authority.get('unaccepted_review_recovery', {})
     proposal_recovery = authority.get('unaccepted_proposal_recovery', {})
     if not isinstance(proposal_recovery,dict):

@@ -3330,7 +3330,14 @@ class PostgresKnowledgeStore:
                         continuation['prior_findings'].update(peer.get('context_findings', {}))
                         continuation['prior_findings'].update(peer.get('findings', {}))
                 if extension and not refresh and goal['original_objects'] != prior['original_goal']['original_objects']:
-                    raise ChangeSetConflict('owner call extension original content scope drifted')
+                    # Authorizing a saved readonly relation can promote its
+                    # endpoint evidence into model scope. Preserve every old
+                    # object; the complete transaction snapshot below must
+                    # still match the predecessor exactly.
+                    permission_follow_up = extension.get('basis') == 'permission_required'
+                    if (not permission_follow_up or any(goal['original_objects'].get(key) != state
+                            for key, state in prior['original_goal']['original_objects'].items())):
+                        raise ChangeSetConflict('owner call extension original content scope drifted')
                 target_baseline = {key:(value['revision'],value['content_sha256'],value['retired'])
                     for key,value in prior['original_goal']['original_objects'].items() if key in request.target_keys}
                 prior_rounds = sorted({slot['round_id'] for slot in prior['call_reservations'].values()})
