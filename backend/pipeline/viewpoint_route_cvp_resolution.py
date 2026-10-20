@@ -6,6 +6,7 @@ passing route set whose final review binds the exact proposal being written.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,42 @@ from backend.pipeline.viewpoint_route_resolution import (
 
 class CvpRouteReviewIncomplete(ValueError):
     """The current CVP route set has no complete independent approval."""
+
+
+def bind_attestation_source_ids(
+    raw: dict[str, Any], route_packet: dict[str, Any]
+) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    """Restore source IDs uniquely determined by pinned Claims and source SHA.
+
+    Model prose can change the script of a Chinese source ID.  Preserve the raw
+    response, and only bind an unknown ID when every named Claim belongs to one
+    source whose pinned revision SHA matches the attestation.  Known but wrong
+    source IDs, mixed Claims, and stale SHAs remain validator errors.
+    """
+
+    payload = deepcopy(raw)
+    proposal = payload.get("revised_proposal", payload)
+    claims = {item["claim_id"]: item["source_id"] for item in route_packet["claims"]}
+    source_shas = route_packet["source_revisions"]
+    bindings: list[dict[str, str]] = []
+    for attestation in proposal.get("source_route_attestations", []):
+        declared = attestation.get("source_id")
+        claim_ids = attestation.get("claim_ids") or []
+        if declared in source_shas or not claim_ids or any(cid not in claims for cid in claim_ids):
+            continue
+        sources = {claims[cid] for cid in claim_ids}
+        if len(sources) != 1:
+            continue
+        source_id = next(iter(sources))
+        if attestation.get("source_revision_sha256") != source_shas[source_id]:
+            continue
+        attestation["source_id"] = source_id
+        bindings.append({
+            "attestation_key": str(attestation.get("local_attestation_key") or ""),
+            "model_source_id": str(declared),
+            "pinned_source_id": source_id,
+        })
+    return payload, bindings
 
 
 def compile_cvp_route_package(
@@ -134,10 +171,15 @@ def run_cvp_route_scope(
     validation_repairs = 0
     while True:
         try:
+            bound_raw, source_bindings = bind_attestation_source_ids(raw, route_packet)
             proposal = ArgumentRouteProposalV2Response.model_validate(
-                canonicalize_proposal(raw)[0]
+                canonicalize_proposal(bound_raw)[0]
             )
             validate_route_proposal(routes=proposal, **validation_args)
+            if source_bindings:
+                write_immutable(output_dir / "route-proposal-source-bindings.json", {
+                    "raw_response_sha256": sha256_json(raw), "bindings": source_bindings,
+                })
             break
         except (ValidationError, BatchResolutionError) as exc:
             if isinstance(exc, ValidationError):
@@ -283,5 +325,17 @@ def run_cvp_route_scope(
             "reconsideration": last_reconsideration,
             "validation": reconsideration_validation,
         })
-        proposal = reconsideration.revised_proposal
+        bound_reconsideration, source_bindings = bind_attestation_source_ids(
+            last_reconsideration, route_packet
+        )
+        if source_bindings:
+            bound = ArgumentRouteReconsiderationV2Response.model_validate(bound_reconsideration)
+            write_immutable(output_dir / f"route-reconsideration-{round_number:03d}-bound.json", {
+                "raw_response_sha256": sha256_json(raw_reconsideration),
+                "source_bindings": source_bindings,
+                "reconsideration": bound.model_dump(mode="json"),
+            })
+            proposal = bound.revised_proposal
+        else:
+            proposal = reconsideration.revised_proposal
     raise AssertionError("route review loop did not terminate")

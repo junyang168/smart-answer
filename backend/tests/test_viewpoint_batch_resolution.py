@@ -40,6 +40,7 @@ from backend.api.canonical_repository.viewpoint_batch_changeset import (
 )
 from backend.api.canonical_repository.viewpoint_resolution import ReviewClaim
 from backend.pipeline.viewpoint_batch_resolution_runner import _stable_decided_at, run_batch
+from backend.pipeline.viewpoint_resolution_runtime import write_immutable
 from backend.pipeline.viewpoint_route_resolution import build_registry_route_packet
 
 ROCK_STATEMENT = "磐石不是彼得这个人，而是彼得所承认的信仰"
@@ -214,6 +215,14 @@ def test_batch_decision_time_is_frozen_across_resume(tmp_path: Path):
     assert first == second
     artifact = json.loads((tmp_path / "decision-time.json").read_text())
     assert artifact["decided_at"] == first
+
+
+def test_immutable_artifact_replay_compares_json_values(tmp_path: Path):
+    path = tmp_path / "plan.json"
+    write_immutable(path, {"operations": ({"object_id": "AR-1"},)})
+    write_immutable(path, {"operations": ({"object_id": "AR-1"},)})
+    with pytest.raises(ValueError, match="immutable artifact differs"):
+        write_immutable(path, {"operations": ({"object_id": "AR-2"},)})
 
 
 def test_route_job_requires_exact_cvp_authority_readback():
@@ -4235,6 +4244,11 @@ def test_route_changeset_compiles_reviewed_v2_master_records():
         existing_routes=[],
     )
     proposal = _routes()
+    # A proposal may redundantly restate the conclusion; the stored route
+    # identifies it only through the approved CVP revision.
+    proposal.argument_route_candidates[0].ordered_inference_nodes[-1].normalized_proposition = (
+        "模型重复写出的结论"
+    )
     package = compile_argument_route_package(
         proposal=proposal,
         passing_route_keys=["ROUTE-GREEK"],
@@ -4267,6 +4281,23 @@ def test_route_changeset_compiles_reviewed_v2_master_records():
     assert attestation["step_bindings"][0]["claim_component_keys"][0].startswith(
         "CCK-"
     )
+
+
+def test_route_changeset_uses_bound_fragment_when_cvp2_link_has_no_occurrence_ref():
+    claim = _claim("C1", ROCK_STATEMENT)
+    packet = build_registry_route_packet(
+        scope_label="matt16-13-18", approved_viewpoints=[_approved_viewpoint()],
+        claims=[claim], viewpoint_claim_links=[_registry_link(claim, occurrence_refs=[])],
+        existing_routes=[],
+    )
+    package = compile_argument_route_package(
+        proposal=_routes(), passing_route_keys=["ROUTE-GREEK"],
+        passing_attestation_keys=["ATTEST-1"], route_packet=packet,
+        existing_routes=[], claims=[claim], proposal_artifact_sha256="proposal-sha",
+        review_artifact_sha256="review-sha", proposer_model_id="gpt-5.6-sol",
+        reviewer_model_id="claude-opus-5", decided_at="2026-08-24T12:00:00Z",
+    )
+    assert package["argument_route_attestations"][0]["occurrence_ref_id"] == "C1-F1"
 
 
 def test_route_changeset_derives_scripture_from_sibling_claim_evidence():
@@ -8063,6 +8094,38 @@ def _routes_v2(**overrides: Any) -> Any:
 def test_whole_cvp_route_schema_does_not_change_legacy_proposal_bytes():
     assert "retired_route_revision_ids" not in _routes().model_dump(mode="json")
     assert _routes_v2().model_dump(mode="json")["retired_route_revision_ids"] == []
+
+
+def test_route_source_id_binding_requires_unique_pinned_claims_and_sha():
+    from backend.pipeline.viewpoint_route_cvp_resolution import bind_attestation_source_ids
+
+    packet = {
+        "claims": [
+            {"claim_id": "C1", "source_id": "notes:繁體"},
+            {"claim_id": "C2", "source_id": "notes:別篇"},
+        ],
+        "source_revisions": {"notes:繁體": "sha-1", "notes:別篇": "sha-2"},
+    }
+    raw = {"revised_proposal": {"source_route_attestations": [
+        {"local_attestation_key": "A1", "source_id": "notes:繁体",
+         "source_revision_sha256": "sha-1", "claim_ids": ["C1"]},
+    ]}}
+    bound, changes = bind_attestation_source_ids(raw, packet)
+    assert bound["revised_proposal"]["source_route_attestations"][0]["source_id"] == "notes:繁體"
+    assert raw["revised_proposal"]["source_route_attestations"][0]["source_id"] == "notes:繁体"
+    assert changes == [{"attestation_key": "A1", "model_source_id": "notes:繁体",
+                        "pinned_source_id": "notes:繁體"}]
+
+    for claim_ids, sha, declared in [
+        (["C1", "C2"], "sha-1", "notes:繁体"),
+        (["C1"], "stale-sha", "notes:繁体"),
+        (["C1"], "sha-1", "notes:別篇"),
+    ]:
+        invalid = {"source_route_attestations": [{"local_attestation_key": "A1",
+                    "source_id": declared, "source_revision_sha256": sha,
+                    "claim_ids": claim_ids}]}
+        unchanged, changes = bind_attestation_source_ids(invalid, packet)
+        assert unchanged == invalid and changes == []
 
 
 def test_whole_cvp_route_review_uses_one_complete_packet_and_no_extra_final(tmp_path):

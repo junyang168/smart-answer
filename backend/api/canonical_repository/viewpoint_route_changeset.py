@@ -133,7 +133,11 @@ def compile_argument_route_package(
                     {
                         "route_step_key": node.route_step_key,
                         "role": node.role,
-                        "normalized_proposition": node.normalized_proposition,
+                        # The conclusion is the referenced approved CVP revision.
+                        # Do not persist a model-copied second copy of its text.
+                        "normalized_proposition": (
+                            None if node.role == "conclusion" else node.normalized_proposition
+                        ),
                         "conclusion_viewpoint_revision_id": (
                             node.conclusion_ref.key() if node.conclusion_ref else None
                         ),
@@ -213,7 +217,12 @@ def compile_argument_route_package(
             raise ArgumentRouteChangeSetError(f"{key}: terminal component has no active Claim link")
         occurrence_refs = sorted(terminal.get("occurrence_ref_ids") or [])
         if not occurrence_refs:
-            raise ArgumentRouteChangeSetError(f"{key}: terminal Claim link has no occurrence")
+            # CVP 2.0 links pin exact evidence pairs but may leave the legacy
+            # opaque occurrence_refs empty.  A bound SourceFragment is a real,
+            # source-versioned occurrence locator for the same terminal Claim.
+            occurrence_refs = sorted(terminal.get("source_fragment_ids") or [])
+        if not occurrence_refs:
+            raise ArgumentRouteChangeSetError(f"{key}: terminal Claim has no source occurrence")
 
         step_bindings = []
         evidence_ids: set[str] = set()

@@ -128,7 +128,7 @@ def write_immutable(path: Path, payload: dict[str, Any], *, require_new: bool = 
     """
     path = Path(path)
     if validating_saved_artifacts():
-        if require_new or read_artifact(path) != payload:
+        if require_new or canonical_json(read_artifact(path)) != canonical_json(payload):
             raise ValueError(f'saved immutable reconstruction differs: {path}')
         return
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -144,7 +144,7 @@ def write_immutable(path: Path, payload: dict[str, Any], *, require_new: bool = 
             except FileExistsError:
                 if require_new:
                     raise ValueError(f"once-only artifact already reserved at {path}")
-                if read_artifact(path) != payload:
+                if canonical_json(read_artifact(path)) != canonical_json(payload):
                     raise ValueError(f"immutable artifact differs at {path}")
             else:
                 directory = os.open(path.parent, os.O_RDONLY)
