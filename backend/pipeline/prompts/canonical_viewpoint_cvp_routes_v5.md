@@ -4,6 +4,8 @@
 
 `inference_method_codes` 只能从以下代码选取：`lexical_semantics`、`morphology`、`syntax`、`literary_context`、`historical_context`、`cross_scripture`、`contrast_elimination`、`analogy_typology`、`causal_reasoning`、`theological_synthesis`、`pastoral_application`、`other`。没有合适代码时选 `other` 并填写 `inference_method_note`，不要创造新代码。
 
+路线必须有来源实际说出的前提与推理关系。若来源只是引用经文或换句话重复 CVP 结论，没有把证据推进到结论的独立步骤，就在 `viewpoints_with_no_route` 说明，而不要造出「经文说 X → CVP 是 X」的路线。邻近段落论证的是另一观点时，也不能借来填充本 CVP。
+
 `argument_route_candidates` 中每条路线至少有一个 `source_route_attestations`。按现有 schema 输出有序推理节点、method codes、完整度、Claim component/EvidenceStep/SourceFragment 绑定和真正陈述结论的 terminal component。每个 `attested` 步都必须同时绑定**至少一个属于该来源的 Claim component**、自己的 EvidenceStep 与其 SourceFragment；只有原文片段而没有 Claim component 的步骤不能标 `attested`，应标 `missing` 并将该来源记为 `partial`，或调整骨架但不得虚构绑定。保留承重经文及其在该篇中的解释。`full` 要覆盖所有必需节点，否则用 `partial`。
 
 `member_existing` 表示该来源有与 CVP 等价的结论，`attesting_source_roster` 只列这些必须交代的来源。逐篇检查 `support_existing` 的实际论据：若同一篇确有该路线的部分推理步骤，而且每步能绑定本篇 Claim component、EvidenceStep 和 SourceFragment，可为它提出 `partial` 实例，未讲或未绑定的步骤如实标 `missing`；不能借另一篇补齐，也不能因支持材料而另立一条相同骨架。只有转述、背景或与路线步骤无关的支持，不强造实例，也不填入 `unattested_members`。`support_existing` 本身不保证完整论证；缺少等价结论连接的来源不得标 `full`。若原文和可用证据确实完整说出结论及全部承重步骤、但现有连接只标为支持，在 `partial` 实例的 `reason` 明示差异与证据，交独立审核判断是否需要 CVP 复核；不擅自修改连接或把它标成 `full`。只陈述结论、无可绑推理的**成员来源**才进入 `unattested_members`，写具体理由；材料不足就不要伪称没有论证。

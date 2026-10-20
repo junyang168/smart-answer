@@ -2,6 +2,8 @@
 
 修改任何 `partial` 实例时，也要核对非空的 `terminal_claim_component_key`：它必须属于同篇所列 Claim，并以 active 正向连接指向**本次 CVP revision**。只有旧 revision 连接的限定来源不能建立实例，也不能用空终端占位；仍可保留为输入上下文。
 
+若异议指出路线只是引文或 CVP 结论的复述，而该来源并无独立推理，应撤去这条路线及其实例，改用 `viewpoints_with_no_route`；有旧路线则明确退役，不为保留写入而虚构前提。
+
 对每条 `correct` 异议输出一个 `finding_dispositions`。若接受，按 acceptance criteria 改实际路线、来源实例或旧路线处置；若不能接受，说明并标 `rebutted/deferred`，程序将暂缓整个 CVP。合并、拆分路线可以同时改变多条 route 和 attestation，但仍须只围绕这个 CVP 和已给材料。任何新造 ID 都只用于 proposal 的 local key；既有 Registry ID 必须引用输入。下轮独立审核会重新看整套待写结果及原始材料。不要抄写输入全文，保留短命题和精确 ID 引用。
 
 每个 attestation 的 `route_ref.local_route_key` 必须指向本次候选路线的 `local_route_key`，其 `route_ref.target_argument_route_revision_id` 留空；候选路线自身才用 `target_argument_route_revision_id` 指向旧 revision。`inference_method_codes` 只能从 `lexical_semantics`、`morphology`、`syntax`、`literary_context`、`historical_context`、`cross_scripture`、`contrast_elimination`、`analogy_typology`、`causal_reasoning`、`theological_synthesis`、`pastoral_application`、`other` 中选取；不要创造新代码。每个 `attested` 步必须同时绑定至少一个该来源的 Claim component、EvidenceStep 和 SourceFragment；原文有细节但无可用 Claim component 的步骤标 `missing`，来源实例降为 `partial`，不能虚构绑定。
