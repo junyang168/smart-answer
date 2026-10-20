@@ -8103,6 +8103,42 @@ def test_whole_cvp_route_review_uses_one_complete_packet_and_no_extra_final(tmp_
     assert not (tmp_path / "raw-route-review-001.json").exists()
 
 
+def test_whole_cvp_route_repairs_invalid_proposal_before_independent_review(tmp_path):
+    from backend.pipeline.viewpoint_route_cvp_resolution import run_cvp_route_scope
+
+    claim = _claim("C1", ROCK_STATEMENT)
+    packet = build_registry_route_packet(
+        scope_label="matt16-13-18", approved_viewpoints=[_approved_viewpoint()],
+        claims=[claim], viewpoint_claim_links=[_registry_link(claim)],
+        existing_routes=[], complete_cvp=True,
+    )
+    corrected = _routes_v2().model_dump(mode="json")
+    invalid = json.loads(json.dumps(corrected))
+    invalid["argument_route_candidates"][0]["inference_method_codes"] = ["lexical_analysis"]
+    review = {
+        "route_proposal_sha256": sha256_json(corrected),
+        "route_evidence_packet_sha256": packet["packet_sha256"],
+        "change_reviews": [
+            {"target_kind": kind, "target_key": key, "decision": "pass",
+             "reason": "修正后的整套路线上下文成立"}
+            for kind, key in (("route", "ROUTE-GREEK"), ("attestation", "ATTEST-1"))
+        ],
+        "cross_source_composition_found": False,
+        "reason": "完整审核通过",
+    }
+    proposer = _SequenceStubAdapter([invalid, corrected])
+    reviewer = _StubAdapter(review)
+    result = run_cvp_route_scope(
+        route_packet=packet, existing_routes=[], output_dir=tmp_path,
+        proposer=proposer, reviewer=reviewer,
+        reconsiderer=_StubAdapter({}), max_correction_rounds=1,
+    )
+    assert result["proposal_validation_repairs"] == 1
+    assert proposer.calls == 2 and reviewer.calls == 1
+    assert "lexical_analysis" in proposer.payloads[1]["validation_findings"][0]
+    assert len(result["rounds"]) == 1
+
+
 def test_whole_cvp_route_proposal_must_dispose_each_old_route():
     from backend.api.canonical_repository.viewpoint_batch_resolution import (
         RouteComponentBinding, validate_route_proposal,

@@ -9,10 +9,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
 from backend.api.canonical_repository.viewpoint_batch_resolution import (
     ArgumentRouteProposalV2Response,
     ArgumentRouteReconsiderationV2Response,
     ArgumentRouteReviewV2Response,
+    BatchResolutionError,
     RouteComponentBinding,
     canonicalize_proposal,
     canonicalize_review,
@@ -127,13 +130,46 @@ def run_cvp_route_scope(
     write_immutable(output_dir / "route-packet.json", route_packet)
     raw, _, _ = call_model(proposer, route_packet,
                            output_dir / "raw-route-proposal-000.json")
-    proposal = ArgumentRouteProposalV2Response.model_validate(
-        canonicalize_proposal(raw)[0]
-    )
+    invalid_proposals: set[str] = set()
+    validation_repairs = 0
+    while True:
+        try:
+            proposal = ArgumentRouteProposalV2Response.model_validate(
+                canonicalize_proposal(raw)[0]
+            )
+            validate_route_proposal(routes=proposal, **validation_args)
+            break
+        except (ValidationError, BatchResolutionError) as exc:
+            if isinstance(exc, ValidationError):
+                findings = [f"{'.'.join(map(str, item['loc']))}: {item['msg']}"
+                            for item in exc.errors(include_input=False)]
+            else:
+                findings = exc.findings
+            raw_sha = sha256_json(raw)
+            if raw_sha in invalid_proposals or validation_repairs >= max_correction_rounds:
+                raise CvpRouteReviewIncomplete(
+                    f"route proposal still fails deterministic validation: {findings}"
+                ) from exc
+            invalid_proposals.add(raw_sha)
+            write_immutable(output_dir / f"route-proposal-validation-{validation_repairs:03d}.json", {
+                "invalid_proposal_sha256": raw_sha,
+                "findings": findings,
+            })
+            repair_packet = route_packet | {
+                "prior_invalid_proposal": raw,
+                "validation_findings": findings,
+                "instruction": "Return the complete corrected proposal in the same schema; do not invent bindings or omit old routes.",
+            }
+            raw, _, _ = call_model(
+                proposer, repair_packet,
+                output_dir / f"raw-route-proposal-validation-{validation_repairs:03d}.json",
+            )
+            validation_repairs += 1
     seen: set[str] = set()
     rounds: list[dict[str, Any]] = []
     last_reconsideration: dict[str, Any] | None = None
-    for round_number in range(max_correction_rounds + 1):
+    remaining_review_corrections = max_correction_rounds - validation_repairs
+    for round_number in range(remaining_review_corrections + 1):
         proposal_payload = proposal.model_dump(mode="json")
         proposal_sha = sha256_json(proposal_payload)
         if proposal_sha in seen:
@@ -197,6 +233,7 @@ def run_cvp_route_scope(
                 "proposal_sha256": sha256_json(effective.model_dump(mode="json")),
                 "review_sha256": review_sha,
                 "rounds": rounds,
+                "proposal_validation_repairs": validation_repairs,
                 "passing_route_keys": sorted(item.local_route_key for item in effective.argument_route_candidates),
                 "passing_attestation_keys": sorted(item.local_attestation_key for item in effective.source_route_attestations),
                 "retired_route_revision_ids": effective.retired_route_revision_ids,
@@ -210,7 +247,7 @@ def run_cvp_route_scope(
             return result
         if (not review_validation["reconsideration_required"]
                 or review_validation["exception_keys"]
-                or round_number == max_correction_rounds):
+                or round_number == remaining_review_corrections):
             raise CvpRouteReviewIncomplete(
                 f"CVP route review stopped at round {round_number}: {review_validation}"
             )

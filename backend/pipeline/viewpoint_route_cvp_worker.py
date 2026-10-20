@@ -118,6 +118,8 @@ def process_cvp_route(
 ) -> dict[str, Any]:
     """Build from current master data; write only after a whole-set pass."""
 
+    output_dir = output_dir.resolve()
+
     def guard() -> None:
         if ownership_guard is not None:
             ownership_guard()
