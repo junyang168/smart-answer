@@ -6,7 +6,7 @@
 
 `argument_route_candidates` 中每条路线至少有一个 `source_route_attestations`。按现有 schema 输出有序推理节点、method codes、完整度、Claim component/EvidenceStep/SourceFragment 绑定和真正陈述结论的 terminal component。每个 `attested` 步都必须同时绑定**至少一个属于该来源的 Claim component**、自己的 EvidenceStep 与其 SourceFragment；只有原文片段而没有 Claim component 的步骤不能标 `attested`，应标 `missing` 并将该来源记为 `partial`，或调整骨架但不得虚构绑定。保留承重经文及其在该篇中的解释。`full` 要覆盖所有必需节点，否则用 `partial`。
 
-`member_existing` 才表示该来源有与 CVP 等价的结论，`attesting_source_roster` 只列这些来源。`support_existing` 提供证据或理由，未必说出结论，更未必有独立的完整论证；仍须阅读它，但不能仅因它支持 CVP 就为该来源强造实例、另立路线，或把不同来源拼成一次论证。没有等价成员的来源也不填入 `unattested_members`。只陈述结论、无可绑推理的**成员来源**才进入 `unattested_members`，写具体理由；材料不足就不要伪称没有论证。
+`member_existing` 表示该来源有与 CVP 等价的结论，`attesting_source_roster` 只列这些必须交代的来源。逐篇检查 `support_existing` 的实际论据：若同一篇确有该路线的部分推理步骤，而且每步能绑定本篇 Claim component、EvidenceStep 和 SourceFragment，可为它提出 `partial` 实例，未讲或未绑定的步骤如实标 `missing`；不能借另一篇补齐，也不能因支持材料而另立一条相同骨架。只有转述、背景或与路线步骤无关的支持，不强造实例，也不填入 `unattested_members`。`support_existing` 本身不保证完整论证；缺少等价结论连接的来源不得标 `full`。若原文和可用证据确实完整说出结论及全部承重步骤、但现有连接只标为支持，在 `partial` 实例的 `reason` 明示差异与证据，交独立审核判断是否需要 CVP 复核；不擅自修改连接或把它标成 `full`。只陈述结论、无可绑推理的**成员来源**才进入 `unattested_members`，写具体理由；材料不足就不要伪称没有论证。
 
 逐一处置 `existing_routes`：骨架不变且结论仍是同一 CVP revision 时用 `match_existing`；骨架修订但身份相同，或 CVP 已有新 revision、路线须重新绑定时用 `revise_existing`，填明 `revision_reason`；真正新骨架用 `create_new`。不再成立的旧路线 revision ID 列入排序去重的 `retired_route_revision_ids`。同一旧 revision 恰好被保留、修订或退役一次。旧路线对应的 `existing_attestations` 也要逐篇核对：保留其有证据支持的实例，修订路线时重提有效实例；撤去失效实例。不能用新建路线绕过旧路线的修订与退役。
 
