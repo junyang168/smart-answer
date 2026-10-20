@@ -8285,6 +8285,39 @@ def test_whole_cvp_route_proposal_must_dispose_each_old_route():
             }
 
 
+def test_whole_cvp_partial_attestation_needs_current_linked_terminal():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import validate_route_proposal
+
+    claim = _claim("C1", ROCK_STATEMENT)
+    binding = _route_component_binding().model_copy(update={
+        "viewpoint_claim_link_id": "L1",
+    })
+    args = dict(
+        scope_label="matt16-13-18", claims=[claim],
+        approved_viewpoint_revision_ids=["CVR-1"], known_route_revision_ids=[],
+        complete_cvp=True,
+    )
+    partial = _attestation(completeness="partial")
+    assert validate_route_proposal(
+        routes=_routes_v2(source_route_attestations=[partial]),
+        component_bindings=[binding], **args,
+    )["partial_count"] == 1
+    with pytest.raises(BatchResolutionError, match="partial terminal must have an active Claim link"):
+        validate_route_proposal(
+            routes=_routes_v2(source_route_attestations=[
+                _attestation(completeness="partial", terminal_claim_component_key=None),
+            ]),
+            component_bindings=[binding], **args,
+        )
+    with pytest.raises(BatchResolutionError, match="partial terminal must have an active Claim link"):
+        validate_route_proposal(
+            routes=_routes_v2(source_route_attestations=[partial]),
+            component_bindings=[binding.model_copy(update={
+                "target_viewpoint_revision_id": "CVR-old",
+            })], **args,
+        )
+
+
 def test_whole_cvp_route_can_repin_same_viewpoint_only_by_revision():
     from backend.api.canonical_repository.viewpoint_batch_resolution import validate_route_proposal
 

@@ -3485,6 +3485,20 @@ def validate_route_proposal(
         route = routes_by_key.get(str(attestation.route_ref.local_route_key))
         if route is None:
             continue
+        if complete_cvp and attestation.completeness == "partial":
+            terminal = component_index.get(str(attestation.terminal_claim_component_key))
+            if (
+                terminal is None
+                or terminal.source_id != attestation.source_id
+                or terminal.claim_id not in attestation.claim_ids
+                or terminal.disposition not in ROUTE_TARGETED_DISPOSITIONS - {"tension_existing"}
+                or terminal.target_viewpoint_revision_id != route.conclusion_ref.key()
+                or not terminal.viewpoint_claim_link_id
+            ):
+                findings.append(
+                    f"{attestation.local_attestation_key}: partial terminal must have an active "
+                    "Claim link to the current conclusion viewpoint revision in this source"
+                )
         attested_by_conclusion.setdefault(route.conclusion_ref.key(), set()).add(
             attestation.source_id
         )
