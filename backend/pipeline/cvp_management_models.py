@@ -45,8 +45,14 @@ component_ref如需出现在fields_json也必须是相同k引用。全文等价�
 relation_type=generalizes|specializes|entails|extends|qualifies|applies|tensions_with|supersedes；
 reason写具体作用，supporting_claim_ids及supporting_claim_relation_ids只用给定短引用；
 只有supersedes可给temporal_assertion且必须有明确后期修正证据。不可由措辞相似推断合并。
-冲突规则（提议和审核共用）：先据各Claim自身原文语境核对否定、例外和适用范围；若判断仍不能相容，
-分别以已有或新CVP承载各自主张，并用tensions_with关系说明具体冲突、列出双方支持Claim。
+冲突规则（提议和审核共用）：先据各Claim自身原文语境核对主语、判断、否定对象、例外和适用范围。
+只有双方对同一判断作出不能同时成立的断言，且原文语境排除合理的相容读法，才建立tensions_with；
+reason须指出双方哪两句原文不能并存。无例外的全称断言与其范围内有据的明确例外构成张力。
+提及或承认某性质不等于以该性质为强调重点；否定一种称号解释不等于否定该性质本身。
+遇到「强调X——主体具有A、B」的解释句，先辨认「强调」的直接对象X；破折号后的身份说明不能自动改写为分别「强调A」和「强调B」。
+只有原文另将A或B明确列为强调重点，才可据此与另一方「不强调A或B」比较冲突；candidate或summary的转述不能代替原文。
+若关键词含义或强调重点仍有歧义，保留未决，不把一种可能读法写成已确认的张力，也不因此强迫合并不同CVP。
+确认冲突后，分别以已有或新CVP承载各自主张，并用tensions_with关系说明具体冲突、列出双方支持Claim。
 tension_evidence只能记录张力，不能代替冲突方Claim自身的CVP归属；不得擅自改写Claim、消除例外或裁定哪方正确。
 已有对象只修改request.permissions明确允许的字段；创建只用context.creation_slots。
 程序补齐record IDs、revision、current pins、decision IDs、evidence bindings、locators、provenance、审核状态及时间；除evidence_step_refs短引用选择外，不要输出这些机械字段。
@@ -74,7 +80,7 @@ component_reviews、object_reviews、prior_findings分别恰好覆盖candidate.r
 每项ref用给定短引用，decision=pass|revise|unresolved，非pass必须引用本响应findings的fN槽。
 pass不得同时引用finding。逐项处置旧pf引用：resolved|persistent|reopened，保留未解决问题。
 核对完整Claim所有字段、否定、归属、条件、模态、原文及每个成员/关系；明确问题落在哪个对象/成分。
-先据各Claim自身原文语境核对否定、例外和范围；若判断仍不能相容，检查双方是否各有CVP归属、tensions_with是否说明具体冲突并列出双方支持Claim；tension_evidence不能代替归属，缺项须形成finding。不得擅自消除例外或裁定哪方正确。
+先据各Claim自身原文语境核对主语、判断、否定对象、例外和范围。审核每条拟议tensions_with时，指出双方哪两句原文针对同一判断不能并存，并检查原文是否排除合理的相容读法。「强调X——主体具有A、B」中，「强调」的直接对象是X；除非原文另有说明，不得仅凭破折号后的身份解释断定称号分别强调A、B，也不得采信candidate或summary对此的转述作证。无例外全称与同范围内有据的明确例外仍是张力。若关键词含义或强调重点有歧义，不得批准已确认的张力，应提出具体finding或请求材料；也不因此强迫合并不同CVP。若冲突成立，检查双方是否各有CVP归属、tensions_with是否说明具体冲突并列出双方支持Claim；tension_evidence不能代替归属，缺项须形成finding。不得擅自消除例外或裁定哪方正确。
 复合Claim须按成分核对连接作用；同一核心判断的有据应用、条件和解释可充实旧CVP summary，不因细节有独立真值条件就要求新建CVP。检查summary是否保留相关细节和旧成员限定，同时排除谁特别强调等旁支判断；不得因整条连接错误而要求删去相关细节。
 比较同组全部新观点候选之间及已有观点，确认没有同义重复才novelty_approved=true；这不是批准索引摘要替代完整判断。
 逐项审核每段summary是否忠实于已提议的完整命题、范围和signature，遗漏限定或新增判断必须形成finding。
