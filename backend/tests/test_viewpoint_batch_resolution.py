@@ -271,8 +271,9 @@ def test_versioned_route_policy_fingerprint_binds_prompt_content():
 
     assert first == second
     assert first != changed
-    assert policy["schema_version"] == "wang_route_resolution_policy_v2"
-    assert policy["review"]["model"] == "claude-fable-5-1"
+    assert policy["schema_version"] == "wang_route_resolution_policy_v3"
+    assert policy["review"]["model"] == "claude-opus-5-5"
+    assert policy["review"]["effort"] == "high"
     assert policy["review"]["targets_per_batch"] == 12
 
 
@@ -314,6 +315,11 @@ def test_legacy_cvp_and_route_policies_remain_loadable_for_artifact_replay():
         load_route_policy(route_v1)["schema_version"]
         == "wang_route_resolution_policy_v1"
     )
+    route_v2 = DEFAULT_ROUTE_POLICY_PATH.with_name(
+        "wang_route_resolution_policy_v2.json"
+    )
+    assert load_route_policy(route_v2)["schema_version"] == "wang_route_resolution_policy_v2"
+    assert load_route_policy(route_v2)["review"]["model"] == "claude-fable-5-1"
 
 
 def test_route_policy_rejects_an_unimplemented_validator(tmp_path: Path):

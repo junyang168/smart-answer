@@ -259,9 +259,9 @@ flowchart TD
     P --> V["程序逐条验证<br/>结论观点、成分键、必需步骤、来源是否越界"]
     V -->|"个别目标确定性无效"| I["隔离该目标后重验<br/>（剩余部分必须仍满足全部不变量）"]
     I --> V
-    V -->|"通过"| R["分批独立复核<br/>claude-fable-5-1，每批 12 个目标"]
+    V -->|"通过"| R["分批独立复核<br/>claude-opus-5-5 high，每批 12 个目标"]
     R -->|"有异议"| C["仲裁：交回提议者<br/>gpt-5.6-sol，最多一轮"]
-    C --> FR["终局复核实际写库的改正稿<br/>claude-fable-5-1；只通过或转人工"]
+    C --> FR["终局复核实际写库的改正稿<br/>claude-opus-5-5 high；只通过或转人工"]
     FR -->|"全部通过"| W
     FR -->|"仍有问题"| E
     R -->|"无异议"| W["逐条路线生成幂等 ChangeSet"]
@@ -286,7 +286,7 @@ flowchart TD
 3. **apply 前要重新确认结论观点仍是 current。** 路线 job 与下一批观点并行时，它的结论观点可能已被改写；这时按最新版本重新入队，而不是把路线挂到一个过期版本上。
 4. **成员来源是实例覆盖的分母。** 每个持有该观点成员主张、且本 scope 有精确证据绑定的来源，要么产生一条实例，要么成为独立复核对象，由 reviewer 确认该篇只断言结论而没有可绑定路线，或要求唯一 correction 补实例。提议者漏填不能让该来源从分母消失，也不能靠反复重问提议者碰运气。
 
-模型分工与观点那条线一致：`gpt-5.6-sol` 提议、`claude-fable-5-1` 复核、意见交回提议者仲裁。若发生改正，同一个独立 reviewer 角色再审核一次实际可能写库的 effective proposal；这次任何非 `pass` 都进入人工 exception，不再交回提议者。初审、改正与终局复核分别绑定 proposal SHA，ChangeSet 的批准依据只能指向实际写库版本的复核。新运行的模型 policy 写在 `backend/pipeline/policies/wang_route_resolution_policy_v2.json` 里；v1 只供历史 artifact 重放与审计。
+論證路線由 `gpt-5.6-sol` 提議、`claude-opus-5-5`（high）獨立復核，意見交回提議者修正。若發生改正，同一獨立 reviewer 角色再審核實際可能寫庫的 effective proposal；現行流程中，這次任何非 `pass` 都進入人工 exception，不再交回提議者。初審、改正與終局復核分別綁定 proposal SHA，ChangeSet 的批准依據只能指向實際寫庫版本的復核。新運行的模型 policy 寫在 `backend/pipeline/policies/wang_route_resolution_policy_v3.json`；v1、v2 保留供歷史 artifact 重放與審計。
 
 **实例分完整与部分。** 一篇里把这条路线的必需步骤都讲全了，是完整实例；缺步骤或有含糊的，只能记部分实例。**部分实例不计入「这条路线反复出现」的次数。**
 
