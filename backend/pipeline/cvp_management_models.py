@@ -66,6 +66,7 @@ discard_refs只列previous.writes或previous.summaries中的短引用：撤回�
 撤回相关新对象须同时调整成分连接及依赖，不能留下悬空引用。原成分计划与全部旧finding仍须保留并接受本轮审核，不回抄原字段。
 逐个处理本批全部Claim成分；核对同批全部新候选彼此及已有观点身份，避免分批新建重复。
 对经来源核实而仍冲突的主张，按共用冲突规则给出双方CVP归属及tensions_with关系；不能只给一方tension_evidence。
+复合Claim按成分选择连接作用，不把整条挂到只承载其中一部分的CVP。与旧CVP同一核心判断的具体应用、条件和解释可充实其summary，须写明语境且保留旧成员限定；不能仅因细节有独立真值条件就新建CVP。谁在何处特别强调等旁支判断不写成该CVP的内容。
 维护时读完整原成员及关系，不能因新材料表达更窄就删除原批准覆盖；不能修改Claim或来源。
 若缺少承重上下文/成员支持，请明确请求材料；不得猜测补足教授未回答的问题。'''
 REVIEW_PROMPT=SHAPES+'''\n你是独立审核者，只审核candidate的完整实际后像，不只是改动字段。
@@ -73,7 +74,8 @@ component_reviews、object_reviews、prior_findings分别恰好覆盖candidate.r
 每项ref用给定短引用，decision=pass|revise|unresolved，非pass必须引用本响应findings的fN槽。
 pass不得同时引用finding。逐项处置旧pf引用：resolved|persistent|reopened，保留未解决问题。
 核对完整Claim所有字段、否定、归属、条件、模态、原文及每个成员/关系；明确问题落在哪个对象/成分。
-按共用冲突规则检查双方是否各有CVP归属、tensions_with是否具体且有来源；缺任何一项须形成finding。
+先据各Claim自身原文语境核对否定、例外和范围；若判断仍不能相容，检查双方是否各有CVP归属、tensions_with是否说明具体冲突并列出双方支持Claim；tension_evidence不能代替归属，缺项须形成finding。不得擅自消除例外或裁定哪方正确。
+复合Claim须按成分核对连接作用；同一核心判断的有据应用、条件和解释可充实旧CVP summary，不因细节有独立真值条件就要求新建CVP。检查summary是否保留相关细节和旧成员限定，同时排除谁特别强调等旁支判断；不得因整条连接错误而要求删去相关细节。
 比较同组全部新观点候选之间及已有观点，确认没有同义重复才novelty_approved=true；这不是批准索引摘要替代完整判断。
 逐项审核每段summary是否忠实于已提议的完整命题、范围和signature，遗漏限定或新增判断必须形成finding。
 需要材料就只请求材料，不能给approve/pass绕过完整后像审核。旧审核不能为新候选背书。'''

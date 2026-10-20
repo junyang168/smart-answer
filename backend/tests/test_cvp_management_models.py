@@ -67,6 +67,8 @@ def test_incremental_summary_prompt_checks_all_old_and_new_members():
     assert '本次修改权限不能单独证明新身份' in proposer._prompt
     assert '仅作supports时也不自动扩大旧scope' in proposer._prompt
     assert '旧CVP经忠实修订仍不能承载的独立真值条件' in proposer._prompt
+    assert '双方CVP归属及tensions_with关系' in proposer._prompt
+    assert '不能仅因细节有独立真值条件就新建CVP' in proposer._prompt
     assert '普通新连接所读取的候选旧成员是只读比较材料' in proposer._prompt
     assert '把仅因该连接产生的summary改动放进discard_refs' in proposer._prompt
     assert '所以就是说' in proposer._prompt
@@ -78,6 +80,8 @@ def test_incremental_summary_prompt_checks_all_old_and_new_members():
     assert '旧scope或本次权限不能修改' in reviewer._prompt
     assert '新候选具有旧CVP不能承载且有原文依据的独立真值条件' in reviewer._prompt
     assert '只能引用target_refs包含该项ref的finding' in reviewer._prompt
+    assert 'tensions_with是否说明具体冲突并列出双方支持Claim' in reviewer._prompt
+    assert '不得因整条连接错误而要求删去相关细节' in reviewer._prompt
 
 
 @pytest.mark.parametrize('bad', ['claim','text','component','creation','target','summary','member'])
