@@ -229,12 +229,17 @@ def build_route_resolution_job(
     receipt: CvpBatchReadbackReceipt,
     evidence_scope_sha256: str,
     route_policy_fingerprint_sha256: str,
+    viewpoint_id: str | None = None,
 ) -> RouteResolutionJob:
-    """Derive one idempotent enqueue artifact from verified committed CVPs."""
+    """Derive one idempotent job, optionally for one CVP in a batch receipt."""
 
     viewpoint_ids = sorted(
         item.viewpoint_id for item in receipt.committed_viewpoint_revisions
     )
+    if viewpoint_id is not None:
+        if viewpoint_id not in viewpoint_ids:
+            raise ValueError("route job viewpoint is absent from verified CVP readback")
+        viewpoint_ids = [viewpoint_id]
     revisions_by_viewpoint = {
         item.viewpoint_id: item.viewpoint_revision_id
         for item in receipt.committed_viewpoint_revisions
@@ -268,6 +273,24 @@ def build_route_resolution_job(
     return RouteResolutionJob.model_validate(
         body | {"artifact_sha256": sha256_json(body)}
     )
+
+
+def build_route_resolution_jobs(
+    *,
+    receipt: CvpBatchReadbackReceipt,
+    evidence_scope_sha256: str,
+    route_policy_fingerprint_sha256: str,
+) -> list[RouteResolutionJob]:
+    """Queue one complete Route work item per committed CVP."""
+    return [
+        build_route_resolution_job(
+            receipt=receipt,
+            evidence_scope_sha256=evidence_scope_sha256,
+            route_policy_fingerprint_sha256=route_policy_fingerprint_sha256,
+            viewpoint_id=item.viewpoint_id,
+        )
+        for item in receipt.committed_viewpoint_revisions
+    ]
 
 
 def coalesce_route_resolution_jobs(

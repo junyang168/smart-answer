@@ -23,7 +23,7 @@ from backend.api.canonical_repository.viewpoint_production_safety import (
 )
 from backend.api.canonical_repository.viewpoint_resolution import ReviewClaim
 from backend.api.canonical_repository.viewpoint_batch_changeset import compile_cvp_batch_package, load_revision_dependents
-from backend.api.canonical_repository.viewpoint_batch_resolution import build_batch_disposition, build_route_resolution_job
+from backend.api.canonical_repository.viewpoint_batch_resolution import build_batch_disposition, build_route_resolution_jobs
 from backend.api.canonical_repository.viewpoint_route_queue import FileRouteResolutionQueue
 from backend.pipeline.viewpoint_batch_resolution_runner import (
     run_batch, build_proposer, build_reviewer, build_reconsiderer, build_consolidator,
@@ -132,8 +132,10 @@ def run(phase: Path, output: Path, backup: Path, apply: bool):
         receipt = _route_receipt_from_package(store=store, package=package, scope_label=saved_packet["scope_label"],
             scope_manifest_sha256=old["claim_manifest_sha256"], batch_id=saved_packet["batch_id"], plan=plan)
         write_immutable(output / "cvp-readback-receipt.json", receipt.model_dump(mode="json"))
-        job = build_route_resolution_job(receipt=receipt, evidence_scope_sha256=old["scope_packet_sha256"], route_policy_fingerprint_sha256=rp_sha)
-        FileRouteResolutionQueue(phase / "run/route-queue").enqueue(job)
+        jobs = build_route_resolution_jobs(receipt=receipt, evidence_scope_sha256=old["scope_packet_sha256"], route_policy_fingerprint_sha256=rp_sha)
+        route_queue = FileRouteResolutionQueue(phase / "run/route-queue")
+        for job in jobs:
+            route_queue.enqueue(job)
         disposition = build_batch_disposition(proposal=report["_effective_proposal"], batch_identity=identity,
             effective_proposal_sha256=report["effective_proposal_sha256"], apply_status=result["status"], readback_receipt_sha256=readback["artifact_sha256"])
         write_immutable(output / "batch-disposition-applied.json", disposition)
@@ -141,7 +143,7 @@ def run(phase: Path, output: Path, backup: Path, apply: bool):
             status="applied_and_route_enqueued", authoritative_artifact=str(output / "cvp-plan-readback-receipt.json"), authoritative_artifact_sha256=readback["artifact_sha256"])
         return {"status": "applied_readback_verified", "new_cvps": len(package["canonical_viewpoints"]),
                 "links": len(package["viewpoint_claim_links"]), "records_verified": len(readback["records"]),
-                "change_set_id": plan.change_set_id, "route_job_id": job.job_id, "model_calls": 0}
+                "change_set_id": plan.change_set_id, "route_job_ids": [job.job_id for job in jobs], "model_calls": 0}
 
 
 def main():

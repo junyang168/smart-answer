@@ -11,14 +11,14 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     ROUTE_VALIDATION_VERSION,
 )
 
-ROUTE_POLICY_VERSION = "wang_route_resolution_policy_v3"
+ROUTE_POLICY_VERSION = "wang_route_resolution_policy_v4"
 SUPPORTED_ROUTE_POLICY_VERSIONS = frozenset(
-    {"wang_route_resolution_policy_v1", "wang_route_resolution_policy_v2", ROUTE_POLICY_VERSION}
+    {"wang_route_resolution_policy_v1", "wang_route_resolution_policy_v2", "wang_route_resolution_policy_v3", ROUTE_POLICY_VERSION}
 )
 DEFAULT_ROUTE_POLICY_PATH = (
     Path(__file__).resolve().parent
     / "policies"
-    / "wang_route_resolution_policy_v3.json"
+    / "wang_route_resolution_policy_v4.json"
 )
 
 

@@ -19,6 +19,7 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     build_batch_packet,
     build_cvp_batch_readback_receipt,
     build_route_resolution_job,
+    build_route_resolution_jobs,
     canonicalize_review,
     coalesce_route_resolution_jobs,
     component_key,
@@ -257,6 +258,36 @@ def test_verified_readback_builds_an_idempotent_route_job():
     assert first.cvp_readback_sha256 == receipt.artifact_sha256
 
 
+def test_verified_batch_enqueues_one_route_job_per_cvp(tmp_path: Path):
+    receipt = build_cvp_batch_readback_receipt(
+        scope_label="matthew-16",
+        scope_manifest_sha256="scope-sha",
+        triggering_cvp_batch_id="CVB-matthew-16-001",
+        cvp_changeset_id="KCS-1",
+        cvp_changeset_sha256="changeset-sha",
+        expected_current_revisions={"CV-2": "CVR-A", "CV-1": "CVR-Z"},
+        observed_current_revisions={"CV-1": "CVR-Z", "CV-2": "CVR-A"},
+    )
+    args = {"receipt": receipt, "evidence_scope_sha256": "evidence-scope-sha",
+            "route_policy_fingerprint_sha256": "route-policy-sha"}
+    jobs = build_route_resolution_jobs(**args)
+    assert jobs == build_route_resolution_jobs(**args)
+    assert [job.logical_viewpoint_ids for job in jobs] == [["CV-1"], ["CV-2"]]
+    assert [job.enqueued_viewpoint_revision_ids for job in jobs] == [["CVR-Z"], ["CVR-A"]]
+    assert len({job.job_id for job in jobs}) == 2
+    assert all(job.cvp_readback_sha256 == receipt.artifact_sha256 for job in jobs)
+
+    queue = FileRouteResolutionQueue(tmp_path / "queue")
+    for job in jobs:
+        queue.enqueue(job)
+    current = {"CV-1": "CVR-Z", "CV-2": "CVR-A"}
+    first = queue.claim(worker_id="worker-a", current_viewpoint_revisions=current, max_jobs=1)
+    second = queue.claim(worker_id="worker-b", current_viewpoint_revisions=current, max_jobs=1)
+    assert first is not None and second is not None
+    assert len(first.current_viewpoint_revisions) == len(second.current_viewpoint_revisions) == 1
+    assert first.current_viewpoint_revisions[0].viewpoint_id != second.current_viewpoint_revisions[0].viewpoint_id
+
+
 def test_versioned_route_policy_fingerprint_binds_prompt_content():
     from backend.pipeline.viewpoint_route_policy import (
         DEFAULT_ROUTE_POLICY_PATH,
@@ -271,7 +302,7 @@ def test_versioned_route_policy_fingerprint_binds_prompt_content():
 
     assert first == second
     assert first != changed
-    assert policy["schema_version"] == "wang_route_resolution_policy_v3"
+    assert policy["schema_version"] == "wang_route_resolution_policy_v4"
     assert policy["review"]["model"] == "claude-opus-5-5"
     assert policy["review"]["effort"] == "high"
     assert policy["review"]["targets_per_batch"] == 12
@@ -320,6 +351,11 @@ def test_legacy_cvp_and_route_policies_remain_loadable_for_artifact_replay():
     )
     assert load_route_policy(route_v2)["schema_version"] == "wang_route_resolution_policy_v2"
     assert load_route_policy(route_v2)["review"]["model"] == "claude-fable-5-1"
+    route_v3 = DEFAULT_ROUTE_POLICY_PATH.with_name(
+        "wang_route_resolution_policy_v3.json"
+    )
+    assert load_route_policy(route_v3)["schema_version"] == "wang_route_resolution_policy_v3"
+    assert load_route_policy(route_v3)["review"]["model"] == "claude-opus-5-5"
 
 
 def test_route_policy_rejects_an_unimplemented_validator(tmp_path: Path):
