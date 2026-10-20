@@ -45,6 +45,9 @@ component_ref如需出现在fields_json也必须是相同k引用。全文等价�
 relation_type=generalizes|specializes|entails|extends|qualifies|applies|tensions_with|supersedes；
 reason写具体作用，supporting_claim_ids及supporting_claim_relation_ids只用给定短引用；
 只有supersedes可给temporal_assertion且必须有明确后期修正证据。不可由措辞相似推断合并。
+冲突规则（提议和审核共用）：先据各Claim自身原文语境核对否定、例外和适用范围；若判断仍不能相容，
+分别以已有或新CVP承载各自主张，并用tensions_with关系说明具体冲突、列出双方支持Claim。
+tension_evidence只能记录张力，不能代替冲突方Claim自身的CVP归属；不得擅自改写Claim、消除例外或裁定哪方正确。
 已有对象只修改request.permissions明确允许的字段；创建只用context.creation_slots。
 程序补齐record IDs、revision、current pins、decision IDs、evidence bindings、locators、provenance、审核状态及时间；除evidence_step_refs短引用选择外，不要输出这些机械字段。
 summary单独放summaries:[{ref,summary}]，每个新观点必须有少于150 Unicode字符的编辑摘要，含问题语境/核心判断/承重限定，不冒充教授原话。
@@ -62,6 +65,7 @@ PROPOSAL_PROMPT=SHAPES+'''\n提出最小完整候选。空delta只表示保留pr
 discard_refs只列previous.writes或previous.summaries中的短引用：撤回未提交的新对象／摘要，或将已有对象的拟议改动恢复为输入原像；不删除数据库对象。
 撤回相关新对象须同时调整成分连接及依赖，不能留下悬空引用。原成分计划与全部旧finding仍须保留并接受本轮审核，不回抄原字段。
 逐个处理本批全部Claim成分；核对同批全部新候选彼此及已有观点身份，避免分批新建重复。
+对经来源核实而仍冲突的主张，按共用冲突规则给出双方CVP归属及tensions_with关系；不能只给一方tension_evidence。
 维护时读完整原成员及关系，不能因新材料表达更窄就删除原批准覆盖；不能修改Claim或来源。
 若缺少承重上下文/成员支持，请明确请求材料；不得猜测补足教授未回答的问题。'''
 REVIEW_PROMPT=SHAPES+'''\n你是独立审核者，只审核candidate的完整实际后像，不只是改动字段。
@@ -69,6 +73,7 @@ component_reviews、object_reviews、prior_findings分别恰好覆盖candidate.r
 每项ref用给定短引用，decision=pass|revise|unresolved，非pass必须引用本响应findings的fN槽。
 pass不得同时引用finding。逐项处置旧pf引用：resolved|persistent|reopened，保留未解决问题。
 核对完整Claim所有字段、否定、归属、条件、模态、原文及每个成员/关系；明确问题落在哪个对象/成分。
+按共用冲突规则检查双方是否各有CVP归属、tensions_with是否具体且有来源；缺任何一项须形成finding。
 比较同组全部新观点候选之间及已有观点，确认没有同义重复才novelty_approved=true；这不是批准索引摘要替代完整判断。
 逐项审核每段summary是否忠实于已提议的完整命题、范围和signature，遗漏限定或新增判断必须形成finding。
 需要材料就只请求材料，不能给approve/pass绕过完整后像审核。旧审核不能为新候选背书。'''
