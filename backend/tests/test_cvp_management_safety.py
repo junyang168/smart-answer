@@ -88,13 +88,33 @@ def test_changed_non_target_member_requires_current_qualification_but_readonly_d
             validate_claim_authority(cursor,bundle,package=changed)
 
 
-def test_changed_member_qualification_authenticates_saved_round_pins_and_current_objections(postgres_store):
+def test_unqualified_legacy_member_allows_only_mechanical_revision_repin(postgres_store):
+    from backend.api.canonical_repository.cvp_management_authority import validate_claim_authority
+    old={'viewpoint_claim_link_id':'link','claim_id':'member','viewpoint_id':'view',
+         'effective_state':'active','pinned_claim_revision':3,'link_type':'supports',
+         'validated_against_viewpoint_revision_id':'old-revision','revision':1}
+    bundle={'claim_input':{'claims':[]},'claim_authority':[],
+            'member_claim_authority':[{'claim_id':'member','qualification':None}],
+            'records':[{'collection':'claims','object_id':'member','revision':3,
+                        'content_sha256':'a'*64},
+                       {'collection':'viewpoint_claim_links','object_id':'link','payload':old}]}
+    repin={**old,'validated_against_viewpoint_revision_id':'new-revision','revision':2,
+           'decision_id':'reviewed-decision'}
+    with postgres_store.connect() as conn,conn.cursor() as cursor:
+        validate_claim_authority(cursor,bundle,package={'viewpoint_claim_links':[repin]})
+        with pytest.raises(ValueError,match='needs_upstream: changed member'):
+            validate_claim_authority(cursor,bundle,package={'viewpoint_claim_links':[
+                {**repin,'link_type':'equivalent_component'}]})
+
+
+@pytest.mark.parametrize('checkpoint',['applied','audited'])
+def test_changed_member_qualification_authenticates_saved_round_pins_and_current_objections(postgres_store,checkpoint):
     from backend.api.canonical_repository.cvp_management_authority import validate_claim_authority
     sha='a'*64
     binding={'path':'/isolated/upstream-readback.json','file_sha256':'b'*64}
     q={'ready':True,'run_id':'member-qualification','revision':3,'content_sha256':sha,
        'validation_kind':'opus_and_program_readback','independent_audit_complete':False,'audit':binding}
-    round_={'kind':'claim_management_round','checkpoint':'audited','outcome':'completed',
+    round_={'kind':'claim_management_round','checkpoint':checkpoint,'outcome':'completed',
             'program_readback_complete':True,'revisit_required':False,
             'stage_results':{'readback':binding},
             'audited_pins':[{'collection':'claims','object_id':'member','pin':[3,sha,False]}]}

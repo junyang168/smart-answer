@@ -181,6 +181,42 @@ def prepare_step(store,parent_id,*,group_key,generation,ordinal,materials,revisi
     return step_id
 
 
+def mark_obsolete_unwritten_history(store,parent_id,*,call_keys,step_ids):
+    """Retire old execution attempts, without asserting their provider outcome.
+
+    A later authenticated trial may use the same action identity. This only
+    marks prepared, unwritten history; it does not change a call's state.
+    """
+    with store.connect() as conn,conn.cursor() as cursor:
+        parent=_load(cursor,parent_id)
+        if parent.get('kind')!='cvp_management_action' or parent['result'].get('status')!='running':
+            raise ChangeSetConflict('obsolete history requires a running CVP2 action')
+        record={'reason':'replaced_by_verified_trial','call_keys':sorted(call_keys),
+                'step_ids':sorted(step_ids)}
+        if parent.get('obsolete_history'):
+            if parent['obsolete_history']!=record:
+                raise ChangeSetConflict('obsolete history identity changed')
+            return record
+        actual_steps=[sid for unit in parent['units'].values() for sid in unit['steps']]
+        if (set(call_keys)!=set(parent['call_reservations']) or len(call_keys)!=len(set(call_keys))
+                or set(step_ids)!=set(actual_steps) or len(step_ids)!=len(set(step_ids))
+                or any(unit.get('completed_step') or unit['status']=='completed'
+                       for unit in parent['units'].values())):
+            raise ChangeSetConflict('obsolete history must name every exact unwritten attempt')
+        for step_id in step_ids:
+            step=_load(cursor,step_id)
+            if (step.get('checkpoint')!='prepared' or step.get('reviewed')
+                    or step.get('change_set_ids')):
+                raise ChangeSetConflict('reviewed or written CVP2 step cannot become obsolete')
+            step['obsolete_for_execution']=True
+            _save(cursor,step_id,step)
+        for key in call_keys:
+            parent['call_reservations'][key]['applicability']='obsolete_for_execution'
+        parent['obsolete_history']=record
+        _save(cursor,parent_id,parent)
+        return record
+
+
 def reserve_call(store,parent_id,*,key,role,intent):
     if role not in {'gpt','opus'}:raise ValueError('CVP2 has only proposal/recall and independent review roles')
     with store.connect() as conn,conn.cursor() as cursor:

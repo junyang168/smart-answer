@@ -226,13 +226,31 @@ def validate_claim_authority(cursor,bundle,*,package=None):
     target_ids={r['claim_id'] for r in bundle['claim_input']['claims']}
     authorities={r['claim_id']:r['qualification'] for r in bundle.get('claim_authority',[])}
     if set(authorities)!=target_ids:raise ValueError('CVP2 omitted current Claim qualification authority')
-    changed_ids={r['claim_id'] for r in (package or {}).get('viewpoint_claim_links',[]) if r.get('effective_state')=='active'}
+    changed_links=[r for r in (package or {}).get('viewpoint_claim_links',[]) if r.get('effective_state')=='active']
     members={r['claim_id']:r['qualification'] for r in bundle.get('member_claim_authority',[])}
-    for cid in changed_ids-target_ids:
-        if cid not in members or not isinstance(members[cid],dict) or members[cid].get('ready') is not True:
-            raise ValueError('needs_upstream: changed member Claim lacks current qualification')
-        authorities[cid]=members[cid]
     originals={(r['collection'],r['object_id']):r for r in bundle['records']}
+    for link in changed_links:
+        cid=link['claim_id']
+        if cid in target_ids or cid in authorities:
+            continue
+        qualification=members.get(cid)
+        if isinstance(qualification,dict) and qualification.get('ready') is True:
+            authorities[cid]=qualification
+            continue
+        # A CVP revision mechanically repins every retained member link. An
+        # unchanged legacy member is already part of the approved old CVP; it
+        # does not become a newly admitted Claim merely by changing the head.
+        old=originals.get(('viewpoint_claim_links',link.get('viewpoint_claim_link_id')))
+        claim=originals.get(('claims',cid))
+        mechanical={'revision','decision_id','schema_version',
+                    'validated_against_viewpoint_revision_id'}
+        before=old['payload'] if old else None
+        if (qualification is not None or not before or not claim
+                or before.get('effective_state')!='active'
+                or before.get('pinned_claim_revision')!=claim['revision']
+                or {k:v for k,v in before.items() if k not in mechanical}!=
+                   {k:v for k,v in link.items() if k not in mechanical}):
+            raise ValueError('needs_upstream: changed member Claim lacks current qualification')
     for cid,q in authorities.items():
         before=originals['claims',cid]
         if (q.get('ready') is not True or (q.get('revision'),q.get('content_sha256'))!=
@@ -251,7 +269,7 @@ def validate_claim_authority(cursor,bundle,*,package=None):
         else:
             proof_ok=value.get('stage_results',{}).get('audit' if independent else 'readback')==q.get('audit')
             qualification_pins=value.get('audited_pins',[])
-        if (value.get('kind')!='claim_management_round' or value.get('checkpoint')!='audited'
+        if (value.get('kind')!='claim_management_round' or value.get('checkpoint') not in {'applied','audited'}
                 or value.get('outcome')!='completed' or value.get('revisit_required')
                 or not value.get('independent_audit_complete' if independent else 'program_readback_complete') or not proof_ok):
             raise ValueError('CVP2 Claim current qualification was withdrawn or misrepresented')
@@ -322,12 +340,12 @@ def validate_completion_scope(store,conn,cursor,evidence,observed):
         if changed_link and (claim_held or domain._held(view['payload'])):
             raise ValueError('CVP2 completion added or changed a held Claim/viewpoint connection')
     maintenance=evidence['bundle'].get('maintenance_viewpoint_ids',[])
-    relations=cursor.execute("""SELECT object_id,payload FROM wang_knowledge.objects
-        WHERE collection='viewpoint_relations' AND retired_at IS NULL AND payload->>'effective_state'='active'
-        AND (payload->>'source_viewpoint_id'=ANY(%s) OR payload->>'target_viewpoint_id'=ANY(%s))""",
-        (maintenance,maintenance)).fetchall()
     expected_relations={oid for (col,oid),row in expected.items() if col=='viewpoint_relations'
                         and row.get('effective_state')=='active'}
+    relations=cursor.execute("""SELECT object_id,payload FROM wang_knowledge.objects
+        WHERE collection='viewpoint_relations' AND retired_at IS NULL AND payload->>'effective_state'='active'
+        AND (payload->>'source_viewpoint_id'=ANY(%s) OR payload->>'target_viewpoint_id'=ANY(%s)
+             OR object_id=ANY(%s))""",(maintenance,maintenance,sorted(expected_relations))).fetchall()
     if {oid for oid,_ in relations}!=expected_relations:
         raise ValueError('CVP2 completion omitted a necessary current relationship')
     for oid,row in relations:

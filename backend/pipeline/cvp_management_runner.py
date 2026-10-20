@@ -73,7 +73,8 @@ def _transport(store,parent_id,root,request,*,invoke=call_model):
         role='gpt' if model.backend=='codex_subscription' else 'opus'
         intent={**model_request_identity(model,payload),'request_bytes':size,'cache_path':str(cache)}
         pending=store.get_cvp_group(parent_id)['call_reservations']
-        if any(slot['state']=='started' and oldkey!=key for oldkey,slot in pending.items()):
+        if any(slot['state']=='started' and slot.get('applicability')!='obsolete_for_execution'
+               and oldkey!=key for oldkey,slot in pending.items()):
             raise ValueError('unknown original model dispatch; reconcile its exact answer before any new call')
         persistence.reserve_call(store,parent_id,key=key,role=role,intent=intent)
         raw,count,seconds=invoke(model,payload,cache,before_dispatch=lambda:
@@ -101,7 +102,8 @@ def _reconcile_saved_dispatches(store,parent_id,unit,request,proposer,reviewer):
         for role,client,filename in [('proposal',proposer,'proposal.json'),('review',reviewer,'review.json')]:
             path=directory/filename
             matching=[(key,slot) for key,slot in parent['call_reservations'].items()
-                      if slot['state']=='started' and slot['intent']['cache_path']==str(path)]
+                      if slot['state']=='started' and slot.get('applicability')!='obsolete_for_execution'
+                      and slot['intent']['cache_path']==str(path)]
             if not matching:continue
             if not path.exists():raise ValueError('unknown original unit call; resume its exact dispatch only')
             if role=='proposal':

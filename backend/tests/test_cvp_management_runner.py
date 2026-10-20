@@ -180,6 +180,31 @@ def test_reviewed_old_action_cannot_be_superseded(setup):
     assert store.get_cvp_group(original['run_id'])['result']['status']=='running'
 
 
+def test_obsolete_unwritten_history_keeps_call_outcome_unknown(setup):
+    from backend.api.canonical_repository import cvp_management_store as persistence
+    from backend.api.canonical_repository.postgres_store import ChangeSetConflict
+    store, request, root, _, _ = setup
+    admission = preflight.prepare_recall(store, request['input'], allow_unqualified=True, defer_index=True)
+    parent = persistence.prepare_action(store, request, root=str(root), preflight=admission)
+    run_id = parent['run_id']
+    step_id = persistence.prepare_step(store, run_id, group_key='g1', generation='old',
+        ordinal=0, materials={'old': True})
+    intent = {'cache_path': str(root / 'review.json'), 'request_bytes': 100,
+              'model_id': 'claude-opus-5-5'}
+    persistence.reserve_call(store, run_id, key='review.json', role='opus', intent=intent)
+    persistence.begin_call(store, run_id, key='review.json', intent=intent)
+    with pytest.raises(ChangeSetConflict, match='every exact unwritten attempt'):
+        persistence.mark_obsolete_unwritten_history(store, run_id, call_keys=[], step_ids=[step_id])
+    record = persistence.mark_obsolete_unwritten_history(store, run_id,
+        call_keys=['review.json'], step_ids=[step_id])
+    assert persistence.mark_obsolete_unwritten_history(store, run_id,
+        call_keys=['review.json'], step_ids=[step_id]) == record
+    saved = store.get_cvp_group(run_id)
+    assert saved['call_reservations']['review.json']['state'] == 'started'
+    assert saved['call_reservations']['review.json']['applicability'] == 'obsolete_for_execution'
+    assert store.get_cvp_group(step_id)['obsolete_for_execution'] is True
+
+
 def test_exact_pre_dispatch_failure_can_be_superseded_without_erasing_call(setup):
     from backend.api.canonical_repository import cvp_management_store as persistence
     from backend.api.canonical_repository.postgres_store import ChangeSetConflict
