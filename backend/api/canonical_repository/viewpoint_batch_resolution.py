@@ -3491,9 +3491,10 @@ def validate_route_proposal(
     eligible_by_conclusion: dict[str, set[str]] = {}
     for binding in component_bindings:
         target = binding.target_viewpoint_revision_id
-        if not target or binding.disposition not in ROUTE_TARGETED_DISPOSITIONS - {
-            "tension_existing"
-        }:
+        if not target or (binding.disposition != "member_existing" if complete_cvp
+                          else binding.disposition not in ROUTE_TARGETED_DISPOSITIONS - {
+                              "tension_existing"
+                          }):
             continue
         eligible_by_conclusion.setdefault(target, set()).add(binding.source_id)
     exempt = {item.key() for item in routes.unattested_members}

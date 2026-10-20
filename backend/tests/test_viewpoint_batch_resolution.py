@@ -5071,6 +5071,51 @@ def test_a_member_source_that_attests_nothing_is_a_finding():
         )
 
 
+def test_support_only_source_does_not_require_its_own_route():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        RouteComponentBinding, validate_route_proposal,
+    )
+    from backend.pipeline.viewpoint_route_resolution import route_member_source_review_targets
+
+    member = _claim("C1", ROCK_STATEMENT)
+    support = _claim("C2", ROCK_STATEMENT, source_id="S2")
+    packet = build_registry_route_packet(
+        scope_label="matt16-13-18", approved_viewpoints=[_approved_viewpoint()],
+        claims=[member, support],
+        viewpoint_claim_links=[
+            _registry_link(member),
+            _registry_link(support, viewpoint_claim_link_id="VCL-S2",
+                           link_type="supports",
+                           evidence_bindings=[{"evidence_step_id": "C2-E1",
+                                               "source_fragment_id": "C2-F1"}]),
+        ], existing_routes=[], complete_cvp=True,
+    )
+    assert {item["source_id"] for item in packet["claims"]} == {"S1", "S2"}
+    assert packet["approved_viewpoints"][0]["attesting_source_roster"] == ["S1"]
+    assert route_member_source_review_targets(proposal=_routes_v2(), route_packet=packet) == {}
+    report = validate_route_proposal(
+        routes=_routes_v2(), scope_label="matt16-13-18", claims=[member, support],
+        approved_viewpoint_revision_ids=["CVR-1"], known_route_revision_ids=[],
+        component_bindings=[RouteComponentBinding.model_validate(item)
+                            for item in packet["claim_components"]],
+        complete_cvp=True,
+    )
+    assert report["member_source_coverage"]["CVR-1"]["eligible"] == ["S1"]
+
+    legacy_packet = build_registry_route_packet(
+        scope_label="matt16-13-18", approved_viewpoints=[_approved_viewpoint()],
+        claims=[member, support],
+        viewpoint_claim_links=[
+            _registry_link(member),
+            _registry_link(support, viewpoint_claim_link_id="VCL-S2",
+                           link_type="supports",
+                           evidence_bindings=[{"evidence_step_id": "C2-E1",
+                                               "source_fragment_id": "C2-F1"}]),
+        ], existing_routes=[],
+    )
+    assert legacy_packet["approved_viewpoints"][0]["attesting_source_roster"] == ["S1", "S2"]
+
+
 def test_missing_member_source_is_an_exact_review_target():
     from backend.pipeline.viewpoint_route_resolution import build_route_review_batches
 

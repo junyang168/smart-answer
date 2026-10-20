@@ -62,9 +62,10 @@ _REGISTRY_LINK_DISPOSITIONS = {
 }
 
 
-#: Dispositions a terminal Claim component may carry -- the same set the route
-#: validator enforces, so the roster promises exactly what can be bound.
-_TERMINAL_ELIGIBLE_DISPOSITIONS = ROUTE_TARGETED_DISPOSITIONS - {"tension_existing"}
+#: Only an equivalent member establishes that this source states the CVP
+#: conclusion. Supporting material remains in the packet, but does not by
+#: itself require a source-local route instance.
+_MEMBER_DISPOSITIONS = {"member_existing"}
 
 
 class RouteStageNotReadyError(ValueError):
@@ -517,7 +518,9 @@ def build_registry_route_packet(
                         binding.source_id
                         for binding in components.values()
                         if binding.target_viewpoint_revision_id == key
-                        and binding.disposition in _TERMINAL_ELIGIBLE_DISPOSITIONS
+                        and (binding.disposition in _MEMBER_DISPOSITIONS
+                             if complete_cvp else binding.disposition in
+                             ROUTE_TARGETED_DISPOSITIONS - {"tension_existing"})
                     }
                 ),
             }
