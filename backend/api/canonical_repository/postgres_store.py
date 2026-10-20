@@ -3330,7 +3330,14 @@ class PostgresKnowledgeStore:
                         continuation['prior_findings'].update(peer.get('context_findings', {}))
                         continuation['prior_findings'].update(peer.get('findings', {}))
                 if extension and not refresh and goal['original_objects'] != prior['original_goal']['original_objects']:
-                    raise ChangeSetConflict('owner call extension original content scope drifted')
+                    # Authorizing a saved readonly relation can promote its
+                    # endpoint evidence into model scope. Preserve every old
+                    # object; the complete transaction snapshot below must
+                    # still match the predecessor exactly.
+                    permission_follow_up = extension.get('basis') == 'permission_required'
+                    if (not permission_follow_up or any(goal['original_objects'].get(key) != state
+                            for key, state in prior['original_goal']['original_objects'].items())):
+                        raise ChangeSetConflict('owner call extension original content scope drifted')
                 target_baseline = {key:(value['revision'],value['content_sha256'],value['retired'])
                     for key,value in prior['original_goal']['original_objects'].items() if key in request.target_keys}
                 prior_rounds = sorted({slot['round_id'] for slot in prior['call_reservations'].values()})
@@ -3837,7 +3844,8 @@ class PostgresKnowledgeStore:
                     reason = ('disagreement' if value.get('source_impact_disagreement') else
                         cm.adjudication_outcome(unresolved, candidate) if adjudicating else cm.failure_reason(unresolved))
                     if (reason == 'revision_required' and materials['request']['operation'] != 'Review'
-                            and not (adjudicating and set(unresolved) - {r.finding_id for r in candidate.finding_resolutions or []})):
+                            and not (adjudicating and set(unresolved) - {r.finding_id for r in candidate.finding_resolutions or []}
+                                     - cm.proposer_reported_finding_ids(unresolved, candidate))):
                         writable = {p.key for p in unit_request.permissions}
                         writable.update(parent['created_keys'])
                         from backend.pipeline.claim_joint_update import enabled

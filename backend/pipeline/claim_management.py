@@ -1021,6 +1021,18 @@ def original_goal(request, before):
         "units": {"CMU-" + sha256_json(keys)[:20]: keys for keys in partition_targets(request, before)},
     }
 
+    # A maintenance request needs its actual question, not merely a target
+    # identity and write grants. Authority bytes are frozen independently;
+    # old actions without questions keep their original packet exactly.
+    if Path(request.authorization.path).is_file():
+        authority = json.loads(source.verify_file(request.authorization).read_text())
+        if 'review_questions' in authority:
+            questions = authority['review_questions']
+            if (not isinstance(questions, list) or not questions
+                    or any(not isinstance(q, str) or not q.strip() for q in questions)
+                    or len(questions) != len(set(questions))):
+                raise ValueError('explicit maintenance review_questions require distinct nonempty questions')
+            result['review_questions'] = list(questions)
     from backend.pipeline.claim_evidence_review import enabled as evidence_enabled, QUESTIONS as evidence_questions
     if evidence_enabled(request):
         result['required_questions'] = sorted(set(result['required_questions']) | evidence_questions)
@@ -1212,10 +1224,21 @@ def candidate_state(before, candidate):
     return sha256_json({"records": records, "replacements": candidate.replacements})
 
 
+def proposer_reported_finding_ids(findings, candidate):
+    """Already stated by GPT, retained as unresolved by independent review.
+
+    This only avoids asking GPT to restate its own exact objection before a
+    permission pause. It resolves nothing and creates no approval or budget.
+    Match the complete original report, not merely its stable identity.
+    """
+    reports = [f.model_dump(mode='json') for f in candidate.findings]
+    return {fid for fid, finding in findings.items() if finding in reports}
+
+
 def adjudication_outcome(findings, candidate):
     """New objections go to GPT before permission/source escalation."""
     decisions = {r.finding_id: r for r in candidate.finding_resolutions or []}
-    if set(findings) - set(decisions):
+    if set(findings) - set(decisions) - proposer_reported_finding_ids(findings, candidate):
         return 'revision_required'
     if any(r.disposition == 'resolved' for r in decisions.values()
            if r.finding_id in findings):
@@ -1407,6 +1430,9 @@ def continuation_budget(previous, request, policy):
             or previous.get('created_keys') or previous.get('replacements')):
         raise ValueError('engineering continuation must retain original Update targets and source without structural writes')
     extension_basis = extension.get('basis', 'unknown_call') if isinstance(extension, dict) else None
+    permission_follow_up = (extension_basis == 'permission_required'
+        and previous['result'].get('reason') == 'permission_required'
+        and finding_permission_extension(previous, old, request))
     qualification_refresh = extension_basis == 'qualification_refresh'
     completed_cleanup = previous['result']['status'] == 'completed' and not qualification_refresh
     old_permissions = {p.key:set(p.fields) for p in old.permissions}
@@ -1428,6 +1454,7 @@ def continuation_budget(previous, request, policy):
         if extension_basis != 'unknown_call':
             extension_keys |= {'basis','current_objects_sha256','related_action_metadata_sha256'}
         valid_basis = (extension_basis == 'unknown_call' and previous['result'].get('reason') == 'call_uncertain'
+            or permission_follow_up
             or extension_basis == 'remaining_findings' and previous['result'].get('reason') == 'budget_exhausted' and bool(previous['findings'])
             or qualification_refresh and previous['result']['status'] == 'completed' and bool(previous.get('context_findings'))
             or read_only_refresh and previous['result'].get('reason') == 'disagreement'
@@ -1440,9 +1467,13 @@ def continuation_budget(previous, request, policy):
                 or not (extension['authorization_quote'] or '').strip()
                 or authority.get('authorized_by') != 'owner' or authority.get('human_content_approval') is not False
                 or completed_cleanup or human_follow_up
-                or (request.permissions != old.permissions and not read_only_refresh) or policy.initial_candidate != 'proposal'
+                or (request.permissions != old.permissions and not read_only_refresh and not permission_follow_up) or policy.initial_candidate != 'proposal'
                 or policy.all_findings_to_gpt != original.all_findings_to_gpt):
             raise ValueError('owner call extension requires exact paused action, authority and explicit new budget')
+        if permission_follow_up and (policy.budget.gpt_calls != 1 or policy.budget.opus_calls != 1
+                or policy.budget.gemini_calls != int(policy.independent_audit_required)
+                or policy.budget.max_revisions != 1):
+            raise ValueError('permission follow-up permits exactly one bounded proposal and review')
     recovery = authority.get('unaccepted_review_recovery', {})
     proposal_recovery = authority.get('unaccepted_proposal_recovery', {})
     if not isinstance(proposal_recovery,dict):
