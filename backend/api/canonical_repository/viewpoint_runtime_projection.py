@@ -176,6 +176,7 @@ def validate_runtime_authoring_graph(
             findings.append(f"{revision_id}: missing argument route {revision['argument_route_id']}")
         elif (
             route.get("current_revision_id") == revision_id
+            and route.get("route_status", "active") == "active"
             and revision_id not in retained_route_revision_ids
             and viewpoint_revision_id
             != viewpoints.get(str(route["conclusion_viewpoint_id"]), {}).get("current_revision_id")

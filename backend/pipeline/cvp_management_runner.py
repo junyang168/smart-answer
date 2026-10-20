@@ -372,13 +372,19 @@ def run(store,request,*,root,execute=False,clients=None):
         if saved.get('request')!=request.model_dump(mode='json') or saved.get('execution_root')!=str(root):
             from backend.api.canonical_repository.postgres_store import ChangeSetConflict
             raise ChangeSetConflict('CVP2 original root/request/policy cannot reset')
-        if saved.get('result',{}).get('status')=='completed':return saved['result']
+        if saved.get('result',{}).get('status')=='completed':
+            from backend.pipeline.viewpoint_route_cvp_worker import handoff_completed_cvp_groups
+            handoff_completed_cvp_groups(store,saved,root)
+            return saved['result']
     preflight=prepare_recall(store,request.input,allow_unqualified=True,defer_index=execute)
     if not execute:return {'status':'preflight','preflight':preflight,'model_calls':0,'semantic_writes':0}
     with exclusive(root):
         parent=persistence.prepare_action(store,request,root=str(root),preflight=preflight)
         parent_id=parent['run_id'];call=_transport(store,parent_id,root,request)
-        if parent['result'].get('status')=='completed':return parent['result']
+        if parent['result'].get('status')=='completed':
+            from backend.pipeline.viewpoint_route_cvp_worker import handoff_completed_cvp_groups
+            handoff_completed_cvp_groups(store,parent,root)
+            return parent['result']
         from backend.pipeline.viewpoint_resolution_runtime import subscription_client
         proposer=clients['gpt'] if clients else subscription_client('codex','gpt-6.1-sol','high')
         reviewer=clients['opus'] if clients else subscription_client('claude','claude-opus-5-5','high')
@@ -399,6 +405,10 @@ def run(store,request,*,root,execute=False,clients=None):
                 continue
             if unit['status']=='completed':
                 completed=store.get_cvp_group(unit['completed_step'])
+                from backend.pipeline.viewpoint_route_cvp_worker import handoff_cvp_route_jobs
+                route_package=completed['reviewed']['evidence']['package']['payload']
+                handoff_cvp_route_jobs(store,route_package,root/'route-queue-v2',
+                                       Path(completed['materials']['step_root']))
                 if not domain.statement_recall(request):
                     approved_cards.extend(_completed_summary_proofs(store,completed))
                 previous_index_root=completed['materials'].get('index_root',previous_index_root)
@@ -417,6 +427,11 @@ def run(store,request,*,root,execute=False,clients=None):
                     readback,rpins=_readback(store,evidence)
                     persistence.complete_step(store,latest['run_id'],readback=readback,read_pins=rpins)
                     persistence.progress(store,parent_id,group_key=key,status='completed',step_id=latest['run_id'])
+                    from backend.pipeline.viewpoint_route_cvp_worker import handoff_cvp_route_jobs
+                    handoff_cvp_route_jobs(store,
+                                           store.get_cvp_group(latest['run_id'])['reviewed']['evidence']['package']['payload'],
+                                           root/'route-queue-v2',
+                                           Path(latest['materials']['step_root']))
                     completed=store.get_cvp_group(latest['run_id'])
                     if not domain.statement_recall(request):
                         approved_cards.extend(_completed_summary_proofs(store,completed))
@@ -729,6 +744,8 @@ def run(store,request,*,root,execute=False,clients=None):
                     readback,rpins=_readback(store,evidence)
                     persistence.complete_step(store,step_id,readback=readback,read_pins=rpins)
                     persistence.progress(store,parent_id,group_key=key,status='completed',step_id=step_id)
+                    from backend.pipeline.viewpoint_route_cvp_worker import handoff_cvp_route_jobs
+                    handoff_cvp_route_jobs(store,package,root/'route-queue-v2',step_root)
                     from backend.pipeline.cvp_management_index import write_committed_summary_proofs
                     if not domain.statement_recall(request):
                         approved_cards.extend(write_committed_summary_proofs(evidence,proposal_path,

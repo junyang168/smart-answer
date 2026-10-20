@@ -6323,6 +6323,11 @@ def test_only_the_current_route_revision_owes_currency_to_the_viewpoint():
 
     lagging = validate_runtime_authoring_graph(graph(current="ARR-old"))
     assert "ARR-old: conclusion viewpoint revision is stale" in lagging
+    retired = graph(current="ARR-old")
+    retired["argument_routes"]["AR-1"]["route_status"] = "retired"
+    assert "ARR-old: conclusion viewpoint revision is stale" not in (
+        validate_runtime_authoring_graph(retired)
+    )
 
 
 def test_revision_that_strands_an_unconfirmed_record_is_refused():
@@ -8042,3 +8047,227 @@ def test_reversal_is_stable_for_the_same_decision():
         reason="措辞不同不改变身份。", review_artifact_sha256="backreview-sha",
     )[1]
     assert first["viewpoint_relation_id"] == second["viewpoint_relation_id"]
+
+
+def _routes_v2(**overrides: Any) -> Any:
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ArgumentRouteProposalV2Response,
+    )
+
+    payload = _routes().model_dump(mode="json")
+    payload["schema_version"] = "wang_argument_route_proposal_v2"
+    payload.update(overrides)
+    return ArgumentRouteProposalV2Response.model_validate(payload)
+
+
+def test_whole_cvp_route_schema_does_not_change_legacy_proposal_bytes():
+    assert "retired_route_revision_ids" not in _routes().model_dump(mode="json")
+    assert _routes_v2().model_dump(mode="json")["retired_route_revision_ids"] == []
+
+
+def test_whole_cvp_route_review_uses_one_complete_packet_and_no_extra_final(tmp_path):
+    from backend.pipeline.viewpoint_route_cvp_resolution import run_cvp_route_scope
+
+    claim = _claim("C1", ROCK_STATEMENT)
+    packet = build_registry_route_packet(
+        scope_label="matt16-13-18", approved_viewpoints=[_approved_viewpoint()],
+        claims=[claim], viewpoint_claim_links=[_registry_link(claim)],
+        existing_routes=[], source_sections=[{"source_ref": "S1", "sections": []}],
+        existing_attestations=[], complete_cvp=True,
+    )
+    proposal = _routes_v2().model_dump(mode="json")
+    review = {
+        "route_proposal_sha256": sha256_json(proposal),
+        "route_evidence_packet_sha256": packet["packet_sha256"],
+        "change_reviews": [
+            {"target_kind": kind, "target_key": key, "decision": "pass",
+             "reason": "证据与完整路线集相符"}
+            for kind, key in (("route", "ROUTE-GREEK"), ("attestation", "ATTEST-1"))
+        ],
+        "cross_source_composition_found": False,
+        "reason": "整套路线成立",
+    }
+    proposer = _StubAdapter(proposal)
+    reviewer = _StubAdapter(review)
+    result = run_cvp_route_scope(
+        route_packet=packet, existing_routes=[], output_dir=tmp_path,
+        proposer=proposer, reviewer=reviewer,
+        reconsiderer=_StubAdapter({}), max_correction_rounds=4,
+    )
+    assert result["passing_route_keys"] == ["ROUTE-GREEK"]
+    assert len(result["rounds"]) == 1
+    assert reviewer.calls == 1
+    assert reviewer.payloads[0]["route_evidence_context"]["source_sections"] == [
+        {"source_ref": "S1", "sections": []}
+    ]
+    assert not (tmp_path / "raw-route-review-001.json").exists()
+
+
+def test_whole_cvp_route_proposal_must_dispose_each_old_route():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        RouteComponentBinding, validate_route_proposal,
+    )
+
+    claim = _claim("C1", ROCK_STATEMENT)
+    packet = build_registry_route_packet(
+        scope_label="matt16-13-18", approved_viewpoints=[_approved_viewpoint()],
+        claims=[claim], viewpoint_claim_links=[_registry_link(claim)], existing_routes=[],
+        complete_cvp=True,
+    )
+    args = dict(
+        scope_label="matt16-13-18", claims=[claim],
+        approved_viewpoint_revision_ids=["CVR-1"],
+        known_route_revision_ids=["ARR-old"],
+        known_route_conclusions={"ARR-old": "CVR-1"},
+        component_bindings=[RouteComponentBinding.model_validate(item)
+                            for item in packet["claim_components"]],
+        complete_cvp=True,
+    )
+    with pytest.raises(BatchResolutionError, match="retain, revise, or retire"):
+        validate_route_proposal(routes=_routes_v2(), **args)
+    assert validate_route_proposal(
+        routes=_routes_v2(retired_route_revision_ids=["ARR-old"]), **args
+    )["route_count"] == 1
+    from backend.pipeline.viewpoint_route_resolution import build_route_review_batches
+    batches = build_route_review_batches(
+        proposal=_routes_v2(retired_route_revision_ids=["ARR-old"]),
+        route_packet=packet, route_proposal_sha256="sha", whole_cvp=True,
+    )
+    assert len(batches) == 1
+    assert {tuple((item["target_kind"], item["target_key"]))
+            for item in batches[0]["review_targets"]} >= {
+                ("route_retirement", "ARR-old"), ("route", "ROUTE-GREEK"),
+                ("attestation", "ATTEST-1"),
+            }
+
+
+def test_whole_cvp_route_can_repin_same_viewpoint_only_by_revision():
+    from backend.api.canonical_repository.viewpoint_batch_resolution import validate_route_proposal
+
+    args = dict(
+        scope_label="matt16-13-18", claims=[_claim("C1", ROCK_STATEMENT)],
+        approved_viewpoint_revision_ids=["CVR-1"],
+        approved_viewpoint_ids={"CVR-1": "CV-1"},
+        known_route_revision_ids=["ARR-old"],
+        known_route_conclusions={"ARR-old": "CVR-old"},
+        known_route_viewpoint_ids={"ARR-old": "CV-1"},
+        component_bindings=[_route_component_binding()], complete_cvp=True,
+    )
+    revised = _routes_v2(argument_route_candidates=[_route(
+        proposed_action="revise_existing",
+        target_argument_route_revision_id="ARR-old",
+        revision_reason="CVP 修订后重新绑定同一条有序论证骨架",
+    )])
+    assert validate_route_proposal(routes=revised, **args)["route_count"] == 1
+    matched = _routes_v2(argument_route_candidates=[_route(
+        proposed_action="match_existing", target_argument_route_revision_id="ARR-old",
+    )])
+    with pytest.raises(BatchResolutionError, match="another conclusion viewpoint"):
+        validate_route_proposal(routes=matched, **args)
+
+
+def test_cvp_route_queue_reclaims_expired_lease_with_new_fencing_epoch(tmp_path):
+    from backend.api.canonical_repository.viewpoint_route_cvp_queue import (
+        CvpRouteQueue, make_cvp_route_job,
+    )
+
+    queue = CvpRouteQueue(tmp_path)
+    job = make_cvp_route_job("CV-1", "material-sha", "policy-sha")
+    queue.enqueue(job)
+    first, epoch = queue.claim(worker_id="worker-1", policy_sha256="policy-sha",
+                               lease_seconds=30)
+    assert first == job
+    newer = make_cvp_route_job("CV-1", "new-material-sha", "policy-sha")
+    queue.enqueue(newer)
+    assert queue.claim(worker_id="worker-2", policy_sha256="policy-sha",
+                       lease_seconds=30) is None
+    queue.assert_owner(job["job_id"], worker_id="worker-1", epoch=epoch)
+    state_path = queue.states / f"{job['job_id']}.json"
+    state = json.loads(state_path.read_text())
+    state["lease_expires_at"] = "2000-01-01T00:00:00+00:00"
+    queue._write(state_path, state)
+    second, next_epoch = queue.claim(worker_id="worker-2", policy_sha256="policy-sha",
+                                     lease_seconds=30)
+    assert second["viewpoint_id"] == "CV-1"
+    assert next_epoch == (epoch + 1 if second == job else 1)
+    with pytest.raises(ValueError, match="lease lost"):
+        queue.assert_owner(job["job_id"], worker_id="worker-1", epoch=epoch)
+
+
+def test_cvp_route_plan_can_resume_for_apply_without_repeating_enqueue(tmp_path):
+    from backend.api.canonical_repository.viewpoint_route_cvp_queue import (
+        CvpRouteQueue, make_cvp_route_job,
+    )
+
+    queue = CvpRouteQueue(tmp_path)
+    job = make_cvp_route_job("CV-1", "material-sha", "policy-sha")
+    queue.enqueue(job)
+    _, epoch = queue.claim(worker_id="planner", policy_sha256="policy-sha",
+                           lease_seconds=30)
+    queue.finish(job["job_id"], worker_id="planner", epoch=epoch, status="planned")
+    assert queue.claim(worker_id="other", policy_sha256="policy-sha",
+                       lease_seconds=30) is None
+    resumed, next_epoch = queue.claim(worker_id="applier", policy_sha256="policy-sha",
+                                       lease_seconds=30, resume_planned=True)
+    assert resumed == job and next_epoch == epoch + 1
+
+
+def test_whole_cvp_route_correction_rereviews_the_actual_replacement(tmp_path):
+    from backend.api.canonical_repository.viewpoint_batch_resolution import ArgumentRouteReviewV2Response
+    from backend.pipeline.viewpoint_route_cvp_resolution import run_cvp_route_scope
+
+    claim = _claim("C1", ROCK_STATEMENT)
+    packet = build_registry_route_packet(
+        scope_label="matt16-13-18", approved_viewpoints=[_approved_viewpoint()],
+        claims=[claim], viewpoint_claim_links=[_registry_link(claim)],
+        existing_routes=[], complete_cvp=True,
+    )
+    original = _routes_v2().model_dump(mode="json")
+    revised = json.loads(json.dumps(original))
+    revised["argument_route_candidates"][0]["route_label"] = "词形差异论证"
+    first = ArgumentRouteReviewV2Response.model_validate({
+        "route_proposal_sha256": sha256_json(original),
+        "route_evidence_packet_sha256": packet["packet_sha256"],
+        "change_reviews": [
+            {"target_kind": "route", "target_key": "ROUTE-GREEK",
+             "decision": "correct", "finding_codes": ["label_overstates"],
+             "reason": "标签过宽", "correction": "收窄标签"},
+            {"target_kind": "attestation", "target_key": "ATTEST-1",
+             "decision": "pass", "reason": "实例成立"},
+        ], "cross_source_composition_found": False, "reason": "修正标签",
+    }).model_dump(mode="json")
+    second = {
+        "route_proposal_sha256": sha256_json(revised),
+        "route_evidence_packet_sha256": packet["packet_sha256"],
+        "change_reviews": [
+            {"target_kind": kind, "target_key": key,
+             "decision": "pass", "reason": "更正后的整套路线成立"}
+            for kind, key in (("route", "ROUTE-GREEK"), ("attestation", "ATTEST-1"))
+        ], "cross_source_composition_found": False, "reason": "通过",
+    }
+    canonical_first = ArgumentRouteReviewV2Response.model_validate(
+        canonicalize_review(first)[0]
+    ).model_dump(mode="json")
+    correction = {
+        "schema_version": "wang_argument_route_reconsideration_v2",
+        "route_proposal_sha256": sha256_json(original),
+        "route_review_sha256": sha256_json(canonical_first),
+        "finding_dispositions": [
+            {"target_kind": "route", "target_key": "ROUTE-GREEK",
+             "disposition": "accepted", "reason": "按要求收窄"}
+        ],
+        "revised_proposal": revised,
+    }
+    reviewer = _SequenceStubAdapter([first, second])
+    result = run_cvp_route_scope(
+        route_packet=packet, existing_routes=[], output_dir=tmp_path,
+        proposer=_StubAdapter(original), reviewer=reviewer,
+        reconsiderer=_StubAdapter(correction), max_correction_rounds=4,
+    )
+    assert len(result["rounds"]) == 2
+    assert result["review_sha256"] == sha256_json(
+        ArgumentRouteReviewV2Response.model_validate(canonicalize_review(second)[0]).model_dump(mode="json")
+    )
+    assert reviewer.payloads[1]["route_proposal_context"]["argument_route_candidates"][0][
+        "route_label"
+    ] == "词形差异论证"

@@ -291,9 +291,9 @@ flowchart TD
 3. **增量维护保留身份。** 对已有路线逐一判断保留、修订、退役或暂缓；骨架实质相同就保留路线 ID，必要时产生新 revision。既有实例也须逐一核对，不能因新增来源而静默遗留过期实例，也不能把所有路线删掉重建。
 4. **一个 CVP 的路线集一起审核、一起写入。** 合并或拆分有异议时，不能先写入该 CVP 的其他路线，否则留下自相矛盾的中间状态。失败只暂缓这个 CVP 的路线集，不回滚已批准的 CVP 身份，也不阻塞其他 CVP 的路线任务。
 
-論證路線由 GPT 提議、Opus 獨立復核；有具體異議時可在同一任務內依版本化 policy 有界多輪修正，原始任務目標與未解異議不得因重提而消失。每輪審核綁定當輪待寫結果的 SHA；最後一輪若通過，該審核就是寫入依據，不另加形式上的終審。無實質進展、材料不全或版本漂移時先查工程與來源，不靠反覆重問取得通過。骨架是編輯歸納，不標成教授原話；每個實例步驟須有可查的 Claim、EvidenceStep 與原文綁定。新運行的模型 policy 寫在 `backend/pipeline/policies/wang_route_resolution_policy_v4.json`；v1 至 v3 保留供歷史 artifact 重放與審計。
+論證路線由 GPT 提議、Opus 獨立復核；有具體異議時可在同一任務內依版本化 policy 有界多輪修正，原始任務目標與未解異議不得因重提而消失。每輪審核綁定當輪待寫結果的 SHA；最後一輪若通過，該審核就是寫入依據，不另加形式上的終審。無實質進展、材料不全或版本漂移時先查工程與來源，不靠反覆重問取得通過。骨架是編輯歸納，不標成教授原話；每個實例步驟須有可查的 Claim、EvidenceStep 與原文綁定。新運行的模型 policy 寫在 `backend/pipeline/policies/wang_route_resolution_policy_v5.json`；v1 至 v4 保留供歷史 artifact 重放與審計。
 
-**實作狀態：**目前 worker 雖已一個 CVP 一個 job，仍只讀舊凍結 Claim scope，範圍外成員只列 ID；復核按 12 個目標裁切上下文，且只有一輪改正與另一次終局復核。上述完整輸入、整套審核、多輪修正、增量退役及完整切面校驗是目標設計，不宣稱已實作。舊 worker 的 `no_attested_route_in_this_evidence_scope` 不能提升為全庫結論。
+**實作狀態：**v5 worker 從當前 CVP 的全部有效連接及其來源小節建立輸入，加入現有路線與實例；每輪審核看整套新舊路線，具體異議可多輪更正，最後一次通過直接成為寫入依據。舊路線須保留、修訂或明確退役；未留在新集合的舊實例在同一 ChangeSet 撤下。提交前核對完整材料，SQL 提交再鎖定其 Registry 版本與成員、路線、實例集合。新提案、復核和更正使用獨立 v2 響應 schema，不改舊 v1 artifact 的 SHA。CVP2 完成後入隊，Claim 或來源另有修改時可用 v5 入隊命令指定受影響的 CVP；這類上游修改的自動入隊接線仍待補。舊 #357 worker 保留供歷史 artifact，舊 `no_attested_route_in_this_evidence_scope` 不得提升為全庫結論。v5 尚需真實模型校準與整套 apply 驗證；目前只有輸入、規劃及單元回歸檢查。
 
 **实例分完整与部分。** 一篇里把这条路线的必需步骤都讲全了，是完整实例；缺步骤或有含糊的，只能记部分实例。**部分实例不计入「这条路线反复出现」的次数。**
 
@@ -394,4 +394,4 @@ flowchart TD
 > **与代码对齐**:第 4 节语境语义规则于 2026-10-05 核对到 `config/wang_cvp_contextual_semantics_v2.md`、`viewpoint_semantic_contract.py`、新版本角色模板及 `scripts/audit-library.py`；身份归并未决出口核对到 v2 response，重复仲裁保护核对到 `viewpoint_adjudication_history.py`。新规则目前只完成离线回归，尚非真实模型校准或生产通过。第 3 节人工交接与受控修订续跑保持 2026-10-04 对 `viewpoint_human_review.py`、`viewpoint_audit_link_repair.py`、`viewpoint_batch_resolution_runner.py` 及对应回归测试的核对；其余未核对。第 1、7 节的数字仍取自 2026-08-25 的 PostgreSQL 快照；partition 实施以 #395 的验证记录为准。
 > **权威范围**:观点、论证路线、观点关系的语义、身份判定与消费边界。
 > **范围管理代码对齐**:第 3 节常规 scope enrichment 于 2026-10-09 核对本次 `cvp_scope_management.py`、共享 SQL action 与隔离交易测试；真实模型／组验收另存，不用离线结果追认新内容。
-> **路線輸入代碼對齊**:第 5 節的全 CVP 成員與相關原文小節輸入尚未實作；現有 Route worker 僅讀凍結 Claim scope，範圍外成員只列 ID。
+> **路線輸入代碼對齊**:第 5 節 v5 實作已核對全 CVP 成員、相關小節、現有路線與實例的只讀構包和 scoped ChangeSet 規劃；尚未做真實模型與 SQL apply 的端到端驗證。舊 #357 worker 仍按凍結 Claim scope 執行歷史任務。

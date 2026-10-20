@@ -1,0 +1,5 @@
+你是同一 CVP 的 ArgumentRoute 提案员。使用 `wang_argument_route_reconsideration_v2` 响应 schema。独立审核员给了具体 `correct` 异议。请交回**完整替换的路线集合**，包括所有 route、逐篇 attestation、no_route、unattested_members 和 `retired_route_revision_ids`；不能只给补丁，也不能漏掉原任务覆盖的成员来源。
+
+对每条 `correct` 异议输出一个 `finding_dispositions`。若接受，按 acceptance criteria 改实际路线、来源实例或旧路线处置；若不能接受，说明并标 `rebutted/deferred`，程序将暂缓整个 CVP。合并、拆分路线可以同时改变多条 route 和 attestation，但仍须只围绕这个 CVP 和已给材料。任何新造 ID 都只用于 proposal 的 local key；既有 Registry ID 必须引用输入。下轮独立审核会重新看整套待写结果及原始材料。不要抄写输入全文，保留短命题和精确 ID 引用。
+
+原样返回 `route_proposal_sha256`、`route_review_sha256`，保持 `scope_label` 与批准的 CVP revision 不变。

@@ -16,7 +16,10 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     BatchResolutionError,
     ArgumentRouteReconsiderationResponse,
     ArgumentRouteProposalResponse,
+    ArgumentRouteProposalV2Response,
     ArgumentRouteReviewResponse,
+    ArgumentRouteReviewV2Response,
+    ArgumentRouteReconsiderationV2Response,
     NoRouteDisposition,
     ROUTE_TARGETED_DISPOSITIONS,
     RouteComponentBinding,
@@ -238,14 +241,15 @@ def build_route_proposer(
     provider: str = "claude",
     prompt_file: str = "canonical_viewpoint_batch_routes.md",
     timeout_seconds: float = CALL_TIMEOUT_SECONDS,
+    whole_cvp: bool = False,
 ) -> StructuredJsonReviewerAdapter:
     return StructuredJsonReviewerAdapter(
         client=_subscription_client(
             provider, model, reasoning_effort, timeout_seconds=timeout_seconds
         ),
         prompt=(PROMPT_DIR / prompt_file).read_text(encoding="utf-8"),
-        response_model=ArgumentRouteProposalResponse,
-        schema_name="wang_argument_route_proposal_v1",
+        response_model=(ArgumentRouteProposalV2Response if whole_cvp else ArgumentRouteProposalResponse),
+        schema_name=("wang_argument_route_proposal_v2" if whole_cvp else "wang_argument_route_proposal_v1"),
     )
 
 
@@ -256,6 +260,7 @@ def build_route_reviewer(
     provider: str = "claude",
     prompt_file: str = "canonical_viewpoint_route_review.md",
     timeout_seconds: float = CALL_TIMEOUT_SECONDS,
+    whole_cvp: bool = False,
 ) -> StructuredJsonReviewerAdapter:
     return StructuredJsonReviewerAdapter(
         client=_subscription_client(
@@ -264,8 +269,8 @@ def build_route_reviewer(
         prompt=(PROMPT_DIR / prompt_file).read_text(
             encoding="utf-8"
         ),
-        response_model=ArgumentRouteReviewResponse,
-        schema_name="wang_argument_route_review_v1",
+        response_model=(ArgumentRouteReviewV2Response if whole_cvp else ArgumentRouteReviewResponse),
+        schema_name=("wang_argument_route_review_v2" if whole_cvp else "wang_argument_route_review_v1"),
     )
 
 
@@ -276,6 +281,7 @@ def build_route_reconsiderer(
     provider: str = "claude",
     prompt_file: str = "canonical_viewpoint_route_reconsideration.md",
     timeout_seconds: float = CALL_TIMEOUT_SECONDS,
+    whole_cvp: bool = False,
 ) -> StructuredJsonReviewerAdapter:
     return StructuredJsonReviewerAdapter(
         client=_subscription_client(
@@ -284,8 +290,8 @@ def build_route_reconsiderer(
         prompt=(PROMPT_DIR / prompt_file).read_text(
             encoding="utf-8"
         ),
-        response_model=ArgumentRouteReconsiderationResponse,
-        schema_name="wang_argument_route_reconsideration_v1",
+        response_model=(ArgumentRouteReconsiderationV2Response if whole_cvp else ArgumentRouteReconsiderationResponse),
+        schema_name=("wang_argument_route_reconsideration_v2" if whole_cvp else "wang_argument_route_reconsideration_v1"),
     )
 
 
@@ -297,6 +303,9 @@ def build_registry_route_packet(
     claims: list[ReviewClaim],
     viewpoint_claim_links: list[dict[str, Any]],
     existing_routes: list[dict[str, Any]],
+    source_sections: list[dict[str, Any]] | None = None,
+    existing_attestations: list[dict[str, Any]] | None = None,
+    complete_cvp: bool = False,
 ) -> dict[str, Any]:
     """Rebuild Route evidence solely from committed Registry state.
 
@@ -531,7 +540,10 @@ def build_registry_route_packet(
                     item["viewpoint_claim_link_id"],
                 ),
             ),
-            "no_route_semantics": "no_attested_route_in_this_evidence_scope",
+            "no_route_semantics": (
+                "no_attested_route_in_complete_cvp_material"
+                if complete_cvp else "no_attested_route_in_this_evidence_scope"
+            ),
         },
         "claim_components": [
             components[key].model_dump(mode="json") for key in sorted(components)
@@ -546,6 +558,15 @@ def build_registry_route_packet(
             key=lambda item: str(item.get("route_revision_id") or item.get("argument_route_revision_id") or ""),
         ),
     }
+    if source_sections is not None:
+        packet["source_sections"] = sorted(
+            source_sections, key=lambda item: str(item["source_ref"])
+        )
+    if existing_attestations is not None:
+        packet["existing_attestations"] = sorted(
+            existing_attestations,
+            key=lambda item: str(item["argument_route_attestation_id"]),
+        )
     packet["packet_sha256"] = sha256_json(packet)
     return packet
 
@@ -553,10 +574,11 @@ def build_registry_route_packet(
 
 def build_route_review_batches(
     *,
-    proposal: ArgumentRouteProposalResponse,
+    proposal: ArgumentRouteProposalResponse | ArgumentRouteProposalV2Response,
     route_packet: dict[str, Any],
     route_proposal_sha256: str,
     max_targets: int = DEFAULT_ROUTE_REVIEW_TARGETS_PER_BATCH,
+    whole_cvp: bool = False,
 ) -> list[dict[str, Any]]:
     """Create exact-once bounded review targets with sufficient read context."""
 
@@ -579,6 +601,11 @@ def build_route_review_batches(
         ("no_route", item.viewpoint_revision_id)
         for item in proposal.viewpoints_with_no_route
     )
+    if whole_cvp:
+        ordered_targets.extend(
+            ("route_retirement", key)
+            for key in getattr(proposal, "retired_route_revision_ids", [])
+        )
     member_source_targets = route_member_source_review_targets(
         proposal=proposal, route_packet=route_packet
     )
@@ -606,6 +633,27 @@ def build_route_review_batches(
     }
 
     batches = []
+    if whole_cvp:
+        batch = {
+            "schema_version": "wang_argument_route_review_batch_v1",
+            "batch_id": "RRB-001",
+            "route_proposal_sha256": route_proposal_sha256,
+            "route_evidence_packet_sha256": route_packet["packet_sha256"],
+            "review_targets": [
+                {"target_kind": kind, "target_key": key}
+                for kind, key in ordered_targets
+            ],
+            "route_proposal_context": {
+                "argument_route_candidates": [item.model_dump(mode="json") for item in proposal.argument_route_candidates],
+                "source_route_attestations": [item.model_dump(mode="json") for item in proposal.source_route_attestations],
+                "viewpoints_with_no_route": [item.model_dump(mode="json") for item in proposal.viewpoints_with_no_route],
+                "retired_route_revision_ids": getattr(proposal, "retired_route_revision_ids", []),
+                "member_source_dispositions": [member_source_targets[key] for key in sorted(member_source_targets)],
+            },
+            "route_evidence_context": route_packet,
+        }
+        batch["batch_sha256"] = sha256_json(batch)
+        return [batch]
     for offset in range(0, len(ordered_targets), max_targets):
         targets = ordered_targets[offset : offset + max_targets]
         target_set = set(targets)

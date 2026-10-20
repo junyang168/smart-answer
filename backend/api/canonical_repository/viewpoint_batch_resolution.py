@@ -1148,6 +1148,9 @@ def _route_findings(
     known_route_revisions: set[str],
     known_route_conclusions: Mapping[str, str],
     component_bindings: Mapping[str, RouteComponentBinding],
+    known_route_viewpoint_ids: Mapping[str, str] | None = None,
+    approved_viewpoint_ids: Mapping[str, str] | None = None,
+    allow_repin_same_viewpoint: bool = False,
 ) -> list[str]:
     """Check routes and attestations, above all for cross-source composition.
 
@@ -1177,11 +1180,18 @@ def _route_findings(
         elif route.proposed_action in ("match_existing", "revise_existing") and (
             known_route_conclusions.get(str(route.target_argument_route_revision_id))
             != conclusion
+        ) and not (
+            allow_repin_same_viewpoint
+            and route.proposed_action == "revise_existing"
+            and known_route_viewpoint_ids is not None
+            and approved_viewpoint_ids is not None
+            and bool(known_route_viewpoint_ids.get(str(route.target_argument_route_revision_id)))
+            and known_route_viewpoint_ids.get(str(route.target_argument_route_revision_id))
+            == approved_viewpoint_ids.get(conclusion)
         ):
             findings.append(
-                # A revision corrects one route's steps. Moving it to a
-                # different conclusion is not a correction, it is a different
-                # route wearing the old one's id.
+                # A different viewpoint is a different route identity. A new
+                # revision of the same viewpoint can be explicitly repinned.
                 f"{where}: existing route revision belongs to another conclusion viewpoint"
             )
         for node in route.ordered_inference_nodes:
@@ -2117,6 +2127,7 @@ def group_coverage_report(
 #: order; rejecting that would throw away a ten-minute call over presentation.
 _SET_FIELDS = (
     "approved_viewpoint_revision_ids",
+    "retired_route_revision_ids",
     "claim_ids",
     "claim_component_keys",
     "evidence_step_ids",
@@ -3238,6 +3249,21 @@ class ArgumentRouteProposalResponse(StrictBatchModel):
         return self
 
 
+class ArgumentRouteProposalV2Response(ArgumentRouteProposalResponse):
+    """Complete replacement of one CVP's routes, including explicit retirement."""
+
+    schema_version: Literal["wang_argument_route_proposal_v2"] = (
+        "wang_argument_route_proposal_v2"
+    )
+    retired_route_revision_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_retirements(self) -> "ArgumentRouteProposalV2Response":
+        if self.retired_route_revision_ids != sorted(set(self.retired_route_revision_ids)):
+            raise ValueError("retired route revisions must be sorted and unique")
+        return self
+
+
 class ReviewedRouteChange(StrictBatchModel):
     target_key: str = Field(min_length=1)
     target_kind: Literal["route", "attestation", "no_route", "member_source"]
@@ -3327,6 +3353,20 @@ class ArgumentRouteReviewResponse(StrictBatchModel):
         return self
 
 
+class ReviewedRouteChangeV2(ReviewedRouteChange):
+    target_kind: Literal["route", "attestation", "no_route", "member_source", "route_retirement"]
+
+
+class CvpReReviewExceptionV2(CvpReReviewException):
+    triggering_target_kind: Literal["route", "attestation", "no_route", "member_source", "route_retirement"]
+
+
+class ArgumentRouteReviewV2Response(ArgumentRouteReviewResponse):
+    schema_version: Literal["wang_argument_route_review_v2"] = "wang_argument_route_review_v2"
+    change_reviews: list[ReviewedRouteChangeV2] = Field(min_length=1)
+    cvp_re_review_exceptions: list[CvpReReviewExceptionV2] = Field(default_factory=list)
+
+
 class RouteFindingDisposition(StrictBatchModel):
     target_key: str = Field(min_length=1)
     target_kind: Literal["route", "attestation", "no_route", "member_source"]
@@ -3351,16 +3391,31 @@ class ArgumentRouteReconsiderationResponse(StrictBatchModel):
         return self
 
 
+class RouteFindingDispositionV2(RouteFindingDisposition):
+    target_kind: Literal["route", "attestation", "no_route", "member_source", "route_retirement"]
+
+
+class ArgumentRouteReconsiderationV2Response(ArgumentRouteReconsiderationResponse):
+    schema_version: Literal["wang_argument_route_reconsideration_v2"] = (
+        "wang_argument_route_reconsideration_v2"
+    )
+    finding_dispositions: list[RouteFindingDispositionV2] = Field(min_length=1)
+    revised_proposal: ArgumentRouteProposalV2Response
+
+
 def validate_route_proposal(
     *,
-    routes: ArgumentRouteProposalResponse,
+    routes: ArgumentRouteProposalResponse | ArgumentRouteProposalV2Response,
     scope_label: str,
     claims: Sequence[ReviewClaim],
     approved_viewpoint_revision_ids: Sequence[str],
     known_route_revision_ids: Sequence[str],
     known_route_conclusions: Mapping[str, str] | None = None,
+    known_route_viewpoint_ids: Mapping[str, str] | None = None,
+    approved_viewpoint_ids: Mapping[str, str] | None = None,
     component_bindings: Sequence[RouteComponentBinding],
     allow_unresolved_member_sources: bool = False,
+    complete_cvp: bool = False,
 ) -> dict[str, Any]:
     """Check routes against the scope's exact approved viewpoint set."""
 
@@ -3370,6 +3425,22 @@ def validate_route_proposal(
     approved = sorted(set(approved_viewpoint_revision_ids))
     if routes.approved_viewpoint_revision_ids != approved:
         findings.append("route proposal approved viewpoint set differs from the scope cut")
+    if complete_cvp:
+        if not isinstance(routes, ArgumentRouteProposalV2Response):
+            findings.append("complete CVP proposal requires route schema v2")
+        retired_ids = getattr(routes, "retired_route_revision_ids", [])
+        referenced = [
+            str(item.target_argument_route_revision_id)
+            for item in routes.argument_route_candidates
+            if item.proposed_action in {"match_existing", "revise_existing"}
+        ]
+        accounted = referenced + retired_ids
+        if len(accounted) != len(set(accounted)) or set(accounted) != set(known_route_revision_ids):
+            findings.append("complete CVP proposal must retain, revise, or retire every existing route exactly once")
+        if retired_ids and any(
+            rid not in known_route_revision_ids for rid in retired_ids
+        ):
+            findings.append("route retirement names an unknown current revision")
     component_index = {item.claim_component_key: item for item in component_bindings}
     if len(component_index) != len(component_bindings):
         findings.append("route component bindings contain duplicate component keys")
@@ -3380,6 +3451,9 @@ def validate_route_proposal(
             approved_revisions=set(approved),
             known_route_revisions=set(known_route_revision_ids),
             known_route_conclusions=known_route_conclusions or {},
+            known_route_viewpoint_ids=known_route_viewpoint_ids or {},
+            approved_viewpoint_ids=approved_viewpoint_ids or {},
+            allow_repin_same_viewpoint=complete_cvp,
             component_bindings=component_index,
         )
     )
@@ -3502,8 +3576,8 @@ def validate_route_proposal(
 
 def validate_route_review(
     *,
-    review: ArgumentRouteReviewResponse,
-    proposal: ArgumentRouteProposalResponse,
+    review: ArgumentRouteReviewResponse | ArgumentRouteReviewV2Response,
+    proposal: ArgumentRouteProposalResponse | ArgumentRouteProposalV2Response,
     route_proposal_sha256: str,
     route_evidence_packet_sha256: str,
     expected_targets: set[tuple[str, str]] | None = None,
@@ -3528,6 +3602,8 @@ def validate_route_review(
         for item in proposal.viewpoints_with_no_route
     } | {
         ("member_source", key) for key in (member_source_targets or set())
+    } | {
+        ("route_retirement", key) for key in getattr(proposal, "retired_route_revision_ids", [])
     }
     expected = expected_targets if expected_targets is not None else full_expected
     if not expected <= full_expected:
@@ -3594,7 +3670,7 @@ def validate_route_review(
 
 
 def _route_change_payloads(
-    proposal: ArgumentRouteProposalResponse,
+    proposal: ArgumentRouteProposalResponse | ArgumentRouteProposalV2Response,
 ) -> dict[tuple[str, str], dict[str, Any]]:
     return {
         **{
@@ -3618,16 +3694,19 @@ def _route_change_payloads(
             ): item.model_dump(mode="json")
             for item in proposal.unattested_members
         },
+        **{("route_retirement", key): {"route_revision_id": key}
+           for key in getattr(proposal, "retired_route_revision_ids", [])},
     }
 
 
 def validate_route_reconsideration(
     *,
-    reconsideration: ArgumentRouteReconsiderationResponse,
-    proposal: ArgumentRouteProposalResponse,
-    review: ArgumentRouteReviewResponse,
+    reconsideration: ArgumentRouteReconsiderationResponse | ArgumentRouteReconsiderationV2Response,
+    proposal: ArgumentRouteProposalResponse | ArgumentRouteProposalV2Response,
+    review: ArgumentRouteReviewResponse | ArgumentRouteReviewV2Response,
     route_proposal_sha256: str,
     route_review_sha256: str,
+    whole_cvp: bool = False,
 ) -> dict[str, Any]:
     """Confine the one Route correction to reviewer-flagged objects."""
 
@@ -3660,6 +3739,30 @@ def validate_route_reconsideration(
 
     before = _route_change_payloads(proposal)
     after = _route_change_payloads(reconsideration.revised_proposal)
+    if whole_cvp:
+        # The next round reviews the complete replacement set. Merge/split can
+        # legitimately change several route and attestation keys at once; the
+        # old target-local correction restriction would make it impossible.
+        escalations = sorted(
+            f"{item.target_kind}:{item.target_key}:{item.disposition}"
+            for item in reconsideration.finding_dispositions
+            if item.disposition != "accepted"
+        )
+        if before == after:
+            findings.append("whole-CVP correction made no substantive change")
+        if findings:
+            raise BatchResolutionError(findings)
+        report = {
+            "schema_version": "wang_argument_route_reconsideration_validation_v2",
+            "route_proposal_sha256": route_proposal_sha256,
+            "route_review_sha256": route_review_sha256,
+            "finding_count": len(flagged),
+            "accepted_count": len(flagged) - len(escalations),
+            "escalations": escalations,
+            "outcome": "resolved" if not escalations else "exception",
+        }
+        report["artifact_sha256"] = sha256_json(report)
+        return report
     # One finding can only be answered by changing the key set: the reviewer
     # says the proposal declared `no_route` for a viewpoint whose route is
     # sitting right there in the evidence, quotes it, and names the nodes.  The

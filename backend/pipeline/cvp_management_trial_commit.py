@@ -35,6 +35,8 @@ def commit_approved_trial(store,root,*,supersede_unwritten_run):
     if existing and existing.get('result',{}).get('status')=='completed':
         if existing.get('request')!=request.model_dump(mode='json') or existing.get('execution_root')!=str(root):
             raise ValueError('completed trial action has a different original request/root')
+        from backend.pipeline.viewpoint_route_cvp_worker import handoff_completed_cvp_groups
+        handoff_completed_cvp_groups(store,existing,root)
         return existing['result']
     if len(request.input['grouping']['groups'])!=1:
         raise ValueError('trial acceptance is limited to exactly one original group')
@@ -73,7 +75,10 @@ def commit_approved_trial(store,root,*,supersede_unwritten_run):
             supersede_unwritten_run=supersede_unwritten_run)
         parent_id=parent['run_id'];group_key=parent['groups'][0]['group_key']
         unit=parent['units'][group_key]
-        if unit['status']=='completed':return parent['result']
+        if unit['status']=='completed':
+            from backend.pipeline.viewpoint_route_cvp_worker import handoff_completed_cvp_groups
+            handoff_completed_cvp_groups(store,parent,root)
+            return parent['result']
         materials={'bundle':bundle,'previous':previous,'prior_findings':findings,
             'step_root':str(step),'recall_root':str(root/'recall'),'index_root':request.input.get('index_root')}
         step_id=persistence.prepare_step(store,parent_id,group_key=group_key,
@@ -106,6 +111,8 @@ def commit_approved_trial(store,root,*,supersede_unwritten_run):
         readback,pins=_readback(store,evidence)
         persistence.complete_step(store,step_id,readback=readback,read_pins=pins)
         persistence.progress(store,parent_id,group_key=group_key,status='completed',step_id=step_id)
+        from backend.pipeline.viewpoint_route_cvp_worker import handoff_cvp_route_jobs
+        handoff_cvp_route_jobs(store,package,root/'route-queue-v2',step)
         return store.get_cvp_group(parent_id)['result']
 
 
@@ -194,6 +201,9 @@ def commit_verified_pair(store,root,*,initial_proposal,initial_review,correction
             readback,pins=_readback(store,evidence_for(step_id))
             persistence.complete_step(store,step_id,readback=readback,read_pins=pins)
             persistence.progress(store,parent_id,group_key=group_key,status='completed',step_id=step_id)
+            from backend.pipeline.viewpoint_route_cvp_worker import handoff_cvp_route_jobs
+            handoff_cvp_route_jobs(store,applied['reviewed']['evidence']['package']['payload'],
+                                   root/'route-queue-v2',archive)
             return store.get_cvp_group(parent_id)['result']
     preflight=prepare_recall(store,request.input,allow_unqualified=True,defer_index=True)
     if preflight['admission']['blocked_claims']:
@@ -202,7 +212,10 @@ def commit_verified_pair(store,root,*,initial_proposal,initial_review,correction
     with exclusive(root):
         parent=persistence.prepare_action(store,request,root=str(root),preflight=preflight)
         parent_id=parent['run_id'];group_key=parent['groups'][0]['group_key']
-        if parent['units'][group_key]['status']=='completed':return parent['result']
+        if parent['units'][group_key]['status']=='completed':
+            from backend.pipeline.viewpoint_route_cvp_worker import handoff_completed_cvp_groups
+            handoff_completed_cvp_groups(store,parent,root)
+            return parent['result']
         if parent.get('obsolete_history'):
             old_calls=parent['obsolete_history']['call_keys']
             old_steps=parent['obsolete_history']['step_ids']
@@ -238,6 +251,8 @@ def commit_verified_pair(store,root,*,initial_proposal,initial_review,correction
         readback,pins=_readback(store,evidence)
         persistence.complete_step(store,step_id,readback=readback,read_pins=pins)
         persistence.progress(store,parent_id,group_key=group_key,status='completed',step_id=step_id)
+        from backend.pipeline.viewpoint_route_cvp_worker import handoff_cvp_route_jobs
+        handoff_cvp_route_jobs(store,package,root/'route-queue-v2',archive)
         return store.get_cvp_group(parent_id)['result']
 
 

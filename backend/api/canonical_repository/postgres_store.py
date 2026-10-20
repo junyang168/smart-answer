@@ -5820,6 +5820,41 @@ class PostgresKnowledgeStore:
                                                'payload':payload,'retired':False}
         return result
 
+    def read_cvp_route_records(self, viewpoint_id):
+        """Current route heads and their attestations for one CVP, using payload GIN."""
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute('SET LOCAL statement_timeout=5000')
+            cursor.execute("""SELECT collection,object_id,revision,content_sha256,payload
+                FROM wang_knowledge.objects WHERE collection='argument_routes'
+                  AND retired_at IS NULL AND payload @> %s::jsonb
+                ORDER BY object_id""", (canonical_json({'conclusion_viewpoint_id':viewpoint_id}),))
+            heads=cursor.fetchall()
+            route_ids=[row[1] for row in heads if row[4].get('route_status')=='active']
+            if route_ids:
+                predicates=' OR '.join(['payload @> %s::jsonb']*len(route_ids))
+                cursor.execute("""SELECT collection,object_id,revision,content_sha256,payload
+                    FROM wang_knowledge.objects WHERE collection='argument_route_attestations'
+                      AND retired_at IS NULL AND payload->>'effective_state'='active'
+                      AND ("""+predicates+") ORDER BY object_id",
+                    tuple(canonical_json({'argument_route_id':rid}) for rid in route_ids))
+                attestations=cursor.fetchall()
+            else:
+                attestations=[]
+        result={}
+        for col,oid,revision,sha,payload in [*heads,*attestations]:
+            if record_content_sha(payload)!=sha:
+                raise ChangeSetConflict('current CVP route record SHA drift')
+            result[col,oid]={'revision':revision,'content_sha256':sha,
+                             'payload':payload,'retired':False}
+        revisions=self.read_current_records([
+            ('argument_route_revisions',row[4]['current_revision_id'])
+            for row in heads if row[4].get('route_status')=='active'
+        ])
+        if len(revisions)!=sum(row[4].get('route_status')=='active' for row in heads):
+            raise ChangeSetConflict('current CVP route revision is missing')
+        result.update(revisions)
+        return result
+
     def read_cvp_relations(self, *, viewpoint_ids=()):
         """Only current relation edges incident to the explicit maintenance heads."""
         if not viewpoint_ids:return {}
@@ -7602,6 +7637,8 @@ class PostgresKnowledgeStore:
         expected_registry_fingerprint_sha256: Optional[str] = None,
         registry_collections: Sequence[str] = (),
         expected_current_source_records: Optional[Mapping[str, tuple[int, str]]] = None,
+        expected_current_route_material_pins: Optional[Mapping[tuple[str, str], tuple[int, str, bool]]] = None,
+        expected_route_scope_sets: Optional[Mapping[str, Any]] = None,
         expected_current_claim_related_records: Optional[
             Mapping[str, Sequence[tuple[str, str, int, str]]]
         ] = None,
@@ -7611,6 +7648,15 @@ class PostgresKnowledgeStore:
             _ClaimEvidenceSourceQueueApplyContext
         ] = None,
     ) -> dict[str, Any]:
+        if plan.source_kind == 'argument_route_resolution_v2' and (
+            expected_current_route_material_pins is None or expected_route_scope_sets is None
+        ):
+            raise ValueError('whole-CVP Route apply requires exact material and scope guards')
+        if (expected_current_route_material_pins is not None or expected_route_scope_sets is not None):
+            if (plan.source_kind != 'argument_route_resolution_v2'
+                    or expected_current_route_material_pins is None
+                    or expected_route_scope_sets is None):
+                raise ValueError('whole-CVP Route apply requires both exact material guards')
         if plan.source_kind == 'wang_claim_relation_retirement_v1' and transaction_context is None:
             raise ValueError('relation retirement cannot bypass common SQL transaction')
         if plan.source_kind=='wang_cvp_management_v2' and transaction_context is None:
@@ -7704,6 +7750,35 @@ class PostgresKnowledgeStore:
                     "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
                     (POSTGRES_APPLY_ADVISORY_LOCK_KEY,),
                 )
+                if expected_current_route_material_pins is not None:
+                    self._assert_transaction_read_pins(cursor, expected_current_route_material_pins)
+                    viewpoint_id = str(expected_route_scope_sets['viewpoint_id'])
+                    cursor.execute("""SELECT object_id FROM wang_knowledge.objects
+                        WHERE collection='viewpoint_claim_links' AND retired_at IS NULL
+                          AND payload @> %s::jsonb
+                          AND payload->>'effective_state'='active'""",
+                        (canonical_json({'viewpoint_id': viewpoint_id}),))
+                    if {row[0] for row in cursor.fetchall()} != set(expected_route_scope_sets['link_ids']):
+                        raise ChangeSetConflict('whole-CVP Route active member set drift')
+                    cursor.execute("""SELECT object_id FROM wang_knowledge.objects
+                        WHERE collection='argument_routes' AND retired_at IS NULL
+                          AND payload @> %s::jsonb
+                          AND payload->>'route_status'='active'""",
+                        (canonical_json({'conclusion_viewpoint_id': viewpoint_id}),))
+                    if {row[0] for row in cursor.fetchall()} != set(expected_route_scope_sets['route_ids']):
+                        raise ChangeSetConflict('whole-CVP Route baseline set drift')
+                    route_ids = sorted(expected_route_scope_sets['route_ids'])
+                    observed_attestations = set()
+                    if route_ids:
+                        predicates = ' OR '.join(['payload @> %s::jsonb']*len(route_ids))
+                        cursor.execute("""SELECT object_id FROM wang_knowledge.objects
+                            WHERE collection='argument_route_attestations' AND retired_at IS NULL
+                              AND payload->>'effective_state'='active'
+                              AND ("""+predicates+")",
+                            tuple(canonical_json({'argument_route_id':rid}) for rid in route_ids))
+                        observed_attestations = {row[0] for row in cursor.fetchall()}
+                    if observed_attestations != set(expected_route_scope_sets['attestation_ids']):
+                        raise ChangeSetConflict('whole-CVP Route attestation set drift')
                 sql_group = None
                 if transaction_context is not None:
                     sql_group = self._lock_reviewed_cvp_group(cursor, plan, transaction_context)
@@ -8026,7 +8101,10 @@ class PostgresKnowledgeStore:
                 self._assert_global_id_uniqueness(cursor, plan)
                 self._assert_source_identity_uniqueness(cursor, plan)
                 self._assert_edge_integrity(cursor, plan)
-                self._assert_no_dangling_package_references(cursor, plan, scoped=transaction_context is not None)
+                self._assert_no_dangling_package_references(
+                    cursor, plan, scoped=(transaction_context is not None
+                                          or plan.source_kind == 'argument_route_resolution_v2')
+                )
                 retirement_package = None
                 if plan.source_kind == 'wang_claim_sql_retirement_v1':
                     if transaction_context is None: raise ChangeSetConflict('Claim retirement lacks transaction authority')
