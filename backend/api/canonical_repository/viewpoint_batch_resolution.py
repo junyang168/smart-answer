@@ -991,6 +991,39 @@ class CanonicalViewpointReviewResponse(StrictBatchModel):
         return "pass"
 
 
+class CoverageReviewedChange(ReviewedChange):
+    """Reviewer-owned sufficiency judgment, not an inference from ID presence."""
+
+    coverage_requirement: Literal[
+        "cvp_required", "evidence_insufficient", "attribution_unresolved",
+        "source_conflict", "human_hold", "observation_only",
+    ]
+    coverage_claim_sha256: str = Field(min_length=1)
+    coverage_evidence_step_ids: list[str]
+    coverage_reason: str = Field(min_length=1)
+    cvp_covered: bool
+
+    @model_validator(mode="after")
+    def validate_coverage(self) -> "CoverageReviewedChange":
+        if self.coverage_evidence_step_ids != sorted(set(self.coverage_evidence_step_ids)):
+            raise ValueError("coverage evidence IDs must be sorted and unique")
+        if self.coverage_requirement == "cvp_required":
+            if not self.coverage_evidence_step_ids:
+                raise ValueError("sufficient Claim coverage requires its own evidence")
+            if not self.cvp_covered and (
+                self.decision != "correct" or "missing_cvp_coverage" not in self.finding_codes
+            ):
+                raise ValueError("sufficient Claim without CVP requires a correct finding")
+        return self
+
+
+class CoverageCanonicalViewpointReviewResponse(CanonicalViewpointReviewResponse):
+    """New request/cache identity; historical v1 reviews are not upgraded."""
+
+    schema_version: Literal["wang_canonical_viewpoint_review_v2"] = "wang_canonical_viewpoint_review_v2"
+    change_reviews: list[CoverageReviewedChange] = Field(min_length=1)
+
+
 def split_batches(
     claim_ids: Sequence[str], *, batch_size: int = DEFAULT_BATCH_SIZE
 ) -> list[list[str]]:
@@ -1499,6 +1532,7 @@ def validate_review(
     review: CanonicalViewpointReviewResponse,
     proposal: CanonicalViewpointProposalResponse,
     proposal_sha256: str,
+    claims: Sequence[ReviewClaim] | None = None,
 ) -> dict[str, Any]:
     """Require the reviewer to have answered every proposed change."""
 
@@ -1519,6 +1553,29 @@ def validate_review(
         findings.append(f"{missing[0]}#{missing[1]}: no review decision")
     for extra in sorted(set(reviewed) - set(expected)):
         findings.append(f"{extra[0]}#{extra[1]}: review points at no proposed change")
+
+    if isinstance(review, CoverageCanonicalViewpointReviewResponse):
+        claim_index = {c.claim_id: c for c in claims or []}
+        if (len(claim_index) != len(claims or [])
+                or set(claim_index) != {d.claim_id for d in proposal.claim_decisions}):
+            findings.append("coverage review requires exact pinned Claim batch")
+        components = {(d.claim_id, i): component for d in proposal.claim_decisions
+                      for i, component in enumerate(d.components)}
+        for item in review.change_reviews:
+            component = components.get((item.claim_id, item.component_index))
+            claim = claim_index.get(item.claim_id)
+            if component is None or claim is None:
+                continue
+            covered = component.disposition not in {"deferred", "no_registry_assertion"}
+            if item.cvp_covered != covered:
+                findings.append(f"{item.claim_id}#{item.component_index}: coverage disagrees with proposed CVP target")
+            if item.coverage_claim_sha256 != claim.claim_revision_sha256:
+                findings.append(f"{item.claim_id}: coverage belongs to another Claim version")
+            own = {e.evidence_step_id for e in claim.evidence}
+            eligible = {e.evidence_step_id for e in claim.evidence if e.valid_for_identity_review}
+            evidence = set(item.coverage_evidence_step_ids)
+            if not evidence <= own or (item.coverage_requirement == "cvp_required" and not evidence <= eligible):
+                findings.append(f"{item.claim_id}: coverage cites foreign or ineligible evidence")
 
     proposed_revisions = {
         item.target_viewpoint_revision_id for item in proposal.viewpoint_revisions
@@ -1614,6 +1671,9 @@ def validate_review(
         or any(not item.synthesis_entailed_by_focal for item in review.structure_reviews)
         or any(not item.direction_correct for item in review.relation_reviews),
     }
+    if isinstance(review, CoverageCanonicalViewpointReviewResponse):
+        report.update(coverage_contract_version="wang_cvp_required_coverage_v1",
+                      coverage_reviewed_change_count=len(review.change_reviews))
     report["artifact_sha256"] = sha256_json(report)
     return report
 
@@ -2124,7 +2184,18 @@ def canonicalize_review(raw: Mapping[str, Any]) -> tuple[dict[str, Any], list[st
     Raw model output remains immutable beside the normalized envelope.
     """
 
-    return canonicalize_proposal(raw)
+    payload, changes = canonicalize_proposal(raw)
+    # Coverage IDs are an order-free reviewer set, but duplicate IDs still
+    # indicate a malformed coverage judgment and must reach strict validation.
+    # Preserve the immutable raw, decisions, reasons and exact multiplicity.
+    for index, row in enumerate(payload.get("change_reviews") or []):
+        ids = row.get("coverage_evidence_step_ids")
+        if isinstance(ids, list) and all(isinstance(item, str) for item in ids):
+            ordered = sorted(ids)
+            if ordered != ids:
+                row["coverage_evidence_step_ids"] = ordered
+                changes.append(f"/change_reviews/{index}/coverage_evidence_step_ids")
+    return payload, sorted(changes)
 
 
 def anchor_proposal_spans(
@@ -2671,6 +2742,27 @@ def apply_reconsideration_patches(
         for item in reconsideration.relation_dispositions
         if item.disposition == "accepted"
     }
+    # Reversing a reviewed edge is also a replacement of that same pair, not
+    # authority to reach a third viewpoint. Require the exact flagged original
+    # edge to be explicitly withdrawn. The unused independent final review
+    # still judges the replacement's type, direction and source-grounded reason.
+    flagged_relation_edges = {
+        item.edge() for item in review.relation_reviews if item.decision != "pass"
+    }
+    accepted_relation_edges = {
+        item.edge() for item in reconsideration.relation_dispositions
+        if item.disposition == "accepted"
+    }
+    withdrawn_reviewed_pairs = {
+        patch.relation.endpoints()
+        for patch in reconsideration.relation_patches
+        if patch.action == "delete"
+        and patch.edge() in relations
+        and tuple(endpoint[1] for endpoint in patch.relation.endpoints())
+            + (patch.relation.relation_type,) in flagged_relation_edges
+        and tuple(endpoint[1] for endpoint in patch.relation.endpoints())
+            + (patch.relation.relation_type,) in accepted_relation_edges
+    }
     for patch in reconsideration.relation_patches:
         endpoints = patch.relation.endpoints()
         patch_ends = (
@@ -2683,7 +2775,12 @@ def apply_reconsideration_patches(
                 or patch.relation.target_local_key
             ),
         )
-        reachable = patch_ends in accepted_relations or any(
+        inverse_replacement = (
+            patch.action == "upsert"
+            and endpoints[0] != endpoints[1]
+            and (endpoints[1], endpoints[0]) in withdrawn_reviewed_pairs
+        )
+        reachable = inverse_replacement or patch_ends in accepted_relations or any(
             key in affected_candidate_keys if kind == "new" else key in affected_revision_ids
             for kind, key in endpoints
         )
@@ -3703,6 +3800,47 @@ class IdentityConsolidationResponse(StrictBatchModel):
         if len(keys) != len(set(keys)):
             raise ValueError("consolidation verdicts must be unique")
         return self
+
+
+class UnresolvedConsolidationItem(StrictBatchModel):
+    local_key: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+
+class ContextualIdentityConsolidationResponse(StrictBatchModel):
+    """Versioned uncertainty exit; never coerces unknown identity into new/merge."""
+
+    schema_version: Literal["wang_canonical_viewpoint_identity_consolidation_v2"] = (
+        "wang_canonical_viewpoint_identity_consolidation_v2"
+    )
+    verdicts: list[ConsolidationVerdict] = Field(default_factory=list)
+    unresolved_items: list[UnresolvedConsolidationItem] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def exact_once_keys(self) -> "ContextualIdentityConsolidationResponse":
+        keys = [item.local_key for item in [*self.verdicts, *self.unresolved_items]]
+        if len(keys) != len(set(keys)):
+            raise ValueError("consolidation candidates cannot have duplicate or contradictory dispositions")
+        if any(not item.reason.strip() for item in self.unresolved_items):
+            raise ValueError("unresolved consolidation requires a concrete reason")
+        return self
+
+
+def decode_consolidation(raw, candidate_keys):
+    if raw.get("schema_version") != "wang_canonical_viewpoint_identity_consolidation_v2":
+        return IdentityConsolidationResponse.model_validate(raw)
+    contextual = ContextualIdentityConsolidationResponse.model_validate(raw)
+    ruled = {item.local_key for item in [*contextual.verdicts, *contextual.unresolved_items]}
+    if ruled != set(candidate_keys):
+        raise BatchResolutionError(["contextual consolidation must cover candidates exactly once"])
+    if contextual.unresolved_items:
+        raise BatchResolutionError([
+            f"{item.local_key}: unresolved identity; {item.reason}"
+            for item in contextual.unresolved_items
+        ])
+    # Accepted rulings still pass all existing deterministic merge/target gates.
+    # The original v2 raw remains immutable; this is an internal decoded view.
+    return IdentityConsolidationResponse(verdicts=contextual.verdicts)
 
 
 def validate_consolidation(

@@ -52,7 +52,7 @@ RESOLUTION_RUN_VERSION = "wang_viewpoint_identity_resolution_run_v1"
 
 APPROVED_STATUSES = frozenset({"system_approved", "human_approved", "approved"})
 IDENTITY_ELIGIBLE_CLAIM_REVIEW_STATUSES = frozenset(
-    {"ai_consensus_reviewed", "human_approved", "approved"}
+    {"ai_consensus_reviewed", "human_approved", "approved", "independent_terminal_reviewed"}
 )
 IDENTITY_TERMINALLY_EXCLUDED_CLAIM_REVIEW_STATUSES = frozenset({"superseded"})
 VALID_ANCHOR_STATES = frozenset(
@@ -146,6 +146,31 @@ class StrictArtifact(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class EvidenceSourceContext(StrictArtifact):
+    schema_version: Literal["wang_evidence_same_paragraph_context_v1"] = "wang_evidence_same_paragraph_context_v1"
+    role: Literal["resolve_excerpt_context_not_new_evidence"] = "resolve_excerpt_context_not_new_evidence"
+    source_id: str
+    source_path: str
+    source_file_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_body_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    paragraph_key: str = Field(pattern=r"^S[0-9]{4,}$")
+    paragraph_text: str = Field(min_length=1, max_length=20000)
+    paragraph_text_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    excerpt_start_char: int = Field(ge=0)
+    excerpt_end_char: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def check_context(self):
+        import hashlib
+        if not Path(self.source_path).is_absolute():
+            raise ValueError("source context path must be absolute")
+        if hashlib.sha256(self.paragraph_text.encode("utf-8")).hexdigest() != self.paragraph_text_sha256:
+            raise ValueError("source context paragraph SHA mismatch")
+        if not self.excerpt_start_char < self.excerpt_end_char <= len(self.paragraph_text):
+            raise ValueError("source context excerpt offsets invalid")
+        return self
+
+
 class ReviewEvidence(StrictArtifact):
     evidence_step_id: str
     source_fragment_id: str
@@ -156,6 +181,9 @@ class ReviewEvidence(StrictArtifact):
     discourse_role: str | None = None
     scripture_refs: list[str] = Field(default_factory=list)
     verbatim_excerpt: str
+    source_context: EvidenceSourceContext | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     # Absence means the legacy spoken-evidence shape.  These fields are emitted
     # only for visual evidence so adding SVG support cannot rewrite every
     # pre-existing review packet or semantic hash in the corpus.
@@ -182,6 +210,11 @@ class ReviewEvidence(StrictArtifact):
 
     @model_validator(mode="after")
     def validate_eligibility(self) -> "ReviewEvidence":
+        if self.source_context is not None:
+            ctx = self.source_context
+            if (ctx.source_id != self.source_id or ctx.paragraph_key != self.paragraph_key
+                    or ctx.paragraph_text[ctx.excerpt_start_char:ctx.excerpt_end_char] != self.verbatim_excerpt):
+                raise ValueError("source context must bind this exact source/paragraph/excerpt")
         if self.scripture_refs != sorted(set(self.scripture_refs)):
             raise ValueError("review evidence scripture refs must be sorted and unique")
         citation_valid = bool(
@@ -820,6 +853,7 @@ def compile_review_claim(
     coverage_source_sha256: Mapping[str, str],
     attestation_sha: str | None,
     active_full_viewpoint_id: str | None = None,
+    unavailable_evidence_ids: frozenset[str] = frozenset(),
 ) -> tuple[ReviewClaim | None, list[str]]:
     """Assemble one evidence-bound ``ReviewClaim`` from pinned master records.
 
@@ -833,8 +867,19 @@ def compile_review_claim(
     evidence_rows: list[ReviewEvidence] = []
     source_ids: set[str] = set()
     claim_id = claim.claim_id
+    if not unavailable_evidence_ids <= set(claim.evidence_step_ids):
+        return None, [f"{claim_id}: foreign unavailable Evidence"]
     for evidence_id in claim.evidence_step_ids:
         evidence = evidence_index.get(evidence_id)
+        if evidence_id in unavailable_evidence_ids:
+            # SQL callers separately disclose the exact current pinned row.
+            # This is absence of usable support, never an Evidence upgrade or
+            # omission of a bound quote. Default callers remain unchanged.
+            if (evidence is None or claim_id not in evidence.produced_claim_ids
+                    or evidence.support_eligibility != 'withheld_missing_anchor'
+                    or evidence.anchor_quality != 'missing' or evidence_fragment_ids(evidence)):
+                findings.append(f"{claim_id}: unavailable Evidence is not exact withheld/unbound")
+            continue
         if not evidence or not evidence_fragment_ids(evidence):
             findings.append(f"{claim_id}: missing evidence {evidence_id}")
             continue
@@ -2056,16 +2101,39 @@ class StructuredJsonReviewerAdapter:
         prompt: str,
         response_model: type[BaseModel],
         schema_name: str,
+        compact_payload: bool = False,
+        shared_text_payload: bool = False,
+        shared_record_payload: bool = False,
+        program_response_binding: bool = False,
     ) -> None:
         self._client = client
-        self._prompt = prompt
+        from .viewpoint_response_binding import PROMPT as BINDING_PROMPT, fields, VERSION
+        self._program_response_binding = program_response_binding and any(fields(response_model))
+        self._base_prompt = prompt
+        self._prompt = prompt + BINDING_PROMPT if self._program_response_binding else prompt
         self._response_model = response_model
         self._schema_name = schema_name
+        self._compact_payload = compact_payload
+        self._shared_text_payload = shared_text_payload
+        self._shared_record_payload = shared_record_payload
+        self._shared_key_payload = False
+        self._shared_key_payload_v2 = False
+        self._shared_value_payload = False
+        self._shared_shape_payload = False
+        self._shared_shape_payload_v2 = False
+        self._shared_shape_payload_v3 = False
+        self._shared_shape_payload_v4 = False
+        self._shared_shape_payload_v5 = False
+        self._shared_shape_payload_v6 = False
+        if shared_record_payload and not shared_text_payload:
+            raise ValueError('shared-record encoding requires shared text')
+        if shared_text_payload and not compact_payload:
+            raise ValueError('shared-text encoding requires compact JSON')
         self.model_id = str(getattr(client, "model", ""))
         if not self.model_id:
             raise ValueError("structured reviewer client must expose model")
         self.backend = str(getattr(client, "backend", "openai_api"))
-        self.prompt_sha256 = sha256_json({"prompt": prompt})
+        self.prompt_sha256 = sha256_json({"prompt": self._prompt})
         self.generation_config_sha256 = sha256_json(
             {
                 "reasoning_effort": getattr(client, "reasoning_effort", None),
@@ -2073,6 +2141,179 @@ class StructuredJsonReviewerAdapter:
                 "temperature": 0.0,
             }
         )
+        if compact_payload:
+            self.generation_config_sha256 = sha256_json({
+                "base_config_sha256": self.generation_config_sha256,
+                "payload_serialization": "compact_json_v1",
+            })
+        if shared_text_payload:
+            self.generation_config_sha256 = sha256_json({
+                'base_config_sha256': self.generation_config_sha256,
+                'payload_serialization': 'wkp_shared_text_json_v1',
+            })
+        if shared_record_payload:
+            self.generation_config_sha256 = sha256_json({
+                'base_config_sha256': self.generation_config_sha256,
+                'payload_serialization': 'wkp_shared_records_json_v1',
+            })
+        if self._program_response_binding:
+            self.generation_config_sha256 = sha256_json({
+                'base_config_sha256': self.generation_config_sha256,
+                'response_metadata_binding': VERSION,
+            })
+
+    def program_bound_copy(self):
+        from copy import copy
+        from .viewpoint_response_binding import fields, PROMPT, VERSION
+        if self._program_response_binding or not any(fields(self._response_model)):
+            return self
+        # Preserve injected transports/subclass behavior; change only the wire
+        # protocol identity, without mutating the adapter used for old receipts.
+        result = copy(self)
+        result._program_response_binding = True
+        result._prompt = self._base_prompt + PROMPT
+        result.prompt_sha256 = sha256_json({'prompt': result._prompt})
+        result.generation_config_sha256 = sha256_json({
+            'base_config_sha256': self.generation_config_sha256,
+            'response_metadata_binding': VERSION,
+        })
+        return result
+
+    def component_roles_copy(self):
+        """New role semantics have their own identity; old cached prompts survive."""
+        from copy import copy
+        from backend.pipeline.viewpoint_semantic_contract import (
+            COMPONENT_ROLES, CONTEXTUAL_SEMANTICS, component_rules,
+        )
+        if getattr(self, '_component_roles_version', None) == COMPONENT_ROLES:
+            return self
+        if CONTEXTUAL_SEMANTICS not in self._base_prompt:
+            return self
+        result = copy(self)
+        result._component_roles_version = COMPONENT_ROLES
+        result._prompt = self._prompt + '\n\n' + component_rules()
+        result.prompt_sha256 = sha256_json({'prompt': result._prompt})
+        result.generation_config_sha256 = sha256_json({
+            'base_config_sha256': self.generation_config_sha256,
+            'component_roles': COMPONENT_ROLES,
+            'component_rules_sha256': sha256_json(component_rules()),
+        })
+        return result
+
+    def _wire_response_schema(self):
+        if not self._program_response_binding: return None
+        from .viewpoint_response_binding import wire_schema
+        return wire_schema(self._response_model)
+
+    def shared_keys_copy(self):
+        """New codec identity; frozen legacy encodings remain byte-identical."""
+        from copy import copy
+        if self._shared_key_payload:return self
+        if not self._shared_record_payload:
+            raise ValueError('shared keys require existing lossless record encoding')
+        result=copy(self)
+        result._shared_key_payload=True
+        result.generation_config_sha256=sha256_json({
+            'base_config_sha256':self.generation_config_sha256,
+            'payload_serialization':'wkp_shared_keys_json_v1'})
+        return result
+
+    def shared_keys_v2_copy(self):
+        """Short key references are a new identity, never a v1 cache rewrite."""
+        from copy import copy
+        if self._shared_key_payload_v2:return self
+        result=copy(self.shared_keys_copy())
+        result._shared_key_payload_v2=True
+        result.generation_config_sha256=sha256_json({
+            'base_config_sha256':result.generation_config_sha256,
+            'payload_serialization':'wkp_shared_keys_json_v2'})
+        return result
+
+    def compact_copy(self) -> "StructuredJsonReviewerAdapter":
+        """A separately identified serialization, without mutating initial review."""
+        if self._compact_payload:
+            return self
+        result = StructuredJsonReviewerAdapter(
+            client=self._client, prompt=self._base_prompt,
+            response_model=self._response_model, schema_name=self._schema_name,
+            compact_payload=True,
+            shared_text_payload=self._shared_text_payload,
+            shared_record_payload=self._shared_record_payload,
+            program_response_binding=self._program_response_binding,
+        )
+        if hasattr(self, "max_request_bytes"):
+            result.max_request_bytes = self.max_request_bytes
+        return result
+
+    def shared_values_copy(self):
+        from copy import copy
+        if self._shared_value_payload:return self
+        result=copy(self.shared_keys_v2_copy())
+        result._shared_value_payload=True
+        result.generation_config_sha256=sha256_json({
+            'base_config_sha256':result.generation_config_sha256,
+            'payload_serialization':'wkp_shared_values_json_v1'})
+        return result
+
+    def shared_shapes_copy(self):
+        from copy import copy
+        if self._shared_shape_payload:return self
+        result=copy(self.shared_values_copy())
+        result._shared_shape_payload=True
+        result.generation_config_sha256=sha256_json({
+            'base_config_sha256':result.generation_config_sha256,
+            'payload_serialization':'wkp_shared_shapes_json_v1'})
+        return result
+
+    def shared_shapes_v2_copy(self):
+        from copy import copy
+        if self._shared_shape_payload_v2:return self
+        result=copy(self.shared_shapes_copy())
+        result._shared_shape_payload_v2=True
+        result.generation_config_sha256=sha256_json({
+            'base_config_sha256':result.generation_config_sha256,
+            'payload_serialization':'wkp_shared_shapes_json_v2'})
+        return result
+
+    def shared_shapes_v3_copy(self):
+        from copy import copy
+        if self._shared_shape_payload_v3:return self
+        result=copy(self.shared_shapes_v2_copy())
+        result._shared_shape_payload_v3=True
+        result.generation_config_sha256=sha256_json({
+            'base_config_sha256':result.generation_config_sha256,
+            'payload_serialization':'wkp_shared_shapes_json_v3'})
+        return result
+
+    def shared_shapes_v4_copy(self):
+        from copy import copy
+        if self._shared_shape_payload_v4:return self
+        result=copy(self.shared_shapes_v3_copy())
+        result._shared_shape_payload_v4=True
+        result.generation_config_sha256=sha256_json({
+            'base_config_sha256':result.generation_config_sha256,
+            'payload_serialization':'wkp_shared_shapes_json_v4'})
+        return result
+
+    def shared_shapes_v5_copy(self):
+        from copy import copy
+        if self._shared_shape_payload_v5:return self
+        result=copy(self.shared_shapes_v4_copy())
+        result._shared_shape_payload_v5=True
+        result.generation_config_sha256=sha256_json({
+            'base_config_sha256':result.generation_config_sha256,
+            'payload_serialization':'wkp_shared_shapes_json_v5'})
+        return result
+
+    def shared_shapes_v6_copy(self):
+        from copy import copy
+        if self._shared_shape_payload_v6:return self
+        result=copy(self.shared_shapes_v5_copy())
+        result._shared_shape_payload_v6=True
+        result.generation_config_sha256=sha256_json({
+            'base_config_sha256':result.generation_config_sha256,
+            'payload_serialization':'wkp_shared_shapes_json_v6'})
+        return result
 
     def generate(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         request = structured_json_request(
@@ -2080,6 +2321,19 @@ class StructuredJsonReviewerAdapter:
             prompt=self._prompt,
             response_model=self._response_model,
             schema_name=self._schema_name,
+            compact_payload=self._compact_payload,
+            shared_text_payload=self._shared_text_payload,
+            shared_record_payload=self._shared_record_payload,
+            response_schema=self._wire_response_schema(),
+            shared_key_payload=self._shared_key_payload,
+            shared_key_payload_v2=self._shared_key_payload_v2,
+            shared_value_payload=self._shared_value_payload,
+            shared_shape_payload=self._shared_shape_payload,
+            shared_shape_payload_v2=self._shared_shape_payload_v2,
+            shared_shape_payload_v3=self._shared_shape_payload_v3,
+            shared_shape_payload_v4=self._shared_shape_payload_v4,
+            shared_shape_payload_v5=self._shared_shape_payload_v5,
+            shared_shape_payload_v6=self._shared_shape_payload_v6,
         )
         return self._client.generate_json(
             **request,
@@ -2093,9 +2347,80 @@ class StructuredJsonReviewerAdapter:
                     prompt=self._prompt,
                     response_model=self._response_model,
                     schema_name=self._schema_name,
+                    compact_payload=self._compact_payload,
+                    shared_text_payload=self._shared_text_payload,
+                    shared_record_payload=self._shared_record_payload,
+                    response_schema=self._wire_response_schema(),
+                    shared_key_payload=self._shared_key_payload,
+                    shared_key_payload_v2=self._shared_key_payload_v2,
+                    shared_value_payload=self._shared_value_payload,
+                    shared_shape_payload=self._shared_shape_payload,
+                    shared_shape_payload_v2=self._shared_shape_payload_v2,
+                    shared_shape_payload_v3=self._shared_shape_payload_v3,
+                    shared_shape_payload_v4=self._shared_shape_payload_v4,
+                    shared_shape_payload_v5=self._shared_shape_payload_v5,
+                    shared_shape_payload_v6=self._shared_shape_payload_v6,
                 )
             ).encode("utf-8")
         )
+
+    def request_encoding_proof(self, payload: Mapping[str, Any]) -> dict[str, Any] | None:
+        if not self._shared_text_payload:
+            return None
+        from .viewpoint_request_encoding import FORMAT, RECORD_FORMAT, KEY_FORMAT, KEY_FORMAT_V2, decode_shared_keys, decode_shared_keys_v2, decode_shared_text, decode_shared_records
+        from .viewpoint_request_encoding import VALUE_FORMAT,decode_shared_values
+        from .viewpoint_request_encoding import SHAPE_FORMAT,decode_shared_shapes
+        from .viewpoint_request_encoding import SHAPE_FORMAT_V2,decode_shared_shapes_v2
+        from .viewpoint_request_encoding import SHAPE_FORMAT_V3,decode_shared_shapes_v3
+        from .viewpoint_request_encoding import SHAPE_FORMAT_V4,decode_shared_shapes_v4
+        from .viewpoint_request_encoding import SHAPE_FORMAT_V5,decode_shared_shapes_v5
+        from .viewpoint_request_encoding import SHAPE_FORMAT_V6,decode_shared_shapes_v6
+        request = structured_json_request(payload, prompt=self._prompt,
+            response_model=self._response_model, schema_name=self._schema_name,
+            compact_payload=self._compact_payload, shared_text_payload=True,
+            shared_record_payload=self._shared_record_payload,
+            shared_key_payload=self._shared_key_payload,
+            shared_key_payload_v2=self._shared_key_payload_v2,
+            shared_value_payload=self._shared_value_payload,
+            shared_shape_payload=self._shared_shape_payload,
+            shared_shape_payload_v2=self._shared_shape_payload_v2,
+            shared_shape_payload_v3=self._shared_shape_payload_v3,
+            shared_shape_payload_v4=self._shared_shape_payload_v4,
+            shared_shape_payload_v5=self._shared_shape_payload_v5,
+            shared_shape_payload_v6=self._shared_shape_payload_v6,
+            response_schema=self._wire_response_schema())
+        wire = json.loads(request['user_prompt'])
+        encoded = wire.get('format') == FORMAT and 'shared_text' in wire
+        records_encoded = wire.get('format') == RECORD_FORMAT and 'shared_records' in wire
+        keys_encoded = wire.get('format') == KEY_FORMAT
+        keys_v2_encoded = wire.get('format') == KEY_FORMAT_V2
+        values_encoded = wire.get('format') == VALUE_FORMAT
+        shapes_encoded = wire.get('format') == SHAPE_FORMAT
+        shapes_v2_encoded = wire.get('format') == SHAPE_FORMAT_V2
+        shapes_v3_encoded = wire.get('format') == SHAPE_FORMAT_V3
+        shapes_v4_encoded = wire.get('format') == SHAPE_FORMAT_V4
+        shapes_v5_encoded = wire.get('format') == SHAPE_FORMAT_V5
+        shapes_v6_encoded = wire.get('format') == SHAPE_FORMAT_V6
+        restored = decode_shared_shapes_v6(wire) if shapes_v6_encoded else decode_shared_shapes_v5(wire) if shapes_v5_encoded else decode_shared_shapes_v4(wire) if shapes_v4_encoded else decode_shared_shapes_v3(wire) if shapes_v3_encoded else decode_shared_shapes_v2(wire) if shapes_v2_encoded else decode_shared_shapes(wire) if shapes_encoded else decode_shared_values(wire) if values_encoded else decode_shared_keys_v2(wire) if keys_v2_encoded else decode_shared_keys(wire) if keys_encoded else decode_shared_records(wire) if records_encoded else decode_shared_text(wire) if encoded else wire
+        if canonical_json(restored) != canonical_json(payload):
+            raise ValueError('actual outgoing request lost semantic content')
+        original = structured_json_request(payload, prompt=self._prompt,
+            response_model=self._response_model, schema_name=self._schema_name,
+            compact_payload=self._compact_payload,
+            response_schema=self._wire_response_schema())
+        return {'serialization_contract': SHAPE_FORMAT_V6 if self._shared_shape_payload_v6 else SHAPE_FORMAT_V5 if self._shared_shape_payload_v5 else SHAPE_FORMAT_V4 if self._shared_shape_payload_v4 else SHAPE_FORMAT_V3 if self._shared_shape_payload_v3 else SHAPE_FORMAT_V2 if self._shared_shape_payload_v2 else SHAPE_FORMAT if self._shared_shape_payload else VALUE_FORMAT if self._shared_value_payload else KEY_FORMAT_V2 if self._shared_key_payload_v2 else KEY_FORMAT if self._shared_key_payload else RECORD_FORMAT if self._shared_record_payload else FORMAT,
+                'effective_serialization': SHAPE_FORMAT_V6 if shapes_v6_encoded else SHAPE_FORMAT_V5 if shapes_v5_encoded else SHAPE_FORMAT_V4 if shapes_v4_encoded else SHAPE_FORMAT_V3 if shapes_v3_encoded else SHAPE_FORMAT_V2 if shapes_v2_encoded else SHAPE_FORMAT if shapes_encoded else VALUE_FORMAT if values_encoded else KEY_FORMAT_V2 if keys_v2_encoded else KEY_FORMAT if keys_encoded else RECORD_FORMAT if records_encoded else FORMAT if encoded else 'compact_json_v1',
+                'semantic_payload_sha256': sha256_json(payload),
+                'restored_payload_sha256': sha256_json(restored),
+                'wire_request_sha256': sha256_json(request),
+                'wire_request_bytes': len(canonical_json(request).encode('utf-8')),
+                'original_request_bytes': len(canonical_json(original).encode('utf-8')),
+                'shared_text_count': len(wire['shared_text']) if encoded else 0,
+                **({'shared_record_count':len(wire['shared_records']) if records_encoded else 0} if self._shared_record_payload else {}),
+                'exact_roundtrip_verified': True,
+                'model_id': self.model_id, 'backend': self.backend,
+                'prompt_sha256': self.prompt_sha256,
+                'generation_config_sha256': self.generation_config_sha256}
 
 
 def structured_json_request(
@@ -2104,16 +2429,88 @@ def structured_json_request(
     prompt: str,
     response_model: type[BaseModel],
     schema_name: str,
+    compact_payload: bool = False,
+    shared_text_payload: bool = False,
+    shared_record_payload: bool = False,
+    shared_key_payload: bool = False,
+    shared_key_payload_v2: bool = False,
+    shared_value_payload: bool = False,
+    shared_shape_payload: bool = False,
+    shared_shape_payload_v2: bool = False,
+    shared_shape_payload_v3: bool = False,
+    shared_shape_payload_v4: bool = False,
+    shared_shape_payload_v5: bool = False,
+    shared_shape_payload_v6: bool = False,
+    response_schema: dict | None = None,
 ) -> dict[str, Any]:
     """The exact arguments passed to generate_json, before transport wrapping."""
 
+    if shared_shape_payload_v6:
+        if not (shared_shape_payload_v5 and shared_shape_payload_v4 and shared_shape_payload_v3
+                and shared_shape_payload_v2 and shared_shape_payload and shared_value_payload
+                and shared_key_payload_v2 and shared_key_payload and shared_record_payload
+                and shared_text_payload and compact_payload):
+            raise ValueError('wide inline-piece encoding requires inline-piece encoding')
+        from .viewpoint_request_encoding import encode_shared_shapes_v6
+        user_prompt=encode_shared_shapes_v6(payload)
+    elif shared_shape_payload_v5:
+        if not shared_shape_payload_v4 or not shared_shape_payload_v3 or not shared_shape_payload_v2 or not shared_shape_payload or not shared_value_payload or not shared_key_payload_v2 or not shared_key_payload or not shared_record_payload or not shared_text_payload or not compact_payload:
+            raise ValueError('inline-piece encoding requires compact string-piece encoding')
+        from .viewpoint_request_encoding import encode_shared_shapes_v5
+        user_prompt=encode_shared_shapes_v5(payload)
+    elif shared_shape_payload_v4:
+        if not shared_shape_payload_v3 or not shared_shape_payload_v2 or not shared_shape_payload or not shared_value_payload or not shared_key_payload_v2 or not shared_key_payload or not shared_record_payload or not shared_text_payload or not compact_payload:
+            raise ValueError('compact string-piece encoding requires compact typed shapes')
+        from .viewpoint_request_encoding import encode_shared_shapes_v4
+        user_prompt=encode_shared_shapes_v4(payload)
+    elif shared_shape_payload_v3:
+        if not shared_shape_payload_v2 or not shared_shape_payload or not shared_value_payload or not shared_key_payload_v2 or not shared_key_payload or not shared_record_payload or not shared_text_payload or not compact_payload:
+            raise ValueError('string-piece encoding requires compact typed shapes')
+        from .viewpoint_request_encoding import encode_shared_shapes_v3
+        user_prompt=encode_shared_shapes_v3(payload)
+    elif shared_shape_payload_v2:
+        if not shared_shape_payload or not shared_value_payload or not shared_key_payload_v2 or not shared_key_payload or not shared_record_payload or not shared_text_payload or not compact_payload:
+            raise ValueError('typed-shape encoding requires compact shared shapes')
+        from .viewpoint_request_encoding import encode_shared_shapes_v2
+        user_prompt=encode_shared_shapes_v2(payload)
+    elif shared_shape_payload:
+        if not shared_value_payload or not shared_key_payload_v2 or not shared_key_payload or not shared_record_payload or not shared_text_payload or not compact_payload:
+            raise ValueError('shared-shape encoding requires compact shared values')
+        from .viewpoint_request_encoding import encode_shared_shapes
+        user_prompt=encode_shared_shapes(payload)
+    elif shared_value_payload:
+        if not shared_key_payload_v2 or not shared_key_payload or not shared_record_payload or not shared_text_payload or not compact_payload:
+            raise ValueError('shared-value encoding requires compact shared keys v2')
+        from .viewpoint_request_encoding import encode_shared_values
+        user_prompt=encode_shared_values(payload)
+    elif shared_key_payload_v2:
+        if not shared_key_payload or not shared_record_payload or not shared_text_payload or not compact_payload:
+            raise ValueError('shared-key v2 encoding requires compact shared keys')
+        from .viewpoint_request_encoding import encode_shared_keys_v2
+        user_prompt=encode_shared_keys_v2(payload)
+    elif shared_key_payload:
+        if not shared_record_payload or not shared_text_payload or not compact_payload:
+            raise ValueError('shared-key encoding requires compact shared records')
+        from .viewpoint_request_encoding import encode_shared_keys
+        user_prompt=encode_shared_keys(payload)
+    elif shared_record_payload:
+        if not shared_text_payload or not compact_payload:
+            raise ValueError('shared-record encoding requires compact shared text')
+        from .viewpoint_request_encoding import encode_shared_records
+        user_prompt = encode_shared_records(payload)
+    elif shared_text_payload:
+        from .viewpoint_request_encoding import encode_shared_text
+        user_prompt = encode_shared_text(payload)
+    else:
+        user_prompt = (json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+                       if compact_payload else json.dumps(payload, ensure_ascii=False, indent=2))
     return {
         "system_prompt": prompt,
-        "user_prompt": json.dumps(payload, ensure_ascii=False, indent=2),
+        "user_prompt": user_prompt,
         "json_schema": {
             "name": schema_name,
             "strict": True,
-            "schema": _strict_json_schema(response_model.model_json_schema()),
+            "schema": _strict_json_schema(response_schema if response_schema is not None else response_model.model_json_schema()),
         },
         "temperature": 0.0,
     }

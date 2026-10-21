@@ -1,0 +1,12 @@
+{
+  "policy_id": "wang-audit-link-repair-v1",
+  "authorized_by": "owner",
+  "authorization_quote": "同意",
+  "scope": "GPT own-source upheld semantic audit objections; bounded equivalent-to-supports connection repair only",
+  "allowed_before_types": ["equivalent_full", "equivalent_component"],
+  "allowed_after_type": "supports",
+  "require_dual_model_postimage_review": true,
+  "maximum_corrections_per_adjudication": 1,
+  "forbid_claim_evidence_source_viewpoint_text_mutation": true,
+  "require_backup_readback_independent_audit": true
+}

@@ -59,16 +59,46 @@ from typing import Any, Iterable
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 #: 被視為「已批准」的 `review_status`。第 2 層只對這些物件要求依賴全部可解析：
 #: candidate 還在流程裡，引用暫時解不開不是缺陷。
-APPROVED_STATUSES = {"approved", "system_approved", "human_approved"}
+APPROVED_STATUSES = {"approved", "system_approved", "human_approved", "independent_terminal_reviewed"}
 
 #: 只有「等價」才算觀點的成員。`supports`／`extends`／`qualifies`／`applies` 是
 #: 關係，不是身份——見 CanonicalViewpoint 設計第 4 節。第 4 層問「這幾條是不是
 #: 同一個觀點」，只能拿成員來問；拿一條 `qualifies` 去問，模型當然說不是同一個，
 #: 而那是審計自己問錯了。
 MEMBER_LINK_TYPES = {"equivalent_full", "equivalent_component"}
+
+CONTEXTUAL_SEMANTICS = "wang_cvp_contextual_semantics_v2"
+SEMANTIC_RULES_PATH = REPO_ROOT / "config" / "wang_cvp_contextual_semantics_v2.md"
+COMPONENT_SEMANTICS = "wang_cvp_component_roles_v1"
+COMPONENT_RULES_PATH = SEMANTIC_RULES_PATH.with_name(COMPONENT_SEMANTICS + '.md')
+RELATION_SEMANTICS = 'wang_cvp_relation_roles_v1'
+SCOPED_RELATION_SEMANTICS = 'wang_cvp_relation_roles_scoped_v1'
+RELATION_RULES_PATH = SEMANTIC_RULES_PATH.with_name(RELATION_SEMANTICS + '.md')
+
+
+def contextual_semantic_rules(version: str) -> str:
+    # Independent text loader; deliberately no backend import/model/reader.
+    if version not in {CONTEXTUAL_SEMANTICS, COMPONENT_SEMANTICS, RELATION_SEMANTICS}:
+        raise ValueError("unknown independent-audit semantic contract")
+    rules = SEMANTIC_RULES_PATH.read_text(encoding="utf-8")
+    if not rules.startswith("## 统一语义规则：" + CONTEXTUAL_SEMANTICS + "\n"):
+        raise ValueError("independent-audit semantic contract identity drift")
+    if version in {COMPONENT_SEMANTICS, RELATION_SEMANTICS}:
+        extra = COMPONENT_RULES_PATH.read_text(encoding='utf-8')
+        if not extra.startswith('## 成分角色規則：' + COMPONENT_SEMANTICS + '\n'):
+            raise ValueError('independent component role contract drift')
+        rules += '\n\n' + extra
+    if version == RELATION_SEMANTICS:
+        extra = RELATION_RULES_PATH.read_text(encoding='utf-8')
+        if not extra.startswith('## 连接作用规则：' + RELATION_SEMANTICS + '\n'):
+            raise ValueError('independent relation role contract drift')
+        rules += '\n\n' + extra
+    return rules
 
 #: 一條欄位路徑要有這個比例的值解析得開，才當它是指向物件的引用。低於這條線的
 #: 是撞號，不是引用——見 `audit_coverage` 裡的說明。
@@ -113,7 +143,7 @@ def normalized(text: str) -> str:
     return WHITESPACE_RUN.sub(" ", ELLIPSIS_RUN.sub("…", text or "")).strip()
 
 
-DEFAULT_MODEL = "gemini-3.7-flash"
+DEFAULT_MODEL = "gemini-3.8-flash"
 GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
 
@@ -159,6 +189,7 @@ class Store:
             ["psql", self.database_url, "-At", "-v", "ON_ERROR_STOP=1", "-c", sql],
             capture_output=True,
             text=True,
+            env={**os.environ,'PGOPTIONS':os.environ.get('PGOPTIONS','')+' -c default_transaction_read_only=on'},
         )
         if result.returncode != 0:
             raise SystemExit(f"psql failed: {result.stderr.strip()}")
@@ -246,6 +277,132 @@ class Store:
         )
 
 
+class SqlGroupStore(Store):
+    """Independent current-graph reader for the SQL transaction flow.
+
+    Does not import backend models or trust its material projection. It reads
+    exact current SQL rows and every target CVP member, then reads original files
+    itself. Previous/superseded IDs resolve by SQL identity, not ancestor payloads.
+    """
+    @staticmethod
+    def literal(value):
+        return "'"+str(value).replace("'","''")+"'"
+
+    def id_array(self,ids):
+        return 'ARRAY['+','.join(self.literal(i) for i in sorted(ids))+']::text[]'
+
+    def __init__(self,database_url,claim_ids,viewpoint_ids,record_keys=()):
+        super().__init__(database_url)
+        if len(record_keys)>128 or len(set(record_keys))!=len(record_keys):
+            raise ValueError('independent SQL pending record population duplicate/oversized')
+        extra={tuple(k.split('/',1)) for k in record_keys}
+        if any(len(k)!=2 or not k[1] or k[0] not in {'canonical_viewpoints','viewpoint_revisions',
+                'viewpoint_claim_links','viewpoint_relations'} for k in extra):
+            raise ValueError('independent SQL pending record is outside CVP management')
+        self.scoped_ids=set(claim_ids)|set(viewpoint_ids)
+        self.scoped_ids.update(oid for _,oid in extra)
+        self.read_pins={}
+        self.external_ids=set();self.names=set();seen=set();bytes_read=0;started=time.monotonic()
+        roots=self._query("SELECT json_build_object('id',edge_id)::text FROM wang_knowledge.edges "
+            "WHERE edge_collection='viewpoint_claim_links' AND retired_at IS NULL AND (to_id=ANY("+
+            self.id_array(claim_ids)+") OR from_id=ANY("+self.id_array(viewpoint_ids)+"))")
+        self.scoped_ids.update(r['id'] for r in roots)
+        for cid in claim_ids:
+            self.scoped_ids.update(r['id'] for r in self._query(
+                "SELECT json_build_object('id',object_id)::text FROM wang_knowledge.objects "
+                "WHERE collection='evidence_steps' AND retired_at IS NULL AND payload->'produced_claim_ids' @> "+
+                self.literal(json.dumps([cid]))+'::jsonb'))
+        while self.scoped_ids-seen:
+            wanted=self.scoped_ids-seen;seen.update(wanted)
+            rows=self._query("SELECT json_build_object('c',collection,'id',object_id,'revision',revision,"
+                             "'sha',content_sha256,'retired',retired_at IS NOT NULL,'payload',payload)::text "
+                             "FROM wang_knowledge.objects WHERE object_id=ANY("+self.id_array(wanted)+")")
+            views=[]
+            for row in rows:
+                semantic={k:v for k,v in row['payload'].items() if k!='revision'}
+                digest=hashlib.sha256(json.dumps(semantic,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+                if digest!=row['sha']:raise ValueError('independent current SQL payload SHA drift')
+                if (row['c'],row['id']) in extra:
+                    payload=row['payload']
+                    affected=({payload.get('source_viewpoint_id'),payload.get('target_viewpoint_id')}
+                              if row['c']=='viewpoint_relations' else {payload.get('viewpoint_id')})
+                    if not affected<=set(viewpoint_ids):
+                        raise ValueError('pending record endpoints are outside the full declared CVP audit')
+                self.read_pins[row['c'],row['id']]=[row['revision'],row['sha'],row['retired']]
+                self.names.add(row['c']);payload=row['payload'];bytes_read+=len(json.dumps(payload).encode())
+                # Source IDs include registered notes_manuscript keys with
+                # spaces/Unicode. They are identities, not UUID-shaped IDs;
+                # using the reference-report heuristic here omits real sources.
+                def source_ids(value):
+                    if isinstance(value,dict):
+                        for field,child in value.items():
+                            if field in {'source_id','topic_id','parent_topic_id'} and isinstance(child,str):yield child
+                            elif field=='topic_ids' and isinstance(child,list):yield from (v for v in child if isinstance(v,str))
+                            elif isinstance(child,(dict,list)):yield from source_ids(child)
+                    elif isinstance(value,list):
+                        for child in value:yield from source_ids(child)
+                self.scoped_ids.update(source_ids(payload))
+                for field,oid in walk_references(payload,{row['id']}):
+                    if field.startswith(('provenance.','source_repair_application.','generation_provenance.')) or field.rsplit('.',1)[-1].startswith(('previous_','supersedes_')):
+                        self.external_ids.add(oid)
+                    else:self.scoped_ids.add(oid)
+                if row['c']=='canonical_viewpoints':views.append(row['id'])
+            if views:
+                self.scoped_ids.update(r['id'] for r in self._query(
+                    "SELECT json_build_object('id',edge_id)::text FROM wang_knowledge.edges "
+                    "WHERE edge_collection='viewpoint_claim_links' AND retired_at IS NULL AND from_id=ANY("+
+                    self.id_array(views)+")"))
+            if bytes_read>64*1024**2 or time.monotonic()-started>5:
+                raise ValueError('independent SQL group read exceeds budget; no whole-store fallback')
+        # A current record may name an old approval/predecessor by identity.
+        # Pin its exact SQL generation without traversing ancestor payloads.
+        # This is a version check, not a new content approval or historical audit.
+        for row in self._query("SELECT json_build_object('c',collection,'id',object_id,'revision',revision,"
+                               "'sha',content_sha256,'retired',retired_at IS NOT NULL)::text "
+                               "FROM wang_knowledge.objects WHERE object_id=ANY("+self.id_array(self.external_ids)+")"):
+            self.read_pins[row['c'],row['id']]=[row['revision'],row['sha'],row['retired']]
+        self.read_metrics={'payload_bytes':bytes_read,'object_ids':len(self.scoped_ids),'seconds':time.monotonic()-started,
+                           'historical_snapshot_reads':0}
+        for col,oid in extra:
+            if self.read_pins.get((col,oid)) is None or self.read_pins[col,oid][2]:
+                raise ValueError('independent SQL pending current record missing/retired')
+        self.extra_record_keys=sorted(record_keys)
+
+    def collection(self,name,*,include_retired=False):
+        key=f'{name}:{include_retired}'
+        if key not in self._cache:
+            self._cache[key]=self._query("SELECT json_build_object('object_id',object_id,'review_status',review_status,"
+                "'revision',revision,'content_sha256',content_sha256,'retired',retired_at IS NOT NULL,'payload',payload)::text "
+                "FROM wang_knowledge.objects WHERE collection="+self.literal(name)+
+                " AND object_id=ANY("+self.id_array(self.scoped_ids)+")"+
+                ('' if include_retired else ' AND retired_at IS NULL')+' ORDER BY object_id')
+            for row in self._cache[key]:
+                if self.read_pins.get((name,row['object_id'])) != [row['revision'],row['content_sha256'],row['retired']]:
+                    raise ValueError('current SQL changed during independent audit; no mixed version judgement')
+        return self._cache[key]
+
+    def collection_names(self):return sorted(self.names)
+
+    def retired_ids(self):
+        rows=self._query("SELECT json_build_object('c',collection,'i',object_id)::text FROM wang_knowledge.objects "
+                         "WHERE retired_at IS NOT NULL AND object_id=ANY("+self.id_array(self.scoped_ids|self.external_ids)+")")
+        return {(r['c'],r['i']) for r in rows}
+
+    def external_reference_ids(self):
+        return self._query("SELECT json_build_object('id',object_id,'collection',collection)::text FROM wang_knowledge.objects "
+                    "WHERE retired_at IS NULL AND object_id=ANY("+self.id_array(self.external_ids)+")")
+
+    def change_set_readback_findings(self):
+        return self._query("SELECT json_build_object('kind','operation_version_mismatch','change_set_id',co.change_set_id,"
+            "'collection',co.collection,'object_id',co.object_id,'revision',co.after_revision)::text "
+            "FROM wang_knowledge.objects o JOIN wang_knowledge.change_operations co "
+            "ON (co.collection,co.object_id,co.after_revision)=(o.collection,o.object_id,o.revision) "
+            "JOIN wang_knowledge.change_sets cs USING(change_set_id) LEFT JOIN wang_knowledge.object_versions v "
+            "ON (v.collection,v.object_id,v.revision,v.change_set_id,v.content_sha256)="
+            "(co.collection,co.object_id,co.after_revision,co.change_set_id,co.after_sha256) "
+            "WHERE cs.status='applied' AND v.object_id IS NULL AND o.object_id=ANY("+self.id_array(self.scoped_ids)+")")
+
+
 # ---------------------------------------------------------------------------
 # 原件：磁碟上的逐字稿與母本
 # ---------------------------------------------------------------------------
@@ -286,6 +443,7 @@ class SourceFile:
     def __init__(self, path: Path, source_type: str, source_document: dict[str, Any]) -> None:
         self.path = path
         self.source_type = source_type
+        self.visual_sources = list(source_document.get("visual_sources") or [])
         raw = path.read_bytes()
         self.sha256 = hashlib.sha256(raw).hexdigest()
         self.body_coordinates = str(source_document.get("locator_space") or "") == "spoken_body_v1"
@@ -384,6 +542,56 @@ class SourceFile:
         return excerpt == visual and (
             not visual_sha256
             or visual_sha256 == hashlib.sha256(visual.encode("utf-8")).hexdigest()
+        )
+
+    def linked_visual_matches(
+        self, segment: dict[str, Any] | None, excerpt: str, payload: dict[str, Any]
+    ) -> bool:
+        """Check a linked SVG against both the manuscript link and physical asset.
+
+        A descriptor is a locator, not proof. Reopen its file and verify the
+        exact Markdown span, URL, file hash and raw block instead of treating
+        SVG bytes as spoken text in the manuscript. No backend reader is used.
+        """
+        if segment is None or payload.get("source_modality") != "visual":
+            return False
+        locator = str(payload.get("visual_locator") or "")
+        parent = re.fullmatch(r"S(\d+)/V\d+", locator)
+        if not parent or segment is not self.by_ordinal(int(parent.group(1))):
+            return False
+        matches = [v for v in self.visual_sources if v.get("locator") == locator]
+        if len(matches) != 1:
+            return False
+        visual = matches[0]
+        if visual.get("binding_kind") != "linked_svg_asset":
+            return False
+        for fragment_key, descriptor_key in (
+            ("visual_source_path", "source_path"),
+            ("visual_source_file_sha256", "source_file_sha256"),
+            ("visual_source_url", "source_url"),
+            ("visual_block_sha256", "raw_sha256"),
+        ):
+            if not payload.get(fragment_key) or payload[fragment_key] != visual.get(descriptor_key):
+                return False
+        text = str(segment.get("text") or "")
+        start, end = visual.get("char_start"), visual.get("char_end")
+        if not isinstance(start, int) or not isinstance(end, int) or not 0 <= start < end <= len(text):
+            return False
+        link = text[start:end]
+        url = str(visual.get("source_url") or "")
+        if not re.fullmatch(r"!?\[[^\]]*\]\(" + re.escape(url) + r"\)", link):
+            return False
+        try:
+            raw = Path(str(visual["source_path"])).read_bytes()
+            svg = raw.decode("utf-8")
+        except (OSError, UnicodeError):
+            return False
+        digest = hashlib.sha256(raw).hexdigest()
+        return bool(
+            digest == visual.get("source_file_sha256")
+            and digest == visual.get("raw_sha256")
+            and svg == visual.get("raw_svg") == excerpt
+            and SVG_BLOCK_PATTERN.fullmatch(svg.strip())
         )
 
 
@@ -542,7 +750,7 @@ def audit_verbatim(store: Store, sources: SourceIndex) -> dict[str, Any]:
             excerpt,
             visual_ordinal=visual_ordinal,
             visual_sha256=str(payload.get("visual_block_sha256") or ""),
-        ):
+        ) or source_file.linked_visual_matches(segment, excerpt, payload):
             located_by.append("visual_locator" if visual_ordinal else "paragraph_key")
 
         segment_index = payload.get("source_segment_index")
@@ -552,7 +760,7 @@ def audit_verbatim(store: Store, sources: SourceIndex) -> dict[str, Any]:
             excerpt,
             visual_ordinal=visual_ordinal,
             visual_sha256=str(payload.get("visual_block_sha256") or ""),
-        ):
+        ) or source_file.linked_visual_matches(by_index, excerpt, payload):
             located_by.append("source_segment_index")
 
         if located_by:
@@ -670,6 +878,8 @@ def audit_coverage(store: Store, sources: SourceIndex) -> dict[str, Any]:
                     own.add(value)
             own_ids_by_object[(name, row["object_id"])] = own
     retired_ids = {object_id for _, object_id in store.retired_ids()}
+    if isinstance(store,SqlGroupStore):
+        for identity in store.external_reference_ids():universe[identity['id']].add(identity['collection'])
 
     resolved_by_field: Counter[str] = Counter()
     unresolved_by_field: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -889,12 +1099,15 @@ def _audit_claim_occurrence_anchors(
                 visual_ordinal = int(match.group(2)) if match and match.group(2) else None
                 if segment is None:
                     findings.append({**base, "verdict": "locator_unresolved"})
-                elif excerpt and not source_file.excerpt_matches(
+                elif excerpt and not (source_file.excerpt_matches(
                     segment,
                     excerpt,
                     visual_ordinal=visual_ordinal,
                     visual_sha256=str(anchor.get("visual_block_sha256") or ""),
-                ):
+                ) or (
+                    anchor.get("visual_locator") == key
+                    and source_file.linked_visual_matches(segment, excerpt, anchor)
+                )):
                     findings.append({**base, "verdict": "excerpt_mismatch", "excerpt": excerpt[:120]})
     return {"checked": checked, "resolved": checked - len(findings), "findings": findings[:200]}
 
@@ -1120,6 +1333,10 @@ def _audit_component_locators(store: Store) -> list[dict[str, Any]]:
         locator = payload.get("component_locator") or {}
         component = str(locator.get("statement_component") or "").strip()
         claim = claims.get(str(payload.get("claim_id") or ""))
+        # Whole-Claim equivalence intentionally has no component locator.
+        # Missing Claims and every actual component still require validation.
+        if payload.get("link_type") == "equivalent_full" and claim is not None and not locator:
+            continue
         if claim is None or not component:
             findings.append({
                 "object_id": row["object_id"],
@@ -1178,6 +1395,68 @@ def _audit_component_locators(store: Store) -> list[dict[str, Any]]:
                 "component": component[:80],
                 "spans_joined": "".join(pieces)[:80],
             })
+    findings.extend(_audit_component_roles(store))
+    return findings
+
+
+def _audit_component_roles(store):
+    """Independent structural check; does not import the production validator."""
+    claims = {r['object_id']: r['payload'] for r in store.collection('claims')}
+    steps = {r['object_id']: r['payload'] for r in store.collection('evidence_steps')}
+    fragments = {r['object_id']: r['payload'] for r in store.collection('source_fragments')}
+    groups = defaultdict(list)
+    for row in store.collection('viewpoint_claim_links'):
+        link = row['payload']
+        if link.get('effective_state') == 'active':
+            groups[(link.get('claim_id'), link.get('viewpoint_id'))].append(link)
+    findings = []
+    for (cid, vid), links in groups.items():
+        for i, left in enumerate(links):
+            for right in links[i+1:]:
+                roles = {left.get('link_type'), right.get('link_type')}
+                if 'supports' not in roles or not roles & MEMBER_LINK_TYPES:
+                    continue
+                error = roles != {'supports', 'equivalent_component'}
+                claim = claims.get(cid) or {}
+                expected_sha = hashlib.sha256(json.dumps(
+                    {k: v for k, v in claim.items() if k != 'revision'},
+                    ensure_ascii=False, sort_keys=True, separators=(',', ':')
+                ).encode('utf-8')).hexdigest()
+                ranges = []
+                for link in (left, right):
+                    loc = link.get('component_locator') or {}
+                    spans = loc.get('canonical_spans') or []
+                    error |= (not claim or link.get('pinned_claim_revision') != claim.get('revision', 1)
+                              or loc.get('claim_sha256') != expected_sha or not spans
+                              or link.get('review_status') not in {'approved', 'system_approved', 'human_approved'}
+                              or not link.get('evidence_bindings'))
+                    current, pieces = [], []
+                    text = claim.get('statement') or ''
+                    for span in spans:
+                        a, b = span.get('start_char'), span.get('end_char')
+                        if (type(a) is not int or type(b) is not int or not 0 <= a < b <= len(text)
+                                or text[a:b] != span.get('exact_text')):
+                            error = True
+                        else:
+                            current.append((a, b)); pieces.append(span['exact_text'])
+                    error |= ''.join(pieces) != loc.get('statement_component')
+                    error |= any(a < d and c < b for j, (a, b) in enumerate(current) for c, d in current[j+1:])
+                    ranges.append(current)
+                    for bound in link.get('evidence_bindings') or []:
+                        eid, fid = bound.get('evidence_step_id'), bound.get('source_fragment_id')
+                        step, fragment = steps.get(eid) or {}, fragments.get(fid) or {}
+                        error |= (eid not in (claim.get('evidence_step_ids') or [])
+                                  or step.get('support_eligibility') not in {'eligible', 'eligible_candidate', 'eligible_reviewed'}
+                                  or step.get('valid_for_identity_review') is False
+                                  or fragment.get('valid_for_identity_review') is False
+                                  or fragment.get('anchor_state') != 'source_version_bound'
+                                  or not str(fragment.get('verbatim_excerpt') or '').strip()
+                                  or fid not in ([step.get('source_fragment_id')] + (step.get('source_fragment_ids') or [])))
+                error |= left.get('validated_against_viewpoint_revision_id') != right.get('validated_against_viewpoint_revision_id')
+                error |= any(a < d and c < b for a, b in ranges[0] for c, d in ranges[1])
+                if error:
+                    findings.append({'object_id': left.get('viewpoint_claim_link_id'), 'claim_id': cid,
+                                     'viewpoint_id': vid, 'verdict': 'invalid_conclusion_reason_components'})
     return findings
 
 
@@ -1234,8 +1513,14 @@ class IndependentModel:
         api_key: str,
         timeout: int = 300,
         cache_dir: Path | None = None,
+        preserve_full_context: bool = False,
+        durable_once: bool = False,
     ) -> None:
         self.model = model
+        self.preserve_full_context = preserve_full_context
+        self.durable_once = durable_once
+        if durable_once and cache_dir is None:
+            raise ValueError('independent revisit requires durable request/result directory')
         self.api_key = api_key
         self.timeout = timeout
         self.calls = 0
@@ -1258,10 +1543,35 @@ class IndependentModel:
     def judge(self, prompt: str, schema: dict[str, Any]) -> dict[str, Any]:
         cached = self._cache_path(prompt)
         if cached is not None and cached.is_file():
+            if self.durable_once:
+                intent = json.loads(cached.with_name(cached.stem + '.call-intent.json').read_text())
+                provider = json.loads(cached.with_name(cached.stem + '.provider-response.json').read_text())
+                if (intent.get('model') != self.model or intent.get('prompt') != prompt
+                        or intent.get('schema') != schema or provider.get('request') != intent):
+                    raise ValueError('independent revisit exact cached request identity drift')
+                raw = provider['provider_response']
+                block = (raw.get('promptFeedback') or {}).get('blockReason')
+                candidates = raw.get('candidates') or []
+                if not block and len(candidates) == 1 and candidates[0].get('finishReason') == 'SAFETY':
+                    block = 'SAFETY'
+                saved = json.loads(cached.read_text())
+                if block:
+                    if saved.get('verdict') != 'blocked':
+                        raise ValueError('independent revisit cannot turn provider block into approval')
+                else:
+                    actual = json.loads(raw['candidates'][0]['content']['parts'][0]['text'])
+                    if saved != actual:
+                        raise ValueError('independent revisit raw/cache response drift')
             try:
                 with self._lock:
                     self.cached += 1
-                return json.loads(cached.read_text(encoding="utf-8"))
+                verdict = json.loads(cached.read_text(encoding="utf-8"))
+                if verdict.get('verdict')=='blocked' and 'provider_content_block' not in verdict:
+                    from backend.pipeline.viewpoint_content_blocked_fallback import cached_provider_binding
+                    receipt = cached_provider_binding(self.model,prompt,schema)
+                    if receipt is not None:
+                        verdict['provider_content_block']=receipt
+                return verdict
             except (json.JSONDecodeError, OSError):
                 pass
         body = json.dumps({
@@ -1272,9 +1582,20 @@ class IndependentModel:
                 "responseSchema": schema,
             },
         }).encode("utf-8")
+        if self.durable_once:
+            from backend.pipeline.viewpoint_resolution_runtime import write_immutable
+            intent = cached.with_name(cached.stem + '.call-intent.json')
+            request_payload = {'model': self.model, 'prompt': prompt, 'schema': schema,
+                               'request_bytes': len(body), 'request_sha256': hashlib.sha256(body).hexdigest(),
+                               'maximum_calls': 1, 'automatic_retry': False}
+            if len(body) > 600000:
+                raise ValueError('independent revisit request exceeds 600000 bytes')
+            if intent.exists():
+                raise ValueError('independent revisit outcome unknown; no automatic resend')
+            write_immutable(intent, request_payload)
         url = GEMINI_ENDPOINT.format(model=self.model) + f"?key={self.api_key}"
         last_error = ""
-        for attempt in range(3):
+        for attempt in range(1 if self.durable_once else 3):
             request = urllib.request.Request(
                 url, data=body, headers={"Content-Type": "application/json"}
             )
@@ -1283,9 +1604,15 @@ class IndependentModel:
                     request, timeout=self.timeout, context=self.ssl_context
                 ) as response:
                     parsed = json.loads(response.read().decode("utf-8"))
+                if self.durable_once:
+                    write_immutable(cached.with_name(cached.stem + '.provider-response.json'),
+                                    {'request': request_payload, 'provider_response': parsed})
                 with self._lock:
                     self.calls += 1
                 blocked = (parsed.get("promptFeedback") or {}).get("blockReason")
+                candidates = parsed.get('candidates') or []
+                if not blocked and len(candidates) == 1 and candidates[0].get('finishReason') == 'SAFETY':
+                    blocked = 'SAFETY'
                 if blocked:
                     # 安全過濾器擋下了 prompt。這是決定性的，重試三次只是把同一
                     # 個拒絕再要兩次。
@@ -1299,6 +1626,13 @@ class IndependentModel:
                         "issue": "other",
                         "reason": f"審計模型的安全過濾器擋下了這一條（{blocked}），沒有判讀。",
                     }
+                    if cached is not None:
+                        from backend.pipeline.viewpoint_resolution_runtime import write_immutable
+                        from backend.pipeline.viewpoint_g035_temporary_audit import binding
+                        receipt = cached.with_name(cached.stem + '.provider-block.json')
+                        write_immutable(receipt, {'model':self.model, 'provider_response':parsed,
+                                                 'prompt':prompt, 'schema':schema})
+                        verdict['provider_content_block'] = binding(receipt)
                     if cached is not None:
                         cached.write_text(
                             json.dumps(verdict, ensure_ascii=False), encoding="utf-8"
@@ -1318,6 +1652,10 @@ class IndependentModel:
             # 抽樣上崩掉。
             except (OSError, KeyError, IndexError, ValueError) as error:
                 last_error = str(error)
+                if self.durable_once:
+                    write_immutable(cached.with_name(cached.stem + '.failure.json'),
+                                    {'request': request_payload, 'error': last_error, 'outcome_unknown': True})
+                    break
                 time.sleep(2 * (attempt + 1))
         return {"verdict": "model_error", "reason": last_error[:400]}
 
@@ -1404,6 +1742,9 @@ def _judge_trimming_on_block(
     """
 
     kept = len(paragraphs)
+    if getattr(model, 'preserve_full_context', False):
+        # #357 owner authorized provider substitution, not source truncation.
+        return model.judge(build(paragraphs), schema), kept
     while kept >= 0:
         verdict = model.judge(build(paragraphs[:kept]), schema)
         if verdict.get("verdict") != "blocked":
@@ -1533,9 +1874,9 @@ def _whole_sources_for_claim(
             seen_sources.add(source_id)
             title = str(sources.documents.get(source_id, {}).get("title") or source_id)
             body = "\n\n".join(
-                live_text(segment.get("text", "")).strip()
+                text
                 for segment in source_file.segments
-                if live_text(segment.get("text", "")).strip()
+                if (text := live_text(segment.get("text", "")).strip())
             )
             texts.append(f"《{title}》\n{body}")
         excerpt = str(payload.get("verbatim_excerpt") or "").strip()
@@ -1778,6 +2119,8 @@ def audit_viewpoints(
     workers: int = 8,
     progress: "Progress | None" = None,
     only: set[str] | None = None,
+    reconsiderations: dict[str, dict[str, Any]] | None = None,
+    semantic_contract_version: str = CONTEXTUAL_SEMANTICS,
 ) -> dict[str, Any]:
     """抽樣問：判為同一個觀點的那幾條主張，真值條件是不是真的一致。
 
@@ -1802,7 +2145,10 @@ def audit_viewpoints(
         payload = row["payload"]
         if payload.get("effective_state") not in (None, "active"):
             continue
-        if payload.get("link_type") not in MEMBER_LINK_TYPES:
+        # Explicit production closure must also audit non-equivalent relations.
+        # Keep the default membership population unchanged, and never relabel
+        # supports as equivalence merely to include a support-only viewpoint.
+        if only is None and payload.get("link_type") not in MEMBER_LINK_TYPES:
             continue
         links_by_viewpoint[str(payload.get("viewpoint_id") or "")].append(payload)
 
@@ -1815,12 +2161,17 @@ def audit_viewpoints(
         if links and viewpoint_id in viewpoints
     ]
     if only:
-        candidates = [v for v in candidates if v in only]
+        candidates = sorted(only)
     chosen = (
         candidates if sample_size is None else rng.sample(candidates, min(sample_size, len(candidates)))
     )
 
     def judge(viewpoint_id: str) -> dict[str, Any]:
+        if viewpoint_id not in viewpoints or not links_by_viewpoint.get(viewpoint_id):
+            return {
+                "viewpoint_id": viewpoint_id, "verdict": "blocked", "issue": "other",
+                "reason": "明確要求的觀點不存在或沒有有效連結，不得略過或聲稱已審核",
+            }
         viewpoint = viewpoints[viewpoint_id]
         revision = revisions.get(str(viewpoint.get("current_revision_id") or ""))
         if revision is None:
@@ -1841,21 +2192,46 @@ def audit_viewpoints(
                 for b in link.get("evidence_bindings") or []
                 if b.get("source_fragment_id")
             ]
-            paragraphs = _paragraphs_for_fragments(fragment_ids, fragments, sources, limit=2)
+            # Identity review needs the complete bound originals, just as Claim
+            # review does. A two-paragraph window can omit later bound evidence
+            # and turn our own truncation into an apparent content disagreement.
+            paragraphs, _ = _whole_sources_for_claim(fragment_ids, fragments, sources)
             source_block = "\n".join(f"    【原文】{p}" for p in paragraphs) or "    （沒有可讀的原文段落）"
+            component_details = (
+                f"    連接 ID：{link.get('viewpoint_claim_link_id')}；Claim 版本：{link.get('pinned_claim_revision')}\n"
+                f"    精確區間：{json.dumps(locator.get('canonical_spans') or [], ensure_ascii=False)}\n"
+                f"    自身證據綁定：{json.dumps(link.get('evidence_bindings') or [], ensure_ascii=False)}\n"
+            ) if semantic_contract_version in {COMPONENT_SEMANTICS, RELATION_SEMANTICS, SCOPED_RELATION_SEMANTICS} else ''
             blocks.append(
                 f"- 主張 [{claim_id}]（連結類型 {link.get('link_type')}）\n"
+                f"{component_details}"
                 f"    被歸入的成分：{component or '（未記錄）'}\n"
                 f"    主張全文：{str(claim.get('statement') or '（庫裡找不到這條主張）').strip()}\n"
                 f"{source_block}"
             )
-        prompt = _viewpoint_prompt(viewpoint_id, revision, blocks)
+        target_version = semantic_contract_version
+        if target_version == SCOPED_RELATION_SEMANTICS:
+            # An irrelevant rule rollout is not a reason to re-judge completed
+            # unchanged equivalent/support targets or discard their once history.
+            target_version = (RELATION_SEMANTICS if any(l.get('link_type') not in
+                {'equivalent_full','equivalent_component','supports'} for l in links_by_viewpoint[viewpoint_id])
+                else COMPONENT_SEMANTICS)
+        prompt = _viewpoint_prompt(viewpoint_id, revision, blocks, semantic_contract_version=target_version)
+        prior = (reconsiderations or {}).get(viewpoint_id)
+        if prior:
+            if prior.get('revision_id') != viewpoint.get('current_revision_id'):
+                return {'viewpoint_id': viewpoint_id, 'verdict': 'blocked', 'issue': 'other',
+                        'reason': '定向復核的原審計觀點版本已漂移'}
+            prompt += _reconsideration_prompt(prior)
         verdict = model.judge(prompt, VIEWPOINT_SCHEMA)
         return {
             "viewpoint_id": viewpoint_id,
             "revision_id": viewpoint.get("current_revision_id"),
             "core_proposition": str(revision.get("core_proposition") or "")[:200],
-            "linked_claims": len(links_by_viewpoint[viewpoint_id]),
+            "linked_claims": len({l['claim_id'] for l in links_by_viewpoint[viewpoint_id]}),
+            "linked_connections": len(links_by_viewpoint[viewpoint_id]),
+            "member_claims": len({l['claim_id'] for l in links_by_viewpoint[viewpoint_id]
+                                  if l.get('link_type') in MEMBER_LINK_TYPES}),
             **verdict,
         }
 
@@ -1878,28 +2254,91 @@ def audit_viewpoints(
     }
 
 
-def _viewpoint_prompt(viewpoint_id: str, revision: dict[str, Any], blocks: list[str]) -> str:
+def _reconsideration_prompt(prior: dict[str, Any]) -> str:
+    return '\n\n【一次定向原文復核，不是要求通過】\n' + json.dumps(prior, ensure_ascii=False) + '''
+上面是先前審計異議，不是權威結論。重新讀本次提供的完整原文和實際連結，明確回應原異議。
+區分：把整條合取 Claim 當成單一 CVP 的 equivalent_full，與把其中一個合取項
+定位為 equivalent_component；後者並不因 Claim 還含另一個合取項就自動違規。
+同樣區分：原文明確界定指代對象，與借其他 Claim 追加未綁定的實質限定。
+只有在本條自己的原文中能確定完整指涉及真值條件相同，才可判 same。
+仍缺條件、定位不穩或原異議成立時，仍判 disputed；不得改連結、改寫教授原話或以多數票判通過。
+reason 必須說明原異議成立或不成立的原文依據。這是唯一一次復核，仍有異議就轉人工。'''
+
+
+def load_reconsiderations(path: Path, selected: set[str]) -> tuple[dict[str, Any], dict[str, Any]]:
+    raw = path.read_bytes()
+    audit = json.loads(raw)
+    report = audit['layers']['4']
+    rows = report['results']
+    if (audit['meta']['model'] != 'gemini-3.8-flash' or not report.get('complete') or
+            report.get('judged') != len(rows) or len({r['viewpoint_id'] for r in rows}) != len(rows) or
+            not {r['viewpoint_id'] for r in rows} <= selected or
+            any(report.get(k, 0) for k in ('model_errors', 'blocked'))):
+        raise ValueError('incomplete or foreign independent audit reconsideration')
+    found = {r['viewpoint_id']: r for r in rows if r.get('verdict') == 'disputed'}
+    if not found or report.get('disputed') != len(found):
+        raise ValueError('no exact disputed population to reconsider')
+    # No recursive reconsideration or cycling to hunt for a passing verdict.
+    if audit['meta'].get('reconsidered_audit'):
+        raise ValueError('independent reconsideration already attempted')
+    return found, {'path': str(path.resolve()), 'file_sha256': hashlib.sha256(raw).hexdigest()}
+
+
+def _viewpoint_prompt(viewpoint_id: str, revision: dict[str, Any], blocks: list[str], *,
+                      semantic_contract_version: str = CONTEXTUAL_SEMANTICS) -> str:
+    if semantic_contract_version == "legacy_v1":
+        return _legacy_viewpoint_prompt(viewpoint_id, revision, blocks)
+    rules = contextual_semantic_rules(semantic_contract_version)
+    signature = revision.get("proposition_signature") or {}
+    return rules + f'''\n\n## 独立审计任务\n
+逐条按实际连结类型审核来源忠实性，不评价教授神学对错。
+equivalent_full/component 才是等价成员；supports 不算成员。
+同义判断须解释原文依据；拒绝等价须指出承重差异与具体误读，不能只列不同词句。
+supports 须说明原文的具体论证作用及所支持部分，不要求每条证明整个合取观点；
+仍核对整个 CVP 的所有实质内容是否有来源，不得用局部支持掩盖无来源合并。
+缺信息或真实范围冲突须报告，不自动改连接、Claim、CVP 或原文。
+scope_mismatch 是实质范围／条件／模态差异；different_proposition 是另一主张；
+over_merge 是等价成员只表达实质独立的一部分，或完整合取观点无来源；其他问题用 other。
+所有连接均符合其各自关系时 verdict=same、issue=none；same 对 supports 仅表示关系成立，不表示等价。
+有问题时 verdict=disputed，reason 写具体原文依据、差异或缺失论证作用及误读，不受一到三句限制。
+claim_ids_in_question 只列本次有问题的 Claim ID；无问题为空。用原有 JSON schema 回答。
+
+观点 [{viewpoint_id}]
+核心命题：{str(revision.get('core_proposition') or '').strip()}
+命题签名：{json.dumps(signature, ensure_ascii=False)}
+适用范围：{json.dumps(revision.get('scope') or {}, ensure_ascii=False)}
+主张与观点的连结（逐条按实际类型审核）：
+{chr(10).join(blocks)}'''
+
+
+def _legacy_viewpoint_prompt(viewpoint_id: str, revision: dict[str, Any], blocks: list[str]) -> str:
     signature = revision.get("proposition_signature") or {}
     signature_line = " / ".join(
         str(signature.get(key) or "—")
         for key in ("subject", "predicate", "object", "polarity", "modality")
     )
     conditions = "、".join(signature.get("conditions") or []) or "無"
-    return f"""你在審計一個講道知識庫的觀點層。庫裡把來自不同講道的多條「主張」判定為同一個「觀點」的成員。
+    return f"""你在審計一個講道知識庫的觀點層。下面列出主張與觀點的連結，每條都標有連結類型；不是所有連結都代表成員資格。
 
-判成成員的意思是**等價**：不是「相關」、不是「支持」、不是「加了限定」，而是真值條件相同。每條主張下面標出的「被歸入的成分」，就是庫裡宣稱與這個觀點等價的那一段；主張的其餘部分不在這次判斷之內。
+只有 `equivalent_full` 和 `equivalent_component` 才宣稱**等價**：不是「相關」、不是「支持」、不是「加了限定」，而是真值條件相同。對這兩種連結，標出的成分必須與觀點等價。
 
-你的任務只有一件：**判斷這些成分是不是真的與觀點的核心命題具有相同的真值條件**——也就是，它們會不會在同樣的情況下為真、同樣的情況下為假。
+`supports` 只宣稱提供論據或支持背景，不宣稱同一命題；檢查所列成分及原文是否確實支持這個觀點，不得僅因真值條件不同就判錯。`extends`、`qualifies`、`applies`、`tension_evidence`、`superseding_evidence` 也不宣稱等價，分別按延伸、限定、應用、張力、後期修正的關係檢查；不符合標明關係時用 `other` 報錯並說明。
 
-不要判斷這個觀點在神學上對不對。只判斷「把這幾條放在一起，算不算同一個觀點」。
+你的任務是按每條連結的類型判斷它是否成立。先確定完整命題及來源中的適用範圍，再判斷等價、支持或限定。對等價連結，要檢查會不會在同樣的情況下為真、同樣的情況下為假；其餘連結不得冒充等價成員。
+
+成分定位不是必須獨立成句的引文。`equivalent_component` 須結合該條主張全文及本連結綁定的原文，理解明確共享的主語、否定、模態、範圍和指代；不得僅因短成分沒有重複這些文字就判異議。主張的未定位部分只用於理解原句語境，不因此成為等價成員；不得借其他主張或未綁定來源補限定，也不得以背景相關冒充雙向等價。原句和本條原文仍無法確定指代、缺少必要條件或範圍不同時，仍須判異議。`equivalent_full` 按完整主張判斷，不能用原文另有的一個結論替換它。
+
+對多條 `supports` 共同支持的複合觀點，不要求每一條局部來源各自等價於整個合取命題；須核實全部來源共同支持完整主張，而且完整主張確實出自教授，不是編輯只憑主題相近拼成的。若合在一起仍缺任何條件或一部分只有系統推論，仍判異議。
+
+不要判斷這個觀點在神學上對不對。只判斷等價身份或所標明的非等價關係是否符合來源。
 
 判 `disputed` 的情形：
 - `scope_mismatch`——某條主張的適用範圍（對象、人群、時態、條件）比觀點窄或寬，兩者不會同真同假；
 - `different_proposition`——某條主張講的根本是另一件事，只是用詞相近；
-- `over_merge`——觀點的表述把兩個可以分開的命題用「和」「以及」併在一起，而有些主張只支持其中一半；
+- `over_merge`——聲稱等價的成員實際只符合合取命題的一半，或共同支持來源仍無法證實教授講過完整合取命題；局部 supports 不冒充整體等價，但也不能藉此容許無來源的合併；
 - `other`——其他你說得出理由的問題。
 
-都對得上就判 `same`，`issue` 填 `none`。
+所有連結均符合各自標明的關係就判 `same`（這是既有結果欄位，對非等價連結只表示關係檢查通過，不表示它是成員），`issue` 填 `none`。
 
 ---
 
@@ -1909,7 +2348,7 @@ def _viewpoint_prompt(viewpoint_id: str, revision: dict[str, Any], blocks: list[
 限定條件：{conditions}
 經文範圍：{'、'.join(revision.get('scope', {}).get('scripture_scope') or []) or '未限定'}
 
-被判定為同一觀點的主張：
+主張與觀點的連結（按各自連結類型審核）：
 {chr(10).join(blocks)}
 
 ---
@@ -2066,6 +2505,8 @@ def render_report(
         f"{meta['claims']:,} 條主張 · {meta['viewpoints']} 個觀點",
         f"範圍        {meta['scope']}"
         + (
+            "（SQL 當前組：原 Claim、全部 retained/new CVP 成員及完整來源依賴；不是全庫審計）"
+            if meta.get('registry_read_scope',{}).get('kind')=='sql_transaction_group' else
             f"（run ledger 說這一輪 ingest 成功的來源；另有 {meta['sources_out_of_scope']} 份更早批次的沒查。"
             "第 2 層例外：依賴是全庫的，範圍縮不了）"
             if meta["scope"] == "current-run"
@@ -2256,7 +2697,13 @@ def main(argv: list[str] | None = None) -> int:
         "--viewpoint-ids", default="", help="只查這幾個觀點（逗號分隔）"
     )
     parser.add_argument("--seed", type=int, default=241, help="抽樣種子，同種子可重放")
+    parser.add_argument('--reconsider-audit', type=Path,
+                        help='一次定向原文復核；保留原審計，不以仲裁模型意見代替獨立判斷')
     parser.add_argument("--model", default=DEFAULT_MODEL, help="第 3、4 層用的獨立模型")
+    parser.add_argument('--preserve-full-context',action='store_true',help='Return the full-source content block; do not retry shortened inputs')
+    parser.add_argument('--component-roles', action='store_true', help='Versioned conclusion/reason component semantics; preserves historical audit prompts')
+    parser.add_argument('--relation-roles',action='store_true',help='Complete nonmember role contract; independently versioned, no historic prompt upgrade')
+    parser.add_argument('--scoped-relation-roles',action='store_true',help='Full roles only for targets using those roles; unchanged equivalent/support prompt retained')
     parser.add_argument(
         "--scope",
         choices=("current-run", "all"),
@@ -2267,6 +2714,10 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument("--out", type=Path, default=None, help="報告輸出目錄")
+    parser.add_argument('--sql-group-scope',action='store_true',
+        help='Read every requested Claim and target CVP member directly from indexed SQL; no historical payload traversal')
+    parser.add_argument('--sql-record-key',action='append',default=[],
+        help='Exact pending CVP management collection/ID to read independently; no status or content approval')
     parser.add_argument(
         "--status-file",
         type=Path,
@@ -2279,6 +2730,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     wanted = {int(x) for x in args.layers.split(",") if x.strip()}
+    reconsiderations, reconsidered_binding = None, None
+    if args.reconsider_audit:
+        if 4 not in wanted or args.viewpoints != 'all' or args.model != 'gemini-3.8-flash':
+            raise ValueError('reconsideration requires complete unchanged independent model audit')
+        reconsiderations, reconsidered_binding = load_reconsiderations(
+            args.reconsider_audit, {x.strip() for x in args.viewpoint_ids.split(',') if x.strip()})
+        if args.out is None or (args.out / 'audit.json').exists():
+            raise ValueError('reconsideration requires a fresh explicit output directory')
     settings = load_settings()
     database_url = settings.get("KNOWLEDGE_DATABASE_URL")
     if not database_url:
@@ -2308,7 +2767,13 @@ def main(argv: list[str] | None = None) -> int:
         scope=args.scope,
         model=args.model,
     )
-    store = Store(database_url)
+    if args.sql_record_key and not args.sql_group_scope:
+        raise ValueError('pending record keys require the explicit SQL group audit boundary')
+    if args.sql_group_scope:
+        if args.scope!='all' or not args.claim_ids:
+            raise ValueError('SQL group audit requires explicit complete Claim/CVP population')
+        store=SqlGroupStore(database_url,{x for x in args.claim_ids.split(',') if x},{x for x in args.viewpoint_ids.split(',') if x},args.sql_record_key)
+    else:store = Store(database_url)
     documents = store.collection("source_documents")
     in_scope: set[str] | None = None
     if args.scope == "current-run":
@@ -2332,6 +2797,7 @@ def main(argv: list[str] | None = None) -> int:
         model = IndependentModel(
             args.model,
             api_key,
+            preserve_full_context=args.preserve_full_context,
             # 判讀結果按 prompt 存檔，跨次重用。全查一次一千多條，中途斷掉不必
             # 從頭付一次錢。
             cache_dir=data_base_dir
@@ -2378,6 +2844,8 @@ def main(argv: list[str] | None = None) -> int:
             args.workers,
             progress,
             {x.strip() for x in args.viewpoint_ids.split(",") if x.strip()} or None,
+            reconsiderations,
+            semantic_contract_version=SCOPED_RELATION_SEMANTICS if args.scoped_relation_roles else (RELATION_SEMANTICS if args.relation_roles else (COMPONENT_SEMANTICS if args.component_roles else CONTEXTUAL_SEMANTICS)),
         )
 
     meta = {
@@ -2385,6 +2853,8 @@ def main(argv: list[str] | None = None) -> int:
         "model": args.model if model else "未使用",
         "seed": args.seed,
         "scope": args.scope,
+        "semantic_contract_version": SCOPED_RELATION_SEMANTICS if args.scoped_relation_roles else (RELATION_SEMANTICS if args.relation_roles else (COMPONENT_SEMANTICS if args.component_roles else CONTEXTUAL_SEMANTICS)),
+        "semantic_contract_file_sha256": hashlib.sha256(SEMANTIC_RULES_PATH.read_bytes()).hexdigest(),
         "sources": len(sources.in_scope) if sources.in_scope is not None else len(sources.documents),
         "sources_out_of_scope": len(sources.out_of_scope),
         "duplicate_sources": duplicate_source_documents(sources),
@@ -2396,6 +2866,20 @@ def main(argv: list[str] | None = None) -> int:
         "claims": len(store.collection("claims")),
         "viewpoints": len(store.collection("canonical_viewpoints")),
     }
+    if args.component_roles or args.relation_roles or args.scoped_relation_roles:
+        meta['component_role_contract_file_sha256'] = hashlib.sha256(COMPONENT_RULES_PATH.read_bytes()).hexdigest()
+    if args.relation_roles or args.scoped_relation_roles:
+        meta['relation_role_contract_file_sha256'] = hashlib.sha256(RELATION_RULES_PATH.read_bytes()).hexdigest()
+    if reconsidered_binding:
+        if hashlib.sha256(args.reconsider_audit.read_bytes()).hexdigest() != reconsidered_binding['file_sha256']:
+            raise ValueError('original independent audit changed during reconsideration')
+        meta['reconsidered_audit'] = reconsidered_binding
+    if args.sql_group_scope:
+        meta['registry_read_scope']={'kind':'sql_transaction_group','claim_ids':[x for x in args.claim_ids.split(',') if x],
+                                     'viewpoint_ids':[x for x in args.viewpoint_ids.split(',') if x],'complete_target_members':True,
+                                     'read_pins':[{'collection':k[0],'object_id':k[1],'pin':v} for k,v in sorted(store.read_pins.items())],
+                                     'metrics':store.read_metrics}
+        meta['registry_read_scope']['pending_management_record_keys']=store.extra_record_keys
     queue = build_human_queue(layers)
     report = render_report(layers, meta, len(queue["items"]))
 

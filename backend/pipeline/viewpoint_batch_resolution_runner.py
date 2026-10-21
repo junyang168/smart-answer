@@ -15,7 +15,7 @@ import argparse
 import json
 import subprocess
 from pathlib import Path
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from dotenv import load_dotenv
@@ -26,7 +26,10 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     CanonicalViewpointProposalResponse,
     CanonicalViewpointReconsiderationResponse,
     IdentityConsolidationResponse,
+    ContextualIdentityConsolidationResponse,
+    decode_consolidation,
     CanonicalViewpointReviewResponse,
+    CoverageCanonicalViewpointReviewResponse,
     ClaimGroupingResponse,
     DEFAULT_BATCH_SIZE,
     anchor_proposal_spans,
@@ -102,6 +105,8 @@ from backend.pipeline.viewpoint_cvp_policy import (
     load_cvp_policy,
 )
 from backend.pipeline.viewpoint_partition_validation import validate_partition_manifest
+from backend.pipeline.viewpoint_validation_context import validation_phase, finish_validation_phase
+from backend.pipeline.viewpoint_grouping_repository import SharedGroupingRepository
 from backend.pipeline.viewpoint_partition_manifest import (
     DEFAULT_PARTITION_POLICY,
     grouping_payload as build_grouping_payload,
@@ -121,67 +126,77 @@ from backend.pipeline.viewpoint_resolution_runtime import (
     write_immutable as _write_immutable,
 )
 
+def _compact_adapter(**kwargs: Any) -> StructuredJsonReviewerAdapter:
+    """One lossless wire-format contract for every CVP model role."""
+    from backend.pipeline.viewpoint_semantic_contract import CONTEXTUAL_SEMANTICS
+    contextual = kwargs['prompt'].startswith('## 统一语义规则：' + CONTEXTUAL_SEMANTICS + '\n')
+    # New contract identity only. Frozen legacy prompts keep their old codec.
+    return StructuredJsonReviewerAdapter(**kwargs, compact_payload=True, shared_text_payload=True,
+                                        shared_record_payload=contextual)
+
+
 def build_proposer(
-    model: str, reasoning_effort: str, *, provider: str = "claude"
+    model: str, reasoning_effort: str, *, provider: str = "claude", cvp_policy=None
 ) -> StructuredJsonReviewerAdapter:
-    return StructuredJsonReviewerAdapter(
+    return _compact_adapter(
         client=_subscription_client(provider, model, reasoning_effort),
-        prompt=(PROMPT_DIR / "canonical_viewpoint_batch_proposal.md").read_text(
-            encoding="utf-8"
-        ),
+        prompt=_role_prompt(cvp_policy, "proposal"),
         response_model=CanonicalViewpointProposalResponse,
         schema_name="wang_canonical_viewpoint_proposal_v1",
     )
 
 
 def build_reviewer(
-    model: str, reasoning_effort: str, *, provider: str = "claude"
+    model: str, reasoning_effort: str, *, provider: str = "claude", cvp_policy=None
 ) -> StructuredJsonReviewerAdapter:
-    return StructuredJsonReviewerAdapter(
+    from backend.pipeline.viewpoint_cvp_coverage_contract import enabled
+    policy = cvp_policy if cvp_policy is not None else load_cvp_policy(DEFAULT_CVP_POLICY_PATH)
+    coverage = enabled(policy)
+    return _compact_adapter(
         client=_subscription_client(provider, model, reasoning_effort),
-        prompt=(PROMPT_DIR / "canonical_viewpoint_batch_review.md").read_text(
-            encoding="utf-8"
-        ),
-        response_model=CanonicalViewpointReviewResponse,
-        schema_name="wang_canonical_viewpoint_review_v1",
+        prompt=_role_prompt(policy, "review"),
+        response_model=CoverageCanonicalViewpointReviewResponse if coverage else CanonicalViewpointReviewResponse,
+        schema_name="wang_canonical_viewpoint_review_v2" if coverage else "wang_canonical_viewpoint_review_v1",
     )
 
 
 def build_consolidator(
-    model: str, reasoning_effort: str, *, provider: str = "claude"
+    model: str, reasoning_effort: str, *, provider: str = "claude", cvp_policy=None
 ) -> StructuredJsonReviewerAdapter:
-    return StructuredJsonReviewerAdapter(
+    policy = cvp_policy if cvp_policy is not None else load_cvp_policy(DEFAULT_CVP_POLICY_PATH)
+    from backend.pipeline.viewpoint_semantic_contract import CONTEXTUAL_SEMANTICS
+    contextual = policy.get('semantic_contract_version') == CONTEXTUAL_SEMANTICS
+    return _compact_adapter(
         client=_subscription_client(provider, model, reasoning_effort),
-        prompt=(PROMPT_DIR / "canonical_viewpoint_identity_consolidation.md").read_text(
-            encoding="utf-8"
-        ),
-        response_model=IdentityConsolidationResponse,
-        schema_name="wang_canonical_viewpoint_identity_consolidation_v1",
+        prompt=_role_prompt(policy, "consolidation"),
+        response_model=ContextualIdentityConsolidationResponse if contextual else IdentityConsolidationResponse,
+        schema_name="wang_canonical_viewpoint_identity_consolidation_v2" if contextual else "wang_canonical_viewpoint_identity_consolidation_v1",
     )
 
 
-def build_grouper(model: str, reasoning_effort: str) -> StructuredJsonReviewerAdapter:
-    return StructuredJsonReviewerAdapter(
+def build_grouper(model: str, reasoning_effort: str, *, cvp_policy=None) -> StructuredJsonReviewerAdapter:
+    return _compact_adapter(
         client=_subscription_client("claude", model, reasoning_effort),
-        prompt=(PROMPT_DIR / "canonical_viewpoint_claim_grouping.md").read_text(
-            encoding="utf-8"
-        ),
+        prompt=_role_prompt(cvp_policy, "grouping"),
         response_model=ClaimGroupingResponse,
         schema_name="wang_canonical_viewpoint_claim_grouping_v1",
     )
 
 
 def build_reconsiderer(
-    model: str, reasoning_effort: str, *, provider: str = "claude"
+    model: str, reasoning_effort: str, *, provider: str = "claude", cvp_policy=None
 ) -> StructuredJsonReviewerAdapter:
-    return StructuredJsonReviewerAdapter(
+    return _compact_adapter(
         client=_subscription_client(provider, model, reasoning_effort),
-        prompt=(PROMPT_DIR / "canonical_viewpoint_batch_reconsideration.md").read_text(
-            encoding="utf-8"
-        ),
+        prompt=_role_prompt(cvp_policy, "correction"),
         response_model=CanonicalViewpointReconsiderationResponse,
         schema_name="wang_canonical_viewpoint_reconsideration_v3",
     )
+
+
+def _role_prompt(policy, role):
+    from backend.pipeline.viewpoint_semantic_contract import policy_prompt
+    return policy_prompt(policy if policy is not None else load_cvp_policy(DEFAULT_CVP_POLICY_PATH), role, PROMPT_DIR)
 
 
 def _plan_from_document(payload: dict[str, Any]) -> ChangeSetPlan:
@@ -309,6 +324,7 @@ def build_consolidation_packet(
     proposal: CanonicalViewpointProposalResponse,
     claims: Sequence[ReviewClaim],
     registry_context: Sequence[dict[str, Any]],
+    include_source_context: bool = False,
 ) -> dict[str, Any]:
     """Candidates with the words they rest on, plus the Registry to check against.
 
@@ -331,6 +347,9 @@ def build_consolidation_packet(
                     "claim_id": claim.claim_id,
                     "source_id": claim.source_id,
                     "statement": claim.statement,
+                    **({'source_context': [item.source_context.model_dump(mode='json')
+                        for item in claim.evidence if item.evidence_step_id in steps
+                        and item.source_context is not None]} if include_source_context else {}),
                     "verbatim": sorted(
                         {
                             item.verbatim_excerpt
@@ -375,6 +394,32 @@ def build_consolidation_packet(
     return packet
 
 
+def _response_normalization(raw_path: Path, response: Mapping[str, Any], changes: list[str]) -> dict[str, Any]:
+    result = {'raw_response_sha256': sha256_json(dict(response)), 'changed_paths': changes,
+              'reader_visible_text_changed': False, 'truth_conditions_changed': False}
+    proof_path = raw_path.with_name(raw_path.stem + '.program-binding.json')
+    if proof_path.exists():
+        proof = _read(proof_path)
+        artifact = _read(raw_path)
+        if (proof['artifact_sha256'] != sha256_json({k:v for k,v in proof.items() if k != 'artifact_sha256'})
+                or proof['raw_artifact_sha256'] != artifact['artifact_sha256']
+                or proof['raw_response_sha256'] != artifact['response_sha256']
+                or proof['bound_response_sha256'] != sha256_json(dict(response))):
+            raise ValueError('review normalization program binding drift')
+        result['raw_response_sha256'] = proof['raw_response_sha256']
+        result['program_binding_sha256'] = proof['artifact_sha256']
+    reference_path = raw_path.with_name(raw_path.stem+'-format-repair-coverage-reference-binding.json')
+    if reference_path.exists():
+        reference = _read(reference_path)
+        if (reference.get('schema_version') != 'wang_exact_own_coverage_reference_binding_v1'
+                or reference.get('original_response_sha256') != sha256_json(dict(response))
+                or reference.get('content_decisions_changed') is not False
+                or reference.get('model_calls_added') != 0):
+            raise ValueError('review coverage reference normalization binding drift')
+        result['coverage_reference_binding_sha256'] = sha256_json(reference)
+    return result
+
+
 def run_final_cvp_review(
     *,
     batch_id: str,
@@ -391,6 +436,9 @@ def run_final_cvp_review(
 
     proposal_payload = proposal.model_dump(mode="json")
     proposal_sha256 = sha256_json(proposal_payload)
+    if (packet.get('retained_review_boundary') is not None
+            and packet['retained_review_boundary']['effective_proposal_sha256'] != proposal_sha256):
+        raise ValueError('retained final review boundary differs from complete effective proposal')
     initial_review_payload = initial_review.model_dump(mode="json")
     reconsideration_payload = reconsideration.model_dump(mode="json")
     initial_review_sha256 = sha256_json(initial_review_payload)
@@ -409,15 +457,25 @@ def run_final_cvp_review(
         "reconsideration": reconsideration_payload,
         "allows_further_correction": False,
     }
+    # Keep the initial review's cache/config intact; final review alone uses
+    # lossless compact JSON, with its own serialization config identity.
+    if isinstance(reviewer, StructuredJsonReviewerAdapter):
+        reviewer = reviewer.compact_copy()
     raw_review, calls, seconds = _call(
         reviewer, review_packet, output_dir / "raw-final-review.json"
     )
-    canonical_review, normalization_changes = canonicalize_review(raw_review)
-    review = CanonicalViewpointReviewResponse.model_validate(canonical_review)
+    from backend.pipeline.viewpoint_review_format_repair import parse_review
+    review, normalization_changes, format_calls, format_seconds = parse_review(
+        raw_review, adapter=reviewer, request=review_packet,
+        cache=output_dir / 'raw-final-review-format-repair.json', call=_call)
+    calls += format_calls
+    seconds += format_seconds
     validation = validate_review(
         review=review,
         proposal=proposal,
         proposal_sha256=proposal_sha256,
+        claims=([ReviewClaim.model_validate(c) for c in packet["claims"]]
+                if isinstance(review, CoverageCanonicalViewpointReviewResponse) else None),
     )
     review_payload = review.model_dump(mode="json")
     review_sha256 = sha256_json(review_payload)
@@ -434,12 +492,8 @@ def run_final_cvp_review(
             "review": review_payload,
             "validation_report": validation,
             "allows_further_correction": False,
-            "normalization": {
-                "raw_response_sha256": sha256_json(dict(raw_review)),
-                "changed_paths": normalization_changes,
-                "reader_visible_text_changed": False,
-                "truth_conditions_changed": False,
-            },
+            "normalization": _response_normalization(
+                output_dir / 'raw-final-review.json', raw_review, normalization_changes),
         },
     )
     return review, validation, calls, seconds
@@ -455,10 +509,21 @@ def run_batch(
     output_dir: Path,
     proposer: Any,
     reviewer: Any,
+    final_reviewer: Any = None,
     reconsiderer: Any = None,
     consolidator: Any = None,
     dependents_loader: Any = None,
+    current_claim_links: Sequence[dict[str, Any]] | None = None,
+    claim_issue_handler: Any = None,
+    management_context: dict[str, Any] | None = None,
+    identity_source_loader: Any = None,
+    retained_review_loader: Any = None,
 ) -> dict[str, Any]:
+    # Accepted grouping preserves its source/argument order. The model packet
+    # has a separate canonical ID-order contract; normalize only this local
+    # copy, never the accepted group, batch identity or campaign schedule.
+    # Sorting must not deduplicate: build_batch_packet still rejects duplicates.
+    claims = sorted(claims, key=lambda item: item.claim_id)
     packet = build_batch_packet(
         batch_id=batch_id,
         scope_label=scope_label,
@@ -466,7 +531,51 @@ def run_batch(
         registry_context=registry_context,
         pending_candidates=pending_candidates,
     )
+    if management_context is not None:
+        packet['claim_management_resolution']=management_context
+        packet['packet_sha256']=sha256_json({k:v for k,v in packet.items() if k!='packet_sha256'})
+    if current_claim_links is not None:
+        if getattr(reviewer,'_response_model',None) is not CoverageCanonicalViewpointReviewResponse:
+            raise ValueError('existing component retention requires the new coverage-contract profile')
+        ids={claim.claim_id for claim in claims}
+        packet['retained_existing_claim_links']=sorted([dict(l) for l in current_claim_links
+            if l.get('claim_id') in ids and l.get('effective_state')=='active'],key=lambda l:l['viewpoint_claim_link_id'])
+        packet['existing_component_write_boundary']='现有active连接原类型、目标CVR、定位spans和Evidence/fragment绑定必须逐项原样保留；正常独立审核仍需检查它们，不借旧审核当本次批准。已有覆盖不新建重复link；只补尚无覆盖的实质成分。若现有连接需实质修改则报告阻塞，不自动改旧关系/CVP。'
+        packet['packet_sha256']=sha256_json({k:v for k,v in packet.items() if k!='packet_sha256'})
+    from backend.pipeline.cvp_retained_review_separation import policy_for,VERSION as RETAINED_VERSION
+    retained_profile_path=output_dir/'retained-review-input-profile.json'
+    if current_claim_links is not None and not any(output_dir.glob('raw-proposal*')):
+        retained_policy=policy_for(output_dir)
+        if retained_policy is not None:
+            _write_immutable(retained_profile_path,{'schema_version':RETAINED_VERSION,
+                'batch_id':batch_id,'packet_sha256':packet['packet_sha256'],
+                'policy':retained_policy['policy'],'old_answers_upgraded':False})
+    retained_initial_profile = _read(retained_profile_path) if retained_profile_path.exists() else None
+    if retained_initial_profile is not None:
+        retained_policy=policy_for(output_dir)
+        if (retained_policy is None or retained_initial_profile['policy']!=retained_policy['policy']
+                or retained_initial_profile['batch_id']!=batch_id
+                or retained_initial_profile['packet_sha256']!=packet['packet_sha256']):
+            raise ValueError('new retained-review profile requires exact original policy/packet')
     _write_immutable(output_dir / "batch-packet.json", packet)
+    # JSONB preserves all values but not object key insertion order. Legacy
+    # lossless codecs bind their actual wire bytes as well as semantic SHA.
+    # Only after the complete immutable equality check, consume the saved
+    # exact packet order for cache authentication, never reinterpret its data.
+    if (output_dir / 'batch-packet.json').exists():
+        packet = _read(output_dir / 'batch-packet.json')
+        registry_context = packet['registry_context']
+    from backend.pipeline import cvp_correction_source_context as correction_context
+    correction_source_profile = correction_context.profile(
+        output_dir, packet, complete_initial=retained_initial_profile is not None)
+    from backend.pipeline.cvp_batch_identity_integration import ENABLED, VERSION
+    integration_path=output_dir/'batch-identity-integration.json'
+    if ENABLED.get() and not any(output_dir.glob('raw-proposal*')):
+        _write_immutable(integration_path, {'schema_version':VERSION,
+            'batch_id':batch_id,'packet_sha256':packet['packet_sha256'],
+            'legacy_answers_upgraded':False,'correction_budget':1})
+    if integration_path.exists() and not ENABLED.get():
+        raise ValueError('new identity integration requires its explicit execution flag on recovery')
 
     raw_proposal, proposal_calls, proposal_seconds = _call(
         proposer, packet, output_dir / "raw-proposal.json"
@@ -489,6 +598,13 @@ def run_batch(
         claims=claims,
         registry_revision_ids=registry_revision_ids,
     )
+    # New GPT-only deferrals can enter Claim management immediately. Saved
+    # later-stage answers/intents always take precedence on recovery.
+    if claim_issue_handler is not None and not any(
+            output_dir.glob('raw-review*')) and not any(output_dir.glob('raw-consolidation*')):
+        claim_issue_handler(proposal=proposal,review=None,origin='gpt_proposal',
+                            report_path=output_dir/'raw-proposal.json',
+                            correction_used=False,terminal_refusal=False)
 
     # Identity, asked on its own. The proposer decides it while also carving
     # components, assigning roles, writing relations and building a structure,
@@ -496,14 +612,75 @@ def run_batch(
     consolidation_calls = 0
     consolidation_seconds = 0.0
     consolidation: IdentityConsolidationResponse | None = None
-    if consolidator is not None and proposal.new_viewpoint_candidates and registry_context:
+    # Never recompile a saved legacy proposal under new semantic instructions.
+    # A marker is created before the first new proposal call, below on next run.
+    integrated=integration_path.exists()
+    identity_correction_used=False
+    integration_review_context=None
+    identity_review_source_ids=set()
+    if consolidator is not None and proposal.new_viewpoint_candidates and (registry_context or integrated):
         consolidation_packet = build_consolidation_packet(
-            proposal=proposal, claims=claims, registry_context=registry_context
+            proposal=proposal, claims=claims, registry_context=registry_context,
+            include_source_context=integrated,
         )
+        if integrated:
+            from backend.pipeline.cvp_batch_identity_integration import adapter as integration_adapter
+            consolidator=integration_adapter(consolidator)
         raw_consolidation, consolidation_calls, consolidation_seconds = _call(
             consolidator, consolidation_packet, output_dir / "raw-consolidation.json"
         )
-        consolidation = IdentityConsolidationResponse.model_validate(raw_consolidation)
+        from backend.pipeline.cvp_owner_candidate_identity import NAME as OWNER_IDENTITY_NAME
+        if (output_dir / OWNER_IDENTITY_NAME).exists():
+            from backend.pipeline.cvp_owner_candidate_identity import revise, RAW
+            proposal, consolidation, owner_calls, owner_seconds = revise(
+                proposal=proposal, consolidation=raw_consolidation, packet=packet,
+                root=output_dir, proposer=proposer, call=_call)
+            proposal_calls += owner_calls
+            proposal_seconds += owner_seconds
+            validation = validate_proposal(proposal=proposal, batch_id=batch_id, claims=claims,
+                                           registry_revision_ids=registry_revision_ids)
+        elif integrated:
+            from backend.pipeline.cvp_batch_identity_integration import parse_and_apply
+            parsed, integrated_proposal=parse_and_apply(raw_consolidation,proposal,registry_revision_ids)
+            if parsed.unresolved_items:
+                # The sole correction budget is shared with normal CVP review;
+                # a final full Opus rejection cannot start another GPT round.
+                if reconsiderer is None:raise ValueError('identity unresolved without the authorized sole correction')
+                if identity_source_loader is None:raise ValueError('identity correction lacks complete own-source loader')
+                keys={x.local_key for x in parsed.unresolved_items}
+                source_ids={c.source_id for c in claims if any(
+                    component.local_new_viewpoint_key in keys
+                    for d in proposal.claim_decisions if d.claim_id==c.claim_id for component in d.components)}
+                identity_review_source_ids.update(source_ids)
+                correction_packet={'original_identity_request':consolidation_packet,
+                    'original_identity_response':raw_consolidation,
+                    'own_source_bodies':identity_source_loader(sorted(source_ids)),
+                    'instruction':'核对各Claim自身完整上下文，返回相同integration schema；不是自动认可或强合，真实矛盾保留unresolved。此为本组唯一纠正，之后完整Opus终审，无第二纠正。'}
+                corrected, calls, seconds=_call(integration_adapter(proposer),correction_packet,
+                    output_dir/'raw-identity-reconsideration.json')
+                proposal_calls+=calls;proposal_seconds+=seconds
+                parsed,integrated_proposal=parse_and_apply(corrected,proposal,registry_revision_ids)
+                identity_correction_used=True
+                if parsed.unresolved_items:
+                    raise BatchResolutionError([f'{x.local_key}: unresolved identity after sole correction; {x.reason}'
+                                                for x in parsed.unresolved_items])
+            proposal=integrated_proposal
+            merged_keys={key for group in parsed.same_batch_groups for key in group.member_local_keys}
+            merged_source_ids={c.source_id for c in claims if any(
+                component.local_new_viewpoint_key in merged_keys
+                for d in CanonicalViewpointProposalResponse.model_validate(canonical_proposal).claim_decisions
+                if d.claim_id==c.claim_id for component in d.components)}
+            identity_review_source_ids.update(merged_source_ids)
+            if identity_review_source_ids and identity_source_loader is None:
+                raise ValueError('integrated identity review lacks complete own-source loader')
+            integration_review_context={'same_batch_groups':[x.model_dump(mode='json') for x in parsed.same_batch_groups],
+                'sole_correction_used':identity_correction_used,
+                'own_source_bodies':identity_source_loader(sorted(identity_review_source_ids)) if identity_review_source_ids else []}
+            consolidation=IdentityConsolidationResponse(verdicts=parsed.verdicts)
+            validation=validate_proposal(proposal=proposal,batch_id=batch_id,claims=claims,
+                                        registry_revision_ids=registry_revision_ids)
+        else:
+            consolidation = decode_consolidation(raw_consolidation, [c.local_key for c in proposal.new_viewpoint_candidates])
         consolidation_report = validate_consolidation(
             consolidation=consolidation,
             proposal=proposal,
@@ -568,15 +745,47 @@ def run_batch(
         "proposal": proposal_payload,
         "revision_dependents": revision_dependents,
     }
+    if integration_review_context is not None:
+        review_packet['same_batch_identity_integration']=integration_review_context
+    if retained_initial_profile is not None:
+        if identity_source_loader is None:
+            raise ValueError('new retained-review profile missing complete own-source loader')
+        review_packet['retained_existing_review_scope']=retained_initial_profile
+        review_packet['own_source_bodies']=identity_source_loader(sorted({c.source_id for c in claims}))
+        from backend.pipeline.cvp_retained_review_separation import final_adapter
+        reviewer=final_adapter(reviewer,initial=True)
+    if (output_dir / 'owner-identity-validation.json').exists():
+        from backend.pipeline.cvp_owner_candidate_identity import NAME, own_sources, reviewer_direction
+        direction = _read(output_dir / NAME)
+        review_packet['owner_identity_direction'] = reviewer_direction(direction)
+        review_packet['own_source_bodies'] = own_sources(packet, direction['claim_ids'])
+        reviewer = reviewer.shared_keys_copy()
     raw_review, review_calls, review_seconds = _call(
         reviewer, review_packet, output_dir / "raw-review.json"
     )
-    canonical_review, review_normalization_changes = canonicalize_review(raw_review)
-    review = CanonicalViewpointReviewResponse.model_validate(canonical_review)
+    from backend.pipeline.viewpoint_review_format_repair import parse_review
+    review, review_normalization_changes, format_calls, format_seconds = parse_review(
+        raw_review, adapter=reviewer, request=review_packet,
+        cache=output_dir / 'raw-review-format-repair.json', call=_call)
+    review_calls += format_calls
+    review_seconds += format_seconds
+    review_artifact_name = 'raw-review.json'
+    pin_authorization = output_dir/'owner-review-pin-format-authorization.json'
+    if pin_authorization.exists():
+        from backend.pipeline.viewpoint_review_format_repair import repair_coverage_pin
+        review, pin_changes, pin_calls, pin_seconds = repair_coverage_pin(
+            review,adapter=reviewer,request=review_packet,claims=claims,proposal=proposal,
+            raw_path=output_dir/'raw-review.json',packet_path=output_dir/'batch-packet.json',
+            authorization_path=pin_authorization,cache=output_dir/'raw-review-pin-format-repair.json',call=_call)
+        review_normalization_changes += pin_changes
+        review_calls += pin_calls
+        review_seconds += pin_seconds
+        review_artifact_name = 'raw-review-pin-format-repair.json'
     review_validation = validate_review(
         review=review,
         proposal=proposal,
         proposal_sha256=proposal_sha,
+        claims=claims,
     )
     review_payload = review.model_dump(mode="json")
     _write_immutable(
@@ -588,16 +797,16 @@ def run_batch(
             "review_sha256": sha256_json(review_payload),
             "review": review_payload,
             "validation_report": review_validation,
-            "normalization": {
-                "raw_response_sha256": sha256_json(dict(raw_review)),
-                "changed_paths": review_normalization_changes,
-                "reader_visible_text_changed": False,
-                "truth_conditions_changed": False,
-            },
+            "normalization": _response_normalization(
+                output_dir / 'raw-review.json', raw_review, review_normalization_changes),
         },
     )
 
     review_sha = sha256_json(review_payload)
+    if claim_issue_handler is not None:
+        claim_issue_handler(proposal=proposal,review=review,origin='opus_initial',
+                            report_path=output_dir/review_artifact_name,
+                            correction_used=identity_correction_used,terminal_refusal=identity_correction_used)
     reconsideration_report: dict[str, Any] | None = None
     reconsideration: CanonicalViewpointReconsiderationResponse | None = None
     reconsideration_calls = 0
@@ -609,6 +818,8 @@ def run_batch(
     effective_proposal = proposal
     effective_validation = validation
     if review_validation["correction_required"] and reconsiderer is not None:
+        if identity_correction_used:
+            raise BatchResolutionError(['full Opus review refused after sole identity correction; no second correction'])
         # Identity consolidation's verdicts are an input to the correction, not
         # just a gate after it. A candidate ruled the same viewpoint as a
         # committed one has to end up connected to that exact revision when the
@@ -634,6 +845,10 @@ def run_batch(
             "review": review_payload,
             "connection_required": connection_required,
         }
+        if correction_source_profile is not None:
+            reconsider_packet = correction_context.complete_packet(
+                reconsider_packet, review_packet['own_source_bodies'], correction_source_profile)
+            reconsiderer = correction_context.adapter(reconsiderer)
         raw_reconsideration, reconsideration_calls, reconsideration_seconds = _call(
             reconsiderer, reconsider_packet, output_dir / "raw-reconsideration.json"
         )
@@ -673,6 +888,10 @@ def run_batch(
             ],
         )
         if reconsideration_report["outcome"] == "resolved":
+            if correction_source_profile is not None:
+                correction_context.validate_scope_preservation(proposal_payload,
+                    revised_proposal.model_dump(mode='json'),review_payload,
+                    reconsider_packet['correction_source_context']['related_claim_ids'])
             effective_proposal = revised_proposal
             effective_validation = revised_validation
         _write_immutable(
@@ -699,8 +918,75 @@ def run_batch(
             },
         )
 
-    if reconsideration_report and reconsideration_report["outcome"] == "resolved":
+    correction_raw_name = 'raw-reconsideration.json'
+    correction_repair = None
+    if (reconsideration_report and reconsideration_report['outcome'] != 'resolved'
+            and (output_dir / correction_context.BINDING).exists()):
+        if identity_source_loader is None:
+            raise ValueError('correction source repair missing current physical source loader')
+        repair_input = correction_context.repair_packet(output_dir,
+            original={n:_read(output_dir/n) for n in
+                      ('raw-proposal.json','raw-review.json','raw-reconsideration.json')},
+            review_packet=review_packet, correction_packet=reconsider_packet,
+            sources=identity_source_loader(sorted({c.source_id for c in claims})),
+            reconsideration=reconsideration, proposal=proposal, review=review)
+        repair_raw, repair_calls, repair_seconds = _call(
+            correction_context.adapter(reconsiderer), repair_input, output_dir/correction_context.RAW)
+        reconsideration_calls += repair_calls
+        reconsideration_seconds += repair_seconds
+        repair_payload, repair_normalization = canonicalize_proposal(repair_raw)
+        repair_payload, repair_spans = anchor_proposal_spans(repair_payload,
+            claim_statements={c.claim_id:c.statement for c in claims})
+        repaired = CanonicalViewpointReconsiderationResponse.model_validate(repair_payload)
+        repaired_report = validate_reconsideration(reconsideration=repaired, proposal=proposal,
+            review=review, proposal_sha256=proposal_sha, review_sha256=review_sha)
+        repaired_proposal = apply_reconsideration_patches(reconsideration=repaired,
+            proposal=proposal, review=review)
+        repaired_validation = validate_proposal(proposal=repaired_proposal, batch_id=batch_id,
+            claims=claims, registry_revision_ids=[str(r['viewpoint_revision_id'])
+            for r in registry_context if r.get('viewpoint_revision_id')])
+        correction_context.validate_scope_preservation(proposal.model_dump(mode='json'),
+            repaired_proposal.model_dump(mode='json'),review.model_dump(mode='json'),
+            repair_input['correction_source_context']['related_claim_ids'])
+        _write_immutable(output_dir/'correction-source-input-repair.json', {
+            'schema_version':correction_context.REPAIR,
+            'receipt':repair_input['correction_source_context'],
+            'reconsideration':repaired.model_dump(mode='json'),
+            'effective_proposal':repaired_proposal.model_dump(mode='json'),
+            'validation_report':repaired_report, 'revised_validation_report':repaired_validation,
+            'normalization_paths':sorted({*repair_normalization,*repair_spans})})
+        if repaired_report['outcome'] != 'resolved':
+            raise BatchResolutionError(['complete source input repair remains unresolved; zero further correction'])
+        correction_repair=repair_input['correction_source_context']
+        reconsideration,reconsideration_report=repaired,repaired_report
+        revised_proposal=effective_proposal=repaired_proposal
+        effective_validation=repaired_validation
+        correction_raw_name=correction_context.RAW
+
+    retained_boundary = None
+    final_packet = packet
+    if reconsideration_report is not None and (correction_source_profile is not None or correction_repair is not None):
+        scoped = correction_context.complete_packet(reconsider_packet,
+            review_packet['own_source_bodies'],correction_repair or correction_source_profile)
+        final_packet={**packet,'own_source_bodies':scoped['own_source_bodies'],
+            'correction_source_context':scoped['correction_source_context']}
+    if (reconsideration_report and reconsideration_report['outcome'] != 'resolved'
+            and retained_review_loader is not None):
+        projected = retained_review_loader(original=proposal.model_dump(mode='json'),
+            revised=revised_proposal.model_dump(mode='json'), review=review.model_dump(mode='json'), packet=packet,
+            reconsideration=reconsideration.model_dump(mode='json'))
+        if projected is not None:
+            effective_proposal, retained_boundary = projected
+            effective_validation = validate_proposal(proposal=effective_proposal,batch_id=batch_id,claims=claims,
+                registry_revision_ids=[str(r['viewpoint_revision_id']) for r in registry_context if r.get('viewpoint_revision_id')])
+            final_packet = {**packet, 'retained_review_boundary':retained_boundary}
+            from backend.pipeline.cvp_retained_review_separation import final_adapter
+            final_reviewer = final_adapter(final_reviewer if final_reviewer is not None else reviewer)
+
+    if reconsideration_report and (reconsideration_report["outcome"] == "resolved" or retained_boundary is not None):
         assert reconsideration is not None
+        if correction_repair is not None or correction_source_profile is not None:
+            final_reviewer = correction_context.adapter(final_reviewer if final_reviewer is not None else reviewer)
         (
             final_review,
             final_review_validation,
@@ -708,15 +994,22 @@ def run_batch(
             final_review_seconds,
         ) = run_final_cvp_review(
             batch_id=batch_id,
-            packet=packet,
+            packet=final_packet,
             proposal=effective_proposal,
             revision_dependents=revision_dependents,
             initial_proposal_sha256=proposal_sha,
             initial_review=review,
             reconsideration=reconsideration,
-            reviewer=reviewer,
+            reviewer=final_reviewer if final_reviewer is not None else reviewer,
             output_dir=output_dir,
         )
+        if retained_boundary is not None:
+            from backend.pipeline.cvp_retained_review_separation import pending_maintenance
+            pending_maintenance(output_dir,retained_boundary,final_review.model_dump(mode='json'))
+        if claim_issue_handler is not None:
+            claim_issue_handler(proposal=effective_proposal,review=final_review,origin='opus_final',
+                                report_path=output_dir/'raw-final-review.json',
+                                correction_used=True,terminal_refusal=final_review_validation['outcome']!='pass')
 
     approval_review = final_review or review
     approval_validation = final_review_validation or review_validation
@@ -768,9 +1061,11 @@ def run_batch(
         raw_artifacts={
             "proposal": "raw-proposal.json",
             "consolidation": "raw-consolidation.json",
-            "review": "raw-review.json",
+            "review": review_artifact_name,
             "reconsideration": "raw-reconsideration.json",
+            "correction_source_input_repair": correction_context.RAW,
             "final_review": "raw-final-review.json",
+            "owner_identity_proposal": "raw-owner-identity-proposal.json",
         },
     )
     report = {
@@ -810,7 +1105,7 @@ def run_batch(
         ),
         "escalations": sorted(
             {
-                *(reconsideration_report["escalations"] if reconsideration_report else []),
+                *(reconsideration_report["escalations"] if reconsideration_report and retained_boundary is None else []),
                 *final_review_escalations,
             }
         ),
@@ -819,6 +1114,11 @@ def run_batch(
         "master_data_mutations": 0,
         "apply_allowed": False,
     }
+    if retained_boundary is not None:
+        report['retained_review_boundary_sha256'] = sha256_json(retained_boundary)
+        report['original_reconsideration_escalations'] = reconsideration_report['escalations']
+    if (output_dir / 'owner-identity-validation.json').exists():
+        report['_initial_proposal_artifact_name'] = 'raw-owner-identity-proposal.json'
     report["artifact_sha256"] = sha256_json(report)
     # Rewritten, not immutable. The batch's semantic artifacts — packet,
     # proposal, review, reconsideration — are the immutable record; this file
@@ -827,14 +1127,16 @@ def run_batch(
     # which is how adding the reconsideration fields broke a completed batch.
     _write_derived(output_dir / "batch-run.json", report)
     superseded = []
-    if (output_dir / "exception.json").exists():
+    from backend.pipeline.viewpoint_resolution_runtime import validating_saved_artifacts
+    if not validating_saved_artifacts() and (output_dir / "exception.json").exists():
         superseded.append("exception.json")
     superseded.extend(
         str(path.relative_to(output_dir))
-        for path in sorted((output_dir / "exceptions").glob("*.json"))
+        for path in (sorted((output_dir / "exceptions").glob("*.json"))
+                     if not validating_saved_artifacts() else [])
     )
     correction_resolved = not review_validation["reconsideration_required"] or bool(
-        reconsideration_report and reconsideration_report["outcome"] == "resolved"
+        reconsideration_report and (reconsideration_report["outcome"] == "resolved" or retained_boundary is not None)
     )
     resolved = correction_resolved and approval_validation["outcome"] == "pass"
     _write_current_state(
@@ -864,9 +1166,13 @@ def run_batch(
         "component_count": validation["component_count"],
     }
     log_path = output_dir / "measurements.json"
-    history = _read(log_path)["executions"] if log_path.exists() else []
+    from backend.pipeline.viewpoint_resolution_runtime import validating_saved_artifacts
+    # A transcript compiler must not read an ever-growing execution log or
+    # append an execution that never happened. These are not approval inputs.
+    saved_only = validating_saved_artifacts()
+    history = _read(log_path)["executions"] if not saved_only and log_path.exists() else []
     history.append(measurements)
-    log_path.write_text(
+    if not saved_only: log_path.write_text(
         json.dumps(
             {
                 "schema_version": "wang_canonical_viewpoint_batch_measurements_v1",
@@ -885,15 +1191,20 @@ def run_batch(
         # In-memory orchestration input only. The immutable proposal and
         # reconsideration envelopes above remain the auditable artifacts.
         "_effective_proposal": effective_proposal,
+        "_initial_review_artifact_name": review_artifact_name,
         "_original_proposal": proposal,
         "_review": approval_review,
         "_initial_review": review,
         "_final_review": final_review,
         "_reconsideration": reconsideration,
+        "_effective_correction_artifact_name": correction_raw_name,
         "_revision_dependents": revision_dependents,
         "_effective_validation": effective_validation,
+        "_retained_review_boundary": retained_boundary,
     }
-def main() -> int:
+def main(argv=None) -> int:
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
     load_dotenv(PROJECT_ROOT / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--packet", type=Path, required=True, help="scope packet from viewpoint_scope_packet_runner")
@@ -993,10 +1304,14 @@ def main() -> int:
         type=Path,
         help="reuse a validated v2 grouping bound to this exact freeze",
     )
+    grouping_source.add_argument(
+        "--accepted-grouping-sha", help="reuse accepted groups from the shared repository without model regrouping",
+    )
+    parser.add_argument("--grouping-repository", type=Path, help="absolute shared grouping repository root")
     parser.add_argument(
         "--canary-selection",
         type=Path,
-        help="deterministic clean-group selection bound to --freeze and --grouping",
+        help="deterministic clean-group selection bound to --freeze and the selected grouping",
     )
     parser.add_argument("--group-model", default="claude-fable-5-1")
     parser.add_argument("--group-effort", choices=("low", "medium", "high", "xhigh"), default="high")
@@ -1005,7 +1320,7 @@ def main() -> int:
         action="append",
         help="resolve only these groups; the grouping plan itself still covers the whole scope",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     return execute(args)
 
 
@@ -1028,8 +1343,46 @@ def _repository_commit() -> str:
     ).stdout.strip()
 
 
+def load_production_grouping(args: argparse.Namespace, *, scope_packet: dict[str, Any], freeze: dict[str, Any]) -> dict[str, Any]:
+    """Resolve shared accepted groups only after normal production admission."""
+    if getattr(args, "accepted_grouping_sha", None):
+        return SharedGroupingRepository(args.grouping_repository).admit(
+            args.accepted_grouping_sha, scope_packet=scope_packet, freeze=freeze,
+        )
+    return _read(args.grouping)
+
+
+def validate_shared_grouping_execution(
+    args: argparse.Namespace, *, scope_packet: dict[str, Any], freeze: dict[str, Any],
+) -> None:
+    """Accepted semantic grouping replaces the old capacity-partition plan.
+
+    It does not replace source qualification, corpus/Registry freezing, backup
+    authorization or exclusive execution. The accepted reference itself must
+    already be part of that production freeze.
+    """
+    repository = SharedGroupingRepository(args.grouping_repository)
+    path = repository.entry_path(args.accepted_grouping_sha)
+    binding = (freeze.get("prerequisites") or {}).get("reviewed_grouping_reference") or {}
+    import hashlib
+    if Path(str(binding.get("path") or "")).resolve() != path.resolve() or not path.is_file():
+        raise CvpProductionBlocked(["shared grouping reference is not bound into this production freeze"])
+    if hashlib.sha256(path.read_bytes()).hexdigest() != binding.get("sha256"):
+        raise CvpProductionBlocked(["freeze-bound shared grouping reference SHA drift"])
+    repository.admit(args.accepted_grouping_sha, scope_packet=scope_packet, freeze=freeze)
+
+
+@validation_phase
 def execute(args: argparse.Namespace) -> int:
-    if not all(
+    from backend.pipeline.cvp_retired_runtime import reject_legacy_execution
+    reject_legacy_execution()
+    if bool(getattr(args, "accepted_grouping_sha", None)) != bool(getattr(args, "grouping_repository", None)):
+        raise CvpProductionBlocked(["--accepted-grouping-sha and --grouping-repository must be supplied together"])
+    accepted_mode = bool(getattr(args, "accepted_grouping_sha", None))
+    legacy_inputs = (getattr(args, "global_freeze", None), getattr(args, "partition_manifest", None), getattr(args, "partition_id", None))
+    if accepted_mode and any(legacy_inputs):
+        raise CvpProductionBlocked(["accepted semantic grouping cannot be mixed with the legacy capacity partition entrance"])
+    if not accepted_mode and not all(
         (getattr(args, "global_freeze", None), getattr(args, "partition_manifest", None), getattr(args, "partition_id", None))
     ):
         raise CvpProductionBlocked(["--global-freeze, --partition-manifest and --partition-id are required"])
@@ -1085,55 +1438,42 @@ def execute(args: argparse.Namespace) -> int:
         raise CvpProductionBlocked(["--apply requires --apply-authorization"])
     if args.apply and args.group:
         raise CvpProductionBlocked(
-            ["--apply requires an already frozen --grouping artifact"]
+            ["--apply requires an existing grouping, not --group"]
         )
-    if getattr(args, "canary_selection", None) and not args.grouping:
+    if getattr(args, "canary_selection", None) and not (args.grouping or getattr(args, "accepted_grouping_sha", None)):
         raise CvpProductionBlocked(
-            ["--canary-selection requires an already frozen --grouping artifact"]
+            ["--canary-selection requires --grouping or --accepted-grouping-sha"]
         )
     if args.group_key and not getattr(args, "canary_selection", None):
         raise CvpProductionBlocked(
             ["--group-key cannot manually select a production canary"]
         )
-    global_freeze = _read(args.global_freeze)
-    validate_cvp_freeze(
-        global_freeze,
-        store=store,
-        cvp_policy_sha256=cvp_policy_sha256,
-        route_policy_sha256=route_policy_sha256,
-        runner_commit=str(global_freeze.get("runner_commit") or ""),
-        validate_registry=False,
-    )
-    manifest = _read(args.partition_manifest)
-    current_partition_policy = load_partition_policy(
-        getattr(args, "partition_policy", DEFAULT_PARTITION_POLICY)
-    )
-    if manifest.get("partition_policy_sha256") != sha256_json(current_partition_policy):
-        raise CvpProductionBlocked(["partition policy drift"])
-    claim_manifest_path = Path(
-        str(((global_freeze.get("prerequisites") or {}).get("claim_manifest") or {}).get("path") or "")
-    )
-    if not claim_manifest_path.is_file():
-        raise CvpProductionBlocked(["global freeze Claim manifest is missing"])
     scope_packet = _read(args.packet)
-    validate_partition_manifest(
-        manifest,
-        claim_manifest=_read(claim_manifest_path),
-        freeze=global_freeze,
-        cvp_policy_sha256=cvp_policy_sha256,
-        store=store,
-        partition_id=args.partition_id,
-        scope_packet=scope_packet,
-        partition_freeze=freeze,
-    )
-    if int(manifest["partition_policy"]["max_request_bytes"]) != int(cvp_policy["max_request_bytes"]):
-        raise CvpProductionBlocked(["partition ceiling differs from CVP policy"])
-    args.partition_claim_ids = [
-        row["claim_id"]
-        for partition in manifest["partitions"]
-        if partition["partition_id"] == args.partition_id
-        for row in partition["claims"]
-    ]
+    if accepted_mode:
+        validate_shared_grouping_execution(args, scope_packet=scope_packet, freeze=freeze)
+        args.partition_claim_ids = [row["claim_id"] for row in scope_packet["claims"]]
+    else:
+        global_freeze = _read(args.global_freeze)
+        validate_cvp_freeze(
+            global_freeze, store=store, cvp_policy_sha256=cvp_policy_sha256,
+            route_policy_sha256=route_policy_sha256,
+            runner_commit=str(global_freeze.get("runner_commit") or ""), validate_registry=False,
+        )
+        manifest = _read(args.partition_manifest)
+        current_partition_policy = load_partition_policy(getattr(args, "partition_policy", DEFAULT_PARTITION_POLICY))
+        if manifest.get("partition_policy_sha256") != sha256_json(current_partition_policy):
+            raise CvpProductionBlocked(["partition policy drift"])
+        claim_manifest_path = Path(str(((global_freeze.get("prerequisites") or {}).get("claim_manifest") or {}).get("path") or ""))
+        if not claim_manifest_path.is_file():
+            raise CvpProductionBlocked(["global freeze Claim manifest is missing"])
+        validate_partition_manifest(
+            manifest, claim_manifest=_read(claim_manifest_path), freeze=global_freeze,
+            cvp_policy_sha256=cvp_policy_sha256, store=store, partition_id=args.partition_id,
+            scope_packet=scope_packet, partition_freeze=freeze,
+        )
+        if int(manifest["partition_policy"]["max_request_bytes"]) != int(cvp_policy["max_request_bytes"]):
+            raise CvpProductionBlocked(["partition ceiling differs from CVP policy"])
+        args.partition_claim_ids = [row["claim_id"] for partition in manifest["partitions"] if partition["partition_id"] == args.partition_id for row in partition["claims"]]
     claim_output_ownership(
         output_root=args.output_dir, freeze=freeze, runner_commit=runner_commit
     )
@@ -1177,11 +1517,11 @@ def _execute_locked(
     awaiting_cvp_apply = False
     master_data_mutations = 0
 
-    if args.grouping:
+    if args.grouping or getattr(args, "accepted_grouping_sha", None):
         # A grouping plan belongs to the scope, not to one resolution run.
         # Re-deriving it per run costs a call and yields different group keys,
         # because the same Claims can be carved into topics more than one way.
-        stored = _read(args.grouping)
+        stored = load_production_grouping(args, scope_packet=scope_packet, freeze=freeze)
         grouping_sha256 = validate_grouping_envelope(stored, freeze=freeze)
         grouping = ClaimGroupingResponse.model_validate(stored["grouping"])
         repairs = list(stored.get("coverage_repairs") or [])
@@ -1246,7 +1586,7 @@ def _execute_locked(
             runner_commit=runner_commit,
         )
         grouping_role = cvp_policy["grouping"]
-        grouper = build_grouper(grouping_role["model"], grouping_role["effort"])
+        grouper = build_grouper(grouping_role["model"], grouping_role["effort"], cvp_policy=cvp_policy)
         grouper.max_request_bytes = int(cvp_policy["max_request_bytes"])
         grouping_payload = build_grouping_payload(
             scope_label, [item.model_dump(mode="json") for item in claims.values()]
@@ -1362,6 +1702,7 @@ def _execute_locked(
         proposal_role["model"],
         proposal_role["effort"],
         provider=proposal_role["provider"],
+        cvp_policy=cvp_policy,
     )
     proposer.max_request_bytes = int(cvp_policy["max_request_bytes"])
     review_role = cvp_policy["review"]
@@ -1369,6 +1710,7 @@ def _execute_locked(
         review_role["model"],
         review_role["effort"],
         provider=review_role["provider"],
+        cvp_policy=cvp_policy,
     )
     reviewer.max_request_bytes = int(cvp_policy["max_request_bytes"])
     correction_role = cvp_policy["correction"]
@@ -1376,6 +1718,7 @@ def _execute_locked(
         correction_role["model"],
         correction_role["effort"],
         provider=correction_role["provider"],
+        cvp_policy=cvp_policy,
     )
     reconsiderer.max_request_bytes = int(cvp_policy["max_request_bytes"])
 
@@ -1384,6 +1727,7 @@ def _execute_locked(
         consolidation_role["model"],
         consolidation_role["effort"],
         provider=consolidation_role["provider"],
+        cvp_policy=cvp_policy,
     )
     consolidator.max_request_bytes = int(cvp_policy["max_request_bytes"])
 
@@ -1567,6 +1911,8 @@ def _execute_locked(
                 dependents_loader=lambda targets: load_revision_dependents(
                     store=store, target_revision_ids=targets
                 ),
+                current_claim_links=(store.list_records('viewpoint_claim_links')
+                    if getattr(reviewer,'_response_model',None) is CoverageCanonicalViewpointReviewResponse else None),
             )
         except (BatchResolutionError, ValidationError) as exc:
             findings = (
@@ -1618,6 +1964,17 @@ def _execute_locked(
             }
             stop["artifact_sha256"] = sha256_json(stop)
             _write_immutable(batch_dir / "scope-stop.json", stop)
+            # D4's terminal human handoff preserves the failed reviews. It does
+            # not create a ChangeSet, retry a model, or turn findings into pass.
+            from backend.pipeline.viewpoint_human_review import create_handoff
+            create_handoff(
+                batch_dir / "human-review-handoff.json", stage="production_review",
+                packet_path=batch_dir / "batch-packet.json",
+                review_paths=[p for p in (batch_dir / "raw-review.json", batch_dir / "raw-final-review.json") if p.is_file()],
+                items=[{"item_id": "effective-proposal", "findings": report.get("escalations") or [stop["reason"]]}],
+                context_paths=[batch_dir / "scope-stop.json", batch_dir / "proposal.json",
+                               *[p for p in (batch_dir / "reconsideration.json", batch_dir / "final-review.json") if p.is_file()]],
+            )
             print(json.dumps(stop, ensure_ascii=False, indent=2))
             return 1
 
@@ -1653,6 +2010,8 @@ def _execute_locked(
             proposer_model_id=str(effective_raw["model_id"]),
             reviewer_model_id=str(raw_review["model_id"]),
             decided_at=_stable_decided_at(batch_dir),
+            current_claim_links=(store.list_records('viewpoint_claim_links')
+                if report['_review'].schema_version=='wang_canonical_viewpoint_review_v2' else None),
         )
         _write_immutable(batch_dir / "cvp-change-package.json", package)
         # A viewpoint-wording supersede strands the attestations pinned to the
@@ -1660,6 +2019,7 @@ def _execute_locked(
         # replacements and named the stranded originals; retiring them rides
         # the same ChangeSet, the same way the route worker retires the
         # attestations its own revisions strand.
+        finish_validation_phase()
         plan = store.plan_package(
             package,
             source_kind="cvp_batch_resolution",

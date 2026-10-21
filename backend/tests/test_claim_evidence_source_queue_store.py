@@ -383,10 +383,12 @@ class _QueueStore(PostgresKnowledgeStore):
     _assert_global_id_uniqueness = staticmethod(lambda *_args: None)
     _assert_source_identity_uniqueness = staticmethod(lambda *_args: None)
     _assert_edge_integrity = staticmethod(lambda *_args: None)
-    _assert_no_dangling_package_references = staticmethod(lambda *_args: None)
-    _assert_no_uncoordinated_semantic_references = staticmethod(lambda *_args: None)
+    # These graph checks are outside this fixture's ledger/rollback subject;
+    # mirror the shared store's keyword-aware boundary, not its old signature.
+    _assert_no_dangling_package_references = staticmethod(lambda *_args, **_kwargs: None)
+    _assert_no_uncoordinated_semantic_references = staticmethod(lambda *_args, **_kwargs: None)
     _assert_current_viewpoint_revisions = staticmethod(lambda *_args: None)
-    _invalidate_dependencies = staticmethod(lambda *_args: 0)
+    _invalidate_dependencies = staticmethod(lambda *_args, **_kwargs: 0)
 
 
 # Preserve params after dispatch; keeping this outside execute makes the mutation
