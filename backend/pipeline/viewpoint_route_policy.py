@@ -11,9 +11,12 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     ROUTE_VALIDATION_VERSION,
 )
 
-ROUTE_POLICY_VERSION = "wang_route_resolution_policy_v5"
+ROUTE_POLICY_VERSION = "wang_route_resolution_policy_v6"
+WHOLE_CVP_ROUTE_POLICY_VERSIONS = frozenset({
+    "wang_route_resolution_policy_v5", ROUTE_POLICY_VERSION,
+})
 SUPPORTED_ROUTE_POLICY_VERSIONS = frozenset(
-    {"wang_route_resolution_policy_v1", "wang_route_resolution_policy_v2", "wang_route_resolution_policy_v3", "wang_route_resolution_policy_v4", ROUTE_POLICY_VERSION}
+    {"wang_route_resolution_policy_v1", "wang_route_resolution_policy_v2", "wang_route_resolution_policy_v3", "wang_route_resolution_policy_v4", *WHOLE_CVP_ROUTE_POLICY_VERSIONS}
 )
 DEFAULT_ROUTE_POLICY_PATH = (
     Path(__file__).resolve().parent
@@ -40,7 +43,8 @@ def load_route_policy(path: Path) -> dict[str, Any]:
         "max_request_bytes",
         "call_timeout_seconds",
     }
-    if policy.get("schema_version") == ROUTE_POLICY_VERSION:
+    whole_cvp = policy.get("schema_version") in WHOLE_CVP_ROUTE_POLICY_VERSIONS
+    if whole_cvp:
         required_top.add("max_correction_rounds")
     if set(policy) != required_top:
         raise ValueError(
@@ -56,7 +60,7 @@ def load_route_policy(path: Path) -> dict[str, Any]:
         if set(policy[role]) != {"provider", "model", "effort"}:
             raise ValueError(f"Route policy {role} fields are invalid")
     review_fields = {"provider", "model", "effort"}
-    if policy["schema_version"] != ROUTE_POLICY_VERSION:
+    if not whole_cvp:
         review_fields.add("targets_per_batch")
     if set(policy["review"]) != review_fields:
         raise ValueError("Route policy review fields are invalid")
@@ -66,14 +70,14 @@ def load_route_policy(path: Path) -> dict[str, Any]:
         raise ValueError("Route proposal/correction policy must use the Codex subscription")
     if policy["review"]["provider"] != "claude":
         raise ValueError("Route review policy must use the Claude subscription")
-    if (policy["schema_version"] != ROUTE_POLICY_VERSION
+    if (not whole_cvp
             and int(policy["review"]["targets_per_batch"]) < 1):
         raise ValueError("Route review batch size must be positive")
     if int(policy["call_timeout_seconds"]) < 1:
         raise ValueError("Route call timeout must be positive")
     if int(policy["max_request_bytes"]) < 1:
         raise ValueError("Route request byte ceiling must be positive")
-    if policy["schema_version"] == ROUTE_POLICY_VERSION and not 1 <= int(
+    if whole_cvp and not 1 <= int(
         policy["max_correction_rounds"]
     ) <= 8:
         raise ValueError("Route correction-round policy must be between 1 and 8")

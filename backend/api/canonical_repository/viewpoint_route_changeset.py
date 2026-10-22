@@ -36,6 +36,7 @@ def compile_argument_route_package(
     proposer_model_id: str,
     reviewer_model_id: str,
     decided_at: str,
+    preserve_support_scope: bool = False,
 ) -> dict[str, Any]:
     """Assign durable v2 route ids after semantic and independent review."""
 
@@ -258,6 +259,10 @@ def compile_argument_route_package(
             "step_bindings": step_bindings,
             "terminal_claim_link_id": terminal["viewpoint_claim_link_id"],
         }
+        # New evidence-inclusive runs retain the reviewed explanation of the
+        # support's scope. Keep historical IDs and package bytes unchanged.
+        if preserve_support_scope:
+            attestation_seed["support_scope_note"] = attestation.reason
         record = ArgumentRouteAttestationRecord(
             argument_route_attestation_id=f"ARA-{sha256_json(attestation_seed)[:20]}",
             argument_route_id=route_id,
@@ -269,6 +274,7 @@ def compile_argument_route_package(
             step_bindings=step_bindings,
             terminal_claim_link_id=str(terminal["viewpoint_claim_link_id"]),
             completeness=attestation.completeness,
+            support_scope_note=attestation.reason if preserve_support_scope else None,
             scripture_refs_derived=scripture_refs,
             review_artifact_sha256=review_artifact_sha256,
             review_status="system_approved",
@@ -283,7 +289,10 @@ def compile_argument_route_package(
             # approved it is the one that approved it.
             unchanged_attestation_ids.append(record.argument_route_attestation_id)
             continue
-        attestation_records.append(record.model_dump(mode="json"))
+        payload = record.model_dump(mode="json")
+        if not preserve_support_scope:
+            payload.pop("support_scope_note")
+        attestation_records.append(payload)
 
     package_seed = {
         "policy_version": ROUTE_CHANGESET_POLICY_VERSION,

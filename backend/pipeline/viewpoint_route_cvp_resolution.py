@@ -102,6 +102,7 @@ def compile_cvp_route_package(
         proposer_model_id=proposer_model_id,
         reviewer_model_id=reviewer_model_id,
         decided_at=decided_at,
+        preserve_support_scope=route_packet.get("evidence_semantics") == "source_support_v1",
     )
     old = {item["route_revision_id"]: item for item in materials["existing_routes"]}
     for revision_id in result["retired_route_revision_ids"]:

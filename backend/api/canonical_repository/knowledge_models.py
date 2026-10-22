@@ -1229,6 +1229,8 @@ class ArgumentRouteAttestationRecord(StrictViewpointRecord):
     step_bindings: list[ArgumentRouteStepBinding] = Field(min_length=1)
     terminal_claim_link_id: str
     completeness: Literal["full", "partial"]
+    # Completeness describes attested steps, not proof of every claimed case.
+    support_scope_note: Optional[str] = None
     scripture_refs_derived: list[str] = Field(default_factory=list)
     review_artifact_sha256: str = Field(min_length=1)
     effective_state: Literal["active", "invalidated", "retired"] = "active"

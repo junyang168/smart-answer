@@ -8448,3 +8448,70 @@ def test_whole_cvp_route_correction_rereviews_the_actual_replacement(tmp_path):
     assert reviewer.payloads[1]["route_proposal_context"]["argument_route_candidates"][0][
         "route_label"
     ] == "词形差异论证"
+
+
+def test_evidence_inclusive_policy_is_default_and_does_not_reuse_v5_jobs():
+    from backend.pipeline.viewpoint_route_cvp_worker import DEFAULT_POLICY
+    from backend.pipeline.viewpoint_route_policy import (
+        load_route_policy, route_policy_fingerprint, route_policy_prompt_sha256s,
+    )
+    from backend.api.canonical_repository.viewpoint_route_cvp_queue import make_cvp_route_job
+
+    old = load_route_policy(DEFAULT_POLICY.with_name('wang_route_resolution_policy_v5.json'))
+    new = load_route_policy(DEFAULT_POLICY)
+    assert new['schema_version'] == 'wang_route_resolution_policy_v6'
+    assert new['review'] == old['review'] == {
+        'provider': 'claude', 'model': 'claude-opus-5-5', 'effort': 'high',
+    }
+    prompt_dir = DEFAULT_POLICY.parent.parent / 'prompts'
+    identities = [route_policy_fingerprint(p, prompt_sha256s=route_policy_prompt_sha256s(
+        p, prompt_dir=prompt_dir)) for p in (old, new)]
+    jobs = [make_cvp_route_job('CV-1', 'same-material', sha) for sha in identities]
+    assert jobs[0]['job_id'] != jobs[1]['job_id']
+    assert old['prompts'] != new['prompts']
+
+
+def test_direct_observation_route_preserves_reviewed_support_scope_without_bridge():
+    from backend.api.canonical_repository.knowledge_models import (
+        ArgumentRouteAttestationRecord, ArgumentRouteRevisionRecord,
+    )
+    claim = _claim('C1', ROCK_STATEMENT)
+    packet = build_registry_route_packet(
+        scope_label='matt16-13-18', approved_viewpoints=[_approved_viewpoint()],
+        claims=[claim], viewpoint_claim_links=[_registry_link(claim)], existing_routes=[],
+        complete_cvp=True,
+    )
+    note = '本篇以词形观察支持判断；没有展示对所有其他用例的调查。'
+    proposal = _routes_v2(source_route_attestations=[_attestation(reason=note)])
+    _check_routes(proposal, [claim])
+    args = dict(
+        proposal=proposal, passing_route_keys=['ROUTE-GREEK'],
+        passing_attestation_keys=['ATTEST-1'], route_packet=packet, existing_routes=[],
+        claims=[claim], proposal_artifact_sha256='proposal-sha',
+        review_artifact_sha256='review-sha', proposer_model_id='gpt',
+        reviewer_model_id='opus', decided_at='2026-10-22T12:00:00Z',
+    )
+    historical = compile_argument_route_package(**args)
+    current = compile_argument_route_package(**args, preserve_support_scope=True)
+    route = ArgumentRouteRevisionRecord.model_validate(current['argument_route_revisions'][0])
+    assert [n.role for n in route.ordered_inference_nodes] == ['observation', 'conclusion']
+    instance = ArgumentRouteAttestationRecord.model_validate(current['argument_route_attestations'][0])
+    assert instance.support_scope_note == note
+    assert 'support_scope_note' not in historical['argument_route_attestations'][0]
+    assert instance.argument_route_attestation_id != historical['argument_route_attestations'][0]['argument_route_attestation_id']
+    # A different approved scope note is a different instance, not an in-place
+    # rewrite hidden by the old binding-only identity.
+    args['proposal'] = _routes_v2(source_route_attestations=[_attestation(reason='仅此处词形观察。')])
+    changed = compile_argument_route_package(**args, preserve_support_scope=True)
+    assert changed['argument_route_attestations'][0]['argument_route_attestation_id'] != instance.argument_route_attestation_id
+
+
+@pytest.mark.parametrize('fault', ['unbound', 'other-source'])
+def test_short_evidence_route_still_requires_real_source_bindings(fault):
+    payload = _routes_v2().model_dump(mode='json')
+    if fault == 'unbound':
+        payload['source_route_attestations'][0]['step_bindings'][0]['source_fragment_ids'] = []
+    else:
+        payload['source_route_attestations'][0]['source_id'] = 'S2'
+    with pytest.raises((ValueError, BatchResolutionError)):
+        _check_routes(_routes_v2(**payload), [_claim('C1', ROCK_STATEMENT)])
