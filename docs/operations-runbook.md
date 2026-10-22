@@ -193,10 +193,15 @@ The service itself answers. Do not "fix" it by killing whatever holds port
 
 ### Web data directory
 
-The web mostly reads data through the backend, but two places read the disk
-directly: public fellowship documents (`/api/fellowship-documents/…`) and the
-Markdown documents on the fellowship page. Both find `fellowship/docs` through
-`DATA_BASE_DIR`.
+The web mostly reads data through the backend, but some places read the disk
+directly through `DATA_BASE_DIR`:
+
+- public fellowship documents (`/api/fellowship-documents/…`) and the Markdown
+  documents on the fellowship page, from `fellowship/docs`;
+- the church website text, from `content/` (#440): `our-faith.md` for
+  `/about/our-faith` and `mission-statement.json` for `/` and `/about`. These
+  pages read the file on every request, so replacing a file updates the site
+  without a deploy. A missing file is a 500 on the home page.
 
 - The backend gets `DATA_BASE_DIR` from its LaunchAgent plist. The web gets it
   from `/opt/homebrew/var/www/smart-answer/web/.env.local`, which every release
@@ -207,6 +212,9 @@ Markdown documents on the fellowship page. Both find `fellowship/docs` through
   without it made every fellowship document return 404 for two days.
 - After switching, the deploy downloads one real fellowship document through
   the new web process; if that fails, it rolls back.
+- It also refuses to deploy when either file under `content/` is missing.
+- In development the web's `.env.local` does not set it; `scripts/dev.sh`
+  passes the backend `.env` value to `next dev`.
 
 ### Google OAuth token
 
