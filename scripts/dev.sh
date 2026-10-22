@@ -209,6 +209,17 @@ do_start() {
   [[ ! -L "$WEB_DIR/node_modules" ]] \
     || fail "web/node_modules is a symlink, which Turbopack rejects. Run: cd \"$WEB_DIR\" && mv node_modules node_modules.link && cp -al \"\$(readlink node_modules.link)\" node_modules && rm node_modules.link"
 
+  # The home and About pages read their text from DATA_BASE_DIR/content (#440),
+  # and the development web/.env.local does not set it; production's does. Take
+  # it from the backend's .env, the same data directory, so a page does not 500.
+  local data_base_dir="${DATA_BASE_DIR:-}"
+  if [[ -z "$data_base_dir" && -f "$REPO_ROOT/.env" ]]; then
+    data_base_dir="$(sed -n 's/^[[:space:]]*DATA_BASE_DIR[[:space:]]*=[[:space:]]*//p' "$REPO_ROOT/.env" \
+      | tail -1 | sed "s/^[\"']//; s/[\"'][[:space:]]*$//; s/[[:space:]]*$//")"
+  fi
+  [[ -n "$data_base_dir" ]] \
+    || fail "DATA_BASE_DIR is not set in the environment or $REPO_ROOT/.env; the web reads site content from it"
+
   local port
   for port in "$API_PORT" "$WEB_PORT"; do
     if [[ -n "$(pid_on_port "$port")" ]]; then
@@ -244,6 +255,7 @@ do_start() {
     export FULL_ARTICLE_SERVICE_URL="$DEV_BACKEND_ORIGIN"
     export SC_API_SERVICE_URL="$DEV_BACKEND_ORIGIN"
     export PORT="$WEB_PORT"
+    export DATA_BASE_DIR="$data_base_dir"
     exec npm run dev
   ) > >(tee -a "$STATE_DIR/$WEB_PORT.log") 2>&1 &
   frontend_pid=$!

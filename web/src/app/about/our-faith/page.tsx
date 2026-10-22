@@ -1,8 +1,7 @@
 import type { Metadata } from 'next';
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
 import ReactMarkdown from 'react-markdown';
 import { Breadcrumb } from '@/app/components/common/Breadcrumb';
+import { readSiteContent } from '@/app/utils/siteContent';
 import styles from './our-faith.module.css';
 
 export const metadata: Metadata = {
@@ -10,11 +9,10 @@ export const metadata: Metadata = {
   description: '達拉斯聖道教會的信仰宣告：聖經、神、人、救贖、教會、洗禮和聖餐、宣教、家庭與末世。',
 };
 
+export const revalidate = 0;
+
 export default async function OurFaithPage() {
-  const markdown = await readFile(
-    path.join(process.cwd(), 'content', 'our-faith.md'),
-    'utf8',
-  );
+  const markdown = await readSiteContent('our-faith.md');
 
   return (
     <div className={styles.page} lang="zh-Hant">

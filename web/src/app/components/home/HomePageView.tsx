@@ -3,7 +3,6 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import missionStatement from '../../../../content/mission-statement.json';
 import Image from 'next/image';
 import { ArrowRight, ChevronLeft, ChevronRight, Search, BrainCircuit, Users, Church } from 'lucide-react';
 
@@ -47,7 +46,7 @@ async function fetchHomePageData() {
 }
 
 
-export const HomePageView = () => {
+export const HomePageView = ({ missionStatement }: { missionStatement: string }) => {
     const [fellowshipData, setFellowshipData] = useState<any>('');
     const [isLoading, setIsLoading] = useState(true);
     const [activeHeroIndex, setActiveHeroIndex] = useState(0);
@@ -214,7 +213,7 @@ export const HomePageView = () => {
                 <div className="container mx-auto px-6 text-center max-w-4xl">
                      <h2 className="text-3xl font-bold font-display text-gray-800">我們的使命</h2>
                      <p className="mt-4 text-xl text-gray-600 italic leading-relaxed">
-                        “{missionStatement.zhHant}”
+                        “{missionStatement}”
                      </p>
                 </div>
             </section>

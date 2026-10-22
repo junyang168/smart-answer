@@ -71,6 +71,9 @@ def deploy_fixture(tmp_path: Path) -> dict[str, object]:
     web_data = tmp_path / "web-data"
     (web_data / "fellowship" / "docs" / "2026-09-25").mkdir(parents=True)
     (web_data / "fellowship" / "docs" / "2026-09-25" / "study.pptx").write_bytes(b"deck")
+    (web_data / "content").mkdir()
+    (web_data / "content" / "our-faith.md").write_text("# 信仰宣告\n", encoding="utf-8")
+    (web_data / "content" / "mission-statement.json").write_text('{"zhHant": "使命"}', encoding="utf-8")
     (legacy / "web").mkdir()
     web_env = legacy / "web" / ".env.local"
     web_env.write_text(f"NEXTAUTH_URL=https://example.test\nDATA_BASE_DIR={web_data}\n", encoding="utf-8")
@@ -636,6 +639,16 @@ def test_deploy_fails_closed_when_web_data_dir_is_missing(deploy_fixture: dict[s
 
     assert result.returncode == 1
     assert "is not a directory: /nonexistent/web-data" in result.stderr
+
+
+def test_deploy_fails_closed_when_site_content_is_missing(deploy_fixture: dict[str, object]) -> None:
+    web_data = deploy_fixture["web_data"]
+    (web_data / "content" / "our-faith.md").unlink()
+
+    result = _run("bash", deploy_fixture["deploy"], "--dry-run", cwd=deploy_fixture["source"], env=deploy_fixture["env"], check=False)
+
+    assert result.returncode == 1
+    assert f"site content not found: {web_data}/content/our-faith.md" in result.stderr
 
 
 def test_unservable_fellowship_document_rolls_back(deploy_fixture: dict[str, object]) -> None:
