@@ -40,7 +40,7 @@ from backend.pipeline.viewpoint_route_policy import (
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_POLICY = Path(__file__).resolve().parent / "policies/wang_route_resolution_policy_v6.json"
+DEFAULT_POLICY = Path(__file__).resolve().parent / "policies/wang_route_resolution_policy_v7.json"
 
 
 def enqueue_current_cvp_routes(
@@ -330,7 +330,7 @@ def main() -> int:
             max_correction_rounds=int(policy["max_correction_rounds"]),
             apply=args.apply, ownership_guard=guard,
             evidence_semantics=("source_support_v1"
-                                if policy["schema_version"] == "wang_route_resolution_policy_v6"
+                                if policy["schema_version"] in {"wang_route_resolution_policy_v6", "wang_route_resolution_policy_v7"}
                                 else None),
         )
         guard()

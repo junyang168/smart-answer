@@ -8459,7 +8459,7 @@ def test_evidence_inclusive_policy_is_default_and_does_not_reuse_v5_jobs():
 
     old = load_route_policy(DEFAULT_POLICY.with_name('wang_route_resolution_policy_v5.json'))
     new = load_route_policy(DEFAULT_POLICY)
-    assert new['schema_version'] == 'wang_route_resolution_policy_v6'
+    assert new['schema_version'] == 'wang_route_resolution_policy_v7'
     assert new['review'] == old['review'] == {
         'provider': 'claude', 'model': 'claude-opus-5-5', 'effort': 'high',
     }
