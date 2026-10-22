@@ -2,7 +2,7 @@
 import { Breadcrumb } from '@/app/components/common/Breadcrumb';
 import Image from 'next/image';
 import Link from 'next/link';
-import missionStatement from '../../../content/mission-statement.json';
+import { readMissionStatement } from '@/app/utils/siteContent';
 import { Landmark, Users, ScrollText, ChevronRight } from 'lucide-react';
 
 // 我們可以把牧師和團隊的數據定義在這裡或從一個單獨的文件導入
@@ -14,7 +14,10 @@ const pastorInfo = {
 };
 
 
-export default function AboutPage() {
+export const revalidate = 0;
+
+export default async function AboutPage() {
+  const missionStatement = await readMissionStatement();
   const breadcrumbLinks = [
     { name: '首頁', href: '/' },
     { name: '關於我們' },

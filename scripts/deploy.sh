@@ -313,9 +313,8 @@ web_data_base_dir() {
     | tail -1 | sed "s/^[\"']//; s/[\"'][[:space:]]*$//; s/[[:space:]]*$//"
 }
 
-# The web reads fellowship documents straight from disk (the only web code
-# that does). Answering / is not enough: fetch one real document through the
-# new process, or roll back.
+# The web reads fellowship documents straight from disk. Answering / is not
+# enough: fetch one real document through the new process, or roll back.
 assert_fellowship_document() {
   local docs="$WEB_DATA_BASE_DIR/fellowship/docs" sample relative url
   sample="$(find "$docs"/ -mindepth 2 -maxdepth 2 -type f \( -name '*.pptx' -o -name '*.md' \) \
@@ -502,6 +501,13 @@ WEB_DATA_BASE_DIR="$(web_data_base_dir)" \
   || fail "DATA_BASE_DIR is not set in $WEB_ENV_FILE; the web cannot find fellowship documents without it"
 [[ -d "$WEB_DATA_BASE_DIR" ]] \
   || fail "DATA_BASE_DIR in $WEB_ENV_FILE is not a directory: $WEB_DATA_BASE_DIR"
+# The home and About pages read their text from here on every request (#440);
+# a missing file is a 500 on / that the health check would only find after the
+# switch.
+for content_file in our-faith.md mission-statement.json; do
+  [[ -f "$WEB_DATA_BASE_DIR/content/$content_file" ]] \
+    || fail "site content not found: $WEB_DATA_BASE_DIR/content/$content_file"
+done
 [[ "$SKIP_GOOGLE_TOKEN_CHECK" == true || -f "$GOOGLE_OAUTH_TOKEN_FILE" ]] \
   || fail "Google OAuth token not found: $GOOGLE_OAUTH_TOKEN_FILE (sign in with generate_user_token.py there, or --skip-google-token-check)"
 
