@@ -38,6 +38,8 @@ def prepare_cvp_route_materials(
     viewpoint_id: str,
     *,
     source_loader: Callable[[dict[str, Any]], Any] = load_context_source,
+    include_context: bool = False,
+    context_claim_ids: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Close active links, their evidence, and related physical source sections.
 
@@ -101,7 +103,11 @@ def prepare_cvp_route_materials(
              for _, row in sorted(link_rows.items())]
     if any(link.validated_against_viewpoint_revision_id != revision_id for link in links):
         raise ValueError("Route CVP has an active connection pinned to another revision")
-    claim_ids = {link.claim_id for link in links}
+    observation_claim_ids={b['claim_id'] for (collection,_),row in route_rows.items()
+        if collection=='viewpoint_observation_supports' for b in row['payload']['evidence_bindings']}
+    linked_claim_ids={link.claim_id for link in links}
+    context_claim_ids=tuple(sorted(set(context_claim_ids) | (observation_claim_ids-linked_claim_ids)))
+    claim_ids = linked_claim_ids | set(context_claim_ids)
     claim_rows = _read_exact(store, {("claims", claim_id) for claim_id in claim_ids})
     claims = {claim_id: ClaimRecord.model_validate(claim_rows["claims", claim_id]["payload"])
               for claim_id in claim_ids}
@@ -129,6 +135,7 @@ def prepare_cvp_route_materials(
 
     review_claims: list[ReviewClaim] = []
     unavailable_evidence = []
+    unusable_context_claims = []
     fragments_by_source: dict[str, dict[str, Any]] = {sid: {} for sid in source_ids}
     for claim_id in sorted(claim_ids):
         unavailable = frozenset(eid for eid in claims[claim_id].evidence_step_ids
@@ -146,7 +153,15 @@ def prepare_cvp_route_materials(
             ) else None,
             unavailable_evidence_ids=unavailable,
         )
+        if (claims[claim_id].review_status in {'rejected','human_hold','human_review_required','invalidated'}
+                or getattr(claims[claim_id], 'human_hold', False)):
+            findings.append('Claim has a content hold or rejection')
         if review is None or findings:
+            if claim_id in context_claim_ids and claim_id not in linked_claim_ids | observation_claim_ids:
+                unusable_context_claims.append({'claim_id':claim_id,
+                    'pinned_claim_revision':claims[claim_id].revision,
+                    'reason':'; '.join(findings), 'usable_for_binding':False})
+                continue
             raise ValueError(f"{claim_id}: Route evidence incomplete: {'; '.join(findings)}")
         review_claims.append(review)
         unavailable_evidence.extend({
@@ -163,6 +178,7 @@ def prepare_cvp_route_materials(
     section_packets = []
     physical_sources = []
     for source_id in sorted(source_ids):
+        if not fragments_by_source[source_id]:continue
         loaded = source_loader(sources[source_id])
         section_packets.append(_source_packet(
             source_id,
@@ -172,6 +188,18 @@ def prepare_cvp_route_materials(
         ))
         physical_sources.append({"source_id": source_id, "path": str(loaded[0]),
                                  "file_sha256": loaded[1]})
+
+    if include_context:
+        # Keep whole source sections as prose context, but structured sibling
+        # Claims come from the actually cited paragraphs. A broad heading can
+        # span most of a sermon; expanding every Claim there inflated this
+        # six-member CVP to 126 Claims without adding needed observations.
+        selected={sid:{str(f['paragraph_key']) for f in rows.values()}
+                  for sid,rows in fragments_by_source.items() if rows}
+        related=set(store.read_section_context_claim_ids(selected))-claim_ids
+        if related:
+            return prepare_cvp_route_materials(store, viewpoint_id, source_loader=source_loader,
+                context_claim_ids=tuple(sorted(related)))
 
     records = {**head_row, **revision_rows, **route_rows, **link_rows, **claim_rows,
                **evidence_rows, **fragment_rows, **source_rows, **citation_rows}
@@ -198,6 +226,14 @@ def prepare_cvp_route_materials(
     }
     if unavailable_evidence:
         body['unavailable_evidence'] = unavailable_evidence
+    if context_claim_ids:
+        body['context_claim_ids'] = sorted(context_claim_ids)
+    observations=[row['payload'] for (collection,_),row in sorted(route_rows.items())
+                  if collection=='viewpoint_observation_supports']
+    if observations:
+        body['existing_observation_supports'] = observations
+    if unusable_context_claims:
+        body['unusable_context_claims'] = unusable_context_claims
     return body | {"artifact_sha256": sha256_json(body)}
 
 
@@ -224,11 +260,11 @@ def verify_cvp_route_materials(store: Any, materials: dict[str, Any]) -> None:
         raise ValueError("Route CVP membership changed after material preparation")
     current_routes = store.read_cvp_route_records(materials["viewpoint_id"])
     route_keys = {key for key in current_routes if key[0] in {
-        "argument_routes", "argument_route_revisions", "argument_route_attestations"
+        "argument_routes", "argument_route_revisions", "argument_route_attestations", "viewpoint_observation_supports"
     }}
     pinned_route_keys = {(row["collection"], row["object_id"])
                          for row in materials["record_pins"] if row["collection"] in {
-                             "argument_routes", "argument_route_revisions", "argument_route_attestations"
+                             "argument_routes", "argument_route_revisions", "argument_route_attestations", "viewpoint_observation_supports"
                          }}
     if route_keys != pinned_route_keys:
         raise ValueError("Route baseline changed after material preparation")

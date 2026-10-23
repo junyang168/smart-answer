@@ -2185,6 +2185,8 @@ _SET_FIELDS = (
 
 #: Object lists whose order carries no meaning, and the key they sort by.
 _ORDERED_LISTS = {
+    "observation_supports": lambda item: str(item.get("local_observation_key", "")),
+    "sources_without_observation": lambda item: (str(item.get("viewpoint_revision_id", "")), str(item.get("source_id", ""))),
     "claim_decisions": lambda item: str(item.get("claim_id", "")),
     "new_viewpoint_candidates": lambda item: str(item.get("local_key", "")),
     "spans": lambda item: (int(item.get("start_char", 0)), int(item.get("end_char", 0))),
@@ -3458,6 +3460,7 @@ def validate_route_proposal(
     allow_unresolved_member_sources: bool = False,
     complete_cvp: bool = False,
     claim_evidence_for_intermediate_steps: bool = False,
+    existing_observation_supports: Sequence[dict[str, Any]] = (),
 ) -> dict[str, Any]:
     """Check routes against the scope's exact approved viewpoint set."""
 
@@ -3581,6 +3584,25 @@ def validate_route_proposal(
                 f"{item.conclusion_viewpoint_revision_id}: unattested_members names "
                 f"{item.source_id}, which does attest a route for it"
             )
+    if hasattr(routes, "observation_supports"):
+        from .viewpoint_observation_support import validate_observation_proposal, compile_observation_package
+        observation_findings = validate_observation_proposal(routes, claims=claims, components=component_bindings,
+            approved_revisions=set(approved), existing_supports=existing_observation_supports,
+            viewpoint_ids=approved_viewpoint_ids)
+        findings.extend(observation_findings)
+        if not observation_findings:
+            observation_packet = {
+                "claims": [c.model_dump(mode="json") for c in claims],
+                "claim_components": [c.model_dump(mode="json") for c in component_bindings],
+                "approved_viewpoints": [{"viewpoint_id": (approved_viewpoint_ids or {}).get(r, r),
+                                         "viewpoint_revision_id": r} for r in approved],
+                "source_revisions": {e.source_id: e.source_sha256 for c in claims for e in c.evidence},
+                "existing_observation_supports": list(existing_observation_supports),
+            }
+            try:
+                compile_observation_package(routes, observation_packet, review_sha256="validation-only")
+            except ValueError as exc:
+                findings.append(str(exc))
     if findings:
         raise BatchResolutionError(findings)
 
@@ -3663,6 +3685,8 @@ def validate_route_review(
     } | {
         ("route_retirement", key) for key in getattr(proposal, "retired_route_revision_ids", [])
     }
+    from .viewpoint_observation_support import observation_targets
+    full_expected |= observation_targets(proposal)
     expected = expected_targets if expected_targets is not None else full_expected
     if not expected <= full_expected:
         findings.append("route review batch contains target outside the proposal")
@@ -3730,7 +3754,7 @@ def validate_route_review(
 def _route_change_payloads(
     proposal: ArgumentRouteProposalResponse | ArgumentRouteProposalV2Response,
 ) -> dict[tuple[str, str], dict[str, Any]]:
-    return {
+    result = {
         **{
             ("route", item.local_route_key): item.model_dump(mode="json")
             for item in proposal.argument_route_candidates
@@ -3755,6 +3779,14 @@ def _route_change_payloads(
         **{("route_retirement", key): {"route_revision_id": key}
            for key in getattr(proposal, "retired_route_revision_ids", [])},
     }
+    if hasattr(proposal, "observation_supports"):
+        result.update({("observation", o.local_observation_key): o.model_dump(mode="json")
+                       for o in proposal.observation_supports})
+        result.update({("observation_source", o.key()): o.model_dump(mode="json")
+                       for o in proposal.sources_without_observation})
+        result.update({("observation_retirement", i): {"observation_support_id": i}
+                       for i in proposal.retired_observation_support_ids})
+    return result
 
 
 def validate_route_reconsideration(

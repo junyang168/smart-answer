@@ -889,7 +889,7 @@ def validate_foundation_change_set(
         "viewpoint_automated_promotion_decisions",
         "argument_routes",
         "argument_route_revisions",
-        "argument_route_attestations",
+        "argument_route_attestations", "viewpoint_observation_supports",
         "viewpoint_relations",
         "viewpoint_structures",
         "viewpoint_structure_revisions",
@@ -912,7 +912,7 @@ def validate_foundation_change_set(
         "viewpoint_atomic_quality_reports",
         "viewpoint_automated_promotion_decisions",
         "argument_route_revisions",
-        "argument_route_attestations",
+        "argument_route_attestations", "viewpoint_observation_supports",
         "viewpoint_identity_candidates",
         "viewpoint_identity_decisions",
         "viewpoint_resolution_ledgers",
@@ -1713,11 +1713,12 @@ def validate_foundation_change_set(
             "claim_relations", "canonical_viewpoints", "viewpoint_revisions",
             "viewpoint_claim_links", "viewpoint_proposition_units",
             "viewpoint_proposition_unit_links", "argument_routes", "argument_route_revisions",
-            "argument_route_attestations", "viewpoint_relations",
+            "argument_route_attestations", "viewpoint_observation_supports", "viewpoint_relations",
         )
     }
     findings.extend(validate_runtime_authoring_graph(runtime_collections,
-        retained_route_revision_ids=scope_retained_route_revision_ids(normalized,existing)))
+        retained_route_revision_ids=scope_retained_route_revision_ids(normalized,existing),
+        current_observation_ids=set(normalized.get('viewpoint_observation_supports', {}))))
 
     if findings:
         raise ViewpointFoundationValidationError(findings)

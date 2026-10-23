@@ -60,7 +60,7 @@ VIEWPOINT_VALIDATION_COLLECTIONS = {
     "viewpoint_proposition_unit_links",
     "argument_routes",
     "argument_route_revisions",
-    "argument_route_attestations",
+    "argument_route_attestations", "viewpoint_observation_supports",
     "viewpoint_relations",
     "viewpoint_identity_candidates",
     "viewpoint_identity_decisions",
@@ -108,6 +108,7 @@ SEMANTIC_EXTRACTION_REFERENCE_FIELDS = {
     "argument_route_attestations": {
         "source_id", "claim_ids", "evidence_step_ids", "source_fragment_ids",
     },
+    "viewpoint_observation_supports": {"source_id", "claim_id", "evidence_step_id", "source_fragment_id"},
     "viewpoint_relations": {
         "supporting_claim_relation_ids", "supporting_claim_ids",
         "correction_evidence_claim_ids",
@@ -204,6 +205,7 @@ SOURCE_KEYS = {
     "argument_routes": "argument_routes",
     "argument_route_revisions": "argument_route_revisions",
     "argument_route_attestations": "argument_route_attestations",
+    "viewpoint_observation_supports": "viewpoint_observation_supports",
     "viewpoint_relations": "viewpoint_relations",
     "viewpoint_identity_candidates": "viewpoint_identity_candidates",
     "viewpoint_identity_decisions": "viewpoint_identity_decisions",
@@ -5848,8 +5850,14 @@ class PostgresKnowledgeStore:
                 attestations=cursor.fetchall()
             else:
                 attestations=[]
+            cursor.execute("""SELECT collection,object_id,revision,content_sha256,payload
+                FROM wang_knowledge.objects WHERE collection='viewpoint_observation_supports'
+                  AND retired_at IS NULL AND payload @> %s::jsonb
+                  AND payload->>'effective_state'='active' ORDER BY object_id""",
+                (canonical_json({'viewpoint_id':viewpoint_id}),))
+            observations=cursor.fetchall()
         result={}
-        for col,oid,revision,sha,payload in [*heads,*attestations]:
+        for col,oid,revision,sha,payload in [*heads,*attestations,*observations]:
             if record_content_sha(payload)!=sha:
                 raise ChangeSetConflict('current CVP route record SHA drift')
             result[col,oid]={'revision':revision,'content_sha256':sha,
@@ -5862,6 +5870,32 @@ class PostgresKnowledgeStore:
             raise ChangeSetConflict('current CVP route revision is missing')
         result.update(revisions)
         return result
+
+    def read_section_context_claim_ids(self, source_paragraphs):
+        """One-hop source-local Claims owning evidence in the cited paragraphs."""
+        claim_ids=set()
+        with self.connect() as conn, conn.cursor() as cursor:
+            cursor.execute('SET LOCAL statement_timeout=5000')
+            for source_id,paragraphs in sorted(source_paragraphs.items()):
+                cursor.execute("""SELECT object_id FROM wang_knowledge.objects
+                    WHERE collection='source_fragments' AND retired_at IS NULL
+                      AND payload @> %s::jsonb AND payload->>'paragraph_key'=ANY(%s)""",
+                    (canonical_json({'source_id':source_id}), sorted(paragraphs)))
+                fragments=[r[0] for r in cursor.fetchall()]
+                for offset in range(0,len(fragments),8):
+                    needles=[canonical_json({key:value}) for fid in fragments[offset:offset+8]
+                             for key,value in [('source_fragment_id',fid),('source_fragment_ids',[fid])]]
+                    cursor.execute("""SELECT object_id FROM wang_knowledge.objects
+                        WHERE collection='evidence_steps' AND retired_at IS NULL
+                          AND payload @> ANY(%s::jsonb[])""",(needles,))
+                    evidence=[r[0] for r in cursor.fetchall()]
+                    for start in range(0,len(evidence),8):
+                        cursor.execute("""SELECT object_id FROM wang_knowledge.objects
+                            WHERE collection='claims' AND retired_at IS NULL
+                              AND payload @> ANY(%s::jsonb[])""",
+                            ([canonical_json({'evidence_step_ids':[eid]}) for eid in evidence[start:start+8]],))
+                        claim_ids.update(r[0] for r in cursor.fetchall())
+        return sorted(claim_ids)
 
     def read_cvp_relations(self, *, viewpoint_ids=()):
         """Current relation edges incident to the explicit candidate/maintenance heads."""
@@ -7794,6 +7828,13 @@ class PostgresKnowledgeStore:
                         observed_attestations = {row[0] for row in cursor.fetchall()}
                     if observed_attestations != set(expected_route_scope_sets['attestation_ids']):
                         raise ChangeSetConflict('whole-CVP Route attestation set drift')
+                    if 'observation_ids' in expected_route_scope_sets:
+                        cursor.execute("""SELECT object_id FROM wang_knowledge.objects
+                            WHERE collection='viewpoint_observation_supports' AND retired_at IS NULL
+                              AND payload @> %s::jsonb AND payload->>'effective_state'='active'""",
+                            (canonical_json({'viewpoint_id':viewpoint_id}),))
+                        if {r[0] for r in cursor.fetchall()} != set(expected_route_scope_sets['observation_ids']):
+                            raise ChangeSetConflict('whole-CVP observation baseline set drift')
                 sql_group = None
                 if transaction_context is not None:
                     sql_group = self._lock_reviewed_cvp_group(cursor, plan, transaction_context)

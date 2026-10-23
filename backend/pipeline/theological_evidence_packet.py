@@ -84,6 +84,7 @@ def _record_id(collection: str, record: Mapping[str, Any]) -> str:
         "argument_routes": "argument_route_id",
         "argument_route_revisions": "argument_route_revision_id",
         "argument_route_attestations": "argument_route_attestation_id",
+        "viewpoint_observation_supports": "observation_support_id",
         "viewpoint_relations": "viewpoint_relation_id",
         "claims": "claim_id",
         "evidence_steps": "evidence_step_id",
@@ -620,6 +621,7 @@ def compile_theological_evidence_packet(
     focal_viewpoints: list[dict[str, Any]] = []
     selected_links: list[dict[str, Any]] = []
     selected_routes: list[dict[str, Any]] = []
+    selected_observations: list[dict[str, Any]] = []
     selected_claim_ids: set[str] = set()
     selected_evidence_ids: set[str] = set()
     selected_fragment_ids: set[str] = set()
@@ -696,6 +698,19 @@ def compile_theological_evidence_packet(
             )
 
         selected_links.extend(links)
+        observations=[o for o in indexes.get('viewpoint_observation_supports',{}).values()
+                      if o['viewpoint_id']==viewpoint['viewpoint_id'] and o.get('effective_state')=='active']
+        if observations:
+            from backend.api.canonical_repository.viewpoint_observation_support import validate_observation_graph
+            _require(not validate_observation_graph({**indexes,'viewpoint_observation_supports':{
+                o['observation_support_id']:o for o in observations}}), 'stale or invalid observation support')
+            selected_observations.extend(observations)
+            for o in observations:
+                selected_source_ids.add(o['source_id'])
+                for b in o['evidence_bindings']:
+                    selected_claim_ids.add(b['claim_id'])
+                    selected_evidence_ids.add(b['evidence_step_id'])
+                    selected_fragment_ids.add(b['source_fragment_id'])
         selected_routes.extend(route_bundles)
         selected_claim_ids.update(member_claim_ids)
         for bundle in route_bundles:
@@ -808,6 +823,7 @@ def compile_theological_evidence_packet(
             ]
         )
     dependency_rows.extend(("viewpoint_relations", item) for item in relations)
+    dependency_rows.extend(('viewpoint_observation_supports',o) for o in selected_observations)
     dependency_rows.extend(("claims", item) for item in claims)
     dependency_rows.extend(("evidence_steps", item) for item in evidence)
     dependency_rows.extend(("source_fragments", item) for item in fragments)
@@ -850,6 +866,12 @@ def compile_theological_evidence_packet(
         "dependency_manifest": dependencies,
         "dependency_manifest_sha256": sha256_json(dependencies),
     }
+    if selected_observations:
+        packet['observation_supports']=sorted(selected_observations,key=lambda o:o['observation_support_id'])
+        for finding in findings:
+            if finding.get('code')=='viewpoint_has_no_full_argument_route':
+                finding['message'] = ('No source fully attests an inference route. Reviewed textual observations, '
+                    'where supplied, remain usable within their recorded support scope; do not invent a missing inference.')
     packet["evidence_packet_sha256"] = sha256_json(packet)
     return packet
 

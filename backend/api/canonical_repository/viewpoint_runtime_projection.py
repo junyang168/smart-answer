@@ -118,6 +118,7 @@ class ViewpointKnowledgeProjection(ImmutableArtifact):
     blocker_codes: list[str]
     viewpoints: list[dict[str, Any]]
     argument_routes: list[dict[str, Any]]
+    observation_supports: list[dict[str, Any]] | None = Field(default=None, exclude_if=lambda v: v is None)
     expanded_claims: list[dict[str, Any]]
     expanded_evidence: list[dict[str, Any]]
     expanded_fragments: list[dict[str, Any]]
@@ -140,7 +141,8 @@ class ViewpointKnowledgeProjection(ImmutableArtifact):
 
 
 def validate_runtime_authoring_graph(
-    collections: Mapping[str, Mapping[str, Mapping[str, Any]]], *, retained_route_revision_ids=()
+    collections: Mapping[str, Mapping[str, Mapping[str, Any]]], *, retained_route_revision_ids=(),
+    current_observation_ids=None,
 ) -> list[str]:
     """Return cross-collection findings for route and relation authoring records."""
     routes = collections.get("argument_routes", {})
@@ -298,6 +300,8 @@ def validate_runtime_authoring_graph(
             for claim_id in relation.get("temporal_assertion", {}).get("correction_evidence_claim_ids") or []:
                 if str(claim_id) not in claims:
                     findings.append(f"{relation_id}: missing correction evidence Claim {claim_id}")
+    from .viewpoint_observation_support import validate_observation_graph
+    findings.extend(validate_observation_graph(collections, current_ids=current_observation_ids))
     return findings
 
 
@@ -327,6 +331,7 @@ class ViewpointRuntimeCompiler:
             "viewpoint_automated_promotion_decisions": "automated_promotion_decision_id",
             "argument_routes": "argument_route_id", "argument_route_revisions": "argument_route_revision_id",
             "argument_route_attestations": "argument_route_attestation_id",
+            "viewpoint_observation_supports": "observation_support_id",
             "viewpoint_relations": "viewpoint_relation_id", "viewpoint_coverage_snapshots": "coverage_snapshot_id",
             "viewpoint_structures": "structure_id",
             "viewpoint_structure_revisions": "structure_revision_id",
@@ -473,6 +478,15 @@ class ViewpointRuntimeCompiler:
             results.append(ViewpointRegistrySnapshot.model_validate(base))
         return results
 
+    def _selected_observations(self, viewpoint_ids):
+        from .viewpoint_observation_support import observation_current_findings, COLLECTION
+        selected=sorted([o for o in self.records.get(COLLECTION,())
+                         if o.viewpoint_id in set(viewpoint_ids) and o.effective_state=='active'],
+                        key=lambda o:o.observation_support_id)
+        findings=[f for o in selected for f in observation_current_findings(o,self.index)]
+        if findings:raise ViewpointRuntimeProjectionError(findings)
+        return selected
+
     def compile_projection(
         self, *, consumer_kind: Literal["registry_review", "composition_plan", "qa_answer", "search_card"],
         coverage_snapshot_id: str, viewpoint_ids: Sequence[str] | None = None,
@@ -521,6 +535,9 @@ class ViewpointRuntimeCompiler:
                 self.index["viewpoint_claim_links"][ident].claim_id
                 for ident in field_related_ids
             } - present_claims))
+        observations=self._selected_observations(selected_ids)
+        extra_claims={b.claim_id for o in observations for b in o.evidence_bindings}-{c.claim_id for c in claims}
+        claims.extend(self.index['claims'][ident] for ident in sorted(extra_claims))
         step_ids = sorted({value for item in claims for value in item.evidence_step_ids})
         steps = [self.index["evidence_steps"][value] for value in step_ids if value in self.index["evidence_steps"]]
         citation_ids = sorted({value for item in steps for value in item.citation_ids})
@@ -589,6 +606,7 @@ class ViewpointRuntimeCompiler:
             *[("source_documents", item.source_id, item) for item in sources],
         ]
         if ledger: dependency_values.append(("viewpoint_resolution_ledgers", ledger.resolution_ledger_id, ledger))
+        dependency_values.extend(('viewpoint_observation_supports',o.observation_support_id,o) for o in observations)
         if quality: dependency_values.append(("viewpoint_quality_reports", quality.quality_report_id, quality))
         manifest = sorted([
             ProjectionDependency(collection=collection, record_id=record_id,
@@ -630,6 +648,7 @@ class ViewpointRuntimeCompiler:
             "dependency_manifest": [item.model_dump(mode="json") for item in manifest],
             "dependency_manifest_sha256": manifest_sha,
         }
+        if observations:base['observation_supports']=[_dump(o) for o in observations]
         base["projection_sha256"] = sha256_json(base)
         return ViewpointKnowledgeProjection.model_validate(base)
 
@@ -711,14 +730,16 @@ class ViewpointRuntimeCompiler:
         )
         missing_unit_ids = sorted(set(selected_unit_ids) - set(units))
         selected_units = [units[item] for item in selected_unit_ids if item in units]
-        claim_ids = sorted({item.parent_claim_id for item in selected_units})
+        observations=self._selected_observations(selected_ids)
+        claim_ids = sorted({item.parent_claim_id for item in selected_units}
+                           |{b.claim_id for o in observations for b in o.evidence_bindings})
         claims = [claims_index[item] for item in claim_ids if item in claims_index]
         binding_pairs = sorted(
             {
                 (binding.evidence_step_id, binding.source_fragment_id)
                 for unit in selected_units
                 for binding in unit.evidence_bindings
-            }
+            } | {(b.evidence_step_id,b.source_fragment_id) for o in observations for b in o.evidence_bindings}
         )
         steps = [
             evidence_index[evidence_id]
@@ -805,6 +826,7 @@ class ViewpointRuntimeCompiler:
             *[("source_documents", item.source_id, item) for item in sources],
             *[("citations", _id(item, "citation_id"), item) for item in citations],
         ]
+        dependency_values.extend(('viewpoint_observation_supports',o.observation_support_id,o) for o in observations)
         if ledger:
             dependency_values.append(
                 (
@@ -873,6 +895,7 @@ class ViewpointRuntimeCompiler:
             "dependency_manifest": manifest_payload,
             "dependency_manifest_sha256": sha256_json(manifest_payload),
         }
+        if observations:base['observation_supports']=[_dump(o) for o in observations]
         base["projection_sha256"] = sha256_json(base)
         return ViewpointKnowledgeProjection.model_validate(base)
 

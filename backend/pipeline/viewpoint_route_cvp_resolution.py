@@ -118,6 +118,13 @@ def compile_cvp_route_package(
     retiring = sorted(("argument_route_attestations", item["argument_route_attestation_id"])
                       for item in materials["existing_attestations"]
                       if item["argument_route_attestation_id"] not in keeping)
+    if hasattr(proposal, 'observation_supports'):
+        from backend.api.canonical_repository.viewpoint_observation_support import compile_observation_package, COLLECTION
+        observations, withdrawn, unchanged = compile_observation_package(
+            proposal, route_packet, review_sha256=result['review_sha256'])
+        package[COLLECTION] = observations
+        package['unchanged_observation_support_ids'] = unchanged
+        retiring.extend(withdrawn)
     return package, retiring
 
 
@@ -148,6 +155,16 @@ def run_cvp_route_scope(
     ):
         raise ValueError("whole-CVP route review requires complete CVP material")
     scope_label = str(route_packet["scope_label"])
+    from backend.api.canonical_repository.viewpoint_observation_support import (
+        CONTRACT, ArgumentRouteProposalV3Response, ArgumentRouteReviewV3Response,
+        ArgumentRouteReconsiderationV3Response,
+    )
+    has_observations = route_packet.get('observation_support_contract') == CONTRACT
+    if route_packet.get('observation_support_contract') not in (None, CONTRACT):
+        raise ValueError('unknown observation support contract')
+    proposal_model = ArgumentRouteProposalV3Response if has_observations else ArgumentRouteProposalV2Response
+    review_model = ArgumentRouteReviewV3Response if has_observations else ArgumentRouteReviewV2Response
+    correction_model = ArgumentRouteReconsiderationV3Response if has_observations else ArgumentRouteReconsiderationV2Response
     claims = [ReviewClaim.model_validate(item) for item in route_packet["claims"]]
     bindings = [RouteComponentBinding.model_validate(item)
                 for item in route_packet["claim_components"]]
@@ -169,6 +186,7 @@ def run_cvp_route_scope(
         allow_unresolved_member_sources=True,
         complete_cvp=True,
         claim_evidence_for_intermediate_steps=contract == CLAIM_EVIDENCE_BINDING_CONTRACT,
+        existing_observation_supports=route_packet.get('existing_observation_supports', []),
     )
     write_immutable(output_dir / "route-packet.json", route_packet)
     last_reconsideration = None
@@ -222,7 +240,7 @@ def run_cvp_route_scope(
     while True:
         try:
             bound_raw, source_bindings = bind_attestation_source_ids(raw, route_packet)
-            proposal = ArgumentRouteProposalV2Response.model_validate(
+            proposal = proposal_model.model_validate(
                 canonicalize_proposal(bound_raw)[0]
             )
             validate_route_proposal(routes=proposal, **validation_args)
@@ -299,7 +317,7 @@ def run_cvp_route_scope(
             reviewer, review_packet,
             output_dir / f"raw-route-review-{round_number:03d}.json",
         )
-        review = ArgumentRouteReviewV2Response.model_validate(
+        review = review_model.model_validate(
             canonicalize_review(raw_review)[0]
         )
         review_validation = validate_route_review(
@@ -371,7 +389,7 @@ def run_cvp_route_scope(
             reconsiderer, reconsider_packet,
             output_dir / f"raw-route-reconsideration-{round_number:03d}.json",
         )
-        reconsideration = ArgumentRouteReconsiderationV2Response.model_validate(
+        reconsideration = correction_model.model_validate(
             canonicalize_proposal(raw_reconsideration)[0]
         )
         reconsideration_validation = validate_route_reconsideration(
@@ -393,7 +411,7 @@ def run_cvp_route_scope(
             last_reconsideration, route_packet
         )
         if source_bindings:
-            bound = ArgumentRouteReconsiderationV2Response.model_validate(bound_reconsideration)
+            bound = correction_model.model_validate(bound_reconsideration)
             write_immutable(output_dir / f"route-reconsideration-{round_number:03d}-bound.json", {
                 "raw_response_sha256": sha256_json(raw_reconsideration),
                 "source_bindings": source_bindings,

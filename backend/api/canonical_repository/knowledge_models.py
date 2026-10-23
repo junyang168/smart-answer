@@ -1251,6 +1251,39 @@ class ArgumentRouteAttestationRecord(StrictViewpointRecord):
         return self
 
 
+class ViewpointObservationEvidenceBinding(ViewpointClaimEvidenceBinding):
+    claim_id: str
+    pinned_claim_revision: int = Field(ge=1)
+    claim_revision_sha256: str = Field(min_length=1)
+
+
+class ViewpointObservationSupportRecord(StrictViewpointRecord):
+    """One source's reviewed textual observation, independent of inference routes."""
+
+    observation_support_id: str
+    schema_version: Literal["wang_viewpoint_observation_support_v1"] = "wang_viewpoint_observation_support_v1"
+    viewpoint_id: str
+    validated_against_viewpoint_revision_id: str
+    source_id: str
+    source_revision_sha256: str = Field(min_length=1)
+    observation_summary: str = Field(min_length=1)
+    supports: str = Field(min_length=1)
+    support_scope_note: str = Field(min_length=1)
+    evidence_bindings: list[ViewpointObservationEvidenceBinding] = Field(min_length=1)
+    review_artifact_sha256: str = Field(min_length=1)
+    effective_state: Literal["active", "invalidated", "retired"] = "active"
+    representation_kind: Literal["editorial_summary_of_professor_observation"] = "editorial_summary_of_professor_observation"
+
+    @model_validator(mode="after")
+    def validate_bindings(self) -> "ViewpointObservationSupportRecord":
+        keys = [(b.claim_id, b.evidence_step_id, b.source_fragment_id) for b in self.evidence_bindings]
+        if keys != sorted(set(keys)):
+            raise ValueError("observation evidence bindings must be sorted and unique")
+        if self.effective_state == "active" and self.review_status not in {"system_approved", "human_approved", "approved"}:
+            raise ValueError("active observation support requires approved review")
+        return self
+
+
 class ViewpointTemporalAssertion(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1847,6 +1880,7 @@ KNOWLEDGE_COLLECTIONS: dict[str, tuple[type[EvolvingKnowledgeRecord], str]] = {
     "argument_routes": (ArgumentRouteRecord, "argument_route_id"),
     "argument_route_revisions": (ArgumentRouteRevisionRecord, "argument_route_revision_id"),
     "argument_route_attestations": (ArgumentRouteAttestationRecord, "argument_route_attestation_id"),
+    "viewpoint_observation_supports": (ViewpointObservationSupportRecord, "observation_support_id"),
     "viewpoint_relations": (ViewpointRelationRecord, "viewpoint_relation_id"),
     "viewpoint_identity_candidates": (
         ViewpointIdentityCandidateRecord,

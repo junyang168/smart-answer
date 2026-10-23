@@ -11,9 +11,9 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     ROUTE_VALIDATION_VERSION,
 )
 
-ROUTE_POLICY_VERSION = "wang_route_resolution_policy_v5"
+ROUTE_POLICY_VERSION = "wang_route_resolution_policy_v8"
 WHOLE_CVP_ROUTE_POLICY_VERSIONS = frozenset({
-    ROUTE_POLICY_VERSION, "wang_route_resolution_policy_v6", "wang_route_resolution_policy_v7",
+    ROUTE_POLICY_VERSION, "wang_route_resolution_policy_v5", "wang_route_resolution_policy_v6", "wang_route_resolution_policy_v7",
 })
 SUPPORTED_ROUTE_POLICY_VERSIONS = frozenset(
     {"wang_route_resolution_policy_v1", "wang_route_resolution_policy_v2", "wang_route_resolution_policy_v3", "wang_route_resolution_policy_v4", *WHOLE_CVP_ROUTE_POLICY_VERSIONS}

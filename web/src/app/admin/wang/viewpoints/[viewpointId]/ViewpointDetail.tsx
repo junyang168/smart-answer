@@ -105,8 +105,24 @@ function SourceLink({ locator }: { locator: { source_admin_url: string | null; s
 }
 
 function ArgumentRoutes({ detail }: { detail: Detail }) {
-  if (!detail.routes.length) return <Empty text="当前 Registry 没有已审核的 source-local ArgumentRoute；不会把平铺经文伪装成完整路线。" />;
-  return <section className="space-y-5">{detail.routes.map((route) => {
+  return <section className="space-y-5">
+    {!!detail.observation_supports?.length && <div className="space-y-4">
+      <h2 className="font-black text-slate-950">圣经观察与支持依据</h2>
+      {detail.observation_supports.map(({ observation_support: observation, bindings, current_registry_ready: current }) => <article key={observation.observation_support_id} className="rounded-2xl border border-emerald-200 bg-white p-5">
+        <h3 className="font-bold text-slate-950">{observation.observation_summary}</h3>
+        {!current && <p className="mt-2 text-sm font-bold text-amber-700">关联材料已更新，此观察待重新审核。</p>}
+        <p className="mt-2 text-sm text-slate-700">{observation.supports}</p>
+        <p className="mt-2 text-sm text-slate-500">{observation.support_scope_note}</p>
+        {bindings.map(({ binding, source_fragment: fragment, source, locator }) => <div key={`${binding.claim_id}:${binding.source_fragment_id}`} className="mt-3 border-t border-slate-100 pt-3 text-sm">
+          <p className="text-xs text-slate-500">{source?.title ?? observation.source_id}</p>
+          {fragment && <blockquote className="my-2 border-l-2 border-emerald-300 pl-3 text-slate-700">{fragment.verbatim_excerpt}</blockquote>}
+          <SourceLink locator={locator} />
+        </div>)}
+      </article>)}
+    </div>}
+    <h2 className="font-black text-slate-950">推理路线</h2>
+    {!detail.routes.length && <Empty text="当前没有已记录的推理路线；已审核的圣经观察仍单独保留。" />}
+    {detail.routes.map((route) => {
     const nodes = route.revision?.ordered_inference_nodes ?? [];
     return <article key={route.route_id} className="overflow-hidden rounded-2xl border border-indigo-200 bg-white">
       <header className="border-b border-indigo-100 bg-indigo-50 p-5">

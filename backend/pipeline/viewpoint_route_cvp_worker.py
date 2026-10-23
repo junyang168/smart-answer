@@ -40,8 +40,8 @@ from backend.pipeline.viewpoint_route_policy import (
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_POLICY = Path(__file__).resolve().parent / "policies/wang_route_resolution_policy_v5.json"
-ROUTE_COLLECTIONS = {"argument_routes", "argument_route_revisions", "argument_route_attestations"}
+DEFAULT_POLICY = Path(__file__).resolve().parent / "policies/wang_route_resolution_policy_v8.json"
+ROUTE_COLLECTIONS = {"argument_routes", "argument_route_revisions", "argument_route_attestations", "viewpoint_observation_supports"}
 
 
 def verify_route_readback(store, package, retiring):
@@ -67,11 +67,13 @@ def authenticate_saved_route_review(output_dir, round_number, final, policy_path
     policy = load_route_policy(policy_path)
     model = build_route_reviewer(str(policy['review']['model']), str(policy['review']['effort']),
         provider=str(policy['review']['provider']), prompt_file=str(policy['prompts']['review']),
-        timeout_seconds=float(policy['call_timeout_seconds']), whole_cvp=True)
+        timeout_seconds=float(policy['call_timeout_seconds']), whole_cvp=True, observations=policy["schema_version"] == "wang_route_resolution_policy_v8")
     model.max_request_bytes = int(policy['max_request_bytes'])
     packet = json.loads((output_dir / f'route-review-packet-{round_number:03d}.json').read_text())
     raw = read_saved_model_response(model, packet, output_dir / f'raw-route-review-{round_number:03d}.json')
-    review = ArgumentRouteReviewV2Response.model_validate(canonicalize_review(raw)[0]).model_dump(mode='json')
+    from backend.api.canonical_repository.viewpoint_observation_support import ArgumentRouteReviewV3Response
+    review_model = ArgumentRouteReviewV3Response if policy['schema_version'] == 'wang_route_resolution_policy_v8' else ArgumentRouteReviewV2Response
+    review = review_model.model_validate(canonicalize_review(raw)[0]).model_dump(mode='json')
     if review != final['review']:
         raise ValueError('committed Route recovery differs from its actual provider review')
 
@@ -129,14 +131,18 @@ def resume_applied_cvp_route(store, viewpoint_id, output_dir, *, material_sha256
     verify_route_readback(store, package, retiring)
     expected_routes = {r['argument_route_id'] for r in material['existing_routes']}
     expected_attestations = {r['argument_route_attestation_id'] for r in material['existing_attestations']}
+    expected_observations = {r['observation_support_id'] for r in material.get('existing_observation_supports', [])}
     for collection, ident in retiring:
         if collection == 'argument_routes':expected_routes.discard(ident)
         if collection == 'argument_route_attestations':expected_attestations.discard(ident)
+        if collection == 'viewpoint_observation_supports':expected_observations.discard(ident)
     expected_routes.update(r['argument_route_id'] for r in package.get('argument_routes',[]))
     expected_attestations.update(r['argument_route_attestation_id'] for r in package.get('argument_route_attestations',[]))
+    expected_observations.update(r['observation_support_id'] for r in package.get('viewpoint_observation_supports', []))
     current = store.read_cvp_route_records(viewpoint_id)
     if ({oid for col,oid in current if col == 'argument_routes'} != expected_routes
-            or {oid for col,oid in current if col == 'argument_route_attestations'} != expected_attestations):
+            or {oid for col,oid in current if col == 'argument_route_attestations'} != expected_attestations
+            or {oid for col,oid in current if col == 'viewpoint_observation_supports'} != expected_observations):
         raise ValueError('committed Route recovery current route population changed')
     report = {'schema_version':'wang_cvp_route_worker_result_v2', 'viewpoint_id':viewpoint_id,
         'material_sha256':material['artifact_sha256'], 'route_packet_sha256':packet['packet_sha256'],
@@ -154,8 +160,8 @@ def enqueue_current_cvp_routes(
     """Idempotently queue current route material after a CVP commit/readback."""
 
     policy = load_route_policy(policy_path)
-    if policy["schema_version"] != "wang_route_resolution_policy_v5":
-        raise ValueError("whole-CVP Route enqueue requires v5 policy")
+    if policy["schema_version"] not in {"wang_route_resolution_policy_v5", "wang_route_resolution_policy_v8"}:
+        raise ValueError("whole-CVP Route enqueue requires v5 or v8 policy")
     policy_sha = route_policy_fingerprint(
         policy, prompt_sha256s=route_policy_prompt_sha256s(
             policy, prompt_dir=Path(__file__).resolve().parent / "prompts"
@@ -164,7 +170,7 @@ def enqueue_current_cvp_routes(
     queue = CvpRouteQueue(queue_dir)
     jobs = []
     for viewpoint_id in sorted(set(viewpoint_ids)):
-        material = prepare_cvp_route_materials(store, viewpoint_id)
+        material = prepare_cvp_route_materials(store, viewpoint_id, include_context=policy["schema_version"] == "wang_route_resolution_policy_v8")
         job = make_cvp_route_job(viewpoint_id, material["artifact_sha256"], policy_sha)
         queue.enqueue(job)
         jobs.append(job["job_id"])
@@ -221,6 +227,7 @@ def process_cvp_route(
     max_correction_rounds: int, apply: bool = False,
     ownership_guard: Callable[[], None] | None = None,
     repair_evidence_input: bool = False,
+    policy_path: Path = DEFAULT_POLICY,
 ) -> dict[str, Any]:
     """Build from current master data; write only after a whole-set pass."""
 
@@ -231,14 +238,18 @@ def process_cvp_route(
             ownership_guard()
 
     guard()
+    policy = load_route_policy(policy_path)
+    observations_enabled = policy['schema_version'] == 'wang_route_resolution_policy_v8'
     from backend.pipeline.viewpoint_route_evidence_recovery import (
         REPAIR_DIRECTORY, prepare_evidence_input_recovery,
     )
     execution_dir = output_dir / REPAIR_DIRECTORY if repair_evidence_input else output_dir
-    recovered = resume_applied_cvp_route(store, viewpoint_id, execution_dir) if apply else None
+    recovered = resume_applied_cvp_route(store, viewpoint_id, execution_dir, policy_path=policy_path) if apply else None
     if recovered is not None:
         return recovered
-    materials = prepare_cvp_route_materials(store, viewpoint_id)
+    materials = prepare_cvp_route_materials(store, viewpoint_id, include_context=observations_enabled)
+    if not observations_enabled and materials.get('existing_observation_supports'):
+        raise ValueError('v5 cannot maintain a CVP with v8 observation support records')
     claims = [ReviewClaim.model_validate(item) for item in materials["claims"]]
     saved_packet_path = output_dir / "route-packet.json"
     use_claim_evidence = (repair_evidence_input or not saved_packet_path.exists()
@@ -257,6 +268,9 @@ def process_cvp_route(
         complete_cvp=True,
         unavailable_evidence=materials.get('unavailable_evidence'),
         claim_evidence_for_intermediate_steps=use_claim_evidence,
+        observation_supports=observations_enabled,
+        existing_observation_supports=materials.get('existing_observation_supports'),
+        unusable_context_claims=materials.get('unusable_context_claims'),
     )
     if packet["membership_ledger"]["out_of_scope_members"]:
         raise ValueError("complete CVP Route packet omitted an active member")
@@ -320,6 +334,9 @@ def process_cvp_route(
             "attestation_ids": sorted(item["argument_route_attestation_id"]
                                       for item in materials["existing_attestations"]),
         }
+        if observations_enabled:
+            scope_sets['observation_ids'] = sorted(o['observation_support_id']
+                for o in materials.get('existing_observation_supports', []))
         applied = store.apply_plan(
             plan, metadata={"route_material_sha256": materials["artifact_sha256"],
                             "route_review_sha256": result["review_sha256"]},
@@ -356,8 +373,8 @@ def main() -> int:
     if args.repair_evidence_input and (args.action != "run" or not args.job_id or not args.retry_exceptions):
         parser.error("evidence input repair requires run, an exact job ID and --retry-exceptions")
     policy = load_route_policy(args.route_policy)
-    if policy["schema_version"] != "wang_route_resolution_policy_v5":
-        parser.error("whole-CVP worker requires Route policy v5")
+    if policy["schema_version"] not in {"wang_route_resolution_policy_v5", "wang_route_resolution_policy_v8"}:
+        parser.error("whole-CVP worker requires Route policy v5 or v8")
     policy_sha = route_policy_fingerprint(
         policy, prompt_sha256s=route_policy_prompt_sha256s(
             policy, prompt_dir=Path(__file__).resolve().parent / "prompts"
@@ -370,7 +387,7 @@ def main() -> int:
             parser.error("enqueue requires viewpoint IDs and does not apply")
         jobs = []
         for viewpoint_id in sorted(set(args.viewpoint_id)):
-            material = prepare_cvp_route_materials(store, viewpoint_id)
+            material = prepare_cvp_route_materials(store, viewpoint_id, include_context=policy["schema_version"] == "wang_route_resolution_policy_v8")
             job = make_cvp_route_job(viewpoint_id, material["artifact_sha256"], policy_sha)
             queue.enqueue(job)
             jobs.append(job["job_id"])
@@ -422,7 +439,7 @@ def main() -> int:
                          status='complete', detail=recovered['status'])
             print(json.dumps(recovered, ensure_ascii=False))
             return 0
-        current = prepare_cvp_route_materials(store, job["viewpoint_id"])
+        current = prepare_cvp_route_materials(store, job["viewpoint_id"], include_context=policy["schema_version"] == "wang_route_resolution_policy_v8")
         if current["artifact_sha256"] != job["material_sha256"]:
             new_job = make_cvp_route_job(job["viewpoint_id"],
                                          current["artifact_sha256"], policy_sha)
@@ -437,7 +454,7 @@ def main() -> int:
                           provider=str(policy[role]["provider"]),
                           prompt_file=str(policy["prompts"][prompt_role]),
                           timeout_seconds=float(policy["call_timeout_seconds"]),
-                          whole_cvp=True)
+                          whole_cvp=True, observations=policy["schema_version"] == "wang_route_resolution_policy_v8")
             for role, prompt_role, builder in (
                 ("proposal", "proposal", build_route_proposer),
                 ("review", "review", build_route_reviewer),
@@ -454,7 +471,7 @@ def main() -> int:
             reconsiderer=OwnershipGuardedAdapter(adapters["correction"], guard),
             max_correction_rounds=int(policy["max_correction_rounds"]),
             apply=args.apply, ownership_guard=guard,
-            repair_evidence_input=args.repair_evidence_input,
+            repair_evidence_input=args.repair_evidence_input, policy_path=args.route_policy,
         )
         guard()
         queue.finish(job["job_id"], worker_id=args.worker_id, epoch=epoch,

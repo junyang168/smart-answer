@@ -8451,7 +8451,7 @@ def test_whole_cvp_route_correction_rereviews_the_actual_replacement(tmp_path):
     ] == "词形差异论证"
 
 
-def test_route_policy_rollback_restores_v5_default_and_keeps_historical_jobs_distinct():
+def test_observation_policy_keeps_v5_and_withdrawn_route_jobs_distinct():
     from backend.pipeline.viewpoint_route_cvp_worker import DEFAULT_POLICY
     from backend.pipeline.viewpoint_route_policy import (
         load_route_policy, route_policy_fingerprint, route_policy_prompt_sha256s,
@@ -8460,7 +8460,7 @@ def test_route_policy_rollback_restores_v5_default_and_keeps_historical_jobs_dis
 
     old = load_route_policy(DEFAULT_POLICY)
     new = load_route_policy(DEFAULT_POLICY.with_name('wang_route_resolution_policy_v7.json'))
-    assert old['schema_version'] == 'wang_route_resolution_policy_v5'
+    assert old['schema_version'] == 'wang_route_resolution_policy_v8'
     assert new['schema_version'] == 'wang_route_resolution_policy_v7'
     assert new['review'] == old['review'] == {
         'provider': 'claude', 'model': 'claude-opus-5-5', 'effort': 'high',
@@ -8522,6 +8522,6 @@ def test_short_evidence_route_still_requires_real_source_bindings(fault):
 @pytest.mark.parametrize('version', [6, 7])
 def test_withdrawn_route_review_policies_cannot_enqueue_new_work(tmp_path, version):
     from backend.pipeline.viewpoint_route_cvp_worker import DEFAULT_POLICY, enqueue_current_cvp_routes
-    with pytest.raises(ValueError, match='requires v5 policy'):
+    with pytest.raises(ValueError, match='requires v5 or v8 policy'):
         enqueue_current_cvp_routes(object(), ['CV-1'], tmp_path,
             policy_path=DEFAULT_POLICY.with_name(f'wang_route_resolution_policy_v{version}.json'))

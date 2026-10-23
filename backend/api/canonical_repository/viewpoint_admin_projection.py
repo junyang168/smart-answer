@@ -109,7 +109,7 @@ class AdminViewpointProjectionCompiler:
                 "viewpoint_atomic_quality_reports",
                 "argument_routes",
                 "argument_route_revisions",
-                "argument_route_attestations",
+                "argument_route_attestations", "viewpoint_observation_supports",
                 "viewpoint_relations",
                 "viewpoint_structures",
                 "viewpoint_structure_revisions",
@@ -244,7 +244,7 @@ class AdminViewpointProjectionCompiler:
             "knowledge_routes",
             "argument_routes",
             "argument_route_revisions",
-            "argument_route_attestations",
+            "argument_route_attestations", "viewpoint_observation_supports",
             "viewpoint_relations",
             "claim_relations",
             "product_dependencies",
@@ -321,6 +321,7 @@ class AdminViewpointProjectionCompiler:
             "argument_routes": "argument_route_id",
             "argument_route_revisions": "argument_route_revision_id",
             "argument_route_attestations": "argument_route_attestation_id",
+            "viewpoint_observation_supports": "observation_support_id",
             "viewpoint_relations": "viewpoint_relation_id",
             "viewpoint_structures": "structure_id",
             "viewpoint_structure_revisions": "structure_revision_id",
@@ -707,6 +708,7 @@ class AdminViewpointProjectionCompiler:
         self, viewpoint_id: str, *, coverage_snapshot_id: str | None = None,
         registry_snapshot_id: str | None = None,
     ) -> dict[str, Any]:
+        from .viewpoint_observation_support import observation_current_findings
         state = self._state(coverage_snapshot_id)
         if registry_snapshot_id and registry_snapshot_id != state["registry_snapshot_id"]:
             raise AdminViewpointProjectionError("registry snapshot is stale or unknown; no current redirect was followed")
@@ -1070,6 +1072,17 @@ class AdminViewpointProjectionCompiler:
                 "viewpoint": _dump(viewpoint), "revision": _dump(revision),
                 "structures": sorted(structures_out, key=lambda item: item["structure_id"]),
                 "members": members, "routes": routes, "relations": relations,
+                "observation_supports": [
+                    {"observation_support": _dump(o), "current_registry_ready": not observation_current_findings(o,idx), "bindings": [
+                        {"binding": _dump(b),
+                         "source_fragment": _dump(fragments[b.source_fragment_id]) if b.source_fragment_id in fragments else None,
+                         "source": _dump(sources[o.source_id]) if o.source_id in sources else None,
+                         "locator": {"source_admin_url": f"/admin/wang/source-coverage?source={quote(o.source_id)}&fragment={quote(b.source_fragment_id)}",
+                                     "source_url": getattr(sources.get(o.source_id), 'source_url', None),
+                                     "source_type": getattr(sources.get(o.source_id), 'source_type', None)}}
+                        for b in o.evidence_bindings]}
+                    for o in sorted(self.records.get('viewpoint_observation_supports', ()), key=lambda o:o.observation_support_id)
+                    if o.viewpoint_id==viewpoint_id and o.effective_state=='active'],
                 "history": revisions, "impact": impact, "graph": graph,
                 "quality": _dump(state["quality"]) if state["quality"] else None,
             },
