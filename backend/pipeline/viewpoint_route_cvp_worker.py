@@ -220,6 +220,7 @@ def process_cvp_route(
     proposer: Any, reviewer: Any, reconsiderer: Any,
     max_correction_rounds: int, apply: bool = False,
     ownership_guard: Callable[[], None] | None = None,
+    repair_evidence_input: bool = False,
 ) -> dict[str, Any]:
     """Build from current master data; write only after a whole-set pass."""
 
@@ -230,12 +231,18 @@ def process_cvp_route(
             ownership_guard()
 
     guard()
-    recovered = resume_applied_cvp_route(store, viewpoint_id, output_dir) if apply else None
+    from backend.pipeline.viewpoint_route_evidence_recovery import (
+        REPAIR_DIRECTORY, prepare_evidence_input_recovery,
+    )
+    execution_dir = output_dir / REPAIR_DIRECTORY if repair_evidence_input else output_dir
+    recovered = resume_applied_cvp_route(store, viewpoint_id, execution_dir) if apply else None
     if recovered is not None:
         return recovered
     materials = prepare_cvp_route_materials(store, viewpoint_id)
-    write_immutable(output_dir / "cvp-route-materials.json", materials)
     claims = [ReviewClaim.model_validate(item) for item in materials["claims"]]
+    saved_packet_path = output_dir / "route-packet.json"
+    use_claim_evidence = (repair_evidence_input or not saved_packet_path.exists()
+                         or bool(json.loads(saved_packet_path.read_text()).get("evidence_binding_contract")))
     packet = build_registry_route_packet(
         scope_label=f"cvp-route:{viewpoint_id}:{materials['viewpoint_revision_id']}",
         approved_viewpoints=[materials["revision"] | {
@@ -249,14 +256,23 @@ def process_cvp_route(
         source_sections=materials["source_sections"],
         complete_cvp=True,
         unavailable_evidence=materials.get('unavailable_evidence'),
+        claim_evidence_for_intermediate_steps=use_claim_evidence,
     )
     if packet["membership_ledger"]["out_of_scope_members"]:
         raise ValueError("complete CVP Route packet omitted an active member")
     guard()
+    recovery_seed = None
+    if repair_evidence_input:
+        recovery_seed = prepare_evidence_input_recovery(
+            output_dir, packet, materials, proposer=proposer, reviewer=reviewer,
+            max_correction_rounds=max_correction_rounds)
+    output_dir = execution_dir
+    write_immutable(output_dir / "cvp-route-materials.json", materials)
     result = run_cvp_route_scope(
         route_packet=packet, existing_routes=materials["existing_routes"],
         output_dir=output_dir, proposer=proposer, reviewer=reviewer,
         reconsiderer=reconsiderer, max_correction_rounds=max_correction_rounds,
+        recovery_seed=recovery_seed,
     )
     if result["cvp_re_review_exceptions"]:
         raise CvpRouteReviewIncomplete("route review raised CVP identity exceptions")
@@ -291,6 +307,7 @@ def process_cvp_route(
         "change_set_id": plan.change_set_id,
         "change_count": len(plan.operations),
         "status": "planned",
+        **({"execution_root": str(output_dir)} if repair_evidence_input else {}),
     }
     if apply:
         guard()
@@ -333,7 +350,11 @@ def main() -> int:
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--retry-exceptions", action="store_true")
     parser.add_argument("--job-id", help="Resume one exact existing queued job")
+    parser.add_argument("--repair-evidence-input", action="store_true",
+                        help="Continue the saved initial review after the Claim-evidence boundary fix")
     args = parser.parse_args()
+    if args.repair_evidence_input and (args.action != "run" or not args.job_id or not args.retry_exceptions):
+        parser.error("evidence input repair requires run, an exact job ID and --retry-exceptions")
     policy = load_route_policy(args.route_policy)
     if policy["schema_version"] != "wang_route_resolution_policy_v5":
         parser.error("whole-CVP worker requires Route policy v5")
@@ -389,7 +410,11 @@ def main() -> int:
         queue.assert_owner(job["job_id"], worker_id=args.worker_id, epoch=epoch)
 
     try:
-        recovered = resume_applied_cvp_route(store, job['viewpoint_id'], args.output_dir / job['job_id'],
+        from backend.pipeline.viewpoint_route_evidence_recovery import REPAIR_DIRECTORY
+        active_output = args.output_dir / job['job_id']
+        if args.repair_evidence_input:
+            active_output = active_output / REPAIR_DIRECTORY
+        recovered = resume_applied_cvp_route(store, job['viewpoint_id'], active_output,
             material_sha256=job['material_sha256'], policy_path=args.route_policy) if args.apply else None
         if recovered is not None:
             guard()
@@ -429,6 +454,7 @@ def main() -> int:
             reconsiderer=OwnershipGuardedAdapter(adapters["correction"], guard),
             max_correction_rounds=int(policy["max_correction_rounds"]),
             apply=args.apply, ownership_guard=guard,
+            repair_evidence_input=args.repair_evidence_input,
         )
         guard()
         queue.finish(job["job_id"], worker_id=args.worker_id, epoch=epoch,

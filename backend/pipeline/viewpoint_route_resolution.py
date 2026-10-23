@@ -297,6 +297,18 @@ def build_route_reconsiderer(
 
 
 
+CLAIM_EVIDENCE_BINDING_CONTRACT = "claim_owned_intermediate_registry_selected_conclusion_v1"
+CLAIM_EVIDENCE_BINDING_NOTE = (
+    "claim_components 的 evidence_step_ids/source_fragment_ids 是已批准 CVP 连接所选择的证据，"
+    "不是中间推理步骤的证据上限。非 conclusion 步骤可通过所列 component 引用该 component "
+    "所属 Claim 的全部来源版本已绑定且未停用的 EvidenceStep/SourceFragment 实际配对，"
+    "不要求这些论据单独建立 CVP 连接；这不扩大 component 的 statement spans 或成员身份。"
+    "valid_for_identity_review 是身份审核的资格标记，不是本论证层已连接 Claim 的取证上限。"
+    "conclusion 步骤仍只能使用所列 component 的连接所选证据，终端仍须是指向本次 CVP revision "
+    "的 active 正向连接。所有步骤保持同一篇来源、精确版本与真实推理要求，停用或无锚点证据不可绑定。"
+)
+
+
 def build_registry_route_packet(
     *,
     scope_label: str,
@@ -308,6 +320,7 @@ def build_registry_route_packet(
     existing_attestations: list[dict[str, Any]] | None = None,
     complete_cvp: bool = False,
     unavailable_evidence: list[dict[str, Any]] | None = None,
+    claim_evidence_for_intermediate_steps: bool = False,
 ) -> dict[str, Any]:
     """Rebuild Route evidence solely from committed Registry state.
 
@@ -588,6 +601,11 @@ def build_registry_route_packet(
         packet['unavailable_evidence'] = sorted(
             [dict(item) for item in unavailable_evidence],
             key=lambda item:(item['claim_id'],item['evidence_step_id']))
+    if claim_evidence_for_intermediate_steps:
+        if not complete_cvp:
+            raise ValueError("Claim-owned intermediate evidence requires complete CVP material")
+        packet["evidence_binding_contract"] = CLAIM_EVIDENCE_BINDING_CONTRACT
+        packet["evidence_binding_note"] = CLAIM_EVIDENCE_BINDING_NOTE
     packet["packet_sha256"] = sha256_json(packet)
     return packet
 

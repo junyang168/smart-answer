@@ -33,6 +33,7 @@ from backend.pipeline.viewpoint_resolution_runtime import (
     write_immutable,
 )
 from backend.pipeline.viewpoint_route_resolution import (
+    CLAIM_EVIDENCE_BINDING_CONTRACT,
     apply_confirmed_unattested_members,
     build_route_review_batches,
     route_member_source_review_targets,
@@ -129,6 +130,7 @@ def run_cvp_route_scope(
     reviewer: Any,
     reconsiderer: Any,
     max_correction_rounds: int,
+    recovery_seed: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Review the entire replacement set on every round, then stop at a pass.
 
@@ -138,6 +140,9 @@ def run_cvp_route_scope(
 
     if max_correction_rounds < 0:
         raise ValueError("max_correction_rounds must be nonnegative")
+    contract = route_packet.get("evidence_binding_contract")
+    if contract not in (None, CLAIM_EVIDENCE_BINDING_CONTRACT):
+        raise ValueError("unknown Route evidence binding contract")
     if route_packet.get("membership_ledger", {}).get("no_route_semantics") != (
         "no_attested_route_in_complete_cvp_material"
     ):
@@ -163,10 +168,55 @@ def run_cvp_route_scope(
         component_bindings=bindings,
         allow_unresolved_member_sources=True,
         complete_cvp=True,
+        claim_evidence_for_intermediate_steps=contract == CLAIM_EVIDENCE_BINDING_CONTRACT,
     )
     write_immutable(output_dir / "route-packet.json", route_packet)
-    raw, _, _ = call_model(proposer, route_packet,
-                           output_dir / "raw-route-proposal-000.json")
+    last_reconsideration = None
+    consumed_corrections = 0
+    if recovery_seed is None:
+        raw, _, _ = call_model(proposer, route_packet,
+                               output_dir / "raw-route-proposal-000.json")
+    else:
+        if max_correction_rounds < 1 or contract != CLAIM_EVIDENCE_BINDING_CONTRACT:
+            raise ValueError("evidence input recovery requires its original remaining correction budget")
+        seed_packet = {
+            "scope_label": scope_label, "route_evidence_packet": route_packet,
+            "route_proposal": recovery_seed["proposal"],
+            "route_proposal_sha256": recovery_seed["proposal_sha256"],
+            "route_review": recovery_seed["review"],
+            "route_review_sha256": recovery_seed["review_sha256"],
+            "engineering_input_recovery": recovery_seed["receipt"],
+            "instruction": (
+                "Continue the saved proposal and ALL original Opus findings. Respond to every correct "
+                "finding in finding_dispositions. The original defer remains an immutable verdict; "
+                "the packet now distinguishes intermediate Claim evidence from conclusion link evidence. "
+                "Use that corrected binding contract to supply the deferred source's actual attestation, "
+                "and explain its evidence in reason. Do not obey obsolete restrictions that excluded "
+                "Claim-owned intermediate evidence solely because it was not selected by a CVP link. "
+                "Do not rewrite the original review, invent evidence or treat this receipt as approval. "
+                "Return the complete revised set for independent whole-CVP review."
+            ),
+        }
+        write_immutable(output_dir / "input-recovery-correction-packet.json", seed_packet)
+        answer, _, _ = call_model(reconsiderer, seed_packet,
+                                  output_dir / "raw-input-recovery-correction.json")
+        corrected = ArgumentRouteReconsiderationV2Response.model_validate(canonicalize_proposal(answer)[0])
+        validation = validate_route_reconsideration(
+            reconsideration=corrected,
+            proposal=ArgumentRouteProposalV2Response.model_validate(recovery_seed["proposal"]),
+            review=ArgumentRouteReviewV2Response.model_validate(recovery_seed["review"]),
+            route_proposal_sha256=recovery_seed["proposal_sha256"],
+            route_review_sha256=recovery_seed["review_sha256"], whole_cvp=True)
+        if validation["outcome"] != "resolved":
+            raise CvpRouteReviewIncomplete("input recovery left original correct findings unresolved")
+        for source_id in recovery_seed["deferred_source_ids"]:
+            if not any(a.source_id == source_id for a in corrected.revised_proposal.source_route_attestations):
+                raise CvpRouteReviewIncomplete("input recovery did not resolve the deferred source coverage")
+        last_reconsideration = corrected.model_dump(mode="json")
+        write_immutable(output_dir / "input-recovery-correction.json",
+                        {"reconsideration": last_reconsideration, "validation": validation})
+        raw = corrected.revised_proposal.model_dump(mode="json")
+        consumed_corrections = 1
     invalid_proposals: set[str] = set()
     validation_repairs = 0
     while True:
@@ -188,7 +238,7 @@ def run_cvp_route_scope(
             else:
                 findings = exc.findings
             raw_sha = sha256_json(raw)
-            if raw_sha in invalid_proposals or validation_repairs >= max_correction_rounds:
+            if raw_sha in invalid_proposals or validation_repairs + consumed_corrections >= max_correction_rounds:
                 raise CvpRouteReviewIncomplete(
                     f"route proposal still fails deterministic validation: {findings}"
                 ) from exc
@@ -209,8 +259,7 @@ def run_cvp_route_scope(
             validation_repairs += 1
     seen: set[str] = set()
     rounds: list[dict[str, Any]] = []
-    last_reconsideration: dict[str, Any] | None = None
-    remaining_review_corrections = max_correction_rounds - validation_repairs
+    remaining_review_corrections = max_correction_rounds - validation_repairs - consumed_corrections
     for round_number in range(remaining_review_corrections + 1):
         proposal_payload = proposal.model_dump(mode="json")
         proposal_sha = sha256_json(proposal_payload)
@@ -226,6 +275,19 @@ def run_cvp_route_scope(
             route_proposal_sha256=proposal_sha,
             whole_cvp=True,
         )[0]
+        if recovery_seed:
+            review_packet["input_recovery_context"] = {
+                "original_review": recovery_seed["review"],
+                "recovery_receipt_sha256": recovery_seed["receipt"]["artifact_sha256"],
+                "evidence_binding_contract": contract,
+                "finding_dispositions": last_reconsideration["finding_dispositions"],
+                "instruction": (
+                    "Independently review the entire current postimage and resolution of ALL saved findings, "
+                    "including the deferred source. The old verdict remains unchanged; engineering recovery "
+                    "is not content approval. Apply the corrected evidence binding contract, not the old "
+                    "assumption that a CVP link's selected evidence limits intermediate Claim evidence."
+                ),
+            }
         write_immutable(output_dir / f"route-proposal-{round_number:03d}.json", {
             "proposal_sha256": proposal_sha,
             "proposal": proposal_payload,
@@ -276,6 +338,8 @@ def run_cvp_route_scope(
                 "review_sha256": review_sha,
                 "rounds": rounds,
                 "proposal_validation_repairs": validation_repairs,
+                **({"input_recovery": recovery_seed["receipt"],
+                    "input_recovery_corrections": consumed_corrections} if recovery_seed else {}),
                 "passing_route_keys": sorted(item.local_route_key for item in effective.argument_route_candidates),
                 "passing_attestation_keys": sorted(item.local_attestation_key for item in effective.source_route_attestations),
                 "retired_route_revision_ids": effective.retired_route_revision_ids,

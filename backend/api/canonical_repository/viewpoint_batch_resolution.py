@@ -19,7 +19,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .viewpoint_foundation import sha256_json
-from .viewpoint_resolution import ReviewClaim
+from .viewpoint_resolution import ReviewClaim, VALID_ANCHOR_STATES, VALID_EVIDENCE_STATES
 
 BATCH_PACKET_VERSION = "wang_canonical_viewpoint_batch_packet_v1"
 PROPOSAL_VERSION = "wang_canonical_viewpoint_proposal_v1"
@@ -1140,6 +1140,16 @@ def _sibling_hint(
     return f"; no component of Claim {claim_id} carries one"
 
 
+def route_evidence_is_usable(evidence: Any) -> bool:
+    # Identity-review validity also requires citation/eligibility attestation.
+    # Routes consume already-linked Claims and exact source evidence instead;
+    # eligible_candidate is their existing anchored-source input, not a new
+    # identity approval. Withheld evidence never becomes a route premise.
+    return bool(evidence.source_sha256
+                and evidence.support_eligibility in VALID_EVIDENCE_STATES | {"eligible_candidate"}
+                and evidence.anchor_state in VALID_ANCHOR_STATES)
+
+
 def _route_findings(
     *,
     proposal: "ArgumentRouteProposalResponse",
@@ -1151,6 +1161,7 @@ def _route_findings(
     known_route_viewpoint_ids: Mapping[str, str] | None = None,
     approved_viewpoint_ids: Mapping[str, str] | None = None,
     allow_repin_same_viewpoint: bool = False,
+    claim_evidence_for_intermediate_steps: bool = False,
 ) -> list[str]:
     """Check routes and attestations, above all for cross-source composition.
 
@@ -1254,6 +1265,33 @@ def _route_findings(
 
         bound_steps: set[str] = set()
         for binding in attestation.step_bindings:
+            if claim_evidence_for_intermediate_steps and route is not None:
+                node = next((n for n in route.ordered_inference_nodes
+                             if n.route_step_key == binding.route_step_key), None)
+                selected_pairs = set()
+                for key in binding.claim_component_keys:
+                    component = component_bindings.get(key)
+                    if component is None:
+                        continue
+                    owner = claim_index.get(component.claim_id)
+                    if owner is None or owner.source_id != attestation.source_id:
+                        continue
+                    selected_pairs.update(
+                        (e.evidence_step_id, e.source_fragment_id)
+                        for e in owner.evidence if route_evidence_is_usable(e)
+                        and (node is not None and node.role != "conclusion" or (
+                            e.evidence_step_id in component.evidence_step_ids
+                            and e.source_fragment_id in component.source_fragment_ids))
+                    )
+                steps, fragments = set(binding.evidence_step_ids), set(binding.source_fragment_ids)
+                referenced = {(e.evidence_step_id, e.source_fragment_id)
+                              for c in claims for e in c.evidence
+                              if e.evidence_step_id in steps and e.source_fragment_id in fragments}
+                if (not referenced <= selected_pairs
+                        or steps - {p[0] for p in selected_pairs if p[1] in fragments}
+                        or fragments - {p[1] for p in selected_pairs if p[0] in steps}):
+                    findings.append(f"{where}: step {binding.route_step_key} exceeds "
+                                    "Claim-owned intermediate or Registry-selected conclusion evidence")
             if route is not None and binding.route_step_key not in {
                 node.route_step_key for node in route.ordered_inference_nodes
             }:
@@ -3416,6 +3454,7 @@ def validate_route_proposal(
     component_bindings: Sequence[RouteComponentBinding],
     allow_unresolved_member_sources: bool = False,
     complete_cvp: bool = False,
+    claim_evidence_for_intermediate_steps: bool = False,
 ) -> dict[str, Any]:
     """Check routes against the scope's exact approved viewpoint set."""
 
@@ -3454,6 +3493,7 @@ def validate_route_proposal(
             known_route_viewpoint_ids=known_route_viewpoint_ids or {},
             approved_viewpoint_ids=approved_viewpoint_ids or {},
             allow_repin_same_viewpoint=complete_cvp,
+            claim_evidence_for_intermediate_steps=claim_evidence_for_intermediate_steps,
             component_bindings=component_index,
         )
     )
