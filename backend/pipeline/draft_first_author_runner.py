@@ -56,6 +56,19 @@ def viewpoint_charter(packet: dict[str, Any]) -> list[dict[str, Any]]:
         for bundle in packet.get("argument_routes") or []
         if bundle.get("full_attestation_count")
     }
+    # A viewpoint with no route can still rest on what the professor saw in
+    # the text (「每次都用定冠詞」: twelve observations in six sermons, no
+    # route). Without them the writer read "no route" as "no basis" (#436).
+    observations: dict[str, list[dict[str, Any]]] = {}
+    for item in packet.get("observation_supports") or []:
+        observations.setdefault(str(item.get("validated_against_viewpoint_revision_id")), []).append(
+            {
+                "source_id": item.get("source_id"),
+                "observation_summary": item.get("observation_summary"),
+                "supports": item.get("supports"),
+                "support_scope_note": item.get("support_scope_note"),
+            }
+        )
     charter: list[dict[str, Any]] = []
     for focal in packet["focal_viewpoints"]:
         revision = focal["revision"]
@@ -69,8 +82,15 @@ def viewpoint_charter(packet: dict[str, Any]) -> list[dict[str, Any]]:
                 "viewpoint_revision_id": revision_id,
                 "has_full_route": revision_id in routed,
                 "core_proposition": revision.get("core_proposition"),
+                # polarity is the proposition's own sign and is already in
+                # core_proposition; alone beside an already-negated sentence
+                # it was read as a second negation (「中文沒有辦法翻」 flagged).
+                "subject": signature.get("subject"),
+                "predicate": signature.get("predicate"),
+                "object": signature.get("object"),
                 "modality": signature.get("modality"),
                 "polarity": signature.get("polarity"),
+                "observation_supports": observations.get(str(revision_id), []),
                 "conditions": signature.get("conditions") or [],
                 "scope": revision.get("scope") or {},
             }
@@ -162,6 +182,11 @@ BACKSTAGE_TERMS = (
     "母本", "讲义", "講義", "材料", "本文", "各自站立",
     "后期修正", "後期修正", "一般惯例", "一般慣例",
 )
+# Naming the professor before every quote turned the run-3 essay into nine
+# 「王教授說」; the body names him at most this often (owner, 2026-10-23).
+MAX_PROFESSOR_NAMES = 2
+# 「醫學院的教授」 is someone else; 「王教授」「教授說」 are him.
+PROFESSOR_NAME = re.compile(r"(?<![的院])教授")
 # 「講提多書時他說」「教授講馬太福音十六章時說」: locating the professor's words
 # sermon by sermon in the body, which the source bindings already carry.
 SOURCE_LOCATION_TAG = re.compile(
@@ -192,6 +217,7 @@ def backstage_language_report(manuscript: str) -> dict[str, Any]:
         "backstage_terms": terms,
         "source_location_tags": tags,
         "professor_mentions": voice.count("教授"),
+        "professor_names": [voice[max(0, m.start() - 1): m.end() + 6].split("\n")[0] for m in PROFESSOR_NAME.finditer(voice)],
     }
 
 

@@ -38,6 +38,7 @@ from backend.pipeline.draft_first_source_reader import SourceReadingTransportExh
 from backend.pipeline.draft_first_author_runner import (
     argument_route_charter,
     backstage_language_report,
+    MAX_PROFESSOR_NAMES,
     source_texts,
     structure_unresolved_items,
     verbatim_quote_report,
@@ -474,9 +475,21 @@ def merge_blocking_findings(
                 "gate": "backstage_check",
                 "kind": "source_location_tag",
                 "anchor": tag,
-                "summary": "正文逐段标注出处；改为直接讲解，逐字引语只在引语前交代一次说话人。",
+                "summary": "正文逐段标注出处；改为直接讲解，全文只在第一次逐字引用时点名一次。",
             }
         )
+    names = backstage.get("professor_names") or []
+    if len(names) > MAX_PROFESSOR_NAMES:
+        for name in names[1:]:
+            findings.append(
+                {
+                    "gate": "backstage_check",
+                    "kind": "professor_named_again",
+                    "anchor": name,
+                    "summary": f"正文点名教授 {len(names)} 次，至多 {MAX_PROFESSOR_NAMES} 次：只保留第一次逐字引用前的点名，"
+                    "其余改用「他」或把引语织进句子；可能被读成耶稣时不用「他」。",
+                }
+            )
     # The blind reader is the lay-reader proxy (the owner's charge after the
     # keys article opened with bare verse numbers and untranslated Greek):
     # a spot that stops the reader cold is a blocking defect even when every
@@ -611,16 +624,33 @@ def run_gates(
     if delta_scope is not None:
         review_payload["review_scope"] = delta_scope
         review_payload["baseline_review"] = dict(baseline_review or {})
-    review, fingerprints["editorial"] = _call(
-        clients["editorial"],
-        PROMPTS / "draft_first_editorial_review.md",
-        review_payload,
-        _review_schema(profile),
-    )
-    if delta_scope is not None and baseline_review is not None:
-        review, score_provenance = merge_delta_scores(baseline_review, review)
-        review["score_provenance"] = score_provenance
-    review_verdict = validate_review(review, manuscript=manuscript, profile=profile)
+    # One retry when the review breaks its own contract. Run 3's reviewer
+    # quoted 「於新約聖經上」 for the draft's 「中」; the program was right to
+    # reject it, but the rejection ended the whole run. A rejected reply is
+    # not a review: it is kept beside the one accepted review, never scored.
+    rejected_reviews: list[dict[str, Any]] = []
+    for attempt in range(2):
+        payload = dict(review_payload)
+        if rejected_reviews:
+            payload["previous_attempt_rejected"] = rejected_reviews[-1]["error"]
+        review, fingerprints["editorial"] = _call(
+            clients["editorial"],
+            PROMPTS / "draft_first_editorial_review.md",
+            payload,
+            _review_schema(profile),
+        )
+        if delta_scope is not None and baseline_review is not None:
+            review, score_provenance = merge_delta_scores(baseline_review, review)
+            review["score_provenance"] = score_provenance
+        try:
+            review_verdict = validate_review(review, manuscript=manuscript, profile=profile)
+            break
+        except DraftReviewContractError as error:
+            rejected_reviews.append({"error": str(error), "review": review})
+            _write(round_dir / "editorial-review-rejected.json", {"rejected_attempts": rejected_reviews})
+            if attempt:
+                raise
+    fingerprints["editorial"]["rejected_attempts"] = len(rejected_reviews)
     fingerprints["editorial"]["result_sha256"] = result_sha256(review)
     _write(round_dir / "editorial-review.json", review)
 

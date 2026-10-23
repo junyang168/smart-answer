@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -414,7 +415,7 @@ def test_author_payload_carries_routes_and_layered_license():
     rules = (prompts / "draft_first_topic_author.md").read_text()
     assert "路线是骨架不是上限" in rules
     alignment = (prompts / "draft_first_alignment_check.md").read_text()
-    assert "polarity 为 denied 的立场不得被正面断言" in alignment
+    assert "不得再叠加一次否定" in alignment
 
 
 def test_backstage_language_flags_production_words_and_sermon_location_tags():
@@ -451,6 +452,7 @@ def test_backstage_language_exempts_footnotes_quotes_and_one_named_speaker():
         "backstage_terms": [],
         "source_location_tags": [],
         "professor_mentions": 1,
+        "professor_names": ["王教授說得很直接："],
     }
 
 
@@ -559,3 +561,111 @@ def test_placeholder_revision_is_rejected():
         )
     revised = before.replace("正文。", "正文！", 1)
     assert validate_revision(before, {"manuscript_markdown": revised, "dispositions": [{}, {}]}, findings) == revised
+
+
+def test_the_body_names_the_professor_at_most_twice():
+    from backend.pipeline.draft_first_author_runner import backstage_language_report
+
+    # Run 3 named him before nearly every quote: nine times, each allowed by
+    # 「引语前交代一次说话人，同段不重复」. 「醫學院的教授」 is somebody else.
+    manuscript = "\n".join(
+        [
+            "# 標題",
+            "王教授說：「我們中文沒有定冠詞。」他的兒子是醫學院的教授。",
+            "王教授說得很直接：「代表神嘛！」",
+            "王教授這樣總結：「我就是神。」",
+        ]
+    )
+    report = backstage_language_report(manuscript)
+    assert len(report["professor_names"]) == 3
+    blocking = merge_blocking_findings(
+        blind_read={"comprehension_obstacles": []},
+        alignment={"findings": []},
+        blind_compare=None,
+        review=_review(findings=[]),
+        review_verdict={"dimensions_below_minimum": [], "hard_failures_failed": []},
+        quote_report={"quotes_failing": []},
+        backstage_report=report,
+    )
+    # The first naming stays; every later one is a finding the revision fixes.
+    assert [item["kind"] for item in blocking] == ["professor_named_again"] * 2
+    assert blocking[0]["anchor"] == "王教授說得很直接："
+    two = backstage_language_report("\n".join(manuscript.splitlines()[:3]))
+    assert not merge_blocking_findings(
+        blind_read={"comprehension_obstacles": []}, alignment={"findings": []}, blind_compare=None,
+        review=_review(findings=[]), review_verdict={"dimensions_below_minimum": [], "hard_failures_failed": []},
+        quote_report={"quotes_failing": []}, backstage_report=two)
+
+
+def test_viewpoint_charter_carries_observations_and_the_proposition_parts():
+    from backend.pipeline.draft_first_author_runner import viewpoint_charter
+
+    packet = {
+        "focal_viewpoints": [
+            {"structure_role": "premise", "revision": {"viewpoint_revision_id": "R1", "core_proposition": "中文无法直接译出定冠词。",
+             "proposition_signature": {"subject": "中文", "predicate": "能够直接译出定冠词", "object": "人子称谓",
+                                       "polarity": "denied", "modality": "断言"}}},
+            {"structure_role": "premise", "revision": {"viewpoint_revision_id": "R2"}},
+        ],
+        "observation_supports": [
+            {"validated_against_viewpoint_revision_id": "R1", "source_id": "S1", "observation_summary": "中文没有定冠词。",
+             "supports": "直接支持", "support_scope_note": "未逐例列举。", "evidence_bindings": [{"claim_id": "C"}]},
+        ],
+    }
+    first, second = viewpoint_charter(packet)
+    # 「中文沒有辦法翻」 was flagged when only the negated sentence and
+    # polarity=denied were sent; the parts show where the negation lives.
+    assert (first["subject"], first["predicate"], first["polarity"]) == ("中文", "能够直接译出定冠词", "denied")
+    assert first["observation_supports"] == [{"source_id": "S1", "observation_summary": "中文没有定冠词。",
+                                              "supports": "直接支持", "support_scope_note": "未逐例列举。"}]
+    assert second["observation_supports"] == []
+
+
+def test_prompts_state_one_naming_observations_and_the_sign_of_polarity():
+    prompts = Path(__file__).resolve().parents[1] / "pipeline" / "prompts"
+    author = (prompts / "draft_first_topic_author.md").read_text()
+    assert "正文点名教授至多两次" in author and "没有路线不等于没有依据" in author
+    assert "同段不重复" not in author
+    for name in ("draft_first_revision.md", "draft_first_editorial_review.md"):
+        assert "第一次逐字引用" in (prompts / name).read_text()
+    alignment = (prompts / "draft_first_alignment_check.md").read_text()
+    assert "不得再叠加一次否定" in alignment and "polarity 为 denied 的立场不得被正面断言" not in alignment
+    assert "support_scope_note" in alignment
+
+
+def test_a_rejected_editorial_reply_is_retried_once_and_kept(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from backend.pipeline import draft_first_review_runner as runner
+
+    # Run 3: the reviewer quoted 「上」 for the draft's 「中」 and the whole run ended.
+    replies = [_review(findings=[{"anchor": "不在成稿裡的句子", "dimension_id": "general_reader_readability",
+                                   "summary": "s", "required_change": "r", "blocking": True}]), _review()]
+    payloads = []
+
+    def call(client, prompt, payload, schema):
+        if prompt.name == "draft_first_blind_read.md":
+            return {"answer_in_one_sentence": "answer", "comprehension_obstacles": []}, {}
+        if prompt.name == "draft_first_alignment_check.md":
+            return {"findings": []}, {}
+        if prompt.name == "draft_first_blind_compare.md":
+            return {"answer_matches_settled_positions": True, "modality_preserved": True, "mismatches": []}, {}
+        payloads.append(payload)
+        return replies.pop(0), {}
+
+    monkeypatch.setattr(runner, "_call", call)
+    packet = {"focal_viewpoints": [], "source_originals": {"originals": []}}
+    clients = {name: SimpleNamespace(model=name) for name in ["alignment", "blind_read", "blind_compare", "editorial"]}
+    runner.run_gates(manuscript=MANUSCRIPT, packet=packet, profile=_profile(), clients=clients, round_dir=tmp_path)
+    assert len(payloads) == 2 and "previous_attempt_rejected" in payloads[1]
+    assert "not verbatim" in payloads[1]["previous_attempt_rejected"]
+    kept = json.loads((tmp_path / "editorial-review-rejected.json").read_text())
+    assert len(kept["rejected_attempts"]) == 1
+    assert json.loads((tmp_path / "editorial-review.json").read_text())["findings"] == []
+
+    # A second rejection is final: no third call.
+    replies[:] = [_review(findings=[{"anchor": "仍不在成稿", "dimension_id": "general_reader_readability",
+                                      "summary": "s", "required_change": "r", "blocking": True}])] * 2
+    payloads.clear()
+    with pytest.raises(runner.DraftReviewContractError):
+        runner.run_gates(manuscript=MANUSCRIPT, packet=packet, profile=_profile(), clients=clients, round_dir=tmp_path / "b")
+    assert len(payloads) == 2
