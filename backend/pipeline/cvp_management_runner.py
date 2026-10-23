@@ -122,11 +122,26 @@ def _reconcile_saved_dispatches(store,parent_id,unit,request,proposer,reviewer):
             persistence.returned_call(store,parent_id,key=key,raw=raw,artifact_sha256=artifact['artifact_sha256'])
 
 
+def _dispatch_identities(store,parent,cache,intent):
+    """Rebuild the original adapter, including its schema/pin wire wrapper."""
+    for unit in parent['units'].values():
+        for step_id in unit['steps']:
+            material=store.get_cvp_group(step_id)['materials']
+            if Path(material['step_root'])!=cache.parent or cache.name!='proposal.json':continue
+            request=domain.Request.model_validate(parent['request'])
+            packet=domain.proposal_packet(request,material['bundle'],previous=material['previous'],
+                                          prior_findings=material['prior_findings'])
+            model=adapter('proposal',request,material['bundle'],packet)
+            return model_request_identity(model,packet),model_request_identity(response_adapter(model,intent),packet)
+    return None,None
+
+
 def _reconcile_capacity_refusals(store,parent_id):
     """Read terminal provider receipts; unknown/partial output stays unknown."""
     from backend.pipeline.claim_management import pre_generation_rejection
     from backend.pipeline.subscription_process import digest_file
-    for key,slot in store.get_cvp_group(parent_id)['call_reservations'].items():
+    parent=store.get_cvp_group(parent_id)
+    for key,slot in parent['call_reservations'].items():
         if slot['state']!='started' or slot['role']!='gpt':continue
         cache=Path(slot['intent']['cache_path']);transport=cache.with_name(cache.stem+'.transport')
         files=[transport/name for name in ('stdout.log','stderr.log')]
@@ -134,10 +149,12 @@ def _reconcile_capacity_refusals(store,parent_id):
                transport/'invocation.json',transport/'exit.json',*files]
         if cache.exists() or not all(p.is_file() for p in paths) or (transport/'response.json').exists():continue
         intent,failure,_,exit_state=[read_artifact(p) for p in paths[:4]]
+        original,wire=_dispatch_identities(store,parent,cache,intent)
         if (exit_state.get('returncode') in (None,0)
                 or exit_state.get('files')!={p.name:digest_file(p) for p in files}
                 or failure.get('invocation_sha256')!=intent.get('artifact_sha256')
-                or any(intent.get(k)!=v for k,v in slot['intent'].items() if k!='request_bytes')
+                or original is None or any(slot['intent'].get(k)!=v for k,v in original.items())
+                or any(intent.get(k)!=v for k,v in wire.items()) or intent.get('cache_path')!=str(cache)
                 or intent.get('artifact_sha256')!=sha256_json({k:v for k,v in intent.items() if k!='artifact_sha256'})):
             continue
         raw={'stdout':files[0].read_text(),'stderr':files[1].read_text(),'last_message':None}

@@ -110,11 +110,14 @@ def test_fragment_repair_binds_own_returned_review_and_does_not_reset_budget(set
 
 
 @pytest.mark.parametrize('case',['capacity','partial_stdout','no_exit','response_file','intent_drift'])
-def test_capacity_classification_preserves_unknown_output_and_spent_call(setup,tmp_path,case):
+def test_capacity_classification_preserves_unknown_output_and_spent_call(setup,tmp_path,monkeypatch,case):
     store,_,_,_=scenario(setup)
     cache=tmp_path/'proposal.json';transport=tmp_path/'proposal.transport';transport.mkdir()
     intent={'backend':'codex_subscription','cache_path':str(cache),'model_id':'gpt-6.1-sol'}
     formal=seal({'schema_version':'wang_model_call_intent_v1',**intent,'automatic_retry':False})
+    expected=deepcopy(intent)
+    monkeypatch.setattr('backend.pipeline.cvp_management_runner._dispatch_identities',
+                        lambda *args:(expected,expected))
     failure=seal({'invocation_sha256':formal['artifact_sha256'],'execution_status':'outcome_unknown'})
     (tmp_path/'proposal.call-intent.json').write_text(json.dumps(formal))
     (tmp_path/'proposal.call-failure.json').write_text(json.dumps(failure))
