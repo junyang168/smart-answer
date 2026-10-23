@@ -1,8 +1,5 @@
 """Source observations survive no_route and share its complete review/write flow."""
 from copy import deepcopy
-from pathlib import Path
-import json
-
 import pytest
 
 from backend.api.canonical_repository.viewpoint_observation_support import (
@@ -144,6 +141,20 @@ def test_current_cvp_sql_apply_readback_and_no_model_completion_recovery(setup,t
     assert (COLLECTION,observation['observation_support_id']) in context
     with pytest.raises(Exception):
         store.retire_objects([('claims','C1')],reason='invalid retirement',package_id='invalid-retire',apply=True)
+    def replacement(packet):
+        raw=observation_proposal(packet)
+        raw['observation_supports'][0]['support_scope_note']='修订后的范围说明仍限于原文所示观察。'
+        raw['retired_observation_support_ids']=[observation['observation_support_id']]
+        return raw
+    maintained=worker.process_cvp_route(store=store,viewpoint_id=vid,output_dir=tmp_path/'maintenance',
+        proposer=Answer(replacement,model_id='gpt'),reviewer=Answer(approved,model_id='opus'),
+        reconsiderer=Answer({}),max_correction_rounds=4,apply=True)
+    assert maintained['status']=='applied_readback_verified' and maintained['change_count']==2
+    current=store.read_cvp_route_records(vid)
+    assert len(current)==1 and (COLLECTION,observation['observation_support_id']) not in current
+    old=store.read_current_records([(COLLECTION,observation['observation_support_id'])])
+    assert old[COLLECTION,observation['observation_support_id']]['retired'] is True
+    assert prepare_cvp_route_materials(store,vid,include_context=True)['links']==before['links']
 
 
 def add_fixture_observation(store):
@@ -204,7 +215,7 @@ def test_context_claim_can_supply_observation_without_becoming_cvp_member():
 
 
 def test_observation_correction_gets_one_whole_set_review_per_revision(tmp_path):
-    from backend.api.canonical_repository.viewpoint_batch_resolution import canonicalize_proposal, canonicalize_review
+    from backend.api.canonical_repository.viewpoint_batch_resolution import canonicalize_proposal
     packet=fixture_packet()
     original=canonicalize_proposal(observation_proposal(packet))[0]
     revised=deepcopy(original)
