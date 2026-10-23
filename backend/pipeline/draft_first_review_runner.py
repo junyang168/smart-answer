@@ -33,14 +33,17 @@ from dotenv import load_dotenv
 
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
-from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
+from backend.pipeline.codex_subscription_client import CodexSubscriptionClient, CodexSubscriptionError
+from backend.pipeline.draft_first_source_reader import SourceReadingTransportExhausted
 from backend.pipeline.draft_first_author_runner import (
     argument_route_charter,
+    backstage_language_report,
     source_texts,
     structure_unresolved_items,
     verbatim_quote_report,
     viewpoint_charter,
 )
+from backend.pipeline.draft_first_scripture import cited_verses, scripture_corpus
 from backend.pipeline.draft_first_source_binding import reader_paragraphs
 from backend.pipeline.matthew_exposition_authoring import sha256_text
 
@@ -246,6 +249,7 @@ def _call(client: Any, prompt_path: Path, payload: dict[str, Any], schema: dict[
         "model": client.model,
         "backend": client.backend,
         "reasoning_effort": client.reasoning_effort,
+        "source_reading": getattr(client, "source_reading_receipt", None),
     }
     return result, fingerprint
 
@@ -333,6 +337,30 @@ def validate_alignment(result: Mapping[str, Any], *, manuscript: str) -> None:
         )
 
 
+def validate_revision(
+    before: str, revision: Mapping[str, Any], findings: list[Mapping[str, Any]]
+) -> str:
+    """The revised manuscript, or a contract error when the revision is not one.
+
+    #439: opus once returned the H1 plus the word PLACEHOLDER with no
+    dispositions, and the next round reviewed an empty article. A revision
+    answers every finding and keeps the article: one disposition per finding,
+    and the body may not collapse to a fraction of what it was.
+    """
+
+    manuscript = str(revision.get("manuscript_markdown") or "")
+    dispositions = revision.get("dispositions") or []
+    if len(dispositions) != len(findings):
+        raise DraftReviewContractError(
+            f"revision gave {len(dispositions)} dispositions for {len(findings)} findings"
+        )
+    if len(manuscript) < len(before) // 2:
+        raise DraftReviewContractError(
+            f"revised manuscript shrank from {len(before)} to {len(manuscript)} characters"
+        )
+    return manuscript
+
+
 def validate_review(
     review: Mapping[str, Any], *, manuscript: str, profile: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -388,15 +416,16 @@ def validate_review(
 
 def merge_blocking_findings(
     *,
-    alignment: Mapping[str, Any],
+    alignment: Mapping[str, Any] | None,
     blind_read: Mapping[str, Any],
-    blind_compare: Mapping[str, Any],
+    blind_compare: Mapping[str, Any] | None,
     review: Mapping[str, Any],
     review_verdict: Mapping[str, Any],
     quote_report: Mapping[str, Any],
+    backstage_report: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
-    for item in alignment["findings"]:
+    for item in alignment["findings"] if alignment is not None else []:
         findings.append(
             {
                 "gate": "alignment",
@@ -427,6 +456,27 @@ def merge_blocking_findings(
                     "不得留在行内引号里；短语提及不受此限。",
                 }
             )
+    # Writing rule 9: the body speaks in the editor's voice; where each
+    # paragraph comes from is the source bindings' job, not the prose's.
+    backstage = backstage_report or {}
+    for term in backstage.get("backstage_terms") or []:
+        findings.append(
+            {
+                "gate": "backstage_check",
+                "kind": "backstage_language",
+                "anchor": term,
+                "summary": "正文出现后台用语；按写作规则第 9 条改为编者口吻直接讲解，说法差异移入编者注。",
+            }
+        )
+    for tag in backstage.get("source_location_tags") or []:
+        findings.append(
+            {
+                "gate": "backstage_check",
+                "kind": "source_location_tag",
+                "anchor": tag,
+                "summary": "正文逐段标注出处；改为直接讲解，逐字引语只在引语前交代一次说话人。",
+            }
+        )
     # The blind reader is the lay-reader proxy (the owner's charge after the
     # keys article opened with bare verse numbers and untranslated Greek):
     # a spot that stops the reader cold is a blocking defect even when every
@@ -445,7 +495,7 @@ def merge_blocking_findings(
                 "读者跳过原文字符仍能完整跟上。",
             }
         )
-    if not (
+    if blind_compare is not None and not (
         blind_compare["answer_matches_settled_positions"]
         and blind_compare["modality_preserved"]
     ):
@@ -487,12 +537,14 @@ def run_gates(
     round_dir: Path,
     baseline_manuscript: str | None = None,
     baseline_review: Mapping[str, Any] | None = None,
+    alignment_baseline_available: bool = True,
 ) -> dict[str, Any]:
     charter = viewpoint_charter(dict(packet))
     unresolved = structure_unresolved_items(dict(packet))
     routes = argument_route_charter(dict(packet))
     sources = source_texts(dict(packet))
     fingerprints: dict[str, Any] = {}
+    stage_errors: list[dict[str, str]] = []
 
     delta_scope: dict[str, Any] | None = None
     if baseline_manuscript is not None:
@@ -509,17 +561,20 @@ def run_gates(
         "unresolved_items": unresolved,
         "source_originals": sources,
     }
-    if delta_scope is not None:
+    if delta_scope is not None and alignment_baseline_available:
         alignment_payload["review_scope"] = delta_scope
-    alignment, fingerprints["alignment"] = _call(
-        clients["alignment"],
-        PROMPTS / "draft_first_alignment_check.md",
-        alignment_payload,
-        ALIGNMENT_SCHEMA,
-    )
-    validate_alignment(alignment, manuscript=manuscript)
-    fingerprints["alignment"]["result_sha256"] = result_sha256(alignment)
-    _write(round_dir / "alignment.json", alignment)
+    try:
+        alignment, fingerprints["alignment"] = _call(
+            clients["alignment"], PROMPTS / "draft_first_alignment_check.md",
+            alignment_payload, ALIGNMENT_SCHEMA,
+        )
+        validate_alignment(alignment, manuscript=manuscript)
+        fingerprints["alignment"]["result_sha256"] = result_sha256(alignment)
+        _write(round_dir / "alignment.json", alignment)
+    except (CodexSubscriptionError, SourceReadingTransportExhausted) as exc:
+        alignment = None
+        stage_errors.append({"stage": "alignment", "error": str(exc)[-500:]})
+        fingerprints["alignment"] = {"status": "provider_unavailable", "model": clients["alignment"].model}
 
     blind_read, fingerprints["blind_read"] = _call(
         clients["blind_read"],
@@ -530,14 +585,20 @@ def run_gates(
     fingerprints["blind_read"]["result_sha256"] = result_sha256(blind_read)
     _write(round_dir / "blind-read.json", blind_read)
 
-    blind_compare, fingerprints["blind_compare"] = _call(
-        clients["blind_compare"],
-        PROMPTS / "draft_first_blind_compare.md",
-        {"approved_viewpoints": charter, "unresolved_items": unresolved, "blind_read": blind_read},
-        BLIND_COMPARE_SCHEMA,
-    )
-    fingerprints["blind_compare"]["result_sha256"] = result_sha256(blind_compare)
-    _write(round_dir / "blind-compare.json", blind_compare)
+    blind_compare = None
+    if alignment is not None:
+        try:
+            blind_compare, fingerprints["blind_compare"] = _call(
+                clients["blind_compare"], PROMPTS / "draft_first_blind_compare.md",
+                {"approved_viewpoints": charter, "unresolved_items": unresolved, "blind_read": blind_read},
+                BLIND_COMPARE_SCHEMA,
+            )
+            fingerprints["blind_compare"]["result_sha256"] = result_sha256(blind_compare)
+            _write(round_dir / "blind-compare.json", blind_compare)
+        except CodexSubscriptionError as exc:
+            stage_errors.append({"stage": "blind_compare", "error": str(exc)[-500:]})
+    else:
+        stage_errors.append({"stage": "blind_compare", "error": "not attempted while its provider is unavailable"})
 
     review_payload = {
         "manuscript_markdown": manuscript,
@@ -563,7 +624,8 @@ def run_gates(
     fingerprints["editorial"]["result_sha256"] = result_sha256(review)
     _write(round_dir / "editorial-review.json", review)
 
-    quote_report = verbatim_quote_report(manuscript, dict(packet))
+    quote_report = verbatim_quote_report(manuscript, dict(packet), scripture_corpus(packet))
+    backstage_report = backstage_language_report(manuscript)
     blocking = merge_blocking_findings(
         alignment=alignment,
         blind_read=blind_read,
@@ -571,23 +633,28 @@ def run_gates(
         review=review,
         review_verdict=review_verdict,
         quote_report=quote_report,
+        backstage_report=backstage_report,
     )
     outcome = {
         "manuscript_sha256": sha256_text(manuscript),
         "gate_fingerprints": fingerprints,
         "review": review,
         "quote_report": quote_report,
+        "backstage_language_report": backstage_report,
         "review_verdict": review_verdict,
         "blind_read": blind_read,
         "blind_compare": blind_compare,
         "blocking_findings": blocking,
-        "passed": not blocking,
+        "stage_errors": stage_errors,
+        "alignment_completed": alignment is not None,
+        "passed": not blocking and not stage_errors,
     }
     _write(round_dir / "outcome.json", outcome)
     return outcome
 
 
 def main() -> int:
+    from backend.pipeline.draft_first_source_reader import with_source_reading
     load_dotenv(PROJECT_ROOT / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--draft", type=Path, required=True, help="draft.md from the author runner")
@@ -613,6 +680,8 @@ def main() -> int:
         "editorial": ClaudeSubscriptionClient(model="claude-fable-5", reasoning_effort="high"),
         "revision": ClaudeSubscriptionClient(model="claude-opus-5", reasoning_effort="high"),
     }
+    for name in ("alignment", "editorial", "revision"):
+        clients[name] = with_source_reading(clients[name], packet, args.output_dir / "source-reading" / name)
     writing_rules = (PROMPTS / "draft_first_topic_author.md").read_text(encoding="utf-8")
     revision_prompt = (
         (PROMPTS / "draft_first_revision.md")
@@ -623,6 +692,7 @@ def main() -> int:
     history: list[dict[str, Any]] = []
     baseline_manuscript: str | None = None
     baseline_review: dict[str, Any] | None = None
+    alignment_baseline_available = False
     for round_number in range(MAX_REVISION_ROUNDS + 1):
         round_dir = args.output_dir / f"round-{round_number:02d}"
         outcome = run_gates(
@@ -633,7 +703,9 @@ def main() -> int:
             round_dir=round_dir,
             baseline_manuscript=baseline_manuscript,
             baseline_review=baseline_review,
+            alignment_baseline_available=alignment_baseline_available,
         )
+        alignment_baseline_available = alignment_baseline_available or outcome["alignment_completed"]
         baseline_manuscript = manuscript
         baseline_review = outcome.get("review")
         history.append(
@@ -647,25 +719,42 @@ def main() -> int:
                 "gate_fingerprints": outcome["gate_fingerprints"],
             }
         )
-        if outcome["passed"] or round_number == MAX_REVISION_ROUNDS:
+        if outcome["passed"] or round_number == MAX_REVISION_ROUNDS or (
+            outcome.get("stage_errors") and not outcome["blocking_findings"]
+        ):
             break
-        revision = clients["revision"].generate_json(
-            revision_prompt,
-            json.dumps(
-                {
-                    "manuscript_markdown": manuscript,
-                    "findings": outcome["blocking_findings"],
-                    "approved_viewpoints": viewpoint_charter(dict(packet)),
-                    "unresolved_items": structure_unresolved_items(dict(packet)),
-                    "source_originals": source_texts(dict(packet)),
-                },
-                ensure_ascii=False,
-                sort_keys=True,
-            ),
-            REVISION_SCHEMA,
+        revision_payload = json.dumps(
+            {
+                "manuscript_markdown": manuscript,
+                "findings": outcome["blocking_findings"],
+                "approved_viewpoints": viewpoint_charter(dict(packet)),
+                "unresolved_items": structure_unresolved_items(dict(packet)),
+                "source_originals": source_texts(dict(packet)),
+                "scripture_cuv": cited_verses(dict(packet)),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
         )
-        _write(round_dir / "revision.json", {"dispositions": revision["dispositions"]})
-        manuscript = str(revision["manuscript_markdown"])
+        revised: str | None = None
+        rejections: list[str] = []
+        for _attempt in range(2):
+            revision = clients["revision"].generate_json(revision_prompt, revision_payload, REVISION_SCHEMA)
+            try:
+                revised = validate_revision(manuscript, revision, outcome["blocking_findings"])
+                break
+            except DraftReviewContractError as error:
+                rejections.append(str(error))
+        _write(
+            round_dir / "revision.json",
+            {"dispositions": revision.get("dispositions") or [], "rejected_attempts": rejections},
+        )
+        if revised is None:
+            # Keep the reviewed manuscript; an empty revision is not a draft.
+            outcome.setdefault("stage_errors", []).append(
+                {"stage": "revision", "error": "; ".join(rejections)}
+            )
+            break
+        manuscript = revised
         (round_dir / "revised-draft.md").write_text(manuscript, encoding="utf-8")
 
     final = {
@@ -678,7 +767,9 @@ def main() -> int:
             args.quality_profile.read_text(encoding="utf-8")
         ),
         "rounds": history,
-        "status": "review_passed" if history[-1]["passed"] else "human_review_required",
+        "status": ("review_passed" if history[-1]["passed"] else
+                   "human_review_required" if outcome["blocking_findings"] else "provider_hold"),
+        "stage_errors": outcome.get("stage_errors", []),
         "final_manuscript_sha256": sha256_text(manuscript),
         "models": {
             name: f"{client.backend}:{client.model}" for name, client in clients.items()

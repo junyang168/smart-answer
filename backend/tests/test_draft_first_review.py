@@ -143,6 +143,34 @@ def test_clean_gates_produce_no_blocking_findings():
     assert blocking == []
 
 
+def test_provider_failure_does_not_pass_but_other_independent_checks_continue(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from backend.pipeline import draft_first_review_runner as runner
+    from backend.pipeline.codex_subscription_client import CodexSubscriptionError
+    called = []
+
+    def call(client, prompt, payload, schema):
+        called.append(prompt.name)
+        if prompt.name == "draft_first_alignment_check.md":
+            raise CodexSubscriptionError("429")
+        if prompt.name == "draft_first_blind_read.md":
+            return {"answer_in_one_sentence": "answer", "comprehension_obstacles": []}, {}
+        assert prompt.name == "draft_first_editorial_review.md"
+        return _review(), {}
+
+    monkeypatch.setattr(runner, "_call", call)
+    packet = {"focal_viewpoints": [], "source_originals": {"originals": []}}
+    outcome = runner.run_gates(manuscript=MANUSCRIPT, packet=packet, profile=_profile(),
+        clients={name: SimpleNamespace(model=name) for name in ["alignment", "blind_read", "blind_compare", "editorial"]},
+        round_dir=tmp_path)
+    assert outcome["passed"] is False
+    assert outcome["blocking_findings"] == []
+    assert outcome["alignment_completed"] is False
+    assert {e["stage"] for e in outcome["stage_errors"]} == {"alignment", "blind_compare"}
+    assert "draft_first_editorial_review.md" in called
+    assert "draft_first_blind_compare.md" not in called
+
+
 def test_unresolved_items_reach_every_payload():
     """#291: the structure's unresolved list must travel with the charter."""
 
@@ -387,3 +415,147 @@ def test_author_payload_carries_routes_and_layered_license():
     assert "路线是骨架不是上限" in rules
     alignment = (prompts / "draft_first_alignment_check.md").read_text()
     assert "polarity 为 denied 的立场不得被正面断言" in alignment
+
+
+def test_backstage_language_flags_production_words_and_sermon_location_tags():
+    from backend.pipeline.draft_first_author_runner import backstage_language_report
+
+    # Phrasings taken from the #439 drafts the owner and the blind review rejected.
+    manuscript = "\n".join(
+        [
+            "# 標題",
+            "這兩種說法，材料裡各自站立。母本列了幾處平行經文。",
+            "講提多書時他說「在聖經裡面沒有任何一個人來叫耶穌叫The Son of Man」。",
+            "王守仁教授講馬太福音十六章28節時說，人子是耶穌自指。",
+        ]
+    )
+    report = backstage_language_report(manuscript)
+    assert {"材料", "各自站立", "母本"} <= set(report["backstage_terms"])
+    assert len(report["source_location_tags"]) == 2
+
+
+def test_backstage_language_exempts_footnotes_quotes_and_one_named_speaker():
+    from backend.pipeline.draft_first_author_runner import backstage_language_report
+
+    manuscript = "\n".join(
+        [
+            "# 標題",
+            "耶穌講這比喻時，門徒並不明白。王教授說得很直接：「這個人子是耶穌基督。」",
+            "> 我看見天開了、人子站在神的右邊。",
+            "這個稱號只由耶穌說出。[^1]",
+            "[^1]: 編者注：另有講義明列司提反為例外；本文保留兩種說法，不推定後期修正。",
+        ]
+    )
+    report = backstage_language_report(manuscript)
+    assert report == {
+        "backstage_terms": [],
+        "source_location_tags": [],
+        "professor_mentions": 1,
+    }
+
+
+def test_backstage_findings_block_after_quote_check():
+    blocking = merge_blocking_findings(
+        blind_read={"comprehension_obstacles": []},
+        alignment={"findings": []},
+        blind_compare=None,
+        review=_review(findings=[]),
+        review_verdict={"dimensions_below_minimum": [], "hard_failures_failed": []},
+        quote_report={"quotes_failing": []},
+        backstage_report={
+            "backstage_terms": ["母本"],
+            "source_location_tags": ["講提多書時他"],
+            "professor_mentions": 9,
+        },
+    )
+    assert [(item["gate"], item["kind"]) for item in blocking] == [
+        ("backstage_check", "backstage_language"),
+        ("backstage_check", "source_location_tag"),
+    ]
+
+
+def _scripture_packet():
+    return {
+        "source_originals": {
+            "originals": [
+                {"content": "約5:27這裡人子沒有定冠詞。看哪、我們上耶路撒冷去、人子要被交給祭司長和文士。"}
+            ]
+        }
+    }
+
+
+def _chapters(book, number):
+    assert (book, number) == ("JHN", 5)
+    return {
+        "26": "因為父怎樣在自己有生命，就賜給他兒子也照樣在自己有生命，",
+        "27": "並且因為他是人子，就賜給他行審判的權柄。",
+    }
+
+
+def test_scripture_blocks_may_match_cuv_but_inline_quotes_stay_sermon_only():
+    """#439: the rule demands the full verse; the professor only cited 約5:27."""
+
+    from backend.pipeline.draft_first_author_runner import verbatim_quote_report
+    from backend.pipeline.draft_first_scripture import cited_verses, scripture_corpus
+
+    packet = _scripture_packet()
+    corpus = scripture_corpus(packet, chapter=_chapters)
+    manuscript = "\n".join(
+        [
+            "# 標題",
+            "> 並且因為他是人子、就賜給他行審判的權柄。",
+            "> 因為父怎樣在自己有生命……就賜給他行審判的權柄。",
+            "> 看哪、我們上耶路撒冷去、人子要被交給祭司長和文士。",
+            "> 並且因為祂是人子，就賜給祂審判的權柄。",
+            "文章說「並且因為他是人子，就賜給他行審判的權柄」。",
+        ]
+    )
+    report = verbatim_quote_report(manuscript, packet, corpus)
+    # Punctuation differs between editions; words do not.
+    assert report["scripture_quotes"] == [
+        "並且因為他是人子、就賜給他行審判的權柄。",
+        "因為父怎樣在自己有生命……就賜給他行審判的權柄。",
+    ]
+    assert report["quotes_failing"] == [
+        "並且因為他是人子，就賜給他行審判的權柄",
+        "並且因為祂是人子，就賜給祂審判的權柄。",
+    ]
+    assert list(report["scripture_chapters"]) == ["JHN/5"]
+    assert cited_verses(packet, chapter=_chapters) == [
+        {"reference": "jhn-5-27", "text": "並且因為他是人子，就賜給他行審判的權柄。"}
+    ]
+
+
+def test_viewpoint_charter_marks_viewpoints_without_a_full_route():
+    from backend.pipeline.draft_first_author_runner import viewpoint_charter
+
+    packet = {
+        "focal_viewpoints": [
+            {"structure_role": "central_claim", "revision": {"viewpoint_revision_id": "R1"}},
+            {"structure_role": "qualification", "revision": {"viewpoint_revision_id": "R2"}},
+        ],
+        "argument_routes": [
+            {"revision": {"validated_against_conclusion_viewpoint_revision_id": "R1"}, "full_attestation_count": 0},
+            {"revision": {"validated_against_conclusion_viewpoint_revision_id": "R2"}, "full_attestation_count": 1},
+        ],
+    }
+    assert [item["has_full_route"] for item in viewpoint_charter(packet)] == [False, True]
+
+
+def test_placeholder_revision_is_rejected():
+    """#439: opus returned the H1 plus PLACEHOLDER and no dispositions."""
+
+    from backend.pipeline.draft_first_review_runner import validate_revision
+
+    before = "# 標題\n\n" + "正文。" * 200
+    findings = [{"gate": "editorial_review"}, {"gate": "blind_read"}]
+    with pytest.raises(DraftReviewContractError, match="dispositions"):
+        validate_revision(before, {"manuscript_markdown": "# 標題\nPLACEHOLDER", "dispositions": []}, findings)
+    with pytest.raises(DraftReviewContractError, match="shrank"):
+        validate_revision(
+            before,
+            {"manuscript_markdown": "# 標題\nPLACEHOLDER", "dispositions": [{}, {}]},
+            findings,
+        )
+    revised = before.replace("正文。", "正文！", 1)
+    assert validate_revision(before, {"manuscript_markdown": revised, "dispositions": [{}, {}]}, findings) == revised

@@ -216,6 +216,8 @@ def main() -> int:
     paragraphs = reader_paragraphs(manuscript)
 
     client = CodexSubscriptionClient(model=args.model, reasoning_effort=args.reasoning_effort)
+    from backend.pipeline.draft_first_source_reader import with_source_reading
+    client = with_source_reading(client, packet, args.output.parent / "binding-source-reading")
     proposed = client.generate_json(
         PROMPT_PATH.read_text(encoding="utf-8"),
         json.dumps(
@@ -241,6 +243,7 @@ def main() -> int:
         "evidence_packet_sha256": packet.get("evidence_packet_sha256"),
         "model": client.model,
         "backend": client.backend,
+        "source_reading": getattr(client, "source_reading_receipt", None),
         "paragraphs_total": len(paragraphs),
         "paragraphs_bound": bound,
         "bindings": result["bindings"],

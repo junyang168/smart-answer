@@ -19,7 +19,7 @@ import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from dotenv import load_dotenv
 
@@ -27,6 +27,8 @@ from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
 from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 from backend.pipeline.matthew_exposition_authoring import sha256_text
+from backend.pipeline.draft_first_scripture import cited_verses, matches_scripture, scripture_corpus
+from backend.pipeline.draft_first_source_reader import with_source_reading
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PROMPT_PATH = Path(__file__).with_name("prompts") / "draft_first_topic_author.md"
@@ -46,18 +48,31 @@ DRAFT_SCHEMA: dict[str, Any] = {
 def viewpoint_charter(packet: dict[str, Any]) -> list[dict[str, Any]]:
     """The approved position list, reduced to what a writer needs."""
 
+    # A viewpoint with no fully attested route is where splicing happens: the
+    # writer has to find an order in the sermons, and the runner's 「錯了99.9%」
+    # hard failure was two sermons stitched into one (#439). Say which ones.
+    routed = {
+        (bundle.get("revision") or {}).get("validated_against_conclusion_viewpoint_revision_id")
+        for bundle in packet.get("argument_routes") or []
+        if bundle.get("full_attestation_count")
+    }
     charter: list[dict[str, Any]] = []
     for focal in packet["focal_viewpoints"]:
         revision = focal["revision"]
         signature = revision.get("proposition_signature") or {}
+        revision_id = revision.get("viewpoint_revision_id") or focal.get("viewpoint", {}).get(
+            "current_revision_id"
+        )
         charter.append(
             {
                 "structure_role": focal.get("structure_role"),
-                "viewpoint_revision_id": revision.get("viewpoint_revision_id")
-                or focal.get("viewpoint", {}).get("current_revision_id"),
+                "viewpoint_revision_id": revision_id,
+                "has_full_route": revision_id in routed,
                 "core_proposition": revision.get("core_proposition"),
                 "modality": signature.get("modality"),
                 "polarity": signature.get("polarity"),
+                "conditions": signature.get("conditions") or [],
+                "scope": revision.get("scope") or {},
             }
         )
     return charter
@@ -73,7 +88,11 @@ def structure_unresolved_items(packet: dict[str, Any]) -> list[str]:
     """
 
     revision = (packet.get("structure") or {}).get("revision") or {}
-    return [str(item) for item in revision.get("unresolved_items") or []]
+    items = [str(item) for item in revision.get("unresolved_items") or []]
+    for relation in packet.get("relations") or []:
+        if relation.get("relation_type") == "tensions_with" and relation.get("effective_state", "active") == "active":
+            items.append(str(relation.get("reason") or relation))
+    return items
 
 
 def argument_route_charter(packet: dict[str, Any]) -> list[dict[str, Any]]:
@@ -139,8 +158,53 @@ def source_texts(packet: dict[str, Any]) -> list[dict[str, str]]:
     ]
 
 
-def verbatim_quote_report(manuscript: str, packet: dict[str, Any]) -> dict[str, Any]:
-    """The one objective signal this card keeps: quotes must be verbatim."""
+BACKSTAGE_TERMS = (
+    "母本", "讲义", "講義", "材料", "本文", "各自站立",
+    "后期修正", "後期修正", "一般惯例", "一般慣例",
+)
+# 「講提多書時他說」「教授講馬太福音十六章時說」: locating the professor's words
+# sermon by sermon in the body, which the source bindings already carry.
+SOURCE_LOCATION_TAG = re.compile(
+    r"(?:教授|他)[^，。「」\n]{0,6}[讲講][^，。「」\n]{1,12}[时時]"
+    r"|[讲講][^，。「」\n]{1,12}[时時]，?(?:他|教授)"
+)
+
+
+def backstage_language_report(manuscript: str) -> dict[str, Any]:
+    """Writing rule 9, mechanically: the body speaks in the editor's voice.
+
+    Footnote definitions (the signed 编者注) and blockquoted Scripture are
+    exempt, and so is anything inside 「」, which is a quotation or a term
+    mention rather than the article's own voice. Backstage terms and sermon
+    location tags block; the bare count of 教授 is reported for the reader,
+    because naming the speaker once before a verbatim quote is allowed.
+    """
+
+    body = "\n".join(
+        line
+        for line in manuscript.splitlines()
+        if not line.startswith("[^") and not line.startswith(">")
+    )
+    voice = re.sub(r"「[^」]*」", "", body)
+    terms = [term for term in BACKSTAGE_TERMS if term in voice]
+    tags = [match.group(0) for match in SOURCE_LOCATION_TAG.finditer(voice)]
+    return {
+        "backstage_terms": terms,
+        "source_location_tags": tags,
+        "professor_mentions": voice.count("教授"),
+    }
+
+
+def verbatim_quote_report(
+    manuscript: str, packet: dict[str, Any], scripture: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
+    """The one objective signal this card keeps: quotes must be verbatim.
+
+    Inline 「」 quotes are his words and match the sermons only. A quote block
+    may instead match the 和合本 text of a chapter the sources cite
+    (`scripture`, from `draft_first_scripture.scripture_corpus`): the rule
+    demands the full verse, and the professor seldom reads it out whole.
+    """
 
     corpus = "\n".join(
         str(item.get("content")) for item in packet["source_originals"]["originals"]
@@ -154,16 +218,25 @@ def verbatim_quote_report(manuscript: str, packet: dict[str, Any]) -> dict[str, 
         for value in re.findall(r"「([^」]+)」", manuscript)
         if len(value.strip()) >= 8
     ]
-    quotes += [
+    block_quotes = [
         line[2:].strip()
         for line in manuscript.splitlines()
         if line.startswith("> ") and not line.startswith("> ——")
     ]
     checked = [
-        {"quote": quote, "verbatim": quote in corpus}
+        {"quote": quote, "verbatim": quote in corpus, "matched": "sermon"}
         for quote in quotes
         if quote
     ]
+    for quote in block_quotes:
+        if not quote:
+            continue
+        if quote in corpus:
+            checked.append({"quote": quote, "verbatim": True, "matched": "sermon"})
+        elif scripture is not None and matches_scripture(quote, scripture):
+            checked.append({"quote": quote, "verbatim": True, "matched": "cuv"})
+        else:
+            checked.append({"quote": quote, "verbatim": False, "matched": None})
     # Readability rule the owner set after the keys article shipped a
     # full-verse quotation inline (the rock article had block-quoted its
     # verses by luck, not by rule): a quotation long enough to be a full
@@ -186,11 +259,15 @@ def verbatim_quote_report(manuscript: str, packet: dict[str, Any]) -> dict[str, 
         quote = match.group(1).strip()
         if quote and quote not in blockquoted and quote not in long_inline:
             long_inline.append(quote)
-    return {
+    report = {
         "quotes_checked": len(checked),
         "quotes_failing": [item["quote"] for item in checked if not item["verbatim"]],
         "long_quotes_not_blockquoted": long_inline,
+        "scripture_quotes": [item["quote"] for item in checked if item["matched"] == "cuv"],
     }
+    if scripture is not None:
+        report["scripture_chapters"] = dict(scripture["chapters"])
+    return report
 
 
 def main() -> int:
@@ -202,9 +279,9 @@ def main() -> int:
         "--audience",
         # A thin label made the author mirror its sources' seminary register
         # (bare verse numbers, untranslated Greek); the profile says what the
-        # reader does not bring, and rule 13 tells the author to write to it.
+        # reader does not bring, and rule 8 tells the author to write to it.
         default=(
-            "神学生和追求的老基督徒。他们有圣经常识——知道摩西五经、先知书、使徒行传是什么，"
+            "神学生和追求的基督徒。他们有圣经常识——知道摩西五经、先知书、使徒行传是什么，"
             "认得利未记、认得拉比这类词，不需要从头解释；但不滚瓜烂熟，"
             "记不住某章某节具体讲了什么、上下文是什么。多数人不懂希腊文。"
         ),
@@ -214,7 +291,7 @@ def main() -> int:
         "--series-context",
         type=Path,
         help="JSON of sibling essays in the series: reader questions, one-line "
-        "answers, claimed arguments; rule 6 keeps this essay from re-arguing them",
+        "answers, claimed arguments; rule 7 keeps this essay from re-arguing them",
     )
     parser.add_argument(
         "--provider",
@@ -237,6 +314,7 @@ def main() -> int:
         "unresolved_items": structure_unresolved_items(packet),
         "argument_routes": argument_route_charter(packet),
         "source_originals": source_texts(packet),
+        "scripture_cuv": cited_verses(packet),
     }
     if args.series_context:
         payload["series_context"] = json.loads(
@@ -248,6 +326,7 @@ def main() -> int:
         CodexSubscriptionClient if args.provider == "codex" else ClaudeSubscriptionClient
     )
     client = client_type(model=args.model, reasoning_effort=args.reasoning_effort)
+    client = with_source_reading(client, packet, args.output_dir / "source-reading")
     result = client.generate_json(prompt, payload_json, DRAFT_SCHEMA)
     manuscript = str(result["manuscript_markdown"])
     # A model occasionally nests the envelope: the field's value is itself a
@@ -277,7 +356,9 @@ def main() -> int:
         "reasoning_effort": client.reasoning_effort,
         "manuscript_sha256": sha256_text(manuscript),
         "manuscript_chars": len(manuscript),
-        "quote_report": verbatim_quote_report(manuscript, packet),
+        "quote_report": verbatim_quote_report(manuscript, packet, scripture_corpus(packet)),
+        "backstage_language_report": backstage_language_report(manuscript),
+        "source_reading": getattr(client, "source_reading_receipt", None),
     }
     record["run_sha256"] = sha256_json(record)
     (args.output_dir / "run.json").write_text(

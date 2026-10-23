@@ -177,6 +177,7 @@ def build_scoped_source_originals(
     *,
     reader: SourceOriginalReader | None = None,
     max_total_characters: int = MAX_DIRECT_SOURCE_ORIGINAL_CHARACTERS,
+    delivery_mode: str = "complete_originals_in_context",
 ) -> dict[str, Any]:
     """Compile every complete scoped transcript/manuscript for runtime roles."""
 
@@ -235,8 +236,9 @@ def build_scoped_source_originals(
         for item in originals
     ]
     total_character_count = sum(int(item["character_count"]) for item in originals)
+    _require(delivery_mode in {"complete_originals_in_context", "source_library"}, "unknown source delivery mode")
     _require(
-        total_character_count <= max_total_characters,
+        delivery_mode == "source_library" or total_character_count <= max_total_characters,
         "complete scoped originals exceed the direct context limit; "
         "batched source reading is required before generation",
     )
@@ -254,7 +256,7 @@ def build_scoped_source_originals(
             ),
             "total_character_count": total_character_count,
             "direct_context_limit_characters": max_total_characters,
-            "delivery_mode": "complete_originals_in_context",
+            "delivery_mode": delivery_mode,
             "overflow_policy": "stop_before_generation_pending_batched_reading",
             "truncation_allowed": False,
         },
@@ -315,7 +317,7 @@ def validate_scoped_source_originals(
         == sum(item.get("source_type") == "notes_manuscript" for item in originals)
         and coverage.get("total_character_count")
         == sum(int(item.get("character_count") or 0) for item in originals)
-        and coverage.get("delivery_mode") == "complete_originals_in_context"
+        and coverage.get("delivery_mode") in {"complete_originals_in_context", "source_library"}
         and coverage.get("truncation_allowed") is False,
         "scoped source original coverage mismatch",
     )
@@ -512,6 +514,8 @@ def compile_theological_evidence_packet(
     scope: Mapping[str, Any],
     records: Mapping[str, Sequence[Mapping[str, Any]]],
     source_original_reader: SourceOriginalReader | None = None,
+    editorial_selection: Mapping[str, Any] | None = None,
+    source_delivery_mode: str = "complete_originals_in_context",
 ) -> dict[str, Any]:
     """Compile the exact reviewed graph one draft-first Author may inspect.
 
@@ -529,6 +533,31 @@ def compile_theological_evidence_packet(
     }
 
     revision_id = str(scope["structure_revision_id"])
+    if editorial_selection is not None:
+        _require(editorial_selection.get("selection_id") == revision_id, "editorial selection/scope mismatch")
+        _require(editorial_selection.get("attribution") == "church_editor", "selection must be editorial")
+        _require(bool(editorial_selection.get("decision_basis")), "selection must record its editorial decision basis")
+        # Selecting already-approved records for an article is not approving a
+        # new knowledge structure. Nothing here is written back to the Registry.
+        structure_revision = dict(editorial_selection)
+        structure = {"selection_id": revision_id, "attribution": "church_editor"}
+    else:
+        structure, structure_revision = _approved_structure(indexes, revision_id)
+
+    focal_rows = list(structure_revision.get("focal_viewpoints") or [])
+    _require(bool(focal_rows), "structure has no focal viewpoints")
+    _unique(
+        [str(item.get("viewpoint_revision_id") or "") for item in focal_rows],
+        "structure focal viewpoint revisions",
+    )
+
+    return _compile_selected_graph(
+        scope, indexes, structure, structure_revision, focal_rows,
+        source_original_reader, source_delivery_mode, editorial_selection is not None,
+    )
+
+
+def _approved_structure(indexes: Mapping[str, Any], revision_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
     structure_revision = indexes.get("viewpoint_structure_revisions", {}).get(
         revision_id
     )
@@ -550,12 +579,19 @@ def compile_theological_evidence_packet(
         f"structure is not approved: {structure_id}",
     )
 
-    focal_rows = list(structure_revision.get("focal_viewpoints") or [])
-    _require(bool(focal_rows), "structure has no focal viewpoints")
-    focal_revision_ids = _unique(
-        [str(item.get("viewpoint_revision_id") or "") for item in focal_rows],
-        "structure focal viewpoint revisions",
-    )
+    return structure, structure_revision
+
+
+def _compile_selected_graph(
+    scope: Mapping[str, Any],
+    indexes: Mapping[str, Mapping[str, dict[str, Any]]],
+    structure: Mapping[str, Any],
+    structure_revision: Mapping[str, Any],
+    focal_rows: Sequence[Mapping[str, Any]],
+    source_original_reader: SourceOriginalReader | None,
+    source_delivery_mode: str,
+    is_editorial_selection: bool,
+) -> dict[str, Any]:
 
     active_links_by_viewpoint: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for link in indexes.get("viewpoint_claim_links", {}).values():
@@ -778,11 +814,12 @@ def compile_theological_evidence_packet(
             if relation.get("source_viewpoint_id") in selected_viewpoint_ids
             and relation.get("target_viewpoint_id") in selected_viewpoint_ids
             and relation.get("review_status") in APPROVED
+            and relation.get("effective_state", "active") == "active"
         ],
         key=lambda item: str(item["viewpoint_relation_id"]),
     )
 
-    dependency_rows: list[tuple[str, Mapping[str, Any]]] = [
+    dependency_rows: list[tuple[str, Mapping[str, Any]]] = [] if is_editorial_selection else [
         ("viewpoint_structures", structure),
         ("viewpoint_structure_revisions", structure_revision),
     ]
@@ -839,6 +876,7 @@ def compile_theological_evidence_packet(
         "source_originals": build_scoped_source_originals(
             sources,
             reader=source_original_reader,
+            delivery_mode=source_delivery_mode,
         ),
         "relations": relations,
         "compiler_findings": findings,
