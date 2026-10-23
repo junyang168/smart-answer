@@ -19,6 +19,8 @@
 5. `claims`：教授明确主张或由本篇论证直接得出的结论；编辑归纳必须标成 `editorial_inference`。
 6. `relations`：证据步骤之间及主张之间的支持、回答、限定、应用、反驳和语境关系。
 
+最小判断规则：一条 Claim 是可以单独被支持、反对或限定的最小判断。论证中途教授明确断言、可以单独成立或被反驳的判断（例如「耶穌每次講『人子』都加定冠詞」「耶穌從來沒有說 a son of man」），即使它同时是另一条结论的根据，也要另立一条 Claim，并让承载它的 evidence_step 的 `produced_claim_ids` 同时列出两条 Claim；不要只把它写进 evidence_step、让它从论证层消失。不要把两个可以分别反驳的判断压进同一条 statement。evidence_step 与 claim 的 statement 都要保留教授自己说出的范围或排他限定（「每次」「從來沒有」「唯一」「都」），不可在转述时删掉。
+
 归属规则：
 
 - 教授自己的断言才可用 `speaker=professor, stance=asserted`。

@@ -224,3 +224,27 @@ def test_changed_source_invalidates_only_affected_completed_group_in_same_transa
     assert previous['checkpoint']=='applied' and previous['revisit_required'] is True
     assert previous['independent_audit_complete'] is False
     assert previous['pending_audit_from_change_set_ids']==[later.change_set_id]
+
+
+def test_indexable_reference_batches_match_recursive_equality_for_nested_object_payloads(postgres_store):
+    import json
+    ids=['needle-'+str(i) for i in range(19)]+['quoted"\\needle']
+    payloads=[{'source_id':'query-'+str(i),'title':'reference test','source_type':'sermon_transcript',
+        'extension':{'record_ids':[[ids[i]]], 'nested':[{'record_id':ids[i]}],
+                     'plain_text':'prefix '+ids[i]+' suffix'}} for i in range(len(ids))]
+    postgres_store.apply_plan(postgres_store.plan_package({'package_id':'reference-query-counterexamples',
+                                                         'source_documents':payloads}))
+    with postgres_store.connect() as conn,conn.cursor() as cursor:
+        paths=['$.** ? (@ == '+json.dumps(i)+')' for i in ids]
+        cursor.execute("SELECT collection,object_id,payload FROM wang_knowledge.objects WHERE retired_at IS NULL "
+            "AND collection=ANY(%s) AND payload @? ANY(%s::jsonpath[]) ORDER BY collection,object_id",(['source_documents'],paths))
+        old=cursor.fetchall()
+        new=postgres_store._reference_consumers(cursor,ids+ids[:3],['source_documents'])
+        assert new==old and len(new)==len(ids)
+        assert postgres_store._reference_consumers(cursor,[],['source_documents'])==[]
+        assert postgres_store._reference_consumers(cursor,ids,[])==[]
+        assert postgres_store._reference_consumers(cursor,['absent'],['source_documents'])==[]
+        for payload in [{'ids':[['needle']]},{'nested':[{'record_id':'needle'}]},{'v':['needle']}, {'v':'needle'},{'v':'prefix needle'}]:
+            cursor.execute('SELECT %s::jsonb @? %s::jsonpath, %s::jsonb @? %s::jsonpath',
+                (json.dumps(payload),'$.** ? (@ == "needle")',json.dumps(payload),'$.**.* ? (@ == "needle")'))
+            left,right=cursor.fetchone();assert left==right

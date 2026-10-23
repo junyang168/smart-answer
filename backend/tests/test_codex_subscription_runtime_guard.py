@@ -201,3 +201,52 @@ def test_release_runtime_consumption_never_generates_diagnostic(tmp_path,monkeyp
             consume_saved_runtime(client,result)
     else:
         assert consume_saved_runtime(client,result)['new_model_calls']==0
+
+
+@pytest.mark.parametrize('drift', [None, 'login', 'binary', 'model', 'path',
+                                  'previous', 'proof', 'missing', 'owner', 'direction'])
+def test_explicit_canonical_renewal_consumes_exact_proof_without_new_call(tmp_path, monkeypatch, drift):
+    import copy
+    import json
+    from backend.pipeline import viewpoint_s201129_source_continuation as mod
+    from backend.pipeline.cvp_sql_flow import binding
+
+    home = tmp_path/'home'; home.mkdir(); (home/'auth.json').write_text('renewed login')
+    client = m.CodexSubscriptionClient(model='gpt-6.1-sol', reasoning_effort='high',
+                                      environment={'CODEX_HOME': str(home)})
+    client.cli_identity = {'path': '/same/codex', 'file_sha256': 'renewed binary'}
+    monkeypatch.setattr(client, '_verify_chatgpt_login', lambda: None)
+    calls = []
+    monkeypatch.setattr(client, 'generate_json', lambda *a, **k: calls.append(True) or {'ok': True})
+    verified = verify_runtime(client, tmp_path/'proofs')
+    old = copy.deepcopy(verified)
+    old['identity']['login_state_sha256'] = 'previous login'
+    old['identity']['cli']['file_sha256'] = 'previous binary'
+    monkeypatch.setattr(mod.repair, 'BASE', tmp_path)
+    previous = tmp_path/'s201129-owner-local-reextraction-20261005-v2/runtime-proof.json'
+    previous.parent.mkdir(); previous.write_text(json.dumps(old))
+    renewal = {'schema_version': 'codex_runtime_renewal.v1', 'authorized_by': 'owner',
+               'owner_direction': 'Use current login and one startup verification.',
+               'previous_runtime': binding(previous), 'current_runtime': verified,
+               'current_proof': binding(verified['proof_path'])}
+    if drift == 'login': (home/'auth.json').write_text('another login')
+    elif drift == 'binary': client.cli_identity['file_sha256'] = 'another binary'
+    elif drift == 'model': verified['identity']['model'] = 'another model'
+    elif drift == 'path': verified['identity']['cli']['path'] = '/foreign/codex'
+    elif drift == 'previous': renewal['previous_runtime']['file_sha256'] = '0'*64
+    elif drift == 'proof': m.Path(verified['proof_path']).write_text('{}')
+    elif drift == 'missing': m.Path(verified['proof_path']).unlink()
+    elif drift == 'owner': renewal['authorized_by'] = 'model'
+    elif drift == 'direction': renewal['owner_direction'] = ''
+    path = tmp_path/'renewal.json'; path.write_text(json.dumps(renewal))
+    monkeypatch.setenv('WKP_CODEX_RUNTIME_RENEWAL', str(path))
+    monkeypatch.setattr(m, 'CodexSubscriptionClient', lambda **kw: client)
+    monkeypatch.setattr(client, 'generate_json', lambda *a, **k: pytest.fail('no diagnostic fallback'))
+    if drift:
+        with pytest.raises((ValueError, RuntimeError, FileNotFoundError)):
+            mod.canonical_runtime()
+    else:
+        result = mod.canonical_runtime()
+        assert result['reused'] and result['new_model_calls'] == 0
+        assert mod.canonical_runtime() == result
+    assert calls == [True]

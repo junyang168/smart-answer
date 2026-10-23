@@ -44,10 +44,9 @@ def maintenance_lock():
     import fcntl
     with (recovery / "recovery.lock").open("r+") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        try:
-            yield
-        finally:
-            fcntl.flock(lock, fcntl.LOCK_UN)
+        # Closing releases the lock after the final inherited descriptor closes.
+        # A batch worker can keep it across coordinator death without a gap.
+        yield lock
 
 
 def model_adapter(stage: str, *, live: bool = False, deferred: bool = False, issue: bool = False, scope: bool = False,
@@ -87,6 +86,49 @@ def model_adapter(stage: str, *, live: bool = False, deferred: bool = False, iss
             "source_reconciliation_review_v1" if review else "deferred_claim_json_records_v1" if deferred else "source_reconciliation_proposal_v1",
         compact_payload=True, shared_text_payload=True, shared_record_payload=True)
     adapter.max_request_bytes = 500000
+    return adapter
+
+
+def claim_management_model_adapter(role, policy, *, live=False):
+    """The new content contract shares the existing subscription transport."""
+    from backend.pipeline.claim_management import JsonCandidate, AdjudicatingJsonCandidate, Review, JointJsonCandidate, JointReview, MODELS
+    if role not in {"gpt", "opus"}:
+        raise ValueError("independent Gemini audit uses audit-library's own transport")
+    model, _ = MODELS[role]
+    client = subscription_client("codex" if role == "gpt" else "claude", model, "high") if live else SimpleNamespace(
+        model=model, backend=MODELS[role][1], reasoning_effort="high",
+        max_output_tokens=policy.budget.max_output_tokens)
+    client.max_output_tokens = policy.budget.max_output_tokens
+    prompt = semantic_prompt((PROMPTS / ("claim_management_proposal_v2.md" if role == "gpt"
+                                          else "claim_management_review_v2.md")).read_text())
+    if role == 'gpt':
+        prompt += '\n输出采用无损 JSON 协议：records 每条 payload_json 为完整后像的 JSON 字符串；replacements_json 为完整 replacements 字典的 JSON 字符串（无替换时为 {}）。程序解析后仍执行完整 Candidate 权限、来源与处置验证，不删字段。'
+    if role == 'gpt' and policy.all_findings_to_gpt:
+        prompt += '\n所有审计异议必须逐项判定：finding_resolutions 对 unresolved 的每个 finding_id 恰好一次，带完整原文逐字引文。resolved 表示通过实际修正或有据否决解决，未改内容须在 reason 中明确反驳依据；persistent 表示认可问题仍未解决，不把 Opus 的验收条件当修改命令。不能跳过无关上下文异议。只写 request 授权字段；缺权限仍须给出判定及所需修正，不能擅自写。Review 操作只作判断，operation 保持 Review、所有 dispositions 保留 retain。'
+    joint = policy.joint_update_contract is not None
+    if joint:
+        prompt += '\n' + semantic_prompt((PROMPTS / 'claim_management_joint_update_v1.md').read_text())
+    response_model = (AdjudicatingJsonCandidate if policy.all_findings_to_gpt else JsonCandidate) if role == 'gpt' else Review
+    schema_name = 'claim_management_candidate_v2' if role == 'gpt' else 'claim_management_review_v2'
+    if joint:
+        response_model = JointJsonCandidate if role == 'gpt' else JointReview
+        schema_name = 'claim_management_joint_candidate_v1' if role == 'gpt' else 'claim_management_joint_review_v1'
+    if policy.model_output_contract:
+        from backend.pipeline.claim_model_output import Changes, FindingsReview
+        response_model = Changes if role == 'gpt' else FindingsReview
+        schema_name = 'claim_changes_v1' if role == 'gpt' else 'claim_findings_review_v1'
+        version = 'v2' if policy.model_output_contract == 'claim_changes_v2' else 'v1'
+        prompt = semantic_prompt((PROMPTS / ('claim_management_compact_' + version + '.md')).read_text()) + ('\n你是提议者，输出 Changes。' if role == 'gpt' else '\n你是独立 Opus 审阅者，输出 FindingsReview。')
+    if policy.evidence_review_contract:
+        from backend.pipeline.claim_evidence_review import BindingFindingsReview
+        prompt += '\n' + semantic_prompt((PROMPTS / 'claim_own_evidence_v1.md').read_text())
+        if role == 'opus':
+            response_model = BindingFindingsReview
+            schema_name = 'claim_own_evidence_review_v1'
+    adapter = StructuredJsonReviewerAdapter(client=client, prompt=prompt,
+        response_model=response_model, schema_name=schema_name,
+        compact_payload=True, shared_text_payload=True, shared_record_payload=True)
+    adapter.max_request_bytes = policy.budget.max_request_bytes
     return adapter
 
 
@@ -218,19 +260,41 @@ class ProductionPorts:
     def scope_adapter(self, stage: str):
         return model_adapter(stage, live=True, scope=True)
 
+    def claim_management_adapter(self, role, policy):
+        """Explicit v2 contract; historical proposal/review prompts stay intact."""
+        return claim_management_model_adapter(role, policy, live=True)
+
+    def claim_management_audit(self, root, audit_input):
+        """Existing standalone auditor reads current SQL and own physical files."""
+        root = Path(root).resolve()
+        destination = root / 'independent-audit'
+        destination.mkdir(parents=True, exist_ok=True)
+        env = {**os.environ, 'KNOWLEDGE_DATABASE_URL': self.store.database_url}
+        with (destination / 'stdout.log').open('w') as out, (destination / 'stderr.log').open('w') as err:
+            result = subprocess.run([str(PROJECT / 'backend/.venv/bin/python'), 'scripts/audit-library.py',
+                '--layers', '3', '--scope', 'all', '--model', audit_input.get('model', 'gemini-3.8-flash'),
+                '--claim-management-input', str(root / 'audit-input.json'), '--out', str(destination),
+                '--no-status-file', '--preserve-full-context'], cwd=PROJECT, env=env, stdout=out, stderr=err)
+        if result.returncode:
+            raise ValueError('independent Claim audit failed; inspect saved logs before recovery')
+
     def before_model_call(self, stage: str) -> None:
         # Cached responses do not run model/auth diagnostics. A new actual
         # invocation needs the committed implementation and physical backup
         # environment too, not only a check after the models have finished.
         self._environment_guard()
 
+    def before_claim_model_call(self, role: str) -> None:
+        self._environment_guard(require_backup=False)
+
     def plan(self, package: dict) -> dict:
         return json.loads(json.dumps(self.store.plan_package(package, source_kind=contract.VERSION).as_dict()))
 
     def backup(self, root: Path) -> dict:
         self._environment_guard()
-        completed = subprocess.run(["scripts/backup-registry.sh", "before-source-357-" + contract.sha256_json(str(root))[:32]],
-            cwd=PROJECT, capture_output=True, text=True, check=True)
+        completed = subprocess.run(['scripts/backup-registry.sh', 'before-source-357-' + contract.sha256_json(str(root))[:32]],
+            cwd=PROJECT, env={**os.environ, 'KNOWLEDGE_DATABASE_URL': self.store.database_url},
+            capture_output=True, text=True, check=True)
         match = re.search(r"backup-registry: wrote (.+\.dump) \(", completed.stdout)
         if not match:
             raise ValueError("backup did not identify the actual dump")
@@ -244,7 +308,7 @@ class ProductionPorts:
         return {"dump": binding(path), "restore_catalog_nonempty": True,
                 "catalog_sha256": hashlib.sha256(listing.stdout).hexdigest(), "restore_list_exit_code": listing.returncode}
 
-    def _environment_guard(self, *, planned_snapshot_bytes=0):
+    def _environment_guard(self, *, planned_snapshot_bytes=0, require_backup=True):
         if subprocess.check_output(["git", "status", "--porcelain"], cwd=PROJECT, text=True).strip():
             raise ValueError("committed clean implementation required before production apply")
         if shutil.disk_usage(PROJECT).free < 2 * 1024**3:
@@ -252,8 +316,9 @@ class ProductionPorts:
         if shutil.disk_usage(PROJECT).free < 2*1024**3 + planned_snapshot_bytes*2:
             raise ValueError('insufficient disk for planned snapshot plus verification reserve')
         # Preserve the owner's SSD requirement and UUID/archive validation.
-        from backend.pipeline.viewpoint_backup_archive import verify_volume
-        verify_volume()
+        if require_backup:
+            from backend.pipeline.viewpoint_backup_archive import verify_volume
+            verify_volume()
 
     def committed(self, plan: dict) -> bool:
         with self.store.connect() as conn, conn.cursor() as cursor:

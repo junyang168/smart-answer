@@ -131,7 +131,7 @@ Claim 可已修复而 CVP pending，CVP 单项也可已提交而完整管理未�
 
 ## 9. 共同执行与端到端验收
 
-沿用 [现有共同 SQL 流程](./cvp_transaction_workflow_v2.md) 的 store、runner、短 transaction、实际完整 RETURNING、history／current、新连线回读、直接 SSD 备份及完成状态。交接和整合验收属于 CVP 端完整责任，由 #357 主控核对，不另设第三个管理域。
+沿用 [现有共同 SQL 流程](./cvp_transaction_workflow_v2.md) 的 store、runner、短 transaction、实际完整 RETURNING、history／current、新连线回读及完成状态。Claim action 的业务保护不以每次整库备份或外接 SSD 为前提；数据库灾难恢复备份属于运维。旧 CVP／来源维护的已绑定备份契约保留。交接和整合验收属于 CVP 端完整责任，由 #357 主控核对，不另设第三个管理域。
 
 先完成模式矩阵与真实保存材料预检，再启用新的有界运行；不能边跑新主题边补正常路径。至少覆盖：
 

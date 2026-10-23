@@ -1,0 +1,38 @@
+{
+  "schema_version": "wang_claim_management_v2",
+  "policy_id": "wang_claim_management_joint_update_v5",
+  "independent_audit": false,
+  "budget": {
+    "max_revisions": 1,
+    "gpt_calls": 2,
+    "opus_calls": 2,
+    "gemini_calls": 0,
+    "max_request_bytes": 500000,
+    "max_output_tokens": 32000
+  },
+  "models": {
+    "gpt": {
+      "model_id": "gpt-6.1-sol",
+      "backend": "codex_subscription",
+      "effort": "high"
+    },
+    "opus": {
+      "model_id": "claude-opus-5-5",
+      "backend": "claude_subscription",
+      "effort": "high"
+    },
+    "gemini": {
+      "model_id": "gemini-4-argon",
+      "backend": "gemini_api",
+      "effort": "high"
+    }
+  },
+  "clarification_per_problem": 1,
+  "review_purpose": "content",
+  "all_findings_to_gpt": true,
+  "joint_update_contract": "wang_claim_joint_update_v1",
+  "joint_update_max_targets": 2,
+  "model_output_contract": "claim_changes_v2",
+  "initial_candidate": "existing",
+  "claim_scope_contract": "claim_direct_neighbours_v1"
+}
