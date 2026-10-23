@@ -621,6 +621,7 @@ class ArgumentRouteCandidate(StrictBatchModel):
     identity_comparison: str = Field(min_length=1)
     #: Why the committed skeleton cannot carry this conclusion, and why the
     #: revised one is the same argument corrected rather than a different route.
+    #: An uncommitted new route may also retain its draft-refinement explanation.
     revision_reason: str | None = None
 
     @model_validator(mode="after")
@@ -646,8 +647,10 @@ class ArgumentRouteCandidate(StrictBatchModel):
             raise ValueError(f"{self.proposed_action} may not pin an existing route revision")
         if self.proposed_action == "revise_existing" and not self.revision_reason:
             raise ValueError("revise_existing must say why the committed skeleton cannot hold")
-        if self.proposed_action != "revise_existing" and self.revision_reason:
-            raise ValueError("only revise_existing carries a revision reason")
+        # A new route may explain a refinement of its uncommitted draft.
+        # This note does not change its action or grant an existing target.
+        if self.proposed_action not in {"revise_existing", "create_new"} and self.revision_reason:
+            raise ValueError("only a new or revised route carries a revision reason")
         return self
 
 

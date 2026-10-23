@@ -4182,9 +4182,10 @@ def test_revise_existing_must_pin_a_revision_and_say_why():
                 target_argument_route_revision_id="ARR-1",
             )
         )
-    with pytest.raises(ValidationError, match="only revise_existing carries a revision reason"):
+    with pytest.raises(ValidationError, match="only a new or revised route carries a revision reason"):
         ArgumentRouteCandidate.model_validate(
-            _route(proposed_action="create_new", revision_reason="理由")
+            _route(proposed_action="match_existing", target_argument_route_revision_id="ARR-1",
+                   revision_reason="理由")
         )
 
 

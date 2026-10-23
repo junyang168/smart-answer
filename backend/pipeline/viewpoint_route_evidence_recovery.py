@@ -90,9 +90,11 @@ def prepare_evidence_input_recovery(parent, packet, materials, *, proposer, revi
             raise ValueError("Route input recovery has no proven Claim-evidence projection defect")
         sources.append(source_id)
         proof.append({"original_defer":verdict,"evidence_boundary_delta":added})
-    original_files = {p.name:sha256_json(json.loads(p.read_text())) for p in parent.glob("*.json")}
-    # Exclude the repair reservation itself when resuming; its original parent set is fixed.
-    original_files.pop("evidence-input-recovery-reservation.json", None)
+    reservation = parent / "evidence-input-recovery-reservation.json"
+    saved = json.loads(reservation.read_text()) if reservation.exists() else None
+    original_paths = ([parent/name for name in saved["original_files"]] if saved else
+                      list(parent.glob("*.json")))
+    original_files = {p.name:sha256_json(json.loads(p.read_text())) for p in original_paths}
     receipt = {"schema_version":"wang_route_claim_evidence_input_recovery_v1",
         "parent_job_root":str(parent), "original_files":original_files,
         "original_packet_sha256":old["packet_sha256"], "corrected_packet_sha256":packet["packet_sha256"],
@@ -108,7 +110,30 @@ def prepare_evidence_input_recovery(parent, packet, materials, *, proposer, revi
             "viewpoint_route_resolution.py", "viewpoint_route_cvp_worker.py",
             "../api/canonical_repository/viewpoint_batch_resolution.py")}}
     receipt["artifact_sha256"] = sha256_json(receipt)
+    if saved is not None:
+        code_fields = {"fixed_code_commit", "implementation_sha256s", "artifact_sha256"}
+        if (saved.get("artifact_sha256") != sha256_json({k:v for k,v in saved.items() if k != "artifact_sha256"})
+                or {k:v for k,v in saved.items() if k not in code_fields}
+                != {k:v for k,v in receipt.items() if k not in code_fields}):
+            raise ValueError("Route input recovery fixed parent, proof or original budget changed")
+        if receipt != saved:
+            project = Path(__file__).resolve().parents[2]
+            for name, digest in saved["implementation_sha256s"].items():
+                relative = (Path(__file__).parent/name).resolve().relative_to(project)
+                text = subprocess.check_output(["git", "show", f"{saved['fixed_code_commit']}:{relative}"],
+                                               cwd=project, text=True)
+                if sha256_json(text) != digest:
+                    raise ValueError("Route input recovery original implementation cannot be authenticated")
+            continuation = {"original_reservation_sha256":saved["artifact_sha256"],
+                "current_code_commit":receipt["fixed_code_commit"],
+                "current_implementation_sha256s":receipt["implementation_sha256s"],
+                "original_inputs_answers_verdicts_budget_unchanged":True,
+                "new_initial_proposal_calls":0}
+            if reserve:
+                write_immutable(parent / f"evidence-input-program-continuation-{sha256_json(continuation)}.json",
+                                continuation)
+        receipt = saved
     if reserve:
-        write_immutable(parent / "evidence-input-recovery-reservation.json", receipt)
+        write_immutable(reservation, receipt)
     return {"receipt":receipt, "proposal":proposal, "proposal_sha256":sha256_json(proposal),
             "review":review, "review_sha256":sha256_json(review), "deferred_source_ids":sorted(sources)}

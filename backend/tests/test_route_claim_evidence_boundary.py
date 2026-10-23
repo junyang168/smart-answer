@@ -75,6 +75,18 @@ def test_partial_component_preserves_approved_spans_without_blocking_own_claim_p
     assert check(packet,proposal)['full_count']==1
 
 
+def test_new_route_can_preserve_a_draft_correction_note_without_changing_write_action():
+    _,packet,proposal=sample()
+    proposal['argument_route_candidates'][0]['revision_reason']='仅解释尚未入库草稿的修改'
+    parsed=ArgumentRouteProposalV2Response.model_validate(proposal)
+    assert parsed.argument_route_candidates[0].proposed_action=='create_new'
+    assert parsed.argument_route_candidates[0].target_argument_route_revision_id is None
+    assert parsed.argument_route_candidates[0].revision_reason=='仅解释尚未入库草稿的修改'
+    assert check(packet,proposal)['route_count']==1
+    proposal['argument_route_candidates'][0]['target_argument_route_revision_id']='foreign'
+    with pytest.raises(ValueError):ArgumentRouteProposalV2Response.model_validate(proposal)
+
+
 @pytest.mark.parametrize('fault',['conclusion','foreign_claim','wrong_pair','withheld','unbound_anchor','terminal'])
 def test_new_scope_does_not_legalize_wrong_conclusion_foreign_or_unusable_evidence(fault):
     claim,packet,proposal=sample()
