@@ -807,6 +807,26 @@ def unresolved_after(action_id, previous, review, *, request=None, candidate=Non
     return result
 
 
+def subtitle_only_generation(document, current):
+    """Subtitles are metadata: the registered file may differ by inserted headings alone.
+
+    #436 inserted subtitle rows into transcripts after registration, so the
+    file SHA moved while body, coordinates and visual content did not, and
+    every Claim action on those sermons was refused as source drift. This
+    accepts only the #436 proof chain (source_editorial_transition), which
+    re-reads both generations and every original row -- never a body-SHA
+    comparison on its own.
+    """
+    from backend.pipeline.source_editorial_transition import verify_current_source_binding
+    try:
+        live = verify_current_source_binding({'path': str(Path(document['source_path']).resolve()),
+                                              'file_sha256': document['source_file_sha256']})
+    except (ValueError, KeyError):
+        return False
+    return (live['file_sha256'] == current['file_sha256']
+            and str(Path(live['path']).resolve()) == str(Path(current['path']).resolve()))
+
+
 def load_authority(request: Request, *, source_documents=None, archived_sources=None, selected_source_ids=None, human_source_decisions=None):
     """Bind a new action to an actual direction and policy, never old v1 flags."""
     policy = Policy.model_validate_json(source.verify_file(request.policy).read_text())
@@ -844,7 +864,7 @@ def load_authority(request: Request, *, source_documents=None, archived_sources=
     for sid, snapshot in sources.items():
         document = (source_documents or {}).get(sid, {})
         declared = document.get('source_file_sha256')
-        if declared and declared != snapshot['file']['file_sha256']:
+        if declared and declared != snapshot['file']['file_sha256'] and not subtitle_only_generation(document, snapshot['file']):
             raise ValueError('registered source physical version drift; new source version/action required')
     source_context = request.source_transition
     if source_context:
