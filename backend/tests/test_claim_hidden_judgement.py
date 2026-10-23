@@ -134,6 +134,11 @@ def test_every_reviewer_and_proposer_prompt_names_the_hidden_judgement_rule(name
         assert '联合 Update 没有创建权限' in text
     if 'proposal' in name:
         assert 'produced_claim_ids 加入新 Claim' in text
+    # Spoken teaching: one test (does the disputable judgement change?), with
+    # the same wording shift harmless or material depending on the point.
+    assert '读者据转述去支持或反驳的，是否仍是教授断言的那个判断' in text
+    assert '能否本身就是论点时，把「不能」写成「难以」' in text
+    assert '论点不在于程度时的程度措辞' in text
 
 
 @pytest.mark.parametrize('role', ['gpt', 'opus'])
@@ -143,6 +148,7 @@ def test_single_target_policy_composes_the_rule_into_the_live_prompt(role):
     prompt = claim_management_model_adapter(role, p)._base_prompt
     assert 'independent_judgement_without_claim' in prompt
     assert ('新建一条同源 Claim' in prompt) == (role == 'gpt')
+    assert '教授是口头讲道，不是法律文本' in prompt
 
 
 def seed_bundled(store):

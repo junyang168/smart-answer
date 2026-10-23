@@ -175,6 +175,8 @@ Update 可在获准范围内联合修正 Claim 表述／归属／类型／经文
 
 教授在论证中途明确断言、可以单独被支持或反驳的判断，若只写成另一条 Claim 的 EvidenceStep 摘要、本篇没有任何 Claim 承载，属于遗漏，不属于原 Claim 的措辞问题。审阅者对该 EvidenceStep 给出 `mapping`／`independent_judgement_without_claim` finding；原 Claim 若正确，保持原样，不把该判断并进它的 statement。单目标 Update 在请求同时授权 `Create`、该来源的 claims `creation_permissions` 和该 EvidenceStep 的 `produced_claim_ids` 写权限时，于同一轮新建同源 Claim，由它与原 Claim 共同拥有既有 EvidenceStep，不另造重复 Evidence；摘要丢掉的「每次」「從來沒有」等原话限定一并恢复。权限不足按第 4.2 节暂停并说明所需许可；联合 Update 没有创建能力，同样暂停。来由是 #439：「耶穌每次講『人子』都加定冠詞」只存在于「人子強調神性」的 EvidenceStep 中，且「每次」已被删去，以它为结论的观点因此只有一句断言可连。
 
+限定与措辞按口头讲道衡量，不按法律文本衡量。审阅只问：读者据转述去支持或反驳的，是否仍是教授断言的那个判断。删掉范围或排他限定、否定变肯定、他人观点变成教授的、先后变因果、局部变普遍，会改变判断；能否本身就是论点时，「不能」写成「难以」也会。语气词、重复、语序和论点不在于程度时的程度措辞不会，不提 finding。来由是 2017 NYSC 4：教授以「中文沒有辦法翻…看不懂」说明译文丢了定冠词的区别，摘要写成「中文難以呈現此差別，容易使讀者看不懂」，论点相同，却被当作模态弱化挡下提交。
+
 新建或改动的 Claim 与 EvidenceStep 必须双向归属：Claim 的 `evidence_step_ids` 与 EvidenceStep 的 `produced_claim_ids` 是同一条连接，候选新引入任何一侧单向的连接，程序在模型审阅前拒绝。两端都须当前有效才计入；候选未触及的既有单向连接留给 reciprocity 修复，不阻断本次写入。Split／Merge 把既有 EvidenceStep 移交新 Claim 时，须同时授权 Update 该 EvidenceStep。
 
 finding 身份按原 action、目标判断／成分、问题类别与来源依据固定，各轮版本另绑；不按模型理由文字或当轮 SHA 改名。Split／Merge 的映射承接旧问题和预算，无法确定对应时暂停核实。每个候选／回应有独立请求身份，累计仍归原 action。

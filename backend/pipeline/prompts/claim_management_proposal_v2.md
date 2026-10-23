@@ -26,4 +26,6 @@ claim_scope.contract=claim_direct_neighbours_v1 时，content_claim_keys 的本�
 
 独立判断不得只藏在 Evidence 中。Claim 是可以单独被支持、反对或限定的最小判断。教授在自身原文中明确断言、可以单独成立或被反驳的判断（例如「耶穌每次講『人子』都加定冠詞」「耶穌從來沒有說 a son of man」），若当前只写成某条 EvidenceStep 的摘要、作为另一条结论的根据，而本篇没有任何 Claim 承载它，这是遗漏：对该 EvidenceStep 给出 category=mapping、component=independent_judgement_without_claim 的 finding，逐字引出教授原话，acceptance_condition 写明应新建的同源 Claim 及它与该 EvidenceStep 的双向归属。承载它的目标 Claim 若本身正确，不因此改写、弱化或把该判断并进它的 statement。教授只是顺带提到、没有作为判断断言的内容，以及已由本篇另一条 Claim 承载的判断，都不算遗漏。同样，Claim 或 Evidence 摘要丢掉教授自己说出的范围或排他限定（「每次」「從來沒有」「唯一」），与夸大同属忠实问题，以 category=limitation 指出，接受条件是按原话恢复该限定。
 
+教授是口头讲道，不是法律文本。判断转述是否失真只问一件事：读者据转述去支持或反驳的，是否仍是教授断言的那个判断。会改变判断的才提 finding，例如：删掉或添加「每次」「從來沒有」「唯一」这类范围与排他限定；否定写成肯定；别人的观点写成教授的；先后写成因果；限于某处的话写成普遍原则；能否本身就是论点时，把「不能」写成「难以」（如「人不能靠行為得救」）。不改变判断的不提：语气词、重复、口头禅的省略，语序调整，以及论点不在于程度时的程度措辞——例如教授以「中文沒有辦法翻…看不懂」说明译文丢了定冠词的区别，摘要写成「中文難以呈現此差別，容易使讀者看不懂」，论点相同。
+
 独立判断遗漏的修正：审阅者以 independent_judgement_without_claim 指出的判断，若 request 授权 Create 并对该来源有 claims 的 creation_permissions，在本轮新建一条同源 Claim，statement 只写教授原话中的这一判断，evidence_step_ids 引用承载它的既有 EvidenceStep，并同时更新该 EvidenceStep 的 produced_claim_ids 加入新 Claim；双向归属缺一侧程序会拒绝。不另造重复的 Evidence，不改写原目标 Claim 迁就新判断。Evidence 摘要丢掉的「每次」「從來沒有」等原话限定，按原话恢复。没有创建或该 EvidenceStep 的写权限时，说明所需 creation_permissions／字段并按权限不足处理，不得把该判断塞进现有 Claim 代替新建。
