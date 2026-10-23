@@ -87,7 +87,8 @@ def test_no_route_observation_is_independently_reviewed_and_v2_bytes_do_not_chan
     assert 'observation_supports' not in ArgumentRouteProposalV2Response.model_json_schema()['properties']
 
 
-@pytest.mark.parametrize('defect',['foreign_component','wrong_pair','source','revision','withheld','coverage','double_coverage'])
+@pytest.mark.parametrize('defect',['foreign_component','wrong_pair','source','revision','withheld','coverage','double_coverage',
+                                  'superseded','human_hold','rejected'])
 def test_observation_rejects_foreign_unusable_or_unaccounted_material(defect):
     packet=fixture_packet();raw=observation_proposal(packet);ob=raw['observation_supports'][0]
     if defect=='foreign_component':ob['evidence_bindings'][0]['claim_component_key']='CCK-'+'f'*64
@@ -95,6 +96,7 @@ def test_observation_rejects_foreign_unusable_or_unaccounted_material(defect):
     elif defect=='source':ob['source_id']='another-sermon'
     elif defect=='revision':ob['viewpoint_revision_id']='different-revision'
     elif defect=='withheld':packet['claims'][0]['evidence'][0]['support_eligibility']='withheld_unreviewed';packet['claims'][0]['evidence'][0]['valid_for_identity_review']=False
+    elif defect in {'superseded','human_hold','rejected'}:packet['claims'][0]['review_status']=defect
     elif defect=='coverage':raw['observation_supports']=[]
     else:raw['sources_without_observation']=[{'viewpoint_revision_id':'CVR-1','source_id':'S1','reason':'没有观察'}]
     with pytest.raises((BatchResolutionError,ValueError)):validate(packet,raw)

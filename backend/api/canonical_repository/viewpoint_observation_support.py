@@ -12,6 +12,15 @@ from .viewpoint_batch_resolution import (
 
 COLLECTION = 'viewpoint_observation_supports'
 CONTRACT = 'wang_cvp_observation_support_v1'
+INELIGIBLE_CLAIM_STATUSES = frozenset({
+    'rejected', 'human_hold', 'human_review_required', 'invalidated',
+    'superseded', 'retired', 'withdrawn', 'withheld_unreviewed',
+})
+
+
+def observation_claim_is_usable(claim):
+    payload=claim.model_dump(mode='json') if hasattr(claim,'model_dump') else claim
+    return payload.get('review_status') not in INELIGIBLE_CLAIM_STATUSES and not payload.get('human_hold')
 
 
 class ObservationBinding(StrictBatchModel):
@@ -132,7 +141,8 @@ def validate_observation_proposal(proposal,*,claims,components,approved_revision
         for b in o.evidence_bindings:
             component=component_index.get(b.claim_component_key)
             claim=claim_index.get(component.claim_id) if component else None
-            if (claim is None or claim.source_id!=o.source_id or component.source_id!=o.source_id
+            if (claim is None or not observation_claim_is_usable(claim)
+                    or claim.source_id!=o.source_id or component.source_id!=o.source_id
                     or not any(e.evidence_step_id==b.evidence_step_id and e.source_fragment_id==b.source_fragment_id
                                and e.source_id==o.source_id and route_evidence_is_usable(e) for e in claim.evidence)):
                 findings.append(f'{o.local_observation_key}: observation evidence is not an eligible source-local Claim pair')
@@ -185,7 +195,7 @@ def validate_observation_graph(collections, *, current_ids=None):
             claim=collections.get('claims',{}).get(b['claim_id'])
             step=collections.get('evidence_steps',{}).get(b['evidence_step_id'])
             fragment=collections.get('source_fragments',{}).get(b['source_fragment_id'])
-            if (not claim or claim['revision']!=b['pinned_claim_revision']
+            if (not claim or not observation_claim_is_usable(claim) or claim['revision']!=b['pinned_claim_revision']
                     or semantic_record_sha(claim)!=b['claim_revision_sha256']
                     or b['evidence_step_id'] not in claim.get('evidence_step_ids',[]) or not step
                     or b['source_fragment_id'] not in evidence_fragment_ids(step) or not fragment

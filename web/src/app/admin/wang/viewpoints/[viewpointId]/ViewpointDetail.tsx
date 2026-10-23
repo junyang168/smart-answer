@@ -113,7 +113,7 @@ function ArgumentRoutes({ detail }: { detail: Detail }) {
         {!current && <p className="mt-2 text-sm font-bold text-amber-700">关联材料已更新，此观察待重新审核。</p>}
         <p className="mt-2 text-sm text-slate-700">{observation.supports}</p>
         <p className="mt-2 text-sm text-slate-500">{observation.support_scope_note}</p>
-        {bindings.map(({ binding, source_fragment: fragment, source, locator }) => <div key={`${binding.claim_id}:${binding.source_fragment_id}`} className="mt-3 border-t border-slate-100 pt-3 text-sm">
+        {bindings.map(({ binding, source_fragment: fragment, source, locator }) => <div key={`${binding.claim_id}:${binding.evidence_step_id}:${binding.source_fragment_id}`} className="mt-3 border-t border-slate-100 pt-3 text-sm">
           <p className="text-xs text-slate-500">{source?.title ?? observation.source_id}</p>
           {fragment && <blockquote className="my-2 border-l-2 border-emerald-300 pl-3 text-slate-700">{fragment.verbatim_excerpt}</blockquote>}
           <SourceLink locator={locator} />

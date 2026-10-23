@@ -18,6 +18,7 @@ from backend.api.canonical_repository.models import Citation
 from backend.api.canonical_repository.postgres_store import record_content_sha
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.api.canonical_repository.viewpoint_resolution import ReviewClaim, compile_review_claim
+from backend.api.canonical_repository.viewpoint_observation_support import observation_claim_is_usable
 from backend.pipeline.cvp_materials import _source_packet
 from backend.pipeline.viewpoint_evidence_source_context import load_context_source
 
@@ -153,9 +154,8 @@ def prepare_cvp_route_materials(
             ) else None,
             unavailable_evidence_ids=unavailable,
         )
-        if (claims[claim_id].review_status in {'rejected','human_hold','human_review_required','invalidated'}
-                or getattr(claims[claim_id], 'human_hold', False)):
-            findings.append('Claim has a content hold or rejection')
+        if not observation_claim_is_usable(claims[claim_id]):
+            findings.append('Claim is held, rejected or no longer current')
         if review is None or findings:
             if claim_id in context_claim_ids and claim_id not in linked_claim_ids | observation_claim_ids:
                 unusable_context_claims.append({'claim_id':claim_id,
