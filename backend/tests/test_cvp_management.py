@@ -190,6 +190,41 @@ def test_shared_evidence_fragment_choice_is_scoped_and_survives_role_only_correc
         cvp.compile_candidate(req,legacy,raw)
 
 
+def test_existing_link_fragment_selection_requires_exact_maintenance_grant():
+    bundle=materials();first=cvp.compile_candidate(request(),bundle,proposal())
+    bundle=deepcopy(bundle)
+    ids={row['collection']:row['object_id'] for row in first['writes']}
+    for row in first['writes']:
+        payload=deepcopy(row['payload'])
+        bundle['records'].append({'collection':row['collection'],'object_id':row['object_id'],
+            'payload':payload,'revision':1,'content_sha256':semantic_record_sha(payload),'retired':False})
+        prefix={'canonical_viewpoints':'v1','viewpoint_revisions':'r1','viewpoint_claim_links':'l1'}[row['collection']]
+        bundle['references'][row['collection']]={row['object_id']:prefix}
+    fragment={'fragment_id':'F2','source_id':'S1'}
+    bundle['records'].append({'collection':'source_fragments','object_id':'F2','payload':fragment,
+        'revision':1,'content_sha256':semantic_record_sha(fragment),'retired':False})
+    bundle['references']['source_fragments']['F2']='f2'
+    step=next(r for r in bundle['records'] if r['collection']=='evidence_steps')
+    step['payload'].pop('source_fragment_id');step['payload']['source_fragment_ids']=['F1','F2']
+    step['content_sha256']=semantic_record_sha(step['payload'])
+    link=next(r for r in bundle['records'] if r['collection']=='viewpoint_claim_links')
+    link['payload']['evidence_bindings'].append({'evidence_step_id':'E1','source_fragment_id':'F2'})
+    link['content_sha256']=semantic_record_sha(link['payload'])
+    vid=ids['canonical_viewpoints'];lid=ids['viewpoint_claim_links']
+    bundle=seal({**{k:v for k,v in bundle.items() if k!='artifact_sha256'},
+        'link_evidence_contract':'source_fragment_refs_v1','maintenance_viewpoint_ids':[vid]})
+    raw={'component_dispositions':[{'component_ref':'k1','disposition':'connected','target_ref':'v1','link_ref':'l1','reason':'同一判断。'}],
+         'changes':[change('l1',source_fragment_refs=['f1'])],
+         'member_dispositions':[{'member_ref':'l1','disposition':'retained','reason':'关系不变，只保留相关证据片段。'}]}
+    req=request(mode='maintain',maintenance_viewpoint_ids=[vid],creation_slots={},permissions=[{
+        'collection':'viewpoint_claim_links','object_id':lid,'fields':['evidence_bindings']}])
+    candidate=cvp.compile_candidate(req,bundle,raw)
+    selected=next(row['payload'] for row in candidate['writes'] if row['ref']=='l1')
+    assert selected['evidence_bindings']==[{'evidence_step_id':'E1','source_fragment_id':'F1'}]
+    with pytest.raises(ValueError,match='fragment selection'):
+        cvp.compile_candidate(req.model_copy(update={'permissions':[]}),bundle,raw)
+
+
 def test_empty_delta_retains_previous_candidate_without_copying_records():
     req, bundle = request(), materials()
     first = cvp.compile_candidate(req, bundle, proposal())

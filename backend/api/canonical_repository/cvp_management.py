@@ -685,7 +685,7 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
                        {'eligible', 'eligible_candidate', 'eligible_with_label'}
                        for eid in selected_evidence):
                     raise ValueError('link evidence selection includes ineligible support')
-            if not is_new and selected_evidence is None:
+            if not is_new and selected_evidence is None and selected_fragments is None:
                 # A version-only repin must not silently widen an approved
                 # link to every other eligible evidence step on the Claim.
                 evidence = deepcopy(original[key]['payload'].get('evidence_bindings', []))
