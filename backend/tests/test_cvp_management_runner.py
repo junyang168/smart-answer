@@ -735,6 +735,66 @@ def add_second_claim(store,request):
     return request
 
 
+@pytest.mark.parametrize('external_change',[False,True])
+def test_parent_closes_by_committed_object_versions_when_held_first_group_finishes_last(setup,monkeypatch,external_change):
+    from backend.api.canonical_repository.cvp_recall import STATEMENT_SCOPE_PROFILE
+    from backend.api.canonical_repository.postgres_store import canonical_json,record_content_sha
+    store,request,root,clients,_=setup;request=add_second_claim(store,request)
+    inp={k:v for k,v in request['input'].items() if k!='artifact_sha256'}
+    inp['recall_profile']=STATEMENT_SCOPE_PROFILE
+    inp['grouping']['groups']=[{'group_key':key,'claim_ids':[cid],'rationale':'完整獨立判斷'}
+        for key,cid in [('g1','C1'),('g2','C2')]]
+    request['input']=seal(inp)
+    auth=Path(request['authorization']['path']);direction=json.loads(auth.read_text())
+    direction['input_sha256']=request['input']['artifact_sha256'];auth.write_text(json.dumps(direction))
+    request['authorization']['file_sha256']=hashlib.sha256(auth.read_bytes()).hexdigest()
+    qualification=store.claim_management_qualification
+    monkeypatch.setattr(store,'claim_management_qualification',lambda cid:
+        {'ready':False,'reason':'upstream verification in progress'} if cid=='C1' else qualification(cid))
+    first=runner.run(store,request,root=root,execute=True,clients=clients)
+    assert first['status']=='partial' and first['units']=={'g1':'needs_upstream','g2':'completed'}
+    original=parent(store);second_step=original['units']['g2']['completed_step']
+    view=store.read_cvp_heads()[0];vid=view['viewpoint_id']
+    old_version=store.get_record_state('canonical_viewpoints',vid)['revision']
+    second_record=store.get_cvp_group(second_step)
+    monkeypatch.setattr(store,'claim_management_qualification',qualification)
+    def connect(packet):
+        if not packet.get('schema_version','').endswith('_proposal_packet'):return
+        vref=packet['material']['viewpoints'][0]['cvp_ref'];cref=packet['input']['claims'][0]['claim_ref']
+        return envelope('candidate',candidate={
+            'component_dispositions':[{'component_ref':'k1','disposition':'connected','target_ref':vref,
+                'link_ref':'nl1','reason':'完整語境內的相同判斷。'}],
+            'changes':[{'ref':'nl1','fields_json':json.dumps({'claim_id':cref,'viewpoint_id':vref,
+                'link_type':'equivalent_full'})}]})
+    clients['gpt'].behavior=connect
+    progress=runner.persistence.progress
+    if external_change:
+        def tamper_after_readback(*args,**kwargs):
+            if kwargs.get('status')=='completed' and kwargs.get('group_key')=='g1':
+                row=store.get_record_state('canonical_viewpoints',vid);payload=deepcopy(row['payload'])
+                payload.update(summary='未經本任務批准的外部修改。',revision=row['revision']+1)
+                with store.connect() as conn:
+                    conn.execute("UPDATE wang_knowledge.objects SET revision=%s,content_sha256=%s,payload=%s::jsonb WHERE collection='canonical_viewpoints' AND object_id=%s",
+                        (payload['revision'],record_content_sha(payload),canonical_json(payload),vid))
+            return progress(*args,**kwargs)
+        monkeypatch.setattr(runner.persistence,'progress',tamper_after_readback)
+    result=runner.run(store,request,root=root,execute=True,clients=clients)
+    action=parent(store)
+    assert store.get_cvp_group(second_step)==second_record  # never reopen/rewrite completed g2
+    assert action['units']['g2']['completed_step']==second_step
+    assert len(store.read_cvp_links(claim_ids=['C1','C2']))==2
+    if external_change:
+        assert result['status']=='partial' and result['units']['g1']=='engineering_required'
+        assert 'unapproved current business dependency change: canonical_viewpoints/'+vid in action['units']['g1']['detail']
+    else:
+        assert result['status']=='completed',{k:u.get('detail') for k,u in action['units'].items()}
+        current=store.get_record_state('canonical_viewpoints',vid)
+        assert current['revision']>old_version and len(current['payload']['summary_basis']['member_link_ids'])==2
+        snapshot={r:len(c.requests) for r,c in clients.items()}
+        assert runner.run(store,request,root=root,execute=True,clients=clients)==result
+        assert snapshot=={r:len(c.requests) for r,c in clients.items()}
+
+
 @pytest.mark.parametrize('interrupt',[False,True])
 @pytest.mark.parametrize('statement_scope',[False,True])
 def test_capacity_children_complete_independently_reuse_recall_and_current_approved_summary(setup,monkeypatch,interrupt,statement_scope):

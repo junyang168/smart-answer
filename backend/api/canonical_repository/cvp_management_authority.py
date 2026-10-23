@@ -374,7 +374,7 @@ def validate_parent_current(store,cursor,parent):
     A later unit may legitimately replace an earlier head. Its actual approved
     afterimage wins in sequence; an unrelated external edit never does.
     """
-    expected={};target_pins={}
+    expected={};target_pins={};written_versions={}
     from .cvp_management_store import _load
     for group in parent.get('work_groups',parent['groups']):
         unit=parent['units'][group['group_key']]
@@ -393,8 +393,17 @@ def validate_parent_current(store,cursor,parent):
             if key[0] in domain.COLLECTIONS:expected.setdefault(key,row['payload'])
             if key[0]=='claims' and key[1] in group['claim_ids']:
                 target_pins[key]=(row['revision'],row['content_sha256'],False)
-        expected.update({key:row for key,row in _stored_package_records(package).items()
-                         if key[0] in domain.COLLECTIONS})
+        for key,payload in _stored_package_records(package).items():
+            if key[0] not in domain.COLLECTIONS:continue
+            # A held early group may commit after a later group. Object
+            # revisions from their audited SQL postimages, not plan order or
+            # timestamps, identify the latest approved write to each object.
+            revision=payload['revision']
+            old=written_versions.get(key)
+            if old is None or revision>old:
+                expected[key]=payload;written_versions[key]=revision
+            elif revision==old and expected[key]!=payload:
+                raise ValueError('CVP2 parent has conflicting approved object versions')
         validate_claim_authority(cursor,proof['bundle'],package=package)
     if {oid for col,oid in target_pins}!=set(parent['request']['input']['claim_ids']):
         raise ValueError('CVP2 parent original Claim denominator is incomplete')
@@ -403,4 +412,4 @@ def validate_parent_current(store,cursor,parent):
     for key,payload in expected.items():
         row=cursor.execute('SELECT payload,content_sha256,retired_at FROM wang_knowledge.objects WHERE collection=%s AND object_id=%s',key).fetchone()
         if not row or row[2] is not None or row[1]!=record_content_sha(payload):
-            raise ValueError('CVP2 parent has an unapproved current business dependency change')
+            raise ValueError(f'CVP2 parent has an unapproved current business dependency change: {key[0]}/{key[1]}')
