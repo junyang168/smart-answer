@@ -29,6 +29,7 @@ REQUIRED_COLLECTIONS = (
     "argument_routes",
     "argument_route_revisions",
     "argument_route_attestations",
+    "viewpoint_observation_supports",
     "viewpoint_relations",
     "claims",
     "evidence_steps",

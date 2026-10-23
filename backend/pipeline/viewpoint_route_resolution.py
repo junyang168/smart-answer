@@ -16,7 +16,10 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     BatchResolutionError,
     ArgumentRouteReconsiderationResponse,
     ArgumentRouteProposalResponse,
+    ArgumentRouteProposalV2Response,
     ArgumentRouteReviewResponse,
+    ArgumentRouteReviewV2Response,
+    ArgumentRouteReconsiderationV2Response,
     NoRouteDisposition,
     ROUTE_TARGETED_DISPOSITIONS,
     RouteComponentBinding,
@@ -59,9 +62,10 @@ _REGISTRY_LINK_DISPOSITIONS = {
 }
 
 
-#: Dispositions a terminal Claim component may carry -- the same set the route
-#: validator enforces, so the roster promises exactly what can be bound.
-_TERMINAL_ELIGIBLE_DISPOSITIONS = ROUTE_TARGETED_DISPOSITIONS - {"tension_existing"}
+#: Only an equivalent member establishes that this source states the CVP
+#: conclusion. Supporting material remains in the packet, but does not by
+#: itself require a source-local route instance.
+_MEMBER_DISPOSITIONS = {"member_existing"}
 
 
 class RouteStageNotReadyError(ValueError):
@@ -238,14 +242,17 @@ def build_route_proposer(
     provider: str = "claude",
     prompt_file: str = "canonical_viewpoint_batch_routes.md",
     timeout_seconds: float = CALL_TIMEOUT_SECONDS,
+    whole_cvp: bool = False,
+    observations: bool = False,
 ) -> StructuredJsonReviewerAdapter:
+    from backend.api.canonical_repository.viewpoint_observation_support import ArgumentRouteProposalV3Response
     return StructuredJsonReviewerAdapter(
         client=_subscription_client(
             provider, model, reasoning_effort, timeout_seconds=timeout_seconds
         ),
         prompt=(PROMPT_DIR / prompt_file).read_text(encoding="utf-8"),
-        response_model=ArgumentRouteProposalResponse,
-        schema_name="wang_argument_route_proposal_v1",
+        response_model=(ArgumentRouteProposalV3Response if observations else ArgumentRouteProposalV2Response if whole_cvp else ArgumentRouteProposalResponse),
+        schema_name=("wang_argument_route_proposal_v3" if observations else "wang_argument_route_proposal_v2" if whole_cvp else "wang_argument_route_proposal_v1"),
     )
 
 
@@ -256,7 +263,10 @@ def build_route_reviewer(
     provider: str = "claude",
     prompt_file: str = "canonical_viewpoint_route_review.md",
     timeout_seconds: float = CALL_TIMEOUT_SECONDS,
+    whole_cvp: bool = False,
+    observations: bool = False,
 ) -> StructuredJsonReviewerAdapter:
+    from backend.api.canonical_repository.viewpoint_observation_support import ArgumentRouteReviewV3Response
     return StructuredJsonReviewerAdapter(
         client=_subscription_client(
             provider, model, reasoning_effort, timeout_seconds=timeout_seconds
@@ -264,8 +274,8 @@ def build_route_reviewer(
         prompt=(PROMPT_DIR / prompt_file).read_text(
             encoding="utf-8"
         ),
-        response_model=ArgumentRouteReviewResponse,
-        schema_name="wang_argument_route_review_v1",
+        response_model=(ArgumentRouteReviewV3Response if observations else ArgumentRouteReviewV2Response if whole_cvp else ArgumentRouteReviewResponse),
+        schema_name=("wang_argument_route_review_v3" if observations else "wang_argument_route_review_v2" if whole_cvp else "wang_argument_route_review_v1"),
     )
 
 
@@ -276,7 +286,10 @@ def build_route_reconsiderer(
     provider: str = "claude",
     prompt_file: str = "canonical_viewpoint_route_reconsideration.md",
     timeout_seconds: float = CALL_TIMEOUT_SECONDS,
+    whole_cvp: bool = False,
+    observations: bool = False,
 ) -> StructuredJsonReviewerAdapter:
+    from backend.api.canonical_repository.viewpoint_observation_support import ArgumentRouteReconsiderationV3Response
     return StructuredJsonReviewerAdapter(
         client=_subscription_client(
             provider, model, reasoning_effort, timeout_seconds=timeout_seconds
@@ -284,10 +297,22 @@ def build_route_reconsiderer(
         prompt=(PROMPT_DIR / prompt_file).read_text(
             encoding="utf-8"
         ),
-        response_model=ArgumentRouteReconsiderationResponse,
-        schema_name="wang_argument_route_reconsideration_v1",
+        response_model=(ArgumentRouteReconsiderationV3Response if observations else ArgumentRouteReconsiderationV2Response if whole_cvp else ArgumentRouteReconsiderationResponse),
+        schema_name=("wang_argument_route_reconsideration_v3" if observations else "wang_argument_route_reconsideration_v2" if whole_cvp else "wang_argument_route_reconsideration_v1"),
     )
 
+
+
+CLAIM_EVIDENCE_BINDING_CONTRACT = "claim_owned_intermediate_registry_selected_conclusion_v1"
+CLAIM_EVIDENCE_BINDING_NOTE = (
+    "claim_components 的 evidence_step_ids/source_fragment_ids 是已批准 CVP 连接所选择的证据，"
+    "不是中间推理步骤的证据上限。非 conclusion 步骤可通过所列 component 引用该 component "
+    "所属 Claim 的全部来源版本已绑定且未停用的 EvidenceStep/SourceFragment 实际配对，"
+    "不要求这些论据单独建立 CVP 连接；这不扩大 component 的 statement spans 或成员身份。"
+    "valid_for_identity_review 是身份审核的资格标记，不是本论证层已连接 Claim 的取证上限。"
+    "conclusion 步骤仍只能使用所列 component 的连接所选证据，终端仍须是指向本次 CVP revision "
+    "的 active 正向连接。所有步骤保持同一篇来源、精确版本与真实推理要求，停用或无锚点证据不可绑定。"
+)
 
 
 def build_registry_route_packet(
@@ -297,6 +322,14 @@ def build_registry_route_packet(
     claims: list[ReviewClaim],
     viewpoint_claim_links: list[dict[str, Any]],
     existing_routes: list[dict[str, Any]],
+    source_sections: list[dict[str, Any]] | None = None,
+    existing_attestations: list[dict[str, Any]] | None = None,
+    complete_cvp: bool = False,
+    unavailable_evidence: list[dict[str, Any]] | None = None,
+    claim_evidence_for_intermediate_steps: bool = False,
+    observation_supports: bool = False,
+    existing_observation_supports: list[dict[str, Any]] | None = None,
+    unusable_context_claims: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Rebuild Route evidence solely from committed Registry state.
 
@@ -443,6 +476,8 @@ def build_registry_route_packet(
     # that keeps the CVP stage scoped had no counterpart here and the route job
     # for a large scope could not run at all.
     member_sources = {binding.source_id for binding in components.values()}
+    if observation_supports:
+        member_sources.update(o['source_id'] for o in existing_observation_supports or [])
     scope_claims = [claim for claim in claims if claim.source_id in member_sources]
     for claim in scope_claims:
         spans = [{"start_char": 0, "end_char": len(claim.statement), "exact_text": claim.statement}]
@@ -508,7 +543,9 @@ def build_registry_route_packet(
                         binding.source_id
                         for binding in components.values()
                         if binding.target_viewpoint_revision_id == key
-                        and binding.disposition in _TERMINAL_ELIGIBLE_DISPOSITIONS
+                        and (binding.disposition in _MEMBER_DISPOSITIONS
+                             if complete_cvp else binding.disposition in
+                             ROUTE_TARGETED_DISPOSITIONS - {"tension_existing"})
                     }
                 ),
             }
@@ -531,7 +568,10 @@ def build_registry_route_packet(
                     item["viewpoint_claim_link_id"],
                 ),
             ),
-            "no_route_semantics": "no_attested_route_in_this_evidence_scope",
+            "no_route_semantics": (
+                "no_attested_route_in_complete_cvp_material"
+                if complete_cvp else "no_attested_route_in_this_evidence_scope"
+            ),
         },
         "claim_components": [
             components[key].model_dump(mode="json") for key in sorted(components)
@@ -546,6 +586,48 @@ def build_registry_route_packet(
             key=lambda item: str(item.get("route_revision_id") or item.get("argument_route_revision_id") or ""),
         ),
     }
+    if source_sections is not None:
+        packet["source_sections"] = sorted(
+            source_sections, key=lambda item: str(item["source_ref"])
+        )
+    if existing_attestations is not None:
+        packet["existing_attestations"] = sorted(
+            existing_attestations,
+            key=lambda item: str(item["argument_route_attestation_id"]),
+        )
+    if unavailable_evidence:
+        available = {item.evidence_step_id for claim in claims for item in claim.evidence}
+        keys = set()
+        for item in unavailable_evidence:
+            key = item.get('claim_id'), item.get('evidence_step_id')
+            if (set(item) != {'claim_id','evidence_step_id','support_eligibility',
+                             'anchor_quality','usable_for_route_binding'}
+                    or key in keys or key[0] not in claim_index or not key[1]
+                    or key[1] in available
+                    or item['support_eligibility'] != 'withheld_missing_anchor'
+                    or item['anchor_quality'] != 'missing'
+                    or item['usable_for_route_binding'] is not False):
+                raise ValueError('Route unavailable Evidence disclosure is inconsistent')
+            keys.add(key)
+        packet['unavailable_evidence'] = sorted(
+            [dict(item) for item in unavailable_evidence],
+            key=lambda item:(item['claim_id'],item['evidence_step_id']))
+    if claim_evidence_for_intermediate_steps:
+        if not complete_cvp:
+            raise ValueError("Claim-owned intermediate evidence requires complete CVP material")
+        packet["evidence_binding_contract"] = CLAIM_EVIDENCE_BINDING_CONTRACT
+        packet["evidence_binding_note"] = CLAIM_EVIDENCE_BINDING_NOTE
+    if observation_supports:
+        if not complete_cvp:
+            raise ValueError('observation support requires complete CVP material')
+        from backend.api.canonical_repository.viewpoint_observation_support import CONTRACT
+        packet['observation_support_contract'] = CONTRACT
+        packet['existing_observation_supports'] = existing_observation_supports or []
+        linked_claims={str(l.get('claim_id')) for l in viewpoint_claim_links
+                       if l.get('effective_state')=='active'}
+        packet['context_claim_ids'] = sorted(c.claim_id for c in scope_claims if c.claim_id not in linked_claims)
+        if unusable_context_claims:
+            packet['unusable_context_claims'] = unusable_context_claims
     packet["packet_sha256"] = sha256_json(packet)
     return packet
 
@@ -553,10 +635,11 @@ def build_registry_route_packet(
 
 def build_route_review_batches(
     *,
-    proposal: ArgumentRouteProposalResponse,
+    proposal: ArgumentRouteProposalResponse | ArgumentRouteProposalV2Response,
     route_packet: dict[str, Any],
     route_proposal_sha256: str,
     max_targets: int = DEFAULT_ROUTE_REVIEW_TARGETS_PER_BATCH,
+    whole_cvp: bool = False,
 ) -> list[dict[str, Any]]:
     """Create exact-once bounded review targets with sufficient read context."""
 
@@ -579,6 +662,11 @@ def build_route_review_batches(
         ("no_route", item.viewpoint_revision_id)
         for item in proposal.viewpoints_with_no_route
     )
+    if whole_cvp:
+        ordered_targets.extend(
+            ("route_retirement", key)
+            for key in getattr(proposal, "retired_route_revision_ids", [])
+        )
     member_source_targets = route_member_source_review_targets(
         proposal=proposal, route_packet=route_packet
     )
@@ -606,6 +694,33 @@ def build_route_review_batches(
     }
 
     batches = []
+    if whole_cvp:
+        from backend.api.canonical_repository.viewpoint_observation_support import observation_targets
+        ordered_targets.extend(sorted(observation_targets(proposal)))
+        batch = {
+            "schema_version": "wang_argument_route_review_batch_v1",
+            "batch_id": "RRB-001",
+            "route_proposal_sha256": route_proposal_sha256,
+            "route_evidence_packet_sha256": route_packet["packet_sha256"],
+            "review_targets": [
+                {"target_kind": kind, "target_key": key}
+                for kind, key in ordered_targets
+            ],
+            "route_proposal_context": {
+                "argument_route_candidates": [item.model_dump(mode="json") for item in proposal.argument_route_candidates],
+                "source_route_attestations": [item.model_dump(mode="json") for item in proposal.source_route_attestations],
+                "viewpoints_with_no_route": [item.model_dump(mode="json") for item in proposal.viewpoints_with_no_route],
+                "retired_route_revision_ids": getattr(proposal, "retired_route_revision_ids", []),
+                "member_source_dispositions": [member_source_targets[key] for key in sorted(member_source_targets)],
+            },
+            "route_evidence_context": route_packet,
+        }
+        if hasattr(proposal, 'observation_supports'):
+            batch['route_proposal_context'].update({name:getattr(proposal,name) if name=='retired_observation_support_ids'
+                else [o.model_dump(mode='json') for o in getattr(proposal,name)] for name in
+                ('observation_supports','sources_without_observation','retired_observation_support_ids')})
+        batch["batch_sha256"] = sha256_json(batch)
+        return [batch]
     for offset in range(0, len(ordered_targets), max_targets):
         targets = ordered_targets[offset : offset + max_targets]
         target_set = set(targets)

@@ -48,7 +48,7 @@ from backend.pipeline.source_keys import normalize_source_key
 #: other is a stage whose runs cannot record at all.
 STAGES = (
     "sectioning", "extraction", "cross_section", "review", "adjudication",
-    "merge", "ingest", "article",
+    "merge", "ingest", "article", "cvp_group",
 )
 
 #: Stages that call a model, and so can cost money.  `merge` and `ingest` are

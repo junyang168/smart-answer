@@ -1,0 +1,14 @@
+{
+  "policy_id": "wang-gemini-content-blocked-subscription-fallback-v1",
+  "authorization_quote": "只允许这一观点和这一版本, 不对, 应该是只允许在 Gemini 审核返回 content blocked 时用这个模型",
+  "trigger": "actual_gemini_content_block_receipt",
+  "model": "gpt-6.1-sol",
+  "backend": "codex_subscription",
+  "reasoning_effort": "high",
+  "independent": false,
+  "revisit_required": true,
+  "other_audit_disputes_waived": false,
+  "quota_network_missing_source_fallback": false,
+  "master_data_mutations": 0,
+  "maximum_calls_per_exact_input": 1
+}

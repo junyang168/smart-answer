@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import hashlib
 from pathlib import Path
 
 from backend.pipeline.source_projection import project_script
@@ -12,6 +13,24 @@ SPEC = importlib.util.spec_from_file_location("audit_library_script", SCRIPT_PAT
 assert SPEC and SPEC.loader
 AUDIT = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(AUDIT)
+
+
+def test_independent_audit_default_model_is_gemini_38_flash() -> None:
+    assert AUDIT.DEFAULT_MODEL == "gemini-3.8-flash"
+
+
+def test_viewpoint_audit_distinguishes_support_from_equivalent_membership() -> None:
+    prompt = AUDIT._viewpoint_prompt("CV-test", {}, ["連結類型 supports"], semantic_contract_version='legacy_v1')
+    assert '只有 `equivalent_full` 和 `equivalent_component`' in prompt
+    assert '`supports` 只宣稱提供論據或支持背景，不宣稱同一命題' in prompt
+    assert '不得僅因真值條件不同就判錯' in prompt
+    assert '不符合標明關係時用 `other` 報錯' in prompt
+    assert '不表示它是成員' in prompt
+    current = AUDIT._viewpoint_prompt("CV-test", {}, ["連結類型 supports"])
+    assert 'equivalent_full/component 才是等价成员；supports 不算成员' in current
+    assert '不要求每条证明整个合取观点' in current
+    assert '仅同主题、相邻出现或相容不算支持' in current
+    assert 'same 对 supports 仅表示关系成立，不表示等价' in current
 
 
 def test_modern_audit_uses_body_coordinates_and_body_identity(tmp_path: Path) -> None:
@@ -46,3 +65,77 @@ def test_visual_locator_requires_exact_block_and_sha(tmp_path: Path) -> None:
     sha = hashlib.sha256(svg.encode("utf-8")).hexdigest()
     assert source.excerpt_matches(segment, svg, visual_ordinal=1, visual_sha256=sha)
     assert not source.excerpt_matches(segment, svg, visual_ordinal=1, visual_sha256="0" * 64)
+
+
+def test_linked_svg_audit_reopens_asset_and_requires_exact_link(tmp_path: Path) -> None:
+    svg = '<svg><text>图</text></svg>'
+    asset = tmp_path / "diagram.svg"
+    asset.write_text(svg)
+    digest = hashlib.sha256(asset.read_bytes()).hexdigest()
+    url = "https://example.org/diagram.svg"
+    link = f"![图]({url})"
+    manuscript = tmp_path / "final.md"
+    manuscript.write_text(link)
+    descriptor = {
+        "locator": "S0001/V01", "binding_kind": "linked_svg_asset",
+        "source_path": str(asset), "source_url": url,
+        "source_file_sha256": digest, "raw_sha256": digest, "raw_svg": svg,
+        "char_start": 0, "char_end": len(link),
+    }
+    payload = {
+        "source_modality": "visual", "visual_locator": "S0001/V01",
+        "visual_source_path": str(asset), "visual_source_url": url,
+        "visual_source_file_sha256": digest, "visual_block_sha256": digest,
+    }
+    source = AUDIT.SourceFile(manuscript, "notes_manuscript", {"visual_sources": [descriptor]})
+    segment = source.by_ordinal(1)
+    assert source.linked_visual_matches(segment, svg, payload)
+    assert not source.linked_visual_matches({"text": "没有链接"}, svg, payload)
+    assert not source.linked_visual_matches(segment, svg, {**payload, "visual_block_sha256": "0" * 64})
+    assert not source.linked_visual_matches(segment, svg, {**payload, "visual_source_path": "/wrong.svg"})
+    assert not source.linked_visual_matches(segment, svg, {**payload, "source_modality": "spoken"})
+    assert not source.linked_visual_matches(segment, svg, {**payload, "visual_locator": "S0002/V01"})
+    source.visual_sources.append(descriptor)
+    assert not source.linked_visual_matches(segment, svg, payload)
+    source.visual_sources.pop()
+    asset.write_text('<svg><text>改图</text></svg>')
+    assert not source.linked_visual_matches(segment, svg, payload)
+
+
+def test_occurrence_anchor_linked_svg_is_verified_physically(tmp_path: Path) -> None:
+    svg = '<svg><text>图</text></svg>\n'
+    asset = tmp_path / "diagram.svg"
+    asset.write_text(svg)
+    digest = hashlib.sha256(asset.read_bytes()).hexdigest()
+    url = "https://example.org/diagram.svg"
+    link = f"![图]({url})"
+    manuscript = tmp_path / "final.md"
+    manuscript.write_text(link)
+    descriptor = {
+        "locator": "S0001/V01", "binding_kind": "linked_svg_asset", "source_path": str(asset),
+        "source_url": url, "source_file_sha256": digest, "raw_sha256": digest,
+        "raw_svg": svg, "char_start": 0, "char_end": len(link),
+    }
+    document = {"source_id": "S1", "transcript_id": "notes:test", "source_type": "notes_manuscript", "visual_sources": [descriptor]}
+    source = AUDIT.SourceFile(manuscript, "notes_manuscript", document)
+    anchor = {
+        "source_modality": "visual", "paragraph_key": "S0001/V01", "visual_locator": "S0001/V01",
+        "visual_source_path": str(asset), "visual_source_url": url, "visual_source_file_sha256": digest,
+        "visual_block_sha256": digest, "proposed_highlight": {"text": svg},
+    }
+
+    class Sources:
+        documents = {"S1": document}
+        def covers(self, source_id):
+            return source_id == "S1"
+        def file_for(self, source_id):
+            return source
+
+    class Store:
+        def collection(self, name):
+            assert name == "claims"
+            return [{"object_id": "C1", "payload": {"occurrences": [{"transcript_id": "notes:test", "anchors": [anchor]}]}}]
+
+    assert AUDIT._audit_claim_occurrence_anchors(Store(), Sources())["findings"] == []
+    asset.write_text('<svg><text>改图</text></svg>')
+    assert AUDIT._audit_claim_occurrence_anchors(Store(), Sources())["findings"][0]["verdict"] == "excerpt_mismatch"

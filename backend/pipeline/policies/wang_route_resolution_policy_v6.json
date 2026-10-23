@@ -1,0 +1,28 @@
+{
+  "schema_version": "wang_route_resolution_policy_v6",
+  "policy_id": "wang-route-resolution-evidence-inclusive-v6",
+  "proposal": {
+    "provider": "codex",
+    "model": "gpt-5.6-sol",
+    "effort": "high"
+  },
+  "review": {
+    "provider": "claude",
+    "model": "claude-opus-5-5",
+    "effort": "high"
+  },
+  "correction": {
+    "provider": "codex",
+    "model": "gpt-5.6-sol",
+    "effort": "high"
+  },
+  "prompts": {
+    "proposal": "canonical_viewpoint_cvp_routes_v6.md",
+    "review": "canonical_viewpoint_cvp_route_review_v6.md",
+    "correction": "canonical_viewpoint_cvp_route_correction_v6.md"
+  },
+  "validator_version": "wang_argument_route_validation_v2",
+  "max_request_bytes": 600000,
+  "call_timeout_seconds": 1800,
+  "max_correction_rounds": 4
+}

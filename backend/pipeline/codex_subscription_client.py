@@ -3,16 +3,49 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
+import re
 import shutil
 import subprocess
 import tempfile
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 
 class CodexSubscriptionError(RuntimeError):
     """The subscription backend could not produce a structured response."""
+
+
+# Local verified compatibility baseline, NOT an account entitlement claim.
+# 0.144.0-alpha.4 rejected this model; 0.159.2 completed real subscription calls.
+VERIFIED_MODEL_CLI_MINIMUM = {"gpt-6.1-sol": (0, 159, 2)}
+
+
+def verify_cli_identity(executable: str, model: str, environment: Mapping[str, str]) -> dict[str, Any]:
+    """Reject stale/missing clients before inference; never choose another model."""
+    resolved = shutil.which(executable, path=environment.get("PATH"))
+    if not resolved:
+        raise CodexSubscriptionError(f"Codex executable unavailable: {executable}")
+    path = Path(resolved).resolve(strict=True)
+    completed = subprocess.run([str(path), "--version"], capture_output=True, text=True,
+                               env=dict(environment), timeout=30, check=False)
+    version_text = completed.stdout.strip()
+    match = re.fullmatch(r"codex-cli (\d+)\.(\d+)\.(\d+)([-+].+)?", version_text)
+    if completed.returncode or not match:
+        raise CodexSubscriptionError(f"Cannot verify Codex client version: {version_text}")
+    version = tuple(int(match[i]) for i in (1, 2, 3))
+    minimum = VERIFIED_MODEL_CLI_MINIMUM.get(model)
+    if minimum and (version < minimum or (version == minimum and (match[4] or '').startswith('-'))):
+        raise CodexSubscriptionError(
+            f"Stale Codex executable {path} ({version_text}) for {model}; "
+            f"local verified baseline is {'.'.join(map(str, minimum))}. "
+            "This is a client configuration failure, not proof of missing subscription access.")
+    with path.open('rb') as stream:
+        digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+    return {"path": str(path), "version": version_text,
+            "file_sha256": digest, "model": model}
 
 
 # These variables can make Codex use separately billed API credentials instead
@@ -94,10 +127,14 @@ class CodexSubscriptionClient:
         self.last_usage: Any = None
         self.last_raw_response: Any = None
         self._authenticated = False
+        self.cli_identity: dict[str, Any] | None = None
 
     def _verify_chatgpt_login(self) -> None:
         if self._authenticated:
             return
+        if self.model in VERIFIED_MODEL_CLI_MINIMUM:
+            self.cli_identity = verify_cli_identity(self.executable, self.model, self.environment)
+            self.executable = self.cli_identity["path"]
         try:
             completed = subprocess.run(
                 [self.executable, "login", "status"],
@@ -118,6 +155,18 @@ class CodexSubscriptionClient:
                 f"received: {status or f'exit {completed.returncode} with no output'}"
             )
         self._authenticated = True
+
+    def verify_model_access(self) -> dict[str, Any]:
+        """One bounded subscription-only diagnostic, not a corpus model call."""
+        result = self.generate_json(
+            "Diagnostic only. Do not use tools or modify files.", "Return ok true.",
+            {"type": "object", "properties": {"ok": {"type": "boolean"}},
+             "required": ["ok"], "additionalProperties": False}, timeout_seconds=60)
+        if result != {"ok": True}:
+            raise CodexSubscriptionError("Model access diagnostic did not return the required response")
+        return {"status": "verified", "backend": self.backend, "model": self.model,
+                "reasoning_effort": self.reasoning_effort, "cli": self.cli_identity,
+                "model_calls": 1, "corpus_writes": 0}
 
     def generate_json(
         self,
@@ -145,13 +194,17 @@ class CodexSubscriptionClient:
         ]
         prompt = "".join(prompt_parts)
 
-        with tempfile.TemporaryDirectory(prefix="codex-subscription-extraction-") as temp_dir:
+        durable = getattr(self, "call_artifacts", None)
+        context = nullcontext(str(durable)) if durable else tempfile.TemporaryDirectory(prefix="codex-subscription-extraction-")
+        with context as temp_dir:
             root = Path(temp_dir)
+            root.mkdir(parents=True, exist_ok=True)
             schema_path = root / "response-schema.json"
             output_path = root / "response.json"
-            schema_path.write_text(
-                json.dumps(schema, ensure_ascii=False, sort_keys=True), encoding="utf-8"
-            )
+            schema_text = json.dumps(schema, ensure_ascii=False, sort_keys=True)
+            if schema_path.exists() and schema_path.read_text() != schema_text:
+                raise CodexSubscriptionError("saved subscription schema drift")
+            schema_path.write_text(schema_text, encoding="utf-8")
             command = [
                 self.executable,
                 "exec",
@@ -181,16 +234,22 @@ class CodexSubscriptionClient:
                 command.extend(["--image", str(resolved)])
             command.append("-")
             try:
-                completed = subprocess.run(
-                    command,
-                    input=prompt,
-                    capture_output=True,
-                    text=True,
-                    cwd=root,
-                    env=self.environment,
-                    timeout=effective_timeout,
-                    check=False,
-                )
+                if durable:
+                    from backend.pipeline.subscription_process import run
+                    completed = run(command, input=prompt, env=self.environment,
+                                    timeout=effective_timeout, directory=root, cwd=root,
+                                    replay_only=getattr(self, "replay_only", False))
+                else:
+                    completed = subprocess.run(
+                        command,
+                        input=prompt,
+                        capture_output=True,
+                        text=True,
+                        cwd=root,
+                        env=self.environment,
+                        timeout=effective_timeout,
+                        check=False,
+                    )
             except (OSError, subprocess.TimeoutExpired) as exc:
                 raise CodexSubscriptionError(
                     f"Codex subscription transport failed: {type(exc).__name__}: {exc}"

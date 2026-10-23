@@ -28,7 +28,7 @@ PROJECTION_COLLECTIONS = (
     "viewpoint_proposition_unit_links",
     "argument_routes",
     "argument_route_revisions",
-    "argument_route_attestations",
+    "argument_route_attestations", "viewpoint_observation_supports",
     "viewpoint_relations",
     "viewpoint_coverage_snapshots",
     "viewpoint_resolution_ledgers",

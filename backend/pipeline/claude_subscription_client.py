@@ -162,15 +162,22 @@ class ClaudeSubscriptionClient:
             json.dumps(schema, ensure_ascii=False, sort_keys=True),
         ]
         try:
-            completed = subprocess.run(
-                command,
-                input=prompt,
-                capture_output=True,
-                text=True,
-                env=self.environment,
-                timeout=timeout_seconds or self.timeout_seconds,
-                check=False,
-            )
+            durable = getattr(self, "call_artifacts", None)
+            if durable:
+                from backend.pipeline.subscription_process import run
+                completed = run(command, input=prompt, env=self.environment,
+                                timeout=timeout_seconds or self.timeout_seconds, directory=durable,
+                                replay_only=getattr(self, "replay_only", False))
+            else:
+                completed = subprocess.run(
+                    command,
+                    input=prompt,
+                    capture_output=True,
+                    text=True,
+                    env=self.environment,
+                    timeout=timeout_seconds or self.timeout_seconds,
+                    check=False,
+                )
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise ClaudeSubscriptionError(
                 f"Claude subscription transport failed: {type(exc).__name__}: {exc}"

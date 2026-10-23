@@ -1,0 +1,22 @@
+{
+  "schema_version": "wang_cvp_resolution_policy_v4",
+  "policy_id": "wang-cvp-resolution-required-coverage-v7-gpt61-opus55-600k",
+  "grouping": {"provider": "claude", "model": "claude-opus-5-5", "effort": "high"},
+  "proposal": {"provider": "codex", "model": "gpt-6.1-sol", "effort": "high"},
+  "review": {"provider": "claude", "model": "claude-opus-5-5", "effort": "high"},
+  "correction": {"provider": "codex", "model": "gpt-6.1-sol", "effort": "high"},
+  "consolidation": {"provider": "claude", "model": "claude-opus-5-5", "effort": "high"},
+  "prompts": {
+    "grouping": "canonical_viewpoint_claim_grouping.md",
+    "proposal": "contextual_v2/canonical_viewpoint_batch_proposal.md",
+    "review": "contextual_v2/canonical_viewpoint_batch_review.md",
+    "correction": "contextual_v2/canonical_viewpoint_batch_reconsideration.md",
+    "consolidation": "contextual_v2/canonical_viewpoint_identity_consolidation.md"
+  },
+  "validator_version": "wang_canonical_viewpoint_batch_validation_v1",
+  "batch_size": 20,
+  "max_request_bytes": 600000,
+  "call_timeout_seconds": 1800,
+  "semantic_contract_version": "wang_cvp_contextual_semantics_v2",
+  "coverage_contract_version": "wang_cvp_required_coverage_v1"
+}

@@ -51,9 +51,129 @@ LINK_TYPES = {
     "tension_existing": "tension_evidence",
 }
 
+RETAINED_WRITE_SCOPE_VERSION = 'wang_cvp_retained_write_scope_v1'
+
+
+def retained_write_components(proposal, review, claims, current, scope, *, retained_null_link_ids=()):
+    """Validate split authority without changing a single model verdict.
+
+    The caller verifies the physical human disposition and current SQL pins.
+    Here the content compiler independently proves every exception is an exact
+    unchanged existing link. Every actual new write still needs model pass.
+    """
+    from .postgres_store import record_content_sha
+    if (scope.get('schema_version') != RETAINED_WRITE_SCOPE_VERSION
+            or scope.get('proposal_sha256') != sha256_json(proposal.model_dump(mode='json'))
+            or scope.get('review_sha256') != sha256_json(review.model_dump(mode='json'))
+            or not scope.get('human_disposition')
+            or scope.get('model_verdicts_changed') is not False):
+        raise CvpBatchChangeSetError('retained write scope lacks exact independent authority')
+    if review.schema_version != 'wang_canonical_viewpoint_review_v2':
+        raise CvpBatchChangeSetError('retained write scope needs complete coverage review')
+    validate_review(review=review,proposal=proposal,
+        proposal_sha256=scope['proposal_sha256'],claims=claims)
+    if (review.novelty_review.status != 'pass'
+            or any(r.decision != 'pass' for r in review.revision_reviews)
+            or any(r.decision != 'pass' or not r.synthesis_entailed_by_focal for r in review.structure_reviews)
+            or any(r.decision != 'pass' or not r.direction_correct for r in review.relation_reviews)):
+        raise CvpBatchChangeSetError('new graph/novelty finding cannot use human link retention')
+    claim_index={c.claim_id:c for c in claims}
+    links={l['viewpoint_claim_link_id']:l for l in current}
+    if len(links)!=len(current):raise CvpBatchChangeSetError('duplicate retained link')
+    pins=scope.get('retained_link_pins',[])
+    if len(pins)!=len(links) or {p['object_id'] for p in pins}!=set(links):
+        raise CvpBatchChangeSetError('retained write scope incomplete current link denominator')
+    for pin in pins:
+        old=links[pin['object_id']]
+        if (pin.get('collection')!='viewpoint_claim_links' or pin.get('revision')!=old['revision']
+                or pin.get('content_sha256')!=record_content_sha(old)
+                or old.get('effective_state')!='active' or old.get('review_status')!='system_approved'):
+            raise CvpBatchChangeSetError('retained write scope stale/unapproved link pin')
+    retained={};used=set()
+    null_ids=set(retained_null_link_ids)
+    if not null_ids<=set(links):raise CvpBatchChangeSetError('foreign retained null locator')
+    for decision in proposal.claim_decisions:
+        claim=claim_index[decision.claim_id]
+        for index,part in enumerate(decision.components):
+            pairs=sorted({(e.evidence_step_id,e.source_fragment_id) for e in claim.evidence
+                if e.evidence_step_id in part.evidence_step_ids and e.source_fragment_id in part.source_fragment_ids})
+            found=[]
+            for lid,old in links.items():
+                locator=old.get('component_locator')
+                if (old['claim_id']!=decision.claim_id
+                        or old['pinned_claim_revision']!=claim.pinned_claim_revision
+                        or old['link_type']!=LINK_TYPES.get(part.disposition)
+                        or old['validated_against_viewpoint_revision_id']!=part.target_viewpoint_revision_id
+                        or part.local_new_viewpoint_key
+                        or sorted((b['evidence_step_id'],b['source_fragment_id']) for b in old['evidence_bindings'])!=pairs):
+                    continue
+                spans=[s.model_dump(mode='json') for s in part.spans]
+                if locator is None:
+                    if lid not in null_ids or old['link_type']!='supports':continue
+                elif (locator['claim_sha256']!=claim.claim_revision_sha256
+                      or locator['canonical_spans']!=spans):continue
+                found.append(lid)
+            if len(found)>1:raise CvpBatchChangeSetError('ambiguous retained component')
+            if found:
+                lid=found[0]
+                if lid in used:raise CvpBatchChangeSetError('retained component repeated')
+                used.add(lid);retained[decision.claim_id,index]=lid
+    if used!=set(links):raise CvpBatchChangeSetError('proposal changed/omitted retained link')
+    human=scope.get('human_retained_link_ids',[])
+    if not human or len(set(human))!=len(human):raise CvpBatchChangeSetError('empty/duplicate human disposition')
+    rejected=[]
+    for item in review.change_reviews:
+        if item.decision=='pass':continue
+        lid=retained.get((item.claim_id,item.component_index))
+        if item.decision not in {'reject','defer'} or lid not in human:
+            raise CvpBatchChangeSetError('new/uncertain component not authorized by exact human retain')
+        rejected.append(lid)
+    if set(rejected)!=set(human) or len(rejected)!=len(human):
+        raise CvpBatchChangeSetError('human disposition differs from retained final findings')
+    revised={r.target_viewpoint_revision_id for r in proposal.viewpoint_revisions}
+    if revised & {l['validated_against_viewpoint_revision_id'] for l in current}:
+        raise CvpBatchChangeSetError('retention cannot rewrite existing CVR')
+    return retained
+
 
 class CvpBatchChangeSetError(ValueError):
     pass
+
+
+def reuse_exact_current_links(proposed, current, *, retained_null_link_ids=()):
+    """Freshly reviewed identical links retain their durable identity/version.
+
+    This is not approval-cache reuse. The effective semantic proposal must
+    already have passed its fresh review; this only avoids duplicate writes.
+    Existing active components cannot silently disappear or be changed.
+    """
+    ignored={'viewpoint_claim_link_id','decision_id','revision','occurrence_refs'}
+    def meaning(row):
+        value=ViewpointClaimLinkRecord.model_validate(row).model_dump(mode='json')
+        return {k:v for k,v in value.items() if k not in ignored}
+    result=[];used=set()
+    allowed_null=set(retained_null_link_ids)
+    if len(allowed_null)!=len(retained_null_link_ids) or not allowed_null <= {l['viewpoint_claim_link_id'] for l in current}:
+        raise CvpBatchChangeSetError('retained-null boundary contains duplicate/foreign existing IDs')
+    for row in proposed:
+        matches=[old for old in current if meaning(old)==meaning(row)]
+        if not matches:
+            # Explicit, independently reviewed retention boundary only. The
+            # program's proposed span is display/context, not permission to
+            # backfill an already-approved supports link's null SQL locator.
+            matches=[old for old in current if old['viewpoint_claim_link_id'] in allowed_null
+                and old['link_type']=='supports' and old.get('component_locator') is None
+                and {k:v for k,v in meaning(old).items() if k!='component_locator'}
+                    == {k:v for k,v in meaning(row).items() if k!='component_locator'}]
+        if len(matches)>1:raise CvpBatchChangeSetError('ambiguous existing exact component link')
+        if matches:
+            old=matches[0];lid=old['viewpoint_claim_link_id']
+            if lid in used:raise CvpBatchChangeSetError('duplicate proposed existing component')
+            used.add(lid);result.append(deepcopy(old))
+        else:result.append(row)
+    if used!={old['viewpoint_claim_link_id'] for old in current}:
+        raise CvpBatchChangeSetError('fresh batch changed/omitted an existing active component; new scope required')
+    return result
 
 
 def _revision_signature(
@@ -106,6 +226,9 @@ def compile_cvp_batch_package(
     proposer_model_id: str,
     reviewer_model_id: str,
     decided_at: str,
+    current_claim_links: Sequence[Mapping[str, Any]] | None = None,
+    retained_null_link_ids: Sequence[str] = (),
+    retained_write_scope: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create one deterministic, no-write CVP package from a passing review."""
 
@@ -115,8 +238,17 @@ def compile_cvp_batch_package(
         review=review,
         proposal=review_target,
         proposal_sha256=review_target_sha256,
+        claims=claims,
     )
-    if review_validation["outcome"] != "pass":
+    retained_components = {}
+    if retained_write_scope is not None:
+        if reviewed_proposal is not None or reconsideration is not None or current_claim_links is None:
+            raise CvpBatchChangeSetError('split authority requires actual complete final review, not a correction shortcut')
+        retained_components = retained_write_components(proposal,review,claims,current_claim_links,
+            retained_write_scope,retained_null_link_ids=retained_null_link_ids)
+    if review_validation["outcome"] != "pass" and retained_write_scope is None:
+        if review.schema_version == "wang_canonical_viewpoint_review_v2":
+            raise CvpBatchChangeSetError("coverage contract requires passing review of effective proposal")
         if reconsideration is None or reviewed_proposal is None:
             raise CvpBatchChangeSetError(
                 "CVP ChangeSet requires a passing review or one resolved correction"
@@ -214,7 +346,11 @@ def compile_cvp_batch_package(
     grouped: dict[tuple[str, str], list[tuple[ReviewClaim, ProposedComponent]]] = defaultdict(list)
     for decision in proposal.claim_decisions:
         claim = claim_index[decision.claim_id]
-        for component in decision.components:
+        for component_index, component in enumerate(decision.components):
+            if (decision.claim_id,component_index) in retained_components:
+                # Not a proposed write or fresh identity approval. Keep original
+                # decision and provenance, even when other new members share CVR.
+                continue
             if component.disposition not in LINK_TYPES:
                 continue
             # support/qualification/tension may attach to a viewpoint this same
@@ -542,6 +678,14 @@ def compile_cvp_batch_package(
                 review_status="system_approved",
             )
             links_out.append(link.model_dump(mode="json"))
+
+    if retained_write_scope is not None:
+        links_out.extend(deepcopy(list(current_claim_links)))
+    if current_claim_links is not None:
+        if review.schema_version != 'wang_canonical_viewpoint_review_v2':
+            raise CvpBatchChangeSetError('exact link retention requires fresh coverage-contract review')
+        current=[dict(l) for l in current_claim_links if l.get('claim_id') in claim_index and l.get('effective_state')=='active']
+        links_out=reuse_exact_current_links(links_out,current,retained_null_link_ids=retained_null_link_ids)
 
     def _resolve(endpoint: tuple[str, str]) -> tuple[str, str]:
         ids = resolved_targets.get(endpoint)

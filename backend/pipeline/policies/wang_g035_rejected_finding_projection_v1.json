@@ -1,0 +1,13 @@
+{
+  "policy_id": "wang-g035-exact-rejected-finding-projection-v1",
+  "authority": "wang-audit-gpt-source-final-v1",
+  "old_finding_sha256": "556a34d0e5d52bb22befad68bbe6015071dad3386e18753d6183d9f4b59e7b3b",
+  "new_finding_sha256": "cc70ed4a924b9db0b9bc3806fe757bfb19928afd54939d6590b7c8c7b468427e",
+  "removed_claim_id": "DK-0bdf88fe8565-P13-CL013",
+  "repaired_link_id": "VCL-d1e6eae6e37b5710b777",
+  "repair_root": "/opt/homebrew/var/www/church/web/data/wang-knowledge-platform/staging/cvp-production-357/g035-mixed-source-supports-repair-20261005-v1",
+  "change_set_id": "KCS-63ce87e58665a000872c",
+  "substantive_item_changes": 0,
+  "new_semantic_calls": 0,
+  "applies_to_other_finding_text": false
+}

@@ -90,11 +90,17 @@ def _run_postgres(command: list[str], *, purpose: str) -> None:
         raise RuntimeError(f"temporary PostgreSQL {purpose} failed: {details}")
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def _temporary_postgres(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[_TemporaryPostgres]:
-    """Start a socket-only cluster whose DSNs cannot resolve to production."""
+    """Start a socket-only cluster whose DSNs cannot resolve to production.
+
+    This fixture is imported by many modules. Module scope releases each
+    cluster after its consumers finish rather than keeping dozens of imported
+    session fixtures alive until the entire suite exhausts macOS shared memory.
+    Each test still receives its own database through postgres_store.
+    """
 
     initdb = shutil.which("initdb")
     pg_ctl = shutil.which("pg_ctl")

@@ -1,0 +1,37 @@
+{
+  "description": "Synthetic semantic controls, never production professor records. Expected results are withheld from models.",
+  "cases": [
+    {
+      "case_id": "direct_scripture",
+      "statement": "太12:8中的人子是安息日的主。",
+      "source_text": "马太福音12:8说：『因为人子是安息日的主。』这句话就是说明耶稣是安息日的主。",
+      "scripture_refs": [
+        "太12:8"
+      ],
+      "expected_route": true
+    },
+    {
+      "case_id": "bare_assertion",
+      "statement": "耶稣每次说『人子』时都使用定冠词。",
+      "source_text": "耶稣每次说『人子』时都使用定冠词。",
+      "scripture_refs": [],
+      "expected_route": false
+    },
+    {
+      "case_id": "tautological_repetition",
+      "statement": "耶稣每次说『人子』时都使用定冠词。",
+      "source_text": "耶稣每次说『人子』时都使用定冠词。换句话说，祂没有一次说『人子』时不使用定冠词。",
+      "scripture_refs": [],
+      "expected_route": false
+    },
+    {
+      "case_id": "bounded_grammar_observation",
+      "statement": "耶稣每次说『人子』时都使用定冠词。",
+      "source_text": "请看太16:28中『人子』前的定冠词；这里的冠词在中文看不见。这是我说耶稣每次使用这个称号都带定冠词的一个例子。",
+      "scripture_refs": [
+        "太16:28"
+      ],
+      "expected_route": true
+    }
+  ]
+}

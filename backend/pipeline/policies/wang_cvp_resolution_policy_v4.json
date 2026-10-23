@@ -1,0 +1,41 @@
+{
+  "schema_version": "wang_cvp_resolution_policy_v3",
+  "policy_id": "wang-cvp-resolution-contextual-v4",
+  "grouping": {
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high"
+  },
+  "proposal": {
+    "provider": "codex",
+    "model": "gpt-5.6-sol",
+    "effort": "high"
+  },
+  "review": {
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high"
+  },
+  "correction": {
+    "provider": "codex",
+    "model": "gpt-5.6-sol",
+    "effort": "high"
+  },
+  "consolidation": {
+    "provider": "claude",
+    "model": "claude-fable-5-1",
+    "effort": "high"
+  },
+  "prompts": {
+    "grouping": "canonical_viewpoint_claim_grouping.md",
+    "proposal": "contextual_v2/canonical_viewpoint_batch_proposal.md",
+    "review": "contextual_v2/canonical_viewpoint_batch_review.md",
+    "correction": "contextual_v2/canonical_viewpoint_batch_reconsideration.md",
+    "consolidation": "contextual_v2/canonical_viewpoint_identity_consolidation.md"
+  },
+  "validator_version": "wang_canonical_viewpoint_batch_validation_v1",
+  "batch_size": 20,
+  "max_request_bytes": 500000,
+  "call_timeout_seconds": 1800,
+  "semantic_contract_version": "wang_cvp_contextual_semantics_v2"
+}

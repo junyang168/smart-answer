@@ -1,0 +1,11 @@
+{
+  "schema_version": "wang_claim_issue_management_v1",
+  "authorization_id": "357-owner-context-label-bugfix-20261009-v2",
+  "authorization_quote": "所以这是个 bug. 要改掉",
+  "human_content_approval": false,
+  "claim_fields": ["statement", "claim_type", "attribution", "discourse_mode", "scripture_refs", "occurrences"],
+  "evidence_fields": ["statement", "source_fragment_id", "source_fragment_ids"],
+  "evidence_eligibility_review": true,
+  "link_fields": ["pinned_claim_revision", "component_locator", "evidence_bindings", "link_type"],
+  "cvp_permissions": []
+}
