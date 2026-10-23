@@ -17,6 +17,7 @@ from backend.api.canonical_repository.viewpoint_route_cvp_queue import (
     make_cvp_route_job,
 )
 from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore, record_content_sha
+from backend.api.canonical_repository.knowledge_models import KNOWLEDGE_COLLECTIONS
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.api.canonical_repository.viewpoint_resolution import ReviewClaim
 from backend.pipeline.viewpoint_resolution_runtime import stable_decided_at, write_derived, write_immutable
@@ -40,6 +41,110 @@ from backend.pipeline.viewpoint_route_policy import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_POLICY = Path(__file__).resolve().parent / "policies/wang_route_resolution_policy_v5.json"
+ROUTE_COLLECTIONS = {"argument_routes", "argument_route_revisions", "argument_route_attestations"}
+
+
+def verify_route_readback(store, package, retiring):
+    """Compare the typed stored postimage, including importer defaults."""
+    for collection in sorted(ROUTE_COLLECTIONS):
+        model, id_field = KNOWLEDGE_COLLECTIONS[collection]
+        for raw in package.get(collection, []):
+            expected = model.model_validate(raw).model_dump(mode="json")
+            observed = store.get_record(collection, expected[id_field])
+            if observed is None or record_content_sha(observed) != record_content_sha(expected):
+                raise ValueError(f"Route apply readback differs: {collection}/{expected[id_field]}")
+    for collection, object_id in retiring:
+        if collection not in ROUTE_COLLECTIONS or store.get_record(collection, object_id) is not None:
+            raise ValueError(f"Route retirement readback differs: {collection}/{object_id}")
+
+
+def authenticate_saved_route_review(output_dir, round_number, final, policy_path):
+    """Use the common receipt verifier; a withdrawn prompt cannot become v5."""
+    from backend.pipeline.viewpoint_resolution_runtime import read_saved_model_response
+    from backend.api.canonical_repository.viewpoint_batch_resolution import (
+        ArgumentRouteReviewV2Response, canonicalize_review,
+    )
+    policy = load_route_policy(policy_path)
+    model = build_route_reviewer(str(policy['review']['model']), str(policy['review']['effort']),
+        provider=str(policy['review']['provider']), prompt_file=str(policy['prompts']['review']),
+        timeout_seconds=float(policy['call_timeout_seconds']), whole_cvp=True)
+    model.max_request_bytes = int(policy['max_request_bytes'])
+    packet = json.loads((output_dir / f'route-review-packet-{round_number:03d}.json').read_text())
+    raw = read_saved_model_response(model, packet, output_dir / f'raw-route-review-{round_number:03d}.json')
+    review = ArgumentRouteReviewV2Response.model_validate(canonicalize_review(raw)[0]).model_dump(mode='json')
+    if review != final['review']:
+        raise ValueError('committed Route recovery differs from its actual provider review')
+
+
+def resume_applied_cvp_route(store, viewpoint_id, output_dir, *, material_sha256=None, policy_path=DEFAULT_POLICY):
+    """Finish a committed job before consulting its now-changed route baseline."""
+    from backend.pipeline.cvp_sql_commit import plan_from_document
+    output_dir = Path(output_dir)
+    plan_path = output_dir / "route-change-plan.json"
+    if not plan_path.exists():
+        return None
+    plan = plan_from_document(json.loads(plan_path.read_text()))
+    history = store.get_change_history(plan.change_set_id)
+    if not history or history['status'] != 'applied':
+        return None
+    def sealed(name, field):
+        value = json.loads((output_dir / name).read_text())
+        if value.get(field) != sha256_json({k:v for k,v in value.items() if k != field}):
+            raise ValueError('saved Route recovery artifact changed: ' + name)
+        return value
+    material = sealed('cvp-route-materials.json', 'artifact_sha256')
+    packet = sealed('route-packet.json', 'packet_sha256')
+    run = sealed('route-cvp-run.json', 'artifact_sha256')
+    package = json.loads((output_dir / 'route-change-package.json').read_text())
+    metadata = history.get('metadata', {})
+    if (material['viewpoint_id'] != viewpoint_id
+            or (material_sha256 is not None and material['artifact_sha256'] != material_sha256)
+            or run['route_packet_sha256'] != packet['packet_sha256']
+            or history['source_kind'] != 'argument_route_resolution_v2'
+            or history['source_sha256'] != plan.source_sha256
+            or plan.source_sha256 != sha256_json(package)
+            or history['fingerprint_sha256'] != plan.fingerprint_sha256
+            or metadata.get('route_review_sha256') != run['review_sha256']
+            or metadata.get('route_material_sha256') != material['artifact_sha256']
+            or not run['rounds'] or run['rounds'][-1]['outcome'] != 'pass'):
+        raise ValueError('committed Route recovery differs from its original approval')
+    final = json.loads((output_dir / f"route-review-{run['rounds'][-1]['round']:03d}.json").read_text())
+    if (final['review_sha256'] != run['review_sha256']
+            or sha256_json(final['review']) != run['review_sha256']
+            or final['validation']['outcome'] != 'pass'
+            or final['review']['route_evidence_packet_sha256'] != packet['packet_sha256']):
+        raise ValueError('committed Route recovery lacks its exact passing review')
+    authenticate_saved_route_review(output_dir, run['rounds'][-1]['round'], final, policy_path)
+    store.verify_current_read_pins({(r['collection'],r['object_id']):
+        (r['revision'],r['content_sha256'],False) for r in material['record_pins']
+        if r['collection'] not in ROUTE_COLLECTIONS})
+    from backend.pipeline.source_editorial_transition import verify_current_source_binding
+    for source in material['physical_sources']:
+        verify_current_source_binding({'path':source['path'],'file_sha256':source['file_sha256']})
+    links = {oid for (col,oid),row in store.read_cvp_links(viewpoint_ids=[viewpoint_id]).items()
+             if row['payload'].get('effective_state') == 'active'}
+    if links != {r['viewpoint_claim_link_id'] for r in material['links']}:
+        raise ValueError('committed Route recovery membership changed')
+    retiring = [(op.collection,op.object_id) for op in plan.operations if op.operation == 'retire']
+    verify_route_readback(store, package, retiring)
+    expected_routes = {r['argument_route_id'] for r in material['existing_routes']}
+    expected_attestations = {r['argument_route_attestation_id'] for r in material['existing_attestations']}
+    for collection, ident in retiring:
+        if collection == 'argument_routes':expected_routes.discard(ident)
+        if collection == 'argument_route_attestations':expected_attestations.discard(ident)
+    expected_routes.update(r['argument_route_id'] for r in package.get('argument_routes',[]))
+    expected_attestations.update(r['argument_route_attestation_id'] for r in package.get('argument_route_attestations',[]))
+    current = store.read_cvp_route_records(viewpoint_id)
+    if ({oid for col,oid in current if col == 'argument_routes'} != expected_routes
+            or {oid for col,oid in current if col == 'argument_route_attestations'} != expected_attestations):
+        raise ValueError('committed Route recovery current route population changed')
+    report = {'schema_version':'wang_cvp_route_worker_result_v2', 'viewpoint_id':viewpoint_id,
+        'material_sha256':material['artifact_sha256'], 'route_packet_sha256':packet['packet_sha256'],
+        'review_sha256':run['review_sha256'], 'change_set_id':plan.change_set_id,
+        'change_count':len(plan.operations), 'status':'applied_readback_verified',
+        'recovered_from_applied':True, 'model_calls':0, 'semantic_writes':0}
+    write_derived(output_dir / 'route-worker-result.json', report | {'artifact_sha256':sha256_json(report)})
+    return report
 
 
 def enqueue_current_cvp_routes(
@@ -125,6 +230,9 @@ def process_cvp_route(
             ownership_guard()
 
     guard()
+    recovered = resume_applied_cvp_route(store, viewpoint_id, output_dir) if apply else None
+    if recovered is not None:
+        return recovered
     materials = prepare_cvp_route_materials(store, viewpoint_id)
     write_immutable(output_dir / "cvp-route-materials.json", materials)
     claims = [ReviewClaim.model_validate(item) for item in materials["claims"]]
@@ -203,18 +311,7 @@ def process_cvp_route(
             expected_current_viewpoint_revisions={viewpoint_id: materials["viewpoint_revision_id"]},
         )
         guard()
-        for collection, id_field in (
-            ("argument_routes", "argument_route_id"),
-            ("argument_route_revisions", "argument_route_revision_id"),
-            ("argument_route_attestations", "argument_route_attestation_id"),
-        ):
-            for expected in package.get(collection, []):
-                observed = store.get_record(collection, expected[id_field])
-                if observed is None or record_content_sha(observed) != record_content_sha(expected):
-                    raise ValueError(f"Route apply readback differs: {collection}/{expected[id_field]}")
-        for collection, object_id in retiring:
-            if store.get_record(collection, object_id) is not None:
-                raise ValueError(f"Route retirement readback differs: {collection}/{object_id}")
+        verify_route_readback(store, package, retiring)
         report |= {"status": "applied_readback_verified", "apply_result": applied}
     write_derived(output_dir / "route-worker-result.json",
                   report | {"artifact_sha256": sha256_json(report)})
@@ -235,6 +332,7 @@ def main() -> int:
     parser.add_argument("--worker-id", default=f"{socket.gethostname()}:{os.getpid()}")
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--retry-exceptions", action="store_true")
+    parser.add_argument("--job-id", help="Resume one exact existing queued job")
     args = parser.parse_args()
     policy = load_route_policy(args.route_policy)
     if policy["schema_version"] != "wang_route_resolution_policy_v5":
@@ -265,7 +363,7 @@ def main() -> int:
     claimed = queue.claim(worker_id=args.worker_id, policy_sha256=policy_sha,
                           lease_seconds=lease_seconds,
                           retry_exceptions=args.retry_exceptions,
-                          resume_planned=args.apply)
+                          resume_planned=args.apply, job_id=args.job_id)
     if claimed is None:
         print(json.dumps({"status": "idle"}))
         return 0
@@ -291,6 +389,14 @@ def main() -> int:
         queue.assert_owner(job["job_id"], worker_id=args.worker_id, epoch=epoch)
 
     try:
+        recovered = resume_applied_cvp_route(store, job['viewpoint_id'], args.output_dir / job['job_id'],
+            material_sha256=job['material_sha256'], policy_path=args.route_policy) if args.apply else None
+        if recovered is not None:
+            guard()
+            queue.finish(job['job_id'], worker_id=args.worker_id, epoch=epoch,
+                         status='complete', detail=recovered['status'])
+            print(json.dumps(recovered, ensure_ascii=False))
+            return 0
         current = prepare_cvp_route_materials(store, job["viewpoint_id"])
         if current["artifact_sha256"] != job["material_sha256"]:
             new_job = make_cvp_route_job(job["viewpoint_id"],

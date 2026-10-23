@@ -72,7 +72,7 @@ class CvpRouteQueue:
 
     def claim(self, *, worker_id: str, policy_sha256: str, lease_seconds: int,
               retry_exceptions: bool = False,
-              resume_planned: bool = False) -> tuple[dict[str, Any], int] | None:
+              resume_planned: bool = False, job_id: str | None = None) -> tuple[dict[str, Any], int] | None:
         if lease_seconds < 1:
             raise ValueError("lease must be positive")
         now = datetime.now(timezone.utc)
@@ -88,6 +88,8 @@ class CvpRouteQueue:
                     active_viewpoints.add(item["viewpoint_id"])
             for path in paths:
                 job = self._read(path)
+                if job_id is not None and job['job_id'] != job_id:
+                    continue
                 if (job.get("artifact_sha256") != sha256_json({
                     key: value for key, value in job.items() if key != "artifact_sha256"
                 }) or path.stem != job.get("job_id")):
