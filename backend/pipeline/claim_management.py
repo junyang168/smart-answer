@@ -1422,13 +1422,49 @@ def human_source_follow_up(previous, request, authority, prior_findings):
             'human_verified_finding_ids':sorted(used | set(ids))}
 
 
+CAPACITY_REJECTION = 'Selected model is at capacity. Please try a different model.'
+
+
+def pre_generation_rejection(raw):
+    """Which provider refusal, if any, proves the call generated nothing.
+
+    Two refusals qualify: the HTTP 400 schema rejection, and the subscription
+    capacity refusal seen twice on 2026-10-23 (「Selected model is at
+    capacity」), returned within seconds with no stdout and no last message.
+    Anything partial, mixed or unrecognised stays an uncertain call.
+    """
+    if raw.get('last_message') is not None or raw.get('stdout'):
+        return None
+    kinds = set()
+    for line in raw.get('stderr', '').splitlines():
+        if not line.startswith('ERROR: '):
+            continue
+        text = line[7:]
+        if text.strip() == CAPACITY_REJECTION:
+            kinds.add('capacity')
+            continue
+        try:
+            error = json.loads(text)
+        except ValueError:
+            return None
+        if (not isinstance(error, dict) or error.get('status') != 400
+                or error.get('error', {}).get('code') != 'invalid_json_schema'
+                or error.get('error', {}).get('param') != 'text.format.schema'):
+            return None
+        kinds.add('schema')
+    return kinds.pop() if len(kinds) == 1 else None
+
+
 def continuation_budget(previous, request, policy):
     """One explicitly authorized successor carries history and unspent budget.
 
     A bound human source answer can instead authorize one new proposal/review
     pair in a linked action; the predecessor's spent budget remains unchanged.
-    A proven HTTP 400 schema rejection generated nothing. Its failed attempt
-    remains in the predecessor ledger and is never represented as a completion.
+    A proven HTTP 400 schema rejection or capacity refusal generated nothing.
+    Its failed attempt remains in the predecessor ledger and is never
+    represented as a completion. A successor may carry the predecessor's exact
+    source-scoped creation grants -- a sibling-Claim repair paused before any
+    commit -- but never new grants, and nothing it already created.
     Unknown calls require a separately bound explicit owner call extension;
     they cannot use the ordinary engineering-input continuation. Completed
     writes cannot be replayed. An explicitly bound qualification refresh instead
@@ -1452,7 +1488,7 @@ def continuation_budget(previous, request, policy):
     if (previous.get('kind') != 'claim_management_action' or previous['result']['status'] not in {'paused','completed'}
             or old.operation != 'Update' or request.operation != 'Update'
             or old.target_keys != request.target_keys or old.source_bindings != request.source_bindings
-            or old.creation_permissions or request.creation_permissions
+            or request.creation_permissions != old.creation_permissions
             or previous.get('created_keys') or previous.get('replacements')):
         raise ValueError('engineering continuation must retain original Update targets and source without structural writes')
     extension_basis = extension.get('basis', 'unknown_call') if isinstance(extension, dict) else None
@@ -1545,16 +1581,11 @@ def continuation_budget(previous, request, policy):
         if slot['role'] != 'gpt' or not failure_path.is_file() or (failure_path.parent / 'gpt.raw.json').exists():
             raise ValueError('uncertain original call cannot be repeated in a continuation')
         failure = body(read(failure_path))
-        raw = failure.get('provider_raw') or {}
-        errors = []
-        for line in raw.get('stderr','').splitlines():
-            if line.startswith('ERROR: '):
-                errors.append(json.loads(line[7:]))
-        if (raw.get('last_message') is not None or raw.get('stdout') or not errors
-                or any(e.get('status') != 400 or e.get('error',{}).get('code') != 'invalid_json_schema'
-                       or e.get('error',{}).get('param') != 'text.format.schema' for e in errors)):
-            raise ValueError('not a proven pre-generation Claim schema rejection')
-        failures[key] = {'path':str(failure_path), 'file_sha256':hashlib.sha256(failure_path.read_bytes()).hexdigest()}
+        kind = pre_generation_rejection(failure.get('provider_raw') or {})
+        if kind is None:
+            raise ValueError('not a proven pre-generation Claim schema or capacity rejection')
+        failures[key] = {'path':str(failure_path), 'file_sha256':hashlib.sha256(failure_path.read_bytes()).hexdigest(),
+                         **({'kind': kind} if kind != 'schema' else {})}
     if set(recovery) != set(unaccepted):
         raise ValueError('unaccepted recovery contains an unbound or already recorded call')
     if set(proposal_recovery) != set(unaccepted_proposals):

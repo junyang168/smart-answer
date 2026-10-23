@@ -236,3 +236,86 @@ def test_coverage_adjudication_does_not_count_a_hidden_judgement_as_covered():
     text = oca.PROMPT_PATH.read_text()
     assert '這種判斷只作為另一條結論的根據，**不算**覆蓋' in text
     assert '丟掉了，也**不算**覆蓋' in text
+
+
+def capacity_refused(ports):
+    factory = ports.claim_management_adapter
+
+    def adapter(role, policy):
+        result = factory(role, policy)
+        if role == 'gpt':
+            def refused(packet):
+                ports.calls.append('gpt')
+                result._client.last_raw_response = {'last_message': None, 'stdout': '',
+                    'stderr': 'ERROR: ' + cm.CAPACITY_REJECTION + '\nERROR: ' + cm.CAPACITY_REJECTION}
+                raise RuntimeError('synthetic capacity refusal')
+            result.generate = refused
+        return result
+    ports.claim_management_adapter = adapter
+
+
+def successor(action, previous_request, previous):
+    request, root = hidden_judgement_request(action)
+    request.predecessor_action_id = previous_request.action_id
+    path = Path(request.authorization.path)
+    direction = json.loads(path.read_text())
+    direction['request'] = request.model_dump(mode='json', exclude={'authorization', 'policy'})
+    path.write_text(json.dumps(direction))
+    request.authorization = cm.source.FileBinding.model_validate(binding(path))
+    return cm.Request.model_validate(request.model_dump(mode='json')), root
+
+
+def test_capacity_refusal_continues_the_sibling_repair_with_the_same_create_grants(action):
+    store, _, _, _, tmp_path, _ = action
+    seed_bundled(store)
+    request, root = hidden_judgement_request(action)
+    ports = SyntheticPorts(store, tmp_path, proposal=propose_sibling, opus=flag_hidden_judgement)
+    capacity_refused(ports)
+    assert execute_claim_management(store, request, root=root, ports=ports)['reason'] == 'model_failed'
+    assert ports.calls == ['opus', 'gpt']
+    previous = store.get_cvp_group('CMA-' + cm.sha256_json(request.action_id))
+    following, following_root = successor(action, request, previous)
+    remaining = cm.Policy.model_validate(previous['policy'])
+    remaining.budget.opus_calls -= 1
+    proof = cm.continuation_budget(previous, following, remaining)
+    # The refused call generated nothing, so it is not spent.
+    assert proof['spent_generations'] == {'gpt': 0, 'opus': 1, 'gemini': 0}
+    assert [v['kind'] for v in proof['pre_generation_schema_rejections'].values()] == ['capacity']
+    # A successor may not widen what it can create.
+    wider = following.model_copy(deep=True)
+    wider.creation_permissions.append(cm.CreationPermission(collection='evidence_steps', source_id='S', fields=['statement']))
+    with pytest.raises(ValueError, match='structural writes'):
+        cm.continuation_budget(previous, wider, remaining)
+    policy_file = tmp_path / 'remaining-policy.json'
+    policy_file.write_text(remaining.model_dump_json())
+    following.policy = cm.source.FileBinding.model_validate(binding(policy_file))
+    path = Path(following.authorization.path)
+    direction = json.loads(path.read_text())
+    direction['policy'] = following.policy.model_dump(mode='json')
+    path.write_text(json.dumps(direction))
+    following.authorization = cm.source.FileBinding.model_validate(binding(path))
+    resumed = SyntheticPorts(store, tmp_path, proposal=propose_sibling, opus=passing)
+    result = execute_claim_management(store, following, root=following_root, ports=resumed)
+    assert result['status'] == 'completed', result
+    assert resumed.calls == ['gpt', 'opus', 'gemini']
+    assert store.get_record_state('claims', 'N')['payload']['evidence_step_ids'] == ['E']
+    assert store.get_record_state('evidence_steps', 'E')['payload']['produced_claim_ids'] == ['C', 'N']
+    assert execute_claim_management(store, request, root=root, ports=ports)['reason'] == 'continued_in_linked_action'
+
+
+@pytest.mark.parametrize('raw', [
+    {'last_message': 'partial', 'stdout': '', 'stderr': 'ERROR: ' + cm.CAPACITY_REJECTION},
+    {'last_message': None, 'stdout': '{"partial": true}', 'stderr': 'ERROR: ' + cm.CAPACITY_REJECTION},
+    {'last_message': None, 'stdout': '', 'stderr': 'ERROR: something else went wrong'},
+    {'last_message': None, 'stdout': '', 'stderr': ''},
+    {'last_message': None, 'stdout': '', 'stderr': 'ERROR: ' + cm.CAPACITY_REJECTION + '\nERROR: '
+        + json.dumps({'status': 400, 'error': {'code': 'invalid_json_schema', 'param': 'text.format.schema'}})},
+])
+def test_only_a_clean_refusal_counts_as_generating_nothing(raw):
+    assert cm.pre_generation_rejection(raw) is None
+
+
+def test_clean_refusals_are_recognised():
+    schema = json.dumps({'status': 400, 'error': {'code': 'invalid_json_schema', 'param': 'text.format.schema'}})
+    assert cm.pre_generation_rejection({'stdout': '', 'stderr': 'ERROR: ' + schema}) == 'schema'
+    assert cm.pre_generation_rejection({'stdout': '', 'stderr': 'noise\nERROR: ' + cm.CAPACITY_REJECTION}) == 'capacity'
