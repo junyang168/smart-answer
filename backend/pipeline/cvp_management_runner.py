@@ -645,14 +645,9 @@ def run(store,request,*,root,execute=False,clients=None):
                     if same:
                         _guard(store,oldbundle)
                         bundle=oldbundle
-                    for oldstep_id in unit['steps']:
-                        oldstep=store.get_cvp_group(oldstep_id)
-                        path=Path(oldstep['materials']['step_root'])/'candidate.json'
-                        if path.exists():
-                            saved=read_artifact(path);verify(saved,domain.VERSION+'_candidate')
-                            seen.add((oldstep['materials']['bundle']['artifact_sha256'],_semantic(saved)))
                     has_approval=(oldroot/'approval.json').exists()
-                    if same and (not has_approval or read_artifact(oldroot/'approval.json')['approved']):
+                    replay_step=same and (not has_approval or read_artifact(oldroot/'approval.json')['approved'])
+                    if replay_step:
                         # A saved passing review still owns this prepared
                         # step when SQL admission failed. Reuse both answers
                         # and finish its exact postimage, without a new round.
@@ -680,6 +675,17 @@ def run(store,request,*,root,execute=False,clients=None):
                                     previous=_rebase_previous(request,oldbundle,bundle,previous,prior_findings=prior_findings)
                         ordinal=latest['ordinal']+1 if latest['generation']==generation else 0
                         revision=has_approval and not read_artifact(oldroot/'approval.json')['approved']
+                    for oldstep_id in unit['steps']:
+                        # Resume authenticates this exact step's cached
+                        # proposal/review below. It is not a new semantic
+                        # attempt, even when it was itself a revision. Keep
+                        # every earlier candidate in the progress comparison.
+                        if replay_step and oldstep_id==latest['run_id']:continue
+                        oldstep=store.get_cvp_group(oldstep_id)
+                        path=Path(oldstep['materials']['step_root'])/'candidate.json'
+                        if path.exists():
+                            saved=read_artifact(path);verify(saved,domain.VERSION+'_candidate')
+                            seen.add((oldstep['materials']['bundle']['artifact_sha256'],_semantic(saved)))
                 while True:
                     step_root=unit_root/f'step-{ordinal:04d}'
                     materials={'bundle':bundle,'previous':previous,'prior_findings':prior_findings,

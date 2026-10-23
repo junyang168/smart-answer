@@ -397,6 +397,110 @@ def test_saved_passing_review_finishes_prepared_sql_failure_without_new_model_ro
     assert len(parent(store)['units']['g1']['steps'])==1
 
 
+@pytest.mark.parametrize('stop_at', ['candidate', 'review_plan', 'approval', 'sql_admission',
+                                   'reviewed', 'applied', 'readback'])
+def test_multiround_resume_keeps_exact_evidence_review_and_single_sql_write(setup,monkeypatch,stop_at):
+    store,request,root,clients,source=setup
+    from backend.api.canonical_repository.postgres_store import canonical_json,record_content_sha
+    from backend.api.canonical_repository.knowledge_models import SourceFragmentRecord
+    # One eligible evidence step has two fragments, only one of which belongs
+    # on this connection. A later summary-only correction must keep that choice.
+    fragment=SourceFragmentRecord.model_validate({'fragment_id':'F2','source_id':'S1',
+        'paragraph_key':'S0002','verbatim_excerpt':'這是另一個完整論證。',
+        'source_sha256':project_script(json.loads(source.read_text())).body_sha256,
+        'anchor_state':'source_version_bound'}).model_dump(mode='json')
+    evidence=deepcopy(store.get_record_state('evidence_steps','E1')['payload'])
+    evidence['source_fragment_ids']=['F1','F2']
+    with store.connect() as conn:
+        conn.execute('''INSERT INTO wang_knowledge.objects(collection,object_id,revision,content_sha256,payload,review_status,visibility)
+            VALUES('source_fragments','F2',1,%s,%s::jsonb,%s,%s)''',
+            (record_content_sha(fragment),canonical_json(fragment),fragment['review_status'],fragment['visibility']))
+        conn.execute("UPDATE wang_knowledge.objects SET content_sha256=%s,payload=%s::jsonb WHERE collection='evidence_steps' AND object_id='E1'",
+            (record_content_sha(evidence),canonical_json(evidence)))
+    before_claim=store.get_record_state('claims','C1');before_source=source.read_bytes()
+    proposals=[];reviews=[];stopped=[]
+    def propose(packet):
+        if not packet.get('schema_version','').endswith('_proposal_packet'):return
+        if not proposals:
+            value=proposal();cref=packet['input']['claims'][0]['claim_ref']
+            for change in value['changes']:
+                fields=json.loads(change['fields_json'])
+                if fields.get('claim_id')=='c1':
+                    fields['claim_id']=cref
+                    fields['source_fragment_refs']=[next(f['fragment_ref'] for f in packet['material']['fragments']
+                        if f['content']['verbatim_excerpt']=='人子是神。')]
+                change['fields_json']=json.dumps(fields,ensure_ascii=False)
+        else:
+            value={'summaries':[{'ref':'nv1','summary':f'第{len(proposals)}次補充：此處的人子稱號指向神性。'}]}
+        proposals.append(True)
+        return envelope('candidate',candidate=value)
+    def review(packet):
+        if not packet.get('schema_version','').endswith('_review_packet'):return
+        candidate=packet['candidate'];value=passing(candidate);reviews.append(True)
+        link=next(w['payload'] for w in candidate['records'] if w['ref']=='nl1')
+        assert len(link['evidence_bindings'])==1
+        assert link['evidence_bindings'][0]['source_fragment_id']==next(
+            f['fragment_ref'] for f in packet['material']['fragments'] if f['content']['verbatim_excerpt']=='人子是神。')
+        value['prior_findings']=[{'ref':ref,'disposition':'resolved','reason':'已完整核對本輪候選。'}
+            for ref in candidate['review_sets']['prior_findings']]
+        if len(reviews)<3:
+            ref='nv1';next(r for r in value['object_reviews'] if r['ref']==ref).update(decision='revise',finding_refs=['f1'])
+            value['findings']=[{'slot':'f1','target_refs':[ref],'category':'wording','reason':'摘要需補充限定。'}]
+        return envelope('review',review=value)
+    clients['gpt'].behavior=propose;clients['opus'].behavior=review
+    write=runner.write_immutable;commit=runner.commit_package;readback=runner._readback
+    def stop():
+        if not stopped:stopped.append(True);raise RuntimeError('test interrupted '+stop_at)
+    def write_then_stop(path,value,**kwargs):
+        write(path,value,**kwargs)
+        names={'candidate':'candidate.json','review_plan':'review-plan.json','approval':'approval.json'}
+        if Path(path).parent.name=='step-0002' and Path(path).name==names.get(stop_at):stop()
+    def commit_then_stop(*args,**kwargs):
+        if len(reviews)==3 and stop_at=='sql_admission':stop()
+        result=commit(*args,**kwargs)
+        if len(reviews)==3 and stop_at=='applied':stop()
+        return result
+    apply=store.apply_plan
+    def apply_then_stop(*args,**kwargs):
+        if len(reviews)==3 and stop_at=='reviewed':stop()
+        return apply(*args,**kwargs)
+    def read_then_stop(*args,**kwargs):
+        result=readback(*args,**kwargs)
+        if len(reviews)==3 and stop_at=='readback':stop()
+        return result
+    monkeypatch.setattr(runner,'write_immutable',write_then_stop)
+    monkeypatch.setattr(runner,'commit_package',commit_then_stop)
+    monkeypatch.setattr(store,'apply_plan',apply_then_stop)
+    monkeypatch.setattr(runner,'_readback',read_then_stop)
+    assert runner.run(store,request,root=root,execute=True,clients=clients)['status']=='partial'
+    assert stopped, parent(store)['units']['g1'].get('detail')
+    original=parent(store);unit=original['units']['g1'];step=store.get_cvp_group(unit['steps'][-1])
+    assert len(unit['steps'])==3 and step['revision'] and len(original['revision_rounds'])==2
+    step_root=Path(step['materials']['step_root'])
+    immutable={p:p.read_bytes() for p in step_root.iterdir() if p.is_file()}
+    monkeypatch.setattr(runner,'write_immutable',write)
+    monkeypatch.setattr(runner,'commit_package',commit)
+    monkeypatch.setattr(store,'apply_plan',apply)
+    monkeypatch.setattr(runner,'_readback',readback)
+    result=runner.run(store,request,root=root,execute=True,clients=clients)
+    assert result['status']=='completed',parent(store)['units']['g1'].get('detail')
+    assert len(proposals)==len(reviews)==3
+    current=parent(store)
+    assert current['units']['g1']['steps']==unit['steps'] and len(current['call_reservations'])==6
+    assert current['revision_rounds']==original['revision_rounds']
+    assert all(p.read_bytes()==data for p,data in immutable.items())
+    completed=store.get_cvp_group(unit['steps'][-1])
+    assert completed['checkpoint']=='audited' and len(completed['change_set_ids'])==1
+    assert completed['completion']['candidate_sha256']==json.loads((step_root/'candidate.json').read_text())['artifact_sha256']
+    links=store.read_cvp_links(claim_ids=['C1']);assert len(links)==1
+    link=next(iter(links.values()))
+    assert link['revision']==1 and link['payload']['evidence_bindings']==[
+        {'evidence_step_id':'E1','source_fragment_id':'F1'}]
+    assert store.get_record_state('claims','C1')==before_claim and source.read_bytes()==before_source
+    assert runner.run(store,request,root=root,execute=True,clients=clients)==result
+    assert len(proposals)==len(reviews)==3
+
+
 def test_existing_viewpoint_connection_rebinds_unchanged_summary_atomically(setup):
     from backend.api.canonical_repository.cvp_recall import STATEMENT_SCOPE_PROFILE
     store,request,root,clients,_=setup
