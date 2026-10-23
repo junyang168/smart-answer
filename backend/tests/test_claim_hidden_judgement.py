@@ -134,6 +134,9 @@ def test_every_reviewer_and_proposer_prompt_names_the_hidden_judgement_rule(name
         assert '联合 Update 没有创建权限' in text
     if 'proposal' in name:
         assert 'produced_claim_ids 加入新 Claim' in text
+        assert '在该 Question 的 answer_claim_ids 加入新 Claim' in text
+    if name in ('claim_management_review_v2.md', 'claim_management_audit_v2.md'):
+        assert 'component=answer_claim_ids' in text
     # Spoken teaching: one test (does the disputable judgement change?), with
     # the same wording shift harmless or material depending on the point.
     assert '读者据转述去支持或反驳的，是否仍是教授断言的那个判断' in text
@@ -325,3 +328,47 @@ def test_clean_refusals_are_recognised():
     schema = json.dumps({'status': 400, 'error': {'code': 'invalid_json_schema', 'param': 'text.format.schema'}})
     assert cm.pre_generation_rejection({'stdout': '', 'stderr': 'ERROR: ' + schema}) == 'schema'
     assert cm.pre_generation_rejection({'stdout': '', 'stderr': 'noise\nERROR: ' + cm.CAPACITY_REJECTION}) == 'capacity'
+
+
+# 2017 NYSC 4: the new Claim 「人子或人的形象代表神」 is the professor's own
+# answer to Q019, but the request could not write Q019, so the link was only noted.
+def with_question(before):
+    before['questions/Q'] = {'payload': {'question_id': 'Q', 'text': '耶穌每次說「人子」都怎樣？',
+        'answer_claim_ids': ['C'], 'source_fragment_ids': ['F']}, 'retired': False}
+    return before
+
+
+def grant_question(request):
+    return request.model_copy(update={'permissions': request.permissions + [
+        c.Permission(collection='questions', object_id='Q', fields=['answer_claim_ids'])]})
+
+
+def test_an_update_that_may_create_claims_must_be_able_to_link_the_questions_it_reads(case):
+    request, before, _ = case
+    before = {k: v | {'revision': 1, 'content_sha256': 'b' * 64} for k, v in with_question(before).items()}
+    with pytest.raises(ValueError, match='answer_claim_ids on every question it reads: questions/Q'):
+        cm.original_goal(request, before)
+    assert 'questions/Q' in cm.original_goal(grant_question(request), before)['original_objects']
+    # Without creation there is no new Claim to link; the old scope still holds.
+    cm.original_goal(request.model_copy(update={'creation_permissions': [], 'allowed_operations': ['Update']}), before)
+
+
+def test_the_new_claim_joins_the_question_answers_without_replacing_them(case):
+    request, before, sources = case
+    with_question(before)
+    request = grant_question(request)
+    candidate = sibling(before)
+    candidate.dispositions = [d for d in candidate.dispositions if d.record_key != 'questions/Q']
+    question = deepcopy(before['questions/Q']['payload']) | {'answer_claim_ids': ['C', 'N']}
+    candidate.records.append(c.Row(collection='questions', object_id='Q', payload=question))
+    candidate.dispositions.append(cm.ObjectDisposition(record_key='questions/Q', action='update',
+        reason='his answer is the new Claim', citations=[cite()]))
+    post, writes = cm.validate_candidate(request, before, candidate, sources)
+    assert post['questions/Q']['answer_claim_ids'] == ['C', 'N'] and writes['questions/Q']['action'] == 'update'
+
+
+def test_an_unlinked_answer_question_blocks_the_round_that_created_the_claim(case):
+    request, before, _ = case
+    finding = {'target_key': 'questions/Q', 'category': 'mapping', 'component': 'answer_claim_ids',
+               'affected_target_keys': ['claims/N'], 'impact_reason': '新 Claim 正是教授對此問題的回答。'}
+    assert cm.finding_blocks(finding, grant_question(request), sibling(with_question(before)))
