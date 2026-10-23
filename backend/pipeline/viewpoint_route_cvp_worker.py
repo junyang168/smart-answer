@@ -140,6 +140,7 @@ def process_cvp_route(
         existing_attestations=materials["existing_attestations"],
         source_sections=materials["source_sections"],
         complete_cvp=True,
+        unavailable_evidence=materials.get('unavailable_evidence'),
     )
     if packet["membership_ledger"]["out_of_scope_members"]:
         raise ValueError("complete CVP Route packet omitted an active member")

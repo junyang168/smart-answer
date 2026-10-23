@@ -307,6 +307,7 @@ def build_registry_route_packet(
     source_sections: list[dict[str, Any]] | None = None,
     existing_attestations: list[dict[str, Any]] | None = None,
     complete_cvp: bool = False,
+    unavailable_evidence: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Rebuild Route evidence solely from committed Registry state.
 
@@ -570,6 +571,23 @@ def build_registry_route_packet(
             existing_attestations,
             key=lambda item: str(item["argument_route_attestation_id"]),
         )
+    if unavailable_evidence:
+        available = {item.evidence_step_id for claim in claims for item in claim.evidence}
+        keys = set()
+        for item in unavailable_evidence:
+            key = item.get('claim_id'), item.get('evidence_step_id')
+            if (set(item) != {'claim_id','evidence_step_id','support_eligibility',
+                             'anchor_quality','usable_for_route_binding'}
+                    or key in keys or key[0] not in claim_index or not key[1]
+                    or key[1] in available
+                    or item['support_eligibility'] != 'withheld_missing_anchor'
+                    or item['anchor_quality'] != 'missing'
+                    or item['usable_for_route_binding'] is not False):
+                raise ValueError('Route unavailable Evidence disclosure is inconsistent')
+            keys.add(key)
+        packet['unavailable_evidence'] = sorted(
+            [dict(item) for item in unavailable_evidence],
+            key=lambda item:(item['claim_id'],item['evidence_step_id']))
     packet["packet_sha256"] = sha256_json(packet)
     return packet
 

@@ -128,8 +128,11 @@ def prepare_cvp_route_materials(
     source_shas = {sid: str(source.get("source_sha256") or "") for sid, source in sources.items()}
 
     review_claims: list[ReviewClaim] = []
+    unavailable_evidence = []
     fragments_by_source: dict[str, dict[str, Any]] = {sid: {} for sid in source_ids}
     for claim_id in sorted(claim_ids):
+        unavailable = frozenset(eid for eid in claims[claim_id].evidence_step_ids
+            if evidence[eid].support_eligibility == 'withheld_missing_anchor')
         review, findings = compile_review_claim(
             claim=claims[claim_id],
             evidence_index=evidence,
@@ -141,10 +144,17 @@ def prepare_cvp_route_materials(
                 link.claim_id == claim_id and link.link_type == "equivalent_full"
                 for link in links
             ) else None,
+            unavailable_evidence_ids=unavailable,
         )
         if review is None or findings:
             raise ValueError(f"{claim_id}: Route evidence incomplete: {'; '.join(findings)}")
         review_claims.append(review)
+        unavailable_evidence.extend({
+            'claim_id': claim_id, 'evidence_step_id': eid,
+            'support_eligibility': evidence[eid].support_eligibility,
+            'anchor_quality': evidence[eid].anchor_quality,
+            'usable_for_route_binding': False,
+        } for eid in sorted(unavailable))
         for item in review.evidence:
             fragments_by_source[item.source_id][item.source_fragment_id] = (
                 fragment_rows["source_fragments", item.source_fragment_id]["payload"]
@@ -186,6 +196,8 @@ def prepare_cvp_route_materials(
         ],
         "physical_sources": physical_sources,
     }
+    if unavailable_evidence:
+        body['unavailable_evidence'] = unavailable_evidence
     return body | {"artifact_sha256": sha256_json(body)}
 
 
