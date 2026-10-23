@@ -7,7 +7,7 @@ only its exact unchanged candidate_claim_ids reference may remain historical.
 import json
 from pathlib import Path
 from backend.api.canonical_repository.postgres_store import KNOWLEDGE_COLLECTIONS, canonical_json, record_content_sha, sha256_json
-from backend.pipeline.cvp_sql_flow import binding, check_binding, pins, pin_rows, decoded_pins
+from backend.pipeline.cvp_sql_commit import binding, check_binding, pins, pin_rows, decoded_pins
 from backend.pipeline.source_reconciliation_runner import read, body, write
 from backend.pipeline.viewpoint_resolution_runtime import read_artifact
 
@@ -155,7 +155,7 @@ def historical_reference_rows(package):
 
 def execute(store, run_id, *, authorization, root, ports):
     from backend.pipeline.cvp_sql_actions import resume_bound_action
-    from backend.pipeline.cvp_sql_flow import commit_package, verified_group_backup
+    from backend.pipeline.cvp_sql_commit import commit_package, verified_group_backup
     check_binding(authorization);d=read_artifact(authorization['path'])
     aid='CVPA-'+sha256_json({'kind':SCHEMA,'claim_id':d['claim_id'],'before_pins':d['before_pins']})
     root=Path(root)/aid;store.bind_cvp_execution_root(run_id,identity=aid,root=root)

@@ -17,10 +17,8 @@ import time
 from dotenv import load_dotenv
 
 from backend.api.canonical_repository.postgres_store import (
-    ChangeOperation, ChangeSetPlan, PlannedReviewEvent, PostgresKnowledgeStore,
-    canonical_json, normalize_package, record_content_sha, sha256_json,
+    PostgresKnowledgeStore, canonical_json, record_content_sha, sha256_json,
 )
-from backend.api.canonical_repository.transaction_validation import TransactionValidation
 from backend.api.canonical_repository.knowledge_models import (
     ClaimRecord, EvidenceStepRecord, SourceFragmentRecord,
 )
@@ -28,180 +26,14 @@ from backend.api.canonical_repository.viewpoint_resolution import compile_review
 from backend.pipeline.viewpoint_resolution_runtime import (
     read_artifact, read_saved_model_response, stable_decided_at, write_immutable,
 )
-
-PROJECT = Path(__file__).resolve().parents[2]
-NORMAL_COLLECTIONS = {"canonical_viewpoints","viewpoint_revisions","viewpoint_claim_links",
-                      "viewpoint_relations","viewpoint_identity_candidates","viewpoint_identity_decisions",
-                      "viewpoint_structures","viewpoint_structure_revisions","viewpoint_coverage_snapshots",
-                      "viewpoint_resolution_ledgers","viewpoint_quality_reports"}
-
-
-def validate_transaction_audit(audit,claim_ids,viewpoint_ids):
-    scope=audit.get('meta',{}).get('registry_read_scope')
-    if (not scope or scope.get('kind')!='sql_transaction_group' or scope.get('complete_target_members') is not True
-            or set(scope.get('claim_ids',[]))!=set(claim_ids) or set(scope.get('viewpoint_ids',[]))!=set(viewpoint_ids)):
-        raise ValueError('SQL completion requires exact complete current group audit scope')
-    first=audit['layers']['1'];second=audit['layers']['2']
-    if any(value for name,value in first['counts'].items() if name!='pass') or first.get('findings'):
-        raise ValueError('affected current source/fragment audit failed')
-    if first.get('version_binding',{}).get('stale') or first.get('version_binding',{}).get('missing'):
-        raise ValueError('affected current source version is not bound')
-    for key in ('findings','dangling','ambiguous_paths','source_document_findings','attestation_findings',
-                'derived_scripture_findings','component_locator_findings','retired_evidence_findings',
-                'struck_evidence_findings','change_set_readback_findings'):
-        if second.get(key):raise ValueError('affected current structural audit failed: '+key)
-    anchors=second.get('claim_occurrence_anchors',{})
-    if anchors.get('findings') or anchors.get('error_count'):raise ValueError('affected current occurrence audit failed')
-    reciprocity=second.get('claim_evidence_reciprocity',{})
-    if any(reciprocity.get(k) for k in ('findings','error_count','claim_only','evidence_only','dangling','duplicate_arrays')):
-        raise ValueError('affected current Claim/Evidence reciprocity failed')
+from backend.pipeline.cvp_sql_commit import (
+    PROJECT, NORMAL_COLLECTIONS, validate_transaction_audit,
+    binding, check_binding, verified_group_backup, plan_from_document,
+    resume_reviewed_action, pins, pin_rows, decoded_pins, commit_package,
+)
 
 
-def binding(path):
-    from backend.api.canonical_repository.viewpoint_production_safety import file_sha256
-    # Authorized SSD archives intentionally retain their original logical
-    # path. The archive reader verifies UUID, exact target, size and SHA first.
-    from backend.pipeline.viewpoint_backup_archive import logical_binding_path
-    path = logical_binding_path(path)
-    return {"path":str(path),"file_sha256":file_sha256(path)}
-
-
-def check_binding(value):
-    if binding(value["path"]) != value: raise ValueError("exact SQL material/source binding drift")
-
-
-def verified_group_backup(root, package, ports):
-    """Persist fresh backup before commit; recover only its exact SSD receipt.
-
-    A crash after pg_dump and before this small record must not create another
-    backup, overwrite an archive, or repeat an already reviewed model request.
-    """
-    from backend.pipeline.viewpoint_backup_archive import LOCAL, NAME, RECEIPT, catalog
-    path = root/'backup.json'
-    package_sha = sha256_json(package)
-    if path.exists():
-        saved = read_artifact(path)
-        if saved['package_sha256'] != package_sha:
-            raise ValueError('saved backup belongs to a different reviewed package')
-        backup = saved['backup']
-    else:
-        label = 'before-source-357-' + sha256_json(str(root))[:32]
-        attempted = list(LOCAL.glob('registry-backup-*-'+label))
-        if len(attempted)>1:
-            raise ValueError('ambiguous backup attempts for exact SQL execution root')
-        if attempted:
-            dump = attempted[0]/NAME
-            receipt = read_artifact(attempted[0]/RECEIPT)
-            if receipt.get('artifact_sha256') != sha256_json({k:v for k,v in receipt.items() if k!='artifact_sha256'}):
-                raise ValueError('saved direct SSD backup receipt seal differs')
-            dump_binding = binding(dump)
-            if not receipt.get('direct_ssd') or dump_binding != {'path':receipt['original_path'],'file_sha256':receipt['file_sha256']}:
-                raise ValueError('exact direct SSD backup identity differs')
-            backup = {'dump':dump_binding,'restore_catalog_nonempty':True,
-                      'catalog_sha256':catalog(dump),'restore_list_exit_code':0}
-            if backup['catalog_sha256'] != receipt['restore_catalog_sha256']:
-                raise ValueError('current backup restore catalog differs')
-        else:
-            backup = ports.backup(root)
-        write_immutable(path, {'package_sha256':package_sha,'backup':backup})
-    check_binding(backup['dump'])
-    if not backup.get('restore_catalog_nonempty') or backup.get('restore_list_exit_code') != 0:
-        raise ValueError('saved backup lacks successful restore catalog')
-    if catalog(Path(backup['dump']['path'])) != backup['catalog_sha256']:
-        raise ValueError('saved backup catalog drift')
-    return backup
-
-
-def plan_from_document(value):
-    return ChangeSetPlan(**{name:value[name] for name in (
-        "change_set_id","fingerprint_sha256","package_id","source_kind","source_sha256","unchanged")},
-        ignored_keys=tuple(value["ignored_keys"]),operations=tuple(ChangeOperation(**op) for op in value["operations"]),
-        review_events=tuple(PlannedReviewEvent(**event) for event in value.get("review_events",[])))
-
-
-def resume_reviewed_action(store, run_id):
-    """One recovery boundary: consume SQL approval, never rebuild or re-review."""
-    saved = store.get_cvp_group(run_id)
-    if saved['checkpoint'] != 'reviewed': return None
-    evidence = saved['reviewed']['evidence']
-    for source in evidence['sources']: check_binding(source)
-    if saved['reviewed']['plan']['source_kind'] != 'wang_claim_management_v2':
-        check_binding(evidence['backup']['dump'])
-    for proof in evidence['approval'].values():
-        if isinstance(proof,dict) and {'path','file_sha256'} <= proof.keys(): check_binding(proof)
-    plan = plan_from_document(saved['reviewed']['plan'])
-    if plan.source_kind == 'cvp_batch_resolution':
-        store.retain_reviewed_cvp_relations(run_id,plan=plan,reviewed_sha256=saved['reviewed_sha256'])
-        saved = store.get_cvp_group(run_id)
-        evidence = saved['reviewed']['evidence']
-    return store.apply_plan(plan_from_document(saved['reviewed']['plan']),
-        transaction_context=TransactionValidation(run_id,saved['reviewed_sha256'],decoded_pins(evidence['read_pins'])),
-        metadata=evidence['execution'])
-
-
-def pins(records, *, absent=()):
-    result = {key:(int(row["revision"]),str(row["content_sha256"]),bool(row.get("retired"))) for key,row in records.items()}
-    for key in absent: result.setdefault(key,None)
-    return result
-
-
-def pin_rows(values):
-    return [{"collection":k[0],"object_id":k[1],"pin":list(v) if v else None} for k,v in sorted(values.items())]
-
-
-def decoded_pins(rows):
-    return {(row["collection"],row["object_id"]):tuple(row["pin"]) if row["pin"] else None for row in rows}
-
-
-def current_claim_authority(store, cid, row):
-    """Consume an actual revision-bound SQL review, not an inherited pass bit."""
-    claim = row["payload"]
-    if row.get("retired") or claim.get("review_status") in {"human_hold","withheld_unreviewed","rejected","superseded"}:
-        raise ValueError("current Claim held or not reviewed: " + cid)
-    qualification = store.claim_management_qualification(cid)
-    if qualification is not None:
-        if (not qualification['ready']
-                or [qualification.get('revision'), qualification.get('content_sha256')]
-                   != [row['revision'], row['content_sha256']]):
-            raise ValueError('current Claim requires exact independent qualification: ' + cid)
-        if (claim.get('review_status') == 'human_review_required'
-                and qualification.get('legacy_ai_spot_check_replaced_by_current_review') is not True):
-            raise ValueError('current Claim held or not reviewed: ' + cid)
-        return {'claim_id': cid, 'revision': row['revision'], 'content_sha256': row['content_sha256'],
-                'qualification': qualification, 'reviewer_kind': 'ai',
-                'decision': 'independent_current_qualified', 'review_artifact_sha256': qualification['audit']['file_sha256']}
-    if claim.get('review_status') == 'human_review_required':
-        raise ValueError('current Claim held or not reviewed: ' + cid)
-    with store.connect() as conn:
-        events = conn.execute("""SELECT review_event_id,reviewer_kind,decision,artifact
-                                 FROM wang_knowledge.review_events
-                                 WHERE collection='claims' AND object_id=%s AND object_revision=%s
-                                   AND decision=%s ORDER BY review_event_id""",
-                              (cid,row["revision"],claim.get("review_status"))).fetchall()
-    if not events:
-        from backend.pipeline.cvp_sql_retained_evidence_locator_authority import authority as fixed_authority
-        fixed=fixed_authority(store,cid,row)
-        if fixed is not None:return fixed
-        return coordinate_predecessor_authority(store, cid, row)
-    if len(events) != 1 or events[0][1] not in {"ai","human","system"} or not events[0][3]:
-        raise ValueError("current Claim has missing/ambiguous exact SQL review: " + cid)
-    return {"claim_id":cid,"revision":row["revision"],"content_sha256":row["content_sha256"],
-            "review_event_id":events[0][0],"reviewer_kind":events[0][1],"decision":events[0][2],
-            "review_artifact_sha256":sha256_json(events[0][3])}
-
-
-def coordinate_predecessor_authority(store, cid, row):
-    """Carry one actual SQL review over an exact applied locator-only step.
-
-    No new review event, status mutation, history-chain replay or legacy runner.
-    The immediate predecessor must have its own unique review, either a bound
-    SQL event or an exact passing imported-input/SQL-graph proof. Inherited
-    review notes grant no authority. The original bounded plan, actual SQL
-    operation and physical body must all agree, and the original deterministic
-    locator compiler must reproduce the full row. Never walk older versions.
-    """
-    from backend.pipeline.cvp_sql_claim_authority import coordinate_authority
-    return coordinate_authority(store, cid, row)
+from backend.pipeline.cvp_sql_claim_authority import current_claim_authority, coordinate_predecessor_authority
 
 
 def prepare_group(store, definition, group):
@@ -338,7 +170,8 @@ def reviewed_cvp_package(root, materials, store, *, require_resolved=False):
     packet = materials["packet"]
     models = adapters({"cvp_policy":materials["policy"]})
     check_binding(materials["policy"]); check_binding(materials["semantic_contract"])
-    for source in materials["sources"]:check_binding(source)
+    from backend.pipeline.source_editorial_transition import verify_current_source_binding
+    current_material_sources = [verify_current_source_binding(source) for source in materials["sources"]]
     from backend.pipeline.claim_issue_management import IssuesDetected,review_findings
     def identity_source_loader(source_ids):
         from backend.pipeline.viewpoint_evidence_source_context import load_context_source
@@ -350,10 +183,12 @@ def reviewed_cvp_package(root, materials, store, *, require_resolved=False):
             if not source:
                 raise ValueError('integration own source missing or retired')
             path,physical_sha,projection=load_context_source(source)
-            if {'path':str(path),'file_sha256':physical_sha} not in materials['sources']:
+            if {'path':str(path),'file_sha256':physical_sha} not in current_material_sources:
                 raise ValueError('integration source is outside prepared physical source bindings')
             result.append({'source_id':sid,'source_type':source['source_type'],
-                'source_path':str(path),'source_file_sha256':physical_sha,
+                # Paragraph-only model input keeps registered provenance; live
+                # physical bindings stay in current_material_sources outside it.
+                'source_path':str(path),'source_file_sha256':source['source_file_sha256'],
                 'source_body_sha256':projection.body_sha256,
                 'paragraph_texts':[r['text'] for r in projection.spoken_rows]})
         return result
@@ -448,93 +283,6 @@ def reviewed_cvp_package(root, materials, store, *, require_resolved=False):
     return package,approval,disposition
 
 
-def commit_package(store, run_id, *, package, approval, authorization, backup, sources,
-                   read_pins, reason, actor, source_kind="cvp_batch_resolution", viewpoint_ids=(), disposition=None, action=None,
-                   pending_cvp_claim_ids=(), pending_cvp_management_record_keys=None):
-    """The shared normal/source/link execution boundary after content approval."""
-    for source in sources:check_binding(source)
-    if source_kind != 'wang_claim_management_v2':
-        if not backup.get('restore_catalog_nonempty') or not backup.get('dump'):
-            raise ValueError('fresh backup lacks verified restore-list proof')
-        check_binding(backup['dump'])
-    from backend.api.canonical_repository.reviewed_candidate_contract import validate_store_package_authorization
-    validate_store_package_authorization(package)
-    plan = store.plan_package(package,source_kind=source_kind,transactional=True)
-    if source_kind == "cvp_batch_resolution" and any(op.collection not in NORMAL_COLLECTIONS for op in plan.operations):
-        raise ValueError("normal CVP package exceeds authorized content scope")
-    complete_pins = dict(read_pins)
-    # Complete unchanged dependencies are SQL-approved current facts, not new
-    # model judgements. The original material pins (including every current
-    # CVP head shown to the model) must remain exact. New revision dependents
-    # were included in the Opus packet by the indexed dependents loader.
-    with store.connect() as conn:
-        context=store._existing_cvp_context(conn,normalize_package(package),
-            [(op.collection,op.object_id) for op in plan.operations if op.operation=='retire'])
-    for key,pin in pins(context).items():
-        if key in complete_pins and complete_pins[key]!=pin:
-            raise ValueError('model materials changed before SQL approval')
-        complete_pins[key]=pin
-    for op in plan.operations:
-        complete_pins.setdefault((op.collection,op.object_id),None if op.before_revision is None else (op.before_revision,op.before_sha256,False))
-    evidence = {"package":{"sha256":sha256_json(package),"payload":package},"approval":approval,
-                "authorization":authorization,"backup":backup,"sources":sources,"read_pins":pin_rows(complete_pins),
-                "viewpoint_ids":list(viewpoint_ids),"disposition":disposition}
-    evidence['execution']={'reason':reason,'actor':actor,'approval':approval,'authorization':authorization,'backup':backup}
-    evidence['pending_cvp_claim_ids']=list(pending_cvp_claim_ids)
-    application = package.get('source_repair_application') or {}
-    if application.get('schema_version') == 'wang_claim_management_v2':
-        from backend.pipeline.source_reconciliation_runner import body, read
-        material = body(read(Path(application['materials']['path'])))
-        evidence['claim_management_scope'] = {'consumer_roots': [list(k) for k in sorted({
-            (key.split('/',1)[0], key.split('/',1)[1]) for key in material['unit_request']['target_keys']} |
-            {(p['collection'],p['object_id']) for p in material['unit_request']['permissions']})]}
-        if 'human_source_decisions' in material:
-            evidence['claim_management_scope'].update(source_ids=sorted(material['unit_request']['source_bindings']),
-                human_source_decisions=material['human_source_decisions'])
-        from backend.pipeline.claim_direct_scope import enabled as direct_scope_enabled
-        if direct_scope_enabled(material['unit_request']):
-            evidence['claim_management_scope'].update(claim_scope_request=material['unit_request'],
-                audit_record_keys=sorted(material['before']))
-        from backend.pipeline.claim_joint_update import CONTRACT
-        if material['original_goal'].get('joint_update_contract') == CONTRACT:
-            evidence['claim_management_scope'].update(joint_update_contract=CONTRACT,
-                audit_record_keys=sorted(material['before']))
-        evidence['pending_cvp_management_record_keys'] = application['pending_consumers']
-    previous_pending=(store.get_cvp_group(run_id) or {}).get('reviewed',{}).get('evidence',{}).get('pending_cvp_management_record_keys',[])
-    # Pending is a durable obligation, not a request to mutate every row.
-    # Even an explicit empty list must not erase an earlier obligation.
-    pending_cvp_management_record_keys=list(dict.fromkeys([*previous_pending,*(pending_cvp_management_record_keys or [])]))
-    if pending_cvp_management_record_keys:
-        evidence['pending_cvp_management_record_keys']=list(pending_cvp_management_record_keys)
-    if action:evidence['action']=action
-    reviewed = store.review_cvp_group(run_id,plan=plan,evidence=evidence)
-    if source_kind == 'cvp_batch_resolution':
-        reviewed = store.retain_reviewed_cvp_relations(run_id,plan=plan,reviewed_sha256=reviewed)
-        saved = store.get_cvp_group(run_id)['reviewed']
-        plan = plan_from_document(saved['plan'])
-        evidence = saved['evidence']
-        complete_pins = decoded_pins(evidence['read_pins'])
-    context = TransactionValidation(run_id,reviewed,complete_pins)
-    result = store.apply_plan(plan,transaction_context=context,metadata=evidence['execution'])
-    if result['change_set_id'] is None:return result
-    # A separate connection confirms commit visibility. Failure here preserves
-    # SQL applied and resumes this read; it never calls apply a second time.
-    history = store.get_change_history(plan.change_set_id)
-    if not history or history["status"] != "applied": raise ValueError("committed ChangeSet not visible")
-    for operation in history['operations']:
-        actual=store.get_record_state(operation['collection'],operation['object_id'])
-        expected_payload=operation['after']
-        # Retirement advances storage/history revision while deliberately
-        # preserving the original object payload byte for byte. Do not treat
-        # that documented distinction as a missing commit or reapply it.
-        if operation['operation']=='retire':
-            expected_payload={**expected_payload,'revision':operation['before_revision']}
-        if (actual is None or actual['payload']!=expected_payload
-                or actual['revision']!=operation['after_revision']
-                or actual['content_sha256']!=operation['after_sha256']
-                or actual['retired']!=(operation['operation']=='retire')):
-            raise ValueError('committed current postimage not visible; do not apply again')
-    return result
 
 
 def audit_resolution_directory(audit_dir,audit_path):
@@ -979,7 +727,7 @@ def main(argv=None):
     parser.add_argument('--integrate-batch-candidates',action='store_true',
                         help='Explicit new-group identity integration; never upgrades saved legacy answers')
     parser.add_argument('--claim-update-preflight', action='store_true', help='Read-only dependency grouping for the exact authorized Claim Update batch')
-    parser.add_argument('--action',choices=('claim-management','group','independent-revisit','audit-run','source-pending-check','source-impact-complete','source','source-write-slice','relation-retire','claim-retire','owner-link','link-target','link-retarget','link-retire','link-replace','link-representation','cvp-merge'),default='group')
+    parser.add_argument('--action',choices=('cvp-management','cvp-management-control','recall-preflight','claim-management','group','independent-revisit','audit-run','source-pending-check','source-impact-complete','source','source-write-slice','relation-retire','claim-retire','owner-link','link-target','link-retarget','link-retire','link-replace','link-representation','cvp-merge'),default='group')
     parser.add_argument('--claim-first',action='store_true',
                         help='Finish only the original bounded Claim/Evidence action; keep all CVPs pending and stop before CVP/group execution')
     parser.add_argument('--candidate-viewpoint-id',action='append',default=[],
@@ -1032,6 +780,24 @@ def main(argv=None):
     parser.add_argument('--review-claim-id-format-repair',type=Path,
                         help='Owner-bound one fixed-parent ID-only transport repair; no semantic re-review')
     args = parser.parse_args(argv)
+    if args.action in {'cvp-management','cvp-management-control'}:
+        if not args.manifest or args.sql_campaign or args.run_id or args.claim_first:
+            raise ValueError('CVP2 requires its own manifest; never upgrades an old campaign')
+        allowed={'action','manifest','output_root','database_url','execute','dry_run'}
+        if any(value not in (None,False,[],{}) for name,value in vars(args).items() if name not in allowed):
+            raise ValueError('CVP2 cannot consume historical campaign/recovery flags')
+        if args.execute and args.dry_run:
+            raise ValueError('choose either --execute or --dry-run')
+        load_dotenv(PROJECT/'.env')
+        store=PostgresKnowledgeStore(args.database_url)
+        if args.action=='cvp-management':
+            from backend.pipeline.cvp_management_runner import run
+            result=run(store,read_artifact(args.manifest),root=args.output_root,execute=args.execute)
+        else:
+            from backend.pipeline.cvp_management_control import run
+            result=run(store,read_artifact(args.manifest),execute=args.execute)
+        print(canonical_json(result))
+        return 0
     if args.action == 'claim-management':
         if not args.manifest or args.sql_campaign or args.run_id or args.claim_first:
             raise ValueError('new Claim action requires its own explicit v2 request; no old campaign upgrade')
@@ -1050,6 +816,18 @@ def main(argv=None):
         ports = ProductionPorts()
         ports.store = store
         print(canonical_json(execute_claim_management(store, request, root=args.output_root, ports=ports)))
+        return 0
+    if args.action=='recall-preflight':
+        if not args.manifest or args.execute or args.sql_campaign or args.run_id or args.claim_first:
+            raise ValueError('recall-preflight requires --manifest and never permits --execute')
+        from backend.pipeline.cvp_recall_preparation import prepare_recall
+        load_dotenv(PROJECT/'.env')
+        store=PostgresKnowledgeStore(args.database_url)
+        result=prepare_recall(store,read_artifact(args.manifest))
+        write_immutable(args.output_root/'recall-preflight.json',result)
+        stage_event('recall_preflight',status=result['status'],groups=len(result['groups']),
+                    active_cvps=len(result['heads']),model_calls=0,semantic_writes=0,
+                    artifact_path=str(args.output_root/'recall-preflight.json'))
         return 0
     if not args.sql_campaign:
         raise ValueError('existing SQL campaign actions still require --sql-campaign')

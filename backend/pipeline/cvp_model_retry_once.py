@@ -21,7 +21,7 @@ def sealed(d):
 
 
 def validate(d, root, campaign):
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     sealed(d)
     if (d.get('schema_version') != SCHEMA or d.get('authorized_by') != 'owner'
             or not d.get('authorization_quote') or d.get('maximum_additional_calls') != 1
@@ -58,7 +58,7 @@ def validate(d, root, campaign):
 
 @contextmanager
 def authorized_retry(root, campaign, authorization=None, store=None):
-    from backend.pipeline.cvp_sql_flow import binding
+    from backend.pipeline.cvp_sql_commit import binding
     root=Path(root).resolve();path=root/NAME
     if authorization is None:
         if path.exists():raise ValueError('saved owner retry requires explicit original authorization')
@@ -76,7 +76,7 @@ def authorized_retry(root, campaign, authorization=None, store=None):
 
 
 def authority(cache, identity, encoding, request_bytes):
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     scope=ACTIVE.get()
     if scope is None or Path(cache).resolve()!=Path(scope[1]['cache_path']):return None
     pin,d=scope;check_binding(pin)

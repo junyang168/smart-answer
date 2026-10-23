@@ -35,7 +35,7 @@ def exact_operation(history, cid, before, after):
 
 
 def sealed_plan(history):
-    from backend.pipeline.cvp_sql_flow import check_binding,plan_from_document
+    from backend.pipeline.cvp_sql_commit import check_binding, plan_from_document
     from backend.api.canonical_repository.postgres_store import validate_change_set_plan_integrity
     b={'path':history['metadata']['source_plan_path'],'file_sha256':history['metadata']['source_plan_file_sha256']}
     require(Path(b['path']).stat().st_size<=2*1024**2,'unbounded exact source plan');check_binding(b)
@@ -54,10 +54,13 @@ def sealed_plan(history):
 
 
 def physical(source):
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     from backend.pipeline.knowledge_source import markdown_source_document
     from backend.pipeline.source_contract_cleanup import build_projection
-    b={'path':source['source_path'],'file_sha256':source['source_file_sha256']};check_binding(b)
+    from backend.pipeline.source_editorial_transition import verify_current_source_binding
+    b={'path':source['source_path'],'file_sha256':source['source_file_sha256']}
+    # These bindings describe original review provenance, not the live file.
+    verify_current_source_binding(b)
     if source['source_type']=='notes_manuscript':payload=markdown_source_document(source)[0]
     else:
         require(source['source_type']=='sermon_transcript','unknown source type')

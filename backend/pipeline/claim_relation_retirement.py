@@ -39,12 +39,12 @@ def validate_material(material, direction):
         p=row['payload']
         if not row['retired'] and (p.get('review_status') in {'human_hold','rejected','needs_review'} or p.get('effective_state')=='held'):
             raise ValueError('retirement cannot waive retirement/hold')
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     for source in material['sources']:check_binding(source)
 
 
 def prepare_material(store, run_id, relation_id):
-    from backend.pipeline.cvp_sql_flow import pins, pin_rows, check_binding
+    from backend.pipeline.cvp_sql_commit import pins, pin_rows, check_binding
     group=store.get_cvp_group(run_id)
     row=store.get_record_state('knowledge_relations',relation_id)
     if not group or not row or row['retired']:raise ValueError('missing current retirement target/group')
@@ -69,14 +69,14 @@ def prepare_material(store, run_id, relation_id):
 
 
 def package_for(material, authorization, root):
-    from backend.pipeline.cvp_sql_flow import binding
+    from backend.pipeline.cvp_sql_commit import binding
     return {'package_id':'CLAIM-RELATION-RETIRE-'+sha256_json(material)[:24],
             'source_repair_application':{'schema_version':SCHEMA,'authorization':authorization,
                                          'materials':binding(root/'materials.json')}}
 
 
 def validate_package(package):
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     app=package['source_repair_application']
     check_binding(app['authorization']);check_binding(app['materials'])
     material=body(read(Path(app['materials']['path'])))
@@ -87,7 +87,7 @@ def validate_package(package):
 
 
 def execute(store, run_id, *, authorization, root, ports):
-    from backend.pipeline.cvp_sql_flow import check_binding, decoded_pins, commit_package, verified_group_backup
+    from backend.pipeline.cvp_sql_commit import check_binding, decoded_pins, commit_package, verified_group_backup
     from backend.pipeline.cvp_sql_actions import resume_bound_action
     check_binding(authorization);direction=read_artifact(authorization['path'])
     if direction['run_id']!=run_id:raise ValueError('foreign retirement run')

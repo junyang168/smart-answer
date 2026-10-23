@@ -39,7 +39,7 @@ from backend.api.canonical_repository.viewpoint_batch_resolution import (
     build_batch_disposition,
     build_batch_packet,
     build_cvp_batch_readback_receipt,
-    build_route_resolution_job,
+    build_route_resolution_jobs,
     canonicalize_proposal,
     canonicalize_review,
     component_key,
@@ -1841,13 +1841,14 @@ def _execute_locked(
                     batch_dir / "cvp-readback-receipt.json",
                     route_receipt.model_dump(mode="json"),
                 )
-                route_job = build_route_resolution_job(
+                route_jobs = build_route_resolution_jobs(
                     receipt=route_receipt,
                     evidence_scope_sha256=str(scope_packet["packet_sha256"]),
                     route_policy_fingerprint_sha256=route_policy_sha256,
                 )
-                route_queue.enqueue(route_job)
-                enqueued_route_jobs.append(route_job.model_dump(mode="json"))
+                for route_job in route_jobs:
+                    route_queue.enqueue(route_job)
+                    enqueued_route_jobs.append(route_job.model_dump(mode="json"))
                 disposition = build_batch_disposition(
                     proposal=effective_proposal,
                     batch_identity=identity,
@@ -2145,14 +2146,14 @@ def _execute_locked(
             apply_result_document
         )
         _write_derived(batch_dir / "cvp-apply-result.json", apply_result_document)
-        route_job = build_route_resolution_job(
+        route_jobs = build_route_resolution_jobs(
             receipt=receipt,
             evidence_scope_sha256=str(scope_packet["packet_sha256"]),
             route_policy_fingerprint_sha256=route_policy_sha256,
         )
-        route_job_payload = route_job.model_dump(mode="json")
-        route_queue.enqueue(route_job)
-        enqueued_route_jobs.append(route_job_payload)
+        for route_job in route_jobs:
+            route_queue.enqueue(route_job)
+            enqueued_route_jobs.append(route_job.model_dump(mode="json"))
         _write_current_state(
             batch_dir,
             schema_version="wang_canonical_viewpoint_batch_current_state_v1",

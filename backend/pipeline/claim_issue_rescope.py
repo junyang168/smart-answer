@@ -83,7 +83,7 @@ def validate_live(store, direction):
             or not previous or previous['materials']!=material
             or store.cvp_action_committed(direction['run_id'],direction['old_action_id'])):
         raise ValueError('scope amendment cannot replace a foreign or committed action')
-    from backend.pipeline.cvp_sql_flow import decoded_pins
+    from backend.pipeline.cvp_sql_commit import decoded_pins
     with store.connect() as conn, conn.cursor() as cursor:
         store._assert_transaction_read_pins(cursor,decoded_pins(material['sql_scope']['read_pins']))
     for issue in material['claim_issue_context']['issues']:
@@ -162,7 +162,7 @@ def amendment_records(store, direction, old):
     unexpected direct consumer of a proposed write fails closed; no scan or
     expanding historical/reverse closure is used as a fallback.
     """
-    from backend.pipeline.cvp_sql_flow import decoded_pins
+    from backend.pipeline.cvp_sql_commit import decoded_pins
     from backend.pipeline.viewpoint_validation_context import read_current_objects
     wanted=decoded_pins(old['sql_scope']['read_pins'])
     records=read_current_objects(store,wanted)

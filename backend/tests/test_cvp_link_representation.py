@@ -75,6 +75,24 @@ def test_real_saved_scoped_graph_isolated_three_ops_rollback_and_cached_resume(p
     # The production action is now committed. Rehydrate its exact saved input
     # into the isolated database, rather than requiring a stale live preimage.
     m=deepcopy(PostgresKnowledgeStore().get_cvp_action(d['run_id'],aid)['materials'])
+    # Rehydrate the historical physical generation too. The live corpus may
+    # now have proven metadata-only headings, while this legacy contract still
+    # requires the exact original physical SHA. Never weaken that gate or
+    # substitute today's bytes for the saved material in this isolated test.
+    import hashlib
+    from backend.pipeline.source_editorial_transition import receipt_path,verify_current_source_binding
+    for source in m['sources']:
+        bound={'path':source['path'],'file_sha256':source['file_sha256']}
+        raw=Path(source['path']).read_bytes()
+        if hashlib.sha256(raw).hexdigest()!=source['file_sha256']:
+            verify_current_source_binding(bound)
+            proof=json.loads(receipt_path(bound).read_bytes())['proof']
+            archived=proof['before'];raw=Path(archived['path']).read_bytes()
+            assert hashlib.sha256(raw).hexdigest()==archived['file_sha256']==source['file_sha256']
+        snapshot=tmp_path/'historical-sources'/(hashlib.sha256(source['path'].encode()).hexdigest()+'.json')
+        snapshot.parent.mkdir(exist_ok=True);snapshot.write_bytes(raw)
+        assert hashlib.sha256(snapshot.read_bytes()).hexdigest()==source['file_sha256']
+        source['path']=str(snapshot)
     f.validate_direction(d,m);s=postgres_store
     # Real saved/current material, isolated database and simulated model answers
     # only. This is not approval of any production role/span postimage.

@@ -68,7 +68,7 @@ def verify_delta(old,current,human_ids):
 
 
 def make_direction(store,run_id,original,quote,human_direction):
-    from backend.pipeline.cvp_sql_flow import binding
+    from backend.pipeline.cvp_sql_commit import binding
     from backend.pipeline.cvp_exact_human_audit_retention import validate_direction,verify_item
     from backend.pipeline.viewpoint_audit_source_adjudication import build_packet,restricted_packet
     old=quota_failure(original);audit=read_artifact(old['audit_binding']['path'])
@@ -91,7 +91,7 @@ def make_direction(store,run_id,original,quote,human_direction):
 
 
 def verify_proof(path):
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     from backend.pipeline.viewpoint_audit_source_adjudication import restricted_packet
     from backend.pipeline.cvp_exact_human_audit_retention import verify_item,validate_direction
     proof=read_artifact(path);sealed(proof)
@@ -120,7 +120,7 @@ def verify_proof(path):
 
 
 def execute(store,run_id,auth):
-    from backend.pipeline.cvp_sql_flow import binding
+    from backend.pipeline.cvp_sql_commit import binding
     from backend.pipeline.viewpoint_audit_source_adjudication import build_packet,restricted_packet,run
     from backend.pipeline.viewpoint_adjudication_history import target_identity
     from backend.pipeline.cvp_exact_human_audit_retention import partition

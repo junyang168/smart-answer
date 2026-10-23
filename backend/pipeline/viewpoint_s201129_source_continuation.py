@@ -142,7 +142,7 @@ def canonical_runtime():
     if renewal_path:
         # Explicit owner-authorized renewal consumes an already verified proof.
         # Startup itself cannot infer under a new login or retry a diagnostic.
-        from backend.pipeline.cvp_sql_flow import binding, check_binding
+        from backend.pipeline.cvp_sql_commit import binding, check_binding
         renewal = read_artifact(Path(renewal_path))
         if (renewal.get('schema_version') != 'codex_runtime_renewal.v1'
                 or renewal.get('authorized_by') != 'owner'

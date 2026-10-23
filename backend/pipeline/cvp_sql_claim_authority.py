@@ -7,7 +7,7 @@ from backend.api.canonical_repository.postgres_store import (
 
 
 def coordinate_authority(store, cid, row):
-    from backend.pipeline.cvp_sql_flow import check_binding, plan_from_document
+    from backend.pipeline.cvp_sql_commit import check_binding, plan_from_document
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact
     from backend.api.canonical_repository.postgres_store import validate_change_set_plan_integrity
     from backend.pipeline.knowledge_source import markdown_source_document
@@ -103,7 +103,10 @@ def coordinate_authority(store, cid, row):
     require(source['source_type'] in {'notes_manuscript','sermon_transcript'}
             and Path(source['source_path']).is_absolute(), 'unsupported source')
     source_binding = {'path':source['source_path'],'file_sha256':source['source_file_sha256']}
-    check_binding(source_binding)
+    from backend.pipeline.source_editorial_transition import verify_current_source_binding
+    # Keep historical review provenance stable; the verifier separately
+    # proves the live file differs only by inserted editorial headings.
+    verify_current_source_binding(source_binding)
     if source['source_type']=='notes_manuscript':
         script,_,_ = markdown_source_document(source)
     else:
@@ -232,3 +235,54 @@ def coordinate_authority(store, cid, row):
         'authority_kind':'exact_sql_applied_locator_postimage','coordinate_change_set_id':current[0],
         'coordinate_plan':plan_binding,'source':source_binding,'model_calls':0,'master_data_mutations':0,
         **({'locator_evidence_pins':locator_evidence_pins} if locator_evidence_pins else {})}
+
+
+def current_claim_authority(store, cid, row):
+    """Consume an actual revision-bound SQL review, not an inherited pass bit."""
+    claim = row["payload"]
+    if row.get("retired") or claim.get("review_status") in {"human_hold","withheld_unreviewed","rejected","superseded"}:
+        raise ValueError("current Claim held or not reviewed: " + cid)
+    qualification = store.claim_management_qualification(cid)
+    if qualification is not None:
+        if (not qualification['ready']
+                or [qualification.get('revision'), qualification.get('content_sha256')]
+                   != [row['revision'], row['content_sha256']]):
+            raise ValueError('current Claim requires exact independent qualification: ' + cid)
+        if (claim.get('review_status') == 'human_review_required'
+                and qualification.get('legacy_ai_spot_check_replaced_by_current_review') is not True):
+            raise ValueError('current Claim held or not reviewed: ' + cid)
+        return {'claim_id': cid, 'revision': row['revision'], 'content_sha256': row['content_sha256'],
+                'qualification': qualification, 'reviewer_kind': 'ai',
+                'decision': 'independent_current_qualified', 'review_artifact_sha256': qualification['audit']['file_sha256']}
+    if claim.get('review_status') == 'human_review_required':
+        raise ValueError('current Claim held or not reviewed: ' + cid)
+    with store.connect() as conn:
+        events = conn.execute("""SELECT review_event_id,reviewer_kind,decision,artifact
+                                 FROM wang_knowledge.review_events
+                                 WHERE collection='claims' AND object_id=%s AND object_revision=%s
+                                   AND decision=%s ORDER BY review_event_id""",
+                              (cid,row["revision"],claim.get("review_status"))).fetchall()
+    if not events:
+        from backend.pipeline.cvp_sql_retained_evidence_locator_authority import authority as fixed_authority
+        fixed=fixed_authority(store,cid,row)
+        if fixed is not None:return fixed
+        return coordinate_predecessor_authority(store, cid, row)
+    if len(events) != 1 or events[0][1] not in {"ai","human","system"} or not events[0][3]:
+        raise ValueError("current Claim has missing/ambiguous exact SQL review: " + cid)
+    return {"claim_id":cid,"revision":row["revision"],"content_sha256":row["content_sha256"],
+            "review_event_id":events[0][0],"reviewer_kind":events[0][1],"decision":events[0][2],
+            "review_artifact_sha256":sha256_json(events[0][3])}
+
+
+def coordinate_predecessor_authority(store, cid, row):
+    """Carry one actual SQL review over an exact applied locator-only step.
+
+    No new review event, status mutation, history-chain replay or legacy runner.
+    The immediate predecessor must have its own unique review, either a bound
+    SQL event or an exact passing imported-input/SQL-graph proof. Inherited
+    review notes grant no authority. The original bounded plan, actual SQL
+    operation and physical body must all agree, and the original deterministic
+    locator compiler must reproduce the full row. Never walk older versions.
+    """
+    from backend.pipeline.cvp_sql_claim_authority import coordinate_authority
+    return coordinate_authority(store, cid, row)

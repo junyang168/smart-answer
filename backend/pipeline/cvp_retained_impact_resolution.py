@@ -24,7 +24,7 @@ def scope_authority(value,store=None,*,cursor=None):
 
 
 def protected_link_ids(value,store=None,*,cursor=None):
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     scope=scope_authority(value,store,cursor=cursor)
     if not scope:return set()
     check_binding(scope);body=read_artifact(scope['path']);check_binding(body['human_disposition'])
@@ -76,7 +76,7 @@ def qualification_only(operations,terminal_sha):
 
 
 def claim_authority(value):
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     from backend.pipeline.claim_first_management import REPROPOSAL_VERSION,VERSION as CLAIM_VERSION
     evidence=value['reviewed']['evidence'];layer=value.get('claim_layer_audit')
     context=evidence['action']['materials'].get('claim_management_resolution',{})
@@ -100,7 +100,7 @@ def claim_authority(value):
 
 
 def build(store,run_id,audit_path,output,*,semantic_resolution=None):
-    from backend.pipeline.cvp_sql_flow import binding,check_binding,decoded_pins
+    from backend.pipeline.cvp_sql_commit import binding, check_binding, decoded_pins
     from backend.pipeline.viewpoint_cvp_campaign_runner import validate_audit
     saved=store.get_cvp_group(run_id);evidence=saved['reviewed']['evidence']
     pending=evidence.get('pending_cvp_management_record_keys',[])
@@ -160,7 +160,7 @@ def build(store,run_id,audit_path,output,*,semantic_resolution=None):
 
 def validate_for_completion(value,path,audit_binding,cursor,*,semantic_resolution=None):
     """Short SQL guard. Files were checked before transaction; no model calls."""
-    from backend.pipeline.cvp_sql_flow import check_binding,decoded_pins
+    from backend.pipeline.cvp_sql_commit import check_binding, decoded_pins
     body=read_artifact(path);evidence=value['reviewed']['evidence']
     if (body.get('schema_version')!=VERSION
             or body.get('artifact_sha256')!=sha256_json({k:v for k,v in body.items() if k!='artifact_sha256'})
@@ -175,7 +175,7 @@ def validate_for_completion(value,path,audit_binding,cursor,*,semantic_resolutio
         raise ValueError('retained management completion proof incomplete/foreign')
     for key in ('audit','scope_authority','claim_layer_completion','human_disposition'):
         check_binding(body[key])
-    from backend.pipeline.cvp_sql_flow import binding
+    from backend.pipeline.cvp_sql_commit import binding
     if body.get('semantic_resolution')!=(binding(semantic_resolution) if semantic_resolution else None):
         raise ValueError('retained impact independent semantic resolution drift')
     if body.get('semantic_resolution'):check_binding(body['semantic_resolution'])

@@ -28,7 +28,7 @@ def committed_context(store, saved):
     """
     from pathlib import Path
     from backend.pipeline.cvp_sql_actions import validate_source_package
-    from backend.pipeline.cvp_sql_flow import check_binding, decoded_pins, pins
+    from backend.pipeline.cvp_sql_commit import check_binding, decoded_pins, pins
     from backend.pipeline.source_reconciliation_runner import body, read
     from backend.api.canonical_repository.viewpoint_foundation import sha256_json
     from backend.pipeline.viewpoint_validation_context import read_current_objects
@@ -84,7 +84,7 @@ def assert_issue_resolution(cursor, run_id, issue):
     """Consume new-source review, without claiming the old action committed."""
     from backend.pipeline.cvp_source_impact_resolution import context, applied_review
     from backend.pipeline.cvp_sql_actions import validate_source_package
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact
     from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
     row=cursor.execute("SELECT metadata FROM wang_knowledge.pipeline_runs WHERE run_id=%s AND stage='cvp_group'",(run_id,)).fetchone()
@@ -187,7 +187,7 @@ def attach(frozen, store=None, *, run_id=None):
                     'semantic_approval':False,'content_write_authority':False}
     prior_issues=[]
     if store is not None and run_id is not None:
-        from backend.pipeline.cvp_sql_flow import check_binding, binding
+        from backend.pipeline.cvp_sql_commit import check_binding, binding
         from backend.pipeline.source_reconciliation_runner import read, body, validate_raw
         from backend.pipeline.claim_issue_management import Issue
         from pathlib import Path
@@ -238,7 +238,7 @@ def execution_context(frozen):
     verify(context['partition'], frozen['manifest'], states, frozen['before'], frozen['after'][0])
     # Saved diagnostic answers remain immutable evidence, not approval of this
     # new source epoch. Check their exact leaves; never rebuild an ancestor chain.
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     for prior in context.get('prior_source_issues', []):
         if prior.get('old_action_committed') is not False or prior.get('original_verdicts_changed') is not False:
             raise ValueError('paragraph source cannot upgrade the original diagnostic verdict')

@@ -339,3 +339,35 @@ def test_imported_pass_requires_current_dependency_postimages(authority_case,mon
         assert result['review_event_id'] is None
         assert result['current_dependency_pins']==proof['imported_dependency_pins']
         assert result['model_calls']==result['master_data_mutations']==0
+
+
+def test_header_metadata_preserves_historical_authority_bytes(authority_case, tmp_path, monkeypatch):
+    from backend.pipeline import source_editorial_transition as transition
+    from backend.pipeline.cvp_sql_retained_evidence_locator_authority import physical
+    s, plan_path, _ = authority_case
+    document = json.loads(plan_path.read_bytes())
+    source = document['source']
+    payload, _, _ = markdown_source_document(source)
+    path = tmp_path/'transcript.json'
+    raw = json.dumps(payload).encode()
+    path.write_bytes(raw)
+    source.update(source_type='sermon_transcript', source_path=str(path),
+                  source_file_sha256=hashlib.sha256(raw).hexdigest(), locator_space='spoken_body_v1')
+    document.pop('artifact_sha256')
+    document['artifact_sha256'] = sha256_json(document)
+    plan_path.write_text(json.dumps(document))
+    s.history['metadata']['source_plan_file_sha256'] = hashlib.sha256(plan_path.read_bytes()).hexdigest()
+    before = current_claim_authority(s, 'CL-test', s.row)
+    original_physical_binding = physical(source)[2]
+    after_payload = deepcopy(payload)
+    after_payload['script'].insert(0, {'index':'subtitle-added', 'type':'subtitle', 'text':'## Added metadata'})
+    after_raw = json.dumps(after_payload).encode()
+    root = tmp_path/'proofs'
+    transition.publish_transition(source=source, before_raw=raw, after_raw=after_raw,
+                                   authorization='Test metadata only', root=root)
+    monkeypatch.setattr(transition, 'transition_root', lambda root=None: tmp_path/'proofs')
+    path.write_bytes(after_raw)
+    after = current_claim_authority(s, 'CL-test', s.row)
+    assert json.dumps(before, sort_keys=True).encode() == json.dumps(after, sort_keys=True).encode()
+    assert physical(source)[2] == original_physical_binding
+    assert transition.file_binding(path)['file_sha256'] != after['source']['file_sha256']

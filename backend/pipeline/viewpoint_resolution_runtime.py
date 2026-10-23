@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import time
+from copy import copy
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
@@ -28,7 +29,7 @@ _authorized_limit = ContextVar('cvp_authorized_request_limit', default=None)
 @contextmanager
 def authorized_request_limit(root, campaign, authorization=None):
     """Execution budget only: never changes a model request or its cache identity."""
-    from backend.pipeline.cvp_sql_flow import binding, check_binding
+    from backend.pipeline.cvp_sql_commit import binding, check_binding
     root = Path(root).resolve()
     saved = root/'request-limit-binding.json'
     if authorization is None:
@@ -78,7 +79,7 @@ def effective_request_limit(adapter, cache):
     root, budget = scope
     if not Path(cache).resolve().is_relative_to(root):
         raise ValueError('model request outside authorized SQL execution root')
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     check_binding(budget['authorization'])
     if 'temporary_run_id' in budget:
         check_binding(budget['supersedes_authorization'])
@@ -127,7 +128,7 @@ def write_immutable(path: Path, payload: dict[str, Any], *, require_new: bool = 
     """
     path = Path(path)
     if validating_saved_artifacts():
-        if require_new or read_artifact(path) != payload:
+        if require_new or canonical_json(read_artifact(path)) != canonical_json(payload):
             raise ValueError(f'saved immutable reconstruction differs: {path}')
         return
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -143,7 +144,7 @@ def write_immutable(path: Path, payload: dict[str, Any], *, require_new: bool = 
             except FileExistsError:
                 if require_new:
                     raise ValueError(f"once-only artifact already reserved at {path}")
-                if read_artifact(path) != payload:
+                if canonical_json(read_artifact(path)) != canonical_json(payload):
                     raise ValueError(f"immutable artifact differs at {path}")
             else:
                 directory = os.open(path.parent, os.O_RDONLY)
@@ -364,7 +365,7 @@ def read_saved_model_response(adapter: Any, payload: dict[str, Any], cache: Path
 
 
 def call_model(
-    adapter: Any, payload: dict[str, Any], cache: Path
+    adapter: Any, payload: dict[str, Any], cache: Path, *, before_dispatch=None
 ) -> tuple[dict[str, Any], int, float]:
     from backend.pipeline.viewpoint_validation_context import finish_validation_phase, historical_context
     cache = Path(cache)
@@ -493,7 +494,18 @@ def call_model(
     if encoding_proof is not None:
         body = {'schema_version': 'wang_model_request_encoding_proof_v1', **encoding_proof}
         write_immutable(encoding_path, body | {'artifact_sha256': sha256_json(body)})
+    if reused is None and isinstance(getattr(adapter, '_client', None),
+                                      (CodexSubscriptionClient, ClaudeSubscriptionClient)):
+        # Retain transport evidence even on timeout/process failure. A local copy
+        # keeps concurrent stages from sharing mutable client artifact paths.
+        adapter = copy(adapter)
+        adapter._client = copy(adapter._client)
+        adapter._client.call_artifacts = cache.with_name(
+            cache.stem + ('.owner-retry-once.transport' if retry else '.transport'))
+        adapter._client.replay_only = False
     try:
+        if reused is None and before_dispatch is not None:
+            before_dispatch()
         raw = dict(reused[0] if reused is not None else adapter.generate(payload))
     except BaseException as exc:
         body = {'schema_version': 'wang_model_call_failure_v1', 'invocation_sha256': intent['artifact_sha256'],

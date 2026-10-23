@@ -36,7 +36,7 @@ def test_ordinary_source_revision_keeps_separate_pending_obligations():
             resume_bound_action=lambda *a:None,initialize_subscription_runtime=lambda *a:None,ScopedSourceModelStages=Stage,
             validate_source_package=lambda *a:None,binding=lambda *a:{'mock':'binding'},
             action_sources=lambda *a:[{'mock':'source'}],commit_package=commit),\
-         patch('backend.pipeline.cvp_sql_flow.verified_group_backup',return_value={'mock':'backup'}):
+         patch('backend.pipeline.cvp_sql_commit.verified_group_backup',return_value={'mock':'backup'}):
         actions.execute_source_action(NS(get_cvp_group=lambda _:saved,bind_claim_issue_action=lambda *a,**kw:None),
             'G',{'source_id':'S'},root=Path('/NO_FILES_REVIEW_ONLY'),ports=NS())
     assert captured['pending_cvp_management_record_keys']==original['pending_cvp_management_record_keys']

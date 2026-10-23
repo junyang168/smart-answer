@@ -14,7 +14,7 @@ NAME='owner-claim-revision-binding.json'
 
 
 def validate_direction(direction,value,claim_state):
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     if (direction.get('schema_version')!=VERSION
             or direction.get('artifact_sha256')!=sha256_json({k:v for k,v in direction.items() if k!='artifact_sha256'})
             or direction.get('campaign_sha256')!=value['campaign_sha256']
@@ -88,7 +88,7 @@ def attach_material(store,value,materials,root):
     previous=inherit(value)
     if previous:
         path=Path(root)/'prior-management.json';write_immutable(path,previous)
-        from backend.pipeline.cvp_sql_flow import binding
+        from backend.pipeline.cvp_sql_commit import binding
         materials['prior_cvp_management']=binding(path)
         materials['claim_management_resolution']=previous['reviewed']['evidence']['action']['materials']['claim_management_resolution']
     materials['owner_claim_completion']=reports[0]
@@ -102,7 +102,7 @@ def validate_joint(materials,proposal,package):
     """
     proof=materials.get('owner_claim_completion')
     if not proof:return False
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     from backend.pipeline import source_reconciliation as c
     check_binding(proof);d=read_artifact(proof['path']);cid=d['claim_id']
     before=c.index(materials['before_records']);after={**before,**c.index(proposal.records)}
@@ -142,7 +142,7 @@ def partial_review(materials,proposal):
     Previously pending unrelated identities remain a separate obligation.
     """
     from backend.pipeline import source_reconciliation as c
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     from backend.api.canonical_repository.viewpoint_foundation import semantic_record_sha
     proof=materials.get('owner_claim_completion')
     if not proof:raise ValueError('partial Claim review lacks exact owner direction')
@@ -215,7 +215,7 @@ def empty_initial_draft(materials,proposal):
     does not call this helper and cannot consume its diagnostic as approval.
     """
     from backend.pipeline import source_reconciliation as c
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     proof=materials.get('owner_claim_completion')
     if not proof or proposal.records:
         raise ValueError('empty owner draft requires direction and zero proposed records')
@@ -259,7 +259,7 @@ def empty_initial_draft(materials,proposal):
 
 def execute(store,run_id,direction_path,root,ports):
     from backend.pipeline.claim_issue_management import IssuesDetected,handle_issues
-    from backend.pipeline.cvp_sql_flow import binding
+    from backend.pipeline.cvp_sql_commit import binding
     d=read_artifact(direction_path);value=store.get_cvp_group(run_id)
     if d['run_id']!=run_id or d['campaign_sha256']!=value['campaign_sha256']:
         raise ValueError('foreign owner Claim direction')
@@ -319,7 +319,7 @@ def stitch(previous,operations,allowed_keys):
 
 
 def managed_operations(value,*,store=None,cursor=None):
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     from backend.pipeline.cvp_pending_link_management import resolved_pending_operations
     from backend.pipeline.cvp_sql_actions import SOURCE_SCHEMA,validate_source_package
     e=value['reviewed']['evidence'];proof=e['approval']['prior_cvp_management'];check_binding(proof)
@@ -352,7 +352,7 @@ def managed_operations(value,*,store=None,cursor=None):
 
 def dependency_direction(value):
     """Reuse one existing dependency audit for an exact source/anchor repair."""
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     if 'reviewed' not in value:
         certificate=value.get('import_certificate',{})
         if (value.get('materials')=={'origin':'explicit_historical_import'}
@@ -408,7 +408,7 @@ def dependency_direction(value):
 def finish_dependency_audit(store,run_id):
     """Audit a corrected existing non-campaign Claim without enlarging the group."""
     import os,subprocess
-    from backend.pipeline.cvp_sql_flow import PROJECT,binding
+    from backend.pipeline.cvp_sql_commit import PROJECT, binding
     from backend.pipeline.claim_first_management import validate_claim_audit_report
     from backend.pipeline.viewpoint_content_blocked_fallback import verify_saved_full_audit
     value=store.get_cvp_group(run_id)
@@ -419,7 +419,7 @@ def finish_dependency_audit(store,run_id):
     if proof is None:return
     e=value['reviewed']['evidence']
     if cid in value['claim_ids']:return
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     check_binding(proof)
     state=store.get_record_state('claims',cid);pin=[state['revision'],state['content_sha256'],False]
     root=Path(e['package']['payload']['source_repair_application']['run_root'])/'dependency-claim-audit'
@@ -451,7 +451,7 @@ def finish_dependency_audit(store,run_id):
 
 
 def validate_dependency_completion(value,*,cursor=None):
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     from backend.pipeline.claim_first_management import validate_claim_audit_report
     from backend.pipeline.viewpoint_content_blocked_fallback import verify_saved_full_audit
     proof,cid=dependency_direction(value)

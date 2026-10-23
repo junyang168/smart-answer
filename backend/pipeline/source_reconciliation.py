@@ -33,7 +33,7 @@ WRITABLE = frozenset({
 IMPACT_ONLY = frozenset({
     "product_dependencies", "impact_events", "composition_plans", "composition_decisions",
     "editorial_checks", "editorial_syntheses", "argument_routes", "argument_route_revisions",
-    "argument_route_attestations", "viewpoint_identity_candidates", "viewpoint_identity_decisions",
+    "argument_route_attestations", "viewpoint_observation_supports", "viewpoint_identity_candidates", "viewpoint_identity_decisions",
     "viewpoint_resolution_ledgers", "viewpoint_quality_reports", "viewpoint_coverage_snapshots",
     # A structure is a reviewed historical synthesis, not permission to
     # regenerate it when one CVP changes. Its exact old CVR pins stay visible.

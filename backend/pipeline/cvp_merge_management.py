@@ -119,7 +119,7 @@ def owner_direction(store,run_id,viewpoint_ids,*,authorization_quote,requested_p
         r=store.get_record('viewpoint_revisions',h['current_revision_id'])
         rows.append({'viewpoint_id':vid,'head_sha256':sha256_json(h),
             'revision_id':h['current_revision_id'],'revision_sha256':sha256_json(r)})
-    from backend.pipeline.cvp_sql_flow import binding
+    from backend.pipeline.cvp_sql_commit import binding
     d={'schema_version':DIRECTION,'run_id':run_id,'campaign_sha256':group['campaign_sha256'],
         'viewpoint_pins':rows,'authorization_quote':authorization_quote,'requested_proposition':requested_proposition,
         'authorized_by':'owner','human_content_approval':False,'policy':binding(POLICY_PATH),
@@ -137,7 +137,7 @@ def validate_direction(d, m):
             or d['campaign_sha256'] != m['campaign_sha256']
             or d['artifact_sha256'] != sha256_json({k:v for k,v in d.items() if k!='artifact_sha256'})):
         raise ValueError('merge exact owner direction/campaign/seal drift')
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact
     check_binding(d['policy'])
     if read_artifact(d['policy']['path'])!=read_artifact(POLICY_PATH):
@@ -160,7 +160,7 @@ def validate_direction(d, m):
 
 
 def prepare_material(store, run_id, authorization):
-    from backend.pipeline.cvp_sql_flow import check_binding, pins, pin_rows
+    from backend.pipeline.cvp_sql_commit import check_binding, pins, pin_rows
     from backend.pipeline.viewpoint_evidence_source_context import load_context_source
     check_binding(authorization)
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact
@@ -189,7 +189,7 @@ def prepare_material(store, run_id, authorization):
         and p['viewpoint_id'] in vids and p.get('effective_state')=='active'], key=lambda p:p['viewpoint_claim_link_id'])
     claims=sorted({p['claim_id'] for p in links})
     if not set(claims)&set(group['claim_ids']):raise ValueError('merge is unrelated to parent group')
-    from backend.pipeline.cvp_sql_flow import current_claim_authority
+    from backend.pipeline.cvp_sql_claim_authority import current_claim_authority
     claim_authority=[{'claim_id':cid,'pin':[records['claims',cid]['revision'],records['claims',cid]['content_sha256'],False],
         'authority':current_claim_authority(store,cid,records['claims',cid])} for cid in claims]
     for link in links:
@@ -550,7 +550,7 @@ def compile_package(m,p,r,root):
 
 
 def validate_package(package):
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact
     app=package['source_repair_application'];root=Path(app['run_root']);m=body(read(root/'materials.json'))
     if app['schema_version']!=SCHEMA or not root.is_absolute() or app['materials_sha256']!=sha256_json(m):
@@ -569,7 +569,7 @@ def validate_package(package):
 
 
 def execute(store,run_id,*,authorization,root,ports):
-    from backend.pipeline.cvp_sql_flow import binding,check_binding,decoded_pins,commit_package,verified_group_backup
+    from backend.pipeline.cvp_sql_commit import binding, check_binding, decoded_pins, commit_package, verified_group_backup
     from backend.pipeline.cvp_sql_actions import initialize_subscription_runtime,resume_bound_action
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact
     check_binding(authorization);d=read_artifact(authorization['path']);aid=action_id(d);root=Path(root)/aid

@@ -4,7 +4,7 @@ Never edits an independent model report or supplies a missing content judgement.
 Only empty-definition, parentless topic identities may be supplemented.
 """
 from pathlib import Path
-from backend.pipeline.cvp_sql_flow import binding, check_binding, decoded_pins
+from backend.pipeline.cvp_sql_commit import binding, check_binding, decoded_pins
 from backend.pipeline.viewpoint_resolution_runtime import read_artifact, write_immutable
 from backend.api.canonical_repository.postgres_store import record_content_sha
 

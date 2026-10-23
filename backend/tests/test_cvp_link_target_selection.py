@@ -159,11 +159,26 @@ def test_single_selection_and_review_resume_without_models_or_sql_writes(monkeyp
 
 
 def test_selection_reserved_unknown_is_not_reissued(monkeypatch,tmp_path):
+    from backend.pipeline.source_reconciliation_runner import Stop
+    store,packet,ports,calls=review_fixture(monkeypatch)
+    def interrupt(stage,request):
+        raise RuntimeError('fixture interrupted after exact durable reservation')
+    ports.model_call_reserved=interrupt
+    with pytest.raises(RuntimeError,match='exact durable reservation'):
+        flow.review_selection(store,packet,root=tmp_path,ports=ports)
+    del ports.model_call_reserved
+    with pytest.raises(Stop,match='do not repeat'):
+        flow.review_selection(store,packet,root=tmp_path,ports=ports)
+    assert calls==[]
+
+
+def test_selection_malformed_reservation_fails_identity_before_dispatch(monkeypatch,tmp_path):
     from backend.pipeline.source_reconciliation_runner import Stop,write
     store,packet,ports,calls=review_fixture(monkeypatch)
     root=tmp_path/('selection-'+flow.sha256_json({'link_id':LINK,'revision':2}))
     write(root/'proposal.reservation.json',{'existing_unknown':True})
-    with pytest.raises(Stop,match='do not repeat'):flow.review_selection(store,packet,root=tmp_path,ports=ports)
+    with pytest.raises(Stop,match='reserved model request drift'):
+        flow.review_selection(store,packet,root=tmp_path,ports=ports)
     assert calls==[]
 
 

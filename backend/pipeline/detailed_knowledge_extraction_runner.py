@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -60,7 +61,10 @@ from backend.pipeline.llm_usage import usage_row, usage_summary
 from backend.pipeline.run_ledger import RunCancelled, RunRecord, run_record
 from backend.pipeline.sentence_ledger_runner import run as run_ledger
 from backend.pipeline.stage1 import Stage1AnthropicClient, Stage1OpenAIClient
-from backend.pipeline.subtitle_generation import generate_subtitles
+from backend.pipeline.subtitle_generation import (
+    PROMPT_PATH as SUBTITLE_PROMPT_PATH,
+    generate_subtitles, subtitle_model, subtitle_reasoning_effort,
+)
 from backend.pipeline.sermon_subtitle_persistence import (
     SUPPORTED_TRANSCRIPT_STAGES,
     SubtitlePersistenceError,
@@ -872,6 +876,104 @@ def _subtitle_provider(source_id: str, client: CodexSubscriptionClient | None = 
     return provider
 
 
+def _bound_subtitle_generation(
+    *, paragraphs: list[dict[str, Any]], source_id: str, source_path: Path,
+    source_sha256: str, output_dir: Path, actor_id: str,
+    scope_end: int | None, client: Any,
+) -> list[dict[str, Any]]:
+    """Persist one dispatch and its answer; a lost dispatch is never re-sent."""
+
+    plan_path = output_dir / "subtitle-generations" / _slug(source_id) / "generation.json"
+    plan_path.parent.mkdir(parents=True, exist_ok=True)
+    binding = {
+        "source_id": source_id, "source_path": str(source_path.resolve()),
+        "source_sha256": source_sha256, "actor_id": actor_id,
+        "prompt_sha256": hashlib.sha256(SUBTITLE_PROMPT_PATH.read_bytes()).hexdigest(),
+        "model": str(getattr(client, "model", None) or subtitle_model()),
+        "reasoning_effort": str(
+            getattr(client, "reasoning_effort", None) or subtitle_reasoning_effort()
+        ),
+        "scope_end": scope_end, "paragraphs": paragraphs,
+    }
+    binding_sha = _package_artifact_sha256(binding)
+    # Serialize concurrent attempts for the same frozen source. The source writer
+    # retains its own CAS lock; this lock protects paid generation/replay only.
+    with plan_path.with_suffix(".lock").open("a+b") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        if plan_path.exists():
+            try:
+                plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise SubtitlePersistenceError("subtitle generation cache is unreadable") from exc
+            if (
+                not isinstance(plan, dict)
+                or plan.get("schema_version") != "wang_subtitle_generation_v1"
+                or plan.get("binding") != binding
+                or plan.get("binding_sha256") != binding_sha
+            ):
+                raise SubtitlePersistenceError(
+                    "subtitle generation cache binding changed; cache must not be replaced"
+                )
+            if plan.get("status") != "validated":
+                raise SubtitlePersistenceError(
+                    "subtitle generation requires reconciliation: "
+                    f"{plan.get('status', 'unknown')}; automatic redispatch refused"
+                )
+            insertions = plan.get("insertions")
+            if not isinstance(insertions, list) or plan.get("insertions_sha256") != _package_artifact_sha256({"insertions": insertions}):
+                raise SubtitlePersistenceError("subtitle generation cache answer SHA mismatch")
+            return insertions
+        # An unavailable CLI or missing login is a local preflight failure,
+        # never an inference dispatch. Check it before reserving a model call.
+        # Saved validated answers above remain replayable without a login.
+        if isinstance(client, CodexSubscriptionClient):
+            client._verify_chatgpt_login()
+        plan = {
+            "schema_version": "wang_subtitle_generation_v1",
+            "binding": binding, "binding_sha256": binding_sha,
+            "status": "dispatch_unknown",
+        }
+        _atomic_json_artifact_write(plan_path, plan)
+        try:
+            insertions = generate_subtitles(
+                paragraphs, subject=source_id,
+                consumer="extraction_persisted_subtitles", client=client,
+                require_leading_title=True,
+            )
+            # Validate the physical insertion contract before recording a replayable
+            # answer. The caller also checks complete source preservation.
+            if not insertions or not any(
+                row.get("after_index") == "START" and row.get("level") == 1
+                for row in insertions
+            ):
+                raise SubtitlePersistenceError("subtitle plan did not title the leading section")
+            boundaries: set[tuple[str, Any]] = set()
+            allowed = {"START", *(str(row["index"]) for row in paragraphs)}
+            for row in insertions:
+                raw_after = row.get("after_index")
+                after = "START" if str(raw_after).upper() == "START" else str(raw_after)
+                if raw_after is None or after not in allowed:
+                    raise SubtitlePersistenceError("subtitle after_index is outside its generation scope")
+                boundary = (after, row.get("level"))
+                if boundary in boundaries:
+                    raise SubtitlePersistenceError("duplicate subtitle boundary")
+                boundaries.add(boundary)
+            apply_insertions(paragraphs, insertions, source_sha256=source_sha256, user_id=actor_id)
+            final_index = str(paragraphs[-1]["index"])
+            if any(str(row.get("after_index")) == final_index for row in insertions):
+                raise SubtitlePersistenceError("subtitle plan opens an empty section after the generation scope")
+        except Exception as exc:
+            plan.update(status="failed", error=f"{type(exc).__name__}: {exc}")
+            _atomic_json_artifact_write(plan_path, plan)
+            raise
+        plan.update(
+            status="validated", insertions=insertions,
+            insertions_sha256=_package_artifact_sha256({"insertions": insertions}),
+        )
+        _atomic_json_artifact_write(plan_path, plan)
+        return insertions
+
+
 def _persist_generated_subtitles(
     *,
     source_id: str,
@@ -893,6 +995,7 @@ def _persist_generated_subtitles(
         )
     source_sha256 = hashlib.sha256(raw).hexdigest()
     segments = list(project_script(source.get("script")).body_rows)
+    all_indexes = [str(row.get("index")) for row in segments]
     if scope_end is not None:
         if scope_end <= 0 or scope_end > len(segments):
             raise SubtitlePersistenceError(
@@ -903,20 +1006,21 @@ def _persist_generated_subtitles(
         {"index": segment.get("index"), "text": segment.get("text")}
         for segment in segments
     ]
+    original_indexes = [str(row.get("index")) for row in paragraphs]
+    positional_anchors = any(all_indexes.count(index) > 1 for index in original_indexes)
+    if positional_anchors:
+        paragraphs = [{**row, "index": f"body-ordinal-{position:06d}"}
+                      for position, row in enumerate(paragraphs, start=1)]
     indexes = [str(row.get("index")) for row in paragraphs]
-    if len(indexes) != len(set(indexes)):
-        raise SubtitlePersistenceError("sermon paragraph indexes are not unique")
 
     print(json.dumps({
         "phase": "subtitle_generation", "source": source_id,
         "paragraphs": len(paragraphs), "status": "started",
     }, ensure_ascii=False), flush=True)
-    insertions = generate_subtitles(
-        paragraphs,
-        subject=source_id,
-        consumer="extraction_persisted_subtitles",
-        client=client,
-        require_leading_title=True,
+    insertions = _bound_subtitle_generation(
+        paragraphs=paragraphs, source_id=source_id, source_path=source_path,
+        source_sha256=source_sha256, output_dir=output_dir, actor_id=actor_id,
+        scope_end=scope_end, client=client,
     )
     if not insertions:
         raise SubtitlePersistenceError(
@@ -956,6 +1060,19 @@ def _persist_generated_subtitles(
             raise SubtitlePersistenceError(
                 f"{source_id}: subtitle plan opens an empty section after the generation scope"
             )
+
+    if positional_anchors:
+        # The model/cache address unique body coordinates; only the writer gets
+        # the original index plus its precise ordinal. Existing source IDs remain.
+        ordinal_by_index = {index: position for position, index in enumerate(indexes, start=1)}
+        insertions = [
+            dict(row) if str(row["after_index"]).upper() == "START" else {
+                **row,
+                "after_index": original_indexes[ordinal_by_index[str(row["after_index"])] - 1],
+                "after_body_ordinal": ordinal_by_index[str(row["after_index"])],
+            }
+            for row in insertions
+        ]
 
     audit_dir = (
         output_dir / "subtitle-applications" / _slug(source_id)
@@ -2482,9 +2599,10 @@ def run_one(
         )
     section_settings = sections or SectionSettings()
     projection = project_script(transcript.get("script"))
-    _assert_inline_source_readable(
-        transcript_id, projection, visual_source_attestations
-    )
+    if not subtitles_only:
+        _assert_inline_source_readable(
+            transcript_id, projection, visual_source_attestations
+        )
     leading_untitled_end = leading_untitled_body_end(
         projection.headings,
         len(projection.body_rows),
@@ -2502,6 +2620,16 @@ def run_one(
         raise SubtitlePersistenceError(
             "subtitle-only mode requires --write-back-generated-subtitles"
         )
+    if (
+        subtitles_only
+        and leading_untitled_end is not None
+        and projection.headings
+        and all(not str(row.get("text") or "").strip()
+                for row in projection.body_rows[:leading_untitled_end])
+    ):
+        # Blank physical rows carry coordinates but no teaching to title. Keep
+        # those rows and any prior dispatch record byte-for-byte unchanged.
+        return "skipped", transcript_path
     subtitles_persisted = False
     if leading_untitled_end is not None and not write_back_subtitles:
         raise SubtitlePersistenceError(

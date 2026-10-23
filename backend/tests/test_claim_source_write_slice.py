@@ -116,7 +116,8 @@ def test_no_extra_scope_or_fake_qualification(monkeypatch,fault):
 
 
 def owner_fixture(monkeypatch):
-    from backend.pipeline import claim_owner_revision as owner, cvp_sql_flow
+    from backend.pipeline import claim_owner_revision as owner
+    from backend.pipeline import cvp_sql_commit as cvp_sql_flow
     from backend.pipeline.viewpoint_resolution_runtime import read_artifact
     from backend.api.canonical_repository.postgres_store import record_content_sha
     from backend.pipeline.claim_issue_management import Proposal, Assessment

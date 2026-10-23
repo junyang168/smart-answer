@@ -154,7 +154,7 @@ def test_common_coverage_consumes_current_contract_and_keeps_existing_impacts(tm
     monkeypatch.setattr(flow,'prepare_group',lambda *a:deepcopy(materials))
     monkeypatch.setattr(m,'coverage_context',lambda *a:deepcopy(resolution))
     monkeypatch.setattr(actions,'initialize_subscription_runtime',lambda *a:None)
-    monkeypatch.setattr(flow,'verified_group_backup',lambda *a:{})
+    monkeypatch.setattr('backend.pipeline.cvp_sql_commit.verified_group_backup',lambda *a:{})
     monkeypatch.setattr(actions,'commit_package',lambda *a,**kw:commits.append(kw) or {'status':'applied'})
     def reviewed(root,material,store,*,require_resolved):
         calls.append(root)

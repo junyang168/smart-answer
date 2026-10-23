@@ -177,7 +177,7 @@ def compile_package(material,proposal,review,root):
 
 
 def validate_package(package):
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     app=package['source_repair_application'];root=Path(app['run_root'])
     if app['schema_version']!=SCHEMA or not root.is_absolute():raise ValueError('retarget authority missing')
     material=body(read(root/'materials.json'))
@@ -193,7 +193,7 @@ def validate_package(package):
 
 def prepare_material(store,run_id,authorization):
     """The same read-only compiler is used by preflight and execution."""
-    from backend.pipeline.cvp_sql_flow import check_binding,pins,pin_rows
+    from backend.pipeline.cvp_sql_commit import check_binding, pins, pin_rows
     check_binding(authorization);direction=read_artifact(authorization['path'])
     group=store.get_cvp_group(run_id)
     packet=selection.build_packet(store,link_id=direction['link_id'],candidate_viewpoint_ids=direction['candidate_viewpoint_ids'])
@@ -218,7 +218,7 @@ def prepare_material(store,run_id,authorization):
 
 def execute(store,run_id,*,authorization,root,ports):
     from backend.pipeline.cvp_sql_actions import initialize_subscription_runtime,resume_bound_action
-    from backend.pipeline.cvp_sql_flow import binding,check_binding,pins,pin_rows,decoded_pins,commit_package,verified_group_backup
+    from backend.pipeline.cvp_sql_commit import binding, check_binding, pins, pin_rows, decoded_pins, commit_package, verified_group_backup
     direction=read_artifact(authorization['path']);check_binding(authorization)
     old=store.get_record('viewpoint_claim_links',direction['link_id'])
     # The original revision, not a changed direction/root, owns the once budget.

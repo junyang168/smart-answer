@@ -20,7 +20,7 @@ def claim_audit_pins(receipt,required):
     pins={(p['collection'],p['object_id']):tuple(p['pin']) for p in receipt['read_pins']}
     missing={('claims',cid) for cid in required}-set(pins)
     if not missing:return pins
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     from backend.pipeline.claim_first_management import validate_claim_audit_report
     from backend.pipeline.viewpoint_content_blocked_fallback import verify_saved_full_audit
     check_binding(receipt['audit']);saved=read_artifact(receipt['audit']['path'])
@@ -57,7 +57,7 @@ def partition_packet(audit,packet,value,store):
 
 def human_items(audit,packet,value,store):
     from backend.pipeline.cvp_retained_impact_resolution import protected_link_ids,scope_authority
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     protected=protected_link_ids(value,store)
     if not protected:return set(),None
     authority=scope_authority(value,store);check_binding(authority)
@@ -149,7 +149,7 @@ def create_if_complete(audit_path,store,run_id,output,*,execution_root=None):
 
 
 def verify_resolution(audit,body):
-    from backend.pipeline.cvp_sql_flow import check_binding
+    from backend.pipeline.cvp_sql_commit import check_binding
     from backend.pipeline.viewpoint_audit_owner_resolution import audit_semantic_sha
     from backend.pipeline.viewpoint_reused_source_resolution import verify
     if (body.get('schema_version')!=VERSION or body.get('artifact_sha256')!=sha256_json({k:v for k,v in body.items() if k!='artifact_sha256'})
