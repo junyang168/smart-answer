@@ -618,7 +618,33 @@ def validate_candidate(request: Request, before, candidate: Candidate, sources, 
             owners={source.split_key(k)[0] for k in post if source.split_key(k)[1]==relation[field]}
             if len(owners)!=1 or not owners<=allowed:
                 raise ValueError(f'knowledge relation {key} {field} has incompatible endpoint collection')
+    active_before = {k for k, v in before.items() if not v['retired']}
+    active_after = (active_before | {k for k, v in writes.items() if v['action'] in {'create', 'restore'}}) - retired_claims - {
+        k for k, v in writes.items() if v['action'] == 'retire'}
+    introduced = (one_sided_owner_pairs(post, active_after)
+                  - one_sided_owner_pairs({k: v['payload'] for k, v in before.items()}, active_before))
+    if any(source.key('claims', c) in writes or source.key('evidence_steps', e) in writes for c, e in introduced):
+        raise ValueError('Claim/Evidence ownership must stay reciprocal: ' + ', '.join(
+            f'{c}<->{e}' for c, e in sorted(introduced)))
     return post, writes
+
+
+def one_sided_owner_pairs(records, active):
+    """Claim.evidence_step_ids and EvidenceStep.produced_claim_ids are one link.
+
+    A sibling Claim that takes over an existing EvidenceStep has to appear on
+    both sides; otherwise the route and CVP layers, which read either side,
+    disagree about who the step supports. Only pairs whose ends are both active
+    count, and only pairs a candidate introduces are refused -- legacy one-sided
+    pairs belong to the reciprocity repair, not to this write.
+    """
+    def ids(collection):
+        return {source.split_key(k)[1]: records[k] for k in active
+                if k in records and source.split_key(k)[0] == collection}
+    claims, steps = ids('claims'), ids('evidence_steps')
+    forward = {(c, str(e)) for c, p in claims.items() for e in p.get('evidence_step_ids') or [] if str(e) in steps}
+    backward = {(str(c), e) for e, p in steps.items() for c in p.get('produced_claim_ids') or [] if str(c) in claims}
+    return forward ^ backward
 
 
 def validate_proposer_resolutions(candidate, previous, sources, *, request=None):
