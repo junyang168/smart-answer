@@ -57,3 +57,11 @@ GPT 提出一条观察 → 结论的短路线、两条来源实例。Opus 首轮
 结果：新增 1 条 ArgumentRoute、1 条 revision、2 条单来源 attestation，共 4 项数据库写入；ChangeSet `KCS-668fbb6ad586c6a80065`，最终审核 SHA `564d3872dee409650634e5fff2095d7daf69440e05c1b66ae2bceec3af26966a`，worker 状态 `applied_readback_verified`。又按计划内容逐条读取数据库，核对已保存内容完全一致；实例支持范围说明也已保存。
 
 `staging/route-evidence-v7-controls-20261022/` 中两项反例再次经 GPT／Opus 运行，纯断言和同义重复均保持无路线。304 项相关程序测试通过。先前 v6 对照中的合成正例不构成真实案例已修复的证明，本次相同真实 packet 对照才检验了本次根因修正。
+
+## 负责人要求回滚审核逻辑
+
+负责人明确指示「你还是 roll back 论证层审核的逻辑吧，现在问题出在 claim 上」。据此撤回 v6／v7 放宽判准，whole-CVP worker 的默认与可执行入口恢复 v5，生成、审核、更正均使用原 v5 prompt；归档 policy／prompt、原始模型回答和本记录保留。v6／v7 可以作为历史数据读取，但不再允许新入队或执行。保留已存记录的可选字段解析兼容性，不把它接回当前生成／编译流程。
+
+按原 v7 结果的精确 ID 和内容核对后，软退役仅由该测试新建的 1 条路线、1 条 revision、2 条实例，共 4 项；未修改 Claim、CVP 或连接。撤回 ChangeSet 为 `KCS-e60e68fbb5e962f7b7f0`，已逐条回读确认退役。计划和回执保存于 `staging/route-review-policy-rollback-20261022/`，没有新增模型调用。
+
+306 项相关测试通过，包括默认恢复 v5，以及归档 v6／v7 无法新入队的反例。本记录上方的模型试验仍是当时结果，不作为当前生产判准或现行路线。后续应核实 Claim 本体、证据及 CVP 连接，不在论证层自行补救这些问题。

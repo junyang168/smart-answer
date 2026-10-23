@@ -36,11 +36,10 @@ from backend.pipeline.viewpoint_route_resolution import (
 from backend.pipeline.viewpoint_route_resolution_worker import OwnershipGuardedAdapter
 from backend.pipeline.viewpoint_route_policy import (
     load_route_policy, route_policy_fingerprint, route_policy_prompt_sha256s,
-    WHOLE_CVP_ROUTE_POLICY_VERSIONS,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_POLICY = Path(__file__).resolve().parent / "policies/wang_route_resolution_policy_v7.json"
+DEFAULT_POLICY = Path(__file__).resolve().parent / "policies/wang_route_resolution_policy_v5.json"
 
 
 def enqueue_current_cvp_routes(
@@ -50,8 +49,8 @@ def enqueue_current_cvp_routes(
     """Idempotently queue current route material after a CVP commit/readback."""
 
     policy = load_route_policy(policy_path)
-    if policy["schema_version"] not in WHOLE_CVP_ROUTE_POLICY_VERSIONS:
-        raise ValueError("whole-CVP Route enqueue requires v5 or newer whole-CVP policy")
+    if policy["schema_version"] != "wang_route_resolution_policy_v5":
+        raise ValueError("whole-CVP Route enqueue requires v5 policy")
     policy_sha = route_policy_fingerprint(
         policy, prompt_sha256s=route_policy_prompt_sha256s(
             policy, prompt_dir=Path(__file__).resolve().parent / "prompts"
@@ -116,7 +115,6 @@ def process_cvp_route(
     proposer: Any, reviewer: Any, reconsiderer: Any,
     max_correction_rounds: int, apply: bool = False,
     ownership_guard: Callable[[], None] | None = None,
-    evidence_semantics: str | None = None,
 ) -> dict[str, Any]:
     """Build from current master data; write only after a whole-set pass."""
 
@@ -145,11 +143,6 @@ def process_cvp_route(
     )
     if packet["membership_ledger"]["out_of_scope_members"]:
         raise ValueError("complete CVP Route packet omitted an active member")
-    if evidence_semantics is not None:
-        packet["evidence_semantics"] = evidence_semantics
-        packet["packet_sha256"] = sha256_json({
-            key: value for key, value in packet.items() if key != "packet_sha256"
-        })
     guard()
     result = run_cvp_route_scope(
         route_packet=packet, existing_routes=materials["existing_routes"],
@@ -243,8 +236,8 @@ def main() -> int:
     parser.add_argument("--retry-exceptions", action="store_true")
     args = parser.parse_args()
     policy = load_route_policy(args.route_policy)
-    if policy["schema_version"] not in WHOLE_CVP_ROUTE_POLICY_VERSIONS:
-        parser.error("whole-CVP worker requires v5 or newer whole-CVP policy")
+    if policy["schema_version"] != "wang_route_resolution_policy_v5":
+        parser.error("whole-CVP worker requires Route policy v5")
     policy_sha = route_policy_fingerprint(
         policy, prompt_sha256s=route_policy_prompt_sha256s(
             policy, prompt_dir=Path(__file__).resolve().parent / "prompts"
@@ -329,9 +322,6 @@ def main() -> int:
             reconsiderer=OwnershipGuardedAdapter(adapters["correction"], guard),
             max_correction_rounds=int(policy["max_correction_rounds"]),
             apply=args.apply, ownership_guard=guard,
-            evidence_semantics=("source_support_v1"
-                                if policy["schema_version"] in {"wang_route_resolution_policy_v6", "wang_route_resolution_policy_v7"}
-                                else None),
         )
         guard()
         queue.finish(job["job_id"], worker_id=args.worker_id, epoch=epoch,
