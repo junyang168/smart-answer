@@ -200,8 +200,10 @@ def prepare_materials(store,preflight,group_key,recall,*,member_support_ids=(),
         # endpoint does not authorize or require maintenance of its neighbour.
         in_scope=bool(scope & maintenance) if col=='viewpoint_relations' else scope<=maintenance
         if not in_scope:raise ValueError('explicit maintenance object is outside viewpoint authority')
-    if maintenance:
-        relation_rows=store.read_cvp_relations(viewpoint_ids=sorted(maintenance))
+    if primary_vids:
+        # Existing candidate relationships are identity facts even when the
+        # task only adds links. Omitting them invites duplicate semantic edges.
+        relation_rows=store.read_cvp_relations(viewpoint_ids=primary_vids)
         accept({k:r for k,r in relation_rows.items() if r['payload'].get('effective_state')=='active'})
     relationship_rows={k:r for k,r in records.items() if k[0]=='viewpoint_relations'}
     context_vids={row['payload'][end+'_viewpoint_id'] for row in relationship_rows.values() for end in ('source','target')}-set(primary_vids)

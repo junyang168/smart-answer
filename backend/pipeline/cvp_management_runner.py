@@ -122,6 +122,31 @@ def _reconcile_saved_dispatches(store,parent_id,unit,request,proposer,reviewer):
             persistence.returned_call(store,parent_id,key=key,raw=raw,artifact_sha256=artifact['artifact_sha256'])
 
 
+def _reconcile_capacity_refusals(store,parent_id):
+    """Read terminal provider receipts; unknown/partial output stays unknown."""
+    from backend.pipeline.claim_management import pre_generation_rejection
+    from backend.pipeline.subscription_process import digest_file
+    for key,slot in store.get_cvp_group(parent_id)['call_reservations'].items():
+        if slot['state']!='started' or slot['role']!='gpt':continue
+        cache=Path(slot['intent']['cache_path']);transport=cache.with_name(cache.stem+'.transport')
+        files=[transport/name for name in ('stdout.log','stderr.log')]
+        paths=[cache.with_name(cache.stem+'.call-intent.json'),cache.with_name(cache.stem+'.call-failure.json'),
+               transport/'invocation.json',transport/'exit.json',*files]
+        if cache.exists() or not all(p.is_file() for p in paths) or (transport/'response.json').exists():continue
+        intent,failure,_,exit_state=[read_artifact(p) for p in paths[:4]]
+        if (exit_state.get('returncode') in (None,0)
+                or exit_state.get('files')!={p.name:digest_file(p) for p in files}
+                or failure.get('invocation_sha256')!=intent.get('artifact_sha256')
+                or any(intent.get(k)!=v for k,v in slot['intent'].items() if k!='request_bytes')
+                or intent.get('artifact_sha256')!=sha256_json({k:v for k,v in intent.items() if k!='artifact_sha256'})):
+            continue
+        raw={'stdout':files[0].read_text(),'stderr':files[1].read_text(),'last_message':None}
+        if pre_generation_rejection(raw)!='capacity':continue
+        persistence.record_pre_generation_refusal(store,parent_id,key=key,intent_sha256=slot['intent_sha256'],
+            proof={'kind':'capacity','generated_content':False,'automatic_retry':False,
+                   'original_failure_preserved':True,'bindings':[binding(p) for p in paths]})
+
+
 def _stage_call_budget(parent,root,request):
     """A stage's total capacity includes its original reserved/cache calls.
 
@@ -272,7 +297,24 @@ def _same_material_inputs(current,saved):
         if current.get('human_source_decisions')!=[d for d in saved.get('human_source_decisions',[])
                                                   if d['source_id'] in source_ids]:return False
     return all(current.get(k)==saved.get(k) for k in (
-        'claim_input','claim_authority','member_claim_authority','human_constraints','quality_findings','maintenance_viewpoint_ids'))
+        'claim_input','claim_authority','member_claim_authority','human_constraints','quality_findings','maintenance_viewpoint_ids','link_evidence_contract'))
+
+
+def _omitted_duplicate_relations(store,step):
+    """Identify the specific missing-input defect, never a rejected verdict."""
+    if not step or step.get('checkpoint')!='reviewed' or step.get('change_set_ids'):
+        return {}
+    bundle=step['materials']['bundle']
+    original={(r['collection'],r['object_id']) for r in bundle['records']}
+    created={tuple(op['payload'][k] for k in ('source_viewpoint_id','target_viewpoint_id','relation_type'))
+             for op in step['reviewed']['plan']['operations']
+             if op['collection']=='viewpoint_relations' and op['operation']=='create'}
+    if not created:return {}
+    return {key:row for key,row in store.read_cvp_relations(
+        viewpoint_ids=bundle['candidate_viewpoint_ids']).items()
+        if key not in original and not row.get('retired')
+        and row['payload'].get('effective_state')=='active'
+        and tuple(row['payload'][k] for k in ('source_viewpoint_id','target_viewpoint_id','relation_type')) in created}
 
 
 def _summary_only_preimage_refresh(old_bundle,new_bundle):
@@ -381,6 +423,7 @@ def run(store,request,*,root,execute=False,clients=None):
     with exclusive(root):
         parent=persistence.prepare_action(store,request,root=str(root),preflight=preflight)
         parent_id=parent['run_id'];call=_transport(store,parent_id,root,request)
+        _reconcile_capacity_refusals(store,parent_id)
         if parent['result'].get('status')=='completed':
             from backend.pipeline.viewpoint_route_cvp_worker import handoff_completed_cvp_groups
             handoff_completed_cvp_groups(store,parent,root)
@@ -421,7 +464,10 @@ def run(store,request,*,root,execute=False,clients=None):
                 # Recover an approved/applying unit before any proposal or
                 # stale-input preparation. Committed identity always wins.
                 latest=store.get_cvp_group(unit['steps'][-1]) if unit['steps'] else None
-                if latest and latest['checkpoint'] in {'reviewed','applied','audited'}:
+                omitted_relations=_omitted_duplicate_relations(store,latest)
+                saved_input_repair=((latest or {}).get('materials',{}).get('bundle',{}).get('material',{}).get('input_repair')
+                                   or parent.get('fragment_selection_repairs',{}).get(key))
+                if latest and latest['checkpoint'] in {'reviewed','applied','audited'} and not omitted_relations:
                     if latest['checkpoint']=='reviewed':resume_reviewed_action(store,latest['run_id'])
                     evidence=store.get_cvp_group(latest['run_id'])['reviewed']['evidence']['cvp_management']
                     readback,rpins=_readback(store,evidence)
@@ -521,7 +567,7 @@ def run(store,request,*,root,execute=False,clients=None):
                     {'group_key':p['group_key'],'plan':metrics['current_plan'] if p['group_key']==key else p['plan']}
                     for p in current['recall_plans']]})
                 filtered_path=unit_root/'filtered-recall.json'
-                if filtered_path.exists():
+                if filtered_path.exists() and not (omitted_relations or saved_input_repair):
                     recall=read_artifact(filtered_path)
                     saved_bundle=unit_root/'filtered-bundle.json'
                     if not saved_bundle.exists():
@@ -530,8 +576,23 @@ def run(store,request,*,root,execute=False,clients=None):
                 else:
                     bundle=prepare_materials(store,current,key,recall,maintenance_viewpoint_ids=request.maintenance_viewpoint_ids,
                                        maintenance_record_keys=[(p.collection,p.object_id) for p in request.permissions],
+                                       member_support_ids=(latest['materials']['bundle']['member_support_ids'] if omitted_relations or saved_input_repair else ()),
                                        summary_root=request.input.get('contextual_summary_root'))
                 bundle=persistence.bind_task_constraints(store,parent_id,bundle)
+                repair=saved_input_repair
+                if omitted_relations:
+                    _guard(store,bundle)
+                    repair=persistence.reserve_missing_relation_repair(store,parent_id,latest['run_id'],
+                        bundle=bundle,relations=omitted_relations,implementation=[
+                            binding(Path(__file__)),binding(Path(__file__).with_name('cvp_materials.py')),
+                            binding(Path(persistence.__file__))])
+                if repair:
+                    # The old approval stays immutable. This new generation
+                    # repairs its missing input and must receive its own review.
+                    generation=sha256_json({'base_generation':generation,'input_repair':repair['artifact_sha256']})[:24]
+                    unit_root=root/('unit-'+sha256_json(key)[:16])/generation
+                    bundle=seal({k:v for k,v in bundle.items() if k!='artifact_sha256'}|{
+                        'material':{**bundle['material'],'input_repair':repair}})
                 if not latest and not filtered_path.exists() and request.input.get('recall_profile')==STATEMENT_SCOPE_PROFILE:
                     initial_packet=domain.proposal_packet(request,bundle)
                     initial_adapter=adapter('proposal',request,bundle,initial_packet,client=proposer)

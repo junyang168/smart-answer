@@ -331,6 +331,23 @@ def test_maintenance_reads_relations_original_reasons_and_direct_support_without
     assert packet['maintenance_scope']['context_grants_write_permission'] is False
 
 
+def test_create_connection_sees_existing_candidate_relations_without_recursive_members():
+    store=MaterialStore(25);maintenance_graph(store)
+    bundle=material(store)
+    packet=bundle['material'];keys={(r['collection'],r['object_id']) for r in bundle['records']}
+    assert [r['content']['viewpoint_relation_id'] for r in packet['relations']]==['Q1']
+    assert ('canonical_viewpoints','V2') in keys
+    assert ('viewpoint_relations','Q2') not in keys
+    assert ('canonical_viewpoints','V3') not in keys
+    assert ('claims','C-unrelated') not in keys
+    assert {r['content']['evidence_step_id'] for r in packet['evidence']}=={'E0','E1','E2'}
+    assert bundle['maintenance_viewpoint_ids']==[]
+    assert packet['maintenance_scope']['context_grants_write_permission'] is False
+    store.records['viewpoint_relations','Q1']['payload']['effective_state']='retired'
+    store.records['viewpoint_relations','Q1']['content_sha256']=record_content_sha(store.records['viewpoint_relations','Q1']['payload'])
+    assert material(store)['material']['relations']==[]
+
+
 def test_explicit_withdrawn_link_and_hold_are_material_not_silent_permission():
     store=MaterialStore();link=store.records['viewpoint_claim_links','L1']['payload']
     store.records['viewpoint_claim_links','L-old']=store.state({**link,'viewpoint_claim_link_id':'L-old',

@@ -445,6 +445,7 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
                        for row in previous['writes'] if row['ref'] not in discarded})
     changes = {}
     link_evidence_choices = {}
+    link_fragment_choices = {}
     permission = {(p.collection, p.object_id): set(p.fields) for p in request.permissions}
     for change in raw.changes:
         if change.ref not in refs or change.ref in changes:
@@ -453,8 +454,20 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
         key = col, oid
         fields = _json_fields(change.fields_json)
         evidence_refs = fields.pop('evidence_step_refs', None)
+        fragment_refs = fields.pop('source_fragment_refs', None)
+        if fragment_refs is not None:
+            if (bundle.get('link_evidence_contract')!='source_fragment_refs_v1'
+                    or col!='viewpoint_claim_links'
+                    or key in original and (request.mode!='maintain' or 'evidence_bindings' not in permission.get(key,set()))
+                    or not isinstance(fragment_refs,list) or not fragment_refs
+                    or any(not isinstance(ref,str) or ref not in refs
+                           or refs[ref]['collection']!='source_fragments' for ref in fragment_refs)
+                    or len(set(fragment_refs))!=len(fragment_refs)):
+                raise ValueError('new link fragment selection requires its bound contract and unique supplied fragment references')
+            link_fragment_choices[change.ref]=[refs[ref]['object_id'] for ref in fragment_refs]
         if evidence_refs is not None:
-            if (col != 'viewpoint_claim_links' or key in original
+            if (col != 'viewpoint_claim_links'
+                    or key in original and (request.mode!='maintain' or 'evidence_bindings' not in permission.get(key,set()))
                     or not isinstance(evidence_refs, list) or not evidence_refs
                     or any(not isinstance(ref, str) or ref not in refs
                            or refs[ref]['collection'] != 'evidence_steps' for ref in evidence_refs)
@@ -652,6 +665,12 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
             payload['decision_id'] = decision_ids[ref]
             payload.setdefault('effective_state', 'active')
             selected_evidence = link_evidence_choices.get(ref)
+            selected_fragments = link_fragment_choices.get(ref)
+            if (selected_fragments is None and ref not in link_evidence_choices
+                    and bundle.get('link_evidence_contract')=='source_fragment_refs_v1'
+                    and previous and is_new):
+                selected_fragments=sorted({row['source_fragment_id']
+                    for row in payload.get('evidence_bindings',[])}) or None
             if selected_evidence is None and previous and is_new:
                 # A correction that changes only the link role must retain the
                 # previous precise selection instead of widening it again.
@@ -694,6 +713,10 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
                         if ('source_fragments', fid) not in original:
                             raise ValueError('link evidence fragment is missing')
                         evidence.append({'evidence_step_id': eid, 'source_fragment_id': fid})
+                if selected_fragments is not None:
+                    if not set(selected_fragments)<={row['source_fragment_id'] for row in evidence}:
+                        raise ValueError('link fragment selection is outside the selected eligible own Claim evidence')
+                    evidence=[row for row in evidence if row['source_fragment_id'] in selected_fragments]
             payload['evidence_bindings'] = sorted(evidence, key=lambda row: (row['evidence_step_id'], row['source_fragment_id']))
         elif col == 'viewpoint_relations':
             for end in ('source', 'target'):

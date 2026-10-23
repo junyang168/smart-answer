@@ -5864,7 +5864,7 @@ class PostgresKnowledgeStore:
         return result
 
     def read_cvp_relations(self, *, viewpoint_ids=()):
-        """Only current relation edges incident to the explicit maintenance heads."""
+        """Current relation edges incident to the explicit candidate/maintenance heads."""
         if not viewpoint_ids:return {}
         with self.connect() as conn,conn.cursor() as cursor:
             cursor.execute('SET LOCAL statement_timeout=5000')

@@ -160,6 +160,36 @@ def test_new_link_evidence_can_be_selected_and_preserved_across_corrections():
         cvp.compile_candidate(req,bundle,{'changes':[change('nl1',evidence_step_refs=['e1','e1'])]},previous=third)
 
 
+def test_shared_evidence_fragment_choice_is_scoped_and_survives_role_only_correction():
+    bundle=materials()
+    step=next(r for r in bundle['records'] if r['collection']=='evidence_steps')
+    step['payload'].pop('source_fragment_id')
+    step['payload']['source_fragment_ids']=['F1','F2']
+    step['content_sha256']=semantic_record_sha(step['payload'])
+    for fid in ['F2','F-foreign']:
+        fragment={'fragment_id':fid,'source_id':'S1'}
+        bundle['records'].append({'collection':'source_fragments','object_id':fid,'payload':fragment,
+            'revision':1,'content_sha256':semantic_record_sha(fragment),'retired':False})
+    bundle['references']['source_fragments'].update({'F2':'f2','F-foreign':'f3'})
+    bundle=seal({**{k:v for k,v in bundle.items() if k!='artifact_sha256'},
+                 'link_evidence_contract':'source_fragment_refs_v1'})
+    raw=proposal();raw['changes'][-1]=change('nl1',viewpoint_id='nv1',claim_id='c1',
+        link_type='equivalent_full',evidence_step_refs=['e1'],source_fragment_refs=['f1'])
+    req=request();first=cvp.compile_candidate(req,bundle,raw)
+    link=lambda c:next(row['payload'] for row in c['writes'] if row['ref']=='nl1')
+    assert link(first)['evidence_bindings']==[{'evidence_step_id':'E1','source_fragment_id':'F1'}]
+    second=cvp.compile_candidate(req,bundle,{'changes':[change('nl1',source_fragment_refs=['f2'])]},previous=first)
+    assert link(second)['evidence_bindings']==[{'evidence_step_id':'E1','source_fragment_id':'F2'}]
+    third=cvp.compile_candidate(req,bundle,{'changes':[change('nl1',link_type='equivalent_component')]},previous=second)
+    assert link(third)['evidence_bindings']==link(second)['evidence_bindings']
+    for fragments in [[],['f1','f1'],['foreign'],['f3']]:
+        with pytest.raises(ValueError,match='fragment selection'):
+            cvp.compile_candidate(req,bundle,{'changes':[change('nl1',source_fragment_refs=fragments)]},previous=first)
+    legacy=seal({k:v for k,v in bundle.items() if k not in {'artifact_sha256','link_evidence_contract'}})
+    with pytest.raises(ValueError,match='bound contract'):
+        cvp.compile_candidate(req,legacy,raw)
+
+
 def test_empty_delta_retains_previous_candidate_without_copying_records():
     req, bundle = request(), materials()
     first = cvp.compile_candidate(req, bundle, proposal())

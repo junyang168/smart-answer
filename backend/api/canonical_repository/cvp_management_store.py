@@ -141,11 +141,98 @@ def prepare_action(store,request,*,root,preflight,supersede_unwritten_run=None,n
             if step_ids:
                 cursor.execute("UPDATE wang_knowledge.pipeline_runs SET status='cancelled',finished_at=now() WHERE run_id=ANY(%s)",(step_ids,))
         value={**identity,'groups':groups,'work_groups':groups,'units':{g['group_key']:{'status':'pending','steps':[],'claim_ids':g['claim_ids']} for g in groups},
+            'model_contracts':{'link_evidence':'source_fragment_refs_v1'},
             'call_reservations':{},'revision_rounds':[], 'input_generations':[],
             'initial_admission':preflight['admission'],'human_constraints':[],'quality_findings':[],'independent_audit':{'status':'not_performed'},
             'result':{'status':'running'}}
         _insert(cursor,run_id,value)
     return {**value,'run_id':run_id}
+
+
+def reserve_missing_relation_repair(store,parent_id,step_id,*,bundle,relations,implementation):
+    """One input repair per group; preserve approved history and original caps.
+
+    Only an unwritten approved insertion colliding with an omitted current
+    relationship qualifies. The corrected postimage still needs fresh review.
+    """
+    from .cvp_recall import seal,verify
+    from backend.pipeline.cvp_sql_commit import decoded_pins
+    verify(bundle,'wang_cvp_common_material_v1')
+    with store.connect() as conn,conn.cursor() as cursor:
+        parent=_load(cursor,parent_id);step=_load(cursor,step_id)
+        if (parent.get('kind')!='cvp_management_action'
+                or parent.get('result',{}).get('status') in {'completed','superseded'}
+                or step.get('kind')!='cvp_management_round'
+                or parent.get('units',{}).get(step.get('group_key'),{}).get('latest_step')!=step_id
+                or step.get('parent_run_id')!=parent_id or step.get('checkpoint')!='reviewed'
+                or step.get('change_set_ids') or not relations):
+            raise ChangeSetConflict('relation input repair requires an unwritten approved original step')
+        if cursor.execute('SELECT 1 FROM wang_knowledge.change_sets WHERE change_set_id=%s',
+                          (step['reviewed']['plan']['change_set_id'],)).fetchone():
+            raise ChangeSetConflict('relation input repair cannot bypass a recorded ChangeSet')
+        old=step['materials']['bundle']
+        if bundle['claim_input']!=old['claim_input']:
+            raise ChangeSetConflict('relation input repair cannot change the original Claim input')
+        old_keys={(r['collection'],r['object_id']) for r in old['records']}
+        new={(r['collection'],r['object_id']):{k:v for k,v in r.items() if k not in {'collection','object_id'}}
+             for r in bundle['records']}
+        created={tuple(op['payload'][k] for k in ('source_viewpoint_id','target_viewpoint_id','relation_type'))
+                 for op in step['reviewed']['plan']['operations']
+                 if op['collection']=='viewpoint_relations' and op['operation']=='create'}
+        pins={}
+        for key,row in relations.items():
+            value=row['payload']
+            if (key[0]!='viewpoint_relations' or key in old_keys or new.get(key)!=row
+                    or row.get('retired') or value.get('effective_state')!='active'
+                    or tuple(value[k] for k in ('source_viewpoint_id','target_viewpoint_id','relation_type')) not in created):
+                raise ChangeSetConflict('relation input repair lacks a proven omitted duplicate edge')
+            pins[key]=(row['revision'],row['content_sha256'],False)
+        store._assert_transaction_read_pins(cursor,pins)
+        store._assert_transaction_read_pins(cursor,decoded_pins(step['reviewed']['evidence']['read_pins']))
+        record=seal({'schema_version':'wang_cvp_missing_relation_input_repair_v1',
+            'original_step_id':step_id,'original_reviewed_sha256':step['reviewed_sha256'],
+            'original_material_sha256':old['artifact_sha256'],
+            'corrected_material_sha256':bundle['artifact_sha256'],
+            'relation_pins':[{'collection':k[0],'object_id':k[1],'pin':list(v)} for k,v in sorted(pins.items())],
+            'implementation':implementation,'max_repair_generations':1,
+            'original_call_budget_unchanged':True,'requires_fresh_proposal_and_review':True})
+        repairs=parent.setdefault('relation_input_repairs',{})
+        key=step['group_key']
+        if key in repairs and repairs[key]!=record:
+            raise ChangeSetConflict('original group relation input repair is already reserved')
+        repairs[key]=record;_save(cursor,parent_id,parent)
+        return record
+
+
+def reserve_fragment_selection_repair(store,parent_id,*,group_key,review_call_key,defect,implementation):
+    """Record a proven output-capability defect on the original stalled group."""
+    from .cvp_recall import seal
+    with store.connect() as conn,conn.cursor() as cursor:
+        parent=_load(cursor,parent_id);unit=parent['units'][group_key]
+        step=_load(cursor,unit['latest_step'])
+        slot=parent['call_reservations'].get(review_call_key,{})
+        response=slot.get('returned',{}).get('response',{})
+        if (parent.get('kind')!='cvp_management_action' or unit['status']!='resource_hold'
+                or step['checkpoint']!='prepared' or step.get('change_set_ids')
+                or slot.get('role')!='opus' or slot.get('state')!='returned'
+                or response.get('result')!='review' or not response['review']['findings']
+                or not defect.strip() or not implementation):
+            raise ChangeSetConflict('fragment capability repair requires its original stalled review and concrete defect')
+        roots=[_load(cursor,sid,lock=False)['materials']['step_root']+'/' for sid in unit['steps']]
+        if (not any(slot['intent']['cache_path'].startswith(root) for root in roots)
+                or any(s['state']=='started' and any(s['intent']['cache_path'].startswith(root) for root in roots)
+                       for s in parent['call_reservations'].values())):
+            raise ChangeSetConflict('fragment capability repair has foreign or unknown original calls')
+        record=seal({'schema_version':'wang_cvp_fragment_selection_repair_v1',
+            'original_step_id':unit['latest_step'],'original_material_sha256':step['materials']['bundle']['artifact_sha256'],
+            'review_call_key':review_call_key,'original_review_sha256':sha256_json(response),
+            'defect':defect,'implementation':implementation,'max_repair_generations':1,
+            'original_call_budget_unchanged':True,'requires_fresh_proposal_and_review':True})
+        repairs=parent.setdefault('fragment_selection_repairs',{})
+        if group_key in repairs and repairs[group_key]!=record:
+            raise ChangeSetConflict('original group fragment capability repair is already reserved')
+        repairs[group_key]=record;_save(cursor,parent_id,parent)
+        return record
 
 
 def prepare_step(store,parent_id,*,group_key,generation,ordinal,materials,revision=False):
@@ -234,6 +321,19 @@ def reserve_call(store,parent_id,*,key,role,intent):
             raise ChangeSetConflict('CVP2 actual request exceeds original byte budget')
         slots[key]={**identity,'state':'planned'};_save(cursor,parent_id,parent)
         return slots[key]
+
+
+def record_pre_generation_refusal(store,parent_id,*,key,intent_sha256,proof):
+    """Classify a proven empty provider refusal; never refund or retry a call."""
+    with store.connect() as conn,conn.cursor() as cursor:
+        parent=_load(cursor,parent_id);slot=parent['call_reservations'].get(key)
+        if (not slot or slot['intent_sha256']!=intent_sha256 or slot['role']!='gpt'
+                or proof.get('kind')!='capacity' or proof.get('generated_content') is not False):
+            raise ChangeSetConflict('pre-generation refusal differs from original dispatch')
+        if slot['state']=='refused' and slot.get('refusal')==proof:return proof
+        if slot['state']!='started':raise ChangeSetConflict('only a started call can acquire refusal evidence')
+        slot.update(state='refused',refusal=proof);_save(cursor,parent_id,parent)
+        return proof
 
 
 def replace_undispatched_call_plan(store,parent_id,*,key,prior_intent_sha256,role,intent):
@@ -380,6 +480,12 @@ def bind_task_constraints(store,parent_id,bundle):
         parent=_load(cursor,parent_id,lock=False)
         quality=_quality_findings(cursor,[(r['collection'],r['object_id']) for r in bundle['records']])
     additions={}
+    group=bundle['group_key']
+    fragment_repair=parent.get('fragment_selection_repairs',{}).get(group)
+    repair=fragment_repair or parent.get('relation_input_repairs',{}).get(group)
+    if parent.get('model_contracts',{}).get('link_evidence')=='source_fragment_refs_v1' or fragment_repair:
+        additions['link_evidence_contract']='source_fragment_refs_v1'
+    if repair:additions['material']={**bundle['material'],'input_repair':repair}
     constraints=[c for c in parent.get('human_constraints',[]) if c['group_key']==bundle['group_key']]
     if constraints:additions['human_constraints']=constraints
     if quality:additions['quality_findings']=quality
