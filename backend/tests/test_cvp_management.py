@@ -224,6 +224,32 @@ def test_existing_link_fragment_selection_requires_exact_maintenance_grant():
     with pytest.raises(ValueError,match='fragment selection'):
         cvp.compile_candidate(req.model_copy(update={'permissions':[]}),bundle,raw)
 
+    # A model may acknowledge an unchanged comparison link outside the
+    # maintenance denominator. Only that redundant retained row is harmless.
+    extra=[]
+    for col,new_id,ref in [('canonical_viewpoints','V2','v2'),('viewpoint_revisions','R2','r2'),
+                           ('viewpoint_claim_links','L2','l2')]:
+        origin=next(r for r in bundle['records'] if r['collection']==col)
+        payload=deepcopy(origin['payload'])
+        field={'canonical_viewpoints':'viewpoint_id','viewpoint_revisions':'viewpoint_revision_id',
+               'viewpoint_claim_links':'viewpoint_claim_link_id'}[col]
+        payload[field]=new_id
+        if col=='canonical_viewpoints':payload['current_revision_id']='R2'
+        else:payload['viewpoint_id']='V2'
+        if col=='viewpoint_claim_links':payload['validated_against_viewpoint_revision_id']='R2'
+        extra.append({'collection':col,'object_id':new_id,'payload':payload,'revision':1,
+                      'content_sha256':semantic_record_sha(payload),'retired':False})
+        bundle['references'][col][new_id]=ref
+    bundle=seal({**{k:v for k,v in bundle.items() if k!='artifact_sha256'},'records':bundle['records']+extra})
+    raw['member_dispositions'].append({'member_ref':'l2','disposition':'retained','reason':'范围外只读，不纳入维护。'})
+    accepted=cvp.compile_candidate(req,bundle,raw)
+    assert [r['member_ref'] for r in accepted['member_dispositions']]==['l1']
+    assert all(r['ref']!='l2' for r in accepted['writes'])
+    for value in ['changed','background','unresolved']:
+        raw['member_dispositions'][-1]['disposition']=value
+        with pytest.raises(ValueError,match='outside full maintenance scope'):
+            cvp.compile_candidate(req,bundle,raw)
+
 
 def test_empty_delta_retains_previous_candidate_without_copying_records():
     req, bundle = request(), materials()

@@ -757,6 +757,13 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
         raise ValueError('duplicate member disposition')
     for row in raw.member_dispositions:
         if row.member_ref not in member_refs:
+            reference=refs.get(row.member_ref)
+            key=(reference['collection'],reference['object_id']) if reference else None
+            if (key in original and key[0]=='viewpoint_claim_links' and row.disposition=='retained'
+                    and row.member_ref not in touched and states[key]==original[key]['payload']):
+                # A redundant acknowledgement of an unchanged, read-only
+                # comparison member is not a maintenance decision or write.
+                continue
             raise ValueError('member disposition is outside full maintenance scope')
         member_dispositions[row.member_ref] = row.model_dump(mode='json')
     if set(member_dispositions) != set(member_refs):
