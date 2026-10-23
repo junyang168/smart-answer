@@ -174,14 +174,17 @@ def test_retirement_preserves_history_and_restore_requires_retired_state(case):
 
 def test_split_requires_every_original_and_new_target_mapping(case):
     request, before, candidate, sources = case
-    request = request.model_copy(update={"operation": "Split", "allowed_operations": ["Split"],
+    request = request.model_copy(update={"operation": "Split", "allowed_operations": ["Split", "Update"],
         "creation_permissions": [m.CreationPermission(collection="claims", source_id="S",
              fields=["statement", "claim_type", "occurrences", "evidence_step_ids"])]})
+    request.permissions.append(c.Permission(collection="evidence_steps", object_id="E", fields=["produced_claim_ids"]))
     candidate = change(candidate, "claims/C", "retire")
     for cid in ["A", "B"]:
         candidate = change(candidate, "claims/" + cid, "create", {**before["claims/C"]["payload"], "claim_id": cid})
+    candidate = change(candidate, "evidence_steps/E", "update",
+                       {**before["evidence_steps/E"]["payload"], "produced_claim_ids": ["A", "B"]})
     candidate.replacements = {"claims/C": ["claims/A", "claims/B"]}
-    assert set(m.validate_candidate(request, before, candidate, sources)[1]) == {"claims/C", "claims/A", "claims/B"}
+    assert set(m.validate_candidate(request, before, candidate, sources)[1]) == {"claims/C", "claims/A", "claims/B", "evidence_steps/E"}
     candidate.replacements["claims/C"].pop()
     with pytest.raises(ValueError, match="replacement mapping"):
         m.validate_candidate(request, before, candidate, sources)
@@ -192,7 +195,7 @@ def test_create_needs_source_scoped_permission_and_absent_identity(case):
     request = request.model_copy(update={"operation": "Create", "allowed_operations": ["Create"],
         "creation_permissions": [m.CreationPermission(collection="claims", source_id="S",
              fields=["statement", "claim_type", "occurrences", "evidence_step_ids"])]})
-    created = change(candidate, "claims/NEW", "create", {**before["claims/C"]["payload"], "claim_id": "NEW"})
+    created = change(candidate, "claims/NEW", "create", {**before["claims/C"]["payload"], "claim_id": "NEW", "evidence_step_ids": []})
     assert m.validate_candidate(request, before, created, sources)[1]["claims/NEW"]["action"] == "create"
     occupied = {**before, "claims/NEW": {"payload": created.records[0].payload, "retired": False}}
     with pytest.raises(ValueError, match="absent identity"):
@@ -202,10 +205,12 @@ def test_create_needs_source_scoped_permission_and_absent_identity(case):
 def test_creating_evidence_resolves_its_own_source_from_fragment(case):
     request, before, candidate, sources = case
     request = request.model_copy(update={"allowed_operations": ["Update", "Create"],
+        "permissions": [c.Permission(collection="claims", object_id="C", fields=["evidence_step_ids"])],
         "creation_permissions": [m.CreationPermission(collection="evidence_steps", source_id="S",
              fields=["statement", "produced_claim_ids", "source_fragment_ids"])]})
     created = change(candidate, "evidence_steps/NEW", "create", {
         "evidence_step_id": "NEW", "statement": "甲是假设。", "produced_claim_ids": ["C"], "source_fragment_ids": ["F"]})
+    created = change(created, "claims/C", "update", {**before["claims/C"]["payload"], "evidence_step_ids": ["E", "NEW"]})
     assert m.validate_candidate(request, before, created, sources)[1]["evidence_steps/NEW"]["action"] == "create"
 
 

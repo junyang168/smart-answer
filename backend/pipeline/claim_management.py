@@ -618,7 +618,33 @@ def validate_candidate(request: Request, before, candidate: Candidate, sources, 
             owners={source.split_key(k)[0] for k in post if source.split_key(k)[1]==relation[field]}
             if len(owners)!=1 or not owners<=allowed:
                 raise ValueError(f'knowledge relation {key} {field} has incompatible endpoint collection')
+    active_before = {k for k, v in before.items() if not v['retired']}
+    active_after = (active_before | {k for k, v in writes.items() if v['action'] in {'create', 'restore'}}) - retired_claims - {
+        k for k, v in writes.items() if v['action'] == 'retire'}
+    introduced = (one_sided_owner_pairs(post, active_after)
+                  - one_sided_owner_pairs({k: v['payload'] for k, v in before.items()}, active_before))
+    if any(source.key('claims', c) in writes or source.key('evidence_steps', e) in writes for c, e in introduced):
+        raise ValueError('Claim/Evidence ownership must stay reciprocal: ' + ', '.join(
+            f'{c}<->{e}' for c, e in sorted(introduced)))
     return post, writes
+
+
+def one_sided_owner_pairs(records, active):
+    """Claim.evidence_step_ids and EvidenceStep.produced_claim_ids are one link.
+
+    A sibling Claim that takes over an existing EvidenceStep has to appear on
+    both sides; otherwise the route and CVP layers, which read either side,
+    disagree about who the step supports. Only pairs whose ends are both active
+    count, and only pairs a candidate introduces are refused -- legacy one-sided
+    pairs belong to the reciprocity repair, not to this write.
+    """
+    def ids(collection):
+        return {source.split_key(k)[1]: records[k] for k in active
+                if k in records and source.split_key(k)[0] == collection}
+    claims, steps = ids('claims'), ids('evidence_steps')
+    forward = {(c, str(e)) for c, p in claims.items() for e in p.get('evidence_step_ids') or [] if str(e) in steps}
+    backward = {(str(c), e) for e, p in steps.items() for c in p.get('produced_claim_ids') or [] if str(c) in claims}
+    return forward ^ backward
 
 
 def validate_proposer_resolutions(candidate, previous, sources, *, request=None):
@@ -781,6 +807,26 @@ def unresolved_after(action_id, previous, review, *, request=None, candidate=Non
     return result
 
 
+def subtitle_only_generation(document, current):
+    """Subtitles are metadata: the registered file may differ by inserted headings alone.
+
+    #436 inserted subtitle rows into transcripts after registration, so the
+    file SHA moved while body, coordinates and visual content did not, and
+    every Claim action on those sermons was refused as source drift. This
+    accepts only the #436 proof chain (source_editorial_transition), which
+    re-reads both generations and every original row -- never a body-SHA
+    comparison on its own.
+    """
+    from backend.pipeline.source_editorial_transition import verify_current_source_binding
+    try:
+        live = verify_current_source_binding({'path': str(Path(document['source_path']).resolve()),
+                                              'file_sha256': document['source_file_sha256']})
+    except (ValueError, KeyError):
+        return False
+    return (live['file_sha256'] == current['file_sha256']
+            and str(Path(live['path']).resolve()) == str(Path(current['path']).resolve()))
+
+
 def load_authority(request: Request, *, source_documents=None, archived_sources=None, selected_source_ids=None, human_source_decisions=None):
     """Bind a new action to an actual direction and policy, never old v1 flags."""
     policy = Policy.model_validate_json(source.verify_file(request.policy).read_text())
@@ -818,7 +864,7 @@ def load_authority(request: Request, *, source_documents=None, archived_sources=
     for sid, snapshot in sources.items():
         document = (source_documents or {}).get(sid, {})
         declared = document.get('source_file_sha256')
-        if declared and declared != snapshot['file']['file_sha256']:
+        if declared and declared != snapshot['file']['file_sha256'] and not subtitle_only_generation(document, snapshot['file']):
             raise ValueError('registered source physical version drift; new source version/action required')
     source_context = request.source_transition
     if source_context:
@@ -1396,13 +1442,49 @@ def human_source_follow_up(previous, request, authority, prior_findings):
             'human_verified_finding_ids':sorted(used | set(ids))}
 
 
+CAPACITY_REJECTION = 'Selected model is at capacity. Please try a different model.'
+
+
+def pre_generation_rejection(raw):
+    """Which provider refusal, if any, proves the call generated nothing.
+
+    Two refusals qualify: the HTTP 400 schema rejection, and the subscription
+    capacity refusal seen twice on 2026-10-23 (「Selected model is at
+    capacity」), returned within seconds with no stdout and no last message.
+    Anything partial, mixed or unrecognised stays an uncertain call.
+    """
+    if raw.get('last_message') is not None or raw.get('stdout'):
+        return None
+    kinds = set()
+    for line in raw.get('stderr', '').splitlines():
+        if not line.startswith('ERROR: '):
+            continue
+        text = line[7:]
+        if text.strip() == CAPACITY_REJECTION:
+            kinds.add('capacity')
+            continue
+        try:
+            error = json.loads(text)
+        except ValueError:
+            return None
+        if (not isinstance(error, dict) or error.get('status') != 400
+                or error.get('error', {}).get('code') != 'invalid_json_schema'
+                or error.get('error', {}).get('param') != 'text.format.schema'):
+            return None
+        kinds.add('schema')
+    return kinds.pop() if len(kinds) == 1 else None
+
+
 def continuation_budget(previous, request, policy):
     """One explicitly authorized successor carries history and unspent budget.
 
     A bound human source answer can instead authorize one new proposal/review
     pair in a linked action; the predecessor's spent budget remains unchanged.
-    A proven HTTP 400 schema rejection generated nothing. Its failed attempt
-    remains in the predecessor ledger and is never represented as a completion.
+    A proven HTTP 400 schema rejection or capacity refusal generated nothing.
+    Its failed attempt remains in the predecessor ledger and is never
+    represented as a completion. A successor may carry the predecessor's exact
+    source-scoped creation grants -- a sibling-Claim repair paused before any
+    commit -- but never new grants, and nothing it already created.
     Unknown calls require a separately bound explicit owner call extension;
     they cannot use the ordinary engineering-input continuation. Completed
     writes cannot be replayed. An explicitly bound qualification refresh instead
@@ -1426,7 +1508,7 @@ def continuation_budget(previous, request, policy):
     if (previous.get('kind') != 'claim_management_action' or previous['result']['status'] not in {'paused','completed'}
             or old.operation != 'Update' or request.operation != 'Update'
             or old.target_keys != request.target_keys or old.source_bindings != request.source_bindings
-            or old.creation_permissions or request.creation_permissions
+            or request.creation_permissions != old.creation_permissions
             or previous.get('created_keys') or previous.get('replacements')):
         raise ValueError('engineering continuation must retain original Update targets and source without structural writes')
     extension_basis = extension.get('basis', 'unknown_call') if isinstance(extension, dict) else None
@@ -1519,16 +1601,11 @@ def continuation_budget(previous, request, policy):
         if slot['role'] != 'gpt' or not failure_path.is_file() or (failure_path.parent / 'gpt.raw.json').exists():
             raise ValueError('uncertain original call cannot be repeated in a continuation')
         failure = body(read(failure_path))
-        raw = failure.get('provider_raw') or {}
-        errors = []
-        for line in raw.get('stderr','').splitlines():
-            if line.startswith('ERROR: '):
-                errors.append(json.loads(line[7:]))
-        if (raw.get('last_message') is not None or raw.get('stdout') or not errors
-                or any(e.get('status') != 400 or e.get('error',{}).get('code') != 'invalid_json_schema'
-                       or e.get('error',{}).get('param') != 'text.format.schema' for e in errors)):
-            raise ValueError('not a proven pre-generation Claim schema rejection')
-        failures[key] = {'path':str(failure_path), 'file_sha256':hashlib.sha256(failure_path.read_bytes()).hexdigest()}
+        kind = pre_generation_rejection(failure.get('provider_raw') or {})
+        if kind is None:
+            raise ValueError('not a proven pre-generation Claim schema or capacity rejection')
+        failures[key] = {'path':str(failure_path), 'file_sha256':hashlib.sha256(failure_path.read_bytes()).hexdigest(),
+                         **({'kind': kind} if kind != 'schema' else {})}
     if set(recovery) != set(unaccepted):
         raise ValueError('unaccepted recovery contains an unbound or already recorded call')
     if set(proposal_recovery) != set(unaccepted_proposals):

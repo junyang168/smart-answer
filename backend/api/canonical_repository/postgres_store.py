@@ -6002,6 +6002,13 @@ class PostgresKnowledgeStore:
         scanned = set()
         started = time.monotonic()
         with self.connect() as conn, conn.cursor() as cursor:
+            # The fixed point takes several statements. Under the default READ
+            # COMMITTED each one sees whatever committed last, so a writer
+            # landing between them tore the read and the conflict check below
+            # refused it -- the Claim batch controller polled into exactly that
+            # on 2026-10-23. One snapshot makes every statement agree; the
+            # check stays as the backstop.
+            cursor.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY')
             cursor.execute('SET LOCAL statement_timeout=5000')
             while True:
                 records = self._existing_cvp_context(conn, roots)

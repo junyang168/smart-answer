@@ -150,12 +150,17 @@ def run(manifest, root):
             log.write(json.dumps(value | {'time': datetime.now(timezone.utc).isoformat()}) + '\n')
             log.flush(); os.fsync(log.fileno())
         try:
+            # A running job keeps the footprint it was launched with; pending
+            # footprints are re-read only when a job exits. Re-reading every
+            # job on every one-second poll raced the worker's own commit.
+            scopes, stale = {}, True
             while pending or active:
-                scopes = {}
-                for key in [*pending, *active]:
-                    request, _ = jobs[key]
-                    records = store.read_claim_context([cm.source.split_key(k) for k in request.target_keys])
-                    scopes[key] = ({cm.source.key(*k) for k in records}, {p.key for p in request.permissions})
+                if stale:
+                    for key in pending:
+                        request, _ = jobs[key]
+                        records = store.read_claim_context([cm.source.split_key(k) for k in request.target_keys])
+                        scopes[key] = ({cm.source.key(*k) for k in records}, {p.key for p in request.permissions})
+                    stale = False
                 for key in selection(pending, active, scopes, plan['max_workers']):
                     token = cm.sha256_json(key)
                     output = root / (token + '.result.json')
@@ -177,6 +182,7 @@ def run(manifest, root):
                         {'action_id': key, 'result': {'status': 'paused', 'reason': 'worker_exited', 'returncode': code}})
                     event(stage='job_finished', action_id=key, result=results[key]['result'])
                     del active[key]
+                    stale = True
                 progress(root / 'status.json', {'controller_pid': os.getpid(), 'active': {k: p[0].pid for k,p in active.items()},
                     'pending': pending, 'results': results, 'heartbeat': datetime.now(timezone.utc).isoformat()})
                 if active:
