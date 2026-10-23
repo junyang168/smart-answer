@@ -382,6 +382,21 @@ def test_success_chain_commits_actual_reviewed_postimage_and_replays_without_cal
     assert len(parent(store)['call_reservations'])==2
 
 
+def test_saved_passing_review_finishes_prepared_sql_failure_without_new_model_round(setup,monkeypatch):
+    store,request,root,clients,_=setup
+    commit=runner.commit_package
+    def failed_admission(*args,**kwargs):raise ValueError('test SQL admission defect')
+    monkeypatch.setattr(runner,'commit_package',failed_admission)
+    assert runner.run(store,request,root=root,execute=True,clients=clients)['status']=='partial'
+    state=parent(store);unit=state['units']['g1'];step=store.get_cvp_group(unit['steps'][-1])
+    assert step['checkpoint']=='prepared' and len(unit['steps'])==1
+    assert len(clients['gpt'].requests)==len(clients['opus'].requests)==1
+    monkeypatch.setattr(runner,'commit_package',commit)
+    assert runner.run(store,request,root=root,execute=True,clients=clients)['status']=='completed'
+    assert len(clients['gpt'].requests)==len(clients['opus'].requests)==1
+    assert len(parent(store)['units']['g1']['steps'])==1
+
+
 def test_existing_viewpoint_connection_rebinds_unchanged_summary_atomically(setup):
     from backend.api.canonical_repository.cvp_recall import STATEMENT_SCOPE_PROFILE
     store,request,root,clients,_=setup

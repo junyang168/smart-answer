@@ -668,10 +668,11 @@ def compile_candidate(request, bundle, raw, *, previous=None, prior_findings=())
             selected_fragments = link_fragment_choices.get(ref)
             if (selected_fragments is None and ref not in link_evidence_choices
                     and bundle.get('link_evidence_contract')=='source_fragment_refs_v1'
-                    and previous and is_new):
+                    and previous):
                 selected_fragments=sorted({row['source_fragment_id']
                     for row in payload.get('evidence_bindings',[])}) or None
-            if selected_evidence is None and previous and is_new:
+            if (selected_evidence is None and ref not in link_fragment_choices and previous
+                    and (is_new or bundle.get('link_evidence_contract')=='source_fragment_refs_v1')):
                 # A correction that changes only the link role must retain the
                 # previous precise selection instead of widening it again.
                 selected_evidence = sorted({row['evidence_step_id']

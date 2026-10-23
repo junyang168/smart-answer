@@ -317,6 +317,7 @@ def prepare_materials(store,preflight,group_key,recall,*,member_support_ids=(),
     pins={(col,oid):(r['revision'],r['content_sha256'],False) for (col,oid),r in records.items()}
     store.verify_current_read_pins(pins)
     return seal({'schema_version':VERSION,'preflight_sha256':preflight['artifact_sha256'],
+        'relationship_scope':'candidate_one_hop_v1',
         'recall_sha256':recall['artifact_sha256'],'group_key':group_key,'material':material,
         'summary_bindings':summary_bindings,
         'references':refs,'records':[{'collection':col,'object_id':oid,**row} for (col,oid),row in sorted(records.items())],

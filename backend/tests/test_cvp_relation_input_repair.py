@@ -139,3 +139,26 @@ def test_capacity_classification_preserves_unknown_output_and_spent_call(setup,t
     assert len(parent['call_reservations'])==1 and parent['request']['budget']['max_calls']==7
     assert json.loads((tmp_path/'proposal.call-failure.json').read_text())==failure
     if case=='capacity':assert saved['refusal']['automatic_retry'] is False
+
+
+@pytest.mark.parametrize('version,ids,approved',[
+    ('candidate_one_hop_v1',['Q1','Q2'],True),
+    ('candidate_one_hop_v1',['Q1'],False),
+    ('candidate_one_hop_v1',['Q1','Q2','Q3'],False),
+    (None,['Q1'],True),(None,['Q1','Q2'],True),(None,['Q2'],False),
+])
+def test_sql_relation_cut_matches_candidate_one_hop_and_preserves_historical_inputs(version,ids,approved):
+    from backend.api.canonical_repository.cvp_management_authority import validate_relationship_scope
+    edges={'Q1':('A','Z'),'Q2':('B','W'),'Q3':('Z','W')}
+    class Cursor:
+        def execute(self,query,params):
+            self.rows=[(oid,) for oid,ends in edges.items() if set(ends)&set(params[0])]
+            return self
+        def fetchall(self):return self.rows
+    bundle={'candidate_viewpoint_ids':['A','B'],'maintenance_viewpoint_ids':['A']}
+    if version:bundle['relationship_scope']=version
+    records={('viewpoint_relations',oid):{'payload':{'effective_state':'active'}} for oid in ids}
+    if approved:validate_relationship_scope(Cursor(),records,bundle)
+    else:
+        with pytest.raises(ValueError,match='relationship scope changed'):
+            validate_relationship_scope(Cursor(),records,bundle)

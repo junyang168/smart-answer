@@ -8,6 +8,27 @@ from .viewpoint_foundation import sha256_json
 VERSION=domain.VERSION
 
 
+def validate_relationship_scope(cursor,original,bundle):
+    """Current packets bind every candidate's direct relations, not neighbours' relations."""
+    scope=bundle.get('relationship_scope')
+    if scope not in (None,'candidate_one_hop_v1'):
+        raise ValueError('unknown CVP2 relationship material scope')
+    primary=bundle.get('candidate_viewpoint_ids',[oid for col,oid in original if col=='canonical_viewpoints'])
+    def current(vids):
+        return {r[0] for r in cursor.execute("""SELECT object_id FROM wang_knowledge.objects
+            WHERE collection='viewpoint_relations' AND retired_at IS NULL
+            AND payload->>'effective_state'='active'
+            AND (payload->>'source_viewpoint_id'=ANY(%s) OR payload->>'target_viewpoint_id'=ANY(%s))""",
+            (vids,vids)).fetchall()}
+    expected={oid for (col,oid),row in original.items() if col=='viewpoint_relations'
+              and row['payload'].get('effective_state')=='active'}
+    if expected==current(primary):return
+    # Historical unversioned inputs used maintenance-only relationships.
+    # Also accept their already complete candidate cut, without upgrading it.
+    if scope is None and expected==current(bundle.get('maintenance_viewpoint_ids',[])):return
+    raise ValueError('CVP2 necessary candidate relationship scope changed')
+
+
 def _stored_package_records(package):
     """Use the same typed postimage that the generic ChangeSet importer stores.
 
@@ -185,16 +206,7 @@ def validate_sql_review(store,cursor,step,evidence,plan):
         (vids,targets)).fetchall()
     if {r[0] for r in rows}!=link_ids:
         raise ValueError('CVP2 membership scope changed outside complete reviewed material')
-    maintenance=proof['bundle'].get('maintenance_viewpoint_ids',[])
-    actual_relations=cursor.execute("""SELECT object_id FROM wang_knowledge.objects
-        WHERE collection='viewpoint_relations' AND retired_at IS NULL
-        AND payload->>'effective_state'='active'
-        AND (payload->>'source_viewpoint_id'=ANY(%s) OR payload->>'target_viewpoint_id'=ANY(%s))""",
-        (maintenance,maintenance)).fetchall()
-    expected_relations={oid for (col,oid),row in original.items() if col=='viewpoint_relations'
-                        and row['payload'].get('effective_state')=='active'}
-    if {r[0] for r in actual_relations}!=expected_relations:
-        raise ValueError('CVP2 necessary maintenance relationship scope changed')
+    validate_relationship_scope(cursor,original,proof['bundle'])
     validate_claim_authority(cursor,proof['bundle'],package=package)
 
 

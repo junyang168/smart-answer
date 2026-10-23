@@ -652,10 +652,10 @@ def run(store,request,*,root,execute=False,clients=None):
                             saved=read_artifact(path);verify(saved,domain.VERSION+'_candidate')
                             seen.add((oldstep['materials']['bundle']['artifact_sha256'],_semantic(saved)))
                     has_approval=(oldroot/'approval.json').exists()
-                    if same and not has_approval:
-                        # A returned proposal is not the next round's previous
-                        # candidate. Replay the original prepared materials and
-                        # let its exact cached proposal/review complete.
+                    if same and (not has_approval or read_artifact(oldroot/'approval.json')['approved']):
+                        # A saved passing review still owns this prepared
+                        # step when SQL admission failed. Reuse both answers
+                        # and finish its exact postimage, without a new round.
                         previous=latest['materials']['previous']
                         prior_findings=latest['materials']['prior_findings']
                         proposal_origin=latest['materials'].get('proposal_origin')

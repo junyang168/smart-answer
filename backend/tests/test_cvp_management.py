@@ -158,6 +158,11 @@ def test_new_link_evidence_can_be_selected_and_preserved_across_corrections():
     assert link(third)['evidence_bindings']==link(second)['evidence_bindings']
     with pytest.raises(ValueError,match='unique supplied evidence short references'):
         cvp.compile_candidate(req,bundle,{'changes':[change('nl1',evidence_step_refs=['e1','e1'])]},previous=third)
+    precise=seal({**{k:v for k,v in bundle.items() if k!='artifact_sha256'},
+                  'link_evidence_contract':'source_fragment_refs_v1'})
+    start=cvp.compile_candidate(req,precise,raw)
+    by_fragment=cvp.compile_candidate(req,precise,{'changes':[change('nl1',source_fragment_refs=['f2'])]},previous=start)
+    assert link(by_fragment)['evidence_bindings']==[{'evidence_step_id':'E2','source_fragment_id':'F2'}]
 
 
 def test_shared_evidence_fragment_choice_is_scoped_and_survives_role_only_correction():
@@ -221,6 +226,8 @@ def test_existing_link_fragment_selection_requires_exact_maintenance_grant():
     candidate=cvp.compile_candidate(req,bundle,raw)
     selected=next(row['payload'] for row in candidate['writes'] if row['ref']=='l1')
     assert selected['evidence_bindings']==[{'evidence_step_id':'E1','source_fragment_id':'F1'}]
+    unchanged=cvp.compile_candidate(req,bundle,{},previous=candidate)
+    assert next(row['payload'] for row in unchanged['writes'] if row['ref']=='l1')['evidence_bindings']==selected['evidence_bindings']
     with pytest.raises(ValueError,match='fragment selection'):
         cvp.compile_candidate(req.model_copy(update={'permissions':[]}),bundle,raw)
 
