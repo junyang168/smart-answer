@@ -776,3 +776,8 @@ def test_concise_is_one_standard_and_the_reviewer_knows_what_wordy_looks_like():
     assert "不要原样嵌进正文当总结" in author
     for kind in ("引完经文紧接着", "相邻几段说两三遍", "路标句", "Claim 的原句嵌进正文"):
         assert kind in reviewer
+    # The author knows the same four kinds the reviewer checks, as understanding, not rules.
+    understanding = author.split("**什么是啰嗦**")[1].split("\n")[0]
+    for kind in ("刚引完经文", "相邻几段换着说", "路标句", "Claim 的原句贴上"):
+        assert kind in understanding
+    assert "通读一遍" in understanding
