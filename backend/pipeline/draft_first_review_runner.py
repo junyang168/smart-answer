@@ -219,13 +219,21 @@ def two_way_review_schema(profile: Mapping[str, Any]) -> dict[str, Any]:
 
 
 REVISION_SCHEMA: dict[str, Any] = {
-    "name": "wang_draft_first_revision_v2",
+    "name": "wang_draft_first_revision_v3",
     "strict": True,
     "schema": {
         "type": "object",
         "additionalProperties": False,
         "properties": {
-            "manuscript_markdown": {"type": "string"},
+            "edits": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {"old_str": {"type": "string"}, "new_str": {"type": "string"}},
+                    "required": ["old_str", "new_str"],
+                },
+            },
             "responses": {
                 "type": "array",
                 "items": {
@@ -240,9 +248,9 @@ REVISION_SCHEMA: dict[str, Any] = {
                     "required": ["finding_id", "response", "note", "source_quote"],
                 },
             },
-            "self_check": {"type": "array", "items": DISPOSITION_ITEM_SCHEMA},
+            "self_check_updates": {"type": "array", "items": DISPOSITION_ITEM_SCHEMA},
         },
-        "required": ["manuscript_markdown", "responses", "self_check"],
+        "required": ["edits", "responses", "self_check_updates"],
     },
 }
 
@@ -321,6 +329,28 @@ def _require(condition: bool, message: str) -> None:
         raise DraftReviewContractError(message)
 
 
+def apply_edits(manuscript: str, edits: list[Mapping[str, Any]]) -> str:
+    """Apply exact replacements in order; each old text must occur exactly once."""
+
+    for number, edit in enumerate(edits, 1):
+        old, new = str(edit.get("old_str") or ""), str(edit.get("new_str") or "")
+        count = manuscript.count(old) if old else 0
+        if count != 1:
+            raise DraftReviewContractError(
+                f"edit {number}: old_str occurs {count} times in the manuscript: {old[:60]!r}"
+            )
+        manuscript = manuscript.replace(old, new)
+    return manuscript
+
+
+def merge_self_check(previous: list[Mapping[str, Any]], updates: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """The previous self-check with the revision's changed items replaced."""
+
+    changed = {str(item["item_id"]): dict(item) for item in updates}
+    merged = [changed.pop(str(item["item_id"]), dict(item)) for item in previous]
+    return merged + list(changed.values())
+
+
 def validate_revision(
     before: str,
     revision: Mapping[str, Any],
@@ -331,14 +361,15 @@ def validate_revision(
 ) -> str:
     """The revised manuscript, or a contract error when the revision is not one.
 
-    #439: opus once returned the H1 plus the word PLACEHOLDER with no
-    dispositions, and the next round reviewed an empty article. A revision
-    answers every finding exactly once and keeps the article. Only a
-    reviewer's finding can be disputed, and only with a verbatim quote:
-    program checks are facts and the blind reader is the reader.
+    A revision returns exact edits, never the whole essay: asked to re-emit
+    it inside one JSON string, opus returned 「PLACEHOLDER」, then 「ized」,
+    then 「zzz」 with every finding otherwise answered (#439). Each finding is
+    answered exactly once and the article is kept. Only a reviewer's finding
+    can be disputed, and only with a verbatim quote: program checks are facts
+    and the blind reader is the reader.
     """
 
-    manuscript = str(revision.get("manuscript_markdown") or "")
+    manuscript = apply_edits(before, list(revision.get("edits") or []))
     responses = revision.get("responses") or []
     expected = sorted(str(item["finding_id"]) for item in findings)
     answered = sorted(str(item.get("finding_id")) for item in responses)
@@ -844,7 +875,13 @@ def main() -> int:
         revised: str | None = None
         rejections: list[str] = []
         for _attempt in range(2):
-            revision = clients["revision"].generate_json(revision_prompt, revision_payload, REVISION_SCHEMA)
+            payload = revision_payload
+            if rejections:
+                # Tell the reviser why: an identical second request returned
+                # the identical broken reply.
+                payload = json.dumps({**json.loads(revision_payload), "previous_attempt_rejected": rejections[-1]},
+                                     ensure_ascii=False, sort_keys=True)
+            revision = clients["revision"].generate_json(revision_prompt, payload, REVISION_SCHEMA)
             try:
                 revised = validate_revision(manuscript, revision, findings, corpus=corpus, scripture=scripture)
                 break
@@ -853,8 +890,9 @@ def main() -> int:
         _write(
             round_dir / "revision.json",
             {
+                "edits": revision.get("edits") or [],
                 "responses": revision.get("responses") or [],
-                "self_check": revision.get("self_check") or [],
+                "self_check_updates": revision.get("self_check_updates") or [],
                 "rejected_attempts": rejections,
             },
         )
@@ -865,7 +903,7 @@ def main() -> int:
             )
             break
         manuscript = revised
-        self_check = list(revision.get("self_check") or [])
+        self_check = merge_self_check(self_check, list(revision.get("self_check_updates") or []))
         responses = {str(item["finding_id"]): item for item in revision["responses"]}
         previous_findings = findings
         author_responses = [

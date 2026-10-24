@@ -504,21 +504,28 @@ def test_viewpoint_charter_marks_viewpoints_without_a_full_route():
     assert [item["has_full_route"] for item in viewpoint_charter(packet)] == [False, True]
 
 
-def test_placeholder_revision_is_rejected():
-    """#439: opus returned the H1 plus PLACEHOLDER and no dispositions."""
+def test_a_revision_is_exact_edits_that_answer_every_finding():
+    """#439: asked for the whole essay in one JSON string, opus returned PLACEHOLDER, ized, zzz."""
 
-    from backend.pipeline.draft_first_review_runner import validate_revision
+    from backend.pipeline.draft_first_review_runner import merge_self_check, validate_revision
 
-    before = "# 標題\n\n" + "正文。" * 200
+    before = "# 標題\n\n王教授說得很直接：代表神嘛！\n\n" + "正文。" * 200
     findings = [{"finding_id": "R0-01", "gate": "review"}, {"finding_id": "R0-02", "gate": "blind_read"}]
     fixed = [{"finding_id": "R0-01", "response": "fixed", "note": "", "source_quote": ""},
              {"finding_id": "R0-02", "response": "fixed", "note": "", "source_quote": ""}]
+    edit = [{"old_str": "王教授說得很直接：代表神嘛！", "new_str": "比獸更高的人子代表神。"}]
     with pytest.raises(DraftReviewContractError, match="answered 0"):
-        validate_revision(before, {"manuscript_markdown": "# 標題\nPLACEHOLDER", "responses": []}, findings)
-    with pytest.raises(DraftReviewContractError, match="shrank"):
-        validate_revision(before, {"manuscript_markdown": "# 標題\nPLACEHOLDER", "responses": fixed}, findings)
-    revised = before.replace("正文。", "正文！", 1)
-    assert validate_revision(before, {"manuscript_markdown": revised, "responses": fixed}, findings) == revised
+        validate_revision(before, {"edits": edit, "responses": []}, findings)
+    with pytest.raises(DraftReviewContractError, match="occurs 200 times"):
+        validate_revision(before, {"edits": [{"old_str": "正文。", "new_str": ""}], "responses": fixed}, findings)
+    with pytest.raises(DraftReviewContractError, match="occurs 0 times"):
+        validate_revision(before, {"edits": [{"old_str": "不在稿裡", "new_str": "x"}], "responses": fixed}, findings)
+    revised = validate_revision(before, {"edits": edit, "responses": fixed}, findings)
+    assert "比獸更高的人子代表神。" in revised and "代表神嘛" not in revised
+    previous = [{"item_id": "V:1", "status": "landed", "anchor": "代表神嘛", "reason": ""},
+                {"item_id": "V:2", "status": "landed", "anchor": "正文。", "reason": ""}]
+    merged = merge_self_check(previous, [{"item_id": "V:1", "status": "landed", "anchor": "人子代表神", "reason": ""}])
+    assert [item["anchor"] for item in merged] == ["人子代表神", "正文。"]
 
 
 def test_the_body_names_the_professor_at_most_twice():
