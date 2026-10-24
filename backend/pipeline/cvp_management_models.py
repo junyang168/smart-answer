@@ -191,6 +191,10 @@ def adapter(role,request,bundle,packet,*,client=None):
     if role=='correction' and packet.get('previous') is None:
         raise ValueError('correction requires its bound previous candidate')
     incremental_summaries=domain.statement_recall(request)
+    if bundle.get('summary_enrichment_contract') not in (None,domain.SUMMARY_ENRICHMENT_CONTRACT):
+        raise ValueError('unknown new-link summary enrichment contract')
+    if bundle.get('summary_enrichment_contract') and not incremental_summaries:
+        raise ValueError('new-link summary enrichment requires statement recall')
     response=(StatementProposalResponse if incremental_summaries else ProposalResponse) if proposal else ReviewResponse
     provider,model,backend=('codex','gpt-6.1-sol','codex_subscription') if proposal else ('claude','claude-opus-5-5','claude_subscription')
     client=client or subscription_client(provider,model,'high')
@@ -201,6 +205,8 @@ def adapter(role,request,bundle,packet,*,client=None):
     task=(PROPOSAL_PROMPT[PROPOSAL_PROMPT.index('candidate语义字段形状'):] if proposal
           else REVIEW_PROMPT[len(SHAPES):])
     if incremental_summaries:
+        if bundle.get('summary_enrichment_contract')==domain.SUMMARY_ENRICHMENT_CONTRACT:
+            task+='\n新增有效连接的目标CVP自动获得本轮配套summary／summary_basis维护权限；这项已有权限不要求目标另列在operation.permissions或maintenance_viewpoint_refs。可为该连接补齐缺失摘要，不得仅因没有单列摘要权限而把成分标为unresolved。须读取完整旧成员及自身证据；材料未齐先用member_requests请求。它只允许实际新增连接的目标摘要，不允许单独修改无新连接的其他CVP摘要，也不允许改statement、scope、身份或旧连接。撤回新连接时同时撤回仅因它产生的摘要修改。\n'
         task=task.replace('每个新观点必须有少于150 Unicode字符的编辑摘要，含问题语境/核心判断/承重限定',
             '每个新观点必须有最多500个Unicode字符的完整编辑摘要，含问题语境、核心判断、论据、适用范围和承重限定')
         task+='\n新建前逐项比较已有CVP，依次回答：本Claim自身断言什么（用原文解释其语境和论证作用，不把相邻的独立结论补入Claim）；旧CVP若明确修订表述或范围，能否忠于全部旧成员并承载这项判断；新Claim应以equivalent、supports、extends或qualifies何种作用连接。Claim措辞不等价不等于CVP身份不同，具体核对能否用extends／qualifies连接到旧CVP；仅作依据的Claim也可用supports连接，不必冒充equivalent成员。旧CVP当前经文、听众、措辞、范围及本次修改权限不能单独证明新身份；共享事件或经文名称也不能单独证明同一身份。若复用需要本次无权执行的旧CVP维护，说明所需维护并将成分标为unresolved，不得为绕过权限而新建；仅作supports时也不自动扩大旧scope。只有指出旧CVP经忠实修订仍不能承载的独立真值条件及其原文依据，才另建CVP。若关系依据不足则保留未决，不能为减少CVP而硬连。\n'

@@ -17,6 +17,7 @@ from .knowledge_models import KNOWLEDGE_COLLECTIONS, evidence_fragment_ids
 from .viewpoint_foundation import semantic_record_sha, sha256_json
 
 VERSION = 'wang_cvp_management_v2'
+SUMMARY_ENRICHMENT_CONTRACT = 'new_link_target_summary_metadata_v1'
 MATERIAL_VERSION = 'wang_cvp_common_material_v1'
 COLLECTIONS = {'canonical_viewpoints', 'viewpoint_revisions', 'viewpoint_claim_links', 'viewpoint_relations'}
 PREFIXES = {'canonical_viewpoints': 'v', 'viewpoint_revisions': 'r',

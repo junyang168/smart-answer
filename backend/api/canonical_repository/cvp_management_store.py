@@ -70,7 +70,7 @@ def extend_call_budget(store,parent_id,*,authorization,total_max_calls):
 
 
 def prepare_action(store,request,*,root,preflight,supersede_unwritten_run=None,nonlaunch=None,interruption=None):
-    from .cvp_management import Request
+    from .cvp_management import Request,SUMMARY_ENRICHMENT_CONTRACT
     from .cvp_recall import work_groups,verify
     from pathlib import PurePath
     request=Request.model_validate(request).model_dump(mode='json')
@@ -141,7 +141,9 @@ def prepare_action(store,request,*,root,preflight,supersede_unwritten_run=None,n
             if step_ids:
                 cursor.execute("UPDATE wang_knowledge.pipeline_runs SET status='cancelled',finished_at=now() WHERE run_id=ANY(%s)",(step_ids,))
         value={**identity,'groups':groups,'work_groups':groups,'units':{g['group_key']:{'status':'pending','steps':[],'claim_ids':g['claim_ids']} for g in groups},
-            'model_contracts':{'link_evidence':'source_fragment_refs_v1'},
+            'model_contracts':{'link_evidence':'source_fragment_refs_v1',
+                **({'summary_enrichment':SUMMARY_ENRICHMENT_CONTRACT}
+                   if request['input'].get('recall_profile')=='statements_scripture_components_v1' else {})},
             'call_reservations':{},'revision_rounds':[], 'input_generations':[],
             'initial_admission':preflight['admission'],'human_constraints':[],'quality_findings':[],'independent_audit':{'status':'not_performed'},
             'result':{'status':'running'}}
@@ -485,12 +487,47 @@ def bind_task_constraints(store,parent_id,bundle):
     repair=fragment_repair or parent.get('relation_input_repairs',{}).get(group)
     if parent.get('model_contracts',{}).get('link_evidence')=='source_fragment_refs_v1' or fragment_repair:
         additions['link_evidence_contract']='source_fragment_refs_v1'
+    from .cvp_management import SUMMARY_ENRICHMENT_CONTRACT
+    if parent.get('model_contracts',{}).get('summary_enrichment')==SUMMARY_ENRICHMENT_CONTRACT:
+        additions['summary_enrichment_contract']=SUMMARY_ENRICHMENT_CONTRACT
     if repair:additions['material']={**bundle['material'],'input_repair':repair}
     constraints=[c for c in parent.get('human_constraints',[]) if c['group_key']==bundle['group_key']]
     if constraints:additions['human_constraints']=constraints
     if quality:additions['quality_findings']=quality
     if not additions:return bundle
     return seal({k:v for k,v in bundle.items() if k!='artifact_sha256'}|additions)
+
+
+def clarify_summary_enrichment(store,parent_id,*,step_id,implementation):
+    """Advertise existing new-link metadata authority, retaining the original task.
+
+    This changes no permissions or budget. Saved bundles remain on their old
+    prompt contract; only subsequently prepared inputs receive the clarification.
+    """
+    from .cvp_management import SUMMARY_ENRICHMENT_CONTRACT,statement_recall
+    from backend.pipeline.cvp_sql_commit import check_binding
+    for bound in implementation:check_binding(bound)
+    if not implementation:raise ValueError('summary clarification requires fixed implementation bindings')
+    with store.connect() as conn,conn.cursor() as cursor:
+        parent=_load(cursor,parent_id);step=_load(cursor,step_id)
+        if (parent.get('kind')!='cvp_management_action' or not statement_recall(parent['request'])
+                or parent['result'].get('status') in {'completed','superseded'}
+                or step.get('parent_run_id')!=parent_id or step.get('checkpoint')!='prepared'
+                or parent['units'][step['group_key']]['steps'][-1]!=step_id
+                or any(s['state']!='returned' for s in parent['call_reservations'].values())):
+            raise ChangeSetConflict('summary clarification requires the open exact returned original step')
+        receipt={'contract':SUMMARY_ENRICHMENT_CONTRACT,'step_id':step_id,
+            'request_sha256':sha256_json(parent['request']),
+            'original_call_intents':{k:s['intent_sha256'] for k,s in parent['call_reservations'].items()},
+            'implementation':implementation}
+        previous=parent.get('summary_enrichment_clarification')
+        if previous:
+            if previous!=receipt:raise ChangeSetConflict('original summary clarification cannot change')
+            return previous
+        parent.setdefault('model_contracts',{})['summary_enrichment']=SUMMARY_ENRICHMENT_CONTRACT
+        parent['summary_enrichment_clarification']=receipt
+        _save(cursor,parent_id,parent)
+    return receipt
 
 
 def register_content_dispute(store,parent_id,step_id,*,dispute,inputs):

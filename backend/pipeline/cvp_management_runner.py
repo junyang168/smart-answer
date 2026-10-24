@@ -314,7 +314,7 @@ def _same_material_inputs(current,saved):
         if current.get('human_source_decisions')!=[d for d in saved.get('human_source_decisions',[])
                                                   if d['source_id'] in source_ids]:return False
     return all(current.get(k)==saved.get(k) for k in (
-        'claim_input','claim_authority','member_claim_authority','human_constraints','quality_findings','maintenance_viewpoint_ids','link_evidence_contract'))
+        'claim_input','claim_authority','member_claim_authority','human_constraints','quality_findings','maintenance_viewpoint_ids','link_evidence_contract','summary_enrichment_contract'))
 
 
 def _omitted_duplicate_relations(store,step):
@@ -623,7 +623,7 @@ def run(store,request,*,root,execute=False,clients=None):
                         write_immutable(filtered_path,recall)
                 # Control facts version semantic material while the original
                 # authenticated recall remains reusable. They never reset calls.
-                controls={k:bundle[k] for k in ('human_constraints','quality_findings') if bundle.get(k)}
+                controls={k:bundle[k] for k in ('human_constraints','quality_findings','summary_enrichment_contract') if bundle.get(k)}
                 if controls:
                     generation=sha256_json({'base_generation':generation,'controls':controls})[:24]
                     unit_root=root/('unit-'+sha256_json(key)[:16])/generation
