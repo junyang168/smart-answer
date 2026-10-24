@@ -782,7 +782,8 @@ def run_gates(
 
 
 def continued_round(
-    previous: Path, packet: Mapping[str, Any], scripture: Mapping[str, Any]
+    previous: Path, packet: Mapping[str, Any], scripture: Mapping[str, Any],
+    owner_notes: list[Mapping[str, Any]] = (),
 ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
     """The last round of a stopped run, for one revision round the owner added.
 
@@ -809,6 +810,16 @@ def continued_round(
         self_check_problems=list(outcome.get("self_check_problems") or []),
         round_number=int(outcome["round"]),
     )
+    # A flaw no gate raised (#439: a stray 」 opening the 太9:6 block). The
+    # owner's note cannot be disputed, only fixed or reported as cannot_fix.
+    for note in owner_notes:
+        if not note.get("anchor") or note["anchor"] not in manuscript:
+            raise DraftReviewContractError(f"owner note anchor not in the draft: {note.get('anchor')!r}")
+        findings.append({
+            "gate": "owner", "kind": "owner_direction", "anchor": note["anchor"],
+            "summary": note["summary"], "required_change": note.get("required_change", ""),
+            "blocking": True, "finding_id": f"R{outcome['round']}-{len(findings) + 1:02d}",
+        })
     return manuscript, self_check, {
         **outcome,
         "quote_report": quote_report,
@@ -839,6 +850,11 @@ def main() -> int:
         help="a finished review run the owner extended by one round: revise its final.md "
         "against its last findings (program checks re-run with the current code), then "
         "review once more and stop",
+    )
+    parser.add_argument(
+        "--owner-findings", type=Path,
+        help="with --continue-from: the owner's own notes on the draft, a JSON list of "
+        "{anchor, summary, required_change}; the author answers them like any finding",
     )
     args = parser.parse_args()
 
@@ -871,7 +887,8 @@ def main() -> int:
     author_responses: list[dict[str, Any]] = []
     first_round, last_round, seeded = 0, MAX_REVISION_ROUNDS, None
     if args.continue_from:
-        manuscript, self_check, seeded = continued_round(args.continue_from, packet, scripture)
+        owner_notes = json.loads(args.owner_findings.read_text(encoding="utf-8")) if args.owner_findings else []
+        manuscript, self_check, seeded = continued_round(args.continue_from, packet, scripture, owner_notes)
         first_round = int(seeded["round"])
         last_round = first_round + 1
         baseline_review = seeded.get("review")

@@ -706,6 +706,13 @@ def test_an_extended_round_revises_the_stopped_draft_against_rechecked_programs(
     _, _, seeded = continued_round(tmp_path, packet, {"chapters": {}, "text": verse, "verses": [verse]})
     assert [(f["finding_id"], f["kind"]) for f in seeded["blocking_findings"]] == [("R2-01", "unverbatim_quote")]
 
+    _, _, noted = continued_round(tmp_path, packet, {"chapters": {}, "text": verse, "verses": [verse]},
+                                  [{"anchor": "為多人。（太26:28）", "summary": "多了一個字"}])
+    assert [(f["finding_id"], f["gate"]) for f in noted["blocking_findings"]] == [("R2-01", "quote_check"), ("R2-02", "owner")]
+    with pytest.raises(DraftReviewContractError):
+        continued_round(tmp_path, packet, {"chapters": {}, "text": verse, "verses": [verse]},
+                        [{"anchor": "not in the draft", "summary": "x"}])
+
     (tmp_path / "final.md").write_text(manuscript + "改過了。\n")
     with pytest.raises(DraftReviewContractError):
         continued_round(tmp_path, packet, {"chapters": {}, "text": verse, "verses": [verse]})
@@ -728,3 +735,6 @@ def test_a_revision_gets_the_verses_its_draft_cites_within_taught_chapters():
     refs = [v["reference"] for v in cited_verses(
         _scripture_packet(), chapter=_chapters, manuscript="約5:26這裡講生命。羅8:1這裡講定罪。")]
     assert "jhn-5-26" in refs and not any(r.startswith("rom") for r in refs)
+    # Owner, 2026-10-24: the scene may come from the verse's own preceding verses.
+    scene = cited_verses(_scripture_packet(), chapter=_chapters, manuscript="約5:27這裡講審判。")
+    assert {"reference": "jhn-5-24-26", "text": "因為父怎樣在自己有生命，就賜給他兒子也照樣在自己有生命，"} in scene

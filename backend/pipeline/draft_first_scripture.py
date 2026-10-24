@@ -37,6 +37,8 @@ _TRANSLATOR_NOTE = re.compile(r"〔[^〕]*〕")
 
 Chapter = Callable[[str, int], Mapping[str, str]]
 
+SCENE_VERSES = 3
+
 
 def normalize(text: str) -> str:
     return _NOT_WORD.sub("", _TRANSLATOR_NOTE.sub("", text)).translate(_VARIANTS)
@@ -78,6 +80,14 @@ def cited_verses(
     taught = set(cited_chapters(packet))
     drafted = [slug for slug in reference_slugs(manuscript)
                if (slug.split("-")[0].upper(), int(slug.split("-")[1])) in taught]
+    # The owner allows a verse's scene from its own preceding verses (路24:7
+    # opens 「說：」; who speaks is in 24:4-6), so a revision gets them too.
+    context = []
+    for slug in drafted:
+        book, number, start = slug.split("-")[:3]
+        if int(start) > 1:
+            context.append(f"{book}-{number}-{max(1, int(start) - SCENE_VERSES)}-{int(start) - 1}")
+    drafted = [*context, *drafted]
     verses: list[dict[str, str]] = []
     for slug in dict.fromkeys([*reference_slugs(scope), *reference_slugs(corpus), *drafted]):
         parts = slug.split("-")
