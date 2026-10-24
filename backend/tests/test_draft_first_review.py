@@ -709,3 +709,12 @@ def test_an_extended_round_revises_the_stopped_draft_against_rechecked_programs(
     (tmp_path / "final.md").write_text(manuscript + "改過了。\n")
     with pytest.raises(DraftReviewContractError):
         continued_round(tmp_path, packet, {"chapters": {}, "text": verse, "verses": [verse]})
+
+
+def test_author_gets_the_verses_of_the_essays_own_passages():
+    """#439: 太9:1-8 is in scope, the sources cite only 9:7, and 9:6 had to be quoted."""
+
+    from backend.pipeline.draft_first_scripture import cited_verses
+
+    packet = {**_scripture_packet(), "scope": {"passage_refs": ["約5:26-27"]}}
+    assert [v["reference"] for v in cited_verses(packet, chapter=_chapters)] == ["jhn-5-26-27", "jhn-5-27"]

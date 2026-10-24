@@ -62,11 +62,17 @@ def cited_chapters(packet: Mapping[str, Any]) -> list[tuple[str, int]]:
 
 
 def cited_verses(packet: Mapping[str, Any], chapter: Chapter = cuv.chapter) -> list[dict[str, str]]:
-    """The 和合本 text of every verse the sources cite, for the author payload."""
+    """The 和合本 text of every verse the sources cite, for the author payload.
+
+    The scope's own passages come first: 太9:1-8 is the essay's text, but the
+    sources cite only 9:7 by reference, so the author was asked to block-quote
+    太9:6 with no verse to quote (#439, two rounds unfixed).
+    """
 
     corpus = "\n".join(str(item.get("content")) for item in packet["source_originals"]["originals"])
+    scope = " ".join(str(ref) for ref in (packet.get("scope") or {}).get("passage_refs") or [])
     verses: list[dict[str, str]] = []
-    for slug in reference_slugs(corpus):
+    for slug in dict.fromkeys([*reference_slugs(scope), *reference_slugs(corpus)]):
         parts = slug.split("-")
         book, number, start = parts[0].upper(), int(parts[1]), int(parts[2])
         end = int(parts[3]) if len(parts) > 3 else start
