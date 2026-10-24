@@ -43,6 +43,13 @@ def validate_authorization(request):
     if direction!=expected:raise ValueError('CVP2 authorization differs from exact operation/scope/budget')
 
 
+def clarify_summary_enrichment(store,parent_id,*,step_id,implementation):
+    """Check fixed code files before recording the existing-capability correction."""
+    for bound in implementation:check_binding(bound)
+    return persistence.clarify_summary_enrichment(store,parent_id,step_id=step_id,
+                                                 implementation=implementation)
+
+
 def _guard(store,bundle):
     from backend.pipeline.cvp_contextual_summary import guard as summary_guard
     for binding in bundle.get('summary_bindings',[]):summary_guard(store,binding)

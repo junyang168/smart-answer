@@ -505,8 +505,6 @@ def clarify_summary_enrichment(store,parent_id,*,step_id,implementation):
     prompt contract; only subsequently prepared inputs receive the clarification.
     """
     from .cvp_management import SUMMARY_ENRICHMENT_CONTRACT,statement_recall
-    from backend.pipeline.cvp_sql_commit import check_binding
-    for bound in implementation:check_binding(bound)
     if not implementation:raise ValueError('summary clarification requires fixed implementation bindings')
     with store.connect() as conn,conn.cursor() as cursor:
         parent=_load(cursor,parent_id);step=_load(cursor,step_id)

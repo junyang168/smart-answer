@@ -138,11 +138,11 @@ def test_existing_summary_capability_can_be_clarified_without_resetting_history(
     persistence.begin_call(store,pid,key='proposal.json',intent=intent)
     implementation=[binding(Path(runner.__file__))]
     with pytest.raises(ChangeSetConflict,match='exact returned original step'):
-        persistence.clarify_summary_enrichment(store,pid,step_id=step,implementation=implementation)
+        runner.clarify_summary_enrichment(store,pid,step_id=step,implementation=implementation)
     persistence.returned_call(store,pid,key='proposal.json',raw={'saved':'answer'},artifact_sha256='sha')
     before=store.get_cvp_group(pid)
-    receipt=persistence.clarify_summary_enrichment(store,pid,step_id=step,implementation=implementation)
-    assert persistence.clarify_summary_enrichment(store,pid,step_id=step,implementation=implementation)==receipt
+    receipt=runner.clarify_summary_enrichment(store,pid,step_id=step,implementation=implementation)
+    assert runner.clarify_summary_enrichment(store,pid,step_id=step,implementation=implementation)==receipt
     after=store.get_cvp_group(pid)
     for key in ('request','call_reservations','revision_rounds','execution_root','units'):
         assert before[key]==after[key]
