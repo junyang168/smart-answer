@@ -3685,6 +3685,15 @@ class PostgresKnowledgeStore:
                                      or value['checkpoint'] != 'applied'):
                 raise ChangeSetConflict('independent Claim audit requires actual applied/readback round')
             if stage == 'candidate':
+                # The bounded model context is not the global identity registry.
+                # A proposed sibling can reuse an ID belonging to an unrelated
+                # Claim outside that context. Never let package upsert semantics
+                # turn such a Create into an unapproved Update.
+                for disposition in candidate.dispositions:
+                    if disposition.action == 'create':
+                        key = cm.source.split_key(disposition.record_key)
+                        if cursor.execute('SELECT 1 FROM wang_knowledge.objects WHERE collection=%s AND object_id=%s', key).fetchone():
+                            raise ChangeSetConflict('create identity already exists: ' + disposition.record_key)
                 fingerprint = cm.candidate_state(materials['before'], candidate)
                 prior = parent.setdefault('candidate_fingerprints', {}).setdefault(value['unit_id'], [])
                 if value['round_number'] and (fingerprint in prior or fingerprint == cm.candidate_state(
@@ -7594,6 +7603,16 @@ class PostgresKnowledgeStore:
                         return {"status":"already_applied","change_set_id":plan.change_set_id,"summary":committed[5]}
                     if sql_group['checkpoint']!='reviewed' or sql_group['reviewed_sha256']!=transaction_context.reviewed_sha256:
                         raise ChangeSetConflict('new write requires the current exact reviewed action')
+                    if plan.source_kind == 'wang_claim_management_v2':
+                        # Preserve Create intent even for a plan saved before
+                        # this guard, or an identity taken while models ran.
+                        # A genuine create also carries an absence read pin.
+                        planned = {(op.collection, op.object_id): op.operation for op in plan.operations}
+                        for disposition in sql_group.get('candidate', {}).get('dispositions', []):
+                            if disposition['action'] == 'create':
+                                key = tuple(disposition['record_key'].split('/', 1))
+                                if planned.get(key) != 'create':
+                                    raise ChangeSetConflict('create identity already exists: ' + disposition['record_key'])
                     transaction_before = self._assert_transaction_read_pins(cursor, transaction_context.read_pins)
                     normalized = {}
                     retiring = {(op.collection,op.object_id) for op in plan.operations if op.operation == "retire"}

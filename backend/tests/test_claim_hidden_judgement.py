@@ -233,6 +233,55 @@ def test_one_sided_sibling_proposal_never_reaches_the_database(action):
     assert store.get_record_state('evidence_steps', 'E')['payload']['produced_claim_ids'] == ['C']
 
 
+def proposal_first(request, tmp_path):
+    value = json.loads(Path(request.policy.path).read_text())
+    value['initial_candidate'] = 'proposal'
+    path = tmp_path / 'proposal-first-policy.json'
+    path.write_text(json.dumps(value))
+    request.policy = cm.source.FileBinding.model_validate(binding(path))
+    path = Path(request.authorization.path)
+    authority = json.loads(path.read_text())
+    authority.update(request=request.model_dump(mode='json', exclude={'authorization', 'policy'}),
+                     policy=request.policy.model_dump(mode='json'))
+    path.write_text(json.dumps(authority))
+    request.authorization = cm.source.FileBinding.model_validate(binding(path))
+    return request
+
+
+def seed_unrelated_identity(store):
+    store.apply_plan(store.plan_package({'package_id': 'unrelated-identity', 'claims': [{
+        'claim_id': 'N', 'statement': '既有的另一項教導，不可覆蓋。', 'claim_type': 'exegesis',
+        'occurrences': [{'source_id': 'S', 'anchors': []}], 'evidence_step_ids': []}]}))
+
+
+@pytest.mark.parametrize('late_collision', [False, True])
+def test_sibling_create_cannot_overwrite_an_identity_outside_its_context(action, late_collision):
+    store, _, _, _, tmp_path, _ = action
+    seed_bundled(store)
+    request, root = hidden_judgement_request(action)
+    request = proposal_first(request, tmp_path)
+    if not late_collision:
+        seed_unrelated_identity(store)
+    evidence_before = store.get_record_state('evidence_steps', 'E')
+
+    def proposal(packet):
+        assert 'claims/N' not in packet['before']
+        return propose_sibling(packet)
+
+    def review(packet):
+        # Simulate a writer taking the absent identity while Opus was running.
+        seed_unrelated_identity(store)
+        return passing(packet)
+
+    ports = SyntheticPorts(store, tmp_path, proposal=proposal, opus=review if late_collision else None)
+    result = execute_claim_management(store, request, root=root, ports=ports)
+    assert result['status'] == 'paused' and 'create identity already exists: claims/N' in result['detail'], result
+    assert ports.calls == (['gpt', 'opus'] if late_collision else ['gpt'])
+    retained = store.get_record_state('claims', 'N')
+    assert retained['revision'] == 1 and retained['payload']['statement'] == '既有的另一項教導，不可覆蓋。'
+    assert store.get_record_state('evidence_steps', 'E') == evidence_before
+
+
 @pytest.mark.parametrize('name', ['detailed_knowledge_extraction.md', 'detailed_notes_knowledge_extraction.md'])
 def test_extraction_keeps_separately_asserted_judgements_as_their_own_claims(name):
     text = (Path(cm.__file__).parent / 'prompts' / name).read_text()
