@@ -738,3 +738,27 @@ def test_a_revision_gets_the_verses_its_draft_cites_within_taught_chapters():
     # Owner, 2026-10-24: the scene may come from the verse's own preceding verses.
     scene = cited_verses(_scripture_packet(), chapter=_chapters, manuscript="約5:27這裡講審判。")
     assert {"reference": "jhn-5-24-26", "text": "因為父怎樣在自己有生命，就賜給他兒子也照樣在自己有生命，"} in scene
+
+
+def test_author_and_reviewer_share_the_2026_10_24_reader_rules():
+    """Owner, 2026-10-24: four rounds each found one more verse lacking a scene.
+
+    Each rule must reach both sides: a rule only the author knows is revised
+    back out by a reviewer who does not.
+    """
+
+    prompts = Path(__file__).resolve().parents[1] / "pipeline" / "prompts"
+    author = (prompts / "draft_first_topic_author.md").read_text()
+    reviewer = (prompts / "draft_first_two_way_review.md").read_text()
+    shared = (prompts / "draft_first_two_way_rules.md").read_text()
+    for text in (author, reviewer):
+        assert "场景只在论证需要时" in text
+        assert "完整的一句话" in text and "不留不成对的引号" in text
+        assert "三个『因为』" in text
+        assert "约三到五句" in text and "干巴巴" in text
+        assert "后期修正" in text and "一般惯例" in text
+    assert "首次触及的经文须先交代场景" not in reviewer
+    assert "用一两句直接回答开头的问题" not in author
+    assert "同一类问题一次列全" in reviewer and "覆盖压低它的全部原因" in reviewer
+    assert "不应为此另写一句复述立场的话" in shared
+    assert "落地是讲清楚，不是复述" in author
