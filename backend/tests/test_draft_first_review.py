@@ -798,3 +798,18 @@ def test_writing_rules_are_grouped_and_referred_to_by_name():
         assert not re.search(r"第 ?\d+ ?条", (prompts / name).read_text()), name
     source = (Path(__file__).resolve().parents[1] / "pipeline" / "draft_first_review_runner.py").read_text()
     assert not re.search(r"写作规则第 ?\d+ ?条", source)
+
+
+def test_the_reviewer_is_told_what_every_scored_dimension_measures():
+    """2026-10-24: dimensions were bare ids; readability sat at 7 on a moving
+    reason for four rounds and concision scored 4/4 on a wordy draft."""
+
+    root = Path(__file__).resolve().parents[1]
+    reviewer = (root / "pipeline" / "prompts" / "draft_first_two_way_review.md").read_text()
+    profile = json.loads((root / "config" / "editorial_quality_profiles"
+                          / "WQ-theological-topic-essay-v1.json").read_text())
+    rubric = reviewer.split("## 三、评分")[1].split("## 四、")[0]
+    for dimension in profile["dimensions"]:
+        assert f"- `{dimension['id']}`：" in rubric, dimension["id"]
+    for heading in ("**忠实**", "**结构**", "**读者**", "**口吻**"):
+        assert heading in rubric
