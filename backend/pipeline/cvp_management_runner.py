@@ -712,8 +712,9 @@ def run(store,request,*,root,execute=False,clients=None):
                         raw,_,_=call(pa,packet,step_root/'proposal.json');response=validate_response('proposal',raw)
                         if response['result']=='context_insufficient':
                             newbundle=_expand(store,request,current,key,recall,bundle,response)
+                            newbundle=persistence.bind_task_constraints(store,parent_id,newbundle)
                             if previous:previous=_rebase_previous(request,bundle,newbundle,previous,prior_findings=prior_findings)
-                            bundle=persistence.bind_task_constraints(store,parent_id,newbundle);ordinal+=1;revision=False;continue
+                            bundle=newbundle;ordinal+=1;revision=False;continue
                         candidate=domain.compile_candidate(request,bundle,response['candidate'],previous=previous,prior_findings=prior_findings)
                         proposal_path=step_root/'proposal.json'
                     else:
@@ -807,8 +808,9 @@ def run(store,request,*,root,execute=False,clients=None):
                     raw_review,_,_=call(ra,packet,step_root/'review.json');review=validate_response('review',raw_review)
                     if review['result']=='context_insufficient':
                         newbundle=_expand(store,request,current,key,recall,bundle,review)
+                        newbundle=persistence.bind_task_constraints(store,parent_id,newbundle)
                         previous=domain.rebind_candidate(request,bundle,newbundle,candidate,prior_findings=prior_findings)
-                        bundle=persistence.bind_task_constraints(store,parent_id,newbundle);proposal_origin=None
+                        bundle=newbundle;proposal_origin=None
                         ordinal+=1;revision=False;continue
                     approval=domain.validate_review(request,bundle,candidate,review['review'],prior_findings=prior_findings)
                     write_immutable(step_root/'approval.json',approval)

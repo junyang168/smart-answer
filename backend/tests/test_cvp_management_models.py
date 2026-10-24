@@ -107,6 +107,29 @@ def test_summary_permission_clarification_is_opt_in_and_does_not_relabel_saved_p
         models.adapter('proposal',req,bad,domain.proposal_packet(req,bad),client=Client())
 
 
+def test_saved_expansion_before_contract_binding_reuses_exact_model_input_only():
+    from backend.api.canonical_repository.cvp_recall import STATEMENT_SCOPE_PROFILE
+    from backend.pipeline.cvp_model_packet import project
+    req=request(input=seal({'schema_version':'wang_cvp_recall_preflight_v1',
+                            'recall_profile':STATEMENT_SCOPE_PROFILE}))
+    before=materials();previous=domain.compile_candidate(req,before,proposal())
+    final=seal({k:v for k,v in before.items() if k!='artifact_sha256'}|{
+        'summary_enrichment_contract':domain.SUMMARY_ENRICHMENT_CONTRACT,
+        'link_evidence_contract':'source_fragment_refs_v1'})
+    repaired=domain.compile_candidate(req,final,{},previous=previous)
+    assert repaired['material_sha256']==final['artifact_sha256']
+    assert repaired['component_plan']==previous['component_plan']
+    assert repaired['prior_findings']==previous['prior_findings']
+    assert repaired['rebase_history'][-1]['candidate_sha256']==previous['artifact_sha256']
+    # No model-visible semantic input is altered by repairing this binding.
+    assert project(domain.proposal_packet(req,final,previous=previous))==project(
+        domain.proposal_packet(req,final,previous=repaired))
+    drift=deepcopy(final);drift['material']['extra_source_fact']='changed'
+    drift=seal({k:v for k,v in drift.items() if k!='artifact_sha256'})
+    with pytest.raises(ValueError,match='changed request/material'):
+        domain.compile_candidate(req,drift,{},previous=previous)
+
+
 @pytest.mark.parametrize('bad', ['claim','text','component','creation','target','summary','member'])
 def test_scoped_proposal_schema_rejects_foreign_component_object_and_creation_refs(bad):
     req,b=request(),materials();a=models.adapter('proposal',req,b,domain.proposal_packet(req,b),client=Client())
