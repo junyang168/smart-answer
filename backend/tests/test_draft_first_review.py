@@ -454,8 +454,12 @@ def _chapters(book, number):
     }
 
 
-def test_scripture_blocks_may_match_cuv_but_inline_quotes_stay_sermon_only():
-    """#439: the rule demands the full verse; the professor only cited 約5:27."""
+def test_scripture_blocks_may_match_cuv_but_inline_quotes_only_repeat_shown_verses():
+    """#439: the rule demands the full verse; the professor only cited 約5:27.
+
+    An inline quote may repeat a verse the article has shown in a block; a
+    verse it has not shown stays sermon-only.
+    """
 
     from backend.pipeline.draft_first_author_runner import verbatim_quote_report
     from backend.pipeline.draft_first_scripture import cited_verses, scripture_corpus
@@ -470,6 +474,7 @@ def test_scripture_blocks_may_match_cuv_but_inline_quotes_stay_sermon_only():
             "> 看哪、我們上耶路撒冷去、人子要被交給祭司長和文士。",
             "> 並且因為祂是人子，就賜給祂審判的權柄。",
             "文章說「並且因為他是人子，就賜給他行審判的權柄」。",
+            "又說「因為父怎樣在自己有生命，就賜給他兒子」。",
         ]
     )
     report = verbatim_quote_report(manuscript, packet, corpus)
@@ -479,7 +484,7 @@ def test_scripture_blocks_may_match_cuv_but_inline_quotes_stay_sermon_only():
         "因為父怎樣在自己有生命……就賜給他行審判的權柄。",
     ]
     assert report["quotes_failing"] == [
-        "並且因為他是人子，就賜給他行審判的權柄",
+        "因為父怎樣在自己有生命，就賜給他兒子",
         "並且因為祂是人子，就賜給祂審判的權柄。",
     ]
     assert list(report["scripture_chapters"]) == ["JHN/5"]
@@ -626,3 +631,29 @@ def test_author_and_reviewer_hold_one_plain_style_standard():
     author, reviewer = standards.values()
     assert author.split("**")[1] == reviewer.split("**")[1]
     assert "不是讲台上鼓舞人心的讲道" in author and "讲台上的资深神学教授" not in author
+
+
+def test_quote_check_holds_verse_words_not_glyphs_notes_or_skipped_verses():
+    """#439 fresh draft, 2026-10-24: 7 of 12 failures were verbatim verses."""
+
+    from backend.pipeline.draft_first_author_runner import verbatim_quote_report
+    from backend.pipeline.draft_first_scripture import normalize
+
+    sermon = ("「又有一獸，第二個獸，如熊。」夠了，跳過去。「此後我觀看，又有一獸，如豹。」"
+              "「耶穌說：『你們中間誰有一隻羊，當安息日掉在坑裡，不把他抓住拉上來呢？』人比羊何等貴重呢！」")
+    packet = {"source_originals": {"originals": [{"content": sermon}]}}
+    verses = ("因為，凡要救自己生命〔生命：或作靈魂；下同〕的，必喪掉生命。"
+              "我觀看，見有寶座設立，上頭坐着亙古常在者。說：人子必須被交在罪人手裏。")
+    scripture = {"chapters": {}, "text": normalize(verses)}
+    manuscript = "\n".join([
+        "# 標題",
+        "> 又有一獸，第二個獸，如熊。……此後我觀看，又有一獸，如豹。（但7:5-6）",
+        "> 耶穌說：「你們中間誰有一隻羊，當安息日掉在坑裡，不把他抓住拉上來呢？」人比羊何等貴重呢！",
+        "> 因為，凡要救自己生命的，必喪掉生命。（太16:25）",
+        "> 我觀看，見有寶座設立，上頭坐著亙古常在者。（但7:9）",
+        "> 說：『人子必須被交在罪人手裏。』（路24:7）",
+        "路24:7 的「人子必須被交在罪人手裡」是轉引。",
+        "> 又有一獸，第二個獸，如熊，口中啣著三根肋骨。",
+    ])
+    report = verbatim_quote_report(manuscript, packet, scripture)
+    assert report["quotes_failing"] == ["又有一獸，第二個獸，如熊，口中啣著三根肋骨。"]

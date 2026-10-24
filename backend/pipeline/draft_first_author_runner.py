@@ -27,7 +27,9 @@ from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
 from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 from backend.pipeline.matthew_exposition_authoring import sha256_text
-from backend.pipeline.draft_first_scripture import cited_verses, matches_scripture, scripture_corpus
+from backend.pipeline.draft_first_scripture import (
+    cited_verses, matches_elided, matches_scripture, normalize, scripture_corpus,
+)
 from backend.pipeline.draft_first_checklist import DISPOSITION_ITEM_SCHEMA, build_checklist, disposition_problems
 from backend.pipeline.draft_first_source_reader import with_source_reading
 
@@ -279,23 +281,37 @@ def verbatim_quote_report(
         for line in manuscript.splitlines()
         if line.startswith("> ") and not line.startswith("> ——")
     ]
-    # Nested quotation marks are typography: the sermon's 「人子」 inside a
-    # quoted sentence is written 『人子』 in the article.
-    checked = [
-        {"quote": quote, "verbatim": quote in corpus or quote.replace("『", "「").replace("』", "」") in corpus,
-         "matched": "sermon"}
-        for quote in quotes
-        if quote
-    ]
+    # A verse block is held to its words, not its typesetting: the sermon reads
+    # 太12:11 as 『你們中間誰有一隻羊…』 inside 「」, the article the other way
+    # round, and reading aloud he skips verses (「又有一獸，第二個獸，如熊。」夠了，
+    # 跳過去) -- so each elided segment must occur in his reading or in 和合本.
+    sermon_words = normalize(corpus)
+    checked: list[dict[str, Any]] = []
+    verified_blocks: list[str] = []
     for quote in block_quotes:
         if not quote:
             continue
-        if quote in corpus:
+        if quote in corpus or matches_elided(quote, sermon_words):
             checked.append({"quote": quote, "verbatim": True, "matched": "sermon"})
         elif scripture is not None and matches_scripture(quote, scripture):
             checked.append({"quote": quote, "verbatim": True, "matched": "cuv"})
         else:
             checked.append({"quote": quote, "verbatim": False, "matched": None})
+            continue
+        verified_blocks.append(normalize(quote))
+    # Nested quotation marks are typography: the sermon's 「人子」 inside a
+    # quoted sentence is written 『人子』 in the article. An inline quote may
+    # also repeat words of a verse the article has just shown in a verified
+    # block (「路24:7 的『人子必須被交在罪人手裏』」); a verse it has not shown
+    # stays sermon-only.
+    checked[:0] = [
+        {"quote": quote,
+         "verbatim": quote in corpus or quote.replace("『", "「").replace("』", "」") in corpus
+         or any(normalize(quote) in block for block in verified_blocks),
+         "matched": "sermon"}
+        for quote in quotes
+        if quote
+    ]
     # Readability rule the owner set after the keys article shipped a
     # full-verse quotation inline (the rock article had block-quoted its
     # verses by luck, not by rule): a quotation long enough to be a full

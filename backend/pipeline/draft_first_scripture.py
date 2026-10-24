@@ -27,12 +27,27 @@ from backend.pipeline.matthew_exposition_authoring import sha256_text
 # cache's commas); the words are what has to be verbatim.
 _NOT_WORD = re.compile(r"[^0-9A-Za-z㐀-鿿]")
 _ELISION = re.compile(r"……|…|⋯")
+# The cache prints 着/裏/牠 where the sermons print 著/裡/他, and 祂 is a
+# typesetting choice for the same pronoun: one word, two glyphs (#439 fresh
+# draft: five verbatim verses failed on these alone).
+_VARIANTS = str.maketrans({"着": "著", "裏": "裡", "牠": "他", "祂": "他"})
+# The cache carries the translators' notes inline, 「生命〔生命：或作靈魂；下同〕的」;
+# they are not part of the verse anyone reads aloud.
+_TRANSLATOR_NOTE = re.compile(r"〔[^〕]*〕")
 
 Chapter = Callable[[str, int], Mapping[str, str]]
 
 
 def normalize(text: str) -> str:
-    return _NOT_WORD.sub("", text)
+    return _NOT_WORD.sub("", _TRANSLATOR_NOTE.sub("", text)).translate(_VARIANTS)
+
+
+def matches_elided(quote: str, *texts: str) -> bool:
+    """Every elided segment of a quote occurs word for word in one of `texts`."""
+
+    segments = [normalize(part) for part in _ELISION.split(quote)]
+    segments = [part for part in segments if part]
+    return bool(segments) and all(any(part in text for text in texts) for part in segments)
 
 
 def cited_chapters(packet: Mapping[str, Any]) -> list[tuple[str, int]]:
@@ -78,6 +93,4 @@ def scripture_corpus(packet: Mapping[str, Any], chapter: Chapter = cuv.chapter) 
 def matches_scripture(quote: str, corpus: Mapping[str, Any]) -> bool:
     """A quote block matches when every elided segment is 和合本 word for word."""
 
-    segments = [normalize(part) for part in _ELISION.split(quote)]
-    segments = [part for part in segments if part]
-    return bool(segments) and all(part in corpus["text"] for part in segments)
+    return matches_elided(quote, corpus["text"])
