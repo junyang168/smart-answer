@@ -136,11 +136,16 @@ def resume_applied_cvp_route(store, viewpoint_id, output_dir, *, material_sha256
         if collection == 'argument_routes':expected_routes.discard(ident)
         if collection == 'argument_route_attestations':expected_attestations.discard(ident)
         if collection == 'viewpoint_observation_supports':expected_observations.discard(ident)
-    expected_routes.update(r['argument_route_id'] for r in package.get('argument_routes',[]))
+    for route in package.get('argument_routes', []):
+        if route['route_status'] == 'active':
+            expected_routes.add(route['argument_route_id'])
+        else:
+            expected_routes.discard(route['argument_route_id'])
     expected_attestations.update(r['argument_route_attestation_id'] for r in package.get('argument_route_attestations',[]))
     expected_observations.update(r['observation_support_id'] for r in package.get('viewpoint_observation_supports', []))
     current = store.read_cvp_route_records(viewpoint_id)
-    if ({oid for col,oid in current if col == 'argument_routes'} != expected_routes
+    if ({oid for (col,oid), row in current.items() if col == 'argument_routes'
+         and row['payload']['route_status'] == 'active'} != expected_routes
             or {oid for col,oid in current if col == 'argument_route_attestations'} != expected_attestations
             or {oid for col,oid in current if col == 'viewpoint_observation_supports'} != expected_observations):
         raise ValueError('committed Route recovery current route population changed')
