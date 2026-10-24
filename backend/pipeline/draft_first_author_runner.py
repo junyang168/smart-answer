@@ -28,7 +28,7 @@ from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
 from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 from backend.pipeline.matthew_exposition_authoring import sha256_text
 from backend.pipeline.draft_first_scripture import (
-    cited_verses, matches_elided, matches_scripture, normalize, scripture_corpus,
+    cited_verses, extends_verse, matches_elided, matches_scripture, normalize, scripture_corpus,
 )
 from backend.pipeline.draft_first_checklist import DISPOSITION_ITEM_SCHEMA, build_checklist, disposition_problems
 from backend.pipeline.draft_first_source_reader import with_source_reading
@@ -290,6 +290,9 @@ def verbatim_quote_report(
     verified_blocks: list[str] = []
     for quote in block_quotes:
         if not quote:
+            continue
+        if "〔" in quote or (scripture is not None and extends_verse(quote, scripture)):
+            checked.append({"quote": quote, "verbatim": False, "matched": None})
             continue
         if quote in corpus or matches_elided(quote, sermon_words):
             checked.append({"quote": quote, "verbatim": True, "matched": "sermon"})

@@ -73,7 +73,7 @@ def cited_verses(packet: Mapping[str, Any], chapter: Chapter = cuv.chapter) -> l
         text = chapter(book, number)
         lines = [text[str(v)] for v in range(start, max(start, end) + 1) if str(v) in text]
         if lines:
-            verses.append({"reference": slug, "text": "".join(lines)})
+            verses.append({"reference": slug, "text": _TRANSLATOR_NOTE.sub("", "".join(lines))})
     return verses
 
 
@@ -82,15 +82,38 @@ def scripture_corpus(packet: Mapping[str, Any], chapter: Chapter = cuv.chapter) 
 
     chapters: dict[str, str] = {}
     texts: list[str] = []
+    each: list[str] = []
     for book, number in cited_chapters(packet):
         verses = chapter(book, number)
         ordered = [verses[key] for key in sorted(verses, key=int)]
         chapters[f"{book}/{number}"] = sha256_text(json.dumps(verses, ensure_ascii=False, sort_keys=True))
         texts.append(normalize("".join(ordered)))
-    return {"edition": "cuv", "chapters": chapters, "text": "|".join(texts)}
+        each.extend(normalize(verse) for verse in ordered)
+    return {"edition": "cuv", "chapters": chapters, "text": "|".join(texts), "verses": each}
+
+
+def extends_verse(quote: str, corpus: Mapping[str, Any]) -> bool:
+    """A segment holding a whole 和合本 verse plus words the verse does not have.
+
+    The sermon is a valid source for a verse block -- his retranslations and
+    his reading aloud -- but a spoken echo is not Scripture: 太26:28 read as
+    「使罪得赦，為多人。」 passed as the verse because the sermon has it.
+    """
+
+    # Only a short addition counts: a block running on into the next verse in
+    # his own reading (可2:10-11, 「回家去罷」) carries far more than an echo.
+    for part in _ELISION.split(quote):
+        segment = normalize(part)
+        if segment and segment not in corpus["text"] and any(
+            len(verse) >= 8 and verse in segment and len(segment) - len(verse) < len(verse) / 2
+            for verse in corpus.get("verses", [])
+        ):
+            return True
+    return False
 
 
 def matches_scripture(quote: str, corpus: Mapping[str, Any]) -> bool:
     """A quote block matches when every elided segment is 和合本 word for word."""
 
-    return matches_elided(quote, corpus["text"])
+    # A translator's note 〔…〕 is stripped for matching, never shown as the verse.
+    return not _TRANSLATOR_NOTE.search(quote) and matches_elided(quote, corpus["text"])

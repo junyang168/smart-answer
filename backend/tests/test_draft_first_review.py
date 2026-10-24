@@ -657,3 +657,30 @@ def test_quote_check_holds_verse_words_not_glyphs_notes_or_skipped_verses():
     ])
     report = verbatim_quote_report(manuscript, packet, scripture)
     assert report["quotes_failing"] == ["又有一獸，第二個獸，如熊，口中啣著三根肋骨。"]
+
+
+def test_quote_check_rejects_translator_notes_and_spoken_echoes_as_the_verse():
+    """#439 round 2: 〔有古卷無我字〕 and 「使罪得赦，為多人。」 both reached final.md."""
+
+    from backend.pipeline.draft_first_author_runner import verbatim_quote_report
+    from backend.pipeline.draft_first_scripture import normalize
+
+    sermon = "『因為這是我立約的血，為多人流出來，使罪得赦，為多人。耶穌就和門徒唱了詩，出來往橄欖山去。』"
+    packet = {"source_originals": {"originals": [{"content": sermon}]}}
+    verses = ["耶穌到了該撒利亞腓立比的境內，就問門徒說：「人說我〔有古卷無我字〕人子是誰？」",
+              "因為這是我立約的血，為多人流出來，使罪得赦。"]
+    scripture = {"chapters": {}, "text": "|".join(normalize(v) for v in verses),
+                 "verses": [normalize(v) for v in verses]}
+    manuscript = "\n".join([
+        "# 標題",
+        "> 耶穌到了該撒利亞腓立比的境內，就問門徒說：「人說我〔有古卷無我字〕人子是誰？」（太16:13）",
+        "> 耶穌到了該撒利亞腓立比的境內，就問門徒說：「人說我人子是誰？」（太16:13）",
+        "> 因為這是我立約的血，為多人流出來，使罪得赦，為多人。（太26:28）",
+        "> 因為這是我立約的血，為多人流出來，使罪得赦。（太26:28）",
+        "> 因為這是我立約的血，為多人流出來，使罪得赦，為多人。耶穌就和門徒唱了詩，出來往橄欖山去。",
+    ])
+    report = verbatim_quote_report(manuscript, packet, scripture)
+    assert report["quotes_failing"] == [
+        "耶穌到了該撒利亞腓立比的境內，就問門徒說：「人說我〔有古卷無我字〕人子是誰？」",
+        "因為這是我立約的血，為多人流出來，使罪得赦，為多人。",
+    ]
