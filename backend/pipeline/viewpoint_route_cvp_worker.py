@@ -170,7 +170,9 @@ def enqueue_current_cvp_routes(
     queue = CvpRouteQueue(queue_dir)
     jobs = []
     for viewpoint_id in sorted(set(viewpoint_ids)):
-        material = prepare_cvp_route_materials(store, viewpoint_id, include_context=policy["schema_version"] == "wang_route_resolution_policy_v8")
+        material = prepare_cvp_route_materials(store, viewpoint_id,
+            include_context=policy["schema_version"] == "wang_route_resolution_policy_v8",
+            include_connection_judgments=True)
         job = make_cvp_route_job(viewpoint_id, material["artifact_sha256"], policy_sha)
         queue.enqueue(job)
         jobs.append(job["job_id"])
@@ -227,6 +229,8 @@ def process_cvp_route(
     max_correction_rounds: int, apply: bool = False,
     ownership_guard: Callable[[], None] | None = None,
     repair_evidence_input: bool = False,
+    repair_connection_context: bool = False,
+    include_connection_judgments: bool = False,
     policy_path: Path = DEFAULT_POLICY,
 ) -> dict[str, Any]:
     """Build from current master data; write only after a whole-set pass."""
@@ -243,11 +247,19 @@ def process_cvp_route(
     from backend.pipeline.viewpoint_route_evidence_recovery import (
         REPAIR_DIRECTORY, prepare_evidence_input_recovery,
     )
+    from backend.pipeline.viewpoint_route_connection_recovery import DIRECTORY, prepare_connection_continuation
+    if repair_connection_context and repair_evidence_input:
+        raise ValueError('Route continuations cannot be combined')
     execution_dir = output_dir / REPAIR_DIRECTORY if repair_evidence_input else output_dir
+    if repair_connection_context:execution_dir = output_dir / DIRECTORY
+    if repair_connection_context and (execution_dir/'route-change-plan.json').exists():
+        from backend.pipeline.viewpoint_route_connection_recovery import verify_connection_reservation
+        verify_connection_reservation(output_dir, execution_dir=execution_dir)
     recovered = resume_applied_cvp_route(store, viewpoint_id, execution_dir, policy_path=policy_path) if apply else None
     if recovered is not None:
         return recovered
-    materials = prepare_cvp_route_materials(store, viewpoint_id, include_context=observations_enabled)
+    materials = prepare_cvp_route_materials(store, viewpoint_id, include_context=observations_enabled,
+        include_connection_judgments=include_connection_judgments or repair_connection_context)
     if not observations_enabled and materials.get('existing_observation_supports'):
         raise ValueError('v5 cannot maintain a CVP with v8 observation support records')
     claims = [ReviewClaim.model_validate(item) for item in materials["claims"]]
@@ -271,14 +283,20 @@ def process_cvp_route(
         observation_supports=observations_enabled,
         existing_observation_supports=materials.get('existing_observation_supports'),
         unusable_context_claims=materials.get('unusable_context_claims'),
+        approved_connection_judgments=materials.get('approved_connection_judgments'),
     )
     if packet["membership_ledger"]["out_of_scope_members"]:
         raise ValueError("complete CVP Route packet omitted an active member")
     guard()
     recovery_seed = None
+    connection_seed = None
     if repair_evidence_input:
         recovery_seed = prepare_evidence_input_recovery(
             output_dir, packet, materials, proposer=proposer, reviewer=reviewer,
+            max_correction_rounds=max_correction_rounds)
+    if repair_connection_context:
+        connection_seed = prepare_connection_continuation(output_dir, packet, materials,
+            proposer=proposer, reviewer=reviewer, reconsiderer=reconsiderer,
             max_correction_rounds=max_correction_rounds)
     output_dir = execution_dir
     write_immutable(output_dir / "cvp-route-materials.json", materials)
@@ -287,6 +305,7 @@ def process_cvp_route(
         output_dir=output_dir, proposer=proposer, reviewer=reviewer,
         reconsiderer=reconsiderer, max_correction_rounds=max_correction_rounds,
         recovery_seed=recovery_seed,
+        connection_seed=connection_seed,
     )
     if result["cvp_re_review_exceptions"]:
         raise CvpRouteReviewIncomplete("route review raised CVP identity exceptions")
@@ -321,7 +340,7 @@ def process_cvp_route(
         "change_set_id": plan.change_set_id,
         "change_count": len(plan.operations),
         "status": "planned",
-        **({"execution_root": str(output_dir)} if repair_evidence_input else {}),
+        **({"execution_root": str(output_dir)} if repair_evidence_input or repair_connection_context else {}),
     }
     if apply:
         guard()
@@ -369,9 +388,14 @@ def main() -> int:
     parser.add_argument("--job-id", help="Resume one exact existing queued job")
     parser.add_argument("--repair-evidence-input", action="store_true",
                         help="Continue the saved initial review after the Claim-evidence boundary fix")
+    parser.add_argument('--repair-connection-context', action='store_true',
+                        help='Continue the exact saved CVP exception with approved connection context')
     args = parser.parse_args()
     if args.repair_evidence_input and (args.action != "run" or not args.job_id or not args.retry_exceptions):
         parser.error("evidence input repair requires run, an exact job ID and --retry-exceptions")
+    if args.repair_connection_context and (args.action != 'run' or not args.job_id
+                                          or not args.retry_exceptions or args.repair_evidence_input):
+        parser.error('connection continuation requires run, exact job ID, --retry-exceptions and no other repair')
     policy = load_route_policy(args.route_policy)
     if policy["schema_version"] not in {"wang_route_resolution_policy_v5", "wang_route_resolution_policy_v8"}:
         parser.error("whole-CVP worker requires Route policy v5 or v8")
@@ -387,7 +411,9 @@ def main() -> int:
             parser.error("enqueue requires viewpoint IDs and does not apply")
         jobs = []
         for viewpoint_id in sorted(set(args.viewpoint_id)):
-            material = prepare_cvp_route_materials(store, viewpoint_id, include_context=policy["schema_version"] == "wang_route_resolution_policy_v8")
+            material = prepare_cvp_route_materials(store, viewpoint_id,
+                include_context=policy["schema_version"] == "wang_route_resolution_policy_v8",
+                include_connection_judgments=True)
             job = make_cvp_route_job(viewpoint_id, material["artifact_sha256"], policy_sha)
             queue.enqueue(job)
             jobs.append(job["job_id"])
@@ -431,16 +457,33 @@ def main() -> int:
         active_output = args.output_dir / job['job_id']
         if args.repair_evidence_input:
             active_output = active_output / REPAIR_DIRECTORY
+        if args.repair_connection_context:
+            from backend.pipeline.viewpoint_route_connection_recovery import DIRECTORY, verify_connection_reservation
+            original = json.loads((active_output/'cvp-route-materials.json').read_text())
+            if original['artifact_sha256'] != job['material_sha256']:
+                raise ValueError('connection continuation original material differs from queued job')
+            if (active_output/'connection-continuation-reservation.json').exists():
+                verify_connection_reservation(active_output, original_material_sha256=job['material_sha256'])
+            active_output = active_output / DIRECTORY
         recovered = resume_applied_cvp_route(store, job['viewpoint_id'], active_output,
-            material_sha256=job['material_sha256'], policy_path=args.route_policy) if args.apply else None
+            material_sha256=None if args.repair_connection_context else job['material_sha256'],
+            policy_path=args.route_policy) if args.apply else None
         if recovered is not None:
             guard()
             queue.finish(job['job_id'], worker_id=args.worker_id, epoch=epoch,
                          status='complete', detail=recovered['status'])
             print(json.dumps(recovered, ensure_ascii=False))
             return 0
-        current = prepare_cvp_route_materials(store, job["viewpoint_id"], include_context=policy["schema_version"] == "wang_route_resolution_policy_v8")
-        if current["artifact_sha256"] != job["material_sha256"]:
+        current = prepare_cvp_route_materials(store, job["viewpoint_id"],
+            include_context=policy["schema_version"] == "wang_route_resolution_policy_v8",
+            include_connection_judgments=True)
+        use_judgments = True
+        if current['artifact_sha256'] != job['material_sha256'] and not args.repair_connection_context:
+            legacy = prepare_cvp_route_materials(store, job['viewpoint_id'],
+                include_context=policy['schema_version'] == 'wang_route_resolution_policy_v8')
+            if legacy['artifact_sha256'] == job['material_sha256']:
+                current, use_judgments = legacy, False
+        if current["artifact_sha256"] != job["material_sha256"] and not args.repair_connection_context:
             new_job = make_cvp_route_job(job["viewpoint_id"],
                                          current["artifact_sha256"], policy_sha)
             queue.enqueue(new_job)
@@ -472,6 +515,8 @@ def main() -> int:
             max_correction_rounds=int(policy["max_correction_rounds"]),
             apply=args.apply, ownership_guard=guard,
             repair_evidence_input=args.repair_evidence_input, policy_path=args.route_policy,
+            repair_connection_context=args.repair_connection_context,
+            include_connection_judgments=use_judgments,
         )
         guard()
         queue.finish(job["job_id"], worker_id=args.worker_id, epoch=epoch,
