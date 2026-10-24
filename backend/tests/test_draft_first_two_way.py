@@ -350,5 +350,7 @@ def test_calibration_scores_hits_against_the_owner_key():
         {"anchor": "教授說得很準", "summary": "評判", "blocking": False},
     ]
     results = {row["id"]: row["result"] for row in calibrate.score(key, findings)}
-    assert results == {"K1": "hit", "K2": "hit", "K3": "miss", "K4": "miss", "K5": "manual",
+    # K2 is blocking since the owner's 2026-10-24 plain-style ruling, so a
+    # non-blocking hit on it no longer counts as agreeing with the owner.
+    assert results == {"K1": "hit", "K2": "hit_nonblocking", "K3": "miss", "K4": "miss", "K5": "manual",
                        "K7": "miss", "K9": "miss", "K10": "hit_nonblocking"}

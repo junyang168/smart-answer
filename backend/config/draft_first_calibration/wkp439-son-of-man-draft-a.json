@@ -8,7 +8,7 @@
              "sha256": "fea10309baf34bf51a3dc890c233f974f26a2370cd0000260a4491076189afe3"},
   "items": [
     {"id": "K1", "finding": "正文以旁观者口吻叙述——「教授說」「母本說」「材料顯示」；应直接向读者讲解经文与论证", "pattern": "母本|材料|本文", "expect_blocking": true},
-    {"id": "K2", "finding": "油滑、操纵式措辞，如「先看一個誰都能核對的現象」「一個聽起來很順的解釋」", "pattern": "幹這件事|邏輯很乾淨|鑰匙|誰都能核對|聽起來很順", "expect_blocking": false},
+    {"id": "K2", "finding": "油滑、操纵式措辞，如「先看一個誰都能核對的現象」「一個聽起來很順的解釋」（负责人 2026-10-24 改判：按平实标准必须修改）", "pattern": "幹這件事|邏輯很乾淨|鑰匙|誰都能核對|聽起來很順", "expect_blocking": true},
     {"id": "K3", "finding": "「神子講神性、人子講人性」的对照没有来源，不得写成有人这样教导", "pattern": "神子", "expect_blocking": true},
     {"id": "K4", "finding": "不推测教授没有说过的动机；文章不以「为什么频繁讲」为中心", "pattern": "99\\.9|常有人|帶查經", "expect_blocking": true},
     {"id": "K5", "finding": "不得把定冠词单独写成足以证明神性的论证", "pattern": null, "expect_blocking": true},
