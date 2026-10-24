@@ -919,7 +919,7 @@ def main() -> int:
                 "approved_viewpoints": viewpoint_charter(dict(packet)),
                 "unresolved_items": structure_unresolved_items(dict(packet)),
                 "source_originals": source_texts(dict(packet)),
-                "scripture_cuv": cited_verses(dict(packet)),
+                "scripture_cuv": cited_verses(dict(packet), manuscript=manuscript),
             },
             ensure_ascii=False,
             sort_keys=True,

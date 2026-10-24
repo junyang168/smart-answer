@@ -718,3 +718,13 @@ def test_author_gets_the_verses_of_the_essays_own_passages():
 
     packet = {**_scripture_packet(), "scope": {"passage_refs": ["約5:26-27"]}}
     assert [v["reference"] for v in cited_verses(packet, chapter=_chapters)] == ["jhn-5-26-27", "jhn-5-27"]
+
+
+def test_a_revision_gets_the_verses_its_draft_cites_within_taught_chapters():
+    """#439 round 3: 太26:28 was required as a block but cited by no source."""
+
+    from backend.pipeline.draft_first_scripture import cited_verses
+
+    refs = [v["reference"] for v in cited_verses(
+        _scripture_packet(), chapter=_chapters, manuscript="約5:26這裡講生命。羅8:1這裡講定罪。")]
+    assert "jhn-5-26" in refs and not any(r.startswith("rom") for r in refs)

@@ -61,18 +61,25 @@ def cited_chapters(packet: Mapping[str, Any]) -> list[tuple[str, int]]:
     return found
 
 
-def cited_verses(packet: Mapping[str, Any], chapter: Chapter = cuv.chapter) -> list[dict[str, str]]:
+def cited_verses(
+    packet: Mapping[str, Any], chapter: Chapter = cuv.chapter, *, manuscript: str = ""
+) -> list[dict[str, str]]:
     """The 和合本 text of every verse the sources cite, for the author payload.
 
     The scope's own passages come first: 太9:1-8 is the essay's text, but the
     sources cite only 9:7 by reference, so the author was asked to block-quote
-    太9:6 with no verse to quote (#439, two rounds unfixed).
+    太9:6 with no verse to quote (#439, two rounds unfixed). A revision also
+    gets the verses its draft cites (太26:28, asked for as a block, cited by
+    no source) -- limited, like the check, to chapters the sources cite.
     """
 
     corpus = "\n".join(str(item.get("content")) for item in packet["source_originals"]["originals"])
     scope = " ".join(str(ref) for ref in (packet.get("scope") or {}).get("passage_refs") or [])
+    taught = set(cited_chapters(packet))
+    drafted = [slug for slug in reference_slugs(manuscript)
+               if (slug.split("-")[0].upper(), int(slug.split("-")[1])) in taught]
     verses: list[dict[str, str]] = []
-    for slug in dict.fromkeys([*reference_slugs(scope), *reference_slugs(corpus)]):
+    for slug in dict.fromkeys([*reference_slugs(scope), *reference_slugs(corpus), *drafted]):
         parts = slug.split("-")
         book, number, start = parts[0].upper(), int(parts[1]), int(parts[2])
         end = int(parts[3]) if len(parts) > 3 else start
