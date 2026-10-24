@@ -1,30 +1,34 @@
-"""Review a draft-first essay through three gates, revising until clean or stopped.
+"""Review a draft-first essay both ways, revising until clean or stopped.
 
 The generation side (#283) writes with no Brief and no author-declared
-provenance, so verification happens entirely after the fact:
+provenance, so verification happens entirely after the fact (#439,
+`draft_first_two_way_review_solution.md`):
 
-- alignment (gpt-5.6-sol / codex): every asserted sentence must be covered by
-  the approved viewpoints or the sources; modality may not be upgraded;
-  the sources' silence may not be re-attributed to Scripture; quotes verbatim.
+- program checks: quotes verbatim (sermons, or 和合本 for quote blocks), no
+  backstage words or per-paragraph attribution, the professor named at most
+  twice, and the author's self-check answering every checklist item.
 - blind read (claude-haiku-4-5): a reader with no background restates the
-  question and the answer; a separate closed comparison (gpt) checks that what
-  reached the reader is what the viewpoint registry meant. The small model is
-  the point — it stands in for the ordinary reader.
-- editorial review (claude-fable-5): completeness, argument closure, and the
-  restraint-vs-flesh balance, scored against the WQ profile's dimensions and
-  hard failures. Author (opus) and reviewer are different models throughout.
+  question and the answer; a separate closed comparison (gpt-6.1-sol) checks
+  that what reached the reader is what the viewpoint registry meant. The small
+  model is the point — it stands in for the ordinary reader.
+- two-way review (gpt-6.1-sol, a codex agent in its own review folder):
+  nothing added (every assertion licensed by the viewpoints or the sources),
+  nothing removed (every checklist item — viewpoints, conditions,
+  observations, tensions, routes — landed or absent for a stated reason),
+  and quality scored against the WQ profile. It reads the sources itself.
 
-Blocking findings from any gate go back to the author model for a minimal
-revision, then every gate reruns on the revised text; at most two revision
-rounds, then the run stops for a human. Every model call goes through a
-subscription CLI — no API-key client is constructed here.
+Author (opus) and reviewer (gpt) are different vendors throughout. Blocking
+findings go back to the author, who fixes each one or disputes a reviewer
+finding with a verbatim source quote; the reviewer then reviews the whole
+revised essay once more and rules on every dispute, as CVP review does. At
+most two revision rounds, then the run stops for a human. Every model call
+goes through a subscription CLI — no API-key client is constructed here.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -34,56 +38,33 @@ from dotenv import load_dotenv
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
 from backend.pipeline.codex_subscription_client import CodexSubscriptionClient, CodexSubscriptionError
+from backend.pipeline.draft_first_checklist import (
+    DISPOSITION_ITEM_SCHEMA,
+    anchor_in,
+    build_checklist,
+    disposition_problems,
+    quote_corpus,
+    quote_found,
+)
+from backend.pipeline.draft_first_review_agent import CodexReviewAgent, ReviewAgentError, prepare_folder
 from backend.pipeline.draft_first_source_reader import SourceReadingTransportExhausted
 from backend.pipeline.draft_first_author_runner import (
     argument_route_charter,
     backstage_language_report,
     MAX_PROFESSOR_NAMES,
+    prompt_text,
     source_texts,
     structure_unresolved_items,
     verbatim_quote_report,
     viewpoint_charter,
 )
 from backend.pipeline.draft_first_scripture import cited_verses, scripture_corpus
-from backend.pipeline.draft_first_source_binding import reader_paragraphs
 from backend.pipeline.matthew_exposition_authoring import sha256_text
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PROMPTS = Path(__file__).with_name("prompts")
 MAX_REVISION_ROUNDS = 2
-
-ALIGNMENT_SCHEMA: dict[str, Any] = {
-    "name": "wang_draft_first_alignment_v1",
-    "strict": True,
-    "schema": {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "findings": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "quote": {"type": "string"},
-                        "kind": {
-                            "type": "string",
-                            "enum": [
-                                "beyond_source",
-                                "modality_exceeded",
-                                "attribution_swap",
-                            ],
-                        },
-                        "note": {"type": "string"},
-                    },
-                    "required": ["quote", "kind", "note"],
-                },
-            },
-            "notes": {"type": "string"},
-        },
-        "required": ["findings", "notes"],
-    },
-}
+REVIEW_MODEL = "gpt-6.1-sol"
 
 BLIND_READ_SCHEMA: dict[str, Any] = {
     "name": "wang_draft_first_blind_read_v1",
@@ -136,18 +117,36 @@ BLIND_COMPARE_SCHEMA: dict[str, Any] = {
     },
 }
 
+FINDING_KINDS = {
+    "added": ("beyond_source", "modality_exceeded", "attribution_swap"),
+    "removed": ("missing", "distorted"),
+    "quality": ("quality",),
+}
 
-def _review_schema(profile: Mapping[str, Any]) -> dict[str, Any]:
+
+def two_way_review_schema(profile: Mapping[str, Any]) -> dict[str, Any]:
     dimension_ids = [str(item["id"]) for item in profile["dimensions"]]
     failure_ids = [str(item) for item in profile["hard_failures"]]
+    kinds = [kind for group in FINDING_KINDS.values() for kind in group]
     return {
-        "name": "wang_draft_first_editorial_review_v1",
+        "name": "wang_draft_first_two_way_review_v1",
         "strict": True,
         "schema": {
             "type": "object",
             "additionalProperties": False,
             "properties": {
                 "summary": {"type": "string"},
+                "checklist_review": {
+                    "type": "array",
+                    "items": {
+                        **DISPOSITION_ITEM_SCHEMA,
+                        "properties": {
+                            **DISPOSITION_ITEM_SCHEMA["properties"],
+                            "acceptable": {"type": "boolean"},
+                        },
+                        "required": [*DISPOSITION_ITEM_SCHEMA["required"], "acceptable"],
+                    },
+                },
                 "dimension_scores": {
                     "type": "array",
                     "items": {
@@ -180,58 +179,70 @@ def _review_schema(profile: Mapping[str, Any]) -> dict[str, Any]:
                         "type": "object",
                         "additionalProperties": False,
                         "properties": {
-                            "anchor": {"type": "string"},
+                            "direction": {"type": "string", "enum": list(FINDING_KINDS)},
+                            "kind": {"type": "string", "enum": kinds},
                             "dimension_id": {"type": "string", "enum": dimension_ids},
+                            "item_id": {"type": "string"},
+                            "anchor": {"type": "string"},
+                            "source_quote": {"type": "string"},
                             "summary": {"type": "string"},
                             "required_change": {"type": "string"},
                             "blocking": {"type": "boolean"},
+                            "upholds": {"type": "string"},
                         },
                         "required": [
-                            "anchor",
-                            "dimension_id",
-                            "summary",
-                            "required_change",
-                            "blocking",
+                            "direction", "kind", "dimension_id", "item_id", "anchor",
+                            "source_quote", "summary", "required_change", "blocking", "upholds",
                         ],
+                    },
+                },
+                "dispute_rulings": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "finding_id": {"type": "string"},
+                            "ruling": {"type": "string", "enum": ["accepted", "upheld"]},
+                            "note": {"type": "string"},
+                        },
+                        "required": ["finding_id", "ruling", "note"],
                     },
                 },
             },
             "required": [
-                "summary",
-                "dimension_scores",
-                "hard_failure_assessments",
-                "findings",
+                "summary", "checklist_review", "dimension_scores",
+                "hard_failure_assessments", "findings", "dispute_rulings",
             ],
         },
     }
 
 
 REVISION_SCHEMA: dict[str, Any] = {
-    "name": "wang_draft_first_revision_v1",
+    "name": "wang_draft_first_revision_v2",
     "strict": True,
     "schema": {
         "type": "object",
         "additionalProperties": False,
         "properties": {
             "manuscript_markdown": {"type": "string"},
-            "dispositions": {
+            "responses": {
                 "type": "array",
                 "items": {
                     "type": "object",
                     "additionalProperties": False,
                     "properties": {
-                        "finding_anchor": {"type": "string"},
-                        "disposition": {
-                            "type": "string",
-                            "enum": ["resolved", "cannot_fix_within_sources"],
-                        },
+                        "finding_id": {"type": "string"},
+                        "response": {"type": "string", "enum": ["fixed", "disputed", "cannot_fix"]},
                         "note": {"type": "string"},
+                        "source_quote": {"type": "string"},
                     },
-                    "required": ["finding_anchor", "disposition", "note"],
+                    "required": ["finding_id", "response", "note", "source_quote"],
                 },
             },
+            "self_check": {"type": "array", "items": DISPOSITION_ITEM_SCHEMA},
         },
-        "required": ["manuscript_markdown", "dispositions"],
+        "required": ["manuscript_markdown", "responses", "self_check"],
     },
 }
 
@@ -258,19 +269,18 @@ def _call(client: Any, prompt_path: Path, payload: dict[str, Any], schema: dict[
 def merge_delta_scores(
     baseline_review: Mapping[str, Any], delta_review: Mapping[str, Any]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Inherit unaffected dimension scores programmatically (#302).
+    """Inherit untouched dimension scores programmatically (#302).
 
-    A delta reviewer told to copy the baseline may or may not comply; the
-    runner therefore copies for it. Only dimensions where the delta round's
-    own findings land keep the delta reviewer's score — affectedness comes
-    from actual finding locations, never a static coupling table (#33's
+    Every revision round is a full review now (#439): fidelity is a per-item
+    disposition and re-checking it does not drift, but quality scores do —
+    a full re-score re-rolls dimensions nobody touched. So a reviewer's score
+    stands only where this round's findings land or where the previous
+    round's blocking findings were just revised; affectedness comes from
+    actual finding locations, never a static coupling table (#33's
     documented mistake). Hard failures stay re-assessed each round: a
     one-vote veto is exactly what must not be inherited blindly.
     """
 
-    # Affected = where this round's findings land, plus where the previous
-    # round's blocking findings landed — those dimensions were just revised,
-    # so their baseline score is exactly the one that must not be inherited.
     affected = {str(item["dimension_id"]) for item in delta_review["findings"]}
     affected |= {
         str(item["dimension_id"])
@@ -302,25 +312,6 @@ def result_sha256(result: Mapping[str, Any]) -> str:
     return sha256_text(json.dumps(result, ensure_ascii=False, sort_keys=True))
 
 
-def changed_and_ending_paragraphs(
-    baseline: str, revised: str
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Paragraphs new in the revision, and the revision's actual ending.
-
-    The old pipeline paid twice for these lessons: rerunning full reviewers
-    every round re-rolls their standards, and judging the ending from a diff
-    misses an unchanged closing paragraph sitting after an insertion. Delta
-    rounds therefore review exactly the changed paragraphs plus the last two
-    reader paragraphs, always re-read from the revised text itself.
-    """
-
-    baseline_shas = {p["paragraph_sha256"] for p in reader_paragraphs(baseline)}
-    revised_paragraphs = reader_paragraphs(revised)
-    changed = [p for p in revised_paragraphs if p["paragraph_sha256"] not in baseline_shas]
-    ending = revised_paragraphs[-2:]
-    return changed, ending
-
-
 class DraftReviewContractError(ValueError):
     pass
 
@@ -330,31 +321,41 @@ def _require(condition: bool, message: str) -> None:
         raise DraftReviewContractError(message)
 
 
-def validate_alignment(result: Mapping[str, Any], *, manuscript: str) -> None:
-    for finding in result["findings"]:
-        _require(
-            str(finding["quote"]) in manuscript,
-            f"alignment quote not verbatim in manuscript: {finding['quote'][:60]!r}",
-        )
-
-
 def validate_revision(
-    before: str, revision: Mapping[str, Any], findings: list[Mapping[str, Any]]
+    before: str,
+    revision: Mapping[str, Any],
+    findings: list[Mapping[str, Any]],
+    *,
+    corpus: str = "",
+    scripture: Mapping[str, Any] | None = None,
 ) -> str:
     """The revised manuscript, or a contract error when the revision is not one.
 
     #439: opus once returned the H1 plus the word PLACEHOLDER with no
     dispositions, and the next round reviewed an empty article. A revision
-    answers every finding and keeps the article: one disposition per finding,
-    and the body may not collapse to a fraction of what it was.
+    answers every finding exactly once and keeps the article. Only a
+    reviewer's finding can be disputed, and only with a verbatim quote:
+    program checks are facts and the blind reader is the reader.
     """
 
     manuscript = str(revision.get("manuscript_markdown") or "")
-    dispositions = revision.get("dispositions") or []
-    if len(dispositions) != len(findings):
+    responses = revision.get("responses") or []
+    expected = sorted(str(item["finding_id"]) for item in findings)
+    answered = sorted(str(item.get("finding_id")) for item in responses)
+    if answered != expected:
         raise DraftReviewContractError(
-            f"revision gave {len(dispositions)} dispositions for {len(findings)} findings"
+            f"revision answered {len(answered)} findings {answered[:6]} for {len(expected)} {expected[:6]}"
         )
+    gates = {str(item["finding_id"]): item.get("gate") for item in findings}
+    for item in responses:
+        if item.get("response") != "disputed":
+            continue
+        if gates.get(str(item["finding_id"])) != "review":
+            raise DraftReviewContractError(f"{item['finding_id']}: only a reviewer finding can be disputed")
+        if not quote_found(str(item.get("source_quote") or ""), corpus, scripture):
+            raise DraftReviewContractError(
+                f"{item['finding_id']}: dispute quote not verbatim in the sources: {str(item.get('source_quote'))[:60]!r}"
+            )
     if len(manuscript) < len(before) // 2:
         raise DraftReviewContractError(
             f"revised manuscript shrank from {len(before)} to {len(manuscript)} characters"
@@ -365,7 +366,7 @@ def validate_revision(
 def validate_review(
     review: Mapping[str, Any], *, manuscript: str, profile: Mapping[str, Any]
 ) -> dict[str, Any]:
-    """Check the review's own discipline, then derive the verdict."""
+    """Check the review's scoring discipline, then derive the verdict."""
 
     weights = {str(item["id"]): item for item in profile["dimensions"]}
     seen = [str(item["dimension_id"]) for item in review["dimension_scores"]]
@@ -393,16 +394,12 @@ def validate_review(
         for item in review["hard_failure_assessments"]
         if item["failed"]
     ]
-    # Reviewers quote what the reader sees; the manuscript carries Markdown.
-    # An anchor inside a blockquote or bold run ('> **編者按**：…') is verbatim
-    # in the rendered text while failing a raw-byte match, and that mismatch
-    # once crashed a whole review run instead of anchoring one finding.
-    rendered = re.sub(r"^>\s?", "", manuscript, flags=re.MULTILINE)
-    rendered = rendered.replace("**", "").replace("*", "")
     for finding in review["findings"]:
-        anchor = str(finding["anchor"])
+        # Teaching that never reached the essay has no sentence to point at.
+        if finding.get("kind") == "missing" and not finding.get("anchor"):
+            continue
         _require(
-            anchor in manuscript or anchor in rendered,
+            anchor_in(manuscript, str(finding["anchor"])),
             f"review anchor not verbatim in manuscript: {finding['anchor'][:60]!r}",
         )
     # A dimension below its minimum or a declared hard failure without any
@@ -415,37 +412,77 @@ def validate_review(
     return {"dimensions_below_minimum": below_minimum, "hard_failures_failed": failed}
 
 
+def validate_two_way_review(
+    review: Mapping[str, Any],
+    *,
+    manuscript: str,
+    profile: Mapping[str, Any],
+    checklist: list[Mapping[str, Any]],
+    corpus: str,
+    scripture: Mapping[str, Any] | None = None,
+    disputed_ids: list[str] = (),
+) -> dict[str, Any]:
+    """The verdict, or a contract error: everything the reviewer cites is checked.
+
+    Every checklist item judged once; an unacceptable item carries a blocking
+    finding; a finding about removed teaching quotes that teaching verbatim;
+    every dispute gets exactly one ruling, and an upheld one is re-issued.
+    A finding the program cannot verify does not reach the author — the
+    polarity misreading and the paraphrased anchor each cost a whole round.
+    """
+
+    verdict = validate_review(review, manuscript=manuscript, profile=profile)
+    problems = disposition_problems(checklist, review["checklist_review"], manuscript)
+    _require(not problems, "checklist review: " + "; ".join(problems[:5]))
+    items = {str(item["item_id"]) for item in checklist}
+    for finding in review["findings"]:
+        kind, direction = finding["kind"], finding["direction"]
+        _require(kind in FINDING_KINDS[direction], f"finding kind {kind} does not belong to {direction}")
+        if direction == "removed":
+            _require(str(finding["item_id"]) in items, f"removed finding names no checklist item: {finding['item_id']!r}")
+            _require(
+                quote_found(str(finding["source_quote"]), corpus, scripture),
+                f"source quote not verbatim in the sources: {str(finding['source_quote'])[:60]!r}",
+            )
+        elif finding.get("source_quote"):
+            _require(
+                quote_found(str(finding["source_quote"]), corpus, scripture),
+                f"source quote not verbatim in the sources: {str(finding['source_quote'])[:60]!r}",
+            )
+    flagged = {str(f["item_id"]) for f in review["findings"] if f["blocking"] and f["direction"] == "removed"}
+    for item in review["checklist_review"]:
+        if not item["acceptable"]:
+            _require(str(item["item_id"]) in flagged, f"{item['item_id']}: judged unacceptable without a blocking finding")
+    rulings = sorted(str(item["finding_id"]) for item in review["dispute_rulings"])
+    _require(rulings == sorted(disputed_ids), f"dispute rulings {rulings} do not match disputes {sorted(disputed_ids)}")
+    upheld = {str(item["finding_id"]) for item in review["dispute_rulings"] if item["ruling"] == "upheld"}
+    reissued = {str(f["upholds"]) for f in review["findings"] if f.get("upholds") and f["blocking"]}
+    _require(upheld <= reissued, f"upheld disputes not re-issued as blocking findings: {sorted(upheld - reissued)}")
+    return verdict
+
+
 def merge_blocking_findings(
     *,
-    alignment: Mapping[str, Any] | None,
     blind_read: Mapping[str, Any],
     blind_compare: Mapping[str, Any] | None,
-    review: Mapping[str, Any],
-    review_verdict: Mapping[str, Any],
+    review: Mapping[str, Any] | None,
     quote_report: Mapping[str, Any],
     backstage_report: Mapping[str, Any] | None = None,
+    self_check_problems: list[str] = (),
+    round_number: int = 0,
 ) -> list[dict[str, Any]]:
+    """Every blocking finding of one round, each with an id the author answers by."""
+
     findings: list[dict[str, Any]] = []
-    for item in alignment["findings"] if alignment is not None else []:
+    for quote in quote_report.get("quotes_failing") or []:
         findings.append(
             {
-                "gate": "alignment",
-                "kind": str(item["kind"]),
-                "anchor": str(item["quote"]),
-                "summary": str(item["note"]),
+                "gate": "quote_check",
+                "kind": "unverbatim_quote",
+                "anchor": quote,
+                "summary": "引文与原文不逐字一致；改为逐字引用，或提及用法去掉引号改为转述。",
             }
         )
-    for quote in quote_report.get("quotes_failing") or []:
-        anchor = f"「{quote}」"
-        if not any(f["anchor"] == anchor or f["anchor"] == quote for f in findings):
-            findings.append(
-                {
-                    "gate": "quote_check",
-                    "kind": "unverbatim_quote",
-                    "anchor": quote,
-                    "summary": "引文与原文不逐字一致；改为逐字引用，或提及用法去掉引号改为转述。",
-                }
-            )
     for quote in quote_report.get("long_quotes_not_blockquoted") or []:
         if not any(f["anchor"] == quote for f in findings):
             findings.append(
@@ -490,6 +527,17 @@ def merge_blocking_findings(
                     "其余改用「他」或把引语织进句子；可能被读成耶稣时不用「他」。",
                 }
             )
+    # The author's self-check answers the same checklist the reviewer does;
+    # an incomplete one is fixed by the author, not argued.
+    for problem in self_check_problems:
+        findings.append(
+            {
+                "gate": "self_check",
+                "kind": "self_check_incomplete",
+                "anchor": "",
+                "summary": "自查未逐项处置清单：" + problem,
+            }
+        )
     # The blind reader is the lay-reader proxy (the owner's charge after the
     # keys article opened with bare verse numbers and untranslated Greek):
     # a spot that stops the reader cold is a blocking defect even when every
@@ -521,24 +569,88 @@ def merge_blocking_findings(
                 + "；".join(str(x) for x in blind_compare["mismatches"]),
             }
         )
-    for item in review["findings"]:
+    for item in (review or {}).get("findings") or []:
         if item["blocking"]:
             findings.append(
                 {
-                    "gate": "editorial_review",
-                    "kind": str(item["dimension_id"]),
+                    "gate": "review",
+                    "kind": str(item["kind"]),
+                    "direction": str(item["direction"]),
+                    "dimension_id": str(item["dimension_id"]),
+                    "item_id": str(item.get("item_id") or ""),
                     "anchor": str(item["anchor"]),
+                    "source_quote": str(item.get("source_quote") or ""),
                     "summary": f"{item['summary']}｜required: {item['required_change']}",
+                    "upholds": str(item.get("upholds") or ""),
                 }
             )
+    for number, finding in enumerate(findings, 1):
+        finding["finding_id"] = f"R{round_number}-{number:02d}"
     return findings
 
 
-def _write(path: Path, payload: Mapping[str, Any]) -> None:
+def _write(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
+
+
+def run_two_way_review(
+    *,
+    agent: Any,
+    manuscript: str,
+    packet: Mapping[str, Any],
+    profile: Mapping[str, Any],
+    checklist: list[dict[str, Any]],
+    task: Mapping[str, Any],
+    round_dir: Path,
+    disputed_ids: list[str],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """One accepted review: the agent in a fresh folder, one retry on a broken contract.
+
+    A rejected reply is not a review: it is kept beside the accepted one,
+    never scored. Run 3's editorial reviewer quoted 「於新約聖經上」 for the
+    draft's 「中」; the program was right to reject it, but the rejection
+    used to end the whole run.
+    """
+
+    prompt = prompt_text(PROMPTS / "draft_first_two_way_review.md")
+    schema = two_way_review_schema(profile)
+    scripture = scripture_corpus(packet)
+    corpus = quote_corpus(packet, checklist)
+    files = {
+        "task.json": dict(task),
+        "checklist.json": checklist,
+        "approved_viewpoints.json": viewpoint_charter(dict(packet)),
+        "unresolved_items.json": structure_unresolved_items(dict(packet)),
+        "argument_routes.json": argument_route_charter(dict(packet)),
+        "quality_profile.json": dict(profile),
+        "scripture_cuv.json": cited_verses(dict(packet)),
+    }
+    rejected: list[dict[str, Any]] = []
+    for attempt in range(2):
+        attempt_files = dict(files)
+        if rejected:
+            attempt_files["task.json"] = {**task, "previous_attempt_rejected": rejected[-1]["error"]}
+        base = round_dir / f"review-attempt-{attempt + 1}"
+        folder = base / "folder"
+        if not folder.exists():
+            prepare_folder(folder, manuscript=manuscript, packet=packet, files=attempt_files)
+        review, receipt = agent.review(folder=folder, call_dir=base / "call", prompt=prompt, schema=schema)
+        try:
+            verdict = validate_two_way_review(
+                review, manuscript=manuscript, profile=profile, checklist=checklist,
+                corpus=corpus, scripture=scripture, disputed_ids=disputed_ids,
+            )
+            receipt["rejected_attempts"] = len(rejected)
+            return {**review, "verdict": verdict}, receipt
+        except DraftReviewContractError as error:
+            rejected.append({"error": str(error), "review": review})
+            _write(round_dir / "review-rejected.json", {"rejected_attempts": rejected})
+            if attempt:
+                raise
+    raise AssertionError("unreachable")
 
 
 def run_gates(
@@ -548,46 +660,17 @@ def run_gates(
     profile: Mapping[str, Any],
     clients: Mapping[str, Any],
     round_dir: Path,
-    baseline_manuscript: str | None = None,
+    round_number: int = 0,
+    self_check: list[Mapping[str, Any]] = (),
     baseline_review: Mapping[str, Any] | None = None,
-    alignment_baseline_available: bool = True,
+    previous_findings: list[Mapping[str, Any]] = (),
+    author_responses: list[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     charter = viewpoint_charter(dict(packet))
     unresolved = structure_unresolved_items(dict(packet))
-    routes = argument_route_charter(dict(packet))
-    sources = source_texts(dict(packet))
+    checklist = build_checklist(packet)
     fingerprints: dict[str, Any] = {}
     stage_errors: list[dict[str, str]] = []
-
-    delta_scope: dict[str, Any] | None = None
-    if baseline_manuscript is not None:
-        changed, ending = changed_and_ending_paragraphs(baseline_manuscript, manuscript)
-        delta_scope = {
-            "mode": "delta",
-            "changed_paragraphs": [p["text"] for p in changed],
-            "ending_paragraphs": [p["text"] for p in ending],
-        }
-
-    alignment_payload = {
-        "manuscript_markdown": manuscript,
-        "approved_viewpoints": charter,
-        "unresolved_items": unresolved,
-        "source_originals": sources,
-    }
-    if delta_scope is not None and alignment_baseline_available:
-        alignment_payload["review_scope"] = delta_scope
-    try:
-        alignment, fingerprints["alignment"] = _call(
-            clients["alignment"], PROMPTS / "draft_first_alignment_check.md",
-            alignment_payload, ALIGNMENT_SCHEMA,
-        )
-        validate_alignment(alignment, manuscript=manuscript)
-        fingerprints["alignment"]["result_sha256"] = result_sha256(alignment)
-        _write(round_dir / "alignment.json", alignment)
-    except (CodexSubscriptionError, SourceReadingTransportExhausted) as exc:
-        alignment = None
-        stage_errors.append({"stage": "alignment", "error": str(exc)[-500:]})
-        fingerprints["alignment"] = {"status": "provider_unavailable", "model": clients["alignment"].model}
 
     blind_read, fingerprints["blind_read"] = _call(
         clients["blind_read"],
@@ -599,84 +682,68 @@ def run_gates(
     _write(round_dir / "blind-read.json", blind_read)
 
     blind_compare = None
-    if alignment is not None:
-        try:
-            blind_compare, fingerprints["blind_compare"] = _call(
-                clients["blind_compare"], PROMPTS / "draft_first_blind_compare.md",
-                {"approved_viewpoints": charter, "unresolved_items": unresolved, "blind_read": blind_read},
-                BLIND_COMPARE_SCHEMA,
-            )
-            fingerprints["blind_compare"]["result_sha256"] = result_sha256(blind_compare)
-            _write(round_dir / "blind-compare.json", blind_compare)
-        except CodexSubscriptionError as exc:
-            stage_errors.append({"stage": "blind_compare", "error": str(exc)[-500:]})
-    else:
-        stage_errors.append({"stage": "blind_compare", "error": "not attempted while its provider is unavailable"})
-
-    review_payload = {
-        "manuscript_markdown": manuscript,
-        "approved_viewpoints": charter,
-        "unresolved_items": unresolved,
-        "argument_routes": routes,
-        "source_originals": sources,
-        "quality_profile": profile,
-    }
-    if delta_scope is not None:
-        review_payload["review_scope"] = delta_scope
-        review_payload["baseline_review"] = dict(baseline_review or {})
-    # One retry when the review breaks its own contract. Run 3's reviewer
-    # quoted 「於新約聖經上」 for the draft's 「中」; the program was right to
-    # reject it, but the rejection ended the whole run. A rejected reply is
-    # not a review: it is kept beside the one accepted review, never scored.
-    rejected_reviews: list[dict[str, Any]] = []
-    for attempt in range(2):
-        payload = dict(review_payload)
-        if rejected_reviews:
-            payload["previous_attempt_rejected"] = rejected_reviews[-1]["error"]
-        review, fingerprints["editorial"] = _call(
-            clients["editorial"],
-            PROMPTS / "draft_first_editorial_review.md",
-            payload,
-            _review_schema(profile),
+    try:
+        blind_compare, fingerprints["blind_compare"] = _call(
+            clients["blind_compare"], PROMPTS / "draft_first_blind_compare.md",
+            {"approved_viewpoints": charter, "unresolved_items": unresolved, "blind_read": blind_read},
+            BLIND_COMPARE_SCHEMA,
         )
-        if delta_scope is not None and baseline_review is not None:
+        fingerprints["blind_compare"]["result_sha256"] = result_sha256(blind_compare)
+        _write(round_dir / "blind-compare.json", blind_compare)
+    except CodexSubscriptionError as exc:
+        stage_errors.append({"stage": "blind_compare", "error": str(exc)[-500:]})
+
+    disputed_ids = [str(item["finding_id"]) for item in author_responses if item.get("response") == "disputed"]
+    task = {
+        "round": round_number,
+        "self_check": list(self_check),
+        "previous_findings": list(previous_findings),
+        "author_responses": list(author_responses),
+    }
+    review = None
+    try:
+        review, fingerprints["review"] = run_two_way_review(
+            agent=clients["review"], manuscript=manuscript, packet=packet, profile=profile,
+            checklist=checklist, task=task, round_dir=round_dir, disputed_ids=disputed_ids,
+        )
+        if baseline_review is not None:
             review, score_provenance = merge_delta_scores(baseline_review, review)
             review["score_provenance"] = score_provenance
-        try:
-            review_verdict = validate_review(review, manuscript=manuscript, profile=profile)
-            break
-        except DraftReviewContractError as error:
-            rejected_reviews.append({"error": str(error), "review": review})
-            _write(round_dir / "editorial-review-rejected.json", {"rejected_attempts": rejected_reviews})
-            if attempt:
-                raise
-    fingerprints["editorial"]["rejected_attempts"] = len(rejected_reviews)
-    fingerprints["editorial"]["result_sha256"] = result_sha256(review)
-    _write(round_dir / "editorial-review.json", review)
+            review["verdict"] = validate_review(review, manuscript=manuscript, profile=profile)
+        fingerprints["review"]["result_sha256"] = result_sha256(review)
+        _write(round_dir / "review.json", review)
+    except (CodexSubscriptionError, ReviewAgentError, SourceReadingTransportExhausted, DraftReviewContractError) as exc:
+        # No accepted review is not a pass: the missing check stays incomplete.
+        stage_errors.append({"stage": "review", "error": str(exc)[-500:]})
+        fingerprints["review"] = {"status": "provider_unavailable", "model": clients["review"].model}
 
     quote_report = verbatim_quote_report(manuscript, dict(packet), scripture_corpus(packet))
     backstage_report = backstage_language_report(manuscript)
+    self_check_problems = disposition_problems(checklist, list(self_check), manuscript)
     blocking = merge_blocking_findings(
-        alignment=alignment,
         blind_read=blind_read,
         blind_compare=blind_compare,
         review=review,
-        review_verdict=review_verdict,
         quote_report=quote_report,
         backstage_report=backstage_report,
+        self_check_problems=self_check_problems,
+        round_number=round_number,
     )
     outcome = {
+        "round": round_number,
         "manuscript_sha256": sha256_text(manuscript),
+        "checklist_sha256": sha256_json(checklist),
         "gate_fingerprints": fingerprints,
         "review": review,
+        "review_verdict": (review or {}).get("verdict"),
         "quote_report": quote_report,
         "backstage_language_report": backstage_report,
-        "review_verdict": review_verdict,
+        "self_check_problems": self_check_problems,
         "blind_read": blind_read,
         "blind_compare": blind_compare,
         "blocking_findings": blocking,
         "stage_errors": stage_errors,
-        "alignment_completed": alignment is not None,
+        "review_completed": review is not None,
         "passed": not blocking and not stage_errors,
     }
     _write(round_dir / "outcome.json", outcome)
@@ -688,6 +755,10 @@ def main() -> int:
     load_dotenv(PROJECT_ROOT / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--draft", type=Path, required=True, help="draft.md from the author runner")
+    parser.add_argument(
+        "--self-check", type=Path,
+        help="the author's self-check.json; defaults to the one beside the draft",
+    )
     parser.add_argument("--packet", type=Path, required=True)
     parser.add_argument(
         "--quality-profile",
@@ -702,27 +773,27 @@ def main() -> int:
     packet = raw.get("result", raw)
     profile = json.loads(args.quality_profile.read_text(encoding="utf-8"))
     manuscript = args.draft.read_text(encoding="utf-8")
+    self_check_path = args.self_check or args.draft.with_name("self-check.json")
+    self_check = json.loads(self_check_path.read_text(encoding="utf-8")) if self_check_path.exists() else []
 
     clients = {
-        "alignment": CodexSubscriptionClient(model="gpt-5.6-sol", reasoning_effort="high"),
         "blind_read": ClaudeSubscriptionClient(model="claude-haiku-4-5", reasoning_effort="high"),
-        "blind_compare": CodexSubscriptionClient(model="gpt-5.6-sol", reasoning_effort="high"),
-        "editorial": ClaudeSubscriptionClient(model="claude-fable-5", reasoning_effort="high"),
+        "blind_compare": CodexSubscriptionClient(model=REVIEW_MODEL, reasoning_effort="high"),
+        "review": CodexReviewAgent(model=REVIEW_MODEL, reasoning_effort="high"),
         "revision": ClaudeSubscriptionClient(model="claude-opus-5", reasoning_effort="high"),
     }
-    for name in ("alignment", "editorial", "revision"):
-        clients[name] = with_source_reading(clients[name], packet, args.output_dir / "source-reading" / name)
-    writing_rules = (PROMPTS / "draft_first_topic_author.md").read_text(encoding="utf-8")
-    revision_prompt = (
-        (PROMPTS / "draft_first_revision.md")
-        .read_text(encoding="utf-8")
-        .replace("{WRITING_RULES}", writing_rules)
+    clients["revision"] = with_source_reading(clients["revision"], packet, args.output_dir / "source-reading" / "revision")
+    revision_prompt = prompt_text(PROMPTS / "draft_first_revision.md").replace(
+        "{WRITING_RULES}", prompt_text(PROMPTS / "draft_first_topic_author.md")
     )
+    checklist = build_checklist(packet)
+    corpus = quote_corpus(packet, checklist)
+    scripture = scripture_corpus(packet)
 
     history: list[dict[str, Any]] = []
-    baseline_manuscript: str | None = None
     baseline_review: dict[str, Any] | None = None
-    alignment_baseline_available = False
+    previous_findings: list[dict[str, Any]] = []
+    author_responses: list[dict[str, Any]] = []
     for round_number in range(MAX_REVISION_ROUNDS + 1):
         round_dir = args.output_dir / f"round-{round_number:02d}"
         outcome = run_gates(
@@ -731,17 +802,17 @@ def main() -> int:
             profile=profile,
             clients=clients,
             round_dir=round_dir,
-            baseline_manuscript=baseline_manuscript,
+            round_number=round_number,
+            self_check=self_check,
             baseline_review=baseline_review,
-            alignment_baseline_available=alignment_baseline_available,
+            previous_findings=previous_findings,
+            author_responses=author_responses,
         )
-        alignment_baseline_available = alignment_baseline_available or outcome["alignment_completed"]
-        baseline_manuscript = manuscript
-        baseline_review = outcome.get("review")
+        baseline_review = outcome.get("review") or baseline_review
         history.append(
             {
                 "round": round_number,
-                "mode": "delta" if round_number else "full",
+                "mode": "full",
                 "passed": outcome["passed"],
                 "blocking_count": len(outcome["blocking_findings"]),
                 "blind_answer": outcome["blind_read"]["answer_in_one_sentence"],
@@ -753,10 +824,13 @@ def main() -> int:
             outcome.get("stage_errors") and not outcome["blocking_findings"]
         ):
             break
+        findings = outcome["blocking_findings"]
         revision_payload = json.dumps(
             {
                 "manuscript_markdown": manuscript,
-                "findings": outcome["blocking_findings"],
+                "findings": findings,
+                "checklist": checklist,
+                "self_check": self_check,
                 "approved_viewpoints": viewpoint_charter(dict(packet)),
                 "unresolved_items": structure_unresolved_items(dict(packet)),
                 "source_originals": source_texts(dict(packet)),
@@ -770,13 +844,17 @@ def main() -> int:
         for _attempt in range(2):
             revision = clients["revision"].generate_json(revision_prompt, revision_payload, REVISION_SCHEMA)
             try:
-                revised = validate_revision(manuscript, revision, outcome["blocking_findings"])
+                revised = validate_revision(manuscript, revision, findings, corpus=corpus, scripture=scripture)
                 break
             except DraftReviewContractError as error:
                 rejections.append(str(error))
         _write(
             round_dir / "revision.json",
-            {"dispositions": revision.get("dispositions") or [], "rejected_attempts": rejections},
+            {
+                "responses": revision.get("responses") or [],
+                "self_check": revision.get("self_check") or [],
+                "rejected_attempts": rejections,
+            },
         )
         if revised is None:
             # Keep the reviewed manuscript; an empty revision is not a draft.
@@ -785,13 +863,21 @@ def main() -> int:
             )
             break
         manuscript = revised
+        self_check = list(revision.get("self_check") or [])
+        responses = {str(item["finding_id"]): item for item in revision["responses"]}
+        previous_findings = findings
+        author_responses = [
+            {**responses[str(finding["finding_id"])], "finding": finding} for finding in findings
+        ]
         (round_dir / "revised-draft.md").write_text(manuscript, encoding="utf-8")
+        _write(round_dir / "revised-self-check.json", self_check)
 
     final = {
-        "schema_version": "wang_draft_first_review_run_v1",
+        "schema_version": "wang_draft_first_review_run_v2",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "draft_path": str(args.draft),
         "evidence_packet_sha256": packet.get("evidence_packet_sha256"),
+        "checklist_sha256": sha256_json(checklist),
         "quality_profile_id": profile.get("profile_id"),
         "quality_profile_sha256": sha256_text(
             args.quality_profile.read_text(encoding="utf-8")
@@ -807,6 +893,7 @@ def main() -> int:
     }
     final["run_sha256"] = sha256_json(final)
     (args.output_dir / "final.md").write_text(manuscript, encoding="utf-8")
+    _write(args.output_dir / "final-self-check.json", self_check)
     _write(args.output_dir / "review-run.json", final)
     print(json.dumps({k: final[k] for k in ("status", "rounds")}, ensure_ascii=False))
     return 0

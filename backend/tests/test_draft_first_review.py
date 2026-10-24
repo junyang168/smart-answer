@@ -6,7 +6,6 @@ import pytest
 from backend.pipeline.draft_first_review_runner import (
     DraftReviewContractError,
     merge_blocking_findings,
-    validate_alignment,
     validate_review,
 )
 
@@ -38,16 +37,6 @@ def _review(score_a=13, score_b=9, failed=False, findings=()):
 MANUSCRIPT = "第一段。證據句。經文沒有說明這件事。結尾句。"
 
 
-def test_alignment_quotes_must_be_verbatim():
-    validate_alignment(
-        {"findings": [{"quote": "經文沒有說明", "kind": "attribution_swap", "note": "偷換"}]},
-        manuscript=MANUSCRIPT,
-    )
-    with pytest.raises(DraftReviewContractError, match="not verbatim"):
-        validate_alignment(
-            {"findings": [{"quote": "稿裡沒有這句", "kind": "beyond_source", "note": ""}]},
-            manuscript=MANUSCRIPT,
-        )
 
 
 def test_review_verdict_derives_from_minimums_not_totals():
@@ -88,14 +77,15 @@ def test_review_anchor_must_be_verbatim():
         )
 
 
+def _finding(anchor, dimension, blocking=True, kind="quality", direction="quality", item_id="", source_quote="", upholds=""):
+    return {"direction": direction, "kind": kind, "dimension_id": dimension, "item_id": item_id,
+            "anchor": anchor, "source_quote": source_quote, "summary": "s", "required_change": "r",
+            "blocking": blocking, "upholds": upholds}
+
+
 def test_blocking_findings_merge_across_gates():
     blocking = merge_blocking_findings(
         blind_read={"comprehension_obstacles": []},
-        alignment={
-            "findings": [
-                {"quote": "經文沒有說明這件事", "kind": "attribution_swap", "note": "把講道的沉默說成經文的"}
-            ]
-        },
         blind_compare={
             "answer_matches_settled_positions": True,
             "modality_preserved": False,
@@ -103,42 +93,25 @@ def test_blocking_findings_merge_across_gates():
         },
         review=_review(
             findings=[
-                {
-                    "anchor": "結尾句。",
-                    "dimension_id": "general_reader_readability",
-                    "summary": "s",
-                    "required_change": "r",
-                    "blocking": True,
-                },
-                {
-                    "anchor": "第一段。",
-                    "dimension_id": "source_and_exegesis",
-                    "summary": "nonblocking",
-                    "required_change": "",
-                    "blocking": False,
-                },
+                _finding("經文沒有說明這件事", "source_and_exegesis", kind="attribution_swap", direction="added"),
+                _finding("結尾句。", "general_reader_readability"),
+                _finding("第一段。", "source_and_exegesis", blocking=False),
             ]
         ),
-        review_verdict={"dimensions_below_minimum": [], "hard_failures_failed": []},
         quote_report={"quotes_failing": ["改動過的引文"]},
+        round_number=1,
     )
-    gates = [item["gate"] for item in blocking]
-    assert gates == ["alignment", "quote_check", "blind_read", "editorial_review"]
-    kinds = {item["kind"] for item in blocking}
-    assert "attribution_swap" in kinds and "reader_path_broken" in kinds
+    assert [item["gate"] for item in blocking] == ["quote_check", "blind_read", "review", "review"]
+    assert {item["kind"] for item in blocking} >= {"attribution_swap", "reader_path_broken"}
+    # Every finding carries an id the author's response names.
+    assert [item["finding_id"] for item in blocking] == ["R1-01", "R1-02", "R1-03", "R1-04"]
 
 
 def test_clean_gates_produce_no_blocking_findings():
     blocking = merge_blocking_findings(
         blind_read={"comprehension_obstacles": []},
-        alignment={"findings": []},
-        blind_compare={
-            "answer_matches_settled_positions": True,
-            "modality_preserved": True,
-            "mismatches": [],
-        },
+        blind_compare={"answer_matches_settled_positions": True, "modality_preserved": True, "mismatches": []},
         review=_review(),
-        review_verdict={"dimensions_below_minimum": [], "hard_failures_failed": []},
         quote_report={"quotes_failing": []},
     )
     assert blocking == []
@@ -152,24 +125,24 @@ def test_provider_failure_does_not_pass_but_other_independent_checks_continue(tm
 
     def call(client, prompt, payload, schema):
         called.append(prompt.name)
-        if prompt.name == "draft_first_alignment_check.md":
-            raise CodexSubscriptionError("429")
         if prompt.name == "draft_first_blind_read.md":
             return {"answer_in_one_sentence": "answer", "comprehension_obstacles": []}, {}
-        assert prompt.name == "draft_first_editorial_review.md"
-        return _review(), {}
+        return {"answer_matches_settled_positions": True, "modality_preserved": True, "mismatches": []}, {}
+
+    def review(**kwargs):
+        raise CodexSubscriptionError("429")
 
     monkeypatch.setattr(runner, "_call", call)
     packet = {"focal_viewpoints": [], "source_originals": {"originals": []}}
+    clients = {name: SimpleNamespace(model=name) for name in ["blind_read", "blind_compare"]}
+    clients["review"] = SimpleNamespace(model="gpt", review=review)
     outcome = runner.run_gates(manuscript=MANUSCRIPT, packet=packet, profile=_profile(),
-        clients={name: SimpleNamespace(model=name) for name in ["alignment", "blind_read", "blind_compare", "editorial"]},
-        round_dir=tmp_path)
+                               clients=clients, round_dir=tmp_path)
     assert outcome["passed"] is False
     assert outcome["blocking_findings"] == []
-    assert outcome["alignment_completed"] is False
-    assert {e["stage"] for e in outcome["stage_errors"]} == {"alignment", "blind_compare"}
-    assert "draft_first_editorial_review.md" in called
-    assert "draft_first_blind_compare.md" not in called
+    assert outcome["review_completed"] is False
+    assert {e["stage"] for e in outcome["stage_errors"]} == {"review"}
+    assert called == ["draft_first_blind_read.md", "draft_first_blind_compare.md"]
 
 
 def test_unresolved_items_reach_every_payload():
@@ -185,8 +158,8 @@ def test_unresolved_items_reach_every_payload():
     assert structure_unresolved_items(packet) == ["三种正面识别之间的关系未统一"]
     assert structure_unresolved_items({}) == []
 
-    gate_source = inspect.getsource(review.run_gates)
-    assert gate_source.count('"unresolved_items": unresolved') == 3
+    assert '"unresolved_items": unresolved' in inspect.getsource(review.run_gates)
+    assert '"unresolved_items.json": structure_unresolved_items' in inspect.getsource(review.run_two_way_review)
     main_source = inspect.getsource(review.main)
     assert '"unresolved_items": structure_unresolved_items(dict(packet))' in main_source
 
@@ -194,27 +167,16 @@ def test_unresolved_items_reach_every_payload():
 # ---- #293 hardening ----
 
 
-def test_changed_and_ending_paragraphs():
-    from backend.pipeline.draft_first_review_runner import changed_and_ending_paragraphs
-
-    baseline = "# T\n\n甲段。\n\n乙段。\n\n收束段落不变。\n"
-    revised = "# T\n\n甲段改了。\n\n乙段。\n\n插入的新段。\n\n收束段落不变。\n"
-    changed, ending = changed_and_ending_paragraphs(baseline, revised)
-    assert [p["text"] for p in changed] == ["甲段改了。", "插入的新段。"]
-    # the unchanged closing paragraph is still re-read every round
-    assert [p["text"] for p in ending] == ["插入的新段。", "收束段落不变。"]
 
 
-def test_gates_carry_routes_fingerprints_and_delta_scope():
+def test_gates_carry_routes_fingerprints_and_inherited_scores():
     import inspect
     from backend.pipeline import draft_first_review_runner as review
 
+    assert '"argument_routes.json": argument_route_charter' in inspect.getsource(review.run_two_way_review)
     src = inspect.getsource(review.run_gates)
-    assert '"argument_routes": routes' in src
-    assert 'fingerprints["alignment"]' in src and 'fingerprints["editorial"]' in src
-    assert '"review_scope"' in src and '"baseline_review"' in src
-    main_src = inspect.getsource(review.main)
-    assert "baseline_manuscript=baseline_manuscript" in main_src
+    assert 'fingerprints["review"]' in src and "merge_delta_scores(baseline_review, review)" in src
+    assert "baseline_review=baseline_review" in inspect.getsource(review.main)
 
 
 def test_excerpt_overlap_flags_unrelated_spans():
@@ -377,7 +339,7 @@ def test_gate_outputs_are_sha_bound():
     from backend.pipeline import draft_first_review_runner as review
 
     src = inspect.getsource(review.run_gates)
-    assert src.count('["result_sha256"]') == 4
+    assert src.count('["result_sha256"]') == 3
     assert '"outcome_sha256"' in inspect.getsource(review.main)
 
 
@@ -414,8 +376,8 @@ def test_author_payload_carries_routes_and_layered_license():
     prompts = Path(author.__file__).parent / "prompts"
     rules = (prompts / "draft_first_topic_author.md").read_text()
     assert "路线是骨架不是上限" in rules
-    alignment = (prompts / "draft_first_alignment_check.md").read_text()
-    assert "不得再叠加一次否定" in alignment
+    reviewer = (prompts / "draft_first_two_way_review.md").read_text()
+    assert "不得再叠加一次否定" in reviewer
 
 
 def test_backstage_language_flags_production_words_and_sermon_location_tags():
@@ -459,10 +421,8 @@ def test_backstage_language_exempts_footnotes_quotes_and_one_named_speaker():
 def test_backstage_findings_block_after_quote_check():
     blocking = merge_blocking_findings(
         blind_read={"comprehension_obstacles": []},
-        alignment={"findings": []},
         blind_compare=None,
         review=_review(findings=[]),
-        review_verdict={"dimensions_below_minimum": [], "hard_failures_failed": []},
         quote_report={"quotes_failing": []},
         backstage_report={
             "backstage_terms": ["母本"],
@@ -550,17 +510,15 @@ def test_placeholder_revision_is_rejected():
     from backend.pipeline.draft_first_review_runner import validate_revision
 
     before = "# 標題\n\n" + "正文。" * 200
-    findings = [{"gate": "editorial_review"}, {"gate": "blind_read"}]
-    with pytest.raises(DraftReviewContractError, match="dispositions"):
-        validate_revision(before, {"manuscript_markdown": "# 標題\nPLACEHOLDER", "dispositions": []}, findings)
+    findings = [{"finding_id": "R0-01", "gate": "review"}, {"finding_id": "R0-02", "gate": "blind_read"}]
+    fixed = [{"finding_id": "R0-01", "response": "fixed", "note": "", "source_quote": ""},
+             {"finding_id": "R0-02", "response": "fixed", "note": "", "source_quote": ""}]
+    with pytest.raises(DraftReviewContractError, match="answered 0"):
+        validate_revision(before, {"manuscript_markdown": "# 標題\nPLACEHOLDER", "responses": []}, findings)
     with pytest.raises(DraftReviewContractError, match="shrank"):
-        validate_revision(
-            before,
-            {"manuscript_markdown": "# 標題\nPLACEHOLDER", "dispositions": [{}, {}]},
-            findings,
-        )
+        validate_revision(before, {"manuscript_markdown": "# 標題\nPLACEHOLDER", "responses": fixed}, findings)
     revised = before.replace("正文。", "正文！", 1)
-    assert validate_revision(before, {"manuscript_markdown": revised, "dispositions": [{}, {}]}, findings) == revised
+    assert validate_revision(before, {"manuscript_markdown": revised, "responses": fixed}, findings) == revised
 
 
 def test_the_body_names_the_professor_at_most_twice():
@@ -580,10 +538,8 @@ def test_the_body_names_the_professor_at_most_twice():
     assert len(report["professor_names"]) == 3
     blocking = merge_blocking_findings(
         blind_read={"comprehension_obstacles": []},
-        alignment={"findings": []},
         blind_compare=None,
         review=_review(findings=[]),
-        review_verdict={"dimensions_below_minimum": [], "hard_failures_failed": []},
         quote_report={"quotes_failing": []},
         backstage_report=report,
     )
@@ -592,9 +548,8 @@ def test_the_body_names_the_professor_at_most_twice():
     assert blocking[0]["anchor"] == "王教授說得很直接："
     two = backstage_language_report("\n".join(manuscript.splitlines()[:3]))
     assert not merge_blocking_findings(
-        blind_read={"comprehension_obstacles": []}, alignment={"findings": []}, blind_compare=None,
-        review=_review(findings=[]), review_verdict={"dimensions_below_minimum": [], "hard_failures_failed": []},
-        quote_report={"quotes_failing": []}, backstage_report=two)
+        blind_read={"comprehension_obstacles": []}, blind_compare=None,
+        review=_review(findings=[]), quote_report={"quotes_failing": []}, backstage_report=two)
 
 
 def test_viewpoint_charter_carries_observations_and_the_proposition_parts():
@@ -626,46 +581,8 @@ def test_prompts_state_one_naming_observations_and_the_sign_of_polarity():
     author = (prompts / "draft_first_topic_author.md").read_text()
     assert "正文点名教授至多两次" in author and "没有路线不等于没有依据" in author
     assert "同段不重复" not in author
-    for name in ("draft_first_revision.md", "draft_first_editorial_review.md"):
+    for name in ("draft_first_revision.md", "draft_first_two_way_review.md"):
         assert "第一次逐字引用" in (prompts / name).read_text()
-    alignment = (prompts / "draft_first_alignment_check.md").read_text()
-    assert "不得再叠加一次否定" in alignment and "polarity 为 denied 的立场不得被正面断言" not in alignment
-    assert "support_scope_note" in alignment
-
-
-def test_a_rejected_editorial_reply_is_retried_once_and_kept(tmp_path, monkeypatch):
-    from types import SimpleNamespace
-    from backend.pipeline import draft_first_review_runner as runner
-
-    # Run 3: the reviewer quoted 「上」 for the draft's 「中」 and the whole run ended.
-    replies = [_review(findings=[{"anchor": "不在成稿裡的句子", "dimension_id": "general_reader_readability",
-                                   "summary": "s", "required_change": "r", "blocking": True}]), _review()]
-    payloads = []
-
-    def call(client, prompt, payload, schema):
-        if prompt.name == "draft_first_blind_read.md":
-            return {"answer_in_one_sentence": "answer", "comprehension_obstacles": []}, {}
-        if prompt.name == "draft_first_alignment_check.md":
-            return {"findings": []}, {}
-        if prompt.name == "draft_first_blind_compare.md":
-            return {"answer_matches_settled_positions": True, "modality_preserved": True, "mismatches": []}, {}
-        payloads.append(payload)
-        return replies.pop(0), {}
-
-    monkeypatch.setattr(runner, "_call", call)
-    packet = {"focal_viewpoints": [], "source_originals": {"originals": []}}
-    clients = {name: SimpleNamespace(model=name) for name in ["alignment", "blind_read", "blind_compare", "editorial"]}
-    runner.run_gates(manuscript=MANUSCRIPT, packet=packet, profile=_profile(), clients=clients, round_dir=tmp_path)
-    assert len(payloads) == 2 and "previous_attempt_rejected" in payloads[1]
-    assert "not verbatim" in payloads[1]["previous_attempt_rejected"]
-    kept = json.loads((tmp_path / "editorial-review-rejected.json").read_text())
-    assert len(kept["rejected_attempts"]) == 1
-    assert json.loads((tmp_path / "editorial-review.json").read_text())["findings"] == []
-
-    # A second rejection is final: no third call.
-    replies[:] = [_review(findings=[{"anchor": "仍不在成稿", "dimension_id": "general_reader_readability",
-                                      "summary": "s", "required_change": "r", "blocking": True}])] * 2
-    payloads.clear()
-    with pytest.raises(runner.DraftReviewContractError):
-        runner.run_gates(manuscript=MANUSCRIPT, packet=packet, profile=_profile(), clients=clients, round_dir=tmp_path / "b")
-    assert len(payloads) == 2
+    reviewer = (prompts / "draft_first_two_way_review.md").read_text()
+    assert "不得再叠加一次否定" in reviewer and "polarity 为 denied 的立场不得被正面断言" not in reviewer
+    assert "support_scope_note" in reviewer

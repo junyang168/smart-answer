@@ -28,21 +28,38 @@ from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
 from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 from backend.pipeline.matthew_exposition_authoring import sha256_text
 from backend.pipeline.draft_first_scripture import cited_verses, matches_scripture, scripture_corpus
+from backend.pipeline.draft_first_checklist import DISPOSITION_ITEM_SCHEMA, build_checklist, disposition_problems
 from backend.pipeline.draft_first_source_reader import with_source_reading
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-PROMPT_PATH = Path(__file__).with_name("prompts") / "draft_first_topic_author.md"
+PROMPTS = Path(__file__).with_name("prompts")
+PROMPT_PATH = PROMPTS / "draft_first_topic_author.md"
 
 DRAFT_SCHEMA: dict[str, Any] = {
-    "name": "wang_draft_first_topic_essay_v1",
+    "name": "wang_draft_first_topic_essay_v2",
     "strict": True,
     "schema": {
         "type": "object",
         "additionalProperties": False,
-        "properties": {"manuscript_markdown": {"type": "string"}},
-        "required": ["manuscript_markdown"],
+        "properties": {
+            "manuscript_markdown": {"type": "string"},
+            "self_check": {"type": "array", "items": DISPOSITION_ITEM_SCHEMA},
+        },
+        "required": ["manuscript_markdown", "self_check"],
     },
 }
+
+
+def prompt_text(path: Path) -> str:
+    """A prompt with the two-way rules filled in.
+
+    The author, the reviser and the reviewer read the same rule text, word
+    for word (owner, 2026-10-24): a rule only the reviewer knows gets the
+    author's draft blocked for something it was never told.
+    """
+
+    rules = (PROMPTS / "draft_first_two_way_rules.md").read_text(encoding="utf-8").strip()
+    return path.read_text(encoding="utf-8").replace("{TWO_WAY_RULES}", rules)
 
 
 def viewpoint_charter(packet: dict[str, Any]) -> list[dict[str, Any]]:
@@ -331,7 +348,8 @@ def main() -> int:
 
     raw = json.loads(args.packet.read_text(encoding="utf-8"))
     packet = raw.get("result", raw)
-    prompt = PROMPT_PATH.read_text(encoding="utf-8")
+    prompt = prompt_text(PROMPT_PATH)
+    checklist = build_checklist(packet)
 
     payload = {
         "reader_question": args.reader_question,
@@ -341,6 +359,7 @@ def main() -> int:
         "argument_routes": argument_route_charter(packet),
         "source_originals": source_texts(packet),
         "scripture_cuv": cited_verses(packet),
+        "checklist": checklist,
     }
     if args.series_context:
         payload["series_context"] = json.loads(
@@ -368,6 +387,10 @@ def main() -> int:
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "draft.md").write_text(manuscript, encoding="utf-8")
+    self_check = list(result.get("self_check") or [])
+    (args.output_dir / "self-check.json").write_text(
+        json.dumps(self_check, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     record = {
         "schema_version": "wang_draft_first_author_run_v1",
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -384,6 +407,8 @@ def main() -> int:
         "manuscript_chars": len(manuscript),
         "quote_report": verbatim_quote_report(manuscript, packet, scripture_corpus(packet)),
         "backstage_language_report": backstage_language_report(manuscript),
+        "checklist_items": len(checklist),
+        "self_check_problems": disposition_problems(checklist, self_check, manuscript),
         "source_reading": getattr(client, "source_reading_receipt", None),
     }
     record["run_sha256"] = sha256_json(record)
