@@ -1,9 +1,9 @@
 # Draft-first 双向审稿：方案
 
 > **读者**：Solution architect、神学编辑
-> **类型**：规范（待负责人批准；批准前不实作）
-> **状态**：草案
-> **与代码对齐**：不适用（描述尚未实作的方案；现状部分核对到 `5b65e744`）
+> **类型**：规范
+> **状态**：当前（负责人 2026-10-24 批准）
+> **与代码对齐**：2026-10-24 核对到 #439 分支的实作（`draft_first_review_runner`、`draft_first_review_agent`、`draft_first_checklist`、`draft_first_coverage_search`）
 > **权威范围**：draft-first 专题文章审稿的分工、双向忠实检查的范围与判准、修订循环、选材覆盖检查。写作规则仍由 [Draft-first 文章流程 v1](./draft_first_workflow_v1.md) 管辖。
 
 **目标：文章对教授的论证不增也不减，而且能证明审稿真的查过每一项。** 现行审稿只查「增」，不查「减」；审稿模型只能看喂给它的材料，自己查不了原文。
@@ -105,7 +105,7 @@ GPT agent（`gpt-6.1-sol`）在编辑选定观点之后、写作之前，检索�
 
 ### 2.7 校准
 
-负责人 2026-10-22 对 draft-A 的人工发现（K1–K10，`agent-comparison-20261022/answer-key-owner-findings.md`）作为常设回归集。审稿 prompt 或模型变化时重跑，比对命中与误报，才能知道审稿者是否仍与负责人一致。
+负责人 2026-10-22 对 draft-A 的人工发现（K1–K10，`agent-comparison-20261022/answer-key-owner-findings.md`）作为常设回归集，存于 `backend/config/draft_first_calibration/`，由 `scripts/draft-first-calibrate.py` 运行。审稿 prompt 或模型变化时重跑，比对命中与误报，才能知道审稿者是否仍与负责人一致。有模式的项由程序判命中；K5 这类只能人判的项列出交负责人。
 
 ## 三、与既有裁定的关系
 
