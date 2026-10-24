@@ -608,3 +608,14 @@ def test_quote_check_reads_verse_labels_nested_marks_and_block_speech_as_the_rea
     report = verbatim_quote_report(manuscript, packet, scripture)
     assert report["quotes_failing"] == ["我就是但以理書七章所說的那一位"]
     assert report["scripture_quotes"] == ["耶穌到了該撒利亞腓立比的境內，就問門徒說：「人說我人子是誰？」"]
+
+
+def test_author_and_reviewer_hold_one_plain_style_standard():
+    """Owner, 2026-10-24: 「代表神嘛」 is too colloquial; plain, not inspirational preaching."""
+
+    prompts = Path(__file__).resolve().parents[1] / "pipeline" / "prompts"
+    standards = {name: next(line for line in (prompts / name).read_text().splitlines() if "成功的标准" in line)
+                 for name in ("draft_first_topic_author.md", "draft_first_two_way_review.md")}
+    author, reviewer = standards.values()
+    assert author.split("**")[1] == reviewer.split("**")[1]
+    assert "不是讲台上鼓舞人心的讲道" in author and "讲台上的资深神学教授" not in author
