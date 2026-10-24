@@ -124,3 +124,24 @@ def test_compiler_excludes_retired_relations_but_keeps_active_tension():
         editorial_selection=p["structure"]["revision"], source_original_reader=_source_reader,
         source_delivery_mode="source_library")
     assert [r["viewpoint_relation_id"] for r in out["relations"]] == ["live"]
+
+
+def test_a_placeholder_reading_reply_is_retried_once_with_the_reason(tmp_path):
+    """#439: Opus answered 「（见上）」 with no requests, twice in one revision."""
+
+    p = packet()
+    sid = p["source_documents"][0]["source_id"]
+    placeholder = {"ready": False, "notebook": "（见上）", "requests": [], "retain": []}
+    client = Fake([
+        placeholder,
+        {"ready": False, "notebook": "", "retain": [],
+         "requests": [{"source_id": sid, "start_block": 2, "end_block": 2}]},
+        {"ready": True, "notebook": "read second", "requests": [], "retain": [{"source_id": sid, "block": 2}]},
+        {"manuscript_markdown": "model prose"},
+    ])
+    result = SourceReadingClient(client, p, tmp_path).generate_json("rules", '{"source_originals": []}', {})
+    assert result["manuscript_markdown"] == "model prose"
+    assert "previous_reply_rejected" in client.requests[1]
+    with pytest.raises(ValueError, match="no progress"):
+        SourceReadingClient(Fake([placeholder, placeholder]), p, tmp_path / "again").generate_json(
+            "rules", '{"source_originals": []}', {})

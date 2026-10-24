@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.pipeline.theological_evidence_packet import validate_theological_evidence_packet
@@ -90,6 +90,19 @@ class SourceReadingClient:
     def __getattr__(self, key):
         return getattr(self.client, key)
 
+    def _read_turn(self, stage: Path, prompt: str, text: str, kwargs: Mapping[str, Any]) -> dict[str, Any]:
+        stage.mkdir(exist_ok=True)
+        reply = _replay(stage, prompt, text)
+        (stage / "request.json").write_text(text)
+        (stage / "system.txt").write_text(prompt)
+        if reply is None:
+            try:
+                reply = self.client.generate_json(prompt, text, READ_SCHEMA, **kwargs)
+            finally:
+                _save_raw(stage, self.client.last_raw_response)
+        (stage / "response.json").write_text(json.dumps(reply, ensure_ascii=False, indent=2))
+        return reply
+
     def _read(self, requests):
         result = {}
         for request in requests:
@@ -164,16 +177,17 @@ class SourceReadingClient:
             if len(text.encode()) > 450_000:
                 raise ValueError("reading request exceeds complete request byte budget")
             stage = root / f"read-{turn:02d}"
-            stage.mkdir(exist_ok=True)
-            reply = _replay(stage, source_access_prompt, text)
-            (stage / "request.json").write_text(text)
-            (stage / "system.txt").write_text(source_access_prompt)
-            if reply is None:
-                try:
-                    reply = self.client.generate_json(source_access_prompt, text, READ_SCHEMA, **kwargs)
-                finally:
-                    _save_raw(stage, self.client.last_raw_response)
-            (stage / "response.json").write_text(json.dumps(reply, ensure_ascii=False, indent=2))
+            reply = self._read_turn(stage, source_access_prompt, text, kwargs)
+            if not reply["ready"] and not reply["requests"]:
+                # Opus under --json-schema sometimes writes its answer as prose
+                # and fills the structured reply with 「（见上）」 (#439, twice in
+                # one revision). One retry that says why, as revisions get; an
+                # identical second request would return the identical reply.
+                text = json.dumps({**request_payload, "previous_reply_rejected":
+                                   "上一次阅读控制回复没有请求、没有保留、也没有 ready（notebook 为「（见上）」之类的占位）。"
+                                   "结构化回复本身必须完整：notebook 写全文，requests 列出要读的块，或 ready=true 并 retain 证据。"},
+                                  ensure_ascii=False, sort_keys=True)
+                reply = self._read_turn(root / f"read-{turn:02d}-retry", source_access_prompt, text, kwargs)
             notebook = reply["notebook"]
             if len(notebook) > 6000:
                 raise ValueError("reading notebook exceeds capacity")
