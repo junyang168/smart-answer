@@ -586,3 +586,23 @@ def test_prompts_state_one_naming_observations_and_the_sign_of_polarity():
     reviewer = (prompts / "draft_first_two_way_review.md").read_text()
     assert "不得再叠加一次否定" in reviewer and "polarity 为 denied 的立场不得被正面断言" not in reviewer
     assert "support_scope_note" in reviewer
+
+
+def test_quote_check_reads_verse_labels_nested_marks_and_block_speech_as_the_reader_does():
+    """#439: 24 of 35 failures on run 3 were verse references inside the block."""
+
+    from backend.pipeline.draft_first_author_runner import verbatim_quote_report
+    from backend.pipeline.draft_first_scripture import normalize
+
+    packet = {"source_originals": {"originals": [{"content": "你看耶穌每次講「人子」、「Son of Man」都加上一個定冠詞，「the Son of Man」。"}]}}
+    verse = "耶穌到了該撒利亞腓立比的境內，就問門徒說：人說我人子是誰"
+    scripture = {"chapters": {}, "text": normalize(verse)}
+    manuscript = "\n".join([
+        "# 標題",
+        "他說：「你看耶穌每次講『人子』、『Son of Man』都加上一個定冠詞，『the Son of Man』。」",
+        "> 耶穌到了該撒利亞腓立比的境內，就問門徒說：「人說我人子是誰？」（太 16:13）",
+        "他說：「我就是但以理書七章所說的那一位」。",
+    ])
+    report = verbatim_quote_report(manuscript, packet, scripture)
+    assert report["quotes_failing"] == ["我就是但以理書七章所說的那一位"]
+    assert report["scripture_quotes"] == ["耶穌到了該撒利亞腓立比的境內，就問門徒說：「人說我人子是誰？」"]

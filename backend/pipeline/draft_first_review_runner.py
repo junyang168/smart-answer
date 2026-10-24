@@ -780,7 +780,9 @@ def main() -> int:
         "blind_read": ClaudeSubscriptionClient(model="claude-haiku-4-5", reasoning_effort="high"),
         "blind_compare": CodexSubscriptionClient(model=REVIEW_MODEL, reasoning_effort="high"),
         "review": CodexReviewAgent(model=REVIEW_MODEL, reasoning_effort="high"),
-        "revision": ClaudeSubscriptionClient(model="claude-opus-5", reasoning_effort="high"),
+        # A revision answers every finding and redoes the whole self-check; on the
+        # 人子 essay (51 findings, 68 items) it ran past the 15-minute default.
+        "revision": ClaudeSubscriptionClient(model="claude-opus-5", reasoning_effort="high", timeout_seconds=3600),
     }
     clients["revision"] = with_source_reading(clients["revision"], packet, args.output_dir / "source-reading" / "revision")
     revision_prompt = prompt_text(PROMPTS / "draft_first_revision.md").replace(

@@ -238,6 +238,9 @@ def backstage_language_report(manuscript: str) -> dict[str, Any]:
     }
 
 
+BLOCK_REFERENCE = re.compile(r"\s*[（(][^（()）]{0,8}\d+\s*[:：]\s*\d+[^（()）]{0,10}[)）]\s*$")
+
+
 def verbatim_quote_report(
     manuscript: str, packet: dict[str, Any], scripture: Mapping[str, Any] | None = None
 ) -> dict[str, Any]:
@@ -252,22 +255,32 @@ def verbatim_quote_report(
     corpus = "\n".join(
         str(item.get("content")) for item in packet["source_originals"]["originals"]
     )
+    # Inline quotes inside a quote block belong to the verse being shown (a
+    # speaker's words within 太16:13), which the block as a whole is checked
+    # for; only the article's own lines carry the professor's inline quotes.
+    prose = "\n".join(line for line in manuscript.splitlines() if not line.startswith(">"))
     # Corner brackets around short runs are term mentions (「性」,「使徒和先知」)
     # — ordinary Chinese typography, not quotation. Only spans long enough to
     # be an actual quoted sentence are held to the verbatim standard; the
     # fabrication risk this gate exists for lives in long quotes.
     quotes = [
         value.strip()
-        for value in re.findall(r"「([^」]+)」", manuscript)
+        for value in re.findall(r"「([^」]+)」", prose)
         if len(value.strip()) >= 8
     ]
+    # A verse block ends with its reference, 「……。（太 16:13）」: the
+    # reference is the article's label, not the verse (#439 run 3: 24 of 35
+    # failures were references).
     block_quotes = [
-        line[2:].strip()
+        BLOCK_REFERENCE.sub("", line[2:]).strip()
         for line in manuscript.splitlines()
         if line.startswith("> ") and not line.startswith("> ——")
     ]
+    # Nested quotation marks are typography: the sermon's 「人子」 inside a
+    # quoted sentence is written 『人子』 in the article.
     checked = [
-        {"quote": quote, "verbatim": quote in corpus, "matched": "sermon"}
+        {"quote": quote, "verbatim": quote in corpus or quote.replace("『", "「").replace("』", "」") in corpus,
+         "matched": "sermon"}
         for quote in quotes
         if quote
     ]
@@ -370,7 +383,7 @@ def main() -> int:
     client_type = (
         CodexSubscriptionClient if args.provider == "codex" else ClaudeSubscriptionClient
     )
-    client = client_type(model=args.model, reasoning_effort=args.reasoning_effort)
+    client = client_type(model=args.model, reasoning_effort=args.reasoning_effort, timeout_seconds=3600)
     client = with_source_reading(client, packet, args.output_dir / "source-reading")
     result = client.generate_json(prompt, payload_json, DRAFT_SCHEMA)
     manuscript = str(result["manuscript_markdown"])
