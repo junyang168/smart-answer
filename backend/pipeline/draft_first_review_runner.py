@@ -781,6 +781,42 @@ def run_gates(
     return outcome
 
 
+def continued_round(
+    previous: Path, packet: Mapping[str, Any], scripture: Mapping[str, Any]
+) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
+    """The last round of a stopped run, for one revision round the owner added.
+
+    Its reviewer findings stand as they were returned; the program checks are
+    re-run on the same manuscript, because a check fixed since then (#439:
+    CUV notes and spoken echoes passing as verses) is what the round is for.
+    """
+
+    manuscript = (previous / "final.md").read_text(encoding="utf-8")
+    self_check = json.loads((previous / "final-self-check.json").read_text(encoding="utf-8"))
+    last = max(previous.glob("round-*/outcome.json"), key=lambda path: path.parent.name)
+    outcome = json.loads(last.read_text(encoding="utf-8"))
+    if outcome["manuscript_sha256"] != sha256_text(manuscript):
+        raise DraftReviewContractError(f"{last} did not review {previous / 'final.md'}")
+    if outcome["passed"]:
+        raise DraftReviewContractError(f"{previous} already passed; nothing to continue")
+    quote_report = verbatim_quote_report(manuscript, dict(packet), scripture)
+    findings = merge_blocking_findings(
+        blind_read=outcome["blind_read"],
+        blind_compare=outcome.get("blind_compare"),
+        review=outcome.get("review"),
+        quote_report=quote_report,
+        backstage_report=outcome.get("backstage_language_report"),
+        self_check_problems=list(outcome.get("self_check_problems") or []),
+        round_number=int(outcome["round"]),
+    )
+    return manuscript, self_check, {
+        **outcome,
+        "quote_report": quote_report,
+        "blocking_findings": findings,
+        "continued_from": str(last),
+    }
+
+
 def main() -> int:
     from backend.pipeline.draft_first_source_reader import with_source_reading
     load_dotenv(PROJECT_ROOT / ".env")
@@ -798,6 +834,12 @@ def main() -> int:
         / "backend/config/editorial_quality_profiles/WQ-theological-topic-essay-v1.json",
     )
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--continue-from", type=Path,
+        help="a finished review run the owner extended by one round: revise its final.md "
+        "against its last findings (program checks re-run with the current code), then "
+        "review once more and stop",
+    )
     args = parser.parse_args()
 
     raw = json.loads(args.packet.read_text(encoding="utf-8"))
@@ -827,20 +869,30 @@ def main() -> int:
     baseline_review: dict[str, Any] | None = None
     previous_findings: list[dict[str, Any]] = []
     author_responses: list[dict[str, Any]] = []
-    for round_number in range(MAX_REVISION_ROUNDS + 1):
+    first_round, last_round, seeded = 0, MAX_REVISION_ROUNDS, None
+    if args.continue_from:
+        manuscript, self_check, seeded = continued_round(args.continue_from, packet, scripture)
+        first_round = int(seeded["round"])
+        last_round = first_round + 1
+        baseline_review = seeded.get("review")
+    for round_number in range(first_round, last_round + 1):
         round_dir = args.output_dir / f"round-{round_number:02d}"
-        outcome = run_gates(
-            manuscript=manuscript,
-            packet=packet,
-            profile=profile,
-            clients=clients,
-            round_dir=round_dir,
-            round_number=round_number,
-            self_check=self_check,
-            baseline_review=baseline_review,
-            previous_findings=previous_findings,
-            author_responses=author_responses,
-        )
+        if seeded is not None and round_number == first_round:
+            outcome = seeded
+            _write(round_dir / "outcome.json", outcome)
+        else:
+            outcome = run_gates(
+                manuscript=manuscript,
+                packet=packet,
+                profile=profile,
+                clients=clients,
+                round_dir=round_dir,
+                round_number=round_number,
+                self_check=self_check,
+                baseline_review=baseline_review,
+                previous_findings=previous_findings,
+                author_responses=author_responses,
+            )
         baseline_review = outcome.get("review") or baseline_review
         history.append(
             {
@@ -853,7 +905,7 @@ def main() -> int:
                 "gate_fingerprints": outcome["gate_fingerprints"],
             }
         )
-        if outcome["passed"] or round_number == MAX_REVISION_ROUNDS or (
+        if outcome["passed"] or round_number == last_round or (
             outcome.get("stage_errors") and not outcome["blocking_findings"]
         ):
             break
@@ -916,6 +968,7 @@ def main() -> int:
         "schema_version": "wang_draft_first_review_run_v2",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "draft_path": str(args.draft),
+        **({"continued_from": str(args.continue_from)} if args.continue_from else {}),
         "evidence_packet_sha256": packet.get("evidence_packet_sha256"),
         "checklist_sha256": sha256_json(checklist),
         "quality_profile_id": profile.get("profile_id"),

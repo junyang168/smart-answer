@@ -684,3 +684,28 @@ def test_quote_check_rejects_translator_notes_and_spoken_echoes_as_the_verse():
         "耶穌到了該撒利亞腓立比的境內，就問門徒說：「人說我〔有古卷無我字〕人子是誰？」",
         "因為這是我立約的血，為多人流出來，使罪得赦，為多人。",
     ]
+
+
+def test_an_extended_round_revises_the_stopped_draft_against_rechecked_programs(tmp_path):
+    """Owner, 2026-10-24: one more round for #439, with the fixed quote check."""
+
+    import pytest
+    from backend.pipeline.draft_first_review_runner import DraftReviewContractError, continued_round
+    from backend.pipeline.matthew_exposition_authoring import sha256_text
+
+    manuscript = "# 標題\n> 因為這是我立約的血，為多人流出來，使罪得赦，為多人。（太26:28）\n"
+    (tmp_path / "final.md").write_text(manuscript)
+    (tmp_path / "final-self-check.json").write_text("[]")
+    (tmp_path / "round-02").mkdir()
+    outcome = {"round": 2, "manuscript_sha256": sha256_text(manuscript), "passed": False,
+               "blind_read": {}, "blind_compare": None, "review": None,
+               "backstage_language_report": {}, "self_check_problems": [], "blocking_findings": []}
+    (tmp_path / "round-02" / "outcome.json").write_text(json.dumps(outcome))
+    packet = {"source_originals": {"originals": [{"content": "因為這是我立約的血，為多人流出來，使罪得赦，為多人。"}]}}
+    verse = "因為這是我立約的血為多人流出來使罪得赦"
+    _, _, seeded = continued_round(tmp_path, packet, {"chapters": {}, "text": verse, "verses": [verse]})
+    assert [(f["finding_id"], f["kind"]) for f in seeded["blocking_findings"]] == [("R2-01", "unverbatim_quote")]
+
+    (tmp_path / "final.md").write_text(manuscript + "改過了。\n")
+    with pytest.raises(DraftReviewContractError):
+        continued_round(tmp_path, packet, {"chapters": {}, "text": verse, "verses": [verse]})
