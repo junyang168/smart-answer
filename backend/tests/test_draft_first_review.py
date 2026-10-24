@@ -762,3 +762,17 @@ def test_author_and_reviewer_share_the_2026_10_24_reader_rules():
     assert "同一类问题一次列全" in reviewer and "覆盖压低它的全部原因" in reviewer
     assert "不应为此另写一句复述立场的话" in shared
     assert "落地是讲清楚，不是复述" in author
+
+
+def test_concise_is_one_standard_and_the_reviewer_knows_what_wordy_looks_like():
+    """Owner, 2026-10-24: 言之有物，言简意赅 -- concision scored 4/4 on a wordy draft."""
+
+    prompts = Path(__file__).resolve().parents[1] / "pipeline" / "prompts"
+    author = (prompts / "draft_first_topic_author.md").read_text()
+    reviewer = (prompts / "draft_first_two_way_review.md").read_text()
+    standard = [next(line for line in text.splitlines() if "成功的标准" in line).split("**")[1]
+                for text in (author, reviewer)]
+    assert standard[0] == standard[1] and "言之有物，言简意赅" in standard[0]
+    assert "不要原样嵌进正文当总结" in author
+    for kind in ("引完经文紧接着", "相邻几段说两三遍", "路标句", "Claim 的原句嵌进正文"):
+        assert kind in reviewer
