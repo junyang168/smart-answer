@@ -781,3 +781,20 @@ def test_concise_is_one_standard_and_the_reviewer_knows_what_wordy_looks_like():
     for kind in ("刚引完经文", "相邻几段换着说", "路标句", "Claim 的原句贴上"):
         assert kind in understanding
     assert "通读一遍" in understanding
+
+
+def test_writing_rules_are_grouped_and_referred_to_by_name():
+    """2026-10-24: rules had accreted by ruling; regrouped, so no 「第 9 条」 can go stale."""
+
+    import re
+
+    prompts = Path(__file__).resolve().parents[1] / "pipeline" / "prompts"
+    author = (prompts / "draft_first_topic_author.md").read_text()
+    for heading in ("## 一、忠实", "## 二、结构", "## 三、读者", "## 四、口吻"):
+        assert heading in author
+    assert author.index("你是一位神学编辑") < author.index("成功的标准")
+    for name in ("draft_first_topic_author.md", "draft_first_revision.md",
+                 "draft_first_two_way_review.md", "draft_first_two_way_rules.md"):
+        assert not re.search(r"第 ?\d+ ?条", (prompts / name).read_text()), name
+    source = (Path(__file__).resolve().parents[1] / "pipeline" / "draft_first_review_runner.py").read_text()
+    assert not re.search(r"写作规则第 ?\d+ ?条", source)

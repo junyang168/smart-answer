@@ -534,7 +534,7 @@ def merge_blocking_findings(
                 "gate": "backstage_check",
                 "kind": "backstage_language",
                 "anchor": term,
-                "summary": "正文出现后台用语；按写作规则第 9 条改为编者口吻直接讲解，说法差异移入编者注。",
+                "summary": "正文出现后台用语；按写作规则「以编者的口吻直接讲解」改为编者口吻直接讲解，说法差异移入编者注。",
             }
         )
     for tag in backstage.get("source_location_tags") or []:
