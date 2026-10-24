@@ -200,7 +200,10 @@ BACKSTAGE_TERMS = (
     "后期修正", "後期修正", "一般惯例", "一般慣例",
 )
 # Naming the professor before every quote turned the run-3 essay into nine
-# 「王教授說」; the body names him at most this often (owner, 2026-10-23).
+# 「王教授說」. He is named only for his own life and experience (the two
+# Dr. Wongs); exegesis and theology are the article's own voice (owner,
+# 2026-10-24). The count is the program's backstop; the reviewer judges what
+# each naming is about.
 MAX_PROFESSOR_NAMES = 2
 # 「醫學院的教授」 is someone else; 「王教授」「教授說」 are him.
 PROFESSOR_NAME = re.compile(r"(?<![的院])教授")

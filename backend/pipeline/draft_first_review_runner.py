@@ -512,7 +512,7 @@ def merge_blocking_findings(
                 "gate": "backstage_check",
                 "kind": "source_location_tag",
                 "anchor": tag,
-                "summary": "正文逐段标注出处；改为直接讲解，全文只在第一次逐字引用时点名一次。",
+                "summary": "正文标注出处；改为文章自己的口吻直接讲解，只在讲他本人的经历时点名。",
             }
         )
     names = backstage.get("professor_names") or []
@@ -523,8 +523,8 @@ def merge_blocking_findings(
                     "gate": "backstage_check",
                     "kind": "professor_named_again",
                     "anchor": name,
-                    "summary": f"正文点名教授 {len(names)} 次，至多 {MAX_PROFESSOR_NAMES} 次：只保留第一次逐字引用前的点名，"
-                    "其余改用「他」或把引语织进句子；可能被读成耶稣时不用「他」。",
+                    "summary": f"正文点名教授 {len(names)} 次，至多 {MAX_PROFESSOR_NAMES} 次：只在讲他本人的生活与经历时点名，"
+                    "释经与神学改为文章自己的口吻直接讲出，不以他为说话人或主语。",
                 }
             )
     # The author's self-check answers the same checklist the reviewer does;

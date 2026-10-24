@@ -580,9 +580,11 @@ def test_prompts_state_one_naming_observations_and_the_sign_of_polarity():
     prompts = Path(__file__).resolve().parents[1] / "pipeline" / "prompts"
     author = (prompts / "draft_first_topic_author.md").read_text()
     assert "正文点名教授至多两次" in author and "没有路线不等于没有依据" in author
-    assert "同段不重复" not in author
-    for name in ("draft_first_revision.md", "draft_first_two_way_review.md"):
-        assert "第一次逐字引用" in (prompts / name).read_text()
+    assert "同段不重复" not in author and "第一次逐字引用" not in author
+    # Owner, 2026-10-24: named only for his own life; exegesis and theology direct.
+    for name in ("draft_first_topic_author.md", "draft_first_revision.md", "draft_first_two_way_review.md"):
+        text = (prompts / name).read_text()
+        assert "只有讲到教授本人的生活与经历" in text and "第一次逐字引用" not in text
     reviewer = (prompts / "draft_first_two_way_review.md").read_text()
     assert "不得再叠加一次否定" in reviewer and "polarity 为 denied 的立场不得被正面断言" not in reviewer
     assert "support_scope_note" in reviewer
