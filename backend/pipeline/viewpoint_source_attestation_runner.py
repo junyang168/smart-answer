@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore
+from backend.api.canonical_repository.postgres_store import PostgresKnowledgeStore, REVIEW_FIELDS
 from backend.api.canonical_repository.knowledge_models import ClaimRecord
 from backend.api.canonical_repository.viewpoint_foundation import (
     semantic_record_sha,
@@ -29,6 +29,16 @@ from backend.pipeline.knowledge_package_merge import (
 
 def _read(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _review_input_meaning(claim: ClaimRecord) -> dict[str, Any]:
+    """Compare reviewed content, not metadata assigned by the review itself.
+
+    The current Claim's full hash is still required to match its sealed final
+    candidate and pinned manifest. Only this pre-review input comparison omits
+    the store's explicit review metadata fields; no content is normalized away.
+    """
+    return {key: value for key, value in claim.model_dump(mode="json").items() if key not in REVIEW_FIELDS}
 
 
 def _file_sha(path: Path) -> str:
@@ -213,7 +223,7 @@ def build_attestations(
                 raise ValueError(
                     f"{claim_id}: independent review input lacks the selected Claim"
                 ) from exc
-            if semantic_record_sha(reviewed_claim) != semantic_record_sha(current):
+            if _review_input_meaning(reviewed_claim) != _review_input_meaning(current):
                 raise ValueError(
                     f"{claim_id}: passing review covers different Claim semantics"
                 )

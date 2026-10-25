@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from copy import deepcopy
 from contextlib import contextmanager
 from collections.abc import Mapping, Sequence
@@ -19,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import fcntl
+from backend.pipeline.viewpoint_validation_context import current_check, typed_records, validation_phase, active_context
 
 from backend.api.canonical_repository.knowledge_models import (
     ClaimRecord,
@@ -76,6 +78,10 @@ class CvpProductionBlocked(ValueError):
 
 
 def file_sha256(path: Path) -> str:
+    from backend.pipeline.viewpoint_validation_context import active_context
+    ctx = active_context()
+    if ctx is not None:
+        return ctx.pin(path)
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
@@ -96,6 +102,10 @@ def collection_fingerprint(store: Any, collections: Sequence[str]) -> str:
 
 
 def collection_cut(store: Any, collections: Sequence[str]) -> dict[str, list[str]]:
+    from backend.pipeline.viewpoint_validation_context import active_context, current_registry_view
+    if active_context() is not None and hasattr(store, 'database_url'):
+        view = current_registry_view(store)
+        return {c: view.canonical_cut(c) for c in collections}
     cuts: dict[str, list[str]] = {}
     for collection in collections:
         cuts[collection] = sorted(
@@ -161,6 +171,7 @@ def validate_registry_transition(intent: Mapping[str, Any], *, store: Any) -> st
     return sha256_json(observed)
 
 
+@validation_phase
 def _validate_scope_packet(scope_packet: Mapping[str, Any], store: Any) -> list[str]:
     findings: list[str] = []
     try:
@@ -177,29 +188,22 @@ def _validate_scope_packet(scope_packet: Mapping[str, Any], store: Any) -> list[
     if len(blocked_claim_ids) != len(set(blocked_claim_ids)):
         findings.append("scope packet contains duplicate blocked Claim IDs")
 
-    current_claims = {
-        row.claim_id: row
-        for row in (
-            ClaimRecord.model_validate(raw) for raw in store.list_records("claims")
-        )
-    }
-    current_evidence = {
-        row.evidence_step_id: row
-        for row in (
-            EvidenceStepRecord.model_validate(raw)
-            for raw in store.list_records("evidence_steps")
-        )
-    }
-    current_fragments = {
-        row.fragment_id: row
-        for row in (
-            SourceFragmentRecord.model_validate(raw)
-            for raw in store.list_records("source_fragments")
-        )
-    }
+    if active_context() is not None and hasattr(store,'database_url'):
+        from backend.pipeline.viewpoint_current_scope import read_current_scope
+        ids = sorted({str(row.get('claim_id') or '') for row in
+            [*(scope_packet.get('claims') or []), *(scope_packet.get('excluded_claims') or [])]})
+        current_claims,current_evidence,current_fragments,source_rows = read_current_scope(store,ids)
+        source_records = list(source_rows.values())
+    else:
+        current_claims = typed_records(store,'claims',ClaimRecord,'claim_id')
+        current_evidence = typed_records(store,'evidence_steps',EvidenceStepRecord,'evidence_step_id')
+        current_fragments = typed_records(store,'source_fragments',SourceFragmentRecord,'fragment_id')
+        source_records = store.list_records("source_documents")
+    context_sources = {str(row.get("source_id") or ""): row for row in source_records}
+    context_cache = {}
     current_sources = {
         str(row.get("source_id") or ""): str(row.get("source_sha256") or "")
-        for row in store.list_records("source_documents")
+        for row in source_records
     }
     packet_claim_ids: list[str] = []
     for raw in scope_packet.get("claims") or []:
@@ -257,6 +261,18 @@ def _validate_scope_packet(scope_packet: Mapping[str, Any], store: Any) -> list[
                 "from current corpus"
             )
         for item in claim.evidence:
+            if (scope_packet.get("source_context_policy") == "same_registered_live_paragraph_v1"
+                    and item.source_modality != "visual" and item.source_context is None):
+                findings.append(f"{claim.claim_id}: required source paragraph context missing")
+            if item.source_context is not None:
+                from backend.pipeline.viewpoint_evidence_source_context import verify_source_context, load_context_source
+                try:
+                    source = context_sources[item.source_id]
+                    if item.source_id not in context_cache:
+                        context_cache[item.source_id] = load_context_source(source)
+                    verify_source_context(item, source, context_cache[item.source_id])
+                except (KeyError, OSError, ValueError) as exc:
+                    findings.append(f"{claim.claim_id}: source context validation failed: {exc}")
             evidence = current_evidence.get(item.evidence_step_id)
             fragment = current_fragments.get(item.source_fragment_id)
             if evidence is None or fragment is None:
@@ -290,6 +306,18 @@ def _validate_scope_packet(scope_packet: Mapping[str, Any], store: Any) -> list[
                 "source_sha256": item.source_sha256,
                 "anchor_state": item.anchor_state,
             }
+            # SVG evidence must not silently become a spoken quotation. Compare
+            # the typed provenance, including literal facts, on every freeze
+            # validation, not only when initially compiling the packet.
+            for field in ("source_modality", "visual_locator", "visual_block_sha256", "visual_facts"):
+                expected_evidence_projection[field] = getattr(fragment, field, None)
+                actual_evidence_projection[field] = getattr(item, field, None)
+            # Historical spoken fragments use either None or "spoken"; the
+            # review projection deliberately omits that default.
+            if expected_evidence_projection["source_modality"] != "visual":
+                expected_evidence_projection["source_modality"] = None
+                if not expected_evidence_projection["visual_facts"]:
+                    expected_evidence_projection["visual_facts"] = None
             if actual_evidence_projection != expected_evidence_projection:
                 findings.append(
                     f"{claim.claim_id}/{item.evidence_step_id}/"
@@ -348,7 +376,8 @@ def _validate_scope_packet(scope_packet: Mapping[str, Any], store: Any) -> list[
 def _artifact_binding(path: Path) -> dict[str, str]:
     if not path.is_file():
         raise CvpProductionBlocked([f"required artifact missing: {path}"])
-    return {"path": str(path.resolve()), "sha256": file_sha256(path)}
+    from backend.pipeline.viewpoint_backup_archive import logical_binding_path
+    return {"path": str(logical_binding_path(path)), "sha256": file_sha256(path)}
 
 
 def _passed_status(payload: Mapping[str, Any]) -> bool:
@@ -362,7 +391,105 @@ def _passed_status(payload: Mapping[str, Any]) -> bool:
     }
 
 
-def _validate_prerequisites(paths: Mapping[str, Path]) -> tuple[dict[str, Any], list[str]]:
+def accepted_grouping_in_passage_order(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Schedule intact Matthew groups by numeric passage, never size or group ID.
+
+    Ties retain the upstream argument-boundary order. The accepted manifest is
+    not modified: this is only an execution schedule over its original groups.
+    """
+    units = manifest.get("units") or []
+    by_id = {row["unit_id"]: row for row in units}
+    if len(by_id) != len(units):
+        raise CvpProductionBlocked(["duplicate passage unit in accepted grouping"])
+    ranked = []
+    for position, group in enumerate(manifest["groups"]):
+        unit = by_id.get(group.get("unit_id"))
+        match = re.fullmatch(r"Matt\.(\d+)\.(\d+)(?:-Matt\.(\d+)\.(\d+))?", str((unit or {}).get("passage_key") or ""))
+        if not match:
+            raise CvpProductionBlocked([f"{group['group_key']}: missing or invalid Matthew passage order"])
+        start_chapter, start_verse = map(int, match.groups()[:2])
+        end_chapter, end_verse = map(int, match.groups()[2:]) if match.group(3) is not None else (start_chapter, start_verse)
+        if not (1 <= start_chapter <= end_chapter <= 28 and start_verse >= 1 and end_verse >= 1) or (start_chapter, start_verse) > (end_chapter, end_verse):
+            raise CvpProductionBlocked([f"{group['group_key']}: reversed or invalid passage range"])
+        ranked.append(((start_chapter, start_verse, end_chapter, end_verse, position), group))
+    return [dict(group) for _, group in sorted(ranked, key=lambda row: row[0])]
+
+
+def accepted_grouping_canary(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    """Qualify the first chapter-ordered group; never skip ahead to an easier one."""
+    groups = accepted_grouping_in_passage_order(manifest)
+    if not groups:
+        raise CvpProductionBlocked(["accepted grouping has no first passage group"])
+    first = groups[0]
+    claims = {row["claim_id"]: row for row in manifest["claim_packets"]}
+    ids = first["claim_ids"]
+    if first["group_key"] == RESIDUAL_GROUP_KEY or not 2 <= len(ids) <= 20 or len({claims[cid]["source_id"] for cid in ids}) < 2:
+        raise CvpProductionBlocked(["first passage group does not meet multi-source canary requirements; cannot skip chapter order"])
+    return first
+
+
+def accepted_grouping_phase_group(manifest: Mapping[str, Any], stage: str) -> dict[str, Any]:
+    """Select one intact accepted group, never an operator-edited Claim subset."""
+    if stage == "canary":
+        return accepted_grouping_canary(manifest)
+    if not stage.startswith("group:"):
+        raise CvpProductionBlocked(["unsupported accepted grouping admission stage"])
+    key = stage[len("group:"):]
+    rows = [g for g in accepted_grouping_in_passage_order(manifest) if g["group_key"] == key]
+    if len(rows) != 1 or key == RESIDUAL_GROUP_KEY or not 1 <= len(rows[0]["claim_ids"]) <= 20:
+        raise CvpProductionBlocked(["invalid intact accepted group phase"])
+    return rows[0]
+
+
+def accepted_grouping_audit_scope(manifest: Mapping[str, Any], stage: str | None) -> dict[str, Any]:
+    if stage is None:
+        return dict(manifest)
+    ids = set(accepted_grouping_phase_group(manifest, stage)["claim_ids"])
+    # This is a derived scope over the original manifest, not a new manifest.
+    # Its artifact_sha256 deliberately names the unchanged parent artifact.
+    return dict(manifest) | {"claim_packets": [row for row in manifest["claim_packets"] if row["claim_id"] in ids]}
+
+
+def validate_scoped_audit_admission(
+    *, audit: Mapping[str, Any], disposition: Mapping[str, Any],
+    reference: Mapping[str, Any], audit_file_sha256: str,
+    selected_claim_ids: Sequence[str],
+    admission_stage: str | None = None,
+    source_epoch_binding=None,
+) -> dict[str, dict[str, Any]]:
+    """Verify owner-authorized isolation against the unfiltered original audit.
+
+    A 'passed' flag is not sufficient. Recompute every classified finding from
+    accepted input, and require the exact frozen input denominator.
+    """
+    from backend.pipeline.viewpoint_reviewed_grouping import validate_accepted_grouping
+    from backend.pipeline.viewpoint_scoped_audit_disposition import scope_audit_disposition
+
+    validate_content_addressed(reference, "artifact_sha256")
+    validate_content_addressed(disposition, "artifact_sha256")
+    if reference.get("schema_version") != "wang_shared_grouping_reference_v1":
+        raise CvpProductionBlocked(["scoped audit requires a shared accepted grouping reference"])
+    manifest_sha = str(reference.get("manifest_sha256") or "")
+    upstream = validate_reviewed_grouping_bindings(reference.get("bindings"), manifest_sha256=manifest_sha,
+                                                 source_epoch_binding=source_epoch_binding)
+    validate_accepted_grouping(**upstream, bindings=reference["bindings"], expected_manifest_sha256=manifest_sha,
+                               source_epoch_binding=source_epoch_binding)
+    audit_scope = accepted_grouping_audit_scope(upstream["manifest"], admission_stage)
+    expected_ids = [row["claim_id"] for row in audit_scope["claim_packets"]]
+    if len(selected_claim_ids) != len(set(selected_claim_ids)) or set(selected_claim_ids) != set(expected_ids):
+        raise CvpProductionBlocked(["scoped audit production denominator differs from accepted grouping"])
+    expected = scope_audit_disposition(
+        audit=audit, manifest=audit_scope, audit_file_sha256=audit_file_sha256,
+        authorized_by=str(disposition.get("authorized_by") or ""),
+    )
+    if dict(disposition) != expected or expected["status"] != "passed":
+        raise CvpProductionBlocked(["scoped audit disposition does not match original findings or has in-scope failures"])
+    return upstream
+
+
+def _validate_prerequisites(
+    paths: Mapping[str, Path], *, scope_packet: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, Any], list[str]]:
     required = {
         "source_universe_manifest",
         "claim_manifest",
@@ -387,7 +514,30 @@ def _validate_prerequisites(paths: Mapping[str, Path]) -> tuple[dict[str, Any], 
         if payload is not None and not _passed_status(payload):
             findings.append(f"{role}: status is not passed")
     audit = payloads.get("independent_audit")
-    if audit is not None:
+    disposition = payloads.get("audit_disposition") or {}
+    scoped_audit = disposition.get("schema_version") == "wang_cvp_scoped_audit_disposition_v1"
+    if scoped_audit:
+        try:
+            from backend.pipeline.viewpoint_g041_source_epoch import GROUPING_EPOCH_KEY
+            if audit is None or scope_packet is None or "reviewed_grouping_reference" not in payloads:
+                raise CvpProductionBlocked(["scoped audit lacks full audit, scope packet or shared grouping reference"])
+            upstream = validate_scoped_audit_admission(
+                audit=audit, disposition=disposition,
+                reference=payloads["reviewed_grouping_reference"],
+                audit_file_sha256=bindings["independent_audit"]["sha256"],
+                selected_claim_ids=[row["claim_id"] for row in scope_packet["claims"]],
+                admission_stage=scope_packet.get("accepted_grouping_stage"),
+                source_epoch_binding=scope_packet.get(GROUPING_EPOCH_KEY),
+            )
+            manifest_ids = [row["claim_id"] for row in (payloads.get("claim_manifest") or {}).get("claims") or []]
+            if set(manifest_ids) != {row["claim_id"] for row in scope_packet["claims"]} or len(manifest_ids) != len(set(manifest_ids)):
+                raise CvpProductionBlocked(["scoped audit Claim manifest denominator mismatch"])
+            reference = payloads["reviewed_grouping_reference"]
+            for role in upstream:
+                bindings[f"accepted_grouping_{role}"] = _artifact_binding(Path(reference["bindings"][role]["path"]))
+        except (CvpProductionBlocked, KeyError, TypeError) as exc:
+            findings.append(f"scoped audit admission: {exc}")
+    if audit is not None and not scoped_audit:
         layers = audit.get("layers") or {}
         for number in ("1", "2"):
             layer = layers.get(number) or layers.get(int(number)) or {}
@@ -435,7 +585,7 @@ def build_cvp_freeze(
         raise CvpProductionBlocked(["runner commit is required"])
     scope_packet = json.loads(scope_packet_path.read_text(encoding="utf-8"))
     findings = _validate_scope_packet(scope_packet, store)
-    bindings, prerequisite_findings = _validate_prerequisites(prerequisite_paths)
+    bindings, prerequisite_findings = _validate_prerequisites(prerequisite_paths, scope_packet=scope_packet)
     findings.extend(prerequisite_findings)
     attestation_binding = bindings.get("source_attestation") or {}
     if (
@@ -445,6 +595,13 @@ def build_cvp_freeze(
         findings.append("scope packet source attestation binding mismatch")
     if findings:
         raise CvpProductionBlocked(findings)
+    source_attestation_path = prerequisite_paths.get("source_attestation")
+    if source_attestation_path is not None:
+        attestation = json.loads(source_attestation_path.read_text(encoding="utf-8"))
+        if attestation.get("schema_version") == "wang_historical_viewpoint_source_eligibility_v1":
+            from backend.pipeline.viewpoint_historical_source_eligibility import validate_historical_source_eligibility
+            claim_manifest = json.loads(prerequisite_paths["claim_manifest"].read_text(encoding="utf-8"))
+            validate_historical_source_eligibility(attestation, claim_manifest=claim_manifest, store=store)
     body = {
         "schema_version": CVP_FREEZE_VERSION,
         "ticket_id": ticket_id,
@@ -464,6 +621,16 @@ def build_cvp_freeze(
         "global_lock_path": str(global_lock_path.resolve()),
         "status": "frozen",
     }
+    if "accepted_grouping_stage" in scope_packet:
+        if scope_packet["accepted_grouping_stage"] != "canary" and not str(scope_packet["accepted_grouping_stage"]).startswith("group:"):
+            raise CvpProductionBlocked(["unsupported accepted grouping admission stage"])
+        body["accepted_grouping_stage"] = scope_packet["accepted_grouping_stage"]
+    from backend.pipeline.viewpoint_applied_source_epochs import GROUPING_EPOCH_KEY, verified_applied
+    if GROUPING_EPOCH_KEY in scope_packet:
+        if 'accepted_grouping_stage' not in scope_packet:
+            raise CvpProductionBlocked(['applied source epoch requires accepted grouping scope'])
+        verified_applied(scope_packet[GROUPING_EPOCH_KEY], store)
+        body[GROUPING_EPOCH_KEY] = scope_packet[GROUPING_EPOCH_KEY]
     return body | {"artifact_sha256": sha256_json(body)}
 
 
@@ -517,6 +684,9 @@ def validate_cvp_freeze(
         findings.extend(_validate_scope_packet(packet, store))
         if packet.get("packet_sha256") != freeze.get("scope_packet_sha256"):
             findings.append("scope packet identity drift")
+        from backend.pipeline.viewpoint_g041_source_epoch import GROUPING_EPOCH_KEY
+        if packet.get(GROUPING_EPOCH_KEY) != freeze.get(GROUPING_EPOCH_KEY):
+            findings.append('scope packet applied source epoch identity drift')
     if findings:
         raise CvpProductionBlocked(sorted(set(findings)))
     return dict(freeze)
@@ -593,7 +763,7 @@ def exclusive_cvp_run_lock(freeze: Mapping[str, Any]):
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise CvpProductionBlocked(["another CVP identity run holds the global lock"]) from exc
-        yield
+        yield handle
     finally:
         handle.close()
 
@@ -620,6 +790,66 @@ def build_batch_identity(
     }
 
 
+@current_check
+def validate_reviewed_grouping_bindings(
+    bindings: Mapping[str, Any], *, manifest_sha256: str, source_epoch_binding=None,
+) -> dict[str, dict[str, Any]]:
+    """Reopen the four upstream artifacts; a cached acceptance is not enough."""
+    roles = {"manifest", "validation", "acceptance", "physical_review"}
+    if not isinstance(bindings, Mapping) or set(bindings) != roles:
+        raise CvpProductionBlocked(["reviewed grouping requires all four upstream bindings"])
+    artifacts: dict[str, dict[str, Any]] = {}
+    for role in sorted(roles):
+        binding = bindings[role]
+        try:
+            path = Path(binding["path"])
+            if not path.is_absolute() or file_sha256(path) != binding["file_sha256"]:
+                raise CvpProductionBlocked([f"reviewed grouping {role}: physical SHA drift"])
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            validate_content_addressed(payload, "artifact_sha256")
+            if payload["artifact_sha256"] != binding["artifact_sha256"]:
+                raise CvpProductionBlocked([f"reviewed grouping {role}: artifact SHA drift"])
+            artifacts[role] = payload
+        except (KeyError, TypeError, OSError, json.JSONDecodeError) as exc:
+            raise CvpProductionBlocked([f"reviewed grouping {role}: unreadable binding"]) from exc
+    manifest, acceptance = artifacts["manifest"], artifacts["acceptance"]
+    if (
+        manifest["artifact_sha256"] != manifest_sha256
+        or acceptance.get("manifest_sha256") != manifest_sha256
+        or artifacts["physical_review"].get("manifest_sha256") != manifest_sha256
+        or acceptance.get("job_validation_sha256") != artifacts["validation"]["artifact_sha256"]
+        or acceptance.get("physical_review_evidence_sha256") != artifacts["physical_review"]["artifact_sha256"]
+    ):
+        raise CvpProductionBlocked(["reviewed grouping upstream lineage drift"])
+    source_rows = manifest.get("sources") or []
+    source_ids = [row.get("source_id") for row in source_rows]
+    selected_sources = {row["source_id"] for row in manifest["claim_packets"]}
+    if set(source_ids) != selected_sources or len(source_ids) != len(set(source_ids)):
+        raise CvpProductionBlocked(["reviewed grouping physical source denominator differs"])
+    transitions = {}
+    if source_epoch_binding is not None:
+        try:
+            from backend.pipeline.viewpoint_applied_source_epochs import grouping_physical_transition
+            transitions = grouping_physical_transition(manifest, source_epoch_binding)
+        except (ValueError, KeyError, TypeError, OSError) as exc:
+            raise CvpProductionBlocked(['reviewed grouping applied source epoch proof invalid: ' + str(exc)]) from exc
+    for source in source_rows:
+        for binding in [source, *(source.get("linked_files") or [])]:
+            try:
+                path = Path(binding["path"])
+                expected = binding['file_sha256']
+                # Never apply a published-source transition to a linked asset.
+                if binding is source and str(path) in transitions:
+                    old_sha, expected = transitions[str(path)]
+                    if binding['file_sha256'] != old_sha:
+                        raise CvpProductionBlocked(['reviewed grouping predecessor SHA drift'])
+                if not path.is_absolute() or file_sha256(path) != expected:
+                    raise CvpProductionBlocked([f"{source['source_id']}: physical source/linked asset SHA drift"])
+            except (KeyError, TypeError, OSError) as exc:
+                raise CvpProductionBlocked([f"{source['source_id']}: missing physical source/linked asset"]) from exc
+    return artifacts
+
+
 def validate_grouping_envelope(
     envelope: Mapping[str, Any], *, freeze: Mapping[str, Any]
 ) -> str:
@@ -637,6 +867,43 @@ def validate_grouping_envelope(
         findings.append("grouping belongs to another scope packet")
     if envelope.get("cvp_policy_sha256") != freeze.get("cvp_policy_sha256"):
         findings.append("grouping belongs to another CVP policy")
+    if "upstream_bindings" in envelope and envelope.get("admission_kind") != "independently_accepted_exegesis_grouping":
+        findings.append("reviewed grouping admission kind may not be removed or changed")
+    if envelope.get("admission_kind") == "independently_accepted_exegesis_grouping":
+        try:
+            from backend.pipeline.viewpoint_g041_source_epoch import GROUPING_EPOCH_KEY
+            if envelope.get(GROUPING_EPOCH_KEY) != freeze.get(GROUPING_EPOCH_KEY):
+                raise CvpProductionBlocked(['grouping applied source epoch differs from freeze'])
+            upstream = validate_reviewed_grouping_bindings(
+                envelope.get("upstream_bindings"),
+                manifest_sha256=str(envelope.get("upstream_manifest_sha256") or ""),
+                source_epoch_binding=freeze.get(GROUPING_EPOCH_KEY),
+            )
+            original_groups = [
+                {key: row[key] for key in ("group_key", "claim_ids", "rationale")}
+                for row in accepted_grouping_in_passage_order(upstream["manifest"])
+            ]
+            stage = envelope.get("accepted_grouping_stage")
+            if stage is not None:
+                if freeze.get("accepted_grouping_stage") != stage:
+                    findings.append("canary grouping requires an explicitly phased freeze")
+                canary = accepted_grouping_phase_group(upstream["manifest"], stage)
+                original_groups = [{key: canary[key] for key in ("group_key", "claim_ids", "rationale")}]
+                if envelope.get("parent_claim_count") != len(upstream["manifest"]["claim_packets"]) or envelope.get("parent_group_count") != len(upstream["manifest"]["groups"]):
+                    findings.append("canary parent denominator drift")
+                expected_deferred = sorted({row["claim_id"] for row in upstream["manifest"]["claim_packets"]} - set(canary["claim_ids"]))
+                if envelope.get("deferred_claim_ids") != expected_deferred:
+                    findings.append("canary deferred denominator drift")
+            elif envelope.get("accepted_grouping_stage") is not None or freeze.get("accepted_grouping_stage") is not None:
+                findings.append("accepted grouping stage drift")
+            if (envelope.get("grouping") or {}).get("groups") != original_groups:
+                findings.append("reviewed grouping boundaries/order differ from accepted manifest")
+            if envelope.get("grouping_reexecuted") is not False:
+                findings.append("reviewed grouping must not be reexecuted")
+        except CvpProductionBlocked as exc:
+            findings.extend(exc.findings)
+        except (KeyError, TypeError):
+            findings.append("reviewed grouping upstream shape is invalid")
     if findings:
         raise CvpProductionBlocked(findings)
     return stated
@@ -649,11 +916,12 @@ def build_canary_selection(
     scope_packet: Mapping[str, Any],
     batch_size: int,
 ) -> dict[str, Any]:
-    """Select the smallest intact multi-source group without semantic proxies.
+    """Select an intact multi-source group without semantic proxies.
 
     The grouping model has already seen the complete frozen scope.  This step
     may only choose among its intact groups using fields already present in the
-    frozen packet; it cannot regroup Claims or infer identity.
+    frozen packet; it cannot regroup Claims or infer identity. Accepted Matthew
+    groups must start at the first passage; only the legacy path ranks by size.
     """
 
     grouping_sha256 = validate_grouping_envelope(grouping_envelope, freeze=freeze)
@@ -686,7 +954,8 @@ def build_canary_selection(
     )
 
     candidates: list[tuple[tuple[int, int, str], dict[str, Any]]] = []
-    for group in grouping.groups:
+    passage_ordered = grouping_envelope.get("admission_kind") == "independently_accepted_exegesis_grouping"
+    for group_position, group in enumerate(grouping.groups):
         group_claims = [claims[claim_id] for claim_id in group.claim_ids]
         source_ids = sorted({claim.source_id for claim in group_claims})
         if (
@@ -694,6 +963,8 @@ def build_canary_selection(
             or not 2 <= len(group_claims) <= batch_size
             or len(source_ids) < 2
         ):
+            if passage_ordered and group_position == 0:
+                raise CvpProductionBlocked(["first passage group cannot be skipped for canary selection"])
             continue
         first_scope_position = min(
             claim_positions[claim_id] for claim_id in group.claim_ids
@@ -706,12 +977,8 @@ def build_canary_selection(
             "source_count": len(source_ids),
             "first_scope_position": first_scope_position,
         }
-        # Prefer the smallest qualifying intact group.  Scope order, which is
-        # already frozen, breaks ties before the stable group key.
-        rank = (
-            len(group_claims),
-            first_scope_position,
-            group.group_key,
+        rank = (group_position, 0, group.group_key) if passage_ordered else (
+            len(group_claims), first_scope_position, group.group_key,
         )
         candidates.append((rank, details))
 
@@ -732,7 +999,7 @@ def build_canary_selection(
             "minimum_claim_count": 2,
             "maximum_claim_count": batch_size,
             "minimum_source_count": 2,
-            "ranking": [
+            "ranking": ["accepted_passage_order_ascending"] if passage_ordered else [
                 "claim_count_ascending",
                 "first_scope_position_ascending",
                 "group_key_ascending",

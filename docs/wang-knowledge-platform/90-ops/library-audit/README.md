@@ -10,6 +10,8 @@
 
 產出位置：`$DATA_BASE_DIR/wang-knowledge-platform/staging/reports/library-audit/<UTC 時間戳>/`
 
+**#357 CVP 生產的後續政策**：本文下方的抽樣命令、舊模型配置與直接人工 queue 描述不是 #357 現行完整組放行流程。#357 使用精確全組母體、指定 Gemini 兩 worker、完整語義異議的 GPT 終局及有標記的 content-blocked 例外；實際分流與人工出口見 [Claims → CVP 現行完整流程](../../20-knowledge/cvp_production_process_v1.md)。不要按一般 CLI 預設抽樣代替全組審計。
+
 ## 怎麼跑
 
 ```bash
@@ -35,7 +37,7 @@ scripts/audit-library.py --claims 40 --viewpoints 15 --seed 241
 設定從環境變數讀，讀不到就退回 repo 根目錄的 `.env`：`KNOWLEDGE_DATABASE_URL`、
 `DATA_BASE_DIR`、`GEMINI_API_KEY1`。
 
-第 3、4 層用 `gemini-3.7-flash`。提議模型是 `gpt-5.6-sol`；新 CVP／Route
+第 3、4 層預設用 `gemini-3.8-flash`（核對到 `scripts/audit-library.py:DEFAULT_MODEL`）。提議模型是 `gpt-5.6-sol`；新 CVP／Route
 複核模型是 `claude-fable-5-1`，歷史判定也曾使用 `claude-opus-5`。這三者都
 參與過或將參與被審的判定，用它們任何一個等於自己審自己。`--model` 可以換，
 換掉之前先確認新的那個沒參與過原判定。

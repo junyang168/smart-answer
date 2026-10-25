@@ -1,0 +1,10 @@
+{
+  "schema_version": "wang_cvp_retained_review_separation_v1",
+  "authorization_quote": "所以不能随意改动已经形成的 CVP 连接，因为在生成时是有上下文的，那以后遇到这种情况应该分开处理\n好，你继续，改完继续跑\n你看这就对上了，所以可以分开处理，实在拿不准，可以转人工",
+  "human_content_approval": false,
+  "preserve_current_approved_links": true,
+  "new_registry_write_permissions": [],
+  "additional_gpt_corrections": 0,
+  "use_only_unreserved_final_review": true,
+  "independent_affected_audit_required": true
+}

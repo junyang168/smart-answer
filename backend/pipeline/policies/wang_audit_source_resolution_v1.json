@@ -1,0 +1,17 @@
+{
+  "policy_id": "wang-audit-gpt-source-final-v1",
+  "authorized_by": "owner",
+  "authorization_quotes": [
+    "GPT 否决就是最后判定！",
+    "同意，你改 code. 12 组放行"
+  ],
+  "scope": "complete semantic independent audit objections only",
+  "model": "gpt-6.1-sol",
+  "backend": "codex_subscription",
+  "effort": "high",
+  "require_exact_own_source_quote": true,
+  "require_source_registry_sha_validation": true,
+  "on_rejected": "final_resolution_without_reviewer_recheck",
+  "on_upheld_or_unresolved": "stop_without_content_mutation",
+  "master_data_mutations": 0
+}

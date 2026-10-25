@@ -1,0 +1,20 @@
+{
+  "schema_version": "wang_draft_first_calibration_key_v1",
+  "key_id": "wkp439-son-of-man-draft-a",
+  "note": "The owner's manual findings on draft-A (2026-10-22, #439), written before any blind review was read. Source: staging/wkp-439/agent-comparison-20261022/answer-key-owner-findings.md. A hit is a reviewer finding whose anchor or summary matches the pattern; items without a pattern are scored by hand.",
+  "draft": {"path": "wang-knowledge-platform/staging/wkp-439/son-of-man-20261021/author-v2/draft.md",
+            "sha256": "04d6e744569d9a861e5aa818a9b1c837eb3f9d138770f3bcb6da1f9f0cc52057"},
+  "packet": {"path": "wang-knowledge-platform/staging/wkp-439/son-of-man-20261021/packet-v2/theological-evidence-packet.json",
+             "sha256": "fea10309baf34bf51a3dc890c233f974f26a2370cd0000260a4491076189afe3"},
+  "items": [
+    {"id": "K1", "finding": "正文以旁观者口吻叙述——「教授說」「母本說」「材料顯示」；应直接向读者讲解经文与论证", "pattern": "母本|材料|本文", "expect_blocking": true},
+    {"id": "K2", "finding": "油滑、操纵式措辞，如「先看一個誰都能核對的現象」「一個聽起來很順的解釋」（负责人 2026-10-24 改判：按平实标准必须修改）", "pattern": "幹這件事|邏輯很乾淨|鑰匙|誰都能核對|聽起來很順", "expect_blocking": true},
+    {"id": "K3", "finding": "「神子講神性、人子講人性」的对照没有来源，不得写成有人这样教导", "pattern": "神子", "expect_blocking": true},
+    {"id": "K4", "finding": "不推测教授没有说过的动机；文章不以「为什么频繁讲」为中心", "pattern": "99\\.9|常有人|帶查經", "expect_blocking": true},
+    {"id": "K5", "finding": "不得把定冠词单独写成足以证明神性的论证", "pattern": null, "expect_blocking": true},
+    {"id": "K7", "finding": "来源差异（司提反例外；冠词全称与約5:27）属于编者注，保留为差异，不判为后期修正", "pattern": "各自站立|並立|5:27|司提反", "expect_blocking": true},
+    {"id": "K9", "finding": "编辑综合不得冒充教授的话；减少归属套语不等于取消来源追溯", "pattern": "我也是人", "expect_blocking": true},
+    {"id": "K10", "finding": "不判断神学对错；不做福音派主流比较", "pattern": "說得很準", "expect_blocking": true}
+  ],
+  "not_applicable": {"K6": "draft-A keeps the full affirmation", "K8": "raised on a later revision, not draft-A"}
+}

@@ -19,6 +19,7 @@
 | [7. 谁读 Claim](#7-谁读-claim) | 观点层、文章、问答各取什么 |
 | [8. 不变量](#8-不变量) | 机器可查的规则 |
 | [9. 设计与实际不符之处](#9-设计与实际不符之处) | 已核实的差距，不粉饰 |
+| [10. 来源校对后的版本更新](#10-来源校对后的版本更新) | 增量写入、完整影响验证 |
 
 ## 1. Claim 是什么
 
@@ -47,7 +48,7 @@
 erDiagram
     SOURCE_FRAGMENT }o--|| SOURCE_DOCUMENT : "锚定到"
     SOURCE_FRAGMENT ||--o{ CLAIM_OCCURRENCE : "锚定"
-    CLAIM ||--o{ CLAIM_OCCURRENCE : "在各篇的出现"
+    CLAIM ||--o{ CLAIM_OCCURRENCE : "在本篇的出现"
     CLAIM ||--o{ EVIDENCE_STEP : "推论步骤"
     CLAIM ||--o{ CLAIM_RELATION : "与别的主张相连"
     CLAIM_RELATION }o--|| POSITION_NODE : "或指向反方立场"
@@ -68,11 +69,15 @@ erDiagram
 | **反方立场** | 教授引用、质疑或驳斥的**别人的**观点。必须独立成节点，不能混进他自己的主张 | `position_nodes` |
 | **观点连接** | 把这条 Claim 挂到某个跨讲道观点上 | `viewpoint_claim_links` |
 
-**为什么「出现」是 Claim 的一部分，而不是另一张表**：同一个判断在不同讲道里讲过，仍然是同一条 Claim；每次讲到就多一个 occurrence。这样「他讲过几次、在哪几篇」是这条记录自己就能回答的问题。
+**为什么「出现」是 Claim 的一部分，而不是另一张表**：同一个判断在同一篇里反复讲到，每次讲到就多一个 occurrence。不同讲道里的同一看法分别记录为 Claim，由观点层关联。历史跨来源记录保留其实际形态，迁移须明确授权及替代映射，不因规范澄清自动改动存量。
 
 ## 3. Claim 怎样产生
 
+本节保留原 extraction 流程；已有 Claim／Evidence 的 Management 2.0 多轮修订与独立终审目标见 [主控设计](./claim_cvp_management_2_design.md)。目标尚未启用，不追认旧审核、不重开旧预算；Claim 清理与 CVP 生成／维护是两个管理域。
+
 这是 [Solution Architecture D4](../00-overview/solution_architecture.md#d4最小化人工提议--复核--仲裁--转人工)「提议 → 复核 → 仲裁 → 转人工」在 Claim 这一层的落地。
+
+本节下图及字段快照描述旧抽取与治理形态，不表示 Claim Management 2.0 已启用。新获准 action 的 operations、既有 Claim 入口、多轮修正、独立终审及当前可用资格以 [Claim Management 2.0 operations 与生命周期设计](./claim_management_2_design.md) 为目标契约。Review 是审阅，Verify 是其中的核实，Cleanup 属于 Update；旧一轮回答和预算保持原样。
 
 ```mermaid
 flowchart TD
@@ -169,6 +174,8 @@ flowchart TD
 
 三者都**只读**已批准的部分，且都要能顺着 `occurrences[].anchors` 回到教授原话。
 
+新的 [Claim Management 2.0 operations 与生命周期设计](./claim_management_2_design.md#10-审核有效性与下游交接) 启用后，当前使用还须核验审核对精确内容、来源、依赖和用途仍然有效；`review_status` 记录结论，`maturity` 记录治理／出版阶段，均不单独代替这项核验。原审核保留真实身份与范围，新流程上线本身不使其失效。
+
 ## 8. 不变量
 
 机器可查，不依赖判断力：
@@ -207,6 +214,14 @@ visibility      internal 1789                               没有一条对外
 
 在归属与成熟度真正被填之前，任何依赖它们做过滤的下游逻辑（例如「只用教授明说的主张写文章」）**实际上过滤不到东西**，必须显式处理这种情况，不能假设字段有值。
 
+## 10. 来源校对后的版本更新
+
+原讲道变化时，按[来源修订 → Claim → CVP 更新流程](./source_reconciliation_workflow_v1.md)处理，不只给旧引文换 SHA。逐句核验许可段落，找齐 Claim、Evidence、anchors、问题答案、归属、关系与反向索引的完整影响清单；新增或拆分判断保留为独立未纳入候选，不静默改变已接受分组成员。
+
+Claim 只从自己的完整语境取证；其他来源不能补成本 Claim 的判断。重复／重叠引文只计一个证据依据。无变化记录保留；有变化的既有 Claim 单次递增版本，旧记录版本与旧审核保留。
+
+GPT 提议，Opus 独立审核，最多一轮 GPT 纠正与 Opus 终审，不加 GPT 前置审核。完整批准后重新绑定最终 Claim SHA 及其 CVP 连接；数据库写入与来源、全 Registry 回读、完整受影响组独立审计是三个不同门槛。有效 human hold 不得用 candidate 状态覆盖。
+
 ## 待定
 
 **复杂论证体系可能需要扩展。** 当前模型是「Claim + 证据步骤 + 主张关系」。多层嵌套的论证、跨观点的联合论证、有条件才成立的结论，现有对象是否够用，尚未论证。本文不擅自扩展模型，记录为公开问题。
@@ -216,5 +231,6 @@ visibility      internal 1789                               没有一条对外
 > **读者**：Solution architect、Developer。同工不需要读本文；同工要知道的在 [Solution Architecture](../00-overview/solution_architecture.md)。
 > **类型**：规范
 > **状态**：当前
+> **来源更新代码对齐**：第 10 节于 2026-10-06 核对到 `eacc753`、`c5bc74a`、`1bcb34f` 及离线回归；新通用入口尚未真实模型／SQL 端到端运行。其余历史字段与数字不因此更新。
 > **与代码对齐**：2026-08-25。第 4、6、9 节的字段与数字取自当日的 PostgreSQL 快照（1,789 条 Claim）。
 > **权威范围**：Claim 对象的语义、字段、不变量与消费边界。与[技术规范 5.8](./repository-tech-spec/data-models.md) 冲突时以本文为准，并按第 8 节修订该规范。

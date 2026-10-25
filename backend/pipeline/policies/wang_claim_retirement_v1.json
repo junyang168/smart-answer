@@ -1,0 +1,12 @@
+{
+  "schema_version": "wang_claim_sql_retirement_v1",
+  "approval_mode": "human_exact_disposition",
+  "physical_delete": false,
+  "source_mutations": [],
+  "allowed_operations": ["claims:retire", "evidence_steps:retire_exclusively_owned", "viewpoint_claim_links:retire"],
+  "preserve_evidence_and_historical_identity": true,
+  "require_complete_live_consumers": true,
+  "require_remaining_equivalent_members": true,
+  "original_campaign_members": "requires_separate_frozen_member_disposition",
+  "automatic_future_retirements_authorized": false
+}

@@ -1,0 +1,15 @@
+{
+  "schema_version": "wang_cvp_contextual_semantic_eval_v1",
+  "synthetic_examples": true,
+  "not_professor_quotes": true,
+  "cases": [
+    {"id":"holdout_pronoun","claim":"这样作不是爱。","viewpoint":"为了称赞而帮助人，不是真正的爱。","source":"我现在说的这样作，就是为了得到称赞而帮助人。这样作不是爱。","requested_relation":"equivalent_full","expected":"valid"},
+    {"id":"holdout_voice","claim":"这个命令是赐给门徒的。","viewpoint":"门徒是这个命令的受领者。","source":"这个命令是赐给门徒的，我这里谈的是命令的受领者，不是执行效果。","requested_relation":"equivalent_full","expected":"valid"},
+    {"id":"holdout_metaphor","claim":"这种认识只是停留在头脑里。","viewpoint":"这种认识尚未成为实际行动。","source":"我说停留在头脑里，是指没有付诸行动，不是否定理解本身。","requested_relation":"equivalent_full","expected":"valid"},
+    {"id":"holdout_exclusion","claim":"不是履行仪式就够了。","viewpoint":"履行仪式没有任何价值。","source":"不是履行仪式就够了，还须真实悔改。我不是说仪式没有任何价值。","requested_relation":"equivalent_full","expected":"invalid"},
+    {"id":"holdout_contrast_reason","claim":"这两个场景中，受吩咐的对象不同。","viewpoint":"解释这两处吩咐时需要分别考虑具体场景。","source":"这两个场景中，受吩咐的对象不同。所以解释时不能忽略具体场景。这里我只提出一个理由。","requested_relation":"supports","expected":"valid"},
+    {"id":"holdout_compatible_only","claim":"这段是在山上讲的。","viewpoint":"这段的每句话都只适用于门徒。","source":"这段是在山上讲的。地点与听众适用范围是两回事，我没有由地点推出适用范围。","requested_relation":"supports","expected":"invalid"},
+    {"id":"holdout_temporal","claim":"他当时还没有理解。","viewpoint":"他始终不可能理解。","source":"他当时还没有理解，后来明白了。我讲的是不同阶段。","requested_relation":"equivalent_full","expected":"invalid"},
+    {"id":"holdout_ambiguous_boundary","claim":"他们都已经如此。","viewpoint":"所有门徒都已经作了见证。","source":"他们都已经如此。前面的录音缺失，无法确定他们指谁，也不知道如此是哪件事。","requested_relation":"equivalent_full","expected":"unresolved"}
+  ]
+}

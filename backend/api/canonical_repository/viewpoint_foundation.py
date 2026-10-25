@@ -806,6 +806,70 @@ def build_foundation_quality_report(
     return ViewpointQualityReportRecord.model_validate(record_payload)
 
 
+def retained_historical_origin(viewpoint_id, viewpoint, existing):
+    """An unchanged creation pointer is historical provenance, not membership.
+
+    Only the SQL loader's exact committed retirement proof can resolve it.
+    Never put this retired candidate into the active candidate denominator.
+    """
+    old=existing.get(('canonical_viewpoints',viewpoint_id))
+    cid=viewpoint.get('created_from_candidate_id')
+    row=existing.get(('viewpoint_identity_candidates',cid))
+    if not old or not row:return False
+    previous=old.get('payload') or {};candidate=row.get('payload') or {}
+    approved={'approved','system_approved','human_approved'}
+    return bool(not old.get('retired') and old.get('retired_at') is None
+        and previous.get('viewpoint_id')==viewpoint_id
+        and previous.get('review_status') in approved
+        and previous.get('created_from_candidate_id')==cid
+        and (row.get('retired') or row.get('retired_at') is not None)
+        and row.get('historical_origin_authority')==[row.get('revision'),row.get('content_sha256')]
+        and isinstance(row.get('revision'),int) and isinstance(row.get('content_sha256'),str)
+        and len(row['content_sha256'])==64
+        and candidate.get('identity_candidate_id')==cid
+        and candidate.get('review_status') in approved|{'candidate','ai_consensus_reviewed'}
+        and candidate.get('proposed_action') in {'create_new','match_existing'}
+        and not candidate.get('blocker_codes'))
+
+
+def scope_retained_route_revision_ids(normalized, existing):
+    """Keep immutable route snapshots during a same-core scripture-scope cut.
+
+    This permits storage, not runtime authoring use: the standalone projection
+    validator remains strict, and normal dependency invalidation still applies.
+    """
+    if any(normalized.get(c) for c in ('argument_routes','argument_route_revisions','argument_route_attestations')):
+        return set()
+    approved={'approved','system_approved','human_approved'}
+    metadata={'viewpoint_revision_id','revision','revision_number','supersedes_revision_id',
+              'review_status','provenance','approved_at','approved_by','scope'}
+    result=set()
+    for vid,new_head in normalized.get('canonical_viewpoints',{}).items():
+        old_row=existing.get(('canonical_viewpoints',vid)) or {};old_head=old_row.get('payload') or {}
+        old_id=old_head.get('current_revision_id');new_id=new_head.get('current_revision_id')
+        old_revision=(existing.get(('viewpoint_revisions',old_id)) or {}).get('payload') or {}
+        new_revision=normalized.get('viewpoint_revisions',{}).get(new_id) or {}
+        if (old_row.get('retired') or old_row.get('retired_at') is not None
+                or old_head.get('review_status') not in approved or old_revision.get('review_status') not in approved
+                or new_head.get('review_status') not in approved or new_revision.get('review_status') not in approved
+                or new_id==old_id or new_revision.get('supersedes_revision_id')!=old_id
+                or old_revision.get('viewpoint_id')!=vid or new_revision.get('viewpoint_id')!=vid
+                or {k:v for k,v in old_revision.items() if k not in metadata}!={k:v for k,v in new_revision.items() if k not in metadata}
+                or {k:v for k,v in old_revision.get('scope',{}).items() if k!='scripture_scope'}!={k:v for k,v in new_revision.get('scope',{}).items() if k!='scripture_scope'}):
+            continue
+        for (collection,rid),row in existing.items():
+            if collection!='argument_route_revisions' or row.get('retired') or row.get('retired_at') is not None:continue
+            payload=row.get('payload') or {};arid=payload.get('argument_route_id')
+            route_row=existing.get(('argument_routes',arid)) or {};route=route_row.get('payload') or {}
+            if (payload.get('review_status') in approved and route.get('review_status') in approved
+                    and not route_row.get('retired') and route_row.get('retired_at') is None
+                    and route.get('current_revision_id')==rid and route.get('conclusion_viewpoint_id')==vid
+                    and payload.get('validated_against_conclusion_viewpoint_revision_id')==old_id
+                    and payload.get('route_signature',{}).get('conclusion_viewpoint_id')==vid):
+                result.add(rid)
+    return result
+
+
 def validate_foundation_change_set(
     normalized: Mapping[str, Mapping[str, Mapping[str, Any]]],
     existing: Mapping[tuple[str, str], Mapping[str, Any]],
@@ -825,7 +889,7 @@ def validate_foundation_change_set(
         "viewpoint_automated_promotion_decisions",
         "argument_routes",
         "argument_route_revisions",
-        "argument_route_attestations",
+        "argument_route_attestations", "viewpoint_observation_supports",
         "viewpoint_relations",
         "viewpoint_structures",
         "viewpoint_structure_revisions",
@@ -848,7 +912,7 @@ def validate_foundation_change_set(
         "viewpoint_atomic_quality_reports",
         "viewpoint_automated_promotion_decisions",
         "argument_route_revisions",
-        "argument_route_attestations",
+        "argument_route_attestations", "viewpoint_observation_supports",
         "viewpoint_identity_candidates",
         "viewpoint_identity_decisions",
         "viewpoint_resolution_ledgers",
@@ -995,13 +1059,37 @@ def validate_foundation_change_set(
             str(item.get("viewpoint_candidate_id"))
             for item in atomic_coverages.values()
         }
-        if candidate_id not in candidates and candidate_id not in atomic_candidate_ids:
+        if (candidate_id not in candidates and candidate_id not in atomic_candidate_ids
+                and not retained_historical_origin(viewpoint_id,viewpoint,existing)):
             findings.append(f"{viewpoint_id}: missing origin candidate {candidate_id}")
 
     active_full: dict[tuple[str, int], set[str]] = defaultdict(set)
     active_link_keys: dict[tuple[str, str, int, str], list[str]] = defaultdict(list)
     active_component_owners: dict[str, set[str]] = defaultdict(set)
+    legacy_component_ids: dict[str, str] = {}
+    field_component_ids: set[str] = set()
     for link_id, link in links.items():
+        # V2 withdrawal records retain their original source assertions. They
+        # assert no current coverage; do not reinterpret old coordinates against
+        # a newly qualified Claim. All historical fields must remain exact.
+        old_link = (existing.get(("viewpoint_claim_links", link_id)) or {}).get("payload")
+        withdrawal_decision = decisions.get(str(link.get("decision_id")), {})
+        mutable_withdrawal = {"schema_version", "revision", "effective_state", "decision_id"}
+        historical_withdrawal = bool(
+            old_link and link.get("schema_version") == "wang_viewpoint_claim_link_v2"
+            and link.get("effective_state") in {"retired", "invalidated"}
+            and {k:v for k,v in old_link.items() if k not in mutable_withdrawal}
+                == {k:v for k,v in link.items() if k not in mutable_withdrawal}
+            and withdrawal_decision.get("policy_version") == "wang_cvp_management_v2"
+            and withdrawal_decision.get("approval_basis") == "dual_model_consensus"
+            and withdrawal_decision.get("review_status") == "system_approved"
+            and withdrawal_decision.get("decision") == "match_existing"
+            and withdrawal_decision.get("resolved_viewpoint_id") == link.get("viewpoint_id"))
+        if (link.get("schema_version") == "wang_viewpoint_claim_link_v2"
+                and link.get("effective_state") in {"retired", "invalidated"}
+                and withdrawal_decision.get("policy_version") == "wang_cvp_management_v2"
+                and not historical_withdrawal):
+            findings.append(f"{link_id}: CVP2 withdrawal changed or lost its historical source binding")
         claim_id = str(link["claim_id"])
         viewpoint_id = str(link["viewpoint_id"])
         revision_id = str(link["validated_against_viewpoint_revision_id"])
@@ -1020,7 +1108,7 @@ def validate_foundation_change_set(
             findings.append(f"{link_id}: active link is not validated against current revision")
         if not claim:
             findings.append(f"{link_id}: missing claim {claim_id}")
-        elif int(claim.get("revision", 1)) != int(link["pinned_claim_revision"]):
+        elif not historical_withdrawal and int(claim.get("revision", 1)) != int(link["pinned_claim_revision"]):
             findings.append(f"{link_id}: pinned Claim revision mismatch")
         if str(link["decision_id"]) not in decisions:
             findings.append(f"{link_id}: missing decision {link['decision_id']}")
@@ -1040,7 +1128,20 @@ def validate_foundation_change_set(
                 "approved",
             }:
                 findings.append(f"{link_id}: active link depends on an unapproved decision")
+        if historical_withdrawal:
+            continue
         component = link.get("component_locator")
+        field_component = link.get("component_position_locator")
+        field_spans = None
+        if field_component is not None and claim:
+            from .viewpoint_component_positions import validated_field_spans
+            try:
+                if (link.get('schema_version') != 'wang_viewpoint_claim_link_v2' or component
+                        or link.get('link_type') == 'equivalent_full'):
+                    raise ValueError('component field locator requires explicit v2 component contract')
+                field_spans = validated_field_spans(field_component, claim, claim_sha=semantic_record_sha)
+            except ValueError as exc:
+                findings.append(f"{link_id}: {exc}")
         if component and claim and component.get("claim_sha256") != semantic_record_sha(claim):
             findings.append(f"{link_id}: component locator Claim SHA mismatch")
         if component and claim:
@@ -1076,13 +1177,21 @@ def validate_foundation_change_set(
             if str(relation_id) not in claim_relations:
                 findings.append(f"{link_id}: missing supporting relation {relation_id}")
         if link.get("effective_state") == "active":
-            locator_sha = sha256_json(component) if component else "full"
+            locator_sha = sha256_json(field_component or component) if (field_component or component) else "full"
+            if field_spans is not None:
+                field_spans = sorted(field_spans, key=lambda row:(canonical_json(row[0]),row[1],row[2],row[3]))
+                locator_sha = sha256_json({'field_spans': [[list(p),a,b,t] for p,a,b,t in field_spans]})
+            elif component:
+                locator_sha = sha256_json({'field_spans': [[['statement'],span['start_char'],span['end_char'],span['exact_text']]
+                                                         for span in component.get('canonical_spans') or []]})
             active_link_keys[
                 (viewpoint_id, claim_id, int(link["pinned_claim_revision"]), locator_sha)
             ].append(link_id)
             if link.get("link_type") == "equivalent_full":
                 active_full[(claim_id, int(link["pinned_claim_revision"]))].add(viewpoint_id)
             if link.get("link_type") in {"equivalent_full", "equivalent_component"} and claim:
+                # Include the raw field path in ownership identity. A field
+                # locator is never promoted to whole-Claim/statement coverage.
                 canonical_spans = (
                     [
                         [
@@ -1101,14 +1210,28 @@ def validate_foundation_change_set(
                         ]
                     ]
                 )
+                coverage_spans = ([[list(path), a, b, exact] for path,a,b,exact in field_spans]
+                                  if field_spans is not None else
+                                  [[['statement'], *span] for span in canonical_spans] if not field_component else [])
                 component_identity = sha256_json(
                     {
                         "claim_id": claim_id,
                         "claim_revision_sha256": semantic_record_sha(claim),
-                        "canonical_spans": canonical_spans,
+                        "field_spans": coverage_spans,
                     }
                 )
                 active_component_owners[component_identity].add(viewpoint_id)
+                if field_component is not None:
+                    field_component_ids.add(component_identity)
+                else:
+                    # Preserve legacy finding IDs/text for all-v1 graphs.
+                    legacy_component_ids[component_identity] = sha256_json({
+                        'claim_id':claim_id, 'claim_revision_sha256':semantic_record_sha(claim),
+                        'canonical_spans':canonical_spans})
+    from .viewpoint_component_roles import component_role_findings
+    findings.extend(component_role_findings(
+        links.values(), claims, evidence_steps, source_fragments, claim_sha=semantic_record_sha
+    ))
     for key, link_ids in active_link_keys.items():
         if len(link_ids) > 1:
             findings.append(
@@ -1120,8 +1243,10 @@ def validate_foundation_change_set(
             findings.append(f"{key[0]}@{key[1]}: multiple active equivalent_full memberships")
     for component_identity, owners in active_component_owners.items():
         if len(owners) > 1:
+            display_identity = (component_identity if component_identity in field_component_ids else
+                                legacy_component_ids.get(component_identity,component_identity))
             findings.append(
-                f"Claim component {component_identity}: multiple active viewpoint owners "
+                f"Claim component {display_identity}: multiple active viewpoint owners "
                 + ", ".join(sorted(owners))
             )
 
@@ -1588,10 +1713,12 @@ def validate_foundation_change_set(
             "claim_relations", "canonical_viewpoints", "viewpoint_revisions",
             "viewpoint_claim_links", "viewpoint_proposition_units",
             "viewpoint_proposition_unit_links", "argument_routes", "argument_route_revisions",
-            "argument_route_attestations", "viewpoint_relations",
+            "argument_route_attestations", "viewpoint_observation_supports", "viewpoint_relations",
         )
     }
-    findings.extend(validate_runtime_authoring_graph(runtime_collections))
+    findings.extend(validate_runtime_authoring_graph(runtime_collections,
+        retained_route_revision_ids=scope_retained_route_revision_ids(normalized,existing),
+        current_observation_ids=set(normalized.get('viewpoint_observation_supports', {}))))
 
     if findings:
         raise ViewpointFoundationValidationError(findings)

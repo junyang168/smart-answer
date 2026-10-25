@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator, model_serializer
 
 
 def _knowledge_sha256_json(value: Any) -> str:
@@ -194,6 +194,12 @@ def evidence_fragment_ids(value: Mapping[str, Any] | EvidenceStepRecord) -> list
         singular = value.source_fragment_id
         plural = value.source_fragment_ids
     return sorted({str(item) for item in [singular, *plural] if item})
+
+
+def knowledge_relation_endpoints(relation_type: str) -> tuple[set[str], set[str]]:
+    """Answers can address a Question; ordinary evidence edges cannot."""
+    return ({'evidence_steps', 'observations'},
+            {'evidence_steps', 'questions'} if relation_type == 'answers' else {'evidence_steps'})
 
 
 class KnowledgeRelationRecord(EvolvingKnowledgeRecord):
@@ -584,6 +590,10 @@ class CanonicalViewpointRecord(StrictViewpointRecord):
     identity_status: Literal["active", "redirected", "split", "merged", "retired"] = "active"
     created_from_candidate_id: str
     redirect_to_viewpoint_id: Optional[str] = None
+    # Editorial context is versioned with the viewpoint identity. The basis is
+    # program owned and identifies the reviewed post-commit member population.
+    summary: Optional[str] = None
+    summary_basis: Optional[dict[str, Any]] = None
 
     @model_validator(mode="after")
     def validate_redirect(self) -> "CanonicalViewpointRecord":
@@ -702,9 +712,38 @@ class ViewpointClaimEvidenceBinding(BaseModel):
     source_fragment_id: str = Field(min_length=1)
 
 
+class ViewpointFieldSpan(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    path: list[str | int] = Field(min_length=1)
+    start_char: int = Field(ge=0,strict=True)
+    end_char: int = Field(gt=0,strict=True)
+    exact_text: str = Field(min_length=1)
+
+    @model_validator(mode='before')
+    @classmethod
+    def raw_path_types(cls,value):
+        if (not isinstance(value,dict) or not isinstance(value.get('path'),list)
+                or any(type(p) not in {str,int} for p in value['path'])):
+            raise ValueError('field paths require exact string/integer keys, never coerced booleans')
+        return value
+
+    @model_validator(mode='after')
+    def valid_span(self):
+        if self.end_char-self.start_char!=len(self.exact_text):
+            raise ValueError('field span length does not match raw Unicode positions')
+        return self
+
+
+class ViewpointFieldLocator(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    input_sha256: str = Field(min_length=1)
+    claim_sha256: str = Field(min_length=1)
+    spans: list[ViewpointFieldSpan] = Field(min_length=1)
+
+
 class ViewpointClaimLinkRecord(StrictViewpointRecord):
     viewpoint_claim_link_id: str
-    schema_version: Literal["wang_viewpoint_claim_link_v1"] = "wang_viewpoint_claim_link_v1"
+    schema_version: Literal["wang_viewpoint_claim_link_v1","wang_viewpoint_claim_link_v2"] = "wang_viewpoint_claim_link_v1"
     viewpoint_id: str
     validated_against_viewpoint_revision_id: str
     claim_id: str
@@ -720,6 +759,7 @@ class ViewpointClaimLinkRecord(StrictViewpointRecord):
         "superseding_evidence",
     ]
     component_locator: Optional[ViewpointComponentLocator] = None
+    component_position_locator: Optional[ViewpointFieldLocator] = None
     supporting_relation_ids: list[str] = Field(default_factory=list)
     evidence_bindings: list[ViewpointClaimEvidenceBinding] = Field(default_factory=list)
     occurrence_refs: list[str] = Field(default_factory=list)
@@ -728,6 +768,10 @@ class ViewpointClaimLinkRecord(StrictViewpointRecord):
 
     @model_validator(mode="after")
     def validate_component(self) -> "ViewpointClaimLinkRecord":
+        if self.schema_version=='wang_viewpoint_claim_link_v1' and self.component_position_locator is not None:
+            raise ValueError('field-position locator requires the explicit v2 link contract')
+        if self.component_locator is not None and self.component_position_locator is not None:
+            raise ValueError('link cannot mix statement and multi-field locator spaces')
         if self.supporting_relation_ids != sorted(set(self.supporting_relation_ids)):
             raise ValueError("supporting_relation_ids must be sorted and unique")
         if self.occurrence_refs != sorted(set(self.occurrence_refs)):
@@ -738,9 +782,9 @@ class ViewpointClaimLinkRecord(StrictViewpointRecord):
         ]
         if bindings != sorted(set(bindings)):
             raise ValueError("evidence_bindings must be sorted and unique")
-        if self.link_type == "equivalent_component" and not self.component_locator:
+        if self.link_type == "equivalent_component" and not (self.component_locator or self.component_position_locator):
             raise ValueError("equivalent_component requires component_locator")
-        if self.link_type == "equivalent_full" and self.component_locator is not None:
+        if self.link_type == "equivalent_full" and (self.component_locator is not None or self.component_position_locator is not None):
             raise ValueError("equivalent_full spans the whole Claim and has no locator")
         if self.effective_state == "active" and self.review_status not in {
             "system_approved",
@@ -749,6 +793,12 @@ class ViewpointClaimLinkRecord(StrictViewpointRecord):
         }:
             raise ValueError("active Claim link requires an approved review status")
         return self
+
+    @model_serializer(mode='wrap')
+    def preserve_v1_shape(self,handler):
+        value=handler(self)
+        if self.component_position_locator is None:value.pop('component_position_locator',None)
+        return value
 
 
 class PropositionUnitStatementSpan(BaseModel):
@@ -1179,6 +1229,8 @@ class ArgumentRouteAttestationRecord(StrictViewpointRecord):
     step_bindings: list[ArgumentRouteStepBinding] = Field(min_length=1)
     terminal_claim_link_id: str
     completeness: Literal["full", "partial"]
+    # Completeness describes attested steps, not proof of every claimed case.
+    support_scope_note: Optional[str] = None
     scripture_refs_derived: list[str] = Field(default_factory=list)
     review_artifact_sha256: str = Field(min_length=1)
     effective_state: Literal["active", "invalidated", "retired"] = "active"
@@ -1196,6 +1248,39 @@ class ArgumentRouteAttestationRecord(StrictViewpointRecord):
             "system_approved", "human_approved", "approved"
         }:
             raise ValueError("active route attestation requires approved review status")
+        return self
+
+
+class ViewpointObservationEvidenceBinding(ViewpointClaimEvidenceBinding):
+    claim_id: str
+    pinned_claim_revision: int = Field(ge=1)
+    claim_revision_sha256: str = Field(min_length=1)
+
+
+class ViewpointObservationSupportRecord(StrictViewpointRecord):
+    """One source's reviewed textual observation, independent of inference routes."""
+
+    observation_support_id: str
+    schema_version: Literal["wang_viewpoint_observation_support_v1"] = "wang_viewpoint_observation_support_v1"
+    viewpoint_id: str
+    validated_against_viewpoint_revision_id: str
+    source_id: str
+    source_revision_sha256: str = Field(min_length=1)
+    observation_summary: str = Field(min_length=1)
+    supports: str = Field(min_length=1)
+    support_scope_note: str = Field(min_length=1)
+    evidence_bindings: list[ViewpointObservationEvidenceBinding] = Field(min_length=1)
+    review_artifact_sha256: str = Field(min_length=1)
+    effective_state: Literal["active", "invalidated", "retired"] = "active"
+    representation_kind: Literal["editorial_summary_of_professor_observation"] = "editorial_summary_of_professor_observation"
+
+    @model_validator(mode="after")
+    def validate_bindings(self) -> "ViewpointObservationSupportRecord":
+        keys = [(b.claim_id, b.evidence_step_id, b.source_fragment_id) for b in self.evidence_bindings]
+        if keys != sorted(set(keys)):
+            raise ValueError("observation evidence bindings must be sorted and unique")
+        if self.effective_state == "active" and self.review_status not in {"system_approved", "human_approved", "approved"}:
+            raise ValueError("active observation support requires approved review")
         return self
 
 
@@ -1426,7 +1511,7 @@ class ViewpointIdentityDecisionRecord(StrictViewpointRecord):
     )
     reviewer_kind: Literal["system", "human_editor"]
     reviewer_id: str
-    approval_basis: Literal["deterministic", "dual_model_consensus", "human_exception_review"]
+    approval_basis: Literal["deterministic", "dual_model_consensus", "human_exception_review", "owner_scoped_independent_terminal_review"]
     reason: str = Field(min_length=1)
     input_sha256: str
     review_artifact_sha256: Optional[str] = None
@@ -1471,6 +1556,23 @@ class ViewpointIdentityDecisionRecord(StrictViewpointRecord):
                 "semantic_call_artifact_sha256s must be sorted and unique"
             )
         if self.review_status == "system_approved":
+            if self.approval_basis == "owner_scoped_independent_terminal_review":
+                scoped_reviewers = {
+                    "wang_owner_claim_statement_revision_v1": "owner_claim_statement_opus_terminal_review",
+                    "wang_source_reconciliation_v1": "source_reconciliation_opus_terminal_review",
+                    "wang_s201129_owner_opus_source_reconciliation_v1": "s201129_owner_scoped_opus_terminal_review",
+                    "wang_s201129_owner_cl005_supports_v1": "s201129_cl005_owner_scoped_opus_terminal_review",
+                    "wang_owner_approved_link_correction_v1": "owner_approved_link_opus_terminal_review",
+                    "wang_owner_sql_link_correction_v2": "owner_approved_link_opus_terminal_review",
+                }
+                if (self.policy_version not in scoped_reviewers
+                        or self.reviewer_kind != "system"
+                        or self.reviewer_id != scoped_reviewers.get(self.policy_version)
+                        or self.reviewer_model_ids != ["claude-opus-5-5"]
+                        or len(self.semantic_call_artifact_sha256s) != 1
+                        or not self.review_artifact_sha256):
+                    raise ValueError("scoped terminal review requires exact policy and single Opus provenance")
+                return self
             if self.approval_basis != "dual_model_consensus":
                 raise ValueError("system-approved identity requires dual-model consensus")
             if (
@@ -1778,6 +1880,7 @@ KNOWLEDGE_COLLECTIONS: dict[str, tuple[type[EvolvingKnowledgeRecord], str]] = {
     "argument_routes": (ArgumentRouteRecord, "argument_route_id"),
     "argument_route_revisions": (ArgumentRouteRevisionRecord, "argument_route_revision_id"),
     "argument_route_attestations": (ArgumentRouteAttestationRecord, "argument_route_attestation_id"),
+    "viewpoint_observation_supports": (ViewpointObservationSupportRecord, "observation_support_id"),
     "viewpoint_relations": (ViewpointRelationRecord, "viewpoint_relation_id"),
     "viewpoint_identity_candidates": (
         ViewpointIdentityCandidateRecord,

@@ -19,7 +19,7 @@ import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from dotenv import load_dotenv
 
@@ -27,37 +27,91 @@ from backend.api.canonical_repository.viewpoint_foundation import sha256_json
 from backend.pipeline.claude_subscription_client import ClaudeSubscriptionClient
 from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
 from backend.pipeline.matthew_exposition_authoring import sha256_text
+from backend.pipeline.draft_first_scripture import (
+    cited_verses, extends_verse, matches_elided, matches_scripture, normalize, scripture_corpus,
+)
+from backend.pipeline.draft_first_checklist import DISPOSITION_ITEM_SCHEMA, build_checklist, disposition_problems
+from backend.pipeline.draft_first_source_reader import with_source_reading
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-PROMPT_PATH = Path(__file__).with_name("prompts") / "draft_first_topic_author.md"
+PROMPTS = Path(__file__).with_name("prompts")
+PROMPT_PATH = PROMPTS / "draft_first_topic_author.md"
 
 DRAFT_SCHEMA: dict[str, Any] = {
-    "name": "wang_draft_first_topic_essay_v1",
+    "name": "wang_draft_first_topic_essay_v2",
     "strict": True,
     "schema": {
         "type": "object",
         "additionalProperties": False,
-        "properties": {"manuscript_markdown": {"type": "string"}},
-        "required": ["manuscript_markdown"],
+        "properties": {
+            "manuscript_markdown": {"type": "string"},
+            "self_check": {"type": "array", "items": DISPOSITION_ITEM_SCHEMA},
+        },
+        "required": ["manuscript_markdown", "self_check"],
     },
 }
+
+
+def prompt_text(path: Path) -> str:
+    """A prompt with the two-way rules filled in.
+
+    The author, the reviser and the reviewer read the same rule text, word
+    for word (owner, 2026-10-24): a rule only the reviewer knows gets the
+    author's draft blocked for something it was never told.
+    """
+
+    rules = (PROMPTS / "draft_first_two_way_rules.md").read_text(encoding="utf-8").strip()
+    return path.read_text(encoding="utf-8").replace("{TWO_WAY_RULES}", rules)
 
 
 def viewpoint_charter(packet: dict[str, Any]) -> list[dict[str, Any]]:
     """The approved position list, reduced to what a writer needs."""
 
+    # A viewpoint with no fully attested route is where splicing happens: the
+    # writer has to find an order in the sermons, and the runner's 「錯了99.9%」
+    # hard failure was two sermons stitched into one (#439). Say which ones.
+    routed = {
+        (bundle.get("revision") or {}).get("validated_against_conclusion_viewpoint_revision_id")
+        for bundle in packet.get("argument_routes") or []
+        if bundle.get("full_attestation_count")
+    }
+    # A viewpoint with no route can still rest on what the professor saw in
+    # the text (「每次都用定冠詞」: twelve observations in six sermons, no
+    # route). Without them the writer read "no route" as "no basis" (#436).
+    observations: dict[str, list[dict[str, Any]]] = {}
+    for item in packet.get("observation_supports") or []:
+        observations.setdefault(str(item.get("validated_against_viewpoint_revision_id")), []).append(
+            {
+                "source_id": item.get("source_id"),
+                "observation_summary": item.get("observation_summary"),
+                "supports": item.get("supports"),
+                "support_scope_note": item.get("support_scope_note"),
+            }
+        )
     charter: list[dict[str, Any]] = []
     for focal in packet["focal_viewpoints"]:
         revision = focal["revision"]
         signature = revision.get("proposition_signature") or {}
+        revision_id = revision.get("viewpoint_revision_id") or focal.get("viewpoint", {}).get(
+            "current_revision_id"
+        )
         charter.append(
             {
                 "structure_role": focal.get("structure_role"),
-                "viewpoint_revision_id": revision.get("viewpoint_revision_id")
-                or focal.get("viewpoint", {}).get("current_revision_id"),
+                "viewpoint_revision_id": revision_id,
+                "has_full_route": revision_id in routed,
                 "core_proposition": revision.get("core_proposition"),
+                # polarity is the proposition's own sign and is already in
+                # core_proposition; alone beside an already-negated sentence
+                # it was read as a second negation (「中文沒有辦法翻」 flagged).
+                "subject": signature.get("subject"),
+                "predicate": signature.get("predicate"),
+                "object": signature.get("object"),
                 "modality": signature.get("modality"),
                 "polarity": signature.get("polarity"),
+                "observation_supports": observations.get(str(revision_id), []),
+                "conditions": signature.get("conditions") or [],
+                "scope": revision.get("scope") or {},
             }
         )
     return charter
@@ -73,7 +127,11 @@ def structure_unresolved_items(packet: dict[str, Any]) -> list[str]:
     """
 
     revision = (packet.get("structure") or {}).get("revision") or {}
-    return [str(item) for item in revision.get("unresolved_items") or []]
+    items = [str(item) for item in revision.get("unresolved_items") or []]
+    for relation in packet.get("relations") or []:
+        if relation.get("relation_type") == "tensions_with" and relation.get("effective_state", "active") == "active":
+            items.append(str(relation.get("reason") or relation))
+    return items
 
 
 def argument_route_charter(packet: dict[str, Any]) -> list[dict[str, Any]]:
@@ -139,28 +197,121 @@ def source_texts(packet: dict[str, Any]) -> list[dict[str, str]]:
     ]
 
 
-def verbatim_quote_report(manuscript: str, packet: dict[str, Any]) -> dict[str, Any]:
-    """The one objective signal this card keeps: quotes must be verbatim."""
+BACKSTAGE_TERMS = (
+    "母本", "讲义", "講義", "材料", "本文", "各自站立",
+    "后期修正", "後期修正", "一般惯例", "一般慣例",
+)
+# Naming the professor before every quote turned the run-3 essay into nine
+# 「王教授說」. He is named only for his own life and experience (the two
+# Dr. Wongs); exegesis and theology are the article's own voice (owner,
+# 2026-10-24). The count is the program's backstop; the reviewer judges what
+# each naming is about.
+MAX_PROFESSOR_NAMES = 2
+# 「醫學院的教授」 is someone else; 「王教授」「教授說」 are him.
+PROFESSOR_NAME = re.compile(r"(?<![的院])教授")
+# 「講提多書時他說」「教授講馬太福音十六章時說」: locating the professor's words
+# sermon by sermon in the body, which the source bindings already carry.
+SOURCE_LOCATION_TAG = re.compile(
+    r"(?:教授|他)[^，。「」\n]{0,6}[讲講][^，。「」\n]{1,12}[时時]"
+    r"|[讲講][^，。「」\n]{1,12}[时時]，?(?:他|教授)"
+)
+
+
+def backstage_language_report(manuscript: str) -> dict[str, Any]:
+    """Writing rule 9, mechanically: the body speaks in the editor's voice.
+
+    Footnote definitions (the signed 编者注) and blockquoted Scripture are
+    exempt, and so is anything inside 「」, which is a quotation or a term
+    mention rather than the article's own voice. Backstage terms and sermon
+    location tags block; the bare count of 教授 is reported for the reader,
+    because naming the speaker once before a verbatim quote is allowed.
+    """
+
+    body = "\n".join(
+        line
+        for line in manuscript.splitlines()
+        if not line.startswith("[^") and not line.startswith(">")
+    )
+    voice = re.sub(r"「[^」]*」", "", body)
+    terms = [term for term in BACKSTAGE_TERMS if term in voice]
+    tags = [match.group(0) for match in SOURCE_LOCATION_TAG.finditer(voice)]
+    return {
+        "backstage_terms": terms,
+        "source_location_tags": tags,
+        "professor_mentions": voice.count("教授"),
+        "professor_names": [voice[max(0, m.start() - 1): m.end() + 6].split("\n")[0] for m in PROFESSOR_NAME.finditer(voice)],
+    }
+
+
+BLOCK_REFERENCE = re.compile(r"\s*[（(][^（()）]{0,8}\d+\s*[:：]\s*\d+[^（()）]{0,10}[)）]\s*$")
+
+
+def verbatim_quote_report(
+    manuscript: str, packet: dict[str, Any], scripture: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
+    """The one objective signal this card keeps: quotes must be verbatim.
+
+    Inline 「」 quotes are his words and match the sermons only. A quote block
+    may instead match the 和合本 text of a chapter the sources cite
+    (`scripture`, from `draft_first_scripture.scripture_corpus`): the rule
+    demands the full verse, and the professor seldom reads it out whole.
+    """
 
     corpus = "\n".join(
         str(item.get("content")) for item in packet["source_originals"]["originals"]
     )
+    # Inline quotes inside a quote block belong to the verse being shown (a
+    # speaker's words within 太16:13), which the block as a whole is checked
+    # for; only the article's own lines carry the professor's inline quotes.
+    prose = "\n".join(line for line in manuscript.splitlines() if not line.startswith(">"))
     # Corner brackets around short runs are term mentions (「性」,「使徒和先知」)
     # — ordinary Chinese typography, not quotation. Only spans long enough to
     # be an actual quoted sentence are held to the verbatim standard; the
     # fabrication risk this gate exists for lives in long quotes.
     quotes = [
         value.strip()
-        for value in re.findall(r"「([^」]+)」", manuscript)
+        for value in re.findall(r"「([^」]+)」", prose)
         if len(value.strip()) >= 8
     ]
-    quotes += [
-        line[2:].strip()
+    # A verse block ends with its reference, 「……。（太 16:13）」: the
+    # reference is the article's label, not the verse (#439 run 3: 24 of 35
+    # failures were references).
+    block_quotes = [
+        BLOCK_REFERENCE.sub("", line[2:]).strip()
         for line in manuscript.splitlines()
         if line.startswith("> ") and not line.startswith("> ——")
     ]
-    checked = [
-        {"quote": quote, "verbatim": quote in corpus}
+    # A verse block is held to its words, not its typesetting: the sermon reads
+    # 太12:11 as 『你們中間誰有一隻羊…』 inside 「」, the article the other way
+    # round, and reading aloud he skips verses (「又有一獸，第二個獸，如熊。」夠了，
+    # 跳過去) -- so each elided segment must occur in his reading or in 和合本.
+    sermon_words = normalize(corpus)
+    checked: list[dict[str, Any]] = []
+    verified_blocks: list[str] = []
+    for quote in block_quotes:
+        if not quote:
+            continue
+        if "〔" in quote or (scripture is not None and extends_verse(quote, scripture)):
+            checked.append({"quote": quote, "verbatim": False, "matched": None})
+            continue
+        if quote in corpus or matches_elided(quote, sermon_words):
+            checked.append({"quote": quote, "verbatim": True, "matched": "sermon"})
+        elif scripture is not None and matches_scripture(quote, scripture):
+            checked.append({"quote": quote, "verbatim": True, "matched": "cuv"})
+        else:
+            checked.append({"quote": quote, "verbatim": False, "matched": None})
+            continue
+        verified_blocks.append(normalize(quote))
+    # Nested quotation marks are typography: the sermon's 「人子」 inside a
+    # quoted sentence is written 『人子』 in the article. An inline quote may
+    # also repeat words of a verse the article has just shown in a verified
+    # block (「路24:7 的『人子必須被交在罪人手裏』」); a verse it has not shown
+    # stays sermon-only.
+    checked[:0] = [
+        {"quote": quote,
+         "verbatim": quote in corpus or quote.replace("『", "「").replace("』", "」") in corpus
+         or any(normalize(quote) in block for block in verified_blocks),
+         "matched": "sermon"}
         for quote in quotes
         if quote
     ]
@@ -186,11 +337,15 @@ def verbatim_quote_report(manuscript: str, packet: dict[str, Any]) -> dict[str, 
         quote = match.group(1).strip()
         if quote and quote not in blockquoted and quote not in long_inline:
             long_inline.append(quote)
-    return {
+    report = {
         "quotes_checked": len(checked),
         "quotes_failing": [item["quote"] for item in checked if not item["verbatim"]],
         "long_quotes_not_blockquoted": long_inline,
+        "scripture_quotes": [item["quote"] for item in checked if item["matched"] == "cuv"],
     }
+    if scripture is not None:
+        report["scripture_chapters"] = dict(scripture["chapters"])
+    return report
 
 
 def main() -> int:
@@ -202,9 +357,9 @@ def main() -> int:
         "--audience",
         # A thin label made the author mirror its sources' seminary register
         # (bare verse numbers, untranslated Greek); the profile says what the
-        # reader does not bring, and rule 13 tells the author to write to it.
+        # reader does not bring, and rule 8 tells the author to write to it.
         default=(
-            "神学生和追求的老基督徒。他们有圣经常识——知道摩西五经、先知书、使徒行传是什么，"
+            "神学生和追求的基督徒。他们有圣经常识——知道摩西五经、先知书、使徒行传是什么，"
             "认得利未记、认得拉比这类词，不需要从头解释；但不滚瓜烂熟，"
             "记不住某章某节具体讲了什么、上下文是什么。多数人不懂希腊文。"
         ),
@@ -214,7 +369,7 @@ def main() -> int:
         "--series-context",
         type=Path,
         help="JSON of sibling essays in the series: reader questions, one-line "
-        "answers, claimed arguments; rule 6 keeps this essay from re-arguing them",
+        "answers, claimed arguments; rule 7 keeps this essay from re-arguing them",
     )
     parser.add_argument(
         "--provider",
@@ -228,7 +383,8 @@ def main() -> int:
 
     raw = json.loads(args.packet.read_text(encoding="utf-8"))
     packet = raw.get("result", raw)
-    prompt = PROMPT_PATH.read_text(encoding="utf-8")
+    prompt = prompt_text(PROMPT_PATH)
+    checklist = build_checklist(packet)
 
     payload = {
         "reader_question": args.reader_question,
@@ -237,6 +393,8 @@ def main() -> int:
         "unresolved_items": structure_unresolved_items(packet),
         "argument_routes": argument_route_charter(packet),
         "source_originals": source_texts(packet),
+        "scripture_cuv": cited_verses(packet),
+        "checklist": checklist,
     }
     if args.series_context:
         payload["series_context"] = json.loads(
@@ -247,7 +405,8 @@ def main() -> int:
     client_type = (
         CodexSubscriptionClient if args.provider == "codex" else ClaudeSubscriptionClient
     )
-    client = client_type(model=args.model, reasoning_effort=args.reasoning_effort)
+    client = client_type(model=args.model, reasoning_effort=args.reasoning_effort, timeout_seconds=3600)
+    client = with_source_reading(client, packet, args.output_dir / "source-reading")
     result = client.generate_json(prompt, payload_json, DRAFT_SCHEMA)
     manuscript = str(result["manuscript_markdown"])
     # A model occasionally nests the envelope: the field's value is itself a
@@ -263,6 +422,10 @@ def main() -> int:
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "draft.md").write_text(manuscript, encoding="utf-8")
+    self_check = list(result.get("self_check") or [])
+    (args.output_dir / "self-check.json").write_text(
+        json.dumps(self_check, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     record = {
         "schema_version": "wang_draft_first_author_run_v1",
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -277,7 +440,11 @@ def main() -> int:
         "reasoning_effort": client.reasoning_effort,
         "manuscript_sha256": sha256_text(manuscript),
         "manuscript_chars": len(manuscript),
-        "quote_report": verbatim_quote_report(manuscript, packet),
+        "quote_report": verbatim_quote_report(manuscript, packet, scripture_corpus(packet)),
+        "backstage_language_report": backstage_language_report(manuscript),
+        "checklist_items": len(checklist),
+        "self_check_problems": disposition_problems(checklist, self_check, manuscript),
+        "source_reading": getattr(client, "source_reading_receipt", None),
     }
     record["run_sha256"] = sha256_json(record)
     (args.output_dir / "run.json").write_text(

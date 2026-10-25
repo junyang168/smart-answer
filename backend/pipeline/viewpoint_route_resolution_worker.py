@@ -377,7 +377,10 @@ def process_work_unit(
     ]
     if len(approved) != len(expected):
         raise ValueError("Registry no longer contains the work unit conclusion cut")
-    existing_routes = _existing_route_context(store)
+    existing_routes = [
+        route for route in _existing_route_context(store)
+        if route["conclusion_viewpoint_revision_id"] in expected.values()
+    ]
     packet = build_registry_route_packet(
         scope_label=work.scope_label,
         approved_viewpoints=approved,
@@ -589,6 +592,8 @@ def main() -> int:
     args = parser.parse_args()
 
     policy = load_route_policy(args.route_policy)
+    if policy["schema_version"] == "wang_route_resolution_policy_v4" and args.max_jobs != 1:
+        parser.error("current Route policy processes exactly one CVP job per worker run")
     policy_sha256 = route_policy_fingerprint(
         policy,
         prompt_sha256s=route_policy_prompt_sha256s(
@@ -728,6 +733,10 @@ def main() -> int:
             item.route_policy_fingerprint_sha256 for item in jobs
         } != {policy_sha256} or work.route_policy_fingerprint_sha256 != policy_sha256:
             raise ValueError("claimed Route work does not bind its selected policy")
+        if policy["schema_version"] == "wang_route_resolution_policy_v4" and (
+            len(jobs) != 1 or len(work.current_viewpoint_revisions) != 1
+        ):
+            raise ValueError("current Route policy requires one CVP per work unit")
         if {item.evidence_scope_sha256 for item in jobs} != {
             str(scope_packet["packet_sha256"])
         } or work.evidence_scope_sha256 != str(scope_packet["packet_sha256"]):

@@ -1,0 +1,16 @@
+{
+  "schema_version": "wang_cvp_membership_management_v1",
+  "authorization_id": "owner-routine-cvp-membership-management-v1",
+  "authorization_quote": "那这个是一个 bug 吧. 常规 CVP management 不需要人工介入",
+  "human_content_approval": false,
+  "automatic_member_revalidation": true,
+  "preserve_core_signature_and_scope": true,
+  "preserve_claims_evidence_sources": true,
+  "preserve_campaign_members_and_order": true,
+  "revive_retired_members": false,
+  "supports_is_equivalent_without_review": false,
+  "proposal_model": "gpt-6.1-sol",
+  "independent_review_model": "claude-opus-5-5",
+  "correction_limit": 1,
+  "unknown_call_retry": false
+}

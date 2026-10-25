@@ -29,6 +29,7 @@ REQUIRED_COLLECTIONS = (
     "argument_routes",
     "argument_route_revisions",
     "argument_route_attestations",
+    "viewpoint_observation_supports",
     "viewpoint_relations",
     "claims",
     "evidence_steps",
@@ -54,7 +55,8 @@ def _write_json_atomic(path: Path, value: Mapping[str, Any]) -> None:
         raise
 
 
-def compile_from_store(*, scope: Mapping[str, Any]) -> dict[str, Any]:
+def compile_from_store(*, scope: Mapping[str, Any], editorial_selection=None,
+                       source_delivery_mode="complete_originals_in_context") -> dict[str, Any]:
     """Read the current master data once and compile one immutable packet."""
 
     validate_editorial_scope(scope)
@@ -63,7 +65,8 @@ def compile_from_store(*, scope: Mapping[str, Any]) -> dict[str, Any]:
         collection: store.list_records(collection)
         for collection in REQUIRED_COLLECTIONS
     }
-    packet = compile_theological_evidence_packet(scope=scope, records=records)
+    packet = compile_theological_evidence_packet(scope=scope, records=records,
+        editorial_selection=editorial_selection, source_delivery_mode=source_delivery_mode)
     validate_theological_evidence_packet(packet)
     return packet
 
@@ -72,6 +75,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scope", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--editorial-selection", type=Path,
+                        help="Article-local selection of current approved CVPs; does not approve or write a knowledge structure")
+    parser.add_argument("--source-delivery", choices=("complete_originals_in_context", "source_library"),
+                        default="complete_originals_in_context")
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -84,7 +91,12 @@ def main() -> int:
 
     load_dotenv(PROJECT_ROOT / ".env")
     scope = json.loads(args.scope.read_text(encoding="utf-8"))
-    packet = compile_from_store(scope=scope)
+    options = {}
+    if args.editorial_selection:
+        options["editorial_selection"] = json.loads(args.editorial_selection.read_text(encoding="utf-8"))
+    if args.source_delivery != "complete_originals_in_context":
+        options["source_delivery_mode"] = args.source_delivery
+    packet = compile_from_store(scope=scope, **options)
     output = args.output_dir / "theological-evidence-packet.json"
     _write_json_atomic(output, packet)
     print(

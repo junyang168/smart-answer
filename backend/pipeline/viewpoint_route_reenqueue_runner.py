@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 
 from backend.api.canonical_repository.viewpoint_batch_resolution import (
     CvpBatchReadbackReceipt,
-    build_route_resolution_job,
+    build_route_resolution_jobs,
 )
 from backend.api.canonical_repository.viewpoint_route_queue import (
     FileRouteResolutionQueue,
@@ -65,7 +65,7 @@ def main() -> int:
         raise SystemExit("route work may only be queued for a verified readback")
     packet = json.loads(args.packet.read_text(encoding="utf-8"))
     policy = load_route_policy(args.route_policy)
-    job = build_route_resolution_job(
+    jobs = build_route_resolution_jobs(
         receipt=receipt,
         evidence_scope_sha256=str(packet["packet_sha256"]),
         route_policy_fingerprint_sha256=route_policy_fingerprint(
@@ -73,13 +73,15 @@ def main() -> int:
             prompt_sha256s=route_policy_prompt_sha256s(policy, prompt_dir=PROMPT_DIR),
         ),
     )
-    FileRouteResolutionQueue(args.queue_dir).enqueue(job)
+    queue = FileRouteResolutionQueue(args.queue_dir)
+    for job in jobs:
+        queue.enqueue(job)
     print(
         json.dumps(
             {
-                "job_id": job.job_id,
-                "viewpoint_count": len(job.logical_viewpoint_ids),
-                "route_policy_fingerprint_sha256": job.route_policy_fingerprint_sha256,
+                "job_ids": [job.job_id for job in jobs],
+                "viewpoint_count": len(jobs),
+                "route_policy_fingerprint_sha256": jobs[0].route_policy_fingerprint_sha256,
             },
             ensure_ascii=False,
             indent=2,

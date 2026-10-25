@@ -6,7 +6,50 @@
 > **與代碼對齊**：不適用
 > **權威範圍**：無。本文只說明此刻已發布什麼，不定規則。
 
-Updated: 2026-09-10 (America/Chicago)
+Updated: 2026-10-24 (America/Chicago)
+
+## 2026-10-24 Draft-first: 人子 essay registered; repeatable pipeline in progress
+
+Work is on card #439, branch `wkp-439-son-of-man-essay`, worktree
+`smart-answer-worktrees/wkp-439-son-of-man-essay`.
+
+**Done.** The 人子 essay passed the two-way review in two revision rounds after
+the rules below, then one owner-note round (a footnote sentence and a stray
+character). It is registered for internal review as `son-of-man-draft-first-v1`
+(admin page `/admin/wang/operations/articles/reviews/son-of-man-draft-first-v1`),
+manuscript SHA `74c4be7f…0716`, 55 of 56 paragraphs source-bound (only the
+closing summary is not, by owner ruling). Artifacts:
+`staging/wkp-439/fresh-20261024/review-v2-owner-b/`. `review-v2-owner-VOID/`
+is a void run (a passed-flag bug, no model calls); do not use it.
+
+**Waiting on the owner.** Final review and the publish button on that page.
+
+**Rules settled this week, and where they now live.** Each is in the author
+and reviewer prompts with a test holding the two sides together, and in
+[Draft-first 文章流程 v1](./draft_first_workflow_v1.md):
+two-way fidelity (nothing added, nothing removed; the reverse check covers
+CVPs and Claims only); the professor is named only for his own life; plain,
+not preaching; 言之有物，言简意赅, with what wordiness looks like given to the
+author as understanding; scene only where the argument needs it, and it may
+come from the verse's own preceding verses; argued verses as one complete
+sentence; the topic-essay ending a short paragraph that answers every part
+of the question; editor's notes in plain words; the reviewer lists every
+instance at once and scores against a per-dimension rubric; a skipped route
+step counts as overstatement; source bindings are derived from the self-check,
+the review and verse matching, with a model only choosing among program
+candidates; every quoted verse must be bound to where the professor reads or
+names it; unresolved problems go to the owner, and only the owner adds rounds.
+
+**In progress.** [Draft-first 写作流程的可重复化：方案](./draft_first_repeatable_pipeline_solution.md),
+order approved: (1) program checks, (2) one resumable command with owner stop
+points, (3) a thin `/topic-essay` skill, (4) 「萬人的贖價」 as the first essay on
+the new pipeline, (5) the Matthew passage entry. Step 1 has started. The
+Matthew decisions in that document's section 4 are deferred by the owner.
+
+**Not yet done.** The branch is far ahead of `main` and has no open PR; it
+carries other cards' work merged earlier, which must be sorted before a PR.
+The reviewer prompt changed after the last K1–K10 calibration, so the next
+review run needs a fresh calibration first.
 
 ## 2026-09-10 Matthew authoring-line decision
 

@@ -116,6 +116,19 @@ export type ViewpointDetail = {
     structure_role: string; focal_count: number; unresolved_items: string[];
   }>;
   members: Member[];
+  observation_supports?: Array<{
+    current_registry_ready: boolean;
+    observation_support: {
+      observation_support_id: string; observation_summary: string; supports: string;
+      support_scope_note: string; source_id: string; review_status: string;
+    };
+    bindings: Array<{
+      binding: { claim_id: string; evidence_step_id: string; source_fragment_id: string };
+      source_fragment: null | { verbatim_excerpt: string; paragraph_key?: string };
+      source: null | { title?: string };
+      locator: { source_admin_url: string | null; source_url: string | null; source_type: string | null };
+    }>;
+  }>;
   routes: Array<Record<string, unknown> & {
     route_id: string; route_type: string; claim_id: string | null; evidence_step_ids: string[];
     revision: null | Record<string, unknown> & {
