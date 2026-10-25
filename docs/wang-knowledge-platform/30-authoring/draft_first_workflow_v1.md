@@ -107,7 +107,7 @@ Draft-first 是专题综合文章唯一的当前生产线；2026-09-10，负责�
 ### 分步阅读：原文完整保存，按需要查阅
 
 编包入口的 `--source-delivery source_library` 将全部相关原文及其 SHA 保存在材料包中，
-不把整批正文直接发送给模型。作者、修订与来源绑定均通过
+不把整批正文直接发送给模型。作者与修订均通过
 `draft_first_source_reader` 先查看完整观点清单、条件、范围、已审核关系、来源目录及证据位置，
 再请求指定来源的完整编号块；可以继续读取相邻块或其他来源。阅读笔记不是证据或新的批准。
 实际读取、选择保留的原文及最终任务的精确输入、原始回复均保存，可重新核对。
@@ -164,7 +164,7 @@ Draft-first 是专题综合文章唯一的当前生产线；2026-09-10，负责�
 
 ### 来源绑定与登记：给审稿的人配全证据
 
-绑定回答「这段话教授在哪里说过」：每段标出原文逐字片段，程序逐字核实，对不上的一律丢弃并记录（第一次实跑就丢弃过全部 37 条错误提案，零错误进页面）。讲道出处自动带录音跳转；论证段另附教授这条论证的步骤展开。稿件、检查记录、绑定、材料包四者的内容指纹互锁登记——事后改动任何一份，审稿页立刻显示「已改变」。
+绑定回答「这段话教授在哪里说过」：每段标出原文逐字片段，程序逐字核实，对不上的一律丢弃并记录（第一次实跑就丢弃过全部 37 条错误提案，零错误进页面）。出处不再另请模型去找（负责人，2026-10-24：「审核的时候没有做过吗」）：作者自查把清单每项落在成稿逐字的一句上，程序沿「清单项 → 观点 → Claim 的可用证据 → 原文片段」把这些片段绑到那一段；清单项不覆盖的故事、背景与字词细节，由审稿在判断「原文里有」时记下查到的原文（`paragraph_sources`）。人子一篇第一次程序绑定，57 段中 29 段绑上，未绑的是经文引文、过渡句与叙事段——后者的出处自下一次审稿起由审稿记下。讲道出处自动带录音跳转；论证段另附教授这条论证的步骤展开。稿件、检查记录、绑定、材料包四者的内容指纹互锁登记——事后改动任何一份，审稿页立刻显示「已改变」。
 
 ### 负责人终审：流程里唯一的人工点
 
@@ -210,9 +210,9 @@ backend/.venv/bin/python -m backend.pipeline.draft_first_author_runner \
 backend/.venv/bin/python -m backend.pipeline.draft_first_review_runner \
   --draft <run>/author-v1/draft.md --packet <同上> --output-dir <run>/review-v1
 
-# 来源绑定
+# 来源绑定（不调用模型：读 final.md、final-self-check.json 与末轮 review.json）
 backend/.venv/bin/python -m backend.pipeline.draft_first_source_binding \
-  --draft <run>/review-v1/final.md --packet <同上> \
+  --review-dir <run>/review-v1 --packet <同上> \
   --output <run>/review-v1/source-bindings.json
 
 # 登记进审稿页

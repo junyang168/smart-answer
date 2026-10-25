@@ -33,6 +33,8 @@
 
 你对清单**每一项**都给出自己的判断（`checklist_review`）：`status` 与作者同一套取值，`anchor` 与 `reason` 同样要求；`acceptable` 表示这一项的现状可以接受——落地无误，或缺席理由正当。核对作者的 `self_check`：作者说落地的，到 anchor 处看判断是否完整；作者说缺席的，判断理由是否正当。`acceptable` 为 false 的项必须有一条 blocking 发现，`item_id` 指向它：没有落地的为 `missing`，判断变了的为 `distorted`；`source_quote` 从原文或清单逐字复制被丢掉或被改动的判断。
 
+**记下你查到的出处**（`paragraph_sources`）：正文里不承载清单项的段落——故事、背景、比喻、字词细节——你判断它「原文里有」时，记下查到的那一处：`anchor` 从 `draft.md` 逐字复制该段的一句，`source_id` 写来源编号，`excerpt` 从该来源逐字复制至少二十个字的原文。审稿页据此逐段给负责人看出处；你没有实际查到原文的段落不要填。
+
 ## 三、评分：每个维度量什么
 
 逐项按 `quality_profile.dimensions` 评分；每项必须单独达到自己的 minimum，总分不决定通过。每项评分的 `evidence` 必须逐字引用成稿至少一句。下面写明每个维度量什么、什么情况压到 minimum 以下；标「必须 blocking」的，出现一处即须作为 blocking 发现。

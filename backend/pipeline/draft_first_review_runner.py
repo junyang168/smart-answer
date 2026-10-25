@@ -209,10 +209,27 @@ def two_way_review_schema(profile: Mapping[str, Any]) -> dict[str, Any]:
                         "required": ["finding_id", "ruling", "note"],
                     },
                 },
+                # Where the reviewer found the support for a paragraph no
+                # checklist item covers (a story, a background detail). The
+                # source bindings use it; a span that is not verbatim is
+                # dropped there with a finding, never trusted.
+                "paragraph_sources": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "anchor": {"type": "string"},
+                            "source_id": {"type": "string"},
+                            "excerpt": {"type": "string"},
+                        },
+                        "required": ["anchor", "source_id", "excerpt"],
+                    },
+                },
             },
             "required": [
                 "summary", "checklist_review", "dimension_scores",
-                "hard_failure_assessments", "findings", "dispute_rulings",
+                "hard_failure_assessments", "findings", "dispute_rulings", "paragraph_sources",
             ],
         },
     }

@@ -1,13 +1,14 @@
-"""Derive per-paragraph source bindings for a draft-first essay.
+"""Per-paragraph source bindings for a draft-first essay, derived without a model.
 
-Draft-first manuscripts carry no author-declared provenance, so the admin
-review preview's per-paragraph source disclosure has nothing to read. This
-module derives that mapping after the fact: one subscription-CLI call proposes
-verbatim source spans for every reader paragraph, and every span is then
-verified character-for-character against the scoped source originals —
-a span that does not survive verification is dropped with a recorded finding,
-never silently kept. The same discipline as texture anchors (#281) and the
-alignment gate (#285): models propose, string comparison decides.
+The review page shows the owner, paragraph by paragraph, where the professor
+said it. Writing and review already record that: the author's self-check
+lands every checklist item on a verbatim sentence, each item leads through
+its viewpoint, Claims and evidence to source fragments the Claim layer
+verified, and the reviewer notes where it found support for paragraphs no
+item covers (`paragraph_sources`). This module follows those links. A model
+used to propose the spans after the fact (owner, 2026-10-24: 「审核的时候没有做过吗」);
+every span is still checked character for character against the source and
+dropped with a recorded finding when it does not survive.
 """
 
 from __future__ import annotations
@@ -23,12 +24,11 @@ from typing import Any, Mapping
 from dotenv import load_dotenv
 
 from backend.api.canonical_repository.viewpoint_foundation import sha256_json
-from backend.pipeline.codex_subscription_client import CodexSubscriptionClient
-from backend.pipeline.draft_first_author_runner import argument_route_charter, source_texts
+from backend.pipeline.draft_first_author_runner import argument_route_charter
+from backend.pipeline.draft_first_checklist import anchor_in
 from backend.pipeline.matthew_exposition_authoring import sha256_text
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-PROMPT_PATH = Path(__file__).with_name("prompts") / "draft_first_source_binding.md"
 MIN_EXCERPT_CHARS = 20
 MAX_SPANS_PER_PARAGRAPH = 3
 #: Character-bigram overlap below this marks a span as low_overlap: verbatim
@@ -49,43 +49,6 @@ def excerpt_overlap(paragraph_text: str, excerpt: str) -> float:
     if not excerpt_grams:
         return 0.0
     return len(excerpt_grams & _bigrams(paragraph_text)) / len(excerpt_grams)
-
-BINDING_SCHEMA: dict[str, Any] = {
-    "name": "wang_draft_first_source_binding_v1",
-    "strict": True,
-    "schema": {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "bindings": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "paragraph_index": {"type": "integer"},
-                        "route_revision_id": {"type": ["string", "null"]},
-                        "spans": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "additionalProperties": False,
-                                "properties": {
-                                    "source_id": {"type": "string"},
-                                    "excerpt": {"type": "string"},
-                                },
-                                "required": ["source_id", "excerpt"],
-                            },
-                        },
-                    },
-                    "required": ["paragraph_index", "route_revision_id", "spans"],
-                },
-            }
-        },
-        "required": ["bindings"],
-    },
-}
-
 
 def reader_paragraphs(markdown: str) -> list[dict[str, Any]]:
     """Reader-visible paragraphs in document order, headings excluded.
@@ -200,50 +163,117 @@ def verify_bindings(
     return {"bindings": verified, "findings": findings}
 
 
+def _fragment_ids(item: Mapping[str, Any], index: Mapping[str, Any]) -> list[str]:
+    """Source fragments behind one checklist item, in packet order."""
+
+    kind = item.get("kind")
+    if kind == "observation":
+        support = index["observations"].get(str(item["item_id"]).split(":", 1)[1]) or {}
+        return [str(b["source_fragment_id"]) for b in support.get("evidence_bindings") or []]
+    if kind == "route":
+        route = index["routes"].get(str(item["item_id"]).split(":", 1)[1]) or {}
+        return [str(f) for a in route.get("attestations") or [] for b in a.get("step_bindings") or []
+                for f in b.get("source_fragment_ids") or []]
+    revisions = item.get("viewpoint_revision_ids") or [item.get("viewpoint_revision_id")]
+    ids: list[str] = []
+    for revision in revisions:
+        viewpoint = index["viewpoints"].get(str(revision)) or {}
+        for claim_id in viewpoint.get("member_claim_ids") or []:
+            claim = index["claims"].get(str(claim_id)) or {}
+            steps = claim.get("eligible_evidence_step_ids") or claim.get("evidence_step_ids") or []
+            for step_id in steps:
+                step = index["steps"].get(str(step_id)) or {}
+                ids.extend(str(f) for f in step.get("source_fragment_ids") or [step.get("source_fragment_id")] if f)
+    return ids
+
+
+def derive_bindings(
+    manuscript: str,
+    packet: Mapping[str, Any],
+    self_check: list[Mapping[str, Any]],
+    checklist: list[Mapping[str, Any]],
+    paragraph_sources: list[Mapping[str, Any]] = (),
+) -> dict[str, Any]:
+    """Proposed bindings (the shape `verify_bindings` checks) and what each came from."""
+
+    paragraphs = reader_paragraphs(manuscript)
+    index = {
+        "viewpoints": {str(v["revision"].get("viewpoint_revision_id")): v for v in packet.get("focal_viewpoints") or []},
+        "claims": {str(c["claim_id"]): c for c in packet.get("claims") or []},
+        "steps": {str(e["evidence_step_id"]): e for e in packet.get("evidence_steps") or []},
+        "fragments": {str(f["fragment_id"]): f for f in packet.get("source_fragments") or []},
+        "observations": {str(o["observation_support_id"]): o for o in packet.get("observation_supports") or []},
+        "routes": {str(r["revision"].get("argument_route_revision_id")): r for r in packet.get("argument_routes") or []},
+    }
+    items = {str(item["item_id"]): item for item in checklist}
+    rows = [{"paragraph_index": p["paragraph_index"], "route_revision_id": None, "spans": [], "basis": []}
+            for p in paragraphs]
+
+    def home(anchor: str) -> dict[str, Any] | None:
+        for paragraph, row in zip(paragraphs, rows):
+            if anchor and anchor_in(paragraph["text"], anchor):
+                return row
+        return None
+
+    for disposition in self_check:
+        item = items.get(str(disposition.get("item_id")))
+        row = home(str(disposition.get("anchor") or "")) if disposition.get("status") == "landed" else None
+        if item is None or row is None:
+            continue
+        row["basis"].append(item["item_id"])
+        if item.get("kind") == "route" and row["route_revision_id"] is None:
+            row["route_revision_id"] = str(item["item_id"]).split(":", 1)[1]
+        for fragment_id in _fragment_ids(item, index):
+            fragment = index["fragments"].get(fragment_id) or {}
+            excerpt = str(fragment.get("verbatim_excerpt") or "").strip()
+            if len(excerpt) >= MIN_EXCERPT_CHARS:
+                row["spans"].append({"source_id": str(fragment["source_id"]), "excerpt": excerpt})
+    for source in paragraph_sources:
+        row = home(str(source.get("anchor") or ""))
+        if row is not None:
+            row["basis"].append("review")
+            row["spans"].append({"source_id": str(source["source_id"]), "excerpt": str(source["excerpt"]).strip()})
+    for paragraph, row in zip(paragraphs, rows):
+        # The spans that read most like the paragraph, each once; the
+        # reviewer's own finds stay in, they are why the paragraph is bound.
+        unique = {(span["source_id"], span["excerpt"]): span for span in row["spans"]}
+        row["spans"] = sorted(unique.values(), key=lambda span: -excerpt_overlap(paragraph["text"], span["excerpt"]))
+        row["spans"] = row["spans"][:MAX_SPANS_PER_PARAGRAPH]
+    return {"bindings": rows}
+
+
 def main() -> int:
     load_dotenv(PROJECT_ROOT / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--draft", type=Path, required=True)
+    parser.add_argument("--review-dir", type=Path, required=True,
+                        help="a draft_first_review_runner output: final.md, final-self-check.json, round-*/review.json")
     parser.add_argument("--packet", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--model", default="gpt-5.6-sol")
-    parser.add_argument("--reasoning-effort", choices=("medium", "high", "xhigh"), default="high")
     args = parser.parse_args()
+
+    from backend.pipeline.draft_first_checklist import build_checklist
 
     raw = json.loads(args.packet.read_text(encoding="utf-8"))
     packet = raw.get("result", raw)
-    manuscript = args.draft.read_text(encoding="utf-8")
+    manuscript = (args.review_dir / "final.md").read_text(encoding="utf-8")
+    self_check = json.loads((args.review_dir / "final-self-check.json").read_text(encoding="utf-8"))
+    last_review = max(args.review_dir.glob("round-*/review.json"), key=lambda path: path.parent.name)
+    review = json.loads(last_review.read_text(encoding="utf-8"))
     paragraphs = reader_paragraphs(manuscript)
-
-    client = CodexSubscriptionClient(model=args.model, reasoning_effort=args.reasoning_effort)
-    from backend.pipeline.draft_first_source_reader import with_source_reading
-    client = with_source_reading(client, packet, args.output.parent / "binding-source-reading")
-    proposed = client.generate_json(
-        PROMPT_PATH.read_text(encoding="utf-8"),
-        json.dumps(
-            {
-                "paragraphs": [
-                    {"paragraph_index": p["paragraph_index"], "text": p["text"]}
-                    for p in paragraphs
-                ],
-                "argument_routes": argument_route_charter(dict(packet)),
-                "source_originals": source_texts(dict(packet)),
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-        ),
-        BINDING_SCHEMA,
-    )
+    proposed = derive_bindings(manuscript, packet, self_check, build_checklist(packet),
+                               list(review.get("paragraph_sources") or []))
     result = verify_bindings(proposed, paragraphs=paragraphs, packet=packet)
+    basis = {row["paragraph_index"]: row["basis"] for row in proposed["bindings"]}
+    for row in result["bindings"]:
+        row["basis"] = basis[row["paragraph_index"]]
     bound = sum(1 for item in result["bindings"] if item["spans"])
     record = {
-        "schema_version": "wang_draft_first_source_bindings_v1",
+        "schema_version": "wang_draft_first_source_bindings_v2",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "manuscript_sha256": sha256_text(manuscript),
         "evidence_packet_sha256": packet.get("evidence_packet_sha256"),
-        "model": client.model,
-        "backend": client.backend,
-        "source_reading": getattr(client, "source_reading_receipt", None),
+        "derivation": "self_check_and_review",
+        "review_sha256": sha256_text(last_review.read_text(encoding="utf-8")),
         "paragraphs_total": len(paragraphs),
         "paragraphs_bound": bound,
         "bindings": result["bindings"],
@@ -251,19 +281,9 @@ def main() -> int:
     }
     record["bindings_sha256"] = sha256_json(record)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(
-        json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
-    print(
-        json.dumps(
-            {
-                "paragraphs_total": len(paragraphs),
-                "paragraphs_bound": bound,
-                "findings": len(result["findings"]),
-            },
-            ensure_ascii=False,
-        )
-    )
+    args.output.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps({"paragraphs_total": len(paragraphs), "paragraphs_bound": bound,
+                      "findings": len(result["findings"])}, ensure_ascii=False))
     return 0
 
 

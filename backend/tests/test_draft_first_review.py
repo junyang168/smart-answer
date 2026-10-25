@@ -813,3 +813,36 @@ def test_the_reviewer_is_told_what_every_scored_dimension_measures():
         assert f"- `{dimension['id']}`：" in rubric, dimension["id"]
     for heading in ("**忠实**", "**结构**", "**读者**", "**口吻**"):
         assert heading in rubric
+
+
+def test_bindings_follow_the_self_check_and_the_reviewers_finds_without_a_model():
+    """Owner, 2026-10-24: the sources were found during writing and review already."""
+
+    from backend.pipeline.draft_first_source_binding import derive_bindings, verify_bindings, reader_paragraphs
+    import backend.pipeline.draft_first_source_binding as binding
+
+    assert not hasattr(binding, "BINDING_SCHEMA") and "CodexSubscriptionClient" not in Path(binding.__file__).read_text()
+    sermon = "人子這個稱號是耶穌自己用的，從來沒有別人這樣稱呼祂。我家裡有兩位 Dr. Wong，打電話來的人分不清是哪一位。"
+    packet = {
+        "source_originals": {"originals": [{"source_id": "S1", "content": sermon}]},
+        "focal_viewpoints": [{"revision": {"viewpoint_revision_id": "R1"}, "member_claim_ids": ["C1"]}],
+        "claims": [{"claim_id": "C1", "eligible_evidence_step_ids": ["E1"], "evidence_step_ids": ["E1", "E2"]}],
+        "evidence_steps": [{"evidence_step_id": "E1", "source_fragment_ids": ["F1"]},
+                           {"evidence_step_id": "E2", "source_fragment_ids": ["F2"]}],
+        "source_fragments": [{"fragment_id": "F1", "source_id": "S1", "verbatim_excerpt": "人子這個稱號是耶穌自己用的，從來沒有別人這樣稱呼祂。"},
+                             {"fragment_id": "F2", "source_id": "S1", "verbatim_excerpt": "我家裡有兩位 Dr. Wong，打電話來的人分不清是哪一位。"}],
+        "observation_supports": [], "argument_routes": [],
+    }
+    manuscript = "# 標題\n\n「人子」是耶穌自己用的稱號，沒有別人這樣稱呼祂。\n\n他家裡有兩位 Dr. Wong，來電的人分不清是哪一位。\n\n第三段沒有出處。"
+    checklist = [{"item_id": "V:R1", "kind": "viewpoint", "viewpoint_revision_id": "R1", "text": "t"}]
+    self_check = [{"item_id": "V:R1", "status": "landed", "anchor": "沒有別人這樣稱呼祂", "reason": ""}]
+    finds = [{"anchor": "來電的人分不清", "source_id": "S1", "excerpt": "我家裡有兩位 Dr. Wong，打電話來的人分不清是哪一位。"},
+             {"anchor": "第三段沒有出處", "source_id": "S1", "excerpt": "這一句不在任何來源裡，所以不得被當成這一段的出處。"}]
+    proposed = derive_bindings(manuscript, packet, self_check, checklist, finds)
+    result = verify_bindings(proposed, paragraphs=reader_paragraphs(manuscript), packet=packet)
+    spans = [[s["excerpt"][:6] for s in row["spans"]] for row in result["bindings"]]
+    # The viewpoint brings only its eligible evidence (F1, not the withheld F2);
+    # the reviewer's find binds the story; an invented excerpt is dropped.
+    assert spans == [["人子這個稱號"], ["我家裡有兩位"], []]
+    assert [row["basis"] for row in proposed["bindings"]] == [["V:R1"], ["review"], ["review"]]
+    assert [f["code"] for f in result["findings"]] == ["excerpt_not_verbatim"]
