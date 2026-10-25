@@ -1057,7 +1057,23 @@ def legacy_audit_keys(request, before, candidate=None):
     return sorted(seen)
 
 
+def unlinkable_questions(request, before):
+    """Questions an Update reads but could not point at a Claim it creates.
+
+    2017 NYSC 4 created 「人子或人的形象代表神」 as its own Claim; Q019 asks exactly
+    that and was answered by the professor in those words, but the request had
+    no answer_claim_ids grant, so the reviewer could only note the gap.
+    """
+    if request.operation != 'Update' or not any(p.collection == 'claims' for p in request.creation_permissions):
+        return []
+    granted = {p.key for p in request.permissions if 'answer_claim_ids' in p.fields}
+    return sorted(k for k, v in before.items() if k.startswith('questions/') and not v['retired'] and k not in granted)
+
+
 def original_goal(request, before):
+    missing = unlinkable_questions(request, before)
+    if missing:
+        raise ValueError('Claim creation requires answer_claim_ids on every question it reads: ' + ', '.join(missing))
     original_keys = set(audit_keys(request, before)) | {source.key('source_documents', sid) for sid in request.source_bindings}
     result = {
         "operation": request.operation, "target_keys": list(request.target_keys),

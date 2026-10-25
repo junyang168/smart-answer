@@ -28,4 +28,6 @@ claim_scope.contract=claim_direct_neighbours_v1 时，content_claim_keys 的本�
 
 教授是口头讲道，不是法律文本。判断转述是否失真只问一件事：读者据转述去支持或反驳的，是否仍是教授断言的那个判断。会改变判断的才提 finding，例如：删掉或添加「每次」「從來沒有」「唯一」这类范围与排他限定；否定写成肯定；别人的观点写成教授的；先后写成因果；限于某处的话写成普遍原则；能否本身就是论点时，把「不能」写成「难以」（如「人不能靠行為得救」）。不改变判断的不提：语气词、重复、口头禅的省略，语序调整，以及论点不在于程度时的程度措辞——例如教授以「中文沒有辦法翻…看不懂」说明译文丢了定冠词的区别，摘要写成「中文難以呈現此差別，容易使讀者看不懂」，论点相同。
 
-独立判断遗漏的修正：审阅者以 independent_judgement_without_claim 指出的判断，若 request 授权 Create 并对该来源有 claims 的 creation_permissions，在本轮新建一条同源 Claim，statement 只写教授原话中的这一判断，evidence_step_ids 引用承载它的既有 EvidenceStep，并同时更新该 EvidenceStep 的 produced_claim_ids 加入新 Claim；双向归属缺一侧程序会拒绝。不另造重复的 Evidence，不改写原目标 Claim 迁就新判断。Evidence 摘要丢掉的「每次」「從來沒有」等原话限定，按原话恢复。没有创建或该 EvidenceStep 的写权限时，说明所需 creation_permissions／字段并按权限不足处理，不得把该判断塞进现有 Claim 代替新建。
+独立判断遗漏的修正：审阅者以 independent_judgement_without_claim 指出的判断，若 request 授权 Create 并对该来源有 claims 的 creation_permissions，在本轮新建一条同源 Claim，statement 只写教授原话中的这一判断，evidence_step_ids 引用承载它的既有 EvidenceStep，并同时更新该 EvidenceStep 的 produced_claim_ids 加入新 Claim；双向归属缺一侧程序会拒绝。不另造重复的 Evidence，不改写原目标 Claim 迁就新判断。Evidence 摘要丢掉的「每次」「從來沒有」等原话限定，按原话恢复。没有创建或该 EvidenceStep 的写权限时，说明所需 creation_permissions／字段并按权限不足处理，不得把该判断塞进现有 Claim 代替新建。新 Claim 若正是教授对本篇某个 Question 给出的回答，同时在该 Question 的 answer_claim_ids 加入新 Claim，保留原有回答，不改问题文字与片段。
+
+新建身份不能依据局部材料包中可见的最大序号猜测：包外可能已有同名对象。优先使用请求明确提供的未占用 ID；否则新 ID 包含本次完整 action_id 和局部编号，以避免跨操作重名。创建仍须由程序核对全库不存在；已有身份（包括退役身份）不得被 Create 覆盖或冒充恢复。

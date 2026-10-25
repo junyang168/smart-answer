@@ -4,6 +4,7 @@
 > **类型**：规范。
 > **状态**：当前规范；普通双目标联合 Update 已完成有界真实审阅与回读验收；常规联合策略容量为 2，旧策略保持原契约。
 > **与代码对齐**：第 5.3 节独立判断遗漏的审阅规则、同轮新建同源 Claim 与双向归属校验于 2026-10-22 核对到引入 `one_sided_owner_pairs` 与 `test_claim_hidden_judgement.py` 的提交；概括语义力度的既有审阅理由于 2026-10-18 核对到 `claim_management_review_v2.md`、`claim_management_compact_v1/v2.md` 与 `claim_own_evidence_v1.md`；具体维护问题冻结与已知权限缺口提前暂停于 2026-10-18 核对到 `a60e4bba`；自身证据覆盖与经文论据归属契约于 2026-10-18 核对到 `a14d8242`；已记录只读异议的联合权限接续于 2026-10-17 核对到 `0077424e`；以下既有项目于 2026-10-16 核对：精简模型输出、显式授权接续及只读资格刷新核对到 `4ee96f3`，真实验收见实施检查点；普通联合 Update 核对到 `45acd7e`；第 10.1 节通用上下文资格保留核对到 `66e04e8`。常规联合 v2 policy 容量为 2；旧策略及未声明容量的缺省值仍为 1。真实样本已验证共同 retain、共同修改 Claim／Evidence／关系及程序回读；晚项回滚和丢失回复路径由隔离反例验证。实际结果见实施检查点。第 9.1 节人工修改／确认的持久登记、自动带入和当前证据核实对齐到 `f6101f47`。
+> **创建身份校验与代码对齐**：2026-10-24 核对到 `PostgresKnowledgeStore.record_claim_management_stage` 的全库缺席检查及 `apply_plan` 的 Create 操作类型校验；局部包外身份碰撞与审核期间并发碰撞均由隔离 PostgreSQL 反例验证。
 > **权威范围**：#435 的 operations、完整生命周期、审核与多轮出口、当前可用资格和 Claim 域交接；不授予模型调用、正式内容修改或旧预算重开权限。
 
 Claim Management 的目标是让新建和既有 Claim 都忠于教授的完整自身来源，保留证据、论证和限定，并通过同一套管理流程持续审阅和更新。Create 从 GPT 候选开始；既有 Claim 直接作为候选进入 Review。Verify 是审阅中的核实，Cleanup 是 Update 的用途。
@@ -131,6 +132,8 @@ Split／Merge 产生新 ID。跨讲同看法交 CVP，不 Merge 成单一 Claim�
 
 ### 4.2 权限与提交边界
 
+Create 的身份缺席必须对全库核对，不能由一跳材料中没有该 ID 推断。候选保存前检查已有身份（含退役对象）；实际 SQL 事务再核对候选中的 create 仍对应计划的 create，禁止 package upsert 将其转成 update。模型采用请求给定的未占用 ID，或包含完整 action_id 的身份，不按局部可见序号递增猜测。内容审核不授予覆盖包外对象的权限。
+
 Update 可在获准范围内联合修正 Claim 表述／归属／类型／经文／限定、occurrences、Evidence 表述／绑定／owner／资格和单篇关系。Evidence 补入不批准扩大 Claim；解绑保存理由；最后一个支持 Evidence 被撤回时，Claim 不可继续就绪。反方改标签不能成为教授立场的支持证据。
 
 完整原文忠实与自身证据绑定充分必须分别审阅。新普通 Update 使用 `claim_own_evidence_v1`：同一份 Opus 回答为每个内容审阅 Claim 给出简短 `binding_assessments`，说明实际自身 Evidence 和逐字片段是否覆盖 statement 的全部实质内容；完整段落中的未绑定句子、Observation 的片段或邻居 Claim 的证据不能自动补足。程序核对分母、自身双向 owner、片段及来源、已有支持资格；充分性本身由独立审阅者判断，不宣称程序做了语义证明。缺失证据覆盖必须给出该 Claim 的具体异议，不能仅凭全段忠实或当前 ready 放行。沿原有提议、审阅、事务和回读执行，不增加审阅轮次或资格库。
@@ -173,7 +176,7 @@ Update 可在获准范围内联合修正 Claim 表述／归属／类型／经文
 
 同一来源判断的误抽措辞、否定或遗漏限定可 Update，由位置和完整语境证明仍在修正同一判断；另一判断另行 Create；没有对应判断则 Retire；边界变化才 Split／Merge。
 
-教授在论证中途明确断言、可以单独被支持或反驳的判断，若只写成另一条 Claim 的 EvidenceStep 摘要、本篇没有任何 Claim 承载，属于遗漏，不属于原 Claim 的措辞问题。审阅者对该 EvidenceStep 给出 `mapping`／`independent_judgement_without_claim` finding；原 Claim 若正确，保持原样，不把该判断并进它的 statement。单目标 Update 在请求同时授权 `Create`、该来源的 claims `creation_permissions` 和该 EvidenceStep 的 `produced_claim_ids` 写权限时，于同一轮新建同源 Claim，由它与原 Claim 共同拥有既有 EvidenceStep，不另造重复 Evidence；摘要丢掉的「每次」「從來沒有」等原话限定一并恢复。权限不足按第 4.2 节暂停并说明所需许可；联合 Update 没有创建能力，同样暂停。来由是 #439：「耶穌每次講『人子』都加定冠詞」只存在于「人子強調神性」的 EvidenceStep 中，且「每次」已被删去，以它为结论的观点因此只有一句断言可连。
+教授在论证中途明确断言、可以单独被支持或反驳的判断，若只写成另一条 Claim 的 EvidenceStep 摘要、本篇没有任何 Claim 承载，属于遗漏，不属于原 Claim 的措辞问题。审阅者对该 EvidenceStep 给出 `mapping`／`independent_judgement_without_claim` finding；原 Claim 若正确，保持原样，不把该判断并进它的 statement。单目标 Update 在请求同时授权 `Create`、该来源的 claims `creation_permissions` 和该 EvidenceStep 的 `produced_claim_ids` 写权限时，于同一轮新建同源 Claim，由它与原 Claim 共同拥有既有 EvidenceStep，不另造重复 Evidence；摘要丢掉的「每次」「從來沒有」等原话限定一并恢复。权限不足按第 4.2 节暂停并说明所需许可；联合 Update 没有创建能力，同样暂停。来由是 #439：「耶穌每次講『人子』都加定冠詞」只存在于「人子強調神性」的 EvidenceStep 中，且「每次」已被删去，以它为结论的观点因此只有一句断言可连。新 Claim 若正是教授对本篇某个 Question 的回答，提议者同时把它加入该 Question 的 `answer_claim_ids`，保留原有回答；审阅者把漏连记为 `mapping`／`answer_claim_ids` finding，影响该新 Claim，因此阻止提交。为使这一步总能做到，可创建 Claim 的 Update 必须对它读入的每个 Question 持有 `answer_claim_ids` 写权限，否则在建立 action 时拒绝并列出缺少的授权。来由是 2017 NYSC 4 的 Q019「在啟示文學中，獸代表人時，人子或人的形象代表什麼？」：教授答「神」，新建的 CL013 正是这句，但请求不能写 Q019，审阅者只能记下。
 
 限定与措辞按口头讲道衡量，不按法律文本衡量。审阅只问：读者据转述去支持或反驳的，是否仍是教授断言的那个判断。删掉范围或排他限定、否定变肯定、他人观点变成教授的、先后变因果、局部变普遍，会改变判断；能否本身就是论点时，「不能」写成「难以」也会。语气词、重复、语序和论点不在于程度时的程度措辞不会，不提 finding。来由是 2017 NYSC 4：教授以「中文沒有辦法翻…看不懂」说明译文丢了定冠词的区别，摘要写成「中文難以呈現此差別，容易使讀者看不懂」，论点相同，却被当作模态弱化挡下提交。
 
