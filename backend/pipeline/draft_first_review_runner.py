@@ -58,6 +58,7 @@ from backend.pipeline.draft_first_author_runner import (
     verbatim_quote_report,
     viewpoint_charter,
 )
+from backend.pipeline.draft_first_program_checks import program_check_report
 from backend.pipeline.draft_first_scripture import cited_verses, scripture_corpus
 from backend.pipeline.matthew_exposition_authoring import sha256_text
 
@@ -518,6 +519,7 @@ def merge_blocking_findings(
     backstage_report: Mapping[str, Any] | None = None,
     self_check_problems: list[str] = (),
     round_number: int = 0,
+    program_report: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Every blocking finding of one round, each with an id the author answers by."""
 
@@ -575,6 +577,20 @@ def merge_blocking_findings(
                     "释经与神学改为文章自己的口吻直接讲出，不以他为说话人或主语。",
                 }
             )
+    # Program checks (#451): what a session once caught by eye. Facts, not
+    # judgements, so the author fixes them and cannot dispute them.
+    program = program_report or {}
+    for stray in program.get("stray_characters") or []:
+        findings.append({
+            "gate": "program_check", "kind": "stray_character", "anchor": stray["context"].strip(),
+            "summary": f"正文有一个读者看不见或无意义的字符 {stray['codepoint']}（{stray['name']}），在「{stray['context'].strip()}」处；删去它，其余不动。",
+        })
+    for block in program.get("unsourced_verse_blocks") or []:
+        findings.append({
+            "gate": "program_check", "kind": "unsourced_verse", "anchor": block,
+            "summary": "这段经文引文在来源里找不到教授念它或提到它的地方，会被读成文章自己拿经文来用；"
+                       "改引教授念过或提到的经文，或去掉引文块改为不引经。",
+        })
     # The author's self-check answers the same checklist the reviewer does;
     # an incomplete one is fixed by the author, not argued.
     for problem in self_check_problems:
@@ -767,8 +783,10 @@ def run_gates(
 
     quote_report = verbatim_quote_report(manuscript, dict(packet), scripture_corpus(packet))
     backstage_report = backstage_language_report(manuscript)
+    program_report = program_check_report(manuscript, packet)
     self_check_problems = disposition_problems(checklist, list(self_check), manuscript)
     blocking = merge_blocking_findings(
+        program_report=program_report,
         blind_read=blind_read,
         blind_compare=blind_compare,
         review=review,
@@ -786,6 +804,7 @@ def run_gates(
         "review_verdict": (review or {}).get("verdict"),
         "quote_report": quote_report,
         "backstage_language_report": backstage_report,
+        "program_check_report": program_report,
         "self_check_problems": self_check_problems,
         "blind_read": blind_read,
         "blind_compare": blind_compare,
@@ -820,7 +839,9 @@ def continued_round(
         # footnote sentence and a stray character, after the review passed).
         raise DraftReviewContractError(f"{previous} already passed; nothing to continue")
     quote_report = verbatim_quote_report(manuscript, dict(packet), scripture)
+    program_report = program_check_report(manuscript, packet)
     findings = merge_blocking_findings(
+        program_report=program_report,
         blind_read=outcome["blind_read"],
         blind_compare=outcome.get("blind_compare"),
         review=outcome.get("review"),
@@ -845,6 +866,7 @@ def continued_round(
         # run said: an owner note on a passed draft must still be revised.
         "passed": bool(outcome["passed"]) and not findings,
         "quote_report": quote_report,
+        "program_check_report": program_report,
         "blocking_findings": findings,
         "continued_from": str(last),
     }

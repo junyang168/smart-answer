@@ -349,6 +349,10 @@ def verbatim_quote_report(
 
 
 def main() -> int:
+    # Imported here: the checks bind verses through the source-binding
+    # module, which itself imports this runner's route charter.
+    from backend.pipeline.draft_first_program_checks import program_check_report
+
     load_dotenv(PROJECT_ROOT / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--packet", type=Path, required=True)
@@ -442,6 +446,7 @@ def main() -> int:
         "manuscript_chars": len(manuscript),
         "quote_report": verbatim_quote_report(manuscript, packet, scripture_corpus(packet)),
         "backstage_language_report": backstage_language_report(manuscript),
+        "program_check_report": program_check_report(manuscript, packet),
         "checklist_items": len(checklist),
         "self_check_problems": disposition_problems(checklist, self_check, manuscript),
         "source_reading": getattr(client, "source_reading_receipt", None),
