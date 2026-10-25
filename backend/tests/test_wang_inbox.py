@@ -103,3 +103,11 @@ def test_graph_components_leave_isolated_viewpoints_ungrouped():
 
     groups = components(["a", "b", "c", "d"], [("a", "b"), ("b", "c")])
     assert groups["a"] == groups["b"] == groups["c"] and "d" not in groups
+
+
+def test_search_folding_maps_only_traditional_characters():
+    from backend.api.wang_knowledge_graph import search_folding
+
+    fold = search_folding(["強調祂的神性", "强调人子"])
+    assert fold["強"] == "强" and fold["調"] == "调"
+    assert "人" not in fold and "强" not in fold
