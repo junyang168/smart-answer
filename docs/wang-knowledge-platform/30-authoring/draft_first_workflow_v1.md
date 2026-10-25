@@ -3,7 +3,7 @@
 > **读者**：神学编辑、Solution architect、Developer
 > **类型**：流程
 > **状态**：当前
-> **与代码对齐**：双向审稿、修订循环与选材覆盖核对到 #439 分支（2026-10-24）；其余未核对（Matthew adapter 尚未实作）
+> **与代码对齐**：双向审稿、修订循环与选材覆盖核对到 #439 分支（2026-10-24）；总命令、程序检查与校准门核对到 #451 分支（2026-10-24）；其余未核对（Matthew adapter 尚未实作）
 > **权威范围**：draft-first 生产线从输入到负责人终审的运行阶段、各道检查的职责边界、修订循环与停止规则。写作规则的具体条文以 prompt 文件为准；知识层（观点、论证路线）的形成不在本文范围。
 
 ## 一、这是什么
@@ -182,7 +182,17 @@ Draft-first 是专题综合文章唯一的当前生产线；2026-09-10，负责�
 
 ## 六、Developer 附录
 
-以下是当前已实作的**专题文章 adapter** 命令（全部模型调用走订阅 CLI，不直连 API）。它们不构成马太释经的可运行入口；马太 adapter 完成前不得用旧 `--plan-id` 命令替代：
+**写一篇专题文章，用一条命令**（#451）：`draft_first_essay` 按次序调用下面各条命令，停在需要负责人决定的地方（范围、选材决定、CVP 缺口、校准不合、审稿没通过、终审），负责人决定后再跑同一条命令续跑；已完成的阶段不重做，输入变了才重做。对话由 `/topic-essay` 技能带。审稿开始前要求审稿 prompt 与模型已对负责人的判定表校准过；交稿与每轮审稿另查无意义或不可见字符、找不到教授念或提到之处的经文引文，与引文核对同为 blocking。
+
+```bash
+backend/.venv/bin/python -m backend.pipeline.draft_first_essay --run-dir <run> --init \
+  --review-id <id> --title <题目> --question <读者问题> --passage <经文> --decision-basis <负责人的原话>
+backend/.venv/bin/python -m backend.pipeline.draft_first_essay --run-dir <run>          # 往下走，到停点为止
+backend/.venv/bin/python -m backend.pipeline.draft_first_essay --run-dir <run> --status # 停在哪里
+backend/.venv/bin/python -m backend.pipeline.draft_first_essay --run-dir <run> --redo coverage
+```
+
+以下是各阶段单独的命令（全部模型调用走订阅 CLI，不直连 API）。它们不构成马太释经的可运行入口；马太 adapter 完成前不得用旧 `--plan-id` 命令替代：
 
 ```bash
 # 先从当前 master data 编译 SHA-bound packet（不会调用模型）

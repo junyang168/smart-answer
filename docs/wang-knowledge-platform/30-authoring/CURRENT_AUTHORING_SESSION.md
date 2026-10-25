@@ -43,13 +43,17 @@ names it; unresolved problems go to the owner, and only the owner adds rounds.
 **In progress.** [Draft-first 写作流程的可重复化：方案](./draft_first_repeatable_pipeline_solution.md),
 order approved: (1) program checks, (2) one resumable command with owner stop
 points, (3) a thin `/topic-essay` skill, (4) 「萬人的贖價」 as the first essay on
-the new pipeline, (5) the Matthew passage entry. Step 1 has started. The
-Matthew decisions in that document's section 4 are deferred by the owner.
+the new pipeline, (5) the Matthew passage entry. Steps 1–3 are implemented on
+card #451 (`wkp-451-repeatable-pipeline`): `python -m backend.pipeline.draft_first_essay`
+with `--init`, `--status`, `--redo` and `--adopt`, the stray-character and
+unsourced-verse checks, the calibration gate, and the `/topic-essay` skill. The
+reviewer prompt changed after the last K1–K10 calibration, so the first review
+on the new command runs a calibration first. Next is step 4, 「萬人的贖價」, the
+first essay written with it. The Matthew decisions in that document's section 4
+are deferred by the owner.
 
 **Not yet done.** The branch is far ahead of `main` and has no open PR; it
 carries other cards' work merged earlier, which must be sorted before a PR.
-The reviewer prompt changed after the last K1–K10 calibration, so the next
-review run needs a fresh calibration first.
 
 ## 2026-09-10 Matthew authoring-line decision
 

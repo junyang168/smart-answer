@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT))
 
 from dotenv import load_dotenv
 from backend.pipeline.draft_first_checklist import build_checklist
+from backend.pipeline.draft_first_calibration import record, reviewer_fingerprint
 from backend.pipeline.draft_first_review_agent import CodexReviewAgent
 from backend.pipeline.draft_first_review_runner import REVIEW_MODEL, run_two_way_review
 from backend.pipeline.matthew_exposition_authoring import sha256_text
@@ -62,7 +63,8 @@ def main() -> int:
         round_dir=args.output_dir, disputed_ids=[],
     )
     rows = score(key, review["findings"])
-    report = {"key_id": key["key_id"], "model": receipt["model"], "rows": rows,
+    entry = record(reviewer_fingerprint(REVIEW_MODEL), key["key_id"], rows, str(args.output_dir))
+    report = {"key_id": key["key_id"], "model": receipt["model"], "rows": rows, "agrees": entry["agrees"],
               "findings": len(review["findings"]), "blocking": sum(f["blocking"] for f in review["findings"])}
     (args.output_dir / "calibration.json").write_text(json.dumps({**report, "review": review}, ensure_ascii=False, indent=2))
     print(json.dumps(report, ensure_ascii=False, indent=1))

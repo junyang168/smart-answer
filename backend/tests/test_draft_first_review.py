@@ -922,3 +922,45 @@ def test_a_passed_draft_reopens_only_for_the_owners_own_notes(tmp_path):
     assert [f["gate"] for f in seeded["blocking_findings"]] == ["owner"]
     # The first run stopped at once: the seeded round still said passed.
     assert seeded["passed"] is False
+
+
+def test_program_checks_catch_a_stray_character_and_an_unsourced_verse():
+    """#451: both were caught by eye in a session on the 人子 essay, not by a gate."""
+
+    from backend.pipeline.draft_first_program_checks import program_check_report, stray_characters
+    from backend.pipeline.draft_first_review_runner import merge_blocking_findings
+
+    # A Bengali nukta before the title is a stray; Hebrew points after a letter
+    # are words; a zero-width space is never wanted.
+    assert [s["codepoint"] for s in stray_characters("় # 標題\n\n像一位人子（כְּבַר אֱנָשׁ）")] == ["U+09BC"]
+    assert [s["codepoint"] for s in stray_characters("人子​在地上")] == ["U+200B"]
+    assert stray_characters("﻿# 標題") == []
+
+    packet = {"source_originals": {"originals": [{"source_id": "S1", "content": "約翰福音 5:27 這裡人子沒有定冠詞。"}]}}
+    manuscript = "# 標題\n\n> 並且因為他是人子，就賜給他行審判的權柄。（約 5:27）\n\n> 我是好牧人，好牧人為羊捨命。（約 10:11）\n"
+    report = program_check_report(manuscript, packet)
+    assert report["unsourced_verse_blocks"] == ["> 我是好牧人，好牧人為羊捨命。（約 10:11）"]
+    findings = merge_blocking_findings(blind_read={}, blind_compare=None, review=None,
+                                       quote_report={}, program_report=report)
+    assert [(f["gate"], f["kind"]) for f in findings] == [("program_check", "unsourced_verse")]
+
+
+def test_a_review_refuses_a_reviewer_the_owner_has_not_calibrated(tmp_path):
+    """#451: the 2026-10-24 calibration ran because someone remembered to."""
+
+    import pytest
+    from backend.pipeline.draft_first_calibration import (
+        CalibrationRequired, record, require_calibrated, reviewer_fingerprint)
+
+    path = tmp_path / "records.json"
+    with pytest.raises(CalibrationRequired, match="not been calibrated"):
+        require_calibrated("gpt-x", path)
+    rows = [{"id": "K1", "result": "hit"}, {"id": "K5", "result": "manual"}, {"id": "K2", "result": "hit_nonblocking"}]
+    record(reviewer_fingerprint("gpt-x"), "key", rows, "run-1", path)
+    with pytest.raises(CalibrationRequired, match="K2"):
+        require_calibrated("gpt-x", path)
+    record(reviewer_fingerprint("gpt-x"), "key", rows[:2], "run-2", path)
+    assert require_calibrated("gpt-x", path)["review_dir"] == "run-2"
+    # Another model is another reviewer.
+    with pytest.raises(CalibrationRequired):
+        require_calibrated("gpt-y", path)
