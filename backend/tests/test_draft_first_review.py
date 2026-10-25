@@ -821,7 +821,10 @@ def test_bindings_follow_the_self_check_and_the_reviewers_finds_without_a_model(
     from backend.pipeline.draft_first_source_binding import derive_bindings, verify_bindings, reader_paragraphs
     import backend.pipeline.draft_first_source_binding as binding
 
-    assert not hasattr(binding, "BINDING_SCHEMA") and "CodexSubscriptionClient" not in Path(binding.__file__).read_text()
+    # No model writes a span: the only model step chooses among program candidates.
+    assert not hasattr(binding, "BINDING_SCHEMA")
+    item = binding.MATCH_SCHEMA["schema"]["properties"]["matches"]["items"]["properties"]
+    assert "excerpt" not in item and set(item) == {"paragraph_index", "candidate_index", "reason"}
     sermon = "人子這個稱號是耶穌自己用的，從來沒有別人這樣稱呼祂。我家裡有兩位 Dr. Wong，打電話來的人分不清是哪一位。"
     packet = {
         "source_originals": {"originals": [{"source_id": "S1", "content": sermon}]},
@@ -865,3 +868,35 @@ def test_every_quoted_verse_is_bound_to_where_the_professor_reads_or_names_it():
     assert cited[0]["excerpt"] in packet["source_originals"]["originals"][1]["content"]
     assert scripture_bindings("> 我是好牧人。（約 10:11）", packet) == []
     assert any(slug.startswith("jhn-5-27") for _, slug in verse_mentions("見約翰福音 5:27。"))
+
+
+def test_a_model_only_chooses_which_program_candidate_is_a_paragraphs_source():
+    """Owner, 2026-10-24: every paragraph but the summary should be traceable."""
+
+    from backend.pipeline.draft_first_source_binding import candidate_passages, confirm_matches, derive_bindings
+
+    story = "那我的兒子，他有 Ph.D.，他也有 M.D.。所以我到他家裡去的時候，很麻煩。人家打電話來，要找 Dr. Wong。"
+    packet = {"source_originals": {"originals": [
+        {"source_id": "S1", "content": "今天講人子。" + story + "後來才知道要找的是癌症專科的教授。"},
+        {"source_id": "S2", "content": "安息日門徒掐起麥穗來吃，法利賽人就說他們犯了安息日。"}]},
+        "focal_viewpoints": [], "claims": [], "evidence_steps": [], "source_fragments": [],
+        "observation_supports": [], "argument_routes": []}
+    paragraph = {"paragraph_index": 0, "text": "他兒子有 Ph.D. 也有 M.D.，電話打來找 Dr. Wong，分不清是哪一位，原來要找癌症專科的教授。"}
+    offered = candidate_passages(paragraph["text"], packet)
+    assert offered[0]["source_id"] == "S1" and offered[0]["excerpt"] in packet["source_originals"]["originals"][0]["content"]
+
+    class Chooser:
+        backend, model = "fake", "fake"
+        def generate_json(self, prompt, payload, schema):
+            self.payload = json.loads(payload)
+            return {"matches": [{"paragraph_index": 0, "candidate_index": 0, "reason": "同一個故事"},
+                                {"paragraph_index": 0, "candidate_index": 9, "reason": "越界"}]}
+    chooser = Chooser()
+    chosen = confirm_matches(chooser, [paragraph], packet)
+    assert [(c["source_id"], c["excerpt"] == offered[0]["excerpt"]) for c in chosen] == [("S1", True)]
+    assert set(chooser.payload["paragraphs"][0]["candidates"][0]) == {"source_id", "excerpt"}
+
+    manuscript = "耶穌隨即說：\n\n> 但要叫你們知道人子在地上有赦罪的權柄、就對癱子說、起來、拿你的褥子回家去罷。（太 9:6）"
+    packet["source_originals"]["originals"].append({"source_id": "S3", "content": "第九章第六節：「但要叫你們知道，人子在地上有赦罪的權柄。就對癱子說：起來，拿你的褥子回家去罷！」這是命令，也是憑據。"})
+    rows = derive_bindings(manuscript, packet, [], [])["bindings"]
+    assert rows[0]["basis"] == ["lead_in"] and rows[0]["spans"] == rows[1]["spans"] != []
