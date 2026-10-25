@@ -943,3 +943,24 @@ def test_program_checks_catch_a_stray_character_and_an_unsourced_verse():
     findings = merge_blocking_findings(blind_read={}, blind_compare=None, review=None,
                                        quote_report={}, program_report=report)
     assert [(f["gate"], f["kind"]) for f in findings] == [("program_check", "unsourced_verse")]
+
+
+def test_a_review_refuses_a_reviewer_the_owner_has_not_calibrated(tmp_path):
+    """#451: the 2026-10-24 calibration ran because someone remembered to."""
+
+    import pytest
+    from backend.pipeline.draft_first_calibration import (
+        CalibrationRequired, record, require_calibrated, reviewer_fingerprint)
+
+    path = tmp_path / "records.json"
+    with pytest.raises(CalibrationRequired, match="not been calibrated"):
+        require_calibrated("gpt-x", path)
+    rows = [{"id": "K1", "result": "hit"}, {"id": "K5", "result": "manual"}, {"id": "K2", "result": "hit_nonblocking"}]
+    record(reviewer_fingerprint("gpt-x"), "key", rows, "run-1", path)
+    with pytest.raises(CalibrationRequired, match="K2"):
+        require_calibrated("gpt-x", path)
+    record(reviewer_fingerprint("gpt-x"), "key", rows[:2], "run-2", path)
+    assert require_calibrated("gpt-x", path)["review_dir"] == "run-2"
+    # Another model is another reviewer.
+    with pytest.raises(CalibrationRequired):
+        require_calibrated("gpt-y", path)
