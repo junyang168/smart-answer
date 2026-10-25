@@ -216,6 +216,25 @@ directly through `DATA_BASE_DIR`:
 - In development the web's `.env.local` does not set it; `scripts/dev.sh`
   passes the backend `.env` value to `next dev`.
 
+### Wang staging lives on the Jun SSD
+
+`DATA_BASE_DIR/wang-knowledge-platform/staging` is a symlink to
+`/Volumes/Jun SSD/wang-knowledge-platform-staging` (#448, 2026-10-24). On that
+date staging held 7.1 GB on an internal disk at 98% and blocked a deploy.
+
+- **It needs the SSD mounted.** Without it the admin article review pages and
+  the CVP and Claim pipelines fail on read or write. The public site does not
+  read staging.
+- **Do not link single subdirectories elsewhere.** The review reader resolves
+  the staging root and each artifact path and requires the artifact to lie
+  inside the root (`backend/api/wang_article_reviews.py`). A subdirectory linked
+  out of the tree resolves outside it and is refused. The whole directory moved
+  for that reason.
+- The move was verified file by file before the internal copy was removed:
+  59,549 files, 10,099 directories and 271 links with identical SHA-256, size,
+  mode and link targets. Database dumps that #423 had already moved to the SSD
+  stay reachable through their absolute links.
+
 ### Google OAuth token
 
 Exporting a sermon to a Google Doc uses the owner's own Google sign-in, stored
