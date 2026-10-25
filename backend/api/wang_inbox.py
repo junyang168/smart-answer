@@ -99,8 +99,28 @@ def legacy_viewpoint_exceptions() -> list[dict[str, Any]]:
     }]
 
 
+def viewpoint_disputes() -> list[dict[str, Any]]:
+    """CVP units a live management action stopped for a person to rule on."""
+
+    from backend.api.wang_runs import cvp_disputes
+
+    try:
+        disputes = cvp_disputes()
+    except Exception:  # the store being down is an operations problem, not a decision
+        return []
+    return [{
+        "kind": "viewpoint_dispute",
+        "line": "观点",
+        "title": f"观点争议：{row['unit']}",
+        "summary": row["detail"] or "两个模型以原文为据仍判不了，等负责人裁决",
+        "waiting_for": "负责人",
+        "at": row["started_at"],
+        "href": "/admin/wang/runs/management#cvp",
+    } for row in disputes]
+
+
 @router.get("")
 def inbox() -> dict[str, Any]:
-    items = final_reviews() + essay_stops() + legacy_viewpoint_exceptions()
+    items = final_reviews() + essay_stops() + viewpoint_disputes() + legacy_viewpoint_exceptions()
     items.sort(key=lambda item: item.get("at") or "", reverse=True)
     return {"items": items}

@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { FileCheck2, HeartPulse, Highlighter, Network, ShieldCheck, Wrench } from "lucide-react";
+import { Cog, FileCheck2, HeartPulse, Highlighter, Network, ShieldCheck, Wrench } from "lucide-react";
 import { SermonOverview } from "../SermonOverview";
 import { operationStageSummary } from "../operations-copy";
 
 // Engineering's pages, off the colleagues' menu (#453): the sermon pipeline
 // table that used to be the home page, and the pages it summarises.
 const areas = [
+  { href: "/admin/wang/runs/management", title: "管理运行", description: "Claim 与 CVP 管理、人工来源决定、审稿校准", icon: Cog },
   { href: "/admin/wang/health", title: "健康度", description: "整个语料的抽取质量分布，有没有该管的事", icon: HeartPulse },
   { href: "/admin/wang/library-audit", title: "独立审计", description: "文库各层的独立审计与要处理的后续", icon: ShieldCheck },
   { href: "/admin/wang/source-coverage", title: "来源覆盖", description: "原文逐句对照 claim 层：抽到了哪些、漏了哪些", icon: Highlighter },
@@ -32,7 +33,7 @@ export default function WangRunsPage() {
         </div>
       </header>
 
-      <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {areas.map((area) => {
           const Icon = area.icon;
           return (
