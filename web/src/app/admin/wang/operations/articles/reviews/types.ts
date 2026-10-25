@@ -27,6 +27,7 @@ export type TopicEssayReview = TopicEssayReviewSummary & {
   source_annotations: ReviewSourceAnnotation[];
   source_projection_audit: ReviewSourceProjectionAudit;
   source_playback_audit: ReviewSourcePlaybackAudit;
+  review?: DraftFirstReview | null;
 };
 
 export type ReviewSourceProjectionFinding = {
@@ -94,7 +95,8 @@ export type ReviewSourceFragment = {
     | "argument_route_attestation"
     | "claim_evidence"
     | "original_exact_quote"
-    | "source_original_context";
+    | "source_original_context"
+    | "derived_source_binding";
   claim_ids: string[];
   evidence_step_ids: string[];
   route_revision_id: string | null;
@@ -111,9 +113,58 @@ export type ReviewRouteStep = {
   media_clips: ReviewSourceMedia[];
 };
 
+export type ReviewSourceBasis = {
+  kind: string;
+  label: string;
+  items: string[];
+};
+
 export type ReviewSourceAnnotation = {
   annotation_id: string;
   sources: ReviewSourceFragment[];
+  basis?: ReviewSourceBasis[];
+};
+
+// What a draft-first review did, read back from its rounds (#453).
+export type DraftFirstFinding = {
+  finding_id: string;
+  gate: string;
+  gate_label: string;
+  anchor: string | null;
+  summary: string;
+  required_change: string | null;
+  source_quote: string | null;
+  response: { kind: string; label: string; note: string } | null;
+  ruling: { kind: string; label: string; note: string } | null;
+};
+
+export type DraftFirstRound = {
+  round: number;
+  passed: boolean;
+  reviewed: boolean;
+  summary: string | null;
+  dimensions_below_minimum: string[];
+  findings: DraftFirstFinding[];
+  edit_count: number;
+};
+
+export type DraftFirstChecklistItem = {
+  item_id: string;
+  kind: string;
+  text: string;
+  status: string | null;
+  status_label: string | null;
+  anchor: string | null;
+  author_reason: string | null;
+  reviewer_acceptable: boolean | null;
+  reviewer_reason: string | null;
+};
+
+export type DraftFirstReview = {
+  status: string | null;
+  rounds: DraftFirstRound[];
+  checklist: DraftFirstChecklistItem[];
+  dimension_scores: { dimension_id: string; score: number; evidence: string }[];
 };
 
 export type TopicEssayReviewList = {

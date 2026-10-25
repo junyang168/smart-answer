@@ -1,6 +1,8 @@
-import { Suspense } from "react";
-import { ViewpointDetail } from "./ViewpointDetail";
+import { redirect } from "next/navigation";
 
-export default function ViewpointDetailPage() {
-  return <Suspense fallback={<p className="py-10 text-sm text-slate-500">载入观点详情…</p>}><ViewpointDetail /></Suspense>;
+// A viewpoint's own address stays shareable; it opens the graph with that
+// viewpoint selected, where its detail now lives (#453).
+export default async function ViewpointDetailPage(props: { params: Promise<{ viewpointId: string }> }) {
+  const { viewpointId } = await props.params;
+  redirect(`/admin/wang/viewpoints?v=${encodeURIComponent(viewpointId)}`);
 }

@@ -6,6 +6,8 @@ import { slugifyHeadingAnchor } from "@/app/components/full-article/heading-anch
 import { ReviewArticle } from "../ReviewArticle";
 import { fetchTopicEssayReview } from "../data";
 import { PublishControls } from "../PublishControls";
+import { DraftFirstReviewPanel } from "../DraftFirstReviewPanel";
+import type { ReviewSourceProjectionFinding } from "../types";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +15,28 @@ export const metadata: Metadata = {
   title: "内部文章审稿 | 王教授文库后台",
   robots: { index: false, follow: false },
 };
+
+function paragraphLabel(id: string): string {
+  const number = id.match(/^p(\d+)$/)?.[1];
+  return number ? `第 ${number} 段` : "全文";
+}
+
+// The audit lists what to look at, not only how many (#453).
+function AuditFindings({ findings }: { findings: ReviewSourceProjectionFinding[] }) {
+  if (findings.length === 0) return null;
+  return (
+    <details className="mt-2 rounded-xl border border-slate-200 bg-slate-50/70 text-sm">
+      <summary className="cursor-pointer px-4 py-2 font-semibold text-slate-700">看是哪几段（{findings.length}）</summary>
+      <ul className="space-y-1 border-t border-slate-200 px-4 py-3 text-slate-700">
+        {findings.map((finding, index) => (
+          <li key={`${finding.paragraph_id}-${finding.code}-${index}`}>
+            <span className="font-semibold">{paragraphLabel(finding.paragraph_id)}</span>：{finding.message}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
 
 function headings(markdown: string) {
   return Array.from(markdown.matchAll(/^##\s+(.+)$/gm), (match) => match[1].trim());
@@ -25,6 +49,7 @@ export default async function TopicEssayReviewPage(props: { params: Promise<{ re
   const sectionHeadings = headings(review.markdown);
   const published = review.workflow_status === "workflow_published";
   const humanPublished = review.publication_decision?.decision === "approved";
+  const awaitingFinal = !humanPublished && !published && review.workflow_status === "review_passed";
 
   return (
     <main className="pb-20">
@@ -37,7 +62,7 @@ export default async function TopicEssayReviewPage(props: { params: Promise<{ re
           <div className="max-w-4xl">
             <p className="flex items-center gap-2 text-sm font-black tracking-[0.14em] text-amber-900">
               <ShieldAlert className="h-4 w-4" />
-              {humanPublished ? "审稿通过 · 已出版" : published ? "POC 内部审稿 · 自动流程已出版" : "POC 内部审稿 · 尚未出版"}
+              {humanPublished ? "审稿通过 · 已出版" : published ? "内部审稿 · 旧流程已自动出版" : awaitingFinal ? "审稿已通过 · 等终审" : "内部审稿 · 尚未出版"}
             </p>
             <p className="mt-6 text-sm font-bold text-stone-600">{review.passage}</p>
             <h1 className="mt-3 font-serif text-3xl font-bold leading-tight text-stone-950 sm:text-5xl">{review.title}</h1>
@@ -45,8 +70,10 @@ export default async function TopicEssayReviewPage(props: { params: Promise<{ re
               {humanPublished
                 ? "这版已经出版，读者可以在王教授文库看见。这里仍保留内部来源对照，供教会同工继续审阅；如需下架，用右侧「从读者站撤下」。"
                 : published
-                ? "这版已经通过 grounding、独立编审、差异审核与程序审计，并由自动流程发布到王教授文库；这里仍保留内部来源对照，供教会同工继续审阅。"
-                : "这是写作流程中的工作稿，只供教会同工继续审阅。页面不会出现在公开文库；闸门全部通过后，可以用右侧「正式出版」发布给读者。"}
+                ? "这版由旧的写作流程自动发布到王教授文库；这里仍保留内部来源对照，供教会同工继续审阅。"
+                : awaitingFinal
+                ? "审稿已经通过。请读全文、展开每段出处，并看下面的审稿过程；确认后用右侧「正式出版」发布给读者。"
+                : "这是写作流程中的工作稿，只供教会同工继续审阅，不会出现在公开文库。"}
             </p>
           </div>
           <div className="flex flex-col items-end gap-3">
@@ -92,10 +119,11 @@ export default async function TopicEssayReviewPage(props: { params: Promise<{ re
             {review.source_projection_audit.paragraphs_with_sources}/{review.source_projection_audit.paragraphs_checked} 段有来源，
             {review.source_projection_audit.direct_quotes_checked} 处逐字引文已核对
           </span>
-          {!review.source_projection_audit.passed ? (
-            <span>· {review.source_projection_audit.findings.length} 项需要处理</span>
+          {review.source_projection_audit.findings.length > 0 ? (
+            <span>· {review.source_projection_audit.findings.length} 项要看</span>
           ) : null}
         </div>
+        <AuditFindings findings={review.source_projection_audit.findings} />
         <div className={`mt-3 flex flex-wrap items-center gap-2 rounded-xl border px-4 py-3 text-sm ${
           review.source_playback_audit.passed
             ? "border-sky-200 bg-sky-50 text-sky-950"
@@ -118,6 +146,7 @@ export default async function TopicEssayReviewPage(props: { params: Promise<{ re
             <span>· {review.source_playback_audit.findings.length} 项文字或时间提示</span>
           ) : null}
         </div>
+        <AuditFindings findings={review.source_playback_audit.findings} />
       </section>
 
       <div className="mt-7 grid items-start gap-7 lg:grid-cols-[16rem_minmax(0,1fr)]">
@@ -138,6 +167,12 @@ export default async function TopicEssayReviewPage(props: { params: Promise<{ re
           <ReviewArticle markdown={review.markdown} sourceAnnotations={review.source_annotations} />
         </article>
       </div>
+
+      {review.review ? (
+        <div className="mt-8">
+          <DraftFirstReviewPanel review={review.review} />
+        </div>
+      ) : null}
     </main>
   );
 }

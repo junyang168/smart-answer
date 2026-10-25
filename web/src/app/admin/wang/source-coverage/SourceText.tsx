@@ -12,6 +12,8 @@ type Props = {
   onlyUncovered: boolean;
   filter: string;
   scrollTo: { ordinal: number; nonce: number } | null;
+  /** The colleagues' reading view (#453): time only, no keys or coverage. */
+  plain?: boolean;
 };
 
 type Piece = { start: number; end: number; run: Run | null };
@@ -48,6 +50,7 @@ export function SourceText({
   onlyUncovered,
   filter,
   scrollTo,
+  plain = false,
 }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
 
@@ -94,6 +97,7 @@ export function SourceText({
           selectedFragmentIds={selectedFragmentIds}
           onSelectFragment={onSelectFragment}
           markUncovered={markUncovered}
+          plain={plain}
         />
       ))}
     </div>
@@ -106,12 +110,14 @@ function SegmentBlock({
   selectedFragmentIds,
   onSelectFragment,
   markUncovered,
+  plain,
 }: {
   segment: Segment;
   fragments: Record<string, Fragment>;
   selectedFragmentIds: Set<string>;
   onSelectFragment: (fragmentId: string) => void;
   markUncovered: boolean;
+  plain: boolean;
 }) {
   const covered = segment.fragment_ids.length > 0;
   const heading = segment.is_heading && !covered;
@@ -138,7 +144,7 @@ function SegmentBlock({
             <mark
               key={piece.start}
               onClick={() => onSelectFragment(anchored)}
-              title={piece.run.fragment_ids.map((id) => fragments[id]?.id ?? id).join("\n")}
+              title={plain ? undefined : piece.run.fragment_ids.map((id) => fragments[id]?.id ?? id).join("\n")}
               className={`cursor-pointer rounded-[3px] px-px ${
                 active ? "bg-amber-300 text-slate-950 ring-1 ring-amber-500" : "bg-indigo-100 text-slate-900 hover:bg-indigo-200"
               }`}
@@ -155,6 +161,11 @@ function SegmentBlock({
 
   return (
     <article data-segment={segment.ordinal} className="flex gap-3 border-b border-slate-100 py-2.5">
+      {plain ? (
+        <div className="w-14 shrink-0 pt-1 text-right font-mono text-[10.5px] text-slate-400">
+          {segment.start_time !== null ? timecode(segment.start_time) : ""}
+        </div>
+      ) : (
       <div className="w-24 shrink-0 pt-0.5 text-right">
         <p className="font-mono text-[11px] text-slate-400">{segment.key}</p>
         {segment.start_time !== null ? (
@@ -170,6 +181,7 @@ function SegmentBlock({
           {covered ? `${share}%` : heading ? "標題" : "未抽取"}
         </p>
       </div>
+      )}
       <p
         className={`min-w-0 flex-1 whitespace-pre-wrap leading-8 ${
           heading ? "text-[14px] font-bold text-slate-700" : covered ? "text-[14px] text-slate-900" : "text-[14px] text-slate-500"

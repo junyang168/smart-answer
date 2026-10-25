@@ -248,7 +248,7 @@ function Detail({ row }: { row: ArticleRow }) {
           <ul className="mt-1 space-y-0.5 text-xs">
             {row.cited_sources.map((source) => (
               <li key={source} className="truncate">
-                <a href={`/admin/wang#${encodeURIComponent(source)}`} className="text-indigo-700 hover:underline">
+                <a href={`/admin/wang/runs#${encodeURIComponent(source)}`} className="text-indigo-700 hover:underline">
                   {source}
                 </a>
               </li>
