@@ -35,6 +35,7 @@
 | [共享知识模型 v1](./00-overview/shared_knowledge_model_v1.md) | Claim、EvidenceStep、Relation、TopicNode 的意义与边界 |
 | [王守仁教授学术思想整理：核心 Use Case](./00-overview/scholarly_thought_reconstruction_use_case.md) | 把教授的学术思想整体重建出来，需要什么 |
 | [同工反馈到产品需求与验收标准 v1](./00-overview/stakeholder_feedback_to_requirements_v1.md) | 同工的一句话怎样变成可验收的需求 |
+| [文库 admin 重新设计：方案](./00-overview/library_admin_ui_solution.md) | `/admin/wang` 的页面分工、待处理首页、观点图与讲道论证图 |
 | [独立 AI 复审、双模型仲裁与人工分歧处理 v1](./00-overview/independent_ai_review_v1.md) | 双模型仲裁政策（跨子系统通用） |
 
 ## 10-extraction —— 来源进入 claim 层
@@ -109,7 +110,7 @@
 
 | 文档 | 它回答什么 |
 | --- | --- |
-| [参考释经书：Carson 马太福音扫描页的 OCR 与研读](./60-reference-commentary/reference_commentary_solution_v1.md) | 扫描页怎样变成可校对的文字、放在哪里、谁能读、与文库的分界（草案，待批准） |
+| [参考释经书：Carson 马太福音扫描页的 OCR 与研读](./60-reference-commentary/reference_commentary_solution_v1.md) | 扫描页怎样变成可校对的文字、放在哪里、谁能读、与文库的分界 |
 | [查经准备：从 Carson 与教授讲道到逐字稿和 PPT](./60-reference-commentary/bible_study_prep_solution_v1.md) | 讨论纪要怎样进逐字稿、逐字稿怎样追到来源、PPT 只放重点 |
 
 ## 90-ops —— 运营与工作台
