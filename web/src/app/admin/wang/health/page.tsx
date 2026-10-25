@@ -137,8 +137,8 @@ export default function ExtractionHealthPage() {
         <span>{report.advisory}</span>
         <span>coverage · stranded · sound 由現有的包算出，沒有多跑</span>
         <span>reachable 要等 #148 的第二次執行</span>
-        <Link href="/admin/wang" className="text-indigo-700 hover:underline">
-          哪幾篇跑過 → 總覽
+        <Link href="/admin/wang/runs" className="text-indigo-700 hover:underline">
+          哪幾篇跑過 → 抽取總表
         </Link>
       </footer>
     </main>

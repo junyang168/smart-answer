@@ -397,41 +397,15 @@ def test_read_only_http_boundary_exposes_projection_and_no_mutation(monkeypatch)
     overview = client.get("/admin/wang/viewpoints/overview")
     listing = client.get("/admin/wang/viewpoints", params={"q": "代表性"})
     detail = client.get("/admin/wang/viewpoints/CV-PETER")
-    recall = client.get("/admin/wang/viewpoints/recall-blocking")
 
     assert overview.status_code == 200
     assert listing.status_code == 200
     assert [item["viewpoint_id"] for item in listing.json()["data"]["items"]] == ["CV-PETER"]
     assert detail.json()["data"]["members"][0]["claim"]["claim_id"] == "CL-PETER"
-    assert recall.status_code == 200
-    assert recall.json()["data"]["available"] is True
+    # The recall-blocking and Matthew 16 pilot pages were retired (#453).
+    assert client.get("/admin/wang/viewpoints/recall-blocking").status_code == 404
     assert client.post("/admin/wang/viewpoints/CV-PETER", json={}).status_code == 405
     assert client.post("/admin/wang/viewpoint-exceptions/VEX-1/changesets", json={}).status_code == 404
-
-
-def test_viewpoint_pilot_is_optional_and_fails_closed(monkeypatch, tmp_path):
-    app = FastAPI()
-    app.include_router(viewpoint_admin.router)
-    client = TestClient(app)
-
-    monkeypatch.delenv("WANG_VIEWPOINT_PILOT_FILE", raising=False)
-    absent = client.get("/admin/wang/viewpoints/pilot")
-    assert absent.status_code == 404
-    assert absent.json()["detail"] == "No viewpoint pilot is configured"
-
-    monkeypatch.setenv(
-        "WANG_VIEWPOINT_PILOT_FILE", str(tmp_path / "missing-pilot.json")
-    )
-    missing = client.get("/admin/wang/viewpoints/pilot")
-    assert missing.status_code == 503
-    assert "configured viewpoint pilot does not exist" in missing.json()["detail"]
-
-    malformed = tmp_path / "malformed-pilot.json"
-    malformed.write_text('{"schema_version":"not-a-pilot"}', encoding="utf-8")
-    monkeypatch.setenv("WANG_VIEWPOINT_PILOT_FILE", str(malformed))
-    invalid = client.get("/admin/wang/viewpoints/pilot")
-    assert invalid.status_code == 503
-    assert "Viewpoint pilot unavailable" in invalid.json()["detail"]
 
 
 def test_every_loaded_collection_resolves_a_record_id() -> None:
