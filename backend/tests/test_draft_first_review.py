@@ -846,3 +846,22 @@ def test_bindings_follow_the_self_check_and_the_reviewers_finds_without_a_model(
     assert spans == [["人子這個稱號"], ["我家裡有兩位"], []]
     assert [row["basis"] for row in proposed["bindings"]] == [["V:R1"], ["review"], ["review"]]
     assert [f["code"] for f in result["findings"]] == ["excerpt_not_verbatim"]
+
+
+def test_every_quoted_verse_is_bound_to_where_the_professor_reads_or_names_it():
+    """Owner, 2026-10-24: an unbound verse can be taken for the article's own use of Scripture."""
+
+    from backend.pipeline.draft_first_source_binding import scripture_bindings, verse_mentions
+
+    packet = {"source_originals": {"originals": [
+        {"source_id": "S1", "content": "我們來看第七章。第七章第三節：「有四個大獸從海中上來，形狀各有不同，頭一個像獅子。」好，跳過去。"},
+        {"source_id": "S2", "content": "另外約翰福音 5:27 這一處沒有定冠詞，這是有文法依據的。"},
+    ]}}
+    read = scripture_bindings("> 有四個大獸從海中上來、形狀各有不同、頭一個像獅子。（但 7:3）", packet)
+    assert [(s["source_id"], s["basis"], s["excerpt"]) for s in read] == [
+        ("S1", "scripture_read", "有四個大獸從海中上來，形狀各有不同，頭一個像獅子")]
+    cited = scripture_bindings("> 並且因為他是人子，就賜給他行審判的權柄。（約 5:27）", packet)
+    assert [(s["source_id"], s["basis"]) for s in cited] == [("S2", "scripture_cited")]
+    assert cited[0]["excerpt"] in packet["source_originals"]["originals"][1]["content"]
+    assert scripture_bindings("> 我是好牧人。（約 10:11）", packet) == []
+    assert any(slug.startswith("jhn-5-27") for _, slug in verse_mentions("見約翰福音 5:27。"))

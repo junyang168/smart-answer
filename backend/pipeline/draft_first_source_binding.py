@@ -187,6 +187,92 @@ def _fragment_ids(item: Mapping[str, Any], index: Mapping[str, Any]) -> list[str
     return ids
 
 
+_VERSE_LABEL = re.compile(r"[（(]([^（）()]*\d+\s*[:：]\s*\d+[^（）()]*)[)）]\s*$")
+
+
+def _verse_range(slug: str) -> tuple[str, int, int, int]:
+    parts = slug.split("-")
+    start = int(parts[2])
+    return parts[0], int(parts[1]), start, int(parts[3]) if len(parts) > 3 else start
+
+
+def verse_mentions(content: str) -> list[tuple[int, str]]:
+    """Where a source names a verse: written (「太16:13」) or spoken (「第七章第三節」)."""
+
+    from backend.api.scripture import _SINGLE_REFERENCE_PATTERN, _resolve_book_slug, spoken_references
+
+    found = list(spoken_references(content))
+    for match in _SINGLE_REFERENCE_PATTERN.finditer(content):
+        book = _resolve_book_slug(match.group("book"))
+        if book is None:
+            # A greedy book token swallows the words before it (「說馬太福音」).
+            book = next((_resolve_book_slug(match.group("book")[-n:]) for n in range(len(match.group("book")) - 1, 0, -1)
+                         if _resolve_book_slug(match.group("book")[-n:])), None)
+        if book:
+            end = match.group("end") or match.group("start")
+            found.append((match.start("book"), f"{book}-{match.group('chapter')}-{match.group('start')}-{end}"))
+    return sorted(found)
+
+
+def _read_aloud(text: str, content: str) -> str | None:
+    """The source's own words for a quoted verse, if the professor read it.
+
+    Matching ignores punctuation and the glyph variants the quote check folds,
+    so the excerpt is cut from the source as written, never from the verse.
+    """
+
+    from backend.pipeline.draft_first_scripture import _ELISION, normalize
+
+    words, at = [], []
+    for position, char in enumerate(content):
+        folded = normalize(char)
+        if folded:
+            words.append(folded)
+            at.append(position)
+    haystack = "".join(words)
+    segment = max((normalize(part) for part in _ELISION.split(text)), key=len, default="")
+    index = haystack.find(segment) if len(segment) >= 8 else -1
+    if index < 0:
+        return None
+    excerpt = content[at[index]: at[index + len(segment) - 1] + 1]
+    return excerpt[:150]
+
+
+def scripture_bindings(paragraph_text: str, packet: Mapping[str, Any]) -> list[dict[str, str]]:
+    """Where the professor reads or cites each verse a quote block shows.
+
+    Owner, 2026-10-24: a verse the article quotes with no source behind it
+    can be taken for the article's own use of Scripture. A block is bound to
+    the professor reading it, else to his naming the verse.
+    """
+
+    from backend.api.scripture import reference_slugs
+
+    lines = [line[1:].strip() for line in paragraph_text.splitlines() if line.startswith(">") and line[1:].strip()]
+    slugs = [slug for line in lines for label in _VERSE_LABEL.findall(line) for slug in reference_slugs(label)]
+    spans: list[dict[str, str]] = []
+    for item in (packet.get("source_originals") or {}).get("originals") or []:
+        content, source_id = str(item.get("content") or ""), str(item.get("source_id") or "")
+        for line in lines:
+            excerpt = _read_aloud(_VERSE_LABEL.sub("", line), content)
+            if excerpt and len(excerpt) >= MIN_EXCERPT_CHARS:
+                spans.append({"source_id": source_id, "excerpt": excerpt, "basis": "scripture_read"})
+    if spans:
+        return spans
+    for item in (packet.get("source_originals") or {}).get("originals") or []:
+        content, source_id = str(item.get("content") or ""), str(item.get("source_id") or "")
+        for position, mention in verse_mentions(content):
+            book, chapter, start, end = _verse_range(mention)
+            if any(b == book and c == chapter and start <= e and s <= end
+                   for b, c, s, e in map(_verse_range, slugs)):
+                excerpt = content[position: position + 120].split("\n\n")[0]
+                if len(excerpt) < MIN_EXCERPT_CHARS:
+                    excerpt = content[position: position + 40]
+                spans.append({"source_id": source_id, "excerpt": excerpt, "basis": "scripture_cited"})
+                break
+    return spans
+
+
 def derive_bindings(
     manuscript: str,
     packet: Mapping[str, Any],
@@ -233,6 +319,11 @@ def derive_bindings(
         if row is not None:
             row["basis"].append("review")
             row["spans"].append({"source_id": str(source["source_id"]), "excerpt": str(source["excerpt"]).strip()})
+    for paragraph, row in zip(paragraphs, rows):
+        if paragraph["text"].startswith(">"):
+            found = scripture_bindings(paragraph["text"], packet)
+            row["basis"].extend(sorted({span.pop("basis") for span in found}))
+            row["spans"].extend(found)
     for paragraph, row in zip(paragraphs, rows):
         # The spans that read most like the paragraph, each once; the
         # reviewer's own finds stay in, they are why the paragraph is bound.
