@@ -11,8 +11,8 @@ const sections = [
   { href: "/admin/wang", label: "待处理", icon: Inbox, match: [] as string[], exact: true },
   { href: "/admin/wang/operations/articles", label: "文章", icon: FileText, match: ["/admin/wang/operations/articles", "/admin/wang/matthew-progress"] },
   { href: "/admin/wang/viewpoints", label: "观点图", icon: Share2, match: ["/admin/wang/viewpoints", "/admin/wang/viewpoint-structures", "/admin/wang/viewpoint-exceptions"] },
-  { href: "/admin/wang/source-coverage", label: "讲道", icon: BookOpenText, match: ["/admin/wang/source-coverage", "/admin/wang/argument-layer"] },
-  { href: "/admin/wang/runs", label: "运行", icon: Wrench, match: ["/admin/wang/runs", "/admin/wang/health", "/admin/wang/library-audit"] },
+  { href: "/admin/wang/sermons", label: "讲道", icon: BookOpenText, match: ["/admin/wang/sermons"] },
+  { href: "/admin/wang/runs", label: "运行", icon: Wrench, match: ["/admin/wang/runs", "/admin/wang/health", "/admin/wang/library-audit", "/admin/wang/source-coverage", "/admin/wang/argument-layer"] },
 ];
 
 export function WangNav() {

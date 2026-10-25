@@ -34,6 +34,16 @@ RELATION_LABELS = {
     "tensions_with": "张力",
 }
 
+CLAIM_RELATION_LABELS = {
+    "supports": "支持",
+    "applies": "应用",
+    "contextualizes": "铺垫",
+    "qualifies": "限定",
+    "answers": "回答",
+    "refutes": "驳斥",
+    "explains": "解释",
+}
+
 _ACTIVE = "retired_at IS NULL AND coalesce(payload->>'effective_state', 'active') = 'active'"
 
 # Viewpoint -> member Claim -> evidence -> source fragment -> source. Evidence
@@ -283,6 +293,72 @@ def viewpoint_detail(store: PostgresKnowledgeStore, viewpoint_id: str) -> dict[s
             for r in sorted(history, key=lambda r: (r.get("revision_number") or 0, str(r.get("approved_at") or "")))
         ],
     }
+
+
+def sermon_graph(store: PostgresKnowledgeStore, source_id: str) -> dict[str, Any] | None:
+    """One sermon's current Claims and the recorded relations among them."""
+
+    with store.connect() as conn, conn.cursor() as cursor:
+        titles = _source_titles(cursor, [source_id])
+        if source_id not in titles:
+            return None
+        claims = [dict(row[0]) for row in _rows(cursor, """
+            WITH f AS (SELECT array_agg(object_id) AS ids FROM wang_knowledge.objects
+                       WHERE collection = 'source_fragments' AND payload->>'source_id' = %s),
+                 s AS (SELECT array_agg(e.object_id) AS ids FROM wang_knowledge.objects e, f
+                       WHERE e.collection = 'evidence_steps'
+                         AND (e.payload->>'source_fragment_id' = ANY(f.ids) OR e.payload->'source_fragment_ids' ?| f.ids))
+            SELECT c.payload FROM wang_knowledge.objects c, s
+            WHERE c.collection = 'claims' AND c.retired_at IS NULL
+              AND c.review_status <> 'superseded' AND c.payload->'evidence_step_ids' ?| s.ids
+            ORDER BY c.object_id""", (source_id,))]
+        ids = [c["claim_id"] for c in claims]
+        relations = _payloads(cursor, "claim_relations",
+                              "AND payload->>'from_id' = ANY(%s) AND payload->>'to_id' = ANY(%s)", (ids, ids)) if ids else []
+        memberships = _rows(cursor, f"""
+            SELECT l.payload->>'claim_id', v.object_id, r.payload->>'core_proposition'
+            FROM wang_knowledge.objects l
+            JOIN wang_knowledge.objects v ON v.collection = 'canonical_viewpoints' AND v.object_id = l.payload->>'viewpoint_id'
+            JOIN wang_knowledge.objects r ON r.collection = 'viewpoint_revisions' AND r.object_id = v.payload->>'current_revision_id'
+            WHERE l.collection = 'viewpoint_claim_links' AND l.retired_at IS NULL
+              AND coalesce(l.payload->>'effective_state', 'active') = 'active'
+              AND l.payload->>'claim_id' = ANY(%s)""", (ids,)) if ids else []
+    viewpoints: dict[str, list[dict[str, str]]] = defaultdict(list)
+    for claim_id, viewpoint_id, text in memberships:
+        viewpoints[claim_id].append({"id": viewpoint_id, "text": text or ""})
+    return {
+        "source": titles[source_id],
+        "claims": [
+            {
+                "id": c["claim_id"],
+                "text": c.get("statement") or "",
+                "claim_type": c.get("claim_type"),
+                "scripture": c.get("scripture_refs") or [],
+                "viewpoints": viewpoints.get(c["claim_id"], []),
+            }
+            for c in claims
+        ],
+        "edges": [
+            {
+                "id": r["claim_relation_id"],
+                "source": r["from_id"],
+                "target": r["to_id"],
+                "type": r["relation_type"],
+                "label": CLAIM_RELATION_LABELS.get(r["relation_type"], r["relation_type"]),
+                "reason": r.get("reason"),
+            }
+            for r in relations
+        ],
+        "relation_labels": CLAIM_RELATION_LABELS,
+    }
+
+
+@router.get("/sermons/{source_id:path}")
+def sermon(source_id: str) -> dict[str, Any]:
+    graph = sermon_graph(_store(), source_id)
+    if graph is None:
+        raise HTTPException(status_code=404, detail="没有这篇讲道")
+    return graph
 
 
 @router.get("/viewpoints")
