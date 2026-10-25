@@ -841,6 +841,9 @@ def continued_round(
         })
     return manuscript, self_check, {
         **outcome,
+        # Open findings mean the round is not passed, whatever the stopped
+        # run said: an owner note on a passed draft must still be revised.
+        "passed": bool(outcome["passed"]) and not findings,
         "quote_report": quote_report,
         "blocking_findings": findings,
         "continued_from": str(last),

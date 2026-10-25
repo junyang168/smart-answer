@@ -920,3 +920,5 @@ def test_a_passed_draft_reopens_only_for_the_owners_own_notes(tmp_path):
         continued_round(tmp_path, packet, scripture)
     _, _, seeded = continued_round(tmp_path, packet, scripture, [{"anchor": "兩者的先後也不加判斷。", "summary": "刪去"}])
     assert [f["gate"] for f in seeded["blocking_findings"]] == ["owner"]
+    # The first run stopped at once: the seeded round still said passed.
+    assert seeded["passed"] is False
